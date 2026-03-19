@@ -117,6 +117,11 @@ const ko = {
   // Settings
   'settings.general': '일반',
   'settings.theme': '테마',
+  'settings.theme.desc': '대시보드 색상 모드를 선택합니다',
+  'settings.lang.desc': 'UI 언어를 선택합니다',
+  'settings.period.desc': 'Incidents · Uptime 화면의 기본 표시 기간',
+  'settings.sla.desc': 'Uptime 차트에 표시할 목표 가용성 기준값',
+  'settings.monitoring.desc': '표시를 끄면 대시보드 카드에서 숨겨집니다',
   'settings.theme.dark': '다크',
   'settings.theme.light': '라이트',
   'settings.theme.system': '시스템',
@@ -131,7 +136,11 @@ const ko = {
   'settings.period.90d': '90일',
   'settings.alert.condition': '알림 조건',
   'settings.alert.target': '알림 대상',
-  'settings.save': '저장',
+  'settings.slack.desc': '이상 감지 시 알림을 받을 Slack 채널 주소',
+  'settings.alert.condition.desc': '어떤 상태 변화에서 알림을 받을지 선택합니다',
+  'settings.alert.target.desc': '알림을 받을 서비스를 선택합니다',
+  'settings.alert.custom': '선택',
+  'settings.save': '설정 저장',
   'settings.saved': '저장됨 ✓',
 
   // Modal

@@ -117,6 +117,11 @@ const en = {
   // Settings
   'settings.general': 'General',
   'settings.theme': 'Theme',
+  'settings.theme.desc': 'Select dashboard color mode',
+  'settings.lang.desc': 'Select UI language',
+  'settings.period.desc': 'Default display period for Incidents and Uptime',
+  'settings.sla.desc': 'Target availability baseline for Uptime chart',
+  'settings.monitoring.desc': 'Hidden services are removed from dashboard cards',
   'settings.theme.dark': 'Dark',
   'settings.theme.light': 'Light',
   'settings.theme.system': 'System',
@@ -131,7 +136,11 @@ const en = {
   'settings.period.90d': '90 Days',
   'settings.alert.condition': 'Alert Conditions',
   'settings.alert.target': 'Alert Targets',
-  'settings.save': 'Save',
+  'settings.slack.desc': 'Slack channel URL for anomaly alerts',
+  'settings.alert.condition.desc': 'Select which status changes trigger alerts',
+  'settings.alert.target.desc': 'Select services to receive alerts for',
+  'settings.alert.custom': 'Custom',
+  'settings.save': 'Save settings',
   'settings.saved': 'Saved ✓',
 
   // Modal

@@ -59,9 +59,13 @@ test.describe('Settings', () => {
   })
 
   test('save button shows feedback', async ({ page }) => {
-    const saveBtn = page.locator('main button').filter({ hasText: 'Save' })
+    // Change a setting so save button becomes active
+    const periodBtn = page.locator('main button').filter({ hasText: '30' }).first()
+    await periodBtn.evaluate((el) => el.click())
+    await page.waitForTimeout(200)
+    const saveBtn = page.locator('main button').filter({ hasText: /저장|Save/ })
     await saveBtn.evaluate((el) => el.click())
-    await expect(page.locator('main').getByText('Saved ✓')).toBeVisible()
-    await expect(page.locator('main').getByText('Saved ✓')).toBeHidden({ timeout: 3000 })
+    await expect(page.locator('main').getByText(/저장됨|Saved/)).toBeVisible()
+    await expect(page.locator('main').getByText(/저장됨|Saved/)).toBeHidden({ timeout: 3000 })
   })
 })

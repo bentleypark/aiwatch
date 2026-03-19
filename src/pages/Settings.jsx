@@ -1,5 +1,5 @@
-// Settings page — theme, language, default period, SLA baseline,
-// monitored services toggles, and Phase 3 alerts placeholders.
+// Settings page — redesigned to match design mockup.
+// Segment controls, green toggles, description text, service dots+uptime.
 
 import { useState, useEffect, useRef } from 'react'
 import { useLang } from '../hooks/useLang'
@@ -8,40 +8,59 @@ import { useSettings } from '../hooks/useSettings'
 import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, ALL_SERVICE_IDS, DEFAULT_SETTINGS } from '../utils/constants'
 import { usePolling } from '../hooks/usePolling'
 
-// ── Sub-components ───────────────────────────────────────────
+// ── Styles matching design mockup ────────────────────────
 
-function SectionTitle({ children }) {
-  return (
-    <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider mb-4">
-      {children}
-    </h2>
-  )
+const sectionTitleStyle = { fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text2)', letterSpacing: '0.12em', textTransform: 'uppercase', paddingBottom: '8px', borderBottom: '1px solid var(--border)', marginBottom: '2px' }
+
+const STATUS_DOT_CLASS = {
+  operational: 'bg-[var(--green)]',
+  degraded: 'bg-[var(--amber)]',
+  down: 'bg-[var(--red)]',
+  unknown: 'bg-[var(--text2)]',
 }
 
-function FieldRow({ label, children }) {
+// ── Sub-components ───────────────────────────────────────
+
+function FieldRow({ label, desc, children, last }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-3 border-b border-[var(--border)] last:border-0">
-      <span className="text-sm text-[var(--text1)]">{label}</span>
-      <div className="flex items-center gap-2">{children}</div>
+    <div className="flex items-center justify-between" style={{ padding: '13px 0', borderBottom: last ? 'none' : '1px solid var(--border)', gap: '16px' }}>
+      <div>
+        <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', marginBottom: '2px' }}>{label}</div>
+        {desc && <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', lineHeight: 1.5 }}>{desc}</div>}
+      </div>
+      <div className="shrink-0">{children}</div>
     </div>
   )
 }
 
-function OptionButton({ active, onClick, children }) {
+// Segment control: bg2 capsule with active: bg4/text0 per design mockup
+function SegmentControl({ options, value, onChange }) {
   return (
-    <button
-      onClick={onClick}
-      className={`px-3 py-1.5 text-xs mono rounded transition-colors ${
-        active
-          ? 'bg-[var(--blue)] text-[var(--bg0)]'
-          : 'bg-[var(--bg2)] text-[var(--text2)] hover:text-[var(--text1)]'
-      }`}
-    >
-      {children}
-    </button>
+    <div role="radiogroup" className="flex bg-[var(--bg2)] border border-[var(--border)]" style={{ borderRadius: '6px', padding: '2px', gap: '1px' }}>
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          onClick={() => onChange(opt.value)}
+          aria-pressed={value === opt.value}
+          className="mono cursor-pointer transition-all whitespace-nowrap"
+          style={{
+            fontSize: '10px',
+            padding: '4px 10px',
+            borderRadius: '4px',
+            letterSpacing: '0.04em',
+            background: value === opt.value ? 'var(--bg4)' : 'transparent',
+            color: value === opt.value ? 'var(--text0)' : 'var(--text2)',
+            border: 'none',
+          }}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
   )
 }
 
+// Toggle: green theme per design mockup (green-dim bg + green border + green knob)
 function Toggle({ checked, onChange, disabled }) {
   return (
     <button
@@ -49,28 +68,35 @@ function Toggle({ checked, onChange, disabled }) {
       aria-checked={checked}
       onClick={() => !disabled && onChange(!checked)}
       disabled={disabled}
-      className={`relative w-9 h-5 rounded-full transition-colors ${
-        disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
-      } ${checked ? 'bg-[var(--blue)]' : 'bg-[var(--bg3)]'}`}
+      className={`relative transition-colors ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+      style={{
+        width: '36px', height: '20px', borderRadius: '20px',
+        background: checked ? 'var(--status-bg-green)' : 'var(--bg4)',
+        border: `1px solid ${checked ? 'var(--green)' : 'var(--border-hi)'}`,
+      }}
     >
       <span
-        className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-[var(--bg0)] transition-transform ${
-          checked ? 'translate-x-4' : ''
-        }`}
+        className="absolute transition-transform"
+        style={{
+          width: '14px', height: '14px', borderRadius: '50%', top: '2px', left: '2px',
+          background: checked ? 'var(--green)' : 'var(--text2)',
+          transform: checked ? 'translateX(16px)' : 'translateX(0)',
+        }}
       />
     </button>
   )
 }
 
-function DisabledBadge({ t }) {
+// Coming Soon badge: blue-dim/blue per design mockup
+function ComingSoonBadge({ t }) {
   return (
-    <span className="text-[10px] mono px-2 py-0.5 rounded bg-[var(--bg3)] text-[var(--amber)]">
+    <span className="mono" style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '3px', background: 'var(--blue-dim)', color: 'var(--blue)', letterSpacing: '0.04em' }}>
       {t('topbar.analyze.soon')}
     </span>
   )
 }
 
-// ── Main Component ───────────────────────────────────────────
+// ── Main Component ───────────────────────────────────────
 
 export default function Settings() {
   const { t, lang, setLang } = useLang()
@@ -79,19 +105,13 @@ export default function Settings() {
   const { services: rawServices } = usePolling()
   const services = rawServices ?? []
 
-  // Local draft state (saved on explicit Save click)
   const [period, setPeriod] = useState(settings.period)
   const [sla, setSla] = useState(settings.sla)
   const [enabledServices, setEnabledServices] = useState(settings.enabledServices)
-
-  // Save feedback
   const [saved, setSaved] = useState(false)
   const saveTimerRef = useRef(null)
 
-  // Cleanup timer on unmount
   useEffect(() => () => clearTimeout(saveTimerRef.current), [])
-
-  // Sync local state if settings change externally
   useEffect(() => {
     setPeriod(settings.period)
     setSla(settings.sla)
@@ -112,43 +132,48 @@ export default function Settings() {
     )
   }
 
-  // Build service name map from polling data
-  const nameMap = {}
-  for (const s of services) nameMap[s.id] = s.name
+  // Check if draft differs from saved settings
+  const hasNoChanges = period === settings.period
+    && sla === settings.sla
+    && JSON.stringify([...enabledServices].sort()) === JSON.stringify([...settings.enabledServices].sort())
+
+  // Service data map
+  const svcMap = {}
+  for (const s of services) svcMap[s.id] = s
 
   return (
-    <div className="flex flex-col max-w-2xl" style={{ gap: '20px' }}>
+    <div className="flex flex-col" style={{ maxWidth: '640px', gap: '28px' }}>
 
       {/* ── General ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
-        <SectionTitle>{t('settings.general')}</SectionTitle>
+      <section>
+        <div style={sectionTitleStyle}>{t('settings.general')}</div>
 
-        <FieldRow label={t('settings.theme')}>
-          {VALID_THEMES.map((v) => (
-            <OptionButton key={v} active={theme === v} onClick={() => setTheme(v)}>
-              {t(`settings.theme.${v}`)}
-            </OptionButton>
-          ))}
+        <FieldRow label={t('settings.theme')} desc={t('settings.theme.desc')}>
+          <SegmentControl
+            value={theme}
+            onChange={setTheme}
+            options={VALID_THEMES.map((v) => ({ value: v, label: t(`settings.theme.${v}`) }))}
+          />
         </FieldRow>
 
-        <FieldRow label={t('settings.language')}>
-          {VALID_LANGS.map((v) => (
-            <OptionButton key={v} active={lang === v} onClick={() => setLang(v)}>
-              {v === 'ko' ? '한국어' : 'English'}
-            </OptionButton>
-          ))}
+        <FieldRow label={t('settings.language')} desc={t('settings.lang.desc')}>
+          <SegmentControl
+            value={lang}
+            onChange={setLang}
+            options={VALID_LANGS.map((v) => ({ value: v, label: v === 'ko' ? '한국어' : 'English' }))}
+          />
         </FieldRow>
 
-        <FieldRow label={t('settings.period')}>
-          {VALID_PERIODS.map((v) => (
-            <OptionButton key={v} active={period === v} onClick={() => setPeriod(v)}>
-              {t(`settings.period.${v}`)}
-            </OptionButton>
-          ))}
+        <FieldRow label={t('settings.period')} desc={t('settings.period.desc')}>
+          <SegmentControl
+            value={period}
+            onChange={setPeriod}
+            options={VALID_PERIODS.map((v) => ({ value: v, label: t(`settings.period.${v}`) }))}
+          />
         </FieldRow>
 
-        <FieldRow label={t('settings.sla')}>
-          <div className="flex items-center gap-1.5">
+        <FieldRow label={t('settings.sla')} desc={t('settings.sla.desc')}>
+          <div className="flex items-center" style={{ gap: '6px' }}>
             <input
               type="number"
               min="0"
@@ -161,74 +186,113 @@ export default function Settings() {
                 const v = parseFloat(raw)
                 if (!isNaN(v) && v >= 0 && v <= 100) setSla(v)
               }}
-              className="w-20 px-2 py-1.5 text-xs mono text-right rounded
-                         bg-[var(--bg2)] border border-[var(--border)] text-[var(--text1)]
-                         focus:border-[var(--blue)] focus:outline-none"
+              className="mono"
+              style={{
+                width: '80px', fontSize: '12px', padding: '5px 8px', textAlign: 'right',
+                background: 'var(--bg2)', border: '1px solid var(--border-hi)', borderRadius: '5px',
+                color: 'var(--text0)', outline: 'none',
+              }}
             />
-            <span className="text-xs mono text-[var(--text2)]">%</span>
+            <span className="mono" style={{ fontSize: '10px', color: 'var(--text2)' }}>%</span>
           </div>
         </FieldRow>
       </section>
 
       {/* ── Monitoring ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
-        <SectionTitle>{t('settings.monitoring')}</SectionTitle>
-        <div className="space-y-0">
-          {ALL_SERVICE_IDS.map((id) => (
-            <div
-              key={id}
-              className="flex items-center justify-between py-2.5 border-b border-[var(--border)] last:border-0"
-            >
-              <span className="text-sm text-[var(--text1)]">
-                {nameMap[id] || id}
-              </span>
-              <Toggle
-                checked={enabledServices.includes(id)}
-                onChange={() => toggleService(id)}
-              />
-            </div>
-          ))}
+      <section>
+        <div style={sectionTitleStyle}>{t('settings.monitoring')}</div>
+        <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', padding: '8px 0 10px' }}>
+          {t('settings.monitoring.desc')}
+        </div>
+        <div>
+          {ALL_SERVICE_IDS.map((id) => {
+            const svc = svcMap[id]
+            const dotCls = STATUS_DOT_CLASS[svc?.status] ?? STATUS_DOT_CLASS.unknown
+            return (
+              <div
+                key={id}
+                className="flex items-center justify-between"
+                style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}
+              >
+                <div className="flex items-center" style={{ gap: '8px' }}>
+                  <span className={`rounded-full shrink-0 ${dotCls}`} style={{ width: '6px', height: '6px' }} />
+                  <span style={{ fontSize: '12px', color: 'var(--text0)' }}>{svc?.name ?? id}</span>
+                  <span className="mono" style={{ fontSize: '10px', color: 'var(--text2)', marginLeft: '4px' }}>
+                    {svc ? `${svc.uptime30d.toFixed(1)}%` : ''}
+                  </span>
+                </div>
+                <Toggle
+                  checked={enabledServices.includes(id)}
+                  onChange={() => toggleService(id)}
+                />
+              </div>
+            )
+          })}
         </div>
       </section>
 
       {/* ── Alerts (Phase 3 — disabled) ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4 opacity-60">
-        <div className="flex items-center gap-3 mb-4">
-          <SectionTitle>{t('settings.alerts')}</SectionTitle>
-          <DisabledBadge t={t} />
+      <section>
+        <div className="flex items-center" style={{ ...sectionTitleStyle, gap: '8px' }}>
+          <span>{t('settings.alerts')}</span>
+          <ComingSoonBadge t={t} />
         </div>
 
-        <FieldRow label={t('settings.slack')}>
-          <input
-            type="text"
-            disabled
-            placeholder="https://hooks.slack.com/..."
-            className="w-48 px-2 py-1.5 text-xs mono rounded
-                       bg-[var(--bg2)] border border-[var(--border)] text-[var(--text2)]
-                       cursor-not-allowed"
-          />
-        </FieldRow>
+        <div style={{ opacity: 0.42, pointerEvents: 'none' }}>
+          <FieldRow label={t('settings.slack')} desc={t('settings.slack.desc')}>
+            <input
+              type="text"
+              disabled
+              placeholder="https://hooks.slack.com/..."
+              className="mono"
+              style={{
+                width: '240px', fontSize: '11px', padding: '6px 10px',
+                background: 'var(--bg2)', border: '1px solid var(--border-hi)', borderRadius: '5px',
+                color: 'var(--text2)', outline: 'none',
+              }}
+            />
+          </FieldRow>
 
-        <FieldRow label={t('settings.alert.condition')}>
-          <DisabledBadge t={t} />
-        </FieldRow>
+          <FieldRow label={t('settings.alert.condition')} desc={t('settings.alert.condition.desc')}>
+            <SegmentControl
+              value=""
+              onChange={() => {}}
+              options={[{ value: 'down', label: t('status.down') }, { value: 'degraded', label: t('status.degraded') }, { value: 'all', label: t('overview.filter.all') }]}
+            />
+          </FieldRow>
 
-        <FieldRow label={t('settings.alert.target')}>
-          <DisabledBadge t={t} />
-        </FieldRow>
+          <FieldRow label={t('settings.alert.target')} desc={t('settings.alert.target.desc')} last>
+            <SegmentControl
+              value=""
+              onChange={() => {}}
+              options={[{ value: 'all', label: t('overview.filter.all') }, { value: 'custom', label: t('settings.alert.custom') }]}
+            />
+          </FieldRow>
+        </div>
       </section>
 
       {/* ── Save ── */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center justify-end" style={{ gap: '12px' }}>
         <button
           onClick={handleSave}
-          className="px-5 py-2 text-sm mono rounded bg-[var(--blue)] text-[var(--bg0)]
-                     hover:opacity-90 transition-opacity"
+          disabled={hasNoChanges}
+          className="mono"
+          style={{
+            fontSize: '11px', padding: '5px 14px', borderRadius: '5px', border: 'none',
+            background: hasNoChanges ? 'var(--bg3)' : 'var(--green)',
+            color: hasNoChanges ? 'var(--text2)' : 'var(--bg0)',
+            fontWeight: 500,
+            cursor: hasNoChanges ? 'not-allowed' : 'pointer',
+            opacity: hasNoChanges ? 0.5 : 1,
+            transition: 'background 0.12s',
+          }}
+          onMouseEnter={(e) => { if (!hasNoChanges) e.target.style.filter = 'brightness(1.1)' }}
+          onMouseLeave={(e) => { if (!hasNoChanges) e.target.style.filter = '' }}
         >
           {t('settings.save')}
         </button>
         {saved && (
-          <span className="text-sm mono text-[var(--green)] animate-[fade-in_0.2s_ease-out]">
+          <span className="mono text-[var(--green)] animate-[fade-in_0.2s_ease-out]" style={{ fontSize: '11px' }}>
             {t('settings.saved')}
           </span>
         )}
