@@ -231,7 +231,7 @@ export default function Overview() {
       <div className="flex items-center justify-between">
         <h2 className="mono text-[10px] text-[var(--text2)] uppercase tracking-wider flex items-center gap-2">
           <span className="text-[var(--green)] font-semibold">//</span>
-          Services
+          {t('nav.services')}
         </h2>
       </div>
       <FilterTabs

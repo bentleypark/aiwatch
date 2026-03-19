@@ -89,6 +89,10 @@ pre,
 }
 
 /* ─── Scrollbar ─────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg4) var(--bg1);
+}
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg1); }
 ::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }

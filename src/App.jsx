@@ -49,19 +49,14 @@ export default function App() {
           </span>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => setPage({ name: 'privacy' })}
-            className="mono text-[11px] text-[var(--text2)] hover:text-[var(--text0)] transition-colors"
-          >
+          {/* Privacy/Terms modals pending — Issue #19 */}
+          <span className="mono text-[11px] text-[var(--text2)] cursor-default">
             {t('footer.privacy')}
-          </button>
+          </span>
           <span className="text-[11px] text-[var(--text2)] opacity-40">|</span>
-          <button
-            onClick={() => setPage({ name: 'terms' })}
-            className="mono text-[11px] text-[var(--text2)] hover:text-[var(--text0)] transition-colors"
-          >
+          <span className="mono text-[11px] text-[var(--text2)] cursor-default">
             {t('footer.terms')}
-          </button>
+          </span>
           <span className="text-[11px] text-[var(--text2)] opacity-40">|</span>
           <a
             href="mailto:contact@aiwatch.dev"
