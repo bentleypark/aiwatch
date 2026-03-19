@@ -74,9 +74,14 @@ function gen24h(baseLatency) {
 }
 
 // Generate last-24-hours labels (HH:00) relative to current time
-// Fixed 24-hour labels: 00:00 → 21:00 (matching design mockup)
+// 24 hour labels ending at current hour: e.g. at 19시 → 20:00(어제)...19:00(오늘)
+// Dummy data phase — will be replaced with real timestamps from Issue #15
 function hourLabels() {
-  return Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`)
+  const currentHour = new Date().getHours()
+  return Array.from({ length: 24 }, (_, i) => {
+    const hour = (currentHour - 23 + i + 24) % 24
+    return `${String(hour).padStart(2, '0')}:00`
+  })
 }
 
 // ── Sub-components ───────────────────────────────────────────
