@@ -1,5 +1,5 @@
-// Shows summary stats, service grid, recent incidents, latency rankings, AI analysis panel.
-// Data comes from usePolling (placeholder until Issue #15).
+// Overview — summary stats, service grid, recent incidents, latency rankings, AI panel.
+// Design mockup: svc-card with left border, provider, 3-col metrics, variable-height history bars.
 
 import { useState } from 'react'
 import { useLang } from '../hooks/useLang'
@@ -12,16 +12,22 @@ import EmptyState from '../components/EmptyState'
 
 // ── Status color maps ────────────────────────────────────────
 
+const BORDER_LEFT_CLASS = {
+  operational: 'border-l-[var(--green)]',
+  degraded:    'border-l-[var(--amber)]',
+  down:        'border-l-[var(--red)]',
+}
+
 const HISTORY_CLASS = {
   operational: 'bg-[var(--green)]',
   degraded:    'bg-[var(--amber)]',
   down:        'bg-[var(--red)]',
 }
 
-const INCIDENT_DOT_CLASS = {
-  ongoing:    'text-[var(--red)]',
-  monitoring: 'text-[var(--amber)]',
-  resolved:   'text-[var(--text2)]',
+const INC_BAR_CLASS = {
+  ongoing:    'bg-[var(--red)]',
+  monitoring: 'bg-[var(--amber)]',
+  resolved:   'bg-[var(--green)]',
 }
 
 // ── Sub-components ───────────────────────────────────────────
@@ -33,60 +39,87 @@ const STAT_TOP_COLOR = {
   'text-[var(--blue)]':  'var(--blue)',
 }
 
-function StatCard({ value, labelKey, colorClass, index, t }) {
+function StatCard({ value, sub, labelKey, colorClass, index, t }) {
   const topColor = STAT_TOP_COLOR[colorClass] ?? 'var(--border)'
   return (
     <div
-      className="relative bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4
-                 flex flex-col gap-1 animate-[fade-in_0.3s_ease_both] overflow-hidden"
-      style={{ animationDelay: `${index * 80}ms` }}
+      className="relative bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden animate-[fade-in_0.3s_ease_both]"
+      style={{ padding: '14px 16px', animationDelay: `${index * 80}ms` }}
     >
       <span className="absolute top-0 left-0 right-0 h-px" style={{ background: topColor }} />
-      <span className="mono text-[9px] text-[var(--text2)] uppercase tracking-wider">{t(labelKey)}</span>
-      <span className={`text-2xl mono font-semibold ${colorClass}`}>{value}</span>
+      <div className="mono text-[9px] text-[var(--text2)] uppercase tracking-wider" style={{ letterSpacing: '0.1em', marginBottom: '6px' }}>
+        {t(labelKey)}
+      </div>
+      <div className={`mono text-[26px] font-semibold leading-none ${colorClass}`} style={{ marginBottom: '4px' }}>
+        {value}
+      </div>
+      {sub && <div className="mono text-[10px] text-[var(--text2)]">{sub}</div>}
     </div>
   )
 }
 
-// 30-day status history as small colored strips (aria-hidden — decorative).
-// Unknown status values fall back to 'operational' styling.
-function MiniHistory({ history30d }) {
+// Variable-height history bars matching design mockup (18px container, bars 4-18px)
+function HistoryBars({ history30d }) {
   return (
-    <div className="flex gap-px" aria-hidden="true">
-      {history30d.map((status, i) => (
-        <div
-          key={i}
-          className={`h-3 flex-1 rounded-sm ${HISTORY_CLASS[status] ?? HISTORY_CLASS.operational}`}
-        />
-      ))}
+    <div className="flex gap-[2px] items-end" style={{ height: '18px' }} aria-hidden="true">
+      {history30d.map((status, i) => {
+        const cls = HISTORY_CLASS[status] ?? HISTORY_CLASS.operational
+        // Deterministic pseudo-random height based on index
+        const baseH = status === 'operational' ? 12 + ((i * 7 + 3) % 7) : 4 + ((i * 5) % 6)
+        return (
+          <div
+            key={i}
+            className={`flex-1 rounded-sm ${cls}`}
+            style={{ height: `${baseH}px`, opacity: status === 'operational' ? 0.6 : 0.8, minHeight: '4px' }}
+          />
+        )
+      })}
     </div>
   )
 }
 
-function ServiceCard({ service, index, onClick }) {
-  const { t } = useLang()
+function ServiceCard({ service, index, onClick, t }) {
+  const borderCls = BORDER_LEFT_CLASS[service.status] ?? BORDER_LEFT_CLASS.operational
+  const incidentCount = service.incidents?.length ?? 0
+  const uptimeColor = service.uptime30d >= 99 ? 'text-[var(--green)]' : service.uptime30d >= 97 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
+  const latencyColor = service.status === 'degraded' ? 'text-[var(--amber)]' : service.status === 'down' ? 'text-[var(--red)]' : 'text-[var(--text0)]'
+
   return (
     <button
       onClick={onClick}
-      className="w-full text-left bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4
-                 hover:bg-[var(--bg2)] hover:border-[var(--border-hi)] transition-colors
-                 flex flex-col gap-3 animate-[fade-in_0.3s_ease_both]"
-      style={{ animationDelay: `${index * 80}ms` }}
+      className={`w-full text-left bg-[var(--bg1)] border border-[var(--border)] border-l-2 ${borderCls} rounded-lg
+                 hover:border-[var(--border-hi)] transition-colors animate-[fade-in_0.3s_ease_both]`}
+      style={{ padding: '14px', animationDelay: `${index * 80}ms` }}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm text-[var(--text0)] font-medium truncate">{service.name}</span>
+      <div className="flex justify-between items-start" style={{ marginBottom: '10px' }}>
+        <div>
+          <div className="text-[13px] font-medium text-[var(--text0)]" style={{ marginBottom: '2px' }}>{service.name}</div>
+          <div className="mono text-[10px] text-[var(--text2)]">{service.provider}</div>
+        </div>
         <StatusPill status={service.status} />
       </div>
-      <div className="flex items-center justify-between text-xs mono text-[var(--text2)]">
-        <span>{service.latency} ms</span>
-        <span>{service.uptime30d.toFixed(2)}%</span>
+
+      <div className="grid grid-cols-3" style={{ gap: '6px', marginBottom: '10px', textAlign: 'center' }}>
+        <div>
+          <div className={`mono text-[13px] font-medium ${latencyColor}`}>{service.latency}ms</div>
+          <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.latency')}</div>
+        </div>
+        <div>
+          <div className={`mono text-[13px] font-medium ${uptimeColor}`}>{service.uptime30d.toFixed(1)}%</div>
+          <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.uptime')}</div>
+        </div>
+        <div>
+          <div className="mono text-[13px] font-medium text-[var(--text0)]">{incidentCount}</div>
+          <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.incidents')}</div>
+        </div>
       </div>
-      <MiniHistory history30d={service.history30d} />
-      <p className="text-[10px] text-[var(--text2)] text-right -mt-1">30d</p>
+
+      <HistoryBars history30d={service.history30d} />
     </button>
   )
 }
 
+// Filter: pill-style segment control per design mockup
 function FilterTabs({ filter, setFilter, total, issueCount, t }) {
   const tabs = [
     { key: 'all',         labelKey: 'overview.filter.all',        count: total },
@@ -94,73 +127,109 @@ function FilterTabs({ filter, setFilter, total, issueCount, t }) {
     { key: 'issues',      labelKey: 'overview.filter.issues',      count: issueCount },
   ]
   return (
-    <div className="flex gap-1 border-b border-[var(--border)]">
+    <div className="flex bg-[var(--bg2)] rounded-[6px] border border-[var(--border)]" style={{ padding: '2px', gap: '1px' }}>
       {tabs.map((tab) => (
         <button
           key={tab.key}
           onClick={() => setFilter(tab.key)}
-          className={`px-4 py-2 text-xs mono border-b-2 transition-colors
-            ${filter === tab.key
-              ? 'border-[var(--blue)] text-[var(--text0)]'
-              : 'border-transparent text-[var(--text2)] hover:text-[var(--text1)]'
-            }`}
+          className={`mono text-[10px] rounded transition-all cursor-pointer`}
+          style={{
+            padding: '4px 10px',
+            letterSpacing: '0.04em',
+            background: filter === tab.key ? 'var(--bg4)' : 'transparent',
+            color: filter === tab.key ? 'var(--text0)' : 'var(--text2)',
+          }}
         >
-          {t(tab.labelKey)}
-          <span className="ml-1.5 text-[10px] text-[var(--text2)]">{tab.count}</span>
+          {t(tab.labelKey)} <span style={{ opacity: 0.6, marginLeft: '2px' }}>{tab.count}</span>
         </button>
       ))}
     </div>
   )
 }
 
-function IncidentItem({ incident, t, lang }) {
-  const dotClass = INCIDENT_DOT_CLASS[incident.status] ?? INCIDENT_DOT_CLASS.resolved
+// Incident item with time + bar + content (matching design mockup)
+function IncidentItem({ incident, lang, t }) {
+  const barCls = INC_BAR_CLASS[incident.status] ?? INC_BAR_CLASS.resolved
   return (
-    <div className="flex items-start gap-3 py-2 border-b border-[var(--border)] last:border-0">
-      <span className={`shrink-0 mt-0.5 text-[10px] mono ${dotClass}`} aria-hidden="true">●</span>
-      <div className="flex-1 min-w-0">
-        <p className="text-xs text-[var(--text1)] truncate">{incident.title}</p>
-        <p className="text-[10px] text-[var(--text2)] mt-0.5">
-          {incident.serviceName} · {formatDate(incident.startedAt, lang)}
-        </p>
+    <div className="flex gap-2.5 items-start" style={{ marginBottom: '8px' }}>
+      <div className="mono text-[10px] text-[var(--text2)] whitespace-nowrap shrink-0" style={{ width: '52px', paddingTop: '1px' }}>
+        {formatDate(incident.startedAt, lang).split(' ').slice(0, 2).join(' ')}
       </div>
-      <span className={`shrink-0 text-[10px] mono ${dotClass}`}>
-        {t(`incidents.status.${incident.status}`)}
-      </span>
+      <div className={`w-[2px] rounded self-stretch ${barCls}`} style={{ minHeight: '32px' }} />
+      <div>
+        <div className="text-[12px] font-medium text-[var(--text0)]" style={{ marginBottom: '2px' }}>
+          {incident.serviceName} — {incident.title}
+        </div>
+        <div className="mono text-[10px] text-[var(--text2)]">
+          {incident.duration ?? t('overview.incidents.monitoring')}
+        </div>
+      </div>
     </div>
   )
 }
 
-// Bars are relative — slowest service always fills 100%. Not comparable across data sets.
-function LatencyBar({ service, maxLatency, rank }) {
+// Latency bar with colored fill per speed tier
+function LatencyBar({ service, maxLatency }) {
   const widthPct = maxLatency > 0 ? Math.round((service.latency / maxLatency) * 100) : 0
+  const fillCls = service.latency < 200 ? 'bg-[var(--green)]' : service.latency < 400 ? 'bg-[var(--amber)]' : 'bg-[var(--red)]'
+  const valColor = service.latency < 200 ? '' : service.latency < 400 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
   return (
-    <div className="flex items-center gap-3">
-      <span className="w-4 shrink-0 text-right text-[10px] mono text-[var(--text2)]">{rank}</span>
-      <span className="w-24 shrink-0 truncate text-xs text-[var(--text1)]">{service.name}</span>
-      <div className="flex-1 bg-[var(--bg3)] rounded-full h-1.5">
-        <div
-          className="h-1.5 rounded-full bg-[var(--blue)]"
-          style={{ width: `${widthPct}%` }}
-        />
+    <div className="flex items-center" style={{ gap: '10px' }}>
+      <span className="mono text-[10px] text-[var(--text1)] shrink-0 whitespace-nowrap truncate" style={{ width: '90px' }}>{service.name}</span>
+      <div className="flex-1 bg-[var(--bg3)] rounded-sm overflow-hidden" style={{ height: '4px' }}>
+        <div className={`h-full rounded-sm ${fillCls}`} style={{ width: `${widthPct}%` }} />
       </div>
-      <span className="w-14 shrink-0 text-right text-xs mono text-[var(--text0)]">
-        {service.latency} ms
+      <span className={`mono text-[10px] shrink-0 text-right ${valColor || 'text-[var(--text1)]'}`} style={{ width: '40px' }}>
+        {service.latency}ms
       </span>
     </div>
   )
 }
 
-// Phase 3 placeholder — do not remove
+// Panel wrapper matching design mockup (header + body)
+function Panel({ title, dotColor, subtitle, children }) {
+  return (
+    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+      <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 14px' }}>
+        <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+          <span className="w-[5px] h-[5px] rounded-full shrink-0" style={{ background: dotColor }} />
+          {title}
+        </div>
+        {subtitle && <span className="mono text-[9px] text-[var(--text2)]">{subtitle}</span>}
+      </div>
+      <div style={{ padding: '14px' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// AI Analysis — Phase 3 placeholder with lock icon
 function AIPanel({ t }) {
   return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-5
-                    flex flex-col items-center justify-center gap-2 text-center py-8">
-      <span className="text-2xl text-[var(--text2)]" aria-hidden="true">🔒</span>
-      <p className="text-sm text-[var(--text1)]">{t('overview.ai.title')}</p>
-      <span className="text-[10px] mono px-2 py-0.5 rounded bg-[var(--bg3)] text-[var(--amber)]">
-        {t('overview.ai.soon')}
-      </span>
+    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+      <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg2)]" style={{ padding: '10px 14px' }}>
+        <div className="mono text-[9px] text-[var(--text2)] uppercase tracking-wider flex items-center gap-1.5" style={{ letterSpacing: '0.1em' }}>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <rect x="2" y="5.5" width="8" height="5.5" rx="1.5" stroke="currentColor" strokeWidth="1.2" opacity="0.5" />
+            <path d="M4 5.5V4a2 2 0 014 0v1.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.5" />
+          </svg>
+          {t('overview.ai.title')}
+        </div>
+      </div>
+      <div className="flex items-center gap-3" style={{ padding: '16px 14px' }}>
+        <div className="flex items-center justify-center shrink-0"
+             style={{ width: '36px', height: '36px', borderRadius: '6px', background: 'var(--bg2)', border: '1px solid var(--border)', opacity: 0.45 }}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <rect x="3" y="7.5" width="10" height="7" rx="2" stroke="var(--text1)" strokeWidth="1.3" />
+            <path d="M5.5 7.5V5.5a2.5 2.5 0 015 0v2" stroke="var(--text1)" strokeWidth="1.3" strokeLinecap="round" />
+          </svg>
+        </div>
+        <div>
+          <div className="text-[13px] font-medium text-[var(--text1)]" style={{ marginBottom: '3px' }}>{t('overview.ai.title')}</div>
+          <div className="mono text-[11px] text-[var(--text2)]">{t('overview.ai.desc')}</div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -173,9 +242,7 @@ export default function Overview() {
   const { services, loading, error, lastUpdated } = usePolling()
   const [filter, setFilter] = useState('all')
 
-  if (loading) {
-    return <SkeletonUI />
-  }
+  if (loading) return <SkeletonUI />
 
   if (error) {
     return (
@@ -190,13 +257,12 @@ export default function Overview() {
     )
   }
 
-  // Derived stats
   const operationalCount = services.filter((s) => s.status === 'operational').length
   const degradedCount    = services.filter((s) => s.status === 'degraded').length
   const downCount        = services.filter((s) => s.status === 'down').length
   const issueCount       = degradedCount + downCount
   const avgUptime = services.length
-    ? (services.reduce((sum, s) => sum + s.uptime30d, 0) / services.length).toFixed(2)
+    ? (services.reduce((sum, s) => sum + s.uptime30d, 0) / services.length).toFixed(1)
     : '—'
 
   const filteredServices =
@@ -204,8 +270,6 @@ export default function Overview() {
     : filter === 'issues'    ? services.filter((s) => s.status !== 'operational')
     : services
 
-  // Recent incidents: last 7 days by startedAt, newest first, max 5
-  // (ongoing incidents started more than 7 days ago are excluded by design)
   const sevenDaysAgo = Date.now() - 7 * 86_400_000
   const recentIncidents = services
     .flatMap((s) => s.incidents.map((inc) => ({ ...inc, serviceName: s.name })))
@@ -217,41 +281,36 @@ export default function Overview() {
   const maxLatency = services.length ? Math.max(...services.map((s) => s.latency)) : 1
 
   return (
-    <div className=" space-y-6">
+    <div className="space-y-6">
 
       {/* ── Summary Stats ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard index={0} value={operationalCount} labelKey="overview.stats.operational" colorClass="text-[var(--green)]" t={t} />
-        <StatCard index={1} value={degradedCount}    labelKey="overview.stats.degraded"    colorClass="text-[var(--amber)]" t={t} />
-        <StatCard index={2} value={downCount}         labelKey="overview.stats.down"         colorClass="text-[var(--red)]"   t={t} />
-        <StatCard index={3} value={`${avgUptime}%`}  labelKey="overview.stats.uptime"       colorClass="text-[var(--blue)]"  t={t} />
+      <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px', marginBottom: '20px' }}>
+        <StatCard index={0} value={operationalCount} sub={t('overview.stats.operational')} labelKey="overview.stats.operational" colorClass="text-[var(--green)]" t={t} />
+        <StatCard index={1} value={degradedCount}    sub={t('overview.stats.degraded')}    labelKey="overview.stats.degraded"    colorClass="text-[var(--amber)]" t={t} />
+        <StatCard index={2} value={downCount}         sub="—"                                labelKey="overview.stats.down"         colorClass="text-[var(--red)]"   t={t} />
+        <StatCard index={3} value={`${avgUptime}%`}  sub={t('overview.stats.uptime.sub')}  labelKey="overview.stats.uptime"       colorClass="text-[var(--blue)]"  t={t} />
       </div>
 
-      {/* ── Section Header + Filter Tabs ── */}
+      {/* ── Section Header + Filter ── */}
       <div className="flex items-center justify-between">
-        <h2 className="mono text-[10px] text-[var(--text2)] uppercase tracking-wider flex items-center gap-2">
+        <h2 className="mono text-[10px] text-[var(--text2)] uppercase flex items-center gap-2" style={{ letterSpacing: '0.1em' }}>
           <span className="text-[var(--green)] font-semibold">//</span>
           {t('nav.services')}
         </h2>
+        <FilterTabs filter={filter} setFilter={setFilter} total={services.length} issueCount={issueCount} t={t} />
       </div>
-      <FilterTabs
-        filter={filter}
-        setFilter={setFilter}
-        total={services.length}
-        issueCount={issueCount}
-        t={t}
-      />
 
       {/* ── Service Grid ── */}
       {filter === 'issues' && filteredServices.length === 0 ? (
         <EmptyState type="good" />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3" style={{ gap: '8px' }}>
           {filteredServices.map((svc, i) => (
             <ServiceCard
               key={svc.id}
               service={svc}
               index={i}
+              t={t}
               onClick={() => setPage({ name: 'service', serviceId: svc.id })}
             />
           ))}
@@ -259,39 +318,29 @@ export default function Overview() {
       )}
 
       {/* ── Bottom Panels ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        {/* Recent Incidents (last 7 days) */}
-        <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
-          <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider mb-3">
-            {t('overview.incidents.title')}
-          </h2>
+      <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>
+        <Panel title={t('overview.incidents.title')} dotColor="var(--red)" subtitle={t('overview.panel.incidents.sub')}>
           {recentIncidents.length === 0 ? (
             <EmptyState type="good" />
           ) : (
             <div>
               {recentIncidents.map((inc) => (
-                <IncidentItem key={inc.id} incident={inc} t={t} lang={lang} />
+                <IncidentItem key={inc.id} incident={inc} lang={lang} t={t} />
               ))}
             </div>
           )}
-        </section>
+        </Panel>
 
-        {/* Latency Rankings (fastest first) */}
-        <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
-          <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider mb-3">
-            {t('overview.latency.title')}
-          </h2>
-          <div className="flex flex-col gap-2.5">
-            {sortedByLatency.map((svc, i) => (
-              <LatencyBar key={svc.id} service={svc} maxLatency={maxLatency} rank={i + 1} />
+        <Panel title={t('overview.latency.title')} dotColor="var(--teal)" subtitle={t('overview.panel.latency.sub')}>
+          <div className="flex flex-col" style={{ gap: '8px' }}>
+            {sortedByLatency.map((svc) => (
+              <LatencyBar key={svc.id} service={svc} maxLatency={maxLatency} />
             ))}
           </div>
-        </section>
-
+        </Panel>
       </div>
 
-      {/* ── AI Analysis Panel (Phase 3, disabled) ── */}
+      {/* ── AI Analysis (Phase 3) ── */}
       <AIPanel t={t} />
 
     </div>

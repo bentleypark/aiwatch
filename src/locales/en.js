@@ -39,8 +39,16 @@ const en = {
   'overview.filter.issues': 'Issues',
   'overview.incidents.title': 'Recent Incidents',
   'overview.latency.title': 'Latency Rankings',
+  'overview.card.latency': 'latency',
+  'overview.card.uptime': 'uptime',
+  'overview.card.incidents': 'incidents',
+  'overview.panel.incidents.sub': 'Last 7 days',
+  'overview.panel.latency.sub': 'Current · ms',
+  'overview.stats.uptime.sub': '30-day average',
+  'overview.incidents.monitoring': 'Monitoring',
   'overview.ai.title': 'AI Analysis',
   'overview.ai.soon': 'Coming Soon',
+  'overview.ai.desc': 'Automatic anomaly detection and analysis is being prepared',
 
   // Empty States
   'empty.issues.title': 'No Issues',

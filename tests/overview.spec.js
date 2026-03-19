@@ -30,8 +30,8 @@ test.describe('Overview page', () => {
   })
 
   test('filter tabs switch between All / Operational / Issues', async ({ page }) => {
-    // Filter tabs are the border-b-2 buttons inside the tab bar
-    const tabBar = page.locator('main .flex.gap-1.border-b')
+    // Filter tabs are pill-style segment control (bg2 rounded container)
+    const tabBar = page.locator('main .flex.bg-\\[var\\(--bg2\\)\\]')
 
     // Click Operational tab via evaluate
     const opTab = tabBar.getByRole('button', { name: /Operational|정상/ })

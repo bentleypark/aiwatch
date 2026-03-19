@@ -14,15 +14,10 @@ const canUseStorage = (() => {
 })()
 
 function detectBrowserLang() {
-  if (typeof navigator === 'undefined') {
-    console.warn('[useLang] navigator is not available (SSR?). Defaulting to "en".')
-    return 'en'
-  }
-  if (!navigator.language) {
-    console.warn('[useLang] navigator.language is empty. Defaulting to "en".')
-    return 'en'
-  }
-  return navigator.language.startsWith('ko') ? 'ko' : 'en'
+  if (typeof navigator === 'undefined') return 'ko'
+  if (!navigator.language) return 'ko'
+  // Default to Korean unless browser explicitly uses English
+  return navigator.language.startsWith('en') ? 'en' : 'ko'
 }
 
 function readStoredLang() {
