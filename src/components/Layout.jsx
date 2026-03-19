@@ -42,8 +42,8 @@ export default function Layout({
         {mobileActionBar}
       </div>
 
-      {/* Body — push content below fixed headers */}
-      <div className="pt-[84px] md:pt-[82px]">
+      {/* Body — push content below fixed headers (inline style: Tailwind v4 doesn't generate md:pt-[82px]) */}
+      <div style={{ paddingTop: '82px' }}>
         <div className="md:grid" style={{ gridTemplateColumns: '220px 1fr' }}>
 
           {/* Desktop sidebar — sticky, starts below ticker bar */}

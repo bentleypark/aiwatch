@@ -2,6 +2,8 @@
 
 /* ─── Design Tokens ─────────────────────────────────────── */
 :root {
+  color-scheme: dark;
+
   /* Backgrounds */
   --bg0: #080c10;
   --bg1: #0d1117;
@@ -41,6 +43,7 @@
 
 /* Light theme: only overrides tokens that differ. Font tokens are intentionally shared. */
 [data-theme="light"] {
+  color-scheme: light;
   --bg0: #ffffff;
   --bg1: #f6f8fa;
   --bg2: #eaeef2;
