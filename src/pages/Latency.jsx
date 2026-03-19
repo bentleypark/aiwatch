@@ -162,14 +162,7 @@ function TrendChart({ services, theme, t }) {
         },
       },
       plugins: {
-        legend: {
-          labels: {
-            color: cssVar('--text1'),
-            font: { family: 'IBM Plex Mono', size: 10 },
-            boxWidth: 10,
-            padding: 12,
-          },
-        },
+        legend: { display: false },
         tooltip: {
           callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y} ms` },
         },
@@ -192,6 +185,15 @@ function TrendChart({ services, theme, t }) {
         <span className="mono text-[9px] text-[var(--text2)]">{t('latency.dummy')}</span>
       </div>
       <div style={{ padding: '16px' }}>
+        {/* Custom legend matching design: 8x3px rounded dot + mono 10px text */}
+        <div className="flex flex-wrap" style={{ gap: '12px', marginBottom: '12px' }}>
+          {services.map((svc) => (
+            <div key={svc.id} className="flex items-center mono text-[10px] text-[var(--text1)] cursor-pointer" style={{ gap: '5px' }}>
+              <span className="shrink-0" style={{ width: '8px', height: '3px', borderRadius: '2px', background: SERVICE_COLOR[svc.id] ?? '#8b949e' }} />
+              {svc.name}
+            </div>
+          ))}
+        </div>
         <div className="h-[320px]">
           <Line key={theme} data={{ labels, datasets }} options={options} />
         </div>
