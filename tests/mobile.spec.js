@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test'
 test.describe('Mobile viewport', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.locator('main').getByText('11').first().waitFor({ state: 'visible', timeout: 5000 })
+    await page.locator('main').getByText('Claude API').first().waitFor({ state: 'visible', timeout: 5000 })
   })
 
   test('sidebar hidden by default, hamburger opens overlay', async ({ page }) => {

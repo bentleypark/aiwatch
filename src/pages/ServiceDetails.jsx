@@ -62,6 +62,12 @@ const STATUS_URL = {
   elevenlabs:  'https://status.elevenlabs.io',
   xai:         'https://status.x.ai',
   deepseek:    'https://status.deepseek.com',
+  claudeai:    'https://status.anthropic.com',
+  chatgpt:     'https://status.openai.com',
+  claudecode:  'https://status.anthropic.com',
+  copilot:     'https://githubstatus.com',
+  cursor:      'https://status.cursor.com',
+  windsurf:    'https://status.codeium.com',
 }
 
 // 30-day calendar status → Tailwind color class

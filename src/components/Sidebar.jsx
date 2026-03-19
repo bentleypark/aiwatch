@@ -74,6 +74,32 @@ const activeBarStyle = { position: 'absolute', left: 0, top: '4px', bottom: '4px
 const sectionTitleStyle = { padding: '6px 8px', letterSpacing: '0.12em', fontSize: '9px', textTransform: 'uppercase', color: 'var(--text2)', fontFamily: 'var(--font-mono)' }
 const badgeStyle = { padding: '1px 5px', borderRadius: '3px', fontSize: '9px', marginLeft: 'auto', fontFamily: 'var(--font-mono)' }
 
+function ServiceNavItem({ svc, page, setPage }) {
+  const active = page.name === 'service' && page.serviceId === svc.id
+  const dotClass = STATUS_DOT_CLASS[svc.status] ?? STATUS_DOT_CLASS.operational
+  const badgeCls = uptimeBadgeCls(svc.uptime30d ?? 100)
+  const statusTextCls = svc.status === 'degraded' ? 'text-[var(--amber)]'
+    : svc.status === 'down' ? 'text-[var(--red)]' : null
+
+  return (
+    <button
+      onClick={() => setPage({ name: 'service', serviceId: svc.id })}
+      aria-current={active ? 'page' : undefined}
+      className={`w-full text-left flex items-center transition-all cursor-pointer
+        ${active ? 'bg-[var(--bg3)] text-[var(--text0)]'
+          : `${statusTextCls ?? 'text-[var(--text1)]'} hover:bg-[var(--bg3)] hover:text-[var(--text0)]`}`}
+      style={navItemStyle}
+    >
+      {active && <span style={activeBarStyle} />}
+      <span className={`rounded-full shrink-0 ${dotClass}`} style={{ width: '6px', height: '6px' }} aria-hidden="true" />
+      <span className="flex-1 min-w-0 truncate">{svc.name}</span>
+      <span className={`shrink-0 ${badgeCls}`} style={badgeStyle}>
+        {(svc.uptime30d ?? 0).toFixed(1)}%
+      </span>
+    </button>
+  )
+}
+
 export default function Sidebar({ visibleServiceIds }) {
   const { page, setPage } = usePage()
   const { t } = useLang()
@@ -128,38 +154,30 @@ export default function Sidebar({ visibleServiceIds }) {
       {/* ── Divider ── */}
       <div style={{ height: '1px', background: 'var(--border)', margin: '8px 12px' }} />
 
-      {/* ── Services section ── */}
+      {/* ── Services section (API + WebApp) ── */}
       <div style={{ padding: '0 12px', marginBottom: '0' }}>
         <div style={sectionTitleStyle}>{t('nav.services')}</div>
       </div>
-      <nav className="flex-1 overflow-y-auto" style={{ padding: '0 12px' }}>
-        {visibleServices.map((svc) => {
-          const active = page.name === 'service' && page.serviceId === svc.id
-          const dotClass = STATUS_DOT_CLASS[svc.status] ?? STATUS_DOT_CLASS.operational
-          const badgeCls = uptimeBadgeCls(svc.uptime30d ?? 100)
-          const statusTextCls = svc.status === 'degraded' ? 'text-[var(--amber)]'
-            : svc.status === 'down' ? 'text-[var(--red)]' : null
-
-          return (
-            <button
-              key={svc.id}
-              onClick={() => setPage({ name: 'service', serviceId: svc.id })}
-              aria-current={active ? 'page' : undefined}
-              className={`w-full text-left flex items-center transition-all cursor-pointer
-                ${active ? 'bg-[var(--bg3)] text-[var(--text0)]'
-                  : `${statusTextCls ?? 'text-[var(--text1)]'} hover:bg-[var(--bg3)] hover:text-[var(--text0)]`}`}
-              style={navItemStyle}
-            >
-              {active && <span style={activeBarStyle} />}
-              <span className={`rounded-full shrink-0 ${dotClass}`} style={{ width: '6px', height: '6px' }} aria-hidden="true" />
-              <span className="flex-1 min-w-0 truncate">{svc.name}</span>
-              <span className={`shrink-0 ${badgeCls}`} style={badgeStyle}>
-                {(svc.uptime30d ?? 0).toFixed(1)}%
-              </span>
-            </button>
-          )
-        })}
+      <nav className="overflow-y-auto" style={{ padding: '0 12px' }}>
+        {visibleServices.filter((s) => s.category !== 'agent').map((svc) => (
+          <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} />
+        ))}
       </nav>
+
+      {/* ── Coding Agents section ── */}
+      {visibleServices.some((s) => s.category === 'agent') && (
+        <>
+          <div style={{ height: '1px', background: 'var(--border)', margin: '8px 12px' }} />
+          <div style={{ padding: '0 12px', marginBottom: '0' }}>
+            <div style={sectionTitleStyle}>{t('nav.agents')}</div>
+          </div>
+          <nav className="overflow-y-auto" style={{ padding: '0 12px' }}>
+            {visibleServices.filter((s) => s.category === 'agent').map((svc) => (
+              <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} />
+            ))}
+          </nav>
+        </>
+      )}
 
       {/* ── Footer ── */}
       <div className="mt-auto">

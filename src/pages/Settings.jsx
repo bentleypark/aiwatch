@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useLang } from '../hooks/useLang'
 import { useTheme } from '../hooks/useTheme'
 import { useSettings } from '../hooks/useSettings'
-import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, ALL_SERVICE_IDS, DEFAULT_SETTINGS } from '../utils/constants'
+import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, API_SERVICE_IDS, WEBAPP_SERVICE_IDS, AGENT_SERVICE_IDS, ALL_SERVICE_IDS, DEFAULT_SETTINGS } from '../utils/constants'
 import { usePolling } from '../hooks/usePolling'
 
 // ── Styles matching design mockup ────────────────────────
@@ -198,22 +198,18 @@ export default function Settings() {
         </FieldRow>
       </section>
 
-      {/* ── Monitoring ── */}
+      {/* ── Monitoring (API + WebApp) ── */}
       <section>
         <div style={sectionTitleStyle}>{t('settings.monitoring')}</div>
         <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', padding: '8px 0 10px' }}>
           {t('settings.monitoring.desc')}
         </div>
         <div>
-          {ALL_SERVICE_IDS.map((id) => {
+          {[...API_SERVICE_IDS, ...WEBAPP_SERVICE_IDS].map((id) => {
             const svc = svcMap[id]
             const dotCls = STATUS_DOT_CLASS[svc?.status] ?? STATUS_DOT_CLASS.unknown
             return (
-              <div
-                key={id}
-                className="flex items-center justify-between"
-                style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}
-              >
+              <div key={id} className="flex items-center justify-between" style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
                 <div className="flex items-center" style={{ gap: '8px' }}>
                   <span className={`rounded-full shrink-0 ${dotCls}`} style={{ width: '6px', height: '6px' }} />
                   <span style={{ fontSize: '12px', color: 'var(--text0)' }}>{svc?.name ?? id}</span>
@@ -221,10 +217,33 @@ export default function Settings() {
                     {svc ? `${svc.uptime30d.toFixed(1)}%` : ''}
                   </span>
                 </div>
-                <Toggle
-                  checked={enabledServices.includes(id)}
-                  onChange={() => toggleService(id)}
-                />
+                <Toggle checked={enabledServices.includes(id)} onChange={() => toggleService(id)} />
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* ── Coding Agents ── */}
+      <section>
+        <div style={sectionTitleStyle}>{t('nav.agents')}</div>
+        <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', padding: '8px 0 10px' }}>
+          {t('settings.monitoring.desc')}
+        </div>
+        <div>
+          {AGENT_SERVICE_IDS.map((id) => {
+            const svc = svcMap[id]
+            const dotCls = STATUS_DOT_CLASS[svc?.status] ?? STATUS_DOT_CLASS.unknown
+            return (
+              <div key={id} className="flex items-center justify-between" style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                <div className="flex items-center" style={{ gap: '8px' }}>
+                  <span className={`rounded-full shrink-0 ${dotCls}`} style={{ width: '6px', height: '6px' }} />
+                  <span style={{ fontSize: '12px', color: 'var(--text0)' }}>{svc?.name ?? id}</span>
+                  <span className="mono" style={{ fontSize: '10px', color: 'var(--text2)', marginLeft: '4px' }}>
+                    {svc ? `${svc.uptime30d.toFixed(1)}%` : ''}
+                  </span>
+                </div>
+                <Toggle checked={enabledServices.includes(id)} onChange={() => toggleService(id)} />
               </div>
             )
           })}

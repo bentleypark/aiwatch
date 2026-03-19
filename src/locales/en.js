@@ -10,6 +10,7 @@ const en = {
   'nav.settings': 'Settings',
   'nav.dashboard': 'Dashboard',
   'nav.services': 'Services',
+  'nav.agents': 'Coding Agents',
   'sidebar.footer': 'aiwatch.dev · v1.0',
 
   // Topbar

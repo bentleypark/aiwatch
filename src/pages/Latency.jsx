@@ -226,11 +226,13 @@ export default function Latency() {
   if (loading) return <SkeletonUI />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
-  const sorted = [...services].sort((a, b) => a.latency - b.latency)
+  // Only include services with latency data (exclude web apps and coding agents)
+  const withLatency = services.filter((s) => s.latency != null)
+  const sorted = [...withLatency].sort((a, b) => a.latency - b.latency)
   const fastest = sorted[0]
   const slowest = sorted[sorted.length - 1]
-  const avg = services.length
-    ? Math.round(services.reduce((s, v) => s + v.latency, 0) / services.length)
+  const avg = withLatency.length
+    ? Math.round(withLatency.reduce((s, v) => s + v.latency, 0) / withLatency.length)
     : 0
   const maxLatency = slowest?.latency ?? 1
 

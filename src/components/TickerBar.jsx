@@ -30,25 +30,40 @@ export default function TickerBar() {
   const { services: rawServices } = usePolling()
   const services = rawServices ?? []
 
-  // Use polling data if available, otherwise minimal placeholder
-  const items = services.length > 0
-    ? services.map((s) => ({ id: s.id, name: s.name, status: s.status }))
-    : [{ id: 'loading', name: '...', status: 'operational' }]
+  const apiItems = services.filter((s) => s.category !== 'agent')
+  const agentItems = services.filter((s) => s.category === 'agent')
+
+  if (services.length === 0) {
+    return (
+      <div className="w-full overflow-hidden h-full flex items-center pl-5">
+        <span className="mono text-[11px] text-[var(--text2)]">...</span>
+      </div>
+    )
+  }
+
+  const separator = <span style={{ color: 'var(--border-hi)', margin: '0 6px' }}>|</span>
+
+  const renderItems = (prefix) => (
+    <>
+      {apiItems.map((svc) => (
+        <TickerItem key={`${prefix}-${svc.id}`} name={svc.name} status={svc.status} />
+      ))}
+      {agentItems.length > 0 && separator}
+      {agentItems.map((svc) => (
+        <TickerItem key={`${prefix}-${svc.id}`} name={svc.name} status={svc.status} />
+      ))}
+    </>
+  )
 
   return (
     <div className="w-full overflow-hidden h-full flex items-center pl-5">
       <div
         className="flex gap-5 will-change-transform"
-        style={{ animation: 'ticker-scroll 40s linear infinite' }}
+        style={{ animation: 'ticker-scroll 50s linear infinite' }}
       >
-        {items.map((svc) => (
-          <TickerItem key={svc.id} name={svc.name} status={svc.status} />
-        ))}
-        {/* Duplicate for seamless loop */}
+        {renderItems('a')}
         <div aria-hidden="true" className="flex gap-5">
-          {items.map((svc) => (
-            <TickerItem key={`${svc.id}:dup`} name={svc.name} status={svc.status} />
-          ))}
+          {renderItems('b')}
         </div>
       </div>
     </div>

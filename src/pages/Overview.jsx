@@ -265,10 +265,18 @@ export default function Overview() {
     ? (services.reduce((sum, s) => sum + s.uptime30d, 0) / services.length).toFixed(1)
     : '—'
 
+  const apiAndWebServices = services.filter((s) => s.category !== 'agent')
+  const agentServices = services.filter((s) => s.category === 'agent')
+
   const filteredServices =
-    filter === 'operational' ? services.filter((s) => s.status === 'operational')
-    : filter === 'issues'    ? services.filter((s) => s.status !== 'operational')
-    : services
+    filter === 'operational' ? apiAndWebServices.filter((s) => s.status === 'operational')
+    : filter === 'issues'    ? apiAndWebServices.filter((s) => s.status !== 'operational')
+    : apiAndWebServices
+
+  const filteredAgents =
+    filter === 'operational' ? agentServices.filter((s) => s.status === 'operational')
+    : filter === 'issues'    ? agentServices.filter((s) => s.status !== 'operational')
+    : agentServices
 
   const sevenDaysAgo = Date.now() - 7 * 86_400_000
   const recentIncidents = services
@@ -277,8 +285,9 @@ export default function Overview() {
     .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
     .slice(0, 5)
 
-  const sortedByLatency = [...services].sort((a, b) => a.latency - b.latency)
-  const maxLatency = services.length ? Math.max(...services.map((s) => s.latency)) : 1
+  const withLatency = services.filter((s) => s.latency != null)
+  const sortedByLatency = [...withLatency].sort((a, b) => a.latency - b.latency)
+  const maxLatency = withLatency.length ? Math.max(...withLatency.map((s) => s.latency)) : 1
 
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>
@@ -315,6 +324,29 @@ export default function Overview() {
             />
           ))}
         </div>
+      )}
+
+      {/* ── Coding Agents ── */}
+      {filteredAgents.length > 0 && (
+        <>
+          <div className="flex items-center justify-between" style={{ marginTop: '16px' }}>
+            <h2 className="mono text-[10px] text-[var(--text2)] uppercase flex items-center gap-2" style={{ letterSpacing: '0.1em' }}>
+              <span className="text-[var(--green)] font-semibold">//</span>
+              {t('nav.agents')}
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3" style={{ gap: '8px' }}>
+            {filteredAgents.map((svc, i) => (
+              <ServiceCard
+                key={svc.id}
+                service={svc}
+                index={i}
+                t={t}
+                onClick={() => setPage({ name: 'service', serviceId: svc.id })}
+              />
+            ))}
+          </div>
+        </>
       )}
 
       {/* ── Bottom Panels ── */}

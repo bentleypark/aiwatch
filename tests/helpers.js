@@ -1,8 +1,8 @@
 // Shared test helpers — usePolling has an 800ms simulated loading delay.
 
 export async function waitForDataLoad(page) {
-  // Wait for the skeleton to clear — stat card "11" (operational count) is a reliable signal
-  await page.locator('main').getByText('11').first().waitFor({ state: 'visible', timeout: 5000 })
+  // Wait for the skeleton to clear — service name is a reliable signal
+  await page.locator('main').getByText('Claude API').first().waitFor({ state: 'visible', timeout: 5000 })
 }
 
 // Navigate to a page via sidebar click (desktop only)

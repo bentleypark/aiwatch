@@ -8,15 +8,18 @@ test.describe('Overview page', () => {
   })
 
   test('renders stat cards with correct data', async ({ page }) => {
-    await expect(page.locator('main').getByText('11').first()).toBeVisible()
+    // 19 services total: 17 operational + 2 degraded
+    await expect(page.locator('main').getByText('17').first()).toBeVisible()
     await expect(page.locator('main').getByText('%').first()).toBeVisible()
   })
 
-  test('renders 13 service cards', async ({ page }) => {
+  test('renders all service cards', async ({ page }) => {
     const serviceNames = [
       'Claude API', 'OpenAI API', 'Gemini API', 'Mistral API',
       'Cohere API', 'Groq Cloud', 'Together AI', 'Perplexity',
       'Hugging Face', 'Replicate', 'ElevenLabs', 'xAI (Grok)', 'DeepSeek API',
+      'claude.ai', 'ChatGPT',
+      'Claude Code', 'GitHub Copilot', 'Cursor', 'Windsurf',
     ]
     for (const name of serviceNames) {
       await expect(page.locator('main').getByText(name).first()).toBeVisible()

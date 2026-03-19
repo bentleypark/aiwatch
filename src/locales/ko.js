@@ -10,6 +10,7 @@ const ko = {
   'nav.settings': '설정',
   'nav.dashboard': '대시보드',
   'nav.services': '서비스',
+  'nav.agents': '코딩 에이전트',
   'sidebar.footer': 'aiwatch.dev · v1.0',
 
   // Topbar
