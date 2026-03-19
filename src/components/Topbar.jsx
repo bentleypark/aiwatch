@@ -53,7 +53,7 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
     : t('topbar.refresh')
 
   return (
-    <div className="flex items-center justify-between w-full px-5">
+    <div className="flex items-center justify-between w-full" style={{ padding: '0 20px' }}>
       {/* Left: hamburger (mobile) + logo mark + logo text */}
       <div className="flex items-center gap-2.5">
         <button
