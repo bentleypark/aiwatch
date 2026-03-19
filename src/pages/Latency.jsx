@@ -222,7 +222,7 @@ export default function Latency() {
   const maxLatency = slowest?.latency ?? 1
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col" style={{ gap: '20px' }}>
 
       {/* ── Section Header ── */}
       <div className="flex items-center justify-between">

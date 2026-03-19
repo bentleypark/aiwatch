@@ -245,7 +245,7 @@ export default function ServiceDetails({ serviceId }) {
   const incidentCount = service.incidents?.length ?? 0
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col" style={{ gap: '20px' }}>
 
       {/* ── Section Title + Back Button ── */}
       <div className="flex items-center justify-between">

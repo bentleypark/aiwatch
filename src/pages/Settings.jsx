@@ -117,7 +117,7 @@ export default function Settings() {
   for (const s of services) nameMap[s.id] = s.name
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="flex flex-col max-w-2xl" style={{ gap: '20px' }}>
 
       {/* ── General ── */}
       <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">

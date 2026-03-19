@@ -125,7 +125,7 @@ export default function Uptime() {
   const months = (services[0]?.history3m ?? []).map((m) => m.month)
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col" style={{ gap: '20px' }}>
 
       {/* ── Section Header ── */}
       <div className="flex items-center justify-between">

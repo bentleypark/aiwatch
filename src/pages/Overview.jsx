@@ -281,7 +281,7 @@ export default function Overview() {
   const maxLatency = services.length ? Math.max(...services.map((s) => s.latency)) : 1
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col" style={{ gap: '20px' }}>
 
       {/* ── Summary Stats ── */}
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px', marginBottom: '20px' }}>

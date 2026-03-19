@@ -246,7 +246,7 @@ export default function Incidents() {
   }
 
   return (
-    <div className=" space-y-4">
+    <div className="flex flex-col" style={{ gap: '16px' }}>
 
       {/* ── Filters ── */}
       <FilterBar
