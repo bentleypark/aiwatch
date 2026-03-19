@@ -17,15 +17,19 @@ No test runner is configured yet.
 
 ### Per-issue process (follow this order every time)
 
-1. **Code** — implement the feature or fix
-2. **Review** — run PR review before committing:
+1. **Design check** (UI issues only) — before coding, compare `docs/AIWatch_화면디자인_초안.html` with the current implementation:
+   - Open design mockup in browser and take screenshots of the relevant area
+   - Identify **every** difference (spacing, colors, fonts, layout, icons, text)
+   - List differences explicitly before writing any code
+2. **Code** — implement the feature or fix
+3. **Review** — run PR review before committing:
    ```
    /pr-review-toolkit:review-pr
    ```
    Address all **Critical** and **Important** findings before committing.
-3. **Commit** — include `closes #N` in the message so GitHub links the commit
-4. **Verify checklist** — read the issue (`gh issue view N`) and confirm every checklist item (`- [ ]`) is actually implemented in code before closing
-5. **Close** — only close the issue after checklist verification: `gh issue close N`
+4. **Commit** — include `closes #N` in the message so GitHub links the commit
+5. **Verify checklist** — read the issue (`gh issue view N`) and confirm every checklist item (`- [ ]`) is actually implemented in code before closing
+6. **Close** — only close the issue after checklist verification: `gh issue close N`
 
 > Never close an issue immediately after committing. Always re-read the issue checklist and verify each item against the code first.
 
