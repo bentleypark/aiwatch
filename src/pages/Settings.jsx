@@ -1,7 +1,7 @@
 // Settings page — theme, language, default period, SLA baseline,
 // monitored services toggles, and Phase 3 alerts placeholders.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useLang } from '../hooks/useLang'
 import { useTheme } from '../hooks/useTheme'
 import { useSettings } from '../hooks/useSettings'
@@ -45,6 +45,8 @@ function OptionButton({ active, onClick, children }) {
 function Toggle({ checked, onChange, disabled }) {
   return (
     <button
+      role="switch"
+      aria-checked={checked}
       onClick={() => !disabled && onChange(!checked)}
       disabled={disabled}
       className={`relative w-9 h-5 rounded-full transition-colors ${
@@ -84,6 +86,10 @@ export default function Settings() {
 
   // Save feedback
   const [saved, setSaved] = useState(false)
+  const saveTimerRef = useRef(null)
+
+  // Cleanup timer on unmount
+  useEffect(() => () => clearTimeout(saveTimerRef.current), [])
 
   // Sync local state if settings change externally
   useEffect(() => {
@@ -96,7 +102,8 @@ export default function Settings() {
     const slaNum = sla === '' ? DEFAULT_SETTINGS.sla : Number(sla)
     save({ period, sla: slaNum, enabledServices })
     setSaved(true)
-    setTimeout(() => setSaved(false), 1800)
+    clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => setSaved(false), 1800)
   }
 
   function toggleService(id) {
@@ -215,8 +222,8 @@ export default function Settings() {
       <div className="flex items-center gap-3">
         <button
           onClick={handleSave}
-          className="px-5 py-2 text-sm mono rounded bg-[var(--blue)] text-white
-                     hover:opacity-90 transition-opacity text-[var(--bg0)]"
+          className="px-5 py-2 text-sm mono rounded bg-[var(--blue)] text-[var(--bg0)]
+                     hover:opacity-90 transition-opacity"
         >
           {t('settings.save')}
         </button>

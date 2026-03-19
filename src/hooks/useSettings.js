@@ -31,8 +31,12 @@ function readStored() {
         ? parsed.enabledServices.filter((id) => ALL_SERVICE_IDS.includes(id))
         : DEFAULT_SETTINGS.enabledServices,
     }
-  } catch {
-    return DEFAULT_SETTINGS
+  } catch (err) {
+    if (err instanceof SyntaxError || err instanceof DOMException) {
+      console.warn('[useSettings] Failed to read stored settings:', err.message)
+      return DEFAULT_SETTINGS
+    }
+    throw err
   }
 }
 
@@ -52,8 +56,14 @@ export function useSettings() {
     if (canUseStorage) {
       try {
         localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(validated))
-      } catch {
-        // Preference not persisted but applied in-memory
+      } catch (err) {
+        if (err instanceof DOMException) {
+          console.warn('[useSettings] Failed to persist settings:', err.message)
+        } else {
+          throw err
+        }
+        setSettings(validated)
+        return false
       }
     }
     setSettings(validated)

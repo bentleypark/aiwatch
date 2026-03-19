@@ -30,7 +30,7 @@ function readStoredTheme() {
   } catch (err) {
     if (err instanceof DOMException) {
       console.warn('[useTheme] localStorage read failed:', err.message)
-      return 'system'
+      return 'dark'
     }
     throw err
   }
