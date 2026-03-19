@@ -40,7 +40,7 @@ export default function Layout({
         {/* Desktop sidebar — fixed left, hidden on mobile */}
         <aside
           className="fixed left-0 top-[82px] w-[220px] h-[calc(100vh-82px)]
-                     hidden md:block overflow-y-auto
+                     hidden md:block overflow-y-auto z-30
                      bg-[var(--bg1)] border-r border-[var(--border)]"
         >
           {sidebar}

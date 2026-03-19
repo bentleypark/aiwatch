@@ -15,16 +15,16 @@ const canUseMatchMedia =
   typeof window !== 'undefined' && typeof window.matchMedia === 'function'
 
 function readStoredTheme() {
-  if (!canUseStorage) return 'system'
+  if (!canUseStorage) return 'dark'
   try {
     const stored = localStorage.getItem(THEME_STORAGE_KEY)
-    if (stored === null) return 'system'
+    if (stored === null) return 'dark'
     if (!VALID_THEMES.includes(stored)) {
       console.warn(
-        `[useTheme] Unrecognized theme "${stored}" in localStorage. Falling back to "system".`
+        `[useTheme] Unrecognized theme "${stored}" in localStorage. Falling back to "dark".`
       )
       localStorage.removeItem(THEME_STORAGE_KEY)
-      return 'system'
+      return 'dark'
     }
     return stored
   } catch (err) {
