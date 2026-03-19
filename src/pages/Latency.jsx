@@ -27,8 +27,8 @@ const cssVar = (name) =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 
 // Latency thresholds for bar color coding
-const FAST_MS   = 200  // ≤ 200ms → green
-const NORMAL_MS = 500  // 201–500ms → amber  /  > 500ms → red
+const FAST_MS   = 300  // ≤ 300ms → green
+const NORMAL_MS = 500  // 301–500ms → amber  /  > 500ms → red
 
 // Per-service chart line colors (visualization palette — not design tokens).
 // Canvas-based charts cannot use CSS custom properties directly.
