@@ -108,10 +108,10 @@ export default function Uptime() {
     [services]
   )
 
-  if (loading) return <div className=""><SkeletonUI /></div>
-  if (error)   return <div className=""><EmptyState type="error" onAction={() => window.location.reload()} /></div>
+  if (loading) return <SkeletonUI />
+  if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
-  if (services.length === 0) return <div className=""><EmptyState type="neutral" /></div>
+  if (services.length === 0) return <EmptyState type="neutral" />
 
   const mostStable = sortedByUptime[0]
   const leastStable = sortedByUptime[sortedByUptime.length - 1]

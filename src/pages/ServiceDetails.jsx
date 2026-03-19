@@ -223,13 +223,13 @@ export default function ServiceDetails({ serviceId }) {
   const { services: rawServices, loading, error } = usePolling()
   const services = rawServices ?? []
 
-  if (loading) return <div className=""><SkeletonUI /></div>
-  if (error)   return <div className=""><EmptyState type="error" onAction={() => window.location.reload()} /></div>
+  if (loading) return <SkeletonUI />
+  if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
   const service = services.find((s) => s.id === serviceId)
   if (!service) {
     return (
-      <div className="">
+      <div>
         <EmptyState type="error" onAction={() => setPage({ name: 'overview' })} />
       </div>
     )

@@ -42,9 +42,6 @@
   --border: rgba(255, 255, 255, 0.07);
   --border-hi: rgba(255, 255, 255, 0.14);
 
-  /* Fonts */
-  --font-mono: "IBM Plex Mono", monospace;
-  --font-sans: "IBM Plex Sans", sans-serif;
 }
 
 /* Light theme: only overrides tokens that differ. Font tokens are intentionally shared. */
@@ -106,6 +103,35 @@ pre,
 .content-padding { padding: 14px; }        /* mobile */
 @media (min-width: 768px) {
   .content-padding { padding: 20px 24px; } /* desktop: matches design mockup */
+}
+
+/* ─── Topbar button (Tailwind v4 base reset zeroes button padding) ── */
+.btn-topbar {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--border-hi);
+  background: transparent;
+  color: var(--text1);
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  transition: all 0.15s;
+}
+.btn-topbar:hover { background: var(--bg3); color: var(--text0); }
+.btn-topbar:disabled, .btn-topbar[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+
+.btn-topbar-disabled {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text2);
+  cursor: not-allowed;
+  letter-spacing: 0.3px;
+  opacity: 0.5;
 }
 
 /* ─── Scrollbar ─────────────────────────────────────────── */

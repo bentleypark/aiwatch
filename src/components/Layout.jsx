@@ -43,7 +43,7 @@ export default function Layout({
 
       {/* Body — .header-offset: mobile 84px, desktop 82px (see index.css) */}
       <div className="header-offset">
-        <div className="md:grid" style={{ gridTemplateColumns: '220px 1fr' }}>
+        <div className="md:grid" style={{ gridTemplateColumns: `${SIDEBAR_W}px 1fr` }}>
 
           {/* Desktop sidebar — sticky, z-[51] above ticker bar so buttons are clickable */}
           <aside

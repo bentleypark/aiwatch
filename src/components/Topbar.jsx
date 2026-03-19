@@ -25,14 +25,10 @@ function HamburgerIcon() {
   )
 }
 
-// Button style matching design mockup: 5px 12px padding, 5px radius, border-hi, 11px mono
-const btnStyle = { padding: '5px 12px', borderRadius: '5px', letterSpacing: '0.3px' }
-const btnCls = 'mono text-[11px] border border-[var(--border-hi)] bg-transparent text-[var(--text1)] cursor-pointer hover:bg-[var(--bg3)] hover:text-[var(--text0)] transition-all'
-
 export default function Topbar({ onRefresh, onMenuToggle }) {
-  const { setPage } = usePage()
+  const { page, setPage } = usePage()
   const { lang, t } = useLang()
-  const [lastRefresh, setLastRefresh] = useState(null)
+  const isSettings = page.name === 'settings'
   const [refreshing, setRefreshing] = useState(false)
 
   const handleRefresh = useCallback(async () => {
@@ -40,26 +36,23 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
     setRefreshing(true)
     try {
       await onRefresh?.()
+      // Simulate network delay matching design mockup (1.2s)
+      await new Promise((r) => setTimeout(r, 1200))
     } finally {
-      setLastRefresh(new Date())
       setRefreshing(false)
     }
   }, [refreshing, onRefresh])
 
-  const refreshLabel = refreshing
-    ? '...'
-    : lastRefresh
-    ? `${formatTime(lastRefresh, lang)} ${t('topbar.refreshed')}`
-    : t('topbar.refresh')
+  // Design mockup: "↻ Loading..." while refreshing, "↻ Refresh" when idle
+  const refreshLabel = refreshing ? t('topbar.refresh.loading') : t('topbar.refresh')
 
   return (
     <div className="flex items-center justify-between w-full" style={{ padding: '0 20px' }}>
       {/* Left: hamburger (mobile) + logo mark + logo text */}
       <div className="flex items-center gap-2.5">
         <button
-          className="md:hidden flex items-center justify-center w-8 h-8 rounded
-                     border border-[var(--border-hi)] bg-transparent text-[var(--text1)]
-                     hover:bg-[var(--bg3)] hover:text-[var(--text0)] transition-all"
+          className="btn-topbar md:hidden flex items-center justify-center"
+          style={{ padding: '6px', width: '32px', height: '32px', borderRadius: '6px' }}
           onClick={onMenuToggle}
           aria-label={t('topbar.menu.open')}
         >
@@ -79,10 +72,7 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
       {/* Center: LIVE · time — hidden on mobile */}
       <div className="hidden md:flex items-center gap-1.5 mono text-[11px] text-[var(--text2)]">
         <span className="w-1.5 h-1.5 rounded-full bg-[var(--green)] animate-[pulse_2s_ease-in-out_infinite]" />
-        <span>
-          {t('topbar.live')}
-          {lastRefresh ? ` · ${formatTime(lastRefresh, lang)}` : ' · —'}
-        </span>
+        <span>{t('topbar.live')} · —</span>
       </div>
 
       {/* Right: actions */}
@@ -92,8 +82,7 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          style={btnStyle}
-          className={`hidden md:inline-block ${btnCls} disabled:opacity-50 disabled:cursor-not-allowed`}
+          className="btn-topbar hidden md:inline-block"
         >
           {refreshLabel}
         </button>
@@ -104,8 +93,7 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
             aria-disabled="true"
             tabIndex={0}
             aria-describedby="analyze-tooltip"
-            style={btnStyle}
-            className="mono text-[11px] border border-[var(--border)] bg-[var(--bg3)] text-[var(--text2)] opacity-50 cursor-not-allowed"
+            className="btn-topbar-disabled"
             onClick={(e) => e.preventDefault()}
           >
             {t('topbar.analyze')} ↗
@@ -113,16 +101,10 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
           <div
             id="analyze-tooltip"
             role="tooltip"
-            className="absolute top-[calc(100%+8px)] right-0 z-[200]
-                        bg-[var(--bg2)] border border-[var(--border-hi)] rounded-[6px]
-                        px-3 py-2 whitespace-nowrap
-                        opacity-0 -translate-y-1 pointer-events-none
-                        group-hover:opacity-100 group-hover:translate-y-0
-                        group-focus-within:opacity-100 group-focus-within:translate-y-0
-                        transition-all duration-150"
+            className="absolute top-[calc(100%+8px)] right-0 z-[200] bg-[var(--bg2)] border border-[var(--border-hi)] rounded-[6px] whitespace-nowrap opacity-0 -translate-y-1 pointer-events-none group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0 transition-all duration-150"
+            style={{ padding: '8px 12px' }}
           >
-            <div className="absolute -top-[5px] right-3.5 w-2 h-2 rotate-45
-                            bg-[var(--bg2)] border-t border-l border-[var(--border-hi)]" />
+            <div className="absolute -top-[5px] right-3.5 w-2 h-2 rotate-45 bg-[var(--bg2)] border-t border-l border-[var(--border-hi)]" />
             <div className="mono text-[10px] text-[var(--blue)] tracking-wide flex items-center gap-1.5 mb-1">
               <span className="w-[5px] h-[5px] rounded-full bg-[var(--blue)]" />
               {t('topbar.analyze.tooltip.title')}
@@ -133,15 +115,18 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
           </div>
         </div>
 
-        {/* Settings — SVG icon + text */}
+        {/* Settings — gear icon + text */}
         <button
           onClick={() => setPage({ name: 'settings' })}
-          style={{ ...btnStyle, display: 'flex', alignItems: 'center', gap: '5px' }}
-          className={`${btnCls}`}
+          className="btn-topbar"
+          style={{
+            display: 'flex', alignItems: 'center', gap: '5px',
+            ...(isSettings ? { color: 'var(--green)', borderColor: 'var(--green)', background: 'var(--bg3)' } : {}),
+          }}
           aria-label={t('nav.settings')}
         >
           <GearIcon />
-          <span className="hidden md:inline">Settings</span>
+          <span className="hidden md:inline">{t('nav.settings')}</span>
         </button>
       </div>
     </div>
@@ -152,37 +137,29 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
 export function MobileActionBar({ onRefresh }) {
   const { lang, t } = useLang()
   const [refreshing, setRefreshing] = useState(false)
-  const [lastRefresh, setLastRefresh] = useState(null)
 
   const handleRefresh = useCallback(async () => {
     if (refreshing) return
     setRefreshing(true)
     try {
       await onRefresh?.()
+      await new Promise((r) => setTimeout(r, 1200))
     } finally {
-      setLastRefresh(new Date())
       setRefreshing(false)
     }
   }, [refreshing, onRefresh])
 
-  const refreshLabel = refreshing
-    ? '...'
-    : lastRefresh
-    ? `${formatTime(lastRefresh, lang)} ${t('topbar.refreshed')}`
-    : t('topbar.refresh')
+  const refreshLabel = refreshing ? t('topbar.refresh.loading') : t('topbar.refresh')
 
   return (
-    <div className="flex items-center gap-2 px-3.5 py-2
-                    bg-[var(--bg1)] border-b border-[var(--border)]">
+    <div className="flex items-center gap-2 bg-[var(--bg1)] border-b border-[var(--border)]" style={{ padding: '8px 14px' }}>
       <span className="w-1.5 h-1.5 rounded-full bg-[var(--green)] animate-[pulse_2s_ease-in-out_infinite]" />
       <span className="mono text-[10px] text-[var(--text2)]">{t('topbar.live')}</span>
       <button
         onClick={handleRefresh}
         disabled={refreshing}
-        className="ml-auto mono text-[11px] px-2.5 py-1 rounded border
-                   border-[var(--border-hi)] bg-transparent text-[var(--text1)]
-                   hover:bg-[var(--bg3)] disabled:opacity-50 disabled:cursor-not-allowed
-                   transition-all"
+        className="btn-topbar ml-auto"
+        style={{ fontSize: '11px', padding: '4px 10px' }}
       >
         {refreshLabel}
       </button>

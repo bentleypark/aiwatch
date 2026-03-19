@@ -174,12 +174,12 @@ export default function Overview() {
   const [filter, setFilter] = useState('all')
 
   if (loading) {
-    return <div className=""><SkeletonUI /></div>
+    return <SkeletonUI />
   }
 
   if (error) {
     return (
-      <div className="">
+      <div>
         <EmptyState type="error" onAction={() => window.location.reload()} />
         {lastUpdated && (
           <p className="mt-2 text-center text-xs text-[var(--text2)]">

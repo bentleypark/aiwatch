@@ -15,6 +15,7 @@ const en = {
   // Topbar
   'topbar.live': 'LIVE',
   'topbar.refresh': '↻ Refresh',
+  'topbar.refresh.loading': '↻ Loading...',
   'topbar.analyze': 'Analyze',
   'topbar.analyze.soon': 'Coming Soon',
   'topbar.analyze.tooltip.title': 'Coming Soon',
