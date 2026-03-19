@@ -1,6 +1,5 @@
 import { useTheme } from './hooks/useTheme'
-
-const THEMES = ['dark', 'light', 'system']
+import { VALID_THEMES } from './utils/constants'
 
 function App() {
   const { theme, setTheme } = useTheme()
@@ -12,16 +11,15 @@ function App() {
         AI API 서비스 실시간 모니터링 대시보드
       </p>
       <div className="mt-4 flex gap-2">
-        {THEMES.map((t) => (
+        {VALID_THEMES.map((t) => (
           <button
             key={t}
             onClick={() => setTheme(t)}
-            className="px-3 py-1 rounded text-xs mono"
-            style={{
-              background: theme === t ? 'var(--bg3)' : 'var(--bg2)',
-              color: theme === t ? 'var(--text0)' : 'var(--text2)',
-              border: `1px solid ${theme === t ? 'var(--border-hi)' : 'var(--border)'}`,
-            }}
+            className={`px-3 py-1 rounded text-xs mono border ${
+              theme === t
+                ? 'bg-[--bg3] text-[--text0] border-[--border-hi]'
+                : 'bg-[--bg2] text-[--text2] border-[--border]'
+            }`}
           >
             {t}
           </button>

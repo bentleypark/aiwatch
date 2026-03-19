@@ -1,11 +1,47 @@
 import { useState, useEffect } from 'react'
+import { VALID_THEMES, THEME_STORAGE_KEY } from '../utils/constants'
 
-const STORAGE_KEY = 'aiwatch-theme'
+const canUseStorage = (() => {
+  try {
+    localStorage.setItem('__test__', '1')
+    localStorage.removeItem('__test__')
+    return true
+  } catch {
+    return false
+  }
+})()
+
+const canUseMatchMedia =
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+
+function readStoredTheme() {
+  if (!canUseStorage) return 'system'
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY)
+    if (stored === null) return 'system'
+    if (!VALID_THEMES.includes(stored)) {
+      console.warn(
+        `[useTheme] Unrecognized theme "${stored}" in localStorage. Falling back to "system".`
+      )
+      localStorage.removeItem(THEME_STORAGE_KEY)
+      return 'system'
+    }
+    return stored
+  } catch (err) {
+    if (err instanceof DOMException) {
+      console.warn('[useTheme] localStorage read failed:', err.message)
+      return 'system'
+    }
+    throw err
+  }
+}
 
 function applyTheme(theme) {
   const root = document.documentElement
   if (theme === 'system') {
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    const prefersDark = canUseMatchMedia
+      ? window.matchMedia('(prefers-color-scheme: dark)').matches
+      : true
     root.removeAttribute('data-theme')
     if (!prefersDark) root.setAttribute('data-theme', 'light')
   } else {
@@ -16,14 +52,18 @@ function applyTheme(theme) {
 }
 
 export function useTheme() {
-  const [theme, setTheme] = useState(() => localStorage.getItem(STORAGE_KEY) ?? 'system')
+  const [theme, setTheme] = useState(readStoredTheme)
 
   useEffect(() => {
-    applyTheme(theme)
+    try {
+      applyTheme(theme)
+    } catch (err) {
+      console.warn('[useTheme] Failed to apply theme:', err.message)
+    }
   }, [theme])
 
   useEffect(() => {
-    if (theme !== 'system') return
+    if (theme !== 'system' || !canUseMatchMedia) return
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
     const handler = () => applyTheme('system')
     mq.addEventListener('change', handler)
@@ -31,7 +71,21 @@ export function useTheme() {
   }, [theme])
 
   function setAndPersist(next) {
-    localStorage.setItem(STORAGE_KEY, next)
+    if (!VALID_THEMES.includes(next)) {
+      console.error(`[useTheme] Invalid theme value: "${next}"`)
+      return
+    }
+    if (canUseStorage) {
+      try {
+        localStorage.setItem(THEME_STORAGE_KEY, next)
+      } catch (err) {
+        if (err instanceof DOMException) {
+          console.warn('[useTheme] Failed to persist theme preference:', err.message)
+        } else {
+          throw err
+        }
+      }
+    }
     setTheme(next)
   }
 
