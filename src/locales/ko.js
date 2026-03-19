@@ -47,6 +47,7 @@ const ko = {
   'empty.error.action': '다시 시도',
 
   // Latency
+  'latency.rankings': '현재 순위',
   'latency.fastest': '가장 빠름',
   'latency.average': '평균',
   'latency.slowest': '가장 느림',

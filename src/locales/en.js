@@ -47,6 +47,7 @@ const en = {
   'empty.error.action': 'Retry',
 
   // Latency
+  'latency.rankings': 'Current Rankings',
   'latency.fastest': 'Fastest',
   'latency.average': 'Average',
   'latency.slowest': 'Slowest',
