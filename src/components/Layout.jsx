@@ -29,9 +29,9 @@ export default function Layout({
         {topbar}
       </header>
 
-      {/* Ticker Bar — fixed, 34px, below Topbar. Hidden on mobile. */}
+      {/* Ticker Bar — fixed, 34px, below Topbar. Hidden on mobile. Offset by sidebar on md+. */}
       <div
-        className="fixed inset-x-0 top-[48px] h-[34px] z-[50] hidden md:flex items-center
+        className="fixed right-0 left-0 md:left-[220px] top-[48px] h-[34px] z-[50] hidden md:flex items-center
                    bg-[var(--bg2)] border-b border-[var(--border)]"
       >
         {tickerBar}
@@ -42,27 +42,28 @@ export default function Layout({
         {mobileActionBar}
       </div>
 
-      {/* Body — Grid on desktop (sidebar + content), block on mobile */}
-      <div className="pt-[84px] md:pt-[82px] md:grid md:min-h-screen"
-           style={{ gridTemplateColumns: '220px 1fr' }}>
+      {/* Body — below fixed topbar+ticker (desktop) or topbar+actionbar (mobile) */}
+      <div className="pt-[84px] md:pt-[82px]">
+        <div className="md:grid" style={{ gridTemplateColumns: '220px 1fr' }}>
 
-        {/* Desktop sidebar — sticky within grid column */}
-        <aside
-          className="hidden md:block sticky top-[82px] h-[calc(100vh-82px)]
-                     overflow-y-auto overflow-x-hidden
-                     bg-[var(--bg1)] border-r border-[var(--border)]"
-        >
-          {sidebar}
-        </aside>
+          {/* Desktop sidebar — sticky within grid column */}
+          <aside
+            className="hidden md:block sticky top-[82px] h-[calc(100vh-82px)]
+                       overflow-y-auto overflow-x-hidden
+                       bg-[var(--bg1)] border-r border-[var(--border)]"
+          >
+            {sidebar}
+          </aside>
 
-        {/* Content + Footer column */}
-        <div className="flex flex-col min-h-[calc(100vh-82px)]">
-          <main className="flex-1">
-            {children}
-          </main>
-          <footer className="bg-[var(--bg1)] border-t border-[var(--border)]">
-            {footer}
-          </footer>
+          {/* Content + Footer column */}
+          <div className="flex flex-col min-h-[calc(100vh-82px)]">
+            <main className="flex-1">
+              {children}
+            </main>
+            <footer className="bg-[var(--bg1)] border-t border-[var(--border)]">
+              {footer}
+            </footer>
+          </div>
         </div>
       </div>
 
