@@ -69,7 +69,9 @@ const ko = {
 
   // Incidents
   'incidents.filter.service': '서비스',
+  'incidents.filter.service.all': '모든 서비스',
   'incidents.filter.status': '상태',
+  'incidents.filter.status.all': '모든 상태',
   'incidents.filter.period': '기간',
   'incidents.filter.all': '전체',
   'incidents.col.time': '시간',
@@ -81,9 +83,9 @@ const ko = {
   'incidents.status.monitoring': '모니터링',
   'incidents.status.resolved': '해결됨',
   'incidents.duration.ongoing': '진행 중',
-  'incidents.period.7d': '7일',
-  'incidents.period.30d': '30일',
-  'incidents.period.90d': '90일',
+  'incidents.period.7d': '최근 7일',
+  'incidents.period.30d': '최근 30일',
+  'incidents.period.90d': '최근 90일',
   'incidents.period.all': '전체 기간',
   'incidents.timeline.title': '타임라인',
   'incidents.timeline.investigating': '조사 중',

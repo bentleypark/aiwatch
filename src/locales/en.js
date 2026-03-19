@@ -69,7 +69,9 @@ const en = {
 
   // Incidents
   'incidents.filter.service': 'Service',
+  'incidents.filter.service.all': 'All services',
   'incidents.filter.status': 'Status',
+  'incidents.filter.status.all': 'All status',
   'incidents.filter.period': 'Period',
   'incidents.filter.all': 'All',
   'incidents.col.time': 'Time',
@@ -81,9 +83,9 @@ const en = {
   'incidents.status.monitoring': 'Monitoring',
   'incidents.status.resolved': 'Resolved',
   'incidents.duration.ongoing': 'Ongoing',
-  'incidents.period.7d': '7 Days',
-  'incidents.period.30d': '30 Days',
-  'incidents.period.90d': '90 Days',
+  'incidents.period.7d': 'Last 7 days',
+  'incidents.period.30d': 'Last 30 days',
+  'incidents.period.90d': 'Last 90 days',
   'incidents.period.all': 'All Time',
   'incidents.timeline.title': 'Timeline',
   'incidents.timeline.investigating': 'Investigating',

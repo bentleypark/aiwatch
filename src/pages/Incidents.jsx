@@ -15,7 +15,7 @@ import EmptyState from '../components/EmptyState'
 const STATUS_BADGE_CLASS = {
   ongoing:    'bg-[var(--status-bg-red)]   text-[var(--red)]',
   monitoring: 'bg-[var(--status-bg-amber)] text-[var(--amber)]',
-  resolved:   'bg-[var(--bg3)]             text-[var(--text2)]',
+  resolved:   'bg-[var(--status-bg-green)] text-[var(--green)]',
 }
 
 // Timeline stage colors: amber=investigating, blue=identified, teal=monitoring, green=resolved.
@@ -28,9 +28,9 @@ const STAGE_CLASS = {
 }
 
 // Period filter options in days; null = all time
-const PERIODS = [7, 30, 90, null]
+const PERIODS = [7, 30, 90]
 
-const TABLE_COLS = ['col.time', 'col.title', 'col.service', 'col.duration', 'col.status']
+const TABLE_COLS = ['col.title', 'col.time', 'col.service', 'col.duration', 'col.status']
 
 // ── Sub-components ───────────────────────────────────────────
 
@@ -44,17 +44,16 @@ function StatusBadge({ status, t }) {
 }
 
 function FilterBar({ services, serviceFilter, setServiceFilter, statusFilter, setStatusFilter, period, setPeriod, t }) {
-  const selectCls = 'bg-[var(--bg2)] border border-[var(--border)] rounded px-2 py-1 text-xs mono text-[var(--text1)] focus:outline-none focus:border-[var(--border-hi)]'
-  const all = t('incidents.filter.all')
+  const selectStyle = { fontFamily: 'var(--font-mono)', fontSize: '11px', padding: '5px 10px', background: 'var(--bg2)', border: '1px solid var(--border-hi)', borderRadius: '5px', color: 'var(--text1)', cursor: 'pointer', outline: 'none' }
   return (
     <div className="flex flex-wrap gap-2">
       <select
         value={serviceFilter}
         onChange={(e) => setServiceFilter(e.target.value)}
-        className={selectCls}
+        style={selectStyle}
         aria-label={t('incidents.filter.service')}
       >
-        <option value="all">{t('incidents.filter.service')}: {all}</option>
+        <option value="all">{t('incidents.filter.service.all')}</option>
         {services.map((svc) => (
           <option key={svc.id} value={svc.id}>{svc.name}</option>
         ))}
@@ -63,24 +62,24 @@ function FilterBar({ services, serviceFilter, setServiceFilter, statusFilter, se
       <select
         value={statusFilter}
         onChange={(e) => setStatusFilter(e.target.value)}
-        className={selectCls}
+        style={selectStyle}
         aria-label={t('incidents.filter.status')}
       >
-        <option value="all">{t('incidents.filter.status')}: {all}</option>
+        <option value="all">{t('incidents.filter.status.all')}</option>
         {['ongoing', 'monitoring', 'resolved'].map((s) => (
           <option key={s} value={s}>{t(`incidents.status.${s}`)}</option>
         ))}
       </select>
 
       <select
-        value={period ?? ''}
-        onChange={(e) => setPeriod(e.target.value === '' ? null : Number(e.target.value))}
-        className={selectCls}
+        value={period}
+        onChange={(e) => setPeriod(Number(e.target.value))}
+        style={selectStyle}
         aria-label={t('incidents.filter.period')}
       >
         {PERIODS.map((p) => (
-          <option key={p ?? 'all'} value={p ?? ''}>
-            {t(p ? `incidents.period.${p}d` : 'incidents.period.all')}
+          <option key={p} value={p}>
+            {t(`incidents.period.${p}d`)}
           </option>
         ))}
       </select>
@@ -145,33 +144,31 @@ function DetailPanel({ incident, onClose, t, lang }) {
   )
 }
 
-// Desktop table row
+// Desktop table row — grid layout matching design mockup: title+badge | time | service | duration | status
 function IncidentRow({ incident, isSelected, onClick, t, lang }) {
+  const statusCls = STATUS_BADGE_CLASS[incident.status] ?? STATUS_BADGE_CLASS.resolved
   return (
-    <tr
+    <div
       onClick={onClick}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
       tabIndex={0}
-      className={`cursor-pointer transition-colors border-b border-[var(--border)] last:border-0
+      role="row"
+      className={`cursor-pointer transition-colors
         focus:outline-none focus:ring-1 focus:ring-[var(--border-hi)]
-        ${isSelected ? 'bg-[var(--bg2)]' : 'hover:bg-[var(--bg2)]'}`}
+        ${isSelected ? 'bg-[var(--bg2)] border-l-2 border-l-[var(--blue)]' : 'hover:bg-[var(--bg2)]'}`}
+      style={{ display: 'grid', gridTemplateColumns: '1fr 140px 100px 80px 80px', gap: '12px', padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}
     >
-      <td className="px-3 py-2.5 text-xs mono text-[var(--text2)] whitespace-nowrap">
-        {formatDate(incident.startedAt, lang)}
-      </td>
-      <td className="px-3 py-2.5 text-xs text-[var(--text1)] max-w-[220px] truncate">
-        {incident.title}
-      </td>
-      <td className="px-3 py-2.5 text-xs mono text-[var(--text2)] whitespace-nowrap">
-        {incident.serviceName}
-      </td>
-      <td className="px-3 py-2.5 text-xs mono text-[var(--text2)] whitespace-nowrap">
-        {incident.duration ?? t('incidents.duration.ongoing')}
-      </td>
-      <td className="px-3 py-2.5">
-        <StatusBadge status={incident.status} t={t} />
-      </td>
-    </tr>
+      <div role="cell" className="flex items-center gap-2 min-w-0">
+        <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text0)' }} className="truncate">{incident.title}</span>
+        <span className={`shrink-0 mono ${statusCls}`} style={{ fontSize: '9px', letterSpacing: '0.04em', padding: '2px 6px', borderRadius: '3px' }}>
+          {t(`incidents.status.${incident.status}`)}
+        </span>
+      </div>
+      <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{formatDate(incident.startedAt, lang)}</span>
+      <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text1)' }}>{incident.serviceName}</span>
+      <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{incident.duration ?? t('incidents.duration.ongoing')}</span>
+      <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{t(`incidents.status.${incident.status}`)}</span>
+    </div>
   )
 }
 
@@ -248,6 +245,15 @@ export default function Incidents() {
   return (
     <div className="flex flex-col" style={{ gap: '16px' }}>
 
+      {/* ── Section Header ── */}
+      <div className="flex items-center justify-between">
+        <h2 className="mono text-[10px] text-[var(--text2)] uppercase flex items-center gap-2" style={{ letterSpacing: '0.1em' }}>
+          <span className="text-[var(--green)] font-semibold">//</span>
+          {t('nav.incidents')}
+        </h2>
+        <span className="mono text-[10px] text-[var(--text2)]">{t('overview.panel.incidents.sub')}</span>
+      </div>
+
       {/* ── Filters ── */}
       <FilterBar
         services={services}
@@ -280,32 +286,27 @@ export default function Incidents() {
             className="hidden md:block bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden"
             aria-label={t('nav.incidents')}
           >
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[var(--border)] bg-[var(--bg2)]">
-                  {TABLE_COLS.map((key) => (
-                    <th
-                      key={key}
-                      className="px-3 py-2 text-left text-[10px] mono text-[var(--text2)] uppercase tracking-wider font-medium"
-                    >
-                      {t(`incidents.${key}`)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((inc) => (
-                  <IncidentRow
-                    key={inc.id}
-                    incident={inc}
-                    isSelected={inc.id === selectedId}
-                    onClick={() => handleSelect(inc.id)}
-                    t={t}
-                    lang={lang}
-                  />
-                ))}
-              </tbody>
-            </table>
+            {/* Header row */}
+            <div role="row" style={{ display: 'grid', gridTemplateColumns: '1fr 140px 100px 80px 80px', gap: '12px', padding: '8px 14px', borderBottom: '1px solid var(--border)' }}>
+              {TABLE_COLS.map((key) => (
+                <span key={key} role="columnheader" className="mono text-[var(--text2)] uppercase font-medium" style={{ fontSize: '9px', letterSpacing: '0.08em' }}>
+                  {t(`incidents.${key}`)}
+                </span>
+              ))}
+            </div>
+            {/* Rows — inline styles required: Tailwind v4 base reset zeroes padding on interactive elements */}
+            <div role="rowgroup">
+              {filtered.map((inc) => (
+                <IncidentRow
+                  key={inc.id}
+                  incident={inc}
+                  isSelected={inc.id === selectedId}
+                  onClick={() => handleSelect(inc.id)}
+                  t={t}
+                  lang={lang}
+                />
+              ))}
+            </div>
           </section>
 
           {/* Mobile card list — shown only on mobile */}

@@ -43,12 +43,22 @@ function formatMonth(yyyyMM, lang) {
 
 // ── Sub-components ───────────────────────────────────────────
 
+const STAT_TOP_COLOR = {
+  'text-[var(--green)]': 'var(--green)',
+  'text-[var(--blue)]':  'var(--blue)',
+  'text-[var(--amber)]': 'var(--amber)',
+  'text-[var(--red)]':   'var(--red)',
+}
+
 function SummaryCard({ label, value, sub, colorClass }) {
+  const topColor = STAT_TOP_COLOR[colorClass] ?? 'var(--border)'
   return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4 flex flex-col gap-1">
-      <span className="text-xs text-[var(--text2)] uppercase tracking-wider">{label}</span>
-      <span className={`text-2xl mono font-semibold ${colorClass}`}>{value}</span>
-      {sub && <span className="text-xs text-[var(--text1)] truncate">{sub}</span>}
+    <div className="relative bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden"
+         style={{ padding: '14px 16px' }}>
+      <span className="absolute top-0 left-0 right-0 h-px" style={{ background: topColor }} />
+      <div className="mono text-[9px] text-[var(--text2)] uppercase" style={{ letterSpacing: '0.1em', marginBottom: '6px' }}>{label}</div>
+      <div className={`mono text-[26px] font-semibold leading-none ${colorClass}`} style={{ marginBottom: '4px' }}>{value}</div>
+      {sub && <div className="mono text-[10px] text-[var(--text2)]">{sub}</div>}
     </div>
   )
 }
@@ -140,21 +150,21 @@ export default function Uptime() {
       <div className="grid grid-cols-1 md:grid-cols-3" style={{ gap: '10px' }}>
         <SummaryCard
           label={t('uptime.stable')}
-          value={`${mostStable.uptime30d.toFixed(2)}%`}
-          sub={mostStable.name}
+          value={mostStable.name}
+          sub={`${mostStable.uptime30d.toFixed(1)}% ${t('overview.card.uptime')}`}
           colorClass="text-[var(--green)]"
         />
         <SummaryCard
           label={t('uptime.average')}
           value={`${avgUptime}%`}
-          sub=""
+          sub={t('overview.stats.uptime.sub')}
           colorClass="text-[var(--blue)]"
         />
         <SummaryCard
           label={t('uptime.issues')}
-          value={`${(mostIssues.incidents?.length ?? 0)} ${t('uptime.incidents')}`}
-          sub={mostIssues.name}
-          colorClass="text-[var(--amber)]"
+          value={mostIssues.name}
+          sub={`${mostIssues.uptime30d.toFixed(1)}% ${t('overview.card.uptime')}`}
+          colorClass="text-[var(--red)]"
         />
       </div>
 
