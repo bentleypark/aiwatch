@@ -102,7 +102,7 @@ function calendarDate(i, lang) {
 
 function MetricCard({ label, value, sub, colorClass }) {
   return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded p-4 flex flex-col gap-1">
+    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4 flex flex-col gap-1">
       <span className="text-xs text-[var(--text2)] uppercase tracking-wider">{label}</span>
       <span className={`text-2xl mono font-semibold ${colorClass}`}>{value}</span>
       {sub && <span className="text-xs text-[var(--text2)]">{sub}</span>}
@@ -156,7 +156,7 @@ function LatencyChart({ service, theme, t }) {
   const labels = useMemo(hourLabels, [service])
 
   return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded p-4">
+    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
       <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider mb-1">
         {t('latency.trend')}
       </h2>
@@ -295,7 +295,7 @@ export default function ServiceDetails({ serviceId }) {
       <LatencyChart service={service} theme={theme} t={t} />
 
       {/* ── Incident History ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded p-4">
+      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
         <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider mb-3">
           {t('svc.incidents')}
         </h2>
@@ -314,7 +314,7 @@ export default function ServiceDetails({ serviceId }) {
       </section>
 
       {/* ── 30-Day Status Calendar ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded p-4">
+      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
         <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider mb-4">
           {t('svc.cal.legend')}
         </h2>

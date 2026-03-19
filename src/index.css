@@ -14,10 +14,12 @@
   --amber: #d29922;
   --red: #f85149;
 
-  /* Status pill backgrounds (dark mode) */
+  /* Dim backgrounds (badges, pill bg) */
   --status-bg-green: #1a3d22;
   --status-bg-amber: #3d2e0a;
   --status-bg-red: #3d1515;
+  --blue-dim: #0d2440;
+  --green-glow: rgba(63, 185, 80, 0.12);
 
   /* Informational */
   --blue: #58a6ff;
@@ -61,6 +63,8 @@
   --status-bg-green: #dcfce7;
   --status-bg-amber: #fef9c3;
   --status-bg-red: #fee2e2;
+  --blue-dim: #dbeafe;
+  --green-glow: rgba(26, 127, 55, 0.08);
 }
 
 * {
@@ -83,6 +87,11 @@ pre,
 .mono {
   font-family: var(--font-mono);
 }
+
+/* ─── Scrollbar ─────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg1); }
+::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
 
 /* ─── Ticker Bar Animation ───────────────────────────────── */
 @keyframes ticker-scroll {

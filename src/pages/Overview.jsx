@@ -26,15 +26,24 @@ const INCIDENT_DOT_CLASS = {
 
 // ── Sub-components ───────────────────────────────────────────
 
+const STAT_TOP_COLOR = {
+  'text-[var(--green)]': 'var(--green)',
+  'text-[var(--amber)]': 'var(--amber)',
+  'text-[var(--red)]':   'var(--red)',
+  'text-[var(--blue)]':  'var(--blue)',
+}
+
 function StatCard({ value, labelKey, colorClass, index, t }) {
+  const topColor = STAT_TOP_COLOR[colorClass] ?? 'var(--border)'
   return (
     <div
-      className="bg-[var(--bg1)] border border-[var(--border)] rounded p-4
-                 flex flex-col gap-1 animate-[fade-in_0.3s_ease_both]"
+      className="relative bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4
+                 flex flex-col gap-1 animate-[fade-in_0.3s_ease_both] overflow-hidden"
       style={{ animationDelay: `${index * 80}ms` }}
     >
+      <span className="absolute top-0 left-0 right-0 h-px" style={{ background: topColor }} />
+      <span className="mono text-[9px] text-[var(--text2)] uppercase tracking-wider">{t(labelKey)}</span>
       <span className={`text-2xl mono font-semibold ${colorClass}`}>{value}</span>
-      <span className="text-xs text-[var(--text2)]">{t(labelKey)}</span>
     </div>
   )
 }
@@ -59,7 +68,7 @@ function ServiceCard({ service, index, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="w-full text-left bg-[var(--bg1)] border border-[var(--border)] rounded p-4
+      className="w-full text-left bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4
                  hover:bg-[var(--bg2)] hover:border-[var(--border-hi)] transition-colors
                  flex flex-col gap-3 animate-[fade-in_0.3s_ease_both]"
       style={{ animationDelay: `${index * 80}ms` }}
@@ -145,7 +154,7 @@ function LatencyBar({ service, maxLatency, rank }) {
 // Phase 3 placeholder — do not remove
 function AIPanel({ t }) {
   return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded p-5
+    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-5
                     flex flex-col items-center justify-center gap-2 text-center py-8">
       <span className="text-2xl text-[var(--text2)]" aria-hidden="true">🔒</span>
       <p className="text-sm text-[var(--text1)]">{t('overview.ai.title')}</p>
@@ -247,7 +256,7 @@ export default function Overview() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* Recent Incidents (last 7 days) */}
-        <section className="bg-[var(--bg1)] border border-[var(--border)] rounded p-4">
+        <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
           <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider mb-3">
             {t('overview.incidents.title')}
           </h2>
@@ -263,7 +272,7 @@ export default function Overview() {
         </section>
 
         {/* Latency Rankings (fastest first) */}
-        <section className="bg-[var(--bg1)] border border-[var(--border)] rounded p-4">
+        <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
           <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider mb-3">
             {t('overview.latency.title')}
           </h2>

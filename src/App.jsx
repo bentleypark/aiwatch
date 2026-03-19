@@ -34,12 +34,43 @@ export default function App() {
   useTheme()
   const { t } = useLang()
 
-  // Footer links (privacy/terms modal) pending — Issue #19
   const tickerBar = <TickerBar />
   const sidebar = <Sidebar />
   const footer = (
-    <div className="px-6 py-3 mono text-xs text-[var(--text2)]">
-      {t('footer.copyright')}
+    <div className="px-4 md:px-6 py-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+        <div className="flex items-center gap-3">
+          <span className="mono font-semibold text-sm">
+            <span className="text-[var(--text0)]">AI</span>
+            <span className="text-[var(--green)]">Watch</span>
+          </span>
+          <span className="hidden md:inline mono text-[10px] text-[var(--text2)]">
+            {t('footer.copyright')}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setPage({ name: 'privacy' })}
+            className="mono text-[11px] text-[var(--text2)] hover:text-[var(--text0)] transition-colors"
+          >
+            {t('footer.privacy')}
+          </button>
+          <span className="text-[11px] text-[var(--text2)] opacity-40">|</span>
+          <button
+            onClick={() => setPage({ name: 'terms' })}
+            className="mono text-[11px] text-[var(--text2)] hover:text-[var(--text0)] transition-colors"
+          >
+            {t('footer.terms')}
+          </button>
+          <span className="text-[11px] text-[var(--text2)] opacity-40">|</span>
+          <a
+            href="mailto:contact@aiwatch.dev"
+            className="mono text-[11px] text-[var(--text2)] hover:text-[var(--text0)] transition-colors"
+          >
+            contact@aiwatch.dev
+          </a>
+        </div>
+      </div>
     </div>
   )
 

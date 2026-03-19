@@ -106,7 +106,7 @@ function TimelineStep({ stage, at, isLast, t, lang }) {
 
 function DetailPanel({ incident, onClose, t, lang }) {
   return (
-    <div className="bg-[var(--bg2)] border border-[var(--border)] rounded p-4 space-y-3">
+    <div className="bg-[var(--bg2)] border border-[var(--border)] rounded-lg p-4 space-y-3">
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-sm text-[var(--text0)] font-medium">{incident.title}</p>
@@ -277,7 +277,7 @@ export default function Incidents() {
         <>
           {/* Desktop table — hidden on mobile */}
           <section
-            className="hidden md:block bg-[var(--bg1)] border border-[var(--border)] rounded overflow-hidden"
+            className="hidden md:block bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden"
             aria-label={t('nav.incidents')}
           >
             <table className="w-full">

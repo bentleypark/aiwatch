@@ -120,7 +120,7 @@ export default function Settings() {
     <div className="p-4 md:p-6 space-y-6 max-w-2xl">
 
       {/* ── General ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded p-4">
+      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
         <SectionTitle>{t('settings.general')}</SectionTitle>
 
         <FieldRow label={t('settings.theme')}>
@@ -171,7 +171,7 @@ export default function Settings() {
       </section>
 
       {/* ── Monitoring ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded p-4">
+      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
         <SectionTitle>{t('settings.monitoring')}</SectionTitle>
         <div className="space-y-0">
           {ALL_SERVICE_IDS.map((id) => (
@@ -192,7 +192,7 @@ export default function Settings() {
       </section>
 
       {/* ── Alerts (Phase 3 — disabled) ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded p-4 opacity-60">
+      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4 opacity-60">
         <div className="flex items-center gap-3 mb-4">
           <SectionTitle>{t('settings.alerts')}</SectionTitle>
           <DisabledBadge t={t} />

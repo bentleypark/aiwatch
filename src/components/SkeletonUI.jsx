@@ -13,7 +13,7 @@ function Block({ className }) {
 
 function StatSkeleton() {
   return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded p-4 flex flex-col gap-3">
+    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4 flex flex-col gap-3">
       <Block className="h-3 w-20" />
       <Block className="h-7 w-12" />
       <Block className="h-3 w-28" />
@@ -23,7 +23,7 @@ function StatSkeleton() {
 
 function ServiceSkeleton() {
   return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded p-4 flex flex-col gap-2">
+    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4 flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <Block className="h-3 w-24" />
         <Block className="h-5 w-20 rounded-full" />
