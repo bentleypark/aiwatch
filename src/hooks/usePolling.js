@@ -31,6 +31,15 @@ function hist(degraded = [], down = []) {
 // history3m: last 3 calendar months, oldest first. Used by Uptime Report matrix.
 // Shape: [{ month: 'YYYY-MM', uptime: number }] — 3 entries, index 0 = oldest.
 const SERVICES = [
+  // claude.ai before Claude API (design v2 order: webapp before related API)
+  {
+    id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', status: 'operational',
+    category: 'webapp',
+    latency: null, uptime30d: 99.00,
+    history30d: hist([3, 9, 13, 19, 27]),
+    history3m: [{ month: '2026-01', uptime: 99.40 }, { month: '2026-02', uptime: 99.10 }, { month: '2026-03', uptime: 99.00 }],
+    incidents: [],
+  },
   {
     id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational',
     latency: 145, uptime30d: 99.97,
@@ -62,6 +71,15 @@ const SERVICES = [
         ],
       },
     ],
+  },
+  // ChatGPT after OpenAI API (design v2 order)
+  {
+    id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', status: 'operational',
+    category: 'webapp',
+    latency: null, uptime30d: 98.20,
+    history30d: hist([1, 4, 8, 12, 18, 22, 28]),
+    history3m: [{ month: '2026-01', uptime: 98.90 }, { month: '2026-02', uptime: 97.50 }, { month: '2026-03', uptime: 98.20 }],
+    incidents: [],
   },
   {
     id: 'gemini', category: 'api', name: 'Gemini API', provider: 'Google', status: 'operational',
@@ -156,23 +174,6 @@ const SERVICES = [
     latency: 321, uptime30d: 99.40,
     history30d: hist([11]),
     history3m: [{ month: '2026-01', uptime: 99.55 }, { month: '2026-02', uptime: 99.48 }, { month: '2026-03', uptime: 99.40 }],
-    incidents: [],
-  },
-  // ── AI Web Services (no latency — web apps, not APIs) ──
-  {
-    id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', status: 'operational',
-    category: 'webapp',
-    latency: null, uptime30d: 99.00,
-    history30d: hist([3, 9, 13, 19, 27]),
-    history3m: [{ month: '2026-01', uptime: 99.40 }, { month: '2026-02', uptime: 99.10 }, { month: '2026-03', uptime: 99.00 }],
-    incidents: [],
-  },
-  {
-    id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', status: 'operational',
-    category: 'webapp',
-    latency: null, uptime30d: 98.20,
-    history30d: hist([1, 4, 8, 12, 18, 22, 28]),
-    history3m: [{ month: '2026-01', uptime: 98.90 }, { month: '2026-02', uptime: 97.50 }, { month: '2026-03', uptime: 98.20 }],
     incidents: [],
   },
   // ── Coding Agents ──

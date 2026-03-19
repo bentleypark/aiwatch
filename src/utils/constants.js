@@ -17,14 +17,20 @@ export const API_SERVICE_IDS = [
   'elevenlabs', 'xai', 'deepseek',
 ]
 
-// AI web apps (no latency — web services)
+// AI web apps (no latency — web services, ordered before related API)
 export const WEBAPP_SERVICE_IDS = ['claudeai', 'chatgpt']
 
 // Coding agents
 export const AGENT_SERVICE_IDS = ['claudecode', 'copilot', 'cursor', 'windsurf']
 
-// All service IDs (used by Settings toggles, etc.)
-export const ALL_SERVICE_IDS = [...API_SERVICE_IDS, ...WEBAPP_SERVICE_IDS, ...AGENT_SERVICE_IDS]
+// Services + WebApps interleaved by design v2 order (webapp before related API)
+export const SERVICE_AND_WEBAPP_IDS = [
+  'claudeai', 'claude', 'openai', 'chatgpt', 'gemini', 'mistral', 'cohere', 'groq',
+  'together', 'perplexity', 'huggingface', 'replicate', 'elevenlabs', 'xai', 'deepseek',
+]
+
+// All service IDs
+export const ALL_SERVICE_IDS = [...SERVICE_AND_WEBAPP_IDS, ...AGENT_SERVICE_IDS]
 
 export const DEFAULT_SETTINGS = {
   period: '7d',

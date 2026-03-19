@@ -7,7 +7,7 @@ import { useMemo, useState } from 'react'
 import {
   Chart as ChartJS,
   CategoryScale, LinearScale, PointElement, LineElement,
-  Tooltip, Legend,
+  Tooltip, Legend, Filler,
 } from 'chart.js'
 import { Line } from 'react-chartjs-2'
 import { useLang } from '../hooks/useLang'
@@ -19,7 +19,7 @@ import SkeletonUI from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import StatusPill from '../components/StatusPill'
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend)
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler)
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -51,14 +51,14 @@ const SERVICE_COLOR = {
 const STATUS_URL = {
   claude:      'https://status.anthropic.com',
   openai:      'https://status.openai.com',
-  gemini:      'https://cloud.google.com/support/docs/dashboard',
+  gemini:      'https://status.cloud.google.com/',
   mistral:     'https://status.mistral.ai',
   cohere:      'https://status.cohere.ai',
   groq:        'https://status.groq.com',
   together:    'https://status.together.ai',
   perplexity:  'https://status.perplexity.ai',
   huggingface: 'https://status.huggingface.co',
-  replicate:   'https://replicate-status.com',
+  replicate:   'https://www.replicatestatus.com',
   elevenlabs:  'https://status.elevenlabs.io',
   xai:         'https://status.x.ai',
   deepseek:    'https://status.deepseek.com',
@@ -87,11 +87,12 @@ function gen24h(baseLatency) {
 }
 
 // Generate last-24-hours labels (HH:00) relative to current time
+// 24 hour labels ending at current hour (matching Latency.jsx)
 function hourLabels() {
-  const now = new Date()
+  const currentHour = new Date().getHours()
   return Array.from({ length: 24 }, (_, i) => {
-    const h = new Date(now - (23 - i) * 3_600_000)
-    return `${String(h.getHours()).padStart(2, '0')}:00`
+    const hour = (currentHour - 23 + i + 24) % 24
+    return `${String(hour).padStart(2, '0')}:00`
   })
 }
 
@@ -106,12 +107,23 @@ function calendarDate(i, lang) {
 
 // ── Sub-components ───────────────────────────────────────────
 
+const METRIC_TOP_COLOR = {
+  'text-[var(--blue)]':  'var(--blue)',
+  'text-[var(--green)]': 'var(--green)',
+  'text-[var(--amber)]': 'var(--amber)',
+  'text-[var(--red)]':   'var(--red)',
+  'text-[var(--text1)]': 'var(--border)',
+  'text-[var(--text2)]': 'var(--border)',
+}
+
 function MetricCard({ label, value, sub, colorClass }) {
+  const topColor = METRIC_TOP_COLOR[colorClass] ?? 'var(--border)'
   return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4 flex flex-col gap-1">
-      <span className="text-xs text-[var(--text2)] uppercase tracking-wider">{label}</span>
-      <span className={`text-2xl mono font-semibold ${colorClass}`}>{value}</span>
-      {sub && <span className="text-xs text-[var(--text2)]">{sub}</span>}
+    <div className="relative bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden" style={{ padding: '14px 16px' }}>
+      <span className="absolute top-0 left-0 right-0 h-px" style={{ background: topColor }} />
+      <div className="mono text-[9px] text-[var(--text2)] uppercase" style={{ letterSpacing: '0.1em', marginBottom: '6px' }}>{label}</div>
+      <div className={`mono text-[26px] font-semibold leading-none ${colorClass}`} style={{ marginBottom: '4px' }}>{value}</div>
+      {sub && <div className="mono text-[10px] text-[var(--text2)]">{sub}</div>}
     </div>
   )
 }
@@ -121,14 +133,19 @@ function LatencyChart({ service, theme, t }) {
   const dataset = useMemo(
     () => ({
       label: service.name,
-      data: gen24h(service.latency),
-      borderColor: SERVICE_COLOR[service.id] ?? '#8b949e',
-      backgroundColor: 'transparent',
+      data: gen24h(service.latency ?? 200),
+      borderColor: service.status === 'degraded' ? cssVar('--amber')
+        : service.status === 'down' ? cssVar('--red')
+        : cssVar('--green'),
+      backgroundColor: service.status === 'degraded' ? cssVar('--amber') + '20'
+        : service.status === 'down' ? cssVar('--red') + '20'
+        : cssVar('--green') + '20',
+      fill: true,
       borderWidth: 1.5,
       pointRadius: 0,
       tension: 0.4,
     }),
-    [service]
+    [service, theme]
   )
 
   const options = useMemo(
@@ -139,7 +156,15 @@ function LatencyChart({ service, theme, t }) {
       scales: {
         x: {
           grid:  { color: cssVar('--border') },
-          ticks: { color: cssVar('--text2'), font: { family: 'IBM Plex Mono', size: 10 }, maxTicksLimit: 8 },
+          ticks: {
+            color: cssVar('--text2'),
+            font: { family: 'IBM Plex Mono', size: 10 },
+            callback: function(val, index, ticks) {
+              const fromEnd = ticks.length - 1 - index
+              if (fromEnd % 3 === 0) return this.getLabelForValue(val)
+              return null
+            },
+          },
         },
         y: {
           grid:  { color: cssVar('--border') },
@@ -203,14 +228,17 @@ function IncidentRow({ incident, t, lang }) {
   )
 }
 
+const CALENDAR_OPACITY = { operational: 0.7, degraded: 0.8, down: 0.9 }
+
 function CalendarCell({ status, date }) {
   const [hovered, setHovered] = useState(false)
   const bgCls = CALENDAR_CLASS[status] ?? 'bg-[var(--bg3)]'
+  const opacity = CALENDAR_OPACITY[status] ?? 1
   return (
     <div className="relative">
       <div
-        className={`rounded-sm ${bgCls} cursor-pointer transition-opacity hover:opacity-70`}
-        style={{ width: '18px', height: '18px' }}
+        className={`${bgCls} cursor-pointer transition-opacity`}
+        style={{ width: '18px', height: '18px', borderRadius: '2px', opacity: hovered ? opacity * 0.8 : opacity }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         aria-label={`${date}: ${status}`}
@@ -292,22 +320,26 @@ export default function ServiceDetails({ serviceId }) {
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>
         <MetricCard
           label={t('svc.latency')}
-          value={`${service.latency} ms`}
+          value={service.latency != null ? `${service.latency} ms` : '—'}
+          sub={t('svc.latency.sub')}
           colorClass="text-[var(--blue)]"
         />
         <MetricCard
           label={t('svc.uptime30d')}
           value={`${(service.uptime30d ?? 0).toFixed(2)}%`}
+          sub={t('svc.uptime.sub')}
           colorClass="text-[var(--green)]"
         />
         <MetricCard
           label={t('svc.incidents')}
           value={incidentCount}
+          sub={t('svc.incidents.sub')}
           colorClass={incidentCount > 0 ? 'text-[var(--amber)]' : 'text-[var(--text1)]'}
         />
         <MetricCard
           label={t('svc.mttr')}
-          value={t('svc.mttr.collecting')}
+          value="—"
+          sub={t('svc.mttr.sub')}
           colorClass="text-[var(--text2)]"
         />
       </div>
@@ -323,7 +355,7 @@ export default function ServiceDetails({ serviceId }) {
           <div className="flex items-center border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
             <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
               <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--red)' }} />
-              {t('svc.incidents')}
+              {t('svc.incidents.history')}
             </div>
           </div>
           <div style={{ padding: '16px' }}>
@@ -359,7 +391,7 @@ export default function ServiceDetails({ serviceId }) {
             </div>
           </div>
           <div style={{ padding: '16px' }}>
-            <div className="flex flex-wrap" style={{ gap: '2px' }}>
+            <div className="flex" style={{ gap: '2px' }}>
               {(service.history30d ?? []).map((status, i) => (
                 <CalendarCell key={i} status={status} date={calendarDate(i, lang)} />
               ))}

@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useLang } from '../hooks/useLang'
 import { useTheme } from '../hooks/useTheme'
 import { useSettings } from '../hooks/useSettings'
-import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, API_SERVICE_IDS, WEBAPP_SERVICE_IDS, AGENT_SERVICE_IDS, ALL_SERVICE_IDS, DEFAULT_SETTINGS } from '../utils/constants'
+import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, SERVICE_AND_WEBAPP_IDS, AGENT_SERVICE_IDS, ALL_SERVICE_IDS, DEFAULT_SETTINGS } from '../utils/constants'
 import { usePolling } from '../hooks/usePolling'
 
 // ── Styles matching design mockup ────────────────────────
@@ -205,7 +205,7 @@ export default function Settings() {
           {t('settings.monitoring.desc')}
         </div>
         <div>
-          {[...API_SERVICE_IDS, ...WEBAPP_SERVICE_IDS].map((id) => {
+          {SERVICE_AND_WEBAPP_IDS.map((id) => {
             const svc = svcMap[id]
             const dotCls = STATUS_DOT_CLASS[svc?.status] ?? STATUS_DOT_CLASS.unknown
             return (
