@@ -74,12 +74,9 @@ function gen24h(baseLatency) {
 }
 
 // Generate last-24-hours labels (HH:00) relative to current time
+// Fixed 24-hour labels: 00:00 → 21:00 (matching design mockup)
 function hourLabels() {
-  const now = new Date()
-  return Array.from({ length: 24 }, (_, i) => {
-    const h = new Date(now - (23 - i) * 3_600_000)
-    return `${String(h.getHours()).padStart(2, '0')}:00`
-  })
+  return Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`)
 }
 
 // ── Sub-components ───────────────────────────────────────────
