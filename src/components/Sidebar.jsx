@@ -72,7 +72,7 @@ function uptimeBadgeCls(uptime) {
 const navItemStyle = { padding: '7px 8px', gap: '8px', borderRadius: '6px', fontSize: '12px', position: 'relative' }
 const activeBarStyle = { position: 'absolute', left: 0, top: '4px', bottom: '4px', width: '2px', borderRadius: '2px', background: 'var(--green)' }
 const sectionTitleStyle = { padding: '6px 8px', letterSpacing: '0.12em', fontSize: '9px', textTransform: 'uppercase', color: 'var(--text2)', fontFamily: 'var(--font-mono)' }
-const badgeStyle = { padding: '1px 5px', borderRadius: '3px', fontSize: '9px', marginLeft: 'auto' }
+const badgeStyle = { padding: '1px 5px', borderRadius: '3px', fontSize: '9px', marginLeft: 'auto', fontFamily: 'var(--font-mono)' }
 
 export default function Sidebar({ visibleServiceIds }) {
   const { page, setPage } = usePage()
@@ -88,7 +88,7 @@ export default function Sidebar({ visibleServiceIds }) {
   const incidentCount = useMemo(() => services.reduce((sum, s) => sum + (s.incidents?.length ?? 0), 0), [services])
 
   return (
-    <div className="flex flex-col h-full mono" style={{ padding: '16px 0' }}>
+    <div className="flex flex-col h-full" style={{ padding: '16px 0' }}>
 
       {/* ── Dashboard section ── */}
       {/* NOTE: inline styles used because Tailwind v4 fails to apply certain utilities
