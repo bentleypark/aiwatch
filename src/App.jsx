@@ -4,6 +4,7 @@ import { useLang } from './hooks/useLang'
 import { PageContext } from './utils/pageContext'
 import Layout from './components/Layout'
 import Topbar from './components/Topbar'
+import TickerBar from './components/TickerBar'
 import Overview from './pages/Overview'
 import Latency from './pages/Latency'
 import Incidents from './pages/Incidents'
@@ -32,12 +33,8 @@ export default function App() {
   useTheme()
   const { t } = useLang()
 
-  // Slot placeholders — TickerBar (#6), Sidebar (#7), Footer (#19) pending
-  const tickerBar = (
-    <span className="px-4 mono text-xs text-[var(--text2)]">
-      {t('topbar.live')} — ticker bar placeholder
-    </span>
-  )
+  // Sidebar (#7) and Footer (#19) pending
+  const tickerBar = <TickerBar />
   const sidebar = (
     <nav className="p-4 mono text-xs text-[var(--text2)]">sidebar placeholder</nav>
   )
