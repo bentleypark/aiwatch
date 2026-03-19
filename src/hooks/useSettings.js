@@ -1,0 +1,64 @@
+import { useState } from 'react'
+import {
+  SETTINGS_STORAGE_KEY,
+  VALID_PERIODS,
+  ALL_SERVICE_IDS,
+  DEFAULT_SETTINGS,
+} from '../utils/constants'
+
+const canUseStorage = (() => {
+  try {
+    localStorage.setItem('__test__', '1')
+    localStorage.removeItem('__test__')
+    return true
+  } catch {
+    return false
+  }
+})()
+
+function readStored() {
+  if (!canUseStorage) return DEFAULT_SETTINGS
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY)
+    if (!raw) return DEFAULT_SETTINGS
+    const parsed = JSON.parse(raw)
+    return {
+      period: VALID_PERIODS.includes(parsed.period) ? parsed.period : DEFAULT_SETTINGS.period,
+      sla: typeof parsed.sla === 'number' && parsed.sla >= 0 && parsed.sla <= 100
+        ? parsed.sla
+        : DEFAULT_SETTINGS.sla,
+      enabledServices: Array.isArray(parsed.enabledServices)
+        ? parsed.enabledServices.filter((id) => ALL_SERVICE_IDS.includes(id))
+        : DEFAULT_SETTINGS.enabledServices,
+    }
+  } catch {
+    return DEFAULT_SETTINGS
+  }
+}
+
+export function useSettings() {
+  const [settings, setSettings] = useState(readStored)
+
+  function save(next) {
+    const validated = {
+      period: VALID_PERIODS.includes(next.period) ? next.period : settings.period,
+      sla: typeof next.sla === 'number' && next.sla >= 0 && next.sla <= 100
+        ? next.sla
+        : settings.sla,
+      enabledServices: Array.isArray(next.enabledServices)
+        ? next.enabledServices.filter((id) => ALL_SERVICE_IDS.includes(id))
+        : settings.enabledServices,
+    }
+    if (canUseStorage) {
+      try {
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(validated))
+      } catch {
+        // Preference not persisted but applied in-memory
+      }
+    }
+    setSettings(validated)
+    return true
+  }
+
+  return { settings, save }
+}
