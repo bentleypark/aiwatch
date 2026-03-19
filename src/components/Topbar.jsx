@@ -146,14 +146,43 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
 }
 
 // Mobile Action Bar — rendered by Layout below the fixed topbar
-export function MobileActionBar() {
+export function MobileActionBar({ onRefresh }) {
   const { lang, t } = useLang()
+  const [refreshing, setRefreshing] = useState(false)
+  const [lastRefresh, setLastRefresh] = useState(null)
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return
+    setRefreshing(true)
+    try {
+      await onRefresh?.()
+    } finally {
+      setLastRefresh(new Date())
+      setRefreshing(false)
+    }
+  }, [refreshing, onRefresh])
+
+  const refreshLabel = refreshing
+    ? '...'
+    : lastRefresh
+    ? `${formatTime(lastRefresh, lang)} ${t('topbar.refreshed')}`
+    : t('topbar.refresh')
 
   return (
     <div className="flex items-center gap-2 px-3.5 py-2
                     bg-[var(--bg1)] border-b border-[var(--border)]">
       <span className="w-1.5 h-1.5 rounded-full bg-[var(--green)] animate-[pulse_2s_ease-in-out_infinite]" />
       <span className="mono text-[10px] text-[var(--text2)]">{t('topbar.live')}</span>
+      <button
+        onClick={handleRefresh}
+        disabled={refreshing}
+        className="ml-auto mono text-[11px] px-2.5 py-1 rounded border
+                   border-[var(--border-hi)] bg-transparent text-[var(--text1)]
+                   hover:bg-[var(--bg3)] disabled:opacity-50 disabled:cursor-not-allowed
+                   transition-all"
+      >
+        {refreshLabel}
+      </button>
     </div>
   )
 }
