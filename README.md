@@ -36,6 +36,32 @@ npm run build
 npm run lint
 ```
 
+## Screen State Management
+
+AIWatch uses **no router library**. Navigation is handled by a `currentPage` state in `App.jsx`, shared via `PageContext`.
+
+```
+PageContext { page, setPage }
+  └── page shape: { name: string, serviceId?: string }
+  └── name: 'overview' | 'latency' | 'incidents' | 'uptime' | 'service' | 'settings'
+```
+
+**How to navigate** from any component:
+
+```jsx
+import { usePage } from './utils/pageContext'
+
+const { setPage } = usePage()
+
+// Go to a dashboard page
+setPage({ name: 'latency' })
+
+// Go to a specific service detail
+setPage({ name: 'service', serviceId: 'claude' })
+```
+
+`App.jsx` passes the current page through `resolvePage()` which renders the matching page component. The Sidebar and Topbar (Issues #5, #7) call `setPage` to drive navigation.
+
 ## License
 
 MIT
