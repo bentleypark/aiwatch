@@ -25,9 +25,9 @@ function HamburgerIcon() {
   )
 }
 
-const btnCls = `mono text-[11px] px-3 py-1 rounded border border-[var(--border-hi)]
-                bg-transparent text-[var(--text1)] cursor-pointer
-                hover:bg-[var(--bg3)] hover:text-[var(--text0)] transition-all tracking-wide`
+// Button style matching design mockup: 5px 12px padding, 5px radius, border-hi, 11px mono
+const btnStyle = { padding: '5px 12px', borderRadius: '5px', letterSpacing: '0.3px' }
+const btnCls = 'mono text-[11px] border border-[var(--border-hi)] bg-transparent text-[var(--text1)] cursor-pointer hover:bg-[var(--bg3)] hover:text-[var(--text0)] transition-all'
 
 export default function Topbar({ onRefresh, onMenuToggle }) {
   const { setPage } = usePage()
@@ -92,6 +92,7 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
         <button
           onClick={handleRefresh}
           disabled={refreshing}
+          style={btnStyle}
           className={`hidden md:inline-block ${btnCls} disabled:opacity-50 disabled:cursor-not-allowed`}
         >
           {refreshLabel}
@@ -103,6 +104,7 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
             aria-disabled="true"
             tabIndex={0}
             aria-describedby="analyze-tooltip"
+            style={btnStyle}
             className={`${btnCls} opacity-50 cursor-not-allowed`}
             onClick={(e) => e.preventDefault()}
           >
@@ -134,7 +136,8 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
         {/* Settings — SVG icon + text */}
         <button
           onClick={() => setPage({ name: 'settings' })}
-          className={`${btnCls} flex items-center gap-1.5`}
+          style={{ ...btnStyle, display: 'flex', alignItems: 'center', gap: '5px' }}
+          className={`${btnCls}`}
           aria-label={t('nav.settings')}
         >
           <GearIcon />
