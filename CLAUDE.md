@@ -13,6 +13,16 @@ npm run lint       # Run ESLint
 
 No test runner is configured yet.
 
+## Development Workflow
+
+After completing any code task, always run a PR review before committing:
+
+```
+/pr-review-toolkit:review-pr
+```
+
+This runs specialized agents (code quality, error handling, comment accuracy, simplification) and surfaces issues before they accumulate. Address all **Critical** and **Important** findings before committing.
+
 ## Architecture
 
 **AIWatch** is a React SPA that monitors 13 AI API services (Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Perplexity, HuggingFace, Replicate, ElevenLabs, xAI, DeepSeek) in real time.
