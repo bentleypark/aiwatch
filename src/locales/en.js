@@ -83,6 +83,9 @@ const en = {
   'uptime.average': 'Avg Uptime',
   'uptime.issues': 'Most Issues',
   'uptime.sla': 'SLA Baseline',
+  'uptime.rankings': 'Uptime Rankings',
+  'uptime.matrix': '3-Month History',
+  'uptime.incidents': 'incidents',
 
   // Service Details
   'svc.latency': 'Current Latency',

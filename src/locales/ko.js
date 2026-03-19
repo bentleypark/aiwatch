@@ -83,6 +83,9 @@ const ko = {
   'uptime.average': '평균 업타임',
   'uptime.issues': '인시던트 최다',
   'uptime.sla': 'SLA 기준',
+  'uptime.rankings': '업타임 순위',
+  'uptime.matrix': '3개월 이력',
+  'uptime.incidents': '인시던트',
 
   // Service Details
   'svc.latency': '현재 레이턴시',
