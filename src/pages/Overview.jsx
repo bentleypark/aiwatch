@@ -227,7 +227,13 @@ export default function Overview() {
         <StatCard index={3} value={`${avgUptime}%`}  labelKey="overview.stats.uptime"       colorClass="text-[var(--blue)]"  t={t} />
       </div>
 
-      {/* ── Filter Tabs ── */}
+      {/* ── Section Header + Filter Tabs ── */}
+      <div className="flex items-center justify-between">
+        <h2 className="mono text-[10px] text-[var(--text2)] uppercase tracking-wider flex items-center gap-2">
+          <span className="text-[var(--green)] font-semibold">//</span>
+          Services
+        </h2>
+      </div>
       <FilterTabs
         filter={filter}
         setFilter={setFilter}
