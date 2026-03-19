@@ -6,6 +6,8 @@ import Layout from './components/Layout'
 import Topbar, { MobileActionBar } from './components/Topbar'
 import TickerBar from './components/TickerBar'
 import Sidebar from './components/Sidebar'
+import Modal from './components/Modal'
+import { PrivacyContent, TermsContent } from './components/LegalContent'
 import Overview from './pages/Overview'
 import Latency from './pages/Latency'
 import Incidents from './pages/Incidents'
@@ -13,7 +15,6 @@ import Uptime from './pages/Uptime'
 import ServiceDetails from './pages/ServiceDetails'
 import Settings from './pages/Settings'
 
-// currentPage shape: { name: 'overview'|'latency'|'incidents'|'uptime'|'service'|'settings', serviceId?: string }
 const DEFAULT_PAGE = { name: 'overview' }
 
 function resolvePage(page) {
@@ -31,6 +32,7 @@ function resolvePage(page) {
 export default function App() {
   const [page, setPage] = useState(DEFAULT_PAGE)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [modal, setModal] = useState(null) // null | 'privacy' | 'terms'
   useTheme()
   const { t } = useLang()
 
@@ -48,14 +50,21 @@ export default function App() {
           </span>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Privacy/Terms modals pending — Issue #19 */}
-          <span className="mono text-[11px] text-[var(--text2)] cursor-default">
+          <button
+            onClick={() => setModal('privacy')}
+            className="mono text-[11px] text-[var(--text2)] hover:text-[var(--text0)] transition-colors cursor-pointer"
+            style={{ background: 'none', border: 'none' }}
+          >
             {t('footer.privacy')}
-          </span>
+          </button>
           <span className="text-[11px] text-[var(--text2)] opacity-40">·</span>
-          <span className="mono text-[11px] text-[var(--text2)] cursor-default">
+          <button
+            onClick={() => setModal('terms')}
+            className="mono text-[11px] text-[var(--text2)] hover:text-[var(--text0)] transition-colors cursor-pointer"
+            style={{ background: 'none', border: 'none' }}
+          >
             {t('footer.terms')}
-          </span>
+          </button>
           <span className="text-[11px] text-[var(--text2)] opacity-40">·</span>
           <a
             href="mailto:contact@aiwatch.dev"
@@ -81,6 +90,23 @@ export default function App() {
       >
         {resolvePage(page)}
       </Layout>
+
+      {/* Legal modals */}
+      <Modal
+        isOpen={modal === 'privacy'}
+        onClose={() => setModal(null)}
+        title={t('footer.privacy')}
+      >
+        <PrivacyContent />
+      </Modal>
+
+      <Modal
+        isOpen={modal === 'terms'}
+        onClose={() => setModal(null)}
+        title={t('footer.terms')}
+      >
+        <TermsContent />
+      </Modal>
     </PageContext.Provider>
   )
 }

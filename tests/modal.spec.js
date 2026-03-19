@@ -7,20 +7,47 @@ test.describe('Modal / Detail Panel', () => {
     await waitForDataLoad(page)
     await navigateVia(page, 'Incidents')
 
-    // Click on an incident row (use first matching table cell or card)
     await page.locator('main').getByText('Elevated API Error Rates').first().click({ force: true })
-
-    // Detail panel should show timeline
     await expect(page.locator('main').getByText('Timeline')).toBeVisible()
 
-    // Close detail panel via × button
     await page.locator('main').getByRole('button', { name: /close|닫기/i }).click({ force: true })
-
-    // Detail panel should be hidden
     await expect(page.locator('main').getByText('Timeline')).toBeHidden()
   })
 
-  // Modal component exists but is not yet used by any page (Issue #19)
-  test.skip('Modal closes on ESC key', async () => {})
-  test.skip('Modal closes on backdrop click', async () => {})
+  test('Privacy modal opens from footer and closes on ESC', async ({ page }) => {
+    await page.goto('/')
+    await waitForDataLoad(page)
+
+    // Scroll to footer and click privacy link
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    const privacyBtn = page.getByRole('button', { name: /개인정보|Privacy/i })
+    await privacyBtn.waitFor({ state: 'visible' })
+    await privacyBtn.evaluate((el) => el.click())
+
+    // Modal should be visible
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await expect(page.getByText(/수집하는 정보|Information We Collect/)).toBeVisible()
+
+    // Close with ESC
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toBeHidden()
+  })
+
+  test('Terms modal opens and closes on backdrop click', async ({ page }) => {
+    await page.goto('/')
+    await waitForDataLoad(page)
+
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    const termsBtn = page.getByRole('button', { name: /이용약관|Terms/i })
+    await termsBtn.waitFor({ state: 'visible' })
+    await termsBtn.evaluate((el) => el.click())
+
+    // Modal should be visible
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await expect(page.getByText(/서비스 개요|Service Overview/)).toBeVisible()
+
+    // Close by clicking backdrop (the fixed overlay outside the modal panel)
+    await page.locator('[role="dialog"]').click({ position: { x: 10, y: 10 } })
+    await expect(page.getByRole('dialog')).toBeHidden()
+  })
 })
