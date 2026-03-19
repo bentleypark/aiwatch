@@ -17,6 +17,7 @@ const en = {
   'topbar.analyze': 'Analyze',
   'topbar.analyze.soon': 'Coming Soon',
   'topbar.refreshed': 'Refreshed',
+  'topbar.menu.open': 'Open menu',
 
   // Status
   'status.operational': 'Operational',

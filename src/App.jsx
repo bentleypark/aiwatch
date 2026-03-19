@@ -3,6 +3,7 @@ import { useTheme } from './hooks/useTheme'
 import { useLang } from './hooks/useLang'
 import { PageContext } from './utils/pageContext'
 import Layout from './components/Layout'
+import Topbar from './components/Topbar'
 import Overview from './pages/Overview'
 import Latency from './pages/Latency'
 import Incidents from './pages/Incidents'
@@ -27,15 +28,11 @@ function resolvePage(page) {
 
 export default function App() {
   const [page, setPage] = useState(DEFAULT_PAGE)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   useTheme()
   const { t } = useLang()
 
-  // Slot placeholders — replaced by Issues #5, #6, #7, #19
-  const topbar = (
-    <span className="px-4 mono text-sm text-[var(--green)]">
-      AIWatch <span className="text-[var(--text2)]">v1.0.0</span>
-    </span>
-  )
+  // Slot placeholders — TickerBar (#6), Sidebar (#7), Footer (#19) pending
   const tickerBar = (
     <span className="px-4 mono text-xs text-[var(--text2)]">
       {t('topbar.live')} — ticker bar placeholder
@@ -52,7 +49,14 @@ export default function App() {
 
   return (
     <PageContext.Provider value={{ page, setPage }}>
-      <Layout topbar={topbar} tickerBar={tickerBar} sidebar={sidebar} footer={footer}>
+      <Layout
+        topbar={<Topbar onMenuToggle={() => setSidebarOpen((o) => !o)} />}
+        tickerBar={tickerBar}
+        sidebar={sidebar}
+        footer={footer}
+        sidebarOpen={sidebarOpen}
+        onSidebarClose={() => setSidebarOpen(false)}
+      >
         {resolvePage(page)}
       </Layout>
     </PageContext.Provider>

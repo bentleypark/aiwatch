@@ -17,6 +17,7 @@ const ko = {
   'topbar.analyze': '분석',
   'topbar.analyze.soon': '준비 중',
   'topbar.refreshed': '새로고침',
+  'topbar.menu.open': '메뉴 열기',
 
   // Status
   'status.operational': 'Operational',
