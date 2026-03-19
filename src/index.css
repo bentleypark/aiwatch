@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+/* ─── Design Tokens ─────────────────────────────────────── */
+:root {
+  /* Backgrounds */
+  --bg0: #080c10;
+  --bg1: #0d1117;
+  --bg2: #161b22;
+  --bg3: #1c2230;
+  --bg4: #242b38;
+
+  /* Status: Operational / Degraded / Down */
+  --green: #3fb950;
+  --amber: #d29922;
+  --red: #f85149;
+
+  /* Informational */
+  --blue: #58a6ff;
+  --teal: #39c5c8;
+
+  /* Text */
+  --text0: #e6edf3;
+  --text1: #8b949e;
+  --text2: #484f58;
+
+  /* Borders */
+  --border: rgba(255, 255, 255, 0.07);
+  --border-hi: rgba(255, 255, 255, 0.14);
+
+  /* Fonts */
+  --font-mono: "IBM Plex Mono", monospace;
+  --font-sans: "IBM Plex Sans", sans-serif;
+}
+
+/* Light theme: only overrides tokens that differ. Font tokens are intentionally shared. */
+[data-theme="light"] {
+  --bg0: #ffffff;
+  --bg1: #f6f8fa;
+  --bg2: #eaeef2;
+  --bg3: #d0d7de;
+  --bg4: #c0c8d0;
+  --text0: #1f2328;
+  --text1: #656d76;
+  --text2: #9198a1;
+  --border: rgba(0, 0, 0, 0.07);
+  --border-hi: rgba(0, 0, 0, 0.14);
+
+  /* Status colors adjusted for light backgrounds (WCAG AA contrast) */
+  --green: #1a7f37;
+  --amber: #9a6700;
+  --red: #cf222e;
+  --blue: #0969da;
+  --teal: #1b7c83;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  background-color: var(--bg0);
+  color: var(--text0);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--font-mono);
+}
