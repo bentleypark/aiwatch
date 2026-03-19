@@ -223,13 +223,13 @@ export default function ServiceDetails({ serviceId }) {
   const { services: rawServices, loading, error } = usePolling()
   const services = rawServices ?? []
 
-  if (loading) return <div className="p-4 md:p-6"><SkeletonUI /></div>
-  if (error)   return <div className="p-4 md:p-6"><EmptyState type="error" onAction={() => window.location.reload()} /></div>
+  if (loading) return <div className=""><SkeletonUI /></div>
+  if (error)   return <div className=""><EmptyState type="error" onAction={() => window.location.reload()} /></div>
 
   const service = services.find((s) => s.id === serviceId)
   if (!service) {
     return (
-      <div className="p-4 md:p-6">
+      <div className="">
         <EmptyState type="error" onAction={() => setPage({ name: 'overview' })} />
       </div>
     )
@@ -239,7 +239,7 @@ export default function ServiceDetails({ serviceId }) {
   const incidentCount = service.incidents?.length ?? 0
 
   return (
-    <div className="p-4 md:p-6 space-y-6">
+    <div className=" space-y-6">
 
       {/* ── Header ── */}
       <div className="flex flex-col gap-3">

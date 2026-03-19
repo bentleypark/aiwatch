@@ -108,10 +108,10 @@ export default function Uptime() {
     [services]
   )
 
-  if (loading) return <div className="p-4 md:p-6"><SkeletonUI /></div>
-  if (error)   return <div className="p-4 md:p-6"><EmptyState type="error" onAction={() => window.location.reload()} /></div>
+  if (loading) return <div className=""><SkeletonUI /></div>
+  if (error)   return <div className=""><EmptyState type="error" onAction={() => window.location.reload()} /></div>
 
-  if (services.length === 0) return <div className="p-4 md:p-6"><EmptyState type="neutral" /></div>
+  if (services.length === 0) return <div className=""><EmptyState type="neutral" /></div>
 
   const mostStable = sortedByUptime[0]
   const leastStable = sortedByUptime[sortedByUptime.length - 1]
@@ -125,7 +125,7 @@ export default function Uptime() {
   const months = (services[0]?.history3m ?? []).map((m) => m.month)
 
   return (
-    <div className="p-4 md:p-6 space-y-6">
+    <div className=" space-y-6">
 
       {/* ── Summary Cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

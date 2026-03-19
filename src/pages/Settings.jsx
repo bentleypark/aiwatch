@@ -117,7 +117,7 @@ export default function Settings() {
   for (const s of services) nameMap[s.id] = s.name
 
   return (
-    <div className="p-4 md:p-6 space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-2xl">
 
       {/* ── General ── */}
       <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">

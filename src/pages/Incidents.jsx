@@ -233,8 +233,8 @@ export default function Incidents() {
       .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
   }, [allIncidents, serviceFilter, statusFilter, period])
 
-  if (loading) return <div className="p-4 md:p-6"><SkeletonUI /></div>
-  if (error)   return <div className="p-4 md:p-6"><EmptyState type="error" onAction={() => window.location.reload()} /></div>
+  if (loading) return <div className=""><SkeletonUI /></div>
+  if (error)   return <div className=""><EmptyState type="error" onAction={() => window.location.reload()} /></div>
 
   const selectedIncident = filtered.find((inc) => inc.id === selectedId) ?? null
   const handleSelect = (id) => setSelectedId((prev) => (prev === id ? null : id))
@@ -246,7 +246,7 @@ export default function Incidents() {
   }
 
   return (
-    <div className="p-4 md:p-6 space-y-4">
+    <div className=" space-y-4">
 
       {/* ── Filters ── */}
       <FilterBar

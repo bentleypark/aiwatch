@@ -155,6 +155,12 @@ export default function Sidebar({ visibleServiceIds }) {
           const active = page.name === 'service' && page.serviceId === svc.id
           const dotClass = STATUS_DOT_CLASS[svc.status] ?? STATUS_DOT_CLASS.operational
           const badgeCls = uptimeBadgeCls(svc.uptime30d ?? 100)
+          // Degraded/down services get status-colored text per design mockup
+          const statusTextCls = svc.status === 'degraded'
+            ? 'text-[var(--amber)]'
+            : svc.status === 'down'
+            ? 'text-[var(--red)]'
+            : null
           return (
             <button
               key={svc.id}
@@ -163,7 +169,7 @@ export default function Sidebar({ visibleServiceIds }) {
               className={`relative w-full text-left px-2 py-[7px] flex items-center gap-2 rounded-[6px] transition-all text-[12px]
                 ${active
                   ? 'bg-[var(--bg3)] text-[var(--text0)]'
-                  : 'text-[var(--text1)] hover:bg-[var(--bg3)] hover:text-[var(--text0)]'
+                  : `${statusTextCls ?? 'text-[var(--text1)]'} hover:bg-[var(--bg3)] hover:text-[var(--text0)]`
                 }`}
             >
               {active && (
@@ -184,8 +190,8 @@ export default function Sidebar({ visibleServiceIds }) {
 
       {/* ── Divider + Footer ── */}
       <div className="h-px bg-[var(--border)] mx-3 my-2" />
-      <div className="px-5 text-[var(--text2)] text-[9px] tracking-wide">
-        {t('sidebar.footer')}
+      <div className="px-3 text-[var(--text2)] text-[9px] tracking-[0.06em]">
+        <span className="px-2 py-1.5 inline-block">{t('sidebar.footer')}</span>
       </div>
     </div>
   )

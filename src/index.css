@@ -91,10 +91,15 @@ pre,
   font-family: var(--font-mono);
 }
 
-/* ─── Layout utility (Tailwind v4 fails to generate responsive arbitrary pt) */
+/* ─── Layout utilities (Tailwind v4 fails to generate some responsive arbitrary values) */
 .header-offset { padding-top: 84px; }     /* mobile: topbar 48 + action bar ~36 */
 @media (min-width: 768px) {
   .header-offset { padding-top: 82px; }   /* desktop: topbar 48 + ticker 34 */
+}
+
+.content-padding { padding: 14px; }        /* mobile */
+@media (min-width: 768px) {
+  .content-padding { padding: 20px 24px; } /* desktop: matches design mockup */
 }
 
 /* ─── Scrollbar ─────────────────────────────────────────── */

@@ -174,12 +174,12 @@ export default function Overview() {
   const [filter, setFilter] = useState('all')
 
   if (loading) {
-    return <div className="p-4 md:p-6"><SkeletonUI /></div>
+    return <div className=""><SkeletonUI /></div>
   }
 
   if (error) {
     return (
-      <div className="p-4 md:p-6">
+      <div className="">
         <EmptyState type="error" onAction={() => window.location.reload()} />
         {lastUpdated && (
           <p className="mt-2 text-center text-xs text-[var(--text2)]">
@@ -217,7 +217,7 @@ export default function Overview() {
   const maxLatency = services.length ? Math.max(...services.map((s) => s.latency)) : 1
 
   return (
-    <div className="p-4 md:p-6 space-y-6">
+    <div className=" space-y-6">
 
       {/* ── Summary Stats ── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

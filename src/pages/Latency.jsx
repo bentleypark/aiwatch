@@ -197,8 +197,8 @@ export default function Latency() {
   // Defensive default — handles transient undefined state
   const services = rawServices ?? []
 
-  if (loading) return <div className="p-4 md:p-6"><SkeletonUI /></div>
-  if (error)   return <div className="p-4 md:p-6"><EmptyState type="error" onAction={() => window.location.reload()} /></div>
+  if (loading) return <div className=""><SkeletonUI /></div>
+  if (error)   return <div className=""><EmptyState type="error" onAction={() => window.location.reload()} /></div>
 
   const sorted = [...services].sort((a, b) => a.latency - b.latency)
   const fastest = sorted[0]
@@ -209,7 +209,7 @@ export default function Latency() {
   const maxLatency = slowest?.latency ?? 1
 
   return (
-    <div className="p-4 md:p-6 space-y-6">
+    <div className=" space-y-6">
 
       {/* ── Summary Cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
