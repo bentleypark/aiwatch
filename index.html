@@ -14,6 +14,20 @@
     />
   </head>
   <body>
+    <script>
+      // Apply theme before React hydrates to prevent FOUC (flash of wrong theme)
+      (function() {
+        try {
+          var t = localStorage.getItem('aiwatch-theme');
+          if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+          else if (t === 'system') {
+            if (window.matchMedia && !window.matchMedia('(prefers-color-scheme: dark)').matches)
+              document.documentElement.setAttribute('data-theme', 'light');
+          }
+          // default (null, 'dark', or anything else) = dark = no attribute needed
+        } catch(e) {}
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

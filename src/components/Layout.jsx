@@ -1,6 +1,6 @@
 // Layout shell — owns structural grid only.
-// Desktop uses CSS Grid (220px + 1fr) matching the design mockup.
-// Sidebar is sticky (not fixed) to avoid z-index overlap with main content.
+// Desktop: Topbar(48px) + Ticker(34px) = 82px fixed header, then Grid (220px sidebar + 1fr content).
+// Mobile: Topbar(48px) + ActionBar(~36px), sidebar as overlay.
 
 const TOPBAR_H = 48
 const TICKER_H = 34
@@ -21,7 +21,7 @@ export default function Layout({
 }) {
   return (
     <div className="min-h-screen bg-[var(--bg0)]">
-      {/* Topbar — fixed, 48px, z-[60] */}
+      {/* Topbar — fixed full width, 48px, highest z */}
       <header
         className="fixed inset-x-0 top-0 z-[60] h-[48px] flex items-center
                    bg-[var(--bg1)] border-b border-[var(--border)]"
@@ -29,9 +29,9 @@ export default function Layout({
         {topbar}
       </header>
 
-      {/* Ticker Bar — fixed, 34px, below Topbar. Hidden on mobile. Offset by sidebar on md+. */}
+      {/* Ticker Bar — fixed full width, 34px, below Topbar. Hidden on mobile. */}
       <div
-        className="fixed right-0 left-0 md:left-[220px] top-[48px] h-[34px] z-[50] hidden md:flex items-center
+        className="fixed inset-x-0 top-[48px] h-[34px] z-[50] hidden md:flex items-center
                    bg-[var(--bg2)] border-b border-[var(--border)]"
       >
         {tickerBar}
@@ -42,11 +42,11 @@ export default function Layout({
         {mobileActionBar}
       </div>
 
-      {/* Body — below fixed topbar+ticker (desktop) or topbar+actionbar (mobile) */}
+      {/* Body — push content below fixed headers */}
       <div className="pt-[84px] md:pt-[82px]">
         <div className="md:grid" style={{ gridTemplateColumns: '220px 1fr' }}>
 
-          {/* Desktop sidebar — sticky within grid column */}
+          {/* Desktop sidebar — sticky, starts below ticker bar */}
           <aside
             className="hidden md:block sticky top-[82px] h-[calc(100vh-82px)]
                        overflow-y-auto overflow-x-hidden
@@ -55,7 +55,7 @@ export default function Layout({
             {sidebar}
           </aside>
 
-          {/* Content + Footer column */}
+          {/* Content + Footer */}
           <div className="flex flex-col min-h-[calc(100vh-82px)]">
             <main className="flex-1">
               {children}
