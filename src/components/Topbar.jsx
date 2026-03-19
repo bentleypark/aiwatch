@@ -8,11 +8,11 @@ const VERSION = 'v1.0.0'
 function GearIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
-      <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.3" />
       <path
-        d="M8 1.5v1.2M8 13.3v1.2M1.5 8h1.2M13.3 8h1.2M3.6 3.6l.85.85M11.55 11.55l.85.85M3.6 12.4l.85-.85M11.55 4.45l.85-.85"
-        stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"
+        d="M6.5 1.5h3l.4 1.7a5.5 5.5 0 011.3.7l1.6-.6 1.5 2.6-1.2 1.1a5.5 5.5 0 010 1.5l1.2 1.1-1.5 2.6-1.6-.6a5.5 5.5 0 01-1.3.7l-.4 1.7h-3l-.4-1.7a5.5 5.5 0 01-1.3-.7l-1.6.6-1.5-2.6 1.2-1.1a5.5 5.5 0 010-1.5L2.7 5.9l1.5-2.6 1.6.6a5.5 5.5 0 011.3-.7z"
+        stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"
       />
+      <circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.2" />
     </svg>
   )
 }
@@ -105,7 +105,7 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
             tabIndex={0}
             aria-describedby="analyze-tooltip"
             style={btnStyle}
-            className={`${btnCls} opacity-50 cursor-not-allowed`}
+            className="mono text-[11px] border border-[var(--border)] bg-[var(--bg3)] text-[var(--text2)] opacity-50 cursor-not-allowed"
             onClick={(e) => e.preventDefault()}
           >
             {t('topbar.analyze')} ↗

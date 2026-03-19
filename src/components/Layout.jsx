@@ -31,7 +31,7 @@ export default function Layout({
       {/* Ticker Bar — fixed full width, 34px, below Topbar. Hidden on mobile. */}
       <div
         className="fixed inset-x-0 top-[48px] h-[34px] z-[50] hidden md:flex items-center
-                   bg-[var(--bg2)] border-b border-[var(--border)]"
+                   bg-[var(--bg1)] border-b border-[var(--border)]"
       >
         {tickerBar}
       </div>
