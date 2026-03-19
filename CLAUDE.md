@@ -15,13 +15,19 @@ No test runner is configured yet.
 
 ## Development Workflow
 
-After completing any code task, always run a PR review before committing:
+### Per-issue process (follow this order every time)
 
-```
-/pr-review-toolkit:review-pr
-```
+1. **Code** — implement the feature or fix
+2. **Review** — run PR review before committing:
+   ```
+   /pr-review-toolkit:review-pr
+   ```
+   Address all **Critical** and **Important** findings before committing.
+3. **Commit** — include `closes #N` in the message so GitHub links the commit
+4. **Verify checklist** — read the issue (`gh issue view N`) and confirm every checklist item (`- [ ]`) is actually implemented in code before closing
+5. **Close** — only close the issue after checklist verification: `gh issue close N`
 
-This runs specialized agents (code quality, error handling, comment accuracy, simplification) and surfaces issues before they accumulate. Address all **Critical** and **Important** findings before committing.
+> Never close an issue immediately after committing. Always re-read the issue checklist and verify each item against the code first.
 
 ## Architecture
 
