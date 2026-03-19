@@ -14,6 +14,7 @@ const POLL_INTERVAL = 60_000 // 60s
 // verify ago() values still fall within the 7-day window used in Overview.jsx.
 const REF = new Date('2026-03-19T10:00:00Z')
 const ago = (ms) => new Date(REF - ms).toISOString()
+const M = 60_000
 const H = 3_600_000
 const D = 86_400_000
 
@@ -39,8 +40,23 @@ const SERVICES = [
     latency: 312, uptime30d: 99.21,
     history30d: hist([22, 23, 28]),
     incidents: [
-      { id: 'oi-1', title: 'Elevated API Error Rates', startedAt: ago(2 * D), duration: '2h 14m', status: 'resolved' },
-      { id: 'oi-2', title: 'Increased Latency on Chat Endpoint', startedAt: ago(4 * H), duration: null, status: 'monitoring' },
+      {
+        id: 'oi-1', title: 'Elevated API Error Rates', startedAt: ago(2 * D), duration: '2h 14m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', at: ago(2 * D) },
+          { stage: 'identified',    at: ago(2 * D - 30 * M) },
+          { stage: 'monitoring',    at: ago(2 * D - 75 * M) },
+          { stage: 'resolved',      at: ago(2 * D - 134 * M) },
+        ],
+      },
+      {
+        id: 'oi-2', title: 'Increased Latency on Chat Endpoint', startedAt: ago(4 * H), duration: null, status: 'monitoring',
+        timeline: [
+          { stage: 'investigating', at: ago(4 * H) },
+          { stage: 'identified',    at: ago(3 * H) },
+          { stage: 'monitoring',    at: ago(2 * H) },
+        ],
+      },
     ],
   },
   {
@@ -84,8 +100,23 @@ const SERVICES = [
     latency: 890, uptime30d: 98.52,
     history30d: hist([10, 20, 25], [15, 16, 17]),
     incidents: [
-      { id: 'hf-1', title: 'Model Inference Slowdown', startedAt: ago(1 * D), duration: null, status: 'monitoring' },
-      { id: 'hf-2', title: 'Inference API Outage', startedAt: ago(15 * D), duration: '8h 32m', status: 'resolved' },
+      {
+        id: 'hf-1', title: 'Model Inference Slowdown', startedAt: ago(1 * D), duration: null, status: 'monitoring',
+        timeline: [
+          { stage: 'investigating', at: ago(1 * D) },
+          { stage: 'identified',    at: ago(1 * D - 2 * H) },
+          { stage: 'monitoring',    at: ago(1 * D - 4 * H) },
+        ],
+      },
+      {
+        id: 'hf-2', title: 'Inference API Outage', startedAt: ago(15 * D), duration: '8h 32m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', at: ago(15 * D) },
+          { stage: 'identified',    at: ago(15 * D - 1 * H) },
+          { stage: 'monitoring',    at: ago(15 * D - 3 * H) },
+          { stage: 'resolved',      at: ago(15 * D - 512 * M) },
+        ],
+      },
     ],
   },
   {
