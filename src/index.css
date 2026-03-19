@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Override Tailwind v4 default font variables with IBM Plex */
+@theme {
+  --font-sans: "IBM Plex Sans", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+}
+
 /* ─── Design Tokens ─────────────────────────────────────── */
 :root {
   color-scheme: dark;
