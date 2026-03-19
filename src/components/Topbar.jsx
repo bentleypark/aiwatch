@@ -1,18 +1,9 @@
 import { useState, useCallback } from 'react'
 import { usePage } from '../utils/pageContext'
 import { useLang } from '../hooks/useLang'
+import { formatTime } from '../utils/time'
 
 const VERSION = 'v1.0.0'
-
-const LOCALE_MAP = { ko: 'ko-KR', en: 'en-US' }
-
-function formatTime(date, lang) {
-  return date.toLocaleTimeString(LOCALE_MAP[lang] ?? 'ko-KR', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-}
 
 export default function Topbar({ onRefresh, onMenuToggle }) {
   const { setPage } = usePage()

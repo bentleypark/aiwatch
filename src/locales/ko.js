@@ -25,6 +25,7 @@ const ko = {
   'status.down': 'Down',
 
   // Overview
+  'overview.last.updated': '마지막 업데이트',
   'overview.stats.operational': '서비스 운영 중',
   'overview.stats.degraded': '부분 영향',
   'overview.stats.down': '서비스 중단',

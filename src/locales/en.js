@@ -25,6 +25,7 @@ const en = {
   'status.down': 'Down',
 
   // Overview
+  'overview.last.updated': 'Last updated',
   'overview.stats.operational': 'services running',
   'overview.stats.degraded': 'partially affected',
   'overview.stats.down': 'service down',

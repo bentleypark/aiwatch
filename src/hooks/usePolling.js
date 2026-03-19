@@ -1,0 +1,152 @@
+// usePolling — returns live service status data
+// Placeholder: simulates 800ms load, returns static data, and re-triggers every 60s
+// to keep lastUpdated live for UI demonstration — no real fetch occurs.
+// Issue #15 replaces this with real Cloudflare Worker polling.
+// The return shape { services, loading, error, lastUpdated } and the ServiceStatus
+// object structure are the public contract — preserve them in Issue #15.
+
+import { useState, useEffect } from 'react'
+
+const POLL_INTERVAL = 60_000 // 60s
+
+// Reference date for deterministic placeholder timestamps.
+// WARNING: incident timestamps are relative to REF — if changed to Date.now(),
+// verify ago() values still fall within the 7-day window used in Overview.jsx.
+const REF = new Date('2026-03-19T10:00:00Z')
+const ago = (ms) => new Date(REF - ms).toISOString()
+const H = 3_600_000
+const D = 86_400_000
+
+// 30-day operational history helper: 0=oldest (left), 29=today (right).
+// MiniHistory renders this order directly with no reversal.
+function hist(degraded = [], down = []) {
+  return Array.from({ length: 30 }, (_, i) => {
+    if (down.includes(i)) return 'down'
+    if (degraded.includes(i)) return 'degraded'
+    return 'operational'
+  })
+}
+
+const SERVICES = [
+  {
+    id: 'claude', name: 'Claude API', status: 'operational',
+    latency: 145, uptime30d: 99.97,
+    history30d: hist([27]),
+    incidents: [],
+  },
+  {
+    id: 'openai', name: 'OpenAI API', status: 'degraded',
+    latency: 312, uptime30d: 99.21,
+    history30d: hist([22, 23, 28]),
+    incidents: [
+      { id: 'oi-1', title: 'Elevated API Error Rates', startedAt: ago(2 * D), duration: '2h 14m', status: 'resolved' },
+      { id: 'oi-2', title: 'Increased Latency on Chat Endpoint', startedAt: ago(4 * H), duration: null, status: 'monitoring' },
+    ],
+  },
+  {
+    id: 'gemini', name: 'Gemini API', status: 'operational',
+    latency: 198, uptime30d: 99.85,
+    history30d: hist([14]),
+    incidents: [],
+  },
+  {
+    id: 'mistral', name: 'Mistral API', status: 'operational',
+    latency: 89, uptime30d: 99.92,
+    history30d: hist(),
+    incidents: [],
+  },
+  {
+    id: 'cohere', name: 'Cohere API', status: 'operational',
+    latency: 234, uptime30d: 99.50,
+    history30d: hist([8]),
+    incidents: [],
+  },
+  {
+    id: 'groq', name: 'Groq Cloud', status: 'operational',
+    latency: 52, uptime30d: 99.95,
+    history30d: hist(),
+    incidents: [],
+  },
+  {
+    id: 'together', name: 'Together AI', status: 'operational',
+    latency: 178, uptime30d: 99.72,
+    history30d: hist([19]),
+    incidents: [],
+  },
+  {
+    id: 'perplexity', name: 'Perplexity', status: 'operational',
+    latency: 420, uptime30d: 99.33,
+    history30d: hist([5, 6]),
+    incidents: [],
+  },
+  {
+    id: 'huggingface', name: 'Hugging Face', status: 'degraded',
+    latency: 890, uptime30d: 98.52,
+    history30d: hist([10, 20, 25], [15, 16, 17]),
+    incidents: [
+      { id: 'hf-1', title: 'Model Inference Slowdown', startedAt: ago(1 * D), duration: null, status: 'monitoring' },
+      { id: 'hf-2', title: 'Inference API Outage', startedAt: ago(15 * D), duration: '8h 32m', status: 'resolved' },
+    ],
+  },
+  {
+    id: 'replicate', name: 'Replicate', status: 'operational',
+    latency: 267, uptime30d: 99.61,
+    history30d: hist([3]),
+    incidents: [],
+  },
+  {
+    id: 'elevenlabs', name: 'ElevenLabs', status: 'operational',
+    latency: 156, uptime30d: 99.80,
+    history30d: hist(),
+    incidents: [],
+  },
+  {
+    id: 'xai', name: 'xAI (Grok)', status: 'operational',
+    latency: 203, uptime30d: 99.75,
+    history30d: hist([24]),
+    incidents: [],
+  },
+  {
+    id: 'deepseek', name: 'DeepSeek API', status: 'operational',
+    latency: 321, uptime30d: 99.40,
+    history30d: hist([11]),
+    incidents: [],
+  },
+]
+
+export function usePolling() {
+  const [state, setState] = useState({
+    services: [],
+    loading: true,
+    error: null,
+    lastUpdated: null,
+  })
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function poll() {
+      try {
+        // Placeholder: simulate network latency for skeleton UI demonstration
+        await new Promise((r) => setTimeout(r, 800))
+        if (!cancelled) {
+          setState({ services: SERVICES, loading: false, error: null, lastUpdated: new Date() })
+        }
+      } catch (err) {
+        // Note: unreachable in placeholder mode — real fetch errors surface here after Issue #15
+        if (!cancelled) {
+          setState((s) => ({ ...s, loading: false, error: err }))
+        }
+      }
+    }
+
+    poll()
+    const interval = setInterval(poll, POLL_INTERVAL)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [])
+
+  return state
+}
