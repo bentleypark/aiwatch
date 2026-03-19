@@ -50,14 +50,14 @@ const STAT_TOP_COLOR = {
   'text-[var(--red)]':   'var(--red)',
 }
 
-function SummaryCard({ label, value, sub, colorClass }) {
+function SummaryCard({ label, value, sub, colorClass, valueSize = '26px', mono = true }) {
   const topColor = STAT_TOP_COLOR[colorClass] ?? 'var(--border)'
   return (
     <div className="relative bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden"
          style={{ padding: '14px 16px' }}>
       <span className="absolute top-0 left-0 right-0 h-px" style={{ background: topColor }} />
       <div className="mono text-[9px] text-[var(--text2)] uppercase" style={{ letterSpacing: '0.1em', marginBottom: '6px' }}>{label}</div>
-      <div className={`mono text-[26px] font-semibold leading-none ${colorClass}`} style={{ marginBottom: '4px' }}>{value}</div>
+      <div className={`font-semibold leading-none ${colorClass} ${mono ? 'mono' : ''}`} style={{ fontSize: valueSize, marginBottom: '4px' }}>{value}</div>
       {sub && <div className="mono text-[10px] text-[var(--text2)]">{sub}</div>}
     </div>
   )
@@ -94,12 +94,18 @@ function UptimeBar({ service, sla }) {
   )
 }
 
+// Matrix cell: colored badge per design (green-dim bg + green text, etc.)
+function matrixCellCls(pct) {
+  if (pct >= GOOD_THRESHOLD) return 'bg-[var(--status-bg-green)] text-[var(--green)]'
+  if (pct >= WARN_THRESHOLD) return 'bg-[var(--status-bg-amber)] text-[var(--amber)]'
+  return 'bg-[var(--status-bg-red)] text-[var(--red)]'
+}
+
 function MatrixCell({ uptime }) {
-  const bg   = uptimeColorClass(uptime)
-  const text = uptimeTextClass(uptime)
+  const cls = matrixCellCls(uptime)
   return (
-    <td className="px-2 py-1.5 text-center">
-      <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] mono font-medium ${bg} text-[var(--bg0)]`}>
+    <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+      <span className={`inline-block mono ${cls}`} style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px' }}>
         {uptime.toFixed(1)}%
       </span>
     </td>
@@ -153,6 +159,8 @@ export default function Uptime() {
           value={mostStable.name}
           sub={`${mostStable.uptime30d.toFixed(1)}% ${t('overview.card.uptime')}`}
           colorClass="text-[var(--green)]"
+          valueSize="18px"
+          mono={false}
         />
         <SummaryCard
           label={t('uptime.average')}
@@ -165,6 +173,8 @@ export default function Uptime() {
           value={mostIssues.name}
           sub={`${mostIssues.uptime30d.toFixed(1)}% ${t('overview.card.uptime')}`}
           colorClass="text-[var(--red)]"
+          valueSize="18px"
+          mono={false}
         />
       </div>
 
@@ -199,12 +209,12 @@ export default function Uptime() {
         <div style={{ padding: '16px' }} className="overflow-x-auto">
         <table className="w-full min-w-[400px]">
           <thead>
-            <tr className="border-b border-[var(--border)]">
-              <th className="pb-2 text-left text-[10px] mono text-[var(--text2)] font-medium w-32">
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              <th className="mono text-[var(--text2)] font-medium" style={{ padding: '6px 10px', textAlign: 'left', fontSize: '9px', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                 {t('incidents.col.service')}
               </th>
               {months.map((m) => (
-                <th key={m} className="pb-2 text-center text-[10px] mono text-[var(--text2)] font-medium">
+                <th key={m} className="mono text-[var(--text2)] font-medium" style={{ padding: '6px 10px', textAlign: 'center', fontSize: '9px', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                   {formatMonth(m, lang)}
                 </th>
               ))}
@@ -212,8 +222,8 @@ export default function Uptime() {
           </thead>
           <tbody>
             {sortedByUptime.map((svc) => (
-              <tr key={svc.id} className="border-b border-[var(--border)] last:border-0">
-                <td className="py-1.5 text-xs text-[var(--text1)] truncate max-w-[128px] pr-2">
+              <tr key={svc.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                <td className="mono text-[var(--text1)]" style={{ padding: '8px 10px', fontSize: '11px' }}>
                   {svc.name}
                 </td>
                 {(svc.history3m ?? []).map((entry) => (

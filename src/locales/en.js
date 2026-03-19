@@ -44,7 +44,7 @@ const en = {
   'overview.card.incidents': 'incidents',
   'overview.panel.incidents.sub': 'Last 7 days',
   'overview.panel.latency.sub': 'Current · ms',
-  'overview.stats.uptime.sub': '30-day average',
+  'overview.stats.uptime.sub': 'Overall average',
   'overview.incidents.monitoring': 'Monitoring',
   'overview.ai.title': 'AI Analysis',
   'overview.ai.soon': 'Coming Soon',

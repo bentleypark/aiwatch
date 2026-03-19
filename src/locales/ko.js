@@ -44,7 +44,7 @@ const ko = {
   'overview.card.incidents': 'incidents',
   'overview.panel.incidents.sub': '최근 7일',
   'overview.panel.latency.sub': '현재 기준 ms',
-  'overview.stats.uptime.sub': '30일 평균',
+  'overview.stats.uptime.sub': '전체 평균',
   'overview.incidents.monitoring': '모니터링 중',
   'overview.ai.title': 'AI Analysis',
   'overview.ai.soon': '준비 중',
