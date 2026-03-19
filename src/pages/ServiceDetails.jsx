@@ -358,6 +358,10 @@ export default function ServiceDetails({ serviceId }) {
                 <CalendarCell key={i} status={status} date={calendarDate(i, lang)} />
               ))}
             </div>
+            <div className="flex justify-between mono text-[9px] text-[var(--text2)]" style={{ marginTop: '6px' }}>
+              <span>{t('svc.cal.ago')}</span>
+              <span>{t('svc.cal.today')}</span>
+            </div>
           </div>
         </section>
 

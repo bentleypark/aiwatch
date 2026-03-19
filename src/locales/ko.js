@@ -110,6 +110,8 @@ const ko = {
   'svc.mttr.collecting': '수집 중',
   'svc.cal.legend': '상태 캘린더',
   'svc.no.incidents': '인시던트 없음 — 안정적으로 운영 중',
+  'svc.cal.ago': '30일 전',
+  'svc.cal.today': '오늘',
   'svc.status.link': '공식 Status',
 
   // Settings

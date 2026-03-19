@@ -110,6 +110,8 @@ const en = {
   'svc.mttr.collecting': 'Collecting',
   'svc.cal.legend': 'Status Calendar',
   'svc.no.incidents': 'No incidents — operating stably',
+  'svc.cal.ago': '30 days ago',
+  'svc.cal.today': 'Today',
   'svc.status.link': 'Official Status',
 
   // Settings
