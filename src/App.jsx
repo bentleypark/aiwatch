@@ -5,6 +5,7 @@ import { PageContext } from './utils/pageContext'
 import Layout from './components/Layout'
 import Topbar from './components/Topbar'
 import TickerBar from './components/TickerBar'
+import Sidebar from './components/Sidebar'
 import Overview from './pages/Overview'
 import Latency from './pages/Latency'
 import Incidents from './pages/Incidents'
@@ -12,7 +13,7 @@ import Uptime from './pages/Uptime'
 import ServiceDetails from './pages/ServiceDetails'
 import Settings from './pages/Settings'
 
-// currentPage shape: { name: string, serviceId?: string }
+// currentPage shape: { name: 'overview'|'latency'|'incidents'|'uptime'|'service'|'settings', serviceId?: string }
 const DEFAULT_PAGE = { name: 'overview' }
 
 function resolvePage(page) {
@@ -33,11 +34,9 @@ export default function App() {
   useTheme()
   const { t } = useLang()
 
-  // Sidebar (#7) and Footer (#19) pending
+  // Footer links (privacy/terms modal) pending — Issue #19
   const tickerBar = <TickerBar />
-  const sidebar = (
-    <nav className="p-4 mono text-xs text-[var(--text2)]">sidebar placeholder</nav>
-  )
+  const sidebar = <Sidebar />
   const footer = (
     <div className="px-6 py-3 mono text-xs text-[var(--text2)]">
       {t('footer.copyright')}
