@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTheme } from './hooks/useTheme'
 import { useLang } from './hooks/useLang'
+import { initGA, trackPageView, trackEvent } from './utils/analytics'
 import { PageContext } from './utils/pageContext'
 import Layout from './components/Layout'
 import Topbar, { MobileActionBar } from './components/Topbar'
@@ -36,6 +37,14 @@ export default function App() {
   useTheme()
   const { t } = useLang()
 
+  // Initialize GA4 once on mount
+  useEffect(() => { initGA() }, [])
+
+  // Track page views on SPA navigation
+  useEffect(() => {
+    trackPageView(page.name, page.serviceId ? { service_id: page.serviceId } : {})
+  }, [page])
+
   const tickerBar = <TickerBar />
   const sidebar = <Sidebar />
   const footer = (
@@ -51,7 +60,7 @@ export default function App() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={() => setModal('privacy')}
+            onClick={() => { setModal('privacy'); trackEvent('open_legal', { type: 'privacy' }) }}
             className="mono text-[11px] text-[var(--text2)] hover:text-[var(--text0)] transition-colors cursor-pointer"
             style={{ background: 'none', border: 'none' }}
           >
@@ -59,7 +68,7 @@ export default function App() {
           </button>
           <span className="text-[11px] text-[var(--text2)] opacity-40">·</span>
           <button
-            onClick={() => setModal('terms')}
+            onClick={() => { setModal('terms'); trackEvent('open_legal', { type: 'terms' }) }}
             className="mono text-[11px] text-[var(--text2)] hover:text-[var(--text0)] transition-colors cursor-pointer"
             style={{ background: 'none', border: 'none' }}
           >

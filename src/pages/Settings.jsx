@@ -7,6 +7,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useSettings } from '../hooks/useSettings'
 import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, SERVICE_AND_WEBAPP_IDS, AGENT_SERVICE_IDS, ALL_SERVICE_IDS, DEFAULT_SETTINGS } from '../utils/constants'
 import { usePolling } from '../hooks/usePolling'
+import { trackEvent } from '../utils/analytics'
 
 // ── Styles matching design mockup ────────────────────────
 
@@ -121,6 +122,7 @@ export default function Settings() {
   function handleSave() {
     const slaNum = sla === '' ? DEFAULT_SETTINGS.sla : Number(sla)
     save({ period, sla: slaNum, enabledServices })
+    trackEvent('save_settings')
     setSaved(true)
     clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => setSaved(false), 1800)

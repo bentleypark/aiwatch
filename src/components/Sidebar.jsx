@@ -5,6 +5,7 @@ import { useMemo } from 'react'
 import { usePage } from '../utils/pageContext'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
+import { trackEvent } from '../utils/analytics'
 
 const EMPTY = []
 
@@ -83,7 +84,7 @@ function ServiceNavItem({ svc, page, setPage }) {
 
   return (
     <button
-      onClick={() => setPage({ name: 'service', serviceId: svc.id })}
+      onClick={() => { trackEvent('view_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }) }}
       aria-current={active ? 'page' : undefined}
       className={`w-full text-left flex items-center transition-all cursor-pointer
         ${active ? 'bg-[var(--bg3)] text-[var(--text0)]'
@@ -134,7 +135,7 @@ export default function Sidebar({ visibleServiceIds }) {
           return (
             <button
               key={item.name}
-              onClick={() => setPage({ name: item.name })}
+              onClick={() => { trackEvent('navigate_page', { page: item.name }); setPage({ name: item.name }) }}
               aria-current={active ? 'page' : undefined}
               className={`w-full text-left flex items-center transition-all cursor-pointer
                 ${active ? 'bg-[var(--bg3)] text-[var(--text0)]' : 'text-[var(--text1)] hover:bg-[var(--bg3)] hover:text-[var(--text0)]'}`}

@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
+import { trackEvent } from '../utils/analytics'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
 import StatusPill from '../components/StatusPill'
@@ -131,7 +132,7 @@ function FilterTabs({ filter, setFilter, total, issueCount, t }) {
       {tabs.map((tab) => (
         <button
           key={tab.key}
-          onClick={() => setFilter(tab.key)}
+          onClick={() => { setFilter(tab.key); trackEvent('change_filter', { filter: tab.key }) }}
           className={`mono text-[10px] rounded transition-all cursor-pointer`}
           style={{
             padding: '4px 10px',
@@ -320,7 +321,7 @@ export default function Overview() {
               service={svc}
               index={i}
               t={t}
-              onClick={() => setPage({ name: 'service', serviceId: svc.id })}
+              onClick={() => { trackEvent('select_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }) }}
             />
           ))}
         </div>
@@ -342,7 +343,7 @@ export default function Overview() {
                 service={svc}
                 index={i}
                 t={t}
-                onClick={() => setPage({ name: 'service', serviceId: svc.id })}
+                onClick={() => { trackEvent('select_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }) }}
               />
             ))}
           </div>

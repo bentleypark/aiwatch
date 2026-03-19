@@ -9,6 +9,7 @@ import { usePolling } from '../hooks/usePolling'
 import { formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
+import { trackEvent } from '../utils/analytics'
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -234,7 +235,13 @@ export default function Incidents() {
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
   const selectedIncident = filtered.find((inc) => inc.id === selectedId) ?? null
-  const handleSelect = (id) => setSelectedId((prev) => (prev === id ? null : id))
+  const handleSelect = (id) => {
+    setSelectedId((prev) => {
+      const next = prev === id ? null : id
+      if (next !== null) trackEvent('view_incident', { incident_id: id })
+      return next
+    })
+  }
   const handleResetFilters = () => {
     setServiceFilter('all')
     setStatusFilter('all')

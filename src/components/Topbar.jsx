@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { usePage } from '../utils/pageContext'
 import { useLang } from '../hooks/useLang'
 import { formatTime } from '../utils/time'
+import { trackEvent } from '../utils/analytics'
 
 const VERSION = 'v1.0.0'
 
@@ -33,6 +34,7 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
 
   const handleRefresh = useCallback(async () => {
     if (refreshing) return
+    trackEvent('click_refresh')
     setRefreshing(true)
     try {
       await onRefresh?.()
@@ -94,7 +96,7 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
             tabIndex={0}
             aria-describedby="analyze-tooltip"
             className="btn-topbar-disabled"
-            onClick={(e) => e.preventDefault()}
+            onClick={(e) => { e.preventDefault(); trackEvent('click_analyze') }}
           >
             {t('topbar.analyze')} ↗
           </button>
