@@ -56,7 +56,7 @@ export default function Layout({
 
           {/* Content + Footer */}
           <div className="flex flex-col min-h-[calc(100vh-82px)]">
-            <main className="flex-1" style={{ paddingTop: '20px' }}>
+            <main className="flex-1" style={{ padding: '20px 24px' }}>
               {children}
             </main>
             <footer className="bg-[var(--bg1)] border-t border-[var(--border)]">
