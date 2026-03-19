@@ -85,7 +85,6 @@ body {
   background-color: var(--bg0);
   color: var(--text0);
   line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
 }
 
 code,
@@ -132,6 +131,14 @@ pre,
   cursor: not-allowed;
   letter-spacing: 0.3px;
   opacity: 0.5;
+}
+
+.site-footer {
+  margin: 20px 24px 20px;
+  padding: 16px 24px;
+}
+@media (max-width: 767px) {
+  .site-footer { margin: 14px; padding: 14px; }
 }
 
 /* ─── Scrollbar ─────────────────────────────────────────── */

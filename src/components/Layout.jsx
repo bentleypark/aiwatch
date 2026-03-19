@@ -59,7 +59,7 @@ export default function Layout({
             <main className="flex-1 content-padding">
               {children}
             </main>
-            <footer className="bg-[var(--bg1)] border-t border-[var(--border)]">
+            <footer className="bg-[var(--bg1)] rounded-lg border-t border-[var(--border)] site-footer">
               {footer}
             </footer>
           </div>

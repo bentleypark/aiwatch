@@ -152,7 +152,16 @@ function TrendChart({ services, theme, t }) {
       scales: {
         x: {
           grid:  { color: cssVar('--border') },
-          ticks: { color: cssVar('--text2'), font: { family: 'IBM Plex Mono', size: 10 }, maxTicksLimit: 8 },
+          ticks: {
+            color: cssVar('--text2'),
+            font: { family: 'IBM Plex Mono', size: 10 },
+            // 3-hour intervals counting backwards from last label (current hour)
+            callback: function(val, index, ticks) {
+              const fromEnd = ticks.length - 1 - index
+              if (fromEnd % 3 === 0) return this.getLabelForValue(val)
+              return null
+            },
+          },
         },
         y: {
           grid:  { color: cssVar('--border') },
