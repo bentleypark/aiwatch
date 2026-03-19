@@ -3,7 +3,7 @@ import { useTheme } from './hooks/useTheme'
 import { useLang } from './hooks/useLang'
 import { PageContext } from './utils/pageContext'
 import Layout from './components/Layout'
-import Topbar from './components/Topbar'
+import Topbar, { MobileActionBar } from './components/Topbar'
 import TickerBar from './components/TickerBar'
 import Sidebar from './components/Sidebar'
 import Overview from './pages/Overview'
@@ -78,6 +78,7 @@ export default function App() {
     <PageContext.Provider value={{ page, setPage }}>
       <Layout
         topbar={<Topbar onMenuToggle={() => setSidebarOpen((o) => !o)} />}
+        mobileActionBar={<MobileActionBar />}
         tickerBar={tickerBar}
         sidebar={sidebar}
         footer={footer}

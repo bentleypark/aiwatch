@@ -14,6 +14,7 @@ export default function Layout({
   tickerBar,
   sidebar,
   footer,
+  mobileActionBar,
   sidebarOpen = false,
   onSidebarClose,
 }) {
@@ -35,8 +36,13 @@ export default function Layout({
         {tickerBar}
       </div>
 
-      {/* Body — pt-[48px] on mobile (no ticker), pt-[82px] on md+ */}
-      <div className="flex pt-[48px] md:pt-[82px]">
+      {/* Mobile Action Bar — sits below topbar, above content on mobile only */}
+      <div className="fixed inset-x-0 top-[48px] z-[55] md:hidden">
+        {mobileActionBar}
+      </div>
+
+      {/* Body — pt accounts for topbar+actionbar on mobile, topbar+ticker on desktop */}
+      <div className="flex pt-[84px] md:pt-[82px]">
         {/* Desktop sidebar — fixed left, hidden on mobile */}
         <aside
           className="fixed left-0 top-[82px] w-[220px] h-[calc(100vh-82px)]

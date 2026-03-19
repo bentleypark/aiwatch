@@ -16,6 +16,8 @@ const en = {
   'topbar.refresh': '↻ Refresh',
   'topbar.analyze': 'Analyze',
   'topbar.analyze.soon': 'Coming Soon',
+  'topbar.analyze.tooltip.title': 'Coming Soon',
+  'topbar.analyze.tooltip.body': 'Automatic anomaly detection and analysis notifications are being prepared',
   'topbar.refreshed': 'Refreshed',
   'topbar.menu.open': 'Open menu',
 

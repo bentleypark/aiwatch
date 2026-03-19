@@ -105,6 +105,12 @@ pre,
   50%      { opacity: 0.65; }
 }
 
+/* ─── LIVE Pulse ────────────────────────────────────────── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--green-glow); }
+  50%      { opacity: 0.7; box-shadow: 0 0 0 4px transparent; }
+}
+
 /* ─── Card Fade-in (stagger via animationDelay inline style) */
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(4px); }
