@@ -22,14 +22,14 @@ No test runner is configured yet.
    - Identify **every** difference (spacing, colors, fonts, layout, icons, text)
    - List differences explicitly before writing any code
 2. **Code** — implement the feature or fix
-3. **Review** — run PR review before committing:
+3. **Review** — run PR review **before** committing:
    ```
    /pr-review-toolkit:review-pr
    ```
-   Address all **Critical** and **Important** findings before committing.
-4. **Commit** — include `closes #N` in the message so GitHub links the commit
-5. **Verify checklist** — read the issue (`gh issue view N`) and confirm every checklist item (`- [ ]`) is actually implemented in code before closing
-6. **Close** — only close the issue after checklist verification: `gh issue close N`
+4. **Fix review issues** — address all **Critical** and **Important** findings. Do NOT commit until all issues are resolved.
+5. **Commit** — only after review issues are fixed. Include `closes #N` in the message so GitHub links the commit
+6. **Verify checklist** — read the issue (`gh issue view N`) and confirm every checklist item (`- [ ]`) is actually implemented in code before closing
+7. **Close** — only close the issue after checklist verification: `gh issue close N`
 
 > Never close an issue immediately after committing. Always re-read the issue checklist and verify each item against the code first.
 

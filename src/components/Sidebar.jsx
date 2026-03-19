@@ -91,7 +91,9 @@ export default function Sidebar({ visibleServiceIds }) {
     <div className="flex flex-col h-full mono" style={{ padding: '16px 0' }}>
 
       {/* ── Dashboard section ── */}
-      <div style={{ padding: '0 12px', marginBottom: '8px' }}>
+      {/* NOTE: inline styles used because Tailwind v4 fails to apply certain utilities
+           (py-[7px], px-[8px], gap-[8px]) on button elements due to base layer reset. */}
+      <nav style={{ padding: '0 12px', marginBottom: '8px' }} aria-label="Dashboard">
         <div style={sectionTitleStyle}>{t('nav.dashboard')}</div>
         {DASHBOARD_ITEMS.map((item) => {
           const active = page.name === item.name
@@ -121,7 +123,7 @@ export default function Sidebar({ visibleServiceIds }) {
             </button>
           )
         })}
-      </div>
+      </nav>
 
       {/* ── Divider ── */}
       <div style={{ height: '1px', background: 'var(--border)', margin: '8px 12px' }} />
@@ -160,11 +162,12 @@ export default function Sidebar({ visibleServiceIds }) {
       </nav>
 
       {/* ── Footer ── */}
-      <div className="mt-auto" />
-      <div style={{ height: '1px', background: 'var(--border)', margin: '8px 12px' }} />
-      <div style={{ padding: '0 12px' }}>
-        <div className="text-[var(--text2)]" style={{ padding: '6px 8px', letterSpacing: '0.06em', fontSize: '9px' }}>
-          {t('sidebar.footer')}
+      <div className="mt-auto">
+        <div style={{ height: '1px', background: 'var(--border)', margin: '8px 12px' }} />
+        <div style={{ padding: '0 12px' }}>
+          <div className="text-[var(--text2)]" style={{ padding: '6px 8px', letterSpacing: '0.06em', fontSize: '9px' }}>
+            {t('sidebar.footer')}
+          </div>
         </div>
       </div>
     </div>
