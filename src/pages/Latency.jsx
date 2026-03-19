@@ -84,12 +84,23 @@ function hourLabels() {
 
 // ── Sub-components ───────────────────────────────────────────
 
-function SummaryCard({ label, value, name, colorClass }) {
+const STAT_TOP_COLOR = {
+  'text-[var(--green)]': 'var(--green)',
+  'text-[var(--blue)]':  'var(--blue)',
+  'text-[var(--red)]':   'var(--red)',
+}
+
+function SummaryCard({ label, value, sub, colorClass }) {
+  const topColor = STAT_TOP_COLOR[colorClass] ?? 'var(--border)'
   return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4 flex flex-col gap-1">
-      <span className="text-xs text-[var(--text2)] uppercase tracking-wider">{label}</span>
-      <span className={`text-2xl mono font-semibold ${colorClass}`}>{value} ms</span>
-      <span className="text-xs text-[var(--text1)] truncate">{name}</span>
+    <div className="relative bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden"
+         style={{ padding: '14px 16px' }}>
+      <span className="absolute top-0 left-0 right-0 h-px" style={{ background: topColor }} />
+      <div className="mono text-[9px] text-[var(--text2)] uppercase" style={{ letterSpacing: '0.1em', marginBottom: '6px' }}>{label}</div>
+      <div className={`mono text-[26px] font-semibold leading-none ${colorClass}`} style={{ marginBottom: '4px' }}>
+        {value}<span style={{ fontSize: '14px' }}>ms</span>
+      </div>
+      {sub && <div className="mono text-[10px] text-[var(--text2)]">{sub}</div>}
     </div>
   )
 }
@@ -172,16 +183,18 @@ function TrendChart({ services, theme, t }) {
   const labels = useMemo(hourLabels, [])
 
   return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
-      <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider mb-1">
-        {t('latency.trend')}
-      </h2>
-      {/* Dummy data notice — remove this and replace gen24h() with real 24h time-series from usePolling()
-          once the hook exposes historical data (Issue #15). Expected shape: { timestamp: number, latency: number }[] */}
-      <p className="text-[10px] text-[var(--amber)] mono mb-4">{t('latency.dummy')}</p>
-      <div className="h-[320px]">
-        {/* key=theme forces Chart.js re-mount on theme switch to pick up new CSS var values */}
-        <Line key={theme} data={{ labels, datasets }} options={options} />
+    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+      <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+        <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+          <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
+          {t('latency.trend')}
+        </div>
+        <span className="mono text-[9px] text-[var(--text2)]">{t('latency.dummy')}</span>
+      </div>
+      <div style={{ padding: '16px' }}>
+        <div className="h-[320px]">
+          <Line key={theme} data={{ labels, datasets }} options={options} />
+        </div>
       </div>
     </div>
   )
@@ -209,20 +222,33 @@ export default function Latency() {
   const maxLatency = slowest?.latency ?? 1
 
   return (
-    <div className=" space-y-6">
+    <div className="space-y-6">
+
+      {/* ── Section Header ── */}
+      <div className="flex items-center justify-between">
+        <h2 className="mono text-[10px] text-[var(--text2)] uppercase flex items-center gap-2" style={{ letterSpacing: '0.1em' }}>
+          <span className="text-[var(--green)] font-semibold">//</span>
+          {t('nav.latency')}
+        </h2>
+        <span className="mono text-[10px] text-[var(--text2)]">{t('overview.panel.latency.sub')}</span>
+      </div>
 
       {/* ── Summary Cards ── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <SummaryCard label={t('latency.fastest')} value={fastest?.latency ?? '—'} name={fastest?.name ?? ''} colorClass="text-[var(--green)]" />
-        <SummaryCard label={t('latency.average')} value={avg}                       name=""                    colorClass="text-[var(--blue)]" />
-        <SummaryCard label={t('latency.slowest')} value={slowest?.latency ?? '—'}   name={slowest?.name ?? ''} colorClass="text-[var(--red)]" />
+      <div className="grid grid-cols-1 md:grid-cols-3" style={{ gap: '10px' }}>
+        <SummaryCard label={t('latency.fastest')} value={fastest?.latency ?? '—'} sub={fastest?.name ?? ''} colorClass="text-[var(--green)]" />
+        <SummaryCard label={t('latency.average')} value={avg}                      sub={`${services.length} ${t('latency.avg.services')}`}  colorClass="text-[var(--blue)]" />
+        <SummaryCard label={t('latency.slowest')} value={slowest?.latency ?? '—'} sub={slowest?.name ?? ''} colorClass="text-[var(--red)]" />
       </div>
 
       {/* ── Ranking Bar Chart ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
-        <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider mb-4">
-          {t('latency.rankings')}
-        </h2>
+      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+        <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+          <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--teal)' }} />
+            {t('latency.rankings')}
+          </div>
+        </div>
+        <div style={{ padding: '16px' }}>
         {services.length === 0 ? (
           <EmptyState type="neutral" />
         ) : (
@@ -232,6 +258,7 @@ export default function Latency() {
             ))}
           </div>
         )}
+        </div>
       </section>
 
       {/* ── 24h Trend Line Chart ── */}

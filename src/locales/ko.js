@@ -65,6 +65,7 @@ const ko = {
   'latency.slowest': '가장 느림',
   'latency.trend': '24시간 추세',
   'latency.dummy': '데이터 수집 중 (24시간 후 실데이터로 전환)',
+  'latency.avg.services': '개 서비스',
 
   // Incidents
   'incidents.filter.service': '서비스',
@@ -98,6 +99,8 @@ const ko = {
   'uptime.rankings': '업타임 순위',
   'uptime.matrix': '3개월 이력',
   'uptime.incidents': '인시던트',
+  'uptime.basis': '30일 기준',
+  'uptime.matrix.sub': '최근 3개월',
 
   // Service Details
   'svc.latency': '현재 레이턴시',

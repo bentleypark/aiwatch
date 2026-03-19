@@ -156,13 +156,18 @@ function LatencyChart({ service, theme, t }) {
   const labels = useMemo(hourLabels, [service])
 
   return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
-      <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider mb-1">
-        {t('latency.trend')}
-      </h2>
-      <p className="text-[10px] text-[var(--amber)] mono mb-4">{t('latency.dummy')}</p>
-      <div className="h-[200px]">
-        <Line key={theme} data={{ labels, datasets: [dataset] }} options={options} />
+    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+      <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+        <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+          <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
+          {t('latency.trend')}
+        </div>
+        <span className="mono text-[9px] text-[var(--text2)]">{t('latency.dummy')}</span>
+      </div>
+      <div style={{ padding: '16px' }}>
+        <div className="h-[200px]">
+          <Line key={theme} data={{ labels, datasets: [dataset] }} options={options} />
+        </div>
       </div>
     </div>
   )
@@ -198,7 +203,8 @@ function CalendarCell({ status, date }) {
   return (
     <div className="relative">
       <div
-        className={`w-4 h-4 rounded-sm ${bgCls} cursor-default`}
+        className={`rounded-sm ${bgCls} cursor-pointer transition-opacity hover:opacity-70`}
+        style={{ width: '18px', height: '18px' }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         aria-label={`${date}: ${status}`}
@@ -239,36 +245,45 @@ export default function ServiceDetails({ serviceId }) {
   const incidentCount = service.incidents?.length ?? 0
 
   return (
-    <div className=" space-y-6">
+    <div className="space-y-6">
 
-      {/* ── Header ── */}
-      <div className="flex flex-col gap-3">
+      {/* ── Section Title + Back Button ── */}
+      <div className="flex items-center justify-between">
+        <h2 className="mono text-[10px] text-[var(--text2)] uppercase flex items-center gap-2" style={{ letterSpacing: '0.1em' }}>
+          <span className="text-[var(--green)] font-semibold">//</span>
+          {t('nav.services')} / {service.name}
+        </h2>
         <button
           onClick={() => setPage({ name: 'overview' })}
-          className="self-start text-xs mono text-[var(--text2)] hover:text-[var(--text1)] transition-colors"
+          className="btn-topbar"
+          style={{ fontSize: '11px', padding: '4px 10px' }}
         >
           ← {t('nav.overview')}
         </button>
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-3">
-            <h1 className="text-lg font-semibold text-[var(--text0)]">{service.name}</h1>
-            <StatusPill status={service.status} />
-          </div>
+      </div>
+
+      {/* ── Header Card ── */}
+      <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg flex justify-between items-start"
+           style={{ padding: '18px 20px' }}>
+        <div>
+          <h1 className="text-xl font-medium text-[var(--text0)]" style={{ marginBottom: '3px' }}>{service.name}</h1>
+          <div className="mono text-[11px] text-[var(--text2)]" style={{ marginBottom: '10px' }}>{service.provider}</div>
           {statusUrl && (
             <a
               href={statusUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs mono text-[var(--blue)] hover:underline"
+              className="mono text-[10px] text-[var(--blue)] hover:underline flex items-center gap-1"
             >
-              {t('svc.status.link')} ↗
+              ↗ {t('svc.status.link')}
             </a>
           )}
         </div>
+        <StatusPill status={service.status} />
       </div>
 
       {/* ── Metric Cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>
         <MetricCard
           label={t('svc.latency')}
           value={`${service.latency} ms`}
@@ -294,49 +309,59 @@ export default function ServiceDetails({ serviceId }) {
       {/* ── 24h Latency Chart ── */}
       <LatencyChart service={service} theme={theme} t={t} />
 
-      {/* ── Incident History ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
-        <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider mb-3">
-          {t('svc.incidents')}
-        </h2>
-        {incidentCount === 0 ? (
-          <div className="flex items-center gap-2 py-4">
-            <span className="text-[var(--green)] text-sm" aria-hidden="true">✓</span>
-            <span className="text-xs text-[var(--text2)]">{t('svc.no.incidents')}</span>
-          </div>
-        ) : (
-          <div>
-            {(service.incidents ?? []).map((inc) => (
-              <IncidentRow key={inc.id} incident={inc} t={t} lang={lang} />
-            ))}
-          </div>
-        )}
-      </section>
+      {/* ── Bottom: Incident History + Calendar (2-col on desktop) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>
 
-      {/* ── 30-Day Status Calendar ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
-        <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider mb-4">
-          {t('svc.cal.legend')}
-        </h2>
-        <div className="flex flex-wrap gap-1.5">
-          {(service.history30d ?? []).map((status, i) => (
-            <CalendarCell
-              key={i}
-              status={status}
-              date={calendarDate(i, lang)}
-            />
-          ))}
-        </div>
-        {/* Legend */}
-        <div className="flex gap-4 mt-3">
-          {['operational', 'degraded', 'down'].map((s) => (
-            <div key={s} className="flex items-center gap-1.5">
-              <div className={`w-3 h-3 rounded-sm ${CALENDAR_CLASS[s]}`} aria-hidden="true" />
-              <span className="text-[10px] mono text-[var(--text2)]">{t(`status.${s}`)}</span>
+        {/* Incident History */}
+        <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+          <div className="flex items-center border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+            <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+              <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--red)' }} />
+              {t('svc.incidents')}
             </div>
-          ))}
-        </div>
-      </section>
+          </div>
+          <div style={{ padding: '16px' }}>
+            {incidentCount === 0 ? (
+              <div className="flex items-center gap-2 py-4">
+                <span className="text-[var(--green)] text-sm" aria-hidden="true">✓</span>
+                <span className="text-xs text-[var(--text2)]">{t('svc.no.incidents')}</span>
+              </div>
+            ) : (
+              <div>
+                {(service.incidents ?? []).map((inc) => (
+                  <IncidentRow key={inc.id} incident={inc} t={t} lang={lang} />
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* 30-Day Status Calendar */}
+        <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+          <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+            <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+              <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--green)' }} />
+              {t('svc.cal.legend')}
+            </div>
+            <div className="flex gap-3">
+              {['operational', 'degraded', 'down'].map((s) => (
+                <div key={s} className="flex items-center gap-1">
+                  <span className={`rounded-sm ${CALENDAR_CLASS[s]}`} style={{ width: '8px', height: '8px' }} />
+                  <span className="text-[9px] mono text-[var(--text2)]">{t(`status.${s}`)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ padding: '16px' }}>
+            <div className="flex flex-wrap" style={{ gap: '2px' }}>
+              {(service.history30d ?? []).map((status, i) => (
+                <CalendarCell key={i} status={status} date={calendarDate(i, lang)} />
+              ))}
+            </div>
+          </div>
+        </section>
+
+      </div>
 
     </div>
   )

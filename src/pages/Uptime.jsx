@@ -125,10 +125,19 @@ export default function Uptime() {
   const months = (services[0]?.history3m ?? []).map((m) => m.month)
 
   return (
-    <div className=" space-y-6">
+    <div className="space-y-6">
+
+      {/* ── Section Header ── */}
+      <div className="flex items-center justify-between">
+        <h2 className="mono text-[10px] text-[var(--text2)] uppercase flex items-center gap-2" style={{ letterSpacing: '0.1em' }}>
+          <span className="text-[var(--green)] font-semibold">//</span>
+          {t('nav.uptime')}
+        </h2>
+        <span className="mono text-[10px] text-[var(--text2)]">{t('uptime.basis')}</span>
+      </div>
 
       {/* ── Summary Cards ── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3" style={{ gap: '10px' }}>
         <SummaryCard
           label={t('uptime.stable')}
           value={`${mostStable.uptime30d.toFixed(2)}%`}
@@ -150,27 +159,34 @@ export default function Uptime() {
       </div>
 
       {/* ── Uptime Rankings ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider">
+      <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>
+      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+        <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+          <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--teal)' }} />
             {t('uptime.rankings')}
-          </h2>
-          <span className="text-[10px] mono text-[var(--text2)]">
-            {t('uptime.sla')}: {SLA_DEFAULT}%
-          </span>
+          </div>
+          <span className="mono text-[9px] text-[var(--text2)]">— {SLA_DEFAULT}% SLA</span>
         </div>
+        <div style={{ padding: '16px' }}>
         <div className="flex flex-col gap-3">
           {sortedByUptime.map((svc) => (
             <UptimeBar key={svc.id} service={svc} sla={SLA_DEFAULT} />
           ))}
         </div>
+        </div>
       </section>
 
       {/* ── 3-Month Matrix ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg p-4 overflow-x-auto">
-        <h2 className="text-xs mono text-[var(--text2)] uppercase tracking-wider mb-4">
-          {t('uptime.matrix')}
-        </h2>
+      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+        <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+          <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--amber)' }} />
+            {t('uptime.matrix')}
+          </div>
+          <span className="mono text-[9px] text-[var(--text2)]">{t('uptime.matrix.sub')}</span>
+        </div>
+        <div style={{ padding: '16px' }} className="overflow-x-auto">
         <table className="w-full min-w-[400px]">
           <thead>
             <tr className="border-b border-[var(--border)]">
@@ -197,7 +213,9 @@ export default function Uptime() {
             ))}
           </tbody>
         </table>
+        </div>
       </section>
+      </div>
 
     </div>
   )

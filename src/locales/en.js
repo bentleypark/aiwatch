@@ -65,6 +65,7 @@ const en = {
   'latency.slowest': 'Slowest',
   'latency.trend': '24h Trend',
   'latency.dummy': 'Collecting data (switches to real data after 24h)',
+  'latency.avg.services': 'services',
 
   // Incidents
   'incidents.filter.service': 'Service',
@@ -98,6 +99,8 @@ const en = {
   'uptime.rankings': 'Uptime Rankings',
   'uptime.matrix': '3-Month History',
   'uptime.incidents': 'incidents',
+  'uptime.basis': '30-day basis',
+  'uptime.matrix.sub': 'Last 3 months',
 
   // Service Details
   'svc.latency': 'Current Latency',
