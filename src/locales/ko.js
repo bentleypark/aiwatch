@@ -96,6 +96,10 @@ const ko = {
   'settings.save': '저장',
   'settings.saved': '저장됨 ✓',
 
+  // Modal
+  'modal.close': '닫기',
+  'modal.loading': '불러오는 중',
+
   // Footer
   'footer.privacy': '개인정보처리방침',
   'footer.terms': '이용약관',

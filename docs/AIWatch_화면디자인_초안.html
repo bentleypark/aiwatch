@@ -1,0 +1,2895 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AIWatch — Design Mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg0: #080c10;
+  --bg1: #0d1117;
+  --bg2: #161b22;
+  --bg3: #1c2230;
+  --bg4: #242b38;
+  --border: rgba(255,255,255,0.07);
+  --border-hi: rgba(255,255,255,0.14);
+  --text0: #e6edf3;
+  --text1: #8b949e;
+  --text2: #484f58;
+  --green: #3fb950;
+  --green-dim: #1a3d22;
+  --green-glow: rgba(63,185,80,0.12);
+  --amber: #d29922;
+  --amber-dim: #3d2e0a;
+  --red: #f85149;
+  --red-dim: #3d1515;
+  --blue: #58a6ff;
+  --blue-dim: #0d2440;
+  --teal: #39c5c8;
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'IBM Plex Sans', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg0);
+  color: var(--text0);
+  font-family: var(--sans);
+  font-size: 13px;
+  min-height: 100vh;
+  line-height: 1.5;
+}
+
+/* ── TOPBAR ── */
+.topbar {
+  height: 48px;
+  background: var(--bg1);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo-mark {
+  width: 26px;
+  height: 26px;
+  background: var(--green);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.logo-mark::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--bg0);
+  border-radius: 50%;
+  position: absolute;
+}
+
+.logo-text {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.3px;
+  color: var(--text0);
+}
+
+.logo-text span { color: var(--green); }
+
+.topbar-center {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(63,185,80,0.4); }
+  50% { opacity: 0.7; box-shadow: 0 0 0 4px rgba(63,185,80,0); }
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--border-hi);
+  background: transparent;
+  color: var(--text1);
+  cursor: pointer;
+  transition: all .15s;
+  letter-spacing: 0.3px;
+}
+
+.btn:hover { background: var(--bg3); color: var(--text0); }
+
+.btn-primary {
+  background: var(--green);
+  color: var(--bg0);
+  border-color: var(--green);
+  font-weight: 500;
+}
+
+.btn-primary:hover { background: #4cc960; }
+
+.btn-icon {
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px; border: 1px solid var(--border-hi);
+  background: transparent; color: var(--text1); cursor: pointer;
+  transition: all .15s; flex-shrink: 0;
+}
+.btn-icon:hover { background: var(--bg3); color: var(--text0); }
+.btn-icon.active { background: var(--bg3); color: var(--green); border-color: var(--green); }
+
+.mobile-action-bar {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--bg1);
+  border-bottom: 1px solid var(--border);
+}
+@media (max-width: 768px) {
+  .mobile-action-bar { display: flex; }
+}
+
+/* ── MOBILE / RESPONSIVE ── */
+.hide-mobile { display: flex; }
+.show-mobile { display: none; }
+
+@media (max-width: 768px) {
+  .hide-mobile { display: none !important; }
+  .show-mobile { display: flex !important; }
+
+  .topbar { padding: 0 14px; }
+  .topbar-center { display: none; }
+
+  .main {
+    display: block !important;
+    grid-template-columns: none !important;
+  }
+
+  .sidebar {
+    display: none !important;
+    position: fixed;
+    left: 0;
+    top: 82px;
+    bottom: 0;
+    width: 240px;
+    z-index: 200;
+    overflow-y: auto;
+    border-right: 1px solid var(--border-hi);
+  }
+  .sidebar.open { display: flex !important; }
+
+  .content {
+    display: block !important;
+    padding: 14px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+  }
+
+  .ticker-bar { display: none; }
+
+  .summary-row { grid-template-columns: repeat(2, 1fr); }
+
+  .services-grid { grid-template-columns: 1fr; }
+
+  .bottom-row { grid-template-columns: 1fr; }
+
+  .latency-stat-row { grid-template-columns: repeat(2, 1fr); }
+
+  .uptime-grid { grid-template-columns: 1fr; }
+
+  .svc-metrics-row { grid-template-columns: repeat(2, 1fr); }
+
+  .inc-table-head { display: none; }
+
+  .inc-row {
+    display: flex !important;
+    flex-direction: column;
+    gap: 5px;
+    padding: 12px 14px;
+  }
+
+  .inc-row-main {
+    display: flex !important;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .inc-row-meta {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .inc-cell-title { font-size: 13px; font-weight: 500; flex: 1; }
+  .inc-cell-time { font-size: 10px; color: var(--text2); font-family: var(--mono); }
+  .inc-cell-svc { font-size: 10px; color: var(--text2); font-family: var(--mono); }
+  .inc-cell-dur { font-size: 10px; color: var(--text2); font-family: var(--mono); display: block !important; }
+
+  .inc-cell-svc::before { content: '·'; margin-right: 6px; }
+  .inc-cell-dur::before { content: '·'; margin-right: 6px; }
+
+  .settings-text-input { width: 100%; }
+  .settings-row { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .settings-ctrl { width: 100%; }
+
+  .filter-tabs { display: none; }
+
+  .svc-detail-header { flex-direction: column; gap: 10px; }
+  .svc-metrics-row { grid-template-columns: repeat(2,1fr); }
+}
+
+.btn-disabled {
+  background: var(--bg3);
+  color: var(--text2);
+  border-color: var(--border);
+  cursor: not-allowed;
+  opacity: 0.5;
+  position: relative;
+}
+
+.btn-disabled:hover { background: var(--bg3); color: var(--text2); }
+
+.btn-disabled:hover .tooltip {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: var(--bg2);
+  border: 1px solid var(--border-hi);
+  border-radius: 6px;
+  padding: 8px 12px;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: all .15s ease;
+  pointer-events: none;
+  z-index: 200;
+  text-align: left;
+}
+
+.tooltip::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  right: 14px;
+  width: 8px;
+  height: 8px;
+  background: var(--bg2);
+  border-top: 1px solid var(--border-hi);
+  border-left: 1px solid var(--border-hi);
+  transform: rotate(45deg);
+}
+
+.tooltip-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--blue);
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tooltip-title::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--blue);
+  flex-shrink: 0;
+}
+
+.tooltip-body {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text2);
+  line-height: 1.6;
+}
+
+/* ── TICKER ── */
+.ticker-bar {
+  background: var(--bg1);
+  border-bottom: 1px solid var(--border);
+  padding: 0 0 0 20px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow: hidden;
+}
+
+.ticker-label {
+  display: none;
+}
+
+.ticker-items {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  animation: ticker 40s linear infinite;
+}
+
+@keyframes ticker {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.tick {
+  font-family: var(--mono);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  color: var(--text1);
+}
+
+.tick-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tick.ok .tick-dot { background: var(--green); }
+.tick.warn .tick-dot { background: var(--amber); }
+.tick.down .tick-dot { background: var(--red); }
+.tick.ok { color: var(--text1); }
+.tick.warn { color: var(--amber); }
+.tick.down { color: var(--red); }
+
+/* ── LAYOUT ── */
+.main {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: calc(100vh - 82px);
+}
+
+/* ── SIDEBAR ── */
+.sidebar {
+  background: var(--bg1);
+  border-right: 1px solid var(--border);
+  padding: 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-section {
+  padding: 0 12px;
+  margin-bottom: 8px;
+}
+
+.sidebar-title {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text2);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 6px 8px 6px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text1);
+  font-size: 12px;
+  transition: all .12s;
+  position: relative;
+}
+
+.nav-item:hover { background: var(--bg3); color: var(--text0); }
+
+.nav-item.active {
+  background: var(--bg3);
+  color: var(--text0);
+}
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--green);
+  border-radius: 2px;
+}
+
+.nav-icon {
+  width: 14px;
+  height: 14px;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.nav-badge {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 9px;
+  background: var(--red-dim);
+  color: var(--red);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.nav-badge.ok {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.sidebar-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 8px 12px;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding: 0 12px;
+}
+
+.version-tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text2);
+  padding: 6px 8px;
+  letter-spacing: 0.06em;
+}
+
+/* ── CONTENT ── */
+.content {
+  padding: 20px 24px;
+  overflow-y: auto;
+  background: var(--bg0);
+}
+
+/* ── SUMMARY ROW ── */
+.summary-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  background: var(--bg1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+}
+
+.stat-card.green::before { background: var(--green); }
+.stat-card.amber::before { background: var(--amber); }
+.stat-card.red::before { background: var(--red); }
+.stat-card.blue::before { background: var(--blue); }
+
+.stat-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text2);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.stat-value {
+  font-family: var(--mono);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.stat-card.green .stat-value { color: var(--green); }
+.stat-card.amber .stat-value { color: var(--amber); }
+.stat-card.red .stat-value { color: var(--red); }
+.stat-card.blue .stat-value { color: var(--blue); }
+
+.stat-sub {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text2);
+}
+
+/* ── SECTION HEADER ── */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.section-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text2);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-title::before {
+  content: '//';
+  color: var(--green);
+  font-weight: 600;
+}
+
+.filter-tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--bg2);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.filter-tab {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text2);
+  border: none;
+  background: transparent;
+  transition: all .12s;
+  letter-spacing: 0.04em;
+}
+
+.filter-tab.active {
+  background: var(--bg4);
+  color: var(--text0);
+}
+
+/* ── SERVICE GRID ── */
+.services-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.svc-card {
+  background: var(--bg1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  position: relative;
+  transition: border-color .15s;
+  cursor: pointer;
+}
+
+.svc-card:hover { border-color: var(--border-hi); }
+
+.svc-card.ok { border-left: 2px solid var(--green); }
+.svc-card.warn { border-left: 2px solid var(--amber); }
+.svc-card.down { border-left: 2px solid var(--red); }
+
+.svc-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.svc-info {}
+
+.svc-name {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text0);
+  margin-bottom: 2px;
+}
+
+.svc-provider {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text2);
+}
+
+.status-pill {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.ok .status-pill { background: var(--green-dim); color: var(--green); }
+.warn .status-pill { background: var(--amber-dim); color: var(--amber); }
+.down .status-pill { background: var(--red-dim); color: var(--red); }
+
+.svc-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.metric {
+  text-align: center;
+}
+
+.metric-val {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text0);
+}
+
+.metric-lbl {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text2);
+  letter-spacing: 0.04em;
+}
+
+.history-dots {
+  display: flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 18px;
+}
+
+.h-bar {
+  flex: 1;
+  border-radius: 1px;
+  min-height: 4px;
+  transition: opacity .15s;
+}
+
+.h-bar.ok { background: var(--green); opacity: 0.6; }
+.h-bar.warn { background: var(--amber); opacity: 0.7; }
+.h-bar.down { background: var(--red); opacity: 0.8; }
+
+.svc-card:hover .h-bar { opacity: 1; }
+
+/* ── BOTTOM PANELS ── */
+.bottom-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.panel {
+  background: var(--bg1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text1);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--blue);
+}
+
+.panel-body { padding: 14px; }
+
+/* incident list */
+.incident-list { display: flex; flex-direction: column; gap: 8px; }
+
+.incident-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.inc-time {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text2);
+  white-space: nowrap;
+  padding-top: 1px;
+  width: 52px;
+  flex-shrink: 0;
+}
+
+.inc-bar {
+  width: 2px;
+  background: var(--border-hi);
+  border-radius: 2px;
+  flex-shrink: 0;
+  align-self: stretch;
+  min-height: 32px;
+}
+
+.inc-bar.warn { background: var(--amber); }
+.inc-bar.down { background: var(--red); }
+.inc-bar.ok { background: var(--green); }
+
+.inc-content {}
+
+.inc-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text0);
+  margin-bottom: 2px;
+}
+
+.inc-detail {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text2);
+}
+
+/* latency chart */
+.latency-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.latency-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.latency-name {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text1);
+  width: 90px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.latency-track {
+  flex: 1;
+  height: 4px;
+  background: var(--bg3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.latency-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width .4s ease;
+}
+
+.latency-fill.fast { background: var(--green); }
+.latency-fill.mid { background: var(--amber); }
+.latency-fill.slow { background: var(--red); }
+
+.latency-val {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text1);
+  width: 40px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* AI panel placeholder */
+.ai-panel {
+  margin-top: 10px;
+  background: var(--bg1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ai-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+
+.ai-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text2);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.phase-badge {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--blue-dim);
+  color: var(--blue);
+  letter-spacing: 0.04em;
+}
+
+.ai-body {
+  padding: 12px 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text2);
+  line-height: 1.7;
+}
+
+/* ── PAGE ANNOTATIONS ── */
+.page-note {
+  text-align: center;
+  padding: 28px 20px 12px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text2);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg1); }
+::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
+
+/* ── FOOTER ── */
+.site-footer {
+  margin-top: 40px;
+  border-top: 1px solid var(--border);
+  padding: 16px 24px;
+  background: var(--bg1);
+}
+.footer-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.footer-logo {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text0);
+  letter-spacing: -0.3px;
+}
+.footer-logo span { color: var(--green); }
+.footer-copy {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text2);
+}
+.footer-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.footer-link {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text2);
+  text-decoration: none;
+  transition: color .12s;
+}
+.footer-link:hover { color: var(--text0); }
+.footer-divider {
+  font-size: 11px;
+  color: var(--text2);
+  opacity: 0.4;
+}
+
+@media (max-width: 768px) {
+  .site-footer { padding: 14px; }
+  .footer-inner { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .footer-copy { display: none; }
+}
+
+/* ── SKELETON UI ── */
+@keyframes shimmer {
+  0% { opacity: .35; }
+  50% { opacity: .65; }
+  100% { opacity: .35; }
+}
+.skel { background: var(--bg3); border-radius: 4px; animation: shimmer 1.4s ease-in-out infinite; }
+.skel-card { background: var(--bg1); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+.skel-stat { height: 18px; width: 48px; margin: 6px 0 4px; }
+.skel-sub { height: 10px; width: 72px; }
+.skel-name { height: 14px; width: 80px; margin-bottom: 5px; }
+.skel-prov { height: 10px; width: 52px; margin-bottom: 10px; }
+.skel-badge { height: 18px; width: 60px; border-radius: 4px; }
+.skel-bar { height: 10px; margin-bottom: 5px; }
+.skel-history { height: 18px; width: 100%; }
+.skel-metric-val { height: 13px; width: 38px; margin: 0 auto 4px; }
+.skel-metric-lbl { height: 9px; width: 30px; margin: 0 auto; }
+
+/* ── EMPTY STATE ── */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 48px 20px; text-align: center;
+}
+.empty-icon {
+  width: 40px; height: 40px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 14px;
+}
+.empty-icon.good { background: var(--green-dim); }
+.empty-icon.neutral { background: var(--bg3); }
+.empty-icon.error { background: var(--red-dim); }
+.empty-title { font-size: 13px; font-weight: 500; color: var(--text0); margin-bottom: 5px; }
+.empty-desc { font-family: var(--mono); font-size: 11px; color: var(--text2); line-height: 1.6; margin-bottom: 14px; }
+.empty-action { font-family: var(--mono); font-size: 11px; padding: 5px 14px; border: 1px solid var(--border-hi); border-radius: 5px; background: transparent; color: var(--text1); cursor: pointer; }
+.empty-action:hover { background: var(--bg3); color: var(--text0); }
+.view { display: none; }
+.view.active { display: block; }
+
+/* ── SETTINGS VIEW ── */
+.settings-wrap { max-width: 640px; }
+.settings-group { margin-bottom: 28px; }
+.settings-group-title { font-family:var(--mono); font-size:9px; color:var(--text2); letter-spacing:.12em; text-transform:uppercase; padding:0 0 8px; border-bottom:1px solid var(--border); margin-bottom:2px; }
+.settings-row { display:flex; align-items:center; justify-content:space-between; padding:13px 0; border-bottom:1px solid var(--border); gap:16px; }
+.settings-row:last-child { border-bottom:none; }
+.settings-label { font-size:13px; font-weight:500; color:var(--text0); margin-bottom:2px; }
+.settings-desc { font-family:var(--mono); font-size:10px; color:var(--text2); line-height:1.5; }
+.settings-ctrl { flex-shrink:0; }
+.seg { display:flex; background:var(--bg2); border-radius:6px; padding:2px; gap:1px; border:1px solid var(--border); }
+.seg-btn { font-family:var(--mono); font-size:10px; padding:4px 10px; border-radius:4px; border:none; background:transparent; color:var(--text2); cursor:pointer; transition:all .12s; white-space:nowrap; }
+.seg-btn.on { background:var(--bg4); color:var(--text0); }
+.seg-btn:hover:not(.on) { color:var(--text1); }
+.sla-input { font-family:var(--mono); font-size:12px; width:80px; background:var(--bg2); border:1px solid var(--border-hi); border-radius:5px; color:var(--text0); padding:5px 8px; text-align:right; }
+.sla-input:focus { outline:none; border-color:var(--blue); }
+.svc-toggle-list { display:flex; flex-direction:column; gap:0; }
+.svc-toggle-row { display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border); }
+.svc-toggle-row:last-child { border-bottom:none; }
+.svc-toggle-info { display:flex; align-items:center; gap:8px; }
+.svc-toggle-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.svc-toggle-name { font-size:12px; color:var(--text0); }
+.svc-toggle-uptime { font-family:var(--mono); font-size:10px; color:var(--text2); margin-left:4px; }
+.toggle-wrap { position:relative; width:36px; height:20px; flex-shrink:0; }
+.toggle-wrap input { opacity:0; width:0; height:0; position:absolute; }
+.toggle-slider { position:absolute; inset:0; cursor:pointer; background:var(--bg4); border-radius:20px; border:1px solid var(--border-hi); transition:.2s; }
+.toggle-slider::before { content:''; position:absolute; width:14px; height:14px; border-radius:50%; background:var(--text2); left:2px; top:2px; transition:.2s; }
+.toggle-wrap input:checked + .toggle-slider { background:var(--green-dim); border-color:var(--green); }
+.toggle-wrap input:checked + .toggle-slider::before { background:var(--green); transform:translateX(16px); }
+.coming-badge { font-family:var(--mono); font-size:9px; padding:2px 7px; border-radius:3px; background:var(--blue-dim); color:var(--blue); letter-spacing:.04em; }
+.settings-locked { opacity:.42; pointer-events:none; }
+.settings-text-input { font-family:var(--mono); font-size:11px; width:240px; background:var(--bg2); border:1px solid var(--border-hi); border-radius:5px; color:var(--text2); padding:6px 10px; }
+.settings-text-input::placeholder { color:var(--text2); opacity:.5; }
+.settings-text-input:focus { outline:none; border-color:var(--blue); color:var(--text0); }
+.save-btn { font-family:var(--mono); font-size:11px; padding:5px 14px; background:var(--green); color:var(--bg0); border:none; border-radius:5px; cursor:pointer; font-weight:500; transition:background .12s; }
+.save-btn:hover { background:#4cc960; }
+
+/* ── LATENCY VIEW ── */
+.latency-stat-row { display: grid; grid-template-columns: repeat(3,1fr); gap:10px; margin-bottom:20px; }
+.chart-panel { background:var(--bg1); border:1px solid var(--border); border-radius:8px; overflow:hidden; margin-bottom:10px; }
+.chart-panel-header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); }
+.chart-panel-title { font-family:var(--mono); font-size:10px; color:var(--text1); letter-spacing:.08em; text-transform:uppercase; display:flex; align-items:center; gap:6px; }
+.chart-panel-body { padding:16px; }
+.lat-bar-row { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+.lat-rank { font-family:var(--mono); font-size:10px; color:var(--text2); width:14px; text-align:right; flex-shrink:0; }
+.lat-name-full { font-family:var(--mono); font-size:11px; color:var(--text1); width:110px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lat-track-full { flex:1; height:6px; background:var(--bg3); border-radius:3px; overflow:hidden; }
+.lat-fill-full { height:100%; border-radius:3px; }
+.lat-fill-full.fast { background:var(--green); }
+.lat-fill-full.mid { background:var(--amber); }
+.lat-fill-full.slow { background:var(--red); }
+.lat-ms { font-family:var(--mono); font-size:11px; width:46px; text-align:right; flex-shrink:0; }
+.line-chart-wrap { position:relative; width:100%; }
+.line-legend { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:12px; }
+.line-legend-item { display:flex; align-items:center; gap:5px; font-family:var(--mono); font-size:10px; color:var(--text1); cursor:pointer; }
+.line-legend-dot { width:8px; height:3px; border-radius:2px; flex-shrink:0; }
+
+/* ── INCIDENTS VIEW ── */
+.filter-bar { display:flex; gap:8px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+.filter-select { font-family:var(--mono); font-size:11px; padding:5px 10px; background:var(--bg2); border:1px solid var(--border-hi); border-radius:5px; color:var(--text1); cursor:pointer; }
+.filter-select:hover { border-color:var(--border-hi); background:var(--bg3); }
+.inc-table { width:100%; }
+.inc-table-head { display:grid; grid-template-columns:140px 1fr 100px 80px 80px; gap:12px; padding:8px 14px; border-bottom:1px solid var(--border); }
+.inc-table-head span { font-family:var(--mono); font-size:9px; color:var(--text2); letter-spacing:.08em; text-transform:uppercase; }
+/* inc-row base (desktop: 5-column grid) */
+.inc-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 100px 80px 80px;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .12s;
+  align-items: center;
+}
+.inc-row:hover { background: var(--bg2); }
+.inc-row.active-row { background: var(--bg2); border-left: 2px solid var(--blue); }
+
+/* desktop: flatten inner wrappers */
+.inc-row-main { display: contents; }
+.inc-row-meta { display: contents; }
+.inc-cell-time { font-family:var(--mono); font-size:11px; color:var(--text2); }
+.inc-cell-title { font-size:12px; font-weight:500; color:var(--text0); }
+.inc-cell-svc { font-family:var(--mono); font-size:11px; color:var(--text1); }
+.inc-cell-dur { font-family:var(--mono); font-size:11px; color:var(--text2); }
+.inc-status-pill { font-family:var(--mono); font-size:9px; letter-spacing:.04em; padding:2px 6px; border-radius:3px; }
+.inc-status-pill.ongoing { background:var(--red-dim); color:var(--red); }
+.inc-status-pill.resolved { background:var(--green-dim); color:var(--green); }
+.inc-status-pill.monitoring { background:var(--amber-dim); color:var(--amber); }
+.detail-panel { background:var(--bg1); border:1px solid var(--border); border-radius:8px; margin-top:10px; overflow:hidden; }
+.detail-header { padding:14px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:flex-start; }
+.detail-title { font-size:14px; font-weight:500; color:var(--text0); margin-bottom:4px; }
+.detail-meta { font-family:var(--mono); font-size:10px; color:var(--text2); }
+.detail-body { padding:16px; }
+.timeline { display:flex; flex-direction:column; gap:0; }
+.tl-item { display:flex; gap:14px; }
+.tl-line-wrap { display:flex; flex-direction:column; align-items:center; width:14px; flex-shrink:0; }
+.tl-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; margin-top:3px; }
+.tl-dot.investigating { background:var(--amber); }
+.tl-dot.identified { background:var(--blue); }
+.tl-dot.monitoring { background:var(--teal); }
+.tl-dot.resolved { background:var(--green); }
+.tl-vline { flex:1; width:1px; background:var(--border); margin:3px 0; min-height:16px; }
+.tl-content { padding-bottom:16px; }
+.tl-status { font-family:var(--mono); font-size:10px; font-weight:500; margin-bottom:3px; }
+.tl-status.investigating { color:var(--amber); }
+.tl-status.identified { color:var(--blue); }
+.tl-status.monitoring { color:var(--teal); }
+.tl-status.resolved { color:var(--green); }
+.tl-text { font-size:12px; color:var(--text1); line-height:1.6; margin-bottom:3px; }
+.tl-time { font-family:var(--mono); font-size:10px; color:var(--text2); }
+
+/* ── UPTIME VIEW ── */
+.uptime-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }
+.uptime-bar-row { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+.uptime-svc-name { font-family:var(--mono); font-size:11px; color:var(--text1); width:110px; flex-shrink:0; }
+.uptime-track { flex:1; height:6px; background:var(--bg3); border-radius:3px; overflow:hidden; position:relative; }
+.uptime-fill { height:100%; border-radius:3px; }
+.sla-line { position:absolute; top:-3px; bottom:-3px; width:1px; background:var(--text2); opacity:0.5; }
+.uptime-pct { font-family:var(--mono); font-size:11px; width:46px; text-align:right; flex-shrink:0; }
+.uptime-matrix { width:100%; border-collapse:collapse; }
+.uptime-matrix th { font-family:var(--mono); font-size:9px; color:var(--text2); letter-spacing:.06em; text-transform:uppercase; padding:6px 10px; text-align:left; border-bottom:1px solid var(--border); }
+.uptime-matrix td { padding:8px 10px; border-bottom:1px solid var(--border); font-family:var(--mono); font-size:11px; }
+.uptime-cell { padding:4px 8px; border-radius:4px; text-align:center; font-size:11px; }
+.uc-green { background:var(--green-dim); color:var(--green); }
+.uc-amber { background:var(--amber-dim); color:var(--amber); }
+.uc-red { background:var(--red-dim); color:var(--red); }
+
+/* ── SERVICE DETAIL VIEW ── */
+.svc-detail-header { background:var(--bg1); border:1px solid var(--border); border-radius:8px; padding:18px 20px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:flex-start; }
+.svc-detail-name { font-size:20px; font-weight:500; color:var(--text0); margin-bottom:3px; }
+.svc-detail-provider { font-family:var(--mono); font-size:11px; color:var(--text2); margin-bottom:10px; }
+.svc-detail-link { font-family:var(--mono); font-size:10px; color:var(--blue); text-decoration:none; display:flex; align-items:center; gap:4px; }
+.svc-detail-link:hover { text-decoration:underline; }
+.svc-metrics-row { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:10px; }
+.heatmap-grid { display:flex; gap:2px; flex-wrap:wrap; }
+.heat-cell { width:18px; height:18px; border-radius:2px; cursor:pointer; transition:opacity .12s; }
+.heat-cell:hover { opacity:0.7; }
+.heat-ok { background:var(--green); opacity:0.7; }
+.heat-warn { background:var(--amber); opacity:0.8; }
+.heat-down { background:var(--red); opacity:0.9; }
+.heat-empty { background:var(--bg3); }
+.heatmap-labels { display:flex; justify-content:space-between; margin-top:6px; font-family:var(--mono); font-size:9px; color:var(--text2); }
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<nav class="topbar">
+  <div class="logo">
+    <div class="logo-mark"></div>
+    <span class="logo-text">AI<span>Watch</span></span>
+  </div>
+  <div class="topbar-center">
+    <div class="pulse"></div>
+    <span id="update-time">LIVE · —</span>
+  </div>
+  <div class="topbar-right">
+    <span style="font-family:var(--mono);font-size:10px;color:var(--text2)" class="hide-mobile">v1.0.0</span>
+    <button class="btn hide-mobile" id="refresh-btn" onclick="doRefresh()">↻ Refresh</button>
+    <button class="btn btn-disabled hide-mobile" disabled>
+      Analyze ↗
+      <div class="tooltip">
+        <div class="tooltip-title">준비 중인 기능</div>
+        <div class="tooltip-body">
+          이상 감지 시 자동으로 원인을 분석하고<br>
+          알림을 보내는 기능을 준비 중입니다
+        </div>
+      </div>
+    </button>
+    <button class="btn" onclick="navigate('settings')" id="topbar-settings-btn" style="display:flex;align-items:center;gap:5px;">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.5v1.2M8 13.3v1.2M1.5 8h1.2M13.3 8h1.2M3.6 3.6l.85.85M11.55 11.55l.85.85M3.6 12.4l.85-.85M11.55 4.45l.85-.85" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      Settings
+    </button>
+    <button class="btn-icon show-mobile" id="hamburger-btn" onclick="toggleMobileNav()" title="메뉴">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+</nav>
+
+<!-- MOBILE ACTION BAR -->
+<div class="mobile-action-bar">
+  <div class="pulse" style="width:6px;height:6px"></div>
+  <span id="update-time-mobile" style="font-family:var(--mono);font-size:10px;color:var(--text2)">LIVE</span>
+  <button class="btn" id="refresh-btn-mobile" style="font-size:11px;padding:4px 10px;margin-left:auto" onclick="doRefresh()">↻ Refresh</button>
+</div>
+<div id="mobile-nav-overlay" onclick="toggleMobileNav()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:199"></div>
+
+<!-- TICKER -->
+<div class="ticker-bar">
+  <span class="ticker-label" data-i18n="ticker.label" style="display:none"></span>
+  <div class="ticker-items">
+    <span class="tick ok"><span class="tick-dot"></span>Claude API</span>
+    <span class="tick warn"><span class="tick-dot"></span>OpenAI API</span>
+    <span class="tick ok"><span class="tick-dot"></span>Gemini API</span>
+    <span class="tick ok"><span class="tick-dot"></span>Mistral API</span>
+    <span class="tick ok"><span class="tick-dot"></span>Groq Cloud</span>
+    <span class="tick ok"><span class="tick-dot"></span>xAI (Grok)</span>
+    <span class="tick ok"><span class="tick-dot"></span>DeepSeek API</span>
+    <span class="tick ok"><span class="tick-dot"></span>Cohere API</span>
+    <span class="tick warn"><span class="tick-dot"></span>Replicate</span>
+    <span class="tick ok"><span class="tick-dot"></span>Together AI</span>
+    <span class="tick ok"><span class="tick-dot"></span>ElevenLabs</span>
+    <span class="tick ok"><span class="tick-dot"></span>Hugging Face</span>
+    <span class="tick ok"><span class="tick-dot"></span>Perplexity</span>
+    <!-- duplicate for seamless loop -->
+    <span class="tick ok"><span class="tick-dot"></span>Claude API</span>
+    <span class="tick warn"><span class="tick-dot"></span>OpenAI API</span>
+    <span class="tick ok"><span class="tick-dot"></span>Gemini API</span>
+    <span class="tick ok"><span class="tick-dot"></span>Mistral API</span>
+    <span class="tick ok"><span class="tick-dot"></span>Groq Cloud</span>
+    <span class="tick ok"><span class="tick-dot"></span>xAI (Grok)</span>
+    <span class="tick ok"><span class="tick-dot"></span>DeepSeek API</span>
+    <span class="tick ok"><span class="tick-dot"></span>Cohere API</span>
+    <span class="tick warn"><span class="tick-dot"></span>Replicate</span>
+    <span class="tick ok"><span class="tick-dot"></span>Together AI</span>
+    <span class="tick ok"><span class="tick-dot"></span>ElevenLabs</span>
+    <span class="tick ok"><span class="tick-dot"></span>Hugging Face</span>
+    <span class="tick ok"><span class="tick-dot"></span>Perplexity</span>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-title">Dashboard</div>
+      <div class="nav-item active" onclick="navigate('overview')" id="nav-overview">
+        <svg class="nav-icon" viewBox="0 0 14 14" fill="none"><rect x="1" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="8" y="1" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="8" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="8" y="8" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/></svg>
+        Overview
+        <span class="nav-badge" style="background:var(--red-dim);color:var(--red)">2</span>
+      </div>
+      <div class="nav-item" onclick="navigate('latency')" id="nav-latency">
+        <svg class="nav-icon" viewBox="0 0 14 14" fill="none"><path d="M2 10L5 7L7 9L10 5L12 7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Latency
+      </div>
+      <div class="nav-item" onclick="navigate('incidents')" id="nav-incidents">
+        <svg class="nav-icon" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.2"/><path d="M7 4V7L9 9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        Incidents
+        <span class="nav-badge">8</span>
+      </div>
+      <div class="nav-item" onclick="navigate('uptime')" id="nav-uptime">
+        <svg class="nav-icon" viewBox="0 0 14 14" fill="none"><path d="M7 1v2M7 11v2M1 7h2M11 7h2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle cx="7" cy="7" r="3" stroke="currentColor" stroke-width="1.2"/></svg>
+        Uptime Report
+      </div>
+    </div>
+
+    <div class="sidebar-divider"></div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-title">Services</div>
+      <div class="nav-item" onclick="navigateSvc('claude')" id="snav-claude">
+        <span class="tick-dot" style="width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0"></span>
+        Claude API
+        <span class="nav-badge ok">99.1%</span>
+      </div>
+      <div class="nav-item" style="color:var(--amber)" onclick="navigateSvc('openai')" id="snav-openai">
+        <span class="tick-dot" style="width:6px;height:6px;border-radius:50%;background:var(--amber);flex-shrink:0"></span>
+        OpenAI API
+        <span class="nav-badge" style="background:var(--amber-dim);color:var(--amber)">97.8%</span>
+      </div>
+      <div class="nav-item" onclick="navigateSvc('gemini')" id="snav-gemini">
+        <span class="tick-dot" style="width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0"></span>
+        Gemini API
+        <span class="nav-badge ok">99.5%</span>
+      </div>
+      <div class="nav-item" onclick="navigateSvc('mistral')" id="snav-mistral">
+        <span class="tick-dot" style="width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0"></span>
+        Mistral API
+        <span class="nav-badge ok">98.9%</span>
+      </div>
+      <div class="nav-item" onclick="navigateSvc('cohere')" id="snav-cohere">
+        <span class="tick-dot" style="width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0"></span>
+        Cohere API
+        <span class="nav-badge ok">99.2%</span>
+      </div>
+      <div class="nav-item" onclick="navigateSvc('groq')" id="snav-groq">
+        <span class="tick-dot" style="width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0"></span>
+        Groq Cloud
+        <span class="nav-badge ok">99.7%</span>
+      </div>
+      <div class="nav-item" onclick="navigateSvc('together')" id="snav-together">
+        <span class="tick-dot" style="width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0"></span>
+        Together AI
+        <span class="nav-badge ok">99.0%</span>
+      </div>
+      <div class="nav-item" onclick="navigateSvc('perplexity')" id="snav-perplexity">
+        <span class="tick-dot" style="width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0"></span>
+        Perplexity API
+        <span class="nav-badge ok">98.6%</span>
+      </div>
+      <div class="nav-item" onclick="navigateSvc('huggingface')" id="snav-huggingface">
+        <span class="tick-dot" style="width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0"></span>
+        Hugging Face
+        <span class="nav-badge ok">98.1%</span>
+      </div>
+      <div class="nav-item" style="color:var(--amber)" onclick="navigateSvc('replicate')" id="snav-replicate">
+        <span class="tick-dot" style="width:6px;height:6px;border-radius:50%;background:var(--amber);flex-shrink:0"></span>
+        Replicate
+        <span class="nav-badge" style="background:var(--amber-dim);color:var(--amber)">95.3%</span>
+      </div>
+      <div class="nav-item" onclick="navigateSvc('elevenlabs')" id="snav-elevenlabs">
+        <span class="tick-dot" style="width:6px;height:6px;border-radius:50%;background:var(--amber);flex-shrink:0"></span>
+        ElevenLabs
+        <span class="nav-badge" style="background:var(--amber-dim);color:var(--amber)">97.5%</span>
+      </div>
+      <div class="nav-item" onclick="navigateSvc('xai')" id="snav-xai">
+        <span class="tick-dot" style="width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0"></span>
+        xAI (Grok)
+        <span class="nav-badge ok">99.8%</span>
+      </div>
+      <div class="nav-item" onclick="navigateSvc('deepseek')" id="snav-deepseek">
+        <span class="tick-dot" style="width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0"></span>
+        DeepSeek API
+        <span class="nav-badge ok">99.1%</span>
+      </div>
+    </div>
+
+    <div class="sidebar-divider"></div>
+
+    <div class="version-tag" data-i18n="nav.version">aiwatch.dev · v1.0</div>
+  </aside>
+
+  <!-- CONTENT AREA -->
+  <main class="content" id="main-content">
+
+    <!-- ══ VIEW: OVERVIEW ══ -->
+    <div class="view active" id="view-overview">
+
+    <!-- SKELETON STATE (로딩 중) -->
+    <div id="overview-skeleton">
+      <div class="summary-row">
+        <div class="stat-card" style="border-top-color:var(--bg3)"><div class="stat-label">Operational</div><div class="skel skel-stat"></div><div class="skel skel-sub"></div></div>
+        <div class="stat-card" style="border-top-color:var(--bg3)"><div class="stat-label">Degraded</div><div class="skel skel-stat"></div><div class="skel skel-sub"></div></div>
+        <div class="stat-card" style="border-top-color:var(--bg3)"><div class="stat-label">Down</div><div class="skel skel-stat"></div><div class="skel skel-sub"></div></div>
+        <div class="stat-card" style="border-top-color:var(--bg3)"><div class="stat-label" data-i18n="summary.uptime">Avg Uptime</div><div class="skel skel-stat"></div><div class="skel skel-sub"></div></div>
+      </div>
+      <div class="section-header"><div class="section-title" data-i18n="section.services">Services</div></div>
+      <div class="services-grid">
+        <div class="skel-card"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><div><div class="skel skel-name"></div><div class="skel skel-prov"></div></div><div class="skel skel-badge"></div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px"><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div></div><div class="skel skel-history"></div></div>
+        <div class="skel-card"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><div><div class="skel skel-name"></div><div class="skel skel-prov"></div></div><div class="skel skel-badge"></div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px"><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div></div><div class="skel skel-history"></div></div>
+        <div class="skel-card"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><div><div class="skel skel-name"></div><div class="skel skel-prov"></div></div><div class="skel skel-badge"></div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px"><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div></div><div class="skel skel-history"></div></div>
+        <div class="skel-card"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><div><div class="skel skel-name"></div><div class="skel skel-prov"></div></div><div class="skel skel-badge"></div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px"><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div></div><div class="skel skel-history"></div></div>
+        <div class="skel-card"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><div><div class="skel skel-name"></div><div class="skel skel-prov"></div></div><div class="skel skel-badge"></div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px"><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div></div><div class="skel skel-history"></div></div>
+        <div class="skel-card"><div style="display:flex;justify-content:space-between;margin-bottom:10px"><div><div class="skel skel-name"></div><div class="skel skel-prov"></div></div><div class="skel skel-badge"></div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px"><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div><div><div class="skel skel-metric-val"></div><div class="skel skel-metric-lbl"></div></div></div><div class="skel skel-history"></div></div>
+      </div>
+    </div>
+
+    <!-- LOADED STATE (데이터 있음) -->
+    <div id="overview-loaded" style="display:none">
+
+    <!-- SUMMARY STATS -->
+    <div class="summary-row">
+      <div class="stat-card green">
+        <div class="stat-label" data-i18n="summary.operational">Operational</div>
+        <div class="stat-value">11</div>
+        <div class="stat-sub" data-i18n="summary.running">services running</div>
+      </div>
+      <div class="stat-card amber">
+        <div class="stat-label" data-i18n="summary.degraded">Degraded</div>
+        <div class="stat-value">2</div>
+        <div class="stat-sub" data-i18n="summary.affected">partially affected</div>
+      </div>
+      <div class="stat-card red">
+        <div class="stat-label" data-i18n="summary.down">Down</div>
+        <div class="stat-value">0</div>
+        <div class="stat-sub">—</div>
+      </div>
+      <div class="stat-card blue">
+        <div class="stat-label" data-i18n="summary.uptime">Avg Uptime</div>
+        <div class="stat-value">97.4<span style="font-size:14px">%</span></div>
+        <div class="stat-sub" data-i18n="summary.avg">30-day average</div>
+      </div>
+    </div>
+
+    <!-- SERVICE CARDS -->
+    <div class="section-header">
+      <div class="section-title">Services</div>
+      <div class="filter-tabs">
+        <button class="filter-tab active" onclick="filterCards('all',this)" data-i18n="filter.all">All</button>
+        <button class="filter-tab" onclick="filterCards('ok',this)" data-i18n="filter.operational">Operational</button>
+        <button class="filter-tab" onclick="filterCards('issues',this)" data-i18n="filter.issues">Issues</button>
+      </div>
+    </div>
+
+    <div class="services-grid">
+
+      <!-- Claude API - OK -->
+      <div class="svc-card ok" data-id="claude">
+        <div class="svc-top">
+          <div class="svc-info">
+            <div class="svc-name">Claude API</div>
+            <div class="svc-provider">Anthropic</div>
+          </div>
+          <span class="status-pill">Operational</span>
+        </div>
+        <div class="svc-metrics">
+          <div class="metric"><div class="metric-val">145ms</div><div class="metric-lbl">latency</div></div>
+          <div class="metric"><div class="metric-val" style="color:var(--green)">99.1%</div><div class="metric-lbl">uptime</div></div>
+          <div class="metric"><div class="metric-val">1</div><div class="metric-lbl">incidents</div></div>
+        </div>
+        <div class="history-dots">
+          <div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:12px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar warn" style="height:10px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:12px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:12px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:18px"></div>
+        </div>
+      </div>
+
+      <!-- OpenAI - WARN -->
+      <div class="svc-card warn" data-id="openai">
+        <div class="svc-top">
+          <div class="svc-info">
+            <div class="svc-name">OpenAI API</div>
+            <div class="svc-provider">OpenAI</div>
+          </div>
+          <span class="status-pill">Degraded</span>
+        </div>
+        <div class="svc-metrics">
+          <div class="metric"><div class="metric-val" style="color:var(--amber)">312ms</div><div class="metric-lbl">latency</div></div>
+          <div class="metric"><div class="metric-val" style="color:var(--amber)">97.8%</div><div class="metric-lbl">uptime</div></div>
+          <div class="metric"><div class="metric-val">3</div><div class="metric-lbl">incidents</div></div>
+        </div>
+        <div class="history-dots">
+          <div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar warn" style="height:9px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:12px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar warn" style="height:8px"></div><div class="h-bar warn" style="height:10px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:12px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar warn" style="height:9px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:12px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar warn" style="height:10px"></div><div class="h-bar ok" style="height:16px"></div>
+        </div>
+      </div>
+
+      <!-- Gemini - OK -->
+      <div class="svc-card ok" data-id="gemini">
+        <div class="svc-top">
+          <div class="svc-info">
+            <div class="svc-name">Gemini API</div>
+            <div class="svc-provider">Google</div>
+          </div>
+          <span class="status-pill">Operational</span>
+        </div>
+        <div class="svc-metrics">
+          <div class="metric"><div class="metric-val">198ms</div><div class="metric-lbl">latency</div></div>
+          <div class="metric"><div class="metric-val" style="color:var(--green)">99.5%</div><div class="metric-lbl">uptime</div></div>
+          <div class="metric"><div class="metric-val">0</div><div class="metric-lbl">incidents</div></div>
+        </div>
+        <div class="history-dots">
+          <div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div>
+        </div>
+      </div>
+
+      <!-- Groq - OK -->
+      <div class="svc-card ok" data-id="groq">
+        <div class="svc-top">
+          <div class="svc-info">
+            <div class="svc-name">Groq Cloud</div>
+            <div class="svc-provider">Groq</div>
+          </div>
+          <span class="status-pill">Operational</span>
+        </div>
+        <div class="svc-metrics">
+          <div class="metric"><div class="metric-val" style="color:var(--green)">89ms</div><div class="metric-lbl">latency</div></div>
+          <div class="metric"><div class="metric-val" style="color:var(--green)">99.7%</div><div class="metric-lbl">uptime</div></div>
+          <div class="metric"><div class="metric-val">0</div><div class="metric-lbl">incidents</div></div>
+        </div>
+        <div class="history-dots">
+          <div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div>
+        </div>
+      </div>
+
+      <!-- xAI - OK -->
+      <div class="svc-card ok" data-id="xai">
+        <div class="svc-top">
+          <div class="svc-info">
+            <div class="svc-name">xAI (Grok)</div>
+            <div class="svc-provider">xAI</div>
+          </div>
+          <span class="status-pill">Operational</span>
+        </div>
+        <div class="svc-metrics">
+          <div class="metric"><div class="metric-val">162ms</div><div class="metric-lbl">latency</div></div>
+          <div class="metric"><div class="metric-val" style="color:var(--green)">99.8%</div><div class="metric-lbl">uptime</div></div>
+          <div class="metric"><div class="metric-val">0</div><div class="metric-lbl">incidents</div></div>
+        </div>
+        <div class="history-dots">
+          <div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div>
+        </div>
+      </div>
+
+      <!-- DeepSeek - OK -->
+      <div class="svc-card ok" data-id="deepseek">
+        <div class="svc-top">
+          <div class="svc-info">
+            <div class="svc-name">DeepSeek API</div>
+            <div class="svc-provider">DeepSeek</div>
+          </div>
+          <span class="status-pill">Operational</span>
+        </div>
+        <div class="svc-metrics">
+          <div class="metric"><div class="metric-val">210ms</div><div class="metric-lbl">latency</div></div>
+          <div class="metric"><div class="metric-val" style="color:var(--green)">99.1%</div><div class="metric-lbl">uptime</div></div>
+          <div class="metric"><div class="metric-val">3</div><div class="metric-lbl">incidents</div></div>
+        </div>
+        <div class="history-dots">
+          <div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar warn" style="height:9px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar warn" style="height:9px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar warn" style="height:9px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:18px"></div><div class="h-bar ok" style="height:16px"></div>
+        </div>
+      </div>
+
+      <!-- Replicate - WARN -->
+      <div class="svc-card warn" data-id="replicate">
+        <div class="svc-top">
+          <div class="svc-info">
+            <div class="svc-name">Replicate</div>
+            <div class="svc-provider">Replicate</div>
+          </div>
+          <span class="status-pill">Degraded</span>
+        </div>
+        <div class="svc-metrics">
+          <div class="metric"><div class="metric-val" style="color:var(--amber)">540ms</div><div class="metric-lbl">latency</div></div>
+          <div class="metric"><div class="metric-val" style="color:var(--amber)">95.3%</div><div class="metric-lbl">uptime</div></div>
+          <div class="metric"><div class="metric-val">4</div><div class="metric-lbl">incidents</div></div>
+        </div>
+        <div class="history-dots">
+          <div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar warn" style="height:9px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar warn" style="height:8px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar warn" style="height:9px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar warn" style="height:8px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar warn" style="height:9px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar warn" style="height:8px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar ok" style="height:16px"></div><div class="h-bar warn" style="height:9px"></div><div class="h-bar ok" style="height:14px"></div><div class="h-bar warn" style="height:10px"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- BOTTOM PANELS -->
+    <div class="bottom-row">
+
+      <!-- Incident Log -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <div class="panel-dot" style="background:var(--red)"></div>
+            Recent Incidents
+          </div>
+          <span style="font-family:var(--mono);font-size:9px;color:var(--text2)">최근 7일</span>
+        </div>
+        <div class="panel-body">
+          <div class="incident-list">
+            <div class="incident-item">
+              <div class="inc-time">03/18 07:29</div>
+              <div class="inc-bar warn"></div>
+              <div class="inc-content">
+                <div class="inc-title">OpenAI API — Elevated Errors</div>
+                <div class="inc-detail">오류율 증가 · 2h 16m 후 해결</div>
+              </div>
+            </div>
+            <div class="incident-item">
+              <div class="inc-time">03/17 19:47</div>
+              <div class="inc-bar warn"></div>
+              <div class="inc-content">
+                <div class="inc-title">Replicate — High Latency</div>
+                <div class="inc-detail">P99 응답 540ms+ · 모니터링 중</div>
+              </div>
+            </div>
+            <div class="incident-item">
+              <div class="inc-time">03/12 16:07</div>
+              <div class="inc-bar ok"></div>
+              <div class="inc-content">
+                <div class="inc-title">Claude API — Sonnet 오류 증가</div>
+                <div class="inc-detail">14분간 오류율 상승 · 해결 완료</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Latency Chart -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <div class="panel-dot" style="background:var(--teal)"></div>
+            Response Latency
+          </div>
+          <span style="font-family:var(--mono);font-size:9px;color:var(--text2)">현재 기준 ms</span>
+        </div>
+        <div class="panel-body">
+          <div class="latency-chart">
+            <div class="latency-row">
+              <span class="latency-name">Groq Cloud</span>
+              <div class="latency-track"><div class="latency-fill fast" style="width:12%"></div></div>
+              <span class="latency-val" style="color:var(--green)">89ms</span>
+            </div>
+            <div class="latency-row">
+              <span class="latency-name">Claude API</span>
+              <div class="latency-track"><div class="latency-fill fast" style="width:20%"></div></div>
+              <span class="latency-val">145ms</span>
+            </div>
+            <div class="latency-row">
+              <span class="latency-name">Together AI</span>
+              <div class="latency-track"><div class="latency-fill fast" style="width:24%"></div></div>
+              <span class="latency-val">175ms</span>
+            </div>
+            <div class="latency-row">
+              <span class="latency-name">Cohere API</span>
+              <div class="latency-track"><div class="latency-fill fast" style="width:25%"></div></div>
+              <span class="latency-val">180ms</span>
+            </div>
+            <div class="latency-row">
+              <span class="latency-name">Gemini API</span>
+              <div class="latency-track"><div class="latency-fill fast" style="width:27%"></div></div>
+              <span class="latency-val">198ms</span>
+            </div>
+            <div class="latency-row">
+              <span class="latency-name">Mistral API</span>
+              <div class="latency-track"><div class="latency-fill fast" style="width:30%"></div></div>
+              <span class="latency-val">220ms</span>
+            </div>
+            <div class="latency-row">
+              <span class="latency-name">OpenAI API</span>
+              <div class="latency-track"><div class="latency-fill mid" style="width:43%"></div></div>
+              <span class="latency-val" style="color:var(--amber)">312ms</span>
+            </div>
+            <div class="latency-row">
+              <span class="latency-name">Replicate</span>
+              <div class="latency-track"><div class="latency-fill slow" style="width:74%"></div></div>
+              <span class="latency-val" style="color:var(--red)">540ms</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- AI Analysis Panel (향후 Phase 3) -->
+    <div class="ai-panel">
+      <div class="ai-panel-header">
+        <div class="ai-label">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="2" y="5.5" width="8" height="5.5" rx="1.5" stroke="rgba(139,148,158,0.5)" stroke-width="1.2"/><path d="M4 5.5V4a2 2 0 014 0v1.5" stroke="rgba(139,148,158,0.5)" stroke-width="1.2" stroke-linecap="round"/></svg>
+          AI Analysis
+        </div>
+      </div>
+      <div class="ai-body" style="display:flex;align-items:center;gap:12px;padding:16px 14px;">
+        <div style="width:36px;height:36px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;opacity:0.45;">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="3" y="7.5" width="10" height="7" rx="2" stroke="#8b949e" stroke-width="1.3"/><path d="M5.5 7.5V5.5a2.5 2.5 0 015 0v2" stroke="#8b949e" stroke-width="1.3" stroke-linecap="round"/></svg>
+        </div>
+        <div>
+          <div style="font-family:var(--sans);font-size:13px;font-weight:500;color:var(--text1);margin-bottom:3px;">AI Analysis</div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--text2);">자동 이상 감지 및 분석 기능을 준비 중입니다</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ISSUES 필터 빈 상태 -->
+    <div id="empty-issues" style="display:none">
+      <div class="chart-panel">
+        <div class="empty-state">
+          <div class="empty-icon good">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 10l4 4 8-8" stroke="#3fb950" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <div class="empty-title" data-i18n="empty.issues.title">현재 이슈 없음</div>
+          <div class="empty-desc">모든 서비스가 정상 운영 중입니다<br>마지막 확인 · <span id="empty-issues-time">—</span></div>
+          <button class="empty-action" onclick="filterCards('all', document.querySelector('.filter-tab'))">전체 보기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- API 오류 상태 -->
+    <div id="overview-error" style="display:none">
+      <div class="chart-panel">
+        <div class="empty-state">
+          <div class="empty-icon error">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 6v5M10 14h.01" stroke="#f85149" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="10" r="8" stroke="#f85149" stroke-width="1.5"/></svg>
+          </div>
+          <div class="empty-title" data-i18n="empty.error.title">상태를 불러올 수 없습니다</div>
+          <div class="empty-desc">네트워크 오류가 발생했습니다<br>마지막 성공 · <span id="last-success-time">—</span></div>
+          <button class="empty-action" onclick="doRefresh()">↻ 다시 시도</button>
+        </div>
+      </div>
+    </div>
+
+    </div><!-- /overview-loaded -->
+
+    <div class="page-note">AIWatch · Design Mockup v1.0 · 2026</div>
+
+    </div><!-- /view-overview -->
+
+    <!-- ══ VIEW: LATENCY ══ -->
+    <div class="view" id="view-latency">
+      <div class="section-header">
+        <div class="section-title" data-i18n="latency.title">Latency</div>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--text2)" data-i18n="latency.subtitle">현재 기준 · ms</span>
+      </div>
+
+      <div class="latency-stat-row">
+        <div class="stat-card green">
+          <div class="stat-label" data-i18n="latency.fastest">Fastest</div>
+          <div class="stat-value">89<span style="font-size:14px">ms</span></div>
+          <div class="stat-sub">Groq Cloud</div>
+        </div>
+        <div class="stat-card blue">
+          <div class="stat-label" data-i18n="latency.avg">Average</div>
+          <div class="stat-value">248<span style="font-size:14px">ms</span></div>
+          <div class="stat-sub">12개 서비스</div>
+        </div>
+        <div class="stat-card red">
+          <div class="stat-label" data-i18n="latency.slowest">Slowest</div>
+          <div class="stat-value">540<span style="font-size:14px">ms</span></div>
+          <div class="stat-sub">Replicate</div>
+        </div>
+      </div>
+
+      <div class="chart-panel" style="margin-bottom:10px">
+        <div class="chart-panel-header">
+          <div class="chart-panel-title">
+            <div class="panel-dot" style="background:var(--teal)"></div>
+            현재 응답속도 순위
+          </div>
+        </div>
+        <div class="chart-panel-body">
+          <div class="lat-bar-row"><span class="lat-rank">1</span><span class="lat-name-full">Groq Cloud</span><div class="lat-track-full"><div class="lat-fill-full fast" style="width:12%"></div></div><span class="lat-ms" style="color:var(--green)">89ms</span></div>
+          <div class="lat-bar-row"><span class="lat-rank">2</span><span class="lat-name-full">Claude API</span><div class="lat-track-full"><div class="lat-fill-full fast" style="width:20%"></div></div><span class="lat-ms">145ms</span></div>
+          <div class="lat-bar-row"><span class="lat-rank">3</span><span class="lat-name-full">Together AI</span><div class="lat-track-full"><div class="lat-fill-full fast" style="width:24%"></div></div><span class="lat-ms">175ms</span></div>
+          <div class="lat-bar-row"><span class="lat-rank">4</span><span class="lat-name-full">Cohere API</span><div class="lat-track-full"><div class="lat-fill-full fast" style="width:25%"></div></div><span class="lat-ms">180ms</span></div>
+          <div class="lat-bar-row"><span class="lat-rank">4</span><span class="lat-name-full">Gemini API</span><div class="lat-track-full"><div class="lat-fill-full fast" style="width:27%"></div></div><span class="lat-ms">198ms</span></div>
+          <div class="lat-bar-row"><span class="lat-rank">6</span><span class="lat-name-full">DeepSeek API</span><div class="lat-track-full"><div class="lat-fill-full fast" style="width:29%"></div></div><span class="lat-ms">210ms</span></div>
+          <div class="lat-bar-row"><span class="lat-rank">12</span><span class="lat-name-full">Mistral API</span><div class="lat-track-full"><div class="lat-fill-full fast" style="width:30%"></div></div><span class="lat-ms">220ms</span></div>
+          <div class="lat-bar-row"><span class="lat-rank">7</span><span class="lat-name-full">Perplexity</span><div class="lat-track-full"><div class="lat-fill-full fast" style="width:32%"></div></div><span class="lat-ms">230ms</span></div>
+          <div class="lat-bar-row"><span class="lat-rank">8</span><span class="lat-name-full">Hugging Face</span><div class="lat-track-full"><div class="lat-fill-full fast" style="width:37%"></div></div><span class="lat-ms">260ms</span></div>
+          <div class="lat-bar-row"><span class="lat-rank">9</span><span class="lat-name-full">ElevenLabs</span><div class="lat-track-full"><div class="lat-fill-full mid" style="width:43%"></div></div><span class="lat-ms" style="color:var(--amber)">310ms</span></div>
+          <div class="lat-bar-row"><span class="lat-rank">10</span><span class="lat-name-full">OpenAI API</span><div class="lat-track-full"><div class="lat-fill-full mid" style="width:44%"></div></div><span class="lat-ms" style="color:var(--amber)">312ms</span></div>
+          <div class="lat-bar-row"><span class="lat-rank">5</span><span class="lat-name-full">xAI (Grok)</span><div class="lat-track-full"><div class="lat-fill-full fast" style="width:22%"></div></div><span class="lat-ms">162ms</span></div>
+          <div class="lat-bar-row"><span class="lat-rank">12</span><span class="lat-name-full">Replicate</span><div class="lat-track-full"><div class="lat-fill-full slow" style="width:74%"></div></div><span class="lat-ms" style="color:var(--red)">540ms</span></div>
+        </div>
+      </div>
+
+      <div class="chart-panel">
+        <div class="chart-panel-header">
+          <div class="chart-panel-title">
+            <div class="panel-dot" style="background:var(--blue)"></div>
+            시간대별 추이 — 최근 24시간
+          </div>
+          <span style="font-family:var(--mono);font-size:9px;color:var(--text2)" data-i18n="latency.dummy">더미 데이터 · 수집 후 실제 데이터로 전환</span>
+        </div>
+        <div class="chart-panel-body">
+          <div class="line-legend" id="latency-legend"></div>
+          <div style="position:relative;height:200px"><canvas id="latencyChart"></canvas></div>
+        </div>
+      </div>
+    </div><!-- /view-latency -->
+
+    <!-- ══ VIEW: INCIDENTS ══ -->
+    <div class="view" id="view-incidents">
+      <div class="section-header">
+        <div class="section-title" data-i18n="incidents.title">Incidents</div>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--text2)" data-i18n="incidents.period">최근 7일</span>
+      </div>
+
+      <div class="filter-bar">
+        <select class="filter-select"><option>모든 서비스</option><option>Claude API</option><option>OpenAI API</option><option>Gemini API</option><option>Mistral API</option><option>Cohere API</option><option>Replicate</option><option>Hugging Face</option><option>Together AI</option><option>Groq Cloud</option><option>Perplexity API</option><option>xAI (Grok)</option><option>DeepSeek API</option><option>ElevenLabs</option></select>
+        <select class="filter-select"><option>모든 상태</option><option>진행 중</option><option>모니터링</option><option>해결됨</option></select>
+        <select class="filter-select"><option>최근 7일</option><option>최근 30일</option><option>최근 90일</option></select>
+      </div>
+
+      <div class="chart-panel">
+        <div class="inc-table">
+          <div class="inc-table-head">
+            <span data-i18n="incidents.col.time">시각</span><span data-i18n="incidents.col.title">내용</span><span data-i18n="incidents.col.svc">서비스</span><span data-i18n="incidents.col.dur">지속시간</span><span data-i18n="incidents.col.status">상태</span>
+          </div>
+          <div class="inc-row" onclick="showIncidentDetail(0)" id="inc-row-0">
+            <div class="inc-row-main">
+              <div class="inc-cell-title">Elevated Error Rate</div>
+              <div><span class="inc-status-pill resolved">해결됨</span></div>
+            </div>
+            <div class="inc-row-meta">
+              <div class="inc-cell-time">03/18 07:29</div>
+              <div class="inc-cell-svc">OpenAI API</div>
+              <div class="inc-cell-dur">2h 16m</div>
+            </div>
+          </div>
+          <div class="inc-row" onclick="showIncidentDetail(0)" id="inc-row-0">
+            <div class="inc-row-main">
+              <div class="inc-cell-title">High Latency</div>
+              <div><span class="inc-status-pill monitoring">모니터링</span></div>
+            </div>
+            <div class="inc-row-meta">
+              <div class="inc-cell-time">03/17 19:47</div>
+              <div class="inc-cell-svc">Replicate</div>
+              <div class="inc-cell-dur">모니터링</div>
+            </div>
+          </div>
+          <div class="inc-row" onclick="showIncidentDetail(1)" id="inc-row-1">
+            <div class="inc-row-main">
+              <div class="inc-cell-title">Elevated Errors on Sonnet</div>
+              <div><span class="inc-status-pill resolved">해결됨</span></div>
+            </div>
+            <div class="inc-row-meta">
+              <div class="inc-cell-time">03/16 14:02</div>
+              <div class="inc-cell-svc">Claude API</div>
+              <div class="inc-cell-dur">38m</div>
+            </div>
+          </div>
+          <div class="inc-row" onclick="showIncidentDetail(2)" id="inc-row-2">
+            <div class="inc-row-main">
+              <div class="inc-cell-title">Elevated Errors on Opus</div>
+              <div><span class="inc-status-pill resolved">해결됨</span></div>
+            </div>
+            <div class="inc-row-meta">
+              <div class="inc-cell-time">03/13 18:37</div>
+              <div class="inc-cell-svc">Claude API</div>
+              <div class="inc-cell-dur">1h 42m</div>
+            </div>
+          </div>
+          <div class="inc-row" onclick="showIncidentDetail(3)" id="inc-row-3">
+            <div class="inc-row-main">
+              <div class="inc-cell-title">Elevated Errors — Sonnet & claude.ai</div>
+              <div><span class="inc-status-pill resolved">해결됨</span></div>
+            </div>
+            <div class="inc-row-meta">
+              <div class="inc-cell-time">03/12 16:07</div>
+              <div class="inc-cell-svc">Claude API</div>
+              <div class="inc-cell-dur">6m</div>
+            </div>
+          </div>
+          <div class="inc-row" onclick="showIncidentDetail(4)" id="inc-row-4">
+            <div class="inc-row-main">
+              <div class="inc-cell-title">Login Issues & Slow Performance</div>
+              <div><span class="inc-status-pill resolved">해결됨</span></div>
+            </div>
+            <div class="inc-row-meta">
+              <div class="inc-cell-time">03/11 14:44</div>
+              <div class="inc-cell-svc">Claude API</div>
+              <div class="inc-cell-dur">2h 44m</div>
+            </div>
+          </div>
+          <div class="inc-row" onclick="showIncidentDetail(5)" id="inc-row-5">
+            <div class="inc-row-main">
+              <div class="inc-cell-title">Scheduled Tasks Infinite Loop</div>
+              <div><span class="inc-status-pill resolved">해결됨</span></div>
+            </div>
+            <div class="inc-row-meta">
+              <div class="inc-cell-time">03/08 17:57</div>
+              <div class="inc-cell-svc">Claude API</div>
+              <div class="inc-cell-dur">1h 55m</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-panel" id="incident-detail" style="display:none">
+        <div class="detail-header">
+          <div>
+            <div class="detail-title" id="detail-title">—</div>
+            <div class="detail-meta" id="detail-meta">—</div>
+          </div>
+          <button class="btn" onclick="closeDetail()" style="font-size:11px;padding:4px 10px" data-i18n="detail.close">✕ 닫기</button>
+        </div>
+        <div class="detail-body">
+          <div class="timeline" id="detail-timeline"></div>
+        </div>
+      </div>
+    </div><!-- /view-incidents -->
+
+    <!-- ══ VIEW: UPTIME ══ -->
+    <div class="view" id="view-uptime">
+      <div class="section-header">
+        <div class="section-title" data-i18n="uptime.title">Uptime Report</div>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--text2)" data-i18n="uptime.period">30일 기준</span>
+      </div>
+
+      <div class="latency-stat-row">
+        <div class="stat-card green">
+          <div class="stat-label" data-i18n="uptime.stable">Most Stable</div>
+          <div class="stat-value" style="font-size:18px">Groq</div>
+          <div class="stat-sub">99.7% uptime</div>
+        </div>
+        <div class="stat-card blue">
+          <div class="stat-label" data-i18n="summary.uptime">Avg Uptime</div>
+          <div class="stat-value">97.4<span style="font-size:14px">%</span></div>
+          <div class="stat-sub">전체 평균</div>
+        </div>
+        <div class="stat-card red">
+          <div class="stat-label" data-i18n="uptime.issues">Most Issues</div>
+          <div class="stat-value" style="font-size:18px">Stability</div>
+          <div class="stat-sub">88.2% uptime</div>
+        </div>
+      </div>
+
+      <div class="uptime-grid">
+        <div class="chart-panel">
+          <div class="chart-panel-header">
+            <div class="chart-panel-title"><div class="panel-dot" style="background:var(--green)"></div data-i18n="uptime.rank">업타임 순위</div>
+            <span style="font-family:var(--mono);font-size:9px;color:var(--text2)" data-i18n="sla.ref">— 99.9% SLA</span>
+          </div>
+          <div class="chart-panel-body">
+            <div class="uptime-bar-row"><span class="uptime-svc-name">Groq Cloud</span><div class="uptime-track"><div class="uptime-fill" style="width:99.7%;background:var(--green)"></div><div class="sla-line" style="left:99.9%"></div></div><span class="uptime-pct" style="color:var(--green)">99.7%</span></div>
+            <div class="uptime-bar-row"><span class="uptime-svc-name">Gemini API</span><div class="uptime-track"><div class="uptime-fill" style="width:99.5%;background:var(--green)"></div><div class="sla-line" style="left:99.9%"></div></div><span class="uptime-pct" style="color:var(--green)">99.5%</span></div>
+            <div class="uptime-bar-row"><span class="uptime-svc-name">Cohere API</span><div class="uptime-track"><div class="uptime-fill" style="width:99.2%;background:var(--green)"></div><div class="sla-line" style="left:99.9%"></div></div><span class="uptime-pct">99.2%</span></div>
+            <div class="uptime-bar-row"><span class="uptime-svc-name">Claude API</span><div class="uptime-track"><div class="uptime-fill" style="width:99.1%;background:var(--green)"></div><div class="sla-line" style="left:99.9%"></div></div><span class="uptime-pct">99.1%</span></div>
+            <div class="uptime-bar-row"><span class="uptime-svc-name">Together AI</span><div class="uptime-track"><div class="uptime-fill" style="width:99%;background:var(--green)"></div><div class="sla-line" style="left:99.9%"></div></div><span class="uptime-pct">99.0%</span></div>
+            <div class="uptime-bar-row"><span class="uptime-svc-name">Perplexity</span><div class="uptime-track"><div class="uptime-fill" style="width:98.6%;background:var(--green)"></div><div class="sla-line" style="left:99.9%"></div></div><span class="uptime-pct">98.6%</span></div>
+            <div class="uptime-bar-row"><span class="uptime-svc-name">Hugging Face</span><div class="uptime-track"><div class="uptime-fill" style="width:98.1%;background:var(--green)"></div><div class="sla-line" style="left:99.9%"></div></div><span class="uptime-pct">98.1%</span></div>
+            <div class="uptime-bar-row"><span class="uptime-svc-name">Mistral API</span><div class="uptime-track"><div class="uptime-fill" style="width:98.9%;background:var(--green)"></div><div class="sla-line" style="left:99.9%"></div></div><span class="uptime-pct">98.9%</span></div>
+            <div class="uptime-bar-row"><span class="uptime-svc-name">ElevenLabs</span><div class="uptime-track"><div class="uptime-fill" style="width:97.5%;background:var(--amber)"></div><div class="sla-line" style="left:99.9%"></div></div><span class="uptime-pct" style="color:var(--amber)">97.5%</span></div>
+            <div class="uptime-bar-row"><span class="uptime-svc-name">OpenAI API</span><div class="uptime-track"><div class="uptime-fill" style="width:97.8%;background:var(--amber)"></div><div class="sla-line" style="left:99.9%"></div></div><span class="uptime-pct" style="color:var(--amber)">97.8%</span></div>
+            <div class="uptime-bar-row"><span class="uptime-svc-name">Replicate</span><div class="uptime-track"><div class="uptime-fill" style="width:95.3%;background:var(--amber)"></div><div class="sla-line" style="left:99.9%"></div></div><span class="uptime-pct" style="color:var(--amber)">95.3%</span></div>
+            <div class="uptime-bar-row"><span class="uptime-svc-name">xAI (Grok)</span><div class="uptime-track"><div class="uptime-fill" style="width:99.8%;background:var(--green)"></div><div class="sla-line" style="left:99.9%"></div></div><span class="uptime-pct" style="color:var(--green)">99.8%</span></div>
+            <div class="uptime-bar-row"><span class="uptime-svc-name">DeepSeek API</span><div class="uptime-track"><div class="uptime-fill" style="width:99.1%;background:var(--green)"></div><div class="sla-line" style="left:99.9%"></div></div><span class="uptime-pct">99.1%</span></div>
+          </div>
+        </div>
+
+        <div class="chart-panel">
+          <div class="chart-panel-header">
+            <div class="chart-panel-title"><div class="panel-dot" style="background:var(--amber)"></div data-i18n="uptime.matrix">월별 가용성</div>
+            <span style="font-family:var(--mono);font-size:9px;color:var(--text2)" data-i18n="uptime.matrix.period">최근 3개월</span>
+          </div>
+          <div class="chart-panel-body" style="overflow-x:auto">
+            <table class="uptime-matrix">
+              <thead><tr>
+                <th style="width:110px">서비스</th>
+                <th>1월</th><th>2월</th><th>3월</th>
+              </tr></thead>
+              <tbody>
+                <tr><td style="font-family:var(--mono);font-size:11px;color:var(--text1)">Groq Cloud</td><td><span class="uptime-cell uc-green">99.8%</span></td><td><span class="uptime-cell uc-green">99.9%</span></td><td><span class="uptime-cell uc-green">99.7%</span></td></tr>
+                <tr><td style="font-family:var(--mono);font-size:11px;color:var(--text1)">Gemini API</td><td><span class="uptime-cell uc-green">99.7%</span></td><td><span class="uptime-cell uc-green">99.8%</span></td><td><span class="uptime-cell uc-green">99.5%</span></td></tr>
+                <tr><td style="font-family:var(--mono);font-size:11px;color:var(--text1)">Claude API</td><td><span class="uptime-cell uc-green">99.6%</span></td><td><span class="uptime-cell uc-green">99.4%</span></td><td><span class="uptime-cell uc-green">99.1%</span></td></tr>
+                <tr><td style="font-family:var(--mono);font-size:11px;color:var(--text1)">OpenAI API</td><td><span class="uptime-cell uc-green">98.9%</span></td><td><span class="uptime-cell uc-amber">97.2%</span></td><td><span class="uptime-cell uc-amber">97.8%</span></td></tr>
+                <tr><td style="font-family:var(--mono);font-size:11px;color:var(--text1)">ElevenLabs</td><td><span class="uptime-cell uc-green">98.2%</span></td><td><span class="uptime-cell uc-amber">97.8%</span></td><td><span class="uptime-cell uc-amber">97.5%</span></td></tr>
+                <tr><td style="font-family:var(--mono);font-size:11px;color:var(--text1)">Replicate</td><td><span class="uptime-cell uc-amber">96.1%</span></td><td><span class="uptime-cell uc-amber">97.0%</span></td><td><span class="uptime-cell uc-amber">95.3%</span></td></tr>
+                <tr><td style="font-family:var(--mono);font-size:11px;color:var(--text1)">xAI (Grok)</td><td><span class="uptime-cell uc-green">99.9%</span></td><td><span class="uptime-cell uc-green">99.8%</span></td><td><span class="uptime-cell uc-green">99.8%</span></td></tr>
+                <tr><td style="font-family:var(--mono);font-size:11px;color:var(--text1)">DeepSeek API</td><td><span class="uptime-cell uc-green">99.4%</span></td><td><span class="uptime-cell uc-amber">97.8%</span></td><td><span class="uptime-cell uc-green">99.1%</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div><!-- /view-uptime -->
+
+    <!-- ══ VIEW: SERVICE DETAIL ══ -->
+    <div class="view" id="view-svc-detail">
+      <div class="section-header">
+        <div class="section-title" id="svc-detail-breadcrumb">Services / —</div>
+        <button class="btn" onclick="navigate('overview')" style="font-size:11px" data-i18n="svc.back">← Overview</button>
+      </div>
+
+      <div class="svc-detail-header">
+        <div>
+          <div class="svc-detail-name" id="svc-detail-name">—</div>
+          <div class="svc-detail-provider" id="svc-detail-provider">—</div>
+          <a href="#" class="svc-detail-link" target="_blank" id="svc-detail-link"><span data-i18n="svc.link">↗ 공식 Status 페이지</span></a>
+        </div>
+        <span class="status-pill" id="svc-detail-badge" style="font-size:11px;padding:5px 12px">—</span>
+      </div>
+
+      <div class="svc-metrics-row">
+        <div class="stat-card blue">
+          <div class="stat-label">Latency</div>
+          <div class="stat-value" id="svc-lat">—</div>
+          <div class="stat-sub">현재</div>
+        </div>
+        <div class="stat-card green">
+          <div class="stat-label">Uptime</div>
+          <div class="stat-value" id="svc-uptime">—</div>
+          <div class="stat-sub">30일</div>
+        </div>
+        <div class="stat-card amber">
+          <div class="stat-label">Incidents</div>
+          <div class="stat-value" id="svc-inc">—</div>
+          <div class="stat-sub">30일</div>
+        </div>
+        <div class="stat-card" style="border-top-color:var(--text2)">
+          <div class="stat-label">Avg Recovery</div>
+          <div class="stat-value" id="svc-mttr" style="color:var(--text1)">—</div>
+          <div class="stat-sub">데이터 수집 중</div>
+        </div>
+      </div>
+
+      <div class="chart-panel" style="margin-bottom:10px">
+        <div class="chart-panel-header">
+          <div class="chart-panel-title"><div class="panel-dot" style="background:var(--blue)"></div>레이턴시 추이 — 최근 24시간</div>
+          <span style="font-family:var(--mono);font-size:9px;color:var(--text2)">더미 데이터</span>
+        </div>
+        <div class="chart-panel-body">
+          <div style="position:relative;height:160px"><canvas id="svcLatencyChart"></canvas></div>
+        </div>
+      </div>
+
+      <div class="bottom-row">
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><div class="panel-dot" style="background:var(--red)"></div>인시던트 히스토리</div>
+          </div>
+          <div class="panel-body">
+            <div class="incident-list" id="svc-incident-list"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title"><div class="panel-dot" style="background:var(--green)"></div>30일 상태 캘린더</div>
+            <span style="font-family:var(--mono);font-size:9px;color:var(--text2)"><span data-i18n="svc.cal.legend">● 정상 ● 경고 ● 장애</span></span>
+          </div>
+          <div class="panel-body">
+            <div class="heatmap-grid" id="svc-heatmap"></div>
+            <div class="heatmap-labels"><span>30일 전</span><span>오늘</span></div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /view-svc-detail -->
+
+    <!-- ══ VIEW: SETTINGS ══ -->
+    <div class="view" id="view-settings">
+      <div class="settings-wrap">
+
+        <!-- 일반 -->
+        <div class="settings-group">
+          <div class="settings-group-title" data-i18n="settings.general">일반</div>
+
+          <div class="settings-row">
+            <div>
+              <div class="settings-label" data-i18n="settings.theme">테마</div>
+              <div class="settings-desc" data-i18n="settings.theme.desc">대시보드 색상 모드를 선택합니다</div>
+            </div>
+            <div class="settings-ctrl">
+              <div class="seg">
+                <button class="seg-btn on" onclick="setTheme('dark',this)">Dark</button>
+                <button class="seg-btn" onclick="setTheme('light',this)">Light</button>
+                <button class="seg-btn" onclick="setTheme('system',this)">System</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <div>
+              <div class="settings-label" data-i18n="settings.lang">표시 언어</div>
+              <div class="settings-desc" data-i18n="settings.lang.desc">UI 언어를 선택합니다</div>
+            </div>
+            <div class="settings-ctrl">
+              <div class="seg">
+                <button class="seg-btn on" onclick="setLang('ko',this)">한국어</button>
+                <button class="seg-btn" onclick="setLang('en',this)">English</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <div>
+              <div class="settings-label" data-i18n="settings.period">조회 기간 기본값</div>
+              <div class="settings-desc" data-i18n="settings.period.desc">Incidents · Uptime 화면의 기본 표시 기간</div>
+            </div>
+            <div class="settings-ctrl">
+              <div class="seg">
+                <button class="seg-btn on" onclick="setSeg(this)">7일</button>
+                <button class="seg-btn" onclick="setSeg(this)">30일</button>
+                <button class="seg-btn" onclick="setSeg(this)">90일</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <div>
+              <div class="settings-label" data-i18n="settings.sla">SLA 기준선</div>
+              <div class="settings-desc" data-i18n="settings.sla.desc">Uptime 차트에 표시할 목표 가용성 기준값</div>
+            </div>
+            <div class="settings-ctrl" style="display:flex;align-items:center;gap:6px">
+              <input class="sla-input" type="number" value="99.9" min="90" max="100" step="0.1" id="sla-val" oninput="document.getElementById('sla-display').textContent=this.value+'%'">
+              <span id="sla-display" style="font-family:var(--mono);font-size:11px;color:var(--text2);width:38px">99.9%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 모니터링 대상 -->
+        <div class="settings-group">
+          <div class="settings-group-title" data-i18n="settings.monitoring">모니터링 대상 서비스</div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--text2);padding:8px 0 10px" data-i18n="settings.monitoring.desc">표시를 끄면 대시보드 카드에서 숨겨집니다</div>
+          <div class="svc-toggle-list">
+            <div class="svc-toggle-row"><div class="svc-toggle-info"><div class="svc-toggle-dot" style="background:var(--green)"></div><span class="svc-toggle-name">Claude API</span><span class="svc-toggle-uptime">99.1%</span></div><label class="toggle-wrap"><input type="checkbox" checked onchange="toggleSvc('claude',this)"><span class="toggle-slider"></span></label></div>
+            <div class="svc-toggle-row"><div class="svc-toggle-info"><div class="svc-toggle-dot" style="background:var(--amber)"></div><span class="svc-toggle-name">OpenAI API</span><span class="svc-toggle-uptime">97.8%</span></div><label class="toggle-wrap"><input type="checkbox" checked onchange="toggleSvc('openai',this)"><span class="toggle-slider"></span></label></div>
+            <div class="svc-toggle-row"><div class="svc-toggle-info"><div class="svc-toggle-dot" style="background:var(--green)"></div><span class="svc-toggle-name">Gemini API</span><span class="svc-toggle-uptime">99.5%</span></div><label class="toggle-wrap"><input type="checkbox" checked onchange="toggleSvc('gemini',this)"><span class="toggle-slider"></span></label></div>
+            <div class="svc-toggle-row"><div class="svc-toggle-info"><div class="svc-toggle-dot" style="background:var(--green)"></div><span class="svc-toggle-name">Mistral API</span><span class="svc-toggle-uptime">98.9%</span></div><label class="toggle-wrap"><input type="checkbox" checked onchange="toggleSvc('mistral',this)"><span class="toggle-slider"></span></label></div>
+            <div class="svc-toggle-row"><div class="svc-toggle-info"><div class="svc-toggle-dot" style="background:var(--green)"></div><span class="svc-toggle-name">Cohere API</span><span class="svc-toggle-uptime">99.2%</span></div><label class="toggle-wrap"><input type="checkbox" checked onchange="toggleSvc('cohere',this)"><span class="toggle-slider"></span></label></div>
+            <div class="svc-toggle-row"><div class="svc-toggle-info"><div class="svc-toggle-dot" style="background:var(--green)"></div><span class="svc-toggle-name">Groq Cloud</span><span class="svc-toggle-uptime">99.7%</span></div><label class="toggle-wrap"><input type="checkbox" checked onchange="toggleSvc('groq',this)"><span class="toggle-slider"></span></label></div>
+            <div class="svc-toggle-row"><div class="svc-toggle-info"><div class="svc-toggle-dot" style="background:var(--green)"></div><span class="svc-toggle-name">Together AI</span><span class="svc-toggle-uptime">99.0%</span></div><label class="toggle-wrap"><input type="checkbox" checked onchange="toggleSvc('together',this)"><span class="toggle-slider"></span></label></div>
+            <div class="svc-toggle-row"><div class="svc-toggle-info"><div class="svc-toggle-dot" style="background:var(--green)"></div><span class="svc-toggle-name">Perplexity API</span><span class="svc-toggle-uptime">98.6%</span></div><label class="toggle-wrap"><input type="checkbox" checked onchange="toggleSvc('perplexity',this)"><span class="toggle-slider"></span></label></div>
+            <div class="svc-toggle-row"><div class="svc-toggle-info"><div class="svc-toggle-dot" style="background:var(--green)"></div><span class="svc-toggle-name">Hugging Face</span><span class="svc-toggle-uptime">98.1%</span></div><label class="toggle-wrap"><input type="checkbox" checked onchange="toggleSvc('huggingface',this)"><span class="toggle-slider"></span></label></div>
+            <div class="svc-toggle-row"><div class="svc-toggle-info"><div class="svc-toggle-dot" style="background:var(--amber)"></div><span class="svc-toggle-name">Replicate</span><span class="svc-toggle-uptime">95.3%</span></div><label class="toggle-wrap"><input type="checkbox" checked onchange="toggleSvc('replicate',this)"><span class="toggle-slider"></span></label></div>
+            <div class="svc-toggle-row"><div class="svc-toggle-info"><div class="svc-toggle-dot" style="background:var(--amber)"></div><span class="svc-toggle-name">ElevenLabs</span><span class="svc-toggle-uptime">97.5%</span></div><label class="toggle-wrap"><input type="checkbox" checked onchange="toggleSvc('elevenlabs',this)"><span class="toggle-slider"></span></label></div>
+            <div class="svc-toggle-row"><div class="svc-toggle-info"><div class="svc-toggle-dot" style="background:var(--green)"></div><span class="svc-toggle-name">xAI (Grok)</span><span class="svc-toggle-uptime">99.8%</span></div><label class="toggle-wrap"><input type="checkbox" checked onchange="toggleSvc('xai',this)"><span class="toggle-slider"></span></label></div>
+            <div class="svc-toggle-row"><div class="svc-toggle-info"><div class="svc-toggle-dot" style="background:var(--green)"></div><span class="svc-toggle-name">DeepSeek API</span><span class="svc-toggle-uptime">99.1%</span></div><label class="toggle-wrap"><input type="checkbox" checked onchange="toggleSvc('deepseek',this)"><span class="toggle-slider"></span></label></div>
+          </div>
+        </div>
+
+        <!-- 알림 (준비 중) -->
+        <div class="settings-group">
+          <div class="settings-group-title" style="display:flex;align-items:center;gap:8px">
+            <span data-i18n="settings.alerts">알림</span>
+            <span class="coming-badge" data-i18n="settings.coming">준비 중</span>
+          </div>
+          <div class="settings-locked">
+            <div class="settings-row">
+              <div>
+                <div class="settings-label" data-i18n="settings.slack">Slack Webhook URL</div>
+                <div class="settings-desc" data-i18n="settings.slack.desc">이상 감지 시 알림을 받을 Slack 채널 주소</div>
+              </div>
+              <div class="settings-ctrl">
+                <input class="settings-text-input" type="text" placeholder="https://hooks.slack.com/services/..." disabled>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div>
+                <div class="settings-label" data-i18n="settings.condition">알림 조건</div>
+                <div class="settings-desc" data-i18n="settings.condition.desc">어떤 상태 변화에서 알림을 받을지 선택합니다</div>
+              </div>
+              <div class="settings-ctrl">
+                <div class="seg">
+                  <button class="seg-btn on">Degraded</button>
+                  <button class="seg-btn">Down만</button>
+                  <button class="seg-btn">둘 다</button>
+                </div>
+              </div>
+            </div>
+            <div class="settings-row" style="border-bottom:none">
+              <div>
+                <div class="settings-label" data-i18n="settings.target">알림 대상</div>
+                <div class="settings-desc" data-i18n="settings.target.desc">알림을 받을 서비스를 선택합니다</div>
+              </div>
+              <div class="settings-ctrl">
+                <div class="seg">
+                  <button class="seg-btn on">전체</button>
+                  <button class="seg-btn">선택</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 저장 -->
+        <div style="display:flex;justify-content:flex-end;padding-top:4px;padding-bottom:24px">
+          <button class="save-btn" onclick="saveSettings()" data-i18n="settings.save">설정 저장</button>
+        </div>
+
+      </div>
+    </div><!-- /view-settings -->
+
+    <!-- ── FOOTER ── -->
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <div class="footer-left">
+          <span class="footer-logo">AI<span>Watch</span></span>
+          <span class="footer-copy">© 2026 AIWatch. All rights reserved.</span>
+        </div>
+        <nav class="footer-links">
+          <a href="#" onclick="openModal('privacy')" class="footer-link" data-i18n="footer.privacy">개인정보처리방침</a>
+          <span class="footer-divider">·</span>
+          <a href="#" onclick="openModal('terms')" class="footer-link" data-i18n="footer.terms">서비스 이용약관</a>
+          <span class="footer-divider">·</span>
+          <a href="mailto:contact@aiwatch.dev" class="footer-link" data-i18n="footer.contact">contact@aiwatch.dev</a>
+        </nav>
+      </div>
+    </footer>
+
+  </main>
+</div>
+
+<!-- ── MODAL ── -->
+<div id="modal-overlay" onclick="closeModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:300;overflow-y:auto;padding:40px 20px"></div>
+<div id="modal-box" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(600px,90vw);max-height:80vh;overflow-y:auto;background:var(--bg1);border:1px solid var(--border-hi);border-radius:12px;z-index:301">
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 20px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg1)">
+    <span id="modal-title" style="font-size:14px;font-weight:500;color:var(--text0)"></span>
+    <button onclick="closeModal()" style="background:transparent;border:none;color:var(--text1);cursor:pointer;font-size:18px;line-height:1;padding:2px 6px">✕</button>
+  </div>
+  <div id="modal-body" style="padding:20px;font-size:13px;color:var(--text1);line-height:1.8"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+// ── DATA ──
+const SVC_DATA = {
+  claude:     { name:'Claude API',   provider:'Anthropic',  status:'ok',   lat:'145ms', uptime:'99.1%', inc:3,  link:'https://status.anthropic.com',      color:'#3fb950' },
+  openai:     { name:'OpenAI API',   provider:'OpenAI',     status:'warn', lat:'312ms', uptime:'97.8%', inc:5,  link:'https://status.openai.com',          color:'#d29922' },
+  gemini:     { name:'Gemini API',   provider:'Google',     status:'ok',   lat:'198ms', uptime:'99.5%', inc:1,  link:'https://status.cloud.google.com',    color:'#3fb950' },
+  mistral:    { name:'Mistral API',  provider:'Mistral AI', status:'ok',   lat:'220ms', uptime:'98.9%', inc:1,  link:'https://status.mistral.ai',          color:'#3fb950' },
+  cohere:     { name:'Cohere API',   provider:'Cohere',     status:'ok',   lat:'180ms', uptime:'99.2%', inc:0,  link:'https://status.cohere.com',          color:'#3fb950' },
+  groq:       { name:'Groq Cloud',   provider:'Groq',       status:'ok',   lat:'89ms',  uptime:'99.7%', inc:0,  link:'https://groqstatus.com',             color:'#3fb950' },
+  together:   { name:'Together AI',  provider:'Together',   status:'ok',   lat:'175ms', uptime:'99.0%', inc:1,  link:'https://status.together.ai',         color:'#3fb950' },
+  perplexity: { name:'Perplexity API',provider:'Perplexity',status:'ok',   lat:'230ms', uptime:'98.6%', inc:1,  link:'https://status.perplexity.ai',       color:'#3fb950' },
+  huggingface:{ name:'Hugging Face', provider:'HuggingFace',status:'ok',   lat:'260ms', uptime:'98.1%', inc:2,  link:'https://status.huggingface.co',      color:'#3fb950' },
+  replicate:  { name:'Replicate',    provider:'Replicate',  status:'warn', lat:'540ms', uptime:'95.3%', inc:4,  link:'https://status.replicate.com',       color:'#d29922' },
+  elevenlabs: { name:'ElevenLabs',   provider:'ElevenLabs', status:'ok',   lat:'310ms', uptime:'97.5%', inc:2,  link:'https://status.elevenlabs.io',       color:'#d29922' },
+  xai:        { name:'xAI (Grok)',   provider:'xAI',        status:'ok',   lat:'162ms', uptime:'99.8%', inc:0,  link:'https://status.x.ai',                color:'#3fb950' },
+  deepseek:   { name:'DeepSeek API', provider:'DeepSeek',   status:'ok',   lat:'210ms', uptime:'99.1%', inc:3,  link:'https://status.deepseek.com',        color:'#3fb950' },
+};
+
+const INC_DATA = [
+  { title:'Elevated Error Rate', svc:'OpenAI API', time:'03/18 07:29', dur:'2h 16m', status:'resolved',
+    timeline:[
+      { s:'investigating', text:'오류율 증가가 감지되었습니다. 조사 중입니다.', time:'03/18 07:29 UTC' },
+      { s:'identified',    text:'모델 추론 레이어에서 문제가 확인되었습니다. 수정 작업 중입니다.', time:'03/18 08:10 UTC' },
+      { s:'monitoring',    text:'수정을 적용했습니다. 결과를 모니터링 중입니다.', time:'03/18 09:12 UTC' },
+      { s:'resolved',      text:'서비스가 정상화되었습니다.', time:'03/18 09:45 UTC' },
+    ]},
+  { title:'High Latency', svc:'Replicate', time:'03/17 19:47', dur:'모니터링', status:'monitoring',
+    timeline:[
+      { s:'investigating', text:'P99 레이턴시가 정상 수준(200ms)의 2배 이상으로 증가했습니다.', time:'03/17 19:47 UTC' },
+      { s:'monitoring',    text:'부분적인 완화 조치를 적용했습니다. 계속 모니터링 중입니다.', time:'03/17 21:30 UTC' },
+    ]},
+  { title:'Elevated Errors on Sonnet', svc:'Claude API', time:'03/16 14:02', dur:'38m', status:'resolved',
+    timeline:[
+      { s:'investigating', text:'Claude Sonnet에서 오류율 증가가 감지되었습니다.', time:'03/16 14:02 UTC' },
+      { s:'resolved',      text:'38분 만에 정상화되었습니다.', time:'03/16 14:40 UTC' },
+    ]},
+  { title:'Elevated Errors on Opus', svc:'Claude API', time:'03/13 18:37', dur:'1h 42m', status:'resolved',
+    timeline:[
+      { s:'investigating', text:'Claude Opus에서 오류율 증가가 감지되었습니다.', time:'03/13 18:37 UTC' },
+      { s:'identified',    text:'API 게이트웨이 레이어 문제로 확인되었습니다.', time:'03/13 19:05 UTC' },
+      { s:'resolved',      text:'1시간 42분 만에 정상화되었습니다.', time:'03/13 20:19 UTC' },
+    ]},
+  { title:'Elevated Errors — Sonnet & claude.ai', svc:'Claude API', time:'03/12 16:07', dur:'6m', status:'resolved',
+    timeline:[
+      { s:'investigating', text:'Sonnet 및 claude.ai에서 동시에 오류율 증가가 감지되었습니다.', time:'03/12 16:07 UTC' },
+      { s:'resolved',      text:'6분 만에 빠르게 정상화되었습니다.', time:'03/12 16:13 UTC' },
+    ]},
+  { title:'Login Issues & Slow Performance', svc:'Claude API', time:'03/11 14:44', dur:'2h 44m', status:'resolved',
+    timeline:[
+      { s:'investigating', text:'로그인 실패 및 전반적인 성능 저하가 보고되고 있습니다.', time:'03/11 14:44 UTC' },
+      { s:'identified',    text:'인증 서버 과부하로 원인이 파악되었습니다.', time:'03/11 15:27 UTC' },
+      { s:'monitoring',    text:'수정을 적용했습니다. 모니터링 중입니다.', time:'03/11 17:22 UTC' },
+      { s:'resolved',      text:'서비스가 완전히 정상화되었습니다.', time:'03/11 17:28 UTC' },
+    ]},
+  { title:'Scheduled Tasks Infinite Loop', svc:'Claude API', time:'03/08 17:57', dur:'1h 55m', status:'resolved',
+    timeline:[
+      { s:'investigating', text:'DST 전환으로 인한 예약 작업 무한루프 문제가 발생했습니다.', time:'03/08 17:57 UTC' },
+      { s:'identified',    text:'DST "skipped hour" 처리 버그로 확인. v1.1.5749 패치 준비 중입니다.', time:'03/08 18:27 UTC' },
+      { s:'resolved',      text:'v1.1.5749 업데이트로 해결되었습니다.', time:'03/08 19:52 UTC' },
+    ]},
+];
+
+// ── NAVIGATION ──
+const VIEWS = ['overview','latency','incidents','uptime','svc-detail','settings'];
+const NAV_IDS = ['overview','latency','incidents','uptime','settings'];
+
+function navigate(view) {
+  VIEWS.forEach(v => {
+    const el = document.getElementById('view-' + (v === 'svc-detail' ? 'svc-detail' : v));
+    if (el) el.classList.toggle('active', v === view);
+  });
+  NAV_IDS.forEach(id => {
+    const nav = document.getElementById('nav-' + id);
+    if (nav) nav.classList.toggle('active', id === view);
+  });
+  const settingsBtn = document.getElementById('topbar-settings-btn');
+  if (settingsBtn) {
+    settingsBtn.classList.toggle('active', view === 'settings');
+    settingsBtn.style.color = view === 'settings' ? 'var(--green)' : '';
+    settingsBtn.style.borderColor = view === 'settings' ? 'var(--green)' : '';
+  }
+
+  document.getElementById('main-content').scrollTop = 0;
+  if (view === 'latency') initLatencyChart();
+  closeMobileNav();
+}
+
+function toggleMobileNav() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('mobile-nav-overlay');
+  const isOpen = sidebar.classList.contains('open');
+  sidebar.classList.toggle('open', !isOpen);
+  overlay.style.display = isOpen ? 'none' : 'block';
+}
+
+function closeMobileNav() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('mobile-nav-overlay');
+  sidebar.classList.remove('open');
+  overlay.style.display = 'none';
+}
+
+function navigateSvc(id) {
+  const d = SVC_DATA[id];
+  if (!d) return;
+  VIEWS.forEach(v => {
+    const el = document.getElementById('view-' + (v === 'svc-detail' ? 'svc-detail' : v));
+    if (el) el.classList.toggle('active', v === 'svc-detail');
+  });
+  NAV_IDS.forEach(navId => {
+    const nav = document.getElementById('nav-' + navId);
+    if (nav) nav.classList.remove('active');
+  });
+  // 서비스 사이드바 활성 표시
+  document.querySelectorAll('[id^="snav-"]').forEach(el => el.classList.remove('active'));
+  const snavEl = document.getElementById('snav-' + id);
+  if (snavEl) snavEl.classList.add('active');
+  document.getElementById('svc-detail-breadcrumb').textContent = 'Services / ' + d.name;
+  document.getElementById('svc-detail-name').textContent = d.name;
+  document.getElementById('svc-detail-provider').textContent = d.provider;
+  document.getElementById('svc-detail-link').href = d.link;
+  document.getElementById('svc-lat').textContent = d.lat;
+  document.getElementById('svc-lat').style.color = d.color;
+  document.getElementById('svc-uptime').textContent = d.uptime;
+  document.getElementById('svc-inc').textContent = d.inc;
+  const badge = document.getElementById('svc-detail-badge');
+  badge.textContent = d.status === 'ok' ? 'Operational' : d.status === 'warn' ? 'Degraded' : 'Down';
+  badge.className = 'status-pill';
+  document.getElementById('main-content').scrollTop = 0;
+  renderSvcIncidents(id);
+  renderHeatmap(id);
+  initSvcLatencyChart(d);
+  closeMobileNav();
+}
+
+// ── INCIDENT DETAIL ──
+let activeIncRow = null;
+
+function showIncidentDetail(idx) {
+  const inc = INC_DATA[idx];
+  if (!inc) return;
+  if (activeIncRow !== null) {
+    const prev = document.getElementById('inc-row-' + activeIncRow);
+    if (prev) prev.classList.remove('active-row');
+  }
+  activeIncRow = idx;
+  const row = document.getElementById('inc-row-' + idx);
+  if (row) row.classList.add('active-row');
+  document.getElementById('detail-title').textContent = inc.svc + ' — ' + inc.title;
+  document.getElementById('detail-meta').textContent = inc.time + '  ·  지속: ' + inc.dur;
+  const tl = document.getElementById('detail-timeline');
+  tl.innerHTML = inc.timeline.map((item, i) => {
+    const isLast = i === inc.timeline.length - 1;
+    return `<div class="tl-item">
+      <div class="tl-line-wrap">
+        <div class="tl-dot ${item.s}"></div>
+        ${!isLast ? '<div class="tl-vline"></div>' : ''}
+      </div>
+      <div class="tl-content">
+        <div class="tl-status ${item.s}">${{investigating:'조사 중',identified:'원인 파악',monitoring:'모니터링',resolved:'해결'}[item.s]}</div>
+        <div class="tl-text">${item.text}</div>
+        <div class="tl-time">${item.time}</div>
+      </div>
+    </div>`;
+  }).join('');
+  const detail = document.getElementById('incident-detail');
+  detail.style.display = 'block';
+  setTimeout(() => detail.scrollIntoView({ behavior:'smooth', block:'nearest' }), 50);
+}
+
+function closeDetail() {
+  document.getElementById('incident-detail').style.display = 'none';
+  if (activeIncRow !== null) {
+    const row = document.getElementById('inc-row-' + activeIncRow);
+    if (row) row.classList.remove('active-row');
+    activeIncRow = null;
+  }
+}
+
+// ── SERVICE INCIDENTS ──
+function renderSvcIncidents(svcId) {
+  const svcName = SVC_DATA[svcId]?.name;
+  const filtered = INC_DATA.filter(i => i.svc === svcName);
+  const el = document.getElementById('svc-incident-list');
+  if (!filtered.length) { el.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--text2);padding:8px 0">인시던트 없음</div>'; return; }
+  el.innerHTML = filtered.map(i => `
+    <div class="incident-item" style="margin-bottom:10px">
+      <div class="inc-time" style="width:auto;padding-top:1px;min-width:80px">${i.time}</div>
+      <div class="inc-bar ${i.status === 'ongoing' ? 'down' : i.status === 'monitoring' ? 'warn' : 'ok'}"></div>
+      <div class="inc-content">
+        <div class="inc-title">${i.title}</div>
+        <div class="inc-detail">${i.dur}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ── HEATMAP ──
+function renderHeatmap(svcId) {
+  const patterns = {
+    claude:    [1,1,1,1,1,1,1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,1,2,1,1,1,2,1,1,1],
+    openai:    [1,1,2,1,1,1,1,1,2,2,1,1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,1,1,2,1],
+    gemini:    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    xai:        Array(30).fill(1),
+    deepseek:   [1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,1,2,1,1,1],
+  };
+  const pat = patterns[svcId] || Array(30).fill(1);
+  const el = document.getElementById('svc-heatmap');
+  el.innerHTML = pat.map(v => {
+    const cls = v === 1 ? 'heat-ok' : v === 2 ? 'heat-warn' : 'heat-down';
+    return `<div class="heat-cell ${cls}" title="${v===1?'정상':v===2?'경고':'장애'}"></div>`;
+  }).join('');
+}
+
+// ── CHARTS ──
+let latencyChartInst = null;
+let svcLatencyChartInst = null;
+
+function genDummyLatency(base) {
+  return Array.from({length:24}, (_, i) => Math.round(base + (Math.random()-0.5)*base*0.3 + Math.sin(i/3)*base*0.1));
+}
+
+function initLatencyChart() {
+  if (latencyChartInst) return;
+  const ctx = document.getElementById('latencyChart');
+  if (!ctx) return;
+  const hours = Array.from({length:24}, (_,i) => `${String(i).padStart(2,'0')}:00`);
+  const datasets = [
+    { label:'Groq',   data:genDummyLatency(89),  borderColor:'#3fb950', tension:.4, pointRadius:0, borderWidth:1.5 },
+    { label:'Claude', data:genDummyLatency(145), borderColor:'#58a6ff', tension:.4, pointRadius:0, borderWidth:1.5 },
+    { label:'OpenAI', data:genDummyLatency(312), borderColor:'#d29922', tension:.4, pointRadius:0, borderWidth:1.5 },
+    { label:'Replicate', data:genDummyLatency(540), borderColor:'#f85149', tension:.4, pointRadius:0, borderWidth:1.5 },
+  ];
+  latencyChartInst = new Chart(ctx, {
+    type:'line',
+    data:{ labels:hours, datasets },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:false } },
+      scales:{
+        x:{ grid:{ color:'rgba(255,255,255,0.05)' }, ticks:{ color:'#484f58', font:{size:10}, maxTicksLimit:8 } },
+        y:{ grid:{ color:'rgba(255,255,255,0.05)' }, ticks:{ color:'#484f58', font:{size:10}, callback:v=>v+'ms' } }
+      }
+    }
+  });
+  const legend = document.getElementById('latency-legend');
+  if (legend) {
+    legend.innerHTML = datasets.map(d =>
+      `<div class="line-legend-item"><div class="line-legend-dot" style="background:${d.borderColor}"></div>${d.label}</div>`
+    ).join('');
+  }
+}
+
+function initSvcLatencyChart(svcData) {
+  if (svcLatencyChartInst) { svcLatencyChartInst.destroy(); svcLatencyChartInst = null; }
+  const ctx = document.getElementById('svcLatencyChart');
+  if (!ctx) return;
+  const baseMs = parseInt(svcData.lat) || 200;
+  const hours = Array.from({length:24}, (_,i) => `${String(i).padStart(2,'0')}:00`);
+  svcLatencyChartInst = new Chart(ctx, {
+    type:'line',
+    data:{
+      labels:hours,
+      datasets:[{
+        label:'Latency',
+        data: genDummyLatency(baseMs),
+        borderColor: svcData.color,
+        backgroundColor: svcData.color + '18',
+        fill:true, tension:.4, pointRadius:0, borderWidth:1.5
+      }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ display:false } },
+      scales:{
+        x:{ grid:{ color:'rgba(255,255,255,0.05)' }, ticks:{ color:'#484f58', font:{size:10}, maxTicksLimit:8 } },
+        y:{ grid:{ color:'rgba(255,255,255,0.05)' }, ticks:{ color:'#484f58', font:{size:10}, callback:v=>v+'ms' } }
+      }
+    }
+  });
+}
+
+// ── I18N ──
+const STRINGS = {
+  ko: {
+    'nav.overview': 'Overview', 'nav.latency': 'Latency',
+    'nav.incidents': 'Incidents', 'nav.uptime': 'Uptime Report',
+    'nav.services': 'Services', 'nav.version': 'aiwatch.dev · v1.0',
+    'ticker.label': 'LIVE STATUS',
+    'topbar.refresh': '↻ Refresh', 'topbar.analyze': 'Analyze ↗',
+    'topbar.loading': '↻ 로딩 중...',
+    'summary.operational': 'Operational', 'summary.degraded': 'Degraded',
+    'summary.down': 'Down', 'summary.uptime': 'Avg Uptime',
+    'summary.running': 'services running', 'summary.affected': 'partially affected',
+    'summary.avg': '30-day average',
+    'section.services': 'Services',
+    'filter.all': 'All', 'filter.operational': 'Operational', 'filter.issues': 'Issues',
+    'card.latency': 'latency', 'card.uptime': 'uptime', 'card.incidents': 'incidents',
+    'empty.issues.title': '현재 이슈 없음',
+    'empty.issues.desc': '모든 서비스가 정상 운영 중입니다',
+    'empty.issues.action': '전체 보기',
+    'empty.error.title': '상태를 불러올 수 없습니다',
+    'empty.error.desc': '네트워크 오류가 발생했습니다',
+    'empty.error.action': '↻ 다시 시도',
+    'incidents.title': 'Incidents', 'incidents.period': '최근 7일',
+    'incidents.filter.all': '모든 서비스', 'incidents.filter.status': '모든 상태',
+    'incidents.col.time': '시각', 'incidents.col.title': '내용',
+    'incidents.col.svc': '서비스', 'incidents.col.dur': '지속시간', 'incidents.col.status': '상태',
+    'latency.title': 'Latency', 'latency.subtitle': '현재 기준 · ms',
+    'latency.fastest': 'Fastest', 'latency.avg': 'Average', 'latency.slowest': 'Slowest',
+    'latency.rank': '현재 응답속도 순위', 'latency.trend': '시간대별 추이 — 최근 24시간',
+    'latency.dummy': '더미 데이터 · 수집 후 실제 데이터로 전환',
+    'uptime.title': 'Uptime Report', 'uptime.period': '30일 기준',
+    'uptime.stable': 'Most Stable', 'uptime.avg': 'Avg Uptime', 'uptime.issues': 'Most Issues',
+    'uptime.rank': '업타임 순위', 'uptime.matrix': '월별 가용성', 'uptime.matrix.period': '최근 3개월',
+    'settings.title': 'Settings',
+    'settings.general': '일반', 'settings.theme': '테마', 'settings.theme.desc': '대시보드 색상 모드를 선택합니다',
+    'settings.lang': '표시 언어', 'settings.lang.desc': 'UI 언어를 선택합니다',
+    'settings.period': '조회 기간 기본값', 'settings.period.desc': 'Incidents · Uptime 화면의 기본 표시 기간',
+    'settings.sla': 'SLA 기준선', 'settings.sla.desc': 'Uptime 차트에 표시할 목표 가용성 기준값',
+    'settings.monitoring': '모니터링 대상 서비스', 'settings.monitoring.desc': '표시를 끄면 대시보드 카드에서 숨겨집니다',
+    'settings.alerts': '알림', 'settings.coming': '준비 중',
+    'settings.slack': 'Slack Webhook URL', 'settings.slack.desc': '이상 감지 시 알림을 받을 Slack 채널 주소',
+    'settings.condition': '알림 조건', 'settings.condition.desc': '어떤 상태 변화에서 알림을 받을지 선택합니다',
+    'settings.target': '알림 대상', 'settings.target.desc': '알림을 받을 서비스를 선택합니다',
+    'settings.save': '설정 저장', 'settings.saved': '저장됨 ✓',
+    'status.operational': 'Operational', 'status.degraded': 'Degraded', 'status.down': 'Down',
+    'mobile.refresh': '↻ 새로고침',
+    'refresh.suffix': '새로고침',
+    'detail.close': '✕ 닫기',
+    'svc.back': '← Overview', 'svc.link': '<span data-i18n="svc.link">↗ 공식 Status 페이지</span>',
+    'svc.lat': '현재', 'svc.uptime30': '30일', 'svc.inc30': '30일', 'svc.mttr': '데이터 수집 중',
+    'svc.latency.title': '레이턴시 추이 — 최근 24시간', 'svc.latency.dummy': '더미 데이터',
+    'svc.inc.title': '인시던트 히스토리', 'svc.cal.title': '30일 상태 캘린더',
+    'svc.cal.legend': '<span data-i18n="svc.cal.legend">● 정상 ● 경고 ● 장애</span>', 'svc.no.incident': '인시던트 없음',
+    'sla.ref': '— 99.9% SLA',
+    'footer.privacy': '개인정보처리방침',
+    'footer.terms': '서비스 이용약관',
+    'footer.contact': 'contact@aiwatch.dev',
+  },
+  en: {
+    'nav.overview': 'Overview', 'nav.latency': 'Latency',
+    'nav.incidents': 'Incidents', 'nav.uptime': 'Uptime Report',
+    'nav.services': 'Services', 'nav.version': 'aiwatch.dev · v1.0',
+    'ticker.label': 'LIVE STATUS',
+    'topbar.refresh': '↻ Refresh', 'topbar.analyze': 'Analyze ↗',
+    'topbar.loading': '↻ Loading...',
+    'summary.operational': 'Operational', 'summary.degraded': 'Degraded',
+    'summary.down': 'Down', 'summary.uptime': 'Avg Uptime',
+    'summary.running': 'services running', 'summary.affected': 'partially affected',
+    'summary.avg': '30-day average',
+    'section.services': 'Services',
+    'filter.all': 'All', 'filter.operational': 'Operational', 'filter.issues': 'Issues',
+    'card.latency': 'latency', 'card.uptime': 'uptime', 'card.incidents': 'incidents',
+    'empty.issues.title': 'No Issues',
+    'empty.issues.desc': 'All services are running normally',
+    'empty.issues.action': 'View all',
+    'empty.error.title': 'Failed to load status',
+    'empty.error.desc': 'A network error occurred',
+    'empty.error.action': '↻ Retry',
+    'incidents.title': 'Incidents', 'incidents.period': 'Last 7 days',
+    'incidents.filter.all': 'All services', 'incidents.filter.status': 'All statuses',
+    'incidents.col.time': 'Time', 'incidents.col.title': 'Description',
+    'incidents.col.svc': 'Service', 'incidents.col.dur': 'Duration', 'incidents.col.status': 'Status',
+    'latency.title': 'Latency', 'latency.subtitle': 'Current · ms',
+    'latency.fastest': 'Fastest', 'latency.avg': 'Average', 'latency.slowest': 'Slowest',
+    'latency.rank': 'Current response time ranking', 'latency.trend': '24-hour trend',
+    'latency.dummy': 'Dummy data · will be replaced after collection',
+    'uptime.title': 'Uptime Report', 'uptime.period': '30-day basis',
+    'uptime.stable': 'Most Stable', 'uptime.avg': 'Avg Uptime', 'uptime.issues': 'Most Issues',
+    'uptime.rank': 'Uptime ranking', 'uptime.matrix': 'Monthly availability', 'uptime.matrix.period': 'Last 3 months',
+    'settings.title': 'Settings',
+    'settings.general': 'General', 'settings.theme': 'Theme', 'settings.theme.desc': 'Choose dashboard color mode',
+    'settings.lang': 'Language', 'settings.lang.desc': 'Select UI language',
+    'settings.period': 'Default period', 'settings.period.desc': 'Default date range for Incidents · Uptime',
+    'settings.sla': 'SLA target', 'settings.sla.desc': 'Target availability shown on Uptime chart',
+    'settings.monitoring': 'Monitored services', 'settings.monitoring.desc': 'Hidden services are removed from the dashboard',
+    'settings.alerts': 'Alerts', 'settings.coming': 'Coming soon',
+    'settings.slack': 'Slack Webhook URL', 'settings.slack.desc': 'Slack channel to receive alerts',
+    'settings.condition': 'Alert condition', 'settings.condition.desc': 'Choose which status changes trigger alerts',
+    'settings.target': 'Alert targets', 'settings.target.desc': 'Select which services send alerts',
+    'settings.save': 'Save settings', 'settings.saved': 'Saved ✓',
+    'status.operational': 'Operational', 'status.degraded': 'Degraded', 'status.down': 'Down',
+    'mobile.refresh': '↻ Refresh',
+    'refresh.suffix': 'Refreshed',
+    'detail.close': '✕ Close',
+    'svc.back': '← Overview', 'svc.link': '↗ Official Status Page',
+    'svc.lat': 'Current', 'svc.uptime30': '30-day', 'svc.inc30': '30-day', 'svc.mttr': 'Collecting data',
+    'svc.latency.title': 'Latency trend — last 24h', 'svc.latency.dummy': 'Dummy data',
+    'svc.inc.title': 'Incident history', 'svc.cal.title': '30-day status calendar',
+    'svc.cal.legend': '● OK ● Warn ● Down', 'svc.no.incident': 'No incidents',
+    'sla.ref': '— 99.9% SLA',
+    'footer.privacy': 'Privacy Policy',
+    'footer.terms': 'Terms of Service',
+    'footer.contact': 'contact@aiwatch.dev',
+  }
+};
+
+let currentLang = 'ko';
+
+function t(key) {
+  return STRINGS[currentLang][key] || STRINGS['ko'][key] || key;
+}
+
+function applyLang() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    const val = t(key);
+    if (val) el.textContent = val;
+  });
+
+  // Refresh 버튼 — 데스크탑 + 모바일 동일 텍스트
+  const refreshText = t('topbar.refresh');
+  const refreshBtn = document.getElementById('refresh-btn');
+  if (refreshBtn) refreshBtn.textContent = refreshText;
+  const refreshBtnMobile = document.getElementById('refresh-btn-mobile');
+  if (refreshBtnMobile) refreshBtnMobile.textContent = refreshText;
+
+  // 시각 표시 갱신
+  const updateEl = document.getElementById('update-time');
+  const mobileEl = document.getElementById('update-time-mobile');
+  const timeStr = getTimeStr();
+  if (updateEl && updateEl.textContent !== 'LIVE · —') {
+    updateEl.textContent = 'LIVE · ' + timeStr + ' ' + t('refresh.suffix');
+  }
+  if (mobileEl && mobileEl.textContent !== 'LIVE') {
+    mobileEl.textContent = 'LIVE · ' + timeStr + ' ' + t('refresh.suffix');
+  }
+
+  // Slack placeholder
+  const slackInput = document.querySelector('.settings-text-input');
+  if (slackInput) slackInput.placeholder =
+    currentLang === 'en' ? 'https://hooks.slack.com/services/...' : 'https://hooks.slack.com/services/...';
+
+  // html lang attribute
+  document.documentElement.lang = currentLang;
+
+  // Save button (data-i18n으로 처리되지만 동적 상태일 수 있으므로 재적용)
+  const saveBtn = document.querySelector('.save-btn');
+  if (saveBtn && saveBtn.textContent !== t('settings.saved')) {
+    saveBtn.textContent = t('settings.save');
+  }
+}
+
+function setLang(lang, btn) {
+  setSeg(btn);
+  currentLang = lang;
+  applyLang();
+}
+
+// ── THEME ──
+let currentTheme = 'dark';
+
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme === 'light') {
+    root.style.setProperty('--bg0', '#f6f8fa');
+    root.style.setProperty('--bg1', '#ffffff');
+    root.style.setProperty('--bg2', '#f0f2f5');
+    root.style.setProperty('--bg3', '#e8eaed');
+    root.style.setProperty('--bg4', '#dde0e4');
+    root.style.setProperty('--border', 'rgba(0,0,0,0.1)');
+    root.style.setProperty('--border-hi', 'rgba(0,0,0,0.18)');
+    root.style.setProperty('--text0', '#1a1a2e');
+    root.style.setProperty('--text1', '#4a5568');
+    root.style.setProperty('--text2', '#9aa0aa');
+    root.style.setProperty('--green-dim', '#dcf5e3');
+    root.style.setProperty('--amber-dim', '#fef3d0');
+    root.style.setProperty('--red-dim', '#fde8e8');
+    root.style.setProperty('--blue-dim', '#dbeafe');
+  } else {
+    root.style.setProperty('--bg0', '#080c10');
+    root.style.setProperty('--bg1', '#0d1117');
+    root.style.setProperty('--bg2', '#161b22');
+    root.style.setProperty('--bg3', '#1c2230');
+    root.style.setProperty('--bg4', '#242b38');
+    root.style.setProperty('--border', 'rgba(255,255,255,0.07)');
+    root.style.setProperty('--border-hi', 'rgba(255,255,255,0.14)');
+    root.style.setProperty('--text0', '#e6edf3');
+    root.style.setProperty('--text1', '#8b949e');
+    root.style.setProperty('--text2', '#484f58');
+    root.style.setProperty('--green-dim', '#1a3d22');
+    root.style.setProperty('--amber-dim', '#3d2e0a');
+    root.style.setProperty('--red-dim', '#3d1515');
+    root.style.setProperty('--blue-dim', '#0d2440');
+  }
+}
+
+function setTheme(theme, btn) {
+  setSeg(btn);
+  currentTheme = theme === 'system'
+    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : theme;
+  applyTheme(currentTheme);
+}
+
+function toggleSvc(id, checkbox) {
+  // Overview 카드 표시/숨김 연동
+  const card = document.querySelector(`.svc-card[data-id="${id}"]`);
+  if (card) card.style.display = checkbox.checked ? '' : 'none';
+  // 사이드바 항목도 연동
+  const snav = document.getElementById('snav-' + id);
+  if (snav) snav.style.display = checkbox.checked ? '' : 'none';
+}
+
+function setSeg(btn) {
+  const group = btn.closest('.seg');
+  group.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+}
+
+function saveSettings() {
+  const btn = document.querySelector('.save-btn');
+  btn.textContent = t('settings.saved');
+  btn.style.background = '#1D9E75';
+  setTimeout(() => {
+    btn.textContent = t('settings.save');
+    btn.style.background = '';
+  }, 1800);
+}
+
+// ── FOOTER / MODAL ──
+const MODAL_CONTENT = {
+  privacy: {
+    ko: {
+      title: '개인정보처리방침',
+      body: `<p style="color:var(--text2);font-family:var(--mono);font-size:10px;margin-bottom:16px">최종 수정일: 2026년 3월</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">1. 수집하는 정보</h3>
+<p style="margin-bottom:16px">AIWatch는 서비스 개선을 위해 Google Analytics 4(GA4)를 통해 다음 정보를 수집합니다.<br><br>
+· 페이지 방문 기록 및 체류 시간<br>
+· 버튼 클릭 이벤트 (Refresh, AI Analysis 등)<br>
+· 기기 종류, 브라우저, 운영체제<br>
+· 국가/지역 정보 (IP 익명화 적용)<br><br>
+개인을 식별할 수 있는 정보(이름, 이메일 등)는 수집하지 않습니다.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">2. 쿠키 사용</h3>
+<p style="margin-bottom:16px">GA4는 분석 목적으로 쿠키를 사용합니다. 브라우저 설정에서 쿠키를 비활성화할 수 있으며, 이 경우 일부 기능이 제한될 수 있습니다.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">3. 정보 보유 기간</h3>
+<p style="margin-bottom:16px">수집된 데이터는 GA4 설정에 따라 최대 2개월간 보관됩니다.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">4. 제3자 공유</h3>
+<p style="margin-bottom:16px">수집된 정보는 Google Analytics 서비스 운영 외의 목적으로 제3자에게 제공되지 않습니다.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">5. 문의</h3>
+<p>개인정보 처리에 관한 문의는 <a href="mailto:contact@aiwatch.dev" style="color:var(--blue)">contact@aiwatch.dev</a>로 연락해 주세요.</p>`
+    },
+    en: {
+      title: 'Privacy Policy',
+      body: `<p style="color:var(--text2);font-family:var(--mono);font-size:10px;margin-bottom:16px">Last updated: March 2026</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">1. Information We Collect</h3>
+<p style="margin-bottom:16px">AIWatch uses Google Analytics 4 (GA4) to collect the following information for service improvement.<br><br>
+· Page visit history and session duration<br>
+· Button click events (Refresh, AI Analysis, etc.)<br>
+· Device type, browser, and operating system<br>
+· Country/region (with IP anonymization)<br><br>
+We do not collect personally identifiable information such as names or email addresses.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">2. Cookies</h3>
+<p style="margin-bottom:16px">GA4 uses cookies for analytics purposes. You may disable cookies in your browser settings, though some features may be limited as a result.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">3. Data Retention</h3>
+<p style="margin-bottom:16px">Collected data is retained for up to 2 months per GA4 settings.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">4. Third-Party Sharing</h3>
+<p style="margin-bottom:16px">Collected information is not shared with third parties beyond what is required for Google Analytics operation.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">5. Contact</h3>
+<p>For privacy inquiries, please contact <a href="mailto:contact@aiwatch.dev" style="color:var(--blue)">contact@aiwatch.dev</a>.</p>`
+    }
+  },
+  terms: {
+    ko: {
+      title: '서비스 이용약관',
+      body: `<p style="color:var(--text2);font-family:var(--mono);font-size:10px;margin-bottom:16px">최종 수정일: 2026년 3월</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">1. 서비스 개요</h3>
+<p style="margin-bottom:16px">AIWatch는 주요 AI API 서비스의 상태를 모니터링하는 무료 대시보드입니다. 제공되는 모든 정보는 각 서비스의 공식 Status API를 기반으로 합니다.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">2. 정보의 정확성</h3>
+<p style="margin-bottom:16px">AIWatch는 정확한 정보 제공을 위해 노력하지만, 각 AI 서비스의 상태 정보는 해당 서비스 제공자의 공식 데이터에 의존합니다. 정보의 정확성이나 최신성을 보장하지 않으며, 이로 인한 손해에 대해 책임지지 않습니다.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">3. 서비스 가용성</h3>
+<p style="margin-bottom:16px">서비스는 사전 고지 없이 변경, 중단될 수 있습니다. 정기적인 유지보수로 인한 일시적 중단이 발생할 수 있습니다.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">4. 지적 재산권</h3>
+<p style="margin-bottom:16px">AIWatch의 디자인, 코드, 콘텐츠에 대한 모든 권리는 AIWatch에 귀속됩니다.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">5. 문의</h3>
+<p>이용약관에 관한 문의는 <a href="mailto:contact@aiwatch.dev" style="color:var(--blue)">contact@aiwatch.dev</a>로 연락해 주세요.</p>`
+    },
+    en: {
+      title: 'Terms of Service',
+      body: `<p style="color:var(--text2);font-family:var(--mono);font-size:10px;margin-bottom:16px">Last updated: March 2026</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">1. Service Overview</h3>
+<p style="margin-bottom:16px">AIWatch is a free dashboard for monitoring the status of major AI API services. All information provided is based on the official Status APIs of each service.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">2. Accuracy of Information</h3>
+<p style="margin-bottom:16px">While AIWatch strives to provide accurate information, status data depends on official data from each service provider. We do not guarantee the accuracy or timeliness of the information and are not liable for any damages arising from its use.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">3. Service Availability</h3>
+<p style="margin-bottom:16px">The service may be modified or discontinued without prior notice. Temporary interruptions may occur due to scheduled maintenance.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">4. Intellectual Property</h3>
+<p style="margin-bottom:16px">All rights to AIWatch's design, code, and content belong to AIWatch.</p>
+
+<h3 style="font-size:13px;font-weight:500;color:var(--text0);margin:0 0 8px">5. Contact</h3>
+<p>For inquiries regarding these terms, please contact <a href="mailto:contact@aiwatch.dev" style="color:var(--blue)">contact@aiwatch.dev</a>.</p>`
+    }
+  }
+};
+
+function openModal(type) {
+  const content = MODAL_CONTENT[type][currentLang] || MODAL_CONTENT[type]['ko'];
+  document.getElementById('modal-title').textContent = content.title;
+  document.getElementById('modal-body').innerHTML = content.body;
+  document.getElementById('modal-overlay').style.display = 'block';
+  document.getElementById('modal-box').style.display = 'block';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').style.display = 'none';
+  document.getElementById('modal-box').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+// ESC 키로 모달 닫기
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+function filterCards(mode, btn) {
+  document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+
+  const cards = document.querySelectorAll('.services-grid .svc-card');
+  let visibleCount = 0;
+  cards.forEach(card => {
+    const isOk = card.classList.contains('ok');
+    const isIssue = card.classList.contains('warn') || card.classList.contains('down');
+    let show = mode === 'all' || (mode === 'ok' && isOk) || (mode === 'issues' && isIssue);
+    card.style.display = show ? '' : 'none';
+    if (show) visibleCount++;
+  });
+
+  const emptyIssues = document.getElementById('empty-issues');
+  const grid = document.querySelector('.services-grid');
+  if (mode === 'issues' && visibleCount === 0) {
+    grid.style.display = 'none';
+    emptyIssues.style.display = 'block';
+    document.getElementById('empty-issues-time').textContent = getTimeStr() + ' 새로고침';
+  } else {
+    grid.style.display = '';
+    emptyIssues.style.display = 'none';
+  }
+}
+
+// ── AUTO LOAD ──
+function simulateLoad() {
+  const skeleton = document.getElementById('overview-skeleton');
+  const loaded = document.getElementById('overview-loaded');
+  const updateEl = document.getElementById('update-time');
+
+  skeleton.style.display = 'block';
+  loaded.style.display = 'none';
+
+  // 서비스별 순차 로딩 시뮬레이션 (빠른 서비스부터)
+  const cards = loaded.querySelectorAll('.svc-card');
+  cards.forEach(c => { c.style.opacity = '0'; c.style.transition = 'opacity .3s ease'; });
+
+  setTimeout(() => {
+    skeleton.style.display = 'none';
+    loaded.style.display = 'block';
+    const timeStr = getTimeStr();
+    updateEl.textContent = 'LIVE · ' + timeStr + ' ' + t('refresh.suffix');
+    document.getElementById('last-success-time').textContent = timeStr;
+    const mobileTime = document.getElementById('update-time-mobile');
+    if (mobileTime) mobileTime.textContent = 'LIVE · ' + timeStr + ' ' + t('refresh.suffix');
+
+    // 카드 순서대로 페이드인
+    cards.forEach((c, i) => {
+      setTimeout(() => { c.style.opacity = '1'; }, i * 80);
+    });
+  }, 1200);
+}
+
+// ── REFRESH ──
+function getTimeStr() {
+  const now = new Date();
+  return String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+}
+
+function doRefresh() {
+  const loadingText = currentLang === 'en' ? '↻ Loading...' : '↻ 로딩 중...';
+  const btn = document.getElementById('refresh-btn');
+  const btnM = document.getElementById('refresh-btn-mobile');
+  [btn, btnM].forEach(b => { if (b) { b.textContent = loadingText; b.disabled = true; } });
+  document.getElementById('overview-error').style.display = 'none';
+
+  if (document.getElementById('view-overview').classList.contains('active')) {
+    simulateLoad();
+  }
+
+  setTimeout(() => {
+    const refreshText = t('topbar.refresh');
+    [btn, btnM].forEach(b => { if (b) { b.textContent = refreshText; b.disabled = false; } });
+    const timeStr = getTimeStr();
+    const suffix = t('refresh.suffix');
+    document.getElementById('update-time').textContent = 'LIVE · ' + timeStr + ' ' + suffix;
+    const mobileTime = document.getElementById('update-time-mobile');
+    if (mobileTime) mobileTime.textContent = 'LIVE · ' + timeStr + ' ' + suffix;
+  }, 1200);
+}
+
+// ── INIT ──
+window.addEventListener('DOMContentLoaded', () => {
+  simulateLoad();
+});
+</script>
+</body>
+</html>

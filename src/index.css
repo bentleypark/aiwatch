@@ -14,6 +14,11 @@
   --amber: #d29922;
   --red: #f85149;
 
+  /* Status pill backgrounds (dark mode) */
+  --status-bg-green: #1a3d22;
+  --status-bg-amber: #3d2e0a;
+  --status-bg-red: #3d1515;
+
   /* Informational */
   --blue: #58a6ff;
   --teal: #39c5c8;
@@ -51,6 +56,11 @@
   --red: #cf222e;
   --blue: #0969da;
   --teal: #1b7c83;
+
+  /* Status pill backgrounds (light mode) */
+  --status-bg-green: #dcfce7;
+  --status-bg-amber: #fef9c3;
+  --status-bg-red: #fee2e2;
 }
 
 * {
@@ -78,4 +88,16 @@ pre,
 @keyframes ticker-scroll {
   from { transform: translateX(0); }
   to   { transform: translateX(-50%); }
+}
+
+/* ─── Skeleton Shimmer ───────────────────────────────────── */
+@keyframes skeleton-shimmer {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 0.65; }
+}
+
+/* ─── Card Fade-in (stagger via animationDelay inline style) */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }

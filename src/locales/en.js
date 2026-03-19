@@ -96,6 +96,10 @@ const en = {
   'settings.save': 'Save',
   'settings.saved': 'Saved ✓',
 
+  // Modal
+  'modal.close': 'Close',
+  'modal.loading': 'Loading',
+
   // Footer
   'footer.privacy': 'Privacy Policy',
   'footer.terms': 'Terms of Service',
