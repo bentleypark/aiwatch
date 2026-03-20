@@ -103,7 +103,7 @@ function normalizeStatus(indicator: string): 'operational' | 'degraded' | 'down'
 }
 
 function parseIncidents(data: StatuspageResponse): Incident[] {
-  return (data.incidents ?? []).slice(0, 25).map((inc) => {
+  return (data.incidents ?? []).map((inc) => {
     const duration = inc.resolved_at
       ? formatDuration(new Date(inc.created_at), new Date(inc.resolved_at))
       : null
@@ -329,7 +329,7 @@ function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident
       return incidentKeywords.some((kw) => title.includes(kw.toLowerCase()))
     }
     return true
-  }).slice(0, 5)
+  })
 }
 
 function formatDuration(start: Date, end: Date): string {
