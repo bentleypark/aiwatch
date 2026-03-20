@@ -42,12 +42,13 @@ interface ServiceConfig {
   rssFeedUrl?: string    // Better Stack RSS feed URL for incidents
   incidentKeywords?: string[]  // Only show incidents matching these keywords (case-insensitive)
   incidentExclude?: string[]   // Exclude incidents matching these keywords
+  incidentIoBaseUrl?: string   // incident.io status page base URL — scrape update text for active incidents
 }
 
 const SERVICES: ServiceConfig[] = [
   // AI API Services
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code'] },
-  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'sora', 'excel plugin'] },
+  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'sora', 'excel plugin'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API' },
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json' },
@@ -61,7 +62,7 @@ const SERVICES: ServiceConfig[] = [
   { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://status.deepseek.com/api/v2/summary.json' },
   // AI Web Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'webapp', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces'] },
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned'] },
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
   // Coding Agents
   { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'] },
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json' },
@@ -332,6 +333,73 @@ function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident
   })
 }
 
+// ── incident.io HTML Scraper — for services that migrated from Atlassian (e.g. OpenAI) ──
+// The /api/v2/incidents.json compatibility endpoint returns empty update bodies.
+// For active (non-resolved) incidents, scrape the incident detail page to get message_string.
+
+interface IncidentIoUpdate {
+  stage: TimelineEntry['stage']
+  text: string
+  at: string
+}
+
+function parseIncidentIoUpdates(html: string): IncidentIoUpdate[] {
+  const results: IncidentIoUpdate[] = []
+  const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
+  for (const chunk of chunks) {
+    const re = /"message_string":"((?:[^"\\]|\\.)*)","published_at":"([^"]+)","to_status":"([^"]+)"/g
+    let m
+    while ((m = re.exec(chunk)) !== null) {
+      const [, rawText, at, toStatus] = m
+      if (!rawText) continue
+      let text: string
+      try { text = JSON.parse(`"${rawText}"`) } catch { text = rawText }
+      const stage: TimelineEntry['stage'] =
+        toStatus === 'resolved' ? 'resolved'
+        : toStatus === 'monitoring' ? 'monitoring'
+        : toStatus === 'identified' ? 'identified'
+        : 'investigating'
+      results.push({ stage, text, at })
+    }
+  }
+  return results
+}
+
+async function enrichIncidentIoText(incidents: Incident[], baseUrl: string): Promise<Incident[]> {
+  // Only scrape active incidents with missing timeline text (max 3 to stay within budget)
+  const toEnrich = incidents.filter(
+    (inc) => inc.status !== 'resolved' && inc.timeline.some((t) => !t.text)
+  ).slice(0, 3)
+
+  if (toEnrich.length === 0) return incidents
+
+  const enriched = new Map<string, Incident>()
+  await Promise.all(toEnrich.map(async (inc) => {
+    try {
+      const res = await fetchWithTimeout(`${baseUrl}/${inc.id}`, 5000)
+      if (!res.ok) return
+      const html = await res.text()
+      const updates = parseIncidentIoUpdates(html)
+      if (updates.length === 0) return
+
+      enriched.set(inc.id, {
+        ...inc,
+        timeline: inc.timeline.map((entry) => {
+          if (entry.text) return entry
+          // Match by stage + timestamp proximity (within 120s)
+          const match = updates.find((u) =>
+            u.stage === entry.stage &&
+            Math.abs(new Date(u.at).getTime() - new Date(entry.at).getTime()) < 120_000
+          )
+          return match ? { ...entry, text: match.text } : entry
+        }),
+      })
+    } catch { /* ignore — enrich is best-effort */ }
+  }))
+
+  return incidents.map((inc) => enriched.get(inc.id) ?? inc)
+}
+
 function formatDuration(start: Date, end: Date): string {
   const diffMs = end.getTime() - start.getTime()
   const hours = Math.floor(diffMs / 3_600_000)
@@ -412,11 +480,16 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
         incidents = parseIncidents(summaryData)
       }
 
+      let filtered = filterIncidents(incidents, config)
+      if (config.incidentIoBaseUrl) {
+        filtered = await enrichIncidentIoText(filtered, config.incidentIoBaseUrl)
+      }
+
       return {
         ...base,
         status: normalizeStatus(summaryData.status?.indicator ?? 'none'),
         latency: config.category === 'api' ? latency : null,
-        incidents: filterIncidents(incidents, config),
+        incidents: filtered,
       }
     } else {
       // No Statuspage API — HTTP check + optional scraping (parallel)
