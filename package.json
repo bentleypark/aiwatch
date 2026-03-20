@@ -10,7 +10,8 @@
     "preview": "npm run build && wrangler dev",
     "test": "npx playwright test",
     "test:ui": "npx playwright test --ui",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && wrangler deploy",
+    "deploy:worker": "npx wrangler deploy --config worker/wrangler.toml"
   },
   "dependencies": {
     "chart.js": "^4.4.7",
