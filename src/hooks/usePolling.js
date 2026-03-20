@@ -401,9 +401,9 @@ function mergeWithMock(liveServices) {
     const live = liveMap[mock.id]
     if (!live) return mock // Worker didn't return this service — use mock
     return {
-      ...mock,            // fallback fields (history30d, history3m for future use)
-      ...live,            // override with live data (status, latency, incidents)
-      uptime30d: null,    // KV daily counter data needed — shows "—" until collected
+      ...mock,            // fallback fields
+      ...live,            // override with live data (status, latency, incidents, uptime30d)
+      uptime30d: live.uptime30d ?? null, // from KV daily counters, null until data collected
       history3m: null,    // KV daily counter data needed — shows "수집 중" until collected
     }
   })
@@ -428,10 +428,11 @@ export function usePolling() {
 function usePollingInternal() {
   const [state, setState] = useState({
     services: [],
-    loading: true,    // true only during initial load (skeleton)
-    refreshing: false, // true during manual refresh (no skeleton, light indicator)
+    loading: true,
+    refreshing: false,
     error: null,
     lastUpdated: null,
+    uptimeDays: 0, // number of days with collected uptime data
   })
   const cancelledRef = useRef(false)
   const controllerRef = useRef(null)
@@ -479,6 +480,7 @@ function usePollingInternal() {
           refreshing: false,
           error: null,
           lastUpdated: new Date(data.lastUpdated),
+          uptimeDays: data.uptimeDays ?? 0,
         })
       }
     } catch (err) {
@@ -514,6 +516,7 @@ function usePollingInternal() {
           refreshing: false,
           error: err instanceof TypeError ? null : err,
           lastUpdated: new Date(),
+          uptimeDays: 0,
         })
       }
     }

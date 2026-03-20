@@ -78,21 +78,43 @@ async function cacheRead(kv: KVNamespace): Promise<{ services: ServiceStatus[]; 
   try { return JSON.parse(raw) } catch { return null }
 }
 
-// Read uptime history for last N days — used by /api/uptime endpoint
+// Read uptime history for last N days (includes today's live counter + archived days)
 export async function readUptimeHistory(kv: KVNamespace, days: number): Promise<Record<string, DailyCounters>> {
   const history: Record<string, DailyCounters> = {}
   const today = new Date()
-  const keys = Array.from({ length: days }, (_, i) => {
-    const d = new Date(today.getTime() - i * 86_400_000)
-    return `history:${d.toISOString().split('T')[0]}`
+  const todayStr = todayUTC()
+
+  // Build key list: today uses daily: prefix, past days use history: prefix
+  const keyPairs = Array.from({ length: days }, (_, i) => {
+    const dateStr = new Date(today.getTime() - i * 86_400_000).toISOString().split('T')[0]
+    const key = dateStr === todayStr ? `daily:${dateStr}` : `history:${dateStr}`
+    return { dateStr, key }
   })
-  const results = await Promise.all(keys.map((k) => kv.get(k).catch(() => null)))
+
+  const results = await Promise.all(keyPairs.map(({ key }) => kv.get(key).catch(() => null)))
   results.forEach((raw, i) => {
     if (raw) {
-      try { history[keys[i].replace('history:', '')] = JSON.parse(raw) } catch { /* ignore */ }
+      try { history[keyPairs[i].dateStr] = JSON.parse(raw) } catch { /* ignore */ }
     }
   })
   return history
+}
+
+// Calculate per-service uptime% from accumulated daily counters
+function computeUptime(history: Record<string, DailyCounters>): Record<string, number> {
+  const totals: Record<string, { ok: number; total: number }> = {}
+  for (const counters of Object.values(history)) {
+    for (const [id, { ok, total }] of Object.entries(counters)) {
+      if (!totals[id]) totals[id] = { ok: 0, total: 0 }
+      totals[id].ok += ok
+      totals[id].total += total
+    }
+  }
+  const result: Record<string, number> = {}
+  for (const [id, { ok, total }] of Object.entries(totals)) {
+    result[id] = total > 0 ? Math.round((ok / total) * 10000) / 100 : 100
+  }
+  return result
 }
 
 // ── Discord Webhook Alerts ──
@@ -221,6 +243,21 @@ export default {
         ctx.waitUntil(cacheWrite(env.STATUS_CACHE, raw))
       }
 
+      // Compute uptime from accumulated daily counters (up to 30 days)
+      // Reads up to 30 KV keys per request. Free tier = 100k reads/day.
+      // At ~1 req/min: 1440 reqs × 30 reads = 43,200 reads/day (safe).
+      let uptimeDays = 0
+      if (env.STATUS_CACHE) {
+        const history = await readUptimeHistory(env.STATUS_CACHE, 30)
+        uptimeDays = Object.keys(history).length
+        if (uptimeDays > 0) {
+          const uptimeMap = computeUptime(history)
+          enriched.forEach((s) => {
+            if (uptimeMap[s.id] != null) s.uptime30d = uptimeMap[s.id]
+          })
+        }
+      }
+
       // Alert if any services are down
       const downServices = enriched.filter((s) => s.status === 'down')
       if (downServices.length > 0) {
@@ -230,6 +267,7 @@ export default {
       return new Response(JSON.stringify({
         services: enriched,
         lastUpdated: new Date().toISOString(),
+        uptimeDays, // number of days with collected data (0-30)
       }), {
         status: 200,
         headers: {
@@ -246,6 +284,7 @@ export default {
           services: cached.services,
           lastUpdated: cached.cachedAt,
           cached: true,
+          uptimeDays: 0,
         }), {
           status: 200,
           headers: {

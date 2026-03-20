@@ -142,6 +142,7 @@ const en = {
   'settings.monitoring': 'Monitored Services',
   'settings.alerts': 'Alerts',
   'settings.slack': 'Slack Webhook URL',
+  'settings.period.suffix': ' days',
   'settings.period.7d': '7 Days',
   'settings.period.30d': '30 Days',
   'settings.period.90d': '90 Days',

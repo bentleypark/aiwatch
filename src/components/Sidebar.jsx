@@ -95,9 +95,11 @@ function ServiceNavItem({ svc, page, setPage, onNavigate }) {
       {active && <span style={activeBarStyle} />}
       <span className={`rounded-full shrink-0 ${dotClass}`} style={{ width: '6px', height: '6px' }} aria-hidden="true" />
       <span className="flex-1 min-w-0 truncate">{svc.name}</span>
-      <span className={`shrink-0 ${badgeCls}`} style={badgeStyle}>
-        {hasUptime ? `${svc.uptime30d.toFixed(2)}%` : '—'}
-      </span>
+      {hasUptime && (
+        <span className={`shrink-0 ${badgeCls}`} style={badgeStyle}>
+          {svc.uptime30d.toFixed(2)}%
+        </span>
+      )}
     </button>
   )
 }

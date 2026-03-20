@@ -116,7 +116,7 @@ function MatrixCell({ uptime }) {
 
 export default function Uptime() {
   const { t, lang } = useLang()
-  const { services: rawServices, loading, error } = usePolling()
+  const { services: rawServices, loading, error, uptimeDays } = usePolling()
   const services = rawServices ?? []
 
   const sortedByUptime = useMemo(
@@ -150,7 +150,9 @@ export default function Uptime() {
           <span className="text-[var(--green)] font-semibold">//</span>
           {t('nav.uptime')}
         </h2>
-        <span className="mono text-[10px] text-[var(--text2)]">{t('uptime.basis')}</span>
+        <span className="mono text-[10px] text-[var(--text2)]">
+          {uptimeDays > 0 ? `${Math.min(uptimeDays, 30)}${t('settings.period.suffix')} ${t('uptime.basis')}` : t('uptime.collecting')}
+        </span>
       </div>
 
       {/* ── Summary Cards ── */}

@@ -142,6 +142,7 @@ const ko = {
   'settings.monitoring': '모니터링',
   'settings.alerts': '알림',
   'settings.slack': 'Slack Webhook URL',
+  'settings.period.suffix': '일',
   'settings.period.7d': '7일',
   'settings.period.30d': '30일',
   'settings.period.90d': '90일',

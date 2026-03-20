@@ -269,7 +269,7 @@ export default function ServiceDetails({ serviceId }) {
   const { t, lang } = useLang()
   const { theme } = useTheme()
   const { setPage } = usePage()
-  const { services: rawServices, loading, error } = usePolling()
+  const { services: rawServices, loading, error, uptimeDays } = usePolling()
   const services = rawServices ?? []
 
   if (loading && services.length === 0) return <SkeletonUI />
@@ -335,9 +335,9 @@ export default function ServiceDetails({ serviceId }) {
           colorClass="text-[var(--blue)]"
         />
         <MetricCard
-          label={t('svc.uptime30d')}
+          label={uptimeDays > 0 ? `${Math.min(uptimeDays, 30)}${t('settings.period.suffix')} Uptime` : t('svc.uptime30d')}
           value={service.uptime30d != null ? `${service.uptime30d.toFixed(2)}%` : '—'}
-          sub={service.uptime30d != null ? t('svc.uptime.sub') : t('uptime.collecting')}
+          sub={service.uptime30d != null ? `${Math.min(uptimeDays, 30)}${t('settings.period.suffix')}` : t('uptime.collecting')}
           colorClass="text-[var(--green)]"
         />
         <MetricCard
