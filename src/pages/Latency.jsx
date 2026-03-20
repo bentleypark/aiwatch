@@ -1,30 +1,13 @@
 // Latency — response time analysis page
-// Shows fastest/average/slowest summary, ranked latency list (proportional bars in HTML/CSS), and 24h trend line chart.
-// Chart.js uses hex colors for service lines (visualization palette — not design tokens).
+// Shows fastest/average/slowest summary, ranked latency list, and current latency snapshot.
 
 import { useMemo } from 'react'
-import {
-  Chart as ChartJS,
-  CategoryScale, LinearScale, PointElement, LineElement,
-  Tooltip, Legend, Filler,
-} from 'chart.js'
-import { Line } from 'react-chartjs-2'
 import { useLang } from '../hooks/useLang'
-import { useTheme } from '../hooks/useTheme'
 import { usePolling } from '../hooks/usePolling'
 import SkeletonUI from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler)
-
 // ── Constants ────────────────────────────────────────────────
-
-// Read a CSS custom property value from :root at render time (not module eval).
-// Note: calls inside useMemo blocks are only re-evaluated when that memo's dependencies change.
-// All cssVar() reads in the options memo are intentionally gated on theme — do not add reads for
-// variables that change independently of theme (they would become stale).
-const cssVar = (name) =>
-  getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 
 // Latency thresholds for bar color coding
 const FAST_MS   = 300  // ≤ 300ms → green
@@ -60,28 +43,6 @@ function latencyTextClass(ms) {
   if (ms <= FAST_MS)   return 'text-[var(--green)]'
   if (ms <= NORMAL_MS) return 'text-[var(--amber)]'
   return 'text-[var(--red)]'
-}
-
-// Generate 24 synthetic hourly data points with sinusoidal variation around baseLatency.
-// Output is deterministic for a given baseLatency (no Math.random).
-// Note: these are dummy values paired with time-relative x-axis labels (see hourLabels).
-// Replace with real 24h time-series from usePolling() once available (Issue #15).
-function gen24h(baseLatency) {
-  return Array.from({ length: 24 }, (_, i) => {
-    const variation = (Math.sin(i * 0.7) * 0.15 + Math.cos(i * 1.3) * 0.10) * baseLatency
-    return Math.max(10, Math.round(baseLatency + variation))
-  })
-}
-
-// Generate last-24-hours labels (HH:00) relative to current time
-// 24 hour labels ending at current hour: e.g. at 19시 → 20:00(어제)...19:00(오늘)
-// Dummy data phase — will be replaced with real timestamps from Issue #15
-function hourLabels() {
-  const currentHour = new Date().getHours()
-  return Array.from({ length: 24 }, (_, i) => {
-    const hour = (currentHour - 23 + i + 24) % 24
-    return `${String(hour).padStart(2, '0')}:00`
-  })
 }
 
 // ── Sub-components ───────────────────────────────────────────
@@ -126,98 +87,10 @@ function RankingBar({ service, maxLatency, rank }) {
   )
 }
 
-// theme prop is used as key on <Line> to force re-mount on theme switch,
-// ensuring cssVar() values in options are re-read after CSS vars change.
-function TrendChart({ services, theme, t }) {
-  // Memoized per service — gen24h is deterministic so re-computation only on services change
-  const datasets = useMemo(
-    () =>
-      services.map((svc) => ({
-        label: svc.name,
-        data: gen24h(svc.latency),
-        borderColor: SERVICE_COLOR[svc.id] ?? '#8b949e',
-        backgroundColor: 'transparent',
-        borderWidth: 1.5,
-        pointRadius: 0,
-        tension: 0.4,
-      })),
-    [services]
-  )
-
-  const options = useMemo(
-    () => ({
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      scales: {
-        x: {
-          grid:  { color: cssVar('--border') },
-          ticks: {
-            color: cssVar('--text2'),
-            font: { family: 'IBM Plex Mono', size: 10 },
-            // 3-hour intervals counting backwards from last label (current hour)
-            callback: function(val, index, ticks) {
-              const fromEnd = ticks.length - 1 - index
-              if (fromEnd % 3 === 0) return this.getLabelForValue(val)
-              return null
-            },
-          },
-        },
-        y: {
-          grid:  { color: cssVar('--border') },
-          ticks: {
-            color: cssVar('--text2'),
-            font: { family: 'IBM Plex Mono', size: 10 },
-            callback: (v) => `${v}ms`,
-          },
-        },
-      },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y} ms` },
-        },
-      },
-    }),
-    [theme] // re-read CSS vars when theme switches
-  )
-
-  // Hour labels are computed once when TrendChart mounts and do not update with polling data.
-  // Labels reflect the time of the last page load. Reload to get current labels.
-  const labels = useMemo(hourLabels, [])
-
-  return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
-        <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
-          <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
-          {t('latency.trend')}
-        </div>
-        <span className="mono text-[9px] text-[var(--text2)]">{t('latency.dummy')}</span>
-      </div>
-      <div style={{ padding: '16px' }}>
-        {/* Custom legend matching design: 8x3px rounded dot + mono 10px text */}
-        <div className="flex flex-wrap" style={{ gap: '12px', marginBottom: '12px' }}>
-          {services.map((svc) => (
-            <div key={svc.id} className="flex items-center mono text-[10px] text-[var(--text1)] cursor-pointer" style={{ gap: '5px' }}>
-              <span className="shrink-0" style={{ width: '8px', height: '3px', borderRadius: '2px', background: SERVICE_COLOR[svc.id] ?? '#8b949e' }} />
-              {svc.name}
-            </div>
-          ))}
-        </div>
-        <div className="h-[320px]">
-          <Line key={theme} data={{ labels, datasets }} options={options} />
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── Main Component ───────────────────────────────────────────
 
 export default function Latency() {
   const { t } = useLang()
-  const { theme } = useTheme()
   const { services: rawServices, loading, error } = usePolling()
 
   // Defensive default — handles transient undefined state
@@ -276,8 +149,27 @@ export default function Latency() {
         </div>
       </section>
 
-      {/* ── 24h Trend Line Chart ── */}
-      <TrendChart services={services} theme={theme} t={t} />
+      {/* ── 24h Trend — placeholder until hourly data is accumulated in KV ── */}
+      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+        <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+          <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
+            {t('latency.trend')}
+          </div>
+          <span className="mono text-[9px] text-[var(--text2)]">{t('uptime.collecting')}</span>
+        </div>
+        <div style={{ padding: '16px' }}>
+          <div className="flex flex-wrap" style={{ gap: '10px' }}>
+            {sorted.map((svc) => (
+              <div key={svc.id} className="flex items-center gap-2 bg-[var(--bg2)] border border-[var(--border)] rounded" style={{ padding: '6px 10px' }}>
+                <span className="shrink-0 rounded-full" style={{ width: '6px', height: '6px', background: SERVICE_COLOR[svc.id] ?? '#8b949e' }} />
+                <span className="mono text-[11px] text-[var(--text1)]">{svc.name}</span>
+                <span className={`mono text-[11px] font-medium ${latencyTextClass(svc.latency)}`}>{svc.latency}ms</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
     </div>
   )
