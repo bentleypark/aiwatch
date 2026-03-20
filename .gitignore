@@ -37,3 +37,7 @@ blob-report/
 .env
 .env.local
 .env.*.local
+
+.dev.vars*
+!.dev.vars.example
+!.env.example
