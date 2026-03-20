@@ -224,14 +224,18 @@ export default function Incidents() {
 
   // Flatten all incidents from all services (stable ref while services unchanged)
   // Normalize Worker statuses (investigating/identified) → 'ongoing' for display
-  // Deduplicate: services sharing a status page (e.g., Claude API + claude.ai) return same incidents
+  // Deduplicate only when no service filter — services sharing a status page (e.g., Claude API +
+  // claude.ai + Claude Code) return same incident IDs. With a service filter active, show all
+  // incidents belonging to that service so none get hidden by earlier-processed services.
   const allIncidents = useMemo(
     () => {
-      const seenOriginalIds = new Set()
+      const seenOriginalIds = serviceFilter === 'all' ? new Set() : null
       return services.flatMap((svc) =>
         (svc.incidents ?? []).flatMap((inc) => {
-          if (seenOriginalIds.has(inc.id)) return []
-          seenOriginalIds.add(inc.id)
+          if (seenOriginalIds) {
+            if (seenOriginalIds.has(inc.id)) return []
+            seenOriginalIds.add(inc.id)
+          }
           return [{
             ...inc,
             id: `${svc.id}:${inc.id}`,
@@ -244,7 +248,7 @@ export default function Incidents() {
         })
       )
     },
-    [services]
+    [services, serviceFilter]
   )
 
   // Apply service, status, and period filters; sort newest first

@@ -286,7 +286,13 @@ export default function Overview() {
   const recentIncidents = services
     .flatMap((s) => s.incidents.map((inc) => ({ ...inc, serviceName: s.name })))
     .filter((inc) => new Date(inc.startedAt).getTime() >= sevenDaysAgo)
-    .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
+    .sort((a, b) => {
+      // Active (non-resolved) incidents always come first
+      const aActive = a.status !== 'resolved' ? 1 : 0
+      const bActive = b.status !== 'resolved' ? 1 : 0
+      if (aActive !== bActive) return bActive - aActive
+      return new Date(b.startedAt) - new Date(a.startedAt)
+    })
     .slice(0, 5)
 
   const withLatency = services.filter((s) => s.latency != null)
