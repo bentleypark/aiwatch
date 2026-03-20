@@ -243,24 +243,6 @@ export default function ServiceDetails({ serviceId }) {
         />
       </div>
 
-      {/* ── 24h Latency — placeholder until hourly KV data is accumulated ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
-          <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
-            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
-            {t('latency.trend')}
-          </div>
-          <span className="mono text-[9px] text-[var(--text2)]">{t('uptime.collecting')}</span>
-        </div>
-        <div className="flex items-center justify-center" style={{ padding: '20px 16px' }}>
-          {service.latency != null ? (
-            <span className="mono text-sm text-[var(--text1)]">{t('svc.latency')}: {service.latency} ms</span>
-          ) : (
-            <span className="mono text-xs text-[var(--text2)]">{t('uptime.collecting')}</span>
-          )}
-        </div>
-      </section>
-
       {/* ── Bottom: Incident History + Calendar (2-col on desktop) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>
 
