@@ -4,5 +4,5 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 
 [vars]
-ALLOWED_ORIGIN = "https://aiwatch.dev,https://aiwatch-dev.vercel.app"
+ALLOWED_ORIGIN = "https://ai-watch.dev,https://www.ai-watch.dev,https://aiwatch-dev.vercel.app"
 # Local dev override: create worker/.dev.vars with ALLOWED_ORIGIN=*
