@@ -347,11 +347,13 @@ function parseIncidentIoUpdates(html: string): IncidentIoUpdate[] {
   const results: IncidentIoUpdate[] = []
   const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
   for (const chunk of chunks) {
-    const re = /"message_string":"((?:[^"\\]|\\.)*)","published_at":"([^"]+)","to_status":"([^"]+)"/g
+    // Quotes inside __next_f JS strings are escaped as \" so match \\"...\\"
+    const re = /\\"message_string\\":\\"((?:[^\\"\\\\]|\\\\.)*)\\",\\"published_at\\":\\"([^\\"]+)\\",\\"to_status\\":\\"([^\\"]+)\\"/g
     let m
     while ((m = re.exec(chunk)) !== null) {
       const [, rawText, at, toStatus] = m
       if (!rawText) continue
+      // Unescape JS-string double-encoding (\\n → \n, \\\\ → \\, etc.)
       let text: string
       try { text = JSON.parse(`"${rawText}"`) } catch { text = rawText }
       const stage: TimelineEntry['stage'] =
