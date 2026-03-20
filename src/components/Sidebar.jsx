@@ -112,7 +112,17 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
     : services
 
   const issueCount = useMemo(() => services.filter((s) => s.status !== 'operational').length, [services])
-  const incidentCount = useMemo(() => services.reduce((sum, s) => sum + (s.incidents?.length ?? 0), 0), [services])
+  // Count only unresolved incidents (investigating/identified/monitoring), deduplicated
+  const incidentCount = useMemo(() => {
+    const seen = new Set()
+    return services.reduce((sum, s) =>
+      sum + (s.incidents ?? []).filter((inc) => {
+        if (seen.has(inc.id)) return false
+        seen.add(inc.id)
+        return inc.status !== 'resolved'
+      }).length
+    , 0)
+  }, [services])
 
   return (
     <div className="flex flex-col h-full" style={{ padding: '16px 0' }}>
