@@ -133,8 +133,9 @@ export default function Uptime() {
   const leastStable = sortedByUptime[sortedByUptime.length - 1]
   const avgUptime = (services.reduce((s, v) => s + v.uptime30d, 0) / services.length).toFixed(2)
 
+  // Lowest uptime = most issues (incident count is capped at 5 per service, unreliable for comparison)
   const mostIssues = [...services].sort(
-    (a, b) => (b.incidents?.length ?? 0) - (a.incidents?.length ?? 0)
+    (a, b) => a.uptime30d - b.uptime30d
   )[0]
 
   // Extract month labels from the first service's history3m (all services share the same months)
