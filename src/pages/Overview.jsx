@@ -82,7 +82,7 @@ function HistoryBars({ history30d }) {
 
 function ServiceCard({ service, index, onClick, t }) {
   const borderCls = BORDER_LEFT_CLASS[service.status] ?? BORDER_LEFT_CLASS.operational
-  const incidentCount = service.incidents?.length ?? 0
+  const incidentCount = (service.incidents ?? []).filter((i) => i.status !== 'resolved').length
   const hasUptime = service.uptime30d != null
   const uptimeColor = !hasUptime ? 'text-[var(--text2)]' : service.uptime30d >= 99 ? 'text-[var(--green)]' : service.uptime30d >= 97 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
   const latencyColor = service.status === 'degraded' ? 'text-[var(--amber)]' : service.status === 'down' ? 'text-[var(--red)]' : 'text-[var(--text0)]'
