@@ -165,11 +165,25 @@ worker/
 
 ## Contributing
 
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for detailed guidelines.
+
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
 3. Follow the development workflow in [CLAUDE.md](CLAUDE.md)
-4. Run tests (`npm test`)
-5. Submit a pull request
+4. Build + test: `npm run build && npm test`
+5. Submit a pull request using the [PR template](.github/pull_request_template.md)
+
+### Issues
+
+- **Bug reports**: Use the [Bug Report](.github/ISSUE_TEMPLATE/bug_report.md) template
+- **Feature requests**: Use the [Feature Request](.github/ISSUE_TEMPLATE/feature_request.md) template
+
+### Pull Requests
+
+- One feature or fix per PR
+- All tests must pass (`npm test` — 13 Playwright specs)
+- Include `closes #N` in commit messages
+- Fill out the PR checklist
 
 ## License
 
