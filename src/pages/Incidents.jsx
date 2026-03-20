@@ -3,7 +3,7 @@
 // Desktop: scrollable table (5 columns). Mobile: card list.
 // Row/card click toggles a DetailPanel with per-stage timeline.
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { formatDate } from '../utils/time'
@@ -88,58 +88,68 @@ function FilterBar({ services, serviceFilter, setServiceFilter, statusFilter, se
   )
 }
 
-function TimelineStep({ stage, at, isLast, t, lang }) {
+function TimelineStep({ stage, text, at, isLast, t, lang }) {
   const { dot: dotCls = 'bg-[var(--text2)]', text: textCls = 'text-[var(--text2)]' } = STAGE_CLASS[stage] ?? {}
   return (
-    <div className="flex gap-3">
-      <div className="flex flex-col items-center">
-        <span className={`w-2.5 h-2.5 rounded-full shrink-0 mt-0.5 ${dotCls}`} aria-hidden="true" />
-        {!isLast && <div className="w-px flex-1 bg-[var(--border)] mt-1" />}
+    <div className="flex gap-[14px]">
+      <div className="flex flex-col items-center w-[14px] shrink-0">
+        <span className={`w-2.5 h-2.5 rounded-full shrink-0 mt-[3px] ${dotCls}`} aria-hidden="true" />
+        {!isLast && <div className="w-px flex-1 bg-[var(--border)] my-[3px] min-h-[16px]" />}
       </div>
       <div className="pb-4">
-        <p className={`text-xs mono font-medium ${textCls}`}>{t(`incidents.timeline.${stage}`)}</p>
-        <p className="text-[10px] text-[var(--text2)] mono mt-0.5">{formatDate(at, lang)}</p>
+        <p className={`mono font-medium text-[10px] mb-[3px] ${textCls}`}>{t(`incidents.timeline.${stage}`)}</p>
+        {text && <p className="text-xs text-[var(--text1)] mb-[3px]" style={{ lineHeight: 1.6 }}>{text}</p>}
+        <p className="mono text-[10px] text-[var(--text2)]">{formatDate(at, lang)}</p>
       </div>
     </div>
   )
 }
 
 function DetailPanel({ incident, onClose, t, lang }) {
+  const panelRef = useRef(null)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [incident.id])
+
   return (
-    <div className="bg-[var(--bg2)] border border-[var(--border)] rounded-lg p-4 space-y-3">
-      <div className="flex items-start justify-between gap-2">
+    <div ref={panelRef} className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden mt-[10px]">
+      <div className="flex items-start justify-between border-b border-[var(--border)]" style={{ padding: '14px 16px' }}>
         <div>
-          <p className="text-sm text-[var(--text0)] font-medium">{incident.title}</p>
-          <p className="text-[10px] text-[var(--text2)] mono mt-0.5">
-            {incident.serviceName} · {formatDate(incident.startedAt, lang)}
-            {incident.duration ? ` · ${incident.duration}` : ''}
+          <p className="text-sm font-medium text-[var(--text0)] mb-1">
+            {incident.serviceName} — {incident.title}
+          </p>
+          <p className="mono text-[10px] text-[var(--text2)]">
+            {formatDate(incident.startedAt, lang)}  ·  {t('incidents.col.duration')}: {incident.duration ?? t('incidents.duration.ongoing')}
           </p>
         </div>
         <button
           onClick={onClose}
-          className="shrink-0 text-xl leading-none text-[var(--text2)] hover:text-[var(--text1)] transition-colors"
+          className="shrink-0 mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] border border-[var(--border)] rounded hover:opacity-80 transition-opacity cursor-pointer"
+          style={{ padding: '4px 10px' }}
           aria-label={t('modal.close')}
         >
-          ×
+          ✕ {t('modal.close')}
         </button>
       </div>
-
-      <h3 className="text-[10px] mono text-[var(--text2)] uppercase tracking-wider">
-        {t('incidents.timeline.title')}
-      </h3>
-
-      {/* timeline may be absent for incidents fetched before Issue #15 adds historical data */}
-      <div>
-        {(incident.timeline ?? []).map((step, i) => (
-          <TimelineStep
-            key={`${step.stage}-${i}`}
-            stage={step.stage}
-            at={step.at}
-            isLast={i === (incident.timeline?.length ?? 0) - 1}
-            t={t}
-            lang={lang}
-          />
-        ))}
+      <div className="p-4">
+        {(incident.timeline ?? []).length === 0 ? (
+          <p className="text-xs text-[var(--text2)]">{t('incidents.timeline.empty')}</p>
+        ) : (
+          (incident.timeline ?? []).map((step, i) => (
+            <TimelineStep
+              key={`${step.stage}-${i}`}
+              stage={step.stage}
+              text={step.text}
+              at={step.at}
+              isLast={i === (incident.timeline?.length ?? 0) - 1}
+              t={t}
+              lang={lang}
+            />
+          ))
+        )}
       </div>
     </div>
   )
@@ -183,13 +193,13 @@ function IncidentCard({ incident, isSelected, onClick, t, lang }) {
           ? 'bg-[var(--bg2)] border-[var(--border-hi)]'
           : 'bg-[var(--bg1)] border-[var(--border)] hover:bg-[var(--bg2)]'}`}
     >
-      <div className="flex items-center justify-center gap-2 flex-wrap">
-        <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)' }}>
+      <div className="flex items-start justify-between gap-2">
+        <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', flex: 1 }}>
           {incident.title}
         </span>
         <StatusBadge status={incident.status} t={t} />
       </div>
-      <div className="flex items-center justify-center flex-wrap mono text-[var(--text2)]" style={{ fontSize: '10px', gap: '6px' }}>
+      <div className="flex items-center flex-wrap mono text-[var(--text2)]" style={{ fontSize: '10px', gap: '6px' }}>
         <span>{formatDate(incident.startedAt, lang)}</span>
         <span>·</span>
         <span>{incident.serviceName}</span>
@@ -213,10 +223,18 @@ export default function Incidents() {
   const [selectedId,    setSelectedId]    = useState(null)
 
   // Flatten all incidents from all services (stable ref while services unchanged)
+  // Normalize Worker statuses (investigating/identified) → 'ongoing' for display
   const allIncidents = useMemo(
     () =>
       services.flatMap((svc) =>
-        (svc.incidents ?? []).map((inc) => ({ ...inc, serviceName: svc.name, serviceId: svc.id }))
+        (svc.incidents ?? []).map((inc) => ({
+          ...inc,
+          status: inc.status === 'resolved' ? 'resolved'
+            : inc.status === 'monitoring' ? 'monitoring'
+            : 'ongoing',
+          serviceName: svc.name,
+          serviceId: svc.id,
+        }))
       ),
     [services]
   )
@@ -273,16 +291,6 @@ export default function Incidents() {
         t={t}
       />
 
-      {/* ── Detail panel (shown above list when an incident is selected) ── */}
-      {selectedIncident && (
-        <DetailPanel
-          incident={selectedIncident}
-          onClose={() => setSelectedId(null)}
-          t={t}
-          lang={lang}
-        />
-      )}
-
       {/* ── Incident list ── */}
       {filtered.length === 0 ? (
         <EmptyState type="neutral" onAction={handleResetFilters} />
@@ -330,6 +338,16 @@ export default function Incidents() {
             ))}
           </div>
         </>
+      )}
+
+      {/* ── Detail panel (shown below list when an incident is selected) ── */}
+      {selectedIncident && (
+        <DetailPanel
+          incident={selectedIncident}
+          onClose={() => setSelectedId(null)}
+          t={t}
+          lang={lang}
+        />
       )}
 
     </div>

@@ -93,6 +93,7 @@ const en = {
   'incidents.timeline.identified': 'Identified',
   'incidents.timeline.monitoring': 'Monitoring',
   'incidents.timeline.resolved': 'Resolved',
+  'incidents.timeline.empty': 'No timeline data available',
 
   // Uptime
   'uptime.stable': 'Most Stable',

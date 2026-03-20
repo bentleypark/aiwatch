@@ -15,10 +15,12 @@ test.describe('Modal / Detail Panel', () => {
       return
     }
     await incidentRows.first().click({ force: true })
-    await expect(page.locator('main').getByText('Timeline')).toBeVisible()
+    // Detail panel shows close button with "닫기" / "Close" text
+    const closeBtn = page.locator('main').getByRole('button', { name: /닫기|Close/i })
+    await expect(closeBtn).toBeVisible()
 
-    await page.locator('main').getByRole('button', { name: /close|닫기/i }).click({ force: true })
-    await expect(page.locator('main').getByText('Timeline')).toBeHidden()
+    await closeBtn.click({ force: true })
+    await expect(closeBtn).toBeHidden()
   })
 
   test('Privacy modal opens from footer and closes on ESC', async ({ page }) => {

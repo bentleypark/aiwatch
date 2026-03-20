@@ -93,6 +93,7 @@ const ko = {
   'incidents.timeline.identified': '원인 파악',
   'incidents.timeline.monitoring': '모니터링',
   'incidents.timeline.resolved': '해결됨',
+  'incidents.timeline.empty': '타임라인 데이터가 없습니다',
 
   // Uptime
   'uptime.stable': '가장 안정적',

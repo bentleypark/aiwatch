@@ -1,12 +1,19 @@
 // Service status fetching and parsing for all monitored AI services.
 // Most status pages use Atlassian Statuspage (status.io) or similar APIs.
 
+export interface TimelineEntry {
+  stage: 'investigating' | 'identified' | 'monitoring' | 'resolved'
+  text: string | null
+  at: string
+}
+
 export interface Incident {
   id: string
   title: string
   status: 'investigating' | 'identified' | 'monitoring' | 'resolved'
   startedAt: string
   duration: string | null
+  timeline: TimelineEntry[]
 }
 
 export interface ServiceStatus {
@@ -68,7 +75,7 @@ interface StatuspageResponse {
     status: string
     created_at: string
     resolved_at: string | null
-    incident_updates?: Array<{ status: string; created_at: string }>
+    incident_updates?: Array<{ status: string; body: string; created_at: string }>
   }>
 }
 
@@ -95,6 +102,17 @@ function parseIncidents(data: StatuspageResponse): Incident[] {
     const duration = inc.resolved_at
       ? formatDuration(new Date(inc.created_at), new Date(inc.resolved_at))
       : null
+    const timeline: TimelineEntry[] = (inc.incident_updates ?? [])
+      .map((u) => ({
+        stage: u.status === 'resolved' ? 'resolved' as const
+          : u.status === 'monitoring' ? 'monitoring' as const
+          : u.status === 'identified' ? 'identified' as const
+          : 'investigating' as const,
+        text: u.body || null,
+        at: u.created_at,
+      }))
+      .reverse() // oldest first
+
     return {
       id: inc.id,
       title: inc.name,
@@ -104,6 +122,7 @@ function parseIncidents(data: StatuspageResponse): Incident[] {
         : 'investigating',
       startedAt: inc.created_at,
       duration,
+      timeline,
     }
   })
 }
@@ -155,7 +174,7 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
       const start = Date.now()
       const [summaryRes, incidentsRes] = await Promise.all([
         fetchWithTimeout(config.apiUrl),
-        fetchWithTimeout(`${baseUrl}/incidents.json`).catch(() => null),
+        fetchWithTimeout(`${baseUrl}/incidents.json`).catch((err) => { console.warn(`[fetchService] ${config.id} incidents.json failed:`, err.message); return null }),
       ])
       const latency = Date.now() - start
 
@@ -189,7 +208,8 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
         latency: config.category === 'api' ? latency : null,
       }
     }
-  } catch {
+  } catch (err) {
+    console.error(`[fetchService] ${config.id} failed:`, err)
     return { ...base, status: 'down' }
   }
 }

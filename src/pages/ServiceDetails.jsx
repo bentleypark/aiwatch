@@ -206,13 +206,18 @@ function LatencyChart({ service, theme, t }) {
 
 function IncidentRow({ incident, t, lang }) {
   const STATUS_CLS = {
-    ongoing:    'text-[var(--red)]',
-    monitoring: 'text-[var(--amber)]',
-    resolved:   'text-[var(--text2)]',
+    investigating: 'text-[var(--red)]',
+    identified:    'text-[var(--red)]',
+    ongoing:       'text-[var(--red)]',
+    monitoring:    'text-[var(--amber)]',
+    resolved:      'text-[var(--text2)]',
   }
   const dotCls = STATUS_CLS[incident.status] ?? STATUS_CLS.resolved
+  const displayStatus = incident.status === 'resolved' ? 'resolved'
+    : incident.status === 'monitoring' ? 'monitoring'
+    : 'ongoing'
   return (
-    <div className="flex items-start gap-3 py-2 border-b border-[var(--border)] last:border-0">
+    <div className="flex items-start gap-3 py-[10px] border-b border-[var(--border)] last:border-0">
       <span className={`shrink-0 mt-0.5 text-[10px] mono ${dotCls}`} aria-hidden="true">●</span>
       <div className="flex-1 min-w-0">
         <p className="text-xs text-[var(--text1)] truncate">{incident.title}</p>
@@ -222,7 +227,7 @@ function IncidentRow({ incident, t, lang }) {
         </p>
       </div>
       <span className={`shrink-0 text-[10px] mono ${dotCls}`}>
-        {t(`incidents.status.${incident.status}`)}
+        {t(`incidents.status.${displayStatus}`)}
       </span>
     </div>
   )
