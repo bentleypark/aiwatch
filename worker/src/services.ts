@@ -372,7 +372,7 @@ function parseIncidentIoUpdates(html: string): IncidentIoUpdate[] {
 // Scraped timeline text is stored per-incident so subsequent invocations skip scraping.
 // KV reads do not count toward the 50-subrequest limit, so we read for every incident freely.
 // Keys: inctext:{incidentId}  Values: { textByKey: {"stage:at": text|null}, cachedAt: string }
-// TTL: 90 days for resolved (rarely changes after resolution), 5 min for active (may get new updates).
+// TTL: 90 days for resolved (rarely changes after resolution), 30 min for active (may get new updates).
 
 interface IncidentTextCache {
   textByKey: Record<string, string | null>  // key = "stage:at" (matches parseIncidents dedup key)
@@ -530,9 +530,9 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, page
       // when the Worker terminates after the response. Latency is negligible (~10-50ms) since
       // we already spent up to 5s on HTTP scraping. A single write failure is non-critical
       // (next invocation re-scrapes), but persistent failures exhaust the enrichment budget.
-      // Resolved: 90-day TTL (rarely changes). Active: 5-min TTL (may receive new updates).
+      // Resolved: 90-day TTL (rarely changes). Active: 30-min TTL (may receive new updates).
       if (kv) {
-        const ttl = enrichedIncident.status === 'resolved' ? 90 * 86_400 : 5 * 60
+        const ttl = enrichedIncident.status === 'resolved' ? 90 * 86_400 : 30 * 60
         try {
           const payload = JSON.stringify(buildTextCache(enrichedIncident))
           await kv.put(`inctext:${inc.id}`, payload, { expirationTtl: ttl })
