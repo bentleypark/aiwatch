@@ -96,13 +96,30 @@ function hourLabels() {
   })
 }
 
-// Compute calendar date label for history30d index i (0 = 29 days ago, 29 = today)
+// Compute calendar date label for index i (0 = 29 days ago, 29 = today)
 function calendarDate(i, lang) {
   const d = new Date(Date.now() - (29 - i) * 86_400_000)
   return new Intl.DateTimeFormat(lang === 'ko' ? 'ko-KR' : 'en-US', {
     month: 'short',
     day: 'numeric',
   }).format(d)
+}
+
+// Build 30-day calendar from incidents (replaces mock history30d)
+// Uses UTC dates to avoid timezone-related off-by-one errors
+function buildCalendarFromIncidents(incidents) {
+  const today = new Date()
+  const dayStatus = {}
+  ;(incidents ?? []).forEach((inc) => {
+    if (!inc.startedAt) return
+    const key = new Date(inc.startedAt).toISOString().split('T')[0]
+    const status = inc.status === 'resolved' ? 'degraded' : 'down'
+    if (!dayStatus[key] || status === 'down') dayStatus[key] = status
+  })
+  return Array.from({ length: 30 }, (_, i) => {
+    const key = new Date(today.getTime() - (29 - i) * 86_400_000).toISOString().split('T')[0]
+    return dayStatus[key] ?? 'operational'
+  })
 }
 
 // ── Sub-components ───────────────────────────────────────────
@@ -282,6 +299,7 @@ export default function ServiceDetails({ serviceId }) {
 
   const statusUrl = STATUS_URL[service.id]
   const incidentCount = service.incidents?.length ?? 0
+  const calendar30d = buildCalendarFromIncidents(service.incidents)
 
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>
@@ -397,7 +415,7 @@ export default function ServiceDetails({ serviceId }) {
           </div>
           <div style={{ padding: '16px' }}>
             <div className="flex" style={{ gap: '2px' }}>
-              {(service.history30d ?? []).map((status, i) => (
+              {calendar30d.map((status, i) => (
                 <CalendarCell key={i} status={status} date={calendarDate(i, lang)} />
               ))}
             </div>
