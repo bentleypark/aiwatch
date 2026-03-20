@@ -57,7 +57,7 @@ const SERVICES: ServiceConfig[] = [
   { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null },
   { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed' },
   { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json' },
-  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json' },
+  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents' },
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null },
   { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://status.deepseek.com/api/v2/summary.json' },
   // AI Web Apps
@@ -368,10 +368,11 @@ function parseIncidentIoUpdates(html: string): IncidentIoUpdate[] {
 }
 
 async function enrichIncidentIoText(incidents: Incident[], baseUrl: string): Promise<Incident[]> {
-  // Only scrape active incidents with missing timeline text (max 3 to stay within budget)
-  const toEnrich = incidents.filter(
-    (inc) => inc.status !== 'resolved' && inc.timeline.some((t) => !t.text)
-  ).slice(0, 3)
+  // Scrape incidents with missing timeline text (active first, max 3 to stay within budget)
+  const toEnrich = incidents
+    .filter((inc) => inc.timeline.some((t) => !t.text))
+    .sort((a, b) => (a.status === 'resolved' ? 1 : 0) - (b.status === 'resolved' ? 1 : 0))
+    .slice(0, 3)
 
   if (toEnrich.length === 0) return incidents
 
