@@ -2,10 +2,15 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Deploy](https://img.shields.io/badge/Deploy-ai--watch.dev-blue)](https://ai-watch.dev)
+[![GitHub stars](https://img.shields.io/github/stars/bentleypark/aiwatch)](https://github.com/bentleypark/aiwatch/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/bentleypark/aiwatch)](https://github.com/bentleypark/aiwatch/commits/main)
 
 Real-time monitoring dashboard for **19 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[https://ai-watch.dev](https://ai-watch.dev)**
+
+<!-- TODO: Add screenshot of the dashboard -->
+<!-- ![AIWatch Dashboard](docs/screenshot.png) -->
 
 ## Features
 

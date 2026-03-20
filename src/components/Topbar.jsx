@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useCallback } from 'react'
 import { usePage } from '../utils/pageContext'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
@@ -30,22 +30,15 @@ function HamburgerIcon() {
 export default function Topbar({ onMenuToggle }) {
   const { page, setPage } = usePage()
   const { lang, t } = useLang()
-  const { lastUpdated, refresh } = usePolling()
+  const { lastUpdated, refresh, refreshing } = usePolling()
   const isSettings = page.name === 'settings'
-  const [refreshing, setRefreshing] = useState(false)
 
-  const handleRefresh = useCallback(async () => {
+  const handleRefresh = useCallback(() => {
     if (refreshing) return
     trackEvent('click_refresh')
-    setRefreshing(true)
-    try {
-      await refresh()
-    } finally {
-      setRefreshing(false)
-    }
+    refresh()
   }, [refreshing, refresh])
 
-  // Design mockup: "↻ Loading..." while refreshing, "↻ Refresh" when idle
   const refreshLabel = refreshing ? t('topbar.refresh.loading') : t('topbar.refresh')
 
   return (
@@ -138,18 +131,12 @@ export default function Topbar({ onMenuToggle }) {
 // Mobile Action Bar — rendered by Layout below the fixed topbar
 export function MobileActionBar() {
   const { lang, t } = useLang()
-  const { refresh, lastUpdated } = usePolling()
-  const [refreshing, setRefreshing] = useState(false)
+  const { refresh, refreshing, lastUpdated } = usePolling()
 
-  const handleRefresh = useCallback(async () => {
+  const handleRefresh = useCallback(() => {
     if (refreshing) return
     trackEvent('click_refresh')
-    setRefreshing(true)
-    try {
-      await refresh()
-    } finally {
-      setRefreshing(false)
-    }
+    refresh()
   }, [refreshing, refresh])
 
   const refreshLabel = refreshing ? t('topbar.refresh.loading') : t('topbar.refresh')
