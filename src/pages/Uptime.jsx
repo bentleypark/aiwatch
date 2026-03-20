@@ -151,7 +151,7 @@ export default function Uptime() {
           {t('nav.uptime')}
         </h2>
         <span className="mono text-[10px] text-[var(--text2)]">
-          {uptimeDays > 0 ? `${Math.min(uptimeDays, 30)}${t('settings.period.suffix')} ${t('uptime.basis')}` : t('uptime.collecting')}
+          {uptimeDays > 0 ? `${Math.min(uptimeDays, 30)}${t('settings.period.suffix')} ${t('uptime.basis.suffix')}` : t('uptime.collecting')}
         </span>
       </div>
 

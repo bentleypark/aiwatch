@@ -104,6 +104,7 @@ const en = {
   'uptime.matrix': '3-Month History',
   'uptime.incidents': 'incidents',
   'uptime.basis': '30-day basis',
+  'uptime.basis.suffix': 'basis',
   'uptime.matrix.sub': 'Last 3 months',
   'uptime.collecting': 'Collecting data',
 

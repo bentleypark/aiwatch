@@ -104,6 +104,7 @@ const ko = {
   'uptime.matrix': '3개월 이력',
   'uptime.incidents': '인시던트',
   'uptime.basis': '30일 기준',
+  'uptime.basis.suffix': '기준',
   'uptime.matrix.sub': '최근 3개월',
   'uptime.collecting': '데이터 수집 중',
 
