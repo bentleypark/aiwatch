@@ -161,7 +161,7 @@ const ko = {
   'modal.loading': '불러오는 중',
 
   // Footer
-  'footer.privacy': '개인정보처리방침',
+  'footer.privacy': '개인정보 처리방침',
   'footer.terms': '이용약관',
   'footer.copyright': '© 2026 AIWatch. All rights reserved.',
 }
