@@ -224,18 +224,26 @@ export default function Incidents() {
 
   // Flatten all incidents from all services (stable ref while services unchanged)
   // Normalize Worker statuses (investigating/identified) → 'ongoing' for display
+  // Deduplicate: services sharing a status page (e.g., Claude API + claude.ai) return same incidents
   const allIncidents = useMemo(
-    () =>
-      services.flatMap((svc) =>
-        (svc.incidents ?? []).map((inc) => ({
-          ...inc,
-          status: inc.status === 'resolved' ? 'resolved'
-            : inc.status === 'monitoring' ? 'monitoring'
-            : 'ongoing',
-          serviceName: svc.name,
-          serviceId: svc.id,
-        }))
-      ),
+    () => {
+      const seenOriginalIds = new Set()
+      return services.flatMap((svc) =>
+        (svc.incidents ?? []).flatMap((inc) => {
+          if (seenOriginalIds.has(inc.id)) return []
+          seenOriginalIds.add(inc.id)
+          return [{
+            ...inc,
+            id: `${svc.id}:${inc.id}`,
+            status: inc.status === 'resolved' ? 'resolved'
+              : inc.status === 'monitoring' ? 'monitoring'
+              : 'ongoing',
+            serviceName: svc.name,
+            serviceId: svc.id,
+          }]
+        })
+      )
+    },
     [services]
   )
 

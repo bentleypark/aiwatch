@@ -105,7 +105,7 @@ function parseIncidents(data: StatuspageResponse): Incident[] {
     const duration = inc.resolved_at
       ? formatDuration(new Date(inc.created_at), new Date(inc.resolved_at))
       : null
-    const timeline: TimelineEntry[] = (inc.incident_updates ?? [])
+    const rawTimeline: TimelineEntry[] = (inc.incident_updates ?? [])
       .map((u) => ({
         stage: u.status === 'resolved' ? 'resolved' as const
           : u.status === 'monitoring' ? 'monitoring' as const
@@ -115,6 +115,14 @@ function parseIncidents(data: StatuspageResponse): Incident[] {
         at: u.created_at,
       }))
       .reverse() // oldest first
+    // Deduplicate: keep one entry per stage (removes duplicate updates at same timestamp)
+    const seen = new Set<string>()
+    const timeline = rawTimeline.filter((t) => {
+      const key = `${t.stage}:${t.at}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
 
     return {
       id: inc.id,
