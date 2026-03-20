@@ -253,7 +253,7 @@ export default function Incidents() {
     return allIncidents
       .filter((inc) => serviceFilter === 'all' || inc.serviceId === serviceFilter)
       .filter((inc) => statusFilter  === 'all' || inc.status    === statusFilter)
-      .filter((inc) => !cutoff || new Date(inc.startedAt).getTime() >= cutoff)
+      .filter((inc) => !cutoff || inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= cutoff)
       .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
   }, [allIncidents, serviceFilter, statusFilter, period])
 
