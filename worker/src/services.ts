@@ -37,6 +37,7 @@ interface ServiceConfig {
   category: 'api' | 'webapp' | 'agent'
   statusUrl: string
   apiUrl: string | null  // Atlassian Statuspage API endpoint if available
+  instatusUrl?: string   // Instatus (Nuxt SSR) incidents page URL
 }
 
 const SERVICES: ServiceConfig[] = [
@@ -44,7 +45,7 @@ const SERVICES: ServiceConfig[] = [
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json' },
   { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json' },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null },
-  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null },
+  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json' },
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json' },
   { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null },
@@ -127,6 +128,74 @@ function parseIncidents(data: StatuspageResponse): Incident[] {
   })
 }
 
+// ── Instatus (Nuxt SSR) Parser — for status pages like Mistral ──
+
+function parseInstatusIncidents(html: string): Incident[] {
+  // Extract Nuxt SSR payload — match everything between the script tags, let JSON.parse validate
+  const match = html.match(/__NUXT_DATA__[^>]*>([\s\S]*?)<\/script/)
+  if (!match) return []
+  try {
+    const arr: unknown[] = JSON.parse(match[1])
+
+    // Find the data refs object containing an 'incidents-by-date' key (avoid hardcoded index)
+    const dataRefs = arr.find(
+      (item): item is Record<string, number> =>
+        typeof item === 'object' && item !== null && !Array.isArray(item) &&
+        Object.keys(item).some((k) => k.startsWith('incidents-by-date'))
+    )
+    if (!dataRefs) return []
+    const incKey = Object.keys(dataRefs).find((k) => k.startsWith('incidents-by-date'))!
+    const incObj = arr[dataRefs[incKey]] as { incidents?: number } | undefined
+    if (!incObj?.incidents) return []
+    const incIndices = arr[incObj.incidents] as number[]
+    if (!Array.isArray(incIndices)) return []
+
+    // Parse each incident with per-item error isolation
+    return incIndices.slice(0, 5).flatMap((idx) => {
+      try {
+        const inc = arr[idx] as Record<string, number>
+        if (!inc || typeof inc !== 'object') return []
+        const name = arr[inc.name] as string
+        const status = (arr[inc.lastUpdateStatus] as string) ?? ''
+        const createdAt = arr[inc.created_at] as string
+        const durationSec = arr[inc.duration] as number | null
+
+        // Parse incident updates
+        const updatesArr = arr[inc.incidentUpdates] as number[] | undefined
+        const timeline: TimelineEntry[] = (updatesArr ?? []).flatMap((ui) => {
+          try {
+            const u = arr[ui] as Record<string, number>
+            if (!u || typeof u !== 'object') return []
+            const uStatus = (arr[u.status] as string) ?? ''
+            return [{
+              stage: uStatus === 'RESOLVED' ? 'resolved' as const
+                : uStatus === 'MONITORING' ? 'monitoring' as const
+                : uStatus === 'IDENTIFIED' ? 'identified' as const
+                : 'investigating' as const,
+              text: (arr[u.description] as string) || null,
+              at: arr[u.created_at] as string,
+            }]
+          } catch { return [] }
+        }).reverse()
+
+        return [{
+          id: arr[inc.id] as string,
+          title: name,
+          status: status === 'RESOLVED' ? 'resolved' as const
+            : status === 'MONITORING' ? 'monitoring' as const
+            : status === 'IDENTIFIED' ? 'identified' as const
+            : 'investigating' as const,
+          startedAt: createdAt,
+          duration: durationSec ? formatDuration(new Date(createdAt), new Date(new Date(createdAt).getTime() + durationSec * 1000)) : null,
+          timeline,
+        }]
+      } catch { return [] }
+    })
+  } catch {
+    return []
+  }
+}
+
 function formatDuration(start: Date, end: Date): string {
   const diffMs = end.getTime() - start.getTime()
   const hours = Math.floor(diffMs / 3_600_000)
@@ -197,15 +266,30 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
         incidents,
       }
     } else {
-      // No API — simple HTTP check
+      // No Statuspage API — HTTP check + optional Instatus scraping (parallel)
       const start = Date.now()
-      const res = await fetchWithTimeout(config.statusUrl)
+      const [res, incRes] = await Promise.all([
+        fetchWithTimeout(config.statusUrl),
+        config.instatusUrl
+          ? fetchWithTimeout(config.instatusUrl).catch((err) => {
+              console.warn(`[fetchService] ${config.id} instatus scrape failed:`, err.message)
+              return null
+            })
+          : Promise.resolve(null),
+      ])
       const latency = Date.now() - start
+
+      let incidents: Incident[] = []
+      if (incRes?.ok) {
+        const html = await incRes.text()
+        incidents = parseInstatusIncidents(html)
+      }
 
       return {
         ...base,
         status: res.ok ? 'operational' : 'degraded',
         latency: config.category === 'api' ? latency : null,
+        incidents,
       }
     }
   } catch (err) {
