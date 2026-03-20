@@ -6,6 +6,7 @@ import { useLang } from '../hooks/useLang'
 import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
+import { buildCalendarFromIncidents } from '../utils/calendar'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
 import StatusPill from '../components/StatusPill'
@@ -115,7 +116,7 @@ function ServiceCard({ service, index, onClick, t }) {
         </div>
       </div>
 
-      <HistoryBars history30d={service.history30d} />
+      <HistoryBars history30d={buildCalendarFromIncidents(service.incidents)} />
     </button>
   )
 }

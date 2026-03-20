@@ -15,6 +15,7 @@ import { useTheme } from '../hooks/useTheme'
 import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { formatDate } from '../utils/time'
+import { buildCalendarFromIncidents } from '../utils/calendar'
 import SkeletonUI from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import StatusPill from '../components/StatusPill'
@@ -103,23 +104,6 @@ function calendarDate(i, lang) {
     month: 'short',
     day: 'numeric',
   }).format(d)
-}
-
-// Build 30-day calendar from incidents (replaces mock history30d)
-// Uses UTC dates to avoid timezone-related off-by-one errors
-function buildCalendarFromIncidents(incidents) {
-  const today = new Date()
-  const dayStatus = {}
-  ;(incidents ?? []).forEach((inc) => {
-    if (!inc.startedAt) return
-    const key = new Date(inc.startedAt).toISOString().split('T')[0]
-    const status = inc.status === 'resolved' ? 'degraded' : 'down'
-    if (!dayStatus[key] || status === 'down') dayStatus[key] = status
-  })
-  return Array.from({ length: 30 }, (_, i) => {
-    const key = new Date(today.getTime() - (29 - i) * 86_400_000).toISOString().split('T')[0]
-    return dayStatus[key] ?? 'operational'
-  })
 }
 
 // ── Sub-components ───────────────────────────────────────────
@@ -414,7 +398,7 @@ export default function ServiceDetails({ serviceId }) {
             </div>
           </div>
           <div style={{ padding: '16px' }}>
-            <div className="flex" style={{ gap: '2px' }}>
+            <div className="flex flex-wrap" style={{ gap: '2px' }}>
               {calendar30d.map((status, i) => (
                 <CalendarCell key={i} status={status} date={calendarDate(i, lang)} />
               ))}
