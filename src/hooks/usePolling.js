@@ -438,6 +438,7 @@ function usePollingInternal() {
   const controllerRef = useRef(null)
   const hasDataRef = useRef(false)
   const refreshingRef = useRef(false) // prevent silent polls from aborting refresh
+  const prevServicesRef = useRef([])  // backup for recovery on refresh failure
 
   const poll = useCallback(async (mode = 'silent') => {
     // Skip silent polls while refresh is in progress
@@ -462,8 +463,11 @@ function usePollingInternal() {
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
     } else if (isRefresh) {
       if (!cancelledRef.current) {
-        setState((prev) => ({ ...prev, refreshing: true }))
+        // Save current services for recovery on fetch failure
+        prevServicesRef.current = state.services
+        setState((prev) => ({ ...prev, loading: true, refreshing: true, services: [] }))
       }
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
     }
 
     try {
@@ -473,13 +477,13 @@ function usePollingInternal() {
       const data = await res.json()
       const merged = mergeWithMock(data.services)
 
-      // Minimum display time: skeleton 2s (initial), refreshing 1s (manual refresh)
+      // Minimum skeleton display time: 2s for both initial and manual refresh
       if (isInitial) {
         const elapsed = Date.now() - loadStart
         if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
       } else if (isRefresh) {
         const elapsed = Date.now() - loadStart
-        if (elapsed < 1000) await new Promise((r) => setTimeout(r, 1000 - elapsed))
+        if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
       }
 
       hasDataRef.current = true
@@ -500,7 +504,12 @@ function usePollingInternal() {
         // Only reset refresh state if OUR controller was aborted (not a previous one)
         if (controller.signal.aborted && isRefresh && !cancelledRef.current) {
           refreshingRef.current = false
-          setState((prev) => ({ ...prev, refreshing: false }))
+          setState((prev) => ({
+            ...prev,
+            loading: false,
+            refreshing: false,
+            services: prevServicesRef.current.length > 0 ? prevServicesRef.current : prev.services,
+          }))
         }
         return
       }
@@ -511,11 +520,16 @@ function usePollingInternal() {
         if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
       }
 
-      // Refresh with existing data: keep current services, just clear refreshing
+      // Refresh failed: restore previous services
       if (isRefresh && hasDataRef.current) {
         refreshingRef.current = false
         if (!cancelledRef.current) {
-          setState((prev) => ({ ...prev, refreshing: false }))
+          setState((prev) => ({
+            ...prev,
+            loading: false,
+            refreshing: false,
+            services: prevServicesRef.current.length > 0 ? prevServicesRef.current : prev.services,
+          }))
         }
         return
       }
