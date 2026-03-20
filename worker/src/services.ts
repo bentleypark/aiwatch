@@ -130,7 +130,7 @@ function parseIncidents(data: StatuspageResponse): Incident[] {
     return {
       id: inc.id,
       title: inc.name,
-      status: inc.status === 'resolved' ? 'resolved'
+      status: (inc.status === 'resolved' || inc.status === 'postmortem') ? 'resolved'
         : inc.status === 'monitoring' ? 'monitoring'
         : inc.status === 'identified' ? 'identified'
         : 'investigating',

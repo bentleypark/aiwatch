@@ -223,7 +223,11 @@ export default function ServiceDetails({ serviceId }) {
   }
 
   const statusUrl = STATUS_URL[service.id]
-  const incidentCount = service.incidents?.length ?? 0
+  const cutoff7d = Date.now() - 7 * 86_400_000
+  const recentIncidents = (service.incidents ?? []).filter(
+    (inc) => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= cutoff7d
+  )
+  const incidentCount = recentIncidents.length
   const calendar30d = buildCalendarFromIncidents(service.incidents)
 
   return (
@@ -319,7 +323,7 @@ export default function ServiceDetails({ serviceId }) {
               </div>
             ) : (
               <div className="flex flex-col" style={{ gap: '8px' }}>
-                {(service.incidents ?? []).map((inc) => (
+                {recentIncidents.map((inc) => (
                   <IncidentRow key={inc.id} incident={inc} t={t} lang={lang} />
                 ))}
               </div>
