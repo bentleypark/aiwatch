@@ -3,6 +3,7 @@ import { useTheme } from './hooks/useTheme'
 import { useLang } from './hooks/useLang'
 import { initGA, trackPageView, trackEvent } from './utils/analytics'
 import { PageContext } from './utils/pageContext'
+import { PollingProvider } from './hooks/usePolling'
 import Layout from './components/Layout'
 import Topbar, { MobileActionBar } from './components/Topbar'
 import TickerBar from './components/TickerBar'
@@ -87,6 +88,7 @@ export default function App() {
   )
 
   return (
+    <PollingProvider>
     <PageContext.Provider value={{ page, setPage }}>
       <Layout
         topbar={<Topbar onMenuToggle={() => setSidebarOpen((o) => !o)} />}
@@ -117,5 +119,6 @@ export default function App() {
         <TermsContent />
       </Modal>
     </PageContext.Provider>
+    </PollingProvider>
   )
 }

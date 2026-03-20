@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { usePage } from '../utils/pageContext'
 import { useLang } from '../hooks/useLang'
+import { usePolling } from '../hooks/usePolling'
 import { formatTime } from '../utils/time'
 import { trackEvent } from '../utils/analytics'
 
@@ -26,9 +27,10 @@ function HamburgerIcon() {
   )
 }
 
-export default function Topbar({ onRefresh, onMenuToggle }) {
+export default function Topbar({ onMenuToggle }) {
   const { page, setPage } = usePage()
   const { lang, t } = useLang()
+  const { lastUpdated, refresh } = usePolling()
   const isSettings = page.name === 'settings'
   const [refreshing, setRefreshing] = useState(false)
 
@@ -37,13 +39,11 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
     trackEvent('click_refresh')
     setRefreshing(true)
     try {
-      await onRefresh?.()
-      // Simulate network delay matching design mockup (1.2s)
-      await new Promise((r) => setTimeout(r, 1200))
+      await refresh()
     } finally {
       setRefreshing(false)
     }
-  }, [refreshing, onRefresh])
+  }, [refreshing, refresh])
 
   // Design mockup: "↻ Loading..." while refreshing, "↻ Refresh" when idle
   const refreshLabel = refreshing ? t('topbar.refresh.loading') : t('topbar.refresh')
@@ -74,7 +74,7 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
       {/* Center: LIVE · time — hidden on mobile */}
       <div className="hidden md:flex items-center gap-1.5 mono text-[11px] text-[var(--text2)]">
         <span className="w-1.5 h-1.5 rounded-full bg-[var(--green)] animate-[pulse_2s_ease-in-out_infinite]" />
-        <span>{t('topbar.live')} · —</span>
+        <span>{t('topbar.live')} · {lastUpdated ? formatTime(lastUpdated, lang) : '—'}</span>
       </div>
 
       {/* Right: actions */}
@@ -136,20 +136,21 @@ export default function Topbar({ onRefresh, onMenuToggle }) {
 }
 
 // Mobile Action Bar — rendered by Layout below the fixed topbar
-export function MobileActionBar({ onRefresh }) {
+export function MobileActionBar() {
   const { lang, t } = useLang()
+  const { refresh, lastUpdated } = usePolling()
   const [refreshing, setRefreshing] = useState(false)
 
   const handleRefresh = useCallback(async () => {
     if (refreshing) return
+    trackEvent('click_refresh')
     setRefreshing(true)
     try {
-      await onRefresh?.()
-      await new Promise((r) => setTimeout(r, 1200))
+      await refresh()
     } finally {
       setRefreshing(false)
     }
-  }, [refreshing, onRefresh])
+  }, [refreshing, refresh])
 
   const refreshLabel = refreshing ? t('topbar.refresh.loading') : t('topbar.refresh')
 

@@ -2,7 +2,7 @@
 // Falls back to mock data when Worker is unavailable (local dev without worker).
 // Return shape: { services, loading, error, lastUpdated, refresh }
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, createContext, useContext, createElement } from 'react'
 
 const POLL_INTERVAL = 60_000 // 60s
 
@@ -216,9 +216,22 @@ function mergeWithMock(liveServices) {
   })
 }
 
-// ── Hook ──
+// ── Context (single instance shared across all components) ──
+
+const PollingContext = createContext(null)
+
+export function PollingProvider({ children }) {
+  const value = usePollingInternal()
+  return createElement(PollingContext.Provider, { value }, children)
+}
 
 export function usePolling() {
+  const ctx = useContext(PollingContext)
+  if (!ctx) throw new Error('usePolling must be used within a PollingProvider')
+  return ctx
+}
+
+function usePollingInternal() {
   const [state, setState] = useState({
     services: [],
     loading: true,
@@ -227,12 +240,19 @@ export function usePolling() {
   })
   const cancelledRef = useRef(false)
   const controllerRef = useRef(null)
-
   const poll = useCallback(async () => {
     controllerRef.current?.abort()
     const controller = new AbortController()
     controllerRef.current = controller
     const timer = setTimeout(() => controller.abort(), 15000)
+
+    // Show skeleton UI
+    if (!cancelledRef.current) {
+      setState((prev) => ({ ...prev, loading: true }))
+    }
+    // Yield to browser so skeleton renders before fetch begins
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+    const loadStart = Date.now()
 
     try {
       const res = await fetch(API_URL, { signal: controller.signal })
@@ -240,6 +260,9 @@ export function usePolling() {
       if (!res.ok) throw new Error(`Worker responded ${res.status}`)
       const data = await res.json()
       const merged = mergeWithMock(data.services)
+
+      const elapsed = Date.now() - loadStart
+      if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
 
       if (!cancelledRef.current) {
         setState({
@@ -251,14 +274,23 @@ export function usePolling() {
       }
     } catch (err) {
       clearTimeout(timer)
+
+      // Skip delay if intentionally aborted (new poll superseded this one)
+      if (err?.name !== 'AbortError') {
+        const elapsed = Date.now() - loadStart
+        if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
+      } else {
+        // Don't change state — the new poll will handle it
+        return
+      }
+
       if (!cancelledRef.current) {
-        // Network error (Worker not running) → silent mock fallback
-        // Other errors (500, timeout, parse) → set error but still show mock
-        const isNetworkError = err instanceof TypeError
+        // Network errors (Worker not running) → silent mock fallback
+        const isSilent = err instanceof TypeError
         setState({
           services: MOCK_SERVICES,
           loading: false,
-          error: isNetworkError ? null : err,
+          error: isSilent ? null : err,
           lastUpdated: new Date(),
         })
       }
@@ -276,5 +308,5 @@ export function usePolling() {
     }
   }, [poll])
 
-  return state
+  return { ...state, refresh: poll }
 }
