@@ -473,10 +473,13 @@ function usePollingInternal() {
       const data = await res.json()
       const merged = mergeWithMock(data.services)
 
-      // Minimum skeleton display time (initial load only)
+      // Minimum display time: skeleton 2s (initial), refreshing 1s (manual refresh)
       if (isInitial) {
         const elapsed = Date.now() - loadStart
         if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
+      } else if (isRefresh) {
+        const elapsed = Date.now() - loadStart
+        if (elapsed < 1000) await new Promise((r) => setTimeout(r, 1000 - elapsed))
       }
 
       hasDataRef.current = true
@@ -493,7 +496,6 @@ function usePollingInternal() {
       }
     } catch (err) {
       clearTimeout(timer)
-
       if (err?.name === 'AbortError') {
         // Only reset refresh state if OUR controller was aborted (not a previous one)
         if (controller.signal.aborted && isRefresh && !cancelledRef.current) {
