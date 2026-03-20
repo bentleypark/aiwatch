@@ -38,13 +38,14 @@ interface ServiceConfig {
   statusUrl: string
   apiUrl: string | null  // Atlassian Statuspage API endpoint if available
   instatusUrl?: string   // Instatus (Nuxt SSR) incidents page URL
+  gcloudProduct?: string // Google Cloud product name filter for incidents.json
 }
 
 const SERVICES: ServiceConfig[] = [
   // AI API Services
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json' },
   { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json' },
-  { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null },
+  { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API' },
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json' },
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json' },
@@ -126,6 +127,57 @@ function parseIncidents(data: StatuspageResponse): Incident[] {
       timeline,
     }
   })
+}
+
+// ── Google Cloud Status Parser — incidents.json with product filtering ──
+
+interface GCloudIncident {
+  id: string
+  service_name: string
+  severity: string
+  begin: string
+  end: string | null
+  affected_products?: Array<{ title: string; id: string }>
+  most_recent_update?: { status: string; text: string }
+  updates?: Array<{ status: string; when: string; text: string }>
+}
+
+function parseGCloudIncidents(data: GCloudIncident[], productFilter: string): Incident[] {
+  return data
+    .filter((inc) =>
+      inc.affected_products?.some((p) => p.title === productFilter) ||
+      inc.service_name?.toLowerCase().includes(productFilter.toLowerCase())
+    )
+    .slice(0, 5)
+    .flatMap((inc) => {
+      try {
+        const duration = inc.end
+          ? formatDuration(new Date(inc.begin), new Date(inc.end))
+          : null
+        const status = inc.most_recent_update?.status
+        const timeline: TimelineEntry[] = (inc.updates ?? [])
+          .map((u) => ({
+            stage: u.status === 'AVAILABLE' ? 'resolved' as const
+              : u.status === 'SERVICE_DISRUPTION' ? 'investigating' as const
+              : u.status === 'SERVICE_INFORMATION' ? 'identified' as const
+              : 'investigating' as const,
+            text: u.text?.replace(/^#.*\n/gm, '').replace(/\*\*/g, '').trim().substring(0, 200) || null,
+            at: u.when,
+          }))
+          .reverse()
+
+        return [{
+          id: inc.id,
+          title: `${inc.service_name} — ${inc.severity}`,
+          status: status === 'AVAILABLE' ? 'resolved' as const
+            : status === 'SERVICE_DISRUPTION' ? 'investigating' as const
+            : 'investigating' as const,
+          startedAt: inc.begin,
+          duration,
+          timeline,
+        }]
+      } catch { return [] }
+    })
 }
 
 // ── Instatus (Nuxt SSR) Parser — for status pages like Mistral ──
@@ -266,13 +318,14 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
         incidents,
       }
     } else {
-      // No Statuspage API — HTTP check + optional Instatus scraping (parallel)
+      // No Statuspage API — HTTP check + optional scraping (parallel)
       const start = Date.now()
-      const [res, incRes] = await Promise.all([
+      const scrapeUrl = config.instatusUrl || (config.gcloudProduct ? 'https://status.cloud.google.com/incidents.json' : null)
+      const [res, scrapeRes] = await Promise.all([
         fetchWithTimeout(config.statusUrl),
-        config.instatusUrl
-          ? fetchWithTimeout(config.instatusUrl).catch((err) => {
-              console.warn(`[fetchService] ${config.id} instatus scrape failed:`, err.message)
+        scrapeUrl
+          ? fetchWithTimeout(scrapeUrl).catch((err) => {
+              console.warn(`[fetchService] ${config.id} scrape failed:`, err.message)
               return null
             })
           : Promise.resolve(null),
@@ -280,9 +333,13 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
       const latency = Date.now() - start
 
       let incidents: Incident[] = []
-      if (incRes?.ok) {
-        const html = await incRes.text()
-        incidents = parseInstatusIncidents(html)
+      if (scrapeRes?.ok) {
+        if (config.instatusUrl) {
+          incidents = parseInstatusIncidents(await scrapeRes.text())
+        } else if (config.gcloudProduct) {
+          const data: GCloudIncident[] = await scrapeRes.json()
+          incidents = parseGCloudIncidents(data, config.gcloudProduct)
+        }
       }
 
       return {

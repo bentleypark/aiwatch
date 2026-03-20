@@ -217,7 +217,7 @@ function IncidentRow({ incident, t, lang }) {
     : incident.status === 'monitoring' ? 'monitoring'
     : 'ongoing'
   return (
-    <div className="flex items-start gap-3 py-[10px] border-b border-[var(--border)] last:border-0">
+    <div className="flex items-start gap-[10px]">
       <span className={`shrink-0 mt-0.5 text-[10px] mono ${dotCls}`} aria-hidden="true">●</span>
       <div className="flex-1 min-w-0">
         <p className="text-xs text-[var(--text1)] truncate">{incident.title}</p>
@@ -370,7 +370,7 @@ export default function ServiceDetails({ serviceId }) {
                 <span className="text-xs text-[var(--text2)]">{t('svc.no.incidents')}</span>
               </div>
             ) : (
-              <div>
+              <div className="flex flex-col" style={{ gap: '8px' }}>
                 {(service.incidents ?? []).map((inc) => (
                   <IncidentRow key={inc.id} incident={inc} t={t} lang={lang} />
                 ))}
