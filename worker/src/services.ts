@@ -52,7 +52,7 @@ interface ServiceConfig {
 const SERVICES: ServiceConfig[] = [
   // AI API Services
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code'], statusComponent: 'Claude API' },
-  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'sora', 'excel plugin'], incidentIoBaseUrl: 'https://status.openai.com/incidents', statusComponent: 'API' },
+  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'sora', 'excel plugin'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API' },
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents' },
@@ -355,24 +355,27 @@ const RANK_TO_IMPACT: Record<number, 'minor' | 'major' | 'critical'> = { 1: 'min
 function buildDailyImpact(data: StatuspageResponse, componentName?: string): Record<string, 'minor' | 'major' | 'critical'> {
   const result: Record<string, number> = {}
   for (const inc of data.incidents ?? []) {
-    const day = new Date(inc.created_at).toISOString().split('T')[0]
-    let worstRank = 0
+    let foundComponent = false
     if (componentName) {
-      // Check affected_components for the specific component
+      // Check affected_components per update, keyed to each update's own date
+      // so multi-day incidents color all affected days (not just creation day).
       for (const u of inc.incident_updates ?? []) {
         for (const c of u.affected_components ?? []) {
           if (c.name.includes(componentName)) {
-            worstRank = Math.max(worstRank, COMP_STATUS_RANK[c.new_status] ?? 0)
+            foundComponent = true
+            const updateDay = new Date(u.created_at).toISOString().split('T')[0]
+            const rank = COMP_STATUS_RANK[c.new_status] ?? 0
+            if (rank > (result[updateDay] ?? 0)) result[updateDay] = rank
           }
         }
       }
     }
     // Fallback to incident-level impact when no component data found
-    if (worstRank === 0) {
+    if (!foundComponent) {
+      const day = new Date(inc.created_at).toISOString().split('T')[0]
       const impactRank = inc.impact === 'critical' ? 3 : inc.impact === 'major' ? 2 : inc.impact === 'minor' ? 1 : 0
-      worstRank = impactRank
+      if (impactRank > (result[day] ?? 0)) result[day] = impactRank
     }
-    if (worstRank > (result[day] ?? 0)) result[day] = worstRank
   }
   const mapped: Record<string, 'minor' | 'major' | 'critical'> = {}
   for (const [day, rank] of Object.entries(result)) {
