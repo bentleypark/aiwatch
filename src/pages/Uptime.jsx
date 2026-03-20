@@ -129,15 +129,17 @@ export default function Uptime() {
 
   if (services.length === 0) return <EmptyState type="neutral" />
 
-  const mostStable = sortedByUptime[0]
   const uptimeServices = services.filter((s) => s.uptime30d != null)
-  const avgUptime = uptimeServices.length
+  const hasUptimeData = uptimeServices.length > 0
+  const mostStable = hasUptimeData
+    ? uptimeServices.reduce((max, s) => s.uptime30d > max.uptime30d ? s : max)
+    : null
+  const mostIssues = hasUptimeData
+    ? uptimeServices.reduce((min, s) => s.uptime30d < min.uptime30d ? s : min)
+    : null
+  const avgUptime = hasUptimeData
     ? (uptimeServices.reduce((s, v) => s + v.uptime30d, 0) / uptimeServices.length).toFixed(2)
     : '—'
-
-  const mostIssues = [...services].sort(
-    (a, b) => (a.uptime30d ?? 100) - (b.uptime30d ?? 100)
-  )[0]
 
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>
@@ -155,25 +157,23 @@ export default function Uptime() {
       <div className="grid grid-cols-1 md:grid-cols-3" style={{ gap: '10px' }}>
         <SummaryCard
           label={t('uptime.stable')}
-          value={mostStable.name}
-          sub={mostStable.uptime30d != null ? `${mostStable.uptime30d.toFixed(2)}% ${t('overview.card.uptime')}` : t('uptime.collecting')}
+          value={mostStable ? mostStable.name : t('uptime.collecting')}
+          sub={mostStable ? `${mostStable.uptime30d.toFixed(2)}% ${t('overview.card.uptime')}` : ''}
           colorClass="text-[var(--green)]"
           valueSize="18px"
-          mono={false}
         />
         <SummaryCard
           label={t('uptime.average')}
-          value={`${avgUptime}%`}
+          value={hasUptimeData ? `${avgUptime}%` : '—'}
           sub={t('overview.stats.uptime.sub')}
           colorClass="text-[var(--blue)]"
         />
         <SummaryCard
           label={t('uptime.issues')}
-          value={mostIssues.name}
-          sub={mostIssues.uptime30d != null ? `${mostIssues.uptime30d.toFixed(2)}% ${t('overview.card.uptime')}` : t('uptime.collecting')}
+          value={mostIssues ? mostIssues.name : t('uptime.collecting')}
+          sub={mostIssues ? `${mostIssues.uptime30d.toFixed(2)}% ${t('overview.card.uptime')}` : ''}
           colorClass="text-[var(--red)]"
           valueSize="18px"
-          mono={false}
         />
       </div>
 

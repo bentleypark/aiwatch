@@ -331,13 +331,13 @@ export default function ServiceDetails({ serviceId }) {
         <MetricCard
           label={t('svc.latency')}
           value={service.latency != null ? `${service.latency} ms` : '—'}
-          sub={t('svc.latency.sub')}
+          sub={service.latency != null ? t('svc.latency.sub') : t('uptime.collecting')}
           colorClass="text-[var(--blue)]"
         />
         <MetricCard
           label={t('svc.uptime30d')}
           value={service.uptime30d != null ? `${service.uptime30d.toFixed(2)}%` : '—'}
-          sub={t('svc.uptime.sub')}
+          sub={service.uptime30d != null ? t('svc.uptime.sub') : t('uptime.collecting')}
           colorClass="text-[var(--green)]"
         />
         <MetricCard
