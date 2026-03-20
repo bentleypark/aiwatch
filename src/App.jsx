@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useTheme } from './hooks/useTheme'
-import { useLang } from './hooks/useLang'
+import { useLang, LangProvider } from './hooks/useLang'
 import { initGA, trackPageView, trackEvent } from './utils/analytics'
 import { PageContext } from './utils/pageContext'
 import { PollingProvider } from './hooks/usePolling'
@@ -32,6 +32,14 @@ function resolvePage(page) {
 }
 
 export default function App() {
+  return (
+    <LangProvider>
+      <AppInner />
+    </LangProvider>
+  )
+}
+
+function AppInner() {
   const [page, setPage] = useState(DEFAULT_PAGE)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [modal, setModal] = useState(null) // null | 'privacy' | 'terms'
@@ -77,10 +85,10 @@ export default function App() {
           </button>
           <span className="text-[11px] text-[var(--text2)] opacity-40">·</span>
           <a
-            href="mailto:contact@aiwatch.dev"
+            href="mailto:contact@ai-watch.dev"
             className="mono text-[11px] text-[var(--text2)] hover:text-[var(--text0)] transition-colors"
           >
-            contact@aiwatch.dev
+            contact@ai-watch.dev
           </a>
         </div>
       </div>
