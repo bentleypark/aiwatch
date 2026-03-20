@@ -372,11 +372,18 @@ function parseIncidentIoUpdates(html: string): IncidentIoUpdate[] {
 // Constructing URLs from inc.id is unreliable because incident.io Atlassian-compat IDs
 // may differ from the native ULID used in detail page URLs.
 async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, pageUrls: Map<string, string>): Promise<Incident[]> {
-  // Scrape incidents with missing timeline text (active first, max 3 to stay within budget)
+  // Scrape incidents with missing timeline text.
+  // Budget = 1 per service: Cloudflare free plan caps at 50 subrequests per invocation.
+  // ~36 base requests (19 services × 2) + 6 services × 1 enrichment = 42 total — within limit.
+  // Prioritise: non-resolved first, then most recently started.
   const toEnrich = incidents
     .filter((inc) => inc.timeline.some((t) => !t.text))
-    .sort((a, b) => (a.status === 'resolved' ? 1 : 0) - (b.status === 'resolved' ? 1 : 0))
-    .slice(0, 3)
+    .sort((a, b) => {
+      const resolvedDiff = (a.status === 'resolved' ? 1 : 0) - (b.status === 'resolved' ? 1 : 0)
+      if (resolvedDiff !== 0) return resolvedDiff
+      return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+    })
+    .slice(0, 1)
 
   if (toEnrich.length === 0) return incidents
 
