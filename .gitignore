@@ -24,6 +24,9 @@ dist-ssr
 *.sln
 *.sw?
 
+# Cloudflare
+.wrangler
+
 # Playwright
 test-results/
 playwright-report/

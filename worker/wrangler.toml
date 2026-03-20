@@ -1,0 +1,6 @@
+name = "aiwatch-worker"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+[vars]
+ALLOWED_ORIGIN = "https://aiwatch.dev"

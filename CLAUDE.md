@@ -35,7 +35,10 @@ No test runner is configured yet.
 
 ## Architecture
 
-**AIWatch** is a React SPA that monitors 13 AI API services (Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Perplexity, HuggingFace, Replicate, ElevenLabs, xAI, DeepSeek) in real time.
+**AIWatch** is a React SPA that monitors 19 AI services in real time:
+- **13 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Perplexity, HuggingFace, Replicate, ElevenLabs, xAI, DeepSeek
+- **2 AI web apps**: claude.ai, ChatGPT
+- **4 coding agents**: Claude Code, GitHub Copilot, Cursor, Windsurf
 
 ### Tech Stack
 - **React 19 + Vite 6** — SPA, no router library
@@ -89,5 +92,8 @@ No React Router. A top-level `currentPage` state in `App.jsx` will determine whi
 ### Key Product Constraints
 - Mobile breakpoint: 768px — sidebar hidden (overlay on hamburger), ticker bar hidden, cards go 1-column
 - Phase 3 features (AI Analysis via Claude API, Slack Webhook, Cloudflare KV cache) are UI-disabled with "준비 중" labels — do not remove these placeholders
-- Status polling proxy lives in a separate Cloudflare Workers project (not this repo)
+- Status polling proxy: `worker/` directory (monorepo), Cloudflare Workers
+  - `cd worker && npm run dev` — local dev (port 8787)
+  - `cd worker && npm run deploy` — deploy to Cloudflare
+  - Endpoint: `GET /api/status` → ServiceStatus[]
 - Deployment: Vercel Hobby (free), domain aiwatch.dev
