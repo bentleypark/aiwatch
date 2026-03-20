@@ -434,7 +434,8 @@ function usePollingInternal() {
   })
   const cancelledRef = useRef(false)
   const controllerRef = useRef(null)
-  // silent=true: background polling (no skeleton), silent=false: show skeleton UI
+  const hasDataRef = useRef(false) // true once first successful load completes
+
   const poll = useCallback(async (silent = false) => {
     controllerRef.current?.abort()
     const controller = new AbortController()
@@ -443,8 +444,8 @@ function usePollingInternal() {
 
     const loadStart = Date.now()
 
-    if (!silent) {
-      // Show skeleton UI for initial load and manual refresh
+    // Only show skeleton on explicit non-silent calls AND before first data load
+    if (!silent && !hasDataRef.current) {
       if (!cancelledRef.current) {
         setState((prev) => ({ ...prev, loading: true }))
       }
@@ -458,12 +459,13 @@ function usePollingInternal() {
       const data = await res.json()
       const merged = mergeWithMock(data.services)
 
-      // Minimum skeleton display time (only for non-silent)
-      if (!silent) {
+      // Minimum skeleton display time (only for first load)
+      if (!silent && !hasDataRef.current) {
         const elapsed = Date.now() - loadStart
         if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
       }
 
+      hasDataRef.current = true
       if (!cancelledRef.current) {
         setState({
           services: merged,
@@ -475,22 +477,21 @@ function usePollingInternal() {
     } catch (err) {
       clearTimeout(timer)
 
-      // Skip delay if aborted or silent
-      if (err?.name !== 'AbortError' && !silent) {
-        const elapsed = Date.now() - loadStart
-        if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
-      } else {
-        // Don't change state — the new poll will handle it
+      if (err?.name === 'AbortError' || silent) {
+        // Aborted or silent poll — don't touch state
         return
       }
 
+      // Non-silent error: wait minimum display time then fallback
+      const elapsed = Date.now() - loadStart
+      if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
+
+      hasDataRef.current = true
       if (!cancelledRef.current) {
-        // Network errors (Worker not running) → silent mock fallback
-        const isSilent = err instanceof TypeError
         setState({
           services: MOCK_SERVICES,
           loading: false,
-          error: isSilent ? null : err,
+          error: err instanceof TypeError ? null : err,
           lastUpdated: new Date(),
         })
       }
@@ -499,8 +500,8 @@ function usePollingInternal() {
 
   useEffect(() => {
     cancelledRef.current = false
-    poll(false) // initial load — show skeleton
-    const interval = setInterval(() => poll(true), POLL_INTERVAL) // auto-polling — silent
+    poll(false) // initial load
+    const interval = setInterval(() => poll(true), POLL_INTERVAL)
     return () => {
       cancelledRef.current = true
       controllerRef.current?.abort()
@@ -508,8 +509,11 @@ function usePollingInternal() {
     }
   }, [poll])
 
-  // refresh: always show skeleton (manual action)
-  const refresh = useCallback(() => poll(false), [poll])
+  // refresh: show skeleton (manual action)
+  const refresh = useCallback(() => {
+    hasDataRef.current = false
+    return poll(false)
+  }, [poll])
 
   return { ...state, refresh }
 }
