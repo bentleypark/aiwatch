@@ -40,12 +40,14 @@ interface ServiceConfig {
   instatusUrl?: string   // Instatus (Nuxt SSR) incidents page URL
   gcloudProduct?: string // Google Cloud product name filter for incidents.json
   rssFeedUrl?: string    // Better Stack RSS feed URL for incidents
+  incidentKeywords?: string[]  // Only show incidents matching these keywords (case-insensitive)
+  incidentExclude?: string[]   // Exclude incidents matching these keywords
 }
 
 const SERVICES: ServiceConfig[] = [
   // AI API Services
-  { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json' },
-  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json' },
+  { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['api', 'opus', 'sonnet', 'haiku', 'across surfaces', 'elevated errors'], incidentExclude: ['claude.ai', 'claude code'] },
+  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['api', 'responses', 'completions', 'embeddings', 'fine-tuning', 'batch'], incidentExclude: ['chatgpt'] },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API' },
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json' },
@@ -58,10 +60,10 @@ const SERVICES: ServiceConfig[] = [
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null },
   { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://status.deepseek.com/api/v2/summary.json' },
   // AI Web Apps
-  { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'webapp', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json' },
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json' },
+  { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'webapp', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'sign-in', 'login'] },
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'sign-in', 'login', 'pinned'] },
   // Coding Agents
-  { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json' },
+  { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'] },
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json' },
   { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json' },
   { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json' },
@@ -318,6 +320,18 @@ function parseInstatusIncidents(html: string): Incident[] {
   }
 }
 
+function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
+  const { incidentKeywords, incidentExclude } = config
+  return incidents.filter((inc) => {
+    const title = inc.title.toLowerCase()
+    if (incidentExclude?.some((kw) => title.includes(kw.toLowerCase()))) return false
+    if (incidentKeywords && incidentKeywords.length > 0) {
+      return incidentKeywords.some((kw) => title.includes(kw.toLowerCase()))
+    }
+    return true
+  })
+}
+
 function formatDuration(start: Date, end: Date): string {
   const diffMs = end.getTime() - start.getTime()
   const hours = Math.floor(diffMs / 3_600_000)
@@ -402,7 +416,7 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
         ...base,
         status: normalizeStatus(summaryData.status?.indicator ?? 'none'),
         latency: config.category === 'api' ? latency : null,
-        incidents,
+        incidents: filterIncidents(incidents, config),
       }
     } else {
       // No Statuspage API — HTTP check + optional scraping (parallel)
@@ -436,7 +450,7 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
         // 2xx = operational; 403 (bot protection) = treat as operational; other errors = degraded
         status: res.ok || res.status === 403 ? 'operational' : 'degraded',
         latency: config.category === 'api' ? latency : null,
-        incidents,
+        incidents: filterIncidents(incidents, config),
       }
     }
   } catch (err) {
