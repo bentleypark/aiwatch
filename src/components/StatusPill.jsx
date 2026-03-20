@@ -17,7 +17,8 @@ export default function StatusPill({ status = 'operational' }) {
   return (
     <span
       role="status"
-      className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] mono font-medium ${cls}`}
+      className={`inline-flex items-center mono font-medium uppercase text-[9px] tracking-[0.06em] ${cls}`}
+      style={{ padding: '3px 7px', borderRadius: '4px' }}
     >
       {t(`status.${status}`)}
     </span>

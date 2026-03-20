@@ -1,25 +1,22 @@
-// usePolling — returns live service status data
-// Placeholder: simulates 800ms load, returns static data, and re-triggers every 60s
-// to keep lastUpdated live for UI demonstration — no real fetch occurs.
-// Issue #15 replaces this with real Cloudflare Worker polling.
-// The return shape { services, loading, error, lastUpdated } and the ServiceStatus
-// object structure are the public contract — preserve them in Issue #15.
+// usePolling — fetches live service status from Cloudflare Worker proxy.
+// Falls back to mock data when Worker is unavailable (local dev without worker).
+// Return shape: { services, loading, error, lastUpdated, refresh }
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 const POLL_INTERVAL = 60_000 // 60s
 
-// Reference date for deterministic placeholder timestamps.
-// WARNING: incident timestamps are relative to REF — if changed to Date.now(),
-// verify ago() values still fall within the 7-day window used in Overview.jsx.
+// Worker API URL — defaults to local dev, override via env
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787/api/status'
+
+// ── Mock data fallback (used when Worker is unavailable) ──
+
 const REF = new Date('2026-03-19T10:00:00Z')
 const ago = (ms) => new Date(REF - ms).toISOString()
 const M = 60_000
 const H = 3_600_000
 const D = 86_400_000
 
-// 30-day operational history helper: 0=oldest (left), 29=today (right).
-// MiniHistory renders this order directly with no reversal.
 function hist(degraded = [], down = []) {
   return Array.from({ length: 30 }, (_, i) => {
     if (down.includes(i)) return 'down'
@@ -28,13 +25,9 @@ function hist(degraded = [], down = []) {
   })
 }
 
-// history3m: last 3 calendar months, oldest first. Used by Uptime Report matrix.
-// Shape: [{ month: 'YYYY-MM', uptime: number }] — 3 entries, index 0 = oldest.
-const SERVICES = [
-  // claude.ai before Claude API (design v2 order: webapp before related API)
+const MOCK_SERVICES = [
   {
-    id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', status: 'operational',
-    category: 'webapp',
+    id: 'claudeai', category: 'webapp', name: 'claude.ai', provider: 'Anthropic', status: 'operational',
     latency: null, uptime30d: 99.00,
     history30d: hist([3, 9, 13, 19, 27]),
     history3m: [{ month: '2026-01', uptime: 99.40 }, { month: '2026-02', uptime: 99.10 }, { month: '2026-03', uptime: 99.00 }],
@@ -72,10 +65,8 @@ const SERVICES = [
       },
     ],
   },
-  // ChatGPT after OpenAI API (design v2 order)
   {
-    id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', status: 'operational',
-    category: 'webapp',
+    id: 'chatgpt', category: 'webapp', name: 'ChatGPT', provider: 'OpenAI', status: 'operational',
     latency: null, uptime30d: 98.20,
     history30d: hist([1, 4, 8, 12, 18, 22, 28]),
     history3m: [{ month: '2026-01', uptime: 98.90 }, { month: '2026-02', uptime: 97.50 }, { month: '2026-03', uptime: 98.20 }],
@@ -176,40 +167,56 @@ const SERVICES = [
     history3m: [{ month: '2026-01', uptime: 99.55 }, { month: '2026-02', uptime: 99.48 }, { month: '2026-03', uptime: 99.40 }],
     incidents: [],
   },
-  // ── Coding Agents ──
   {
-    id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', status: 'operational',
-    category: 'agent',
+    id: 'claudecode', category: 'agent', name: 'Claude Code', provider: 'Anthropic', status: 'operational',
     latency: null, uptime30d: 99.00,
     history30d: hist([5, 13, 21, 29]),
     history3m: [{ month: '2026-01', uptime: 99.50 }, { month: '2026-02', uptime: 99.20 }, { month: '2026-03', uptime: 99.00 }],
     incidents: [],
   },
   {
-    id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', status: 'operational',
-    category: 'agent',
+    id: 'copilot', category: 'agent', name: 'GitHub Copilot', provider: 'Microsoft', status: 'operational',
     latency: null, uptime30d: 99.40,
     history30d: hist([9, 24]),
     history3m: [{ month: '2026-01', uptime: 99.60 }, { month: '2026-02', uptime: 99.50 }, { month: '2026-03', uptime: 99.40 }],
     incidents: [],
   },
   {
-    id: 'cursor', name: 'Cursor', provider: 'Anysphere', status: 'operational',
-    category: 'agent',
+    id: 'cursor', category: 'agent', name: 'Cursor', provider: 'Anysphere', status: 'operational',
     latency: null, uptime30d: 99.20,
     history30d: hist(),
     history3m: [{ month: '2026-01', uptime: 99.40 }, { month: '2026-02', uptime: 99.30 }, { month: '2026-03', uptime: 99.20 }],
     incidents: [],
   },
   {
-    id: 'windsurf', name: 'Windsurf', provider: 'Codeium', status: 'operational',
-    category: 'agent',
+    id: 'windsurf', category: 'agent', name: 'Windsurf', provider: 'Codeium', status: 'operational',
     latency: null, uptime30d: 98.80,
     history30d: hist([10, 27]),
     history3m: [{ month: '2026-01', uptime: 99.20 }, { month: '2026-02', uptime: 99.00 }, { month: '2026-03', uptime: 98.80 }],
     incidents: [],
   },
 ]
+
+// ── Merge live Worker data with mock fallback ──
+// Worker provides: id, name, provider, category, status, latency, incidents
+// Mock provides: uptime30d, history30d, history3m (not available from Worker yet)
+// Merge: start from mock list (preserves order + all services), overlay live data
+function mergeWithMock(liveServices) {
+  const liveMap = Object.fromEntries(liveServices.map((s) => [s.id, s]))
+  return MOCK_SERVICES.map((mock) => {
+    const live = liveMap[mock.id]
+    if (!live) return mock // Worker didn't return this service — use mock
+    return {
+      ...mock,            // fallback fields (uptime30d, history30d, history3m)
+      ...live,            // override with live data (status, latency, incidents)
+      uptime30d: mock.uptime30d,       // Worker doesn't provide this yet
+      history30d: mock.history30d,     // Worker doesn't provide this yet
+      history3m: mock.history3m,       // Worker doesn't provide this yet
+    }
+  })
+}
+
+// ── Hook ──
 
 export function usePolling() {
   const [state, setState] = useState({
@@ -218,32 +225,56 @@ export function usePolling() {
     error: null,
     lastUpdated: null,
   })
+  const cancelledRef = useRef(false)
+  const controllerRef = useRef(null)
 
-  useEffect(() => {
-    let cancelled = false
+  const poll = useCallback(async () => {
+    controllerRef.current?.abort()
+    const controller = new AbortController()
+    controllerRef.current = controller
+    const timer = setTimeout(() => controller.abort(), 15000)
 
-    async function poll() {
-      try {
-        // Placeholder: simulate network latency for skeleton UI demonstration
-        await new Promise((r) => setTimeout(r, 800))
-        if (!cancelled) {
-          setState({ services: SERVICES, loading: false, error: null, lastUpdated: new Date() })
-        }
-      } catch (err) {
-        // Note: unreachable in placeholder mode — real fetch errors surface here after Issue #15
-        if (!cancelled) {
-          setState((s) => ({ ...s, loading: false, error: err }))
-        }
+    try {
+      const res = await fetch(API_URL, { signal: controller.signal })
+      clearTimeout(timer)
+      if (!res.ok) throw new Error(`Worker responded ${res.status}`)
+      const data = await res.json()
+      const merged = mergeWithMock(data.services)
+
+      if (!cancelledRef.current) {
+        setState({
+          services: merged,
+          loading: false,
+          error: null,
+          lastUpdated: new Date(data.lastUpdated),
+        })
+      }
+    } catch (err) {
+      clearTimeout(timer)
+      if (!cancelledRef.current) {
+        // Network error (Worker not running) → silent mock fallback
+        // Other errors (500, timeout, parse) → set error but still show mock
+        const isNetworkError = err instanceof TypeError
+        setState({
+          services: MOCK_SERVICES,
+          loading: false,
+          error: isNetworkError ? null : err,
+          lastUpdated: new Date(),
+        })
       }
     }
+  }, [])
 
+  useEffect(() => {
+    cancelledRef.current = false
     poll()
     const interval = setInterval(poll, POLL_INTERVAL)
     return () => {
-      cancelled = true
+      cancelledRef.current = true
+      controllerRef.current?.abort()
       clearInterval(interval)
     }
-  }, [])
+  }, [poll])
 
   return state
 }

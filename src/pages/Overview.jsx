@@ -102,7 +102,7 @@ function ServiceCard({ service, index, onClick, t }) {
 
       <div className="grid grid-cols-3" style={{ gap: '6px', marginBottom: '10px', textAlign: 'center' }}>
         <div>
-          <div className={`mono text-[13px] font-medium ${latencyColor}`}>{service.latency}ms</div>
+          <div className={`mono text-[13px] font-medium ${latencyColor}`}>{service.latency != null ? `${service.latency}ms` : '—'}</div>
           <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.latency')}</div>
         </div>
         <div>
@@ -181,7 +181,7 @@ function LatencyBar({ service, maxLatency }) {
         <div className={`h-full rounded-sm ${fillCls}`} style={{ width: `${widthPct}%` }} />
       </div>
       <span className={`mono text-[10px] shrink-0 text-right ${valColor || 'text-[var(--text1)]'}`} style={{ width: '40px' }}>
-        {service.latency}ms
+        {service.latency != null ? `${service.latency}ms` : '—'}
       </span>
     </div>
   )
@@ -294,7 +294,7 @@ export default function Overview() {
     <div className="flex flex-col" style={{ gap: '20px' }}>
 
       {/* ── Summary Stats ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px', marginBottom: '20px' }}>
+      <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>
         <StatCard index={0} value={operationalCount} sub={t('overview.stats.operational')} labelKey="overview.stats.operational" colorClass="text-[var(--green)]" t={t} />
         <StatCard index={1} value={degradedCount}    sub={t('overview.stats.degraded')}    labelKey="overview.stats.degraded"    colorClass="text-[var(--amber)]" t={t} />
         <StatCard index={2} value={downCount}         sub="—"                                labelKey="overview.stats.down"         colorClass="text-[var(--red)]"   t={t} />

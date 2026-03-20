@@ -26,6 +26,7 @@ dist-ssr
 
 # Cloudflare
 .wrangler
+.dev.vars
 
 # Playwright
 test-results/
