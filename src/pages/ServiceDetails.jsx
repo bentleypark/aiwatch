@@ -1,17 +1,9 @@
 // Service Details — per-service monitoring page
 // Receives serviceId prop from App.jsx (page.serviceId).
-// Shows header, 4 metric cards, 24h latency chart, incident history, 30-day status calendar.
-// Chart.js registration is idempotent — safe to call even if Latency.jsx registered first.
+// Shows header, 4 metric cards, incident history, 30-day status calendar.
 
 import { useMemo, useState } from 'react'
-import {
-  Chart as ChartJS,
-  CategoryScale, LinearScale, PointElement, LineElement,
-  Tooltip, Legend, Filler,
-} from 'chart.js'
-import { Line } from 'react-chartjs-2'
 import { useLang } from '../hooks/useLang'
-import { useTheme } from '../hooks/useTheme'
 import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { formatDate } from '../utils/time'
@@ -20,14 +12,7 @@ import SkeletonUI from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import StatusPill from '../components/StatusPill'
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler)
-
 // ── Constants ────────────────────────────────────────────────
-
-// Read a CSS custom property value from :root at render time (not module eval).
-// Only call inside useMemo blocks that are gated on theme to avoid stale values.
-const cssVar = (name) =>
-  getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 
 // Per-service chart line colors (visualization palette — not design tokens).
 // Canvas-based charts cannot use CSS custom properties directly.
@@ -81,25 +66,6 @@ const CALENDAR_CLASS = {
   down:        'bg-[var(--red)]',
 }
 
-// Generates 24 synthetic hourly data points — mirrors gen24h in Latency.jsx.
-// Replace with real time-series data in Issue #15.
-function gen24h(baseLatency) {
-  return Array.from({ length: 24 }, (_, i) => {
-    const variation = (Math.sin(i * 0.7) * 0.15 + Math.cos(i * 1.3) * 0.10) * baseLatency
-    return Math.max(10, Math.round(baseLatency + variation))
-  })
-}
-
-// Generate last-24-hours labels (HH:00) relative to current time
-// 24 hour labels ending at current hour (matching Latency.jsx)
-function hourLabels() {
-  const currentHour = new Date().getHours()
-  return Array.from({ length: 24 }, (_, i) => {
-    const hour = (currentHour - 23 + i + 24) % 24
-    return `${String(hour).padStart(2, '0')}:00`
-  })
-}
-
 // Compute calendar date label for index i (0 = 29 days ago, 29 = today)
 function calendarDate(i, lang) {
   const d = new Date(Date.now() - (29 - i) * 86_400_000)
@@ -128,82 +94,6 @@ function MetricCard({ label, value, sub, colorClass }) {
       <div className="mono text-[9px] text-[var(--text2)] uppercase" style={{ letterSpacing: '0.1em', marginBottom: '6px' }}>{label}</div>
       <div className={`mono text-[26px] font-semibold leading-none ${colorClass}`} style={{ marginBottom: '4px' }}>{value}</div>
       {sub && <div className="mono text-[10px] text-[var(--text2)]">{sub}</div>}
-    </div>
-  )
-}
-
-// theme is used as key to force Chart.js re-mount on theme switch so cssVar() is re-read
-function LatencyChart({ service, theme, t }) {
-  const dataset = useMemo(
-    () => ({
-      label: service.name,
-      data: gen24h(service.latency ?? 200),
-      borderColor: service.status === 'degraded' ? cssVar('--amber')
-        : service.status === 'down' ? cssVar('--red')
-        : cssVar('--green'),
-      backgroundColor: service.status === 'degraded' ? cssVar('--amber') + '20'
-        : service.status === 'down' ? cssVar('--red') + '20'
-        : cssVar('--green') + '20',
-      fill: true,
-      borderWidth: 1.5,
-      pointRadius: 0,
-      tension: 0.4,
-    }),
-    [service, theme]
-  )
-
-  const options = useMemo(
-    () => ({
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      scales: {
-        x: {
-          grid:  { color: cssVar('--border') },
-          ticks: {
-            color: cssVar('--text2'),
-            font: { family: 'IBM Plex Mono', size: 10 },
-            callback: function(val, index, ticks) {
-              const fromEnd = ticks.length - 1 - index
-              if (fromEnd % 3 === 0) return this.getLabelForValue(val)
-              return null
-            },
-          },
-        },
-        y: {
-          grid:  { color: cssVar('--border') },
-          ticks: {
-            color: cssVar('--text2'),
-            font: { family: 'IBM Plex Mono', size: 10 },
-            callback: (v) => `${v}ms`,
-          },
-        },
-      },
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: (ctx) => `${ctx.parsed.y} ms` } },
-      },
-    }),
-    [theme] // re-read CSS vars when theme switches
-  )
-
-  // Keyed on service so labels re-sync when polling brings a new data snapshot
-  const labels = useMemo(hourLabels, [service])
-
-  return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
-        <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
-          <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
-          {t('latency.trend')}
-        </div>
-        <span className="mono text-[9px] text-[var(--text2)]">{t('latency.dummy')}</span>
-      </div>
-      <div style={{ padding: '16px' }}>
-        <div className="h-[200px]">
-          <Line key={theme} data={{ labels, datasets: [dataset] }} options={options} />
-        </div>
-      </div>
     </div>
   )
 }
@@ -267,7 +157,6 @@ function CalendarCell({ status, date }) {
 
 export default function ServiceDetails({ serviceId }) {
   const { t, lang } = useLang()
-  const { theme } = useTheme()
   const { setPage } = usePage()
   const { services: rawServices, loading, error, uptimeDays } = usePolling()
   const services = rawServices ?? []
@@ -354,8 +243,23 @@ export default function ServiceDetails({ serviceId }) {
         />
       </div>
 
-      {/* ── 24h Latency Chart ── */}
-      <LatencyChart service={service} theme={theme} t={t} />
+      {/* ── 24h Latency — placeholder until hourly KV data is accumulated ── */}
+      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+        <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+          <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
+            {t('latency.trend')}
+          </div>
+          <span className="mono text-[9px] text-[var(--text2)]">{t('uptime.collecting')}</span>
+        </div>
+        <div className="flex items-center justify-center" style={{ padding: '20px 16px' }}>
+          {service.latency != null ? (
+            <span className="mono text-sm text-[var(--text1)]">{t('svc.latency')}: {service.latency} ms</span>
+          ) : (
+            <span className="mono text-xs text-[var(--text2)]">{t('uptime.collecting')}</span>
+          )}
+        </div>
+      </section>
 
       {/* ── Bottom: Incident History + Calendar (2-col on desktop) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>
