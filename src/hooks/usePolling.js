@@ -437,11 +437,18 @@ function usePollingInternal() {
   const cancelledRef = useRef(false)
   const controllerRef = useRef(null)
   const hasDataRef = useRef(false)
+  const refreshingRef = useRef(false) // prevent silent polls from aborting refresh
 
   const poll = useCallback(async (mode = 'silent') => {
-    controllerRef.current?.abort()
+    // Skip silent polls while refresh is in progress
+    if (mode === 'silent' && refreshingRef.current) return
+
+    // Create new controller BEFORE aborting previous to avoid race condition
     const controller = new AbortController()
+    const previousController = controllerRef.current
     controllerRef.current = controller
+    if (mode === 'refresh') refreshingRef.current = true
+    previousController?.abort()
     const timer = setTimeout(() => controller.abort(), 15000)
 
     const loadStart = Date.now()
@@ -473,6 +480,7 @@ function usePollingInternal() {
       }
 
       hasDataRef.current = true
+      refreshingRef.current = false
       if (!cancelledRef.current) {
         setState({
           services: merged,
@@ -487,8 +495,9 @@ function usePollingInternal() {
       clearTimeout(timer)
 
       if (err?.name === 'AbortError') {
-        // Reset refreshing flag on abort so UI doesn't get stuck
-        if (isRefresh && !cancelledRef.current) {
+        // Only reset refresh state if OUR controller was aborted (not a previous one)
+        if (controller.signal.aborted && isRefresh && !cancelledRef.current) {
+          refreshingRef.current = false
           setState((prev) => ({ ...prev, refreshing: false }))
         }
         return
@@ -502,6 +511,7 @@ function usePollingInternal() {
 
       // Refresh with existing data: keep current services, just clear refreshing
       if (isRefresh && hasDataRef.current) {
+        refreshingRef.current = false
         if (!cancelledRef.current) {
           setState((prev) => ({ ...prev, refreshing: false }))
         }
@@ -509,6 +519,7 @@ function usePollingInternal() {
       }
 
       hasDataRef.current = true
+      refreshingRef.current = false
       if (!cancelledRef.current) {
         setState({
           services: MOCK_SERVICES,
