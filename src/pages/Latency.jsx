@@ -45,6 +45,45 @@ function latencyTextClass(ms) {
   return 'text-[var(--red)]'
 }
 
+// ── 24h Trend Section (ready for chart integration) ──────────
+
+function LatencyTrendSection({ services, t, hourlyData }) {
+  const hasData = hourlyData && Object.keys(hourlyData).length > 0
+
+  return (
+    <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+      <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+        <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+          <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
+          {t('latency.trend')}
+        </div>
+      </div>
+      {hasData ? (
+        <div style={{ padding: '16px' }}>
+          {/* Service badges (legend) */}
+          <div className="flex flex-wrap" style={{ gap: '10px', marginBottom: '12px' }}>
+            {services.map((svc) => (
+              <div key={svc.id} className="flex items-center gap-2 bg-[var(--bg2)] border border-[var(--border)] rounded" style={{ padding: '6px 10px' }}>
+                <span className="shrink-0 rounded-full" style={{ width: '6px', height: '6px', background: SERVICE_COLOR[svc.id] ?? '#8b949e' }} />
+                <span className="mono text-[11px] text-[var(--text1)]">{svc.name}</span>
+                <span className={`mono text-[11px] font-medium ${latencyTextClass(svc.latency)}`}>{svc.latency}ms</span>
+              </div>
+            ))}
+          </div>
+          {/* TODO: Chart.js Line chart using hourlyData */}
+          <div className="h-[320px] flex items-center justify-center">
+            <p className="text-xs text-[var(--text2)] mono">차트 렌더링 영역</p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-center" style={{ padding: '40px 16px' }}>
+          <p className="text-xs text-[var(--text2)] mono">{t('uptime.collecting')}</p>
+        </div>
+      )}
+    </section>
+  )
+}
+
 // ── Sub-components ───────────────────────────────────────────
 
 const STAT_TOP_COLOR = {
@@ -149,18 +188,8 @@ export default function Latency() {
         </div>
       </section>
 
-      {/* ── 24h Trend — placeholder until hourly data is accumulated in KV ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
-          <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
-            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
-            {t('latency.trend')}
-          </div>
-        </div>
-        <div className="flex items-center justify-center" style={{ padding: '40px 16px' }}>
-          <p className="text-xs text-[var(--text2)] mono">{t('uptime.collecting')}</p>
-        </div>
-      </section>
+      {/* ── 24h Trend — shows badges + chart when hourly KV data exists ── */}
+      <LatencyTrendSection services={sorted} t={t} hourlyData={null /* TODO: pass from usePolling when KV hourly data available */} />
 
     </div>
   )

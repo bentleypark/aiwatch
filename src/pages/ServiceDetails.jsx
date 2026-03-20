@@ -98,6 +98,41 @@ function MetricCard({ label, value, sub, colorClass }) {
   )
 }
 
+function ServiceLatencyTrend({ service, t, hourlyData }) {
+  const hasData = hourlyData && hourlyData.length > 0
+
+  return (
+    <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+      <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+        <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+          <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
+          {t('latency.trend')}
+        </div>
+      </div>
+      {hasData ? (
+        <div style={{ padding: '16px' }}>
+          {/* Current latency badge */}
+          {service.latency != null && (
+            <div className="flex items-center gap-2 mb-3">
+              <span className="rounded-full" style={{ width: '6px', height: '6px', background: SERVICE_COLOR[service.id] ?? '#8b949e' }} />
+              <span className="mono text-[11px] text-[var(--text1)]">{service.name}</span>
+              <span className="mono text-[11px] font-medium text-[var(--text0)]">{service.latency}ms</span>
+            </div>
+          )}
+          {/* TODO: Chart.js Line chart using hourlyData */}
+          <div className="h-[200px] flex items-center justify-center">
+            <p className="text-xs text-[var(--text2)] mono">차트 렌더링 영역</p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-center" style={{ padding: '40px 16px' }}>
+          <p className="text-xs text-[var(--text2)] mono">{t('uptime.collecting')}</p>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function IncidentRow({ incident, t, lang }) {
   const STATUS_CLS = {
     investigating: 'text-[var(--red)]',
@@ -161,6 +196,20 @@ export default function ServiceDetails({ serviceId }) {
   const { services: rawServices, loading, error, uptimeDays } = usePolling()
   const services = rawServices ?? []
 
+  // useMemo must be called before any early returns (Rules of Hooks)
+  const mttr = useMemo(() => {
+    const svc = services.find((s) => s.id === serviceId)
+    const resolved = (svc?.incidents ?? []).filter((i) => i.status === 'resolved' && i.duration)
+    if (resolved.length === 0) return null
+    const totalMinutes = resolved.reduce((sum, i) => {
+      const m = i.duration.match(/(?:(\d+)h\s*)?(\d+)m/)
+      return sum + (m ? (parseInt(m[1] || '0') * 60 + parseInt(m[2])) : 0)
+    }, 0)
+    if (totalMinutes === 0) return null
+    const avg = Math.round(totalMinutes / resolved.length)
+    return avg >= 60 ? `${Math.floor(avg / 60)}h ${avg % 60}m` : `${avg}m`
+  }, [services, serviceId])
+
   if (loading && services.length === 0) return <SkeletonUI />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
@@ -176,19 +225,6 @@ export default function ServiceDetails({ serviceId }) {
   const statusUrl = STATUS_URL[service.id]
   const incidentCount = service.incidents?.length ?? 0
   const calendar30d = buildCalendarFromIncidents(service.incidents)
-
-  // MTTR: average duration of resolved incidents with parseable duration
-  const mttr = useMemo(() => {
-    const resolved = (service.incidents ?? []).filter((i) => i.status === 'resolved' && i.duration)
-    if (resolved.length === 0) return null
-    const totalMinutes = resolved.reduce((sum, i) => {
-      const m = i.duration.match(/(?:(\d+)h\s*)?(\d+)m/)
-      return sum + (m ? (parseInt(m[1] || '0') * 60 + parseInt(m[2])) : 0)
-    }, 0)
-    if (totalMinutes === 0) return null
-    const avg = Math.round(totalMinutes / resolved.length)
-    return avg >= 60 ? `${Math.floor(avg / 60)}h ${avg % 60}m` : `${avg}m`
-  }, [service.incidents])
 
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>
@@ -256,18 +292,8 @@ export default function ServiceDetails({ serviceId }) {
         />
       </div>
 
-      {/* ── 24h Latency Trend — placeholder until hourly KV data ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
-          <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
-            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
-            {t('latency.trend')}
-          </div>
-        </div>
-        <div className="flex items-center justify-center" style={{ padding: '40px 16px' }}>
-          <p className="text-xs text-[var(--text2)] mono">{t('uptime.collecting')}</p>
-        </div>
-      </section>
+      {/* ── 24h Latency Trend — shows chart when hourly KV data exists ── */}
+      <ServiceLatencyTrend service={service} t={t} hourlyData={null /* TODO: pass from usePolling when KV hourly data available */} />
 
       {/* ── Bottom: Incident History + Calendar (2-col on desktop) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>
