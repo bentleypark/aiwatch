@@ -119,6 +119,7 @@ const en = {
   'svc.cal.legend': 'Status Calendar',
   'svc.incidents.history': 'Incident History',
   'svc.no.incidents': 'No incidents',
+  'svc.incidents.unsupported': 'Incident data not available for this service',
   'svc.cal.ago': '30 days ago',
   'svc.cal.today': 'Today',
   'svc.status.link': 'Official Status',

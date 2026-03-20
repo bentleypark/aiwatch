@@ -71,6 +71,9 @@ const STATUS_URL = {
   windsurf:    'https://status.windsurf.com',
 }
 
+// Services that cannot provide incident data (no API, bot-protected, etc.)
+const NO_INCIDENT_SUPPORT = new Set(['together', 'perplexity', 'huggingface', 'xai'])
+
 // 30-day calendar status → Tailwind color class
 const CALENDAR_CLASS = {
   operational: 'bg-[var(--green)]',
@@ -366,7 +369,12 @@ export default function ServiceDetails({ serviceId }) {
             </div>
           </div>
           <div style={{ padding: '16px' }}>
-            {incidentCount === 0 ? (
+            {NO_INCIDENT_SUPPORT.has(service.id) ? (
+              <div className="flex items-center gap-2 py-4">
+                <span className="text-[var(--text2)] text-sm" aria-hidden="true">—</span>
+                <span className="text-xs text-[var(--text2)]">{t('svc.incidents.unsupported')}</span>
+              </div>
+            ) : incidentCount === 0 ? (
               <div className="flex items-center gap-2 py-4">
                 <span className="text-[var(--green)] text-sm" aria-hidden="true">✓</span>
                 <span className="text-xs text-[var(--text2)]">{t('svc.no.incidents')}</span>

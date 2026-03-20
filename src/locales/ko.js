@@ -119,6 +119,7 @@ const ko = {
   'svc.cal.legend': '상태 캘린더',
   'svc.incidents.history': '인시던트 히스토리',
   'svc.no.incidents': '인시던트 없음',
+  'svc.incidents.unsupported': '인시던트 데이터를 제공하지 않는 서비스입니다',
   'svc.cal.ago': '30일 전',
   'svc.cal.today': '오늘',
   'svc.status.link': '공식 Status',
