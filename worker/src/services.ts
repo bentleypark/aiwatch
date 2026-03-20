@@ -373,8 +373,9 @@ function parseIncidentIoUpdates(html: string): IncidentIoUpdate[] {
 // may differ from the native ULID used in detail page URLs.
 async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, pageUrls: Map<string, string>): Promise<Incident[]> {
   // Scrape incidents with missing timeline text.
-  // Budget = 1 per service: Cloudflare free plan caps at 50 subrequests per invocation.
-  // ~36 base requests (19 services × 2) + 6 services × 1 enrichment = 42 total — within limit.
+  // Budget = 2 per service: pre-fetching deduplicates shared status pages (30 base requests)
+  // leaving 20 slots. 6 incident.io services × 2 enrichment = 12 → 42 total, leaving 8 spare
+  // slots as headroom for fetchWithRetry retries on non-apiUrl services.
   // Prioritise: non-resolved first, then most recently started.
   const toEnrich = incidents
     .filter((inc) => inc.timeline.some((t) => !t.text))
@@ -383,7 +384,7 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, page
       if (resolvedDiff !== 0) return resolvedDiff
       return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
     })
-    .slice(0, 1)
+    .slice(0, 2)
 
   if (toEnrich.length === 0) return incidents
 
@@ -392,10 +393,16 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, page
     try {
       const url = pageUrls.get(inc.id) ?? `${baseUrl}/${inc.id}`
       const res = await fetchWithTimeout(url, 5000)
-      if (!res.ok) return
+      if (!res.ok) {
+        console.warn(`[enrichIncidentIoText] ${inc.id} returned HTTP ${res.status}`)
+        return
+      }
       const html = await res.text()
       const allUpdates = parseIncidentIoUpdates(html)
-      if (allUpdates.length === 0) return
+      if (allUpdates.length === 0) {
+        console.warn(`[enrichIncidentIoText] ${inc.id} — page fetched OK but no updates parsed (HTML structure may have changed)`)
+        return
+      }
 
       // The incident.io SSR payload may include updates from multiple incidents.
       // Scope to updates within the target incident's time window (±1h) to avoid
@@ -407,7 +414,13 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, page
         const t = new Date(u.at).getTime()
         return t >= windowStart && t <= windowEnd
       })
-      if (updates.length === 0) return
+      if (updates.length === 0) {
+        console.warn(`[enrichIncidentIoText] ${inc.id} — ${allUpdates.length} updates found but all filtered by time window`)
+        return
+      }
+
+      const STAGE_ORDER: Record<string, number> = { investigating: 0, identified: 1, monitoring: 2, resolved: 3 }
+      const usedUpdateIndices = new Set<number>()
 
       enriched.set(inc.id, {
         ...inc,
@@ -415,27 +428,42 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, page
           if (entry.text) return entry
           const entryMs = new Date(entry.at).getTime()
           // 1st: exact match — same stage + within 10 min (handles most cases)
-          const exact = updates.find((u) =>
+          const exactIdx = updates.findIndex((u, i) =>
+            !usedUpdateIndices.has(i) &&
             u.stage === entry.stage &&
             Math.abs(new Date(u.at).getTime() - entryMs) < 600_000
           )
-          if (exact) return { ...entry, text: exact.text }
+          if (exactIdx !== -1) {
+            usedUpdateIndices.add(exactIdx)
+            return { ...entry, text: updates[exactIdx].text }
+          }
           // 2nd: timestamp-only match within 10 min — handles stage label mismatch between
           // incident.io HTML and Atlassian-compat API (they use different status vocabularies).
           // Only allow adjacent stages (investigating↔identified, identified↔monitoring,
           // monitoring↔resolved) to avoid assigning clearly wrong text across distant stages.
-          const STAGE_ORDER: Record<string, number> = { investigating: 0, identified: 1, monitoring: 2, resolved: 3 }
-          const byTime = updates
-            .filter((u) => {
+          const candidates = updates
+            .map((u, i) => ({ u, i }))
+            .filter(({ u, i }) => {
+              if (usedUpdateIndices.has(i)) return false
               const dist = Math.abs((STAGE_ORDER[entry.stage] ?? 0) - (STAGE_ORDER[u.stage] ?? 0))
               return dist <= 1 && Math.abs(new Date(u.at).getTime() - entryMs) < 600_000
             })
-            .sort((a, b) => Math.abs(new Date(a.at).getTime() - entryMs) - Math.abs(new Date(b.at).getTime() - entryMs))
-          if (byTime.length > 0) return { ...entry, text: byTime[0].text }
+            .sort((a, b) => Math.abs(new Date(a.u.at).getTime() - entryMs) - Math.abs(new Date(b.u.at).getTime() - entryMs))
+          if (candidates.length > 0) {
+            usedUpdateIndices.add(candidates[0].i)
+            return { ...entry, text: candidates[0].u.text }
+          }
           return entry
         }),
       })
-    } catch { /* ignore — enrich is best-effort */ }
+    } catch (err) {
+      const isTimeout = err instanceof Error && err.name === 'AbortError'
+      if (isTimeout) {
+        console.error(`[enrichIncidentIoText] timeout enriching ${inc.id}`)
+      } else {
+        console.warn(`[enrichIncidentIoText] failed to enrich ${inc.id}:`, err instanceof Error ? err.message : err)
+      }
+    }
   }))
 
   return incidents.map((inc) => enriched.get(inc.id) ?? inc)
@@ -478,13 +506,25 @@ async function fetchWithRetry(url: string, timeoutMs = 8000): Promise<Response> 
   }
 }
 
+// ── Prefetched Atlassian API Data ──
+// Services sharing the same status page (claude/claudeai/claudecode → status.claude.com;
+// openai/chatgpt → status.openai.com) would otherwise each make 2 duplicate requests.
+// Pre-fetching deduplicates these, saving 6 subrequests (36→30 base) and freeing
+// budget for incident text enrichment scraping.
+
+interface PrefetchedData {
+  summary: StatuspageResponse
+  incidents: StatuspageResponse | null
+  latency: number
+}
+
 // ── Fetch Single Service ──
 // NOTE: `latency` measures status page response time, not actual AI API latency.
 // This is a known v1 limitation — real API latency measurement is planned for a future phase.
 // For services without `apiUrl`, status is based on HTTP reachability of the status page (200 = operational).
 // This may not reflect actual service outages if the status page itself remains up.
 
-async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
+async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData): Promise<ServiceStatus> {
   const now = new Date().toISOString()
   const base: ServiceStatus = {
     id: config.id,
@@ -500,26 +540,38 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
 
   try {
     if (config.apiUrl) {
-      // Atlassian Statuspage API — fetch summary + recent incidents in parallel
-      const baseUrl = config.apiUrl.replace('/summary.json', '')
-      const start = Date.now()
-      const [summaryRes, incidentsRes] = await Promise.all([
-        fetchWithRetry(config.apiUrl),
-        fetchWithRetry(`${baseUrl}/incidents.json`).catch((err) => { console.warn(`[fetchService] ${config.id} incidents.json failed:`, err.message); return null }),
-      ])
-      const latency = Date.now() - start
+      // Atlassian Statuspage API — use pre-fetched data when available, else fetch directly
+      let summaryData: StatuspageResponse
+      let latency: number
+      let rawIncData: StatuspageResponse | null
 
-      if (!summaryRes.ok) return { ...base, status: 'degraded' }
+      if (prefetched) {
+        summaryData = prefetched.summary
+        latency = prefetched.latency
+        rawIncData = prefetched.incidents
+      } else {
+        const baseUrl = config.apiUrl.replace('/summary.json', '')
+        const start = Date.now()
+        const [summaryRes, incidentsRes] = await Promise.all([
+          fetchWithRetry(config.apiUrl),
+          fetchWithRetry(`${baseUrl}/incidents.json`).catch((err) => { console.warn(`[fetchService] ${config.id} incidents.json failed:`, err.message); return null }),
+        ])
+        latency = Date.now() - start
+        if (!summaryRes.ok) {
+          console.error(`[fetchService] ${config.id} summary.json returned HTTP ${summaryRes.status}`)
+          return { ...base, status: 'degraded' }
+        }
+        summaryData = await summaryRes.json()
+        rawIncData = incidentsRes?.ok ? await incidentsRes.json() : null
+      }
 
-      const summaryData: StatuspageResponse = await summaryRes.json()
       // incidents.json has full history; summary.json only has active ones
       let incidents: Incident[] = []
       const pageUrls = new Map<string, string>()
-      if (incidentsRes?.ok) {
-        const incData: StatuspageResponse = await incidentsRes.json()
-        incidents = parseIncidents(incData)
+      if (rawIncData) {
+        incidents = parseIncidents(rawIncData)
         // Build shortlink map: incidentId → detail page URL (used by enrichIncidentIoText)
-        for (const inc of incData.incidents ?? []) {
+        for (const inc of rawIncData.incidents ?? []) {
           if (inc.shortlink) pageUrls.set(inc.id, inc.shortlink)
         }
       } else {
@@ -588,8 +640,40 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
 export const CACHE_KEY = 'services:latest'
 
 export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[] }> {
+  // Pre-fetch unique Atlassian status API endpoints once.
+  // Services sharing a status page (claude+claudeai+claudecode, openai+chatgpt) would each fetch
+  // the same URLs independently. Deduplicating saves 6 subrequests, freeing budget for enrichment.
+  const uniqueApiUrls = [...new Set(SERVICES.filter((s) => s.apiUrl).map((s) => s.apiUrl!))]
+  const prefetchMap = new Map<string, PrefetchedData>()
+  await Promise.all(uniqueApiUrls.map(async (apiUrl) => {
+    const baseUrl = apiUrl.replace('/summary.json', '')
+    const start = Date.now()
+    try {
+      // Use fetchWithTimeout (no retry) — prefetch failure falls through to direct fetch
+      // in fetchService, so retrying here would waste 2 subrequests before the fallback.
+      const [summaryRes, incidentsRes] = await Promise.all([
+        fetchWithTimeout(apiUrl, 8000),
+        fetchWithTimeout(`${baseUrl}/incidents.json`, 8000).catch((err) => {
+          console.warn(`[prefetch] incidents.json failed for ${baseUrl}:`, err.message)
+          return null
+        }),
+      ])
+      const latency = Date.now() - start
+      if (!summaryRes.ok) {
+        console.warn(`[prefetch] ${apiUrl} returned HTTP ${summaryRes.status} — skipping; fetchService will fetch directly`)
+        return
+      }
+      const summary: StatuspageResponse = await summaryRes.json()
+      const incidents: StatuspageResponse | null = incidentsRes?.ok ? await incidentsRes.json() : null
+      prefetchMap.set(apiUrl, { summary, incidents, latency })
+    } catch (err) {
+      const isJsonErr = err instanceof SyntaxError
+      console.warn(`[prefetch] ${isJsonErr ? 'JSON parse' : 'network'} failure for ${baseUrl}:`, err instanceof Error ? err.message : err)
+    }
+  }))
+
   const results = await Promise.allSettled(
-    SERVICES.map((config) => fetchService(config))
+    SERVICES.map((config) => fetchService(config, config.apiUrl ? prefetchMap.get(config.apiUrl) : undefined))
   )
 
   // Raw results (for caching — no fallback substitution)
