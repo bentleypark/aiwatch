@@ -367,8 +367,10 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
       }
     }
   } catch (err) {
+    // Fetch failure (timeout/network) ≠ confirmed outage → degraded, not down
+    // Only Statuspage API indicator 'major'/'critical' should produce 'down'
     console.error(`[fetchService] ${config.id} failed:`, err)
-    return { ...base, status: 'down' }
+    return { ...base, status: 'degraded' }
   }
 }
 
