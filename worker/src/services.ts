@@ -387,7 +387,19 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, page
       const res = await fetchWithTimeout(url, 5000)
       if (!res.ok) return
       const html = await res.text()
-      const updates = parseIncidentIoUpdates(html)
+      const allUpdates = parseIncidentIoUpdates(html)
+      if (allUpdates.length === 0) return
+
+      // The incident.io SSR payload may include updates from multiple incidents.
+      // Scope to updates within the target incident's time window (±1h) to avoid
+      // cross-incident pollution (e.g., Pinned chats entries appearing in SSO incident).
+      const entryTimes = inc.timeline.map((t) => new Date(t.at).getTime())
+      const windowStart = Math.min(...entryTimes) - 3_600_000
+      const windowEnd   = Math.max(...entryTimes) + 3_600_000
+      const updates = allUpdates.filter((u) => {
+        const t = new Date(u.at).getTime()
+        return t >= windowStart && t <= windowEnd
+      })
       if (updates.length === 0) return
 
       enriched.set(inc.id, {
