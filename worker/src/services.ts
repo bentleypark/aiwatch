@@ -341,7 +341,7 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
       const [res, scrapeRes] = await Promise.all([
         fetchWithRetry(config.statusUrl),
         scrapeUrl
-          ? fetchWithTimeout(scrapeUrl).catch((err) => {
+          ? fetchWithRetry(scrapeUrl).catch((err) => {
               console.warn(`[fetchService] ${config.id} scrape failed:`, err.message)
               return null
             })
