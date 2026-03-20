@@ -526,14 +526,16 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, page
       }
       enriched.set(inc.id, enrichedIncident)
 
-      // Phase 3: Persist scraped text to KV (fire-and-forget — a single write failure is non-critical,
-      // but persistent failures cause every invocation to re-scrape, exhausting the enrichment budget).
+      // Phase 3: Persist scraped text to KV. Must be awaited — unawaited KV writes are cancelled
+      // when the Worker terminates after the response. Latency is negligible (~10-50ms) since
+      // we already spent up to 5s on HTTP scraping. A single write failure is non-critical
+      // (next invocation re-scrapes), but persistent failures exhaust the enrichment budget.
       // Resolved: 90-day TTL (rarely changes). Active: 5-min TTL (may receive new updates).
       if (kv) {
         const ttl = enrichedIncident.status === 'resolved' ? 90 * 86_400 : 5 * 60
         try {
           const payload = JSON.stringify(buildTextCache(enrichedIncident))
-          kv.put(`inctext:${inc.id}`, payload, { expirationTtl: ttl })
+          await kv.put(`inctext:${inc.id}`, payload, { expirationTtl: ttl })
             .catch((err) => console.error(`[inctext cache] write failed for ${inc.id}:`, err))
         } catch (buildErr) {
           console.error(`[inctext cache] failed to serialize cache for ${inc.id}:`, buildErr instanceof Error ? buildErr.message : buildErr)
