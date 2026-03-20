@@ -276,7 +276,7 @@ export default function Incidents() {
           <span className="text-[var(--green)] font-semibold">//</span>
           {t('nav.incidents')}
         </h2>
-        <span className="mono text-[10px] text-[var(--text2)]">{t('overview.panel.incidents.sub')}</span>
+        <span className="mono text-[10px] text-[var(--text2)]">{t(`incidents.period.${period}d`)}</span>
       </div>
 
       {/* ── Filters ── */}
