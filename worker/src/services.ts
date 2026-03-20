@@ -268,6 +268,23 @@ async function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response
   }
 }
 
+// Retry once on failure to reduce false-positive 'down' from transient network issues
+// Retry uses shorter timeout to keep total budget under ~12s per service
+async function fetchWithRetry(url: string, timeoutMs = 8000): Promise<Response> {
+  try {
+    return await fetchWithTimeout(url, timeoutMs)
+  } catch (err) {
+    console.warn(`[fetchWithRetry] first attempt failed for ${url}, retrying...`)
+    await new Promise((r) => setTimeout(r, 1000))
+    try {
+      return await fetchWithTimeout(url, Math.min(timeoutMs, 3000))
+    } catch (retryErr) {
+      console.error(`[fetchWithRetry] retry also failed for ${url}`)
+      throw retryErr
+    }
+  }
+}
+
 // ── Fetch Single Service ──
 // NOTE: `latency` measures status page response time, not actual AI API latency.
 // This is a known v1 limitation — real API latency measurement is planned for a future phase.
@@ -294,8 +311,8 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
       const baseUrl = config.apiUrl.replace('/summary.json', '')
       const start = Date.now()
       const [summaryRes, incidentsRes] = await Promise.all([
-        fetchWithTimeout(config.apiUrl),
-        fetchWithTimeout(`${baseUrl}/incidents.json`).catch((err) => { console.warn(`[fetchService] ${config.id} incidents.json failed:`, err.message); return null }),
+        fetchWithRetry(config.apiUrl),
+        fetchWithRetry(`${baseUrl}/incidents.json`).catch((err) => { console.warn(`[fetchService] ${config.id} incidents.json failed:`, err.message); return null }),
       ])
       const latency = Date.now() - start
 
@@ -322,7 +339,7 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
       const start = Date.now()
       const scrapeUrl = config.instatusUrl || (config.gcloudProduct ? 'https://status.cloud.google.com/incidents.json' : null)
       const [res, scrapeRes] = await Promise.all([
-        fetchWithTimeout(config.statusUrl),
+        fetchWithRetry(config.statusUrl),
         scrapeUrl
           ? fetchWithTimeout(scrapeUrl).catch((err) => {
               console.warn(`[fetchService] ${config.id} scrape failed:`, err.message)
