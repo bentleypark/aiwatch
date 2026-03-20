@@ -81,7 +81,7 @@ interface StatuspageResponse {
     status: string
     created_at: string
     resolved_at: string | null
-    incident_updates?: Array<{ status: string; body: string; created_at: string }>
+    incident_updates?: Array<{ status: string; body: string; created_at: string; display_at?: string }>
   }>
 }
 
@@ -115,10 +115,10 @@ function parseIncidents(data: StatuspageResponse): Incident[] {
           : u.status === 'identified' ? 'identified' as const
           : 'investigating' as const,
         text: u.body || null,
-        at: u.created_at,
+        at: u.display_at ?? u.created_at,
       }))
       .reverse() // oldest first
-    // Deduplicate: keep one entry per stage (removes duplicate updates at same timestamp)
+    // Deduplicate: keep one entry per stage+time (removes duplicate updates)
     const seen = new Set<string>()
     const timeline = rawTimeline.filter((t) => {
       const key = `${t.stage}:${t.at}`
