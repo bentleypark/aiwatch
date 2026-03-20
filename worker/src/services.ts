@@ -81,6 +81,7 @@ interface StatuspageResponse {
     status: string
     created_at: string
     resolved_at: string | null
+    shortlink?: string
     incident_updates?: Array<{ status: string; body: string; created_at: string; display_at?: string }>
   }>
 }
@@ -367,7 +368,10 @@ function parseIncidentIoUpdates(html: string): IncidentIoUpdate[] {
   return results
 }
 
-async function enrichIncidentIoText(incidents: Incident[], baseUrl: string): Promise<Incident[]> {
+// pageUrls: incidentId → direct detail page URL (from Atlassian API shortlink).
+// Constructing URLs from inc.id is unreliable because incident.io Atlassian-compat IDs
+// may differ from the native ULID used in detail page URLs.
+async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, pageUrls: Map<string, string>): Promise<Incident[]> {
   // Scrape incidents with missing timeline text (active first, max 3 to stay within budget)
   const toEnrich = incidents
     .filter((inc) => inc.timeline.some((t) => !t.text))
@@ -379,7 +383,8 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string): Pro
   const enriched = new Map<string, Incident>()
   await Promise.all(toEnrich.map(async (inc) => {
     try {
-      const res = await fetchWithTimeout(`${baseUrl}/${inc.id}`, 5000)
+      const url = pageUrls.get(inc.id) ?? `${baseUrl}/${inc.id}`
+      const res = await fetchWithTimeout(url, 5000)
       if (!res.ok) return
       const html = await res.text()
       const updates = parseIncidentIoUpdates(html)
@@ -389,12 +394,26 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string): Pro
         ...inc,
         timeline: inc.timeline.map((entry) => {
           if (entry.text) return entry
-          // Match by stage + timestamp proximity (within 120s)
-          const match = updates.find((u) =>
+          const entryMs = new Date(entry.at).getTime()
+          // 1st: exact match — same stage + within 10 min (handles most cases)
+          const exact = updates.find((u) =>
             u.stage === entry.stage &&
-            Math.abs(new Date(u.at).getTime() - new Date(entry.at).getTime()) < 120_000
+            Math.abs(new Date(u.at).getTime() - entryMs) < 600_000
           )
-          return match ? { ...entry, text: match.text } : entry
+          if (exact) return { ...entry, text: exact.text }
+          // 2nd: timestamp-only match within 10 min — handles stage label mismatch between
+          // incident.io HTML and Atlassian-compat API (they use different status vocabularies).
+          // Only allow adjacent stages (investigating↔identified, identified↔monitoring,
+          // monitoring↔resolved) to avoid assigning clearly wrong text across distant stages.
+          const STAGE_ORDER: Record<string, number> = { investigating: 0, identified: 1, monitoring: 2, resolved: 3 }
+          const byTime = updates
+            .filter((u) => {
+              const dist = Math.abs((STAGE_ORDER[entry.stage] ?? 0) - (STAGE_ORDER[u.stage] ?? 0))
+              return dist <= 1 && Math.abs(new Date(u.at).getTime() - entryMs) < 600_000
+            })
+            .sort((a, b) => Math.abs(new Date(a.at).getTime() - entryMs) - Math.abs(new Date(b.at).getTime() - entryMs))
+          if (byTime.length > 0) return { ...entry, text: byTime[0].text }
+          return entry
         }),
       })
     } catch { /* ignore — enrich is best-effort */ }
@@ -476,16 +495,24 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
       const summaryData: StatuspageResponse = await summaryRes.json()
       // incidents.json has full history; summary.json only has active ones
       let incidents: Incident[] = []
+      const pageUrls = new Map<string, string>()
       if (incidentsRes?.ok) {
         const incData: StatuspageResponse = await incidentsRes.json()
         incidents = parseIncidents(incData)
+        // Build shortlink map: incidentId → detail page URL (used by enrichIncidentIoText)
+        for (const inc of incData.incidents ?? []) {
+          if (inc.shortlink) pageUrls.set(inc.id, inc.shortlink)
+        }
       } else {
         incidents = parseIncidents(summaryData)
+        for (const inc of summaryData.incidents ?? []) {
+          if (inc.shortlink) pageUrls.set(inc.id, inc.shortlink)
+        }
       }
 
       let filtered = filterIncidents(incidents, config)
       if (config.incidentIoBaseUrl) {
-        filtered = await enrichIncidentIoText(filtered, config.incidentIoBaseUrl)
+        filtered = await enrichIncidentIoText(filtered, config.incidentIoBaseUrl, pageUrls)
       }
 
       return {
