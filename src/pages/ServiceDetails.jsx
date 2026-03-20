@@ -336,7 +336,7 @@ export default function ServiceDetails({ serviceId }) {
         />
         <MetricCard
           label={t('svc.uptime30d')}
-          value={`${(service.uptime30d ?? 0).toFixed(2)}%`}
+          value={service.uptime30d != null ? `${service.uptime30d.toFixed(2)}%` : '—'}
           sub={t('svc.uptime.sub')}
           colorClass="text-[var(--green)]"
         />

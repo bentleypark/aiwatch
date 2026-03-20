@@ -105,6 +105,7 @@ const en = {
   'uptime.incidents': 'incidents',
   'uptime.basis': '30-day basis',
   'uptime.matrix.sub': 'Last 3 months',
+  'uptime.collecting': 'Collecting data',
 
   // Service Details
   'svc.latency': 'Current Latency',

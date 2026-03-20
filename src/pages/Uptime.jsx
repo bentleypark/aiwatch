@@ -68,19 +68,19 @@ function UptimeBar({ service, sla }) {
   // (all services cluster near 100%; linear 0–100% scale makes differences invisible)
   const MIN_DISPLAY = 95
   const range = 100 - MIN_DISPLAY
-  const clampedPct = Math.max(MIN_DISPLAY, service.uptime30d)
-  const widthPct = Math.round(((clampedPct - MIN_DISPLAY) / range) * 100)
-  // SLA marker position within the same 95–100% range
+  const uptime = service.uptime30d ?? 0
+  const hasUptime = service.uptime30d != null
+  const clampedPct = Math.max(MIN_DISPLAY, uptime)
+  const widthPct = hasUptime ? Math.round(((clampedPct - MIN_DISPLAY) / range) * 100) : 0
   const slaPos = Math.round(((sla - MIN_DISPLAY) / range) * 100)
-  const barColorClass = uptimeColorClass(service.uptime30d)
-  const textColorClass = uptimeTextClass(service.uptime30d)
+  const barColorClass = hasUptime ? uptimeColorClass(uptime) : 'bg-[var(--bg3)]'
+  const textColorClass = hasUptime ? uptimeTextClass(uptime) : 'text-[var(--text2)]'
 
   return (
     <div className="flex items-center gap-3">
       <span className="w-28 shrink-0 truncate text-xs text-[var(--text1)]">{service.name}</span>
       <div className="flex-1 relative bg-[var(--bg3)] rounded-full h-2">
         <div className={`h-2 rounded-full ${barColorClass}`} style={{ width: `${widthPct}%` }} />
-        {/* SLA baseline marker — vertical notch at the SLA threshold position */}
         <div
           className="absolute top-[-2px] bottom-[-2px] w-px bg-[var(--text2)] opacity-60"
           style={{ left: `${slaPos}%` }}
@@ -88,7 +88,7 @@ function UptimeBar({ service, sla }) {
         />
       </div>
       <span className={`w-16 shrink-0 text-right text-xs mono font-medium ${textColorClass}`}>
-        {service.uptime30d.toFixed(2)}%
+        {hasUptime ? `${uptime.toFixed(2)}%` : '—'}
       </span>
     </div>
   )
@@ -120,7 +120,7 @@ export default function Uptime() {
   const services = rawServices ?? []
 
   const sortedByUptime = useMemo(
-    () => [...services].sort((a, b) => b.uptime30d - a.uptime30d),
+    () => [...services].sort((a, b) => (b.uptime30d ?? 0) - (a.uptime30d ?? 0)),
     [services]
   )
 
@@ -130,16 +130,14 @@ export default function Uptime() {
   if (services.length === 0) return <EmptyState type="neutral" />
 
   const mostStable = sortedByUptime[0]
-  const leastStable = sortedByUptime[sortedByUptime.length - 1]
-  const avgUptime = (services.reduce((s, v) => s + v.uptime30d, 0) / services.length).toFixed(2)
+  const uptimeServices = services.filter((s) => s.uptime30d != null)
+  const avgUptime = uptimeServices.length
+    ? (uptimeServices.reduce((s, v) => s + v.uptime30d, 0) / uptimeServices.length).toFixed(2)
+    : '—'
 
-  // Lowest uptime = most issues (incident count is capped at 5 per service, unreliable for comparison)
   const mostIssues = [...services].sort(
-    (a, b) => a.uptime30d - b.uptime30d
+    (a, b) => (a.uptime30d ?? 100) - (b.uptime30d ?? 100)
   )[0]
-
-  // Extract month labels from the first service's history3m (all services share the same months)
-  const months = (services[0]?.history3m ?? []).map((m) => m.month)
 
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>
@@ -158,7 +156,7 @@ export default function Uptime() {
         <SummaryCard
           label={t('uptime.stable')}
           value={mostStable.name}
-          sub={`${mostStable.uptime30d.toFixed(2)}% ${t('overview.card.uptime')}`}
+          sub={mostStable.uptime30d != null ? `${mostStable.uptime30d.toFixed(2)}% ${t('overview.card.uptime')}` : t('uptime.collecting')}
           colorClass="text-[var(--green)]"
           valueSize="18px"
           mono={false}
@@ -172,7 +170,7 @@ export default function Uptime() {
         <SummaryCard
           label={t('uptime.issues')}
           value={mostIssues.name}
-          sub={`${mostIssues.uptime30d.toFixed(2)}% ${t('overview.card.uptime')}`}
+          sub={mostIssues.uptime30d != null ? `${mostIssues.uptime30d.toFixed(2)}% ${t('overview.card.uptime')}` : t('uptime.collecting')}
           colorClass="text-[var(--red)]"
           valueSize="18px"
           mono={false}
@@ -198,7 +196,7 @@ export default function Uptime() {
         </div>
       </section>
 
-      {/* ── 3-Month Matrix ── */}
+      {/* ── 3-Month Matrix — placeholder until KV provides real data ── */}
       <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
         <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
           <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
@@ -207,33 +205,8 @@ export default function Uptime() {
           </div>
           <span className="mono text-[9px] text-[var(--text2)]">{t('uptime.matrix.sub')}</span>
         </div>
-        <div style={{ padding: '16px' }} className="overflow-x-auto">
-        <table className="w-full min-w-[400px]">
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              <th className="mono text-[var(--text2)] font-medium" style={{ padding: '6px 10px', textAlign: 'left', fontSize: '9px', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                {t('incidents.col.service')}
-              </th>
-              {months.map((m) => (
-                <th key={m} className="mono text-[var(--text2)] font-medium" style={{ padding: '6px 10px', textAlign: 'center', fontSize: '9px', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                  {formatMonth(m, lang)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sortedByUptime.map((svc) => (
-              <tr key={svc.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                <td className="mono text-[var(--text1)]" style={{ padding: '8px 10px', fontSize: '11px' }}>
-                  {svc.name}
-                </td>
-                {(svc.history3m ?? []).map((entry) => (
-                  <MatrixCell key={entry.month} uptime={entry.uptime} />
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div style={{ padding: '20px 16px' }} className="flex items-center justify-center">
+          <p className="text-xs text-[var(--text2)] mono">{t('uptime.collecting')}</p>
         </div>
       </section>
       </div>

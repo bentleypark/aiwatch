@@ -78,7 +78,8 @@ const badgeStyle = { padding: '1px 5px', borderRadius: '3px', fontSize: '9px', m
 function ServiceNavItem({ svc, page, setPage, onNavigate }) {
   const active = page.name === 'service' && page.serviceId === svc.id
   const dotClass = STATUS_DOT_CLASS[svc.status] ?? STATUS_DOT_CLASS.operational
-  const badgeCls = uptimeBadgeCls(svc.uptime30d ?? 100)
+  const hasUptime = svc.uptime30d != null
+  const badgeCls = hasUptime ? uptimeBadgeCls(svc.uptime30d) : 'bg-[var(--bg3)] text-[var(--text2)]'
   const statusTextCls = svc.status === 'degraded' ? 'text-[var(--amber)]'
     : svc.status === 'down' ? 'text-[var(--red)]' : null
 
@@ -95,7 +96,7 @@ function ServiceNavItem({ svc, page, setPage, onNavigate }) {
       <span className={`rounded-full shrink-0 ${dotClass}`} style={{ width: '6px', height: '6px' }} aria-hidden="true" />
       <span className="flex-1 min-w-0 truncate">{svc.name}</span>
       <span className={`shrink-0 ${badgeCls}`} style={badgeStyle}>
-        {(svc.uptime30d ?? 0).toFixed(2)}%
+        {hasUptime ? `${svc.uptime30d.toFixed(2)}%` : '—'}
       </span>
     </button>
   )

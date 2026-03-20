@@ -10,28 +10,89 @@ interface Env {
   STATUS_CACHE: KVNamespace
 }
 
-// ── KV Cache ──
+// ── KV Cache + Daily Counters ──
 
-const CACHE_TTL_SECONDS = 3600 // 1 hour — long enough for extended outages
+const CACHE_TTL_SECONDS = 3600
 let lastKvWrite = 0
-const KV_WRITE_INTERVAL_MS = 90_000 // throttle per-isolate; actual rate depends on isolate lifecycle
+const KV_WRITE_INTERVAL_MS = 180_000 // 3 minutes — 2 writes per interval = ~960/day within free tier
+let lastArchivedDate = '' // prevent duplicate archival writes within same isolate
+
+interface DailyCounters {
+  [serviceId: string]: { ok: number; total: number }
+}
+
+function todayUTC(): string {
+  return new Date().toISOString().split('T')[0]
+}
 
 async function cacheWrite(kv: KVNamespace, services: ServiceStatus[]): Promise<void> {
   const now = Date.now()
   if (now - lastKvWrite < KV_WRITE_INTERVAL_MS) return
   lastKvWrite = now
-  await kv.put(CACHE_KEY, JSON.stringify({
-    services,
-    cachedAt: new Date().toISOString(),
-  }), { expirationTtl: CACHE_TTL_SECONDS }).catch((err) =>
-    console.error('[kv] cache write failed:', err)
-  )
+
+  const today = todayUTC()
+  const dailyKey = `daily:${today}`
+
+  // Read today's counters from separate daily key (survives cache TTL expiry)
+  let counters: DailyCounters = {}
+  try {
+    const existing = await kv.get(dailyKey)
+    if (existing) counters = JSON.parse(existing)
+  } catch { /* ignore */ }
+
+  // Update counters
+  services.forEach((s) => {
+    if (!counters[s.id]) counters[s.id] = { ok: 0, total: 0 }
+    counters[s.id].total++
+    if (s.status === 'operational') counters[s.id].ok++
+  })
+
+  // Write cache + daily counters (2 writes per interval)
+  await Promise.all([
+    kv.put(CACHE_KEY, JSON.stringify({
+      services,
+      cachedAt: new Date().toISOString(),
+    }), { expirationTtl: CACHE_TTL_SECONDS }),
+    kv.put(dailyKey, JSON.stringify(counters), {
+      expirationTtl: 2 * 86400, // 2 days — enough to survive overnight low traffic
+    }),
+  ]).catch((err) => console.error('[kv] cache write failed:', err))
+
+  // Archive yesterday's counters to permanent history (once per day per isolate)
+  const yesterday = new Date(now - 86_400_000).toISOString().split('T')[0]
+  if (lastArchivedDate !== yesterday) {
+    const yesterdayKey = `daily:${yesterday}`
+    const yesterdayData = await kv.get(yesterdayKey).catch(() => null)
+    if (yesterdayData) {
+      await kv.put(`history:${yesterday}`, yesterdayData, {
+        expirationTtl: 90 * 86400,
+      }).catch(() => {})
+      lastArchivedDate = yesterday
+    }
+  }
 }
 
 async function cacheRead(kv: KVNamespace): Promise<{ services: ServiceStatus[]; cachedAt: string } | null> {
   const raw = await kv.get(CACHE_KEY).catch(() => null)
   if (!raw) return null
   try { return JSON.parse(raw) } catch { return null }
+}
+
+// Read uptime history for last N days — used by /api/uptime endpoint
+export async function readUptimeHistory(kv: KVNamespace, days: number): Promise<Record<string, DailyCounters>> {
+  const history: Record<string, DailyCounters> = {}
+  const today = new Date()
+  const keys = Array.from({ length: days }, (_, i) => {
+    const d = new Date(today.getTime() - i * 86_400_000)
+    return `history:${d.toISOString().split('T')[0]}`
+  })
+  const results = await Promise.all(keys.map((k) => kv.get(k).catch(() => null)))
+  results.forEach((raw, i) => {
+    if (raw) {
+      try { history[keys[i].replace('history:', '')] = JSON.parse(raw) } catch { /* ignore */ }
+    }
+  })
+  return history
 }
 
 // ── Discord Webhook Alerts ──
@@ -134,10 +195,21 @@ export default {
       return new Response(null, { status: 204, headers: cors })
     }
 
-    if (url.pathname !== '/api/status' || request.method !== 'GET') {
+    if (request.method !== 'GET' || (url.pathname !== '/api/status' && url.pathname !== '/api/uptime')) {
       return new Response(JSON.stringify({ error: 'Not Found' }), {
         status: 404,
         headers: { ...cors, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // GET /api/uptime — return daily uptime history
+    if (url.pathname === '/api/uptime') {
+      const rawDays = Number(url.searchParams.get('days') ?? 30)
+      const days = Math.min(Number.isNaN(rawDays) ? 30 : rawDays, 90)
+      const history = env.STATUS_CACHE ? await readUptimeHistory(env.STATUS_CACHE, days) : {}
+      return new Response(JSON.stringify({ history, days }), {
+        status: 200,
+        headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=60' },
       })
     }
 

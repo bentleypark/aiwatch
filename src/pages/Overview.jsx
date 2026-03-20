@@ -83,7 +83,8 @@ function HistoryBars({ history30d }) {
 function ServiceCard({ service, index, onClick, t }) {
   const borderCls = BORDER_LEFT_CLASS[service.status] ?? BORDER_LEFT_CLASS.operational
   const incidentCount = service.incidents?.length ?? 0
-  const uptimeColor = service.uptime30d >= 99 ? 'text-[var(--green)]' : service.uptime30d >= 97 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
+  const hasUptime = service.uptime30d != null
+  const uptimeColor = !hasUptime ? 'text-[var(--text2)]' : service.uptime30d >= 99 ? 'text-[var(--green)]' : service.uptime30d >= 97 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
   const latencyColor = service.status === 'degraded' ? 'text-[var(--amber)]' : service.status === 'down' ? 'text-[var(--red)]' : 'text-[var(--text0)]'
 
   return (
@@ -107,7 +108,7 @@ function ServiceCard({ service, index, onClick, t }) {
           <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.latency')}</div>
         </div>
         <div>
-          <div className={`mono text-[13px] font-medium ${uptimeColor}`}>{service.uptime30d.toFixed(2)}%</div>
+          <div className={`mono text-[13px] font-medium ${uptimeColor}`}>{hasUptime ? `${service.uptime30d.toFixed(2)}%` : '—'}</div>
           <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.uptime')}</div>
         </div>
         <div>
@@ -263,8 +264,9 @@ export default function Overview() {
   const degradedCount    = services.filter((s) => s.status === 'degraded').length
   const downCount        = services.filter((s) => s.status === 'down').length
   const issueCount       = degradedCount + downCount
-  const avgUptime = services.length
-    ? (services.reduce((sum, s) => sum + s.uptime30d, 0) / services.length).toFixed(1)
+  const uptimeServices = services.filter((s) => s.uptime30d != null)
+  const avgUptime = uptimeServices.length
+    ? (uptimeServices.reduce((sum, s) => sum + s.uptime30d, 0) / uptimeServices.length).toFixed(1)
     : '—'
 
   const apiAndWebServices = services.filter((s) => s.category !== 'agent')

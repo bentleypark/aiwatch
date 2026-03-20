@@ -401,11 +401,10 @@ function mergeWithMock(liveServices) {
     const live = liveMap[mock.id]
     if (!live) return mock // Worker didn't return this service — use mock
     return {
-      ...mock,            // fallback fields (uptime30d, history30d, history3m)
+      ...mock,            // fallback fields (history30d, history3m for future use)
       ...live,            // override with live data (status, latency, incidents)
-      uptime30d: mock.uptime30d,       // Worker doesn't provide this yet
-      history30d: mock.history30d,     // Worker doesn't provide this yet
-      history3m: mock.history3m,       // Worker doesn't provide this yet
+      uptime30d: null,    // KV daily counter data needed — shows "—" until collected
+      history3m: null,    // KV daily counter data needed — shows "수집 중" until collected
     }
   })
 }
