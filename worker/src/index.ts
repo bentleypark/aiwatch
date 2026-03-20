@@ -14,7 +14,7 @@ interface Env {
 
 const CACHE_TTL_SECONDS = 3600
 let lastKvWrite = 0
-const KV_WRITE_INTERVAL_MS = 300_000 // 5 minutes — 2 writes per interval = ~576/day within free tier
+const KV_WRITE_INTERVAL_MS = 600_000 // 10 minutes — 2 writes per interval = ~288/day within free tier
 let lastArchivedDate = '' // prevent duplicate archival writes within same isolate
 
 interface DailyCounters {

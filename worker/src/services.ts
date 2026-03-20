@@ -12,6 +12,7 @@ export interface Incident {
   title: string
   status: 'investigating' | 'identified' | 'monitoring' | 'resolved'
   impact: 'minor' | 'major' | 'critical' | null
+  componentNames?: string[]
   startedAt: string
   duration: string | null
   timeline: TimelineEntry[]
@@ -84,7 +85,11 @@ interface StatuspageResponse {
     created_at: string
     resolved_at: string | null
     shortlink?: string
-    incident_updates?: Array<{ status: string; body: string; created_at: string; display_at?: string }>
+    components?: Array<{ name: string }>
+    incident_updates?: Array<{
+      status: string; body: string; created_at: string; display_at?: string
+      affected_components?: Array<{ new_status: string }>
+    }>
   }>
 }
 
@@ -130,10 +135,25 @@ function parseIncidents(data: StatuspageResponse): Incident[] {
       return true
     })
 
-    const impact = inc.impact === 'critical' ? 'critical' as const
+    // Derive impact from worst affected_components status (matches Statuspage calendar logic).
+    // major_outage → critical (red), partial_outage → major (orange),
+    // degraded_performance → minor (green on calendar). Falls back to incident-level impact.
+    const OUTAGE_RANK: Record<string, number> = { major_outage: 3, partial_outage: 2, degraded_performance: 1 }
+    let worstRank = 0
+    for (const u of inc.incident_updates ?? []) {
+      for (const c of u.affected_components ?? []) {
+        worstRank = Math.max(worstRank, OUTAGE_RANK[c.new_status] ?? 0)
+      }
+    }
+    const impact = worstRank >= 3 ? 'critical' as const
+      : worstRank >= 2 ? 'major' as const
+      : worstRank >= 1 ? 'minor' as const
+      : inc.impact === 'critical' ? 'critical' as const
       : inc.impact === 'major' ? 'major' as const
       : inc.impact === 'minor' ? 'minor' as const
       : null
+
+    const componentNames = inc.components?.map((c) => c.name) ?? []
 
     return {
       id: inc.id,
@@ -143,6 +163,7 @@ function parseIncidents(data: StatuspageResponse): Incident[] {
         : inc.status === 'identified' ? 'identified'
         : 'investigating',
       impact,
+      ...(componentNames.length > 0 ? { componentNames } : {}),
       startedAt: inc.created_at,
       duration,
       timeline,
@@ -342,7 +363,12 @@ function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident
     const title = inc.title.toLowerCase()
     if (incidentExclude?.some((kw) => title.includes(kw.toLowerCase()))) return false
     if (incidentKeywords && incidentKeywords.length > 0) {
-      return incidentKeywords.some((kw) => title.includes(kw.toLowerCase()))
+      // Match against title OR affected component names
+      const compNames = (inc.componentNames ?? []).map((n) => n.toLowerCase())
+      return incidentKeywords.some((kw) => {
+        const kwLower = kw.toLowerCase()
+        return title.includes(kwLower) || compNames.some((n) => n.includes(kwLower))
+      })
     }
     return true
   })

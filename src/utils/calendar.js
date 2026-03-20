@@ -3,10 +3,10 @@
 // Returns array of 30 statuses: 'operational' | 'degraded' | 'down'
 // Index 0 = 29 days ago, index 29 = today
 //
-// Color logic mirrors Statuspage (e.g. status.claude.com):
-//   red (down)    — critical impact incident, or currently active (non-resolved)
-//   orange (degraded) — major/minor impact incident (resolved)
-//   green (operational) — no incidents
+// Color logic mirrors Statuspage (e.g. status.claude.com) calendar:
+//   red (down)       — component had major_outage (impact=critical), or currently active
+//   orange (degraded) — component had partial_outage (impact=major)
+//   green (operational) — no outage, or only degraded_performance (impact=minor)
 
 export function buildCalendarFromIncidents(incidents) {
   const today = new Date()
@@ -18,9 +18,11 @@ export function buildCalendarFromIncidents(incidents) {
     if (inc.status !== 'resolved') {
       status = 'down' // active incident → always red
     } else if (inc.impact === 'critical') {
-      status = 'down' // critical impact → red
+      status = 'down' // major_outage → red
+    } else if (inc.impact === 'major') {
+      status = 'degraded' // partial_outage → orange
     } else {
-      status = 'degraded' // major/minor/null → orange
+      return // minor (degraded_performance) or null → no outage, skip
     }
     // Only escalate: down > degraded > operational
     if (!dayStatus[key] || status === 'down') dayStatus[key] = status
