@@ -368,16 +368,84 @@ function parseIncidentIoUpdates(html: string): IncidentIoUpdate[] {
   return results
 }
 
+// ── Incident Text KV Cache ──
+// Scraped timeline text is stored per-incident so subsequent invocations skip scraping.
+// KV reads do not count toward the 50-subrequest limit, so we read for every incident freely.
+// Keys: inctext:{incidentId}  Values: { textByKey: {"stage:at": text|null}, cachedAt: string }
+// TTL: 90 days for resolved (rarely changes after resolution), 5 min for active (may get new updates).
+
+interface IncidentTextCache {
+  textByKey: Record<string, string | null>  // key = "stage:at" (matches parseIncidents dedup key)
+  cachedAt: string
+}
+
+async function readIncidentTextCache(kv: KVNamespace, incidentIds: string[]): Promise<Map<string, IncidentTextCache>> {
+  const results = await Promise.all(
+    incidentIds.map((id) =>
+      kv.get(`inctext:${id}`).catch((err) => {
+        console.error(`[inctext cache] KV read failed for ${id}:`, err instanceof Error ? err.message : err)
+        return null
+      })
+    )
+  )
+  const map = new Map<string, IncidentTextCache>()
+  results.forEach((raw, i) => {
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw)
+      // Runtime shape check — guards against schema changes or corrupt entries causing applyTextCache to throw
+      if (parsed && typeof parsed === 'object' && typeof parsed.textByKey === 'object' && parsed.textByKey !== null) {
+        map.set(incidentIds[i], parsed as IncidentTextCache)
+      } else {
+        console.warn(`[inctext cache] unexpected shape for incident ${incidentIds[i]} — discarding`)
+      }
+    } catch {
+      console.warn(`[inctext cache] corrupt KV entry for incident ${incidentIds[i]} — discarding`)
+    }
+  })
+  return map
+}
+
+function applyTextCache(inc: Incident, cache: IncidentTextCache): Incident {
+  return {
+    ...inc,
+    timeline: inc.timeline.map((entry) => {
+      if (entry.text !== null) return entry
+      const cached = cache.textByKey[`${entry.stage}:${entry.at}`]
+      // cached===undefined means key absent (not yet scraped); null means scraped but no text found
+      return cached !== undefined ? { ...entry, text: cached } : entry
+    }),
+  }
+}
+
+function buildTextCache(inc: Incident): IncidentTextCache {
+  const textByKey: Record<string, string | null> = {}
+  for (const entry of inc.timeline) textByKey[`${entry.stage}:${entry.at}`] = entry.text
+  return { textByKey, cachedAt: new Date().toISOString() }
+}
+
 // pageUrls: incidentId → direct detail page URL (from Atlassian API shortlink).
 // Constructing URLs from inc.id is unreliable because incident.io Atlassian-compat IDs
 // may differ from the native ULID used in detail page URLs.
-async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, pageUrls: Map<string, string>): Promise<Incident[]> {
-  // Scrape incidents with missing timeline text.
-  // Budget = 2 per service: pre-fetching deduplicates shared status pages (30 base requests)
-  // leaving 20 slots. 6 incident.io services × 2 enrichment = 12 → 42 total, leaving 8 spare
-  // slots as headroom for fetchWithRetry retries on non-apiUrl services.
-  // Prioritise: non-resolved first, then most recently started.
-  const toEnrich = incidents
+async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, pageUrls: Map<string, string>, kv?: KVNamespace): Promise<Incident[]> {
+  // Phase 1: Apply cached text from KV for all incidents that have null-text entries.
+  // KV reads do not count toward the 50 subrequest limit, so we read for all candidates freely.
+  let workingIncidents = incidents
+  const needsText = incidents.filter((inc) => inc.timeline.some((t) => !t.text))
+  if (kv && needsText.length > 0) {
+    const cacheMap = await readIncidentTextCache(kv, needsText.map((i) => i.id))
+    if (cacheMap.size > 0) {
+      workingIncidents = incidents.map((inc) => {
+        const cached = cacheMap.get(inc.id)
+        return cached ? applyTextCache(inc, cached) : inc
+      })
+    }
+  }
+
+  // Phase 2: Scrape incidents still missing text after cache application (up to budget=2).
+  // Budget = 2 per service: 30 base requests + 6 services × 2 = 42 total, leaving 8 spare slots.
+  // Prioritise: non-resolved first (may get new updates), then most recently started.
+  const toEnrich = workingIncidents
     .filter((inc) => inc.timeline.some((t) => !t.text))
     .sort((a, b) => {
       const resolvedDiff = (a.status === 'resolved' ? 1 : 0) - (b.status === 'resolved' ? 1 : 0)
@@ -386,7 +454,7 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, page
     })
     .slice(0, 2)
 
-  if (toEnrich.length === 0) return incidents
+  if (toEnrich.length === 0) return workingIncidents
 
   const enriched = new Map<string, Incident>()
   await Promise.all(toEnrich.map(async (inc) => {
@@ -422,7 +490,7 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, page
       const STAGE_ORDER: Record<string, number> = { investigating: 0, identified: 1, monitoring: 2, resolved: 3 }
       const usedUpdateIndices = new Set<number>()
 
-      enriched.set(inc.id, {
+      const enrichedIncident: Incident = {
         ...inc,
         timeline: inc.timeline.map((entry) => {
           if (entry.text) return entry
@@ -455,7 +523,22 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, page
           }
           return entry
         }),
-      })
+      }
+      enriched.set(inc.id, enrichedIncident)
+
+      // Phase 3: Persist scraped text to KV (fire-and-forget — a single write failure is non-critical,
+      // but persistent failures cause every invocation to re-scrape, exhausting the enrichment budget).
+      // Resolved: 90-day TTL (rarely changes). Active: 5-min TTL (may receive new updates).
+      if (kv) {
+        const ttl = enrichedIncident.status === 'resolved' ? 90 * 86_400 : 5 * 60
+        try {
+          const payload = JSON.stringify(buildTextCache(enrichedIncident))
+          kv.put(`inctext:${inc.id}`, payload, { expirationTtl: ttl })
+            .catch((err) => console.error(`[inctext cache] write failed for ${inc.id}:`, err))
+        } catch (buildErr) {
+          console.error(`[inctext cache] failed to serialize cache for ${inc.id}:`, buildErr instanceof Error ? buildErr.message : buildErr)
+        }
+      }
     } catch (err) {
       const isTimeout = err instanceof Error && err.name === 'AbortError'
       if (isTimeout) {
@@ -466,7 +549,7 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, page
     }
   }))
 
-  return incidents.map((inc) => enriched.get(inc.id) ?? inc)
+  return workingIncidents.map((inc) => enriched.get(inc.id) ?? inc)
 }
 
 function formatDuration(start: Date, end: Date): string {
@@ -490,7 +573,7 @@ async function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response
 }
 
 // Retry once on failure to reduce false-positive 'down' from transient network issues
-// Retry uses shorter timeout to keep total budget under ~12s per service
+// Retry uses shorter timeout to keep total wall-clock time under ~12s per service
 async function fetchWithRetry(url: string, timeoutMs = 8000): Promise<Response> {
   try {
     return await fetchWithTimeout(url, timeoutMs)
@@ -524,7 +607,7 @@ interface PrefetchedData {
 // For services without `apiUrl`, status is based on HTTP reachability of the status page (200 = operational).
 // This may not reflect actual service outages if the status page itself remains up.
 
-async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData): Promise<ServiceStatus> {
+async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
   const now = new Date().toISOString()
   const base: ServiceStatus = {
     id: config.id,
@@ -583,7 +666,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData):
 
       let filtered = filterIncidents(incidents, config)
       if (config.incidentIoBaseUrl) {
-        filtered = await enrichIncidentIoText(filtered, config.incidentIoBaseUrl, pageUrls)
+        filtered = await enrichIncidentIoText(filtered, config.incidentIoBaseUrl, pageUrls, kv)
       }
 
       return {
@@ -673,7 +756,7 @@ export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: Service
   }))
 
   const results = await Promise.allSettled(
-    SERVICES.map((config) => fetchService(config, config.apiUrl ? prefetchMap.get(config.apiUrl) : undefined))
+    SERVICES.map((config) => fetchService(config, config.apiUrl ? prefetchMap.get(config.apiUrl) : undefined, kv))
   )
 
   // Raw results (for caching — no fallback substitution)
@@ -698,7 +781,7 @@ export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: Service
   if (needsFallback && kv) {
     const cached = await kv.get(CACHE_KEY).catch(() => null)
     if (cached) {
-      try { cachedServices = JSON.parse(cached).services } catch { /* ignore */ }
+      try { cachedServices = JSON.parse(cached).services } catch { console.warn('[fetchAllServices] corrupt services cache in KV — fallback not available') }
     }
   }
 
