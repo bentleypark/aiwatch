@@ -177,6 +177,19 @@ export default function ServiceDetails({ serviceId }) {
   const incidentCount = service.incidents?.length ?? 0
   const calendar30d = buildCalendarFromIncidents(service.incidents)
 
+  // MTTR: average duration of resolved incidents with parseable duration
+  const mttr = useMemo(() => {
+    const resolved = (service.incidents ?? []).filter((i) => i.status === 'resolved' && i.duration)
+    if (resolved.length === 0) return null
+    const totalMinutes = resolved.reduce((sum, i) => {
+      const m = i.duration.match(/(?:(\d+)h\s*)?(\d+)m/)
+      return sum + (m ? (parseInt(m[1] || '0') * 60 + parseInt(m[2])) : 0)
+    }, 0)
+    if (totalMinutes === 0) return null
+    const avg = Math.round(totalMinutes / resolved.length)
+    return avg >= 60 ? `${Math.floor(avg / 60)}h ${avg % 60}m` : `${avg}m`
+  }, [service.incidents])
+
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>
 
@@ -237,20 +250,19 @@ export default function ServiceDetails({ serviceId }) {
         />
         <MetricCard
           label={t('svc.mttr')}
-          value="—"
-          sub={t('svc.mttr.sub')}
-          colorClass="text-[var(--text2)]"
+          value={mttr ?? '—'}
+          sub={mttr ? `${(service.incidents ?? []).filter(i => i.status === 'resolved').length} ${t('svc.incidents.sub')}` : t('uptime.collecting')}
+          colorClass={mttr ? 'text-[var(--amber)]' : 'text-[var(--text2)]'}
         />
       </div>
 
       {/* ── 24h Latency Trend — placeholder until hourly KV data ── */}
       <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+        <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
           <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
             <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
             {t('latency.trend')}
           </div>
-          <span className="mono text-[9px] text-[var(--text2)]">{t('uptime.collecting')}</span>
         </div>
         <div className="flex items-center justify-center" style={{ padding: '40px 16px' }}>
           <p className="text-xs text-[var(--text2)] mono">{t('uptime.collecting')}</p>
