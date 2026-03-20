@@ -361,7 +361,8 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
 
       return {
         ...base,
-        status: res.ok ? 'operational' : 'degraded',
+        // 2xx = operational; 403 (bot protection) = treat as operational; other errors = degraded
+        status: res.ok || res.status === 403 ? 'operational' : 'degraded',
         latency: config.category === 'api' ? latency : null,
         incidents,
       }
