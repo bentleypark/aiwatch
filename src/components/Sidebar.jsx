@@ -95,7 +95,7 @@ function ServiceNavItem({ svc, page, setPage, onNavigate }) {
       <span className={`rounded-full shrink-0 ${dotClass}`} style={{ width: '6px', height: '6px' }} aria-hidden="true" />
       <span className="flex-1 min-w-0 truncate">{svc.name}</span>
       <span className={`shrink-0 ${badgeCls}`} style={badgeStyle}>
-        {(svc.uptime30d ?? 0).toFixed(1)}%
+        {(svc.uptime30d ?? 0).toFixed(2)}%
       </span>
     </button>
   )

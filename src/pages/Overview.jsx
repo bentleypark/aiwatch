@@ -107,7 +107,7 @@ function ServiceCard({ service, index, onClick, t }) {
           <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.latency')}</div>
         </div>
         <div>
-          <div className={`mono text-[13px] font-medium ${uptimeColor}`}>{service.uptime30d.toFixed(1)}%</div>
+          <div className={`mono text-[13px] font-medium ${uptimeColor}`}>{service.uptime30d.toFixed(2)}%</div>
           <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.uptime')}</div>
         </div>
         <div>

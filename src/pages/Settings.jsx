@@ -216,7 +216,7 @@ export default function Settings() {
                   <span className={`rounded-full shrink-0 ${dotCls}`} style={{ width: '6px', height: '6px' }} />
                   <span style={{ fontSize: '12px', color: 'var(--text0)' }}>{svc?.name ?? id}</span>
                   <span className="mono" style={{ fontSize: '10px', color: 'var(--text2)', marginLeft: '4px' }}>
-                    {svc ? `${svc.uptime30d.toFixed(1)}%` : ''}
+                    {svc ? `${svc.uptime30d.toFixed(2)}%` : ''}
                   </span>
                 </div>
                 <Toggle checked={enabledServices.includes(id)} onChange={() => toggleService(id)} />
@@ -242,7 +242,7 @@ export default function Settings() {
                   <span className={`rounded-full shrink-0 ${dotCls}`} style={{ width: '6px', height: '6px' }} />
                   <span style={{ fontSize: '12px', color: 'var(--text0)' }}>{svc?.name ?? id}</span>
                   <span className="mono" style={{ fontSize: '10px', color: 'var(--text2)', marginLeft: '4px' }}>
-                    {svc ? `${svc.uptime30d.toFixed(1)}%` : ''}
+                    {svc ? `${svc.uptime30d.toFixed(2)}%` : ''}
                   </span>
                 </div>
                 <Toggle checked={enabledServices.includes(id)} onChange={() => toggleService(id)} />

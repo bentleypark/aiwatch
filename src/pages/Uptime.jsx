@@ -106,7 +106,7 @@ function MatrixCell({ uptime }) {
   return (
     <td style={{ padding: '8px 10px', textAlign: 'center' }}>
       <span className={`inline-block mono ${cls}`} style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px' }}>
-        {uptime.toFixed(1)}%
+        {uptime.toFixed(2)}%
       </span>
     </td>
   )
@@ -157,7 +157,7 @@ export default function Uptime() {
         <SummaryCard
           label={t('uptime.stable')}
           value={mostStable.name}
-          sub={`${mostStable.uptime30d.toFixed(1)}% ${t('overview.card.uptime')}`}
+          sub={`${mostStable.uptime30d.toFixed(2)}% ${t('overview.card.uptime')}`}
           colorClass="text-[var(--green)]"
           valueSize="18px"
           mono={false}
@@ -171,7 +171,7 @@ export default function Uptime() {
         <SummaryCard
           label={t('uptime.issues')}
           value={mostIssues.name}
-          sub={`${mostIssues.uptime30d.toFixed(1)}% ${t('overview.card.uptime')}`}
+          sub={`${mostIssues.uptime30d.toFixed(2)}% ${t('overview.card.uptime')}`}
           colorClass="text-[var(--red)]"
           valueSize="18px"
           mono={false}
