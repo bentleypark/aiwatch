@@ -157,7 +157,7 @@ export function MobileActionBar() {
   return (
     <div className="flex items-center gap-2 bg-[var(--bg1)] border-b border-[var(--border)]" style={{ padding: '8px 14px' }}>
       <span className="w-1.5 h-1.5 rounded-full bg-[var(--green)] animate-[pulse_2s_ease-in-out_infinite]" />
-      <span className="mono text-[10px] text-[var(--text2)]">{t('topbar.live')}</span>
+      <span className="mono text-[10px] text-[var(--text2)]">{t('topbar.live')} · {lastUpdated ? formatTime(lastUpdated, lang) : '—'}</span>
       <button
         onClick={handleRefresh}
         disabled={refreshing}

@@ -75,7 +75,7 @@ const activeBarStyle = { position: 'absolute', left: 0, top: '4px', bottom: '4px
 const sectionTitleStyle = { padding: '6px 8px', letterSpacing: '0.12em', fontSize: '9px', textTransform: 'uppercase', color: 'var(--text2)', fontFamily: 'var(--font-mono)' }
 const badgeStyle = { padding: '1px 5px', borderRadius: '3px', fontSize: '9px', marginLeft: 'auto', fontFamily: 'var(--font-mono)' }
 
-function ServiceNavItem({ svc, page, setPage }) {
+function ServiceNavItem({ svc, page, setPage, onNavigate }) {
   const active = page.name === 'service' && page.serviceId === svc.id
   const dotClass = STATUS_DOT_CLASS[svc.status] ?? STATUS_DOT_CLASS.operational
   const badgeCls = uptimeBadgeCls(svc.uptime30d ?? 100)
@@ -84,7 +84,7 @@ function ServiceNavItem({ svc, page, setPage }) {
 
   return (
     <button
-      onClick={() => { trackEvent('view_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }) }}
+      onClick={() => { trackEvent('view_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }); onNavigate?.() }}
       aria-current={active ? 'page' : undefined}
       className={`w-full text-left flex items-center transition-all cursor-pointer
         ${active ? 'bg-[var(--bg3)] text-[var(--text0)]'
@@ -101,7 +101,7 @@ function ServiceNavItem({ svc, page, setPage }) {
   )
 }
 
-export default function Sidebar({ visibleServiceIds }) {
+export default function Sidebar({ visibleServiceIds, onNavigate }) {
   const { page, setPage } = usePage()
   const { t } = useLang()
   const { services: rawServices } = usePolling()
@@ -135,7 +135,7 @@ export default function Sidebar({ visibleServiceIds }) {
           return (
             <button
               key={item.name}
-              onClick={() => { trackEvent('navigate_page', { page: item.name }); setPage({ name: item.name }) }}
+              onClick={() => { trackEvent('navigate_page', { page: item.name }); setPage({ name: item.name }); onNavigate?.() }}
               aria-current={active ? 'page' : undefined}
               className={`w-full text-left flex items-center transition-all cursor-pointer
                 ${active ? 'bg-[var(--bg3)] text-[var(--text0)]' : 'text-[var(--text1)] hover:bg-[var(--bg3)] hover:text-[var(--text0)]'}`}
@@ -161,7 +161,7 @@ export default function Sidebar({ visibleServiceIds }) {
       </div>
       <nav className="overflow-y-auto" style={{ padding: '0 12px' }}>
         {visibleServices.filter((s) => s.category !== 'agent').map((svc) => (
-          <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} />
+          <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} onNavigate={onNavigate} />
         ))}
       </nav>
 
@@ -174,7 +174,7 @@ export default function Sidebar({ visibleServiceIds }) {
           </div>
           <nav className="overflow-y-auto" style={{ padding: '0 12px' }}>
             {visibleServices.filter((s) => s.category === 'agent').map((svc) => (
-              <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} />
+              <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} onNavigate={onNavigate} />
             ))}
           </nav>
         </>

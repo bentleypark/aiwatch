@@ -240,19 +240,22 @@ function usePollingInternal() {
   })
   const cancelledRef = useRef(false)
   const controllerRef = useRef(null)
-  const poll = useCallback(async () => {
+  // silent=true: background polling (no skeleton), silent=false: show skeleton UI
+  const poll = useCallback(async (silent = false) => {
     controllerRef.current?.abort()
     const controller = new AbortController()
     controllerRef.current = controller
     const timer = setTimeout(() => controller.abort(), 15000)
 
-    // Show skeleton UI
-    if (!cancelledRef.current) {
-      setState((prev) => ({ ...prev, loading: true }))
-    }
-    // Yield to browser so skeleton renders before fetch begins
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
     const loadStart = Date.now()
+
+    if (!silent) {
+      // Show skeleton UI for initial load and manual refresh
+      if (!cancelledRef.current) {
+        setState((prev) => ({ ...prev, loading: true }))
+      }
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+    }
 
     try {
       const res = await fetch(API_URL, { signal: controller.signal })
@@ -261,8 +264,11 @@ function usePollingInternal() {
       const data = await res.json()
       const merged = mergeWithMock(data.services)
 
-      const elapsed = Date.now() - loadStart
-      if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
+      // Minimum skeleton display time (only for non-silent)
+      if (!silent) {
+        const elapsed = Date.now() - loadStart
+        if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
+      }
 
       if (!cancelledRef.current) {
         setState({
@@ -275,8 +281,8 @@ function usePollingInternal() {
     } catch (err) {
       clearTimeout(timer)
 
-      // Skip delay if intentionally aborted (new poll superseded this one)
-      if (err?.name !== 'AbortError') {
+      // Skip delay if aborted or silent
+      if (err?.name !== 'AbortError' && !silent) {
         const elapsed = Date.now() - loadStart
         if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
       } else {
@@ -299,8 +305,8 @@ function usePollingInternal() {
 
   useEffect(() => {
     cancelledRef.current = false
-    poll()
-    const interval = setInterval(poll, POLL_INTERVAL)
+    poll(false) // initial load — show skeleton
+    const interval = setInterval(() => poll(true), POLL_INTERVAL) // auto-polling — silent
     return () => {
       cancelledRef.current = true
       controllerRef.current?.abort()
@@ -308,5 +314,8 @@ function usePollingInternal() {
     }
   }, [poll])
 
-  return { ...state, refresh: poll }
+  // refresh: always show skeleton (manual action)
+  const refresh = useCallback(() => poll(false), [poll])
+
+  return { ...state, refresh }
 }

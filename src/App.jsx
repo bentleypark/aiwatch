@@ -47,7 +47,7 @@ export default function App() {
   }, [page])
 
   const tickerBar = <TickerBar />
-  const sidebar = <Sidebar />
+  const sidebar = <Sidebar onNavigate={() => setSidebarOpen(false)} />
   const footer = (
     <div>
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
