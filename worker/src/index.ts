@@ -10,17 +10,25 @@ interface Env {
 function corsHeaders(origin: string, allowedOrigin: string | undefined): HeadersInit {
   let allowOrigin = ''
   if (!allowedOrigin) {
-    allowOrigin = '' // deny all if not configured
+    allowOrigin = ''
   } else if (allowedOrigin === '*') {
-    allowOrigin = '*' // literal wildcard, not origin reflection
-  } else if (origin === allowedOrigin) {
-    allowOrigin = origin
+    allowOrigin = '*'
+  } else {
+    // Support comma-separated origins: "https://aiwatch.dev,https://aiwatch-dev.vercel.app"
+    const allowed = allowedOrigin.split(',').map((s) => s.trim())
+    if (allowed.includes(origin)) {
+      allowOrigin = origin
+    }
   }
+  // Omit CORS headers entirely for disallowed origins
+  if (!allowOrigin) return {}
+
   return {
     'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
+    'Vary': 'Origin',
   }
 }
 

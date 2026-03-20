@@ -7,14 +7,14 @@ test.describe('Modal / Detail Panel', () => {
     await waitForDataLoad(page)
     await navigateVia(page, 'Incidents')
 
-    // Find any incident row (data varies between live/mock)
-    const incidentRow = page.locator('main [role="row"]').first()
-    const hasIncidents = await incidentRow.count() > 0
-    if (!hasIncidents) {
-      // No incidents available — skip gracefully
+    // Find incident rows in rowgroup (skip header row)
+    const incidentRows = page.locator('main [role="rowgroup"] [role="row"]')
+    const count = await incidentRows.count()
+    if (count === 0) {
+      // No incidents available (live data may have none) — skip gracefully
       return
     }
-    await incidentRow.click({ force: true })
+    await incidentRows.first().click({ force: true })
     await expect(page.locator('main').getByText('Timeline')).toBeVisible()
 
     await page.locator('main').getByRole('button', { name: /close|닫기/i }).click({ force: true })

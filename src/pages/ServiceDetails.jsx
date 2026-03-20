@@ -49,7 +49,7 @@ const SERVICE_COLOR = {
 
 // Official status page URLs for each monitored service
 const STATUS_URL = {
-  claude:      'https://status.anthropic.com',
+  claude:      'https://status.claude.com',
   openai:      'https://status.openai.com',
   gemini:      'https://status.cloud.google.com/',
   mistral:     'https://status.mistral.ai',
@@ -62,12 +62,12 @@ const STATUS_URL = {
   elevenlabs:  'https://status.elevenlabs.io',
   xai:         'https://status.x.ai',
   deepseek:    'https://status.deepseek.com',
-  claudeai:    'https://status.anthropic.com',
+  claudeai:    'https://status.claude.com',
   chatgpt:     'https://status.openai.com',
-  claudecode:  'https://status.anthropic.com',
+  claudecode:  'https://status.claude.com',
   copilot:     'https://githubstatus.com',
   cursor:      'https://status.cursor.com',
-  windsurf:    'https://status.codeium.com',
+  windsurf:    'https://status.windsurf.com',
 }
 
 // 30-day calendar status → Tailwind color class
