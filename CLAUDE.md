@@ -27,7 +27,10 @@ npm test           # Run Playwright E2E tests (13 specs)
    - Identify **every** difference (spacing, colors, fonts, layout, icons, text)
    - List differences explicitly before writing any code
 2. **Code** — implement the feature or fix
-3. **Build + Test** — `npm run build` 성공 및 `npm test` 전체 통과 확인. 실패 시 코드 수정 후 재실행
+3. **Build + Test** — 변경 범위에 따라:
+   - **프론트엔드 변경** (`src/`): `npm run build` + `npm test` (Playwright)
+   - **백엔드 변경** (`worker/`): `cd worker && npx wrangler deploy --dry-run`
+   - **양쪽 모두 변경**: 위 두 가지 모두 실행
 4. **Review** — run PR review **before** committing:
    ```
    /pr-review-toolkit:review-pr

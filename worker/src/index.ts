@@ -1,11 +1,37 @@
 // AIWatch Status Polling Proxy — Cloudflare Worker
 // Fetches AI service status pages and returns normalized ServiceStatus[]
+// Uses KV cache to serve last-known-good data on fetch failures
 
-import { fetchAllServices, type ServiceStatus } from './services'
+import { fetchAllServices, CACHE_KEY, type ServiceStatus } from './services'
 
 interface Env {
   ALLOWED_ORIGIN: string
   DISCORD_WEBHOOK_URL?: string
+  STATUS_CACHE: KVNamespace
+}
+
+// ── KV Cache ──
+
+const CACHE_TTL_SECONDS = 3600 // 1 hour — long enough for extended outages
+let lastKvWrite = 0
+const KV_WRITE_INTERVAL_MS = 90_000 // throttle per-isolate; actual rate depends on isolate lifecycle
+
+async function cacheWrite(kv: KVNamespace, services: ServiceStatus[]): Promise<void> {
+  const now = Date.now()
+  if (now - lastKvWrite < KV_WRITE_INTERVAL_MS) return
+  lastKvWrite = now
+  await kv.put(CACHE_KEY, JSON.stringify({
+    services,
+    cachedAt: new Date().toISOString(),
+  }), { expirationTtl: CACHE_TTL_SECONDS }).catch((err) =>
+    console.error('[kv] cache write failed:', err)
+  )
+}
+
+async function cacheRead(kv: KVNamespace): Promise<{ services: ServiceStatus[]; cachedAt: string } | null> {
+  const raw = await kv.get(CACHE_KEY).catch(() => null)
+  if (!raw) return null
+  try { return JSON.parse(raw) } catch { return null }
 }
 
 // ── Discord Webhook Alerts ──
@@ -82,13 +108,11 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
   } else if (allowedOrigin === '*') {
     allowOrigin = '*'
   } else {
-    // Support comma-separated origins: "https://ai-watch.dev,https://aiwatch-dev.vercel.app"
     const allowed = allowedOrigin.split(',').map((s) => s.trim())
     if (allowed.includes(origin)) {
       allowOrigin = origin
     }
   }
-  // Omit CORS headers entirely for disallowed origins
   if (!allowOrigin) return {}
 
   return {
@@ -106,12 +130,10 @@ export default {
     const origin = request.headers.get('Origin') ?? ''
     const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)
 
-    // Handle CORS preflight
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: cors })
     }
 
-    // Only GET /api/status is supported
     if (url.pathname !== '/api/status' || request.method !== 'GET') {
       return new Response(JSON.stringify({ error: 'Not Found' }), {
         status: 404,
@@ -120,16 +142,21 @@ export default {
     }
 
     try {
-      const services: ServiceStatus[] = await fetchAllServices()
+      const { raw, enriched } = await fetchAllServices(env.STATUS_CACHE)
 
-      // Alert if any services are down (non-blocking, with 5min cooldown per service)
-      const downServices = services.filter((s) => s.status === 'down')
+      // Cache raw results only (no fallback substitution — prevents cache poisoning)
+      if (env.STATUS_CACHE) {
+        ctx.waitUntil(cacheWrite(env.STATUS_CACHE, raw))
+      }
+
+      // Alert if any services are down
+      const downServices = enriched.filter((s) => s.status === 'down')
       if (downServices.length > 0) {
         ctx.waitUntil(alertServicesDown(env, downServices))
       }
 
       return new Response(JSON.stringify({
-        services,
+        services: enriched,
         lastUpdated: new Date().toISOString(),
       }), {
         status: 200,
@@ -140,6 +167,23 @@ export default {
         },
       })
     } catch (err) {
+      // Total failure — try returning cached data
+      const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+      if (cached) {
+        return new Response(JSON.stringify({
+          services: cached.services,
+          lastUpdated: cached.cachedAt,
+          cached: true,
+        }), {
+          status: 200,
+          headers: {
+            ...cors,
+            'Content-Type': 'application/json',
+            'Cache-Control': 'public, max-age=10',
+          },
+        })
+      }
+
       const message = err instanceof Error ? err.message : 'Unknown error'
       ctx.waitUntil(alertWorkerError(env, message))
       return new Response(JSON.stringify({ error: message }), {

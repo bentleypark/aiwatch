@@ -374,26 +374,51 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
   }
 }
 
-// ── Fetch All Services (parallel) ──
+// ── Fetch All Services (parallel, with KV fallback) ──
 
-export async function fetchAllServices(): Promise<ServiceStatus[]> {
+export const CACHE_KEY = 'services:latest'
+
+export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[] }> {
   const results = await Promise.allSettled(
     SERVICES.map((config) => fetchService(config))
   )
 
-  return results.map((result, i) => {
+  // Raw results (for caching — no fallback substitution)
+  const raw: ServiceStatus[] = results.map((result, i) => {
     if (result.status === 'fulfilled') return result.value
-    // Fallback for rejected promises
     return {
       id: SERVICES[i].id,
       name: SERVICES[i].name,
       provider: SERVICES[i].provider,
       category: SERVICES[i].category,
-      status: 'down' as const,
+      status: 'degraded' as const,
       latency: null,
       uptime30d: null,
       lastChecked: new Date().toISOString(),
       incidents: [],
     }
   })
+
+  // Read cached snapshot for fallback (only if needed)
+  let cachedServices: ServiceStatus[] | null = null
+  const needsFallback = raw.some((s) => s.status === 'degraded')
+  if (needsFallback && kv) {
+    const cached = await kv.get(CACHE_KEY).catch(() => null)
+    if (cached) {
+      try { cachedServices = JSON.parse(cached).services } catch { /* ignore */ }
+    }
+  }
+
+  // Enriched results (with cache fallback for degraded services)
+  const enriched: ServiceStatus[] = raw.map((svc) => {
+    if (svc.status === 'degraded' && cachedServices) {
+      const prev = cachedServices.find((s) => s.id === svc.id)
+      if (prev && prev.status === 'operational') {
+        return { ...prev, lastChecked: svc.lastChecked }
+      }
+    }
+    return svc
+  })
+
+  return { raw, enriched }
 }
