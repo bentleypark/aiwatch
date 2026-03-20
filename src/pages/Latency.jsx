@@ -223,7 +223,7 @@ export default function Latency() {
   // Defensive default — handles transient undefined state
   const services = rawServices ?? []
 
-  if (loading) return <SkeletonUI />
+  if (loading && services.length === 0) return <SkeletonUI />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
   // Only include services with latency data (exclude web apps and coding agents)

@@ -124,7 +124,7 @@ export default function Uptime() {
     [services]
   )
 
-  if (loading) return <SkeletonUI />
+  if (loading && services.length === 0) return <SkeletonUI />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
   if (services.length === 0) return <EmptyState type="neutral" />

@@ -243,7 +243,7 @@ export default function Overview() {
   const { services, loading, error, lastUpdated } = usePolling()
   const [filter, setFilter] = useState('all')
 
-  if (loading) return <SkeletonUI />
+  if (loading && services.length === 0) return <SkeletonUI />
 
   if (error) {
     return (

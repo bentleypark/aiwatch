@@ -249,7 +249,7 @@ export default function Incidents() {
       .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
   }, [allIncidents, serviceFilter, statusFilter, period])
 
-  if (loading) return <SkeletonUI />
+  if (loading && services.length === 0) return <SkeletonUI />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
   const selectedIncident = filtered.find((inc) => inc.id === selectedId) ?? null
