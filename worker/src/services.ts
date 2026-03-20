@@ -150,19 +150,32 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
 
   try {
     if (config.apiUrl) {
-      // Atlassian Statuspage API — structured JSON
+      // Atlassian Statuspage API — fetch summary + recent incidents in parallel
+      const baseUrl = config.apiUrl.replace('/summary.json', '')
       const start = Date.now()
-      const res = await fetchWithTimeout(config.apiUrl)
+      const [summaryRes, incidentsRes] = await Promise.all([
+        fetchWithTimeout(config.apiUrl),
+        fetchWithTimeout(`${baseUrl}/incidents.json`).catch(() => null),
+      ])
       const latency = Date.now() - start
 
-      if (!res.ok) return { ...base, status: 'degraded' }
+      if (!summaryRes.ok) return { ...base, status: 'degraded' }
 
-      const data: StatuspageResponse = await res.json()
+      const summaryData: StatuspageResponse = await summaryRes.json()
+      // incidents.json has full history; summary.json only has active ones
+      let incidents: Incident[] = []
+      if (incidentsRes?.ok) {
+        const incData: StatuspageResponse = await incidentsRes.json()
+        incidents = parseIncidents(incData)
+      } else {
+        incidents = parseIncidents(summaryData)
+      }
+
       return {
         ...base,
-        status: normalizeStatus(data.status?.indicator ?? 'none'),
+        status: normalizeStatus(summaryData.status?.indicator ?? 'none'),
         latency: config.category === 'api' ? latency : null,
-        incidents: parseIncidents(data),
+        incidents,
       }
     } else {
       // No API — simple HTTP check
