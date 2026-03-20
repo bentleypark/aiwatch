@@ -11,6 +11,7 @@ export interface Incident {
   id: string
   title: string
   status: 'investigating' | 'identified' | 'monitoring' | 'resolved'
+  impact: 'minor' | 'major' | 'critical' | null
   startedAt: string
   duration: string | null
   timeline: TimelineEntry[]
@@ -79,6 +80,7 @@ interface StatuspageResponse {
     id: string
     name: string
     status: string
+    impact: string
     created_at: string
     resolved_at: string | null
     shortlink?: string
@@ -128,6 +130,11 @@ function parseIncidents(data: StatuspageResponse): Incident[] {
       return true
     })
 
+    const impact = inc.impact === 'critical' ? 'critical' as const
+      : inc.impact === 'major' ? 'major' as const
+      : inc.impact === 'minor' ? 'minor' as const
+      : null
+
     return {
       id: inc.id,
       title: inc.name,
@@ -135,6 +142,7 @@ function parseIncidents(data: StatuspageResponse): Incident[] {
         : inc.status === 'monitoring' ? 'monitoring'
         : inc.status === 'identified' ? 'identified'
         : 'investigating',
+      impact,
       startedAt: inc.created_at,
       duration,
       timeline,
@@ -191,6 +199,7 @@ function parseRssIncidents(xml: string): Incident[] {
       id: guid.split('#')[1] ?? guid,
       title: `${component} — ${isResolved ? 'recovered' : 'down'}`,
       status: isResolved ? 'resolved' : 'investigating',
+      impact: null,
       startedAt,
       duration,
       timeline: events.map((e, idx) => ({
@@ -240,12 +249,16 @@ function parseGCloudIncidents(data: GCloudIncident[], productFilter: string): In
           }))
           .reverse()
 
+        const impact = inc.severity === 'high' ? 'major' as const
+          : inc.severity === 'medium' ? 'minor' as const
+          : null
         return [{
           id: inc.id,
           title: `${inc.service_name} — ${inc.severity}`,
           status: status === 'AVAILABLE' ? 'resolved' as const
             : status === 'SERVICE_DISRUPTION' ? 'investigating' as const
             : 'investigating' as const,
+          impact,
           startedAt: inc.begin,
           duration,
           timeline,
@@ -311,6 +324,7 @@ function parseInstatusIncidents(html: string): Incident[] {
             : status === 'MONITORING' ? 'monitoring' as const
             : status === 'IDENTIFIED' ? 'identified' as const
             : 'investigating' as const,
+          impact: null,
           startedAt: createdAt,
           duration: durationSec ? formatDuration(new Date(createdAt), new Date(new Date(createdAt).getTime() + durationSec * 1000)) : null,
           timeline,
