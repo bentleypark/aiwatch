@@ -104,6 +104,10 @@ No React Router. A top-level `currentPage` state in `App.jsx` determines which p
 - Phase 3 features (AI Analysis) are UI-disabled with "Coming soon" labels — do not remove these placeholders
 - Status polling proxy: `worker/` directory (monorepo), Cloudflare Workers
   - `cd worker && npm run dev` — local dev (port 8787)
-  - `cd worker && npm run deploy` — deploy to Cloudflare
+  - **IMPORTANT**: Worker 배포는 반드시 아래 명령어 사용 (루트에서 `npm run deploy` 또는 `wrangler deploy` 실행 시 SPA용 `aiwatch` worker가 배포됨 — 잘못된 배포):
+    ```
+    npx wrangler deploy --config worker/wrangler.toml
+    ```
+  - 배포 후 출력에 `Uploaded aiwatch-worker` 확인 필수 (`aiwatch`이면 잘못된 배포)
   - Endpoints: `GET /api/status`, `GET /api/uptime?days=30`
 - Deployment: Vercel, domain ai-watch.dev
