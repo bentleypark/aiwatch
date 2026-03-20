@@ -90,7 +90,7 @@ function ServiceCard({ service, index, onClick, t }) {
     <button
       onClick={onClick}
       className={`w-full text-left bg-[var(--bg1)] border border-[var(--border)] border-l-2 ${borderCls} rounded-lg
-                 hover:border-[var(--border-hi)] transition-colors animate-[fade-in_0.3s_ease_both]`}
+                 hover:border-t-[var(--border-hi)] hover:border-r-[var(--border-hi)] hover:border-b-[var(--border-hi)] transition-colors animate-[fade-in_0.3s_ease_both]`}
       style={{ padding: '14px', animationDelay: `${index * 80}ms` }}
     >
       <div className="flex justify-between items-start" style={{ marginBottom: '10px' }}>
