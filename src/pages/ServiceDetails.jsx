@@ -304,11 +304,12 @@ export default function ServiceDetails({ serviceId }) {
 
         {/* Incident History */}
         <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
-          <div className="flex items-center border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+          <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
             <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
               <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--red)' }} />
               {t('svc.incidents.history')}
             </div>
+            <span className="mono text-[10px] text-[var(--text2)]">{t('incidents.period.7d')}</span>
           </div>
           <div style={{ padding: '16px' }}>
             {NO_INCIDENT_SUPPORT.has(service.id) ? (
