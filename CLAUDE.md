@@ -11,25 +11,31 @@ npm run preview    # Preview production build
 npm run lint       # Run ESLint
 ```
 
-No test runner is configured yet.
+```bash
+npm test           # Run Playwright E2E tests (13 specs)
+```
 
 ## Development Workflow
 
+> **IMPORTANT**: 모든 작업을 시작하기 전에 이 섹션의 규칙을 반드시 다시 읽고 확인할 것. 특히 코드리뷰(3단계)와 테스트는 절대 생략하지 않는다.
+
 ### Per-issue process (follow this order every time)
 
+0. **규칙 확인** — 작업 시작 전 이 Development Workflow 섹션을 다시 읽고 각 단계를 순서대로 따를 것
 1. **Design check** (UI issues only) — before coding, compare `docs/AIWatch_화면디자인_초안.html` with the current implementation:
    - Open design mockup in browser and take screenshots of the relevant area
    - Identify **every** difference (spacing, colors, fonts, layout, icons, text)
    - List differences explicitly before writing any code
 2. **Code** — implement the feature or fix
-3. **Review** — run PR review **before** committing:
+3. **Build + Test** — `npm run build` 성공 및 `npm test` 전체 통과 확인. 실패 시 코드 수정 후 재실행
+4. **Review** — run PR review **before** committing:
    ```
    /pr-review-toolkit:review-pr
    ```
-4. **Fix review issues** — address all **Critical** and **Important** findings. Do NOT commit until all issues are resolved.
-5. **Commit** — only after review issues are fixed. Include `closes #N` in the message so GitHub links the commit
-6. **Verify checklist** — read the issue (`gh issue view N`) and confirm every checklist item (`- [ ]`) is actually implemented in code before closing
-7. **Close** — only close the issue after checklist verification: `gh issue close N`
+5. **Fix review issues** — address all **Critical** and **Important** findings. 수정 후 다시 Build + Test 실행
+6. **Commit** — only after review issues are fixed and tests pass. Include `closes #N` in the message so GitHub links the commit
+7. **Verify checklist** — read the issue (`gh issue view N`) and confirm every checklist item (`- [ ]`) is actually implemented in code before closing
+8. **Close** — only close the issue after checklist verification: `gh issue close N`
 
 > Never close an issue immediately after committing. Always re-read the issue checklist and verify each item against the code first.
 
