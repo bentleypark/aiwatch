@@ -110,4 +110,4 @@ No React Router. A top-level `currentPage` state in `App.jsx` determines which p
     ```
   - 배포 후 출력에 `Uploaded aiwatch-worker` 확인 필수 (`aiwatch`이면 잘못된 배포)
   - Endpoints: `GET /api/status`, `GET /api/uptime?days=30`
-- Deployment: Vercel, domain ai-watch.dev
+- **Frontend 배포**: Vercel, domain ai-watch.dev — `git push origin main` 으로 자동 배포 트리거. 프론트엔드 변경 후 반드시 push 해야 반영됨 (`npm run build`는 로컬 빌드만, 배포 아님)
