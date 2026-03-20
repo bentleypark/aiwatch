@@ -39,6 +39,7 @@ interface ServiceConfig {
   apiUrl: string | null  // Atlassian Statuspage API endpoint if available
   instatusUrl?: string   // Instatus (Nuxt SSR) incidents page URL
   gcloudProduct?: string // Google Cloud product name filter for incidents.json
+  rssFeedUrl?: string    // Better Stack RSS feed URL for incidents
 }
 
 const SERVICES: ServiceConfig[] = [
@@ -49,9 +50,9 @@ const SERVICES: ServiceConfig[] = [
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json' },
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json' },
-  { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null },
+  { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed' },
   { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null },
-  { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null },
+  { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed' },
   { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json' },
   { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json' },
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null },
@@ -127,6 +128,67 @@ function parseIncidents(data: StatuspageResponse): Incident[] {
       timeline,
     }
   })
+}
+
+// ── Better Stack RSS Feed Parser — for HuggingFace, Together ──
+// RSS items come in pairs: "X went down" + "X recovered", grouped by guid
+
+function decodeXmlEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/<[^>]*>/g, '') // strip HTML tags
+}
+
+function isValidDate(s: string): boolean {
+  return !isNaN(new Date(s).getTime())
+}
+
+function parseRssIncidents(xml: string): Incident[] {
+  const items = xml.match(/<item>([\s\S]*?)<\/item>/g)
+  if (!items) return []
+
+  // Group by guid (same guid = same incident)
+  const groups = new Map<string, Array<{ title: string; date: string; desc: string }>>()
+  for (const item of items) {
+    const guid = item.match(/<guid>(.*?)<\/guid>/)?.[1]
+    if (!guid) continue // skip items without guid
+    const date = item.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] ?? ''
+    if (!isValidDate(date)) continue // skip malformed dates
+    const title = decodeXmlEntities(item.match(/<title>(.*?)<\/title>/)?.[1] ?? '')
+    const desc = decodeXmlEntities(item.match(/<description>(.*?)<\/description>/)?.[1] ?? '')
+    if (!groups.has(guid)) groups.set(guid, [])
+    groups.get(guid)!.push({ title, date, desc })
+  }
+
+  // Convert each group to an Incident (limit to 5)
+  const incidents: Incident[] = []
+  for (const [guid, events] of groups) {
+    if (incidents.length >= 5) break
+    events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    const first = events[0]
+    const last = events[events.length - 1]
+    const isResolved = last.title.toLowerCase().includes('recovered')
+    const startedAt = new Date(first.date).toISOString()
+    const duration = isResolved
+      ? formatDuration(new Date(first.date), new Date(last.date))
+      : null
+    const component = first.title.replace(/ went down$/i, '').replace(/ recovered$/i, '')
+
+    incidents.push({
+      id: guid.split('#')[1] ?? guid,
+      title: `${component} — ${isResolved ? 'recovered' : 'down'}`,
+      status: isResolved ? 'resolved' : 'investigating',
+      startedAt,
+      duration,
+      timeline: events.map((e, idx) => ({
+        stage: (isResolved && idx === events.length - 1) ? 'resolved' as const : 'investigating' as const,
+        text: e.desc || e.title,
+        at: new Date(e.date).toISOString(),
+      })),
+    })
+  }
+  return incidents
 }
 
 // ── Google Cloud Status Parser — incidents.json with product filtering ──
@@ -337,7 +399,7 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
     } else {
       // No Statuspage API — HTTP check + optional scraping (parallel)
       const start = Date.now()
-      const scrapeUrl = config.instatusUrl || (config.gcloudProduct ? 'https://status.cloud.google.com/incidents.json' : null)
+      const scrapeUrl = config.instatusUrl || config.rssFeedUrl || (config.gcloudProduct ? 'https://status.cloud.google.com/incidents.json' : null)
       const [res, scrapeRes] = await Promise.all([
         fetchWithRetry(config.statusUrl),
         scrapeUrl
@@ -353,6 +415,8 @@ async function fetchService(config: ServiceConfig): Promise<ServiceStatus> {
       if (scrapeRes?.ok) {
         if (config.instatusUrl) {
           incidents = parseInstatusIncidents(await scrapeRes.text())
+        } else if (config.rssFeedUrl) {
+          incidents = parseRssIncidents(await scrapeRes.text())
         } else if (config.gcloudProduct) {
           const data: GCloudIncident[] = await scrapeRes.json()
           incidents = parseGCloudIncidents(data, config.gcloudProduct)

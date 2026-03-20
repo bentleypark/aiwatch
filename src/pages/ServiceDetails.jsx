@@ -72,7 +72,7 @@ const STATUS_URL = {
 }
 
 // Services that cannot provide incident data (no API, bot-protected, etc.)
-const NO_INCIDENT_SUPPORT = new Set(['together', 'perplexity', 'huggingface', 'xai'])
+const NO_INCIDENT_SUPPORT = new Set(['perplexity', 'xai'])
 
 // 30-day calendar status → Tailwind color class
 const CALENDAR_CLASS = {
