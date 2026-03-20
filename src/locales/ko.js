@@ -15,7 +15,7 @@ const ko = {
 
   // Topbar
   'topbar.live': 'LIVE',
-  'topbar.refresh': '↻ Refresh',
+  'topbar.refresh': '↻ 새로고침',
   'topbar.refresh.loading': '↻ 로딩 중...',
   'topbar.analyze': '분석',
   'topbar.analyze.soon': '준비 중',
