@@ -117,7 +117,7 @@ function ServiceCard({ service, index, onClick, t }) {
         </div>
       </div>
 
-      <HistoryBars history30d={buildCalendarFromIncidents(service.incidents)} />
+      <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact)} />
     </button>
   )
 }

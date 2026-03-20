@@ -28,6 +28,7 @@ export interface ServiceStatus {
   uptime30d: number | null
   lastChecked: string
   incidents: Incident[]
+  dailyImpact?: Record<string, 'minor' | 'major' | 'critical'>
 }
 
 // ── Status Page Configs ──
@@ -45,12 +46,13 @@ interface ServiceConfig {
   incidentKeywords?: string[]  // Only show incidents matching these keywords (case-insensitive)
   incidentExclude?: string[]   // Exclude incidents matching these keywords
   incidentIoBaseUrl?: string   // incident.io status page base URL — scrape update text for active incidents
+  statusComponent?: string     // Statuspage component name for per-component calendar impact
 }
 
 const SERVICES: ServiceConfig[] = [
   // AI API Services
-  { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code'] },
-  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'sora', 'excel plugin'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
+  { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code'], statusComponent: 'Claude API' },
+  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'sora', 'excel plugin'], incidentIoBaseUrl: 'https://status.openai.com/incidents', statusComponent: 'API' },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API' },
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents' },
@@ -63,10 +65,10 @@ const SERVICES: ServiceConfig[] = [
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null },
   { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://status.deepseek.com/api/v2/summary.json' },
   // AI Web Apps
-  { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'webapp', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces'] },
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
+  { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'webapp', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces'], statusComponent: 'claude.ai' },
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned'], incidentIoBaseUrl: 'https://status.openai.com/incidents', statusComponent: 'ChatGPT' },
   // Coding Agents
-  { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'] },
+  { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'], statusComponent: 'Claude Code' },
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json' },
   { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json' },
   { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json' },
@@ -88,7 +90,7 @@ interface StatuspageResponse {
     components?: Array<{ name: string }>
     incident_updates?: Array<{
       status: string; body: string; created_at: string; display_at?: string
-      affected_components?: Array<{ new_status: string }>
+      affected_components?: Array<{ code: string; name: string; new_status: string }>
     }>
   }>
 }
@@ -135,20 +137,7 @@ function parseIncidents(data: StatuspageResponse): Incident[] {
       return true
     })
 
-    // Derive impact from worst affected_components status (matches Statuspage calendar logic).
-    // major_outage → critical (red), partial_outage → major (orange),
-    // degraded_performance → minor (green on calendar). Falls back to incident-level impact.
-    const OUTAGE_RANK: Record<string, number> = { major_outage: 3, partial_outage: 2, degraded_performance: 1 }
-    let worstRank = 0
-    for (const u of inc.incident_updates ?? []) {
-      for (const c of u.affected_components ?? []) {
-        worstRank = Math.max(worstRank, OUTAGE_RANK[c.new_status] ?? 0)
-      }
-    }
-    const impact = worstRank >= 3 ? 'critical' as const
-      : worstRank >= 2 ? 'major' as const
-      : worstRank >= 1 ? 'minor' as const
-      : inc.impact === 'critical' ? 'critical' as const
+    const impact = inc.impact === 'critical' ? 'critical' as const
       : inc.impact === 'major' ? 'major' as const
       : inc.impact === 'minor' ? 'minor' as const
       : null
@@ -355,6 +344,41 @@ function parseInstatusIncidents(html: string): Incident[] {
   } catch {
     return []
   }
+}
+
+// Build per-day max impact from affected_components for a specific Statuspage component.
+// major_outage → critical (red), partial_outage → major (orange),
+// degraded_performance → minor (green). Falls back to incident-level impact when no component data.
+const COMP_STATUS_RANK: Record<string, number> = { major_outage: 3, partial_outage: 2, degraded_performance: 1 }
+const RANK_TO_IMPACT: Record<number, 'minor' | 'major' | 'critical'> = { 1: 'minor', 2: 'major', 3: 'critical' }
+
+function buildDailyImpact(data: StatuspageResponse, componentName?: string): Record<string, 'minor' | 'major' | 'critical'> {
+  const result: Record<string, number> = {}
+  for (const inc of data.incidents ?? []) {
+    const day = new Date(inc.created_at).toISOString().split('T')[0]
+    let worstRank = 0
+    if (componentName) {
+      // Check affected_components for the specific component
+      for (const u of inc.incident_updates ?? []) {
+        for (const c of u.affected_components ?? []) {
+          if (c.name.includes(componentName)) {
+            worstRank = Math.max(worstRank, COMP_STATUS_RANK[c.new_status] ?? 0)
+          }
+        }
+      }
+    }
+    // Fallback to incident-level impact when no component data found
+    if (worstRank === 0) {
+      const impactRank = inc.impact === 'critical' ? 3 : inc.impact === 'major' ? 2 : inc.impact === 'minor' ? 1 : 0
+      worstRank = impactRank
+    }
+    if (worstRank > (result[day] ?? 0)) result[day] = worstRank
+  }
+  const mapped: Record<string, 'minor' | 'major' | 'critical'> = {}
+  for (const [day, rank] of Object.entries(result)) {
+    mapped[day] = RANK_TO_IMPACT[rank]
+  }
+  return mapped
 }
 
 function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
@@ -706,6 +730,10 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         }
       }
 
+      // Compute daily max impact from ALL incidents (before keyword filtering)
+      // using per-component affected_components status for accurate calendar colors.
+      const dailyImpact = buildDailyImpact(rawIncData ?? summaryData, config.statusComponent)
+
       let filtered = filterIncidents(incidents, config)
       if (config.incidentIoBaseUrl) {
         filtered = await enrichIncidentIoText(filtered, config.incidentIoBaseUrl, pageUrls, kv)
@@ -716,6 +744,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         status: normalizeStatus(summaryData.status?.indicator ?? 'none'),
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
+        ...(Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
       }
     } else {
       // No Statuspage API — HTTP check + optional scraping (parallel)

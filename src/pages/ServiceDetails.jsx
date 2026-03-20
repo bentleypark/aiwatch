@@ -228,7 +228,7 @@ export default function ServiceDetails({ serviceId }) {
     (inc) => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= cutoff7d
   )
   const incidentCount = recentIncidents.length
-  const calendar30d = buildCalendarFromIncidents(service.incidents)
+  const calendar30d = buildCalendarFromIncidents(service.incidents, service.dailyImpact)
 
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>
