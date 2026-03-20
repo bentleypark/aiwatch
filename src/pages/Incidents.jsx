@@ -134,7 +134,7 @@ function DetailPanel({ incident, onClose, t, lang }) {
           ✕ {t('modal.close')}
         </button>
       </div>
-      <div className="p-4">
+      <div style={{ padding: '20px 24px' }}>
         {(incident.timeline ?? []).length === 0 ? (
           <p className="text-xs text-[var(--text2)]">{t('incidents.timeline.empty')}</p>
         ) : (
