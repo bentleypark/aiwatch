@@ -233,7 +233,6 @@ function parseXaiRssIncidents(xml: string): Incident[] {
 
   const incidents: Incident[] = []
   for (const item of items) {
-    if (incidents.length >= 25) break
     const title = item.match(/<title>(.*?)<\/title>/)?.[1] ?? ''
     const guid = item.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1] ?? ''
     if (!guid) continue
@@ -242,17 +241,18 @@ function parseXaiRssIncidents(xml: string): Incident[] {
     const desc = item.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/)?.[1] ?? ''
     const statusMatch = desc.match(/Status:\s*(\w+)/)
     const resolvedMatch = desc.match(/Resolved:\s*([^<]+)/)
-    const isResolved = statusMatch?.group(1) === 'RESOLVED' || statusMatch?.[1] === 'RESOLVED'
+    const isResolved = statusMatch?.[1] === 'RESOLVED'
 
-    // Extract timeline updates from description HTML
+    // Extract timeline updates from description HTML (assumes flat <div> structure)
     const updateBlocks = desc.match(/<div>([\s\S]*?)<\/div>/g) ?? []
     const timeline: TimelineEntry[] = updateBlocks.flatMap((block) => {
       const dateMatch = block.match(/<strong>(.*?)<\/strong>/)
       const titleMatch = block.match(/<h3>(.*?)<\/h3>/)
       const textMatch = block.match(/<p>(?!<strong>)(.*?)<\/p>/g)
       if (!dateMatch) return []
-      const at = new Date(dateMatch[1]).toISOString()
-      if (isNaN(new Date(at).getTime())) return []
+      const parsedDate = new Date(dateMatch[1])
+      if (isNaN(parsedDate.getTime())) return []
+      const at = parsedDate.toISOString()
       const stage = titleMatch?.[1]?.toLowerCase().includes('resolved') ? 'resolved' as const
         : titleMatch?.[1]?.toLowerCase().includes('monitor') ? 'monitoring' as const
         : titleMatch?.[1]?.toLowerCase().includes('identif') ? 'identified' as const
@@ -262,14 +262,15 @@ function parseXaiRssIncidents(xml: string): Incident[] {
     }).reverse() // oldest first
 
     const startedAt = timeline.length > 0 ? timeline[0].at : new Date().toISOString()
-    const resolvedAt = resolvedMatch ? new Date(resolvedMatch[1].trim()) : null
+    const resolvedDate = resolvedMatch ? new Date(resolvedMatch[1].trim()) : null
+    const resolvedAt = (resolvedDate && !isNaN(resolvedDate.getTime())) ? resolvedDate : null
     const duration = (isResolved && resolvedAt && timeline.length > 0)
       ? formatDuration(new Date(startedAt), resolvedAt)
       : null
 
     incidents.push({
       id: guid,
-      title: title.replace(/^\[[^\]]*\]\s*/, ''), // strip [Component] prefix
+      title,
       status: isResolved ? 'resolved' : 'investigating',
       impact: null,
       startedAt,
