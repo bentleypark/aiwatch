@@ -383,8 +383,8 @@ function parseUptimeData(html: string, componentId: string): Record<string, Dail
       if (!day.date || !day.outages) continue
       const m = day.outages.m ?? 0
       const p = day.outages.p ?? 0
-      if (m > 0) result[day.date] = 'critical'
-      else if (p > 0) result[day.date] = 'major'
+      if (m > 0 && m > p) result[day.date] = 'critical'  // major outage dominant → red
+      else if (p > 0 || m > 0) result[day.date] = 'major'  // partial outage dominant → orange
     }
   } catch (err) {
     console.warn('[parseUptimeData] failed to parse uptimeData:', err instanceof Error ? err.message : err)
