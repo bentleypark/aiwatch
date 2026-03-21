@@ -1,6 +1,6 @@
 # AIWatch
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Deploy](https://img.shields.io/badge/Deploy-ai--watch.dev-blue)](https://ai-watch.dev)
 [![GitHub stars](https://img.shields.io/github/stars/bentleypark/aiwatch)](https://github.com/bentleypark/aiwatch/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/bentleypark/aiwatch)](https://github.com/bentleypark/aiwatch/commits/main)
@@ -191,4 +191,4 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for detailed guidelines.
 
 ## License
 
-[MIT](LICENSE)
+[AGPL-3.0](LICENSE)
