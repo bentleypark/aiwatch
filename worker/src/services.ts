@@ -53,7 +53,7 @@ interface ServiceConfig {
 const SERVICES: ServiceConfig[] = [
   // AI API Services
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp' },
-  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'sora', 'excel plugin', 'login', 'sign-in', 'sign in', 'deep research', 'workspaces', 'codex'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
+  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'sora', 'excel plugin', 'login', 'sign-in', 'sign in', 'deep research', 'workspaces', 'codex', 'conversation', 'logged out', 'support chat'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API' },
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents' },
@@ -390,25 +390,6 @@ function parseUptimeData(html: string, componentId: string): Record<string, Dail
     console.warn('[parseUptimeData] failed to parse uptimeData:', err instanceof Error ? err.message : err)
   }
   return result
-}
-
-const RANK_TO_IMPACT: Record<number, DailyImpactLevel> = { 1: 'minor', 2: 'major', 3: 'critical' }
-
-// Fallback: build dailyImpact from filtered incidents when uptimeData HTML is unavailable.
-// Uses post-filter incidents so excluded incidents (e.g., Sora for OpenAI API) don't
-// pollute the calendar of unrelated services.
-function buildDailyImpactFromIncidents(incidents: Incident[]): Record<string, DailyImpactLevel> {
-  const result: Record<string, number> = {}
-  for (const inc of incidents) {
-    const day = new Date(inc.startedAt).toISOString().split('T')[0]
-    const rank = inc.impact === 'critical' ? 3 : inc.impact === 'major' ? 2 : inc.impact === 'minor' ? 1 : 0
-    if (rank > (result[day] ?? 0)) result[day] = rank
-  }
-  const mapped: Record<string, DailyImpactLevel> = {}
-  for (const [day, rank] of Object.entries(result)) {
-    mapped[day] = RANK_TO_IMPACT[rank]
-  }
-  return mapped
 }
 
 function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
@@ -766,18 +747,20 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         filtered = await enrichIncidentIoText(filtered, config.incidentIoBaseUrl, pageUrls, kv)
       }
 
-      // Compute daily impact for calendar: prefer uptimeData from HTML (exact match with
-      // Statuspage's own calendar), fall back to filtered incidents data.
+      // Compute daily impact for calendar from uptimeData HTML (Statuspage services only).
+      // For non-Statuspage services (incident.io), skip dailyImpact — the frontend uses
+      // per-incident startedAt with local timezone conversion instead (more accurate for
+      // users in non-UTC timezones).
       const dailyImpact = (prefetched?.uptimeHtml && config.statusComponentId)
         ? parseUptimeData(prefetched.uptimeHtml, config.statusComponentId)
-        : buildDailyImpactFromIncidents(filtered)
+        : null
 
       return {
         ...base,
         status: normalizeStatus(summaryData.status?.indicator ?? 'none'),
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
-        ...(Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
+        ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
       }
     } else {
       // No Statuspage API — HTTP check + optional scraping (parallel)
