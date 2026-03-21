@@ -394,15 +394,17 @@ function parseUptimeData(html: string, componentId: string): Record<string, Dail
 
 const RANK_TO_IMPACT: Record<number, DailyImpactLevel> = { 1: 'minor', 2: 'major', 3: 'critical' }
 
-// Fallback: build dailyImpact from incidents API when uptimeData HTML is unavailable
-function buildDailyImpactFromIncidents(data: StatuspageResponse): Record<string, DailyImpactLevel> {
+// Fallback: build dailyImpact from filtered incidents when uptimeData HTML is unavailable.
+// Uses post-filter incidents so excluded incidents (e.g., Sora for OpenAI API) don't
+// pollute the calendar of unrelated services.
+function buildDailyImpactFromIncidents(incidents: Incident[]): Record<string, DailyImpactLevel> {
   const result: Record<string, number> = {}
-  for (const inc of data.incidents ?? []) {
-    const day = new Date(inc.created_at).toISOString().split('T')[0]
+  for (const inc of incidents) {
+    const day = new Date(inc.startedAt).toISOString().split('T')[0]
     const rank = inc.impact === 'critical' ? 3 : inc.impact === 'major' ? 2 : inc.impact === 'minor' ? 1 : 0
     if (rank > (result[day] ?? 0)) result[day] = rank
   }
-  const mapped: Record<string, 'minor' | 'major' | 'critical'> = {}
+  const mapped: Record<string, DailyImpactLevel> = {}
   for (const [day, rank] of Object.entries(result)) {
     mapped[day] = RANK_TO_IMPACT[rank]
   }
@@ -759,16 +761,16 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         }
       }
 
-      // Compute daily impact for calendar: prefer uptimeData from HTML (exact match with
-      // Statuspage's own calendar), fall back to incidents API data.
-      const dailyImpact = (prefetched?.uptimeHtml && config.statusComponentId)
-        ? parseUptimeData(prefetched.uptimeHtml, config.statusComponentId)
-        : buildDailyImpactFromIncidents(rawIncData ?? summaryData)
-
       let filtered = filterIncidents(incidents, config)
       if (config.incidentIoBaseUrl) {
         filtered = await enrichIncidentIoText(filtered, config.incidentIoBaseUrl, pageUrls, kv)
       }
+
+      // Compute daily impact for calendar: prefer uptimeData from HTML (exact match with
+      // Statuspage's own calendar), fall back to filtered incidents data.
+      const dailyImpact = (prefetched?.uptimeHtml && config.statusComponentId)
+        ? parseUptimeData(prefetched.uptimeHtml, config.statusComponentId)
+        : buildDailyImpactFromIncidents(filtered)
 
       return {
         ...base,
