@@ -63,7 +63,7 @@ const SERVICES: ServiceConfig[] = [
   { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed' },
   { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents' },
   { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents' },
-  { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null },
+  { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'] },
   { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://status.deepseek.com/api/v2/summary.json' },
   // AI Web Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'webapp', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
@@ -218,6 +218,63 @@ function parseRssIncidents(xml: string): Incident[] {
         text: e.desc || e.title,
         at: new Date(e.date).toISOString(),
       })),
+    })
+  }
+  return incidents
+}
+
+// ── xAI RSS Feed Parser — custom format with HTML description containing updates ──
+// Each <item> is a single incident with all updates in the description.
+// Title format: "[Component] incident title"
+
+function parseXaiRssIncidents(xml: string): Incident[] {
+  const items = xml.match(/<item>([\s\S]*?)<\/item>/g)
+  if (!items) return []
+
+  const incidents: Incident[] = []
+  for (const item of items) {
+    if (incidents.length >= 25) break
+    const title = item.match(/<title>(.*?)<\/title>/)?.[1] ?? ''
+    const guid = item.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1] ?? ''
+    if (!guid) continue
+
+    // Extract status and resolved date from description
+    const desc = item.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/)?.[1] ?? ''
+    const statusMatch = desc.match(/Status:\s*(\w+)/)
+    const resolvedMatch = desc.match(/Resolved:\s*([^<]+)/)
+    const isResolved = statusMatch?.group(1) === 'RESOLVED' || statusMatch?.[1] === 'RESOLVED'
+
+    // Extract timeline updates from description HTML
+    const updateBlocks = desc.match(/<div>([\s\S]*?)<\/div>/g) ?? []
+    const timeline: TimelineEntry[] = updateBlocks.flatMap((block) => {
+      const dateMatch = block.match(/<strong>(.*?)<\/strong>/)
+      const titleMatch = block.match(/<h3>(.*?)<\/h3>/)
+      const textMatch = block.match(/<p>(?!<strong>)(.*?)<\/p>/g)
+      if (!dateMatch) return []
+      const at = new Date(dateMatch[1]).toISOString()
+      if (isNaN(new Date(at).getTime())) return []
+      const stage = titleMatch?.[1]?.toLowerCase().includes('resolved') ? 'resolved' as const
+        : titleMatch?.[1]?.toLowerCase().includes('monitor') ? 'monitoring' as const
+        : titleMatch?.[1]?.toLowerCase().includes('identif') ? 'identified' as const
+        : 'investigating' as const
+      const text = textMatch?.map(p => decodeXmlEntities(p.replace(/<[^>]*>/g, ''))).join(' ').trim() || null
+      return [{ stage, text, at }]
+    }).reverse() // oldest first
+
+    const startedAt = timeline.length > 0 ? timeline[0].at : new Date().toISOString()
+    const resolvedAt = resolvedMatch ? new Date(resolvedMatch[1].trim()) : null
+    const duration = (isResolved && resolvedAt && timeline.length > 0)
+      ? formatDuration(new Date(startedAt), resolvedAt)
+      : null
+
+    incidents.push({
+      id: guid,
+      title: title.replace(/^\[[^\]]*\]\s*/, ''), // strip [Component] prefix
+      status: isResolved ? 'resolved' : 'investigating',
+      impact: null,
+      startedAt,
+      duration,
+      timeline,
     })
   }
   return incidents
@@ -782,7 +839,10 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         if (config.instatusUrl) {
           incidents = parseInstatusIncidents(await scrapeRes.text())
         } else if (config.rssFeedUrl) {
-          incidents = parseRssIncidents(await scrapeRes.text())
+          const rssText = await scrapeRes.text()
+          incidents = config.rssFeedUrl.includes('status.x.ai')
+            ? parseXaiRssIncidents(rssText)
+            : parseRssIncidents(rssText)
         } else if (config.gcloudProduct) {
           const data: GCloudIncident[] = await scrapeRes.json()
           incidents = parseGCloudIncidents(data, config.gcloudProduct)
