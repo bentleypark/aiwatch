@@ -28,7 +28,7 @@ export interface ServiceStatus {
   uptime30d: number | null
   lastChecked: string
   incidents: Incident[]
-  dailyImpact?: Record<string, 'degraded' | 'minor' | 'major' | 'critical'>
+  dailyImpact?: Record<string, 'minor' | 'major' | 'critical'>
 }
 
 // ── Status Page Configs ──
@@ -358,7 +358,7 @@ interface UptimeDayEntry {
   related_events?: Array<{ name: string }>
 }
 
-type DailyImpactLevel = 'degraded' | 'minor' | 'major' | 'critical'
+type DailyImpactLevel = 'minor' | 'major' | 'critical'
 
 function parseUptimeData(html: string, componentId: string): Record<string, DailyImpactLevel> {
   const result: Record<string, DailyImpactLevel> = {}
@@ -385,7 +385,6 @@ function parseUptimeData(html: string, componentId: string): Record<string, Dail
       const p = day.outages.p ?? 0
       if (m > 0) result[day.date] = 'critical'
       else if (p > 0) result[day.date] = 'major'
-      else if ((day.related_events?.length ?? 0) > 0) result[day.date] = 'degraded'
     }
   } catch (err) {
     console.warn('[parseUptimeData] failed to parse uptimeData:', err instanceof Error ? err.message : err)
