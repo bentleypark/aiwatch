@@ -34,17 +34,21 @@ export function buildCalendarFromIncidents(incidents, dailyImpact) {
     }
   }
 
-  // Phase 2: Apply per-incident data (handles active incidents + non-Statuspage services)
-  ;(incidents ?? []).forEach((inc) => {
-    if (!inc.startedAt) return
-    const key = toLocalDate(new Date(inc.startedAt))
-    if (inc.status !== 'resolved') {
-      escalate(dayStatus, key, 'down')
-    } else if (!dailyImpact) {
-      if (inc.impact === 'critical' || inc.impact === 'major') escalate(dayStatus, key, 'degraded')
-      else if (inc.impact === 'minor') escalate(dayStatus, key, 'degraded_perf')
-    }
-  })
+  // Phase 2: Apply per-incident data (only for non-Statuspage services without dailyImpact).
+  // When dailyImpact exists, it's the authoritative source — don't override with incident status.
+  if (!dailyImpact) {
+    ;(incidents ?? []).forEach((inc) => {
+      if (!inc.startedAt) return
+      const key = toLocalDate(new Date(inc.startedAt))
+      if (inc.status !== 'resolved') {
+        escalate(dayStatus, key, 'down')
+      } else if (inc.impact === 'critical' || inc.impact === 'major') {
+        escalate(dayStatus, key, 'degraded')
+      } else if (inc.impact === 'minor') {
+        escalate(dayStatus, key, 'degraded_perf')
+      }
+    })
+  }
 
   return Array.from({ length: 30 }, (_, i) => {
     const d = new Date(today)
