@@ -5,6 +5,8 @@
 [![GitHub stars](https://img.shields.io/github/stars/bentleypark/aiwatch)](https://github.com/bentleypark/aiwatch/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/bentleypark/aiwatch)](https://github.com/bentleypark/aiwatch/commits/main)
 
+**English** | [한국어](README.ko.md)
+
 Real-time monitoring dashboard for **19 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[https://ai-watch.dev](https://ai-watch.dev)**
