@@ -46,12 +46,13 @@ interface ServiceConfig {
   incidentKeywords?: string[]  // Only show incidents matching these keywords (case-insensitive)
   incidentExclude?: string[]   // Exclude incidents matching these keywords
   incidentIoBaseUrl?: string   // incident.io status page base URL — scrape update text for active incidents
-  statusComponent?: string     // Statuspage component name for per-component calendar impact
+  statusComponent?: string     // Statuspage component name for incident filtering
+  statusComponentId?: string   // Statuspage component ID for uptimeData calendar parsing
 }
 
 const SERVICES: ServiceConfig[] = [
   // AI API Services
-  { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code'], statusComponent: 'Claude API' },
+  { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp' },
   { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'sora', 'excel plugin'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API' },
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
@@ -65,10 +66,10 @@ const SERVICES: ServiceConfig[] = [
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null },
   { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://status.deepseek.com/api/v2/summary.json' },
   // AI Web Apps
-  { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'webapp', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces'], statusComponent: 'claude.ai' },
+  { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'webapp', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned'], incidentIoBaseUrl: 'https://status.openai.com/incidents', statusComponent: 'ChatGPT' },
   // Coding Agents
-  { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'], statusComponent: 'Claude Code' },
+  { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'], statusComponent: 'Claude Code', statusComponentId: 'yyzkbfz2thpt' },
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json' },
   { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json' },
   { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json' },
@@ -346,36 +347,57 @@ function parseInstatusIncidents(html: string): Incident[] {
   }
 }
 
-// Build per-day max impact from affected_components for a specific Statuspage component.
-// major_outage → critical (red), partial_outage → major (orange),
-// degraded_performance → minor (green). Falls back to incident-level impact when no component data.
-const COMP_STATUS_RANK: Record<string, number> = { major_outage: 3, partial_outage: 2, degraded_performance: 1 }
+// ── Statuspage uptimeData Parser ──
+// Parses the embedded uptimeData from status page HTML to get accurate per-component
+// daily outage data (p=partial seconds, m=major seconds). This is the same data
+// Statuspage uses to render its own calendar, so it's 100% accurate.
+
+interface UptimeDayEntry {
+  date: string
+  outages?: { p?: number; m?: number }
+}
+
+function parseUptimeData(html: string, componentId: string): Record<string, 'minor' | 'major' | 'critical'> {
+  const result: Record<string, 'minor' | 'major' | 'critical'> = {}
+  // Find "var uptimeData = " then extract JSON by brace counting (50KB+ object)
+  const prefix = 'var uptimeData = '
+  const startIdx = html.indexOf(prefix)
+  if (startIdx === -1) return result
+  const jsonStart = startIdx + prefix.length
+  let depth = 0
+  let jsonEnd = -1
+  for (let i = jsonStart; i < html.length; i++) {
+    if (html[i] === '{') depth++
+    else if (html[i] === '}') { depth--; if (depth === 0) { jsonEnd = i + 1; break } }
+  }
+  if (jsonEnd === -1) return result
+  try {
+    // Structure: { componentId: { component: {...}, days: [{date, outages: {p, m}}] } }
+    const data = JSON.parse(html.substring(jsonStart, jsonEnd)) as Record<string, { days?: UptimeDayEntry[] }>
+    const comp = data[componentId]
+    if (!comp?.days || !Array.isArray(comp.days)) return result
+    for (const day of comp.days) {
+      if (!day.date || !day.outages) continue
+      const m = day.outages.m ?? 0
+      const p = day.outages.p ?? 0
+      if (m > 0) result[day.date] = 'critical'
+      else if (p > 0) result[day.date] = 'major'
+    }
+  } catch (err) {
+    console.warn('[parseUptimeData] failed to parse uptimeData:', err instanceof Error ? err.message : err)
+  }
+  return result
+}
+
 const RANK_TO_IMPACT: Record<number, 'minor' | 'major' | 'critical'> = { 1: 'minor', 2: 'major', 3: 'critical' }
 
-function buildDailyImpact(data: StatuspageResponse, componentName?: string): Record<string, 'minor' | 'major' | 'critical'> {
+// Fallback: build dailyImpact from incidents API when uptimeData HTML is unavailable
+function buildDailyImpactFromIncidents(data: StatuspageResponse): Record<string, 'minor' | 'major' | 'critical'> {
   const result: Record<string, number> = {}
   for (const inc of data.incidents ?? []) {
-    let foundComponent = false
-    if (componentName) {
-      // Check affected_components per update, keyed to each update's own date
-      // so multi-day incidents color all affected days (not just creation day).
-      for (const u of inc.incident_updates ?? []) {
-        for (const c of u.affected_components ?? []) {
-          if (c.name.includes(componentName)) {
-            foundComponent = true
-            const updateDay = new Date(u.created_at).toISOString().split('T')[0]
-            const rank = COMP_STATUS_RANK[c.new_status] ?? 0
-            if (rank > (result[updateDay] ?? 0)) result[updateDay] = rank
-          }
-        }
-      }
-    }
-    // Fallback to incident-level impact when no component data found
-    if (!foundComponent) {
-      const day = new Date(inc.created_at).toISOString().split('T')[0]
-      const impactRank = inc.impact === 'critical' ? 3 : inc.impact === 'major' ? 2 : inc.impact === 'minor' ? 1 : 0
-      if (impactRank > (result[day] ?? 0)) result[day] = impactRank
-    }
+    const day = new Date(inc.created_at).toISOString().split('T')[0]
+    const rank = inc.impact === 'critical' ? 3 : inc.impact === 'major' ? 2 : inc.impact === 'minor' ? 1 : 0
+    if (rank > (result[day] ?? 0)) result[day] = rank
   }
   const mapped: Record<string, 'minor' | 'major' | 'critical'> = {}
   for (const [day, rank] of Object.entries(result)) {
@@ -668,6 +690,7 @@ interface PrefetchedData {
   summary: StatuspageResponse
   incidents: StatuspageResponse | null
   latency: number
+  uptimeHtml?: string  // Status page HTML for uptimeData parsing
 }
 
 // ── Fetch Single Service ──
@@ -733,9 +756,11 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         }
       }
 
-      // Compute daily max impact from ALL incidents (before keyword filtering)
-      // using per-component affected_components status for accurate calendar colors.
-      const dailyImpact = buildDailyImpact(rawIncData ?? summaryData, config.statusComponent)
+      // Compute daily impact for calendar: prefer uptimeData from HTML (exact match with
+      // Statuspage's own calendar), fall back to incidents API data.
+      const dailyImpact = (prefetched?.uptimeHtml && config.statusComponentId)
+        ? parseUptimeData(prefetched.uptimeHtml, config.statusComponentId)
+        : buildDailyImpactFromIncidents(rawIncData ?? summaryData)
 
       let filtered = filterIncidents(incidents, config)
       if (config.incidentIoBaseUrl) {
@@ -822,7 +847,17 @@ export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: Service
       }
       const summary: StatuspageResponse = await summaryRes.json()
       const incidents: StatuspageResponse | null = incidentsRes?.ok ? await incidentsRes.json() : null
-      prefetchMap.set(apiUrl, { summary, incidents, latency })
+      // Fetch status page HTML for uptimeData (only if any service uses statusComponentId)
+      const statusUrl = baseUrl.replace('/api/v2', '')
+      const needsUptime = SERVICES.some((s) => s.apiUrl === apiUrl && s.statusComponentId)
+      let uptimeHtml: string | undefined
+      if (needsUptime) {
+        try {
+          const htmlRes = await fetchWithTimeout(statusUrl, 5000)
+          if (htmlRes.ok) uptimeHtml = await htmlRes.text()
+        } catch { /* non-critical — fallback to incidents API */ }
+      }
+      prefetchMap.set(apiUrl, { summary, incidents, latency, uptimeHtml })
     } catch (err) {
       const isJsonErr = err instanceof SyntaxError
       console.warn(`[prefetch] ${isJsonErr ? 'JSON parse' : 'network'} failure for ${baseUrl}:`, err instanceof Error ? err.message : err)
