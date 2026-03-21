@@ -1,9 +1,9 @@
 // Build 30-day status calendar from service data
 // Uses local dates so the calendar aligns with the user's timezone.
-// Returns array of 30 statuses matching Statuspage 4-level calendar:
-//   'down'               — red: major_outage (impact=critical), or currently active
-//   'degraded'           — orange: partial_outage (impact=major)
-//   'degraded_perf'      — yellow: incidents occurred but no outage (impact=degraded)
+// Returns array of 30 statuses matching 5-level calendar:
+//   'down'               — red: full/major outage
+//   'degraded'           — orange: partial outage
+//   'degraded_perf'      — yellow: degraded performance (minor impact)
 //   'operational'        — green: no incidents
 // Index 0 = 29 days ago, index 29 = today
 
@@ -26,7 +26,7 @@ export function buildCalendarFromIncidents(incidents, dailyImpact) {
   // Phase 1: Apply dailyImpact (pre-filter, most accurate for Statuspage services)
   // Keys are UTC dates from the worker — convert to local dates for display.
   if (dailyImpact) {
-    const impactToStatus = { critical: 'down', major: 'degraded', minor: 'degraded', degraded: 'degraded_perf' }
+    const impactToStatus = { critical: 'down', major: 'degraded', minor: 'degraded_perf' }
     for (const [utcDay, impact] of Object.entries(dailyImpact)) {
       const localDay = toLocalDate(new Date(utcDay + 'T12:00:00Z'))
       const status = impactToStatus[impact]
@@ -42,7 +42,9 @@ export function buildCalendarFromIncidents(incidents, dailyImpact) {
       const key = toLocalDate(new Date(inc.startedAt))
       if (inc.status !== 'resolved') {
         escalate(dayStatus, key, 'down')
-      } else if (inc.impact === 'critical' || inc.impact === 'major') {
+      } else if (inc.impact === 'critical') {
+        escalate(dayStatus, key, 'down')
+      } else if (inc.impact === 'major') {
         escalate(dayStatus, key, 'degraded')
       } else if (inc.impact === 'minor') {
         escalate(dayStatus, key, 'degraded_perf')

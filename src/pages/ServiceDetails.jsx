@@ -341,7 +341,7 @@ export default function ServiceDetails({ serviceId }) {
               {t('svc.cal.legend')}
             </div>
             <div className="flex gap-3">
-              {['operational', 'degraded', 'down'].map((s) => (
+              {['operational', 'degraded_perf', 'degraded', 'down'].map((s) => (
                 <div key={s} className="flex items-center gap-1">
                   <span className={`rounded-sm ${CALENDAR_CLASS[s]}`} style={{ width: '8px', height: '8px' }} />
                   <span className="text-[9px] mono text-[var(--text2)]">{t(`status.${s}`)}</span>
