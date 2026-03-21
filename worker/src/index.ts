@@ -40,7 +40,8 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[]): Promise<v
     if (existing) counters = JSON.parse(existing)
   } catch { /* ignore */ }
 
-  // Update counters
+  // Update counters for all services (official sources take priority in response,
+  // but counters serve as fallback if official sources fail)
   services.forEach((s) => {
     if (!counters[s.id]) counters[s.id] = { ok: 0, total: 0 }
     counters[s.id].total++
@@ -243,9 +244,8 @@ export default {
         ctx.waitUntil(cacheWrite(env.STATUS_CACHE, raw))
       }
 
-      // Compute uptime from accumulated daily counters (up to 30 days)
-      // Reads up to 30 KV keys per request. Free tier = 100k reads/day.
-      // At ~1 req/min: 1440 reqs × 30 reads = 43,200 reads/day (safe).
+      // Compute uptime: official sources already set uptime30d in fetchService.
+      // For estimate-only services, use accumulated daily counters (up to 30 days).
       let uptimeDays = 0
       if (env.STATUS_CACHE) {
         const history = await readUptimeHistory(env.STATUS_CACHE, 30)
@@ -253,7 +253,12 @@ export default {
         if (uptimeDays > 0) {
           const uptimeMap = computeUptime(history)
           enriched.forEach((s) => {
-            if (uptimeMap[s.id] != null) s.uptime30d = uptimeMap[s.id]
+            // Only apply KV-based uptime for services that have no uptime set yet
+            // (official and incident-based estimate already set in fetchService)
+            if (!s.uptimeSource && uptimeMap[s.id] != null) {
+              s.uptime30d = uptimeMap[s.id]
+              s.uptimeSource = 'estimate'
+            }
           })
         }
       }

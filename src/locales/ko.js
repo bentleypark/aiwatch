@@ -112,6 +112,8 @@ const ko = {
   // Service Details
   'svc.latency': '현재 레이턴시',
   'svc.uptime30d': '30일 업타임',
+  'uptime.label.official': '공식 Uptime',
+  'uptime.sub.official': '공식 status page 기준',
   'svc.incidents': '인시던트',
   'svc.mttr': '평균 복구',
   'svc.mttr.collecting': '수집 중',

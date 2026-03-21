@@ -112,6 +112,8 @@ const en = {
   // Service Details
   'svc.latency': 'Current Latency',
   'svc.uptime30d': '30-Day Uptime',
+  'uptime.label.official': 'Official Uptime',
+  'uptime.sub.official': 'Official status page',
   'svc.incidents': 'Incidents',
   'svc.mttr': 'Avg Recovery',
   'svc.mttr.collecting': 'Collecting',

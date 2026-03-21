@@ -29,6 +29,7 @@ export interface ServiceStatus {
   lastChecked: string
   incidents: Incident[]
   dailyImpact?: Record<string, 'minor' | 'major' | 'critical'>
+  uptimeSource?: 'official' | 'estimate'
 }
 
 // ── Status Page Configs ──
@@ -48,31 +49,33 @@ interface ServiceConfig {
   incidentIoBaseUrl?: string   // incident.io status page base URL — scrape update text for active incidents
   statusComponent?: string     // Statuspage component name for incident filtering
   statusComponentId?: string   // Statuspage component ID for uptimeData calendar parsing
+  incidentIoComponentId?: string // incident.io component ID for uptime calculation from incidents
+  betterStackUrl?: string        // Better Stack status page base URL for /index.json uptime API
 }
 
 const SERVICES: ServiceConfig[] = [
   // AI API Services
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp' },
-  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
+  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW' },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API' },
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
-  { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents' },
-  { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents' },
-  { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed' },
+  { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE' },
+  { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM' },
+  { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed', betterStackUrl: 'https://status.together.ai' },
   { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com' },
-  { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed' },
-  { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents' },
-  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents' },
+  { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed', betterStackUrl: 'https://status.huggingface.co' },
+  { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: '01JRJYHBWCXHFZ0NHMP1N7T2G3' },
+  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P' },
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'] },
-  { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://status.deepseek.com/api/v2/summary.json' },
+  { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://status.deepseek.com/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x' },
   // AI Web Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'webapp', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned'], incidentIoBaseUrl: 'https://status.openai.com/incidents', statusComponent: 'ChatGPT' },
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned'], incidentIoBaseUrl: 'https://status.openai.com/incidents', statusComponent: 'ChatGPT', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG' },
   // Coding Agents
   { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'], statusComponent: 'Claude Code', statusComponentId: 'yyzkbfz2thpt' },
-  { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json' },
-  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json' },
-  { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json' },
+  { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2' },
+  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: '92rkl6jnscl8' },
+  { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m' },
 ]
 
 // ── Statuspage API Parser (Atlassian format) ──
@@ -473,8 +476,13 @@ interface UptimeDayEntry {
 
 type DailyImpactLevel = 'minor' | 'major' | 'critical'
 
-function parseUptimeData(html: string, componentId: string): Record<string, DailyImpactLevel> {
-  const result: Record<string, DailyImpactLevel> = {}
+interface UptimeDataResult {
+  dailyImpact: Record<string, DailyImpactLevel>
+  uptimePercent: number | null
+}
+
+function parseUptimeData(html: string, componentId: string): UptimeDataResult {
+  const result: UptimeDataResult = { dailyImpact: {}, uptimePercent: null }
   // Find "var uptimeData = " then extract JSON by brace counting (50KB+ object)
   const prefix = 'var uptimeData = '
   const startIdx = html.indexOf(prefix)
@@ -492,17 +500,128 @@ function parseUptimeData(html: string, componentId: string): Record<string, Dail
     const data = JSON.parse(html.substring(jsonStart, jsonEnd)) as Record<string, { days?: UptimeDayEntry[] }>
     const comp = data[componentId]
     if (!comp?.days || !Array.isArray(comp.days)) return result
+
+    let totalWeightedSec = 0
+    let validDays = 0
+
     for (const day of comp.days) {
-      if (!day.date || !day.outages) continue
+      if (!day.date) continue
+      // Days with outages property defined (even if empty) count as valid data points
+      if (day.outages !== undefined) validDays++
+      if (!day.outages) continue
       const m = day.outages.m ?? 0
       const p = day.outages.p ?? 0
-      if (m > 0 && m > p) result[day.date] = 'critical'  // major outage dominant → red
-      else if (p > 0 || m > 0) result[day.date] = 'major'  // partial outage dominant → orange
+      // Statuspage weights: major=100%, partial=30% (Atlassian default)
+      totalWeightedSec += m + 0.3 * p
+      if (m > 0 && m > p) result.dailyImpact[day.date] = 'critical'  // major outage dominant → red
+      else if (p > 0 || m > 0) result.dailyImpact[day.date] = 'major'  // partial outage dominant → orange
+    }
+
+    // Compute uptime%: (1 - weightedOutage / totalWindow) × 100
+    if (validDays > 0) {
+      result.uptimePercent = Math.round((1 - totalWeightedSec / (validDays * 86400)) * 10000) / 100
     }
   } catch (err) {
     console.warn('[parseUptimeData] failed to parse uptimeData:', err instanceof Error ? err.message : err)
   }
   return result
+}
+
+// ── incident.io Uptime Calculator ──
+// Computes uptime% from filtered incident durations over a 90-day window.
+// Uses the same incident data from Atlassian-compat API (no additional fetch needed).
+
+function computeUptimeFromIncidents(incidents: Incident[]): number | null {
+  // No incidents at all → return null (no data) rather than asserting 100%
+  if (incidents.length === 0) return null
+
+  const now = Date.now()
+  const windowMs = 90 * 86_400_000
+  const windowStart = now - windowMs
+
+  // Collect outage intervals, then merge overlapping ones to avoid double-counting
+  const intervals: Array<{ start: number; end: number }> = []
+  for (const inc of incidents) {
+    const start = new Date(inc.startedAt).getTime()
+    if (isNaN(start)) continue
+
+    let endMs: number
+    if (inc.status === 'resolved' && inc.duration) {
+      const hours = parseInt(inc.duration.match(/(\d+)h/)?.[1] ?? '0')
+      const mins = parseInt(inc.duration.match(/(\d+)m/)?.[1] ?? '0')
+      endMs = start + (hours * 3600 + mins * 60) * 1000
+      // Fallback: if duration parsed to 0, try resolved timestamp from timeline
+      if (endMs === start) {
+        const resolvedEntry = inc.timeline.find((t) => t.stage === 'resolved')
+        if (resolvedEntry) {
+          const resolvedMs = new Date(resolvedEntry.at).getTime()
+          if (!isNaN(resolvedMs) && resolvedMs > start) endMs = resolvedMs
+        }
+      }
+    } else if (inc.status === 'resolved') {
+      // No duration string — try resolved timestamp from timeline
+      const resolvedEntry = inc.timeline.find((t) => t.stage === 'resolved')
+      if (resolvedEntry) {
+        const resolvedMs = new Date(resolvedEntry.at).getTime()
+        if (!isNaN(resolvedMs) && resolvedMs > start) endMs = resolvedMs
+        else continue
+      } else {
+        continue
+      }
+    } else {
+      endMs = now // unresolved → ongoing outage
+    }
+
+    // Clamp to 90-day window
+    if (endMs > windowStart && start < now) {
+      intervals.push({ start: Math.max(start, windowStart), end: Math.min(endMs, now) })
+    }
+  }
+
+  // Merge overlapping intervals to prevent double-counting
+  if (intervals.length === 0) return 100
+  intervals.sort((a, b) => a.start - b.start)
+  let totalOutageMs = 0
+  let curStart = intervals[0].start
+  let curEnd = intervals[0].end
+  for (let i = 1; i < intervals.length; i++) {
+    if (intervals[i].start <= curEnd) {
+      curEnd = Math.max(curEnd, intervals[i].end)
+    } else {
+      totalOutageMs += curEnd - curStart
+      curStart = intervals[i].start
+      curEnd = intervals[i].end
+    }
+  }
+  totalOutageMs += curEnd - curStart
+
+  return Math.max(0, Math.round((1 - totalOutageMs / windowMs) * 10000) / 100)
+}
+
+// ── Better Stack Uptime Parser ──
+// Fetches /index.json from Better Stack status pages and returns average availability.
+
+interface BetterStackIndex {
+  included?: Array<{
+    type: string
+    attributes?: { availability?: number }
+  }>
+}
+
+function parseBetterStackUptime(data: BetterStackIndex): number | null {
+  const resources = (data.included ?? []).filter(
+    (r) => r.type === 'status_page_resource' && r.attributes?.availability != null
+  )
+  if (resources.length === 0) return null
+
+  const sum = resources.reduce((acc, r) => acc + (r.attributes!.availability! * 100), 0)
+  const avg = Math.round((sum / resources.length) * 100) / 100
+
+  if (avg < 0 || avg > 100) {
+    console.warn(`[parseBetterStackUptime] computed ${avg}% out of range — API format may have changed`)
+    return null
+  }
+  return avg
 }
 
 function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
@@ -864,9 +983,21 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       // For non-Statuspage services (incident.io), skip dailyImpact — the frontend uses
       // per-incident startedAt with local timezone conversion instead (more accurate for
       // users in non-UTC timezones).
-      const dailyImpact = (prefetched?.uptimeHtml && config.statusComponentId)
+      const uptimeResult = (prefetched?.uptimeHtml && config.statusComponentId)
         ? parseUptimeData(prefetched.uptimeHtml, config.statusComponentId)
         : null
+      const dailyImpact = uptimeResult?.dailyImpact ?? null
+
+      // Uptime%: Statuspage → uptimeData (official), incident.io → incident durations (estimate)
+      let uptimeValue: number | null = null
+      let uptimeSrc: 'official' | 'estimate' | undefined
+      if (uptimeResult?.uptimePercent != null) {
+        uptimeValue = uptimeResult.uptimePercent
+        uptimeSrc = 'official'
+      } else if (config.incidentIoComponentId) {
+        uptimeValue = computeUptimeFromIncidents(filtered)
+        uptimeSrc = 'estimate' // approximate — phase 2 will use component_impacts for official
+      }
 
       return {
         ...base,
@@ -874,16 +1005,23 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
+        ...(uptimeValue != null ? { uptime30d: uptimeValue, uptimeSource: uptimeSrc } : {}),
       }
     } else {
       // No Statuspage API — HTTP check + optional scraping (parallel)
       const start = Date.now()
       const scrapeUrl = config.instatusUrl || config.rssFeedUrl || (config.gcloudProduct ? 'https://status.cloud.google.com/incidents.json' : null)
-      const [res, scrapeRes] = await Promise.all([
+      const [res, scrapeRes, betterStackRes] = await Promise.all([
         fetchWithRetry(config.statusUrl),
         scrapeUrl
           ? fetchWithRetry(scrapeUrl).catch((err) => {
               console.warn(`[fetchService] ${config.id} scrape failed:`, err.message)
+              return null
+            })
+          : Promise.resolve(null),
+        config.betterStackUrl
+          ? fetchWithTimeout(`${config.betterStackUrl}/index.json`, 5000).catch((err) => {
+              console.warn(`[fetchService] ${config.id} BetterStack uptime fetch failed:`, err instanceof Error ? err.message : err)
               return null
             })
           : Promise.resolve(null),
@@ -905,12 +1043,24 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         }
       }
 
+      // Better Stack uptime: parse /index.json for average availability
+      let betterStackUptime: number | null = null
+      if (betterStackRes?.ok) {
+        try {
+          const bsData: BetterStackIndex = await betterStackRes.json()
+          betterStackUptime = parseBetterStackUptime(bsData)
+        } catch (err) {
+          console.warn(`[fetchService] ${config.id} BetterStack uptime parse failed:`, err instanceof Error ? err.message : err)
+        }
+      }
+
       return {
         ...base,
         // 2xx = operational; 403 (bot protection) = treat as operational; other errors = degraded
         status: res.ok || res.status === 403 ? 'operational' : 'degraded',
         latency: config.category === 'api' ? latency : null,
         incidents: filterIncidents(incidents, config),
+        ...(betterStackUptime != null ? { uptime30d: betterStackUptime, uptimeSource: 'official' as const } : {}),
       }
     }
   } catch (err) {

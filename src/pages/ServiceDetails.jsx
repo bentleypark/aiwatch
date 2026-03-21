@@ -278,9 +278,9 @@ export default function ServiceDetails({ serviceId }) {
           colorClass="text-[var(--blue)]"
         />
         <MetricCard
-          label={uptimeDays > 0 ? `${Math.min(uptimeDays, 30)}${t('settings.period.suffix')} Uptime` : t('svc.uptime30d')}
+          label={service.uptimeSource === 'official' ? t('uptime.label.official') : (uptimeDays > 0 ? `${Math.min(uptimeDays, 30)}${t('settings.period.suffix')} Uptime` : t('svc.uptime30d'))}
           value={service.uptime30d != null ? `${service.uptime30d.toFixed(2)}%` : '—'}
-          sub={service.uptime30d != null ? `${Math.min(uptimeDays, 30)}${t('settings.period.suffix')}` : t('uptime.collecting')}
+          sub={service.uptimeSource === 'official' ? t('uptime.sub.official') : (service.uptime30d != null ? `${Math.min(uptimeDays, 30)}${t('settings.period.suffix')}` : t('uptime.collecting'))}
           colorClass="text-[var(--green)]"
         />
         <MetricCard

@@ -90,6 +90,9 @@ function UptimeBar({ service, sla }) {
       <span className={`w-16 shrink-0 text-right text-xs mono font-medium ${textColorClass}`}>
         {hasUptime ? `${uptime.toFixed(2)}%` : '—'}
       </span>
+      <span className="w-8 shrink-0 text-right text-[9px] mono text-[var(--text2)]">
+        {service.uptimeSource === 'official' ? 'OFF' : 'EST'}
+      </span>
     </div>
   )
 }
@@ -198,19 +201,7 @@ export default function Uptime() {
         </div>
       </section>
 
-      {/* ── 3-Month Matrix — placeholder until KV provides real data ── */}
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
-          <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
-            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--amber)' }} />
-            {t('uptime.matrix')}
-          </div>
-          <span className="mono text-[9px] text-[var(--text2)]">{t('uptime.matrix.sub')}</span>
-        </div>
-        <div style={{ padding: '20px 16px' }} className="flex items-center justify-center">
-          <p className="text-xs text-[var(--text2)] mono">{t('uptime.collecting')}</p>
-        </div>
-      </section>
+      {/* 3-Month Matrix hidden — official uptime sources provide accurate data directly */}
       </div>
 
     </div>
