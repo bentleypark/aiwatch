@@ -12,7 +12,7 @@ npm run lint       # Run ESLint
 ```
 
 ```bash
-npm test           # Run Playwright E2E tests (13 specs)
+npm test           # Run Playwright E2E tests (25 specs)
 ```
 
 ## Development Workflow

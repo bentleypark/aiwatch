@@ -26,7 +26,7 @@
 
 ## 모니터링 서비스
 
-### AI API 서비스 (13개)
+### AI API 서비스 (25개)
 
 | 서비스 | 제공업체 | 상태 소스 |
 |--------|----------|-----------|
@@ -139,7 +139,7 @@ npm run dev        # 개발 서버 (localhost:5173)
 npm run build      # 프로덕션 빌드 → dist/
 npm run preview    # 프로덕션 미리보기
 npm run lint       # ESLint
-npm test           # Playwright E2E 테스트 (13개)
+npm test           # Playwright E2E 테스트 (25개)
 
 # Worker
 cd worker

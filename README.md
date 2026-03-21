@@ -139,7 +139,7 @@ npm run dev        # Dev server (localhost:5173)
 npm run build      # Production build → dist/
 npm run preview    # Preview production build
 npm run lint       # ESLint
-npm test           # Playwright E2E tests (13 specs)
+npm test           # Playwright E2E tests (25 specs)
 
 # Worker
 cd worker
@@ -187,7 +187,7 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for detailed guidelines.
 ### Pull Requests
 
 - One feature or fix per PR
-- All tests must pass (`npm test` — 13 Playwright specs)
+- All tests must pass (`npm test` — 25 Playwright specs)
 - Include `closes #N` in commit messages
 - Fill out the PR checklist
 
