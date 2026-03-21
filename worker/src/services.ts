@@ -344,7 +344,7 @@ function parseInstatusNextIncidents(html: string): Incident[] {
   try {
     // Next.js SSR payload has escaped quotes: notices\":{\"id\":{...}}
     // Find the notices section and unescape
-    const match = html.match(/notices\\":\{(\\"cm[\s\S]*?)\},\\"metrics/)
+    const match = html.match(/notices\\":\{(\\"[a-z0-9][\s\S]*?)\},\\"metrics/)
     if (!match) return []
     // Unescape the JSON: \" → "
     const raw = '{' + match[1].replace(/\\"/g, '"') + '}'
@@ -365,7 +365,7 @@ function parseInstatusNextIncidents(html: string): Incident[] {
         { stage: 'investigating' as const, text: notice.name.default, at: startDate.toISOString() },
       ]
       if (isResolved && resolvedDate && !isNaN(resolvedDate.getTime())) {
-        timeline.push({ stage: 'resolved' as const, text: null, at: resolvedDate.toISOString() })
+        timeline.push({ stage: 'resolved' as const, text: 'Resolved', at: resolvedDate.toISOString() })
       }
 
       incidents.push({
@@ -381,7 +381,8 @@ function parseInstatusNextIncidents(html: string): Incident[] {
       })
     }
     return incidents
-  } catch {
+  } catch (err) {
+    console.warn('[parseInstatusNext] failed:', err instanceof Error ? err.message : err)
     return []
   }
 }
