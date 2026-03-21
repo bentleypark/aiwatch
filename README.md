@@ -9,8 +9,7 @@ Real-time monitoring dashboard for **19 AI services** — track status, latency,
 
 **[https://ai-watch.dev](https://ai-watch.dev)**
 
-<!-- TODO: Add screenshot of the dashboard -->
-<!-- ![AIWatch Dashboard](docs/screenshot.png) -->
+![AIWatch Dashboard](docs/screenshot.png)
 
 ## Features
 
