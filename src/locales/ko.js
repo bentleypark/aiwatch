@@ -25,9 +25,10 @@ const ko = {
   'topbar.menu.open': '메뉴 열기',
 
   // Status
-  'status.operational': 'Operational',
-  'status.degraded': 'Degraded',
-  'status.down': 'Down',
+  'status.operational': '정상',
+  'status.degraded_perf': '성능 저하',
+  'status.degraded': '부분 장애',
+  'status.down': '주요 장애',
 
   // Overview
   'overview.last.updated': '마지막 업데이트',

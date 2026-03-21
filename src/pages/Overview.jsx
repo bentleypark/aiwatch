@@ -21,9 +21,10 @@ const BORDER_LEFT_CLASS = {
 }
 
 const HISTORY_CLASS = {
-  operational: 'bg-[var(--green)]',
-  degraded:    'bg-[var(--amber)]',
-  down:        'bg-[var(--red)]',
+  operational:    'bg-[var(--green)]',
+  degraded_perf:  'bg-[var(--yellow)]',
+  degraded:       'bg-[var(--amber)]',
+  down:           'bg-[var(--red)]',
 }
 
 const INC_BAR_CLASS = {

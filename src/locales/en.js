@@ -26,8 +26,9 @@ const en = {
 
   // Status
   'status.operational': 'Operational',
-  'status.degraded': 'Degraded',
-  'status.down': 'Down',
+  'status.degraded_perf': 'Degraded',
+  'status.degraded': 'Partial Outage',
+  'status.down': 'Major Outage',
 
   // Overview
   'overview.last.updated': 'Last updated',

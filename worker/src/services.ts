@@ -28,7 +28,7 @@ export interface ServiceStatus {
   uptime30d: number | null
   lastChecked: string
   incidents: Incident[]
-  dailyImpact?: Record<string, 'minor' | 'major' | 'critical'>
+  dailyImpact?: Record<string, 'degraded' | 'minor' | 'major' | 'critical'>
 }
 
 // ── Status Page Configs ──
@@ -355,10 +355,13 @@ function parseInstatusIncidents(html: string): Incident[] {
 interface UptimeDayEntry {
   date: string
   outages?: { p?: number; m?: number }
+  related_events?: Array<{ name: string }>
 }
 
-function parseUptimeData(html: string, componentId: string): Record<string, 'minor' | 'major' | 'critical'> {
-  const result: Record<string, 'minor' | 'major' | 'critical'> = {}
+type DailyImpactLevel = 'degraded' | 'minor' | 'major' | 'critical'
+
+function parseUptimeData(html: string, componentId: string): Record<string, DailyImpactLevel> {
+  const result: Record<string, DailyImpactLevel> = {}
   // Find "var uptimeData = " then extract JSON by brace counting (50KB+ object)
   const prefix = 'var uptimeData = '
   const startIdx = html.indexOf(prefix)
@@ -382,6 +385,7 @@ function parseUptimeData(html: string, componentId: string): Record<string, 'min
       const p = day.outages.p ?? 0
       if (m > 0) result[day.date] = 'critical'
       else if (p > 0) result[day.date] = 'major'
+      else if ((day.related_events?.length ?? 0) > 0) result[day.date] = 'degraded'
     }
   } catch (err) {
     console.warn('[parseUptimeData] failed to parse uptimeData:', err instanceof Error ? err.message : err)
@@ -389,10 +393,10 @@ function parseUptimeData(html: string, componentId: string): Record<string, 'min
   return result
 }
 
-const RANK_TO_IMPACT: Record<number, 'minor' | 'major' | 'critical'> = { 1: 'minor', 2: 'major', 3: 'critical' }
+const RANK_TO_IMPACT: Record<number, DailyImpactLevel> = { 1: 'minor', 2: 'major', 3: 'critical' }
 
 // Fallback: build dailyImpact from incidents API when uptimeData HTML is unavailable
-function buildDailyImpactFromIncidents(data: StatuspageResponse): Record<string, 'minor' | 'major' | 'critical'> {
+function buildDailyImpactFromIncidents(data: StatuspageResponse): Record<string, DailyImpactLevel> {
   const result: Record<string, number> = {}
   for (const inc of data.incidents ?? []) {
     const day = new Date(inc.created_at).toISOString().split('T')[0]

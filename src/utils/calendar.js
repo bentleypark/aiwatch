@@ -1,18 +1,22 @@
 // Build 30-day status calendar from service data
 // Uses local dates so the calendar aligns with the user's timezone.
-// Returns array of 30 statuses: 'operational' | 'degraded' | 'down'
+// Returns array of 30 statuses matching Statuspage 4-level calendar:
+//   'down'               — red: major_outage (impact=critical), or currently active
+//   'degraded'           — orange: partial_outage (impact=major)
+//   'degraded_perf'      — yellow: incidents occurred but no outage (impact=degraded)
+//   'operational'        — green: no incidents
 // Index 0 = 29 days ago, index 29 = today
-//
-// Color logic mirrors Statuspage (e.g. status.claude.com) calendar:
-//   red (down)       — component had major_outage (impact=critical), or currently active
-//   orange (degraded) — component had partial_outage (impact=major)
-//   green (operational) — no outage, or only degraded_performance (impact=minor)
-//
-// Uses dailyImpact (computed from ALL incidents before keyword filtering) when available,
-// falling back to per-incident impact for non-Statuspage services.
+
+const STATUS_RANK = { operational: 0, degraded_perf: 1, degraded: 2, down: 3 }
 
 function toLocalDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function escalate(dayStatus, key, status) {
+  if ((STATUS_RANK[status] ?? 0) > (STATUS_RANK[dayStatus[key]] ?? 0)) {
+    dayStatus[key] = status
+  }
 }
 
 export function buildCalendarFromIncidents(incidents, dailyImpact) {
@@ -21,15 +25,12 @@ export function buildCalendarFromIncidents(incidents, dailyImpact) {
 
   // Phase 1: Apply dailyImpact (pre-filter, most accurate for Statuspage services)
   // Keys are UTC dates from the worker — convert to local dates for display.
-  // A UTC date at noon maps to the correct local date for most timezones (UTC-12 to UTC+11).
   if (dailyImpact) {
+    const impactToStatus = { critical: 'down', major: 'degraded', minor: 'degraded', degraded: 'degraded_perf' }
     for (const [utcDay, impact] of Object.entries(dailyImpact)) {
       const localDay = toLocalDate(new Date(utcDay + 'T12:00:00Z'))
-      if (impact === 'critical') {
-        if (dayStatus[localDay] !== 'down') dayStatus[localDay] = 'down'
-      } else if (impact === 'major') {
-        if (!dayStatus[localDay]) dayStatus[localDay] = 'degraded'
-      }
+      const status = impactToStatus[impact]
+      if (status) escalate(dayStatus, localDay, status)
     }
   }
 
@@ -37,17 +38,12 @@ export function buildCalendarFromIncidents(incidents, dailyImpact) {
   ;(incidents ?? []).forEach((inc) => {
     if (!inc.startedAt) return
     const key = toLocalDate(new Date(inc.startedAt))
-    let status
     if (inc.status !== 'resolved') {
-      status = 'down' // active incident → always red
-    } else if (!dailyImpact && inc.impact === 'critical') {
-      status = 'down'
-    } else if (!dailyImpact && inc.impact === 'major') {
-      status = 'degraded'
-    } else {
-      return
+      escalate(dayStatus, key, 'down')
+    } else if (!dailyImpact) {
+      if (inc.impact === 'critical' || inc.impact === 'major') escalate(dayStatus, key, 'degraded')
+      else if (inc.impact === 'minor') escalate(dayStatus, key, 'degraded_perf')
     }
-    if (!dayStatus[key] || status === 'down') dayStatus[key] = status
   })
 
   return Array.from({ length: 30 }, (_, i) => {

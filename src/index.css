@@ -17,13 +17,15 @@
   --bg3: #1c2230;
   --bg4: #242b38;
 
-  /* Status: Operational / Degraded / Down */
+  /* Status: Operational / Degraded Performance / Partial Outage / Down */
   --green: #3fb950;
+  --yellow: #faa72a;
   --amber: #e86235;
   --red: #f85149;
 
   /* Dim backgrounds (badges, pill bg) */
   --status-bg-green: #1a3d22;
+  --status-bg-yellow: #3d2e0a;
   --status-bg-amber: #3d1c0e;
   --status-bg-red: #3d1515;
   --blue-dim: #0d2440;
@@ -60,6 +62,7 @@
 
   /* Status colors adjusted for light backgrounds (WCAG AA contrast) */
   --green: #1a7f37;
+  --yellow: #b08800;
   --amber: #d4551a;
   --red: #cf222e;
   --blue: #0969da;
@@ -67,6 +70,7 @@
 
   /* Status pill backgrounds (light mode) */
   --status-bg-green: #dcfce7;
+  --status-bg-yellow: #fef9c3;
   --status-bg-amber: #fee4d6;
   --status-bg-red: #fee2e2;
   --blue-dim: #dbeafe;
