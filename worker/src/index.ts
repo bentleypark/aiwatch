@@ -12,7 +12,7 @@ interface Env {
 
 // ── KV Cache + Daily Counters ──
 
-const CACHE_TTL_SECONDS = 3600
+const CACHE_TTL_SECONDS = 300 // 5 min — short TTL so stale cache clears quickly on outage recovery
 let lastKvWrite = 0
 const KV_WRITE_INTERVAL_MS = 600_000 // 10 minutes — 2 writes per interval = ~288/day within free tier
 let lastArchivedDate = '' // prevent duplicate archival writes within same isolate

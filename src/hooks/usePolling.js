@@ -552,11 +552,26 @@ function usePollingInternal() {
   useEffect(() => {
     cancelledRef.current = false
     poll('initial')
-    const interval = setInterval(() => poll('silent'), POLL_INTERVAL)
+
+    // Adaptive polling: 60s when active, 5min when tab is hidden
+    let interval = setInterval(() => poll('silent'), POLL_INTERVAL)
+
+    const handleVisibility = () => {
+      clearInterval(interval)
+      if (document.hidden) {
+        interval = setInterval(() => poll('silent'), 5 * 60_000) // 5min when hidden
+      } else {
+        poll('silent') // immediate refresh on tab focus
+        interval = setInterval(() => poll('silent'), POLL_INTERVAL) // resume 60s
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+
     return () => {
       cancelledRef.current = true
       controllerRef.current?.abort()
       clearInterval(interval)
+      document.removeEventListener('visibilitychange', handleVisibility)
     }
   }, [poll])
 
