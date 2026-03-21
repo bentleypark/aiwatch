@@ -59,7 +59,7 @@ const SERVICES: ServiceConfig[] = [
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents' },
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents' },
   { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed' },
-  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null },
+  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com' },
   { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed' },
   { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents' },
   { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents' },
@@ -336,9 +336,63 @@ function parseGCloudIncidents(data: GCloudIncident[], productFilter: string): In
     })
 }
 
+// ── Instatus (Next.js SSR) Parser — for status pages like Perplexity ──
+// The Next.js version embeds incident data in __next_f.push chunks as a
+// "notices" object: { id: { name, impact, started, resolved, status, components } }
+
+function parseInstatusNextIncidents(html: string): Incident[] {
+  try {
+    // Next.js SSR payload has escaped quotes: notices\":{\"id\":{...}}
+    // Find the notices section and unescape
+    const match = html.match(/notices\\":\{(\\"cm[\s\S]*?)\},\\"metrics/)
+    if (!match) return []
+    // Unescape the JSON: \" → "
+    const raw = '{' + match[1].replace(/\\"/g, '"') + '}'
+    const notices = JSON.parse(raw) as Record<string, {
+      id: string; name: { default: string }; impact: string
+      started: string; resolved: string | null; status: string
+    }>
+
+    const incidents: Incident[] = []
+    for (const notice of Object.values(notices)) {
+      if (incidents.length >= 5) break
+      const startDate = new Date(notice.started)
+      if (isNaN(startDate.getTime())) continue
+      const resolvedDate = notice.resolved ? new Date(notice.resolved) : null
+      const isResolved = notice.status === 'RESOLVED'
+
+      const timeline: TimelineEntry[] = [
+        { stage: 'investigating' as const, text: notice.name.default, at: startDate.toISOString() },
+      ]
+      if (isResolved && resolvedDate && !isNaN(resolvedDate.getTime())) {
+        timeline.push({ stage: 'resolved' as const, text: null, at: resolvedDate.toISOString() })
+      }
+
+      incidents.push({
+        id: notice.id,
+        title: notice.name.default,
+        status: isResolved ? 'resolved' : 'investigating',
+        impact: notice.impact === 'MAJOROUTAGE' ? 'major' : notice.impact === 'PARTIALOUTAGE' ? 'minor' : null,
+        startedAt: startDate.toISOString(),
+        duration: (isResolved && resolvedDate && !isNaN(resolvedDate.getTime()))
+          ? formatDuration(startDate, resolvedDate)
+          : null,
+        timeline,
+      })
+    }
+    return incidents
+  } catch {
+    return []
+  }
+}
+
 // ── Instatus (Nuxt SSR) Parser — for status pages like Mistral ──
 
 function parseInstatusIncidents(html: string): Incident[] {
+  // Instatus has two SSR formats: Nuxt (__NUXT_DATA__) and Next.js (__next_f)
+  if (!html.includes('__NUXT_DATA__') && html.includes('__next_f')) {
+    return parseInstatusNextIncidents(html)
+  }
   // Extract Nuxt SSR payload — match everything between the script tags, let JSON.parse validate
   const match = html.match(/__NUXT_DATA__[^>]*>([\s\S]*?)<\/script/)
   if (!match) return []
