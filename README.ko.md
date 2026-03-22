@@ -32,6 +32,7 @@
 - **다크/라이트 테마** — 시스템 설정 감지 + 수동 전환
 - **한국어/영어** — 이중 언어 지원
 - **모바일 반응형** — 사이드바 오버레이, 모바일 액션 바
+- **AIWatch Score** — 종합 신뢰도 점수 (uptime + 인시던트 + 복구시간)
 - **페이지별 스켈레톤** — 각 페이지 레이아웃에 맞는 로딩 placeholder
 
 ## 모니터링 서비스
@@ -157,7 +158,7 @@ npm run dev:all      # 둘 다 동시 실행
 npm run build        # 프로덕션 빌드 → dist/
 npm run lint         # ESLint
 npm test             # Playwright E2E 테스트 (25개)
-npm run test:worker  # Worker 단위 테스트 (51개, vitest)
+npm run test:worker  # Worker 단위 테스트 (65개, vitest)
 
 # Worker 배포
 npm run deploy:worker  # Cloudflare 배포 (npm 스크립트만 사용)
@@ -241,17 +242,19 @@ src/
   locales/       # ko.js, en.js (flat key→string 맵)
 worker/
   src/
-    index.ts     # Worker 진입점: CORS, KV 캐시, Discord 알림, 라우팅, /api/alert 프록시
+    index.ts     # Worker 진입점: CORS, KV, 알림, 라우팅, /api/alert, /badge, /api/v1
     services.ts  # 서비스 설정 + fetch 오케스트레이터
     types.ts     # 공유 타입 (ServiceStatus, Incident 등)
     utils.ts     # 공유 유틸리티 (formatDuration, fetchWithTimeout)
+    score.ts     # AIWatch Score 계산
+    badge.ts     # SVG 배지 생성기
     parsers/     # 플랫폼별 파서
       statuspage.ts   # Atlassian Statuspage (7개 서비스)
       incident-io.ts  # incident.io (6개 서비스)
       gcloud.ts       # Google Cloud (1개 서비스)
       instatus.ts     # Instatus (2개 서비스)
       betterstack.ts  # Better Stack (3개 서비스)
-    parsers/__tests__/ # Vitest 단위 테스트 (51개)
+    parsers/__tests__/ # Vitest 단위 테스트 (65개)
 ```
 
 ## 기여하기
@@ -272,7 +275,7 @@ worker/
 ### 풀 리퀘스트
 
 - PR당 하나의 기능 또는 수정
-- 모든 테스트 통과 (E2E 25개 + 단위 51개 = 76개)
+- 모든 테스트 통과 (E2E 25개 + 단위 65개 = 90개)
 - 커밋 메시지에 `closes #N` 포함
 - PR 체크리스트 작성
 

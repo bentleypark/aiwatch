@@ -32,6 +32,7 @@ Real-time monitoring dashboard for **19 AI services** — track status, latency,
 - **Dark/Light theme** — System-aware with manual toggle
 - **Bilingual** — Korean / English
 - **Mobile responsive** — Sidebar overlay, mobile action bar
+- **AIWatch Score** — Composite reliability score (uptime + incidents + recovery)
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 
 ## Monitored Services
@@ -157,7 +158,7 @@ npm run dev:all      # Both simultaneously
 npm run build        # Production build → dist/
 npm run lint         # ESLint
 npm test             # Playwright E2E tests (25 specs)
-npm run test:worker  # Worker parser unit tests (51 specs, vitest)
+npm run test:worker  # Worker parser unit tests (65 specs, vitest)
 
 # Worker deployment
 npm run deploy:worker  # Deploy to Cloudflare (use npm script only)
@@ -241,17 +242,19 @@ src/
   locales/       # ko.js, en.js (flat key→string maps)
 worker/
   src/
-    index.ts     # Worker entry: CORS, KV cache, Discord alerts, routing, /api/alert proxy
+    index.ts     # Worker entry: CORS, KV cache, alerts, routing, /api/alert, /badge, /api/v1
     services.ts  # Service configs + fetch orchestrator
     types.ts     # Shared types (ServiceStatus, Incident, etc.)
     utils.ts     # Shared utilities (formatDuration, fetchWithTimeout)
+    score.ts     # AIWatch Score calculation
+    badge.ts     # SVG badge generator
     parsers/     # Platform-specific parsers
       statuspage.ts   # Atlassian Statuspage (7 services)
       incident-io.ts  # incident.io (6 services)
       gcloud.ts       # Google Cloud (1 service)
       instatus.ts     # Instatus (2 services)
       betterstack.ts  # Better Stack (3 services)
-    parsers/__tests__/ # Vitest unit tests (51 specs)
+    parsers/__tests__/ # Vitest unit tests (65 specs)
 ```
 
 ## Contributing
@@ -272,7 +275,7 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for detailed guidelines.
 ### Pull Requests
 
 - One feature or fix per PR
-- All tests must pass (25 E2E + 51 unit = 76 specs)
+- All tests must pass (25 E2E + 65 unit = 90 specs)
 - Include `closes #N` in commit messages
 - Fill out the PR checklist
 

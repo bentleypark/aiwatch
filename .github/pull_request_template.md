@@ -12,7 +12,7 @@
 ## Checklist
 - [ ] `npm run build` passes
 - [ ] `npm test` passes (25 Playwright E2E specs)
-- [ ] `npm run test:worker` passes (51 Vitest unit specs)
+- [ ] `npm run test:worker` passes (65 Vitest unit specs)
 - [ ] Code review completed (`/pr-review-toolkit:review-pr`)
 - [ ] Critical and Important review issues fixed
 - [ ] No hardcoded hex colors (use CSS design tokens)

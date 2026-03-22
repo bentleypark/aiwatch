@@ -15,7 +15,7 @@ npm run lint       # Run ESLint
 
 ```bash
 npm test           # Run Playwright E2E tests (25 specs)
-npm run test:worker # Run Worker unit tests (51 specs, vitest)
+npm run test:worker # Run Worker unit tests (65 specs, vitest)
 ```
 
 ## Development Workflow
@@ -69,10 +69,12 @@ src/
   locales/      # ko.js, en.js — flat key→string maps (default exports)
 worker/
   src/
-    index.ts    # Worker entry: CORS, KV cache, Discord alerts, routing, /api/alert proxy
+    index.ts    # Worker entry: CORS, KV, alerts, routing, /api/alert, /badge, /api/v1
     services.ts # Service configs + fetch orchestrator
     types.ts    # Shared types (ServiceStatus, Incident, etc.)
     utils.ts    # Shared utilities (formatDuration, fetchWithTimeout)
+    score.ts    # AIWatch Score calculation
+    badge.ts    # SVG badge generator
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack)
 ```
 
