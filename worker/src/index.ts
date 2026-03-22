@@ -14,7 +14,7 @@ interface Env {
 
 // ── KV Cache + Daily Counters ──
 
-const CACHE_TTL_SECONDS = 300 // 5 min — short TTL so stale cache clears quickly on outage recovery
+const CACHE_TTL_SECONDS = 900 // 15 min — must exceed KV_WRITE_INTERVAL_MS (10 min) to avoid cache gaps
 let lastKvWrite = 0
 const KV_WRITE_INTERVAL_MS = 600_000 // 10 minutes — 2 writes per interval = ~288/day within free tier
 let lastArchivedDate = '' // prevent duplicate archival writes within same isolate
@@ -554,8 +554,9 @@ export default {
       const { raw, enriched } = await fetchAllServices(env.STATUS_CACHE)
 
       // Cache raw results only (no fallback substitution — prevents cache poisoning)
+      // Await cacheWrite so badge/v1 endpoints see data immediately
       if (env.STATUS_CACHE) {
-        ctx.waitUntil(cacheWrite(env.STATUS_CACHE, raw))
+        await cacheWrite(env.STATUS_CACHE, raw)
         ctx.waitUntil(writeLatencySnapshot(env.STATUS_CACHE, raw))
       }
 
