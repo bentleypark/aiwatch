@@ -15,7 +15,7 @@ npm run lint       # Run ESLint
 
 ```bash
 npm test           # Run Playwright E2E tests (25 specs)
-npm run test:worker # Run Worker parser unit tests (40 specs, vitest)
+npm run test:worker # Run Worker unit tests (51 specs, vitest)
 ```
 
 ## Development Workflow
@@ -32,8 +32,9 @@ npm run test:worker # Run Worker parser unit tests (40 specs, vitest)
 2. **Code** — implement the feature or fix
 3. **Build + Test** — based on change scope:
    - **Frontend changes** (`src/`): `npm run build` + `npm test` (Playwright)
-   - **Backend changes** (`worker/`): `npm run deploy:worker --dry-run` (dry-run: `npx wrangler deploy --config worker/wrangler.toml --dry-run`)
+   - **Backend changes** (`worker/`): `npx wrangler deploy --config worker/wrangler.toml --dry-run` + `npm run test:worker` (Vitest)
    - **Both**: run all of the above
+   - **Worker logic additions**: new functions must have unit tests — extract to separate files with exports, test in `worker/src/__tests__/` or `worker/src/parsers/__tests__/`
 4. **Review** — run PR review **before** committing:
    ```
    /pr-review-toolkit:review-pr

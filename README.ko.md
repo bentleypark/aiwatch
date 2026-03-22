@@ -157,7 +157,7 @@ npm run dev:all      # 둘 다 동시 실행
 npm run build        # 프로덕션 빌드 → dist/
 npm run lint         # ESLint
 npm test             # Playwright E2E 테스트 (25개)
-npm run test:worker  # Worker 파서 단위 테스트 (40개, vitest)
+npm run test:worker  # Worker 단위 테스트 (51개, vitest)
 
 # Worker 배포
 npm run deploy:worker  # Cloudflare 배포 (npm 스크립트만 사용)
@@ -233,7 +233,7 @@ worker/
       gcloud.ts       # Google Cloud (1개 서비스)
       instatus.ts     # Instatus (2개 서비스)
       betterstack.ts  # Better Stack (3개 서비스)
-    parsers/__tests__/ # Vitest 단위 테스트 (40개)
+    parsers/__tests__/ # Vitest 단위 테스트 (51개)
 ```
 
 ## 기여하기
@@ -254,7 +254,7 @@ worker/
 ### 풀 리퀘스트
 
 - PR당 하나의 기능 또는 수정
-- 모든 테스트 통과 (E2E 25개 + 단위 40개 = 65개)
+- 모든 테스트 통과 (E2E 25개 + 단위 51개 = 76개)
 - 커밋 메시지에 `closes #N` 포함
 - PR 체크리스트 작성
 
