@@ -48,13 +48,23 @@ function IconTarget() {
   )
 }
 
-const NAV_ICONS = { overview: IconGrid, latency: IconChart, incidents: IconClock, uptime: IconTarget }
+function IconTrophy() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ opacity: 0.6 }}>
+      <path d="M4 2h6v4a3 3 0 01-6 0V2z" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M7 9v2M5 12h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+const NAV_ICONS = { overview: IconGrid, latency: IconChart, incidents: IconClock, uptime: IconTarget, ranking: IconTrophy }
 
 const DASHBOARD_ITEMS = [
   { name: 'overview', labelKey: 'nav.overview' },
   { name: 'latency', labelKey: 'nav.latency' },
   { name: 'incidents', labelKey: 'nav.incidents' },
   { name: 'uptime', labelKey: 'nav.uptime' },
+  { name: 'ranking', labelKey: 'nav.ranking' },
 ]
 
 const STATUS_DOT_CLASS = {

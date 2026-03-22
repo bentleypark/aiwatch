@@ -7,6 +7,7 @@ const en = {
   'nav.latency': 'Latency',
   'nav.incidents': 'Incidents',
   'nav.uptime': 'Uptime Report',
+  'nav.ranking': 'Reliability Ranking',
   'nav.settings': 'Settings',
   'nav.dashboard': 'Dashboard',
   'nav.services': 'Services',
@@ -199,6 +200,18 @@ const en = {
   'cookie.description': 'AIWatch uses Google Analytics cookies to improve the service. Only anonymous usage statistics (pages visited, time spent) are collected. No personally identifiable information is gathered. Essential cookies (theme, language) are always used regardless of this setting.',
   'cookie.accept': 'Accept All',
   'cookie.essential': 'Essential Only',
+
+  // Ranking
+  'ranking.title': 'Reliability Ranking',
+  'ranking.table': 'Full Rankings',
+  'ranking.service': 'Service',
+  'ranking.affectedDays': 'Affected Days',
+  'ranking.na': 'Insufficient Data',
+  'ranking.naReason': 'No uptime data, no incidents in 30 days',
+  'ranking.score': 'Score',
+  'ranking.grade': 'Grade',
+  'ranking.uptime': 'Uptime',
+  'ranking.aboutScore': 'How AIWatch Score Works',
 
   // About Score
   'aboutScore.title': 'How AIWatch Score Works',

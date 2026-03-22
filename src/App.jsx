@@ -19,10 +19,11 @@ import Uptime from './pages/Uptime'
 import ServiceDetails from './pages/ServiceDetails'
 import Settings from './pages/Settings'
 import AboutScore from './pages/AboutScore'
+import Ranking from './pages/Ranking'
 
 import { ALL_SERVICE_IDS } from './utils/constants'
 
-const PAGE_NAMES = ['overview', 'latency', 'incidents', 'uptime', 'settings', 'about-score']
+const PAGE_NAMES = ['overview', 'latency', 'incidents', 'uptime', 'settings', 'about-score', 'ranking']
 
 function hashToPage(hash) {
   const id = hash.replace(/^#/, '').split(/[?&#]/)[0]
@@ -49,6 +50,7 @@ function resolvePage(page) {
     case 'service':   return <ServiceDetails serviceId={page.serviceId} />
     case 'settings':  return <Settings />
     case 'about-score': return <AboutScore />
+    case 'ranking':     return <Ranking />
     default:          return <Overview />
   }
 }
@@ -89,8 +91,9 @@ function AppInner() {
   // Initialize GA4 once on mount
   useEffect(() => { initConsentDefault(); initGA() }, [])
 
-  // Track page views on SPA navigation
+  // Track page views + scroll to top on SPA navigation
   useEffect(() => {
+    window.scrollTo(0, 0)
     trackPageView(page.name, page.serviceId ? { service_id: page.serviceId } : {})
   }, [page])
 

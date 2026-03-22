@@ -7,6 +7,7 @@ const ko = {
   'nav.latency': '레이턴시',
   'nav.incidents': '인시던트',
   'nav.uptime': '업타임 리포트',
+  'nav.ranking': '신뢰도 랭킹',
   'nav.settings': '설정',
   'nav.dashboard': '대시보드',
   'nav.services': '서비스',
@@ -199,6 +200,18 @@ const ko = {
   'cookie.description': 'AIWatch는 서비스 개선을 위해 Google Analytics 쿠키를 사용합니다. 방문 페이지, 체류 시간 등 익명 사용 통계만 수집하며, 개인 식별 정보는 수집하지 않습니다. 필수 쿠키(테마, 언어 설정)는 분석과 무관하게 항상 사용됩니다.',
   'cookie.accept': '모두 동의',
   'cookie.essential': '필수만 사용',
+
+  // Ranking
+  'ranking.title': '신뢰도 랭킹',
+  'ranking.table': '전체 순위',
+  'ranking.service': '서비스',
+  'ranking.affectedDays': '영향 일수',
+  'ranking.na': '데이터 불충분 서비스',
+  'ranking.naReason': 'uptime 미제공, 30일 인시던트 없음',
+  'ranking.score': '점수',
+  'ranking.grade': '등급',
+  'ranking.uptime': 'Uptime',
+  'ranking.aboutScore': 'AIWatch Score 계산 방식',
 
   // About Score
   'aboutScore.title': 'AIWatch Score 계산 방식',
