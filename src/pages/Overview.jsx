@@ -1,13 +1,13 @@
 // Overview — summary stats, service grid, recent incidents, latency rankings, AI panel.
 // Design mockup: svc-card with left border, provider, 3-col metrics, variable-height history bars.
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
-import { SCORE_BG_CLASS } from '../utils/constants'
+import { SCORE_BG_CLASS, SERVICE_CATEGORIES } from '../utils/constants'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
@@ -147,7 +147,7 @@ function ServiceCard({ service, index, onClick, t }) {
 // Score color maps from constants
 
 // Filter: pill-style segment control per design mockup
-function FilterTabs({ filter, setFilter, total, issueCount, t }) {
+function FilterTabs({ filter, setFilter, total, issueCount, downCount, t }) {
   const tabs = [
     { key: 'all',         labelKey: 'overview.filter.all',        count: total },
     { key: 'operational', labelKey: 'overview.filter.operational', count: total - issueCount },
@@ -168,6 +168,15 @@ function FilterTabs({ filter, setFilter, total, issueCount, t }) {
           }}
         >
           {t(tab.labelKey)} <span style={{ opacity: 0.6, marginLeft: '2px' }}>{tab.count}</span>
+          {tab.key === 'issues' && issueCount > 0 && (
+            <span
+              className="inline-block rounded-full"
+              style={{
+                width: '6px', height: '6px', marginLeft: '4px', verticalAlign: 'middle',
+                background: downCount > 0 ? 'var(--red)' : 'var(--amber)',
+              }}
+            />
+          )}
         </button>
       ))}
     </div>
@@ -265,11 +274,18 @@ function AIPanel({ t }) {
 
 export default function Overview() {
   const { t, lang } = useLang()
-  const { setPage } = usePage()
+  const { setPage, categoryFilter } = usePage()
   const { services: allServices, loading, error, lastUpdated } = usePolling()
   const { settings } = useSettings()
   const services = allServices.filter((s) => settings.enabledServices.includes(s.id))
   const [filter, setFilter] = useState('all')
+
+  // Reset status filter when category changes
+  useEffect(() => { setFilter('all') }, [categoryFilter])
+
+  // Apply sidebar category filter
+  const categoryIds = SERVICE_CATEGORIES[categoryFilter]?.ids
+  const catServices = categoryIds ? services.filter((s) => categoryIds.includes(s.id)) : services
 
   if (loading && services.length === 0) return <SkeletonUI />
 
@@ -286,17 +302,18 @@ export default function Overview() {
     )
   }
 
-  const operationalCount = services.filter((s) => s.status === 'operational').length
-  const degradedCount    = services.filter((s) => s.status === 'degraded').length
-  const downCount        = services.filter((s) => s.status === 'down').length
+  // Stats are based on category-filtered services
+  const operationalCount = catServices.filter((s) => s.status === 'operational').length
+  const degradedCount    = catServices.filter((s) => s.status === 'degraded').length
+  const downCount        = catServices.filter((s) => s.status === 'down').length
   const issueCount       = degradedCount + downCount
-  const uptimeServices = services.filter((s) => s.uptime30d != null)
+  const uptimeServices = catServices.filter((s) => s.uptime30d != null)
   const avgUptime = uptimeServices.length
     ? (uptimeServices.reduce((sum, s) => sum + s.uptime30d, 0) / uptimeServices.length).toFixed(1)
     : '—'
 
-  const apiAndWebServices = services.filter((s) => s.category !== 'agent')
-  const agentServices = services.filter((s) => s.category === 'agent')
+  const apiAndWebServices = catServices.filter((s) => s.category !== 'agent')
+  const agentServices = catServices.filter((s) => s.category === 'agent')
 
   const statusPriority = { down: 0, degraded: 1, operational: 2 }
   const issueSort = (a, b) => (statusPriority[a.status] - statusPriority[b.status]) || ((a.aiwatchScore ?? 0) - (b.aiwatchScore ?? 0))
@@ -312,7 +329,7 @@ export default function Overview() {
     : agentServices
 
   const sevenDaysAgo = Date.now() - 7 * 86_400_000
-  const recentIncidents = services
+  const recentIncidents = catServices
     .flatMap((s) => s.incidents.map((inc) => ({ ...inc, serviceName: s.name })))
     .filter((inc) => new Date(inc.startedAt).getTime() >= sevenDaysAgo)
     .sort((a, b) => {
@@ -324,7 +341,7 @@ export default function Overview() {
     })
     .slice(0, 5)
 
-  const withLatency = services.filter((s) => s.latency != null)
+  const withLatency = catServices.filter((s) => s.latency != null)
   const sortedByLatency = [...withLatency].sort((a, b) => a.latency - b.latency)
   const maxLatency = withLatency.length ? Math.max(...withLatency.map((s) => s.latency)) : 1
 
@@ -345,7 +362,7 @@ export default function Overview() {
           <span className="text-[var(--green)] font-semibold">//</span>
           {t('nav.services')}
         </h2>
-        <FilterTabs filter={filter} setFilter={setFilter} total={services.length} issueCount={issueCount} t={t} />
+        <FilterTabs filter={filter} setFilter={setFilter} total={catServices.length} issueCount={issueCount} downCount={downCount} t={t} />
       </div>
 
       {/* ── Service Grid ── */}

@@ -6,6 +6,7 @@ import { usePage } from '../utils/pageContext'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
+import { SERVICE_CATEGORIES } from '../utils/constants'
 
 const EMPTY = []
 
@@ -115,8 +116,10 @@ function ServiceNavItem({ svc, page, setPage, onNavigate }) {
   )
 }
 
+const CATEGORY_KEYS = Object.keys(SERVICE_CATEGORIES)
+
 export default function Sidebar({ visibleServiceIds, onNavigate }) {
-  const { page, setPage } = usePage()
+  const { page, setPage, categoryFilter, setCategoryFilter } = usePage()
   const { t } = useLang()
   const { services: rawServices } = usePolling()
   const services = rawServices ?? EMPTY
@@ -124,6 +127,11 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
   const visibleServices = visibleServiceIds
     ? services.filter((s) => visibleServiceIds.includes(s.id))
     : services
+
+  const categoryIds = SERVICE_CATEGORIES[categoryFilter]?.ids
+  const categoryServices = categoryIds
+    ? visibleServices.filter((s) => categoryIds.includes(s.id))
+    : visibleServices
 
   const issueCount = useMemo(() => services.filter((s) => s.status !== 'operational').length, [services])
   // Count only unresolved incidents (investigating/identified/monitoring), deduplicated
@@ -179,25 +187,45 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
       {/* ── Divider ── */}
       <div style={{ height: '1px', background: 'var(--border)', margin: '8px 12px' }} />
 
-      {/* ── Services section (API + WebApp) ── */}
-      <div style={{ padding: '0 12px', marginBottom: '0' }}>
+      {/* ── Category filter tabs ── */}
+      <div style={{ padding: '0 12px', marginBottom: '4px' }}>
         <div style={sectionTitleStyle}>{t('nav.services')}</div>
+        <div className="flex flex-wrap" style={{ gap: '3px' }}>
+          {CATEGORY_KEYS.map((key) => (
+            <button
+              key={key}
+              onClick={() => { setCategoryFilter(key); trackEvent('category_filter', { category: key }) }}
+              className="mono text-[9px] rounded transition-all cursor-pointer"
+              style={{
+                padding: '3px 7px',
+                letterSpacing: '0.03em',
+                background: categoryFilter === key ? 'var(--bg4)' : 'transparent',
+                color: categoryFilter === key ? 'var(--text0)' : 'var(--text2)',
+                border: categoryFilter === key ? '1px solid var(--border-hi)' : '1px solid transparent',
+              }}
+            >
+              {t(SERVICE_CATEGORIES[key].labelKey)}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* ── Filtered service list ── */}
       <nav className="overflow-y-auto" style={{ padding: '0 12px' }}>
-        {visibleServices.filter((s) => s.category !== 'agent').map((svc) => (
+        {categoryServices.filter((s) => s.category !== 'agent').map((svc) => (
           <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} onNavigate={onNavigate} />
         ))}
       </nav>
 
-      {/* ── Coding Agents section ── */}
-      {visibleServices.some((s) => s.category === 'agent') && (
+      {/* ── Coding Agents section (shown when 'all' or 'agents' filter) ── */}
+      {categoryServices.some((s) => s.category === 'agent') && (
         <>
           <div style={{ height: '1px', background: 'var(--border)', margin: '8px 12px' }} />
           <div style={{ padding: '0 12px', marginBottom: '0' }}>
             <div style={sectionTitleStyle}>{t('nav.agents')}</div>
           </div>
           <nav className="overflow-y-auto" style={{ padding: '0 12px' }}>
-            {visibleServices.filter((s) => s.category === 'agent').map((svc) => (
+            {categoryServices.filter((s) => s.category === 'agent').map((svc) => (
               <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} onNavigate={onNavigate} />
             ))}
           </nav>

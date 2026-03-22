@@ -32,6 +32,15 @@ export const SERVICE_AND_WEBAPP_IDS = [
 // All service IDs
 export const ALL_SERVICE_IDS = [...SERVICE_AND_WEBAPP_IDS, ...AGENT_SERVICE_IDS]
 
+// Sidebar category filters — splits Worker's 'api' into LLM vs Voice/Inference
+export const SERVICE_CATEGORIES = {
+  all:       { labelKey: 'filter.all',       ids: null }, // null = show all
+  llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'groq', 'together', 'mistral', 'cohere', 'deepseek', 'perplexity', 'xai'] },
+  agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'copilot', 'cursor', 'windsurf'] },
+  webapps:   { labelKey: 'filter.webapps',   ids: ['claudeai', 'chatgpt'] },
+  inference: { labelKey: 'filter.inference', ids: ['elevenlabs', 'replicate', 'huggingface'] },
+}
+
 export const VALID_ALERT_CONDITIONS = ['down', 'degraded', 'all']
 
 export const DEFAULT_SETTINGS = {

@@ -67,6 +67,7 @@ function AppInner() {
   const [page, setPageState] = useState(() => hashToPage(window.location.hash))
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [modal, setModal] = useState(null) // null | 'privacy' | 'terms'
+  const [categoryFilter, setCategoryFilter] = useState('all')
   useTheme()
   const { t } = useLang()
   const { settings } = useSettings()
@@ -140,7 +141,7 @@ function AppInner() {
 
   return (
     <PollingProvider>
-    <PageContext.Provider value={{ page, setPage }}>
+    <PageContext.Provider value={{ page, setPage, categoryFilter, setCategoryFilter }}>
       <Layout
         topbar={<Topbar onMenuToggle={() => setSidebarOpen((o) => !o)} />}
         mobileActionBar={<MobileActionBar />}
