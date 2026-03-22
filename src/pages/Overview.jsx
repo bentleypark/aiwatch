@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
+import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { formatTime, formatDate } from '../utils/time'
@@ -243,7 +244,9 @@ function AIPanel({ t }) {
 export default function Overview() {
   const { t, lang } = useLang()
   const { setPage } = usePage()
-  const { services, loading, error, lastUpdated } = usePolling()
+  const { services: allServices, loading, error, lastUpdated } = usePolling()
+  const { settings } = useSettings()
+  const services = allServices.filter((s) => settings.enabledServices.includes(s.id))
   const [filter, setFilter] = useState('all')
 
   if (loading && services.length === 0) return <SkeletonUI />

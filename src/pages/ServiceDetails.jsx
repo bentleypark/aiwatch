@@ -301,7 +301,7 @@ export default function ServiceDetails({ serviceId }) {
         <MetricCard
           label={t({ official: 'uptime.label.official', platform_avg: 'uptime.label.platform_avg', estimate: 'uptime.label.estimate' }[service.uptimeSource] ?? 'svc.uptime30d')}
           value={service.uptime30d != null ? `${service.uptime30d.toFixed(2)}%` : '—'}
-          sub={t({ official: 'uptime.sub.official', platform_avg: 'uptime.sub.platform_avg', estimate: 'uptime.sub.estimate' }[service.uptimeSource] ?? 'uptime.collecting')}
+          sub={t({ official: 'uptime.sub.official', platform_avg: 'uptime.sub.platform_avg', estimate: 'uptime.sub.estimate' }[service.uptimeSource] ?? 'uptime.unavailable')}
           colorClass="text-[var(--green)]"
         />
         <MetricCard

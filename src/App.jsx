@@ -4,6 +4,7 @@ import { useLang, LangProvider } from './hooks/useLang'
 import { initGA, trackPageView, trackEvent } from './utils/analytics'
 import { PageContext } from './utils/pageContext'
 import { PollingProvider } from './hooks/usePolling'
+import { useSettings } from './hooks/useSettings'
 import Layout from './components/Layout'
 import Topbar, { MobileActionBar } from './components/Topbar'
 import TickerBar from './components/TickerBar'
@@ -45,6 +46,7 @@ function AppInner() {
   const [modal, setModal] = useState(null) // null | 'privacy' | 'terms'
   useTheme()
   const { t } = useLang()
+  const { settings } = useSettings()
 
   // Initialize GA4 once on mount
   useEffect(() => { initGA() }, [])
@@ -55,7 +57,7 @@ function AppInner() {
   }, [page])
 
   const tickerBar = <TickerBar />
-  const sidebar = <Sidebar onNavigate={() => setSidebarOpen(false)} />
+  const sidebar = <Sidebar visibleServiceIds={settings.enabledServices} onNavigate={() => setSidebarOpen(false)} />
   const footer = (
     <div>
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">

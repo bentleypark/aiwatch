@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   SETTINGS_STORAGE_KEY,
   VALID_PERIODS,
@@ -15,6 +15,8 @@ const canUseStorage = (() => {
     return false
   }
 })()
+
+const SETTINGS_EVENT = 'aiwatch-settings-change'
 
 function readStored() {
   if (!canUseStorage) return DEFAULT_SETTINGS
@@ -43,6 +45,13 @@ function readStored() {
 export function useSettings() {
   const [settings, setSettings] = useState(readStored)
 
+  // Listen for settings changes from other useSettings instances
+  useEffect(() => {
+    const handler = () => setSettings(readStored())
+    window.addEventListener(SETTINGS_EVENT, handler)
+    return () => window.removeEventListener(SETTINGS_EVENT, handler)
+  }, [])
+
   function save(next) {
     const validated = {
       period: VALID_PERIODS.includes(next.period) ? next.period : settings.period,
@@ -67,6 +76,8 @@ export function useSettings() {
       }
     }
     setSettings(validated)
+    // Notify all other useSettings instances
+    window.dispatchEvent(new Event(SETTINGS_EVENT))
     return true
   }
 

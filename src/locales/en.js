@@ -121,6 +121,8 @@ const en = {
   'svc.incidents': 'Incidents',
   'svc.mttr': 'Avg Recovery',
   'svc.mttr.collecting': 'Collecting',
+  'uptime.unavailable': 'Not provided',
+  'uptime.sla.label': 'SLA threshold',
   'svc.mttr.none': 'No incidents in 7 days',
   'svc.latency.sub': 'Current',
   'svc.uptime.sub': '30 days',

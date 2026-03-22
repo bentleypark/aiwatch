@@ -121,6 +121,8 @@ const ko = {
   'svc.incidents': '인시던트',
   'svc.mttr': '평균 복구',
   'svc.mttr.collecting': '수집 중',
+  'uptime.unavailable': '공식 데이터 미제공',
+  'uptime.sla.label': 'SLA 기준',
   'svc.mttr.none': '최근 7일 인시던트 없음',
   'svc.latency.sub': '현재',
   'svc.uptime.sub': '30일',

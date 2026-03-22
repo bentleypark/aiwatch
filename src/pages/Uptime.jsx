@@ -1,44 +1,30 @@
-// Uptime Report — 30-day availability page
+// Uptime Report — availability page
 // Summary cards: most stable, avg uptime, most issues.
 // Rankings: horizontal bars with SLA baseline marker.
-// 3-month matrix: service × month, color-coded by uptime threshold.
-// SLA_DEFAULT used until useSettings is wired in Issue #14.
 
 import { useMemo } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
+import { useSettings } from '../hooks/useSettings'
 import SkeletonUI from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 
 // ── Constants ────────────────────────────────────────────────
 
-// SLA threshold — wired to useSettings in Issue #14
-const SLA_DEFAULT = 99.9
-
-// Uptime thresholds for bar/cell color coding
-const GOOD_THRESHOLD = SLA_DEFAULT // >= 99.9% → green
-const WARN_THRESHOLD = 95.0        // >= 95% and < 99.9% → amber  /  < 95% → red
+const WARN_THRESHOLD = 95.0 // < 95% → red
 
 // ── Helpers ──────────────────────────────────────────────────
 
-function uptimeColorClass(pct) {
-  if (pct >= GOOD_THRESHOLD) return 'bg-[var(--green)]'
+function uptimeColorClass(pct, sla) {
+  if (pct >= sla) return 'bg-[var(--green)]'
   if (pct >= WARN_THRESHOLD) return 'bg-[var(--amber)]'
   return 'bg-[var(--red)]'
 }
 
-function uptimeTextClass(pct) {
-  if (pct >= GOOD_THRESHOLD) return 'text-[var(--green)]'
+function uptimeTextClass(pct, sla) {
+  if (pct >= sla) return 'text-[var(--green)]'
   if (pct >= WARN_THRESHOLD) return 'text-[var(--amber)]'
   return 'text-[var(--red)]'
-}
-
-// Format month string ('YYYY-MM') to locale-aware short label (e.g. 'Jan', '1월')
-function formatMonth(yyyyMM, lang) {
-  const [y, m] = yyyyMM.split('-').map(Number)
-  return new Intl.DateTimeFormat(lang === 'ko' ? 'ko-KR' : 'en-US', {
-    month: 'short',
-  }).format(new Date(y, m - 1, 1))
 }
 
 // ── Sub-components ───────────────────────────────────────────
@@ -73,8 +59,8 @@ function UptimeBar({ service, sla }) {
   const clampedPct = Math.max(MIN_DISPLAY, uptime)
   const widthPct = hasUptime ? Math.round(((clampedPct - MIN_DISPLAY) / range) * 100) : 0
   const slaPos = Math.round(((sla - MIN_DISPLAY) / range) * 100)
-  const barColorClass = hasUptime ? uptimeColorClass(uptime) : 'bg-[var(--bg3)]'
-  const textColorClass = hasUptime ? uptimeTextClass(uptime) : 'text-[var(--text2)]'
+  const barColorClass = hasUptime ? uptimeColorClass(uptime, sla) : 'bg-[var(--bg3)]'
+  const textColorClass = hasUptime ? uptimeTextClass(uptime, sla) : 'text-[var(--text2)]'
 
   return (
     <div className="flex items-center gap-3">
@@ -97,30 +83,14 @@ function UptimeBar({ service, sla }) {
   )
 }
 
-// Matrix cell: colored badge per design (green-dim bg + green text, etc.)
-function matrixCellCls(pct) {
-  if (pct >= GOOD_THRESHOLD) return 'bg-[var(--status-bg-green)] text-[var(--green)]'
-  if (pct >= WARN_THRESHOLD) return 'bg-[var(--status-bg-amber)] text-[var(--amber)]'
-  return 'bg-[var(--status-bg-red)] text-[var(--red)]'
-}
-
-function MatrixCell({ uptime }) {
-  const cls = matrixCellCls(uptime)
-  return (
-    <td style={{ padding: '8px 10px', textAlign: 'center' }}>
-      <span className={`inline-block mono ${cls}`} style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px' }}>
-        {uptime.toFixed(2)}%
-      </span>
-    </td>
-  )
-}
-
 // ── Main Component ───────────────────────────────────────────
 
 export default function Uptime() {
   const { t, lang } = useLang()
   const { services: rawServices, loading, error } = usePolling()
-  const services = rawServices ?? []
+  const { settings } = useSettings()
+  const sla = settings.sla
+  const services = (rawServices ?? []).filter((s) => settings.enabledServices.includes(s.id))
 
   const sortedByUptime = useMemo(
     () => [...services].sort((a, b) => (b.uptime30d ?? 0) - (a.uptime30d ?? 0)),
@@ -183,26 +153,22 @@ export default function Uptime() {
       </div>
 
       {/* ── Uptime Rankings ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>
       <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
         <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
           <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
             <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--teal)' }} />
             {t('uptime.rankings')}
           </div>
-          <span className="mono text-[9px] text-[var(--text2)]">— {SLA_DEFAULT}% SLA</span>
+          <span className="mono text-[9px] text-[var(--text2)]">— {sla}% {t('uptime.sla.label')}</span>
         </div>
         <div style={{ padding: '16px' }}>
-        <div className="flex flex-col gap-3">
-          {sortedByUptime.map((svc) => (
-            <UptimeBar key={svc.id} service={svc} sla={SLA_DEFAULT} />
-          ))}
-        </div>
+          <div className="flex flex-col gap-3">
+            {sortedByUptime.map((svc) => (
+              <UptimeBar key={svc.id} service={svc} sla={sla} />
+            ))}
+          </div>
         </div>
       </section>
-
-      {/* 3-Month Matrix hidden — official uptime sources provide accurate data directly */}
-      </div>
 
     </div>
   )
