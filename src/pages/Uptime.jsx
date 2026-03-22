@@ -6,7 +6,7 @@ import { useMemo } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
-import SkeletonUI from '../components/SkeletonUI'
+import { UptimeSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 
 // ── Constants ────────────────────────────────────────────────
@@ -97,7 +97,7 @@ export default function Uptime() {
     [services]
   )
 
-  if (loading && services.length === 0) return <SkeletonUI />
+  if (loading && services.length === 0) return <UptimeSkeleton />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
   if (services.length === 0) return <EmptyState type="neutral" />

@@ -7,7 +7,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { formatDate } from '../utils/time'
-import SkeletonUI from '../components/SkeletonUI'
+import { IncidentsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import { trackEvent } from '../utils/analytics'
 
@@ -261,7 +261,7 @@ export default function Incidents() {
       .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
   }, [allIncidents, serviceFilter, statusFilter, period])
 
-  if (loading && services.length === 0) return <SkeletonUI />
+  if (loading && services.length === 0) return <IncidentsSkeleton />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
   const selectedIncident = filtered.find((inc) => inc.id === selectedId) ?? null

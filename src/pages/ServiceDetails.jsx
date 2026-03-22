@@ -9,7 +9,7 @@ import { usePolling } from '../hooks/usePolling'
 import { formatDate } from '../utils/time'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { Chart, LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip } from 'chart.js'
-import SkeletonUI from '../components/SkeletonUI'
+import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import StatusPill from '../components/StatusPill'
 
@@ -285,7 +285,7 @@ export default function ServiceDetails({ serviceId }) {
     return avg >= 60 ? `${Math.floor(avg / 60)}h ${avg % 60}m` : `${avg}m`
   }, [services, serviceId])
 
-  if (loading && services.length === 0) return <SkeletonUI />
+  if (loading && services.length === 0) return <ServiceDetailsSkeleton />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
   const service = services.find((s) => s.id === serviceId)

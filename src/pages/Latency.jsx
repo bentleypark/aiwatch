@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { Chart, LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip, Legend } from 'chart.js'
-import SkeletonUI from '../components/SkeletonUI'
+import { LatencySkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip, Legend)
@@ -188,7 +188,7 @@ export default function Latency() {
   // Defensive default — handles transient undefined state
   const services = rawServices ?? []
 
-  if (loading && services.length === 0) return <SkeletonUI />
+  if (loading && services.length === 0) return <LatencySkeleton />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
   // Only include services with latency data (exclude web apps and coding agents)
