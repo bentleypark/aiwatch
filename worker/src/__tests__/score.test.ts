@@ -40,16 +40,17 @@ describe('calculateAIWatchScore', () => {
     expect(r90.breakdown.uptime).toBe(0) // clamped
   })
 
-  it('calculates incident_score with exponential decay', () => {
+  it('calculates incident_score based on affected days (not raw count)', () => {
     const r0 = calculateAIWatchScore(makeSvc())
-    const r5 = calculateAIWatchScore(makeSvc({ incidents: Array.from({ length: 5 }, (_, i) => makeIncident(i + 1)) }))
-    const r15 = calculateAIWatchScore(makeSvc({ incidents: Array.from({ length: 15 }, (_, i) => makeIncident(i + 1)) }))
+    // 5 incidents on 5 different days
+    const r5days = calculateAIWatchScore(makeSvc({ incidents: Array.from({ length: 5 }, (_, i) => makeIncident(i + 1)) }))
+    // 5 incidents on same day → 1 affected day
+    const r5same = calculateAIWatchScore(makeSvc({ incidents: Array.from({ length: 5 }, () => makeIncident(1)) }))
 
     expect(r0.breakdown.incidents).toBe(30)
-    expect(r5.breakdown.incidents).toBeGreaterThan(15)
-    expect(r5.breakdown.incidents).toBeLessThan(25)
-    expect(r15.breakdown.incidents).toBeGreaterThan(5)
-    expect(r15.breakdown.incidents).toBeLessThan(15)
+    expect(r5days.breakdown.incidents).toBeLessThan(r5same.breakdown.incidents) // more days = lower score
+    expect(r5same.metrics.affectedDays30d).toBe(1) // same day deduped
+    expect(r5days.metrics.affectedDays30d).toBe(5)
   })
 
   it('uses median MTTR for 3+ samples', () => {

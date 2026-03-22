@@ -39,6 +39,9 @@ export function calculateAIWatchScore(service: ServiceStatus, cutoffDays = 30): 
   const incidents30d = (service.incidents ?? []).filter((i) => i.startedAt >= cutoff)
   const incidentCount = incidents30d.length
 
+  // Affected days: unique dates with incidents (component-structure agnostic)
+  const affectedDays = new Set(incidents30d.map((i) => i.startedAt.slice(0, 10))).size
+
   // MTTR calculation (resolved incidents with positive duration only)
   const durations = incidents30d
     .filter((i) => i.status === 'resolved' && i.duration)
@@ -59,7 +62,7 @@ export function calculateAIWatchScore(service: ServiceStatus, cutoffDays = 30): 
     return {
       score: null, grade: null, confidence: 'low',
       breakdown: { uptime: null, incidents: 30, recovery: 20 },
-      metrics: { uptimePct: null, incidents30d: 0, mttrHours: null },
+      metrics: { uptimePct: null, incidents30d: 0, affectedDays30d: 0, mttrHours: null },
     }
   }
 
@@ -70,8 +73,10 @@ export function calculateAIWatchScore(service: ServiceStatus, cutoffDays = 30): 
     uptimeScore = Math.max(0, Math.min(50, (service.uptime30d! / 100 - 0.95) / 0.05 * 50))
   }
 
-  // incident_score (0-30): exponential decay, divisor 15
-  const incidentScore = 30 * Math.exp(-incidentCount / 15)
+  // incident_score (0-30): exponential decay based on affected days (not raw count)
+  // Using affected_days instead of incidentCount avoids penalizing services
+  // with per-component reporting (e.g., Anthropic Opus/Sonnet/Haiku)
+  const incidentScore = 30 * Math.exp(-affectedDays / 10)
 
   // recovery_score (0-20): exponential decay, divisor 4h
   const recoveryScore = mttrHours != null
@@ -108,6 +113,7 @@ export function calculateAIWatchScore(service: ServiceStatus, cutoffDays = 30): 
     metrics: {
       uptimePct: service.uptime30d ?? null,
       incidents30d: incidentCount,
+      affectedDays30d: affectedDays,
       mttrHours: mttrHours != null ? Math.round(mttrHours * 10) / 10 : null,
     },
   }
