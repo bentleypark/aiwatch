@@ -300,8 +300,8 @@ async function detectAndAlertIncidents(
         })
       }
 
-      // Incident resolved
-      if (prev[inc.id] && prev[inc.id] !== 'resolved' && inc.status === 'resolved') {
+      // Incident resolved — only alert if started within last 24 hours
+      if (prev[inc.id] && prev[inc.id] !== 'resolved' && inc.status === 'resolved' && incAge < 86_400_000) {
         const durationText = inc.duration ? ` (${inc.duration})` : ''
         alerts.push({
           key: `inc-sent:res:${inc.id}`,
