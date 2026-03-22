@@ -32,11 +32,11 @@ Follow the steps in [CLAUDE.md](../CLAUDE.md) — especially:
 ## Testing
 
 ```bash
-npm test             # Playwright E2E tests (25 specs)
+npm test             # Playwright E2E tests (27 specs)
 npm run test:worker  # Vitest unit tests (65 specs)
 ```
 
-All 90 tests must pass before submitting a PR.
+All 92 tests must pass before submitting a PR.
 
 ## Pull Request Guidelines
 

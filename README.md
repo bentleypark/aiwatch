@@ -157,7 +157,7 @@ npm run dev:worker   # Worker dev server (localhost:8788)
 npm run dev:all      # Both simultaneously
 npm run build        # Production build → dist/
 npm run lint         # ESLint
-npm test             # Playwright E2E tests (25 specs)
+npm test             # Playwright E2E tests (27 specs)
 npm run test:worker  # Worker parser unit tests (65 specs, vitest)
 
 # Worker deployment
@@ -236,7 +236,7 @@ Embed real-time status badges in your README, docs, or blog.
 ```
 src/
   components/    # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner
-  pages/         # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, AboutScore
+  pages/         # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, AboutScore, Ranking
   hooks/         # usePolling, useTheme, useLang, useSettings
   utils/         # analytics, calendar, time, pageContext, constants
   locales/       # ko.js, en.js (flat key→string maps)
@@ -275,7 +275,7 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for detailed guidelines.
 ### Pull Requests
 
 - One feature or fix per PR
-- All tests must pass (25 E2E + 65 unit = 90 specs)
+- All tests must pass (27 E2E + 65 unit = 92 specs)
 - Include `closes #N` in commit messages
 - Fill out the PR checklist
 
