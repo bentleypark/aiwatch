@@ -157,7 +157,7 @@ interface IncidentIoUpdate {
   at: string
 }
 
-function parseIncidentIoUpdates(html: string): IncidentIoUpdate[] {
+export function parseIncidentIoUpdates(html: string): IncidentIoUpdate[] {
   const results: IncidentIoUpdate[] = []
   const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
   for (const chunk of chunks) {
@@ -181,7 +181,7 @@ function parseIncidentIoUpdates(html: string): IncidentIoUpdate[] {
   return results
 }
 
-interface IncidentTextCache {
+export interface IncidentTextCache {
   textByKey: Record<string, string | null>  // key = "stage:at" (matches parseIncidents dedup key)
   cachedAt: string
 }
@@ -213,7 +213,7 @@ async function readIncidentTextCache(kv: KVNamespace, incidentIds: string[]): Pr
   return map
 }
 
-function applyTextCache(inc: Incident, cache: IncidentTextCache): Incident {
+export function applyTextCache(inc: Incident, cache: IncidentTextCache): Incident {
   return {
     ...inc,
     timeline: inc.timeline.map((entry) => {
@@ -225,7 +225,7 @@ function applyTextCache(inc: Incident, cache: IncidentTextCache): Incident {
   }
 }
 
-function buildTextCache(inc: Incident): IncidentTextCache {
+export function buildTextCache(inc: Incident): IncidentTextCache {
   const textByKey: Record<string, string | null> = {}
   for (const entry of inc.timeline) textByKey[`${entry.stage}:${entry.at}`] = entry.text
   return { textByKey, cachedAt: new Date().toISOString() }
