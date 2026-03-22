@@ -49,7 +49,7 @@ function SummaryCard({ label, value, sub, colorClass, valueSize = '26px', mono =
   )
 }
 
-function UptimeBar({ service, sla }) {
+function UptimeBar({ service, sla, t }) {
   // Bar width is proportional within 95–100% range to show meaningful variance
   // (all services cluster near 100%; linear 0–100% scale makes differences invisible)
   const MIN_DISPLAY = 95
@@ -168,7 +168,7 @@ export default function Uptime() {
         <div style={{ padding: '16px' }}>
           <div className="flex flex-col gap-3">
             {sortedByUptime.map((svc) => (
-              <UptimeBar key={svc.id} service={svc} sla={sla} />
+              <UptimeBar key={svc.id} service={svc} sla={sla} t={t} />
             ))}
           </div>
         </div>
