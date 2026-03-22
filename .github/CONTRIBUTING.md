@@ -6,8 +6,12 @@ Thank you for your interest in contributing to AIWatch!
 
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/aiwatch.git`
-3. Install dependencies: `npm install`
-4. Start dev server: `npm run dev`
+3. Install dependencies:
+   ```bash
+   npm install
+   cd worker && npm install && cd ..
+   ```
+4. Start dev servers: `npm run dev:all`
 
 ## Development Workflow
 
@@ -22,15 +26,24 @@ Follow the steps in [CLAUDE.md](../CLAUDE.md) — especially:
 
 - **CSS**: Use design tokens (`var(--green)`, not `#3fb950`). See `src/index.css`
 - **i18n**: Add keys to both `src/locales/ko.js` and `en.js`
-- **Components**: Prefer inline styles for values Tailwind v4 doesn't generate reliably (padding on buttons, etc.)
+- **Components**: Prefer inline styles for values Tailwind v4 doesn't generate reliably
 - **Worker**: TypeScript, error logging with `console.error/warn`
+
+## Testing
+
+```bash
+npm test             # Playwright E2E tests (25 specs)
+npm run test:worker  # Vitest parser unit tests (40 specs)
+```
+
+All 65 tests must pass before submitting a PR.
 
 ## Pull Request Guidelines
 
 - Keep PRs focused — one feature or fix per PR
 - Include screenshots for UI changes
 - Fill out the PR template checklist
-- Tests must pass: `npm test` (13 Playwright specs)
+- Worker deployment: use `npm run deploy:worker` only (never `wrangler deploy` directly)
 
 ## Reporting Issues
 
@@ -41,8 +54,8 @@ Follow the steps in [CLAUDE.md](../CLAUDE.md) — especially:
 ## Project Structure
 
 ```
-src/           # React frontend
-worker/        # Cloudflare Workers backend
+src/           # React frontend (pages, components, hooks, utils, locales)
+worker/        # Cloudflare Workers backend (parsers, types, utils)
 tests/         # Playwright E2E tests
 docs/          # Design mockups
 ```
