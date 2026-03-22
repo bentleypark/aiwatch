@@ -30,7 +30,11 @@ function readStored() {
         ? parsed.sla
         : DEFAULT_SETTINGS.sla,
       enabledServices: Array.isArray(parsed.enabledServices)
-        ? parsed.enabledServices.filter((id) => ALL_SERVICE_IDS.includes(id))
+        ? (() => {
+            const stored = parsed.enabledServices.filter((id) => ALL_SERVICE_IDS.includes(id))
+            const newIds = ALL_SERVICE_IDS.filter((id) => !stored.includes(id))
+            return [...stored, ...newIds]
+          })()
         : DEFAULT_SETTINGS.enabledServices,
     }
   } catch (err) {
