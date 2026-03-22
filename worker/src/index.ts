@@ -16,6 +16,7 @@ const CACHE_TTL_SECONDS = 300 // 5 min — short TTL so stale cache clears quick
 let lastKvWrite = 0
 const KV_WRITE_INTERVAL_MS = 600_000 // 10 minutes — 2 writes per interval = ~288/day within free tier
 let lastArchivedDate = '' // prevent duplicate archival writes within same isolate
+let lastLatencyHour = '' // prevent duplicate hourly latency writes within same isolate
 
 interface DailyCounters {
   [serviceId: string]: { ok: number; total: number }
@@ -70,6 +71,31 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[]): Promise<v
       }).catch(() => {})
       lastArchivedDate = yesterday
     }
+  }
+
+}
+
+// Hourly latency snapshot — independent of cacheWrite throttle (+24 writes/day)
+async function writeLatencySnapshot(kv: KVNamespace, services: ServiceStatus[]): Promise<void> {
+  const currentHour = new Date().toISOString().slice(0, 13) // "2026-03-22T03"
+  if (lastLatencyHour === currentHour) return
+
+  const latencyData: Record<string, number> = {}
+  services.forEach((s) => { if (s.latency != null) latencyData[s.id] = s.latency })
+
+  try {
+    const LATENCY_KEY = 'latency:24h'
+    const MAX_SNAPSHOTS = 24
+    const existing = await kv.get(LATENCY_KEY).catch(() => null)
+    const snapshots = existing ? (JSON.parse(existing).snapshots ?? []) : []
+    snapshots.push({ t: new Date().toISOString(), data: latencyData })
+    const trimmed = snapshots.slice(-MAX_SNAPSHOTS)
+    await kv.put(LATENCY_KEY, JSON.stringify({ snapshots: trimmed }), {
+      expirationTtl: 90000, // 25 hours
+    })
+    lastLatencyHour = currentHour // set after successful write
+  } catch (err) {
+    console.warn('[kv] latency snapshot write failed:', err instanceof Error ? err.message : err)
   }
 }
 
@@ -242,6 +268,16 @@ export default {
       // Cache raw results only (no fallback substitution — prevents cache poisoning)
       if (env.STATUS_CACHE) {
         ctx.waitUntil(cacheWrite(env.STATUS_CACHE, raw))
+        ctx.waitUntil(writeLatencySnapshot(env.STATUS_CACHE, raw))
+      }
+
+      // Read hourly latency snapshots (1 KV read)
+      let latency24h: Array<{ t: string; data: Record<string, number> }> = []
+      if (env.STATUS_CACHE) {
+        const raw = await env.STATUS_CACHE.get('latency:24h').catch(() => null)
+        if (raw) {
+          try { latency24h = JSON.parse(raw).snapshots ?? [] } catch { /* ignore */ }
+        }
       }
 
       // Alert if any services are down
@@ -253,6 +289,7 @@ export default {
       return new Response(JSON.stringify({
         services: enriched,
         lastUpdated: new Date().toISOString(),
+        latency24h,
       }), {
         status: 200,
         headers: {

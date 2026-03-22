@@ -2,15 +2,18 @@
 // Receives serviceId prop from App.jsx (page.serviceId).
 // Shows header, 4 metric cards, incident history, 30-day status calendar.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { formatDate } from '../utils/time'
 import { buildCalendarFromIncidents } from '../utils/calendar'
+import { Chart, LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip } from 'chart.js'
 import SkeletonUI from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import StatusPill from '../components/StatusPill'
+
+Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip)
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -100,7 +103,67 @@ function MetricCard({ label, value, sub, colorClass }) {
 }
 
 function ServiceLatencyTrend({ service, t, hourlyData }) {
+  const canvasRef = useRef(null)
+  const chartRef = useRef(null)
   const hasData = hourlyData && hourlyData.length > 0
+
+  useEffect(() => {
+    if (!canvasRef.current || !hasData) return
+    if (chartRef.current) chartRef.current.destroy()
+
+    const labels = hourlyData.map((s) => {
+      const d = new Date(s.t)
+      return `${String(d.getHours()).padStart(2, '0')}:00`
+    })
+    const values = hourlyData.map((s) => s.data[service.id] ?? null)
+    const color = SERVICE_COLOR[service.id] ?? '#8b949e'
+
+    const styles = getComputedStyle(document.documentElement)
+    const textMuted = styles.getPropertyValue('--text2').trim() || '#6b7280'
+    const borderColor = styles.getPropertyValue('--border').trim() || 'rgba(107,114,128,0.1)'
+
+    chartRef.current = new Chart(canvasRef.current, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          borderColor: color,
+          backgroundColor: color + '20',
+          borderWidth: 1.5,
+          pointRadius: 2,
+          pointHoverRadius: 4,
+          tension: 0.3,
+          fill: true,
+          spanGaps: true,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.parsed.y}ms`,
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: { font: { size: 9, family: 'var(--font-mono)' }, color: textMuted, maxTicksLimit: 8 },
+            grid: { display: false },
+          },
+          y: {
+            ticks: { font: { size: 9, family: 'var(--font-mono)' }, color: textMuted, callback: (v) => `${v}ms` },
+            grid: { color: borderColor },
+          },
+        },
+      },
+    })
+
+    return () => { if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null } }
+  }, [hasData, hourlyData, service.id])
 
   return (
     <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
@@ -112,7 +175,6 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
       </div>
       {hasData ? (
         <div style={{ padding: '16px' }}>
-          {/* Current latency badge */}
           {service.latency != null && (
             <div className="flex items-center gap-2 mb-3">
               <span className="rounded-full" style={{ width: '6px', height: '6px', background: SERVICE_COLOR[service.id] ?? '#8b949e' }} />
@@ -120,9 +182,8 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
               <span className="mono text-[11px] font-medium text-[var(--text0)]">{service.latency}ms</span>
             </div>
           )}
-          {/* TODO: Chart.js Line chart using hourlyData */}
-          <div className="h-[200px] flex items-center justify-center">
-            <p className="text-xs text-[var(--text2)] mono">차트 렌더링 영역</p>
+          <div style={{ height: '200px' }}>
+            <canvas ref={canvasRef} />
           </div>
         </div>
       ) : (
@@ -213,7 +274,7 @@ function CalendarCell({ status, date }) {
 export default function ServiceDetails({ serviceId }) {
   const { t, lang } = useLang()
   const { setPage } = usePage()
-  const { services: rawServices, loading, error } = usePolling()
+  const { services: rawServices, loading, error, latency24h } = usePolling()
   const services = rawServices ?? []
 
   // useMemo must be called before any early returns (Rules of Hooks)
@@ -319,7 +380,7 @@ export default function ServiceDetails({ serviceId }) {
       </div>
 
       {/* ── 24h Latency Trend — shows chart when hourly KV data exists ── */}
-      <ServiceLatencyTrend service={service} t={t} hourlyData={null /* TODO: pass from usePolling when KV hourly data available */} />
+      <ServiceLatencyTrend service={service} t={t} hourlyData={latency24h} />
 
       {/* ── Bottom: Incident History + Calendar (2-col on desktop) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>
