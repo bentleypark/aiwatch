@@ -557,7 +557,10 @@ function detectIncidentChanges(services) {
   let prevIncidents = {}
   try {
     const raw = localStorage.getItem(PREV_INCIDENTS_KEY)
-    if (raw) prevIncidents = JSON.parse(raw)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      prevIncidents = parsed.data ?? parsed // backward compat
+    }
   } catch { /* ignore */ }
 
   // Build current incident state: { serviceId: { incId: status } }
@@ -569,11 +572,30 @@ function detectIncidentChanges(services) {
     }
   }
 
-  // Save current state on every call, but skip alerting on first run per session
-  // (prevents stale localStorage from causing alert bursts on fresh page loads)
+  // Always save current state with timestamp
+  const stateToSave = { data: currentIncidents, savedAt: Date.now() }
+
+  // Skip alerting on first run per session OR when previous data is stale (>5 min)
+  // Prevents false "new incident" alerts from old localStorage data
   if (incidentFirstRun) {
     incidentFirstRun = false
-    try { localStorage.setItem(PREV_INCIDENTS_KEY, JSON.stringify(currentIncidents)) } catch { /* ignore */ }
+    try { localStorage.setItem(PREV_INCIDENTS_KEY, JSON.stringify(stateToSave)) } catch { /* ignore */ }
+    return
+  }
+
+  // Check if previous data is stale
+  let prevSavedAt = 0
+  try {
+    const raw = localStorage.getItem(PREV_INCIDENTS_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      prevSavedAt = parsed.savedAt ?? 0
+    }
+  } catch { /* ignore */ }
+
+  if (Date.now() - prevSavedAt > 5 * 60_000) {
+    // Previous data too old — refresh without alerting
+    try { localStorage.setItem(PREV_INCIDENTS_KEY, JSON.stringify(stateToSave)) } catch { /* ignore */ }
     return
   }
 
@@ -708,7 +730,7 @@ function detectIncidentChanges(services) {
   }
 
   // Save current state
-  try { localStorage.setItem(PREV_INCIDENTS_KEY, JSON.stringify(currentIncidents)) } catch { /* ignore */ }
+  try { localStorage.setItem(PREV_INCIDENTS_KEY, JSON.stringify({ data: currentIncidents, savedAt: Date.now() })) } catch { /* ignore */ }
 }
 
 // mode: 'initial' = first load (skeleton), 'refresh' = manual (keep data, show refreshing), 'silent' = auto-poll (invisible)
