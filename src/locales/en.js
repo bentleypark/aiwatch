@@ -175,6 +175,12 @@ const en = {
   'footer.privacy': 'Privacy Policy',
   'footer.terms': 'Terms of Service',
   'footer.copyright': '© 2026 AIWatch. All rights reserved.',
+
+  // Cookie Banner
+  'cookie.title': 'Cookie Notice',
+  'cookie.description': 'AIWatch uses Google Analytics cookies to improve the service. Only anonymous usage statistics (pages visited, time spent) are collected. No personally identifiable information is gathered. Essential cookies (theme, language) are always used regardless of this setting.',
+  'cookie.accept': 'Accept All',
+  'cookie.essential': 'Essential Only',
 }
 
 export default en

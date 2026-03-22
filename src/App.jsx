@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTheme } from './hooks/useTheme'
 import { useLang, LangProvider } from './hooks/useLang'
-import { initGA, trackPageView, trackEvent } from './utils/analytics'
+import { initConsentDefault, initGA, trackPageView, trackEvent } from './utils/analytics'
 import { PageContext } from './utils/pageContext'
 import { PollingProvider } from './hooks/usePolling'
 import { useSettings } from './hooks/useSettings'
@@ -10,6 +10,7 @@ import Topbar, { MobileActionBar } from './components/Topbar'
 import TickerBar from './components/TickerBar'
 import Sidebar from './components/Sidebar'
 import Modal from './components/Modal'
+import CookieBanner from './components/CookieBanner'
 import { PrivacyContent, TermsContent } from './components/LegalContent'
 import Overview from './pages/Overview'
 import Latency from './pages/Latency'
@@ -49,7 +50,7 @@ function AppInner() {
   const { settings } = useSettings()
 
   // Initialize GA4 once on mount
-  useEffect(() => { initGA() }, [])
+  useEffect(() => { initConsentDefault(); initGA() }, [])
 
   // Track page views on SPA navigation
   useEffect(() => {
@@ -128,6 +129,8 @@ function AppInner() {
       >
         <TermsContent />
       </Modal>
+
+      <CookieBanner />
     </PageContext.Provider>
     </PollingProvider>
   )

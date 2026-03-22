@@ -175,6 +175,12 @@ const ko = {
   'footer.privacy': '개인정보 처리방침',
   'footer.terms': '이용약관',
   'footer.copyright': '© 2026 AIWatch. All rights reserved.',
+
+  // Cookie Banner
+  'cookie.title': '쿠키 사용 안내',
+  'cookie.description': 'AIWatch는 서비스 개선을 위해 Google Analytics 쿠키를 사용합니다. 방문 페이지, 체류 시간 등 익명 사용 통계만 수집하며, 개인 식별 정보는 수집하지 않습니다. 필수 쿠키(테마, 언어 설정)는 분석과 무관하게 항상 사용됩니다.',
+  'cookie.accept': '모두 동의',
+  'cookie.essential': '필수만 사용',
 }
 
 export default ko
