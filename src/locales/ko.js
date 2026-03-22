@@ -6,7 +6,7 @@ const ko = {
   'nav.overview': '개요',
   'nav.latency': '레이턴시',
   'nav.incidents': '인시던트',
-  'nav.uptime': '업타임 리포트',
+  'nav.uptime': '업타임 현황',
   'nav.ranking': '신뢰도 랭킹',
   'nav.settings': '설정',
   'nav.dashboard': '대시보드',

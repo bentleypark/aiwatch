@@ -73,11 +73,15 @@ function UptimeBar({ service, sla }) {
           aria-hidden="true"
         />
       </div>
-      <span className={`w-16 shrink-0 text-right text-xs mono font-medium ${textColorClass}`}>
-        {hasUptime ? `${uptime.toFixed(2)}%` : '—'}
+      <span className={`w-16 shrink-0 text-right text-xs mono font-medium ${textColorClass}`}
+            title={!hasUptime ? t('uptime.unavailable.tooltip') : undefined}>
+        {hasUptime ? `${uptime.toFixed(2)}%` : t('uptime.unavailable.short')}
       </span>
-      <span className="w-8 shrink-0 text-right text-[9px] mono text-[var(--text2)]">
-        {service.uptimeSource === 'official' ? 'OFF' : service.uptimeSource === 'platform_avg' ? 'AVG' : service.uptimeSource === 'estimate' ? 'EST' : ''}
+      <span className="w-8 shrink-0 text-right text-[9px] mono text-[var(--text2)]"
+            title={service.uptimeSource === 'official' ? t('uptime.sub.official')
+              : service.uptimeSource === 'platform_avg' ? t('uptime.sub.platform_avg')
+              : service.uptimeSource === 'estimate' ? t('uptime.sub.estimate') : undefined}>
+        {service.uptimeSource === 'official' ? 'off' : service.uptimeSource === 'platform_avg' ? 'avg' : service.uptimeSource === 'estimate' ? 'est' : ''}
       </span>
     </div>
   )
@@ -145,7 +149,7 @@ export default function Uptime() {
         />
         <SummaryCard
           label={t('uptime.issues')}
-          value={mostIssues ? mostIssues.name : t('uptime.collecting')}
+          value={mostIssues ? `${mostIssues.name} (${(mostIssues.incidents ?? []).length})` : t('uptime.collecting')}
           sub={mostIssues ? `${mostIssues.uptime30d.toFixed(2)}% ${t('overview.card.uptime')}` : ''}
           colorClass="text-[var(--red)]"
           valueSize="18px"

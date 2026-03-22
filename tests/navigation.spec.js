@@ -21,8 +21,8 @@ test.describe('Sidebar navigation', () => {
     await sidebar.getByRole('button', { name: 'Incidents' }).click()
     await expect(page.locator('main select').first()).toBeVisible()
 
-    // Uptime Report page
-    await sidebar.getByRole('button', { name: 'Uptime Report' }).click()
+    // Uptime Status page
+    await sidebar.getByRole('button', { name: 'Uptime Status' }).click()
     await expect(page.locator('main').getByText('Most Stable')).toBeVisible()
 
     // Back to Overview

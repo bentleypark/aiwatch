@@ -5,7 +5,7 @@ test.describe('Uptime page', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await waitForDataLoad(page)
-    await navigateVia(page, 'Uptime Report')
+    await navigateVia(page, 'Uptime Status')
   })
 
   test('renders summary cards with uptime percentages', async ({ page }) => {

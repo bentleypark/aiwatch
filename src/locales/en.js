@@ -6,7 +6,7 @@ const en = {
   'nav.overview': 'Overview',
   'nav.latency': 'Latency',
   'nav.incidents': 'Incidents',
-  'nav.uptime': 'Uptime Report',
+  'nav.uptime': 'Uptime Status',
   'nav.ranking': 'Reliability Ranking',
   'nav.settings': 'Settings',
   'nav.dashboard': 'Dashboard',
