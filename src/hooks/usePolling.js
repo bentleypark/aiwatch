@@ -3,8 +3,6 @@
 // Return shape: { services, loading, error, lastUpdated, refresh }
 
 import { useState, useEffect, useCallback, useRef, createContext, useContext, createElement } from 'react'
-import { SETTINGS_STORAGE_KEY } from '../utils/constants'
-
 const POLL_INTERVAL = 60_000 // 60s
 
 // Worker API URL — defaults to local dev, override via env
@@ -425,294 +423,9 @@ export function usePolling() {
   return ctx
 }
 
-// ── Status Change Detection + Webhook Alerts ──
 
-const ALERT_COOLDOWN_MS = 5 * 60_000
-const COOLDOWN_STORAGE_KEY = 'aiwatch-alert-cooldowns'
-
-// Persistent cooldowns across tabs and page reloads
-function getCooldowns() {
-  try {
-    const raw = localStorage.getItem(COOLDOWN_STORAGE_KEY)
-    return raw ? JSON.parse(raw) : {}
-  } catch { return {} }
-}
-
-function setCooldown(key) {
-  try {
-    const cooldowns = getCooldowns()
-    cooldowns[key] = Date.now()
-    // Prune old entries (> 10 min)
-    const now = Date.now()
-    for (const k of Object.keys(cooldowns)) {
-      if (now - cooldowns[k] > ALERT_COOLDOWN_MS * 2) delete cooldowns[k]
-    }
-    localStorage.setItem(COOLDOWN_STORAGE_KEY, JSON.stringify(cooldowns))
-  } catch { /* ignore */ }
-}
-
-function isInCooldown(key) {
-  const cooldowns = getCooldowns()
-  const last = cooldowns[key]
-  return last && Date.now() - last < ALERT_COOLDOWN_MS
-}
-
-function detectStatusChanges(prev, current) {
-  if (!prev || prev.length === 0) return
-
-  // Read alert settings from localStorage
-  let alertSettings
-  try {
-    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY)
-    if (!raw) return
-    alertSettings = JSON.parse(raw)
-  } catch { return }
-
-  const { slackUrl, discordUrl, alertCondition, alertTarget, alertServices } = alertSettings
-  if (!slackUrl && !discordUrl) return
-
-  const prevMap = new Map(prev.map((s) => [s.id, s.status]))
-
-  for (const svc of current) {
-    const prevStatus = prevMap.get(svc.id)
-    if (!prevStatus || prevStatus === svc.status) continue
-
-    // Check alert condition (including recovery):
-    // 'down' = down 진입 + down 복구
-    // 'degraded' = degraded/down 진입 + degraded/down 복구
-    // 'all' = 모든 상태 변경
-    if (alertCondition === 'down' && svc.status !== 'down' && prevStatus !== 'down') continue
-    if (alertCondition === 'degraded' && svc.status === 'operational' && prevStatus === 'operational') continue
-
-    // Check alert target
-    if (alertTarget === 'custom' && !alertServices?.includes(svc.id)) continue
-
-    // Cooldown check
-    const cooldownKey = `${svc.id}:${svc.status}`
-    if (isInCooldown(cooldownKey)) continue
-    setCooldown(cooldownKey)
-
-    // Send alerts
-    const isRecovery = svc.status === 'operational'
-    const emoji = isRecovery ? '🟢' : svc.status === 'down' ? '🔴' : '🟡'
-    const statusLabel = isRecovery ? 'Recovered' : svc.status === 'down' ? 'Down' : 'Degraded'
-
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8788'
-    const apiBase = API_URL.replace('/api/status', '')
-
-    const siteUrl = `https://ai-watch.dev/#${svc.id}`
-
-    if (slackUrl) {
-      fetch(`${apiBase}/api/alert`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          webhookUrl: slackUrl, channel: 'slack',
-          payload: { text: `${emoji} *${svc.name}* — ${statusLabel}\n${prevStatus} → ${svc.status}\n<${siteUrl}|AIWatch에서 확인>` },
-        }),
-      }).catch(() => {})
-    }
-
-    if (discordUrl) {
-      fetch(`${apiBase}/api/alert`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          webhookUrl: discordUrl, channel: 'discord',
-          payload: {
-            embeds: [{
-              title: `${emoji} ${svc.name} — ${statusLabel}`,
-              url: siteUrl,
-              description: `${prevStatus} → ${svc.status}`,
-              color: isRecovery ? 0x57F287 : svc.status === 'down' ? 0xED4245 : 0xFEE75C,
-              timestamp: new Date().toISOString(),
-              footer: { text: 'AIWatch Alert' },
-            }],
-          },
-        }),
-      }).catch(() => {})
-    }
-  }
-}
-
-// ── Incident Change Detection + Webhook Alerts ──
-
-const PREV_INCIDENTS_KEY = 'aiwatch-prev-incidents'
-let incidentFirstRun = true
-
-function detectIncidentChanges(services) {
-  // Read alert settings
-  let alertSettings
-  try {
-    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY)
-    if (!raw) return
-    alertSettings = JSON.parse(raw)
-  } catch { return }
-
-  const { slackUrl, discordUrl, alertIncidents, alertTarget, alertServices: targetServices } = alertSettings
-  if (!slackUrl && !discordUrl) return
-  if (alertIncidents === false) return
-
-  // Read previous incident state
-  let prevIncidents = {}
-  try {
-    const raw = localStorage.getItem(PREV_INCIDENTS_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw)
-      prevIncidents = parsed.data ?? parsed
-    }
-  } catch { /* ignore */ }
-
-  // Build current incident state: { serviceId: { incId: status } }
-  const currentIncidents = {}
-  for (const svc of services) {
-    currentIncidents[svc.id] = {}
-    for (const inc of svc.incidents ?? []) {
-      currentIncidents[svc.id][inc.id] = { status: inc.status, title: inc.title, duration: inc.duration }
-    }
-  }
-
-  // Skip alerting on first run per session only
-  // (subsequent polls compare against data saved from previous poll in this session)
-  if (incidentFirstRun) {
-    incidentFirstRun = false
-    try { localStorage.setItem(PREV_INCIDENTS_KEY, JSON.stringify(currentIncidents)) } catch { /* ignore */ }
-    return
-  }
-
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8788'
-  const apiBase = API_URL.replace('/api/status', '')
-
-  for (const svc of services) {
-    // Check alert target
-    if (alertTarget === 'custom' && !targetServices?.includes(svc.id)) continue
-
-    const prev = prevIncidents[svc.id] ?? {}
-    const curr = currentIncidents[svc.id] ?? {}
-
-    for (const [incId, incData] of Object.entries(curr)) {
-      const prevInc = prev[incId]
-
-      // New incident
-      if (!prevInc) {
-        // Cooldown
-        const cooldownKey = `inc:${incId}`
-        if (isInCooldown(cooldownKey)) continue
-        setCooldown(cooldownKey)
-
-        const siteUrl = `https://ai-watch.dev/#${svc.id}`
-
-        if (slackUrl) {
-          fetch(`${apiBase}/api/alert`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              webhookUrl: slackUrl, channel: 'slack',
-              payload: { text: `🔴 *${svc.name}* — 신규 인시던트\n${incData.title}\n<${siteUrl}|AIWatch에서 확인>` },
-            }),
-          }).catch(() => {})
-        }
-        if (discordUrl) {
-          fetch(`${apiBase}/api/alert`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              webhookUrl: discordUrl, channel: 'discord',
-              payload: {
-                embeds: [{
-                  title: `🔴 ${svc.name} — 신규 인시던트`,
-                  url: siteUrl,
-                  description: incData.title,
-                  color: 0xED4245,
-                  timestamp: new Date().toISOString(),
-                  footer: { text: 'AIWatch Alert' },
-                }],
-              },
-            }),
-          }).catch(() => {})
-        }
-      }
-
-      // Incident resolved
-      if (prevInc && prevInc.status !== 'resolved' && incData.status === 'resolved') {
-        const cooldownKey = `inc-resolve:${incId}`
-        if (isInCooldown(cooldownKey)) continue
-        setCooldown(cooldownKey)
-
-        const siteUrl = `https://ai-watch.dev/#${svc.id}`
-        const durationText = incData.duration ? ` (${incData.duration})` : ''
-
-        if (slackUrl) {
-          fetch(`${apiBase}/api/alert`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              webhookUrl: slackUrl, channel: 'slack',
-              payload: { text: `🟢 *${svc.name}* — 인시던트 해결${durationText}\n${incData.title}\n<${siteUrl}|AIWatch에서 확인>` },
-            }),
-          }).catch(() => {})
-        }
-        if (discordUrl) {
-          fetch(`${apiBase}/api/alert`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              webhookUrl: discordUrl, channel: 'discord',
-              payload: {
-                embeds: [{
-                  title: `🟢 ${svc.name} — 인시던트 해결${durationText}`,
-                  url: siteUrl,
-                  description: incData.title,
-                  color: 0x57F287,
-                  timestamp: new Date().toISOString(),
-                  footer: { text: 'AIWatch Alert' },
-                }],
-              },
-            }),
-          }).catch(() => {})
-        }
-      }
-    }
-
-    // Check for incidents that vanished from the feed (treat as resolved)
-    for (const [incId, prevInc] of Object.entries(prev)) {
-      if (!curr[incId] && prevInc.status !== 'resolved') {
-        const cooldownKey = `inc-resolve:${incId}`
-        if (isInCooldown(cooldownKey)) continue
-        setCooldown(cooldownKey)
-
-        const siteUrl = `https://ai-watch.dev/#${svc.id}`
-
-        if (slackUrl) {
-          fetch(`${apiBase}/api/alert`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              webhookUrl: slackUrl, channel: 'slack',
-              payload: { text: `🟢 *${svc.name}* — incident resolved\n${prevInc.title}\n<${siteUrl}|AIWatch>` },
-            }),
-          }).catch(() => {})
-        }
-        if (discordUrl) {
-          fetch(`${apiBase}/api/alert`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              webhookUrl: discordUrl, channel: 'discord',
-              payload: {
-                embeds: [{
-                  title: `🟢 ${svc.name} — incident resolved`,
-                  url: siteUrl,
-                  description: prevInc.title,
-                  color: 0x57F287,
-                  timestamp: new Date().toISOString(),
-                  footer: { text: 'AIWatch Alert' },
-                }],
-              },
-            }),
-          }).catch(() => {})
-        }
-      }
-    }
-  }
-
-  // Save current state
-  try { localStorage.setItem(PREV_INCIDENTS_KEY, JSON.stringify(currentIncidents)) } catch { /* ignore */ }
-}
+// Status/incident alerts handled server-side (Worker detectAndAlertIncidents).
+// Browser-side detection removed to prevent duplicate alerts.
 
 // mode: 'initial' = first load (skeleton), 'refresh' = manual (keep data, show refreshing), 'silent' = auto-poll (invisible)
 function usePollingInternal() {
@@ -729,7 +442,6 @@ function usePollingInternal() {
   const hasDataRef = useRef(false)
   const refreshingRef = useRef(false) // prevent silent polls from aborting refresh
   const prevServicesRef = useRef([])  // backup for recovery on refresh failure
-  const alertPrevRef = useRef([])     // separate ref for alert detection (avoids false alerts)
 
   const poll = useCallback(async (mode = 'silent') => {
     // Skip silent polls while refresh is in progress
@@ -777,12 +489,8 @@ function usePollingInternal() {
         if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
       }
 
-      // Detect status/incident changes and send webhook alerts
-      if (hasDataRef.current && merged.length > 0) {
-        detectStatusChanges(alertPrevRef.current, merged)
-        detectIncidentChanges(merged)
-      }
-      alertPrevRef.current = merged
+      // Status/incident alerts handled server-side (Worker detectAndAlertIncidents)
+      // to avoid duplicate alerts when both browser and Worker are running
 
       hasDataRef.current = true
       refreshingRef.current = false

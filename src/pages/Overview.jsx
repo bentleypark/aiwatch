@@ -88,7 +88,10 @@ function ServiceCard({ service, index, onClick, t }) {
   const incidentCount = (service.incidents ?? []).filter((i) => i.status !== 'resolved').length
   const hasUptime = service.uptime30d != null
   const uptimeColor = !hasUptime ? 'text-[var(--text2)]' : service.uptime30d >= 99 ? 'text-[var(--green)]' : service.uptime30d >= 97 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
-  const latencyColor = service.status === 'degraded' ? 'text-[var(--amber)]' : service.status === 'down' ? 'text-[var(--red)]' : 'text-[var(--text0)]'
+  const latencyColor = service.latency == null ? 'text-[var(--text2)]'
+    : service.latency < 200 ? 'text-[var(--green)]'
+    : service.latency < 500 ? 'text-[var(--amber)]'
+    : 'text-[var(--red)]'
 
   return (
     <button
@@ -111,7 +114,9 @@ function ServiceCard({ service, index, onClick, t }) {
           <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.latency')}</div>
         </div>
         <div>
-          <div className={`mono text-[13px] font-medium ${uptimeColor}`}>{hasUptime ? `${service.uptime30d.toFixed(2)}%` : '—'}</div>
+          <div className={`mono text-[13px] font-medium ${uptimeColor}`} title={!hasUptime ? t('uptime.unavailable.tooltip') : undefined}>
+            {hasUptime ? `${service.uptime30d.toFixed(2)}%` : t('uptime.unavailable.short')}
+          </div>
           <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.uptime')}</div>
         </div>
         <div>
@@ -128,8 +133,10 @@ function ServiceCard({ service, index, onClick, t }) {
             <div className={`rounded-full ${SCORE_BG_CLASS[service.scoreGrade] ?? 'bg-[var(--bg3)]'}`}
                  style={{ height: '4px', width: `${service.aiwatchScore}%` }} />
           </div>
-          <span className={`mono text-[11px] font-medium ${SCORE_TEXT_CLASS[service.scoreGrade] ?? 'text-[var(--text2)]'}`}>
+          <span className={`mono text-[11px] font-medium ${SCORE_TEXT_CLASS[service.scoreGrade] ?? 'text-[var(--text2)]'}`}
+                title={t('score.tooltip')}>
             {service.aiwatchScore}
+            {service.scoreGrade && <span className="text-[9px] ml-1 opacity-70">{service.scoreGrade}</span>}
           </span>
         </div>
       )}
@@ -293,14 +300,17 @@ export default function Overview() {
   const apiAndWebServices = services.filter((s) => s.category !== 'agent')
   const agentServices = services.filter((s) => s.category === 'agent')
 
+  const statusPriority = { down: 0, degraded: 1, operational: 2 }
+  const issueSort = (a, b) => (statusPriority[a.status] - statusPriority[b.status]) || ((a.aiwatchScore ?? 0) - (b.aiwatchScore ?? 0))
+
   const filteredServices =
     filter === 'operational' ? apiAndWebServices.filter((s) => s.status === 'operational')
-    : filter === 'issues'    ? apiAndWebServices.filter((s) => s.status !== 'operational')
+    : filter === 'issues'    ? [...apiAndWebServices.filter((s) => s.status !== 'operational')].sort(issueSort)
     : apiAndWebServices
 
   const filteredAgents =
     filter === 'operational' ? agentServices.filter((s) => s.status === 'operational')
-    : filter === 'issues'    ? agentServices.filter((s) => s.status !== 'operational')
+    : filter === 'issues'    ? [...agentServices.filter((s) => s.status !== 'operational')].sort(issueSort)
     : agentServices
 
   const sevenDaysAgo = Date.now() - 7 * 86_400_000
