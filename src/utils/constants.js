@@ -45,3 +45,19 @@ export const DEFAULT_SETTINGS = {
   alertServices: ALL_SERVICE_IDS,
   alertIncidents: false,
 }
+
+export const SCORE_BG_CLASS = {
+  excellent: 'bg-[var(--green)]',
+  good: 'bg-[var(--green)]',
+  fair: 'bg-[var(--yellow)]',
+  degrading: 'bg-[var(--amber)]',
+  unstable: 'bg-[var(--red)]',
+}
+
+export const SCORE_TEXT_CLASS = {
+  excellent: 'text-[var(--green)]',
+  good: 'text-[var(--green)]',
+  fair: 'text-[var(--yellow)]',
+  degrading: 'text-[var(--amber)]',
+  unstable: 'text-[var(--red)]',
+}

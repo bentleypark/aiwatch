@@ -86,9 +86,9 @@ export function calculateAIWatchScore(service: ServiceStatus, cutoffDays = 30): 
     score = uptimeScore! + incidentScore + recoveryScore
     confidence = 'high'
   } else {
-    // No uptime data → reweight + 10% penalty
-    const raw = incidentScore * 0.6 + recoveryScore * 0.4
-    score = raw * 0.9
+    // No uptime data → assume industry average (99.5% = 45pts) + 10% penalty
+    const assumedUptime = 45 // 99.5% baseline assumption
+    score = (assumedUptime + incidentScore + recoveryScore) * 0.9
     confidence = 'medium'
   }
 

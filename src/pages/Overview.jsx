@@ -7,6 +7,7 @@ import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
+import { SCORE_BG_CLASS, SCORE_TEXT_CLASS } from '../utils/constants'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
@@ -119,10 +120,26 @@ function ServiceCard({ service, index, onClick, t }) {
         </div>
       </div>
 
+      {/* AIWatch Score */}
+      {service.aiwatchScore != null && (
+        <div className="flex items-center gap-2" style={{ marginBottom: '8px' }}>
+          <span className="mono text-[9px] text-[var(--text2)]">{t('score.bar.label')}</span>
+          <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '4px' }}>
+            <div className={`rounded-full ${SCORE_BG_CLASS[service.scoreGrade] ?? 'bg-[var(--bg3)]'}`}
+                 style={{ height: '4px', width: `${service.aiwatchScore}%` }} />
+          </div>
+          <span className={`mono text-[11px] font-medium ${SCORE_TEXT_CLASS[service.scoreGrade] ?? 'text-[var(--text2)]'}`}>
+            {service.aiwatchScore}
+          </span>
+        </div>
+      )}
+
       <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact)} />
     </button>
   )
 }
+
+// Score color maps from constants
 
 // Filter: pill-style segment control per design mockup
 function FilterTabs({ filter, setFilter, total, issueCount, t }) {

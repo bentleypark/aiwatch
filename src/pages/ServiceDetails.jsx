@@ -9,6 +9,7 @@ import { usePolling } from '../hooks/usePolling'
 import { formatDate } from '../utils/time'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { Chart, LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip } from 'chart.js'
+import { SCORE_TEXT_CLASS } from '../utils/constants'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import StatusPill from '../components/StatusPill'
@@ -413,6 +414,57 @@ export default function ServiceDetails({ serviceId }) {
           colorClass={mttr ? 'text-[var(--amber)]' : 'text-[var(--text2)]'}
         />
       </div>
+
+      {/* ── AIWatch Score Breakdown ── */}
+      {service.aiwatchScore != null && (
+        <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+          <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+            <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+              <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--teal)' }} />
+              {t('score.label')}
+              <span className="text-[var(--text2)] font-normal">— 30{t('settings.period.suffix')}</span>
+            </div>
+            <span className={`mono text-[18px] font-semibold ${SCORE_TEXT_CLASS[service.scoreGrade] ?? 'text-[var(--text2)]'}`}>
+              {service.aiwatchScore}
+            </span>
+          </div>
+          <div style={{ padding: '16px' }}>
+            <div className="flex flex-col gap-3">
+              {service.scoreBreakdown?.uptime != null ? (
+                <div className="flex items-center gap-3">
+                  <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.uptime')}</span>
+                  <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
+                    <div className="bg-[var(--teal)] rounded-full" style={{ height: '6px', width: `${(service.scoreBreakdown.uptime / 50) * 100}%` }} />
+                  </div>
+                  <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{service.scoreBreakdown.uptime}/50</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.uptime')}</span>
+                  <span className="mono text-[10px] text-[var(--text2)]">{t('uptime.unavailable')}</span>
+                </div>
+              )}
+              {[
+                { label: t('score.incidents'), value: service.scoreBreakdown?.incidents, max: 30 },
+                { label: t('score.recovery'), value: service.scoreBreakdown?.recovery, max: 20 },
+              ].map(({ label, value, max }) => (
+                <div key={label} className="flex items-center gap-3">
+                  <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{label}</span>
+                  <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
+                    <div className="bg-[var(--teal)] rounded-full" style={{ height: '6px', width: `${((value ?? 0) / max) * 100}%` }} />
+                  </div>
+                  <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{value != null ? value : '—'}/{max}</span>
+                </div>
+              ))}
+            </div>
+            {service.scoreConfidence !== 'high' && (
+              <div className="mono text-[9px] text-[var(--text2)]" style={{ marginTop: '10px' }}>
+                * {t('score.no_uptime')}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ── 24h Latency Trend — shows chart when hourly KV data exists ── */}
       {service.category === 'api' && <ServiceLatencyTrend service={service} t={t} hourlyData={latency24h} />}
