@@ -5,6 +5,11 @@
 [![GitHub stars](https://img.shields.io/github/stars/bentleypark/aiwatch)](https://github.com/bentleypark/aiwatch/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/bentleypark/aiwatch)](https://github.com/bentleypark/aiwatch/commits/main)
 
+[![Claude API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/claude)](https://ai-watch.dev/#claude)
+[![OpenAI API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/openai)](https://ai-watch.dev/#openai)
+[![Gemini API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/gemini)](https://ai-watch.dev/#gemini)
+[![GitHub Copilot](https://aiwatch-worker.p2c2kbf.workers.dev/badge/copilot)](https://ai-watch.dev/#copilot)
+
 **English** | [한국어](README.ko.md)
 
 Real-time monitoring dashboard for **19 AI services** — track status, latency, uptime, and incidents across major AI providers.
@@ -165,6 +170,47 @@ npm run deploy:worker  # Deploy to Cloudflare (use npm script only)
 | `/api/status` | GET | All service statuses + incidents + uptime + latency24h |
 | `/api/uptime?days=30` | GET | Daily uptime history (1-90 days) |
 | `/api/alert` | POST | Webhook proxy (Slack/Discord only, SSRF protected) |
+| `/badge/:serviceId` | GET | SVG status badge (shields.io style) |
+
+## Status Badges
+
+Embed real-time status badges in your README, docs, or blog.
+
+```markdown
+[![Claude API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/claude)](https://ai-watch.dev/#claude)
+```
+
+[![Claude API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/claude)](https://ai-watch.dev/#claude)
+
+### Parameters
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `uptime` | Show uptime % | `/badge/claude?uptime=true` |
+| `style` | `flat` or `flat-square` | `/badge/claude?style=flat-square` |
+| `label` | Custom label | `/badge/claude?label=My+API` |
+
+### Examples
+
+[![OpenAI API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/openai)](https://ai-watch.dev/#openai)
+[![Gemini API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/gemini)](https://ai-watch.dev/#gemini)
+[![Claude API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/claude?uptime=true)](https://ai-watch.dev/#claude)
+[![Cursor](https://aiwatch-worker.p2c2kbf.workers.dev/badge/cursor?style=flat-square)](https://ai-watch.dev/#cursor)
+
+### Available Service IDs
+
+| ID | Service | ID | Service |
+|----|---------|----|---------|
+| `claude` | Claude API | `claudeai` | claude.ai |
+| `openai` | OpenAI API | `chatgpt` | ChatGPT |
+| `gemini` | Gemini API | `claudecode` | Claude Code |
+| `mistral` | Mistral API | `copilot` | GitHub Copilot |
+| `cohere` | Cohere API | `cursor` | Cursor |
+| `groq` | Groq Cloud | `windsurf` | Windsurf |
+| `together` | Together AI | `deepseek` | DeepSeek API |
+| `perplexity` | Perplexity | `xai` | xAI (Grok) |
+| `huggingface` | Hugging Face | `replicate` | Replicate |
+| `elevenlabs` | ElevenLabs | | |
 
 ## Project Structure
 

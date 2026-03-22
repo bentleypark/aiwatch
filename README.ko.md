@@ -5,6 +5,11 @@
 [![GitHub stars](https://img.shields.io/github/stars/bentleypark/aiwatch)](https://github.com/bentleypark/aiwatch/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/bentleypark/aiwatch)](https://github.com/bentleypark/aiwatch/commits/main)
 
+[![Claude API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/claude)](https://ai-watch.dev/#claude)
+[![OpenAI API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/openai)](https://ai-watch.dev/#openai)
+[![Gemini API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/gemini)](https://ai-watch.dev/#gemini)
+[![GitHub Copilot](https://aiwatch-worker.p2c2kbf.workers.dev/badge/copilot)](https://ai-watch.dev/#copilot)
+
 [English](README.md) | **한국어**
 
 **19개 AI 서비스**의 상태, 지연시간, 가동률, 인시던트를 실시간으로 모니터링하는 대시보드입니다.
@@ -165,6 +170,47 @@ npm run deploy:worker  # Cloudflare 배포 (npm 스크립트만 사용)
 | `/api/status` | GET | 전체 서비스 상태 + 인시던트 + 가동률 + latency24h |
 | `/api/uptime?days=30` | GET | 일별 가동률 이력 (1-90일) |
 | `/api/alert` | POST | Webhook 프록시 (Slack/Discord만, SSRF 보호) |
+| `/badge/:serviceId` | GET | SVG 상태 배지 (shields.io 스타일) |
+
+## 상태 배지
+
+README, 문서, 블로그에 실시간 상태 배지를 임베드할 수 있습니다.
+
+```markdown
+[![Claude API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/claude)](https://ai-watch.dev/#claude)
+```
+
+[![Claude API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/claude)](https://ai-watch.dev/#claude)
+
+### 파라미터
+
+| 파라미터 | 설명 | 예시 |
+|---------|------|------|
+| `uptime` | 가동률 % 표시 | `/badge/claude?uptime=true` |
+| `style` | `flat` 또는 `flat-square` | `/badge/claude?style=flat-square` |
+| `label` | 커스텀 라벨 | `/badge/claude?label=My+API` |
+
+### 예시
+
+[![OpenAI API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/openai)](https://ai-watch.dev/#openai)
+[![Gemini API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/gemini)](https://ai-watch.dev/#gemini)
+[![Claude API](https://aiwatch-worker.p2c2kbf.workers.dev/badge/claude?uptime=true)](https://ai-watch.dev/#claude)
+[![Cursor](https://aiwatch-worker.p2c2kbf.workers.dev/badge/cursor?style=flat-square)](https://ai-watch.dev/#cursor)
+
+### 사용 가능한 서비스 ID
+
+| ID | 서비스 | ID | 서비스 |
+|----|---------|----|---------|
+| `claude` | Claude API | `claudeai` | claude.ai |
+| `openai` | OpenAI API | `chatgpt` | ChatGPT |
+| `gemini` | Gemini API | `claudecode` | Claude Code |
+| `mistral` | Mistral API | `copilot` | GitHub Copilot |
+| `cohere` | Cohere API | `cursor` | Cursor |
+| `groq` | Groq Cloud | `windsurf` | Windsurf |
+| `together` | Together AI | `deepseek` | DeepSeek API |
+| `perplexity` | Perplexity | `xai` | xAI (Grok) |
+| `huggingface` | Hugging Face | `replicate` | Replicate |
+| `elevenlabs` | ElevenLabs | | |
 
 ## 프로젝트 구조
 

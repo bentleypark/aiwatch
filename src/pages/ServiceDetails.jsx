@@ -262,6 +262,48 @@ function CalendarCell({ status, date }) {
   )
 }
 
+function BadgeCode({ serviceId, serviceName, t }) {
+  const [copied, setCopied] = useState(false)
+  const baseUrl = 'https://aiwatch-worker.p2c2kbf.workers.dev'
+  const code = `[![${serviceName}](${baseUrl}/badge/${serviceId})](https://ai-watch.dev/#${serviceId})`
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }).catch(() => {})
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="text"
+        readOnly
+        value={code}
+        className="mono flex-1"
+        style={{
+          fontSize: '10px', padding: '6px 8px',
+          background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '4px',
+          color: 'var(--text1)', outline: 'none',
+        }}
+        onClick={(e) => e.target.select()}
+      />
+      <button
+        onClick={handleCopy}
+        className="mono shrink-0"
+        style={{
+          fontSize: '10px', padding: '5px 10px', borderRadius: '4px', border: 'none',
+          background: copied ? 'var(--green)' : 'var(--bg3)',
+          color: copied ? 'var(--bg0)' : 'var(--text1)',
+          cursor: 'pointer',
+        }}
+      >
+        {copied ? t('svc.badge.copied') : t('svc.badge.copy')}
+      </button>
+    </div>
+  )
+}
+
 // ── Main Component ───────────────────────────────────────────
 
 export default function ServiceDetails({ serviceId }) {
@@ -436,6 +478,23 @@ export default function ServiceDetails({ serviceId }) {
             </div>
           </div>
         </section>}
+
+      {/* ── Badge Embed ── */}
+      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+        <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+          <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--teal)' }} />
+            {t('svc.badge')}
+          </div>
+        </div>
+        <div style={{ padding: '16px' }}>
+          <div className="flex items-center gap-3" style={{ marginBottom: '12px' }}>
+            <img src={`${(import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')}/badge/${service.id}`} alt={`${service.name} status`} height="20" />
+            <img src={`${(import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')}/badge/${service.id}?uptime=true`} alt={`${service.name} uptime`} height="20" />
+          </div>
+          <BadgeCode serviceId={service.id} serviceName={service.name} t={t} />
+        </div>
+      </section>
 
       </div>
 
