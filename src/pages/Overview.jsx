@@ -172,7 +172,7 @@ function FilterTabs({ filter, setFilter, total, issueCount, downCount, t }) {
             <span
               className="inline-block rounded-full"
               style={{
-                width: '6px', height: '6px', marginLeft: '4px', verticalAlign: 'middle',
+                width: '6px', height: '6px', marginLeft: '6px', verticalAlign: 'middle',
                 background: downCount > 0 ? 'var(--red)' : 'var(--amber)',
               }}
             />
