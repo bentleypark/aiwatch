@@ -18,6 +18,7 @@ const CACHE_TTL_SECONDS = 900 // 15 min — must exceed KV_WRITE_INTERVAL_MS (10
 let lastKvWrite = 0
 const KV_WRITE_INTERVAL_MS = 600_000 // 10 minutes — 2 writes per interval = ~288/day within free tier
 let lastArchivedDate = '' // prevent duplicate archival writes within same isolate
+let lastKvLimitAlert = 0 // in-memory throttle for KV limit alerts (can't use KV when KV is full)
 let lastLatencySlot = '' // prevent duplicate 30-min latency writes within same isolate
 const alertProxyRate = new Map<string, { start: number; count: number }>() // rate limit for /api/alert
 const publicApiRate = new Map<string, { start: number; count: number }>() // rate limit for /api/v1/*
@@ -30,7 +31,7 @@ function todayUTC(): string {
   return new Date().toISOString().split('T')[0]
 }
 
-async function cacheWrite(kv: KVNamespace, services: ServiceStatus[]): Promise<void> {
+async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl?: string): Promise<void> {
   const now = Date.now()
   if (now - lastKvWrite < KV_WRITE_INTERVAL_MS) return
   lastKvWrite = now
@@ -62,7 +63,19 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[]): Promise<v
     kv.put(dailyKey, JSON.stringify(counters), {
       expirationTtl: 2 * 86400, // 2 days — enough to survive overnight low traffic
     }),
-  ]).catch((err) => console.error('[kv] cache write failed:', err))
+  ]).catch((err) => {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[kv] cache write failed:', msg)
+    // Alert on KV limit exceeded — use in-memory throttle (1h) since KV dedup won't work
+    if (msg.includes('limit exceeded') && now - lastKvLimitAlert > 3_600_000) {
+      lastKvLimitAlert = now
+      if (discordUrl) sendDiscordAlert(discordUrl, {
+        title: '⚠️ KV Write Limit Exceeded',
+        description: 'Cloudflare KV 무료 플랜 일일 쓰기 한도(1,000회) 초과.\n배지, API v1, 캐시가 작동하지 않습니다.\nUTC 자정(KST 09:00)에 자동 리셋됩니다.',
+        color: 0xFF9800,
+      }).catch(() => {})
+    }
+  })
 
   // Archive yesterday's counters to permanent history (once per day per isolate)
   const yesterday = new Date(now - 86_400_000).toISOString().split('T')[0]
@@ -556,7 +569,7 @@ export default {
       // Cache raw results only (no fallback substitution — prevents cache poisoning)
       // Await cacheWrite so badge/v1 endpoints see data immediately
       if (env.STATUS_CACHE) {
-        await cacheWrite(env.STATUS_CACHE, raw)
+        await cacheWrite(env.STATUS_CACHE, raw, env.DISCORD_WEBHOOK_URL)
         ctx.waitUntil(writeLatencySnapshot(env.STATUS_CACHE, raw))
       }
 
