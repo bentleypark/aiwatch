@@ -167,6 +167,8 @@ const ko = {
   'settings.alert.testing': '전송 중...',
   'settings.alert.test.ok': '전송 성공 ✓',
   'settings.alert.test.error': '전송 실패 ✗',
+  'settings.alert.incidents': '인시던트 알림',
+  'settings.alert.incidents.desc': '신규 인시던트 등록 및 해결 시 알림',
   'settings.alert.condition.desc': '어떤 상태 변화에서 알림을 받을지 선택합니다',
   'settings.alert.target.desc': '알림을 받을 서비스를 선택합니다',
   'settings.alert.custom': '선택',

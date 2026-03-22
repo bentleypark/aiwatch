@@ -167,6 +167,8 @@ const en = {
   'settings.alert.testing': 'Sending...',
   'settings.alert.test.ok': 'Sent ✓',
   'settings.alert.test.error': 'Failed ✗',
+  'settings.alert.incidents': 'Incident Alerts',
+  'settings.alert.incidents.desc': 'Alert on new incidents and resolutions',
   'settings.alert.condition.desc': 'Select which status changes trigger alerts',
   'settings.alert.target.desc': 'Select services to receive alerts for',
   'settings.alert.custom': 'Custom',

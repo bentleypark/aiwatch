@@ -44,6 +44,7 @@ function readStored() {
       alertServices: Array.isArray(parsed.alertServices)
         ? parsed.alertServices.filter((id) => ALL_SERVICE_IDS.includes(id))
         : DEFAULT_SETTINGS.alertServices,
+      alertIncidents: typeof parsed.alertIncidents === 'boolean' ? parsed.alertIncidents : DEFAULT_SETTINGS.alertIncidents,
     }
   } catch (err) {
     if (err instanceof SyntaxError || err instanceof DOMException) {
@@ -80,6 +81,7 @@ export function useSettings() {
       alertServices: Array.isArray(next.alertServices)
         ? next.alertServices.filter((id) => ALL_SERVICE_IDS.includes(id))
         : settings.alertServices,
+      alertIncidents: typeof next.alertIncidents === 'boolean' ? next.alertIncidents : settings.alertIncidents,
     }
     if (canUseStorage) {
       try {

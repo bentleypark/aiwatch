@@ -43,4 +43,5 @@ export const DEFAULT_SETTINGS = {
   alertCondition: 'down',  // 'down' | 'degraded' | 'all'
   alertTarget: 'all',      // 'all' | 'custom'
   alertServices: ALL_SERVICE_IDS,
+  alertIncidents: false,
 }

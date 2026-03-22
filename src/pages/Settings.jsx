@@ -114,6 +114,7 @@ export default function Settings() {
   const [alertCondition, setAlertCondition] = useState(settings.alertCondition)
   const [alertTarget, setAlertTarget] = useState(settings.alertTarget)
   const [alertServices, setAlertServices] = useState(settings.alertServices)
+  const [alertIncidents, setAlertIncidents] = useState(settings.alertIncidents)
   const [saved, setSaved] = useState(false)
   const [testResult, setTestResult] = useState(null) // null | 'sending' | 'ok' | 'error'
   const saveTimerRef = useRef(null)
@@ -128,11 +129,12 @@ export default function Settings() {
     setAlertCondition(settings.alertCondition)
     setAlertTarget(settings.alertTarget)
     setAlertServices(settings.alertServices)
+    setAlertIncidents(settings.alertIncidents)
   }, [settings])
 
   function handleSave() {
     const slaNum = sla === '' ? DEFAULT_SETTINGS.sla : Number(sla)
-    save({ period, sla: slaNum, enabledServices, slackUrl, discordUrl, alertCondition, alertTarget, alertServices })
+    save({ period, sla: slaNum, enabledServices, slackUrl, discordUrl, alertCondition, alertTarget, alertServices, alertIncidents })
     trackEvent('save_settings')
     setSaved(true)
     clearTimeout(saveTimerRef.current)
@@ -154,6 +156,7 @@ export default function Settings() {
     && alertCondition === settings.alertCondition
     && alertTarget === settings.alertTarget
     && JSON.stringify([...alertServices].sort()) === JSON.stringify([...settings.alertServices].sort())
+    && alertIncidents === settings.alertIncidents
 
   // Service data map
   const svcMap = {}
@@ -314,12 +317,16 @@ export default function Settings() {
           />
         </FieldRow>
 
-        <FieldRow label={t('settings.alert.target')} desc={t('settings.alert.target.desc')} last>
+        <FieldRow label={t('settings.alert.target')} desc={t('settings.alert.target.desc')}>
           <SegmentControl
             value={alertTarget}
             onChange={setAlertTarget}
             options={[{ value: 'all', label: t('overview.filter.all') }, { value: 'custom', label: t('settings.alert.custom') }]}
           />
+        </FieldRow>
+
+        <FieldRow label={t('settings.alert.incidents')} desc={t('settings.alert.incidents.desc')} last>
+          <Toggle checked={alertIncidents} onChange={() => setAlertIncidents((v) => !v)} />
         </FieldRow>
 
         {(slackUrl || discordUrl) && (
