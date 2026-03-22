@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "npm run build && wrangler dev",
     "test": "npx playwright test",
+    "test:worker": "npx vitest run --config worker/vitest.config.ts",
     "test:ui": "npx playwright test --ui",
     "deploy": "npm run build && wrangler deploy",
     "deploy:worker": "npx wrangler deploy --config worker/wrangler.toml",

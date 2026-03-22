@@ -5,11 +5,14 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
-    "wrangler": "^4.0.0",
+    "@cloudflare/workers-types": "^4.0.0",
     "typescript": "^5.0.0",
-    "@cloudflare/workers-types": "^4.0.0"
+    "vitest": "^4.1.0",
+    "wrangler": "^4.0.0"
   }
 }
