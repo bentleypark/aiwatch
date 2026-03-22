@@ -1,6 +1,6 @@
 // Layout shell — owns structural grid only.
 // Desktop: Topbar(48px) + Ticker(34px) = 82px fixed header, then Grid (220px sidebar + 1fr content).
-// Mobile: Topbar(48px) + ActionBar(~36px) = ~84px, sidebar as overlay.
+// Mobile: Topbar(48px) only, sidebar as overlay.
 // NOTE: Tailwind v4 cannot scan template literals with variables — use hardcoded class strings.
 
 export const TOPBAR_H = 48
@@ -14,7 +14,6 @@ export default function Layout({
   tickerBar,
   sidebar,
   footer,
-  mobileActionBar,
   sidebarOpen = false,
   onSidebarClose,
 }) {
@@ -36,12 +35,7 @@ export default function Layout({
         {tickerBar}
       </div>
 
-      {/* Mobile Action Bar — below topbar on mobile only */}
-      <div className="fixed inset-x-0 top-[48px] z-[55] md:hidden">
-        {mobileActionBar}
-      </div>
-
-      {/* Body — .header-offset: mobile 84px, desktop 82px (see index.css) */}
+      {/* Body — .header-offset: mobile 48px topbar only, desktop 82px topbar+ticker */}
       <div className="header-offset">
         <div className="md:grid" style={{ gridTemplateColumns: `${SIDEBAR_W}px 1fr` }}>
 

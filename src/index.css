@@ -98,7 +98,7 @@ pre,
 }
 
 /* ─── Layout utilities (Tailwind v4 fails to generate some responsive arbitrary values) */
-.header-offset { padding-top: 84px; }     /* mobile: topbar 48 + action bar ~36 */
+.header-offset { padding-top: 48px; }     /* mobile: topbar only */
 @media (min-width: 768px) {
   .header-offset { padding-top: 82px; }   /* desktop: topbar 48 + ticker 34 */
 }

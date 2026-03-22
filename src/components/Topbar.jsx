@@ -42,8 +42,6 @@ export default function Topbar({ onMenuToggle }) {
     refresh()
   }, [refreshing, refresh])
 
-  const refreshLabel = refreshing ? t('topbar.refresh.loading') : t('topbar.refresh')
-
   return (
     <div className="flex items-center justify-between w-full" style={{ padding: '0 20px' }}>
       {/* Left: hamburger (mobile) + logo mark + logo text */}
@@ -68,14 +66,14 @@ export default function Topbar({ onMenuToggle }) {
         </a>
       </div>
 
-      {/* Center: LIVE · time — hidden on mobile */}
-      <div className="hidden md:flex items-center gap-1.5 mono text-[11px] text-[var(--text2)]">
+      {/* Center: LIVE · time */}
+      <div className="flex items-center gap-1.5 mono text-[10px] md:text-[11px] text-[var(--text2)]">
         <span className="w-1.5 h-1.5 rounded-full bg-[var(--green)] animate-[pulse_2s_ease-in-out_infinite]" />
         <span>{t('topbar.live')} · {lastUpdated ? formatTime(lastUpdated, lang) : '—'}</span>
       </div>
 
       {/* Right: actions */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-4 md:gap-2">
         <span className="hidden md:inline mono text-[10px] text-[var(--text2)]">{VERSION}</span>
 
         <a
@@ -84,16 +82,25 @@ export default function Topbar({ onMenuToggle }) {
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 mono text-[10px] text-[var(--text2)] hover:text-[var(--text0)] transition-colors"
           onClick={() => trackEvent('click_github_header')}
+          aria-label="GitHub"
         >
-          <span className="hidden md:inline">GitHub</span> {stars != null && stars >= 100 ? `★ ${stars}` : '↗'}
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/>
+          </svg>
+          <span className="hidden md:inline">{stars != null && stars >= 100 ? `★ ${stars}` : 'GitHub'}</span>
         </a>
 
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="btn-topbar hidden md:inline-block"
+          className="inline-flex items-center gap-1 text-[var(--text2)] hover:text-[var(--text0)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed md:btn-topbar"
+          aria-label={t('topbar.refresh')}
         >
-          {refreshLabel}
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" className={refreshing ? 'animate-spin' : ''}>
+            <path d="M14 8A6 6 0 114.5 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            <path d="M4.5 0.5v3h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="hidden md:inline">{refreshing ? t('topbar.refresh.loading').replace('↻ ', '') : t('topbar.refresh').replace('↻ ', '')}</span>
         </button>
 
         {/* Analyze — disabled with hover/focus tooltip */}
@@ -127,9 +134,8 @@ export default function Topbar({ onMenuToggle }) {
         {/* Settings — gear icon + text */}
         <button
           onClick={() => setPage({ name: 'settings' })}
-          className="btn-topbar"
+          className="inline-flex items-center gap-1 text-[var(--text2)] hover:text-[var(--text0)] transition-colors cursor-pointer md:btn-topbar"
           style={{
-            display: 'flex', alignItems: 'center', gap: '5px',
             ...(isSettings ? { color: 'var(--green)', borderColor: 'var(--green)', background: 'var(--bg3)' } : {}),
           }}
           aria-label={t('nav.settings')}
@@ -142,31 +148,3 @@ export default function Topbar({ onMenuToggle }) {
   )
 }
 
-// Mobile Action Bar — rendered by Layout below the fixed topbar
-export function MobileActionBar() {
-  const { lang, t } = useLang()
-  const { refresh, refreshing, lastUpdated } = usePolling()
-
-  const handleRefresh = useCallback(() => {
-    if (refreshing) return
-    trackEvent('click_refresh')
-    refresh()
-  }, [refreshing, refresh])
-
-  const refreshLabel = refreshing ? t('topbar.refresh.loading') : t('topbar.refresh')
-
-  return (
-    <div className="flex items-center gap-2 bg-[var(--bg1)] border-b border-[var(--border)]" style={{ padding: '8px 14px' }}>
-      <span className="w-1.5 h-1.5 rounded-full bg-[var(--green)] animate-[pulse_2s_ease-in-out_infinite]" />
-      <span className="mono text-[10px] text-[var(--text2)]">{t('topbar.live')} · {lastUpdated ? formatTime(lastUpdated, lang) : '—'}</span>
-      <button
-        onClick={handleRefresh}
-        disabled={refreshing}
-        className="btn-topbar ml-auto"
-        style={{ fontSize: '11px', padding: '4px 10px' }}
-      >
-        {refreshLabel}
-      </button>
-    </div>
-  )
-}

@@ -6,7 +6,7 @@ import { PageContext } from './utils/pageContext'
 import { PollingProvider } from './hooks/usePolling'
 import { useSettings } from './hooks/useSettings'
 import Layout from './components/Layout'
-import Topbar, { MobileActionBar } from './components/Topbar'
+import Topbar from './components/Topbar'
 import TickerBar from './components/TickerBar'
 import Sidebar from './components/Sidebar'
 import Modal from './components/Modal'
@@ -144,7 +144,7 @@ function AppInner() {
     <PageContext.Provider value={{ page, setPage, categoryFilter, setCategoryFilter }}>
       <Layout
         topbar={<Topbar onMenuToggle={() => setSidebarOpen((o) => !o)} />}
-        mobileActionBar={<MobileActionBar />}
+
         tickerBar={tickerBar}
         sidebar={sidebar}
         footer={footer}

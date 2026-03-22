@@ -299,8 +299,8 @@ function ActionBanner({ services, setPage, setFilter, setCategoryFilter, t }) {
     const names = affected.slice(0, 3).map(s => s.name).join(', ')
     const suffix = affected.length > 3 ? ` +${affected.length - 3}` : ''
     return (
-      <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg" style={{ padding: '12px 16px', borderLeft: `3px solid ${borderColor}` }}>
-        <div className="text-[13px] font-medium text-[var(--text0)]" style={{ marginBottom: '4px' }}>
+      <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg" style={{ padding: '10px 14px', lineHeight: 1.4, borderLeft: `3px solid ${borderColor}` }}>
+        <div className="text-[13px] font-medium text-[var(--text0)]" style={{ marginBottom: '3px' }}>
           {icon} {t('overview.banner.affected').replace('{n}', affected.length)} — {names}{suffix}
         </div>
         <button
@@ -325,10 +325,10 @@ function ActionBanner({ services, setPage, setFilter, setCategoryFilter, t }) {
         return (
           <div key={svc.id}
                className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg cursor-pointer hover:border-[var(--border-hi)] transition-colors"
-               style={{ padding: '12px 16px', borderLeft: `3px solid ${svc.status === 'down' ? 'var(--red)' : 'var(--amber)'}` }}
+               style={{ padding: '10px 14px', lineHeight: 1.4, borderLeft: `3px solid ${svc.status === 'down' ? 'var(--red)' : 'var(--amber)'}` }}
                onClick={() => setPage({ name: 'service', serviceId: svc.id })}>
-            <div className="text-[13px] font-medium text-[var(--text0)]" style={{ marginBottom: '4px' }}>
-              {svcIcon} {svc.name} — {statusLabel}
+            <div className="text-[13px] font-medium text-[var(--text0)]" style={{ marginBottom: '3px' }}>
+              {svcIcon} {svc.name} — <span className={svc.status === 'down' ? 'text-[var(--red)]' : 'text-[var(--amber)]'}>{statusLabel}</span>
             </div>
             <div className="mono text-[11px] text-[var(--text2)]">
               {fallbacks.length > 0 ? (
