@@ -63,17 +63,20 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl
     kv.put(dailyKey, JSON.stringify(counters), {
       expirationTtl: 2 * 86400, // 2 days — enough to survive overnight low traffic
     }),
-  ]).catch((err) => {
+  ]).catch(async (err) => {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[kv] cache write failed:', msg)
     // Alert on KV limit exceeded — use in-memory throttle (1h) since KV dedup won't work
-    if (msg.includes('limit exceeded') && now - lastKvLimitAlert > 3_600_000) {
-      lastKvLimitAlert = now
-      if (discordUrl) sendDiscordAlert(discordUrl, {
-        title: '⚠️ KV Write Limit Exceeded',
-        description: 'Cloudflare KV 무료 플랜 일일 쓰기 한도(1,000회) 초과.\n배지, API v1, 캐시가 작동하지 않습니다.\nUTC 자정(KST 09:00)에 자동 리셋됩니다.',
-        color: 0xFF9800,
-      }).catch(() => {})
+    const alertNow = Date.now()
+    if (msg.includes('limit exceeded') && alertNow - lastKvLimitAlert > 3_600_000) {
+      lastKvLimitAlert = alertNow
+      if (discordUrl) {
+        await sendDiscordAlert(discordUrl, {
+          title: '⚠️ KV Write Limit Exceeded',
+          description: 'Cloudflare KV 무료 플랜 일일 쓰기 한도(1,000회) 초과.\n배지, API v1, 캐시가 작동하지 않습니다.\nUTC 자정(KST 09:00)에 자동 리셋됩니다.',
+          color: 0xFF9800,
+        }).catch(() => {})
+      }
     }
   })
 
