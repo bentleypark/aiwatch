@@ -226,6 +226,8 @@ function alertServicesDown(env: Env, downServices: ServiceStatus[]) {
 const INCIDENT_STATE_KEY = 'incident-alert-state'
 const INCIDENT_CHECK_KEY = 'incident-last-check'
 const INCIDENT_CHECK_INTERVAL_MS = 600_000 // 10 minutes
+// In-memory throttle: instant dedup within same isolate (no KV latency)
+let lastIncidentCheckMemory = 0
 
 async function detectAndAlertIncidents(
   env: Env,
@@ -233,9 +235,13 @@ async function detectAndAlertIncidents(
 ): Promise<void> {
   if (!env.DISCORD_WEBHOOK_URL || !env.STATUS_CACHE) return
 
-  // KV-based throttle: shared across all isolates.
-  // Per-alert dedup keys (inc-sent:*) provide the true uniqueness guarantee.
   const now = Date.now()
+
+  // Layer 1: in-memory throttle (same isolate — instant, no race condition)
+  if (now - lastIncidentCheckMemory < INCIDENT_CHECK_INTERVAL_MS) return
+  lastIncidentCheckMemory = now
+
+  // Layer 2: KV-based throttle (cross isolate — eventual consistency, best-effort)
   let lastCheckStr: string | null = null
   try {
     lastCheckStr = await env.STATUS_CACHE.get(INCIDENT_CHECK_KEY)
