@@ -1,5 +1,6 @@
 # AIWatch
 
+[![Tests](https://github.com/bentleypark/aiwatch/actions/workflows/test.yml/badge.svg)](https://github.com/bentleypark/aiwatch/actions/workflows/test.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Deploy](https://img.shields.io/badge/Deploy-ai--watch.dev-blue)](https://ai-watch.dev)
 [![GitHub stars](https://img.shields.io/github/stars/bentleypark/aiwatch)](https://github.com/bentleypark/aiwatch/stargazers)
