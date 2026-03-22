@@ -61,15 +61,18 @@ npm run test:worker # Run Worker parser unit tests (40 specs, vitest)
 ### Directory Layout
 ```
 src/
-  components/   # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar
+  components/   # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner
   pages/        # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings
   hooks/        # usePolling, useTheme, useLang, useSettings
   utils/        # analytics, calendar, time, pageContext, constants
   locales/      # ko.js, en.js — flat key→string maps (default exports)
 worker/
   src/
-    index.ts    # Worker entry: CORS, KV cache, Discord alerts, routing
-    services.ts # Service configs, status fetching, parsers
+    index.ts    # Worker entry: CORS, KV cache, Discord alerts, routing, /api/alert proxy
+    services.ts # Service configs + fetch orchestrator
+    types.ts    # Shared types (ServiceStatus, Incident, etc.)
+    utils.ts    # Shared utilities (formatDuration, fetchWithTimeout)
+    parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack)
 ```
 
 ### Design System
