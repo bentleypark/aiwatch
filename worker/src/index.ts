@@ -18,6 +18,7 @@ const KV_WRITE_INTERVAL_MS = 600_000 // 10 minutes — 2 writes per interval = ~
 let lastArchivedDate = '' // prevent duplicate archival writes within same isolate
 let lastLatencySlot = '' // prevent duplicate 30-min latency writes within same isolate
 const alertProxyRate = new Map<string, { start: number; count: number }>() // rate limit for /api/alert
+const publicApiRate = new Map<string, { start: number; count: number }>() // rate limit for /api/v1/*
 
 interface DailyCounters {
   [serviceId: string]: { ok: number; total: number }
@@ -352,6 +353,86 @@ export default {
           'Access-Control-Allow-Origin': '*',
         },
       })
+    }
+
+    // GET /api/v1/status — public API (lightweight, CORS *, rate limited)
+    if (request.method === 'GET' && (url.pathname === '/api/v1/status' || url.pathname.startsWith('/api/v1/status/'))) {
+      // Rate limit: 60 req/min per IP
+      const clientIp = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim() ?? 'local'
+      const rateEntry = publicApiRate.get(clientIp)
+      const now = Date.now()
+      if (rateEntry && rateEntry.count >= 60 && now - rateEntry.start < 60_000) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded. Max 60 requests/minute.' }), {
+          status: 429,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Retry-After': '60' },
+        })
+      }
+      if (!rateEntry || now - rateEntry.start >= 60_000) {
+        publicApiRate.set(clientIp, { start: now, count: 1 })
+      } else {
+        rateEntry.count++
+      }
+      // Evict stale entries to prevent memory leak
+      if (publicApiRate.size > 10_000) {
+        for (const [ip, entry] of publicApiRate) {
+          if (now - entry.start >= 60_000) publicApiRate.delete(ip)
+        }
+      }
+
+      // Read cached services
+      const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+      if (!cached) {
+        return new Response(JSON.stringify({ error: 'Service data not available' }), {
+          status: 503, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        })
+      }
+
+      const publicHeaders = {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'public, max-age=30',
+      }
+
+      // Individual service: /api/v1/status/:serviceId
+      const segments = url.pathname.split('/')
+      const serviceId = segments[4] ?? ''
+      if (segments.length > 5) {
+        return new Response(JSON.stringify({ error: 'Not Found' }), { status: 404, headers: publicHeaders })
+      }
+      if (serviceId && !/^[a-z0-9_-]+$/i.test(serviceId)) {
+        return new Response(JSON.stringify({ error: 'Invalid service ID' }), { status: 400, headers: publicHeaders })
+      }
+      if (serviceId) {
+        const svc = cached.services.find((s) => s.id === serviceId)
+        if (!svc) {
+          return new Response(JSON.stringify({ error: `Service '${serviceId}' not found` }), {
+            status: 404, headers: publicHeaders,
+          })
+        }
+        return new Response(JSON.stringify({
+          service: {
+            id: svc.id, name: svc.name, provider: svc.provider, category: svc.category,
+            status: svc.status, latency: svc.latency, uptime30d: svc.uptime30d,
+            uptimeSource: svc.uptimeSource, lastChecked: svc.lastChecked,
+            incidents: (svc.incidents ?? []).slice(0, 5).map((i) => ({
+              id: i.id, title: i.title, status: i.status, impact: i.impact,
+              startedAt: i.startedAt, duration: i.duration,
+            })),
+          },
+          cachedAt: cached.cachedAt,
+        }), { status: 200, headers: publicHeaders })
+      }
+
+      // All services: /api/v1/status
+      return new Response(JSON.stringify({
+        services: cached.services.map((svc) => ({
+          id: svc.id, name: svc.name, provider: svc.provider, category: svc.category,
+          status: svc.status, latency: svc.latency, uptime30d: svc.uptime30d,
+          uptimeSource: svc.uptimeSource, lastChecked: svc.lastChecked,
+          incidentCount: (svc.incidents ?? []).length,
+        })),
+        cachedAt: cached.cachedAt,
+      }), { status: 200, headers: publicHeaders })
     }
 
     if (request.method !== 'GET' || (url.pathname !== '/api/status' && url.pathname !== '/api/uptime')) {

@@ -428,7 +428,34 @@ export function usePolling() {
 // ── Status Change Detection + Webhook Alerts ──
 
 const ALERT_COOLDOWN_MS = 5 * 60_000
-const alertCooldowns = new Map()
+const COOLDOWN_STORAGE_KEY = 'aiwatch-alert-cooldowns'
+
+// Persistent cooldowns across tabs and page reloads
+function getCooldowns() {
+  try {
+    const raw = localStorage.getItem(COOLDOWN_STORAGE_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch { return {} }
+}
+
+function setCooldown(key) {
+  try {
+    const cooldowns = getCooldowns()
+    cooldowns[key] = Date.now()
+    // Prune old entries (> 10 min)
+    const now = Date.now()
+    for (const k of Object.keys(cooldowns)) {
+      if (now - cooldowns[k] > ALERT_COOLDOWN_MS * 2) delete cooldowns[k]
+    }
+    localStorage.setItem(COOLDOWN_STORAGE_KEY, JSON.stringify(cooldowns))
+  } catch { /* ignore */ }
+}
+
+function isInCooldown(key) {
+  const cooldowns = getCooldowns()
+  const last = cooldowns[key]
+  return last && Date.now() - last < ALERT_COOLDOWN_MS
+}
 
 function detectStatusChanges(prev, current) {
   if (!prev || prev.length === 0) return
@@ -462,9 +489,8 @@ function detectStatusChanges(prev, current) {
 
     // Cooldown check
     const cooldownKey = `${svc.id}:${svc.status}`
-    const lastAlert = alertCooldowns.get(cooldownKey)
-    if (lastAlert && Date.now() - lastAlert < ALERT_COOLDOWN_MS) continue
-    alertCooldowns.set(cooldownKey, Date.now())
+    if (isInCooldown(cooldownKey)) continue
+    setCooldown(cooldownKey)
 
     // Send alerts
     const isRecovery = svc.status === 'operational'
@@ -568,9 +594,8 @@ function detectIncidentChanges(services) {
       if (!prevInc) {
         // Cooldown
         const cooldownKey = `inc:${incId}`
-        const last = alertCooldowns.get(cooldownKey)
-        if (last && Date.now() - last < ALERT_COOLDOWN_MS) continue
-        alertCooldowns.set(cooldownKey, Date.now())
+        if (isInCooldown(cooldownKey)) continue
+        setCooldown(cooldownKey)
 
         const siteUrl = `https://ai-watch.dev/#${svc.id}`
 
@@ -606,9 +631,8 @@ function detectIncidentChanges(services) {
       // Incident resolved
       if (prevInc && prevInc.status !== 'resolved' && incData.status === 'resolved') {
         const cooldownKey = `inc-resolve:${incId}`
-        const last = alertCooldowns.get(cooldownKey)
-        if (last && Date.now() - last < ALERT_COOLDOWN_MS) continue
-        alertCooldowns.set(cooldownKey, Date.now())
+        if (isInCooldown(cooldownKey)) continue
+        setCooldown(cooldownKey)
 
         const siteUrl = `https://ai-watch.dev/#${svc.id}`
         const durationText = incData.duration ? ` (${incData.duration})` : ''
@@ -647,9 +671,8 @@ function detectIncidentChanges(services) {
     for (const [incId, prevInc] of Object.entries(prev)) {
       if (!curr[incId] && prevInc.status !== 'resolved') {
         const cooldownKey = `inc-resolve:${incId}`
-        const last = alertCooldowns.get(cooldownKey)
-        if (last && Date.now() - last < ALERT_COOLDOWN_MS) continue
-        alertCooldowns.set(cooldownKey, Date.now())
+        if (isInCooldown(cooldownKey)) continue
+        setCooldown(cooldownKey)
 
         const siteUrl = `https://ai-watch.dev/#${svc.id}`
 
