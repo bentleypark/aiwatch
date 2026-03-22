@@ -490,7 +490,7 @@ export default function ServiceDetails({ serviceId }) {
         <div style={{ padding: '16px' }}>
           <div className="flex items-center gap-3" style={{ marginBottom: '12px' }}>
             <img src={`${(import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')}/badge/${service.id}`} alt={`${service.name} status`} height="20" />
-            <img src={`${(import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')}/badge/${service.id}?uptime=true`} alt={`${service.name} uptime`} height="20" />
+            {service.uptime30d != null && <img src={`${(import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')}/badge/${service.id}?uptime=true`} alt={`${service.name} uptime`} height="20" />}
           </div>
           <BadgeCode serviceId={service.id} serviceName={service.name} t={t} />
         </div>
