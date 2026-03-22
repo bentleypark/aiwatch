@@ -210,27 +210,18 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
         </div>
       </div>
 
-      {/* ── Filtered service list ── */}
+      {/* ── Filtered service list (unified, divider between non-agent/agent in All tab) ── */}
       <nav className="overflow-y-auto" style={{ padding: '0 12px' }}>
         {categoryServices.filter((s) => s.category !== 'agent').map((svc) => (
           <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} onNavigate={onNavigate} />
         ))}
+        {categoryFilter === 'all' && categoryServices.some((s) => s.category === 'agent') && (
+          <div style={{ height: '1px', background: 'var(--border)', margin: '6px 0' }} />
+        )}
+        {categoryServices.filter((s) => s.category === 'agent').map((svc) => (
+          <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} onNavigate={onNavigate} />
+        ))}
       </nav>
-
-      {/* ── Coding Agents section (shown when 'all' or 'agents' filter) ── */}
-      {categoryServices.some((s) => s.category === 'agent') && (
-        <>
-          <div style={{ height: '1px', background: 'var(--border)', margin: '8px 12px' }} />
-          <div style={{ padding: '0 12px', marginBottom: '0' }}>
-            <div style={sectionTitleStyle}>{t('nav.agents')}</div>
-          </div>
-          <nav className="overflow-y-auto" style={{ padding: '0 12px' }}>
-            {categoryServices.filter((s) => s.category === 'agent').map((svc) => (
-              <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} onNavigate={onNavigate} />
-            ))}
-          </nav>
-        </>
-      )}
 
       {/* ── Footer ── */}
       <div className="mt-auto">
