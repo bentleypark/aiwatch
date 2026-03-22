@@ -183,7 +183,10 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
 
       return {
         ...base,
-        status: normalizeStatus(summaryData.status?.indicator ?? 'none'),
+        // Use per-component status when available (prevents one degraded component from affecting all)
+        status: config.statusComponent
+          ? normalizeStatus(summaryData.components?.find((c) => c.name.startsWith(config.statusComponent))?.status ?? summaryData.status?.indicator ?? 'none')
+          : normalizeStatus(summaryData.status?.indicator ?? 'none'),
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
