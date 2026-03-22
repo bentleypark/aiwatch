@@ -93,7 +93,7 @@ export default function Topbar({ onMenuToggle }) {
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="inline-flex items-center gap-1 text-[var(--text2)] hover:text-[var(--text0)] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed md:btn-topbar"
+          className="topbar-action"
           aria-label={t('topbar.refresh')}
         >
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" className={refreshing ? 'animate-spin' : ''}>
@@ -134,7 +134,7 @@ export default function Topbar({ onMenuToggle }) {
         {/* Settings — gear icon + text */}
         <button
           onClick={() => setPage({ name: 'settings' })}
-          className="inline-flex items-center gap-1 text-[var(--text2)] hover:text-[var(--text0)] transition-colors cursor-pointer md:btn-topbar"
+          className="topbar-action"
           style={{
             ...(isSettings ? { color: 'var(--green)', borderColor: 'var(--green)', background: 'var(--bg3)' } : {}),
           }}

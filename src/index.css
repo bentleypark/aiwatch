@@ -124,6 +124,30 @@ pre,
 .btn-topbar:hover { background: var(--bg3); color: var(--text0); }
 .btn-topbar:disabled, .btn-topbar[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
 
+/* Topbar action: borderless icon on mobile, btn-topbar on desktop */
+.topbar-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text2);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.topbar-action:hover { color: var(--text0); }
+.topbar-action:disabled { opacity: 0.5; cursor: not-allowed; }
+@media (min-width: 768px) {
+  .topbar-action {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 5px 12px;
+    border-radius: 5px;
+    border: 1px solid var(--border-hi);
+    background: transparent;
+    letter-spacing: 0.3px;
+  }
+  .topbar-action:hover { background: var(--bg3); }
+}
+
 .btn-topbar-disabled {
   font-family: var(--font-mono);
   font-size: 11px;
