@@ -104,6 +104,11 @@ No React Router. A top-level `currentPage` state in `App.jsx` determines which p
 - Phase 3 features (AI Analysis) are UI-disabled with "Coming soon" labels — do not remove these placeholders
 - Status polling proxy: `worker/` directory (monorepo), Cloudflare Workers
   - `cd worker && npm run dev` — local dev (port 8787)
+  - **Worker 배포 규칙** (KV 무료 한도: 1,000 writes/day):
+    1. 개발 중 → `npx wrangler dev --config worker/wrangler.toml --port 8788` (로컬 테스트만, 절대 배포하지 않음)
+    2. 배포 전 → `npx wrangler deploy --config worker/wrangler.toml --dry-run` (빌드 확인)
+    3. 배포 → 커밋 완료 + 사용자 승인 후 **1회만** `npm run deploy:worker`
+    4. 반복 배포 금지 — Worker 배포마다 isolate가 리셋되어 KV write throttle이 초기화됨
   - **IMPORTANT**: Always use the npm script to deploy the worker — never run `wrangler deploy` or `cd worker && wrangler deploy` directly (both pick up the wrong config and deploy the SPA):
     ```
     npm run deploy:worker
