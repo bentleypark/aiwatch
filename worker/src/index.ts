@@ -239,6 +239,41 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
   }
 }
 
+// ── SVG Badge Generator (shields.io style) ──
+
+function generateBadgeSvg(label: string, status: string, color: string, style: string): string {
+  // Approximate text width: 6.5px per character + padding
+  const labelWidth = Math.round(label.length * 6.5 + 12)
+  const statusWidth = Math.round(status.length * 6.5 + 12)
+  const totalWidth = labelWidth + statusWidth
+  const radius = style === 'flat-square' ? '0' : '3'
+  const safeLabel = escapeXml(label)
+  const safeStatus = escapeXml(status)
+  const safeColor = /^#[0-9a-fA-F]{3,8}$/.test(color) ? color : '#9e9e9e'
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="20" role="img" aria-label="${safeLabel}: ${safeStatus}">
+  <title>${safeLabel}: ${safeStatus}</title>
+  <linearGradient id="s" x2="0" y2="100%">
+    <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+    <stop offset="1" stop-opacity=".1"/>
+  </linearGradient>
+  <clipPath id="r"><rect width="${totalWidth}" height="20" rx="${radius}" fill="#fff"/></clipPath>
+  <g clip-path="url(#r)">
+    <rect width="${labelWidth}" height="20" fill="#555"/>
+    <rect x="${labelWidth}" width="${statusWidth}" height="20" fill="${safeColor}"/>
+    <rect width="${totalWidth}" height="20" fill="url(#s)"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="11">
+    <text x="${labelWidth / 2}" y="14">${safeLabel}</text>
+    <text x="${labelWidth + statusWidth / 2}" y="14">${safeStatus}</text>
+  </g>
+</svg>`
+}
+
+function escapeXml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
@@ -302,6 +337,54 @@ export default {
           status: 500, headers: { ...cors, 'Content-Type': 'application/json' },
         })
       }
+    }
+
+    // GET /badge/:serviceId — dynamic SVG status badge
+    if (request.method === 'GET' && url.pathname.startsWith('/badge/')) {
+      const serviceId = url.pathname.split('/')[2] ?? ''
+      if (!/^[a-z0-9_-]+$/i.test(serviceId)) {
+        return new Response(generateBadgeSvg('error', 'invalid id', '#9e9e9e', 'flat'), {
+          status: 400,
+          headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=60', 'Access-Control-Allow-Origin': '*' },
+        })
+      }
+      const showUptime = url.searchParams.get('uptime') === 'true'
+      const style = url.searchParams.get('style') === 'flat-square' ? 'flat-square' : 'flat'
+      const customLabel = url.searchParams.get('label')
+
+      // Read cached services from KV
+      let service: { name: string; status: string; uptime30d?: number | null } | null = null
+      if (env.STATUS_CACHE) {
+        const cached = await cacheRead(env.STATUS_CACHE)
+        if (cached) {
+          service = cached.services.find((s) => s.id === serviceId) ?? null
+        }
+      }
+
+      if (!service) {
+        return new Response(generateBadgeSvg(customLabel ?? serviceId, 'not found', '#9e9e9e', style), {
+          status: 404,
+          headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=60', 'Access-Control-Allow-Origin': '*' },
+        })
+      }
+
+      const label = customLabel ?? service.name
+      const statusColor = service.status === 'operational' ? '#3fb950'
+        : service.status === 'degraded' ? '#d29922'
+        : '#f85149'
+      let statusText = service.status
+      if (showUptime && service.uptime30d != null) {
+        statusText = `${service.uptime30d.toFixed(2)}%`
+      }
+
+      return new Response(generateBadgeSvg(label, statusText, statusColor, style), {
+        status: 200,
+        headers: {
+          'Content-Type': 'image/svg+xml',
+          'Cache-Control': 'public, max-age=60',
+          'Access-Control-Allow-Origin': '*',
+        },
+      })
     }
 
     if (request.method !== 'GET' || (url.pathname !== '/api/status' && url.pathname !== '/api/uptime')) {
