@@ -228,7 +228,7 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
         <div style={{ height: '1px', background: 'var(--border)', margin: '8px 12px' }} />
         <div style={{ padding: '0 12px' }}>
           <div className="text-[var(--text2)]" style={{ padding: '6px 8px', letterSpacing: '0.06em', fontSize: '9px' }}>
-            {t('sidebar.footer')}
+            aiwatch.dev · v{__APP_VERSION__}
           </div>
         </div>
       </div>

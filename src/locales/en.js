@@ -12,7 +12,7 @@ const en = {
   'nav.dashboard': 'Dashboard',
   'nav.services': 'Services',
   'nav.agents': 'Coding Agents',
-  'sidebar.footer': 'aiwatch.dev · v1.0',
+  // sidebar.footer removed — version now dynamic via __APP_VERSION__
 
   // Topbar
   'topbar.live': 'LIVE',

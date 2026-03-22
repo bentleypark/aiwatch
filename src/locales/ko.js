@@ -12,7 +12,7 @@ const ko = {
   'nav.dashboard': '대시보드',
   'nav.services': '서비스',
   'nav.agents': '코딩 에이전트',
-  'sidebar.footer': 'aiwatch.dev · v1.0',
+  // sidebar.footer removed — version now dynamic via __APP_VERSION__
 
   // Topbar
   'topbar.live': 'LIVE',

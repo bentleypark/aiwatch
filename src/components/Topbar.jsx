@@ -2,10 +2,12 @@ import { useCallback } from 'react'
 import { usePage } from '../utils/pageContext'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
+import { useGitHubStars } from '../hooks/useGitHubStars'
 import { formatTime } from '../utils/time'
 import { trackEvent } from '../utils/analytics'
 
-const VERSION = 'v1.0.0'
+const VERSION = `v${__APP_VERSION__}`
+const GITHUB_URL = 'https://github.com/bentleypark/aiwatch'
 
 function GearIcon() {
   return (
@@ -31,6 +33,7 @@ export default function Topbar({ onMenuToggle }) {
   const { page, setPage } = usePage()
   const { lang, t } = useLang()
   const { lastUpdated, refresh, refreshing } = usePolling()
+  const stars = useGitHubStars()
   const isSettings = page.name === 'settings'
 
   const handleRefresh = useCallback(() => {
@@ -74,6 +77,16 @@ export default function Topbar({ onMenuToggle }) {
       {/* Right: actions */}
       <div className="flex items-center gap-2">
         <span className="hidden md:inline mono text-[10px] text-[var(--text2)]">{VERSION}</span>
+
+        <a
+          href={GITHUB_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 mono text-[10px] text-[var(--text2)] hover:text-[var(--text0)] transition-colors"
+          onClick={() => trackEvent('click_github_header')}
+        >
+          <span className="hidden md:inline">GitHub</span> {stars != null && stars >= 100 ? `★ ${stars}` : '↗'}
+        </a>
 
         <button
           onClick={handleRefresh}
