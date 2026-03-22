@@ -54,7 +54,7 @@ export default function Topbar({ onMenuToggle }) {
           <HamburgerIcon />
         </button>
 
-        <a href="/" className="flex items-center gap-2.5 no-underline" onClick={(e) => { e.preventDefault(); window.location.reload() }}>
+        <a href="/" className="flex items-center gap-2.5 no-underline" onClick={(e) => { e.preventDefault(); window.location.href = window.location.pathname }}>
           <div className="w-[26px] h-[26px] bg-[var(--green)] rounded-[6px] flex items-center justify-center">
             <span className="w-2.5 h-2.5 border-2 border-[var(--bg0)] rounded-full" />
           </div>
