@@ -136,6 +136,11 @@ export default function Settings() {
     const slaNum = sla === '' ? DEFAULT_SETTINGS.sla : Number(sla)
     save({ period, sla: slaNum, enabledServices, slackUrl, discordUrl, alertCondition, alertTarget, alertServices, alertIncidents })
     trackEvent('save_settings')
+    // Track webhook registration/removal for operational metrics
+    if (discordUrl && !settings.discordUrl) trackEvent('webhook_register', { type: 'discord' })
+    if (!discordUrl && settings.discordUrl) trackEvent('webhook_remove', { type: 'discord' })
+    if (slackUrl && !settings.slackUrl) trackEvent('webhook_register', { type: 'slack' })
+    if (!slackUrl && settings.slackUrl) trackEvent('webhook_remove', { type: 'slack' })
     setSaved(true)
     clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => setSaved(false), 1800)
