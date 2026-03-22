@@ -158,8 +158,8 @@ npm run dev:worker   # Worker dev server (localhost:8788)
 npm run dev:all      # Both simultaneously
 npm run build        # Production build → dist/
 npm run lint         # ESLint
-npm test             # Playwright E2E tests (27 specs)
-npm run test:worker  # Worker parser unit tests (65 specs, vitest)
+npm test             # Playwright E2E tests
+npm run test:worker  # Worker unit tests (vitest)
 
 # Worker deployment
 npm run deploy:worker  # Deploy to Cloudflare (use npm script only)
@@ -255,7 +255,7 @@ worker/
       gcloud.ts       # Google Cloud (1 service)
       instatus.ts     # Instatus (2 services)
       betterstack.ts  # Better Stack (3 services)
-    parsers/__tests__/ # Vitest unit tests (65 specs)
+    parsers/__tests__/ # Vitest unit tests
 ```
 
 ## Contributing
@@ -276,7 +276,7 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for detailed guidelines.
 ### Pull Requests
 
 - One feature or fix per PR
-- All tests must pass (27 E2E + 65 unit = 92 specs)
+- All tests must pass (`npm test` + `npm run test:worker`)
 - Include `closes #N` in commit messages
 - Fill out the PR checklist
 

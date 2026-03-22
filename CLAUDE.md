@@ -14,8 +14,8 @@ npm run lint       # Run ESLint
 ```
 
 ```bash
-npm test           # Run Playwright E2E tests (27 specs)
-npm run test:worker # Run Worker unit tests (106 specs, vitest)
+npm test           # Run Playwright E2E tests
+npm run test:worker # Run Worker unit tests (vitest)
 ```
 
 ## Development Workflow
