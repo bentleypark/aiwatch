@@ -46,6 +46,11 @@ npm run test:worker # Run Worker unit tests (vitest)
 
 > Never close an issue immediately after committing. Always re-read the issue checklist and verify each item against the code first.
 
+### Debugging rules
+- Before writing any fix, read all relevant code and identify the root cause
+- Propose ONE fix approach with reasoning — do not shotgun multiple approaches
+- Wait for user confirmation before implementing the fix
+
 ## Architecture
 
 **AIWatch** is a React SPA that monitors 19 AI services in real time:
