@@ -91,7 +91,7 @@ function UptimeBar({ service, sla }) {
         {hasUptime ? `${uptime.toFixed(2)}%` : '—'}
       </span>
       <span className="w-8 shrink-0 text-right text-[9px] mono text-[var(--text2)]">
-        {service.uptimeSource === 'official' ? 'OFF' : 'EST'}
+        {service.uptimeSource === 'official' ? 'OFF' : service.uptimeSource === 'platform_avg' ? 'AVG' : service.uptimeSource === 'estimate' ? 'EST' : ''}
       </span>
     </div>
   )
@@ -119,7 +119,7 @@ function MatrixCell({ uptime }) {
 
 export default function Uptime() {
   const { t, lang } = useLang()
-  const { services: rawServices, loading, error, uptimeDays } = usePolling()
+  const { services: rawServices, loading, error } = usePolling()
   const services = rawServices ?? []
 
   const sortedByUptime = useMemo(
@@ -154,7 +154,7 @@ export default function Uptime() {
           {t('nav.uptime')}
         </h2>
         <span className="mono text-[10px] text-[var(--text2)]">
-          {uptimeDays > 0 ? `${Math.min(uptimeDays, 30)}${t('settings.period.suffix')} ${t('uptime.basis.suffix')}` : t('uptime.collecting')}
+          {hasUptimeData ? t('uptime.basis') : t('uptime.collecting')}
         </span>
       </div>
 

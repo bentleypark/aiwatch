@@ -244,25 +244,6 @@ export default {
         ctx.waitUntil(cacheWrite(env.STATUS_CACHE, raw))
       }
 
-      // Compute uptime: official sources already set uptime30d in fetchService.
-      // For estimate-only services, use accumulated daily counters (up to 30 days).
-      let uptimeDays = 0
-      if (env.STATUS_CACHE) {
-        const history = await readUptimeHistory(env.STATUS_CACHE, 30)
-        uptimeDays = Object.keys(history).length
-        if (uptimeDays > 0) {
-          const uptimeMap = computeUptime(history)
-          enriched.forEach((s) => {
-            // Only apply KV-based uptime for services that have no uptime set yet
-            // (official and incident-based estimate already set in fetchService)
-            if (!s.uptimeSource && uptimeMap[s.id] != null) {
-              s.uptime30d = uptimeMap[s.id]
-              s.uptimeSource = 'estimate'
-            }
-          })
-        }
-      }
-
       // Alert if any services are down
       const downServices = enriched.filter((s) => s.status === 'down')
       if (downServices.length > 0) {
@@ -272,7 +253,6 @@ export default {
       return new Response(JSON.stringify({
         services: enriched,
         lastUpdated: new Date().toISOString(),
-        uptimeDays, // number of days with collected data (0-30)
       }), {
         status: 200,
         headers: {

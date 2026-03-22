@@ -2,7 +2,7 @@
 // Receives serviceId prop from App.jsx (page.serviceId).
 // Shows header, 4 metric cards, incident history, 30-day status calendar.
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
@@ -67,9 +67,9 @@ const CALENDAR_CLASS = {
   down:           'bg-[var(--red)]',
 }
 
-// Compute calendar date label for index i (0 = 29 days ago, 29 = today)
-function calendarDate(i, lang) {
-  const d = new Date(Date.now() - (29 - i) * 86_400_000)
+// Compute calendar date label for index i (0 = oldest, last = today)
+function calendarDate(i, lang, days = 30) {
+  const d = new Date(Date.now() - (days - 1 - i) * 86_400_000)
   return new Intl.DateTimeFormat(lang === 'ko' ? 'ko-KR' : 'en-US', {
     month: 'short',
     day: 'numeric',
@@ -169,6 +169,15 @@ function CalendarCell({ status, date }) {
   const [hovered, setHovered] = useState(false)
   const bgCls = CALENDAR_CLASS[status] ?? 'bg-[var(--bg3)]'
   const opacity = CALENDAR_OPACITY[status] ?? 1
+
+  // Dismiss tooltip on scroll to prevent stale fixed positioning
+  useEffect(() => {
+    if (!hovered) return
+    const dismiss = () => setHovered(false)
+    window.addEventListener('scroll', dismiss, { passive: true, capture: true })
+    return () => window.removeEventListener('scroll', dismiss, { capture: true })
+  }, [hovered])
+
   return (
     <div className="relative">
       <div
@@ -179,9 +188,19 @@ function CalendarCell({ status, date }) {
         aria-label={`${date}: ${status}`}
       />
       {hovered && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-10
-                        bg-[var(--bg4)] border border-[var(--border)] rounded px-2 py-1
-                        text-[10px] mono text-[var(--text1)] whitespace-nowrap pointer-events-none">
+        <div className="fixed z-50 bg-[var(--bg4)] border border-[var(--border)] rounded px-2 py-1
+                        text-[10px] mono text-[var(--text1)] whitespace-nowrap pointer-events-none"
+             style={{ transform: 'translate(-50%, -100%)', marginTop: '-6px' }}
+             ref={(el) => {
+               if (el) {
+                 const parent = el.previousElementSibling
+                 if (parent) {
+                   const r = parent.getBoundingClientRect()
+                   el.style.left = `${r.left + r.width / 2}px`
+                   el.style.top = `${r.top}px`
+                 }
+               }
+             }}>
           {date} — {status}
         </div>
       )}
@@ -194,13 +213,14 @@ function CalendarCell({ status, date }) {
 export default function ServiceDetails({ serviceId }) {
   const { t, lang } = useLang()
   const { setPage } = usePage()
-  const { services: rawServices, loading, error, uptimeDays } = usePolling()
+  const { services: rawServices, loading, error } = usePolling()
   const services = rawServices ?? []
 
   // useMemo must be called before any early returns (Rules of Hooks)
   const mttr = useMemo(() => {
     const svc = services.find((s) => s.id === serviceId)
-    const resolved = (svc?.incidents ?? []).filter((i) => i.status === 'resolved' && i.duration)
+    const cutoff = Date.now() - 7 * 86_400_000
+    const resolved = (svc?.incidents ?? []).filter((i) => i.status === 'resolved' && i.duration && i.duration !== '0m' && new Date(i.startedAt).getTime() >= cutoff)
     if (resolved.length === 0) return null
     const totalMinutes = resolved.reduce((sum, i) => {
       const m = i.duration.match(/(?:(\d+)h\s*)?(\d+)m/)
@@ -229,7 +249,8 @@ export default function ServiceDetails({ serviceId }) {
     (inc) => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= cutoff7d
   )
   const incidentCount = recentIncidents.length
-  const calendar30d = buildCalendarFromIncidents(service.incidents, service.dailyImpact)
+  const calendarDays = service.calendarDays ?? 14
+  const calendarData = buildCalendarFromIncidents(service.incidents, service.dailyImpact, calendarDays)
 
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>
@@ -278,9 +299,9 @@ export default function ServiceDetails({ serviceId }) {
           colorClass="text-[var(--blue)]"
         />
         <MetricCard
-          label={service.uptimeSource === 'official' ? t('uptime.label.official') : (uptimeDays > 0 ? `${Math.min(uptimeDays, 30)}${t('settings.period.suffix')} Uptime` : t('svc.uptime30d'))}
+          label={t({ official: 'uptime.label.official', platform_avg: 'uptime.label.platform_avg', estimate: 'uptime.label.estimate' }[service.uptimeSource] ?? 'svc.uptime30d')}
           value={service.uptime30d != null ? `${service.uptime30d.toFixed(2)}%` : '—'}
-          sub={service.uptimeSource === 'official' ? t('uptime.sub.official') : (service.uptime30d != null ? `${Math.min(uptimeDays, 30)}${t('settings.period.suffix')}` : t('uptime.collecting'))}
+          sub={t({ official: 'uptime.sub.official', platform_avg: 'uptime.sub.platform_avg', estimate: 'uptime.sub.estimate' }[service.uptimeSource] ?? 'uptime.collecting')}
           colorClass="text-[var(--green)]"
         />
         <MetricCard
@@ -292,7 +313,7 @@ export default function ServiceDetails({ serviceId }) {
         <MetricCard
           label={t('svc.mttr')}
           value={mttr ?? '—'}
-          sub={mttr ? `${(service.incidents ?? []).filter(i => i.status === 'resolved').length} ${t('svc.incidents.sub')}` : t('uptime.collecting')}
+          sub={mttr ? t('svc.incidents.sub') : t('svc.mttr.none')}
           colorClass={mttr ? 'text-[var(--amber)]' : 'text-[var(--text2)]'}
         />
       </div>
@@ -333,8 +354,8 @@ export default function ServiceDetails({ serviceId }) {
           </div>
         </section>
 
-        {/* 30-Day Status Calendar */}
-        <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+        {/* Status Calendar — hidden when calendarDays is 0 (no reliable data) */}
+        {calendarDays > 0 && <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
             <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
               <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--green)' }} />
@@ -351,16 +372,16 @@ export default function ServiceDetails({ serviceId }) {
           </div>
           <div style={{ padding: '16px' }}>
             <div className="flex flex-wrap" style={{ gap: '2px' }}>
-              {calendar30d.map((status, i) => (
-                <CalendarCell key={i} status={status} date={calendarDate(i, lang)} />
+              {calendarData.map((status, i) => (
+                <CalendarCell key={i} status={status} date={calendarDate(i, lang, calendarDays)} />
               ))}
             </div>
             <div className="flex justify-between mono text-[9px] text-[var(--text2)]" style={{ marginTop: '6px' }}>
-              <span>{t('svc.cal.ago')}</span>
+              <span>{calendarDays}{t('settings.period.suffix')} {t('svc.cal.ago.suffix')}</span>
               <span>{t('svc.cal.today')}</span>
             </div>
           </div>
-        </section>
+        </section>}
 
       </div>
 

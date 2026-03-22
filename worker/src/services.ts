@@ -29,7 +29,8 @@ export interface ServiceStatus {
   lastChecked: string
   incidents: Incident[]
   dailyImpact?: Record<string, 'minor' | 'major' | 'critical'>
-  uptimeSource?: 'official' | 'estimate'
+  calendarDays?: number  // 30 for Statuspage (accurate), 14 for incident.io (API limit)
+  uptimeSource?: 'official' | 'platform_avg' | 'estimate'  // official=Statuspage/incident.io, platform_avg=Better Stack avg, estimate=incident duration
 }
 
 // ── Status Page Configs ──
@@ -43,6 +44,7 @@ interface ServiceConfig {
   apiUrl: string | null  // Atlassian Statuspage API endpoint if available
   instatusUrl?: string   // Instatus (Nuxt SSR) incidents page URL
   gcloudProduct?: string // Google Cloud product name filter for incidents.json
+  gcloudProductId?: string // Google Cloud product ID for more precise filtering
   rssFeedUrl?: string    // Better Stack RSS feed URL for incidents
   incidentKeywords?: string[]  // Only show incidents matching these keywords (case-insensitive)
   incidentExclude?: string[]   // Exclude incidents matching these keywords
@@ -56,8 +58,8 @@ interface ServiceConfig {
 const SERVICES: ServiceConfig[] = [
   // AI API Services
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp' },
-  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW' },
-  { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API' },
+  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'conversation', 'workspaces', 'logged out', 'codex', 'support chat'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW' },
+  { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B' },
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE' },
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM' },
@@ -65,9 +67,9 @@ const SERVICES: ServiceConfig[] = [
   { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com' },
   { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed', betterStackUrl: 'https://status.huggingface.co' },
   { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: '01JRJYHBWCXHFZ0NHMP1N7T2G3' },
-  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P' },
+  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['sip', 'webpage'] },
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'] },
-  { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://status.deepseek.com/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x' },
+  { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://status.deepseek.com/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x', incidentKeywords: ['api'] },
   // AI Web Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'webapp', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned'], incidentIoBaseUrl: 'https://status.openai.com/incidents', statusComponent: 'ChatGPT', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG' },
@@ -297,9 +299,10 @@ interface GCloudIncident {
   updates?: Array<{ status: string; when: string; text: string }>
 }
 
-function parseGCloudIncidents(data: GCloudIncident[], productFilter: string): Incident[] {
+function parseGCloudIncidents(data: GCloudIncident[], productFilter: string, productId?: string): Incident[] {
   return data
     .filter((inc) =>
+      (productId && inc.affected_products?.some((p) => p.id === productId)) ||
       inc.affected_products?.some((p) => p.title === productFilter) ||
       inc.service_name?.toLowerCase().includes(productFilter.toLowerCase())
     )
@@ -580,12 +583,14 @@ function parseIncidentIoComponentImpacts(html: string, componentId: string): Rec
       const impacts = JSON.parse(raw) as Array<{
         component_id: string; start_at: string; end_at: string; status: string
       }>
-      // Filter for target component
+      // Filter by target component for Phase 1 accuracy; Phase 2 (incidents) fills in other components
       const mine = impacts.filter((i) => i.component_id === componentId)
       for (const impact of mine) {
         const start = new Date(impact.start_at)
         const end = new Date(impact.end_at)
         if (isNaN(start.getTime()) || isNaN(end.getTime())) continue
+        // Skip impacts shorter than 10 minutes (matches official calendar threshold)
+        if (end.getTime() - start.getTime() < 600_000) continue
 
         // Map status to DailyImpactLevel
         const level: DailyImpactLevel =
@@ -1104,6 +1109,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
+        calendarDays: config.statusComponentId ? 30 : 14,
         ...(uptimeValue != null ? { uptime30d: uptimeValue, uptimeSource: uptimeSrc } : {}),
       }
     } else {
@@ -1139,7 +1145,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
             : parseRssIncidents(rssText)
         } else if (config.gcloudProduct) {
           const data: GCloudIncident[] = await scrapeRes.json()
-          incidents = parseGCloudIncidents(data, config.gcloudProduct)
+          incidents = parseGCloudIncidents(data, config.gcloudProduct, config.gcloudProductId)
         }
       }
 
@@ -1154,13 +1160,19 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         }
       }
 
+      const filtered = filterIncidents(incidents, config)
+      // For GCloud services: use ongoing incidents (unresolved) to determine status
+      // instead of HTTP check against the generic status.cloud.google.com page
+      const hasOngoing = config.gcloudProduct && filtered.some((i) => i.status !== 'resolved')
+      const httpStatus = res.ok || res.status === 403 ? 'operational' : 'degraded'
+
       return {
         ...base,
-        // 2xx = operational; 403 (bot protection) = treat as operational; other errors = degraded
-        status: res.ok || res.status === 403 ? 'operational' : 'degraded',
+        status: hasOngoing ? 'degraded' : httpStatus,
         latency: config.category === 'api' ? latency : null,
-        incidents: filterIncidents(incidents, config),
-        ...(betterStackUptime != null ? { uptime30d: betterStackUptime, uptimeSource: 'official' as const } : {}),
+        incidents: filtered,
+        calendarDays: 14,
+        ...(betterStackUptime != null ? { uptime30d: betterStackUptime, uptimeSource: 'platform_avg' as const } : {}),
       }
     }
   } catch (err) {

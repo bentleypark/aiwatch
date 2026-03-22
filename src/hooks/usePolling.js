@@ -432,7 +432,6 @@ function usePollingInternal() {
     refreshing: false,
     error: null,
     lastUpdated: null,
-    uptimeDays: 0, // number of days with collected uptime data
   })
   const cancelledRef = useRef(false)
   const controllerRef = useRef(null)
@@ -495,7 +494,6 @@ function usePollingInternal() {
           refreshing: false,
           error: null,
           lastUpdated: new Date(data.lastUpdated),
-          uptimeDays: data.uptimeDays ?? 0,
         })
       }
     } catch (err) {
@@ -543,7 +541,6 @@ function usePollingInternal() {
           refreshing: false,
           error: err instanceof TypeError ? null : err,
           lastUpdated: new Date(),
-          uptimeDays: 0,
         })
       }
     }

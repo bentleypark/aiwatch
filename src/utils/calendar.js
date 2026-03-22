@@ -1,12 +1,11 @@
-// Build 30-day status calendar from service data
-// Uses UTC dates consistently to match Statuspage uptimeData and provide
-// deterministic behavior across timezones.
-// Returns array of 30 statuses matching 5-level calendar:
+// Build status calendar from service data
+// Uses local dates to match how official status pages display dates to users.
+// Returns array of N statuses (default 30, incident.io services use 14):
 //   'down'               — red: full/major outage
 //   'degraded'           — orange: partial outage
 //   'degraded_perf'      — yellow: degraded performance (minor impact)
 //   'operational'        — green: no incidents
-// Index 0 = 29 days ago, index 29 = today
+// Index 0 = oldest, last index = today
 
 const STATUS_RANK = { operational: 0, degraded_perf: 1, degraded: 2, down: 3 }
 
@@ -16,38 +15,50 @@ function escalate(dayStatus, key, status) {
   }
 }
 
-export function buildCalendarFromIncidents(incidents, dailyImpact) {
+// Convert Date to local YYYY-MM-DD string
+function toLocalDateKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30) {
   const today = new Date()
   const dayStatus = {}
 
-  // Phase 1: Apply dailyImpact (Statuspage uptimeData — keys are UTC dates)
+  // Phase 1: Apply dailyImpact (keys are UTC dates from Worker — remap to local)
   if (dailyImpact) {
     const impactToStatus = { critical: 'down', major: 'degraded', minor: 'degraded_perf' }
     for (const [utcDay, impact] of Object.entries(dailyImpact)) {
       const status = impactToStatus[impact]
-      if (status) escalate(dayStatus, utcDay, status)
+      if (!status) continue
+      // UTC date key → local date key (may shift ±1 day depending on timezone)
+      const localKey = toLocalDateKey(new Date(utcDay + 'T12:00:00Z'))
+      escalate(dayStatus, localKey, status)
     }
   }
 
-  // Phase 2: Apply per-incident data (non-Statuspage services without dailyImpact)
-  if (!dailyImpact) {
+  // Phase 2: Apply per-incident data.
+  // Statuspage (30-day, dailyImpact from uptimeData): skip — Phase 1 is 100% accurate,
+  // adding incidents would introduce noise from unrelated components.
+  // incident.io (14-day) and others: supplement Phase 1 with keyword-filtered incidents.
+  if (!(dailyImpact && days === 30)) {
     ;(incidents ?? []).forEach((inc) => {
       if (!inc.startedAt) return
-      const key = new Date(inc.startedAt).toISOString().split('T')[0]
+      const key = toLocalDateKey(new Date(inc.startedAt))
       if (inc.status !== 'resolved') {
         escalate(dayStatus, key, 'down')
       } else if (inc.impact === 'critical') {
         escalate(dayStatus, key, 'down')
       } else if (inc.impact === 'major') {
         escalate(dayStatus, key, 'degraded')
-      } else if (inc.impact === 'minor') {
+      } else {
+        // minor, null, or unknown impact — show as degraded_perf (yellow)
         escalate(dayStatus, key, 'degraded_perf')
       }
     })
   }
 
-  return Array.from({ length: 30 }, (_, i) => {
-    const key = new Date(today.getTime() - (29 - i) * 86_400_000).toISOString().split('T')[0]
-    return dayStatus[key] ?? 'operational'
+  return Array.from({ length: days }, (_, i) => {
+    const d = new Date(today.getTime() - (days - 1 - i) * 86_400_000)
+    return dayStatus[toLocalDateKey(d)] ?? 'operational'
   })
 }
