@@ -343,7 +343,7 @@ async function detectAndAlertIncidents(
   // If Discord send fails, the key expires in 1h and the alert retries next cycle.
   for (const alert of deduped) {
     try {
-      await env.STATUS_CACHE.put(alert.key, '1', { expirationTtl: 3600 })
+      await env.STATUS_CACHE.put(alert.key, '1', { expirationTtl: 86400 })
     } catch (err) {
       console.error('[incident-detect] dedup marker write failed:', alert.key, err instanceof Error ? err.message : err)
     }
