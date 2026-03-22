@@ -1161,9 +1161,9 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       }
 
       const filtered = filterIncidents(incidents, config)
-      // For GCloud services: use ongoing incidents (unresolved) to determine status
-      // instead of HTTP check against the generic status.cloud.google.com page
-      const hasOngoing = config.gcloudProduct && filtered.some((i) => i.status !== 'resolved')
+      // Use ongoing incidents (unresolved) to determine status — more accurate than
+      // HTTP check which only tests if the status page itself is up
+      const hasOngoing = filtered.some((i) => i.status !== 'resolved')
       const httpStatus = res.ok || res.status === 403 ? 'operational' : 'degraded'
 
       return {
