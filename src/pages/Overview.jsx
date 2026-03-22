@@ -7,7 +7,7 @@ import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
-import { SCORE_BG_CLASS, SCORE_TEXT_CLASS } from '../utils/constants'
+import { SCORE_BG_CLASS } from '../utils/constants'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
@@ -16,11 +16,7 @@ import EmptyState from '../components/EmptyState'
 
 // ── Status color maps ────────────────────────────────────────
 
-const BORDER_LEFT_CLASS = {
-  operational: 'border-l-[var(--green)]',
-  degraded:    'border-l-[var(--amber)]',
-  down:        'border-l-[var(--red)]',
-}
+// Border-left now applied via inline style in ServiceCard
 
 const HISTORY_CLASS = {
   operational:    'bg-[var(--green)]',
@@ -84,7 +80,6 @@ function HistoryBars({ history30d }) {
 }
 
 function ServiceCard({ service, index, onClick, t }) {
-  const borderCls = BORDER_LEFT_CLASS[service.status] ?? BORDER_LEFT_CLASS.operational
   const incidentCount = (service.incidents ?? []).filter((i) => i.status !== 'resolved').length
   const hasUptime = service.uptime30d != null
   const uptimeColor = !hasUptime ? 'text-[var(--text2)]' : service.uptime30d >= 99 ? 'text-[var(--green)]' : service.uptime30d >= 97 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
@@ -96,9 +91,13 @@ function ServiceCard({ service, index, onClick, t }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left bg-[var(--bg1)] border border-[var(--border)] border-l-2 ${borderCls} rounded-lg
-                 hover:border-t-[var(--border-hi)] hover:border-r-[var(--border-hi)] hover:border-b-[var(--border-hi)] transition-colors animate-[fade-in_0.3s_ease_both]`}
-      style={{ padding: '14px', animationDelay: `${index * 80}ms` }}
+      className="w-full text-left bg-[var(--bg1)] border border-[var(--border)] rounded-lg
+                 hover:border-t-[var(--border-hi)] hover:border-r-[var(--border-hi)] hover:border-b-[var(--border-hi)] transition-colors animate-[fade-in_0.3s_ease_both]"
+      style={{
+        padding: '14px',
+        animationDelay: `${index * 80}ms`,
+        borderLeft: `3px solid ${service.status === 'down' ? 'var(--red)' : service.status === 'degraded' ? 'var(--amber)' : 'var(--green)'}`,
+      }}
     >
       <div className="flex justify-between items-start" style={{ marginBottom: '10px' }}>
         <div>
@@ -133,10 +132,9 @@ function ServiceCard({ service, index, onClick, t }) {
             <div className={`rounded-full ${SCORE_BG_CLASS[service.scoreGrade] ?? 'bg-[var(--bg3)]'}`}
                  style={{ height: '4px', width: `${service.aiwatchScore}%` }} />
           </div>
-          <span className={`mono text-[11px] font-medium ${SCORE_TEXT_CLASS[service.scoreGrade] ?? 'text-[var(--text2)]'}`}
-                title={t('score.tooltip')}>
-            {service.aiwatchScore}
-            {service.scoreGrade && <span className="text-[9px] ml-1 opacity-70">{service.scoreGrade}</span>}
+          <span className={`mono text-[10px] font-medium rounded ${SCORE_BG_CLASS[service.scoreGrade] ?? 'bg-[var(--bg3)]'} text-[var(--bg0)]`}
+                style={{ padding: '2px 6px' }}>
+            {service.aiwatchScore} {service.scoreGrade}
           </span>
         </div>
       )}
