@@ -10,3 +10,6 @@ ALLOWED_ORIGIN = "https://ai-watch.dev,https://www.ai-watch.dev,https://aiwatch-
 [[kv_namespaces]]
 binding = "STATUS_CACHE"
 id = "e49508d80bb144e9a7ff872f2be771a4"
+
+[triggers]
+crons = ["*/5 * * * *"]

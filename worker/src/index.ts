@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, type ServiceStatus } from './services'
 import { calculateAIWatchScore } from './score'
-import { getFallbacks, buildFallbackText } from './fallback'
+import { buildIncidentAlerts, buildServiceAlerts } from './alerts'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -152,19 +152,9 @@ function computeUptime(history: Record<string, DailyCounters>): Record<string, n
   return result
 }
 
-// ── Discord Webhook Alerts ──
+import { sanitize } from './utils'
 
-// Module-level cooldown (persists across requests within same isolate)
-const lastAlertTime = new Map<string, number>()
-const ALERT_COOLDOWN_MS = 5 * 60_000 // 5 minutes
-
-function sanitize(s: string, maxLen = 1000): string {
-  return s
-    .replace(/@(everyone|here)/g, '@\u200b$1')
-    .replace(/<@[!&]?\d+>/g, '[mention]')
-    .replace(/```/g, '\\`\\`\\`')
-    .slice(0, maxLen)
-}
+// ── Discord Webhook Alerts (Cron-based, no isolate concurrency) ──
 
 async function sendDiscordAlert(webhookUrl: string, embed: { title: string; description: string; color: number }) {
   try {
@@ -187,181 +177,77 @@ async function sendDiscordAlert(webhookUrl: string, embed: { title: string; desc
   }
 }
 
-function alertWorkerError(env: Env, error: string) {
-  if (!env.DISCORD_WEBHOOK_URL) return Promise.resolve()
-  const now = Date.now()
-  const last = lastAlertTime.get('__worker_error__')
-  if (last && now - last < ALERT_COOLDOWN_MS) return Promise.resolve()
-  lastAlertTime.set('__worker_error__', now)
-
-  return sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+async function alertWorkerError(env: Env, error: string) {
+  if (!env.DISCORD_WEBHOOK_URL || !env.STATUS_CACHE) return
+  const key = 'alerted:worker-error'
+  const existing = await env.STATUS_CACHE.get(key).catch(() => null)
+  if (existing) return
+  await env.STATUS_CACHE.put(key, '1', { expirationTtl: 300 }).catch(() => {}) // 5min cooldown
+  await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
     title: '🔴 Worker Error — API 장애',
     description: `\`fetchAllServices()\` 전체 실패\n\`\`\`${sanitize(error)}\`\`\``,
-    color: 0xED4245, // red
+    color: 0xED4245,
   })
 }
 
-function alertServicesDown(env: Env, downServices: ServiceStatus[]) {
-  if (!env.DISCORD_WEBHOOK_URL || downServices.length === 0) return Promise.resolve()
-  const now = Date.now()
-  const newDown = downServices.filter((s) => {
-    const last = lastAlertTime.get(s.id)
-    return !last || now - last > ALERT_COOLDOWN_MS
-  })
-  if (newDown.length === 0) return Promise.resolve()
-  newDown.forEach((s) => lastAlertTime.set(s.id, now))
+// ── Cron-based Alert Detection ──
+// Runs every 5 minutes via Cron Trigger (single execution, no concurrency).
+// Uses KV dedup by incident/service ID (7-day TTL) instead of state comparison.
 
-  const list = newDown.map((s) => `• **${s.name}** (${s.provider})`).join('\n')
-  return sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-    title: `🟡 ${newDown.length} service(s) down`,
-    description: list,
-    color: 0xFEE75C, // yellow
-  })
-}
-
-// ── Server-side Incident Detection ──
-// Compares current incidents against KV-stored previous state.
-// Sends Discord alerts for new incidents and resolutions.
-
-const INCIDENT_STATE_KEY = 'incident-alert-state'
-const INCIDENT_CHECK_KEY = 'incident-last-check'
-const INCIDENT_CHECK_INTERVAL_MS = 600_000 // 10 minutes
-// In-memory throttle: instant dedup within same isolate (no KV latency)
-let lastIncidentCheckMemory = 0
-
-async function detectAndAlertIncidents(
-  env: Env,
-  services: ServiceStatus[],
-): Promise<void> {
+async function cronAlertCheck(env: Env): Promise<void> {
   if (!env.DISCORD_WEBHOOK_URL || !env.STATUS_CACHE) return
 
-  const now = Date.now()
-
-  // Layer 1: in-memory throttle (same isolate — instant, no race condition)
-  if (now - lastIncidentCheckMemory < INCIDENT_CHECK_INTERVAL_MS) return
-  lastIncidentCheckMemory = now
-
-  // Layer 2: KV-based throttle (cross isolate — eventual consistency, best-effort)
-  let lastCheckStr: string | null = null
+  // Read cached service data (written by /api/status handler)
+  const raw = await env.STATUS_CACHE.get(CACHE_KEY).catch(() => null)
+  if (!raw) return
+  let services: ServiceStatus[]
   try {
-    lastCheckStr = await env.STATUS_CACHE.get(INCIDENT_CHECK_KEY)
-  } catch (err) {
-    console.error('[incident-detect] KV throttle read failed, proceeding:', err instanceof Error ? err.message : err)
-  }
-  if (lastCheckStr && now - Number(lastCheckStr) < INCIDENT_CHECK_INTERVAL_MS) return
-  await env.STATUS_CACHE.put(INCIDENT_CHECK_KEY, String(now), { expirationTtl: 3600 })
-    .catch((err) => console.error('[incident-detect] KV throttle write failed:', err instanceof Error ? err.message : err))
+    const parsed = JSON.parse(raw)
+    services = Array.isArray(parsed) ? parsed : parsed.services
+    if (!Array.isArray(services)) return
+  } catch { return }
 
-  // Read previous incident state from KV
-  let prevState: Record<string, Record<string, string>> = {} // { serviceId: { incId: status } }
-  try {
-    const raw = await env.STATUS_CACHE.get(INCIDENT_STATE_KEY)
-    if (raw) prevState = JSON.parse(raw)
-  } catch (err) {
-    console.error('[incident-detect] failed to read previous state:', err instanceof Error ? err.message : err)
-    return
-  }
+  // Calculate scores for fallback recommendations
+  const scored = services.map((svc) => {
+    const s = calculateAIWatchScore(svc)
+    return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
+  })
 
-  // Build current state
-  const currentState: Record<string, Record<string, string>> = {}
-  for (const svc of services) {
-    currentState[svc.id] = {}
+  // Collect previously alerted IDs from KV for dedup context
+  const alertedNewIds = new Set<string>()
+  const alertedDownIds = new Set<string>()
+  for (const svc of scored) {
     for (const inc of svc.incidents ?? []) {
-      currentState[svc.id][inc.id] = inc.status
+      const wasAlerted = await env.STATUS_CACHE.get(`alerted:new:${inc.id}`).catch(() => null)
+      if (wasAlerted) alertedNewIds.add(inc.id)
     }
+    const wasDown = await env.STATUS_CACHE.get(`alerted:down:${svc.id}`).catch(() => null)
+    if (wasDown) alertedDownIds.add(svc.id)
   }
 
-  // Skip on first run (no previous data)
-  if (Object.keys(prevState).length === 0) {
-    await env.STATUS_CACHE.put(INCIDENT_STATE_KEY, JSON.stringify(currentState), {
-      expirationTtl: 7 * 86400,
-    }).catch((err) => console.error('[incident-detect] first-run state save failed:', err instanceof Error ? err.message : err))
-    return
+  // Build alerts using pure functions
+  const incidentAlerts = buildIncidentAlerts(scored, alertedNewIds)
+  const serviceAlerts = buildServiceAlerts(scored, alertedDownIds)
+  const allAlerts = [...incidentAlerts, ...serviceAlerts]
+
+  // Dedup: skip alerts already sent
+  const toSend = []
+  for (const alert of allAlerts) {
+    const existing = await env.STATUS_CACHE.get(alert.key).catch(() => null)
+    if (existing) continue
+    toSend.push(alert)
   }
 
-  const alerts: Array<{ key: string; title: string; description: string; color: number; url: string }> = []
-
-  for (const svc of services) {
-    const prev = prevState[svc.id] ?? {}
-    const curr = currentState[svc.id] ?? {}
-
-    for (const inc of svc.incidents ?? []) {
-      // New incident — only alert if started within last 24 hours
-      const incAge = Date.now() - new Date(inc.startedAt).getTime()
-      if (!prev[inc.id] && incAge < 86_400_000) {
-        const fallbacks = getFallbacks(svc.id, svc.category, services)
-        const fallbackText = buildFallbackText(fallbacks)
-        alerts.push({
-          key: `inc-sent:new:${inc.id}`,
-          title: `🔴 ${svc.name} — New Incident`,
-          description: `${sanitize(inc.title)}\n${fallbackText}`,
-          color: 0xED4245,
-          url: `https://ai-watch.dev/#${svc.id}`,
-        })
-      }
-
-      // Incident resolved — only alert if started within last 24 hours
-      if (prev[inc.id] && prev[inc.id] !== 'resolved' && inc.status === 'resolved' && incAge < 86_400_000) {
-        const durationText = inc.duration ? ` (${inc.duration})` : ''
-        alerts.push({
-          key: `inc-sent:res:${inc.id}`,
-          title: `🟢 ${svc.name} — Incident Resolved${durationText}`,
-          description: sanitize(inc.title),
-          color: 0x57F287,
-          url: `https://ai-watch.dev/#${svc.id}`,
-        })
-      }
-    }
-
-    // Check for incidents that vanished (resolved and removed from status page)
-    for (const [incId, prevStatus] of Object.entries(prev)) {
-      if (prevStatus !== 'resolved' && !curr[incId]) {
-        alerts.push({
-          key: `inc-sent:res:${incId}`,
-          title: `🟢 ${svc.name} — Incident Resolved`,
-          description: '(incident removed from status page)',
-          color: 0x57F287,
-          url: `https://ai-watch.dev/#${svc.id}`,
-        })
-      }
-    }
+  // Send + mark as alerted (down: 2h TTL, incidents/recovery: 7d TTL)
+  for (const alert of toSend.slice(0, 5)) {
+    const ttl = alert.key.startsWith('alerted:down:') ? 7200 : 604800
+    await env.STATUS_CACHE.put(alert.key, '1', { expirationTtl: ttl }).catch(() => {})
+    await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+      title: alert.title,
+      description: `${alert.description}\n[View on AIWatch](${alert.url})`,
+      color: alert.color,
+    })
   }
-
-  // KV-based dedup: skip alerts already sent by another isolate
-  const deduped: typeof alerts = []
-  for (const alert of alerts.slice(0, 3)) {
-    try {
-      const existing = await env.STATUS_CACHE.get(alert.key)
-      if (existing) continue
-    } catch (err) {
-      console.error('[incident-detect] KV dedup read failed, allowing alert:', alert.key, err instanceof Error ? err.message : err)
-    }
-    deduped.push(alert)
-  }
-
-  // Mark as sent BEFORE sending to prevent duplicate sends from concurrent isolates.
-  // If Discord send fails, the key expires in 1h and the alert retries next cycle.
-  for (const alert of deduped) {
-    try {
-      await env.STATUS_CACHE.put(alert.key, '1', { expirationTtl: 86400 })
-    } catch (err) {
-      console.error('[incident-detect] dedup marker write failed:', alert.key, err instanceof Error ? err.message : err)
-    }
-  }
-  await Promise.all(
-    deduped.map((alert) =>
-      sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-        title: alert.title,
-        description: `${alert.description}\n[View on AIWatch](${alert.url})`,
-        color: alert.color,
-      })
-    )
-  )
-
-  // Save current state
-  await env.STATUS_CACHE.put(INCIDENT_STATE_KEY, JSON.stringify(currentState), {
-    expirationTtl: 7 * 86400,
-  }).catch((err) => console.error('[incident-detect] state save failed:', err instanceof Error ? err.message : err))
 }
 
 function corsHeaders(origin: string, allowedOrigin: string | undefined): HeadersInit {
@@ -390,6 +276,10 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
 import { generateBadgeSvg } from './badge'
 
 export default {
+  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+    await cronAlertCheck(env)
+  },
+
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
     const origin = request.headers.get('Origin') ?? ''
@@ -628,20 +518,12 @@ export default {
         }
       }
 
-      // Alert if any services are down
-      const downServices = enriched.filter((s) => s.status === 'down')
-      if (downServices.length > 0) {
-        ctx.waitUntil(alertServicesDown(env, downServices))
-      }
-
       // Add AIWatch Score to each service
       const servicesWithScore = enriched.map((svc) => {
         const s = calculateAIWatchScore(svc)
         return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown }
       })
-
-      // Detect new/resolved incidents and send Discord alerts (after score calc for fallback)
-      ctx.waitUntil(detectAndAlertIncidents(env, servicesWithScore))
+      // NOTE: Alert detection moved to Cron Trigger (scheduled handler)
 
       return new Response(JSON.stringify({
         services: servicesWithScore,
