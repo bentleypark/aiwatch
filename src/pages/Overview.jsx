@@ -283,7 +283,7 @@ function getFallbacks(service, allServices) {
 
 // ── Action Banner — shows fallback recommendations during outages ──
 
-function ActionBanner({ services, setPage, setFilter, t }) {
+function ActionBanner({ services, setPage, setFilter, setCategoryFilter, t }) {
   const statusPriority = { down: 0, degraded: 1 }
   const affected = services
     .filter(s => s.status === 'down' || s.status === 'degraded')
@@ -304,7 +304,7 @@ function ActionBanner({ services, setPage, setFilter, t }) {
           {icon} {t('overview.banner.affected').replace('{n}', affected.length)} — {names}{suffix}
         </div>
         <button
-          onClick={() => { setFilter('issues'); }}
+          onClick={() => { setCategoryFilter('all'); setFilter('issues'); }}
           className="mono text-[11px] text-[var(--blue)] hover:underline cursor-pointer"
           style={{ background: 'none', border: 'none', padding: 0 }}
         >
@@ -362,7 +362,7 @@ function ActionBanner({ services, setPage, setFilter, t }) {
 
 export default function Overview() {
   const { t, lang } = useLang()
-  const { setPage, categoryFilter } = usePage()
+  const { setPage, categoryFilter, setCategoryFilter } = usePage()
   const { services: allServices, loading, error, lastUpdated } = usePolling()
   const { settings } = useSettings()
   const services = allServices.filter((s) => settings.enabledServices.includes(s.id))
@@ -437,7 +437,7 @@ export default function Overview() {
     <div className="flex flex-col" style={{ gap: '20px' }}>
 
       {/* ── Action Banner (outage fallback) ── */}
-      <ActionBanner services={services} setPage={setPage} setFilter={setFilter} t={t} />
+      <ActionBanner services={services} setPage={setPage} setFilter={setFilter} setCategoryFilter={setCategoryFilter} t={t} />
 
       {/* ── Summary Stats ── */}
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>

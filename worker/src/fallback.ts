@@ -1,5 +1,6 @@
 // Fallback recommendation logic for incident alerts
 
+// Keep in sync with src/utils/constants.js EXCLUDE_FALLBACK
 export const EXCLUDE_FALLBACK = ['elevenlabs', 'replicate', 'huggingface']
 
 interface FallbackCandidate {

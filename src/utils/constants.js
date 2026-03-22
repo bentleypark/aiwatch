@@ -42,6 +42,7 @@ export const SERVICE_CATEGORIES = {
 }
 
 // Services excluded from fallback recommendations (not interchangeable with LLM APIs)
+// Keep in sync with worker/src/fallback.ts EXCLUDE_FALLBACK
 export const EXCLUDE_FALLBACK = ['elevenlabs', 'replicate', 'huggingface']
 
 export const VALID_ALERT_CONDITIONS = ['down', 'degraded', 'all']
