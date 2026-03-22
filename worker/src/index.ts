@@ -89,7 +89,10 @@ async function writeLatencySnapshot(kv: KVNamespace, services: ServiceStatus[]):
     const MAX_SNAPSHOTS = 48 // 24h × 2 per hour
     const existing = await kv.get(LATENCY_KEY).catch(() => null)
     const snapshots = existing ? (JSON.parse(existing).snapshots ?? []) : []
-    snapshots.push({ t: `${currentSlot}:00Z`, data: latencyData })
+    // Deduplicate: skip if this slot already exists (another isolate wrote it)
+    const slotTs = `${currentSlot}:00Z`
+    if (snapshots.some((s: { t: string }) => s.t === slotTs)) { lastLatencySlot = currentSlot; return }
+    snapshots.push({ t: slotTs, data: latencyData })
     const trimmed = snapshots.slice(-MAX_SNAPSHOTS)
     await kv.put(LATENCY_KEY, JSON.stringify({ snapshots: trimmed }), {
       expirationTtl: 90000, // 25 hours
