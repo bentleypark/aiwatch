@@ -1,11 +1,14 @@
 // Latency — response time analysis page
 // Shows fastest/average/slowest summary, ranked latency list, and current latency snapshot.
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
+import { Chart, LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip, Legend } from 'chart.js'
 import SkeletonUI from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
+
+Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip, Legend)
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -48,7 +51,68 @@ function latencyTextClass(ms) {
 // ── 24h Trend Section (ready for chart integration) ──────────
 
 function LatencyTrendSection({ services, t, hourlyData }) {
-  const hasData = hourlyData && Object.keys(hourlyData).length > 0
+  const canvasRef = useRef(null)
+  const chartRef = useRef(null)
+  const hasData = hourlyData && hourlyData.length > 0
+
+  useEffect(() => {
+    if (!canvasRef.current || !hasData) return
+    if (chartRef.current) chartRef.current.destroy()
+
+    const labels = hourlyData.map((s) => {
+      const d = new Date(s.t)
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    })
+
+    const apiServices = services.filter((s) => s.category === 'api' && s.latency != null)
+    const styles = getComputedStyle(document.documentElement)
+    const textMuted = styles.getPropertyValue('--text2').trim() || '#6b7280'
+    const borderClr = styles.getPropertyValue('--border').trim() || 'rgba(107,114,128,0.1)'
+
+    const datasets = apiServices.map((svc) => ({
+      label: svc.name,
+      data: hourlyData.map((s) => s.data[svc.id] ?? null),
+      borderColor: SERVICE_COLOR[svc.id] ?? '#8b949e',
+      borderWidth: 1.5,
+      pointRadius: 1.5,
+      pointHoverRadius: 3,
+      tension: 0.3,
+      fill: false,
+      spanGaps: true,
+    }))
+
+    chartRef.current = new Chart(canvasRef.current, {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            display: true,
+            position: 'bottom',
+            labels: { font: { size: 9, family: 'var(--font-mono)' }, color: textMuted, boxWidth: 8, padding: 8 },
+          },
+          tooltip: {
+            callbacks: { label: (ctx) => ctx.parsed.y != null ? `${ctx.dataset.label}: ${ctx.parsed.y}ms` : null },
+          },
+        },
+        scales: {
+          x: {
+            ticks: { font: { size: 9, family: 'var(--font-mono)' }, color: textMuted, maxTicksLimit: 12 },
+            grid: { display: false },
+          },
+          y: {
+            ticks: { font: { size: 9, family: 'var(--font-mono)' }, color: textMuted, callback: (v) => `${v}ms` },
+            grid: { color: borderClr },
+          },
+        },
+      },
+    })
+
+    return () => { if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null } }
+  }, [hasData, hourlyData])
 
   return (
     <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
@@ -60,19 +124,8 @@ function LatencyTrendSection({ services, t, hourlyData }) {
       </div>
       {hasData ? (
         <div style={{ padding: '16px' }}>
-          {/* Service badges (legend) */}
-          <div className="flex flex-wrap" style={{ gap: '10px', marginBottom: '12px' }}>
-            {services.map((svc) => (
-              <div key={svc.id} className="flex items-center gap-2 bg-[var(--bg2)] border border-[var(--border)] rounded" style={{ padding: '6px 10px' }}>
-                <span className="shrink-0 rounded-full" style={{ width: '6px', height: '6px', background: SERVICE_COLOR[svc.id] ?? '#8b949e' }} />
-                <span className="mono text-[11px] text-[var(--text1)]">{svc.name}</span>
-                <span className={`mono text-[11px] font-medium ${latencyTextClass(svc.latency)}`}>{svc.latency}ms</span>
-              </div>
-            ))}
-          </div>
-          {/* TODO: Chart.js Line chart using hourlyData */}
-          <div className="h-[320px] flex items-center justify-center">
-            <p className="text-xs text-[var(--text2)] mono">차트 렌더링 영역</p>
+          <div style={{ height: '320px' }}>
+            <canvas ref={canvasRef} />
           </div>
         </div>
       ) : (
@@ -130,7 +183,7 @@ function RankingBar({ service, maxLatency, rank }) {
 
 export default function Latency() {
   const { t } = useLang()
-  const { services: rawServices, loading, error } = usePolling()
+  const { services: rawServices, loading, error, latency24h } = usePolling()
 
   // Defensive default — handles transient undefined state
   const services = rawServices ?? []
@@ -189,7 +242,7 @@ export default function Latency() {
       </section>
 
       {/* ── 24h Trend — shows badges + chart when hourly KV data exists ── */}
-      <LatencyTrendSection services={sorted} t={t} hourlyData={null /* TODO: pass from usePolling when KV hourly data available */} />
+      <LatencyTrendSection services={sorted} t={t} hourlyData={latency24h} />
 
     </div>
   )

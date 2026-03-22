@@ -113,7 +113,7 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
 
     const labels = hourlyData.map((s) => {
       const d = new Date(s.t)
-      return `${String(d.getHours()).padStart(2, '0')}:00`
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
     })
     const values = hourlyData.map((s) => s.data[service.id] ?? null)
     const color = SERVICE_COLOR[service.id] ?? '#8b949e'
@@ -145,7 +145,7 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
           legend: { display: false },
           tooltip: {
             callbacks: {
-              label: (ctx) => `${ctx.parsed.y}ms`,
+              label: (ctx) => ctx.parsed.y != null ? `${ctx.parsed.y}ms` : null,
             },
           },
         },
@@ -175,13 +175,6 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
       </div>
       {hasData ? (
         <div style={{ padding: '16px' }}>
-          {service.latency != null && (
-            <div className="flex items-center gap-2 mb-3">
-              <span className="rounded-full" style={{ width: '6px', height: '6px', background: SERVICE_COLOR[service.id] ?? '#8b949e' }} />
-              <span className="mono text-[11px] text-[var(--text1)]">{service.name}</span>
-              <span className="mono text-[11px] font-medium text-[var(--text0)]">{service.latency}ms</span>
-            </div>
-          )}
           <div style={{ height: '200px' }}>
             <canvas ref={canvasRef} />
           </div>
@@ -380,7 +373,7 @@ export default function ServiceDetails({ serviceId }) {
       </div>
 
       {/* ── 24h Latency Trend — shows chart when hourly KV data exists ── */}
-      <ServiceLatencyTrend service={service} t={t} hourlyData={latency24h} />
+      {service.category === 'api' && <ServiceLatencyTrend service={service} t={t} hourlyData={latency24h} />}
 
       {/* ── Bottom: Incident History + Calendar (2-col on desktop) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>

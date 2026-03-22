@@ -16,7 +16,7 @@ const CACHE_TTL_SECONDS = 300 // 5 min — short TTL so stale cache clears quick
 let lastKvWrite = 0
 const KV_WRITE_INTERVAL_MS = 600_000 // 10 minutes — 2 writes per interval = ~288/day within free tier
 let lastArchivedDate = '' // prevent duplicate archival writes within same isolate
-let lastLatencyHour = '' // prevent duplicate hourly latency writes within same isolate
+let lastLatencySlot = '' // prevent duplicate 30-min latency writes within same isolate
 
 interface DailyCounters {
   [serviceId: string]: { ok: number; total: number }
@@ -75,25 +75,26 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[]): Promise<v
 
 }
 
-// Hourly latency snapshot — independent of cacheWrite throttle (+24 writes/day)
+// 30-min latency snapshot — independent of cacheWrite throttle (+48 writes/day)
 async function writeLatencySnapshot(kv: KVNamespace, services: ServiceStatus[]): Promise<void> {
-  const currentHour = new Date().toISOString().slice(0, 13) // "2026-03-22T03"
-  if (lastLatencyHour === currentHour) return
+  const now = new Date()
+  const currentSlot = `${now.toISOString().slice(0, 14)}${now.getUTCMinutes() < 30 ? '00' : '30'}` // "2026-03-22T03:00" or "2026-03-22T03:30"
+  if (lastLatencySlot === currentSlot) return
 
   const latencyData: Record<string, number> = {}
   services.forEach((s) => { if (s.latency != null) latencyData[s.id] = s.latency })
 
   try {
     const LATENCY_KEY = 'latency:24h'
-    const MAX_SNAPSHOTS = 24
+    const MAX_SNAPSHOTS = 48 // 24h × 2 per hour
     const existing = await kv.get(LATENCY_KEY).catch(() => null)
     const snapshots = existing ? (JSON.parse(existing).snapshots ?? []) : []
-    snapshots.push({ t: new Date().toISOString(), data: latencyData })
+    snapshots.push({ t: `${currentSlot}:00Z`, data: latencyData })
     const trimmed = snapshots.slice(-MAX_SNAPSHOTS)
     await kv.put(LATENCY_KEY, JSON.stringify({ snapshots: trimmed }), {
       expirationTtl: 90000, // 25 hours
     })
-    lastLatencyHour = currentHour // set after successful write
+    lastLatencySlot = currentSlot // set after successful write
   } catch (err) {
     console.warn('[kv] latency snapshot write failed:', err instanceof Error ? err.message : err)
   }
