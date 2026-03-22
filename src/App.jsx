@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useTheme } from './hooks/useTheme'
 import { useLang, LangProvider } from './hooks/useLang'
 import { initConsentDefault, initGA, trackPageView, trackEvent } from './utils/analytics'
@@ -19,7 +19,23 @@ import Uptime from './pages/Uptime'
 import ServiceDetails from './pages/ServiceDetails'
 import Settings from './pages/Settings'
 
-const DEFAULT_PAGE = { name: 'overview' }
+import { ALL_SERVICE_IDS } from './utils/constants'
+
+const PAGE_NAMES = ['overview', 'latency', 'incidents', 'uptime', 'settings']
+
+function hashToPage(hash) {
+  const id = hash.replace(/^#/, '').split(/[?&#]/)[0]
+  if (!id) return { name: 'overview' }
+  if (PAGE_NAMES.includes(id)) return { name: id }
+  if (ALL_SERVICE_IDS.includes(id)) return { name: 'service', serviceId: id }
+  return { name: 'overview' }
+}
+
+function pageToHash(page) {
+  if (page.name === 'service') return `#${page.serviceId}`
+  if (page.name === 'overview') return ''
+  return `#${page.name}`
+}
 
 function resolvePage(page) {
   switch (page.name) {
@@ -42,12 +58,29 @@ export default function App() {
 }
 
 function AppInner() {
-  const [page, setPage] = useState(DEFAULT_PAGE)
+  const [page, setPageState] = useState(() => hashToPage(window.location.hash))
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [modal, setModal] = useState(null) // null | 'privacy' | 'terms'
   useTheme()
   const { t } = useLang()
   const { settings } = useSettings()
+
+  // Sync page → hash
+  const setPage = useCallback((p) => {
+    setPageState(p)
+    const hash = pageToHash(p)
+    const currentHash = window.location.hash === '#' ? '' : window.location.hash
+    if (currentHash !== hash) {
+      window.history.pushState(null, '', hash || window.location.pathname)
+    }
+  }, [])
+
+  // Sync hash → page (browser back/forward)
+  useEffect(() => {
+    const onPopState = () => setPageState(hashToPage(window.location.hash))
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
 
   // Initialize GA4 once on mount
   useEffect(() => { initConsentDefault(); initGA() }, [])
