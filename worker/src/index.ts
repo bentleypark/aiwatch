@@ -303,6 +303,10 @@ export default {
         },
       })
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      console.error('[worker] request failed:', message)
+      ctx.waitUntil(alertWorkerError(env, message))
+
       // Total failure — try returning cached data
       const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
       if (cached) {
@@ -310,7 +314,6 @@ export default {
           services: cached.services,
           lastUpdated: cached.cachedAt,
           cached: true,
-          uptimeDays: 0,
         }), {
           status: 200,
           headers: {
@@ -320,9 +323,6 @@ export default {
           },
         })
       }
-
-      const message = err instanceof Error ? err.message : 'Unknown error'
-      ctx.waitUntil(alertWorkerError(env, message))
       return new Response(JSON.stringify({ error: message }), {
         status: 500,
         headers: { ...cors, 'Content-Type': 'application/json' },
