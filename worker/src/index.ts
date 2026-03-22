@@ -194,18 +194,30 @@ async function alertWorkerError(env: Env, error: string) {
 // Runs every 5 minutes via Cron Trigger (single execution, no concurrency).
 // Uses KV dedup by incident/service ID (7-day TTL) instead of state comparison.
 
-async function cronAlertCheck(env: Env): Promise<void> {
-  if (!env.DISCORD_WEBHOOK_URL || !env.STATUS_CACHE) return
+interface CronResult {
+  total: number
+  operational: number
+  issues: number
+  sent: number
+  newCount: number
+  resolvedCount: number
+  downCount: number
+  recoveredCount: number
+}
+
+async function cronAlertCheck(env: Env): Promise<CronResult> {
+  const empty: CronResult = { total: 0, operational: 0, issues: 0, sent: 0, newCount: 0, resolvedCount: 0, downCount: 0, recoveredCount: 0 }
+  if (!env.DISCORD_WEBHOOK_URL || !env.STATUS_CACHE) return empty
 
   // Read cached service data (written by /api/status handler)
   const raw = await env.STATUS_CACHE.get(CACHE_KEY).catch(() => null)
-  if (!raw) return
+  if (!raw) return empty
   let services: ServiceStatus[]
   try {
     const parsed = JSON.parse(raw)
     services = Array.isArray(parsed) ? parsed : parsed.services
-    if (!Array.isArray(services)) return
-  } catch { return }
+    if (!Array.isArray(services)) return empty
+  } catch { return empty }
 
   // Calculate scores for fallback recommendations
   const scored = services.map((svc) => {
@@ -239,7 +251,8 @@ async function cronAlertCheck(env: Env): Promise<void> {
   }
 
   // Send + mark as alerted (down: 2h TTL, incidents/recovery: 7d TTL)
-  for (const alert of toSend.slice(0, 5)) {
+  const sent = toSend.slice(0, 5)
+  for (const alert of sent) {
     const ttl = alert.key.startsWith('alerted:down:') ? 7200 : 604800
     await env.STATUS_CACHE.put(alert.key, '1', { expirationTtl: ttl }).catch(() => {})
     await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
@@ -247,6 +260,18 @@ async function cronAlertCheck(env: Env): Promise<void> {
       description: `${alert.description}\n[View on AIWatch](${alert.url})`,
       color: alert.color,
     })
+  }
+
+  const operational = scored.filter(s => s.status === 'operational').length
+  return {
+    total: scored.length,
+    operational,
+    issues: scored.length - operational,
+    sent: sent.length,
+    newCount: sent.filter(a => a.key.startsWith('alerted:new:')).length,
+    resolvedCount: sent.filter(a => a.key.startsWith('alerted:res:')).length,
+    downCount: sent.filter(a => a.key.startsWith('alerted:down:')).length,
+    recoveredCount: sent.filter(a => a.key.startsWith('alerted:recovered:')).length,
   }
 }
 
@@ -277,7 +302,32 @@ import { generateBadgeSvg } from './badge'
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
-    await cronAlertCheck(env)
+    const result = await cronAlertCheck(env)
+    if (!env.DISCORD_WEBHOOK_URL) return
+
+    // Alert summary when alerts were sent (blue embed)
+    if (result.sent > 0) {
+      const parts = []
+      if (result.newCount) parts.push(`${result.newCount} new`)
+      if (result.resolvedCount) parts.push(`${result.resolvedCount} resolved`)
+      if (result.downCount) parts.push(`${result.downCount} down`)
+      if (result.recoveredCount) parts.push(`${result.recoveredCount} recovered`)
+      await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+        title: `🔔 Cron: ${result.sent} alert(s) sent`,
+        description: parts.join(', '),
+        color: 0x5865F2, // blue
+      })
+    }
+
+    // Daily summary at UTC 09:00 (KST 18:00) — purple embed
+    const now = new Date()
+    if (now.getUTCHours() === 9 && now.getUTCMinutes() < 5) {
+      await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+        title: '📊 Daily Summary',
+        description: `${result.total} services checked\n${result.operational} operational · ${result.issues} issues`,
+        color: 0x9B59B6, // purple
+      })
+    }
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
