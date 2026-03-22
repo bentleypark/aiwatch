@@ -28,6 +28,8 @@ function hashToPage(hash) {
   if (!id) return { name: 'overview' }
   if (PAGE_NAMES.includes(id)) return { name: id }
   if (ALL_SERVICE_IDS.includes(id)) return { name: 'service', serviceId: id }
+  // Invalid hash — clean up URL and fallback to overview
+  window.history.replaceState(null, '', window.location.pathname)
   return { name: 'overview' }
 }
 
