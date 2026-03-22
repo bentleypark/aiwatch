@@ -268,8 +268,10 @@ async function detectAndAlertIncidents(
     const curr = currentState[svc.id] ?? {}
 
     for (const inc of svc.incidents ?? []) {
-      // New incident
-      if (!prev[inc.id]) {
+      // New incident — only alert if started within last 24 hours
+      // (prevents alerting on old incidents after Worker restart or KV expiry)
+      const incAge = Date.now() - new Date(inc.startedAt).getTime()
+      if (!prev[inc.id] && incAge < 86_400_000) {
         const cooldownKey = `inc-new:${inc.id}`
         const last = lastAlertTime.get(cooldownKey)
         if (last && Date.now() - last < ALERT_COOLDOWN_MS) continue
