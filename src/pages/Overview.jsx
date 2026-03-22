@@ -278,6 +278,7 @@ function getFallbacks(service, allServices) {
     .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational')
     .sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0))
     .slice(0, 2)
+    .map(s => ({ id: s.id, name: s.name, aiwatchScore: s.aiwatchScore ?? null }))
 }
 
 // ── Action Banner — shows fallback recommendations during outages ──
@@ -320,17 +321,36 @@ function ActionBanner({ services, setPage, setFilter, t }) {
         const fallbacks = getFallbacks(svc, services)
         const statusLabel = svc.status === 'down' ? t('overview.banner.down') : t('overview.banner.degraded')
         const svcIcon = svc.status === 'down' ? '🔴' : '⚠️'
-        const fallbackLine = fallbacks.length > 0
-          ? `👉 ${t('overview.banner.fallback')} ${fallbacks.map(f => f.aiwatchScore != null ? `${f.name} (${f.aiwatchScore})` : f.name).join(' · ')}`
-          : `⚠️ ${t('overview.banner.noFallback')}`
 
         return (
-          <div key={svc.id} className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg"
-               style={{ padding: '12px 16px', borderLeft: `3px solid ${svc.status === 'down' ? 'var(--red)' : 'var(--amber)'}` }}>
+          <div key={svc.id}
+               className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg cursor-pointer hover:border-[var(--border-hi)] transition-colors"
+               style={{ padding: '12px 16px', borderLeft: `3px solid ${svc.status === 'down' ? 'var(--red)' : 'var(--amber)'}` }}
+               onClick={() => setPage({ name: 'service', serviceId: svc.id })}>
             <div className="text-[13px] font-medium text-[var(--text0)]" style={{ marginBottom: '4px' }}>
               {svcIcon} {svc.name} — {statusLabel}
             </div>
-            <div className="mono text-[11px] text-[var(--text2)]">{fallbackLine}</div>
+            <div className="mono text-[11px] text-[var(--text2)]">
+              {fallbacks.length > 0 ? (
+                <>
+                  👉 {t('overview.banner.fallback')}{' '}
+                  {fallbacks.map((f, i) => (
+                    <span key={f.id}>
+                      {i > 0 && ' · '}
+                      <span
+                        className="hover:underline hover:text-[var(--text0)] transition-colors cursor-pointer"
+                        onClick={(e) => { e.stopPropagation(); setPage({ name: 'service', serviceId: f.id }) }}
+                      >
+                        {i === 0 && <span className="text-[var(--yellow)]">★ </span>}
+                        {f.name}{f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}
+                      </span>
+                    </span>
+                  ))}
+                </>
+              ) : (
+                `⚠️ ${t('overview.banner.noFallback')}`
+              )}
+            </div>
           </div>
         )
       })}

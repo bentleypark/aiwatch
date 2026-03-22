@@ -25,6 +25,9 @@ export function getFallbacks(
 
 export function buildFallbackText(fallbacks: Array<{ name: string; score: number | null }>): string {
   if (fallbacks.length === 0) return '⚠️ No operational fallback available. Consider retry logic or caching.'
-  const list = fallbacks.map(f => f.score != null ? `${f.name} (Score ${f.score})` : f.name).join(' · ')
+  const list = fallbacks.map((f, i) => {
+    const label = f.score != null ? `${f.name} (Score ${f.score})` : f.name
+    return i === 0 ? `★ ${label}` : label
+  }).join(' · ')
   return `👉 Suggested fallback: ${list}`
 }
