@@ -5,7 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run dev        # Start dev server (localhost:5173)
+npm run dev        # Start frontend dev server (localhost:5173)
+npm run dev:worker # Start Worker dev server (localhost:8788)
+npm run dev:all    # Start both simultaneously
 npm run build      # Production build → dist/
 npm run preview    # Preview production build
 npm run lint       # Run ESLint
