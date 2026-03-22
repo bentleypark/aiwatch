@@ -17,12 +17,17 @@ Real-time monitoring dashboard for **19 AI services** — track status, latency,
 
 - **Real-time status** — Operational / Degraded / Down for 19 AI services
 - **Latency monitoring** — Status page response time per API service
+- **24h latency trend** — Chart.js line chart with 30-min snapshots
 - **Incident history** — Timeline with details from multiple status page formats
-- **Uptime tracking** — Daily counters accumulated via Cloudflare KV
-- **Discord alerts** — Automatic notifications on service outages
+- **Official uptime** — Per-component uptime from Statuspage, incident.io, Better Stack
+- **Status calendar** — 30-day (Statuspage) or 14-day (incident.io) daily status visualization
+- **Slack/Discord alerts** — Webhook notifications on status changes and incidents
+- **Cookie consent** — GA4 Consent Mode v2 with accept/essential-only
+- **Deep links** — Hash-based routing (`#claude`, `#latency`) for direct page access
 - **Dark/Light theme** — System-aware with manual toggle
 - **Bilingual** — Korean / English
 - **Mobile responsive** — Sidebar overlay, mobile action bar
+- **Page-specific skeletons** — Loading placeholders matched to each page layout
 
 ## Monitored Services
 
@@ -31,17 +36,17 @@ Real-time monitoring dashboard for **19 AI services** — track status, latency,
 | Service | Provider | Status Source |
 |---------|----------|---------------|
 | Claude API | Anthropic | Atlassian Statuspage |
-| OpenAI API | OpenAI | Atlassian Statuspage |
+| OpenAI API | OpenAI | incident.io (Atlassian compat) |
 | Gemini API | Google | Google Cloud incidents.json |
 | Mistral API | Mistral AI | Instatus (Nuxt SSR) |
-| Cohere API | Cohere | Atlassian Statuspage |
-| Groq Cloud | Groq | Atlassian Statuspage |
-| Together AI | Together | Better Stack RSS |
-| Perplexity | Perplexity AI | HTTP check |
-| Hugging Face | HuggingFace | Better Stack RSS |
-| Replicate | Replicate | Atlassian Statuspage |
-| ElevenLabs | ElevenLabs | Atlassian Statuspage |
-| xAI (Grok) | xAI | HTTP check |
+| Cohere API | Cohere | incident.io (Atlassian compat) |
+| Groq Cloud | Groq | incident.io (Atlassian compat) |
+| Together AI | Together | Better Stack RSS + uptime API |
+| Perplexity | Perplexity AI | Instatus (Next.js SSR) |
+| Hugging Face | HuggingFace | Better Stack RSS + uptime API |
+| Replicate | Replicate | incident.io (Atlassian compat) |
+| ElevenLabs | ElevenLabs | incident.io (Atlassian compat) |
+| xAI (Grok) | xAI | RSS feed |
 | DeepSeek API | DeepSeek | Atlassian Statuspage |
 
 ### AI Web Apps (2)
@@ -64,30 +69,36 @@ Real-time monitoring dashboard for **19 AI services** — track status, latency,
 
 | Layer | Technology |
 |-------|------------|
-| Frontend | React 19, Vite 6, TailwindCSS v4 |
+| Frontend | React 19, Vite 6, TailwindCSS v4, Chart.js |
 | Backend | Cloudflare Workers (TypeScript) |
-| Cache | Cloudflare KV (uptime counters, status cache) |
+| Cache | Cloudflare KV (status cache, latency snapshots) |
 | Hosting | Vercel |
-| Alerts | Discord Webhook |
-| Analytics | Google Analytics 4 |
+| Alerts | Discord/Slack Webhook (Worker proxy) |
+| Analytics | Google Analytics 4 (Consent Mode v2) |
+| Tests | Playwright (E2E), Vitest (unit) |
 
 ## Architecture
 
 ```
-Browser (React SPA)
-  ↓ polling (60s)
-Cloudflare Worker (/api/status)
-  ↓ parallel fetch (19 services)
-  ├── Atlassian Statuspage API (summary.json + incidents.json)
-  ├── Google Cloud incidents.json
-  ├── Instatus Nuxt SSR scraping
-  ├── Better Stack RSS feed parsing
-  └── HTTP reachability check
+Browser (React SPA, 60s polling)
+  ↓
+Cloudflare Worker
+  ├── GET /api/status    → parallel fetch (19 services) → normalize
+  ├── GET /api/uptime    → daily uptime history
+  └── POST /api/alert   → webhook proxy (Slack/Discord, SSRF protected)
+  ↓
+Parsers (worker/src/parsers/)
+  ├── statuspage.ts      → Atlassian Statuspage API + uptimeData HTML
+  ├── incident-io.ts     → incident.io compat API + component_uptimes/impacts
+  ├── gcloud.ts          → Google Cloud incidents.json
+  ├── instatus.ts        → Instatus Nuxt/Next.js SSR
+  └── betterstack.ts     → Better Stack RSS + /index.json uptime API
   ↓
 Cloudflare KV
-  ├── services:latest (status cache, TTL 1h)
-  ├── daily:YYYY-MM-DD (uptime counters, TTL 2d)
-  └── history:YYYY-MM-DD (archived counters, TTL 90d)
+  ├── services:latest    (status cache, TTL 5min)
+  ├── daily:YYYY-MM-DD   (uptime counters, TTL 2d)
+  ├── history:YYYY-MM-DD (archived counters, TTL 90d)
+  └── latency:24h        (30-min snapshots, max 48, TTL 25h)
 ```
 
 ## Getting Started
@@ -121,7 +132,7 @@ npm run dev        # localhost:8787
 
 **Frontend (.env)**
 ```
-VITE_API_URL=http://localhost:8787/api/status
+VITE_API_URL=http://localhost:8788/api/status
 VITE_GA4_ID=                # Optional: Google Analytics measurement ID
 ```
 
@@ -135,38 +146,48 @@ DISCORD_WEBHOOK_URL=        # Worker Secret: Discord webhook for alerts
 
 ```bash
 # Frontend
-npm run dev        # Dev server (localhost:5173)
-npm run build      # Production build → dist/
-npm run preview    # Preview production build
-npm run lint       # ESLint
-npm test           # Playwright E2E tests (25 specs)
+npm run dev          # Dev server (localhost:5173)
+npm run dev:worker   # Worker dev server (localhost:8788)
+npm run dev:all      # Both simultaneously
+npm run build        # Production build → dist/
+npm run lint         # ESLint
+npm test             # Playwright E2E tests (25 specs)
+npm run test:worker  # Worker parser unit tests (40 specs, vitest)
 
-# Worker
-cd worker
-npm run dev        # Local Worker (localhost:8787)
-npm run deploy     # Deploy to Cloudflare
+# Worker deployment
+npm run deploy:worker  # Deploy to Cloudflare (use npm script only)
 ```
 
 ## API Endpoints
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/status` | All service statuses + incidents + uptime |
-| `GET /api/uptime?days=30` | Daily uptime history (1-90 days) |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/status` | GET | All service statuses + incidents + uptime + latency24h |
+| `/api/uptime?days=30` | GET | Daily uptime history (1-90 days) |
+| `/api/alert` | POST | Webhook proxy (Slack/Discord only, SSRF protected) |
 
 ## Project Structure
 
 ```
 src/
-  components/    # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar
+  components/    # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner
   pages/         # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings
   hooks/         # usePolling, useTheme, useLang, useSettings
   utils/         # analytics, calendar, time, pageContext, constants
   locales/       # ko.js, en.js (flat key→string maps)
 worker/
   src/
-    index.ts     # Worker entry: CORS, KV cache, Discord alerts, routing
-    services.ts  # Service configs, status fetching, parsers (Statuspage/Instatus/GCloud/RSS)
+    index.ts     # Worker entry: CORS, KV cache, Discord alerts, routing, /api/alert proxy
+    services.ts  # Service configs + fetch orchestrator
+    types.ts     # Shared types (ServiceStatus, Incident, etc.)
+    utils.ts     # Shared utilities (formatDuration, fetchWithTimeout)
+    parsers/     # Platform-specific parsers
+      statuspage.ts   # Atlassian Statuspage (7 services)
+      incident-io.ts  # incident.io (6 services)
+      gcloud.ts       # Google Cloud (1 service)
+      instatus.ts     # Instatus (2 services)
+      betterstack.ts  # Better Stack (3 services)
+    parsers/__tests__/ # Vitest unit tests (40 specs)
 ```
 
 ## Contributing
@@ -176,7 +197,7 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for detailed guidelines.
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
 3. Follow the development workflow in [CLAUDE.md](CLAUDE.md)
-4. Build + test: `npm run build && npm test`
+4. Build + test: `npm run build && npm test && npm run test:worker`
 5. Submit a pull request using the [PR template](.github/pull_request_template.md)
 
 ### Issues
@@ -187,7 +208,7 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for detailed guidelines.
 ### Pull Requests
 
 - One feature or fix per PR
-- All tests must pass (`npm test` — 25 Playwright specs)
+- All tests must pass (25 E2E + 40 unit = 65 specs)
 - Include `closes #N` in commit messages
 - Fill out the PR checklist
 

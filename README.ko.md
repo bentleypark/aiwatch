@@ -17,16 +17,21 @@
 
 - **실시간 상태 모니터링** — 19개 AI 서비스의 정상 / 성능 저하 / 장애 상태
 - **지연시간 측정** — API 서비스별 상태 페이지 응답 시간
+- **24시간 지연시간 추세** — Chart.js 라인 차트 (30분 간격 스냅샷)
 - **인시던트 이력** — 다양한 상태 페이지 형식의 타임라인 상세 정보
-- **가동률 추적** — Cloudflare KV를 통한 일별 가동률 누적
-- **Discord 알림** — 서비스 장애 시 자동 알림
+- **공식 가동률** — Statuspage, incident.io, Better Stack에서 컴포넌트별 가동률
+- **상태 캘린더** — 30일(Statuspage) 또는 14일(incident.io) 일별 상태 시각화
+- **Slack/Discord 알림** — 상태 변경 및 인시던트 Webhook 알림
+- **쿠키 동의** — GA4 Consent Mode v2 (동의/필수만)
+- **딥링크** — hash 기반 라우팅 (`#claude`, `#latency`)
 - **다크/라이트 테마** — 시스템 설정 감지 + 수동 전환
 - **한국어/영어** — 이중 언어 지원
 - **모바일 반응형** — 사이드바 오버레이, 모바일 액션 바
+- **페이지별 스켈레톤** — 각 페이지 레이아웃에 맞는 로딩 placeholder
 
 ## 모니터링 서비스
 
-### AI API 서비스 (25개)
+### AI API 서비스 (13개)
 
 | 서비스 | 제공업체 | 상태 소스 |
 |--------|----------|-----------|
@@ -36,12 +41,12 @@
 | Mistral API | Mistral AI | Instatus (Nuxt SSR) |
 | Cohere API | Cohere | incident.io (Atlassian 호환) |
 | Groq Cloud | Groq | incident.io (Atlassian 호환) |
-| Together AI | Together | Better Stack RSS |
-| Perplexity | Perplexity AI | HTTP 체크 |
-| Hugging Face | HuggingFace | Better Stack RSS |
+| Together AI | Together | Better Stack RSS + 가동률 API |
+| Perplexity | Perplexity AI | Instatus (Next.js SSR) |
+| Hugging Face | HuggingFace | Better Stack RSS + 가동률 API |
 | Replicate | Replicate | incident.io (Atlassian 호환) |
 | ElevenLabs | ElevenLabs | incident.io (Atlassian 호환) |
-| xAI (Grok) | xAI | HTTP 체크 |
+| xAI (Grok) | xAI | RSS 피드 |
 | DeepSeek API | DeepSeek | Atlassian Statuspage |
 
 ### AI 웹 앱 (2개)
@@ -64,30 +69,36 @@
 
 | 계층 | 기술 |
 |------|------|
-| 프론트엔드 | React 19, Vite 6, TailwindCSS v4 |
+| 프론트엔드 | React 19, Vite 6, TailwindCSS v4, Chart.js |
 | 백엔드 | Cloudflare Workers (TypeScript) |
-| 캐시 | Cloudflare KV (가동률 카운터, 상태 캐시) |
+| 캐시 | Cloudflare KV (상태 캐시, 지연시간 스냅샷) |
 | 호스팅 | Vercel |
-| 알림 | Discord Webhook |
-| 분석 | Google Analytics 4 |
+| 알림 | Discord/Slack Webhook (Worker 프록시) |
+| 분석 | Google Analytics 4 (Consent Mode v2) |
+| 테스트 | Playwright (E2E), Vitest (단위) |
 
 ## 아키텍처
 
 ```
-브라우저 (React SPA)
-  ↓ 폴링 (60초)
-Cloudflare Worker (/api/status)
-  ↓ 병렬 fetch (19개 서비스)
-  ├── Atlassian Statuspage API (summary.json + incidents.json)
-  ├── Google Cloud incidents.json
-  ├── Instatus Nuxt SSR 스크래핑
-  ├── Better Stack RSS 피드 파싱
-  └── HTTP 접근성 체크
+브라우저 (React SPA, 60초 폴링)
+  ↓
+Cloudflare Worker
+  ├── GET /api/status    → 병렬 fetch (19개 서비스) → 정규화
+  ├── GET /api/uptime    → 일별 가동률 이력
+  └── POST /api/alert   → Webhook 프록시 (Slack/Discord, SSRF 보호)
+  ↓
+파서 (worker/src/parsers/)
+  ├── statuspage.ts      → Atlassian Statuspage API + uptimeData HTML
+  ├── incident-io.ts     → incident.io 호환 API + component_uptimes/impacts
+  ├── gcloud.ts          → Google Cloud incidents.json
+  ├── instatus.ts        → Instatus Nuxt/Next.js SSR
+  └── betterstack.ts     → Better Stack RSS + /index.json 가동률 API
   ↓
 Cloudflare KV
-  ├── services:latest (상태 캐시, TTL 1시간)
-  ├── daily:YYYY-MM-DD (가동률 카운터, TTL 2일)
-  └── history:YYYY-MM-DD (아카이브 카운터, TTL 90일)
+  ├── services:latest    (상태 캐시, TTL 5분)
+  ├── daily:YYYY-MM-DD   (가동률 카운터, TTL 2일)
+  ├── history:YYYY-MM-DD (아카이브 카운터, TTL 90일)
+  └── latency:24h        (30분 스냅샷, 최대 48개, TTL 25시간)
 ```
 
 ## 시작하기
@@ -121,7 +132,7 @@ npm run dev        # localhost:8787
 
 **프론트엔드 (.env)**
 ```
-VITE_API_URL=http://localhost:8787/api/status
+VITE_API_URL=http://localhost:8788/api/status
 VITE_GA4_ID=                # 선택: Google Analytics 측정 ID
 ```
 
@@ -135,24 +146,49 @@ DISCORD_WEBHOOK_URL=        # Worker Secret: Discord 웹훅 URL
 
 ```bash
 # 프론트엔드
-npm run dev        # 개발 서버 (localhost:5173)
-npm run build      # 프로덕션 빌드 → dist/
-npm run preview    # 프로덕션 미리보기
-npm run lint       # ESLint
-npm test           # Playwright E2E 테스트 (25개)
+npm run dev          # 개발 서버 (localhost:5173)
+npm run dev:worker   # Worker 개발 서버 (localhost:8788)
+npm run dev:all      # 둘 다 동시 실행
+npm run build        # 프로덕션 빌드 → dist/
+npm run lint         # ESLint
+npm test             # Playwright E2E 테스트 (25개)
+npm run test:worker  # Worker 파서 단위 테스트 (40개, vitest)
 
-# Worker
-cd worker
-npm run dev        # 로컬 Worker (localhost:8787)
-npm run deploy     # Cloudflare 배포
+# Worker 배포
+npm run deploy:worker  # Cloudflare 배포 (npm 스크립트만 사용)
 ```
 
 ## API 엔드포인트
 
-| 엔드포인트 | 설명 |
-|-----------|------|
-| `GET /api/status` | 전체 서비스 상태 + 인시던트 + 가동률 |
-| `GET /api/uptime?days=30` | 일별 가동률 이력 (1-90일) |
+| 엔드포인트 | 메서드 | 설명 |
+|-----------|--------|------|
+| `/api/status` | GET | 전체 서비스 상태 + 인시던트 + 가동률 + latency24h |
+| `/api/uptime?days=30` | GET | 일별 가동률 이력 (1-90일) |
+| `/api/alert` | POST | Webhook 프록시 (Slack/Discord만, SSRF 보호) |
+
+## 프로젝트 구조
+
+```
+src/
+  components/    # 공유 UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner
+  pages/         # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings
+  hooks/         # usePolling, useTheme, useLang, useSettings
+  utils/         # analytics, calendar, time, pageContext, constants
+  locales/       # ko.js, en.js (flat key→string 맵)
+worker/
+  src/
+    index.ts     # Worker 진입점: CORS, KV 캐시, Discord 알림, 라우팅, /api/alert 프록시
+    services.ts  # 서비스 설정 + fetch 오케스트레이터
+    types.ts     # 공유 타입 (ServiceStatus, Incident 등)
+    utils.ts     # 공유 유틸리티 (formatDuration, fetchWithTimeout)
+    parsers/     # 플랫폼별 파서
+      statuspage.ts   # Atlassian Statuspage (7개 서비스)
+      incident-io.ts  # incident.io (6개 서비스)
+      gcloud.ts       # Google Cloud (1개 서비스)
+      instatus.ts     # Instatus (2개 서비스)
+      betterstack.ts  # Better Stack (3개 서비스)
+    parsers/__tests__/ # Vitest 단위 테스트 (40개)
+```
 
 ## 기여하기
 
@@ -161,13 +197,20 @@ npm run deploy     # Cloudflare 배포
 1. 레포지토리 포크
 2. 기능 브랜치 생성 (`git checkout -b feature/my-feature`)
 3. [CLAUDE.md](CLAUDE.md)의 개발 워크플로우 따르기
-4. 빌드 + 테스트: `npm run build && npm test`
+4. 빌드 + 테스트: `npm run build && npm test && npm run test:worker`
 5. [PR 템플릿](.github/pull_request_template.md)으로 풀 리퀘스트 제출
 
 ### 이슈
 
 - **버그 리포트**: [Bug Report](.github/ISSUE_TEMPLATE/bug_report.md) 템플릿 사용
 - **기능 요청**: [Feature Request](.github/ISSUE_TEMPLATE/feature_request.md) 템플릿 사용
+
+### 풀 리퀘스트
+
+- PR당 하나의 기능 또는 수정
+- 모든 테스트 통과 (E2E 25개 + 단위 40개 = 65개)
+- 커밋 메시지에 `closes #N` 포함
+- PR 체크리스트 작성
 
 ## 라이선스
 
