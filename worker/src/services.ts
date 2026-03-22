@@ -527,9 +527,96 @@ function parseUptimeData(html: string, componentId: string): UptimeDataResult {
   return result
 }
 
-// ── incident.io Uptime Calculator ──
+// ── incident.io Uptime Parser ──
+// Extracts per-component uptime% directly from the status page HTML.
+// The __next_f.push SSR payload contains a component_uptimes array with official uptime values.
+
+function parseIncidentIoUptime(html: string, componentId: string): number | null {
+  const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
+  for (const chunk of chunks) {
+    if (!chunk.includes('component_uptimes')) continue
+    // Find our componentId and its uptime value in escaped JSON
+    // Format: \"component_id\":\"<id>\",...,\"uptime\":\"99.99\"
+    const re = new RegExp(
+      `\\\\"component_id\\\\":\\\\"${componentId}\\\\"[\\s\\S]*?\\\\"uptime\\\\":\\\\"([^\\\\"]*)\\\\"`
+    )
+    const match = chunk.match(re)
+    if (!match) continue
+    const raw = match[1]
+    if (raw === '$undefined' || raw === '') return null
+    const pct = parseFloat(raw)
+    if (isNaN(pct) || pct < 0 || pct > 100) {
+      console.warn(`[parseIncidentIoUptime] unexpected uptime value "${raw}" for ${componentId}`)
+      return null
+    }
+    return pct
+  }
+  return null
+}
+
+// ── incident.io Component Impacts Parser ──
+// Extracts per-component daily impact levels from component_impacts in the status page HTML.
+// Used to build accurate 30-day status calendars for incident.io services.
+
+function parseIncidentIoComponentImpacts(html: string, componentId: string): Record<string, DailyImpactLevel> {
+  const result: Record<string, DailyImpactLevel> = {}
+  const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
+  for (const chunk of chunks) {
+    if (!chunk.includes('component_impacts')) continue
+    // Extract array between component_impacts and component_uptimes
+    const idx1 = chunk.indexOf('component_impacts')
+    const idx2 = chunk.indexOf('component_uptimes')
+    if (idx1 === -1 || idx2 === -1 || idx2 <= idx1) continue
+    const segment = chunk.substring(idx1, idx2)
+    const arrStart = segment.indexOf('[')
+    const arrEnd = segment.lastIndexOf(']')
+    if (arrStart === -1 || arrEnd === -1) continue
+    let raw = segment.substring(arrStart, arrEnd + 1)
+    // Unescape: \\" → "
+    raw = raw.replace(/\\"/g, '"')
+    raw = raw.replace(/"\$undefined"/g, 'null')
+
+    try {
+      const impacts = JSON.parse(raw) as Array<{
+        component_id: string; start_at: string; end_at: string; status: string
+      }>
+      // Filter for target component
+      const mine = impacts.filter((i) => i.component_id === componentId)
+      for (const impact of mine) {
+        const start = new Date(impact.start_at)
+        const end = new Date(impact.end_at)
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) continue
+
+        // Map status to DailyImpactLevel
+        const level: DailyImpactLevel =
+          impact.status === 'full_outage' ? 'critical'
+          : impact.status === 'partial_outage' ? 'major'
+          : 'minor' // degraded_performance
+
+        // Mark each UTC day the impact spans
+        const dayMs = 86_400_000
+        const startDay = new Date(start.toISOString().split('T')[0]).getTime()
+        const endDay = new Date(end.toISOString().split('T')[0]).getTime()
+        for (let d = startDay; d <= endDay; d += dayMs) {
+          const dateStr = new Date(d).toISOString().split('T')[0]
+          // Keep worst level per day: critical > major > minor
+          const existing = result[dateStr]
+          if (!existing || level === 'critical' || (level === 'major' && existing === 'minor')) {
+            result[dateStr] = level
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[parseIncidentIoComponentImpacts] parse failed:', err instanceof Error ? err.message : err)
+    }
+    break
+  }
+  return result
+}
+
+// ── incident.io Uptime Calculator (fallback) ──
 // Computes uptime% from filtered incident durations over a 90-day window.
-// Uses the same incident data from Atlassian-compat API (no additional fetch needed).
+// Used when component_uptimes is unavailable ($undefined).
 
 function computeUptimeFromIncidents(incidents: Incident[]): number | null {
   // No incidents at all → return null (no data) rather than asserting 100%
@@ -749,8 +836,8 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, page
     }
   }
 
-  // Phase 2: Scrape incidents still missing text after cache application (up to budget=2).
-  // Budget = 2 per service: 30 base requests + 6 services × 2 = 42 total, leaving 8 spare slots.
+  // Phase 2: Scrape incidents still missing text after cache application (up to budget=1).
+  // Budget = 1 per service: 44 base requests + 6 services × 1 = 50 (at Cloudflare free tier limit).
   // Prioritise: non-resolved first (may get new updates), then most recently started.
   const toEnrich = workingIncidents
     .filter((inc) => inc.timeline.some((t) => !t.text))
@@ -759,7 +846,7 @@ async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, page
       if (resolvedDiff !== 0) return resolvedDiff
       return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
     })
-    .slice(0, 2)
+    .slice(0, 1)
 
   if (toEnrich.length === 0) return workingIncidents
 
@@ -980,23 +1067,35 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       }
 
       // Compute daily impact for calendar from uptimeData HTML (Statuspage services only).
-      // For non-Statuspage services (incident.io), skip dailyImpact — the frontend uses
-      // per-incident startedAt with local timezone conversion instead (more accurate for
-      // users in non-UTC timezones).
+      // Daily impact for calendar: Statuspage uptimeData OR incident.io component_impacts
       const uptimeResult = (prefetched?.uptimeHtml && config.statusComponentId)
         ? parseUptimeData(prefetched.uptimeHtml, config.statusComponentId)
         : null
-      const dailyImpact = uptimeResult?.dailyImpact ?? null
+      const ioDailyImpact = (prefetched?.uptimeHtml && config.incidentIoComponentId)
+        ? parseIncidentIoComponentImpacts(prefetched.uptimeHtml, config.incidentIoComponentId)
+        : null
+      const dailyImpact = uptimeResult?.dailyImpact
+        ?? (ioDailyImpact && Object.keys(ioDailyImpact).length > 0 ? ioDailyImpact : null)
 
-      // Uptime%: Statuspage → uptimeData (official), incident.io → incident durations (estimate)
+      // Uptime%: Statuspage uptimeData > incident.io component_uptimes > incident duration estimate
       let uptimeValue: number | null = null
       let uptimeSrc: 'official' | 'estimate' | undefined
       if (uptimeResult?.uptimePercent != null) {
         uptimeValue = uptimeResult.uptimePercent
         uptimeSrc = 'official'
+      } else if (prefetched?.uptimeHtml && config.incidentIoComponentId) {
+        const ioUptime = parseIncidentIoUptime(prefetched.uptimeHtml, config.incidentIoComponentId)
+        if (ioUptime != null) {
+          uptimeValue = ioUptime
+          uptimeSrc = 'official'
+        } else {
+          // Fallback for services without component_uptimes (Replicate, ElevenLabs)
+          uptimeValue = computeUptimeFromIncidents(filtered)
+          uptimeSrc = 'estimate'
+        }
       } else if (config.incidentIoComponentId) {
         uptimeValue = computeUptimeFromIncidents(filtered)
-        uptimeSrc = 'estimate' // approximate — phase 2 will use component_impacts for official
+        uptimeSrc = 'estimate'
       }
 
       return {
@@ -1009,13 +1108,14 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       }
     } else {
       // No Statuspage API — HTTP check + optional scraping (parallel)
+      // Uses fetchWithTimeout (no retry) to stay within 50-subrequest budget
       const start = Date.now()
       const scrapeUrl = config.instatusUrl || config.rssFeedUrl || (config.gcloudProduct ? 'https://status.cloud.google.com/incidents.json' : null)
       const [res, scrapeRes, betterStackRes] = await Promise.all([
-        fetchWithRetry(config.statusUrl),
+        fetchWithTimeout(config.statusUrl),
         scrapeUrl
-          ? fetchWithRetry(scrapeUrl).catch((err) => {
-              console.warn(`[fetchService] ${config.id} scrape failed:`, err.message)
+          ? fetchWithTimeout(scrapeUrl).catch((err) => {
+              console.warn(`[fetchService] ${config.id} scrape failed:`, err instanceof Error ? err.message : err)
               return null
             })
           : Promise.resolve(null),
@@ -1101,11 +1201,11 @@ export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: Service
       }
       const summary: StatuspageResponse = await summaryRes.json()
       const incidents: StatuspageResponse | null = incidentsRes?.ok ? await incidentsRes.json() : null
-      // Fetch status page HTML for uptimeData (only if any service uses statusComponentId)
+      // Fetch status page HTML for uptimeData/component_uptimes parsing
       const statusUrl = baseUrl.replace('/api/v2', '')
-      const needsUptime = SERVICES.some((s) => s.apiUrl === apiUrl && s.statusComponentId)
+      const needsHtml = SERVICES.some((s) => s.apiUrl === apiUrl && (s.statusComponentId || s.incidentIoComponentId))
       let uptimeHtml: string | undefined
-      if (needsUptime) {
+      if (needsHtml) {
         try {
           const htmlRes = await fetchWithTimeout(statusUrl, 5000)
           if (htmlRes.ok) uptimeHtml = await htmlRes.text()

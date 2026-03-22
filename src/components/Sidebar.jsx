@@ -73,7 +73,7 @@ function uptimeBadgeCls(uptime) {
 const navItemStyle = { padding: '7px 8px', gap: '8px', borderRadius: '6px', fontSize: '12px', position: 'relative' }
 const activeBarStyle = { position: 'absolute', left: 0, top: '4px', bottom: '4px', width: '2px', borderRadius: '2px', background: 'var(--green)' }
 const sectionTitleStyle = { padding: '6px 8px', letterSpacing: '0.12em', fontSize: '9px', textTransform: 'uppercase', color: 'var(--text2)', fontFamily: 'var(--font-mono)' }
-const badgeStyle = { padding: '1px 5px', borderRadius: '3px', fontSize: '9px', marginLeft: 'auto', fontFamily: 'var(--font-mono)' }
+const badgeStyle = { padding: '1px 5px', borderRadius: '3px', fontSize: '9px', marginLeft: 'auto', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }
 
 function ServiceNavItem({ svc, page, setPage, onNavigate }) {
   const active = page.name === 'service' && page.serviceId === svc.id
