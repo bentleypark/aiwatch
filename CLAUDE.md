@@ -15,7 +15,7 @@ npm run lint       # Run ESLint
 
 ```bash
 npm test           # Run Playwright E2E tests (27 specs)
-npm run test:worker # Run Worker unit tests (65 specs, vitest)
+npm run test:worker # Run Worker unit tests (88 specs, vitest)
 ```
 
 ## Development Workflow
@@ -64,17 +64,19 @@ npm run test:worker # Run Worker unit tests (65 specs, vitest)
 src/
   components/   # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner
   pages/        # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, AboutScore, Ranking
-  hooks/        # usePolling, useTheme, useLang, useSettings
+  hooks/        # usePolling, useTheme, useLang, useSettings, useGitHubStars
   utils/        # analytics, calendar, time, pageContext, constants
   locales/      # ko.js, en.js — flat key→string maps (default exports)
 worker/
   src/
-    index.ts    # Worker entry: CORS, KV, alerts, routing, /api/alert, /badge, /api/v1
+    index.ts    # Worker entry: CORS, KV, routing, /api/alert, /badge, /api/v1, Cron scheduled handler
     services.ts # Service configs + fetch orchestrator
     types.ts    # Shared types (ServiceStatus, Incident, etc.)
-    utils.ts    # Shared utilities (formatDuration, fetchWithTimeout)
+    utils.ts    # Shared utilities (formatDuration, fetchWithTimeout, sanitize)
     score.ts    # AIWatch Score calculation
     badge.ts    # SVG badge generator
+    alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts)
+    fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack)
 ```
 
@@ -85,6 +87,7 @@ All colors are CSS custom properties defined in `src/index.css`. **Never use har
 |---|---|
 | `--bg0…--bg4` | Background layers (darkest → lighter) |
 | `--green / --amber / --red` | Operational / Degraded / Down |
+| `--yellow` | Warning / Score fair |
 | `--blue / --teal` | Informational |
 | `--text0…--text2` | Primary → muted text |
 | `--border / --border-hi` | Subtle / prominent borders |
@@ -103,6 +106,11 @@ Browser (React SPA, 60s polling)
     → write to KV (cache + daily counters)
   → React state (usePolling hook via PollingContext)
   → all pages read from context
+
+Cron Trigger (*/5 min)
+  → read KV cache → detect incidents/status changes
+  → KV ID-based dedup → Discord alerts
+  → daily summary at UTC 09:00 (KST 18:00)
 ```
 
 ### SPA Navigation
@@ -123,5 +131,6 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
     npm run deploy:worker
     ```
   - Verify the output says `Uploaded aiwatch-worker` (not `aiwatch`)
-  - Endpoints: `GET /api/status`, `GET /api/uptime?days=30`, `POST /api/alert`
+  - Endpoints: `GET /api/status`, `GET /api/uptime?days=30`, `POST /api/alert`, `GET /badge/:serviceId`, `GET /api/v1/status`
+  - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res/down/recovered:` keys, 7d TTL)
 - **Frontend deployment**: Vercel, domain ai-watch.dev — `git push origin main` triggers auto-deploy. `npm run build` is local only; changes are not live until pushed
