@@ -7,7 +7,7 @@ import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
-import { SCORE_BG_CLASS, SERVICE_CATEGORIES } from '../utils/constants'
+import { SCORE_BG_CLASS, SERVICE_CATEGORIES, EXCLUDE_FALLBACK } from '../utils/constants'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
@@ -270,6 +270,74 @@ function AIPanel({ t }) {
   )
 }
 
+// ── Fallback logic (mirrors worker/src/fallback.ts) ──
+
+function getFallbacks(service, allServices) {
+  if (EXCLUDE_FALLBACK.includes(service.id)) return []
+  return allServices
+    .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational')
+    .sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0))
+    .slice(0, 2)
+}
+
+// ── Action Banner — shows fallback recommendations during outages ──
+
+function ActionBanner({ services, setPage, setFilter, t }) {
+  const statusPriority = { down: 0, degraded: 1 }
+  const affected = services
+    .filter(s => s.status === 'down' || s.status === 'degraded')
+    .sort((a, b) => (statusPriority[a.status] ?? 2) - (statusPriority[b.status] ?? 2))
+  if (affected.length === 0) return null
+
+  const hasDown = affected.some(s => s.status === 'down')
+  const borderColor = hasDown ? 'var(--red)' : 'var(--amber)'
+  const icon = hasDown ? '🔴' : '⚠️'
+
+  // 3+ services: summary mode
+  if (affected.length >= 3) {
+    const names = affected.slice(0, 3).map(s => s.name).join(', ')
+    const suffix = affected.length > 3 ? ` +${affected.length - 3}` : ''
+    return (
+      <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg" style={{ padding: '12px 16px', borderLeft: `3px solid ${borderColor}` }}>
+        <div className="text-[13px] font-medium text-[var(--text0)]" style={{ marginBottom: '4px' }}>
+          {icon} {t('overview.banner.affected').replace('{n}', affected.length)} — {names}{suffix}
+        </div>
+        <button
+          onClick={() => { setFilter('issues'); }}
+          className="mono text-[11px] text-[var(--blue)] hover:underline cursor-pointer"
+          style={{ background: 'none', border: 'none', padding: 0 }}
+        >
+          👉 {t('overview.banner.viewIssues')}
+        </button>
+      </div>
+    )
+  }
+
+  // 1-2 services: detailed mode with fallbacks
+  return (
+    <div className="flex flex-col" style={{ gap: '8px' }}>
+      {affected.map(svc => {
+        const fallbacks = getFallbacks(svc, services)
+        const statusLabel = svc.status === 'down' ? t('overview.banner.down') : t('overview.banner.degraded')
+        const svcIcon = svc.status === 'down' ? '🔴' : '⚠️'
+        const fallbackLine = fallbacks.length > 0
+          ? `👉 ${t('overview.banner.fallback')} ${fallbacks.map(f => f.aiwatchScore != null ? `${f.name} (${f.aiwatchScore})` : f.name).join(' · ')}`
+          : `⚠️ ${t('overview.banner.noFallback')}`
+
+        return (
+          <div key={svc.id} className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg"
+               style={{ padding: '12px 16px', borderLeft: `3px solid ${svc.status === 'down' ? 'var(--red)' : 'var(--amber)'}` }}>
+            <div className="text-[13px] font-medium text-[var(--text0)]" style={{ marginBottom: '4px' }}>
+              {svcIcon} {svc.name} — {statusLabel}
+            </div>
+            <div className="mono text-[11px] text-[var(--text2)]">{fallbackLine}</div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Main Component ───────────────────────────────────────────
 
 export default function Overview() {
@@ -347,6 +415,9 @@ export default function Overview() {
 
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>
+
+      {/* ── Action Banner (outage fallback) ── */}
+      <ActionBanner services={services} setPage={setPage} setFilter={setFilter} t={t} />
 
       {/* ── Summary Stats ── */}
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>

@@ -41,6 +41,9 @@ export const SERVICE_CATEGORIES = {
   inference: { labelKey: 'filter.inference', ids: ['elevenlabs', 'replicate', 'huggingface'] },
 }
 
+// Services excluded from fallback recommendations (not interchangeable with LLM APIs)
+export const EXCLUDE_FALLBACK = ['elevenlabs', 'replicate', 'huggingface']
+
 export const VALID_ALERT_CONDITIONS = ['down', 'degraded', 'all']
 
 export const DEFAULT_SETTINGS = {
