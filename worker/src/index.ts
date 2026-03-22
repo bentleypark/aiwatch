@@ -3,6 +3,7 @@
 // Uses KV cache to serve last-known-good data on fetch failures
 
 import { fetchAllServices, CACHE_KEY, type ServiceStatus } from './services'
+import { calculateAIWatchScore } from './score'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -526,6 +527,7 @@ export default {
             status: 404, headers: publicHeaders,
           })
         }
+        const scoreData = calculateAIWatchScore(svc)
         return new Response(JSON.stringify({
           service: {
             id: svc.id, name: svc.name, provider: svc.provider, category: svc.category,
@@ -535,6 +537,11 @@ export default {
               id: i.id, title: i.title, status: i.status, impact: i.impact,
               startedAt: i.startedAt, duration: i.duration,
             })),
+            aiwatchScore: scoreData.score,
+            scoreGrade: scoreData.grade,
+            scoreConfidence: scoreData.confidence,
+            scoreBreakdown: scoreData.breakdown,
+            scoreMetrics: scoreData.metrics,
           },
           cachedAt: cached.cachedAt,
         }), { status: 200, headers: publicHeaders })
@@ -542,12 +549,16 @@ export default {
 
       // All services: /api/v1/status
       return new Response(JSON.stringify({
-        services: cached.services.map((svc) => ({
-          id: svc.id, name: svc.name, provider: svc.provider, category: svc.category,
-          status: svc.status, latency: svc.latency, uptime30d: svc.uptime30d,
-          uptimeSource: svc.uptimeSource, lastChecked: svc.lastChecked,
-          incidentCount: (svc.incidents ?? []).length,
-        })),
+        services: cached.services.map((svc) => {
+          const scoreData = calculateAIWatchScore(svc)
+          return {
+            id: svc.id, name: svc.name, provider: svc.provider, category: svc.category,
+            status: svc.status, latency: svc.latency, uptime30d: svc.uptime30d,
+            uptimeSource: svc.uptimeSource, lastChecked: svc.lastChecked,
+            incidentCount: (svc.incidents ?? []).length,
+            aiwatchScore: scoreData.score, scoreGrade: scoreData.grade,
+          }
+        }),
         cachedAt: cached.cachedAt,
       }), { status: 200, headers: publicHeaders })
     }
@@ -597,8 +608,14 @@ export default {
       // Detect new/resolved incidents and send Discord alerts
       ctx.waitUntil(detectAndAlertIncidents(env, enriched))
 
+      // Add AIWatch Score to each service
+      const servicesWithScore = enriched.map((svc) => {
+        const s = calculateAIWatchScore(svc)
+        return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown }
+      })
+
       return new Response(JSON.stringify({
-        services: enriched,
+        services: servicesWithScore,
         lastUpdated: new Date().toISOString(),
         latency24h,
       }), {
