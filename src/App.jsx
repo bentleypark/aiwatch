@@ -18,10 +18,11 @@ import Incidents from './pages/Incidents'
 import Uptime from './pages/Uptime'
 import ServiceDetails from './pages/ServiceDetails'
 import Settings from './pages/Settings'
+import AboutScore from './pages/AboutScore'
 
 import { ALL_SERVICE_IDS } from './utils/constants'
 
-const PAGE_NAMES = ['overview', 'latency', 'incidents', 'uptime', 'settings']
+const PAGE_NAMES = ['overview', 'latency', 'incidents', 'uptime', 'settings', 'about-score']
 
 function hashToPage(hash) {
   const id = hash.replace(/^#/, '').split(/[?&#]/)[0]
@@ -47,6 +48,7 @@ function resolvePage(page) {
     case 'uptime':    return <Uptime />
     case 'service':   return <ServiceDetails serviceId={page.serviceId} />
     case 'settings':  return <Settings />
+    case 'about-score': return <AboutScore />
     default:          return <Overview />
   }
 }

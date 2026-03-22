@@ -63,7 +63,7 @@ npm run test:worker # Run Worker unit tests (65 specs, vitest)
 ```
 src/
   components/   # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner
-  pages/        # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings
+  pages/        # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, AboutScore
   hooks/        # usePolling, useTheme, useLang, useSettings
   utils/        # analytics, calendar, time, pageContext, constants
   locales/      # ko.js, en.js — flat key→string maps (default exports)

@@ -32,7 +32,7 @@ Real-time monitoring dashboard for **19 AI services** — track status, latency,
 - **Dark/Light theme** — System-aware with manual toggle
 - **Bilingual** — Korean / English
 - **Mobile responsive** — Sidebar overlay, mobile action bar
-- **AIWatch Score** — Composite reliability score (uptime + incidents + recovery)
+- **AIWatch Score** — Composite reliability score ([how it works](https://ai-watch.dev/#about-score))
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 
 ## Monitored Services
@@ -236,7 +236,7 @@ Embed real-time status badges in your README, docs, or blog.
 ```
 src/
   components/    # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner
-  pages/         # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings
+  pages/         # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, AboutScore
   hooks/         # usePolling, useTheme, useLang, useSettings
   utils/         # analytics, calendar, time, pageContext, constants
   locales/       # ko.js, en.js (flat key→string maps)
