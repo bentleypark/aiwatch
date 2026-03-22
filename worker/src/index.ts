@@ -4,6 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, type ServiceStatus } from './services'
 import { calculateAIWatchScore } from './score'
+import { getFallbacks, buildFallbackText } from './fallback'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -282,10 +283,12 @@ async function detectAndAlertIncidents(
       // New incident — only alert if started within last 24 hours
       const incAge = Date.now() - new Date(inc.startedAt).getTime()
       if (!prev[inc.id] && incAge < 86_400_000) {
+        const fallbacks = getFallbacks(svc.id, svc.category, services)
+        const fallbackText = buildFallbackText(fallbacks)
         alerts.push({
           key: `inc-sent:new:${inc.id}`,
           title: `🔴 ${svc.name} — New Incident`,
-          description: sanitize(inc.title),
+          description: `${sanitize(inc.title)}\n${fallbackText}`,
           color: 0xED4245,
           url: `https://ai-watch.dev/#${svc.id}`,
         })
@@ -625,14 +628,14 @@ export default {
         ctx.waitUntil(alertServicesDown(env, downServices))
       }
 
-      // Detect new/resolved incidents and send Discord alerts
-      ctx.waitUntil(detectAndAlertIncidents(env, enriched))
-
       // Add AIWatch Score to each service
       const servicesWithScore = enriched.map((svc) => {
         const s = calculateAIWatchScore(svc)
         return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown }
       })
+
+      // Detect new/resolved incidents and send Discord alerts (after score calc for fallback)
+      ctx.waitUntil(detectAndAlertIncidents(env, servicesWithScore))
 
       return new Response(JSON.stringify({
         services: servicesWithScore,
