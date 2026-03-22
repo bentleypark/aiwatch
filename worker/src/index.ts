@@ -223,7 +223,7 @@ function alertServicesDown(env: Env, downServices: ServiceStatus[]) {
 // Sends Discord alerts for new incidents and resolutions.
 
 const INCIDENT_STATE_KEY = 'incident-alert-state'
-let lastIncidentCheck = 0
+const INCIDENT_CHECK_KEY = 'incident-last-check'
 const INCIDENT_CHECK_INTERVAL_MS = 600_000 // 10 minutes
 
 async function detectAndAlertIncidents(
@@ -232,17 +232,28 @@ async function detectAndAlertIncidents(
 ): Promise<void> {
   if (!env.DISCORD_WEBHOOK_URL || !env.STATUS_CACHE) return
 
-  // Throttle: check every 10 minutes only
+  // KV-based throttle: shared across all isolates.
+  // Per-alert dedup keys (inc-sent:*) provide the true uniqueness guarantee.
   const now = Date.now()
-  if (now - lastIncidentCheck < INCIDENT_CHECK_INTERVAL_MS) return
-  lastIncidentCheck = now
+  let lastCheckStr: string | null = null
+  try {
+    lastCheckStr = await env.STATUS_CACHE.get(INCIDENT_CHECK_KEY)
+  } catch (err) {
+    console.error('[incident-detect] KV throttle read failed, proceeding:', err instanceof Error ? err.message : err)
+  }
+  if (lastCheckStr && now - Number(lastCheckStr) < INCIDENT_CHECK_INTERVAL_MS) return
+  await env.STATUS_CACHE.put(INCIDENT_CHECK_KEY, String(now), { expirationTtl: 3600 })
+    .catch((err) => console.error('[incident-detect] KV throttle write failed:', err instanceof Error ? err.message : err))
 
   // Read previous incident state from KV
   let prevState: Record<string, Record<string, string>> = {} // { serviceId: { incId: status } }
   try {
     const raw = await env.STATUS_CACHE.get(INCIDENT_STATE_KEY)
     if (raw) prevState = JSON.parse(raw)
-  } catch { /* ignore */ }
+  } catch (err) {
+    console.error('[incident-detect] failed to read previous state:', err instanceof Error ? err.message : err)
+    return
+  }
 
   // Build current state
   const currentState: Record<string, Record<string, string>> = {}
@@ -257,11 +268,11 @@ async function detectAndAlertIncidents(
   if (Object.keys(prevState).length === 0) {
     await env.STATUS_CACHE.put(INCIDENT_STATE_KEY, JSON.stringify(currentState), {
       expirationTtl: 7 * 86400,
-    }).catch(() => {})
+    }).catch((err) => console.error('[incident-detect] first-run state save failed:', err instanceof Error ? err.message : err))
     return
   }
 
-  const alerts: Array<{ title: string; description: string; color: number; url: string }> = []
+  const alerts: Array<{ key: string; title: string; description: string; color: number; url: string }> = []
 
   for (const svc of services) {
     const prev = prevState[svc.id] ?? {}
@@ -269,15 +280,10 @@ async function detectAndAlertIncidents(
 
     for (const inc of svc.incidents ?? []) {
       // New incident — only alert if started within last 24 hours
-      // (prevents alerting on old incidents after Worker restart or KV expiry)
       const incAge = Date.now() - new Date(inc.startedAt).getTime()
       if (!prev[inc.id] && incAge < 86_400_000) {
-        const cooldownKey = `inc-new:${inc.id}`
-        const last = lastAlertTime.get(cooldownKey)
-        if (last && Date.now() - last < ALERT_COOLDOWN_MS) continue
-        lastAlertTime.set(cooldownKey, Date.now())
-
         alerts.push({
+          key: `inc-sent:new:${inc.id}`,
           title: `🔴 ${svc.name} — New Incident`,
           description: sanitize(inc.title),
           color: 0xED4245,
@@ -287,13 +293,9 @@ async function detectAndAlertIncidents(
 
       // Incident resolved
       if (prev[inc.id] && prev[inc.id] !== 'resolved' && inc.status === 'resolved') {
-        const cooldownKey = `inc-res:${inc.id}`
-        const last = lastAlertTime.get(cooldownKey)
-        if (last && Date.now() - last < ALERT_COOLDOWN_MS) continue
-        lastAlertTime.set(cooldownKey, Date.now())
-
         const durationText = inc.duration ? ` (${inc.duration})` : ''
         alerts.push({
+          key: `inc-sent:res:${inc.id}`,
           title: `🟢 ${svc.name} — Incident Resolved${durationText}`,
           description: sanitize(inc.title),
           color: 0x57F287,
@@ -305,12 +307,8 @@ async function detectAndAlertIncidents(
     // Check for incidents that vanished (resolved and removed from status page)
     for (const [incId, prevStatus] of Object.entries(prev)) {
       if (prevStatus !== 'resolved' && !curr[incId]) {
-        const cooldownKey = `inc-res:${incId}`
-        const last = lastAlertTime.get(cooldownKey)
-        if (last && Date.now() - last < ALERT_COOLDOWN_MS) continue
-        lastAlertTime.set(cooldownKey, Date.now())
-
         alerts.push({
+          key: `inc-sent:res:${incId}`,
           title: `🟢 ${svc.name} — Incident Resolved`,
           description: '(incident removed from status page)',
           color: 0x57F287,
@@ -320,9 +318,29 @@ async function detectAndAlertIncidents(
     }
   }
 
-  // Send alerts in parallel (max 3 to stay within subrequest budget)
+  // KV-based dedup: skip alerts already sent by another isolate
+  const deduped: typeof alerts = []
+  for (const alert of alerts.slice(0, 3)) {
+    try {
+      const existing = await env.STATUS_CACHE.get(alert.key)
+      if (existing) continue
+    } catch (err) {
+      console.error('[incident-detect] KV dedup read failed, allowing alert:', alert.key, err instanceof Error ? err.message : err)
+    }
+    deduped.push(alert)
+  }
+
+  // Mark as sent BEFORE sending to prevent duplicate sends from concurrent isolates.
+  // If Discord send fails, the key expires in 1h and the alert retries next cycle.
+  for (const alert of deduped) {
+    try {
+      await env.STATUS_CACHE.put(alert.key, '1', { expirationTtl: 3600 })
+    } catch (err) {
+      console.error('[incident-detect] dedup marker write failed:', alert.key, err instanceof Error ? err.message : err)
+    }
+  }
   await Promise.all(
-    alerts.slice(0, 3).map((alert) =>
+    deduped.map((alert) =>
       sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
         title: alert.title,
         description: `${alert.description}\n[View on AIWatch](${alert.url})`,
@@ -334,7 +352,7 @@ async function detectAndAlertIncidents(
   // Save current state
   await env.STATUS_CACHE.put(INCIDENT_STATE_KEY, JSON.stringify(currentState), {
     expirationTtl: 7 * 86400,
-  }).catch(() => {})
+  }).catch((err) => console.error('[incident-detect] state save failed:', err instanceof Error ? err.message : err))
 }
 
 function corsHeaders(origin: string, allowedOrigin: string | undefined): HeadersInit {
