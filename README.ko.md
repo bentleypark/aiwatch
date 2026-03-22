@@ -171,6 +171,24 @@ npm run deploy:worker  # Cloudflare 배포 (npm 스크립트만 사용)
 | `/api/uptime?days=30` | GET | 일별 가동률 이력 (1-90일) |
 | `/api/alert` | POST | Webhook 프록시 (Slack/Discord만, SSRF 보호) |
 | `/badge/:serviceId` | GET | SVG 상태 배지 (shields.io 스타일) |
+| `/api/v1/status` | GET | 공개 API — 전체 서비스 (경량, CORS `*`) |
+| `/api/v1/status/:id` | GET | 공개 API — 개별 서비스 + 최근 5건 인시던트 |
+
+## 공개 API (v1)
+
+외부 개발자용 공개 API. 인증 불필요. 분당 60회 제한.
+
+**전체 서비스:**
+```bash
+curl https://aiwatch-worker.p2c2kbf.workers.dev/api/v1/status
+```
+
+**개별 서비스:**
+```bash
+curl https://aiwatch-worker.p2c2kbf.workers.dev/api/v1/status/claude
+```
+
+응답 항목: `id`, `name`, `provider`, `category`, `status`, `latency`, `uptime30d`, `uptimeSource`, `lastChecked`, 최근 인시던트 5건 (개별 조회 시).
 
 ## 상태 배지
 

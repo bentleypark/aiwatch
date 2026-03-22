@@ -171,6 +171,24 @@ npm run deploy:worker  # Deploy to Cloudflare (use npm script only)
 | `/api/uptime?days=30` | GET | Daily uptime history (1-90 days) |
 | `/api/alert` | POST | Webhook proxy (Slack/Discord only, SSRF protected) |
 | `/badge/:serviceId` | GET | SVG status badge (shields.io style) |
+| `/api/v1/status` | GET | Public API — all services (lightweight, CORS `*`) |
+| `/api/v1/status/:id` | GET | Public API — single service + top 5 incidents |
+
+## Public API (v1)
+
+Open API for external developers. No authentication required. Rate limited to 60 req/min.
+
+**All services:**
+```bash
+curl https://aiwatch-worker.p2c2kbf.workers.dev/api/v1/status
+```
+
+**Single service:**
+```bash
+curl https://aiwatch-worker.p2c2kbf.workers.dev/api/v1/status/claude
+```
+
+Response includes: `id`, `name`, `provider`, `category`, `status`, `latency`, `uptime30d`, `uptimeSource`, `lastChecked`, and up to 5 recent incidents (single service only).
 
 ## Status Badges
 
