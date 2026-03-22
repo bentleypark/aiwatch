@@ -17,6 +17,7 @@ let lastKvWrite = 0
 const KV_WRITE_INTERVAL_MS = 600_000 // 10 minutes — 2 writes per interval = ~288/day within free tier
 let lastArchivedDate = '' // prevent duplicate archival writes within same isolate
 let lastLatencySlot = '' // prevent duplicate 30-min latency writes within same isolate
+const alertProxyRate = new Map<string, { start: number; count: number }>() // rate limit for /api/alert
 
 interface DailyCounters {
   [serviceId: string]: { ok: number; total: number }
@@ -231,7 +232,7 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
 
   return {
     'Access-Control-Allow-Origin': allowOrigin,
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin',
@@ -246,6 +247,61 @@ export default {
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: cors })
+    }
+
+    // POST /api/alert — webhook proxy (CORS workaround for Slack/Discord)
+    if (request.method === 'POST' && url.pathname === '/api/alert') {
+      try {
+        const body = await request.json() as { webhookUrl?: string; channel?: string; payload?: unknown }
+        const { webhookUrl, channel, payload } = body
+        if (!webhookUrl || !payload) {
+          return new Response(JSON.stringify({ error: 'Missing webhookUrl or payload' }), {
+            status: 400, headers: { ...cors, 'Content-Type': 'application/json' },
+          })
+        }
+        // Strict validation — protocol, domain, and path prefix
+        const parsed = new URL(webhookUrl)
+        if (parsed.protocol !== 'https:') {
+          return new Response(JSON.stringify({ error: 'Only HTTPS webhook URLs allowed' }), {
+            status: 403, headers: { ...cors, 'Content-Type': 'application/json' },
+          })
+        }
+        const isSlack = parsed.hostname === 'hooks.slack.com' && parsed.pathname.startsWith('/services/')
+        const isDiscord = parsed.hostname === 'discord.com' && parsed.pathname.startsWith('/api/webhooks/')
+        if (!isSlack && !isDiscord) {
+          return new Response(JSON.stringify({ error: 'Webhook URL not allowed' }), {
+            status: 403, headers: { ...cors, 'Content-Type': 'application/json' },
+          })
+        }
+        // Rate limit: max 10 per minute per webhook URL
+        const now = Date.now()
+        const rateKey = parsed.pathname
+        const rateEntry = alertProxyRate.get(rateKey)
+        if (rateEntry && rateEntry.count >= 10 && now - rateEntry.start < 60_000) {
+          return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
+            status: 429, headers: { ...cors, 'Content-Type': 'application/json' },
+          })
+        }
+        if (!rateEntry || now - rateEntry.start >= 60_000) {
+          alertProxyRate.set(rateKey, { start: now, count: 1 })
+        } else {
+          rateEntry.count++
+        }
+        const resp = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        return new Response(JSON.stringify({ ok: resp.ok, status: resp.status }), {
+          status: resp.ok ? 200 : 502,
+          headers: { ...cors, 'Content-Type': 'application/json' },
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        return new Response(JSON.stringify({ error: message }), {
+          status: 500, headers: { ...cors, 'Content-Type': 'application/json' },
+        })
+      }
     }
 
     if (request.method !== 'GET' || (url.pathname !== '/api/status' && url.pathname !== '/api/uptime')) {

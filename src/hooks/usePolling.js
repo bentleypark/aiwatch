@@ -3,6 +3,7 @@
 // Return shape: { services, loading, error, lastUpdated, refresh }
 
 import { useState, useEffect, useCallback, useRef, createContext, useContext, createElement } from 'react'
+import { SETTINGS_STORAGE_KEY } from '../utils/constants'
 
 const POLL_INTERVAL = 60_000 // 60s
 
@@ -424,6 +425,90 @@ export function usePolling() {
   return ctx
 }
 
+// ── Status Change Detection + Webhook Alerts ──
+
+const ALERT_COOLDOWN_MS = 5 * 60_000
+const alertCooldowns = new Map()
+
+function detectStatusChanges(prev, current) {
+  if (!prev || prev.length === 0) return
+
+  // Read alert settings from localStorage
+  let alertSettings
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY)
+    if (!raw) return
+    alertSettings = JSON.parse(raw)
+  } catch { return }
+
+  const { slackUrl, discordUrl, alertCondition, alertTarget, alertServices } = alertSettings
+  if (!slackUrl && !discordUrl) return
+
+  const prevMap = new Map(prev.map((s) => [s.id, s.status]))
+
+  for (const svc of current) {
+    const prevStatus = prevMap.get(svc.id)
+    if (!prevStatus || prevStatus === svc.status) continue
+
+    // Check alert condition (including recovery):
+    // 'down' = down 진입 + down 복구
+    // 'degraded' = degraded/down 진입 + degraded/down 복구
+    // 'all' = 모든 상태 변경
+    if (alertCondition === 'down' && svc.status !== 'down' && prevStatus !== 'down') continue
+    if (alertCondition === 'degraded' && svc.status === 'operational' && prevStatus === 'operational') continue
+
+    // Check alert target
+    if (alertTarget === 'custom' && !alertServices?.includes(svc.id)) continue
+
+    // Cooldown check
+    const cooldownKey = `${svc.id}:${svc.status}`
+    const lastAlert = alertCooldowns.get(cooldownKey)
+    if (lastAlert && Date.now() - lastAlert < ALERT_COOLDOWN_MS) continue
+    alertCooldowns.set(cooldownKey, Date.now())
+
+    // Send alerts
+    const isRecovery = svc.status === 'operational'
+    const emoji = isRecovery ? '🟢' : svc.status === 'down' ? '🔴' : '🟡'
+    const statusLabel = isRecovery ? 'Recovered' : svc.status === 'down' ? 'Down' : 'Degraded'
+
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8788'
+    const apiBase = API_URL.replace('/api/status', '')
+
+    const siteUrl = `https://ai-watch.dev/#${svc.id}`
+
+    if (slackUrl) {
+      fetch(`${apiBase}/api/alert`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          webhookUrl: slackUrl, channel: 'slack',
+          payload: { text: `${emoji} *${svc.name}* — ${statusLabel}\n${prevStatus} → ${svc.status}\n<${siteUrl}|AIWatch에서 확인>` },
+        }),
+      }).catch(() => {})
+    }
+
+    if (discordUrl) {
+      fetch(`${apiBase}/api/alert`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          webhookUrl: discordUrl, channel: 'discord',
+          payload: {
+            embeds: [{
+              title: `${emoji} ${svc.name} — ${statusLabel}`,
+              url: siteUrl,
+              description: `${prevStatus} → ${svc.status}`,
+              color: isRecovery ? 0x57F287 : svc.status === 'down' ? 0xED4245 : 0xFEE75C,
+              timestamp: new Date().toISOString(),
+              footer: { text: 'AIWatch Alert' },
+            }],
+          },
+        }),
+      }).catch(() => {})
+    }
+  }
+}
+
 // mode: 'initial' = first load (skeleton), 'refresh' = manual (keep data, show refreshing), 'silent' = auto-poll (invisible)
 function usePollingInternal() {
   const [state, setState] = useState({
@@ -439,6 +524,7 @@ function usePollingInternal() {
   const hasDataRef = useRef(false)
   const refreshingRef = useRef(false) // prevent silent polls from aborting refresh
   const prevServicesRef = useRef([])  // backup for recovery on refresh failure
+  const alertPrevRef = useRef([])     // separate ref for alert detection (avoids false alerts)
 
   const poll = useCallback(async (mode = 'silent') => {
     // Skip silent polls while refresh is in progress
@@ -485,6 +571,12 @@ function usePollingInternal() {
         const elapsed = Date.now() - loadStart
         if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
       }
+
+      // Detect status changes and send webhook alerts
+      if (hasDataRef.current && merged.length > 0) {
+        detectStatusChanges(alertPrevRef.current, merged)
+      }
+      alertPrevRef.current = merged
 
       hasDataRef.current = true
       refreshingRef.current = false

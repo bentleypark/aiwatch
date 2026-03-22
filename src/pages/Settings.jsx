@@ -109,7 +109,13 @@ export default function Settings() {
   const [period, setPeriod] = useState(settings.period)
   const [sla, setSla] = useState(settings.sla)
   const [enabledServices, setEnabledServices] = useState(settings.enabledServices)
+  const [slackUrl, setSlackUrl] = useState(settings.slackUrl)
+  const [discordUrl, setDiscordUrl] = useState(settings.discordUrl)
+  const [alertCondition, setAlertCondition] = useState(settings.alertCondition)
+  const [alertTarget, setAlertTarget] = useState(settings.alertTarget)
+  const [alertServices, setAlertServices] = useState(settings.alertServices)
   const [saved, setSaved] = useState(false)
+  const [testResult, setTestResult] = useState(null) // null | 'sending' | 'ok' | 'error'
   const saveTimerRef = useRef(null)
 
   useEffect(() => () => clearTimeout(saveTimerRef.current), [])
@@ -117,11 +123,16 @@ export default function Settings() {
     setPeriod(settings.period)
     setSla(settings.sla)
     setEnabledServices(settings.enabledServices)
+    setSlackUrl(settings.slackUrl)
+    setDiscordUrl(settings.discordUrl)
+    setAlertCondition(settings.alertCondition)
+    setAlertTarget(settings.alertTarget)
+    setAlertServices(settings.alertServices)
   }, [settings])
 
   function handleSave() {
     const slaNum = sla === '' ? DEFAULT_SETTINGS.sla : Number(sla)
-    save({ period, sla: slaNum, enabledServices })
+    save({ period, sla: slaNum, enabledServices, slackUrl, discordUrl, alertCondition, alertTarget, alertServices })
     trackEvent('save_settings')
     setSaved(true)
     clearTimeout(saveTimerRef.current)
@@ -138,6 +149,11 @@ export default function Settings() {
   const hasNoChanges = period === settings.period
     && sla === settings.sla
     && JSON.stringify([...enabledServices].sort()) === JSON.stringify([...settings.enabledServices].sort())
+    && slackUrl === settings.slackUrl
+    && discordUrl === settings.discordUrl
+    && alertCondition === settings.alertCondition
+    && alertTarget === settings.alertTarget
+    && JSON.stringify([...alertServices].sort()) === JSON.stringify([...settings.alertServices].sort())
 
   // Service data map
   const svcMap = {}
@@ -252,44 +268,89 @@ export default function Settings() {
         </div>
       </section>
 
-      {/* ── Alerts (Phase 3 — disabled) ── */}
+      {/* ── Alerts ── */}
       <section>
-        <div className="flex items-center" style={{ ...sectionTitleStyle, gap: '8px' }}>
-          <span>{t('settings.alerts')}</span>
-          <ComingSoonBadge t={t} />
+        <div style={sectionTitleStyle}>{t('settings.alerts')}</div>
+
+        <div style={{ padding: '13px 0', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', marginBottom: '2px' }}>{t('settings.slack')}</div>
+          <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', lineHeight: 1.5, marginBottom: '8px' }}>{t('settings.slack.desc')}</div>
+          <input
+            type="text"
+            value={slackUrl}
+            onChange={(e) => setSlackUrl(e.target.value)}
+            placeholder="https://hooks.slack.com/services/..."
+            className="mono"
+            style={{
+              width: '100%', fontSize: '11px', padding: '6px 10px',
+              background: 'var(--bg2)', border: '1px solid var(--border-hi)', borderRadius: '5px',
+              color: 'var(--text0)', outline: 'none', boxSizing: 'border-box',
+            }}
+          />
         </div>
 
-        <div style={{ opacity: 0.42, pointerEvents: 'none' }}>
-          <FieldRow label={t('settings.slack')} desc={t('settings.slack.desc')}>
-            <input
-              type="text"
-              disabled
-              placeholder="https://hooks.slack.com/..."
+        <div style={{ padding: '13px 0', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', marginBottom: '2px' }}>{t('settings.discord')}</div>
+          <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', lineHeight: 1.5, marginBottom: '8px' }}>{t('settings.discord.desc')}</div>
+          <input
+            type="text"
+            value={discordUrl}
+            onChange={(e) => setDiscordUrl(e.target.value)}
+            placeholder="https://discord.com/api/webhooks/..."
+            className="mono"
+            style={{
+              width: '100%', fontSize: '11px', padding: '6px 10px',
+              background: 'var(--bg2)', border: '1px solid var(--border-hi)', borderRadius: '5px',
+              color: 'var(--text0)', outline: 'none', boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        <FieldRow label={t('settings.alert.condition')} desc={t('settings.alert.condition.desc')}>
+          <SegmentControl
+            value={alertCondition}
+            onChange={setAlertCondition}
+            options={[{ value: 'down', label: t('status.down') }, { value: 'degraded', label: t('status.degraded') }, { value: 'all', label: t('overview.filter.all') }]}
+          />
+        </FieldRow>
+
+        <FieldRow label={t('settings.alert.target')} desc={t('settings.alert.target.desc')} last>
+          <SegmentControl
+            value={alertTarget}
+            onChange={setAlertTarget}
+            options={[{ value: 'all', label: t('overview.filter.all') }, { value: 'custom', label: t('settings.alert.custom') }]}
+          />
+        </FieldRow>
+
+        {(slackUrl || discordUrl) && (
+          <div style={{ marginTop: '12px' }}>
+            <button
+              onClick={async () => {
+                setTestResult('sending')
+                const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8788'
+                const apiBase = API_URL.replace('/api/status', '')
+                const targets = []
+                if (slackUrl) targets.push({ url: slackUrl, channel: 'slack', payload: { text: '🧪 AIWatch 테스트 알림 — Webhook 연동 성공' } })
+                if (discordUrl) targets.push({ url: discordUrl, channel: 'discord', payload: { embeds: [{ title: '🧪 AIWatch 테스트 알림', description: 'Webhook 연동 성공', color: 5814783, footer: { text: 'AIWatch Alert — Test' } }] } })
+                try {
+                  const results = await Promise.all(targets.map((t) =>
+                    fetch(`${apiBase}/api/alert`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ webhookUrl: t.url, channel: t.channel, payload: t.payload }) }).then((r) => r.ok)
+                  ))
+                  setTestResult(results.every(Boolean) ? 'ok' : 'error')
+                } catch { setTestResult('error') }
+                setTimeout(() => setTestResult(null), 3000)
+              }}
+              disabled={testResult === 'sending'}
               className="mono"
               style={{
-                width: '240px', fontSize: '11px', padding: '6px 10px',
-                background: 'var(--bg2)', border: '1px solid var(--border-hi)', borderRadius: '5px',
-                color: 'var(--text2)', outline: 'none',
+                fontSize: '11px', padding: '5px 14px', borderRadius: '5px', border: 'none',
+                background: 'var(--blue)', color: 'var(--bg0)', cursor: 'pointer', opacity: testResult === 'sending' ? 0.6 : 1,
               }}
-            />
-          </FieldRow>
-
-          <FieldRow label={t('settings.alert.condition')} desc={t('settings.alert.condition.desc')}>
-            <SegmentControl
-              value=""
-              onChange={() => {}}
-              options={[{ value: 'down', label: t('status.down') }, { value: 'degraded', label: t('status.degraded') }, { value: 'all', label: t('overview.filter.all') }]}
-            />
-          </FieldRow>
-
-          <FieldRow label={t('settings.alert.target')} desc={t('settings.alert.target.desc')} last>
-            <SegmentControl
-              value=""
-              onChange={() => {}}
-              options={[{ value: 'all', label: t('overview.filter.all') }, { value: 'custom', label: t('settings.alert.custom') }]}
-            />
-          </FieldRow>
-        </div>
+            >
+              {testResult === 'sending' ? t('settings.alert.testing') : testResult === 'ok' ? t('settings.alert.test.ok') : testResult === 'error' ? t('settings.alert.test.error') : t('settings.alert.test')}
+            </button>
+          </div>
+        )}
       </section>
 
       {/* ── Save ── */}

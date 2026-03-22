@@ -32,8 +32,15 @@ export const SERVICE_AND_WEBAPP_IDS = [
 // All service IDs
 export const ALL_SERVICE_IDS = [...SERVICE_AND_WEBAPP_IDS, ...AGENT_SERVICE_IDS]
 
+export const VALID_ALERT_CONDITIONS = ['down', 'degraded', 'all']
+
 export const DEFAULT_SETTINGS = {
   period: '7d',
   sla: 99.9,
   enabledServices: ALL_SERVICE_IDS,
+  slackUrl: '',
+  discordUrl: '',
+  alertCondition: 'down',  // 'down' | 'degraded' | 'all'
+  alertTarget: 'all',      // 'all' | 'custom'
+  alertServices: ALL_SERVICE_IDS,
 }
