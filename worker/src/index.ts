@@ -217,6 +217,123 @@ function alertServicesDown(env: Env, downServices: ServiceStatus[]) {
   })
 }
 
+// ── Server-side Incident Detection ──
+// Compares current incidents against KV-stored previous state.
+// Sends Discord alerts for new incidents and resolutions.
+
+const INCIDENT_STATE_KEY = 'incident-alert-state'
+let lastIncidentCheck = 0
+const INCIDENT_CHECK_INTERVAL_MS = 600_000 // 10 minutes
+
+async function detectAndAlertIncidents(
+  env: Env,
+  services: ServiceStatus[],
+): Promise<void> {
+  if (!env.DISCORD_WEBHOOK_URL || !env.STATUS_CACHE) return
+
+  // Throttle: check every 10 minutes only
+  const now = Date.now()
+  if (now - lastIncidentCheck < INCIDENT_CHECK_INTERVAL_MS) return
+  lastIncidentCheck = now
+
+  // Read previous incident state from KV
+  let prevState: Record<string, Record<string, string>> = {} // { serviceId: { incId: status } }
+  try {
+    const raw = await env.STATUS_CACHE.get(INCIDENT_STATE_KEY)
+    if (raw) prevState = JSON.parse(raw)
+  } catch { /* ignore */ }
+
+  // Build current state
+  const currentState: Record<string, Record<string, string>> = {}
+  for (const svc of services) {
+    currentState[svc.id] = {}
+    for (const inc of svc.incidents ?? []) {
+      currentState[svc.id][inc.id] = inc.status
+    }
+  }
+
+  // Skip on first run (no previous data)
+  if (Object.keys(prevState).length === 0) {
+    await env.STATUS_CACHE.put(INCIDENT_STATE_KEY, JSON.stringify(currentState), {
+      expirationTtl: 7 * 86400,
+    }).catch(() => {})
+    return
+  }
+
+  const alerts: Array<{ title: string; description: string; color: number; url: string }> = []
+
+  for (const svc of services) {
+    const prev = prevState[svc.id] ?? {}
+    const curr = currentState[svc.id] ?? {}
+
+    for (const inc of svc.incidents ?? []) {
+      // New incident
+      if (!prev[inc.id]) {
+        const cooldownKey = `inc-new:${inc.id}`
+        const last = lastAlertTime.get(cooldownKey)
+        if (last && Date.now() - last < ALERT_COOLDOWN_MS) continue
+        lastAlertTime.set(cooldownKey, Date.now())
+
+        alerts.push({
+          title: `🔴 ${svc.name} — New Incident`,
+          description: sanitize(inc.title),
+          color: 0xED4245,
+          url: `https://ai-watch.dev/#${svc.id}`,
+        })
+      }
+
+      // Incident resolved
+      if (prev[inc.id] && prev[inc.id] !== 'resolved' && inc.status === 'resolved') {
+        const cooldownKey = `inc-res:${inc.id}`
+        const last = lastAlertTime.get(cooldownKey)
+        if (last && Date.now() - last < ALERT_COOLDOWN_MS) continue
+        lastAlertTime.set(cooldownKey, Date.now())
+
+        const durationText = inc.duration ? ` (${inc.duration})` : ''
+        alerts.push({
+          title: `🟢 ${svc.name} — Incident Resolved${durationText}`,
+          description: sanitize(inc.title),
+          color: 0x57F287,
+          url: `https://ai-watch.dev/#${svc.id}`,
+        })
+      }
+    }
+
+    // Check for incidents that vanished (resolved and removed from status page)
+    for (const [incId, prevStatus] of Object.entries(prev)) {
+      if (prevStatus !== 'resolved' && !curr[incId]) {
+        const cooldownKey = `inc-res:${incId}`
+        const last = lastAlertTime.get(cooldownKey)
+        if (last && Date.now() - last < ALERT_COOLDOWN_MS) continue
+        lastAlertTime.set(cooldownKey, Date.now())
+
+        alerts.push({
+          title: `🟢 ${svc.name} — Incident Resolved`,
+          description: '(incident removed from status page)',
+          color: 0x57F287,
+          url: `https://ai-watch.dev/#${svc.id}`,
+        })
+      }
+    }
+  }
+
+  // Send alerts in parallel (max 3 to stay within subrequest budget)
+  await Promise.all(
+    alerts.slice(0, 3).map((alert) =>
+      sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+        title: alert.title,
+        description: `${alert.description}\n[View on AIWatch](${alert.url})`,
+        color: alert.color,
+      })
+    )
+  )
+
+  // Save current state
+  await env.STATUS_CACHE.put(INCIDENT_STATE_KEY, JSON.stringify(currentState), {
+    expirationTtl: 7 * 86400,
+  }).catch(() => {})
+}
+
 function corsHeaders(origin: string, allowedOrigin: string | undefined): HeadersInit {
   let allowOrigin = ''
   if (!allowedOrigin) {
@@ -476,6 +593,9 @@ export default {
       if (downServices.length > 0) {
         ctx.waitUntil(alertServicesDown(env, downServices))
       }
+
+      // Detect new/resolved incidents and send Discord alerts
+      ctx.waitUntil(detectAndAlertIncidents(env, enriched))
 
       return new Response(JSON.stringify({
         services: enriched,
