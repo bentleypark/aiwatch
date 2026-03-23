@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackUptime } from '../betterstack'
+import { describe, it, expect, vi } from 'vitest'
+import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime } from '../betterstack'
 
 describe('parseRssIncidents', () => {
   it('groups RSS items by guid into incidents', () => {
@@ -82,6 +82,34 @@ describe('parseXaiRssIncidents', () => {
 
   it('returns empty for no items', () => {
     expect(parseXaiRssIncidents('<rss></rss>')).toEqual([])
+  })
+})
+
+describe('parseBetterStackStatus', () => {
+  it('returns operational for aggregate_state "operational"', () => {
+    expect(parseBetterStackStatus({ data: { attributes: { aggregate_state: 'operational' } } })).toBe('operational')
+  })
+
+  it('returns down for aggregate_state "downtime"', () => {
+    expect(parseBetterStackStatus({ data: { attributes: { aggregate_state: 'downtime' } } })).toBe('down')
+  })
+
+  it('returns degraded for "degraded" and "maintenance"', () => {
+    expect(parseBetterStackStatus({ data: { attributes: { aggregate_state: 'degraded' } } })).toBe('degraded')
+    expect(parseBetterStackStatus({ data: { attributes: { aggregate_state: 'maintenance' } } })).toBe('degraded')
+  })
+
+  it('returns degraded with warning for unknown state', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(parseBetterStackStatus({ data: { attributes: { aggregate_state: 'new_state' } } })).toBe('degraded')
+    expect(spy).toHaveBeenCalledOnce()
+    spy.mockRestore()
+  })
+
+  it('returns null when data or aggregate_state is missing', () => {
+    expect(parseBetterStackStatus({})).toBeNull()
+    expect(parseBetterStackStatus({ data: {} })).toBeNull()
+    expect(parseBetterStackStatus({ data: { attributes: {} } })).toBeNull()
   })
 })
 

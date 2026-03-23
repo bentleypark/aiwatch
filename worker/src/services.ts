@@ -7,13 +7,13 @@ import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeDa
 import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, computeUptimeFromIncidents, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import { parseInstatusIncidents } from './parsers/instatus'
-import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackUptime } from './parsers/betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
 
 const SERVICES: ServiceConfig[] = [
   // AI API Services
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp' },
-  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'conversation', 'workspaces', 'logged out', 'codex', 'support chat'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW' },
+  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'conversation', 'workspaces', 'logged out', 'codex', 'support chat'], statusComponent: 'Chat Completions', incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW' },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B' },
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE' },
@@ -246,26 +246,29 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         }
       }
 
-      // Better Stack uptime: parse /index.json for average availability
+      // Better Stack uptime + status: parse /index.json for aggregate_state and availability
       let betterStackUptime: number | null = null
+      let betterStackStat: 'operational' | 'degraded' | 'down' | null = null
       if (betterStackRes?.ok) {
         try {
           const bsData: BetterStackIndex = await betterStackRes.json()
           betterStackUptime = parseBetterStackUptime(bsData)
+          betterStackStat = parseBetterStackStatus(bsData)
         } catch (err) {
-          console.warn(`[fetchService] ${config.id} BetterStack uptime parse failed:`, err instanceof Error ? err.message : err)
+          console.warn(`[fetchService] ${config.id} BetterStack parse failed:`, err instanceof Error ? err.message : err)
         }
       }
 
       const filtered = filterIncidents(incidents, config)
-      // Use ongoing incidents (unresolved) to determine status — more accurate than
-      // HTTP check which only tests if the status page itself is up
+      // Prefer BetterStack aggregate_state (authoritative platform status),
+      // then fall back to RSS incident check, then HTTP check
       const hasOngoing = filtered.some((i) => i.status !== 'resolved')
       const httpStatus = res.ok || res.status === 403 ? 'operational' : 'degraded'
+      const derivedStatus = betterStackStat ?? (hasOngoing ? 'degraded' : httpStatus)
 
       return {
         ...base,
-        status: hasOngoing ? 'degraded' : httpStatus,
+        status: derivedStatus,
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
         calendarDays: 14,

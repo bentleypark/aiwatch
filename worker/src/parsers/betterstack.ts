@@ -121,10 +121,23 @@ export function parseXaiRssIncidents(xml: string): Incident[] {
 }
 
 export interface BetterStackIndex {
+  data?: {
+    attributes?: { aggregate_state?: string }
+  }
   included?: Array<{
     type: string
     attributes?: { availability?: number }
   }>
+}
+
+export function parseBetterStackStatus(data: BetterStackIndex): 'operational' | 'degraded' | 'down' | null {
+  const state = data.data?.attributes?.aggregate_state
+  if (!state) return null
+  if (state === 'operational') return 'operational'
+  if (state === 'downtime') return 'down'
+  if (state === 'degraded' || state === 'maintenance') return 'degraded'
+  console.warn(`[parseBetterStackStatus] unknown aggregate_state: "${state}" — treating as degraded`)
+  return 'degraded'
 }
 
 export function parseBetterStackUptime(data: BetterStackIndex): number | null {
