@@ -16,12 +16,17 @@ export default defineConfig({
     {
       name: 'desktop',
       use: { ...devices['Desktop Chrome'] },
-      testIgnore: /mobile\.spec/,
+      testIgnore: /mobile\.spec|is-down\.spec/,
     },
     {
       name: 'mobile',
       use: { viewport: { width: 375, height: 812 } },
       testMatch: /mobile\.spec/,
+    },
+    {
+      name: 'is-down',
+      use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:3000' },
+      testMatch: /is-down\.spec/,
     },
   ],
   webServer: {
