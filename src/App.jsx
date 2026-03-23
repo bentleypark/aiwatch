@@ -11,6 +11,7 @@ import TickerBar from './components/TickerBar'
 import Sidebar from './components/Sidebar'
 import Modal from './components/Modal'
 import CookieBanner from './components/CookieBanner'
+import InstallBanner from './components/InstallBanner'
 import { PrivacyContent, TermsContent } from './components/LegalContent'
 import Overview from './pages/Overview'
 import Latency from './pages/Latency'
@@ -172,6 +173,7 @@ function AppInner() {
       </Modal>
 
       <CookieBanner />
+      <InstallBanner />
     </PageContext.Provider>
     </PollingProvider>
   )

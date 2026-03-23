@@ -255,6 +255,12 @@ const en = {
   'aboutScore.grade.fair': 'Fair',
   'aboutScore.grade.degrading': 'Degrading',
   'aboutScore.grade.unstable': 'Unstable',
+
+  // PWA Install Banner
+  'install.title': 'Monitor AI status from your dock',
+  'install.desc': 'Instant access — no app store needed',
+  'install.btn': 'Add App',
+  'install.ios': 'Tap the Share button in Safari, then "Add to Home Screen"',
 }
 
 export default en

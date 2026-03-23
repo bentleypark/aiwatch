@@ -255,6 +255,12 @@ const ko = {
   'aboutScore.grade.fair': 'Fair',
   'aboutScore.grade.degrading': 'Degrading',
   'aboutScore.grade.unstable': 'Unstable',
+
+  // PWA Install Banner
+  'install.title': 'AI 서비스 장애를 바로 확인하세요',
+  'install.desc': '앱 설치 없이 홈 화면에서 바로 접근',
+  'install.btn': '홈 화면 추가',
+  'install.ios': 'Safari 하단 공유 버튼 → "홈 화면에 추가"를 선택하세요',
 }
 
 export default ko
