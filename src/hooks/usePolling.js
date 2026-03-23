@@ -322,6 +322,13 @@ const MOCK_SERVICES = [
     ],
   },
   {
+    id: 'openrouter', category: 'api', name: 'OpenRouter', provider: 'OpenRouter', status: 'operational',
+    latency: 580, uptime30d: 99.89,
+    history30d: hist([2, 3]),
+    history3m: [{ month: '2026-01', uptime: 99.85 }, { month: '2026-02', uptime: 99.70 }, { month: '2026-03', uptime: 99.89 }],
+    incidents: [],
+  },
+  {
     id: 'claudecode', category: 'agent', name: 'Claude Code', provider: 'Anthropic', status: 'operational',
     latency: null, uptime30d: 99.00,
     history30d: hist([5, 13, 21, 29]),
@@ -396,7 +403,7 @@ const MOCK_SERVICES = [
 // Merge: start from mock list (preserves order + all services), overlay live data
 function mergeWithMock(liveServices) {
   const liveMap = Object.fromEntries(liveServices.map((s) => [s.id, s]))
-  return MOCK_SERVICES.map((mock) => {
+  const merged = MOCK_SERVICES.map((mock) => {
     const live = liveMap[mock.id]
     if (!live) return mock // Worker didn't return this service — use mock
     return {
@@ -406,6 +413,14 @@ function mergeWithMock(liveServices) {
       history3m: null,    // KV daily counter data needed — shows "수집 중" until collected
     }
   })
+  // Include services from Worker that are not in MOCK_SERVICES (newly added)
+  const mockIds = new Set(MOCK_SERVICES.map((m) => m.id))
+  for (const live of liveServices) {
+    if (!mockIds.has(live.id)) {
+      merged.push({ ...live, uptime30d: live.uptime30d ?? null, history3m: null })
+    }
+  }
+  return merged
 }
 
 // ── Context (single instance shared across all components) ──

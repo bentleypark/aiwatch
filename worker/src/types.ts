@@ -52,4 +52,6 @@ export interface ServiceConfig {
   statusComponentId?: string
   incidentIoComponentId?: string
   betterStackUrl?: string
+  onlineOrNotUrl?: string
+  onlineOrNotComponent?: string
 }

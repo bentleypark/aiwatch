@@ -8,6 +8,7 @@ import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, computeUptimeFr
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import { parseInstatusIncidents } from './parsers/instatus'
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackUptime } from './parsers/betterstack'
+import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
 
 const SERVICES: ServiceConfig[] = [
   // AI API Services
@@ -24,6 +25,7 @@ const SERVICES: ServiceConfig[] = [
   { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['sip', 'webpage'] },
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'] },
   { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://status.deepseek.com/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x', incidentKeywords: ['api'] },
+  { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, onlineOrNotUrl: 'https://status.openrouter.ai', onlineOrNotComponent: 'Chat (/api/v1/chat/completions)' },
   // AI Web Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'webapp', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned'], incidentIoBaseUrl: 'https://status.openai.com/incidents', statusComponent: 'ChatGPT', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG' },
@@ -216,7 +218,21 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       const latency = Date.now() - start
 
       let incidents: Incident[] = []
-      if (scrapeRes?.ok) {
+      if (config.onlineOrNotUrl && res.ok) {
+        const html = await res.text()
+        incidents = parseOnlineOrNotIncidents(html)
+        if (config.onlineOrNotComponent) {
+          const uptime = parseOnlineOrNotUptime(html, config.onlineOrNotComponent)
+          if (uptime != null) {
+            base.uptime30d = uptime
+            base.uptimeSource = 'platform_avg'
+          } else {
+            console.warn(`[fetchService] ${config.id} OnlineOrNot uptime not found for component: ${config.onlineOrNotComponent}`)
+          }
+        }
+      } else if (config.onlineOrNotUrl && !res.ok) {
+        console.warn(`[fetchService] ${config.id} OnlineOrNot status page returned ${res.status}`)
+      } else if (scrapeRes?.ok) {
         if (config.instatusUrl) {
           incidents = parseInstatusIncidents(await scrapeRes.text())
         } else if (config.rssFeedUrl) {

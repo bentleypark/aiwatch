@@ -53,8 +53,8 @@ npm run test:worker # Run Worker unit tests (vitest)
 
 ## Architecture
 
-**AIWatch** is a React SPA that monitors 19 AI services in real time:
-- **13 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Perplexity, HuggingFace, Replicate, ElevenLabs, xAI, DeepSeek
+**AIWatch** is a React SPA that monitors 20 AI services in real time:
+- **14 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Perplexity, HuggingFace, Replicate, ElevenLabs, xAI, DeepSeek, OpenRouter
 - **2 AI web apps**: claude.ai, ChatGPT
 - **4 coding agents**: Claude Code, GitHub Copilot, Cursor, Windsurf
 
@@ -106,7 +106,7 @@ Theme switching: add `data-theme="light"` to `<html>` — CSS variables remap au
 ```
 Browser (React SPA, 60s polling)
   → Cloudflare Worker (/api/status)
-    → parallel fetch (19 services)
+    → parallel fetch (20 services)
     → normalize to ServiceStatus[]
     → write to KV (cache + daily counters)
   → React state (usePolling hook via PollingContext)

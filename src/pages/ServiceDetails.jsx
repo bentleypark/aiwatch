@@ -52,6 +52,7 @@ const STATUS_URL = {
   elevenlabs:  'https://status.elevenlabs.io',
   xai:         'https://status.x.ai',
   deepseek:    'https://status.deepseek.com',
+  openrouter:  'https://status.openrouter.ai',
   claudeai:    'https://status.claude.com',
   chatgpt:     'https://status.openai.com',
   claudecode:  'https://status.claude.com',
