@@ -232,7 +232,7 @@ Embed real-time status badges in your README, docs, or blog.
 | `together` | Together AI | `deepseek` | DeepSeek API |
 | `perplexity` | Perplexity | `xai` | xAI (Grok) |
 | `huggingface` | Hugging Face | `replicate` | Replicate |
-| `elevenlabs` | ElevenLabs | | |
+| `elevenlabs` | ElevenLabs | `openrouter` | OpenRouter |
 
 ## Project Structure
 
