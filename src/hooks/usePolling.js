@@ -555,17 +555,30 @@ function usePollingInternal() {
         return
       }
 
-      hasDataRef.current = true
       refreshingRef.current = false
       if (!cancelledRef.current) {
         const isDev = import.meta.env.DEV
-        setState({
-          services: isDev ? MOCK_SERVICES : [],
-          loading: false,
-          refreshing: false,
-          error: isDev ? null : (err || new Error('Failed to fetch')),
-          lastUpdated: isDev ? new Date() : null,
-        })
+        const isNetworkError = err instanceof TypeError && /fetch|network/i.test(err.message)
+        if (isDev && isNetworkError) {
+          // Worker not running — show mock data for local development
+          hasDataRef.current = true
+          setState({
+            services: MOCK_SERVICES,
+            loading: false,
+            refreshing: false,
+            error: null,
+            lastUpdated: new Date(),
+          })
+        } else {
+          // Real error (prod, or non-network error in dev) — show offline UI
+          setState({
+            services: [],
+            loading: false,
+            refreshing: false,
+            error: err || new Error('Failed to fetch'),
+            lastUpdated: null,
+          })
+        }
       }
     }
   }, [])
