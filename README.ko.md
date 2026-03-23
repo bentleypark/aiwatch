@@ -16,7 +16,7 @@
 
 **[https://ai-watch.dev](https://ai-watch.dev)**
 
-![AIWatch 대시보드](docs/screenshot.png)
+![AIWatch 대시보드](docs/screenshot.png?v=2)
 
 ## 주요 기능
 
