@@ -71,6 +71,9 @@ const en = {
   'empty.filter.action': 'Reset Filters',
   'empty.error.title': 'Failed to load data',
   'empty.error.action': 'Retry',
+  'empty.offline.title': 'Unable to connect',
+  'empty.offline.desc': 'Cannot fetch service status. Please check your internet connection.',
+  'empty.offline.action': 'Retry',
 
   // Latency
   'latency.rankings': 'Current Rankings',

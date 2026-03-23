@@ -1,5 +1,5 @@
 // EmptyState — shown when a section has no content to display
-// type: 'good' (no issues), 'neutral' (no filter results), 'error' (API/load failure)
+// type: 'good' (no issues), 'neutral' (no filter results), 'error' (API/load failure), 'offline' (network unavailable)
 
 import { useLang } from '../hooks/useLang'
 
@@ -23,6 +23,13 @@ const CONFIG = {
     iconClass: 'text-[var(--red)]',
     titleKey:  'empty.error.title',
     actionKey: 'empty.error.action',
+  },
+  offline: {
+    icon:      '⚡',
+    iconClass: 'text-[var(--yellow)]',
+    titleKey:  'empty.offline.title',
+    descKey:   'empty.offline.desc',
+    actionKey: 'empty.offline.action',
   },
 }
 

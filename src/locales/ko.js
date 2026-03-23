@@ -71,6 +71,9 @@ const ko = {
   'empty.filter.action': '필터 초기화',
   'empty.error.title': '데이터를 불러올 수 없습니다',
   'empty.error.action': '다시 시도',
+  'empty.offline.title': '연결할 수 없습니다',
+  'empty.offline.desc': '서비스 상태를 가져올 수 없습니다. 인터넷 연결을 확인해 주세요.',
+  'empty.offline.action': '다시 시도',
 
   // Latency
   'latency.rankings': '현재 순위',

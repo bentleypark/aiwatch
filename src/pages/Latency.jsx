@@ -183,12 +183,13 @@ function RankingBar({ service, maxLatency, rank }) {
 
 export default function Latency() {
   const { t } = useLang()
-  const { services: rawServices, loading, error, latency24h } = usePolling()
+  const { services: rawServices, loading, error, latency24h, refresh } = usePolling()
 
   // Defensive default — handles transient undefined state
   const services = rawServices ?? []
 
   if (loading && services.length === 0) return <LatencySkeleton />
+  if (!loading && services.length === 0 && error) return <EmptyState type="offline" onAction={refresh} />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
   // Only include services with latency data (exclude web apps and coding agents)

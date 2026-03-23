@@ -311,7 +311,7 @@ function BadgeCode({ serviceId, serviceName, t }) {
 export default function ServiceDetails({ serviceId }) {
   const { t, lang } = useLang()
   const { setPage } = usePage()
-  const { services: rawServices, loading, error, latency24h } = usePolling()
+  const { services: rawServices, loading, error, latency24h, refresh } = usePolling()
   const services = rawServices ?? []
 
   // useMemo must be called before any early returns (Rules of Hooks)
@@ -330,6 +330,7 @@ export default function ServiceDetails({ serviceId }) {
   }, [services, serviceId])
 
   if (loading && services.length === 0) return <ServiceDetailsSkeleton />
+  if (!loading && services.length === 0 && error) return <EmptyState type="offline" onAction={refresh} />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
   const service = services.find((s) => s.id === serviceId)

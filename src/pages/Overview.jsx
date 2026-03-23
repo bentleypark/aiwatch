@@ -363,7 +363,7 @@ function ActionBanner({ services, setPage, setFilter, setCategoryFilter, t }) {
 export default function Overview() {
   const { t, lang } = useLang()
   const { setPage, categoryFilter, setCategoryFilter } = usePage()
-  const { services: allServices, loading, error, lastUpdated } = usePolling()
+  const { services: allServices, loading, error, lastUpdated, refresh } = usePolling()
   const { settings } = useSettings()
   const services = allServices.filter((s) => settings.enabledServices.includes(s.id))
   const [filter, setFilter] = useState('all')
@@ -376,6 +376,7 @@ export default function Overview() {
   const catServices = categoryIds ? services.filter((s) => categoryIds.includes(s.id)) : services
 
   if (loading && services.length === 0) return <SkeletonUI />
+  if (!loading && services.length === 0 && error) return <EmptyState type="offline" onAction={refresh} />
 
   if (error) {
     return (

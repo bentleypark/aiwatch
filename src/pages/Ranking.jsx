@@ -15,7 +15,7 @@ const MEDALS = ['🥇', '🥈', '🥉']
 export default function Ranking() {
   const { t } = useLang()
   const { setPage } = usePage()
-  const { services: rawServices, loading, error, lastUpdated } = usePolling()
+  const { services: rawServices, loading, error, lastUpdated, refresh } = usePolling()
   const { settings } = useSettings()
   const services = (rawServices ?? []).filter((s) => settings.enabledServices.includes(s.id))
 
@@ -33,6 +33,7 @@ export default function Ranking() {
   }, [services])
 
   if (loading && services.length === 0) return <SkeletonUI />
+  if (!loading && services.length === 0 && error) return <EmptyState type="offline" onAction={refresh} />
   if (error) return <EmptyState type="error" onAction={() => window.location.reload()} />
   if (services.length === 0) return <EmptyState type="neutral" />
 

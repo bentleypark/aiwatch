@@ -558,12 +558,13 @@ function usePollingInternal() {
       hasDataRef.current = true
       refreshingRef.current = false
       if (!cancelledRef.current) {
+        const isDev = import.meta.env.DEV
         setState({
-          services: MOCK_SERVICES,
+          services: isDev ? MOCK_SERVICES : [],
           loading: false,
           refreshing: false,
-          error: err instanceof TypeError ? null : err,
-          lastUpdated: new Date(),
+          error: isDev ? null : (err || new Error('Failed to fetch')),
+          lastUpdated: isDev ? new Date() : null,
         })
       }
     }

@@ -91,7 +91,7 @@ function UptimeBar({ service, sla, t }) {
 
 export default function Uptime() {
   const { t, lang } = useLang()
-  const { services: rawServices, loading, error } = usePolling()
+  const { services: rawServices, loading, error, refresh } = usePolling()
   const { settings } = useSettings()
   const sla = settings.sla
   const services = (rawServices ?? []).filter((s) => settings.enabledServices.includes(s.id))
@@ -102,6 +102,7 @@ export default function Uptime() {
   )
 
   if (loading && services.length === 0) return <UptimeSkeleton />
+  if (!loading && services.length === 0 && error) return <EmptyState type="offline" onAction={refresh} />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
   if (services.length === 0) return <EmptyState type="neutral" />

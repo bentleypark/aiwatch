@@ -214,7 +214,7 @@ function IncidentCard({ incident, isSelected, onClick, t, lang }) {
 
 export default function Incidents() {
   const { t, lang } = useLang()
-  const { services: rawServices, loading, error } = usePolling()
+  const { services: rawServices, loading, error, refresh } = usePolling()
   const services = rawServices ?? []
 
   const [serviceFilter, setServiceFilter] = useState('all')
@@ -262,6 +262,7 @@ export default function Incidents() {
   }, [allIncidents, serviceFilter, statusFilter, period])
 
   if (loading && services.length === 0) return <IncidentsSkeleton />
+  if (!loading && services.length === 0 && error) return <EmptyState type="offline" onAction={refresh} />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
   const selectedIncident = filtered.find((inc) => inc.id === selectedId) ?? null
