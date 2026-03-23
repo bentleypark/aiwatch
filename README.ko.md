@@ -261,6 +261,9 @@ worker/
     utils.ts     # 공유 유틸리티 (formatDuration, fetchWithTimeout)
     score.ts     # AIWatch Score 계산
     badge.ts     # SVG 배지 생성기
+    alerts.ts    # 알림 감지 로직 (인시던트 + 서비스 알림)
+    fallback.ts  # 대체 서비스 추천
+    probe.ts     # 헬스체크 프로빙 — 직접 RTT 측정
     parsers/     # 플랫폼별 파서
       statuspage.ts   # Atlassian Statuspage (7개 서비스)
       incident-io.ts  # incident.io (6개 서비스)

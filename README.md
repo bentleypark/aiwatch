@@ -262,6 +262,9 @@ worker/
     utils.ts     # Shared utilities (formatDuration, fetchWithTimeout)
     score.ts     # AIWatch Score calculation
     badge.ts     # SVG badge generator
+    alerts.ts    # Alert detection logic (incident + service alerts)
+    fallback.ts  # Fallback recommendation
+    probe.ts     # Health check probing — direct RTT measurement
     parsers/     # Platform-specific parsers
       statuspage.ts   # Atlassian Statuspage (7 services)
       incident-io.ts  # incident.io (6 services)
