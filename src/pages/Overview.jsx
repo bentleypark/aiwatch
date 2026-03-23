@@ -167,7 +167,7 @@ function FilterTabs({ filter, setFilter, total, issueCount, downCount, t }) {
             color: filter === tab.key ? 'var(--text0)' : 'var(--text2)',
           }}
         >
-          {t(tab.labelKey)} <span style={{ opacity: 0.75, marginLeft: '2px' }}>{tab.count}</span>
+          {t(tab.labelKey)} <span style={{ marginLeft: '2px' }}>{tab.count}</span>
           {tab.key === 'issues' && issueCount > 0 && (
             <span
               className="inline-block rounded-full"
