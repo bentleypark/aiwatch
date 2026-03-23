@@ -286,6 +286,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // Collect previously alerted IDs from KV for dedup context
   const alertedNewIds = new Set<string>()
   const alertedDownIds = new Set<string>()
+  const alertedDegradedIds = new Set<string>()
   for (const svc of scored) {
     for (const inc of svc.incidents ?? []) {
       const wasAlerted = await env.STATUS_CACHE.get(`alerted:new:${inc.id}`).catch(() => null)
@@ -293,11 +294,13 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     }
     const wasDown = await env.STATUS_CACHE.get(`alerted:down:${svc.id}`).catch(() => null)
     if (wasDown) alertedDownIds.add(svc.id)
+    const wasDegraded = await env.STATUS_CACHE.get(`alerted:degraded:${svc.id}`).catch(() => null)
+    if (wasDegraded) alertedDegradedIds.add(svc.id)
   }
 
   // Build alerts using pure functions
   const incidentAlerts = buildIncidentAlerts(scored, alertedNewIds)
-  const serviceAlerts = buildServiceAlerts(scored, alertedDownIds)
+  const serviceAlerts = buildServiceAlerts(scored, alertedDownIds, alertedDegradedIds)
   const allAlerts = [...incidentAlerts, ...serviceAlerts]
 
   // Dedup: skip alerts already sent
@@ -323,10 +326,11 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     }
   }
 
-  // Send + mark as alerted (down: 2h TTL, incidents/recovery: 7d TTL)
+  // Send + mark as alerted (down/degraded: 2h TTL, incidents/recovery: 7d TTL)
   const sent = toSend.slice(0, 5)
   for (const alert of sent) {
-    const ttl = alert.key.startsWith('alerted:down:') ? 7200 : 604800
+    const isStatusAlert = alert.key.startsWith('alerted:down:') || alert.key.startsWith('alerted:degraded:')
+    const ttl = isStatusAlert ? 7200 : 604800
     await env.STATUS_CACHE.put(alert.key, '1', { expirationTtl: ttl }).catch(() => {})
     await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
       title: alert.title,

@@ -60,26 +60,41 @@ export function buildIncidentAlerts(
 }
 
 /**
- * Build service down/recovered alerts.
- * @param alertedDownIds Set of service IDs that were previously alerted as down
+ * Build service status change alerts (degraded/down/recovered).
+ * Suppresses status alerts when ongoing incidents already cover the service.
+ * @param alertedDownIds Set of service IDs previously alerted as down
+ * @param alertedDegradedIds Set of service IDs previously alerted as degraded
  */
 export function buildServiceAlerts(
   services: ScoredService[],
   alertedDownIds: Set<string>,
+  alertedDegradedIds: Set<string> = new Set(),
 ): AlertCandidate[] {
   const alerts: AlertCandidate[] = []
 
   for (const svc of services) {
-    if (svc.status === 'down') {
+    // Suppress status alerts if ongoing incidents exist (incident alert already covers it)
+    const hasOngoingIncident = (svc.incidents ?? []).some((i) => i.status !== 'resolved')
+
+    if (svc.status === 'down' && !hasOngoingIncident) {
       alerts.push({
         key: `alerted:down:${svc.id}`,
-        title: `🟡 ${svc.name} — Service Down`,
+        title: `🔴 ${svc.name} — Service Down`,
         description: `**${svc.name}** (${svc.provider})`,
-        color: 0xFEE75C,
+        color: 0xED4245,
         url: `https://ai-watch.dev/#${svc.id}`,
       })
     }
-    if (svc.status === 'operational' && alertedDownIds.has(svc.id)) {
+    if (svc.status === 'degraded' && !hasOngoingIncident) {
+      alerts.push({
+        key: `alerted:degraded:${svc.id}`,
+        title: `🟠 ${svc.name} — Partially Degraded`,
+        description: `**${svc.name}** (${svc.provider})`,
+        color: 0xE86235,
+        url: `https://ai-watch.dev/#${svc.id}`,
+      })
+    }
+    if (svc.status === 'operational' && (alertedDownIds.has(svc.id) || alertedDegradedIds.has(svc.id))) {
       alerts.push({
         key: `alerted:recovered:${svc.id}`,
         title: `🟢 ${svc.name} — Service Recovered`,
