@@ -1,4 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-  <rect width="32" height="32" rx="6" fill="#3fb950"/>
-  <circle cx="16" cy="16" r="5" stroke="#080c10" stroke-width="2.5" fill="none"/>
+  <rect width="32" height="32" rx="6" fill="#080c10"/>
+  <!-- 베이스라인 (흐린) -->
+  <polyline points="3,18 7,18 10,9 13,26 16,16 19,26 22,9 25,18 29,18"
+    stroke="#3fb950" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
+  <!-- W 피크 강조 (밝게) -->
+  <polyline points="10,9 13,26 16,16 19,26 22,9"
+    stroke="#3fb950" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- 피크 꼭짓점 점 -->
+  <circle cx="10" cy="9" r="1.8" fill="#3fb950"/>
+  <circle cx="16" cy="16" r="1.8" fill="#3fb950"/>
+  <circle cx="22" cy="9" r="1.8" fill="#3fb950"/>
 </svg>

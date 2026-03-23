@@ -105,7 +105,8 @@ function AppInner() {
     <div>
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
         <div className="flex items-center gap-3">
-          <span className="mono text-[var(--text0)]" style={{ fontSize: '13px', fontWeight: 600, letterSpacing: '-0.3px' }}>
+          <span className="flex items-center gap-1.5 mono text-[var(--text0)]" style={{ fontSize: '13px', fontWeight: 600, letterSpacing: '-0.3px' }}>
+            <img src="/favicon.svg" alt="" width={18} height={18} style={{ borderRadius: 3 }} />
             AI<span className="text-[var(--green)]">Watch</span>
           </span>
           <span className="hidden md:inline mono text-[10px] text-[var(--text2)]">
