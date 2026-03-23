@@ -40,9 +40,15 @@ npm run test:worker # Run Worker unit tests (vitest)
    /pr-review-toolkit:review-pr
    ```
 5. **Fix review issues** — address all **Critical** and **Important** findings. Re-run Build + Test after fixes
-6. **Commit** — only after review issues are fixed and tests pass. Include `closes #N` in the message so GitHub links the commit
-7. **Verify checklist** — read the issue (`gh issue view N`) and confirm every checklist item (`- [ ]`) is actually implemented in code before closing
-8. **Close** — only close the issue after checklist verification: `gh issue close N`
+6. **Docs update** — update documentation affected by the change:
+   - `CLAUDE.md`: architecture, service count, directory layout, constraints
+   - `README.md` / `README.ko.md`: features, service tables, Project Structure, Available Service IDs
+   - `.github/CONTRIBUTING.md`: Project Structure
+   - `index.html`: SEO meta tags (service count, description)
+   - `aiwatch-reports/`: service count, category breakdown (if applicable)
+7. **Commit** — only after review issues are fixed and tests pass. Include `closes #N` in the message so GitHub links the commit
+8. **Verify checklist** — read the issue (`gh issue view N`) and confirm every checklist item (`- [ ]`) is actually implemented in code before closing
+9. **Close** — only close the issue after checklist verification: `gh issue close N`
 
 > Never close an issue immediately after committing. Always re-read the issue checklist and verify each item against the code first.
 
