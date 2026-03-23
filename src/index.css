@@ -37,8 +37,8 @@
 
   /* Text */
   --text0: #e6edf3;
-  --text1: #8b949e;
-  --text2: #768390;
+  --text1: #adbac7;
+  --text2: #8b949e;
 
   /* Borders */
   --border: rgba(255, 255, 255, 0.07);
@@ -55,8 +55,8 @@
   --bg3: #d0d7de;
   --bg4: #c0c8d0;
   --text0: #1f2328;
-  --text1: #656d76;
-  --text2: #6e7781;
+  --text1: #4e5660;
+  --text2: #636c77;
   --border: rgba(0, 0, 0, 0.07);
   --border-hi: rgba(0, 0, 0, 0.14);
 
@@ -198,6 +198,6 @@ pre,
 
 /* ─── Card Fade-in (stagger via animationDelay inline style) */
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { transform: translateY(4px); }
+  to   { transform: translateY(0); }
 }
