@@ -12,7 +12,7 @@
 
 [English](README.md) | **한국어**
 
-**19개 AI 서비스**의 상태, 지연시간, 가동률, 인시던트를 실시간으로 모니터링하는 대시보드입니다.
+**20개 AI 서비스**의 상태, 지연시간, 가동률, 인시던트를 실시간으로 모니터링하는 대시보드입니다.
 
 **[https://ai-watch.dev](https://ai-watch.dev)**
 
@@ -20,7 +20,8 @@
 
 ## 주요 기능
 
-- **실시간 상태 모니터링** — 19개 AI 서비스의 정상 / 성능 저하 / 장애 상태
+- **실시간 상태 모니터링** — 20개 AI 서비스의 정상 / 성능 저하 / 장애 상태
+- **PWA 지원** — 홈 화면 추가, Service Worker 오프라인 캐시
 - **지연시간 측정** — API 서비스별 상태 페이지 응답 시간
 - **24시간 지연시간 추세** — Chart.js 라인 차트 (30분 간격 스냅샷)
 - **인시던트 이력** — 다양한 상태 페이지 형식의 타임라인 상세 정보
@@ -37,7 +38,7 @@
 
 ## 모니터링 서비스
 
-### AI API 서비스 (13개)
+### AI API 서비스 (14개)
 
 | 서비스 | 제공업체 | 상태 소스 |
 |--------|----------|-----------|
@@ -54,6 +55,7 @@
 | ElevenLabs | ElevenLabs | incident.io (Atlassian 호환) |
 | xAI (Grok) | xAI | RSS 피드 |
 | DeepSeek API | DeepSeek | Atlassian Statuspage |
+| OpenRouter | OpenRouter | OnlineOrNot (React Router SSR) |
 
 ### AI 웹 앱 (2개)
 

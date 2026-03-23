@@ -13,7 +13,7 @@
 
 **English** | [한국어](README.ko.md)
 
-Real-time monitoring dashboard for **19 AI services** — track status, latency, uptime, and incidents across major AI providers.
+Real-time monitoring dashboard for **20 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[https://ai-watch.dev](https://ai-watch.dev)**
 
@@ -21,7 +21,8 @@ Real-time monitoring dashboard for **19 AI services** — track status, latency,
 
 ## Features
 
-- **Real-time status** — Operational / Degraded / Down for 19 AI services
+- **Real-time status** — Operational / Degraded / Down for 20 AI services
+- **PWA support** — Add to home screen, offline cache with Service Worker
 - **Latency monitoring** — Status page response time per API service
 - **24h latency trend** — Chart.js line chart with 30-min snapshots
 - **Incident history** — Timeline with details from multiple status page formats
@@ -38,7 +39,7 @@ Real-time monitoring dashboard for **19 AI services** — track status, latency,
 
 ## Monitored Services
 
-### AI API Services (13)
+### AI API Services (14)
 
 | Service | Provider | Status Source |
 |---------|----------|---------------|
@@ -55,6 +56,7 @@ Real-time monitoring dashboard for **19 AI services** — track status, latency,
 | ElevenLabs | ElevenLabs | incident.io (Atlassian compat) |
 | xAI (Grok) | xAI | RSS feed |
 | DeepSeek API | DeepSeek | Atlassian Statuspage |
+| OpenRouter | OpenRouter | OnlineOrNot (React Router SSR) |
 
 ### AI Web Apps (2)
 

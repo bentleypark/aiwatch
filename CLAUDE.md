@@ -139,3 +139,5 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
   - Endpoints: `GET /api/status`, `GET /api/uptime?days=30`, `POST /api/alert`, `GET /badge/:serviceId`, `GET /api/v1/status`
   - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res/down/recovered:` keys, 7d TTL)
 - **Frontend deployment**: Vercel, domain ai-watch.dev — `git push origin main` triggers auto-deploy. `npm run build` is local only; changes are not live until pushed
+- **PWA**: `public/manifest.json` + `public/sw.js` (stale-while-revalidate). CACHE_NAME in `sw.js` must be bumped manually when static assets change. SW excludes `/is-*` (Edge SSR) and `/api/*` (real-time data) from caching
+- **Edge SSR**: `api/is-down.ts` serves "Is X Down?" SEO pages via Vercel Edge Functions. `vercel.json` rewrites route `/is-{service}-down` to the handler
