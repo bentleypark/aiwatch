@@ -26,7 +26,7 @@ const CONFIG = {
   },
   offline: {
     icon:      '⚡',
-    iconClass: 'text-[var(--yellow)]',
+    iconClass: 'text-[var(--green)]',
     titleKey:  'empty.offline.title',
     descKey:   'empty.offline.desc',
     actionKey: 'empty.offline.action',
@@ -50,7 +50,7 @@ export default function EmptyState({ type = 'neutral', onAction }) {
       {cfg.actionKey && onAction && (
         <button
           onClick={onAction}
-          className="mt-2 px-3 py-1 text-xs mono rounded
+          className="mt-2 px-5 py-2 text-xs mono rounded
                      border border-[var(--border-hi)] text-[var(--text1)]
                      hover:text-[var(--text0)] hover:border-[var(--text2)]
                      transition-colors"
