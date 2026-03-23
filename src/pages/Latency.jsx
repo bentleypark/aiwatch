@@ -100,7 +100,7 @@ function LatencyTrendSection({ services, t, hourlyData }) {
         },
         scales: {
           x: {
-            ticks: { font: { size: 9, family: 'var(--font-mono)' }, color: textMuted, maxTicksLimit: 24, callback: (_, i) => labels[i]?.endsWith(':00') ? labels[i] : '' },
+            ticks: { font: { size: 9, family: 'var(--font-mono)' }, color: textMuted, maxTicksLimit: 12, callback: (_, i) => { const l = labels[i]; return l ? l.slice(0, 3) + '00' : '' } },
             grid: { display: false },
           },
           y: {
