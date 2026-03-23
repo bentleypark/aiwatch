@@ -238,11 +238,22 @@ Embed real-time status badges in your README, docs, or blog.
 
 ```
 src/
-  components/    # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner
+  components/    # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, InstallBanner
   pages/         # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, AboutScore, Ranking
   hooks/         # usePolling, useTheme, useLang, useSettings
   utils/         # analytics, calendar, time, pageContext, constants
   locales/       # ko.js, en.js (flat key→string maps)
+api/
+  is-down.ts           # Vercel Edge Function — "Is X Down?" SSR pages
+  is-down/
+    slug-map.ts        # URL slug ↔ service ID mapping
+    seo-content.ts     # Per-service SEO text + FAQ
+    html-template.ts   # SSR HTML rendering helpers
+public/
+  manifest.json        # PWA manifest
+  sw.js                # Service Worker (stale-while-revalidate)
+  icon-192.png         # PWA icon 192x192
+  icon-512.png         # PWA icon 512x512
 worker/
   src/
     index.ts     # Worker entry: CORS, KV cache, alerts, routing, /api/alert, /badge, /api/v1
@@ -257,6 +268,7 @@ worker/
       gcloud.ts       # Google Cloud (1 service)
       instatus.ts     # Instatus (2 services)
       betterstack.ts  # Better Stack (3 services)
+      onlineornot.ts  # OnlineOrNot (1 service — OpenRouter)
     parsers/__tests__/ # Vitest unit tests
 ```
 
