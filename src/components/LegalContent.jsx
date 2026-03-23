@@ -76,7 +76,7 @@ export function TermsContent() {
     <div>
       <p style={dateStyle}>Last updated: March 2026</p>
       <h3 style={headingStyle}>1. Service Overview</h3>
-      <p style={paraStyle}>AIWatch is a free dashboard for monitoring the status of major AI API services. All information provided is based on the official Status APIs or status pages of each service.</p>
+      <p style={paraStyle}>AIWatch is a free dashboard for monitoring the status of major AI services. All information provided is based on the official Status APIs or status pages of each service.</p>
       <h3 style={headingStyle}>2. Accuracy of Information</h3>
       <p style={paraStyle}>While AIWatch strives to provide accurate information, status data depends on official data from each service provider. We do not guarantee the accuracy or timeliness of the information and are not liable for any damages arising from its use.</p>
       <h3 style={headingStyle}>3. Service Availability</h3>
@@ -101,7 +101,7 @@ export function TermsContent() {
     <div>
       <p style={dateStyle}>최종 수정일: 2026년 3월</p>
       <h3 style={headingStyle}>1. 서비스 개요</h3>
-      <p style={paraStyle}>AIWatch는 주요 AI API 서비스의 상태를 모니터링하는 무료 대시보드입니다. 제공되는 모든 정보는 각 서비스의 공식 Status API 또는 상태 페이지를 기반으로 합니다.</p>
+      <p style={paraStyle}>AIWatch는 주요 AI 서비스의 상태를 모니터링하는 무료 대시보드입니다. 제공되는 모든 정보는 각 서비스의 공식 Status API 또는 상태 페이지를 기반으로 합니다.</p>
       <h3 style={headingStyle}>2. 정보의 정확성</h3>
       <p style={paraStyle}>AIWatch는 정확한 정보 제공을 위해 노력하지만, 각 AI 서비스의 상태 정보는 해당 서비스 제공자의 공식 데이터에 의존합니다. 정보의 정확성이나 최신성을 보장하지 않으며, 이로 인한 손해에 대해 책임지지 않습니다.</p>
       <h3 style={headingStyle}>3. 서비스 가용성</h3>

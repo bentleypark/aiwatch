@@ -333,6 +333,6 @@ function renderFooter(slug: string): string {
 <p style="margin-bottom:12px"><a href="https://ai-watch.dev" class="btn">View Full Dashboard</a></p>
 <p><a href="https://ai-watch.dev/#${esc(slug)}">Detailed service page</a> &middot; <a href="https://bentleypark.github.io/aiwatch-reports/">Monthly reports</a> &middot; <a href="https://ai-watch.dev/#settings">Set up alerts</a></p>
 ${otherLinks ? `<p style="margin-top:12px;font-size:12px">Also check: ${otherLinks}</p>` : ''}
-<p style="margin-top:12px">&copy; 2026 AIWatch. Real-time AI API status monitoring.</p>
+<p style="margin-top:12px">&copy; 2026 AIWatch. Real-time AI service status monitoring.</p>
 </div>`
 }

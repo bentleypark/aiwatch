@@ -1,6 +1,6 @@
 const en = {
   // App
-  'app.tagline': 'Real-time AI API service monitoring dashboard',
+  'app.tagline': 'Real-time AI service monitoring dashboard',
 
   // Navigation
   'nav.overview': 'Overview',

@@ -1,6 +1,6 @@
 const ko = {
   // App
-  'app.tagline': 'AI API 서비스 실시간 모니터링 대시보드',
+  'app.tagline': 'AI 서비스 실시간 모니터링 대시보드',
 
   // Navigation
   'nav.overview': '개요',
