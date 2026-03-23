@@ -88,6 +88,7 @@ worker/
     badge.ts    # SVG badge generator
     alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts)
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText)
+    probe.ts    # Health check probing — direct RTT measurement (Phase 2 PoC)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack)
 ```
 
@@ -119,7 +120,9 @@ Browser (React SPA, 60s polling)
   → all pages read from context
 
 Cron Trigger (*/5 min)
+  → health check probing (direct RTT to API endpoints, stored in probe:24h)
   → read KV cache → detect incidents/status changes
+  → record detection timestamps (detected:{serviceId}) for Detection Lead
   → KV ID-based dedup → Discord alerts
   → daily summary at UTC 09:00 (KST 18:00)
 ```

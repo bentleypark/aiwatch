@@ -123,6 +123,48 @@ async function writeLatencySnapshot(kv: KVNamespace, services: ServiceStatus[]):
   }
 }
 
+// ── Health Check Probing (Phase 2 PoC) ──
+import { type ProbeResult, type ProbeSnapshot, PROBE_TARGETS, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe } from './probe'
+
+let lastProbeSlot = ''
+
+async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
+  const currentSlot = computeProbeSlot(new Date())
+  if (lastProbeSlot === currentSlot) return
+
+  const data: Record<string, ProbeResult> = {}
+  await Promise.all(PROBE_TARGETS.map(async ({ id, url }) => {
+    try {
+      const start = Date.now()
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { 'User-Agent': 'ai-watch.dev-monitoring (contact@ai-watch.dev)' },
+        signal: AbortSignal.timeout(5000),
+      })
+      data[id] = { status: res.status, rtt: Date.now() - start }
+    } catch {
+      data[id] = failedProbe()
+    }
+  }))
+
+  try {
+    const PROBE_KEY = 'probe:24h'
+    const MAX_SNAPSHOTS = 288 // 24h × 12 per hour (every 5 min)
+    const existing = await kv.get(PROBE_KEY).catch(() => null)
+    const snapshots: ProbeSnapshot[] = existing ? (JSON.parse(existing).snapshots ?? []) : []
+    const slotTs = slotToTimestamp(currentSlot)
+    if (hasSlot(snapshots, slotTs)) { lastProbeSlot = currentSlot; return }
+    snapshots.push({ t: slotTs, data })
+    const trimmed = trimSnapshots(snapshots, MAX_SNAPSHOTS)
+    await kv.put(PROBE_KEY, JSON.stringify({ snapshots: trimmed }), {
+      expirationTtl: 90000, // 25 hours
+    })
+    lastProbeSlot = currentSlot
+  } catch (err) {
+    console.warn('[probe] snapshot write failed:', err instanceof Error ? err.message : err)
+  }
+}
+
 async function cacheRead(kv: KVNamespace): Promise<{ services: ServiceStatus[]; cachedAt: string } | null> {
   const raw = await kv.get(CACHE_KEY).catch(() => null)
   if (!raw) return null
@@ -333,6 +375,13 @@ import { generateBadgeSvg } from './badge'
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+    // Health check probing (Phase 2) — runs every cron cycle
+    if (env.STATUS_CACHE) {
+      await writeProbeSnapshot(env.STATUS_CACHE).catch((err) =>
+        console.warn('[cron] probe failed:', err instanceof Error ? err.message : err)
+      )
+    }
+
     const result = await cronAlertCheck(env)
     if (!env.DISCORD_WEBHOOK_URL) return
 
@@ -591,12 +640,19 @@ export default {
         ctx.waitUntil(writeLatencySnapshot(env.STATUS_CACHE, raw))
       }
 
-      // Read hourly latency snapshots (1 KV read)
+      // Read hourly latency snapshots + probe data (2 KV reads)
       let latency24h: Array<{ t: string; data: Record<string, number> }> = []
+      let probe24h: ProbeSnapshot[] = []
       if (env.STATUS_CACHE) {
-        const raw = await env.STATUS_CACHE.get('latency:24h').catch(() => null)
-        if (raw) {
-          try { latency24h = JSON.parse(raw).snapshots ?? [] } catch { /* ignore */ }
+        const [latRaw, probeRaw] = await Promise.all([
+          env.STATUS_CACHE.get('latency:24h').catch(() => null),
+          env.STATUS_CACHE.get('probe:24h').catch(() => null),
+        ])
+        if (latRaw) {
+          try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch { /* ignore */ }
+        }
+        if (probeRaw) {
+          try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch { /* ignore */ }
         }
       }
 
@@ -620,6 +676,7 @@ export default {
         services: servicesWithScore,
         lastUpdated: new Date().toISOString(),
         latency24h,
+        ...(probe24h.length > 0 ? { probe24h } : {}),
       }), {
         status: 200,
         headers: {
