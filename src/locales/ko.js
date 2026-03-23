@@ -159,6 +159,7 @@ const ko = {
   'svc.mttr.sub': '데이터 수집 중',
   'svc.cal.legend': '상태 캘린더',
   'svc.incidents.history': '인시던트 히스토리',
+  'svc.detectionLead': '공식 발표보다 {n} 빠르게 감지',
   'svc.no.incidents': '인시던트 없음',
   'svc.incidents.unsupported': '인시던트 데이터를 제공하지 않는 서비스입니다',
   'svc.cal.ago': '30일 전',

@@ -30,6 +30,7 @@ export interface ServiceStatus {
   dailyImpact?: Record<string, DailyImpactLevel>
   calendarDays?: number
   uptimeSource?: 'official' | 'platform_avg' | 'estimate'
+  detectedAt?: string
 }
 
 export type DailyImpactLevel = 'minor' | 'major' | 'critical'

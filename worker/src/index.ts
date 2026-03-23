@@ -266,6 +266,21 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     toSend.push(alert)
   }
 
+  // Record detection timestamps for non-operational services (Detection Lead feature)
+  // Only store if no existing detection — preserves earliest detection time
+  for (const svc of scored) {
+    if (svc.status !== 'operational') {
+      const detectKey = `detected:${svc.id}`
+      const existing = await env.STATUS_CACHE.get(detectKey).catch(() => null)
+      if (!existing) {
+        await env.STATUS_CACHE.put(detectKey, new Date().toISOString(), { expirationTtl: 604800 }).catch(() => {})
+      }
+    } else {
+      // Service recovered — clean up detection timestamp
+      await env.STATUS_CACHE.delete(`detected:${svc.id}`).catch(() => {})
+    }
+  }
+
   // Send + mark as alerted (down: 2h TTL, incidents/recovery: 7d TTL)
   const sent = toSend.slice(0, 5)
   for (const alert of sent) {
@@ -585,12 +600,21 @@ export default {
         }
       }
 
-      // Add AIWatch Score to each service
+      // Add AIWatch Score + Detection Lead timestamps to each service
+      const detectionMap = new Map<string, string>()
+      if (env.STATUS_CACHE) {
+        await Promise.all(enriched.map(async (svc) => {
+          if (svc.status !== 'operational') {
+            const ts = await env.STATUS_CACHE!.get(`detected:${svc.id}`).catch(() => null)
+            if (ts) detectionMap.set(svc.id, ts)
+          }
+        }))
+      }
       const servicesWithScore = enriched.map((svc) => {
         const s = calculateAIWatchScore(svc)
-        return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown }
+        const detectedAt = detectionMap.get(svc.id) ?? null
+        return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, ...(detectedAt ? { detectedAt } : {}) }
       })
-      // NOTE: Alert detection moved to Cron Trigger (scheduled handler)
 
       return new Response(JSON.stringify({
         services: servicesWithScore,

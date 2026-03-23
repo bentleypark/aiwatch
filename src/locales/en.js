@@ -159,6 +159,7 @@ const en = {
   'svc.mttr.sub': 'Collecting data',
   'svc.cal.legend': 'Status Calendar',
   'svc.incidents.history': 'Incident History',
+  'svc.detectionLead': 'Detected {n} before official report',
   'svc.no.incidents': 'No incidents',
   'svc.incidents.unsupported': 'Incident data not available for this service',
   'svc.cal.ago': '30 days ago',

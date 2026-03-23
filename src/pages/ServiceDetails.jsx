@@ -190,7 +190,7 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
   )
 }
 
-function IncidentRow({ incident, t, lang }) {
+function IncidentRow({ incident, detectedAt, t, lang }) {
   const STATUS_CLS = {
     investigating: 'text-[var(--red)]',
     identified:    'text-[var(--red)]',
@@ -202,11 +202,41 @@ function IncidentRow({ incident, t, lang }) {
   const displayStatus = incident.status === 'resolved' ? 'resolved'
     : incident.status === 'monitoring' ? 'monitoring'
     : 'ongoing'
+
+  // Detection Lead: per-incident calculation
+  const lead = (() => {
+    if (!detectedAt || incident.status === 'resolved') return null
+    const detected = new Date(detectedAt).getTime()
+    const started = new Date(incident.startedAt).getTime()
+    const diffMs = started - detected
+    if (diffMs <= 0) return null
+    const mins = Math.round(diffMs / 60_000)
+    if (mins < 1) return null
+    const label = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`
+    const timeOpts = { hour: '2-digit', minute: '2-digit', hour12: false }
+    const detectedTime = new Date(detectedAt).toLocaleTimeString(lang === 'ko' ? 'ko-KR' : 'en-US', timeOpts)
+    const officialTime = new Date(incident.startedAt).toLocaleTimeString(lang === 'ko' ? 'ko-KR' : 'en-US', timeOpts)
+    return { label, detectedTime, officialTime }
+  })()
+
   return (
     <div className="flex items-start gap-[10px]">
       <span className={`shrink-0 mt-0.5 text-[10px] mono ${dotCls}`} aria-hidden="true">●</span>
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-[var(--text1)] truncate">{incident.title}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-[var(--text1)] truncate">{incident.title}</p>
+          {lead && (
+            <span
+              className="shrink-0 mono text-[9px] text-[var(--green)] bg-[var(--status-bg-green)] rounded cursor-default"
+              style={{ padding: '1px 5px' }}
+              title={lang === 'ko'
+                ? `AIWatch 감지: ${lead.detectedTime} / 공식 발표: ${lead.officialTime}`
+                : `AIWatch detected: ${lead.detectedTime} / Official report: ${lead.officialTime}`}
+            >
+              <span style={{ fontWeight: 600 }}>{lead.label}</span> lead
+            </span>
+          )}
+        </div>
         <p className="text-[10px] text-[var(--text2)] mono mt-0.5">
           {formatDate(incident.startedAt, lang)}
           {incident.duration ? ` · ${incident.duration}` : ''}
@@ -349,6 +379,7 @@ export default function ServiceDetails({ serviceId }) {
   )
   const incidentCount = recentIncidents.length
   const calendarDays = service.calendarDays ?? 14
+
   const calendarData = buildCalendarFromIncidents(service.incidents, service.dailyImpact, calendarDays)
 
   return (
@@ -497,7 +528,7 @@ export default function ServiceDetails({ serviceId }) {
             ) : (
               <div className="flex flex-col" style={{ gap: '8px' }}>
                 {recentIncidents.map((inc) => (
-                  <IncidentRow key={inc.id} incident={inc} t={t} lang={lang} />
+                  <IncidentRow key={inc.id} incident={inc} detectedAt={service.detectedAt} t={t} lang={lang} />
                 ))}
               </div>
             )}

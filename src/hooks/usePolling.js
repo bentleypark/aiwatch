@@ -65,7 +65,7 @@ const MOCK_SERVICES = [
   },
   {
     id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'degraded',
-    latency: 312, uptime30d: 99.21,
+    latency: 312, uptime30d: 99.21, detectedAt: ago(4 * H + 7 * M),
     history30d: hist([22, 23, 28]),
     history3m: [{ month: '2026-01', uptime: 99.80 }, { month: '2026-02', uptime: 99.65 }, { month: '2026-03', uptime: 99.21 }],
     incidents: [
