@@ -47,7 +47,7 @@ const ko = {
   'filter.inference': '음성 & 추론',
   'overview.incidents.title': '최근 인시던트',
   'overview.latency.title': '레이턴시 순위',
-  'overview.card.latency': 'latency',
+  'overview.card.latency': '상태 페이지',
   'overview.card.uptime': 'uptime',
   'overview.card.incidents': 'incidents',
   'overview.panel.incidents.sub': '최근 7일',
@@ -77,6 +77,7 @@ const ko = {
 
   // Latency
   'latency.rankings': '현재 순위',
+  'latency.disclaimer': '각 서비스의 공식 상태 페이지 응답 시간을 측정합니다.',
   'latency.fastest': '가장 빠름',
   'latency.average': '평균',
   'latency.slowest': '가장 느림',
@@ -125,7 +126,7 @@ const ko = {
   'uptime.collecting': '데이터 수집 중',
 
   // Service Details
-  'svc.latency': '현재 레이턴시',
+  'svc.latency': '상태 페이지 레이턴시',
   'svc.uptime30d': '30일 업타임',
   'uptime.label.official': '공식 Uptime',
   'uptime.sub.official': '공식 status page 기준',

@@ -214,6 +214,9 @@ export default function Latency() {
         <span className="mono text-[10px] text-[var(--text2)]">{t('overview.panel.latency.sub')}</span>
       </div>
 
+      {/* ── Disclaimer ── */}
+      <p className="text-[11px] text-[var(--text2)]" style={{ marginTop: '-12px' }}>{t('latency.disclaimer')}</p>
+
       {/* ── Summary Cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-3" style={{ gap: '10px' }}>
         <SummaryCard label={t('latency.fastest')} value={fastest?.latency ?? '—'} sub={fastest?.name ?? ''} colorClass="text-[var(--green)]" />

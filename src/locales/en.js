@@ -47,7 +47,7 @@ const en = {
   'filter.inference': 'Voice & Inference',
   'overview.incidents.title': 'Recent Incidents',
   'overview.latency.title': 'Latency Rankings',
-  'overview.card.latency': 'latency',
+  'overview.card.latency': 'status page',
   'overview.card.uptime': 'uptime',
   'overview.card.incidents': 'incidents',
   'overview.panel.incidents.sub': 'Last 7 days',
@@ -77,6 +77,7 @@ const en = {
 
   // Latency
   'latency.rankings': 'Current Rankings',
+  'latency.disclaimer': 'Measures each service\'s official status page response time.',
   'latency.fastest': 'Fastest',
   'latency.average': 'Average',
   'latency.slowest': 'Slowest',
@@ -125,7 +126,7 @@ const en = {
   'uptime.collecting': 'Collecting data',
 
   // Service Details
-  'svc.latency': 'Current Latency',
+  'svc.latency': 'Status Page Latency',
   'svc.uptime30d': '30-Day Uptime',
   'uptime.label.official': 'Official Uptime',
   'uptime.sub.official': 'Official status page',
