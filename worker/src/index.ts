@@ -285,22 +285,22 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
 
   // Collect previously alerted IDs from KV for dedup context
   const alertedNewIds = new Set<string>()
-  const alertedDownIds = new Set<string>()
-  const alertedDegradedIds = new Set<string>()
+  const alertedDownMap = new Map<string, string>()
+  const alertedDegradedMap = new Map<string, string>()
   for (const svc of scored) {
     for (const inc of svc.incidents ?? []) {
       const wasAlerted = await env.STATUS_CACHE.get(`alerted:new:${inc.id}`).catch(() => null)
       if (wasAlerted) alertedNewIds.add(inc.id)
     }
     const wasDown = await env.STATUS_CACHE.get(`alerted:down:${svc.id}`).catch(() => null)
-    if (wasDown) alertedDownIds.add(svc.id)
+    if (wasDown) alertedDownMap.set(svc.id, wasDown)
     const wasDegraded = await env.STATUS_CACHE.get(`alerted:degraded:${svc.id}`).catch(() => null)
-    if (wasDegraded) alertedDegradedIds.add(svc.id)
+    if (wasDegraded) alertedDegradedMap.set(svc.id, wasDegraded)
   }
 
   // Build alerts using pure functions
   const incidentAlerts = buildIncidentAlerts(scored, alertedNewIds)
-  const serviceAlerts = buildServiceAlerts(scored, alertedDownIds, alertedDegradedIds)
+  const serviceAlerts = buildServiceAlerts(scored, alertedDownMap, alertedDegradedMap)
   const allAlerts = [...incidentAlerts, ...serviceAlerts]
 
   // Dedup: skip alerts already sent
@@ -331,7 +331,8 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   for (const alert of sent) {
     const isStatusAlert = alert.key.startsWith('alerted:down:') || alert.key.startsWith('alerted:degraded:')
     const ttl = isStatusAlert ? 7200 : 604800
-    await env.STATUS_CACHE.put(alert.key, '1', { expirationTtl: ttl }).catch(() => {})
+    const kvValue = isStatusAlert ? new Date().toISOString() : '1'
+    await env.STATUS_CACHE.put(alert.key, kvValue, { expirationTtl: ttl }).catch(() => {})
     await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
       title: alert.title,
       description: `${alert.description}\n[View on AIWatch](${alert.url})`,

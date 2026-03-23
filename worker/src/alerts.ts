@@ -2,7 +2,7 @@
 // Used by cronAlertCheck in index.ts
 
 import { getFallbacks, buildFallbackText } from './fallback'
-import { sanitize } from './utils'
+import { sanitize, formatDuration } from './utils'
 import type { ServiceStatus } from './services'
 
 export interface AlertCandidate {
@@ -62,13 +62,13 @@ export function buildIncidentAlerts(
 /**
  * Build service status change alerts (degraded/down/recovered).
  * Suppresses status alerts when ongoing incidents already cover the service.
- * @param alertedDownIds Set of service IDs previously alerted as down
- * @param alertedDegradedIds Set of service IDs previously alerted as degraded
+ * @param alertedDownMap Map of service ID → ISO timestamp when alerted as down
+ * @param alertedDegradedMap Map of service ID → ISO timestamp when alerted as degraded
  */
 export function buildServiceAlerts(
   services: ScoredService[],
-  alertedDownIds: Set<string>,
-  alertedDegradedIds: Set<string> = new Set(),
+  alertedDownMap: Map<string, string>,
+  alertedDegradedMap: Map<string, string> = new Map(),
 ): AlertCandidate[] {
   const alerts: AlertCandidate[] = []
 
@@ -94,10 +94,19 @@ export function buildServiceAlerts(
         url: `https://ai-watch.dev/#${svc.id}`,
       })
     }
-    if (svc.status === 'operational' && (alertedDownIds.has(svc.id) || alertedDegradedIds.has(svc.id))) {
+    if (svc.status === 'operational' && (alertedDownMap.has(svc.id) || alertedDegradedMap.has(svc.id))) {
+      // Calculate downtime from stored timestamp
+      const alertedAt = alertedDownMap.get(svc.id) ?? alertedDegradedMap.get(svc.id)
+      let downtimeText = ''
+      if (alertedAt && alertedAt.length > 10) {
+        const start = new Date(alertedAt)
+        if (!isNaN(start.getTime()) && start.getTime() > 1_700_000_000_000) {
+          downtimeText = ` (${formatDuration(start, new Date())})`
+        }
+      }
       alerts.push({
         key: `alerted:recovered:${svc.id}`,
-        title: `🟢 ${svc.name} — Service Recovered`,
+        title: `🟢 ${svc.name} — Service Recovered${downtimeText}`,
         description: `**${svc.name}** is back to operational`,
         color: 0x57F287,
         url: `https://ai-watch.dev/#${svc.id}`,

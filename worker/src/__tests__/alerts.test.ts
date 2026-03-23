@@ -97,7 +97,7 @@ describe('buildIncidentAlerts', () => {
 describe('buildServiceAlerts', () => {
   it('creates down alert for service with status down (no ongoing incidents)', () => {
     const svc = mockService({ status: 'down' })
-    const alerts = buildServiceAlerts([svc], new Set(), new Set())
+    const alerts = buildServiceAlerts([svc], new Map(), new Map())
     expect(alerts).toHaveLength(1)
     expect(alerts[0].key).toBe('alerted:down:openai')
     expect(alerts[0].title).toContain('Service Down')
@@ -106,7 +106,7 @@ describe('buildServiceAlerts', () => {
 
   it('creates degraded alert for service with status degraded (no ongoing incidents)', () => {
     const svc = mockService({ status: 'degraded' })
-    const alerts = buildServiceAlerts([svc], new Set(), new Set())
+    const alerts = buildServiceAlerts([svc], new Map(), new Map())
     expect(alerts).toHaveLength(1)
     expect(alerts[0].key).toBe('alerted:degraded:openai')
     expect(alerts[0].title).toContain('Partially Degraded')
@@ -118,7 +118,7 @@ describe('buildServiceAlerts', () => {
       status: 'degraded',
       incidents: [{ id: 'inc1', title: 'Errors', status: 'investigating', startedAt: recentDate, impact: 'major' }],
     })
-    const alerts = buildServiceAlerts([svc], new Set(), new Set())
+    const alerts = buildServiceAlerts([svc], new Map(), new Map())
     expect(alerts).toHaveLength(0)
   })
 
@@ -127,7 +127,7 @@ describe('buildServiceAlerts', () => {
       status: 'down',
       incidents: [{ id: 'inc1', title: 'Outage', status: 'identified', startedAt: recentDate, impact: 'critical' }],
     })
-    const alerts = buildServiceAlerts([svc], new Set(), new Set())
+    const alerts = buildServiceAlerts([svc], new Map(), new Map())
     expect(alerts).toHaveLength(0)
   })
 
@@ -136,19 +136,19 @@ describe('buildServiceAlerts', () => {
       status: 'degraded',
       incidents: [{ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, duration: '10m', impact: 'minor' }],
     })
-    const alerts = buildServiceAlerts([svc], new Set(), new Set())
+    const alerts = buildServiceAlerts([svc], new Map(), new Map())
     expect(alerts).toHaveLength(1)
     expect(alerts[0].key).toBe('alerted:degraded:openai')
   })
 
   it('does not create alert for operational service', () => {
     const svc = mockService({ status: 'operational' })
-    expect(buildServiceAlerts([svc], new Set(), new Set())).toHaveLength(0)
+    expect(buildServiceAlerts([svc], new Map(), new Map())).toHaveLength(0)
   })
 
   it('creates recovery alert if previously alerted as down', () => {
     const svc = mockService({ status: 'operational' })
-    const alerts = buildServiceAlerts([svc], new Set(['openai']), new Set())
+    const alerts = buildServiceAlerts([svc], new Map([['openai', '2026-03-24T00:00:00Z']]), new Map())
     expect(alerts).toHaveLength(1)
     expect(alerts[0].key).toBe('alerted:recovered:openai')
     expect(alerts[0].title).toContain('Service Recovered')
@@ -157,7 +157,7 @@ describe('buildServiceAlerts', () => {
 
   it('creates recovery alert if previously alerted as degraded', () => {
     const svc = mockService({ status: 'operational' })
-    const alerts = buildServiceAlerts([svc], new Set(), new Set(['openai']))
+    const alerts = buildServiceAlerts([svc], new Map(), new Map([['openai', '2026-03-24T00:00:00Z']]))
     expect(alerts).toHaveLength(1)
     expect(alerts[0].key).toBe('alerted:recovered:openai')
   })
@@ -165,9 +165,34 @@ describe('buildServiceAlerts', () => {
   it('creates both down and recovery alerts for different services', () => {
     const downSvc = mockService({ id: 'openai', name: 'OpenAI API', status: 'down' })
     const recoveredSvc = mockService({ id: 'claude', name: 'Claude API', status: 'operational' })
-    const alerts = buildServiceAlerts([downSvc, recoveredSvc], new Set(['claude']), new Set())
+    const alerts = buildServiceAlerts([downSvc, recoveredSvc], new Map([['claude', '2026-03-24T00:00:00Z']]), new Map())
     expect(alerts).toHaveLength(2)
     expect(alerts[0].key).toBe('alerted:down:openai')
     expect(alerts[1].key).toBe('alerted:recovered:claude')
+  })
+
+  it('includes downtime duration in recovery alert title', () => {
+    const svc = mockService({ status: 'operational' })
+    // Alerted 45 minutes ago
+    const alertedAt = new Date(Date.now() - 45 * 60_000).toISOString()
+    const alerts = buildServiceAlerts([svc], new Map([['openai', alertedAt]]), new Map())
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0].title).toContain('Service Recovered')
+    expect(alerts[0].title).toMatch(/\(.*45m.*\)/)
+  })
+
+  it('includes downtime duration from degraded alert in recovery', () => {
+    const svc = mockService({ status: 'operational' })
+    const alertedAt = new Date(Date.now() - 2 * 3600_000 - 10 * 60_000).toISOString()
+    const alerts = buildServiceAlerts([svc], new Map(), new Map([['openai', alertedAt]]))
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0].title).toMatch(/\(.*2h 10m.*\)/)
+  })
+
+  it('handles legacy "1" value gracefully (no duration)', () => {
+    const svc = mockService({ status: 'operational' })
+    const alerts = buildServiceAlerts([svc], new Map([['openai', '1']]), new Map())
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0].title).toBe('🟢 OpenAI API — Service Recovered')
   })
 })
