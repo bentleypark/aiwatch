@@ -55,6 +55,8 @@ All 92 tests must pass before submitting a PR.
 
 ```
 src/           # React frontend (pages, components, hooks, utils, locales)
+api/           # Vercel Edge Functions — "Is X Down?" SSR pages
+public/        # Static assets (manifest.json, sw.js, icons)
 worker/        # Cloudflare Workers backend (parsers, types, utils)
 tests/         # Playwright E2E tests
 docs/          # Design mockups
