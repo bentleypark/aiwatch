@@ -45,7 +45,10 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30) {
       if (!inc.startedAt) return
       const key = toLocalDateKey(new Date(inc.startedAt))
       if (inc.status !== 'resolved') {
-        escalate(dayStatus, key, 'down')
+        // Ongoing incidents: use impact level instead of always 'down'
+        if (inc.impact === 'critical') escalate(dayStatus, key, 'down')
+        else if (inc.impact === 'major') escalate(dayStatus, key, 'degraded')
+        else escalate(dayStatus, key, 'degraded_perf')
       } else if (inc.impact === 'critical') {
         escalate(dayStatus, key, 'down')
       } else if (inc.impact === 'major') {
