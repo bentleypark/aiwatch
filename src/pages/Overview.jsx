@@ -339,7 +339,7 @@ function ActionBanner({ services, setPage, setFilter, setCategoryFilter, t }) {
                       {i > 0 && ' · '}
                       <span
                         className="hover:underline hover:text-[var(--text0)] transition-colors cursor-pointer"
-                        onClick={(e) => { e.stopPropagation(); setPage({ name: 'service', serviceId: f.id }) }}
+                        onClick={(e) => { e.stopPropagation(); trackEvent('fallback_click', { from_service: svc.id, to_service: f.id, location: 'action_banner' }); setPage({ name: 'service', serviceId: f.id }) }}
                       >
                         {i === 0 && <span className="text-[var(--yellow)]">★ </span>}
                         {f.name}{f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}

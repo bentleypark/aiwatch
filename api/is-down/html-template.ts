@@ -177,7 +177,7 @@ ${renderCTA(seo, service?.status ?? 'operational')}
 ${renderIncidents(service)}
 ${renderDescription(seo, service)}
 ${renderFAQ(seo, fallbacks)}
-${renderFallbacks(seo, fallbacks)}
+${renderFallbacks(seo, fallbacks, service?.id)}
 ${renderFooter(slug)}
 
 </div>
@@ -338,14 +338,15 @@ function renderFAQ(seo: ServiceSEO, fallbacks: Fallback[]): string {
 <div class="card">${items}</div>`
 }
 
-function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[]): string {
+function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string): string {
   if (fallbacks.length === 0) return ''
   const items = fallbacks.map(f => {
     const scoreText = f.score != null ? `Score: ${f.score}` : ''
     const color = statusColor(f.status)
     const label = statusLabel(f.status)
     const fbSlug = SERVICE_ID_TO_SLUG[f.id]
-    const nameHtml = fbSlug ? `<a href="/is-${esc(fbSlug)}-down" style="color:#e6edf3">${esc(f.name)}</a>` : esc(f.name)
+    const gaClick = fromId ? ` onclick="typeof gtag==='function'&&gtag('event','fallback_click',{from_service:'${esc(fromId)}',to_service:'${esc(f.id)}',location:'is_down_page'})"` : ''
+    const nameHtml = fbSlug ? `<a href="/is-${esc(fbSlug)}-down" style="color:#e6edf3"${gaClick}>${esc(f.name)}</a>` : esc(f.name)
     return `<div class="fallback-item">
 <span class="fallback-name">${nameHtml}</span>
 <span class="fallback-score mono">${scoreText} &nbsp; <span style="color:${color}">${statusEmoji(f.status)} ${label}</span></span>
