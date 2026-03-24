@@ -43,6 +43,17 @@ test.describe('Is X Down? SSR pages', () => {
         await expect(p.locator('body')).toContainText('AIWatch Insight:')
       })
 
+      test(`has AIWatch Data summary`, async ({ page: p }) => {
+        await p.goto(`/is-${page.slug}-down`, { waitUntil: 'domcontentloaded' })
+        // Data summary should contain "Based on AIWatch data" or not exist (when service data unavailable)
+        const body = await p.locator('body').textContent()
+        if (body?.includes('AIWatch Data:')) {
+          expect(body).toMatch(/Based on AIWatch data from the last 30 days/)
+          // Should contain either incident count or "zero incidents"
+          expect(body).toMatch(/experienced \d+ incident|zero incidents/)
+        }
+      })
+
       test(`has CTA alert banner`, async ({ page: p }) => {
         await p.goto(`/is-${page.slug}-down`, { waitUntil: 'domcontentloaded' })
         await expect(p.locator('.cta')).toBeVisible()
