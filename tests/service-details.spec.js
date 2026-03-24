@@ -117,6 +117,60 @@ test.describe('xAI Regional Availability', () => {
   })
 })
 
+test.describe('Gemini Regional Availability', () => {
+  test('shows regional status for Gemini with region-specific incident', async ({ page }) => {
+    await page.route('**/api/status', async (route) => {
+      await route.fulfill({ json: {
+        services: [
+          { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
+          {
+            id: 'gemini', category: 'api', name: 'Gemini API', provider: 'Google', status: 'degraded',
+            latency: 180, uptime30d: 99.80, calendarDays: 30,
+            incidents: [
+              { id: 'gm-1', title: 'Vertex AI europe-west1 elevated error rates', startedAt: new Date(Date.now() - 3600000).toISOString(), duration: null, status: 'investigating', impact: null, timeline: [] },
+            ],
+          },
+        ],
+        lastUpdated: new Date().toISOString(),
+      } })
+    })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    await page.locator('main button').filter({ hasText: 'Gemini' }).first().evaluate((el) => el.click())
+    await expect(page.locator('main').getByText(/Regional Availability|리전별 가용성/)).toBeVisible({ timeout: 5000 })
+    // Europe West should show incident, other regions should be ok
+    await expect(page.locator('main').getByText(/No Active Incidents|활성 장애 없음/).first()).toBeVisible()
+    await expect(page.locator('main').getByText(/Inference Issue|추론 장애/)).toBeVisible()
+  })
+})
+
+test.describe('OpenAI Regional Availability', () => {
+  test('shows regional status for OpenAI with global incident', async ({ page }) => {
+    await page.route('**/api/status', async (route) => {
+      await route.fulfill({ json: {
+        services: [
+          { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
+          {
+            id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'degraded',
+            latency: 250, uptime30d: 99.70, calendarDays: 30,
+            incidents: [
+              { id: 'oa-1', title: 'Elevated API Error Rates', startedAt: new Date(Date.now() - 1800000).toISOString(), duration: null, status: 'investigating', impact: null, timeline: [] },
+            ],
+          },
+        ],
+        lastUpdated: new Date().toISOString(),
+      } })
+    })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    await page.locator('main button').filter({ hasText: 'OpenAI' }).first().evaluate((el) => el.click())
+    await expect(page.locator('main').getByText(/Regional Availability|리전별 가용성/)).toBeVisible({ timeout: 5000 })
+    // Global incident → all 3 regions should show incident
+    await expect(page.locator('main').getByText(/Incident Detected|장애 감지/)).toHaveCount(3)
+    await expect(page.locator('main').getByText(/all regions|모든 리전/i)).toBeVisible()
+  })
+})
+
 test.describe('Detection Lead badge', () => {
   test('shows lead badge for OpenAI ongoing incident', async ({ page }) => {
     await page.goto('/')

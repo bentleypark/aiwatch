@@ -131,6 +131,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | `save_settings` | — | Settings | Settings saved |
 | `webhook_register` | `type` (discord/slack) | Settings | Webhook URL added |
 | `webhook_remove` | `type` (discord/slack) | Settings | Webhook URL removed |
+| `region_switch_intent` | `service_id`, `recommended_region` | ServiceDetails (Regional) | Region guide link click |
 
 Is X Down pages (Edge SSR) use inline `gtag()` calls directly since they don't use React.
 

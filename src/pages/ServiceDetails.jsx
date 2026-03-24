@@ -307,100 +307,105 @@ const INCIDENT_DOT_COLOR = {
   incident: 'bg-[var(--red)]',
 }
 
-function deriveRegionStatus(serviceId, incidents) {
-  const regions = SERVICE_REGIONS[serviceId]
-  if (!regions) return null
-
-  const ongoing = (Array.isArray(incidents) ? incidents : []).filter(
-    (i) => i && typeof i.title === 'string' && i.status !== 'resolved'
-  )
-  if (ongoing.length === 0) return null // no ongoing → don't show section
-
-  const regionStatus = {}
-  let hasRegionSpecific = false
-
-  for (const region of regions) {
-    const regionIncident = ongoing.find((i) => i.title.toLowerCase().includes(region.key))
-    if (regionIncident) {
-      regionStatus[region.key] = { status: 'incident', type: classifyIncident(regionIncident.title) }
-      hasRegionSpecific = true
-    } else {
-      regionStatus[region.key] = { status: 'ok' }
-    }
-  }
-
-  // Global incident (no specific region mentioned) → all regions affected
-  if (!hasRegionSpecific) {
-    const globalType = classifyIncident(ongoing[0].title)
-    for (const region of regions) {
-      regionStatus[region.key] = { status: 'incident', type: globalType }
-    }
-  }
-
-  return regionStatus
+const REGION_DOCS_URL = {
+  xai: 'https://docs.x.ai/docs/regions',
+  gemini: 'https://cloud.google.com/vertex-ai/docs/general/locations',
+  openai: 'https://platform.openai.com/docs/guides/production-best-practices',
+  chatgpt: 'https://status.openai.com',
 }
 
 function RegionalAvailability({ service, t }) {
-  const regions = SERVICE_REGIONS[service.id]
-  const regionStatus = useMemo(() => {
-    try { return deriveRegionStatus(service.id, service.incidents) }
-    catch { return null }
-  }, [service.id, service.incidents])
+  try {
+    const regions = SERVICE_REGIONS[service.id]
+    if (!regions) return null
 
-  if (!regionStatus || !regions) return null
+    const incidents = Array.isArray(service.incidents) ? service.incidents : []
+    const ongoing = incidents.filter(i => i && typeof i.title === 'string' && i.status !== 'resolved')
+    if (ongoing.length === 0) return null
 
-  const incidentRegions = regions.filter((r) => regionStatus[r.key].status === 'incident')
-  const okRegions = regions.filter((r) => regionStatus[r.key].status === 'ok')
-  const allDown = incidentRegions.length === regions.length
+    const regionStatus = {}
+    let hasRegionSpecific = false
 
-  return (
-    <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
-      <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
-        <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
-          <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--amber)' }} />
-          {t('svc.region.title')}
-        </div>
-      </div>
-      <div style={{ padding: '16px' }}>
-        <div className="flex flex-col" style={{ gap: '8px' }}>
-          {regions.map((region) => {
-            const info = regionStatus[region.key]
-            const isIncident = info.status === 'incident'
-            const dotCls = isIncident ? (INCIDENT_DOT_COLOR[info.type] ?? 'bg-[var(--red)]') : 'bg-[var(--green)]'
-            const textCls = isIncident ? (INCIDENT_TYPE_COLOR[info.type] ?? 'text-[var(--red)]') : 'text-[var(--green)]'
-            const labelKey = isIncident ? (INCIDENT_TYPE_LABEL[info.type] ?? 'svc.region.incident') : 'svc.region.noIncidents'
-            return (
-              <div key={region.key} className="flex items-center gap-2">
-                <span className={`rounded-full shrink-0 ${dotCls}`} style={{ width: '6px', height: '6px' }} />
-                <span className="mono text-xs text-[var(--text1)]">{region.label}</span>
-                <span className={`mono text-[10px] ml-auto ${textCls}`}>{t(labelKey)}</span>
-              </div>
-            )
-          })}
-        </div>
-        {/* Recommendation: evidence-based, only when one region has incident but not all */}
-        {!allDown && okRegions.length > 0 && (
-          <div className="mono text-[10px] text-[var(--blue)] mt-3 flex items-center justify-between" style={{ padding: '6px 8px', background: 'var(--bg2)', borderRadius: '4px' }}>
-            <span>{t('svc.region.recommend').replace('{region}', okRegions[0].label)}</span>
-            <a
-              href={service.id === 'xai' ? "https://docs.x.ai/docs/regions" : "https://cloud.google.com/vertex-ai/docs/general/locations"}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-2 font-bold underline hover:text-[var(--text1)] shrink-0"
-              onClick={() => trackEvent('region_switch_intent', { service_id: service.id, recommended_region: okRegions[0].key })}
-            >
-              {t('svc.region.action.guide')} →
-            </a>
+    for (const r of regions) {
+      regionStatus[r.key] = { status: 'ok', type: 'incident' }
+    }
+
+    for (const inc of ongoing) {
+      const titleLower = (inc.title || '').toLowerCase()
+      for (const r of regions) {
+        if (titleLower.includes(r.key.toLowerCase())) {
+          regionStatus[r.key] = { status: 'incident', type: classifyIncident(inc.title) }
+          hasRegionSpecific = true
+        }
+      }
+    }
+
+    if (!hasRegionSpecific) {
+      const globalType = classifyIncident(ongoing[0].title)
+      for (const r of regions) {
+        regionStatus[r.key] = { status: 'incident', type: globalType }
+      }
+    }
+
+    const okRegions = regions.filter(r => regionStatus[r.key].status === 'ok')
+    const allDown = regions.length - okRegions.length === regions.length
+    const docsUrl = REGION_DOCS_URL[service.id]
+    const recommendText = (t('svc.region.recommend') || '').replace('{region}', okRegions[0]?.label ?? '')
+
+    return (
+      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+        <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+          <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--amber)' }} />
+            {t('svc.region.title')}
           </div>
-        )}
-        {allDown && (
-          <div className="mono text-[10px] text-[var(--red)] mt-3" style={{ padding: '6px 8px', background: 'var(--bg2)', borderRadius: '4px' }}>
-            {t('svc.region.allDown')}
+        </div>
+        <div style={{ padding: '16px' }}>
+          <div className="flex flex-col" style={{ gap: '8px' }}>
+            {regions.map((region) => {
+              const info = regionStatus[region.key]
+              const isIncident = info.status === 'incident'
+              const type = info.type || 'incident'
+              const dotCls = isIncident ? (INCIDENT_DOT_COLOR[type] ?? 'bg-[var(--red)]') : 'bg-[var(--green)]'
+              const textCls = isIncident ? (INCIDENT_TYPE_COLOR[type] ?? 'text-[var(--red)]') : 'text-[var(--green)]'
+              const labelKey = isIncident ? (INCIDENT_TYPE_LABEL[type] ?? 'svc.region.incident') : 'svc.region.noIncidents'
+              return (
+                <div key={region.key} className="flex items-center gap-2">
+                  <span className={`rounded-full shrink-0 ${dotCls}`} style={{ width: '6px', height: '6px' }} />
+                  <span className="mono text-xs text-[var(--text1)]">{region.label}</span>
+                  <span className={`mono text-[10px] ml-auto ${textCls}`}>{t(labelKey)}</span>
+                </div>
+              )
+            })}
           </div>
-        )}
-      </div>
-    </section>
-  )
+          {!allDown && okRegions.length > 0 && (
+            <div className="mono text-[10px] text-[var(--blue)] mt-3 flex items-center justify-between" style={{ padding: '6px 8px', background: 'var(--bg2)', borderRadius: '4px' }}>
+              <span>{recommendText}</span>
+              {docsUrl && (
+                <a
+                  href={docsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-2 font-bold underline hover:text-[var(--text1)] shrink-0"
+                  onClick={() => trackEvent('region_switch_intent', { service_id: service.id, recommended_region: okRegions[0].key })}
+                >
+                  {t('svc.region.action.guide')} →
+                </a>
+              )}
+            </div>
+          )}
+          {allDown && (
+            <div className="mono text-[10px] text-[var(--red)] mt-3" style={{ padding: '6px 8px', background: 'var(--bg2)', borderRadius: '4px' }}>
+              {t('svc.region.allDown')}
+            </div>
+          )}
+        </div>
+      </section>
+    )
+  } catch (err) {
+    console.error('[RegionalAvailability] render failed:', err)
+    return null
+  }
 }
 
 
