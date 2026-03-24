@@ -298,17 +298,40 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     if (wasDegraded) alertedDegradedMap.set(svc.id, wasDegraded)
   }
 
+  // Anti-flapping: read pending state BEFORE building alerts.
+  // Degraded alerts require consecutive detection (2 cron cycles ≈ 10min).
+  // Down alerts are sent immediately (high urgency).
+  const pendingDegraded = new Set<string>()
+  for (const svc of scored) {
+    if (svc.status === 'degraded') {
+      const pending = await env.STATUS_CACHE.get(`pending:degraded:${svc.id}`).catch(() => null)
+      if (pending) pendingDegraded.add(svc.id)
+    }
+  }
+
   // Build alerts using pure functions
   const incidentAlerts = buildIncidentAlerts(scored, alertedNewIds)
   const serviceAlerts = buildServiceAlerts(scored, alertedDownMap, alertedDegradedMap)
   const allAlerts = [...incidentAlerts, ...serviceAlerts]
 
-  // Dedup: skip alerts already sent
+  // Dedup: skip alerts already sent + anti-flapping for degraded
   const toSend = []
   for (const alert of allAlerts) {
     const existing = await env.STATUS_CACHE.get(alert.key).catch(() => null)
     if (existing) continue
+    // Anti-flapping: degraded alerts need pending from PREVIOUS cron cycle
+    if (alert.key.startsWith('alerted:degraded:')) {
+      const svcId = alert.key.replace('alerted:degraded:', '')
+      if (!pendingDegraded.has(svcId)) continue // first detection → skip
+    }
     toSend.push(alert)
+  }
+
+  // Write pending keys AFTER filtering (so they exist for the next cron cycle)
+  for (const svc of scored) {
+    if (svc.status === 'degraded') {
+      await env.STATUS_CACHE.put(`pending:degraded:${svc.id}`, '1', { expirationTtl: 600 }).catch(() => {})
+    }
   }
 
   // Record detection timestamps for non-operational services (Detection Lead feature)
