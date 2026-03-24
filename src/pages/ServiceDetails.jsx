@@ -250,13 +250,30 @@ function IncidentRow({ incident, detectedAt, t, lang }) {
   )
 }
 
-// ── xAI Regional Availability ────────────────────────────────
-// Extracts region info from ongoing incident titles (us-east-1, eu-west-1)
+// ── Regional Availability ────────────────────────────────
+// Extracts region info from ongoing incident titles
 
-const XAI_REGIONS = [
-  { key: 'us-east-1', label: 'US (us-east-1)' },
-  { key: 'eu-west-1', label: 'EU (eu-west-1)' },
-]
+const SERVICE_REGIONS = {
+  xai: [
+    { key: 'us-east-1', label: 'US (us-east-1)' },
+    { key: 'eu-west-1', label: 'EU (eu-west-1)' },
+  ],
+  gemini: [
+    { key: 'us-central1', label: 'US Central (us-central1)' },
+    { key: 'europe-west1', label: 'Europe West (europe-west1)' },
+    { key: 'asia-northeast1', label: 'Asia Northeast (asia-northeast1)' },
+  ],
+  openai: [
+    { key: 'us-east-1', label: 'US East (us-east-1)' },
+    { key: 'us-west-2', label: 'US West (us-west-2)' },
+    { key: 'eu-central-1', label: 'Europe Central (eu-central-1)' },
+  ],
+  chatgpt: [
+    { key: 'us-east-1', label: 'US East (us-east-1)' },
+    { key: 'us-west-2', label: 'US West (us-west-2)' },
+    { key: 'eu-central-1', label: 'Europe Central (eu-central-1)' },
+  ],
+}
 
 // Classify incident type from title keywords
 function classifyIncident(title) {
@@ -264,7 +281,7 @@ function classifyIncident(title) {
   const lower = title.toLowerCase()
   if (/down|outage|unavailable/.test(lower)) return 'down'
   if (/latency|slow|timeout|delay/.test(lower)) return 'degraded_perf'
-  if (/inference|grok|model/.test(lower)) return 'inference'
+  if (/inference|grok|model|gemini|vertex/.test(lower)) return 'inference'
   return 'incident' // generic
 }
 
@@ -290,7 +307,10 @@ const INCIDENT_DOT_COLOR = {
   incident: 'bg-[var(--red)]',
 }
 
-function deriveRegionStatus(incidents) {
+function deriveRegionStatus(serviceId, incidents) {
+  const regions = SERVICE_REGIONS[serviceId]
+  if (!regions) return null
+
   const ongoing = (Array.isArray(incidents) ? incidents : []).filter(
     (i) => i && typeof i.title === 'string' && i.status !== 'resolved'
   )
@@ -299,7 +319,7 @@ function deriveRegionStatus(incidents) {
   const regionStatus = {}
   let hasRegionSpecific = false
 
-  for (const region of XAI_REGIONS) {
+  for (const region of regions) {
     const regionIncident = ongoing.find((i) => i.title.toLowerCase().includes(region.key))
     if (regionIncident) {
       regionStatus[region.key] = { status: 'incident', type: classifyIncident(regionIncident.title) }
@@ -312,7 +332,7 @@ function deriveRegionStatus(incidents) {
   // Global incident (no specific region mentioned) → all regions affected
   if (!hasRegionSpecific) {
     const globalType = classifyIncident(ongoing[0].title)
-    for (const region of XAI_REGIONS) {
+    for (const region of regions) {
       regionStatus[region.key] = { status: 'incident', type: globalType }
     }
   }
@@ -321,15 +341,17 @@ function deriveRegionStatus(incidents) {
 }
 
 function RegionalAvailability({ service, t }) {
+  const regions = SERVICE_REGIONS[service.id]
   const regionStatus = useMemo(() => {
-    try { return deriveRegionStatus(service.incidents) }
+    try { return deriveRegionStatus(service.id, service.incidents) }
     catch { return null }
-  }, [service.incidents])
-  if (!regionStatus) return null
+  }, [service.id, service.incidents])
 
-  const incidentRegions = XAI_REGIONS.filter((r) => regionStatus[r.key].status === 'incident')
-  const okRegions = XAI_REGIONS.filter((r) => regionStatus[r.key].status === 'ok')
-  const allDown = incidentRegions.length === XAI_REGIONS.length
+  if (!regionStatus || !regions) return null
+
+  const incidentRegions = regions.filter((r) => regionStatus[r.key].status === 'incident')
+  const okRegions = regions.filter((r) => regionStatus[r.key].status === 'ok')
+  const allDown = incidentRegions.length === regions.length
 
   return (
     <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
@@ -341,7 +363,7 @@ function RegionalAvailability({ service, t }) {
       </div>
       <div style={{ padding: '16px' }}>
         <div className="flex flex-col" style={{ gap: '8px' }}>
-          {XAI_REGIONS.map((region) => {
+          {regions.map((region) => {
             const info = regionStatus[region.key]
             const isIncident = info.status === 'incident'
             const dotCls = isIncident ? (INCIDENT_DOT_COLOR[info.type] ?? 'bg-[var(--red)]') : 'bg-[var(--green)]'
@@ -361,7 +383,7 @@ function RegionalAvailability({ service, t }) {
           <div className="mono text-[10px] text-[var(--blue)] mt-3 flex items-center justify-between" style={{ padding: '6px 8px', background: 'var(--bg2)', borderRadius: '4px' }}>
             <span>{t('svc.region.recommend').replace('{region}', okRegions[0].label)}</span>
             <a
-              href="https://docs.x.ai/docs/regions"
+              href={service.id === 'xai' ? "https://docs.x.ai/docs/regions" : "https://cloud.google.com/vertex-ai/docs/general/locations"}
               target="_blank"
               rel="noopener noreferrer"
               className="ml-2 font-bold underline hover:text-[var(--text1)] shrink-0"
@@ -380,6 +402,7 @@ function RegionalAvailability({ service, t }) {
     </section>
   )
 }
+
 
 const CALENDAR_OPACITY = { operational: 0.7, degraded: 0.8, down: 0.9 }
 
@@ -634,8 +657,8 @@ export default function ServiceDetails({ serviceId }) {
       {/* ── 24h Latency Trend — shows chart when hourly KV data exists ── */}
       {service.category === 'api' && <ServiceLatencyTrend service={service} t={t} hourlyData={latency24h} />}
 
-      {/* ── xAI Regional Availability (only for xAI service) ── */}
-      {service.id === 'xai' && <RegionalAvailability service={service} t={t} />}
+      {/* ── Regional Availability (only for services with defined regions) ── */}
+      {SERVICE_REGIONS[service.id] && <RegionalAvailability service={service} t={t} />}
 
       {/* ── Bottom: Incident History + Calendar (2-col on desktop) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>

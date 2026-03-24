@@ -42,9 +42,17 @@ export function parseGCloudIncidents(data: GCloudIncident[], productFilter: stri
         const impact = inc.severity === 'high' ? 'major' as const
           : inc.severity === 'medium' ? 'minor' as const
           : null
+
+        // Include regional info in title if present in affected_products
+        const regionInfo = inc.affected_products
+          ?.filter((p) => p.title.toLowerCase().includes(productFilter.toLowerCase()))
+          .map((p) => p.title)
+          .join(', ')
+        const displayTitle = regionInfo || inc.service_name
+
         return [{
           id: inc.id,
-          title: `${inc.service_name} — ${inc.severity}`,
+          title: `${displayTitle} — ${inc.severity}`,
           status: status === 'AVAILABLE' ? 'resolved' as const
             : status === 'SERVICE_DISRUPTION' ? 'investigating' as const
             : 'investigating' as const,
