@@ -219,10 +219,15 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
 
       return {
         ...base,
-        // Use per-component status when available (prevents one degraded component from affecting all)
-        status: config.statusComponent
-          ? normalizeStatus(summaryData.components?.find((c) => c.name.startsWith(config.statusComponent))?.status ?? summaryData.status?.indicator ?? 'none')
-          : normalizeStatus(summaryData.status?.indicator ?? 'none'),
+        // Per-component status when available, but never better than overall indicator
+        // (prevents showing 'operational' when official page says 'degraded')
+        status: (() => {
+          const overall = normalizeStatus(summaryData.status?.indicator ?? 'none')
+          if (!config.statusComponent) return overall
+          const component = normalizeStatus(summaryData.components?.find((c) => c.name.startsWith(config.statusComponent))?.status ?? summaryData.status?.indicator ?? 'none')
+          const rank = { operational: 0, degraded: 1, down: 2 }
+          return (rank[overall] ?? 0) > (rank[component] ?? 0) ? overall : component
+        })(),
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
         ...(Object.keys(augmentedImpact).length > 0 ? { dailyImpact: augmentedImpact } : {}),
