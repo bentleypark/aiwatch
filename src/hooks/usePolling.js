@@ -289,11 +289,15 @@ const MOCK_SERVICES = [
     ],
   },
   {
-    id: 'xai', category: 'api', name: 'xAI (Grok)', provider: 'xAI', status: 'operational',
+    id: 'xai', category: 'api', name: 'xAI (Grok)', provider: 'xAI', status: 'degraded',
     latency: 203, uptime30d: 99.75,
     history30d: hist([24]),
     history3m: [{ month: '2026-01', uptime: 99.82 }, { month: '2026-02', uptime: 99.79 }, { month: '2026-03', uptime: 99.75 }],
     incidents: [
+      { id: 'xa-0', title: 'eu-west-1.api.x.ai went down', startedAt: ago(2 * H), duration: null, status: 'investigating',
+        timeline: [
+          { stage: 'investigating', text: 'EU region API endpoint is experiencing errors.', at: ago(2 * H) },
+        ] },
       { id: 'xa-1', title: 'Authentication Errors', startedAt: ago(2 * D + 14 * H), duration: '22m', status: 'resolved',
         timeline: [
           { stage: 'investigating', text: 'API 인증 오류가 다수 발생 중입니다.', at: ago(2 * D + 14 * H) },

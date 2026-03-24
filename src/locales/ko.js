@@ -166,6 +166,14 @@ const ko = {
   'svc.cal.ago.suffix': '전',
   'svc.cal.today': '오늘',
   'svc.status.link': '공식 Status',
+  'svc.region.title': '리전별 가용성',
+  'svc.region.noIncidents': '활성 장애 없음',
+  'svc.region.incident': '장애 감지',
+  'svc.region.type.down': '서비스 중단',
+  'svc.region.type.degraded': '성능 저하',
+  'svc.region.type.inference': '추론 장애',
+  'svc.region.recommend': '리전 장애가 감지되었습니다. 서비스 중단을 피하려면 {region} 사용을 권장합니다.',
+  'svc.region.allDown': '모든 리전에서 장애가 감지되었습니다',
 
   // Settings
   'settings.general': '일반',

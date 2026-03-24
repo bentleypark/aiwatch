@@ -249,6 +249,128 @@ function IncidentRow({ incident, detectedAt, t, lang }) {
   )
 }
 
+// ── xAI Regional Availability ────────────────────────────────
+// Extracts region info from ongoing incident titles (us-east-1, eu-west-1)
+
+const XAI_REGIONS = [
+  { key: 'us-east-1', label: 'US (us-east-1)' },
+  { key: 'eu-west-1', label: 'EU (eu-west-1)' },
+]
+
+// Classify incident type from title keywords
+function classifyIncident(title) {
+  if (!title || typeof title !== 'string') return 'incident'
+  const lower = title.toLowerCase()
+  if (/down|outage|unavailable/.test(lower)) return 'down'
+  if (/latency|slow|timeout|delay/.test(lower)) return 'degraded_perf'
+  if (/inference|grok|model/.test(lower)) return 'inference'
+  return 'incident' // generic
+}
+
+// Label key for each incident type
+const INCIDENT_TYPE_LABEL = {
+  down: 'svc.region.type.down',
+  degraded_perf: 'svc.region.type.degraded',
+  inference: 'svc.region.type.inference',
+  incident: 'svc.region.incident',
+}
+
+const INCIDENT_TYPE_COLOR = {
+  down: 'text-[var(--red)]',
+  degraded_perf: 'text-[var(--amber)]',
+  inference: 'text-[var(--red)]',
+  incident: 'text-[var(--red)]',
+}
+
+const INCIDENT_DOT_COLOR = {
+  down: 'bg-[var(--red)]',
+  degraded_perf: 'bg-[var(--amber)]',
+  inference: 'bg-[var(--red)]',
+  incident: 'bg-[var(--red)]',
+}
+
+function deriveRegionStatus(incidents) {
+  const ongoing = (Array.isArray(incidents) ? incidents : []).filter(
+    (i) => i && typeof i.title === 'string' && i.status !== 'resolved'
+  )
+  if (ongoing.length === 0) return null // no ongoing → don't show section
+
+  const regionStatus = {}
+  let hasRegionSpecific = false
+
+  for (const region of XAI_REGIONS) {
+    const regionIncident = ongoing.find((i) => i.title.toLowerCase().includes(region.key))
+    if (regionIncident) {
+      regionStatus[region.key] = { status: 'incident', type: classifyIncident(regionIncident.title) }
+      hasRegionSpecific = true
+    } else {
+      regionStatus[region.key] = { status: 'ok' }
+    }
+  }
+
+  // Global incident (no specific region mentioned) → all regions affected
+  if (!hasRegionSpecific) {
+    const globalType = classifyIncident(ongoing[0].title)
+    for (const region of XAI_REGIONS) {
+      regionStatus[region.key] = { status: 'incident', type: globalType }
+    }
+  }
+
+  return regionStatus
+}
+
+function RegionalAvailability({ service, t }) {
+  const regionStatus = useMemo(() => {
+    try { return deriveRegionStatus(service.incidents) }
+    catch { return null }
+  }, [service.incidents])
+  if (!regionStatus) return null
+
+  const incidentRegions = XAI_REGIONS.filter((r) => regionStatus[r.key].status === 'incident')
+  const okRegions = XAI_REGIONS.filter((r) => regionStatus[r.key].status === 'ok')
+  const allDown = incidentRegions.length === XAI_REGIONS.length
+
+  return (
+    <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+      <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+        <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+          <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--amber)' }} />
+          {t('svc.region.title')}
+        </div>
+      </div>
+      <div style={{ padding: '16px' }}>
+        <div className="flex flex-col" style={{ gap: '8px' }}>
+          {XAI_REGIONS.map((region) => {
+            const info = regionStatus[region.key]
+            const isIncident = info.status === 'incident'
+            const dotCls = isIncident ? (INCIDENT_DOT_COLOR[info.type] ?? 'bg-[var(--red)]') : 'bg-[var(--green)]'
+            const textCls = isIncident ? (INCIDENT_TYPE_COLOR[info.type] ?? 'text-[var(--red)]') : 'text-[var(--green)]'
+            const labelKey = isIncident ? (INCIDENT_TYPE_LABEL[info.type] ?? 'svc.region.incident') : 'svc.region.noIncidents'
+            return (
+              <div key={region.key} className="flex items-center gap-2">
+                <span className={`rounded-full shrink-0 ${dotCls}`} style={{ width: '6px', height: '6px' }} />
+                <span className="mono text-xs text-[var(--text1)]">{region.label}</span>
+                <span className={`mono text-[10px] ml-auto ${textCls}`}>{t(labelKey)}</span>
+              </div>
+            )
+          })}
+        </div>
+        {/* Recommendation: evidence-based, only when one region has incident but not all */}
+        {!allDown && okRegions.length > 0 && (
+          <div className="mono text-[10px] text-[var(--blue)] mt-3" style={{ padding: '6px 8px', background: 'var(--bg2)', borderRadius: '4px' }}>
+            {t('svc.region.recommend').replace('{region}', okRegions[0].label)}
+          </div>
+        )}
+        {allDown && (
+          <div className="mono text-[10px] text-[var(--red)] mt-3" style={{ padding: '6px 8px', background: 'var(--bg2)', borderRadius: '4px' }}>
+            {t('svc.region.allDown')}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 const CALENDAR_OPACITY = { operational: 0.7, degraded: 0.8, down: 0.9 }
 
 function CalendarCell({ status, date }) {
@@ -501,6 +623,9 @@ export default function ServiceDetails({ serviceId }) {
 
       {/* ── 24h Latency Trend — shows chart when hourly KV data exists ── */}
       {service.category === 'api' && <ServiceLatencyTrend service={service} t={t} hourlyData={latency24h} />}
+
+      {/* ── xAI Regional Availability (only for xAI service) ── */}
+      {service.id === 'xai' && <RegionalAvailability service={service} t={t} />}
 
       {/* ── Bottom: Incident History + Calendar (2-col on desktop) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>

@@ -49,6 +49,72 @@ test.describe('ServiceDetails page', () => {
   })
 })
 
+test.describe('xAI Regional Availability', () => {
+  // Inject mock xAI data with EU region ongoing incident via API intercept
+  const XAI_MOCK = {
+    id: 'xai', category: 'api', name: 'xAI (Grok)', provider: 'xAI', status: 'degraded',
+    latency: 203, uptime30d: 99.75, calendarDays: 30,
+    incidents: [
+      { id: 'xa-0', title: 'eu-west-1.api.x.ai went down', startedAt: new Date(Date.now() - 7200000).toISOString(), duration: null, status: 'investigating', impact: null, timeline: [] },
+      { id: 'xa-1', title: 'Authentication Errors', startedAt: new Date(Date.now() - 86400000 * 2).toISOString(), duration: '22m', status: 'resolved', impact: null, timeline: [] },
+    ],
+  }
+
+  test('shows regional status with incident type for xAI', async ({ page }) => {
+    // Intercept API: serve mock response with xAI EU incident
+    await page.route('**/api/status', async (route) => {
+      const mockResponse = {
+        services: [
+          { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
+          XAI_MOCK,
+        ],
+        lastUpdated: new Date().toISOString(),
+      }
+      await route.fulfill({ json: mockResponse })
+    })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    await page.locator('main button').filter({ hasText: 'xAI' }).first().evaluate((el) => el.click())
+    await expect(page.locator('main').getByText(/Regional Availability|리전별 가용성/)).toBeVisible({ timeout: 5000 })
+    // EU region should show incident type label (Service Down)
+    await expect(page.locator('main').getByText(/Service Down|서비스 중단/)).toBeVisible()
+    // US region should show no active incidents
+    await expect(page.locator('main').getByText(/No Active Incidents|활성 장애 없음/)).toBeVisible()
+  })
+
+  test('shows all regions affected for global incident (no region keyword)', async ({ page }) => {
+    const globalMock = { ...XAI_MOCK, incidents: [
+      { id: 'xa-g', title: 'Elevated API Error Rates', startedAt: new Date(Date.now() - 3600000).toISOString(), duration: null, status: 'investigating', impact: null, timeline: [] },
+    ] }
+    await page.route('**/api/status', async (route) => {
+      await route.fulfill({ json: {
+        services: [
+          { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
+          globalMock,
+        ],
+        lastUpdated: new Date().toISOString(),
+      } })
+    })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    await page.locator('main button').filter({ hasText: 'xAI' }).first().evaluate((el) => el.click())
+    await expect(page.locator('main').getByText(/Regional Availability|리전별 가용성/)).toBeVisible({ timeout: 5000 })
+    // Both regions should show incident (global → all affected)
+    await expect(page.locator('main').getByText(/Incident Detected|장애 감지/)).toHaveCount(2)
+    // All-down message should be visible
+    await expect(page.locator('main').getByText(/all regions|모든 리전/i)).toBeVisible()
+  })
+
+  test('does not show regional section for non-xAI service', async ({ page }) => {
+    await page.goto('/')
+    await waitForDataLoad(page)
+    const card = page.locator('main button').filter({ hasText: 'Claude API' }).first()
+    await card.evaluate((el) => el.click())
+    await expect(page.locator('main').getByText('Status Calendar')).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('main').getByText(/Regional Availability|리전별 가용성/)).not.toBeVisible()
+  })
+})
+
 test.describe('Detection Lead badge', () => {
   test('shows lead badge for OpenAI ongoing incident', async ({ page }) => {
     await page.goto('/')

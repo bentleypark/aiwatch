@@ -1,0 +1,549 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - link "AIWatch" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e10]: AIWatch
+        - generic [ref=e13]: LIVE · 11:26
+        - generic [ref=e14]:
+          - generic [ref=e15]: v1.1.0
+          - link "GitHub" [ref=e16] [cursor=pointer]:
+            - /url: https://github.com/bentleypark/aiwatch
+            - img [ref=e17]
+            - generic [ref=e19]: GitHub
+          - button "↻ Refresh" [ref=e20] [cursor=pointer]:
+            - img [ref=e21]
+            - generic [ref=e24]: Refresh
+          - generic [ref=e25]:
+            - button "Analyze ↗" [disabled] [ref=e26]
+            - tooltip "Coming Soon Automatic anomaly detection and analysis notifications are being prepared":
+              - generic: Coming Soon
+              - generic: Automatic anomaly detection and analysis notifications are being prepared
+          - button "Settings" [ref=e27] [cursor=pointer]:
+            - img [ref=e28]
+            - generic [ref=e31]: Settings
+    - generic [ref=e139]:
+      - generic [ref=e140]: claude.ai
+      - generic [ref=e142]: Claude API
+      - generic [ref=e144]: OpenAI API
+      - generic [ref=e146]: ChatGPT
+      - generic [ref=e148]: Gemini API
+      - generic [ref=e150]: Mistral API
+      - generic [ref=e152]: Cohere API
+      - generic [ref=e154]: Groq Cloud
+      - generic [ref=e156]: Together AI
+      - generic [ref=e158]: Perplexity
+      - generic [ref=e160]: Hugging Face
+      - generic [ref=e162]: Replicate
+      - generic [ref=e164]: ElevenLabs
+      - generic [ref=e166]: xAI (Grok)
+      - generic [ref=e168]: DeepSeek API
+      - generic [ref=e170]: OpenRouter
+      - generic [ref=e172]: "|"
+      - generic [ref=e173]: Claude Code
+      - generic [ref=e175]: GitHub Copilot
+      - generic [ref=e177]: Cursor
+      - generic [ref=e179]: Windsurf
+      - generic [ref=e181]:
+        - generic [ref=e182]: claude.ai
+        - generic [ref=e184]: Claude API
+        - generic [ref=e186]: OpenAI API
+        - generic [ref=e188]: ChatGPT
+        - generic [ref=e190]: Gemini API
+        - generic [ref=e192]: Mistral API
+        - generic [ref=e194]: Cohere API
+        - generic [ref=e196]: Groq Cloud
+        - generic [ref=e198]: Together AI
+        - generic [ref=e200]: Perplexity
+        - generic [ref=e202]: Hugging Face
+        - generic [ref=e204]: Replicate
+        - generic [ref=e206]: ElevenLabs
+        - generic [ref=e208]: xAI (Grok)
+        - generic [ref=e210]: DeepSeek API
+        - generic [ref=e212]: OpenRouter
+        - generic [ref=e214]: "|"
+        - generic [ref=e215]: Claude Code
+        - generic [ref=e217]: GitHub Copilot
+        - generic [ref=e219]: Cursor
+        - generic [ref=e221]: Windsurf
+    - generic [ref=e36]:
+      - complementary [ref=e37]:
+        - generic [ref=e38]:
+          - navigation "Dashboard" [ref=e39]:
+            - generic [ref=e40]: Dashboard
+            - button "Overview" [ref=e41] [cursor=pointer]:
+              - img [ref=e43]
+              - text: Overview
+            - button "Latency" [ref=e48] [cursor=pointer]:
+              - img [ref=e50]
+              - text: Latency
+            - button "Incidents" [ref=e52] [cursor=pointer]:
+              - img [ref=e55]
+              - text: Incidents
+            - button "Uptime Status" [ref=e58] [cursor=pointer]:
+              - img [ref=e60]
+              - text: Uptime Status
+            - button "Reliability Ranking" [ref=e63] [cursor=pointer]:
+              - img [ref=e65]
+              - text: Reliability Ranking
+          - generic [ref=e69]:
+            - generic [ref=e70]: Services
+            - generic [ref=e71]:
+              - button "All" [ref=e72] [cursor=pointer]
+              - button "LLM APIs" [ref=e73] [cursor=pointer]
+              - button "Coding Agents" [ref=e74] [cursor=pointer]
+              - button "Web Apps" [ref=e75] [cursor=pointer]
+              - button "Voice & Inference" [ref=e76] [cursor=pointer]
+          - navigation [ref=e223]:
+            - button "claude.ai 99.31%" [ref=e224] [cursor=pointer]:
+              - generic [ref=e226]: claude.ai
+              - generic [ref=e227]: 99.31%
+            - button "Claude API 99.34%" [ref=e228] [cursor=pointer]:
+              - generic [ref=e230]: Claude API
+              - generic [ref=e231]: 99.34%
+            - button "OpenAI API 99.99%" [ref=e232] [cursor=pointer]:
+              - generic [ref=e234]: OpenAI API
+              - generic [ref=e235]: 99.99%
+            - button "ChatGPT 99.99%" [ref=e236] [cursor=pointer]:
+              - generic [ref=e238]: ChatGPT
+              - generic [ref=e239]: 99.99%
+            - button "Gemini API" [ref=e240] [cursor=pointer]:
+              - generic [ref=e242]: Gemini API
+            - button "Mistral API" [ref=e243] [cursor=pointer]:
+              - generic [ref=e245]: Mistral API
+            - button "Cohere API 100.00%" [ref=e246] [cursor=pointer]:
+              - generic [ref=e248]: Cohere API
+              - generic [ref=e249]: 100.00%
+            - button "Groq Cloud 100.00%" [ref=e250] [cursor=pointer]:
+              - generic [ref=e252]: Groq Cloud
+              - generic [ref=e253]: 100.00%
+            - button "Together AI 99.62%" [ref=e254] [cursor=pointer]:
+              - generic [ref=e256]: Together AI
+              - generic [ref=e257]: 99.62%
+            - button "Perplexity" [ref=e258] [cursor=pointer]:
+              - generic [ref=e260]: Perplexity
+            - button "Hugging Face 99.99%" [ref=e261] [cursor=pointer]:
+              - generic [ref=e263]: Hugging Face
+              - generic [ref=e264]: 99.99%
+            - button "Replicate 99.06%" [ref=e265] [cursor=pointer]:
+              - generic [ref=e267]: Replicate
+              - generic [ref=e268]: 99.06%
+            - button "ElevenLabs 97.67%" [ref=e269] [cursor=pointer]:
+              - generic [ref=e271]: ElevenLabs
+              - generic [ref=e272]: 97.67%
+            - button "xAI (Grok)" [ref=e273] [cursor=pointer]:
+              - generic [ref=e275]: xAI (Grok)
+            - button "DeepSeek API 100.00%" [ref=e276] [cursor=pointer]:
+              - generic [ref=e278]: DeepSeek API
+              - generic [ref=e279]: 100.00%
+            - button "OpenRouter 99.89%" [ref=e280] [cursor=pointer]:
+              - generic [ref=e282]: OpenRouter
+              - generic [ref=e283]: 99.89%
+            - button "Claude Code 99.58%" [ref=e285] [cursor=pointer]:
+              - generic [ref=e287]: Claude Code
+              - generic [ref=e288]: 99.58%
+            - button "GitHub Copilot 99.62%" [ref=e289] [cursor=pointer]:
+              - generic [ref=e291]: GitHub Copilot
+              - generic [ref=e292]: 99.62%
+            - button "Cursor 100.00%" [ref=e293] [cursor=pointer]:
+              - generic [ref=e295]: Cursor
+              - generic [ref=e296]: 100.00%
+            - button "Windsurf 99.99%" [ref=e297] [cursor=pointer]:
+              - generic [ref=e299]: Windsurf
+              - generic [ref=e300]: 99.99%
+          - generic [ref=e80]: aiwatch.dev · v1.1.0
+      - generic [ref=e81]:
+        - main [ref=e82]:
+          - generic [ref=e301]:
+            - generic [ref=e302]:
+              - heading "// Incidents" [level=2] [ref=e303]:
+                - generic [ref=e304]: //
+                - text: Incidents
+              - generic [ref=e305]: Last 7 days
+            - generic [ref=e306]:
+              - combobox "Service" [ref=e307] [cursor=pointer]:
+                - option "All services" [selected]
+                - option "claude.ai"
+                - option "Claude API"
+                - option "OpenAI API"
+                - option "ChatGPT"
+                - option "Gemini API"
+                - option "Mistral API"
+                - option "Cohere API"
+                - option "Groq Cloud"
+                - option "Together AI"
+                - option "Perplexity"
+                - option "Hugging Face"
+                - option "Replicate"
+                - option "ElevenLabs"
+                - option "xAI (Grok)"
+                - option "DeepSeek API"
+                - option "OpenRouter"
+                - option "Claude Code"
+                - option "GitHub Copilot"
+                - option "Cursor"
+                - option "Windsurf"
+              - combobox "Status" [ref=e308] [cursor=pointer]:
+                - option "All status" [selected]
+                - option "In Progress"
+                - option "Monitoring"
+                - option "Resolved"
+              - combobox "Period" [ref=e309] [cursor=pointer]:
+                - option "Last 7 days" [selected]
+                - option "Last 30 days"
+                - option "Last 90 days"
+            - region "Incidents" [ref=e310]:
+              - row "Time Title Service Duration Status" [ref=e311]:
+                - columnheader "Time" [ref=e312]
+                - columnheader "Title" [ref=e313]
+                - columnheader "Service" [ref=e314]
+                - columnheader "Duration" [ref=e315]
+                - columnheader "Status" [ref=e316]
+              - rowgroup [ref=e317]:
+                - row "Mar 23, 03:31 Claude.ai and Claude login down Resolved claude.ai 19m Resolved" [ref=e318] [cursor=pointer]:
+                  - cell "Mar 23, 03:31" [ref=e319]
+                  - cell "Claude.ai and Claude login down Resolved" [ref=e320]:
+                    - generic [ref=e321]: Claude.ai and Claude login down
+                    - generic [ref=e322]: Resolved
+                  - cell "claude.ai" [ref=e323]
+                  - cell "19m" [ref=e324]
+                  - cell "Resolved" [ref=e325]
+                - row "Mar 23, 00:42 Moonshot Kimi K2.5 — recovered Resolved Together AI 21m Resolved" [ref=e326] [cursor=pointer]:
+                  - cell "Mar 23, 00:42" [ref=e327]
+                  - cell "Moonshot Kimi K2.5 — recovered Resolved" [ref=e328]:
+                    - generic [ref=e329]: Moonshot Kimi K2.5 — recovered
+                    - generic [ref=e330]: Resolved
+                  - cell "Together AI" [ref=e331]
+                  - cell "21m" [ref=e332]
+                  - cell "Resolved" [ref=e333]
+                - row "Mar 22, 20:14 Delayed response completion on Claude.ai Resolved claude.ai 1h 59m Resolved" [ref=e334] [cursor=pointer]:
+                  - cell "Mar 22, 20:14" [ref=e335]
+                  - cell "Delayed response completion on Claude.ai Resolved" [ref=e336]:
+                    - generic [ref=e337]: Delayed response completion on Claude.ai
+                    - generic [ref=e338]: Resolved
+                  - cell "claude.ai" [ref=e339]
+                  - cell "1h 59m" [ref=e340]
+                  - cell "Resolved" [ref=e341]
+                - row "Mar 22, 18:08 Disruption with some GitHub services Resolved GitHub Copilot 53m Resolved" [ref=e342] [cursor=pointer]:
+                  - cell "Mar 22, 18:08" [ref=e343]
+                  - cell "Disruption with some GitHub services Resolved" [ref=e344]:
+                    - generic [ref=e345]: Disruption with some GitHub services
+                    - generic [ref=e346]: Resolved
+                  - cell "GitHub Copilot" [ref=e347]
+                  - cell "53m" [ref=e348]
+                  - cell "Resolved" [ref=e349]
+                - row "Mar 22, 15:29 Qwen3 235B A22B Thinking 2507 — recovered Resolved Together AI 31m Resolved" [ref=e350] [cursor=pointer]:
+                  - cell "Mar 22, 15:29" [ref=e351]
+                  - cell "Qwen3 235B A22B Thinking 2507 — recovered Resolved" [ref=e352]:
+                    - generic [ref=e353]: Qwen3 235B A22B Thinking 2507 — recovered
+                    - generic [ref=e354]: Resolved
+                  - cell "Together AI" [ref=e355]
+                  - cell "31m" [ref=e356]
+                  - cell "Resolved" [ref=e357]
+                - row "Mar 22, 08:00 Qwen3.5 9B — recovered Resolved Together AI 17m Resolved" [ref=e358] [cursor=pointer]:
+                  - cell "Mar 22, 08:00" [ref=e359]
+                  - cell "Qwen3.5 9B — recovered Resolved" [ref=e360]:
+                    - generic [ref=e361]: Qwen3.5 9B — recovered
+                    - generic [ref=e362]: Resolved
+                  - cell "Together AI" [ref=e363]
+                  - cell "17m" [ref=e364]
+                  - cell "Resolved" [ref=e365]
+                - row "Mar 22, 07:29 Qwen3.5 9B — recovered Resolved Together AI 12m Resolved" [ref=e366] [cursor=pointer]:
+                  - cell "Mar 22, 07:29" [ref=e367]
+                  - cell "Qwen3.5 9B — recovered Resolved" [ref=e368]:
+                    - generic [ref=e369]: Qwen3.5 9B — recovered
+                    - generic [ref=e370]: Resolved
+                  - cell "Together AI" [ref=e371]
+                  - cell "12m" [ref=e372]
+                  - cell "Resolved" [ref=e373]
+                - row "Mar 22, 03:05 Qwen3.5 9B — recovered Resolved Together AI 14m Resolved" [ref=e374] [cursor=pointer]:
+                  - cell "Mar 22, 03:05" [ref=e375]
+                  - cell "Qwen3.5 9B — recovered Resolved" [ref=e376]:
+                    - generic [ref=e377]: Qwen3.5 9B — recovered
+                    - generic [ref=e378]: Resolved
+                  - cell "Together AI" [ref=e379]
+                  - cell "14m" [ref=e380]
+                  - cell "Resolved" [ref=e381]
+                - row "Mar 21, 09:07 Elevated error rates on Claude Opus and Sonnet 4.6 Resolved claude.ai 1h 35m Resolved" [ref=e382] [cursor=pointer]:
+                  - cell "Mar 21, 09:07" [ref=e383]
+                  - cell "Elevated error rates on Claude Opus and Sonnet 4.6 Resolved" [ref=e384]:
+                    - generic [ref=e385]: Elevated error rates on Claude Opus and Sonnet 4.6
+                    - generic [ref=e386]: Resolved
+                  - cell "claude.ai" [ref=e387]
+                  - cell "1h 35m" [ref=e388]
+                  - cell "Resolved" [ref=e389]
+                - row "Mar 21, 08:37 Service Degradation Resolved Cursor 4h 3m Resolved" [ref=e390] [cursor=pointer]:
+                  - cell "Mar 21, 08:37" [ref=e391]
+                  - cell "Service Degradation Resolved" [ref=e392]:
+                    - generic [ref=e393]: Service Degradation
+                    - generic [ref=e394]: Resolved
+                  - cell "Cursor" [ref=e395]
+                  - cell "4h 3m" [ref=e396]
+                  - cell "Resolved" [ref=e397]
+                - row "Mar 21, 02:46 Completion API Degraded Resolved Mistral API 1m Resolved" [ref=e398] [cursor=pointer]:
+                  - cell "Mar 21, 02:46" [ref=e399]
+                  - cell "Completion API Degraded Resolved" [ref=e400]:
+                    - generic [ref=e401]: Completion API Degraded
+                    - generic [ref=e402]: Resolved
+                  - cell "Mistral API" [ref=e403]
+                  - cell "1m" [ref=e404]
+                  - cell "Resolved" [ref=e405]
+                - row "Mar 21, 00:34 Completion API Degraded Resolved Mistral API 0m Resolved" [ref=e406] [cursor=pointer]:
+                  - cell "Mar 21, 00:34" [ref=e407]
+                  - cell "Completion API Degraded Resolved" [ref=e408]:
+                    - generic [ref=e409]: Completion API Degraded
+                    - generic [ref=e410]: Resolved
+                  - cell "Mistral API" [ref=e411]
+                  - cell "0m" [ref=e412]
+                  - cell "Resolved" [ref=e413]
+                - row "Mar 21, 00:23 Completion API Degraded Resolved Mistral API 0m Resolved" [ref=e414] [cursor=pointer]:
+                  - cell "Mar 21, 00:23" [ref=e415]
+                  - cell "Completion API Degraded Resolved" [ref=e416]:
+                    - generic [ref=e417]: Completion API Degraded
+                    - generic [ref=e418]: Resolved
+                  - cell "Mistral API" [ref=e419]
+                  - cell "0m" [ref=e420]
+                  - cell "Resolved" [ref=e421]
+                - row "Mar 21, 00:00 Pinned chats are not loading on web browsers for ChatGPT Resolved ChatGPT 9h 7m Resolved" [ref=e422] [cursor=pointer]:
+                  - cell "Mar 21, 00:00" [ref=e423]
+                  - cell "Pinned chats are not loading on web browsers for ChatGPT Resolved" [ref=e424]:
+                    - generic [ref=e425]: Pinned chats are not loading on web browsers for ChatGPT
+                    - generic [ref=e426]: Resolved
+                  - cell "ChatGPT" [ref=e427]
+                  - cell "9h 7m" [ref=e428]
+                  - cell "Resolved" [ref=e429]
+                - row "Mar 20, 23:56 Embedding API Degraded Resolved Mistral API 1m Resolved" [ref=e430] [cursor=pointer]:
+                  - cell "Mar 20, 23:56" [ref=e431]
+                  - cell "Embedding API Degraded Resolved" [ref=e432]:
+                    - generic [ref=e433]: Embedding API Degraded
+                    - generic [ref=e434]: Resolved
+                  - cell "Mistral API" [ref=e435]
+                  - cell "1m" [ref=e436]
+                  - cell "Resolved" [ref=e437]
+                - row "Mar 20, 23:54 Completion API Degraded Resolved Mistral API 0m Resolved" [ref=e438] [cursor=pointer]:
+                  - cell "Mar 20, 23:54" [ref=e439]
+                  - cell "Completion API Degraded Resolved" [ref=e440]:
+                    - generic [ref=e441]: Completion API Degraded
+                    - generic [ref=e442]: Resolved
+                  - cell "Mistral API" [ref=e443]
+                  - cell "0m" [ref=e444]
+                  - cell "Resolved" [ref=e445]
+                - row "Mar 20, 09:58 Disruption with Copilot Coding Agent Sessions Resolved GitHub Copilot 1h 0m Resolved" [ref=e446] [cursor=pointer]:
+                  - cell "Mar 20, 09:58" [ref=e447]
+                  - cell "Disruption with Copilot Coding Agent Sessions Resolved" [ref=e448]:
+                    - generic [ref=e449]: Disruption with Copilot Coding Agent Sessions
+                    - generic [ref=e450]: Resolved
+                  - cell "GitHub Copilot" [ref=e451]
+                  - cell "1h 0m" [ref=e452]
+                  - cell "Resolved" [ref=e453]
+                - row "Mar 20, 04:21 Elevated Error Rates Resolved ElevenLabs 2h 46m Resolved" [ref=e454] [cursor=pointer]:
+                  - cell "Mar 20, 04:21" [ref=e455]
+                  - cell "Elevated Error Rates Resolved" [ref=e456]:
+                    - generic [ref=e457]: Elevated Error Rates
+                    - generic [ref=e458]: Resolved
+                  - cell "ElevenLabs" [ref=e459]
+                  - cell "2h 46m" [ref=e460]
+                  - cell "Resolved" [ref=e461]
+                - row "Mar 20, 01:25 Git operations for users in the west coast are experiencing an increase in latency Resolved GitHub Copilot 7h 40m Resolved" [ref=e462] [cursor=pointer]:
+                  - cell "Mar 20, 01:25" [ref=e463]
+                  - cell "Git operations for users in the west coast are experiencing an increase in latency Resolved" [ref=e464]:
+                    - generic [ref=e465]: Git operations for users in the west coast are experiencing an increase in latency
+                    - generic [ref=e466]: Resolved
+                  - cell "GitHub Copilot" [ref=e467]
+                  - cell "7h 40m" [ref=e468]
+                  - cell "Resolved" [ref=e469]
+                - row "Mar 20, 00:59 Elevated errors on Claude Opus 4.6 Resolved claude.ai 16m Resolved" [ref=e470] [cursor=pointer]:
+                  - cell "Mar 20, 00:59" [ref=e471]
+                  - cell "Elevated errors on Claude Opus 4.6 Resolved" [ref=e472]:
+                    - generic [ref=e473]: Elevated errors on Claude Opus 4.6
+                    - generic [ref=e474]: Resolved
+                  - cell "claude.ai" [ref=e475]
+                  - cell "16m" [ref=e476]
+                  - cell "Resolved" [ref=e477]
+                - row "Mar 20, 00:37 Elevated errors on Claude Sonnet 4.6 Resolved claude.ai 8m Resolved" [ref=e478] [cursor=pointer]:
+                  - cell "Mar 20, 00:37" [ref=e479]
+                  - cell "Elevated errors on Claude Sonnet 4.6 Resolved" [ref=e480]:
+                    - generic [ref=e481]: Elevated errors on Claude Sonnet 4.6
+                    - generic [ref=e482]: Resolved
+                  - cell "claude.ai" [ref=e483]
+                  - cell "8m" [ref=e484]
+                  - cell "Resolved" [ref=e485]
+                - row "Mar 19, 22:44 Issues with Copilot Coding Agent Resolved GitHub Copilot 48m Resolved" [ref=e486] [cursor=pointer]:
+                  - cell "Mar 19, 22:44" [ref=e487]
+                  - cell "Issues with Copilot Coding Agent Resolved" [ref=e488]:
+                    - generic [ref=e489]: Issues with Copilot Coding Agent
+                    - generic [ref=e490]: Resolved
+                  - cell "GitHub Copilot" [ref=e491]
+                  - cell "48m" [ref=e492]
+                  - cell "Resolved" [ref=e493]
+                - row "Mar 19, 21:51 openai/gpt-oss-120b Performance Issue Resolved Groq Cloud 59m Resolved" [ref=e494] [cursor=pointer]:
+                  - cell "Mar 19, 21:51" [ref=e495]
+                  - cell "openai/gpt-oss-120b Performance Issue Resolved" [ref=e496]:
+                    - generic [ref=e497]: openai/gpt-oss-120b Performance Issue
+                    - generic [ref=e498]: Resolved
+                  - cell "Groq Cloud" [ref=e499]
+                  - cell "59m" [ref=e500]
+                  - cell "Resolved" [ref=e501]
+                - row "Mar 19, 11:05 Disruption with Copilot Coding Agent sessions Resolved GitHub Copilot 46m Resolved" [ref=e502] [cursor=pointer]:
+                  - cell "Mar 19, 11:05" [ref=e503]
+                  - cell "Disruption with Copilot Coding Agent sessions Resolved" [ref=e504]:
+                    - generic [ref=e505]: Disruption with Copilot Coding Agent sessions
+                    - generic [ref=e506]: Resolved
+                  - cell "GitHub Copilot" [ref=e507]
+                  - cell "46m" [ref=e508]
+                  - cell "Resolved" [ref=e509]
+                - row "Mar 19, 09:28 Elevated errors across surfaces Resolved claude.ai 1h 9m Resolved" [ref=e510] [cursor=pointer]:
+                  - cell "Mar 19, 09:28" [ref=e511]
+                  - cell "Elevated errors across surfaces Resolved" [ref=e512]:
+                    - generic [ref=e513]: Elevated errors across surfaces
+                    - generic [ref=e514]: Resolved
+                  - cell "claude.ai" [ref=e515]
+                  - cell "1h 9m" [ref=e516]
+                  - cell "Resolved" [ref=e517]
+                - row "Mar 19, 07:36 Disruption with some GitHub services Resolved GitHub Copilot 3h 7m Resolved" [ref=e518] [cursor=pointer]:
+                  - cell "Mar 19, 07:36" [ref=e519]
+                  - cell "Disruption with some GitHub services Resolved" [ref=e520]:
+                    - generic [ref=e521]: Disruption with some GitHub services
+                    - generic [ref=e522]: Resolved
+                  - cell "GitHub Copilot" [ref=e523]
+                  - cell "3h 7m" [ref=e524]
+                  - cell "Resolved" [ref=e525]
+                - row "Mar 19, 03:51 Webhook delivery is delayed Resolved GitHub Copilot 55m Resolved" [ref=e526] [cursor=pointer]:
+                  - cell "Mar 19, 03:51" [ref=e527]
+                  - cell "Webhook delivery is delayed Resolved" [ref=e528]:
+                    - generic [ref=e529]: Webhook delivery is delayed
+                    - generic [ref=e530]: Resolved
+                  - cell "GitHub Copilot" [ref=e531]
+                  - cell "55m" [ref=e532]
+                  - cell "Resolved" [ref=e533]
+                - row "Mar 19, 00:16 Elevated errors on Claude.ai Resolved claude.ai 48m Resolved" [ref=e534] [cursor=pointer]:
+                  - cell "Mar 19, 00:16" [ref=e535]
+                  - cell "Elevated errors on Claude.ai Resolved" [ref=e536]:
+                    - generic [ref=e537]: Elevated errors on Claude.ai
+                    - generic [ref=e538]: Resolved
+                  - cell "claude.ai" [ref=e539]
+                  - cell "48m" [ref=e540]
+                  - cell "Resolved" [ref=e541]
+                - row "Mar 18, 21:30 Increased errors on Opus 4.6 Resolved claude.ai 1h 27m Resolved" [ref=e542] [cursor=pointer]:
+                  - cell "Mar 18, 21:30" [ref=e543]
+                  - cell "Increased errors on Opus 4.6 Resolved" [ref=e544]:
+                    - generic [ref=e545]: Increased errors on Opus 4.6
+                    - generic [ref=e546]: Resolved
+                  - cell "claude.ai" [ref=e547]
+                  - cell "1h 27m" [ref=e548]
+                  - cell "Resolved" [ref=e549]
+                - row "Mar 18, 15:41 Elevated errors on Claude Opus 4.6 Resolved claude.ai 3h 4m Resolved" [ref=e550] [cursor=pointer]:
+                  - cell "Mar 18, 15:41" [ref=e551]
+                  - cell "Elevated errors on Claude Opus 4.6 Resolved" [ref=e552]:
+                    - generic [ref=e553]: Elevated errors on Claude Opus 4.6
+                    - generic [ref=e554]: Resolved
+                  - cell "claude.ai" [ref=e555]
+                  - cell "3h 4m" [ref=e556]
+                  - cell "Resolved" [ref=e557]
+                - row "Mar 18, 04:57 Increased error for Opus 4.6 from model provider Resolved Cursor 3h 9m Resolved" [ref=e558] [cursor=pointer]:
+                  - cell "Mar 18, 04:57" [ref=e559]
+                  - cell "Increased error for Opus 4.6 from model provider Resolved" [ref=e560]:
+                    - generic [ref=e561]: Increased error for Opus 4.6 from model provider
+                    - generic [ref=e562]: Resolved
+                  - cell "Cursor" [ref=e563]
+                  - cell "3h 9m" [ref=e564]
+                  - cell "Resolved" [ref=e565]
+                - row "Mar 18, 04:47 Elevated errors on Claude Opus 4.6 Resolved claude.ai 4h 38m Resolved" [ref=e566] [cursor=pointer]:
+                  - cell "Mar 18, 04:47" [ref=e567]
+                  - cell "Elevated errors on Claude Opus 4.6 Resolved" [ref=e568]:
+                    - generic [ref=e569]: Elevated errors on Claude Opus 4.6
+                    - generic [ref=e570]: Resolved
+                  - cell "claude.ai" [ref=e571]
+                  - cell "4h 38m" [ref=e572]
+                  - cell "Resolved" [ref=e573]
+                - row "Mar 18, 03:16 High Error rates with ChatGPT 5.4 Pro Resolved ChatGPT 23m Resolved" [ref=e574] [cursor=pointer]:
+                  - cell "Mar 18, 03:16" [ref=e575]
+                  - cell "High Error rates with ChatGPT 5.4 Pro Resolved" [ref=e576]:
+                    - generic [ref=e577]: High Error rates with ChatGPT 5.4 Pro
+                    - generic [ref=e578]: Resolved
+                  - cell "ChatGPT" [ref=e579]
+                  - cell "23m" [ref=e580]
+                  - cell "Resolved" [ref=e581]
+                - row "Mar 17, 23:07 Elevated errors on Claude Sonnet 4.6 Resolved claude.ai 1h 37m Resolved" [ref=e582] [cursor=pointer]:
+                  - cell "Mar 17, 23:07" [ref=e583]
+                  - cell "Elevated errors on Claude Sonnet 4.6 Resolved" [ref=e584]:
+                    - generic [ref=e585]: Elevated errors on Claude Sonnet 4.6
+                    - generic [ref=e586]: Resolved
+                  - cell "claude.ai" [ref=e587]
+                  - cell "1h 37m" [ref=e588]
+                  - cell "Resolved" [ref=e589]
+                - row "Mar 17, 18:46 Elevated errors on Claude Opus 4.6 Resolved claude.ai 1h 59m Resolved" [ref=e590] [cursor=pointer]:
+                  - cell "Mar 17, 18:46" [ref=e591]
+                  - cell "Elevated errors on Claude Opus 4.6 Resolved" [ref=e592]:
+                    - generic [ref=e593]: Elevated errors on Claude Opus 4.6
+                    - generic [ref=e594]: Resolved
+                  - cell "claude.ai" [ref=e595]
+                  - cell "1h 59m" [ref=e596]
+                  - cell "Resolved" [ref=e597]
+                - row "Mar 17, 17:04 Elevated errors on Claude Sonnet 4.6 Resolved claude.ai 4h 58m Resolved" [ref=e598] [cursor=pointer]:
+                  - cell "Mar 17, 17:04" [ref=e599]
+                  - cell "Elevated errors on Claude Sonnet 4.6 Resolved" [ref=e600]:
+                    - generic [ref=e601]: Elevated errors on Claude Sonnet 4.6
+                    - generic [ref=e602]: Resolved
+                  - cell "claude.ai" [ref=e603]
+                  - cell "4h 58m" [ref=e604]
+                  - cell "Resolved" [ref=e605]
+                - row "Mar 17, 11:58 Elevated Errors Affecting ChatGPT Free and Guest Plan Users Resolved ChatGPT 2h 22m Resolved" [ref=e606] [cursor=pointer]:
+                  - cell "Mar 17, 11:58" [ref=e607]
+                  - cell "Elevated Errors Affecting ChatGPT Free and Guest Plan Users Resolved" [ref=e608]:
+                    - generic [ref=e609]: Elevated Errors Affecting ChatGPT Free and Guest Plan Users
+                    - generic [ref=e610]: Resolved
+                  - cell "ChatGPT" [ref=e611]
+                  - cell "2h 22m" [ref=e612]
+                  - cell "Resolved" [ref=e613]
+                - row "Mar 17, 00:01 Errors starting and connecting to Codespaces Resolved GitHub Copilot 27m Resolved" [ref=e614] [cursor=pointer]:
+                  - cell "Mar 17, 00:01" [ref=e615]
+                  - cell "Errors starting and connecting to Codespaces Resolved" [ref=e616]:
+                    - generic [ref=e617]: Errors starting and connecting to Codespaces
+                    - generic [ref=e618]: Resolved
+                  - cell "GitHub Copilot" [ref=e619]
+                  - cell "27m" [ref=e620]
+                  - cell "Resolved" [ref=e621]
+                - row "Mar 16, 23:02 Elevated errors on Claude Sonnet 4.6 Resolved claude.ai 2h 33m Resolved" [ref=e622] [cursor=pointer]:
+                  - cell "Mar 16, 23:02" [ref=e623]
+                  - cell "Elevated errors on Claude Sonnet 4.6 Resolved" [ref=e624]:
+                    - generic [ref=e625]: Elevated errors on Claude Sonnet 4.6
+                    - generic [ref=e626]: Resolved
+                  - cell "claude.ai" [ref=e627]
+                  - cell "2h 33m" [ref=e628]
+                  - cell "Resolved" [ref=e629]
+                - row "Mar 16, 22:56 Elevated errors on Claude.ai Resolved claude.ai 25m Resolved" [ref=e630] [cursor=pointer]:
+                  - cell "Mar 16, 22:56" [ref=e631]
+                  - cell "Elevated errors on Claude.ai Resolved" [ref=e632]:
+                    - generic [ref=e633]: Elevated errors on Claude.ai
+                    - generic [ref=e634]: Resolved
+                  - cell "claude.ai" [ref=e635]
+                  - cell "25m" [ref=e636]
+                  - cell "Resolved" [ref=e637]
+                - row "Mar 16, 21:01 Elevated errors on Claude.ai Resolved claude.ai 35m Resolved" [ref=e638] [cursor=pointer]:
+                  - cell "Mar 16, 21:01" [ref=e639]
+                  - cell "Elevated errors on Claude.ai Resolved" [ref=e640]:
+                    - generic [ref=e641]: Elevated errors on Claude.ai
+                    - generic [ref=e642]: Resolved
+                  - cell "claude.ai" [ref=e643]
+                  - cell "35m" [ref=e644]
+                  - cell "Resolved" [ref=e645]
+        - contentinfo [ref=e120]:
+          - generic [ref=e122]:
+            - generic [ref=e123]:
+              - generic [ref=e124]: AIWatch
+              - generic [ref=e125]: © 2026 AIWatch. All rights reserved.
+            - generic [ref=e126]:
+              - button "Privacy Policy" [ref=e127] [cursor=pointer]
+              - generic [ref=e128]: ·
+              - button "Terms of Service" [ref=e129] [cursor=pointer]
+              - generic [ref=e130]: ·
+              - link "contact@ai-watch.dev" [ref=e131] [cursor=pointer]:
+                - /url: mailto:contact@ai-watch.dev
+  - generic [ref=e133]:
+    - paragraph [ref=e134]: Cookie Notice
+    - paragraph [ref=e135]: AIWatch uses Google Analytics cookies to improve the service. Only anonymous usage statistics (pages visited, time spent) are collected. No personally identifiable information is gathered. Essential cookies (theme, language) are always used regardless of this setting.
+    - generic [ref=e136]:
+      - button "Essential Only" [ref=e137] [cursor=pointer]
+      - button "Accept All" [ref=e138] [cursor=pointer]

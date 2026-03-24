@@ -166,6 +166,14 @@ const en = {
   'svc.cal.ago.suffix': 'ago',
   'svc.cal.today': 'Today',
   'svc.status.link': 'Official Status',
+  'svc.region.title': 'Regional Availability',
+  'svc.region.noIncidents': 'No Active Incidents',
+  'svc.region.incident': 'Incident Detected',
+  'svc.region.type.down': 'Service Down',
+  'svc.region.type.degraded': 'Degraded Performance',
+  'svc.region.type.inference': 'Inference Issue',
+  'svc.region.recommend': 'Active incident detected. Use {region} to avoid service interruption.',
+  'svc.region.allDown': 'Active incidents detected in all regions',
 
   // Settings
   'settings.general': 'General',
