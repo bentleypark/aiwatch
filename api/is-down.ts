@@ -50,6 +50,14 @@ export default async function handler(req: Request) {
           serviceData = target
         }
 
+        // Calculate rank by AIWatch Score
+        if (target?.aiwatchScore != null) {
+          const scored = allServices.filter(s => s.aiwatchScore != null).sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0))
+          const rank = scored.findIndex(s => s.id === entry.id) + 1
+          if (rank > 0) (serviceData as any).rank = rank;
+          (serviceData as any).totalRanked = scored.length
+        }
+
         // Build fallbacks from same data
         if (!EXCLUDE_FALLBACK.includes(entry.id)) {
           fallbacks = allServices
