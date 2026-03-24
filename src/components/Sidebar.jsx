@@ -100,7 +100,7 @@ function ServiceNavItem({ svc, page, setPage, onNavigate }) {
       onClick={() => { trackEvent('view_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }); onNavigate?.() }}
       aria-current={active ? 'page' : undefined}
       className={`w-full text-left flex items-center transition-all cursor-pointer
-        ${active ? 'bg-[var(--bg3)] text-[var(--text0)]'
+        ${active ? `bg-[var(--bg3)] ${statusTextCls ?? 'text-[var(--text0)]'}`
           : `${statusTextCls ?? 'text-[var(--text1)]'} hover:bg-[var(--bg3)] hover:text-[var(--text0)]`}`}
       style={navItemStyle}
     >
