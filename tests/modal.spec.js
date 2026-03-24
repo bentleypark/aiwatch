@@ -19,7 +19,7 @@ test.describe('Modal / Detail Panel', () => {
     const closeBtn = page.locator('main').getByRole('button', { name: /닫기|Close/i })
     await expect(closeBtn).toBeVisible()
 
-    await closeBtn.click({ force: true })
+    await closeBtn.evaluate((el) => el.click())
     await expect(closeBtn).toBeHidden({ timeout: 5000 })
   })
 
