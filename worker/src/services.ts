@@ -28,7 +28,7 @@ const SERVICES: ServiceConfig[] = [
   { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, onlineOrNotUrl: 'https://status.openrouter.ai', onlineOrNotComponent: 'Chat (/api/v1/chat/completions)' },
   // AI Web Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'webapp', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned'], incidentIoBaseUrl: 'https://status.openai.com/incidents', statusComponent: 'ChatGPT', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG' },
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG' },
   // Coding Agents
   { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'], statusComponent: 'Claude Code', statusComponentId: 'yyzkbfz2thpt' },
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2' },
@@ -147,6 +147,19 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       }
 
       let filtered = filterIncidents(incidents, config)
+      // If service has keyword filters, is degraded/down, but no ongoing incidents matched,
+      // include untagged incidents (provider didn't tag components on the incident)
+      if (filtered.filter((i) => i.status !== 'resolved').length === 0 && config.incidentKeywords) {
+        const svcStatus = normalizeStatus(summaryData.status?.indicator ?? 'none')
+        if (svcStatus !== 'operational') {
+          const untagged = incidents.filter((inc) =>
+            inc.status !== 'resolved' &&
+            (inc.componentNames ?? []).length === 0 &&
+            !config.incidentExclude?.some((kw) => inc.title.toLowerCase().includes(kw.toLowerCase()))
+          )
+          filtered = [...filtered, ...untagged]
+        }
+      }
       if (config.incidentIoBaseUrl) {
         filtered = await enrichIncidentIoText(filtered, config.incidentIoBaseUrl, pageUrls, kv)
       }
@@ -183,6 +196,17 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         uptimeSrc = 'estimate'
       }
 
+      // Augment dailyImpact with ongoing incidents (source data only includes resolved)
+      const augmentedImpact = dailyImpact ? { ...dailyImpact } : {}
+      for (const inc of filtered) {
+        if (inc.status !== 'resolved') {
+          const day = inc.startedAt.split('T')[0]
+          if (day && !augmentedImpact[day]) {
+            augmentedImpact[day] = inc.impact === 'major' || inc.impact === 'critical' ? 'critical' : 'major'
+          }
+        }
+      }
+
       return {
         ...base,
         // Use per-component status when available (prevents one degraded component from affecting all)
@@ -191,7 +215,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           : normalizeStatus(summaryData.status?.indicator ?? 'none'),
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
-        ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
+        ...(Object.keys(augmentedImpact).length > 0 ? { dailyImpact: augmentedImpact } : {}),
         calendarDays: config.statusComponentId ? 30 : 14,
         ...(uptimeValue != null ? { uptime30d: uptimeValue, uptimeSource: uptimeSrc } : {}),
       }
