@@ -211,7 +211,7 @@ function IncidentRow({ incident, detectedAt, t, lang }) {
     const diffMs = started - detected
     if (diffMs <= 0) return null
     const mins = Math.round(diffMs / 60_000)
-    if (mins < 1) return null
+    if (mins < 1 || mins > 60) return null // >60m means detectedAt is stale, not related to this incident
     const label = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`
     const timeOpts = { hour: '2-digit', minute: '2-digit', hour12: false }
     const detectedTime = new Date(detectedAt).toLocaleTimeString(lang === 'ko' ? 'ko-KR' : 'en-US', timeOpts)
