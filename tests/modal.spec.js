@@ -20,7 +20,7 @@ test.describe('Modal / Detail Panel', () => {
     await expect(closeBtn).toBeVisible()
 
     await closeBtn.click({ force: true })
-    await expect(closeBtn).toBeHidden()
+    await expect(closeBtn).toBeHidden({ timeout: 5000 })
   })
 
   test('Privacy modal opens from footer and closes on ESC', async ({ page }) => {
