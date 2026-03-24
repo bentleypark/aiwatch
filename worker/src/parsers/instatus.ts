@@ -24,6 +24,9 @@ function parseInstatusNextIncidents(html: string): Incident[] {
       const resolvedDate = notice.resolved ? new Date(notice.resolved) : null
       const isResolved = notice.status === 'RESOLVED'
 
+      // Skip micro-incidents (<1min) — automated monitoring noise (e.g. Checkly/Mistral)
+      if (isResolved && resolvedDate && resolvedDate.getTime() - startDate.getTime() < 60_000) continue
+
       const timeline: TimelineEntry[] = [
         { stage: 'investigating' as const, text: notice.name.default, at: startDate.toISOString() },
       ]
@@ -83,6 +86,10 @@ export function parseInstatusIncidents(html: string): Incident[] {
         const status = (arr[inc.lastUpdateStatus] as string) ?? ''
         const createdAt = arr[inc.created_at] as string
         const durationSec = arr[inc.duration] as number | null
+
+        // Skip micro-incidents (<1min) — automated monitoring noise
+        const isResolved = status === 'RESOLVED'
+        if (isResolved && durationSec != null && durationSec < 60) return []
 
         // Parse incident updates
         const updatesArr = arr[inc.incidentUpdates] as number[] | undefined
