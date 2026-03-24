@@ -157,7 +157,9 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
             (inc.componentNames ?? []).length === 0 &&
             !config.incidentExclude?.some((kw) => inc.title.toLowerCase().includes(kw.toLowerCase()))
           )
-          filtered = [...filtered, ...untagged]
+          filtered = [...filtered, ...untagged].sort((a, b) =>
+            new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+          )
         }
       }
       if (config.incidentIoBaseUrl) {
@@ -197,12 +199,20 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       }
 
       // Augment dailyImpact with ongoing incidents (source data only includes resolved)
+      // Only augment when service itself is non-operational (avoid marking calendar for
+      // unrelated incidents that passed through filters but don't affect this component)
+      const svcStatus = config.statusComponent
+        ? normalizeStatus(summaryData.components?.find((c) => c.name.startsWith(config.statusComponent))?.status ?? summaryData.status?.indicator ?? 'none')
+        : normalizeStatus(summaryData.status?.indicator ?? 'none')
       const augmentedImpact = dailyImpact ? { ...dailyImpact } : {}
-      for (const inc of filtered) {
-        if (inc.status !== 'resolved') {
-          const day = inc.startedAt.split('T')[0]
-          if (day && !augmentedImpact[day]) {
-            augmentedImpact[day] = inc.impact === 'major' || inc.impact === 'critical' ? 'critical' : 'major'
+      if (svcStatus !== 'operational') {
+        for (const inc of filtered) {
+          if (inc.status !== 'resolved') {
+            const day = inc.startedAt.split('T')[0]
+            if (day && !augmentedImpact[day]) {
+              augmentedImpact[day] = inc.impact === 'major' || inc.impact === 'critical' ? 'critical'
+                : inc.impact === 'minor' ? 'minor' : 'major'
+            }
           }
         }
       }
