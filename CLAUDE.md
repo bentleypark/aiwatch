@@ -30,11 +30,13 @@ npm run test:worker # Run Worker unit tests (vitest)
    - Identify **every** difference (spacing, colors, fonts, layout, icons, text)
    - List differences explicitly before writing any code
 2. **Code** — implement the feature or fix
+2.5. **Local verify** — start dev server (`npm run dev`) and let the user confirm in browser before proceeding. For Worker changes, also start `npx wrangler dev`. Never skip this step.
 3. **Build + Test** — based on change scope:
    - **Frontend changes** (`src/`): `npm run build` + `npm test` (Playwright)
    - **Backend changes** (`worker/`): `npx wrangler deploy --config worker/wrangler.toml --dry-run` + `npm run test:worker` (Vitest)
    - **Both**: run all of the above
    - **Worker logic additions**: new functions must have unit tests — extract to separate files with exports, test in `worker/src/__tests__/` or `worker/src/parsers/__tests__/`
+   - **Bug fixes**: every bug fix must include a test that would have caught the bug — E2E (Playwright) for frontend, Vitest for worker
 4. **Review** — run PR review **before** committing:
    ```
    /pr-review-toolkit:review-pr

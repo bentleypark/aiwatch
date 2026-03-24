@@ -36,10 +36,27 @@ test.describe('ServiceDetails page', () => {
     await expect(calendarCells.first()).toBeVisible()
   })
 
+  test('Detection Lead badge not shown for Claude (no detectedAt)', async ({ page }) => {
+    // Claude has no detectedAt in mock — no lead badge
+    await expect(page.locator('main').getByText(/lead/)).not.toBeVisible()
+  })
+
   test('back button returns to overview', async ({ page }) => {
     const backBtn = page.locator('main').getByRole('button', { name: /Overview|← / })
     await backBtn.click()
     // Should return to overview with service grid
     await expect(page.locator('main button').filter({ hasText: 'Claude API' }).first()).toBeVisible()
+  })
+})
+
+test.describe('Detection Lead badge', () => {
+  test('shows lead badge for OpenAI ongoing incident', async ({ page }) => {
+    await page.goto('/')
+    await waitForDataLoad(page)
+    // Navigate to OpenAI (mock: detectedAt 7min before ongoing incident)
+    await page.locator('main button').filter({ hasText: 'OpenAI API' }).first().evaluate((el) => el.click())
+    await expect(page.locator('main').getByText('Incident History')).toBeVisible({ timeout: 5000 })
+    // Lead badge should be visible for ongoing incident
+    await expect(page.locator('main').getByText('lead').first()).toBeVisible()
   })
 })
