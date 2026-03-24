@@ -39,12 +39,4 @@
     <changefreq>hourly</changefreq>
     <priority>0.9</priority>
   </url>
-
-  <!-- Monthly reports -->
-  <url>
-    <loc>https://bentleypark.github.io/aiwatch-reports/</loc>
-    <lastmod>2026-03-24</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
 </urlset>
