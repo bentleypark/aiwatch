@@ -35,6 +35,11 @@ Real-time monitoring dashboard for **20 AI services** — track status, latency,
 - **Bilingual** — Korean / English
 - **Mobile responsive** — Sidebar overlay, mobile action bar
 - **AIWatch Score** — Composite reliability score ([how it works](https://ai-watch.dev/#about-score))
+- **Detection Lead** — Shows how much earlier AIWatch detected an incident vs official report
+- **Smart alerts** — Discord alerts for degraded/down status with incident suppression and recovery duration
+- **Offline UI** — Graceful error state when API is unreachable (production only)
+- **Is X Down SEO pages** — Dynamic data summary, AIWatch rank, and fallback recommendations
+- **Health check probing** — Direct RTT measurement to API endpoints (Gemini PoC)
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 
 ## Monitored Services
