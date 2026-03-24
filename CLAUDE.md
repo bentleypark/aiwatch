@@ -109,6 +109,29 @@ Theme switching: add `data-theme="light"` to `<html>` — CSS variables remap au
 ### i18n
 `src/locales/ko.js` and `en.js` export flat `{ 'dot.key': 'string' }` maps (default exports).
 
+### GA4 Analytics Events
+All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active when user consents via cookie banner.
+
+| Event | Parameters | Location | Purpose |
+|---|---|---|---|
+| `page_view` | `page_title`, `service_id?` | App.jsx | SPA page transition |
+| `select_service` | `service_id` | Overview (card click) | Service card click |
+| `view_service` | `service_id` | Sidebar (service list) | Sidebar service click |
+| `view_incident` | `incident_id` | Incidents page | Incident detail open |
+| `fallback_click` | `from_service`, `to_service`, `location` | ActionBanner, Is X Down | Fallback recommendation click |
+| `change_filter` | `filter` | Overview (filter tabs) | Status filter change |
+| `category_filter` | `category` | Sidebar (category) | Category filter change |
+| `navigate_page` | `page` | Sidebar (nav) | Page navigation |
+| `click_refresh` | — | Topbar | Manual refresh |
+| `click_github_header` | — | Topbar | GitHub link click |
+| `click_analyze` | — | Topbar | Analyze button click |
+| `open_legal` | `type` (privacy/terms) | Footer | Legal modal open |
+| `save_settings` | — | Settings | Settings saved |
+| `webhook_register` | `type` (discord/slack) | Settings | Webhook URL added |
+| `webhook_remove` | `type` (discord/slack) | Settings | Webhook URL removed |
+
+Is X Down pages (Edge SSR) use inline `gtag()` calls directly since they don't use React.
+
 ### Status Data Flow
 ```
 Browser (React SPA, 60s polling)
