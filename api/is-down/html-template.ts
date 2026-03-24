@@ -173,7 +173,7 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 ${renderStatusHeader(service, seo)}
 ${renderCTA(seo, service?.status ?? 'operational')}
 ${renderIncidents(service)}
-${renderDescription(seo)}
+${renderDescription(seo, service)}
 ${renderFAQ(seo, fallbacks)}
 ${renderFallbacks(seo, fallbacks)}
 ${renderFooter(slug)}
@@ -273,9 +273,47 @@ function renderIncidents(service: ServiceData | null): string {
 <div class="card">${items}</div>`
 }
 
-function renderDescription(seo: ServiceSEO): string {
+function buildDataSummary(service: ServiceData | null, displayName: string): string {
+  if (!service) return ''
+  const incidents = Array.isArray(service.incidents) ? service.incidents : []
+  const cutoff = Date.now() - 30 * 86_400_000
+  const recent = incidents.filter((i) => new Date(i.startedAt).getTime() >= cutoff)
+  const count = recent.length
+  const uptime = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d)
+    ? `${service.uptime30d.toFixed(2)}%` : null
+
+  if (count === 0) {
+    return uptime
+      ? `Based on AIWatch data from the last 30 days, ${displayName} has maintained a clean record with zero incidents. 30-day uptime: ${uptime}.`
+      : `Based on AIWatch data from the last 30 days, ${displayName} has maintained a clean record with zero incidents.`
+  }
+
+  // MTTR: only resolved incidents with parseable duration
+  const resolved = recent.filter((i) => i.status === 'resolved' && i.duration)
+  let mttrText = ''
+  if (resolved.length > 0) {
+    const totalMins = resolved.reduce((sum, i) => {
+      const h = i.duration!.match(/(\d+)h/)
+      const m = i.duration!.match(/(\d+)m/)
+      return sum + (h ? parseInt(h[1]) * 60 : 0) + (m ? parseInt(m[1]) : 0)
+    }, 0)
+    const avg = Math.round(totalMins / resolved.length)
+    if (avg > 0) {
+      const mttrStr = avg >= 60 ? `${Math.floor(avg / 60)}h ${avg % 60}m` : `${avg} minutes`
+      mttrText = ` with an average recovery time of ${mttrStr}`
+    }
+  }
+
+  return uptime
+    ? `Based on AIWatch data from the last 30 days, ${displayName} experienced ${count} incident${count > 1 ? 's' : ''}${mttrText}. 30-day uptime: ${uptime}.`
+    : `Based on AIWatch data from the last 30 days, ${displayName} experienced ${count} incident${count > 1 ? 's' : ''}${mttrText}.`
+}
+
+function renderDescription(seo: ServiceSEO, service: ServiceData | null): string {
+  const summary = buildDataSummary(service, seo.displayName)
   return `<h2>About ${esc(seo.displayName)}</h2>
 <div class="card">
+${summary ? `<p style="font-size:14px;margin-bottom:12px;padding:10px 14px;background:#161b22;border-left:3px solid #3fb950;border-radius:0 4px 4px 0"><strong>AIWatch Data:</strong> ${esc(summary)}</p>` : ''}
 <p style="font-size:14px;margin-bottom:12px">${esc(seo.description)}</p>
 ${seo.insight ? `<p style="font-size:14px;margin-bottom:12px;padding:10px 14px;background:#161b22;border-left:3px solid #58a6ff;border-radius:0 4px 4px 0"><strong>AIWatch Insight:</strong> ${esc(seo.insight)}</p>` : ''}
 <p style="font-size:14px;color:#8b949e">${esc(seo.whenDown)}</p>
