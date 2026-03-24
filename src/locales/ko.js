@@ -174,6 +174,7 @@ const ko = {
   'svc.region.type.inference': '추론 장애',
   'svc.region.recommend': '리전 장애가 감지되었습니다. 서비스 중단을 피하려면 {region} 사용을 권장합니다.',
   'svc.region.allDown': '모든 리전에서 장애가 감지되었습니다',
+  'svc.region.action.guide': 'API 가이드 확인',
 
   // Settings
   'settings.general': '일반',

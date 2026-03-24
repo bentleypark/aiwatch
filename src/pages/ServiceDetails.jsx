@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
+import { trackEvent } from '../utils/analytics'
 import { formatDate } from '../utils/time'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { Chart, LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip } from 'chart.js'
@@ -357,8 +358,17 @@ function RegionalAvailability({ service, t }) {
         </div>
         {/* Recommendation: evidence-based, only when one region has incident but not all */}
         {!allDown && okRegions.length > 0 && (
-          <div className="mono text-[10px] text-[var(--blue)] mt-3" style={{ padding: '6px 8px', background: 'var(--bg2)', borderRadius: '4px' }}>
-            {t('svc.region.recommend').replace('{region}', okRegions[0].label)}
+          <div className="mono text-[10px] text-[var(--blue)] mt-3 flex items-center justify-between" style={{ padding: '6px 8px', background: 'var(--bg2)', borderRadius: '4px' }}>
+            <span>{t('svc.region.recommend').replace('{region}', okRegions[0].label)}</span>
+            <a
+              href="https://docs.x.ai/docs/regions"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-2 font-bold underline hover:text-[var(--text1)] shrink-0"
+              onClick={() => trackEvent('region_switch_intent', { service_id: service.id, recommended_region: okRegions[0].key })}
+            >
+              {t('svc.region.action.guide')} →
+            </a>
           </div>
         )}
         {allDown && (

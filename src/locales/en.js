@@ -174,6 +174,7 @@ const en = {
   'svc.region.type.inference': 'Inference Issue',
   'svc.region.recommend': 'Active incident detected. Use {region} to avoid service interruption.',
   'svc.region.allDown': 'Active incidents detected in all regions',
+  'svc.region.action.guide': 'Check API Guide',
 
   // Settings
   'settings.general': 'General',

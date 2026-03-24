@@ -80,6 +80,8 @@ test.describe('xAI Regional Availability', () => {
     await expect(page.locator('main').getByText(/Service Down|서비스 중단/)).toBeVisible()
     // US region should show no active incidents
     await expect(page.locator('main').getByText(/No Active Incidents|활성 장애 없음/)).toBeVisible()
+    // Recommendation + Guide link should be visible
+    await expect(page.locator('main').getByText(/API Guide|API 가이드/)).toBeVisible()
   })
 
   test('shows all regions affected for global incident (no region keyword)', async ({ page }) => {
