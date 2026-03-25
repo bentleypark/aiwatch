@@ -29,7 +29,7 @@ export default async function handler(req: Request) {
     let fallbacks: Array<{ id: string; name: string; score: number | null; status: string }> = []
 
     const result = await Promise.allSettled([
-      fetch(`${WORKER_API}/api/status`, { signal: AbortSignal.timeout(8000) }),
+      fetch(`${WORKER_API}/api/status/cached`, { signal: AbortSignal.timeout(3000) }),
     ])
 
     if (result[0].status === 'fulfilled' && result[0].value.ok) {

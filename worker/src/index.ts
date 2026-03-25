@@ -691,6 +691,21 @@ export default {
       })
     }
 
+    // GET /api/status/cached — KV cache only (no live fetch), for Is X Down SSR pages
+    if (url.pathname === '/api/status/cached') {
+      const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+      if (cached) {
+        return new Response(JSON.stringify({ services: cached.services, lastUpdated: cached.cachedAt, cached: true }), {
+          status: 200,
+          headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
+        })
+      }
+      return new Response(JSON.stringify({ error: 'no cached data' }), {
+        status: 503,
+        headers: { ...cors, 'Content-Type': 'application/json' },
+      })
+    }
+
     try {
       const { raw, enriched } = await fetchAllServices(env.STATUS_CACHE)
 
