@@ -27,9 +27,11 @@ const HISTORY_CLASS = {
 }
 
 const INC_BAR_CLASS = {
-  ongoing:    'bg-[var(--red)]',
-  monitoring: 'bg-[var(--amber)]',
-  resolved:   'bg-[var(--green)]',
+  ongoing:        'bg-[var(--red)]',
+  investigating:  'bg-[var(--red)]',
+  identified:     'bg-[var(--red)]',
+  monitoring:     'bg-[var(--amber)]',
+  resolved:       'bg-[var(--green)]',
 }
 
 // ── Sub-components ───────────────────────────────────────────
@@ -210,7 +212,7 @@ function IncidentItem({ incident, lang, t }) {
             )}
           </div>
           <div className="mono text-[10px] text-[var(--text2)]">
-            {incident.duration ?? t('overview.incidents.monitoring')}
+            {incident.duration ?? (incident.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}
           </div>
         </div>
       </div>
@@ -218,7 +220,7 @@ function IncidentItem({ incident, lang, t }) {
         <div className="ml-[66px]">
           <IncidentTimeline
             title={`${incident.serviceName} — ${incident.title}`}
-            subtitle={`${formatDate(incident.startedAt, lang)}  ·  ${incident.duration ?? t('overview.incidents.monitoring')}`}
+            subtitle={`${formatDate(incident.startedAt, lang)}  ·  ${incident.duration ?? (incident.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}`}
             timeline={incident.timeline}
             onClose={() => setExpanded(false)}
             t={t}
