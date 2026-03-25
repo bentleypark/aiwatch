@@ -69,6 +69,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Is Cursor down because of Claude or OpenAI?', a: 'Cursor relies on external model providers. Check the AIWatch dashboard at ai-watch.dev to see if Claude API or OpenAI is also experiencing issues.' },
     ],
   },
+  'claude-code': {
+    displayName: 'Claude Code',
+    description: 'Claude Code is Anthropic\'s official CLI tool for AI-powered coding. It runs in the terminal, understands entire codebases, and can edit files, run commands, and manage git workflows autonomously using Claude models.',
+    insight: 'Claude Code shares Anthropic\'s status page with Claude API and claude.ai. An incident on Claude API (e.g., Opus or Sonnet errors) will also affect Claude Code since it relies on the same backend models. When evaluating Claude Code reliability, check both the Claude Code status and the Claude API status on AIWatch.',
+    whenDown: 'When Claude Code is down, developers cannot use AI-assisted coding in their terminal. Code generation, file editing, command execution, and codebase Q&A features will be unavailable. Consider using an alternative coding agent until the service recovers.',
+    faqs: [
+      { q: 'Is Claude Code down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Claude Code every 60 seconds and shows real-time operational status, uptime percentage, and recent incidents.' },
+      { q: 'Why is Claude Code not working?', a: 'Claude Code relies on Anthropic\'s Claude API backend. If Claude API is experiencing issues (model errors, rate limiting), Claude Code will also be affected. Check this page for current status.' },
+      { q: 'What can I use instead of Claude Code?', a: 'When Claude Code is down, GitHub Copilot, Cursor, or Windsurf are alternative AI coding tools. AIWatch shows which are currently operational.' },
+      { q: 'Is Claude Code down because of Claude API?', a: 'Yes, Claude Code depends on Claude API models. Check the AIWatch dashboard at ai-watch.dev to see if Claude API is also experiencing issues — they often share the same incidents.' },
+    ],
+  },
 }
 
 export function getSEOContent(slug: string): ServiceSEO | null {

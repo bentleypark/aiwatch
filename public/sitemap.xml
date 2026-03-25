@@ -39,6 +39,12 @@
     <changefreq>hourly</changefreq>
     <priority>0.9</priority>
   </url>
+  <url>
+    <loc>https://ai-watch.dev/is-claude-code-down</loc>
+    <lastmod>2026-03-25</lastmod>
+    <changefreq>hourly</changefreq>
+    <priority>0.9</priority>
+  </url>
 
   <!-- Monthly Reports (external) -->
   <url>
