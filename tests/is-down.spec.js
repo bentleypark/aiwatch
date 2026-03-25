@@ -89,10 +89,24 @@ test.describe('Is X Down? SSR pages', () => {
     await expect(page.locator('a[href="/is-cursor-down"]')).toBeVisible()
   })
 
-  test('OG meta tags are present', async ({ page }) => {
+  test('OG meta tags point to dynamic OG image', async ({ page }) => {
     await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
     await expect(page.locator('meta[property="og:title"]')).toHaveAttribute('content', /Is Claude Down/)
     await expect(page.locator('meta[property="og:url"]')).toHaveAttribute('content', 'https://ai-watch.dev/is-claude-down')
-    await expect(page.locator('meta[property="og:image"]')).toHaveAttribute('content', /og-image/)
+    // Dynamic OG image URL should contain /api/og with service param
+    await expect(page.locator('meta[property="og:image"]')).toHaveAttribute('content', /\/api\/og\?service=Claude/)
+    await expect(page.locator('meta[name="twitter:image"]')).toHaveAttribute('content', /\/api\/og\?service=Claude/)
+  })
+
+  test('share buttons are present', async ({ page }) => {
+    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    // X (Twitter) share link
+    await expect(page.locator('a.share-x')).toHaveAttribute('href', /x\.com\/intent\/tweet/)
+    // Threads share link
+    await expect(page.locator('a.share-threads')).toHaveAttribute('href', /threads\.net\/intent\/post/)
+    // Copy Link button
+    await expect(page.locator('button.share-copy')).toBeVisible()
+    // KakaoTalk button exists (hidden until SDK loads)
+    await expect(page.locator('#kakao-share')).toHaveCount(1)
   })
 })

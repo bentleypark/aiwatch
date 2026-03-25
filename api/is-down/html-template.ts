@@ -93,6 +93,13 @@ export function renderPage(
     : `Check if ${seo.displayName} is down right now. Real-time status monitoring by AIWatch.`
   const canonical = `https://ai-watch.dev/is-${slug}-down`
 
+  // Dynamic OG image URL — cache busted per 10-min window
+  const ogParams = new URLSearchParams({ service: seo.displayName, status: service?.status ?? 'operational' })
+  if (service?.aiwatchScore != null && Number.isFinite(service.aiwatchScore)) ogParams.set('score', String(service.aiwatchScore))
+  if (typeof service?.uptime30d === 'number' && !Number.isNaN(service.uptime30d)) ogParams.set('uptime', service.uptime30d.toFixed(2))
+  ogParams.set('v', String(Math.floor(Date.now() / 600_000))) // 10-min cache bust
+  const ogImageUrl = `https://ai-watch.dev/api/og?${ogParams.toString()}`
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -108,14 +115,14 @@ export function renderPage(
 <meta property="og:url" content="${esc(canonical)}">
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(desc)}">
-<meta property="og:image" content="https://ai-watch.dev/og-image.png">
+<meta property="og:image" content="${esc(ogImageUrl)}">
 <meta property="og:site_name" content="AIWatch">
 
 <!-- Twitter -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${esc(title)}">
 <meta name="twitter:description" content="${esc(desc)}">
-<meta name="twitter:image" content="https://ai-watch.dev/og-image.png">
+<meta name="twitter:image" content="${esc(ogImageUrl)}">
 
 <meta name="theme-color" content="#080c10">
 
@@ -166,6 +173,14 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 .links{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .links a{font-size:13px;padding:6px 12px;background:#161b22;border:1px solid rgba(255,255,255,0.07);border-radius:4px;color:#8b949e}
 .links a:hover{color:#e6edf3;text-decoration:none}
+.share-bar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:24px 0}
+.share-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:6px;font-size:13px;font-weight:500;border:1px solid rgba(255,255,255,0.1);cursor:pointer;transition:opacity 0.2s}
+.share-btn:hover{opacity:0.85;text-decoration:none}
+.share-x{background:#000;color:#fff;border-color:#333}
+.share-threads{background:#000;color:#fff;border-color:#333}
+.share-kakao{background:#FEE500;color:#191919;border-color:#FEE500}
+.share-copy{background:#161b22;color:#e6edf3;border-color:rgba(255,255,255,0.14)}
+.share-copy.copied{background:#1a3d22;border-color:#3fb950;color:#3fb950}
 @media(max-width:600px){h1{font-size:22px}.container{padding:16px 12px}}
 </style>
 </head>
@@ -178,6 +193,7 @@ ${renderIncidents(service)}
 ${renderDescription(seo, service)}
 ${renderFAQ(seo, fallbacks)}
 ${renderFallbacks(seo, fallbacks, service?.id)}
+${renderShareButtons(seo, service, canonical, ogImageUrl)}
 ${renderFooter(slug)}
 
 </div>
@@ -361,6 +377,74 @@ ${items}
 <a href="https://reports.ai-watch.dev/">Monthly reports &rarr;</a>
 </div>
 </div>`
+}
+
+function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canonical: string, ogImageUrl: string): string {
+  const status = service ? statusLabel(service.status) : 'Unknown'
+  const text = `Is ${seo.displayName} down? Current status: ${status}. Check live:`
+  const encodedText = encodeURIComponent(text)
+  const encodedUrl = encodeURIComponent(canonical)
+
+  // Use JSON.stringify for safe JS string interpolation (prevents XSS via backslash/newline)
+  const jsDisplayName = JSON.stringify(seo.displayName)
+  const jsCanonical = JSON.stringify(canonical)
+  const jsOgImageUrl = JSON.stringify(ogImageUrl)
+  const jsStatus = JSON.stringify(status)
+
+  return `<div class="share-bar">
+<a href="https://x.com/intent/tweet?text=${encodedText}&amp;url=${encodedUrl}" target="_blank" rel="noopener" class="share-btn share-x" onclick="gtag('event','share',{method:'x',content_type:'is_x_down',item_id:${jsDisplayName}})">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+Post
+</a>
+<a href="https://www.threads.net/intent/post?text=${encodedText}%20${encodedUrl}" target="_blank" rel="noopener" class="share-btn share-threads" onclick="gtag('event','share',{method:'threads',content_type:'is_x_down',item_id:${jsDisplayName}})">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12.186 24h-.007c-3.581-.024-6.334-1.205-8.184-3.509C2.35 18.44 1.5 15.586 1.472 12.01v-.017c.03-3.579.879-6.43 2.525-8.482C5.845 1.205 8.6.024 12.18 0h.014c2.746.02 5.043.725 6.826 2.098 1.677 1.29 2.858 3.13 3.509 5.467l-2.04.569c-1.104-3.96-3.898-5.984-8.304-6.015-2.91.022-5.11.936-6.54 2.717C4.307 6.504 3.616 8.914 3.59 12c.025 3.083.718 5.496 2.057 7.164 1.432 1.783 3.631 2.698 6.54 2.717 2.623-.02 4.358-.631 5.8-2.045 1.647-1.613 1.618-3.593 1.09-4.798-.346-.789-.96-1.42-1.757-1.846-.184 2.985-1.086 5.27-2.844 6.39-1.34.853-3.065 1.062-4.62.559-1.72-.557-3.09-1.843-3.37-3.583-.203-1.264.066-2.418.757-3.248.86-1.032 2.278-1.578 3.952-1.578 2.37 0 3.877 1.128 4.453 2.325.153-.915.177-1.937.073-3.065l2.023-.235c.203 2.153.015 4.027-.735 5.483a5.997 5.997 0 0 0 1.013.607c1.27.605 2.567.665 3.557-.12 1.258-1 1.554-2.79 1.168-4.34-.478-1.922-1.806-3.598-3.853-4.85C17.257 5.282 14.907 4.725 12.2 4.708h-.015c-3.34.024-5.886 1.348-7.357 3.832C3.622 10.52 3.088 12.947 3.088 12c0-.96.533-3.504 1.74-5.488 1.41-2.319 3.756-3.568 6.857-3.655h.02c2.467.02 4.57.527 6.25 1.508 1.735 1.012 3.032 2.488 3.558 4.282.65 2.214.23 4.685-1.496 6.055-1.497 1.187-3.366 1.065-4.868.348a7.89 7.89 0 0 1-.778-.42c-.66 1.345-1.68 2.276-3.063 2.788-.986.365-2.103.432-3.243.19-1.882-.401-3.466-1.576-4.156-3.216-.475-1.13-.53-2.394-.155-3.586.468-1.484 1.634-2.632 3.288-3.063 1.918-.5 3.728-.074 5.02 1.182.574.558 1.005 1.26 1.283 2.094.228-.76.382-1.581.455-2.46l-.005-.038z"/></svg>
+Share
+</a>
+<button id="kakao-share" class="share-btn share-kakao" style="display:none" onclick="shareKakao()">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="#191919"><path d="M12 3C6.477 3 2 6.463 2 10.691c0 2.754 1.862 5.18 4.67 6.532-.16.578-.583 2.096-.668 2.421-.104.397.146.392.306.285.126-.084 2.005-1.36 2.816-1.912.93.134 1.891.205 2.876.205 5.523 0 10-3.463 10-7.691S17.523 3 12 3z"/></svg>
+KakaoTalk
+</button>
+<button class="share-btn share-copy" onclick="copyLink(this)" data-url="${esc(canonical)}">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+Copy Link
+</button>
+</div>
+
+<script>
+var _copyOrig='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy Link';
+function copyLink(btn){
+  if(!navigator.clipboard){btn.textContent='Copy failed';setTimeout(function(){btn.innerHTML=_copyOrig},2000);return}
+  navigator.clipboard.writeText(btn.dataset.url).then(function(){
+    btn.classList.add('copied');btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>Copied!';
+    gtag('event','share',{method:'copy',content_type:'is_x_down',item_id:${jsDisplayName}});
+    setTimeout(function(){btn.classList.remove('copied');btn.innerHTML=_copyOrig},2000)
+  }).catch(function(){
+    btn.textContent='Copy failed';setTimeout(function(){btn.innerHTML=_copyOrig},2000)
+  })
+}
+function shareKakao(){
+  if(!window.Kakao||!Kakao.isInitialized())return;
+  try{
+    Kakao.Share.sendDefault({
+      objectType:'feed',
+      content:{title:'Is '+${jsDisplayName}+' Down?',description:'Current status: '+${jsStatus},imageUrl:${jsOgImageUrl},link:{mobileWebUrl:${jsCanonical},webUrl:${jsCanonical}}},
+      buttons:[{title:'Check Live Status',link:{mobileWebUrl:${jsCanonical},webUrl:${jsCanonical}}}]
+    });
+    gtag('event','share',{method:'kakao',content_type:'is_x_down',item_id:${jsDisplayName}});
+  }catch(e){console.error('[AIWatch] Kakao share failed:',e)}
+}
+</script>
+<script>
+(function(){
+  var s=document.createElement('script');s.src='https://t1.kakaocdn.net/kakao_js_sdk/2.7.4/kakao.min.js';
+  s.onload=function(){
+    try{Kakao.init('e6712bbd869339b3ec96ce09088ba143');document.getElementById('kakao-share').style.display='inline-flex'}
+    catch(e){console.error('[AIWatch] Kakao init failed:',e)}
+  };
+  s.onerror=function(){console.warn('[AIWatch] Kakao SDK failed to load')};
+  document.head.appendChild(s);
+})();
+</script>`
 }
 
 function renderFooter(slug: string): string {
