@@ -72,6 +72,27 @@ npm run test:worker # Run Worker unit tests (vitest)
 - **Cloudflare Workers** — status polling proxy with KV cache
 - **Cloudflare KV** — daily uptime counters, status cache, history archival
 
+### KV Key Schema (STATUS_CACHE namespace)
+
+| Key Pattern | Value | TTL | Writes/Day | Purpose |
+|---|---|---|---|---|
+| `services:latest` | `{ services, cachedAt }` JSON | 5min | ~288 | Real-time status cache (all 25 services) |
+| `daily:{YYYY-MM-DD}` | `{ [svcId]: { ok, total } }` JSON | 2d | ~288 | Daily uptime counters |
+| `history:{YYYY-MM-DD}` | Same as daily | 90d | 1 | Archived yesterday's counters |
+| `latency:24h` | `{ snapshots: [{ t, data }] }` JSON | 25h | ~48 | 30-min latency snapshots (max 48) |
+| `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 25h | ~288 | 5-min health check probe results |
+| `alerted:new:{incId}` | `"1"` | 7d | ~5 | Incident alert dedup |
+| `alerted:res:{incId}` | `"1"` | 7d | ~2 | Resolved incident alert dedup |
+| `alerted:down:{svcId}` | ISO timestamp | 2h | ~2 | Service down alert dedup + recovery duration |
+| `alerted:degraded:{svcId}` | ISO timestamp | 2h | ~2 | Service degraded alert dedup |
+| `alerted:recovered:{svcId}` | `"1"` | 2h | ~2 | Recovery alert dedup |
+| `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
+| `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time |
+| `reddit:seen:{postId}` | `"1"` | 24h | ~72 | Reddit post dedup (hourly scan) |
+| `kv_limit_alert` | `"1"` | 5min | ~1 | KV write limit exceeded cooldown |
+
+**Free tier budget**: 1,000 writes/day. Estimated total: ~800-900 writes/day (within budget).
+
 ### Directory Layout
 ```
 src/
