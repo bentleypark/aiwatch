@@ -427,8 +427,18 @@ function shareKakao(){
   try{
     Kakao.Share.sendDefault({
       objectType:'feed',
-      content:{title:'Is '+${jsDisplayName}+' Down?',description:'Current status: '+${jsStatus},imageUrl:${jsOgImageUrl},link:{mobileWebUrl:${jsCanonical},webUrl:${jsCanonical}}},
-      buttons:[{title:'Check Live Status',link:{mobileWebUrl:${jsCanonical},webUrl:${jsCanonical}}}]
+      content:{
+        title:'Is '+${jsDisplayName}+' Down?',
+        description:'Current status: '+${jsStatus}+'. Real-time AI service monitoring by AIWatch.',
+        imageUrl:${jsOgImageUrl},
+        imageWidth:1200,
+        imageHeight:630,
+        link:{mobileWebUrl:${jsCanonical},webUrl:${jsCanonical}}
+      },
+      buttons:[
+        {title:'Check Live Status',link:{mobileWebUrl:${jsCanonical},webUrl:${jsCanonical}}},
+        {title:'View Dashboard',link:{mobileWebUrl:"https://ai-watch.dev",webUrl:"https://ai-watch.dev"}}
+      ]
     });
     gtag('event','share',{method:'kakao',content_type:'is_x_down',item_id:${jsDisplayName}});
   }catch(e){console.error('[AIWatch] Kakao share failed:',e)}
