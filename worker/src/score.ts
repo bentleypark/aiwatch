@@ -87,9 +87,14 @@ export function calculateAIWatchScore(service: ServiceStatus, cutoffDays = 30): 
   let score: number
   let confidence: 'high' | 'medium' | 'low'
 
-  if (hasUptime) {
+  const isEstimate = service.uptimeSource === 'estimate'
+  if (hasUptime && !isEstimate) {
     score = uptimeScore! + incidentScore + recoveryScore
     confidence = 'high'
+  } else if (hasUptime && isEstimate) {
+    // Estimate uptime (e.g., AWS RSS, Azure RSS) — 10% penalty, medium confidence
+    score = (uptimeScore! + incidentScore + recoveryScore) * 0.9
+    confidence = 'medium'
   } else {
     // No uptime data → assume industry average (99.5% = 45pts) + 10% penalty
     const assumedUptime = 45 // (0.995 - 0.95) / 0.05 * 50
