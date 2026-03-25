@@ -10,6 +10,7 @@ const ko = {
   'nav.ranking': '신뢰도 랭킹',
   'nav.settings': '설정',
   'nav.dashboard': '대시보드',
+  'nav.reports': '월간 리포트',
   'nav.services': '서비스',
   'nav.agents': '코딩 에이전트',
   // sidebar.footer removed — version now dynamic via __APP_VERSION__

@@ -10,6 +10,7 @@ const en = {
   'nav.ranking': 'Reliability Ranking',
   'nav.settings': 'Settings',
   'nav.dashboard': 'Dashboard',
+  'nav.reports': 'Reports',
   'nav.services': 'Services',
   'nav.agents': 'Coding Agents',
   // sidebar.footer removed — version now dynamic via __APP_VERSION__

@@ -58,6 +58,15 @@ function IconTrophy() {
   )
 }
 
+function IconReport() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ opacity: 0.6 }}>
+      <rect x="2" y="1" width="10" height="12" rx="1" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M5 4h4M5 7h4M5 10h2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 const NAV_ICONS = { overview: IconGrid, latency: IconChart, incidents: IconClock, uptime: IconTarget, ranking: IconTrophy }
 
 const DASHBOARD_ITEMS = [
@@ -182,6 +191,20 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
             </button>
           )
         })}
+        <a
+          href="https://reports.ai-watch.dev/"
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => { trackEvent('click_reports', {}); onNavigate?.() }}
+          className="w-full text-left flex items-center transition-all cursor-pointer text-[var(--text1)] hover:bg-[var(--bg3)] hover:text-[var(--text0)]"
+          style={navItemStyle}
+        >
+          <span className="shrink-0"><IconReport /></span>
+          {t('nav.reports')}
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ marginLeft: 'auto', opacity: 0.4 }}>
+            <path d="M3 1h6v6M9 1L4 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </a>
       </nav>
 
       {/* ── Divider ── */}
