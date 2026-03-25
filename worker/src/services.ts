@@ -22,6 +22,7 @@ const SERVICES: ServiceConfig[] = [
     'https://status.aws.amazon.com/rss/bedrock-eu-west-1.rss',
     'https://status.aws.amazon.com/rss/bedrock-ap-northeast-1.rss',
   ] },
+  { id: 'azureopenai', name: 'Azure OpenAI', provider: 'Microsoft', category: 'api', statusUrl: 'https://azure.status.microsoft/en-us/status', apiUrl: null, azureRssUrl: 'https://rssfeed.azure.status.microsoft/en-us/status/feed/', incidentKeywords: ['Azure OpenAI'] },
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE' },
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM' },
@@ -34,8 +35,10 @@ const SERVICES: ServiceConfig[] = [
   { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://status.deepseek.com/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x', incidentKeywords: ['api'] },
   { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, onlineOrNotUrl: 'https://status.openrouter.ai', onlineOrNotComponent: 'Chat (/api/v1/chat/completions)' },
   { id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', statusUrl: 'https://status.pinecone.io', apiUrl: 'https://status.pinecone.io/api/v2/summary.json', statusComponentId: 'r7tngp2p3sjd' },
+  { id: 'stability', name: 'Stability AI', provider: 'Stability AI', category: 'api', statusUrl: 'https://status.stability.ai', apiUrl: 'https://status.stability.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.stability.ai/incidents', incidentIoComponentId: '01JW9J39X55NDFZTZT3K5NYR48' },
   // AI Web Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'webapp', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
+  { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'webapp', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl' },
   { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG' },
   // Coding Agents
   { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'], statusComponent: 'Claude Code', statusComponentId: 'yyzkbfz2thpt' },
@@ -294,6 +297,32 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         allIncidents.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
         const filtered = filterIncidents(allIncidents, config)
         // Estimate uptime from incidents; no incidents = 100% (RSS confirmed reachable)
+        const uptimeEst = computeUptimeFromIncidents(filtered) ?? 100
+        return {
+          ...base,
+          status: deriveAwsStatus(filtered),
+          latency: config.category === 'api' ? latency : null,
+          incidents: filtered,
+          calendarDays: 14,
+          uptime30d: uptimeEst,
+          uptimeSource: 'estimate' as const,
+        }
+      }
+
+      // Azure RSS — single feed, keyword-filtered (reuses AWS parser)
+      if (config.azureRssUrl) {
+        const start = Date.now()
+        const rssRes = await fetchWithTimeout(config.azureRssUrl, 8000).catch((err) => {
+          console.warn(`[fetchService] ${config.id} Azure RSS failed:`, err instanceof Error ? err.message : err)
+          return null
+        })
+        const latency = Date.now() - start
+        if (!rssRes || !rssRes.ok) {
+          if (rssRes) console.warn(`[fetchService] ${config.id} Azure RSS HTTP ${rssRes.status}`)
+          return { ...base, status: 'degraded', latency: config.category === 'api' ? latency : null }
+        }
+        const incidents = parseAwsRssIncidents(await rssRes.text())
+        const filtered = filterIncidents(incidents, config)
         const uptimeEst = computeUptimeFromIncidents(filtered) ?? 100
         return {
           ...base,

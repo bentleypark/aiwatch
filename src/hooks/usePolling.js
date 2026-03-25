@@ -56,6 +56,13 @@ const MOCK_SERVICES = [
         ] },
     ],
   },
+  {
+    id: 'characterai', category: 'webapp', name: 'Character.AI', provider: 'Character AI', status: 'operational',
+    latency: null, uptime30d: null,
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
+  },
   // ── LLM API ──
   {
     id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational',
@@ -150,6 +157,13 @@ const MOCK_SERVICES = [
   {
     id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational',
     latency: 280, uptime30d: null,
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
+  },
+  {
+    id: 'azureopenai', category: 'api', name: 'Azure OpenAI', provider: 'Microsoft', status: 'operational',
+    latency: 350, uptime30d: null,
     history30d: hist(),
     history3m: null,
     incidents: [],
@@ -348,6 +362,14 @@ const MOCK_SERVICES = [
     history3m: null,
     incidents: [],
   },
+  {
+    id: 'stability', category: 'api', name: 'Stability AI', provider: 'Stability AI', status: 'operational',
+    latency: 400, uptime30d: null,
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
+  },
+  // ── Coding Agents ──
   {
     id: 'claudecode', category: 'agent', name: 'Claude Code', provider: 'Anthropic', status: 'operational',
     latency: null, uptime30d: 99.00,

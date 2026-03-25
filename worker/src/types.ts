@@ -56,4 +56,5 @@ export interface ServiceConfig {
   onlineOrNotUrl?: string
   onlineOrNotComponent?: string
   awsRssUrls?: string[]
+  azureRssUrl?: string
 }

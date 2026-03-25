@@ -13,7 +13,7 @@
 
 **English** | [한국어](README.ko.md)
 
-Real-time monitoring dashboard for **22 AI services** — track status, latency, uptime, and incidents across major AI providers.
+Real-time monitoring dashboard for **25 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[https://ai-watch.dev](https://ai-watch.dev)**
 
@@ -21,7 +21,7 @@ Real-time monitoring dashboard for **22 AI services** — track status, latency,
 
 ## Features
 
-- **Real-time status** — Operational / Degraded / Down for 22 AI services
+- **Real-time status** — Operational / Degraded / Down for 25 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
 - **Latency monitoring** — Status page response time per API service
 - **24h latency trend** — Chart.js line chart with 30-min snapshots
@@ -45,7 +45,7 @@ Real-time monitoring dashboard for **22 AI services** — track status, latency,
 
 ## Monitored Services
 
-### AI API Services (16)
+### AI API Services (18)
 
 | Service | Provider | Status Source |
 |---------|----------|---------------|
@@ -65,13 +65,16 @@ Real-time monitoring dashboard for **22 AI services** — track status, latency,
 | OpenRouter | OpenRouter | OnlineOrNot (React Router SSR) |
 | Amazon Bedrock | AWS | AWS Health Dashboard |
 | Pinecone | Pinecone | Atlassian Statuspage |
+| Stability AI | Stability AI | Atlassian Statuspage |
+| Azure OpenAI | Microsoft | Azure Status RSS |
 
-### AI Web Apps (2)
+### AI Web Apps (3)
 
 | Service | Provider |
 |---------|----------|
 | claude.ai | Anthropic |
 | ChatGPT | OpenAI |
+| Character.AI | Character AI |
 
 ### Coding Agents (4)
 
@@ -100,7 +103,7 @@ Real-time monitoring dashboard for **22 AI services** — track status, latency,
 Browser (React SPA, 60s polling)
   ↓
 Cloudflare Worker
-  ├── GET /api/status    → parallel fetch (22 services) → normalize
+  ├── GET /api/status    → parallel fetch (25 services) → normalize
   ├── GET /api/uptime    → daily uptime history
   └── POST /api/alert   → webhook proxy (Slack/Discord, SSRF protected)
   ↓
@@ -243,6 +246,8 @@ Embed real-time status badges in your README, docs, or blog.
 | `huggingface` | Hugging Face | `replicate` | Replicate |
 | `elevenlabs` | ElevenLabs | `openrouter` | OpenRouter |
 | `bedrock` | Amazon Bedrock | `pinecone` | Pinecone |
+| `azureopenai` | Azure OpenAI | `stability` | Stability AI |
+| `characterai` | Character.AI | | |
 
 ## Project Structure
 
