@@ -182,3 +182,22 @@ test.describe('Detection Lead badge', () => {
     await expect(page.locator('main').getByText('lead').first()).toBeVisible()
   })
 })
+
+test.describe('Incident accordion in ServiceDetails', () => {
+  test('clicking incident expands timeline inline', async ({ page }) => {
+    await page.goto('/')
+    await waitForDataLoad(page)
+    // Navigate to Claude API (has incidents in mock data)
+    await page.locator('main button').filter({ hasText: 'Claude API' }).first().click()
+    await expect(page.locator('main').getByText('Incident History')).toBeVisible({ timeout: 5000 })
+    // Find an incident row with the expand arrow
+    const arrow = page.locator('main').getByText('▸').first()
+    if (await arrow.isVisible()) {
+      await arrow.click()
+      // Timeline should expand with close button
+      await expect(page.locator('main').getByText('✕').first()).toBeVisible({ timeout: 3000 })
+      // Click close
+      await page.locator('main').getByText('✕').first().click()
+    }
+  })
+})

@@ -200,6 +200,7 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
 }
 
 function IncidentRow({ incident, detectedAt, t, lang }) {
+  const [expanded, setExpanded] = useState(false)
   const STATUS_CLS = {
     investigating: 'text-[var(--red)]',
     identified:    'text-[var(--red)]',
@@ -211,6 +212,7 @@ function IncidentRow({ incident, detectedAt, t, lang }) {
   const displayStatus = incident.status === 'resolved' ? 'resolved'
     : incident.status === 'monitoring' ? 'monitoring'
     : 'ongoing'
+  const hasTimeline = (incident.timeline ?? []).length > 0
 
   // Detection Lead: per-incident calculation
   const lead = (() => {
@@ -229,31 +231,79 @@ function IncidentRow({ incident, detectedAt, t, lang }) {
   })()
 
   return (
-    <div className="flex items-start gap-[10px]">
-      <span className={`shrink-0 mt-0.5 text-[10px] mono ${dotCls}`} aria-hidden="true">●</span>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <p className="text-xs text-[var(--text1)] truncate">{incident.title}</p>
-          {lead && (
-            <span
-              className="shrink-0 mono text-[9px] text-[var(--green)] bg-[var(--status-bg-green)] rounded cursor-default"
-              style={{ padding: '1px 5px' }}
-              title={lang === 'ko'
-                ? `AIWatch 감지: ${lead.detectedTime} / 공식 발표: ${lead.officialTime}`
-                : `AIWatch detected: ${lead.detectedTime} / Official report: ${lead.officialTime}`}
-            >
-              <span style={{ fontWeight: 600 }}>{lead.label}</span> lead
-            </span>
-          )}
+    <div>
+      <div
+        className={`flex items-start gap-[10px] ${hasTimeline ? 'cursor-pointer hover:bg-[var(--bg2)] rounded transition-colors' : ''}`}
+        style={{ padding: '2px 4px', margin: '-2px -4px' }}
+        onClick={hasTimeline ? () => setExpanded((v) => !v) : undefined}
+      >
+        <span className={`shrink-0 mt-0.5 text-[10px] mono ${dotCls}`} aria-hidden="true">●</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-[var(--text1)] truncate">{incident.title}</p>
+            {lead && (
+              <span
+                className="shrink-0 mono text-[9px] text-[var(--green)] bg-[var(--status-bg-green)] rounded cursor-default"
+                style={{ padding: '1px 5px' }}
+                title={lang === 'ko'
+                  ? `AIWatch 감지: ${lead.detectedTime} / 공식 발표: ${lead.officialTime}`
+                  : `AIWatch detected: ${lead.detectedTime} / Official report: ${lead.officialTime}`}
+              >
+                <span style={{ fontWeight: 600 }}>{lead.label}</span> lead
+              </span>
+            )}
+            {hasTimeline && (
+              <span className="shrink-0 text-[9px] text-[var(--text2)]">{expanded ? '▾' : '▸'}</span>
+            )}
+          </div>
+          <p className="text-[10px] text-[var(--text2)] mono mt-0.5">
+            {formatDate(incident.startedAt, lang)}
+            {incident.duration ? ` · ${incident.duration}` : ''}
+          </p>
         </div>
-        <p className="text-[10px] text-[var(--text2)] mono mt-0.5">
-          {formatDate(incident.startedAt, lang)}
-          {incident.duration ? ` · ${incident.duration}` : ''}
-        </p>
+        <span className={`shrink-0 text-[10px] mono ${dotCls}`}>
+          {t(`incidents.status.${displayStatus}`)}
+        </span>
       </div>
-      <span className={`shrink-0 text-[10px] mono ${dotCls}`}>
-        {t(`incidents.status.${displayStatus}`)}
-      </span>
+      {expanded && (
+        <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden mt-2 ml-6">
+          <div className="flex items-start justify-between border-b border-[var(--border)]" style={{ padding: '14px 16px' }}>
+            <div>
+              <p className="text-sm font-medium text-[var(--text0)] mb-1">{incident.title}</p>
+              <p className="mono text-[10px] text-[var(--text2)]">
+                {formatDate(incident.startedAt, lang)}  ·  {incident.duration ?? t('incidents.duration.ongoing')}
+              </p>
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); setExpanded(false) }}
+              className="shrink-0 mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] border border-[var(--border)] rounded hover:opacity-80 transition-opacity cursor-pointer"
+              style={{ padding: '4px 10px' }}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ padding: '20px 24px' }}>
+            {incident.timeline.map((step, i) => {
+              const isLast = i === incident.timeline.length - 1
+              const stageDot = { investigating: 'bg-[var(--amber)]', identified: 'bg-[var(--blue)]', monitoring: 'bg-[var(--teal)]', resolved: 'bg-[var(--green)]' }
+              const stageText = { investigating: 'text-[var(--amber)]', identified: 'text-[var(--blue)]', monitoring: 'text-[var(--teal)]', resolved: 'text-[var(--green)]' }
+              return (
+                <div key={i} className="flex gap-[14px]">
+                  <div className="flex flex-col items-center w-[14px] shrink-0">
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 mt-[3px] ${stageDot[step.stage] ?? 'bg-[var(--text2)]'}`} />
+                    {!isLast && <div className="w-px flex-1 bg-[var(--border)] my-[3px] min-h-[16px]" />}
+                  </div>
+                  <div className="pb-4">
+                    <p className={`mono font-medium text-[10px] mb-[3px] ${stageText[step.stage] ?? 'text-[var(--text2)]'}`}>{t(`incidents.timeline.${step.stage}`)}</p>
+                    {step.text && <p className="text-xs text-[var(--text1)] mb-[3px]" style={{ lineHeight: 1.6 }}>{step.text}</p>}
+                    <p className="mono text-[10px] text-[var(--text2)]">{formatDate(step.at, lang)}</p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -557,7 +607,12 @@ export default function ServiceDetails({ serviceId }) {
   const cutoff7d = Date.now() - 7 * 86_400_000
   const recentIncidents = (service.incidents ?? []).filter(
     (inc) => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= cutoff7d
-  )
+  ).sort((a, b) => {
+    const aOngoing = a.status !== 'resolved' ? 1 : 0
+    const bOngoing = b.status !== 'resolved' ? 1 : 0
+    if (aOngoing !== bOngoing) return bOngoing - aOngoing
+    return new Date(b.startedAt) - new Date(a.startedAt)
+  })
   const incidentCount = recentIncidents.length
   const calendarDays = service.calendarDays ?? 14
 

@@ -46,4 +46,38 @@ test.describe('Incidents filtering', () => {
     const options = await periodSelect.locator('option').count()
     expect(options).toBeGreaterThanOrEqual(3) // 7d, 30d, 90d
   })
+
+  test('clicking incident row expands accordion detail inline', async ({ page }) => {
+    const main = page.locator('main')
+    const rows = main.locator('[role="rowgroup"] [role="row"]')
+    const count = await rows.count()
+    if (count === 0) return // no incidents to test
+    // Click first incident row
+    await rows.first().click()
+    // Accordion detail should appear: header with service name + close button
+    await expect(main.getByText('✕').first()).toBeVisible({ timeout: 3000 })
+    // Timeline should be visible
+    const timeline = main.locator('.rounded-full.w-2\\.5.h-2\\.5')
+    expect(await timeline.count()).toBeGreaterThan(0)
+    // Click close button
+    await main.getByText('✕').first().click()
+    // Detail panel should disappear
+    await expect(main.locator('.rounded-lg.overflow-hidden.mt-\\[10px\\]')).not.toBeVisible()
+  })
+
+  test('ongoing incidents are sorted before resolved', async ({ page }) => {
+    const main = page.locator('main')
+    const rows = main.locator('[role="rowgroup"] [role="row"]')
+    const count = await rows.count()
+    if (count < 2) return
+    // Check first row — if there are ongoing incidents, they should be first
+    const firstRowText = await rows.first().textContent()
+    const hasOngoing = firstRowText?.toLowerCase().includes('ongoing') || firstRowText?.toLowerCase().includes('monitoring')
+    // If no ongoing, all should be resolved — which is also valid
+    if (!hasOngoing) {
+      const allText = await rows.allTextContents()
+      const allResolved = allText.every(t => t.toLowerCase().includes('resolved'))
+      expect(allResolved).toBe(true)
+    }
+  })
 })

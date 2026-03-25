@@ -156,57 +156,64 @@ function DetailPanel({ incident, onClose, t, lang }) {
 }
 
 // Desktop table row — grid layout matching design mockup: title+badge | time | service | duration | status
-function IncidentRow({ incident, isSelected, onClick, t, lang }) {
+// Accordion: detail panel renders inline below the selected row
+function IncidentRow({ incident, isSelected, onClick, onClose, t, lang }) {
   const statusCls = STATUS_BADGE_CLASS[incident.status] ?? STATUS_BADGE_CLASS.resolved
   return (
-    <div
-      onClick={onClick}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
-      tabIndex={0}
-      role="row"
-      className={`cursor-pointer transition-colors
-        focus:outline-none focus:ring-1 focus:ring-[var(--border-hi)]
-        ${isSelected ? 'bg-[var(--bg2)] border-l-2 border-l-[var(--blue)]' : 'hover:bg-[var(--bg2)]'}`}
-      style={{ display: 'grid', gridTemplateColumns: '140px 1fr 100px 80px 80px', gap: '12px', padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}
-    >
-      <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{formatDate(incident.startedAt, lang)}</span>
-      <div role="cell" className="flex items-center gap-2 min-w-0">
-        <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text0)' }} className="truncate">{incident.title}</span>
-        <span className={`shrink-0 mono ${statusCls}`} style={{ fontSize: '9px', letterSpacing: '0.04em', padding: '2px 6px', borderRadius: '3px' }}>
-          {t(`incidents.status.${incident.status}`)}
-        </span>
+    <>
+      <div
+        onClick={onClick}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
+        tabIndex={0}
+        role="row"
+        className={`cursor-pointer transition-colors
+          focus:outline-none focus:ring-1 focus:ring-[var(--border-hi)]
+          ${isSelected ? 'bg-[var(--bg2)] border-l-2 border-l-[var(--blue)]' : 'hover:bg-[var(--bg2)]'}`}
+        style={{ display: 'grid', gridTemplateColumns: '140px 1fr 100px 80px 80px', gap: '12px', padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}
+      >
+        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{formatDate(incident.startedAt, lang)}</span>
+        <div role="cell" className="flex items-center gap-2 min-w-0">
+          <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text0)' }} className="truncate">{incident.title}</span>
+          <span className={`shrink-0 mono ${statusCls}`} style={{ fontSize: '9px', letterSpacing: '0.04em', padding: '2px 6px', borderRadius: '3px' }}>
+            {t(`incidents.status.${incident.status}`)}
+          </span>
+        </div>
+        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text1)' }}>{incident.serviceName}</span>
+        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{incident.duration ?? t('incidents.duration.ongoing')}</span>
+        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{t(`incidents.status.${incident.status}`)}</span>
       </div>
-      <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text1)' }}>{incident.serviceName}</span>
-      <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{incident.duration ?? t('incidents.duration.ongoing')}</span>
-      <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{t(`incidents.status.${incident.status}`)}</span>
-    </div>
+      {isSelected && <DetailPanel incident={incident} onClose={onClose} t={t} lang={lang} />}
+    </>
   )
 }
 
-// Mobile card
-function IncidentCard({ incident, isSelected, onClick, t, lang }) {
+// Mobile card — accordion detail inline
+function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }) {
   return (
-    <button
-      onClick={onClick}
-      className={`w-full text-left rounded border p-3 transition-colors space-y-1
-        ${isSelected
-          ? 'bg-[var(--bg2)] border-[var(--border-hi)]'
-          : 'bg-[var(--bg1)] border-[var(--border)] hover:bg-[var(--bg2)]'}`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', flex: 1 }}>
-          {incident.title}
-        </span>
-        <StatusBadge status={incident.status} t={t} />
-      </div>
-      <div className="flex items-center flex-wrap mono text-[var(--text2)]" style={{ fontSize: '10px', gap: '6px' }}>
-        <span>{formatDate(incident.startedAt, lang)}</span>
-        <span>·</span>
-        <span>{incident.serviceName}</span>
-        <span>·</span>
-        <span>{incident.duration ?? t('incidents.duration.ongoing')}</span>
-      </div>
-    </button>
+    <div>
+      <button
+        onClick={onClick}
+        className={`w-full text-left rounded border p-3 transition-colors space-y-1
+          ${isSelected
+            ? 'bg-[var(--bg2)] border-[var(--border-hi)]'
+            : 'bg-[var(--bg1)] border-[var(--border)] hover:bg-[var(--bg2)]'}`}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', flex: 1 }}>
+            {incident.title}
+          </span>
+          <StatusBadge status={incident.status} t={t} />
+        </div>
+        <div className="flex items-center flex-wrap mono text-[var(--text2)]" style={{ fontSize: '10px', gap: '6px' }}>
+          <span>{formatDate(incident.startedAt, lang)}</span>
+          <span>·</span>
+          <span>{incident.serviceName}</span>
+          <span>·</span>
+          <span>{incident.duration ?? t('incidents.duration.ongoing')}</span>
+        </div>
+      </button>
+      {isSelected && <DetailPanel incident={incident} onClose={onClose} t={t} lang={lang} />}
+    </div>
   )
 }
 
@@ -258,7 +265,13 @@ export default function Incidents() {
       .filter((inc) => serviceFilter === 'all' || inc.serviceId === serviceFilter)
       .filter((inc) => statusFilter  === 'all' || inc.status    === statusFilter)
       .filter((inc) => !cutoff || inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= cutoff)
-      .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
+      .sort((a, b) => {
+        // Ongoing incidents first, then by startedAt newest
+        const aOngoing = a.status !== 'resolved' ? 1 : 0
+        const bOngoing = b.status !== 'resolved' ? 1 : 0
+        if (aOngoing !== bOngoing) return bOngoing - aOngoing
+        return new Date(b.startedAt) - new Date(a.startedAt)
+      })
   }, [allIncidents, serviceFilter, statusFilter, period])
 
   if (loading && services.length === 0) return <IncidentsSkeleton />
@@ -330,6 +343,7 @@ export default function Incidents() {
                   incident={inc}
                   isSelected={inc.id === selectedId}
                   onClick={() => handleSelect(inc.id)}
+                  onClose={() => setSelectedId(null)}
                   t={t}
                   lang={lang}
                 />
@@ -345,22 +359,13 @@ export default function Incidents() {
                 incident={inc}
                 isSelected={inc.id === selectedId}
                 onClick={() => handleSelect(inc.id)}
+                onClose={() => setSelectedId(null)}
                 t={t}
                 lang={lang}
               />
             ))}
           </div>
         </>
-      )}
-
-      {/* ── Detail panel (shown below list when an incident is selected) ── */}
-      {selectedIncident && (
-        <DetailPanel
-          incident={selectedIncident}
-          onClose={() => setSelectedId(null)}
-          t={t}
-          lang={lang}
-        />
       )}
 
     </div>
