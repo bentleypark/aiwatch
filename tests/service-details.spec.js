@@ -163,7 +163,7 @@ test.describe('OpenAI Regional Availability', () => {
     })
     await page.goto('/')
     await waitForDataLoad(page)
-    await page.locator('main button').filter({ hasText: 'OpenAI' }).first().evaluate((el) => el.click())
+    await page.locator('main button').filter({ hasText: 'OpenAI API' }).first().click()
     await expect(page.locator('main').getByText(/Regional Availability|리전별 가용성/)).toBeVisible({ timeout: 5000 })
     // Global incident → all 3 regions should show incident
     await expect(page.locator('main').getByText(/Incident Detected|장애 감지/)).toHaveCount(3)
@@ -176,7 +176,7 @@ test.describe('Detection Lead badge', () => {
     await page.goto('/')
     await waitForDataLoad(page)
     // Navigate to OpenAI (mock: detectedAt 7min before ongoing incident)
-    await page.locator('main button').filter({ hasText: 'OpenAI API' }).first().evaluate((el) => el.click())
+    await page.locator('main button').filter({ hasText: 'OpenAI API' }).first().click()
     await expect(page.locator('main').getByText('Incident History')).toBeVisible({ timeout: 5000 })
     // Lead badge should be visible for ongoing incident
     await expect(page.locator('main').getByText('lead').first()).toBeVisible()
