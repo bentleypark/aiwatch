@@ -55,4 +55,5 @@ export interface ServiceConfig {
   betterStackUrl?: string
   onlineOrNotUrl?: string
   onlineOrNotComponent?: string
+  awsRssUrl?: string
 }

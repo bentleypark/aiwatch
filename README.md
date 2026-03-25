@@ -13,7 +13,7 @@
 
 **English** | [한국어](README.ko.md)
 
-Real-time monitoring dashboard for **20 AI services** — track status, latency, uptime, and incidents across major AI providers.
+Real-time monitoring dashboard for **21 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[https://ai-watch.dev](https://ai-watch.dev)**
 
@@ -21,7 +21,7 @@ Real-time monitoring dashboard for **20 AI services** — track status, latency,
 
 ## Features
 
-- **Real-time status** — Operational / Degraded / Down for 20 AI services
+- **Real-time status** — Operational / Degraded / Down for 21 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
 - **Latency monitoring** — Status page response time per API service
 - **24h latency trend** — Chart.js line chart with 30-min snapshots
@@ -45,7 +45,7 @@ Real-time monitoring dashboard for **20 AI services** — track status, latency,
 
 ## Monitored Services
 
-### AI API Services (14)
+### AI API Services (15)
 
 | Service | Provider | Status Source |
 |---------|----------|---------------|
@@ -63,6 +63,7 @@ Real-time monitoring dashboard for **20 AI services** — track status, latency,
 | xAI (Grok) | xAI | RSS feed |
 | DeepSeek API | DeepSeek | Atlassian Statuspage |
 | OpenRouter | OpenRouter | OnlineOrNot (React Router SSR) |
+| Amazon Bedrock | AWS | AWS Health Dashboard |
 
 ### AI Web Apps (2)
 
@@ -98,7 +99,7 @@ Real-time monitoring dashboard for **20 AI services** — track status, latency,
 Browser (React SPA, 60s polling)
   ↓
 Cloudflare Worker
-  ├── GET /api/status    → parallel fetch (19 services) → normalize
+  ├── GET /api/status    → parallel fetch (20 services) → normalize
   ├── GET /api/uptime    → daily uptime history
   └── POST /api/alert   → webhook proxy (Slack/Discord, SSRF protected)
   ↓
@@ -107,7 +108,8 @@ Parsers (worker/src/parsers/)
   ├── incident-io.ts     → incident.io compat API + component_uptimes/impacts
   ├── gcloud.ts          → Google Cloud incidents.json
   ├── instatus.ts        → Instatus Nuxt/Next.js SSR
-  └── betterstack.ts     → Better Stack RSS + /index.json uptime API
+  ├── betterstack.ts     → Better Stack RSS + /index.json uptime API
+  └── aws.ts             → AWS Health Dashboard RSS
   ↓
 Cloudflare KV
   ├── services:latest    (status cache, TTL 5min)
@@ -239,6 +241,7 @@ Embed real-time status badges in your README, docs, or blog.
 | `perplexity` | Perplexity | `xai` | xAI (Grok) |
 | `huggingface` | Hugging Face | `replicate` | Replicate |
 | `elevenlabs` | ElevenLabs | `openrouter` | OpenRouter |
+| `bedrock` | Amazon Bedrock | | |
 
 ## Project Structure
 
@@ -278,6 +281,7 @@ worker/
       instatus.ts     # Instatus (2 services)
       betterstack.ts  # Better Stack (3 services)
       onlineornot.ts  # OnlineOrNot (1 service — OpenRouter)
+      aws.ts          # AWS Health Dashboard (1 service — Bedrock)
     parsers/__tests__/ # Vitest unit tests
 ```
 

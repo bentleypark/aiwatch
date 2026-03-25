@@ -61,8 +61,8 @@ npm run test:worker # Run Worker unit tests (vitest)
 
 ## Architecture
 
-**AIWatch** is a React SPA that monitors 20 AI services in real time:
-- **14 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Perplexity, HuggingFace, Replicate, ElevenLabs, xAI, DeepSeek, OpenRouter
+**AIWatch** is a React SPA that monitors 21 AI services in real time:
+- **15 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Perplexity, HuggingFace, Replicate, ElevenLabs, xAI, DeepSeek, OpenRouter, Bedrock
 - **2 AI web apps**: claude.ai, ChatGPT
 - **4 coding agents**: Claude Code, GitHub Copilot, Cursor, Windsurf
 
@@ -91,7 +91,7 @@ worker/
     alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts)
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText)
     probe.ts    # Health check probing — direct RTT measurement (Phase 2 PoC)
-    parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack)
+    parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
 ```
 
 ### Design System
@@ -140,7 +140,7 @@ Is X Down pages (Edge SSR) use inline `gtag()` calls directly since they don't u
 ```
 Browser (React SPA, 60s polling)
   → Cloudflare Worker (/api/status)
-    → parallel fetch (20 services)
+    → parallel fetch (21 services)
     → normalize to ServiceStatus[]
     → write to KV (cache + daily counters)
   → React state (usePolling hook via PollingContext)

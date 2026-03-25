@@ -9,12 +9,14 @@ import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import { parseInstatusIncidents } from './parsers/instatus'
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
+import { parseAwsRssIncidents, deriveAwsStatus } from './parsers/aws'
 
 const SERVICES: ServiceConfig[] = [
   // AI API Services
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp' },
   { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'conversation', 'workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], statusComponent: 'Chat Completions', incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'] },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B', incidentKeywords: ['vertex', 'gemini', 'us-central1', 'europe-west1', 'asia-northeast1'] },
+  { id: 'bedrock', name: 'Amazon Bedrock', provider: 'AWS', category: 'api', statusUrl: 'https://health.aws.amazon.com/health/status', apiUrl: null, awsRssUrl: 'https://status.aws.amazon.com/rss/bedrock-us-east-1.rss' },
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE' },
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM' },
@@ -234,6 +236,29 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
     } else {
       // No Statuspage API — HTTP check + optional scraping (parallel)
       // Uses fetchWithTimeout (no retry) to stay within 50-subrequest budget
+      // AWS RSS — dedicated path (separate parser, custom status derivation)
+      if (config.awsRssUrl) {
+        const start = Date.now()
+        const rssRes = await fetchWithTimeout(config.awsRssUrl).catch((err) => {
+          console.warn(`[fetchService] ${config.id} AWS RSS failed:`, err instanceof Error ? err.message : err)
+          return null
+        })
+        const latency = Date.now() - start
+        if (!rssRes || !rssRes.ok) {
+          if (rssRes) console.warn(`[fetchService] ${config.id} AWS RSS HTTP ${rssRes.status}`)
+          return { ...base, status: 'degraded', latency: config.category === 'api' ? latency : null }
+        }
+        const incidents = parseAwsRssIncidents(await rssRes.text())
+        const filtered = filterIncidents(incidents, config)
+        return {
+          ...base,
+          status: deriveAwsStatus(filtered),
+          latency: config.category === 'api' ? latency : null,
+          incidents: filtered,
+          calendarDays: 14,
+        }
+      }
+
       const start = Date.now()
       const scrapeUrl = config.instatusUrl || config.rssFeedUrl || (config.gcloudProduct ? 'https://status.cloud.google.com/incidents.json' : null)
       const [res, scrapeRes, betterStackRes] = await Promise.all([

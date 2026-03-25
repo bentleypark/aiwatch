@@ -147,6 +147,13 @@ const MOCK_SERVICES = [
     ],
   },
   {
+    id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational',
+    latency: 280, uptime30d: null,
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
+  },
+  {
     id: 'mistral', category: 'api', name: 'Mistral API', provider: 'Mistral AI', status: 'operational',
     latency: 89, uptime30d: 99.92,
     history30d: hist(),
