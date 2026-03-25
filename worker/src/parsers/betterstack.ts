@@ -31,10 +31,10 @@ export function parseRssIncidents(xml: string): Incident[] {
     groups.get(guid)!.push({ title, date, desc })
   }
 
-  // Convert each group to an Incident (limit to 5)
+  // Convert each group to an Incident (limit to 20)
   const incidents: Incident[] = []
   for (const [guid, events] of groups) {
-    if (incidents.length >= 5) break
+    if (incidents.length >= 20) break
     events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     const first = events[0]
     const last = events[events.length - 1]

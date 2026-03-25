@@ -21,7 +21,7 @@ export function parseGCloudIncidents(data: GCloudIncident[], productFilter: stri
       inc.affected_products?.some((p) => p.title === productFilter) ||
       inc.service_name?.toLowerCase().includes(productFilter.toLowerCase())
     )
-    .slice(0, 5)
+    .slice(0, 20)
     .flatMap((inc) => {
       try {
         const duration = inc.end

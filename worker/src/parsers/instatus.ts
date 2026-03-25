@@ -18,14 +18,11 @@ function parseInstatusNextIncidents(html: string): Incident[] {
 
     const incidents: Incident[] = []
     for (const notice of Object.values(notices)) {
-      if (incidents.length >= 5) break
+      if (incidents.length >= 20) break
       const startDate = new Date(notice.started)
       if (isNaN(startDate.getTime())) continue
       const resolvedDate = notice.resolved ? new Date(notice.resolved) : null
       const isResolved = notice.status === 'RESOLVED'
-
-      // Skip micro-incidents (<1min) — automated monitoring noise (e.g. Checkly/Mistral)
-      if (isResolved && resolvedDate && resolvedDate.getTime() - startDate.getTime() < 60_000) continue
 
       const timeline: TimelineEntry[] = [
         { stage: 'investigating' as const, text: notice.name.default, at: startDate.toISOString() },
@@ -77,8 +74,8 @@ export function parseInstatusIncidents(html: string): Incident[] {
     const incIndices = arr[incObj.incidents] as number[]
     if (!Array.isArray(incIndices)) return []
 
-    // Parse each incident with per-item error isolation
-    return incIndices.slice(0, 5).flatMap((idx) => {
+    // Parse all incidents, then limit to 20
+    return incIndices.flatMap((idx) => {
       try {
         const inc = arr[idx] as Record<string, number>
         if (!inc || typeof inc !== 'object') return []
@@ -87,9 +84,20 @@ export function parseInstatusIncidents(html: string): Incident[] {
         const createdAt = arr[inc.created_at] as string
         const durationSec = arr[inc.duration] as number | null
 
-        // Skip micro-incidents (<1min) — automated monitoring noise
-        const isResolved = status === 'RESOLVED'
-        if (isResolved && durationSec != null && durationSec < 60) return []
+        // Extract affected service name from services array (e.g. "Chat Completions API")
+        const servicesArr = arr[inc.services] as number[] | undefined
+        let affectedService = ''
+        if (Array.isArray(servicesArr) && servicesArr.length > 0) {
+          try {
+            const svc = arr[servicesArr[0]] as Record<string, number>
+            if (svc && typeof svc === 'object') affectedService = (arr[svc.name] as string) ?? ''
+          } catch { /* ignore */ }
+        }
+
+        // Build descriptive title: "Completion API Degraded · Chat Completions API"
+        const displayTitle = affectedService && !name.toLowerCase().includes(affectedService.toLowerCase())
+          ? `${name} · ${affectedService}`
+          : name
 
         // Parse incident updates
         const updatesArr = arr[inc.incidentUpdates] as number[] | undefined
@@ -111,7 +119,7 @@ export function parseInstatusIncidents(html: string): Incident[] {
 
         return [{
           id: arr[inc.id] as string,
-          title: name,
+          title: displayTitle,
           status: status === 'RESOLVED' ? 'resolved' as const
             : status === 'MONITORING' ? 'monitoring' as const
             : status === 'IDENTIFIED' ? 'identified' as const
@@ -122,7 +130,7 @@ export function parseInstatusIncidents(html: string): Incident[] {
           timeline,
         }]
       } catch { return [] }
-    })
+    }).slice(0, 20)
   } catch {
     return []
   }

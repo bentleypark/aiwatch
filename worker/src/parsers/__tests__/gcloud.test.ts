@@ -62,11 +62,11 @@ describe('parseGCloudIncidents', () => {
     expect(result[0].duration).toBe('2h 0m')
   })
 
-  it('limits to 5 incidents', () => {
-    const data = Array.from({ length: 10 }, (_, i) =>
+  it('limits to 20 incidents', () => {
+    const data = Array.from({ length: 25 }, (_, i) =>
       makeIncident(`${i}`, [{ title: 'Gemini', id: 'g' }])
     )
     const result = parseGCloudIncidents(data, 'Gemini', 'g')
-    expect(result).toHaveLength(5)
+    expect(result).toHaveLength(20)
   })
 })

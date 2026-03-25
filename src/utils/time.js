@@ -20,5 +20,6 @@ export function formatDate(date, lang) {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
+    timeZoneName: 'short',
   }).format(new Date(date))
 }

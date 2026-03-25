@@ -86,22 +86,22 @@ describe('parseInstatusIncidents — Next.js SSR (Perplexity format)', () => {
     expect(result[0].timeline[1].stage).toBe('resolved')
   })
 
-  it('limits to 5 incidents', () => {
+  it('limits to 20 incidents', () => {
     const notices: Record<string, unknown> = {}
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 25; i++) {
       notices[`id${i}`] = {
         id: `id${i}`, name: { default: `Inc ${i}` },
-        impact: 'MAJOROUTAGE', started: `2026-03-0${i + 1}T10:00:00Z`,
+        impact: 'MAJOROUTAGE', started: `2026-03-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
         resolved: null, status: 'INVESTIGATING',
       }
     }
     const escaped = JSON.stringify(notices).slice(1, -1).replace(/"/g, '\\"')
     const html = `<script>self.__next_f.push([1,"notices\\":{${escaped}},\\"metrics"])</script>`
     const result = parseInstatusIncidents(html)
-    expect(result).toHaveLength(5)
+    expect(result).toHaveLength(20)
   })
 
-  it('skips micro-incidents shorter than 1 minute', () => {
+  it('includes sub-minute incidents with <1m duration', () => {
     const notice = {
       id1: {
         id: 'id1', name: { default: 'Completion API Degraded' },
@@ -112,35 +112,8 @@ describe('parseInstatusIncidents — Next.js SSR (Perplexity format)', () => {
     const escaped = JSON.stringify(notice).slice(1, -1).replace(/"/g, '\\"')
     const html = `<script>self.__next_f.push([1,"notices\\":{${escaped}},\\"metrics"])</script>`
     const result = parseInstatusIncidents(html)
-    expect(result).toHaveLength(0)
-  })
-
-  it('keeps incidents exactly 1 minute or longer', () => {
-    const notice = {
-      id1: {
-        id: 'id1', name: { default: 'Completion API Degraded' },
-        impact: 'PARTIALOUTAGE', started: '2026-03-23T14:57:00Z',
-        resolved: '2026-03-23T14:58:00Z', status: 'RESOLVED', // exactly 60s
-      },
-    }
-    const escaped = JSON.stringify(notice).slice(1, -1).replace(/"/g, '\\"')
-    const html = `<script>self.__next_f.push([1,"notices\\":{${escaped}},\\"metrics"])</script>`
-    const result = parseInstatusIncidents(html)
     expect(result).toHaveLength(1)
-  })
-
-  it('keeps ongoing (unresolved) micro-incidents', () => {
-    const notice = {
-      id1: {
-        id: 'id1', name: { default: 'API Down' },
-        impact: 'MAJOROUTAGE', started: '2026-03-23T14:57:00Z',
-        resolved: null, status: 'INVESTIGATING',
-      },
-    }
-    const escaped = JSON.stringify(notice).slice(1, -1).replace(/"/g, '\\"')
-    const html = `<script>self.__next_f.push([1,"notices\\":{${escaped}},\\"metrics"])</script>`
-    const result = parseInstatusIncidents(html)
-    expect(result).toHaveLength(1)
+    expect(result[0].duration).toBe('<1m')
   })
 
   it('skips notices with invalid dates', () => {
@@ -190,7 +163,7 @@ describe('parseInstatusIncidents — Nuxt SSR (Mistral format)', () => {
     expect(result[0].timeline[0].text).toBe('Issue has been fixed')
   })
 
-  it('skips Nuxt micro-incidents shorter than 1 minute', () => {
+  it('includes Nuxt sub-minute incidents with <1m duration', () => {
     const nuxtData = [
       null,
       { 'incidents-by-date-2026-03': 2 },
@@ -203,7 +176,8 @@ describe('parseInstatusIncidents — Nuxt SSR (Mistral format)', () => {
     ]
     const html = `<script type="application/json" id="__NUXT_DATA__">${JSON.stringify(nuxtData)}</script>`
     const result = parseInstatusIncidents(html)
-    expect(result).toHaveLength(0)
+    expect(result).toHaveLength(1)
+    expect(result[0].duration).toBe('<1m')
   })
 
   it('returns empty for malformed __NUXT_DATA__', () => {

@@ -45,17 +45,17 @@ describe('parseRssIncidents', () => {
     expect(parseRssIncidents('<rss></rss>')).toEqual([])
   })
 
-  it('limits to 5 incidents', () => {
-    const items = Array.from({ length: 10 }, (_, i) => `
+  it('limits to 20 incidents', () => {
+    const items = Array.from({ length: 25 }, (_, i) => `
       <item>
         <guid>http://example.com#${i}</guid>
         <title>Svc ${i} went down</title>
-        <pubDate>Sat, 01 Mar 2026 ${10 + i}:00:00 GMT</pubDate>
+        <pubDate>Sat, 01 Mar 2026 ${String(i).padStart(2, '0')}:00:00 GMT</pubDate>
         <description>Down</description>
       </item>
     `).join('')
     const result = parseRssIncidents(`<rss>${items}</rss>`)
-    expect(result).toHaveLength(5)
+    expect(result).toHaveLength(20)
   })
 })
 
