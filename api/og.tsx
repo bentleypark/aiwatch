@@ -1,9 +1,9 @@
-// Vercel Edge Function — Dynamic OG image for Is X Down pages
+// Vercel Serverless Function — Dynamic OG image for Is X Down pages
 // Uses @vercel/og (Satori) to render 1200×630 PNG with service status
 
 import { ImageResponse } from '@vercel/og'
 
-export const config = { runtime: 'edge' }
+export const config = { runtime: 'nodejs' }
 
 const FALLBACK_OG = 'https://ai-watch.dev/og-image.png'
 
