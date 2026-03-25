@@ -413,13 +413,13 @@ Copy Link
 <script>
 var _copyOrig='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy Link';
 function copyLink(btn){
-  if(!navigator.clipboard){btn.textContent='Copy failed';setTimeout(function(){btn.innerHTML=_copyOrig},2000);return}
+  if(!navigator.clipboard){prompt('Copy this URL:',btn.dataset.url);setTimeout(function(){btn.innerHTML=_copyOrig},500);return}
   navigator.clipboard.writeText(btn.dataset.url).then(function(){
     btn.classList.add('copied');btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>Copied!';
     gtag('event','share',{method:'copy',content_type:'is_x_down',item_id:${jsDisplayName}});
     setTimeout(function(){btn.classList.remove('copied');btn.innerHTML=_copyOrig},2000)
   }).catch(function(){
-    btn.textContent='Copy failed';setTimeout(function(){btn.innerHTML=_copyOrig},2000)
+    prompt('Copy this URL:',btn.dataset.url);setTimeout(function(){btn.innerHTML=_copyOrig},500)
   })
 }
 function shareKakao(){

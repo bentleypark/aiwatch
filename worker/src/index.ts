@@ -524,11 +524,11 @@ export default {
           },
         })
       } catch (err) {
-        console.warn('[og] PNG render failed, falling back to SVG:', err instanceof Error ? err.message : err)
+        console.error('[og] PNG render failed, falling back to SVG:', err instanceof Error ? err.message : err)
         return new Response(svg, {
           headers: {
             'Content-Type': 'image/svg+xml',
-            'Cache-Control': 'public, max-age=600, s-maxage=600',
+            'Cache-Control': 'public, max-age=60, s-maxage=60',
             'Access-Control-Allow-Origin': '*',
           },
         })
@@ -692,7 +692,7 @@ export default {
     }
 
     // GET /api/status/cached — KV cache only (no live fetch), for Is X Down SSR pages
-    if (url.pathname === '/api/status/cached') {
+    if (request.method === 'GET' && url.pathname === '/api/status/cached') {
       const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
       if (cached) {
         return new Response(JSON.stringify({ services: cached.services, lastUpdated: cached.cachedAt, cached: true }), {
