@@ -506,20 +506,33 @@ export default {
       }
     }
 
-    // GET /api/og — dynamic OG image (SVG) for social share previews
+    // GET /api/og — dynamic OG image (PNG) for social share previews
     if (request.method === 'GET' && url.pathname === '/api/og') {
       const service = (url.searchParams.get('service') || 'Unknown').slice(0, 50)
       const status = url.searchParams.get('status') || 'operational'
       const score = (url.searchParams.get('score') || '').slice(0, 5)
       const uptime = (url.searchParams.get('uptime') || '').slice(0, 6)
       const svg = generateOgSvg(service, status, score, uptime)
-      return new Response(svg, {
-        headers: {
-          'Content-Type': 'image/svg+xml',
-          'Cache-Control': 'public, max-age=600, s-maxage=600',
-          'Access-Control-Allow-Origin': '*',
-        },
-      })
+      try {
+        const { renderPng } = await import('./og-render')
+        const png = await renderPng(svg)
+        return new Response(png, {
+          headers: {
+            'Content-Type': 'image/png',
+            'Cache-Control': 'public, max-age=600, s-maxage=600',
+            'Access-Control-Allow-Origin': '*',
+          },
+        })
+      } catch (err) {
+        console.warn('[og] PNG render failed, falling back to SVG:', err instanceof Error ? err.message : err)
+        return new Response(svg, {
+          headers: {
+            'Content-Type': 'image/svg+xml',
+            'Cache-Control': 'public, max-age=600, s-maxage=600',
+            'Access-Control-Allow-Origin': '*',
+          },
+        })
+      }
     }
 
     // GET /badge/:serviceId — dynamic SVG status badge
