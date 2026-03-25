@@ -2,8 +2,7 @@
 // Uses @vercel/og (Satori) to render 1200×630 PNG with service status
 
 import { ImageResponse } from '@vercel/og'
-
-export const config = { runtime: 'nodejs' }
+import type { VercelRequest, VercelResponse } from '@vercel/node'
 
 const FALLBACK_OG = 'https://ai-watch.dev/og-image.png'
 
@@ -13,17 +12,16 @@ const STATUS_STYLE: Record<string, { label: string; color: string; bg: string }>
   down:        { label: 'Down',        color: '#f85149', bg: '#3d1a1a' },
 }
 
-export default async function handler(req: Request) {
-  const url = new URL(req.url)
-  const service = (url.searchParams.get('service') || 'Unknown').slice(0, 50)
-  const status = url.searchParams.get('status') || 'operational'
-  const score = (url.searchParams.get('score') || '').slice(0, 5)
-  const uptime = (url.searchParams.get('uptime') || '').slice(0, 6)
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const service = (String(req.query.service || 'Unknown')).slice(0, 50)
+  const status = String(req.query.status || 'operational')
+  const score = (String(req.query.score || '')).slice(0, 5)
+  const uptime = (String(req.query.uptime || '')).slice(0, 6)
 
   const s = STATUS_STYLE[status] ?? STATUS_STYLE.operational
 
   try {
-    return new ImageResponse(
+    const imgRes = new ImageResponse(
       (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', background: '#080c10', padding: '40px' }}>
           <div style={{ display: 'flex', position: 'absolute', top: 0, left: 0, right: 0, height: '4px', background: s.color }} />
@@ -44,8 +42,13 @@ export default async function handler(req: Request) {
       ),
       { width: 1200, height: 630 },
     )
+
+    const buffer = Buffer.from(await imgRes.arrayBuffer())
+    res.setHeader('Content-Type', 'image/png')
+    res.setHeader('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=1200')
+    res.status(200).send(buffer)
   } catch (err) {
     console.error('[og] Image generation failed:', err instanceof Error ? err.message : err)
-    return Response.redirect(FALLBACK_OG, 302)
+    res.redirect(302, FALLBACK_OG)
   }
 }
