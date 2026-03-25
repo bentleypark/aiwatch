@@ -55,6 +55,7 @@ const STATUS_URL = {
   deepseek:    'https://status.deepseek.com',
   openrouter:  'https://status.openrouter.ai',
   bedrock:     'https://health.aws.amazon.com/health/status',
+  pinecone:    'https://status.pinecone.io',
   claudeai:    'https://status.claude.com',
   chatgpt:     'https://status.openai.com',
   claudecode:  'https://status.claude.com',
@@ -278,6 +279,14 @@ const SERVICE_REGIONS = {
     { key: 'eu-west-1', label: 'Europe (Ireland)' },
     { key: 'ap-northeast-1', label: 'Asia Pacific (Tokyo)' },
   ],
+  pinecone: [
+    { key: 'AWS us-east-1', label: 'AWS US East' },
+    { key: 'AWS us-west-2', label: 'AWS US West' },
+    { key: 'AWS eu-west-1', label: 'AWS EU West' },
+    { key: 'Azure eastus2', label: 'Azure East US' },
+    { key: 'GCP us-central1', label: 'GCP US Central' },
+    { key: 'GCP europe-west4', label: 'GCP EU West' },
+  ],
 }
 
 // Classify incident type from title keywords
@@ -318,6 +327,7 @@ const REGION_DOCS_URL = {
   openai: 'https://platform.openai.com/docs/guides/production-best-practices',
   chatgpt: 'https://status.openai.com',
   bedrock: 'https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-regions.html',
+  pinecone: 'https://docs.pinecone.io/troubleshooting/available-cloud-regions',
 }
 
 function RegionalAvailability({ service, t }) {

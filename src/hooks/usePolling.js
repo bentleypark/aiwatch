@@ -33,6 +33,31 @@ const MOCK_SERVICES = [
     incidents: [],
   },
   {
+    id: 'chatgpt', category: 'webapp', name: 'ChatGPT', provider: 'OpenAI', status: 'operational',
+    latency: null, uptime30d: 98.20,
+    history30d: hist([1, 4, 8, 12, 18, 22, 28]),
+    history3m: [{ month: '2026-01', uptime: 98.90 }, { month: '2026-02', uptime: 97.50 }, { month: '2026-03', uptime: 98.20 }],
+    incidents: [
+      { id: 'cg-1', title: 'Slow Response Times', startedAt: ago(1 * D + 3 * H), duration: '1h 20m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: 'ChatGPT 응답 시간이 평소보다 느립니다.', at: ago(1 * D + 3 * H) },
+          { stage: 'resolved', text: '캐시 서버 재시작 후 정상화.', at: ago(1 * D + 3 * H - 80 * M) },
+        ] },
+      { id: 'cg-2', title: 'Image Upload Failures', startedAt: ago(3 * D + 5 * H), duration: '45m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: '이미지 업로드가 간헐적으로 실패합니다.', at: ago(3 * D + 5 * H) },
+          { stage: 'resolved', text: 'CDN 설정 복구 후 정상화.', at: ago(3 * D + 5 * H - 45 * M) },
+        ] },
+      { id: 'cg-3', title: 'Login Errors for Some Users', startedAt: ago(5 * D), duration: '2h 10m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: '일부 사용자가 로그인에 실패하고 있습니다.', at: ago(5 * D) },
+          { stage: 'identified', text: 'OAuth 토큰 갱신 문제로 확인.', at: ago(5 * D - 30 * M) },
+          { stage: 'resolved', text: '토큰 서비스 패치 후 정상화.', at: ago(5 * D - 130 * M) },
+        ] },
+    ],
+  },
+  // ── LLM API ──
+  {
     id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational',
     latency: 145, uptime30d: 99.97,
     history30d: hist([27]),
@@ -101,30 +126,6 @@ const MOCK_SERVICES = [
           { stage: 'resolved',      text: '설정을 복구했습니다.', at: ago(5 * D - 52 * M) },
         ],
       },
-    ],
-  },
-  {
-    id: 'chatgpt', category: 'webapp', name: 'ChatGPT', provider: 'OpenAI', status: 'operational',
-    latency: null, uptime30d: 98.20,
-    history30d: hist([1, 4, 8, 12, 18, 22, 28]),
-    history3m: [{ month: '2026-01', uptime: 98.90 }, { month: '2026-02', uptime: 97.50 }, { month: '2026-03', uptime: 98.20 }],
-    incidents: [
-      { id: 'cg-1', title: 'Slow Response Times', startedAt: ago(1 * D + 3 * H), duration: '1h 20m', status: 'resolved',
-        timeline: [
-          { stage: 'investigating', text: 'ChatGPT 응답 시간이 평소보다 느립니다.', at: ago(1 * D + 3 * H) },
-          { stage: 'resolved', text: '캐시 서버 재시작 후 정상화.', at: ago(1 * D + 3 * H - 80 * M) },
-        ] },
-      { id: 'cg-2', title: 'Image Upload Failures', startedAt: ago(3 * D + 5 * H), duration: '45m', status: 'resolved',
-        timeline: [
-          { stage: 'investigating', text: '이미지 업로드가 간헐적으로 실패합니다.', at: ago(3 * D + 5 * H) },
-          { stage: 'resolved', text: 'CDN 설정 복구 후 정상화.', at: ago(3 * D + 5 * H - 45 * M) },
-        ] },
-      { id: 'cg-3', title: 'Login Errors for Some Users', startedAt: ago(5 * D), duration: '2h 10m', status: 'resolved',
-        timeline: [
-          { stage: 'investigating', text: '일부 사용자가 로그인에 실패하고 있습니다.', at: ago(5 * D) },
-          { stage: 'identified', text: 'OAuth 토큰 갱신 문제로 확인.', at: ago(5 * D - 30 * M) },
-          { stage: 'resolved', text: '토큰 서비스 패치 후 정상화.', at: ago(5 * D - 130 * M) },
-        ] },
     ],
   },
   {
@@ -239,6 +240,51 @@ const MOCK_SERVICES = [
     ],
   },
   {
+    id: 'xai', category: 'api', name: 'xAI (Grok)', provider: 'xAI', status: 'degraded',
+    latency: 203, uptime30d: 99.75,
+    history30d: hist([24]),
+    history3m: [{ month: '2026-01', uptime: 99.82 }, { month: '2026-02', uptime: 99.79 }, { month: '2026-03', uptime: 99.75 }],
+    incidents: [
+      { id: 'xa-0', title: 'eu-west-1.api.x.ai went down', startedAt: ago(2 * H), duration: null, status: 'investigating',
+        timeline: [
+          { stage: 'investigating', text: 'EU region API endpoint is experiencing errors.', at: ago(2 * H) },
+        ] },
+      { id: 'xa-1', title: 'Authentication Errors', startedAt: ago(2 * D + 14 * H), duration: '22m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: 'API 인증 오류가 다수 발생 중입니다.', at: ago(2 * D + 14 * H) },
+          { stage: 'resolved', text: '인증 서버 설정 복구.', at: ago(2 * D + 14 * H - 22 * M) },
+        ] },
+    ],
+  },
+  {
+    id: 'deepseek', category: 'api', name: 'DeepSeek API', provider: 'DeepSeek', status: 'operational',
+    latency: 321, uptime30d: 99.40,
+    history30d: hist([11]),
+    history3m: [{ month: '2026-01', uptime: 99.55 }, { month: '2026-02', uptime: 99.48 }, { month: '2026-03', uptime: 99.40 }],
+    incidents: [
+      { id: 'ds-1', title: 'API Response Truncation', startedAt: ago(1 * D + 12 * H), duration: '1h 33m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: 'API 응답이 중간에 잘리는 현상이 보고되었습니다.', at: ago(1 * D + 12 * H) },
+          { stage: 'identified', text: '프록시 버퍼 크기 설정 오류로 확인.', at: ago(1 * D + 12 * H - 40 * M) },
+          { stage: 'resolved', text: '버퍼 크기 증가 후 정상화.', at: ago(1 * D + 12 * H - 93 * M) },
+        ] },
+      { id: 'ds-2', title: 'Elevated Error Rates', startedAt: ago(4 * D + 8 * H), duration: '2h 5m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: '전반적인 오류율이 증가했습니다.', at: ago(4 * D + 8 * H) },
+          { stage: 'monitoring', text: '핫픽스를 배포했습니다.', at: ago(4 * D + 8 * H - 90 * M) },
+          { stage: 'resolved', text: '오류율이 정상 범위로 복귀.', at: ago(4 * D + 8 * H - 125 * M) },
+        ] },
+    ],
+  },
+  {
+    id: 'openrouter', category: 'api', name: 'OpenRouter', provider: 'OpenRouter', status: 'operational',
+    latency: 580, uptime30d: 99.89,
+    history30d: hist([2, 3]),
+    history3m: [{ month: '2026-01', uptime: 99.85 }, { month: '2026-02', uptime: 99.70 }, { month: '2026-03', uptime: 99.89 }],
+    incidents: [],
+  },
+  // ── Inference / Infrastructure ──
+  {
     id: 'huggingface', category: 'api', name: 'Hugging Face', provider: 'Hugging Face', status: 'degraded',
     latency: 890, uptime30d: 98.52,
     history30d: hist([10, 20, 25], [15, 16, 17]),
@@ -296,47 +342,10 @@ const MOCK_SERVICES = [
     ],
   },
   {
-    id: 'xai', category: 'api', name: 'xAI (Grok)', provider: 'xAI', status: 'degraded',
-    latency: 203, uptime30d: 99.75,
-    history30d: hist([24]),
-    history3m: [{ month: '2026-01', uptime: 99.82 }, { month: '2026-02', uptime: 99.79 }, { month: '2026-03', uptime: 99.75 }],
-    incidents: [
-      { id: 'xa-0', title: 'eu-west-1.api.x.ai went down', startedAt: ago(2 * H), duration: null, status: 'investigating',
-        timeline: [
-          { stage: 'investigating', text: 'EU region API endpoint is experiencing errors.', at: ago(2 * H) },
-        ] },
-      { id: 'xa-1', title: 'Authentication Errors', startedAt: ago(2 * D + 14 * H), duration: '22m', status: 'resolved',
-        timeline: [
-          { stage: 'investigating', text: 'API 인증 오류가 다수 발생 중입니다.', at: ago(2 * D + 14 * H) },
-          { stage: 'resolved', text: '인증 서버 설정 복구.', at: ago(2 * D + 14 * H - 22 * M) },
-        ] },
-    ],
-  },
-  {
-    id: 'deepseek', category: 'api', name: 'DeepSeek API', provider: 'DeepSeek', status: 'operational',
-    latency: 321, uptime30d: 99.40,
-    history30d: hist([11]),
-    history3m: [{ month: '2026-01', uptime: 99.55 }, { month: '2026-02', uptime: 99.48 }, { month: '2026-03', uptime: 99.40 }],
-    incidents: [
-      { id: 'ds-1', title: 'API Response Truncation', startedAt: ago(1 * D + 12 * H), duration: '1h 33m', status: 'resolved',
-        timeline: [
-          { stage: 'investigating', text: 'API 응답이 중간에 잘리는 현상이 보고되었습니다.', at: ago(1 * D + 12 * H) },
-          { stage: 'identified', text: '프록시 버퍼 크기 설정 오류로 확인.', at: ago(1 * D + 12 * H - 40 * M) },
-          { stage: 'resolved', text: '버퍼 크기 증가 후 정상화.', at: ago(1 * D + 12 * H - 93 * M) },
-        ] },
-      { id: 'ds-2', title: 'Elevated Error Rates', startedAt: ago(4 * D + 8 * H), duration: '2h 5m', status: 'resolved',
-        timeline: [
-          { stage: 'investigating', text: '전반적인 오류율이 증가했습니다.', at: ago(4 * D + 8 * H) },
-          { stage: 'monitoring', text: '핫픽스를 배포했습니다.', at: ago(4 * D + 8 * H - 90 * M) },
-          { stage: 'resolved', text: '오류율이 정상 범위로 복귀.', at: ago(4 * D + 8 * H - 125 * M) },
-        ] },
-    ],
-  },
-  {
-    id: 'openrouter', category: 'api', name: 'OpenRouter', provider: 'OpenRouter', status: 'operational',
-    latency: 580, uptime30d: 99.89,
-    history30d: hist([2, 3]),
-    history3m: [{ month: '2026-01', uptime: 99.85 }, { month: '2026-02', uptime: 99.70 }, { month: '2026-03', uptime: 99.89 }],
+    id: 'pinecone', category: 'api', name: 'Pinecone', provider: 'Pinecone', status: 'operational',
+    latency: 320, uptime30d: null,
+    history30d: hist(),
+    history3m: null,
     incidents: [],
   },
   {

@@ -14,7 +14,7 @@ export const VALID_PERIODS = ['7d', '30d', '90d']
 export const API_SERVICE_IDS = [
   'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq',
   'together', 'perplexity', 'huggingface', 'replicate',
-  'elevenlabs', 'xai', 'deepseek', 'openrouter', 'bedrock',
+  'elevenlabs', 'xai', 'deepseek', 'openrouter', 'bedrock', 'pinecone',
 ]
 
 // AI web apps (no latency — web services, ordered before related API)
@@ -23,10 +23,15 @@ export const WEBAPP_SERVICE_IDS = ['claudeai', 'chatgpt']
 // Coding agents
 export const AGENT_SERVICE_IDS = ['claudecode', 'copilot', 'cursor', 'windsurf']
 
-// Services + WebApps interleaved by design v2 order (webapp before related API)
+// Display order: webapp → LLM → inference → agent
 export const SERVICE_AND_WEBAPP_IDS = [
-  'claudeai', 'claude', 'openai', 'chatgpt', 'gemini', 'bedrock', 'mistral', 'cohere', 'groq',
-  'together', 'perplexity', 'huggingface', 'replicate', 'elevenlabs', 'xai', 'deepseek', 'openrouter',
+  // webapp
+  'claudeai', 'chatgpt',
+  // LLM API
+  'claude', 'openai', 'gemini', 'bedrock', 'mistral', 'cohere', 'groq',
+  'together', 'perplexity', 'xai', 'deepseek', 'openrouter',
+  // inference / infrastructure
+  'huggingface', 'replicate', 'elevenlabs', 'pinecone',
 ]
 
 // All service IDs
@@ -35,15 +40,15 @@ export const ALL_SERVICE_IDS = [...SERVICE_AND_WEBAPP_IDS, ...AGENT_SERVICE_IDS]
 // Sidebar category filters — splits Worker's 'api' into LLM vs Voice/Inference
 export const SERVICE_CATEGORIES = {
   all:       { labelKey: 'filter.all',       ids: null }, // null = show all
-  llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'groq', 'together', 'mistral', 'cohere', 'deepseek', 'perplexity', 'xai', 'openrouter', 'bedrock'] },
-  agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'copilot', 'cursor', 'windsurf'] },
   webapps:   { labelKey: 'filter.webapps',   ids: ['claudeai', 'chatgpt'] },
-  inference: { labelKey: 'filter.inference', ids: ['elevenlabs', 'replicate', 'huggingface'] },
+  llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'mistral', 'cohere', 'groq', 'together', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
+  inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'elevenlabs', 'pinecone'] },
+  agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'copilot', 'cursor', 'windsurf'] },
 }
 
 // Services excluded from fallback recommendations (not interchangeable with LLM APIs)
 // Keep in sync with worker/src/fallback.ts EXCLUDE_FALLBACK
-export const EXCLUDE_FALLBACK = ['elevenlabs', 'replicate', 'huggingface']
+export const EXCLUDE_FALLBACK = ['elevenlabs', 'replicate', 'huggingface', 'pinecone']
 
 export const VALID_ALERT_CONDITIONS = ['down', 'degraded', 'all']
 
