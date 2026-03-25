@@ -2,6 +2,7 @@
 // Design mockup: svc-card with left border, provider, 3-col metrics, variable-height history bars.
 
 import { useState, useEffect } from 'react'
+import IncidentTimeline from '../components/IncidentTimeline'
 import { useLang } from '../hooks/useLang'
 import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
@@ -204,8 +205,8 @@ function IncidentItem({ incident, lang, t }) {
             <div className="text-[12px] font-medium text-[var(--text0)] truncate" style={{ marginBottom: '2px' }}>
               {incident.serviceName} — {incident.title}
             </div>
-            {hasTimeline && (
-              <span className="shrink-0 text-[9px] text-[var(--text2)]">{expanded ? '▾' : '▸'}</span>
+            {hasTimeline && expanded && (
+              <span className="shrink-0 text-[9px] text-[var(--text2)]">▾</span>
             )}
           </div>
           <div className="mono text-[10px] text-[var(--text2)]">
@@ -214,44 +215,15 @@ function IncidentItem({ incident, lang, t }) {
         </div>
       </div>
       {expanded && (
-        <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden mt-2 ml-[66px]">
-          <div className="flex items-start justify-between border-b border-[var(--border)]" style={{ padding: '14px 16px' }}>
-            <div>
-              <p className="text-sm font-medium text-[var(--text0)] mb-1">
-                {incident.serviceName} — {incident.title}
-              </p>
-              <p className="mono text-[10px] text-[var(--text2)]">
-                {formatDate(incident.startedAt, lang)}  ·  {incident.duration ?? t('overview.incidents.monitoring')}
-              </p>
-            </div>
-            <button
-              onClick={(e) => { e.stopPropagation(); setExpanded(false) }}
-              className="shrink-0 mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] border border-[var(--border)] rounded hover:opacity-80 transition-opacity cursor-pointer"
-              style={{ padding: '4px 10px' }}
-            >
-              ✕
-            </button>
-          </div>
-          <div style={{ padding: '20px 24px' }}>
-            {incident.timeline.map((step, i) => {
-              const isLast = i === incident.timeline.length - 1
-              const stageDot = { investigating: 'bg-[var(--amber)]', identified: 'bg-[var(--blue)]', monitoring: 'bg-[var(--teal)]', resolved: 'bg-[var(--green)]' }
-              const stageText = { investigating: 'text-[var(--amber)]', identified: 'text-[var(--blue)]', monitoring: 'text-[var(--teal)]', resolved: 'text-[var(--green)]' }
-              return (
-                <div key={i} className="flex gap-[14px]">
-                  <div className="flex flex-col items-center w-[14px] shrink-0">
-                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 mt-[3px] ${stageDot[step.stage] ?? 'bg-[var(--text2)]'}`} />
-                    {!isLast && <div className="w-px flex-1 bg-[var(--border)] my-[3px] min-h-[16px]" />}
-                  </div>
-                  <div className="pb-4">
-                    <p className={`mono font-medium text-[10px] mb-[3px] ${stageText[step.stage] ?? 'text-[var(--text2)]'}`}>{t(`incidents.timeline.${step.stage}`)}</p>
-                    {step.text && <p className="text-xs text-[var(--text1)] mb-[3px]" style={{ lineHeight: 1.6 }}>{step.text}</p>}
-                    <p className="mono text-[10px] text-[var(--text2)]">{formatDate(step.at, lang)}</p>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+        <div className="ml-[66px]">
+          <IncidentTimeline
+            title={`${incident.serviceName} — ${incident.title}`}
+            subtitle={`${formatDate(incident.startedAt, lang)}  ·  ${incident.duration ?? t('overview.incidents.monitoring')}`}
+            timeline={incident.timeline}
+            onClose={() => setExpanded(false)}
+            t={t}
+            lang={lang}
+          />
         </div>
       )}
     </div>
@@ -358,11 +330,11 @@ function ActionBanner({ services, setPage, setFilter, setCategoryFilter, t }) {
           {icon} {t('overview.banner.affected').replace('{n}', affected.length)} — {names}{suffix}
         </div>
         <button
-          onClick={() => { setCategoryFilter('all'); setFilter('issues'); }}
+          onClick={() => setPage({ name: 'incidents' })}
           className="mono text-[11px] text-[var(--blue)] hover:underline cursor-pointer"
           style={{ background: 'none', border: 'none', padding: 0 }}
         >
-          👉 {t('overview.banner.viewIssues')}
+          👉 {t('overview.banner.viewIncidents')}
         </button>
       </div>
     )

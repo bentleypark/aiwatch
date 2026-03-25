@@ -55,4 +55,15 @@ test.describe('Overview page', () => {
     await page.waitForTimeout(200)
     await expect(page.locator('main button').filter({ hasText: 'Claude API' })).toBeVisible()
   })
+
+  test('action banner navigates to Incidents page on click', async ({ page }) => {
+    // Banner only shows when services are degraded/down — check if it exists
+    const banner = page.locator('main').getByText(/인시던트 상세 확인|View incident details/)
+    if (await banner.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await banner.click()
+      // Should navigate to Incidents page
+      // Incidents page has filter selects
+      await expect(page.locator('main select').first()).toBeVisible({ timeout: 5000 })
+    }
+  })
 })

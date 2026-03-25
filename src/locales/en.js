@@ -61,6 +61,7 @@ const en = {
   'overview.banner.fallback': 'Suggested fallback:',
   'overview.banner.noFallback': 'No direct fallback available · Retry or caching recommended',
   'overview.banner.viewIssues': 'View Issues tab for details',
+  'overview.banner.viewIncidents': 'View incident details',
   'overview.ai.title': 'AI Analysis',
   'overview.ai.soon': 'Coming Soon',
   'overview.ai.desc': 'Automatic anomaly detection and analysis is being prepared',

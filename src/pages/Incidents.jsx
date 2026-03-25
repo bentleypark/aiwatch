@@ -3,11 +3,12 @@
 // Desktop: scrollable table (5 columns). Mobile: card list.
 // Row/card click toggles a DetailPanel with per-stage timeline.
 
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { formatDate } from '../utils/time'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
+import IncidentTimeline from '../components/IncidentTimeline'
 import EmptyState from '../components/EmptyState'
 import { trackEvent } from '../utils/analytics'
 
@@ -88,70 +89,16 @@ function FilterBar({ services, serviceFilter, setServiceFilter, statusFilter, se
   )
 }
 
-function TimelineStep({ stage, text, at, isLast, t, lang }) {
-  const { dot: dotCls = 'bg-[var(--text2)]', text: textCls = 'text-[var(--text2)]' } = STAGE_CLASS[stage] ?? {}
-  return (
-    <div className="flex gap-[14px]">
-      <div className="flex flex-col items-center w-[14px] shrink-0">
-        <span className={`w-2.5 h-2.5 rounded-full shrink-0 mt-[3px] ${dotCls}`} aria-hidden="true" />
-        {!isLast && <div className="w-px flex-1 bg-[var(--border)] my-[3px] min-h-[16px]" />}
-      </div>
-      <div className="pb-4">
-        <p className={`mono font-medium text-[10px] mb-[3px] ${textCls}`}>{t(`incidents.timeline.${stage}`)}</p>
-        {text && <p className="text-xs text-[var(--text1)] mb-[3px]" style={{ lineHeight: 1.6 }}>{text}</p>}
-        <p className="mono text-[10px] text-[var(--text2)]">{formatDate(at, lang)}</p>
-      </div>
-    </div>
-  )
-}
-
 function DetailPanel({ incident, onClose, t, lang }) {
-  const panelRef = useRef(null)
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-    }, 50)
-    return () => clearTimeout(timer)
-  }, [incident.id])
-
   return (
-    <div ref={panelRef} className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden mt-[10px]">
-      <div className="flex items-start justify-between border-b border-[var(--border)]" style={{ padding: '14px 16px' }}>
-        <div>
-          <p className="text-sm font-medium text-[var(--text0)] mb-1">
-            {incident.serviceName} — {incident.title}
-          </p>
-          <p className="mono text-[10px] text-[var(--text2)]">
-            {formatDate(incident.startedAt, lang)}  ·  {t('incidents.col.duration')}: {incident.duration ?? t('incidents.duration.ongoing')}
-          </p>
-        </div>
-        <button
-          onClick={onClose}
-          className="shrink-0 mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] border border-[var(--border)] rounded hover:opacity-80 transition-opacity cursor-pointer"
-          style={{ padding: '4px 10px' }}
-          aria-label={t('modal.close')}
-        >
-          ✕ {t('modal.close')}
-        </button>
-      </div>
-      <div style={{ padding: '20px 24px' }}>
-        {(incident.timeline ?? []).length === 0 ? (
-          <p className="text-xs text-[var(--text2)]">{t('incidents.timeline.empty')}</p>
-        ) : (
-          (incident.timeline ?? []).map((step, i) => (
-            <TimelineStep
-              key={`${step.stage}-${i}`}
-              stage={step.stage}
-              text={step.text}
-              at={step.at}
-              isLast={i === (incident.timeline?.length ?? 0) - 1}
-              t={t}
-              lang={lang}
-            />
-          ))
-        )}
-      </div>
-    </div>
+    <IncidentTimeline
+      title={`${incident.serviceName} — ${incident.title}`}
+      subtitle={`${formatDate(incident.startedAt, lang)}  ·  ${t('incidents.col.duration')}: ${incident.duration ?? t('incidents.duration.ongoing')}`}
+      timeline={incident.timeline}
+      onClose={onClose}
+      t={t}
+      lang={lang}
+    />
   )
 }
 

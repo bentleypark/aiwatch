@@ -61,6 +61,7 @@ const ko = {
   'overview.banner.fallback': '대체 추천:',
   'overview.banner.noFallback': '대체 서비스 없음 · 재시도 또는 캐싱 권장',
   'overview.banner.viewIssues': 'Issues 탭에서 확인',
+  'overview.banner.viewIncidents': '인시던트 상세 확인',
   'overview.ai.title': 'AI Analysis',
   'overview.ai.soon': '준비 중',
   'overview.ai.desc': '자동 이상 감지 및 분석 기능을 준비 중입니다',
