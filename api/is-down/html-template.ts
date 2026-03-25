@@ -358,7 +358,7 @@ function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string
 ${items}
 <div class="links" style="margin-top:12px">
 <a href="https://ai-watch.dev/#ranking">Reliability rankings &rarr;</a>
-<a href="https://bentleypark.github.io/aiwatch-reports/">Monthly reports &rarr;</a>
+<a href="https://reports.ai-watch.dev/">Monthly reports &rarr;</a>
 </div>
 </div>`
 }
@@ -373,7 +373,7 @@ function renderFooter(slug: string): string {
 
   return `<div class="footer">
 <p style="margin-bottom:12px"><a href="https://ai-watch.dev" class="btn">View Full Dashboard</a></p>
-<p><a href="https://ai-watch.dev/#${esc(slug)}">Detailed service page</a> &middot; <a href="https://bentleypark.github.io/aiwatch-reports/">Monthly reports</a> &middot; <a href="https://ai-watch.dev/#settings">Set up alerts</a></p>
+<p><a href="https://ai-watch.dev/#${esc(slug)}">Detailed service page</a> &middot; <a href="https://reports.ai-watch.dev/">Monthly reports</a> &middot; <a href="https://ai-watch.dev/#settings">Set up alerts</a></p>
 ${otherLinks ? `<p style="margin-top:12px;font-size:12px">Also check: ${otherLinks}</p>` : ''}
 <p style="margin-top:12px">&copy; 2026 AIWatch. Real-time AI service status monitoring.</p>
 </div>`
