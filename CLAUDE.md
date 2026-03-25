@@ -88,6 +88,8 @@ worker/
     utils.ts    # Shared utilities (formatDuration, fetchWithTimeout, sanitize)
     score.ts    # AIWatch Score calculation
     badge.ts    # SVG badge generator
+    og.ts       # OG image SVG generator (1200×630 for social share)
+    og-render.ts # SVG → PNG conversion (resvg-wasm, Inter font from CDN)
     alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts)
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText)
     probe.ts    # Health check probing — direct RTT measurement (Phase 2 PoC)
@@ -133,6 +135,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | `webhook_remove` | `type` (discord/slack) | Settings | Webhook URL removed |
 | `region_switch_intent` | `service_id`, `recommended_region` | ServiceDetails (Regional) | Region guide link click |
 | `click_reports` | — | Sidebar | Monthly reports link click |
+| `share` | `method` (x/threads/kakao/copy), `item_id` | Is X Down (share buttons) | Social share button click |
 
 Is X Down pages (Edge SSR) use inline `gtag()` calls directly since they don't use React.
 
@@ -172,8 +175,8 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
     npm run deploy:worker
     ```
   - Verify the output says `Uploaded aiwatch-worker` (not `aiwatch`)
-  - Endpoints: `GET /api/status`, `GET /api/uptime?days=30`, `POST /api/alert`, `GET /badge/:serviceId`, `GET /api/v1/status`
-  - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res/down/recovered:` keys, 7d TTL)
+  - Endpoints: `GET /api/status`, `GET /api/status/cached` (KV-only, for SSR), `GET /api/uptime?days=30`, `POST /api/alert`, `GET /badge/:serviceId`, `GET /api/og` (dynamic OG image PNG), `GET /api/v1/status`
+  - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res:` keys 7d TTL, `alerted:down/degraded/recovered:` keys 2h TTL). Fallback recommendations only included when service status is degraded/down (not operational)
 - **Frontend deployment**: Vercel, domain ai-watch.dev — `git push origin main` triggers auto-deploy. `npm run build` is local only; changes are not live until pushed
 - **PWA**: `public/manifest.json` + `public/sw.js` (stale-while-revalidate). CACHE_NAME in `sw.js` must be bumped manually when static assets change. SW excludes `/is-*` (Edge SSR) and `/api/*` (real-time data) from caching
-- **Edge SSR**: `api/is-down.ts` serves "Is X Down?" SEO pages via Vercel Edge Functions. `vercel.json` rewrites route `/is-{service}-down` to the handler
+- **Edge SSR**: `api/is-down.ts` serves "Is X Down?" SEO pages (6 services: claude, chatgpt, gemini, github-copilot, cursor, claude-code) via Vercel Edge Functions. Uses `/api/status/cached` (KV-only) for fast SSR (~1.2s). Dynamic OG image via Worker `/api/og` (PNG, resvg-wasm). Share buttons: X, Threads, KakaoTalk (SDK async), Copy Link. `vercel.json` rewrites route `/is-{service}-down` to the handler
