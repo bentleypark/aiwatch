@@ -356,9 +356,15 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   const sent = toSend.slice(0, 5)
   for (const alert of sent) {
     const isStatusAlert = alert.key.startsWith('alerted:down:') || alert.key.startsWith('alerted:degraded:')
-    const ttl = isStatusAlert ? 7200 : 604800
+    const isRecoveryAlert = alert.key.startsWith('alerted:recovered:')
+    const ttl = (isStatusAlert || isRecoveryAlert) ? 7200 : 604800
     const kvValue = isStatusAlert ? new Date().toISOString() : '1'
     await env.STATUS_CACHE.put(alert.key, kvValue, { expirationTtl: ttl }).catch(() => {})
+    // Clean up recovered key when new degraded/down alert fires, so future recovery can trigger
+    if (isStatusAlert) {
+      const svcId = alert.key.split(':').pop()!
+      await env.STATUS_CACHE.delete(`alerted:recovered:${svcId}`).catch(() => {})
+    }
     await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
       title: alert.title,
       description: `${alert.description}\n[View on AIWatch](${alert.url})`,
