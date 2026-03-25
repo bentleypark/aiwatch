@@ -39,4 +39,12 @@
     <changefreq>hourly</changefreq>
     <priority>0.9</priority>
   </url>
+
+  <!-- Monthly Reports (external) -->
+  <url>
+    <loc>https://reports.ai-watch.dev/</loc>
+    <lastmod>2026-03-25</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
 </urlset>
