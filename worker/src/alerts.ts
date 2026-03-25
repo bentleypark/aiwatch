@@ -36,10 +36,13 @@ export function buildIncidentAlerts(
       if (incAge > 86_400_000) continue
 
       if (inc.status !== 'resolved' && !alertedNewIds.has(inc.id)) {
+        const fallbackText = svc.status !== 'operational'
+          ? buildFallbackText(getFallbacks(svc.id, svc.category, services))
+          : ''
         alerts.push({
           key: `alerted:new:${inc.id}`,
           title: `🔴 ${svc.name} — New Incident`,
-          description: `${sanitize(inc.title)}\n${buildFallbackText(getFallbacks(svc.id, svc.category, services))}`,
+          description: fallbackText ? `${sanitize(inc.title)}\n${fallbackText}` : sanitize(inc.title),
           color: 0xED4245,
           url: `https://ai-watch.dev/#${svc.id}`,
         })

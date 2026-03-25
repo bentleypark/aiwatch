@@ -404,7 +404,7 @@ Share
 <svg width="16" height="16" viewBox="0 0 24 24" fill="#191919"><path d="M12 3C6.477 3 2 6.463 2 10.691c0 2.754 1.862 5.18 4.67 6.532-.16.578-.583 2.096-.668 2.421-.104.397.146.392.306.285.126-.084 2.005-1.36 2.816-1.912.93.134 1.891.205 2.876.205 5.523 0 10-3.463 10-7.691S17.523 3 12 3z"/></svg>
 KakaoTalk
 </button>
-<button class="share-btn share-copy" onclick="copyLink(this)" data-url="${esc(canonical)}">
+<button class="share-btn share-copy" onclick="copyLink(this)" data-url="${esc(canonical)}" data-text="${esc(`Is ${seo.displayName} down? Current status: ${status}. Check live: ${canonical}`)}">
 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
 Copy Link
 </button>
@@ -413,13 +413,14 @@ Copy Link
 <script>
 var _copyOrig='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy Link';
 function copyLink(btn){
-  if(!navigator.clipboard){prompt('Copy this URL:',btn.dataset.url);setTimeout(function(){btn.innerHTML=_copyOrig},500);return}
-  navigator.clipboard.writeText(btn.dataset.url).then(function(){
+  var copyText=btn.dataset.text||btn.dataset.url;
+  if(!navigator.clipboard){prompt('Copy this:',copyText);setTimeout(function(){btn.innerHTML=_copyOrig},500);return}
+  navigator.clipboard.writeText(copyText).then(function(){
     btn.classList.add('copied');btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>Copied!';
     gtag('event','share',{method:'copy',content_type:'is_x_down',item_id:${jsDisplayName}});
     setTimeout(function(){btn.classList.remove('copied');btn.innerHTML=_copyOrig},2000)
   }).catch(function(){
-    prompt('Copy this URL:',btn.dataset.url);setTimeout(function(){btn.innerHTML=_copyOrig},500)
+    prompt('Copy this:',copyText);setTimeout(function(){btn.innerHTML=_copyOrig},500)
   })
 }
 function shareKakao(){

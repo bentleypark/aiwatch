@@ -75,6 +75,18 @@ describe('buildIncidentAlerts', () => {
     expect(alerts[0].description).toContain('Suggested fallback')
   })
 
+  it('omits fallback when service is operational (incident without outage)', () => {
+    const openai = mockService({
+      id: 'openai', status: 'operational',
+      incidents: [{ id: 'inc1', title: 'Minor issue', status: 'investigating', startedAt: recentDate, impact: 'minor' }],
+    })
+    const claude = mockService({ id: 'claude', name: 'Claude API', aiwatchScore: 90 })
+    const alerts = buildIncidentAlerts([openai, claude], new Set(), NOW)
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0].description).not.toContain('Suggested fallback')
+    expect(alerts[0].description).toBe('Minor issue')
+  })
+
   it('handles service with no incidents', () => {
     const svc = mockService({ incidents: [] })
     expect(buildIncidentAlerts([svc], new Set(), NOW)).toHaveLength(0)
