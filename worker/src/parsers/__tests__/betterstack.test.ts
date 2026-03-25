@@ -90,8 +90,30 @@ describe('parseBetterStackStatus', () => {
     expect(parseBetterStackStatus({ data: { attributes: { aggregate_state: 'operational' } } })).toBe('operational')
   })
 
-  it('returns down for aggregate_state "downtime"', () => {
+  it('returns down for aggregate_state "downtime" without resource data', () => {
     expect(parseBetterStackStatus({ data: { attributes: { aggregate_state: 'downtime' } } })).toBe('down')
+  })
+
+  it('returns degraded for "downtime" when minority of resources are down', () => {
+    expect(parseBetterStackStatus({
+      data: { attributes: { aggregate_state: 'downtime' } },
+      included: [
+        { type: 'status_page_resource', attributes: { status: 'operational' } },
+        { type: 'status_page_resource', attributes: { status: 'operational' } },
+        { type: 'status_page_resource', attributes: { status: 'downtime' } },
+      ],
+    })).toBe('degraded')
+  })
+
+  it('returns down for "downtime" when majority of resources are down', () => {
+    expect(parseBetterStackStatus({
+      data: { attributes: { aggregate_state: 'downtime' } },
+      included: [
+        { type: 'status_page_resource', attributes: { status: 'downtime' } },
+        { type: 'status_page_resource', attributes: { status: 'downtime' } },
+        { type: 'status_page_resource', attributes: { status: 'operational' } },
+      ],
+    })).toBe('down')
   })
 
   it('returns degraded for "degraded" and "maintenance"', () => {

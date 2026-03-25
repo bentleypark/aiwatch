@@ -134,8 +134,18 @@ export function parseBetterStackStatus(data: BetterStackIndex): 'operational' | 
   const state = data.data?.attributes?.aggregate_state
   if (!state) return null
   if (state === 'operational') return 'operational'
-  if (state === 'downtime') return 'down'
   if (state === 'degraded' || state === 'maintenance') return 'degraded'
+  if (state === 'downtime') {
+    // Check resource-level status: if majority is operational, treat as degraded not down
+    const resources = (data.included ?? []).filter(
+      (r) => r.type === 'status_page_resource' && r.attributes?.status
+    )
+    if (resources.length > 0) {
+      const downCount = resources.filter((r) => r.attributes.status === 'downtime').length
+      return downCount > resources.length / 2 ? 'down' : 'degraded'
+    }
+    return 'down'
+  }
   console.warn(`[parseBetterStackStatus] unknown aggregate_state: "${state}" — treating as degraded`)
   return 'degraded'
 }
