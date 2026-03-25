@@ -380,7 +380,7 @@ ${items}
 }
 
 function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canonical: string, ogImageUrl: string): string {
-  const status = service ? statusLabel(service.status) : 'Unknown'
+  const status = service ? statusLabel(service.status) : 'Operational'
   const text = `Is ${seo.displayName} down? Current status: ${status}. Check live:`
   const encodedText = encodeURIComponent(text)
   const encodedUrl = encodeURIComponent(canonical)
@@ -436,8 +436,8 @@ function shareKakao(){
         link:{mobileWebUrl:${jsCanonical},webUrl:${jsCanonical}}
       },
       buttons:[
-        {title:'Check Live Status',link:{mobileWebUrl:${jsCanonical},webUrl:${jsCanonical}}},
-        {title:'View Dashboard',link:{mobileWebUrl:"https://ai-watch.dev",webUrl:"https://ai-watch.dev"}}
+        {title:'Live Status',link:{mobileWebUrl:${jsCanonical},webUrl:${jsCanonical}}},
+        {title:'Dashboard',link:{mobileWebUrl:"https://ai-watch.dev",webUrl:"https://ai-watch.dev"}}
       ]
     });
     gtag('event','share',{method:'kakao',content_type:'is_x_down',item_id:${jsDisplayName}});
