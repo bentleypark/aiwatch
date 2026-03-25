@@ -268,11 +268,6 @@ const SERVICE_REGIONS = {
     { key: 'us-west-2', label: 'US West (us-west-2)' },
     { key: 'eu-central-1', label: 'Europe Central (eu-central-1)' },
   ],
-  chatgpt: [
-    { key: 'us-east-1', label: 'US East (us-east-1)' },
-    { key: 'us-west-2', label: 'US West (us-west-2)' },
-    { key: 'eu-central-1', label: 'Europe Central (eu-central-1)' },
-  ],
 }
 
 // Classify incident type from title keywords
