@@ -13,6 +13,18 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'windsurf':        { id: 'windsurf',  name: 'Windsurf',        provider: 'Codeium',     category: 'agent' },
 }
 
+// Related services for cross-linking (SEO internal links)
+export const RELATED_SLUGS: Record<string, string[]> = {
+  'claude':         ['claude-code', 'openai', 'chatgpt'],
+  'claude-code':    ['claude', 'cursor', 'github-copilot', 'windsurf'],
+  'chatgpt':        ['openai', 'claude', 'gemini'],
+  'openai':         ['chatgpt', 'claude', 'gemini'],
+  'gemini':         ['openai', 'claude', 'chatgpt'],
+  'github-copilot': ['cursor', 'windsurf', 'claude-code'],
+  'cursor':         ['windsurf', 'github-copilot', 'claude-code'],
+  'windsurf':       ['cursor', 'github-copilot', 'claude-code'],
+}
+
 // Reverse lookup: service ID → URL slug (for internal linking)
 export const SERVICE_ID_TO_SLUG: Record<string, string> = Object.fromEntries(
   Object.entries(SLUG_TO_SERVICE).map(([slug, entry]) => [entry.id, slug])

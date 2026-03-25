@@ -1,7 +1,7 @@
 // SSR HTML template for "Is X Down?" pages
 
 import type { ServiceSEO } from './seo-content'
-import { SERVICE_ID_TO_SLUG } from './slug-map'
+import { SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE, RELATED_SLUGS } from './slug-map'
 
 interface ServiceData {
   id: string
@@ -381,7 +381,11 @@ ${items}
 
 function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canonical: string, ogImageUrl: string): string {
   const status = service ? statusLabel(service.status) : 'Operational'
-  const text = `Is ${seo.displayName} down? Current status: ${status}. Check live:`
+  const rawStatus = service?.status ?? 'operational'
+  const sharePhrase = rawStatus === 'down' ? 'appears to be down right now'
+    : rawStatus === 'degraded' ? 'seems to be having issues right now'
+    : 'is running fine right now'
+  const text = `${seo.displayName} ${sharePhrase} —`
   const encodedText = encodeURIComponent(text)
   const encodedUrl = encodeURIComponent(canonical)
 
@@ -404,7 +408,7 @@ Share
 <svg width="16" height="16" viewBox="0 0 24 24" fill="#191919"><path d="M12 3C6.477 3 2 6.463 2 10.691c0 2.754 1.862 5.18 4.67 6.532-.16.578-.583 2.096-.668 2.421-.104.397.146.392.306.285.126-.084 2.005-1.36 2.816-1.912.93.134 1.891.205 2.876.205 5.523 0 10-3.463 10-7.691S17.523 3 12 3z"/></svg>
 KakaoTalk
 </button>
-<button class="share-btn share-copy" onclick="copyLink(this)" data-url="${esc(canonical)}" data-text="${esc(`Is ${seo.displayName} down? Current status: ${status}. Check live: ${canonical}`)}">
+<button class="share-btn share-copy" onclick="copyLink(this)" data-url="${esc(canonical)}" data-text="${esc(`${seo.displayName} ${sharePhrase} — ${canonical}`)}">
 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
 Copy Link
 </button>
@@ -459,17 +463,27 @@ function shareKakao(){
 }
 
 function renderFooter(slug: string): string {
-  const otherSlugs = Object.keys(SERVICE_ID_TO_SLUG)
-    .map(id => SERVICE_ID_TO_SLUG[id])
-    .filter(s => s !== slug)
-  const otherLinks = otherSlugs
-    .map(s => `<a href="/is-${esc(s)}-down">Is ${esc(s.replace(/-/g, ' '))} down?</a>`)
+  // Related services first (SEO cross-linking), then remaining
+  const related = (RELATED_SLUGS[slug] ?? []).filter(s => SLUG_TO_SERVICE[s])
+  const allSlugs = Object.keys(SLUG_TO_SERVICE).filter(s => s !== slug)
+  const remaining = allSlugs.filter(s => !related.includes(s))
+
+  const seoEntry = SLUG_TO_SERVICE[slug]
+  const relatedLinks = related
+    .map(s => {
+      const name = SLUG_TO_SERVICE[s]?.name ?? s.replace(/-/g, ' ')
+      return `<a href="/is-${esc(s)}-down" style="font-weight:500">Is ${esc(name)} down?</a>`
+    })
+    .join(' &middot; ')
+  const otherLinks = remaining
+    .map(s => `<a href="/is-${esc(s)}-down">Is ${esc(SLUG_TO_SERVICE[s]?.name ?? s.replace(/-/g, ' '))} down?</a>`)
     .join(' ')
 
   return `<div class="footer">
 <p style="margin-bottom:12px"><a href="https://ai-watch.dev" class="btn">View Full Dashboard</a></p>
-<p><a href="https://ai-watch.dev/#${esc(slug)}">Detailed service page</a> &middot; <a href="https://reports.ai-watch.dev/">Monthly reports</a> &middot; <a href="https://ai-watch.dev/#settings">Set up alerts</a></p>
-${otherLinks ? `<p style="margin-top:12px;font-size:12px">Also check: ${otherLinks}</p>` : ''}
+<p><a href="https://ai-watch.dev/#${esc(seoEntry?.id ?? slug)}">Detailed service page</a> &middot; <a href="https://reports.ai-watch.dev/">Monthly reports</a> &middot; <a href="https://ai-watch.dev/#settings">Set up alerts</a></p>
+${relatedLinks ? `<p style="margin-top:12px;font-size:13px">Related: ${relatedLinks}</p>` : ''}
+${otherLinks ? `<p style="margin-top:8px;font-size:12px">Also check: ${otherLinks}</p>` : ''}
 <p style="margin-top:12px">&copy; 2026 AIWatch. Real-time AI service status monitoring.</p>
 </div>`
 }
