@@ -18,12 +18,11 @@
     "dev:all": "npx wrangler dev --config worker/wrangler.toml --port 8788 & vite"
   },
   "dependencies": {
-    "@resvg/resvg-js": "^2.6.2",
+    "@vercel/og": "^0.11.1",
     "chart.js": "^4.4.7",
     "react": "^19.0.0",
     "react-chartjs-2": "^5.3.0",
-    "react-dom": "^19.0.0",
-    "satori": "^0.26.0"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.30.0",
