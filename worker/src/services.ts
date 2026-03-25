@@ -219,14 +219,13 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
 
       return {
         ...base,
-        // Per-component status when available, but never better than overall indicator
-        // (prevents showing 'operational' when official page says 'degraded')
+        // Use target component status when statusComponent is configured;
+        // fall back to overall indicator only when no component match found
         status: (() => {
           const overall = normalizeStatus(summaryData.status?.indicator ?? 'none')
           if (!config.statusComponent) return overall
-          const component = normalizeStatus(summaryData.components?.find((c) => c.name.startsWith(config.statusComponent))?.status ?? summaryData.status?.indicator ?? 'none')
-          const rank = { operational: 0, degraded: 1, down: 2 }
-          return (rank[overall] ?? 0) > (rank[component] ?? 0) ? overall : component
+          const comp = summaryData.components?.find((c) => c.name.startsWith(config.statusComponent))
+          return comp ? normalizeStatus(comp.status) : overall
         })(),
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
