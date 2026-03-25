@@ -279,9 +279,9 @@ const SERVICE_REGIONS = {
 function classifyIncident(title) {
   if (!title || typeof title !== 'string') return 'incident'
   const lower = title.toLowerCase()
-  if (/down|outage|unavailable/.test(lower)) return 'down'
-  if (/latency|slow|timeout|delay/.test(lower)) return 'degraded_perf'
-  if (/inference|grok|model|gemini|vertex/.test(lower)) return 'inference'
+  if (/\b(down|outage|unavailable)\b/.test(lower)) return 'down'
+  if (/\b(latency|slow|timeout|delay)\b/.test(lower)) return 'degraded_perf'
+  if (/\b(inference|grok|model|gemini|vertex)\b/.test(lower)) return 'inference'
   return 'incident' // generic
 }
 

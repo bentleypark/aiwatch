@@ -28,7 +28,7 @@ const SERVICES: ServiceConfig[] = [
   { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, onlineOrNotUrl: 'https://status.openrouter.ai', onlineOrNotComponent: 'Chat (/api/v1/chat/completions)' },
   // AI Web Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'webapp', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG' },
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'webapp', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentExclude: ['file', 'download', 'preview', 'upload', 'project files'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG' },
   // Coding Agents
   { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'], statusComponent: 'Claude Code', statusComponentId: 'yyzkbfz2thpt' },
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2' },
@@ -201,9 +201,14 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       // Augment dailyImpact with ongoing incidents (source data only includes resolved)
       // Only augment when service itself is non-operational (avoid marking calendar for
       // unrelated incidents that passed through filters but don't affect this component)
-      const svcStatus = config.statusComponent
-        ? normalizeStatus(summaryData.components?.find((c) => c.name.startsWith(config.statusComponent))?.status ?? summaryData.status?.indicator ?? 'none')
-        : normalizeStatus(summaryData.status?.indicator ?? 'none')
+      const svcStatus = (() => {
+        const overall = normalizeStatus(summaryData.status?.indicator ?? 'none')
+        if (!config.statusComponent && !config.statusComponentId) return overall
+        const comp = config.statusComponent
+          ? summaryData.components?.find((c) => c.name.startsWith(config.statusComponent))
+          : summaryData.components?.find((c) => c.id === config.statusComponentId)
+        return comp ? normalizeStatus(comp.status) : overall
+      })()
       const augmentedImpact = dailyImpact ? { ...dailyImpact } : {}
       if (svcStatus !== 'operational') {
         for (const inc of filtered) {
@@ -219,14 +224,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
 
       return {
         ...base,
-        // Use target component status when statusComponent is configured;
-        // fall back to overall indicator only when no component match found
-        status: (() => {
-          const overall = normalizeStatus(summaryData.status?.indicator ?? 'none')
-          if (!config.statusComponent) return overall
-          const comp = summaryData.components?.find((c) => c.name.startsWith(config.statusComponent))
-          return comp ? normalizeStatus(comp.status) : overall
-        })(),
+        status: svcStatus,
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
         ...(Object.keys(augmentedImpact).length > 0 ? { dailyImpact: augmentedImpact } : {}),
