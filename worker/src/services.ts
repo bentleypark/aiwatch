@@ -16,7 +16,12 @@ const SERVICES: ServiceConfig[] = [
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp' },
   { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'conversation', 'workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], statusComponent: 'Chat Completions', incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'] },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B', incidentKeywords: ['vertex', 'gemini', 'us-central1', 'europe-west1', 'asia-northeast1'] },
-  { id: 'bedrock', name: 'Amazon Bedrock', provider: 'AWS', category: 'api', statusUrl: 'https://health.aws.amazon.com/health/status', apiUrl: null, awsRssUrl: 'https://status.aws.amazon.com/rss/bedrock-us-east-1.rss' },
+  { id: 'bedrock', name: 'Amazon Bedrock', provider: 'AWS', category: 'api', statusUrl: 'https://health.aws.amazon.com/health/status', apiUrl: null, awsRssUrls: [
+    'https://status.aws.amazon.com/rss/bedrock-us-east-1.rss',
+    'https://status.aws.amazon.com/rss/bedrock-us-west-2.rss',
+    'https://status.aws.amazon.com/rss/bedrock-eu-west-1.rss',
+    'https://status.aws.amazon.com/rss/bedrock-ap-northeast-1.rss',
+  ] },
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE' },
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM' },
@@ -236,26 +241,67 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
     } else {
       // No Statuspage API — HTTP check + optional scraping (parallel)
       // Uses fetchWithTimeout (no retry) to stay within 50-subrequest budget
-      // AWS RSS — dedicated path (separate parser, custom status derivation)
-      if (config.awsRssUrl) {
+      // AWS RSS — multi-region parallel fetch, OR logic (any region degraded → degraded)
+      if (config.awsRssUrls) {
         const start = Date.now()
-        const rssRes = await fetchWithTimeout(config.awsRssUrl).catch((err) => {
-          console.warn(`[fetchService] ${config.id} AWS RSS failed:`, err instanceof Error ? err.message : err)
-          return null
-        })
+        const regionResults = await Promise.all(
+          config.awsRssUrls.map(async (url) => {
+            const region = url.match(/bedrock-(.+)\.rss/)?.[1] ?? 'unknown'
+            try {
+              const res = await fetchWithTimeout(url, 5000)
+              if (!res.ok) {
+                console.warn(`[fetchService] ${config.id} AWS RSS ${region} HTTP ${res.status}`)
+                return { region, incidents: [] as Incident[], ok: false }
+              }
+              const incidents = parseAwsRssIncidents(await res.text())
+              // Tag incidents with region via componentNames
+              for (const inc of incidents) {
+                inc.componentNames = [region]
+              }
+              return { region, incidents, ok: true }
+            } catch (err) {
+              console.warn(`[fetchService] ${config.id} AWS RSS ${region} failed:`, err instanceof Error ? err.message : err)
+              return { region, incidents: [] as Incident[], ok: false }
+            }
+          })
+        )
         const latency = Date.now() - start
-        if (!rssRes || !rssRes.ok) {
-          if (rssRes) console.warn(`[fetchService] ${config.id} AWS RSS HTTP ${rssRes.status}`)
+        const okCount = regionResults.filter((r) => r.ok).length
+        if (okCount === 0) {
           return { ...base, status: 'degraded', latency: config.category === 'api' ? latency : null }
         }
-        const incidents = parseAwsRssIncidents(await rssRes.text())
-        const filtered = filterIncidents(incidents, config)
+        if (okCount < regionResults.length) {
+          console.warn(`[fetchService] ${config.id} AWS RSS: ${okCount}/${regionResults.length} regions responded`)
+        }
+        // Merge incidents from all regions, deduplicate by ID, merge componentNames for global incidents
+        const seenMap = new Map<string, Incident>()
+        const allIncidents: Incident[] = []
+        for (const r of regionResults) {
+          for (const inc of r.incidents) {
+            const existing = seenMap.get(inc.id)
+            if (existing) {
+              // Global incident: merge region tags
+              const regions = new Set(existing.componentNames ?? [])
+              for (const name of inc.componentNames ?? []) regions.add(name)
+              existing.componentNames = [...regions]
+            } else {
+              seenMap.set(inc.id, inc)
+              allIncidents.push(inc)
+            }
+          }
+        }
+        allIncidents.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+        const filtered = filterIncidents(allIncidents, config)
+        // Estimate uptime from incidents; no incidents = 100% (RSS confirmed reachable)
+        const uptimeEst = computeUptimeFromIncidents(filtered) ?? 100
         return {
           ...base,
           status: deriveAwsStatus(filtered),
           latency: config.category === 'api' ? latency : null,
           incidents: filtered,
           calendarDays: 14,
+          uptime30d: uptimeEst,
+          uptimeSource: 'estimate' as const,
         }
       }
 

@@ -201,6 +201,134 @@ description with <b>HTML</b> tags]]></description>
     expect(result).toHaveLength(1)
     expect(result[0].impact).toBeNull()
   })
+
+  it('handles partial/malformed XML gracefully', () => {
+    expect(parseAwsRssIncidents('<rss><channel>')).toEqual([])
+    expect(parseAwsRssIncidents('<item><title>No closing')).toEqual([])
+    expect(parseAwsRssIncidents('not xml at all')).toEqual([])
+  })
+
+  it('strips HTML tags from description', () => {
+    const xml = `
+      <item>
+        <title>Issue</title>
+        <guid>aws-html</guid>
+        <pubDate>Mon, 24 Mar 2026 14:00:00 GMT</pubDate>
+        <description>Error in &lt;b&gt;us-east-1&lt;/b&gt; region. See &lt;a href="https://aws.amazon.com"&gt;details&lt;/a&gt;.</description>
+      </item>`
+    const result = parseAwsRssIncidents(xml)
+    expect(result[0].timeline[0].text).toBe('Error in us-east-1 region. See details.')
+  })
+
+  it('uses title as timeline text when description is empty', () => {
+    const xml = `
+      <item>
+        <title>Service disruption</title>
+        <guid>aws-no-desc</guid>
+        <pubDate>Mon, 24 Mar 2026 14:00:00 GMT</pubDate>
+        <description></description>
+      </item>`
+    const result = parseAwsRssIncidents(xml)
+    expect(result[0].timeline[0].text).toBe('Service disruption')
+  })
+})
+
+describe('deriveAwsStatus — multi-region scenarios', () => {
+  it('returns operational when incidents from multiple regions are all resolved', () => {
+    const incidents = [
+      { id: 'r1', title: '[RESOLVED] Issue', status: 'resolved' as const, impact: 'major' as const, componentNames: ['us-east-1'], startedAt: '2026-03-24T14:00:00Z', duration: '1h 0m', timeline: [] },
+      { id: 'r2', title: '[RESOLVED] Issue', status: 'resolved' as const, impact: 'critical' as const, componentNames: ['eu-west-1'], startedAt: '2026-03-24T12:00:00Z', duration: '2h 0m', timeline: [] },
+    ]
+    expect(deriveAwsStatus(incidents)).toBe('operational')
+  })
+
+  it('returns down when any region has critical active incident', () => {
+    const incidents = [
+      { id: 'r1', title: 'Minor issue', status: 'investigating' as const, impact: 'minor' as const, componentNames: ['us-east-1'], startedAt: '2026-03-24T14:00:00Z', duration: null, timeline: [] },
+      { id: 'r2', title: 'Service outage', status: 'investigating' as const, impact: 'critical' as const, componentNames: ['ap-northeast-1'], startedAt: '2026-03-24T15:00:00Z', duration: null, timeline: [] },
+    ]
+    expect(deriveAwsStatus(incidents)).toBe('down')
+  })
+
+  it('returns degraded when one region has active non-critical, others resolved', () => {
+    const incidents = [
+      { id: 'r1', title: 'Elevated errors', status: 'monitoring' as const, impact: 'major' as const, componentNames: ['us-west-2'], startedAt: '2026-03-24T14:00:00Z', duration: null, timeline: [] },
+      { id: 'r2', title: '[RESOLVED] Old issue', status: 'resolved' as const, impact: 'critical' as const, componentNames: ['us-east-1'], startedAt: '2026-03-24T10:00:00Z', duration: '1h 0m', timeline: [] },
+    ]
+    expect(deriveAwsStatus(incidents)).toBe('degraded')
+  })
+})
+
+describe('multi-region deduplication', () => {
+  it('same incident ID from multiple regions should deduplicate and merge componentNames', () => {
+    // Simulates the dedup+merge logic from services.ts
+    const region1 = parseAwsRssIncidents(`
+      <item>
+        <title>Global outage</title>
+        <guid>arn:aws:health:global::event/BEDROCK/issue/global1</guid>
+        <pubDate>Mon, 24 Mar 2026 14:00:00 GMT</pubDate>
+        <description>Global impact.</description>
+      </item>`)
+    const region2 = parseAwsRssIncidents(`
+      <item>
+        <title>Global outage</title>
+        <guid>arn:aws:health:global::event/BEDROCK/issue/global1</guid>
+        <pubDate>Mon, 24 Mar 2026 14:00:00 GMT</pubDate>
+        <description>Global impact.</description>
+      </item>`)
+
+    region1.forEach(inc => { inc.componentNames = ['us-east-1'] })
+    region2.forEach(inc => { inc.componentNames = ['eu-west-1'] })
+
+    // Dedup + merge componentNames (same logic as services.ts)
+    const seenMap = new Map<string, typeof region1[0]>()
+    const merged: typeof region1 = []
+    for (const inc of [...region1, ...region2]) {
+      const existing = seenMap.get(inc.id)
+      if (existing) {
+        const regions = new Set(existing.componentNames ?? [])
+        for (const name of inc.componentNames ?? []) regions.add(name)
+        existing.componentNames = [...regions]
+      } else {
+        seenMap.set(inc.id, inc)
+        merged.push(inc)
+      }
+    }
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0].componentNames).toEqual(['us-east-1', 'eu-west-1'])
+  })
+
+  it('different incidents from different regions are kept', () => {
+    const region1 = parseAwsRssIncidents(`
+      <item>
+        <title>Increased errors</title>
+        <guid>arn:aws:health:us-east-1::event/BEDROCK/issue/inc1</guid>
+        <pubDate>Mon, 24 Mar 2026 14:00:00 GMT</pubDate>
+        <description>US East issue.</description>
+      </item>`)
+    const region2 = parseAwsRssIncidents(`
+      <item>
+        <title>Elevated latency</title>
+        <guid>arn:aws:health:eu-west-1::event/BEDROCK/issue/inc2</guid>
+        <pubDate>Mon, 24 Mar 2026 15:00:00 GMT</pubDate>
+        <description>EU West issue.</description>
+      </item>`)
+
+    region1.forEach(inc => { inc.componentNames = ['us-east-1'] })
+    region2.forEach(inc => { inc.componentNames = ['eu-west-1'] })
+
+    const seen = new Set<string>()
+    const merged = [...region1, ...region2].filter(inc => {
+      if (seen.has(inc.id)) return false
+      seen.add(inc.id)
+      return true
+    })
+
+    expect(merged).toHaveLength(2)
+    expect(merged[0].componentNames).toEqual(['us-east-1'])
+    expect(merged[1].componentNames).toEqual(['eu-west-1'])
+  })
 })
 
 describe('deriveAwsStatus', () => {

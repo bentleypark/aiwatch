@@ -54,6 +54,7 @@ const STATUS_URL = {
   xai:         'https://status.x.ai',
   deepseek:    'https://status.deepseek.com',
   openrouter:  'https://status.openrouter.ai',
+  bedrock:     'https://health.aws.amazon.com/health/status',
   claudeai:    'https://status.claude.com',
   chatgpt:     'https://status.openai.com',
   claudecode:  'https://status.claude.com',
@@ -64,6 +65,9 @@ const STATUS_URL = {
 
 // Services that cannot provide incident data (no API, bot-protected, etc.)
 const NO_INCIDENT_SUPPORT = new Set([])
+
+// Services with real-time-only incident data (no historical archive)
+const REALTIME_ONLY = new Set(['bedrock'])
 
 // 30-day calendar status → Tailwind color class
 const CALENDAR_CLASS = {
@@ -268,6 +272,12 @@ const SERVICE_REGIONS = {
     { key: 'us-west-2', label: 'US West (us-west-2)' },
     { key: 'eu-central-1', label: 'Europe Central (eu-central-1)' },
   ],
+  bedrock: [
+    { key: 'us-east-1', label: 'US East (N. Virginia)' },
+    { key: 'us-west-2', label: 'US West (Oregon)' },
+    { key: 'eu-west-1', label: 'Europe (Ireland)' },
+    { key: 'ap-northeast-1', label: 'Asia Pacific (Tokyo)' },
+  ],
 }
 
 // Classify incident type from title keywords
@@ -276,7 +286,7 @@ function classifyIncident(title) {
   const lower = title.toLowerCase()
   if (/\b(down|outage|unavailable)\b/.test(lower)) return 'down'
   if (/\b(latency|slow|timeout|delay)\b/.test(lower)) return 'degraded_perf'
-  if (/\b(inference|grok|model|gemini|vertex)\b/.test(lower)) return 'inference'
+  if (/\b(inference|grok|model|gemini|vertex|bedrock)\b/.test(lower)) return 'inference'
   return 'incident' // generic
 }
 
@@ -307,6 +317,7 @@ const REGION_DOCS_URL = {
   gemini: 'https://cloud.google.com/vertex-ai/docs/general/locations',
   openai: 'https://platform.openai.com/docs/guides/production-best-practices',
   chatgpt: 'https://status.openai.com',
+  bedrock: 'https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-regions.html',
 }
 
 function RegionalAvailability({ service, t }) {
@@ -327,8 +338,10 @@ function RegionalAvailability({ service, t }) {
 
     for (const inc of ongoing) {
       const titleLower = (inc.title || '').toLowerCase()
+      const compNames = (inc.componentNames ?? []).map(n => n.toLowerCase())
       for (const r of regions) {
-        if (titleLower.includes(r.key.toLowerCase())) {
+        const keyLower = r.key.toLowerCase()
+        if (titleLower.includes(keyLower) || compNames.some(n => n.includes(keyLower))) {
           regionStatus[r.key] = { status: 'incident', type: classifyIncident(inc.title) }
           hasRegionSpecific = true
         }
@@ -681,7 +694,7 @@ export default function ServiceDetails({ serviceId }) {
             ) : incidentCount === 0 ? (
               <div className="flex items-center gap-2 py-4">
                 <span className="text-[var(--green)] text-sm" aria-hidden="true">✓</span>
-                <span className="text-xs text-[var(--text2)]">{t('svc.no.incidents')}</span>
+                <span className="text-xs text-[var(--text2)]">{t(REALTIME_ONLY.has(service.id) ? 'svc.no.incidents.realtime' : 'svc.no.incidents')}</span>
               </div>
             ) : (
               <div className="flex flex-col" style={{ gap: '8px' }}>
