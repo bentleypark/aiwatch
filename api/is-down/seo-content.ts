@@ -81,6 +81,30 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Is Claude Code down because of Claude API?', a: 'Yes, Claude Code depends on Claude API models. Check the AIWatch dashboard at ai-watch.dev to see if Claude API is also experiencing issues — they often share the same incidents.' },
     ],
   },
+  openai: {
+    displayName: 'OpenAI',
+    description: 'OpenAI API powers GPT-4o, o1, DALL-E, Whisper, and other foundation models used by millions of developers. It serves both the ChatGPT consumer product and enterprise API integrations.',
+    insight: 'OpenAI API and ChatGPT share infrastructure but are monitored separately by AIWatch. An API outage may not affect ChatGPT and vice versa. OpenAI maintains one of the highest uptime records among AI providers, with most incidents resolved within 30 minutes.',
+    whenDown: 'When OpenAI API is down, applications using GPT-4o, o1, embeddings, or image generation will fail. This affects thousands of third-party apps, chatbots, and developer tools that rely on OpenAI as their backend.',
+    faqs: [
+      { q: 'Is OpenAI API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors OpenAI API every 60 seconds and shows real-time operational status, uptime percentage, and recent incidents.' },
+      { q: 'Is this affecting ChatGPT too?', a: 'OpenAI API and ChatGPT are tracked separately. Check the AIWatch dashboard at ai-watch.dev to see if both are affected or just one.' },
+      { q: 'What should I do when OpenAI API is down?', a: 'Consider switching to Claude API by Anthropic or Gemini API by Google as alternatives. AIWatch provides real-time fallback recommendations based on current availability.' },
+      { q: 'How do I check OpenAI API status?', a: 'You can check OpenAI status on this page (updated every 60 seconds), on the official OpenAI status page at status.openai.com, or on the AIWatch dashboard at ai-watch.dev.' },
+    ],
+  },
+  windsurf: {
+    displayName: 'Windsurf',
+    description: 'Windsurf is an AI-powered code editor by Codeium, offering intelligent code completions, multi-file editing, and an agentic coding experience. It supports multiple LLM backends and is designed as a Cursor alternative.',
+    insight: 'Windsurf relies on Codeium\'s own infrastructure plus upstream model providers. AIWatch tracks Windsurf independently — when Windsurf reports an issue, it may be Codeium-specific or caused by an upstream model outage. Windsurf has maintained strong uptime since launch.',
+    whenDown: 'When Windsurf is down, developers lose AI code completions, multi-file editing, and agentic coding features. The editor may still function for basic editing, but all AI-powered features will be unavailable.',
+    faqs: [
+      { q: 'Is Windsurf down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Windsurf every 60 seconds and shows real-time operational status.' },
+      { q: 'Why is Windsurf AI not working?', a: 'Windsurf AI features may be down due to Codeium server issues or upstream model provider outages. Check this page for current status details.' },
+      { q: 'What are alternatives to Windsurf?', a: 'When Windsurf is down, Cursor, GitHub Copilot, or Claude Code are alternative AI coding tools. AIWatch shows which are currently operational.' },
+      { q: 'Is Windsurf better than Cursor?', a: 'Both are AI-native code editors with different strengths. Check AIWatch reliability rankings at ai-watch.dev/#ranking to compare uptime and incident history.' },
+    ],
+  },
 }
 
 export function getSEOContent(slug: string): ServiceSEO | null {

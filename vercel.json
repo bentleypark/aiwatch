@@ -7,6 +7,8 @@
     { "source": "/is-github-copilot-down", "destination": "/api/is-down?slug=github-copilot" },
     { "source": "/is-cursor-down", "destination": "/api/is-down?slug=cursor" },
     { "source": "/is-claude-code-down", "destination": "/api/is-down?slug=claude-code" },
+    { "source": "/is-openai-down", "destination": "/api/is-down?slug=openai" },
+    { "source": "/is-windsurf-down", "destination": "/api/is-down?slug=windsurf" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

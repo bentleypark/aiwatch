@@ -9,6 +9,8 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'github-copilot':  { id: 'copilot',   name: 'GitHub Copilot',   provider: 'Microsoft',   category: 'agent' },
   'cursor':          { id: 'cursor',    name: 'Cursor',           provider: 'Anysphere',   category: 'agent' },
   'claude-code':     { id: 'claudecode', name: 'Claude Code',     provider: 'Anthropic',   category: 'agent' },
+  'openai':          { id: 'openai',    name: 'OpenAI API',      provider: 'OpenAI',      category: 'api' },
+  'windsurf':        { id: 'windsurf',  name: 'Windsurf',        provider: 'Codeium',     category: 'agent' },
 }
 
 // Reverse lookup: service ID → URL slug (for internal linking)
