@@ -438,7 +438,7 @@ function shareKakao(){
 (function(){
   var s=document.createElement('script');s.src='https://t1.kakaocdn.net/kakao_js_sdk/2.7.4/kakao.min.js';
   s.onload=function(){
-    try{Kakao.init('e6712bbd869339b3ec96ce09088ba143');document.getElementById('kakao-share').style.display='inline-flex'}
+    try{Kakao.init('37903a9f5c2488dd6761866846073112');document.getElementById('kakao-share').style.display='inline-flex'}
     catch(e){console.error('[AIWatch] Kakao init failed:',e)}
   };
   s.onerror=function(){console.warn('[AIWatch] Kakao SDK failed to load')};
