@@ -126,7 +126,7 @@ export interface BetterStackIndex {
   }
   included?: Array<{
     type: string
-    attributes?: { availability?: number }
+    attributes?: { availability?: number; status?: string }
   }>
 }
 
@@ -141,7 +141,7 @@ export function parseBetterStackStatus(data: BetterStackIndex): 'operational' | 
       (r) => r.type === 'status_page_resource' && r.attributes?.status
     )
     if (resources.length > 0) {
-      const downCount = resources.filter((r) => r.attributes.status === 'downtime').length
+      const downCount = resources.filter((r) => r.attributes?.status === 'downtime').length
       return downCount > resources.length / 2 ? 'down' : 'degraded'
     }
     return 'down'

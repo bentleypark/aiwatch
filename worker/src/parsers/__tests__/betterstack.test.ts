@@ -116,6 +116,26 @@ describe('parseBetterStackStatus', () => {
     })).toBe('down')
   })
 
+  it('returns down for "downtime" when all resources are down', () => {
+    expect(parseBetterStackStatus({
+      data: { attributes: { aggregate_state: 'downtime' } },
+      included: [
+        { type: 'status_page_resource', attributes: { status: 'downtime' } },
+        { type: 'status_page_resource', attributes: { status: 'downtime' } },
+      ],
+    })).toBe('down')
+  })
+
+  it('returns degraded for "downtime" when exactly half are down (conservative)', () => {
+    expect(parseBetterStackStatus({
+      data: { attributes: { aggregate_state: 'downtime' } },
+      included: [
+        { type: 'status_page_resource', attributes: { status: 'downtime' } },
+        { type: 'status_page_resource', attributes: { status: 'operational' } },
+      ],
+    })).toBe('degraded')
+  })
+
   it('returns degraded for "degraded" and "maintenance"', () => {
     expect(parseBetterStackStatus({ data: { attributes: { aggregate_state: 'degraded' } } })).toBe('degraded')
     expect(parseBetterStackStatus({ data: { attributes: { aggregate_state: 'maintenance' } } })).toBe('degraded')
