@@ -6,6 +6,6 @@
     { "source": "/is-gemini-down", "destination": "/api/is-down?slug=gemini" },
     { "source": "/is-github-copilot-down", "destination": "/api/is-down?slug=github-copilot" },
     { "source": "/is-cursor-down", "destination": "/api/is-down?slug=cursor" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

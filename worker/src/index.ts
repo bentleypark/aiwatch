@@ -403,6 +403,7 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
 }
 
 import { generateBadgeSvg } from './badge'
+import { generateOgSvg } from './og'
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
@@ -503,6 +504,22 @@ export default {
           status: 500, headers: { ...cors, 'Content-Type': 'application/json' },
         })
       }
+    }
+
+    // GET /api/og — dynamic OG image (SVG) for social share previews
+    if (request.method === 'GET' && url.pathname === '/api/og') {
+      const service = (url.searchParams.get('service') || 'Unknown').slice(0, 50)
+      const status = url.searchParams.get('status') || 'operational'
+      const score = (url.searchParams.get('score') || '').slice(0, 5)
+      const uptime = (url.searchParams.get('uptime') || '').slice(0, 6)
+      const svg = generateOgSvg(service, status, score, uptime)
+      return new Response(svg, {
+        headers: {
+          'Content-Type': 'image/svg+xml',
+          'Cache-Control': 'public, max-age=600, s-maxage=600',
+          'Access-Control-Allow-Origin': '*',
+        },
+      })
     }
 
     // GET /badge/:serviceId — dynamic SVG status badge

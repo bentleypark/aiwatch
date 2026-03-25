@@ -98,7 +98,7 @@ export function renderPage(
   if (service?.aiwatchScore != null && Number.isFinite(service.aiwatchScore)) ogParams.set('score', String(service.aiwatchScore))
   if (typeof service?.uptime30d === 'number' && !Number.isNaN(service.uptime30d)) ogParams.set('uptime', service.uptime30d.toFixed(2))
   ogParams.set('v', String(Math.floor(Date.now() / 600_000))) // 10-min cache bust
-  const ogImageUrl = `https://ai-watch.dev/api/og?${ogParams.toString()}`
+  const ogImageUrl = `https://aiwatch-worker.p2c2kbf.workers.dev/api/og?${ogParams.toString()}`
 
   return `<!DOCTYPE html>
 <html lang="en">
