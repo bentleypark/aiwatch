@@ -410,6 +410,7 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
 
 import { generateBadgeSvg } from './badge'
 import { generateOgSvg } from './og'
+import { detectRedditPosts, formatRedditAlert } from './reddit'
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
@@ -435,6 +436,29 @@ export default {
         description: parts.join(', '),
         color: 0x5865F2, // blue
       })
+    }
+
+    // Reddit community monitoring — runs once per hour (minute 0-4) to respect rate limits
+    // KV budget: max 3 writes/hour = 72/day (well within 1,000/day free tier)
+    if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCMinutes() < 5) {
+      try {
+        const redditAlerts = await detectRedditPosts(env.STATUS_CACHE)
+        const toNotify = redditAlerts.slice(0, 3)
+        // Batch KV writes for all seen posts
+        for (const alert of toNotify) {
+          await env.STATUS_CACHE.put(alert.key, '1', { expirationTtl: 86400 }).catch(() => {})
+        }
+        for (const alert of toNotify) {
+          const formatted = formatRedditAlert(alert)
+          await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+            title: formatted.title,
+            description: `${formatted.description}\n[View Post](${formatted.url})`,
+            color: formatted.color,
+          })
+        }
+      } catch (err) {
+        console.warn('[cron] Reddit monitoring failed:', err instanceof Error ? err.message : err)
+      }
     }
 
     // Daily summary at UTC 09:00 (KST 18:00) — purple embed

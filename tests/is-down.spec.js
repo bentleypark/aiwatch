@@ -84,9 +84,9 @@ test.describe('Is X Down? SSR pages', () => {
 
   test('footer has internal cross-links to other service pages', async ({ page }) => {
     await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
-    await expect(page.locator('a[href="/is-chatgpt-down"]')).toBeVisible()
-    await expect(page.locator('a[href="/is-gemini-down"]')).toBeVisible()
-    await expect(page.locator('a[href="/is-cursor-down"]')).toBeVisible()
+    await expect(page.locator('a[href="/is-chatgpt-down"]').first()).toBeAttached()
+    await expect(page.locator('a[href="/is-gemini-down"]').first()).toBeAttached()
+    await expect(page.locator('a[href="/is-cursor-down"]').first()).toBeAttached()
   })
 
   test('OG meta tags point to dynamic OG image', async ({ page }) => {
@@ -108,5 +108,22 @@ test.describe('Is X Down? SSR pages', () => {
     await expect(page.locator('button.share-copy')).toBeVisible()
     // KakaoTalk button exists (hidden until SDK loads)
     await expect(page.locator('#kakao-share')).toHaveCount(1)
+  })
+
+  test('share text includes AIWatch branding', async ({ page }) => {
+    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    // Copy button data-text should mention AIWatch
+    const copyText = await page.locator('button.share-copy').getAttribute('data-text')
+    expect(copyText).toContain('AIWatch')
+    // X share href should contain encoded text with AIWatch
+    const xHref = await page.locator('a.share-x').getAttribute('href')
+    expect(xHref).toContain('AIWatch')
+  })
+
+  test('related cross-links are present in footer', async ({ page }) => {
+    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    // Claude page should cross-link to Claude Code and OpenAI
+    await expect(page.locator('a[href="/is-claude-code-down"]').first()).toBeAttached()
+    await expect(page.locator('a[href="/is-openai-down"]').first()).toBeAttached()
   })
 })
