@@ -444,11 +444,15 @@ export default function Overview() {
     : agentServices
 
   const sevenDaysAgo = Date.now() - 7 * 86_400_000
+  const seenIncIds = new Set()
   const recentIncidents = catServices
-    .flatMap((s) => s.incidents.map((inc) => ({ ...inc, serviceName: s.name })))
+    .flatMap((s) => s.incidents.flatMap((inc) => {
+      if (seenIncIds.has(inc.id)) return []
+      seenIncIds.add(inc.id)
+      return [{ ...inc, serviceName: s.name }]
+    }))
     .filter((inc) => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= sevenDaysAgo)
     .sort((a, b) => {
-      // Active (non-resolved) incidents always come first
       const aActive = a.status !== 'resolved' ? 1 : 0
       const bActive = b.status !== 'resolved' ? 1 : 0
       if (aActive !== bActive) return bActive - aActive

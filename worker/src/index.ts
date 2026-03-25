@@ -314,9 +314,11 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   const serviceAlerts = buildServiceAlerts(scored, alertedDownMap, alertedDegradedMap)
   const allAlerts = [...incidentAlerts, ...serviceAlerts]
 
-  // Dedup: skip alerts already sent + anti-flapping for degraded
+  // Dedup: skip alerts already sent + same-batch dedup + anti-flapping for degraded
   const toSend = []
+  const seenKeys = new Set<string>()
   for (const alert of allAlerts) {
+    if (seenKeys.has(alert.key)) continue // same incident across shared-status-page services
     const existing = await env.STATUS_CACHE.get(alert.key).catch(() => null)
     if (existing) continue
     // Anti-flapping: degraded alerts need pending from PREVIOUS cron cycle
@@ -324,6 +326,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       const svcId = alert.key.replace('alerted:degraded:', '')
       if (!pendingDegraded.has(svcId)) continue // first detection → skip
     }
+    seenKeys.add(alert.key)
     toSend.push(alert)
   }
 

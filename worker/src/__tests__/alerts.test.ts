@@ -80,6 +80,36 @@ describe('buildIncidentAlerts', () => {
     expect(buildIncidentAlerts([svc], new Set(), NOW)).toHaveLength(0)
   })
 
+  it('generates duplicate alerts for shared-status-page services (caller must dedup by key)', () => {
+    // Claude API, claude.ai, Claude Code share Anthropic status page → same inc.id
+    const sharedIncident = { id: 'shared1', title: 'Elevated errors', status: 'investigating', startedAt: recentDate, impact: 'major' }
+    const claude = mockService({ id: 'claude', name: 'Claude API', category: 'api', incidents: [sharedIncident] })
+    const claudeai = mockService({ id: 'claudeai', name: 'claude.ai', category: 'webapp', incidents: [sharedIncident] })
+    const claudecode = mockService({ id: 'claudecode', name: 'Claude Code', category: 'agent', incidents: [sharedIncident] })
+
+    const alerts = buildIncidentAlerts([claude, claudeai, claudecode], new Set(), NOW)
+
+    // buildIncidentAlerts produces one alert per service — all with the same key
+    expect(alerts).toHaveLength(3)
+    expect(alerts[0].key).toBe('alerted:new:shared1')
+    expect(alerts[1].key).toBe('alerted:new:shared1')
+    expect(alerts[2].key).toBe('alerted:new:shared1')
+    // Different service names
+    expect(alerts[0].title).toContain('Claude API')
+    expect(alerts[1].title).toContain('claude.ai')
+    expect(alerts[2].title).toContain('Claude Code')
+
+    // Caller (cronAlertCheck) uses seenKeys Set to dedup → only first is sent
+    const seenKeys = new Set<string>()
+    const deduped = alerts.filter(a => {
+      if (seenKeys.has(a.key)) return false
+      seenKeys.add(a.key)
+      return true
+    })
+    expect(deduped).toHaveLength(1)
+    expect(deduped[0].title).toContain('Claude API')
+  })
+
   it('handles multiple incidents per service', () => {
     const svc = mockService({
       incidents: [
