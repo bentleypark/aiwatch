@@ -446,7 +446,7 @@ export default function Overview() {
   const sevenDaysAgo = Date.now() - 7 * 86_400_000
   const recentIncidents = catServices
     .flatMap((s) => s.incidents.map((inc) => ({ ...inc, serviceName: s.name })))
-    .filter((inc) => new Date(inc.startedAt).getTime() >= sevenDaysAgo)
+    .filter((inc) => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= sevenDaysAgo)
     .sort((a, b) => {
       // Active (non-resolved) incidents always come first
       const aActive = a.status !== 'resolved' ? 1 : 0
