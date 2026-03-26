@@ -185,10 +185,12 @@ npm run deploy:worker  # Deploy to Cloudflare (use npm script only)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/status` | GET | All service statuses + incidents + uptime + latency24h |
+| `/api/status` | GET | All service statuses + incidents + uptime + latency24h + aiAnalysis |
+| `/api/status/cached` | GET | KV-only cached status (for Edge SSR, fast ~1.2s) |
 | `/api/uptime?days=30` | GET | Daily uptime history (1-90 days) |
 | `/api/alert` | POST | Webhook proxy (Slack/Discord only, SSRF protected) |
 | `/badge/:serviceId` | GET | SVG status badge (shields.io style) |
+| `/api/og` | GET | Dynamic OG image PNG (1200×630, resvg-wasm) |
 | `/api/v1/status` | GET | Public API — all services (lightweight, CORS `*`) |
 | `/api/v1/status/:id` | GET | Public API — single service + top 5 incidents |
 

@@ -184,10 +184,12 @@ npm run deploy:worker  # Cloudflare 배포 (npm 스크립트만 사용)
 
 | 엔드포인트 | 메서드 | 설명 |
 |-----------|--------|------|
-| `/api/status` | GET | 전체 서비스 상태 + 인시던트 + 가동률 + latency24h |
+| `/api/status` | GET | 전체 서비스 상태 + 인시던트 + 가동률 + latency24h + aiAnalysis |
+| `/api/status/cached` | GET | KV 캐시 전용 (Edge SSR용, ~1.2초) |
 | `/api/uptime?days=30` | GET | 일별 가동률 이력 (1-90일) |
 | `/api/alert` | POST | Webhook 프록시 (Slack/Discord만, SSRF 보호) |
 | `/badge/:serviceId` | GET | SVG 상태 배지 (shields.io 스타일) |
+| `/api/og` | GET | 동적 OG 이미지 PNG (1200×630, resvg-wasm) |
 | `/api/v1/status` | GET | 공개 API — 전체 서비스 (경량, CORS `*`) |
 | `/api/v1/status/:id` | GET | 공개 API — 개별 서비스 + 최근 5건 인시던트 |
 
