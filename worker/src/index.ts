@@ -839,8 +839,8 @@ export default {
           if (raw) {
             try {
               const parsed = JSON.parse(raw) as AIAnalysisResult
-              const hasMatchingInc = (svc.incidents ?? []).some(i => i.id === parsed.incidentId && i.status !== 'resolved')
-              if (hasMatchingInc) aiAnalysis[svc.id] = parsed
+              const hasActiveInc = (svc.incidents ?? []).some(i => i.status !== 'resolved')
+              if (hasActiveInc) aiAnalysis[svc.id] = parsed
             } catch { /* ignore */ }
           }
         }))
@@ -938,9 +938,9 @@ export default {
           if (raw) {
             try {
               const parsed = JSON.parse(raw) as AIAnalysisResult
-              // Cross-verify: only include if incidentId matches a current incident
-              const hasMatchingInc = (svc.incidents ?? []).some(i => i.id === parsed.incidentId && i.status !== 'resolved')
-              if (hasMatchingInc) aiAnalysis[svc.id] = parsed
+              // Include if service has any active incident (analysis is service-level, not incident-specific)
+              const hasActiveInc = (svc.incidents ?? []).some(i => i.status !== 'resolved')
+              if (hasActiveInc) aiAnalysis[svc.id] = parsed
             } catch { /* ignore */ }
           }
         }))
