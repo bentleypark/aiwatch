@@ -127,7 +127,7 @@ export function parseInstatusIncidents(html: string): Incident[] {
             : 'investigating' as const,
           impact: null,
           startedAt: createdAt,
-          resolvedAt: (status === 'RESOLVED' && durationSec) ? new Date(new Date(createdAt).getTime() + durationSec * 1000).toISOString() : null,
+          resolvedAt: (status === 'RESOLVED' && durationSec != null) ? new Date(new Date(createdAt).getTime() + durationSec * 1000).toISOString() : null,
           duration: durationSec ? formatDuration(new Date(createdAt), new Date(new Date(createdAt).getTime() + durationSec * 1000)) : null,
           timeline,
         }]

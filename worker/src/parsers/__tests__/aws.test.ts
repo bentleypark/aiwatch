@@ -33,6 +33,7 @@ describe('parseAwsRssIncidents', () => {
     expect(result[0].status).toBe('investigating')
     expect(result[0].impact).toBe('major')
     expect(result[0].duration).toBeNull()
+    expect(result[0].resolvedAt).toBeNull() // ongoing
     expect(result[0].startedAt).toBe('2026-03-24T14:00:00.000Z')
     expect(result[0].timeline).toHaveLength(1)
     expect(result[0].timeline[0].stage).toBe('investigating')
@@ -50,6 +51,7 @@ describe('parseAwsRssIncidents', () => {
     const result = parseAwsRssIncidents(xml)
     expect(result).toHaveLength(1)
     expect(result[0].status).toBe('resolved')
+    expect(result[0].resolvedAt).toBe(result[0].startedAt) // AWS RSS: single timestamp
     expect(result[0].duration).toBe('<1m') // same start/end
   })
 

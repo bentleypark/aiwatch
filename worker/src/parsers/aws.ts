@@ -83,6 +83,8 @@ export function parseAwsRssIncidents(xml: string): Incident[] {
       status,
       impact,
       startedAt,
+      // AWS RSS has one pubDate per item — for resolved items this is the resolution time,
+      // not the true start. Both startedAt and resolvedAt reflect the last-update timestamp.
       resolvedAt: status === 'resolved' ? startedAt : null,
       duration,
       timeline,
