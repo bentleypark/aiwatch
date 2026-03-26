@@ -115,7 +115,7 @@ Parsers (worker/src/parsers/)
   ├── incident-io.ts     → incident.io compat API + component_uptimes/impacts
   ├── gcloud.ts          → Google Cloud incidents.json
   ├── instatus.ts        → Instatus Nuxt/Next.js SSR
-  ├── betterstack.ts     → Better Stack RSS + /index.json uptime API
+  ├── betterstack.ts     → Better Stack RSS + /index.json uptime API + dailyImpact (status_history)
   └── aws.ts             → AWS Health Dashboard RSS
   ↓
 Cloudflare KV
