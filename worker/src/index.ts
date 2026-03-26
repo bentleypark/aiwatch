@@ -440,6 +440,7 @@ export default {
 
     // Reddit community monitoring — runs once per hour (minute 0-4) to respect rate limits
     // KV budget: max 3 writes/hour = 72/day (well within 1,000/day free tier)
+    const now = new Date()
     if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCMinutes() < 5) {
       try {
         const redditAlerts = await detectRedditPosts(env.STATUS_CACHE)
@@ -462,7 +463,6 @@ export default {
     }
 
     // Daily summary at UTC 09:00 (KST 18:00) — purple embed
-    const now = new Date()
     if (now.getUTCHours() === 9 && now.getUTCMinutes() < 5) {
       await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
         title: '📊 Daily Summary',
