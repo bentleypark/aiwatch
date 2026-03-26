@@ -537,14 +537,9 @@ function usePollingInternal() {
       const data = await res.json()
       const merged = mergeWithMock(data.services)
 
-      // Minimum skeleton display time: 2s for both initial and manual refresh
-      if (isInitial) {
-        const elapsed = Date.now() - loadStart
-        if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
-      } else if (isRefresh) {
-        const elapsed = Date.now() - loadStart
-        if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
-      }
+      // Minimum skeleton display time: 1s to prevent flash
+      const elapsed = Date.now() - loadStart
+      if ((isInitial || isRefresh) && elapsed < 1000) await new Promise((r) => setTimeout(r, 1000 - elapsed))
 
       // Status/incident alerts handled server-side (Worker detectAndAlertIncidents)
       // to avoid duplicate alerts when both browser and Worker are running
@@ -578,9 +573,10 @@ function usePollingInternal() {
       }
       if (mode === 'silent') return
 
+      // Minimum skeleton display time: 1s to prevent flash (error path)
       if (isInitial) {
         const elapsed = Date.now() - loadStart
-        if (elapsed < 2000) await new Promise((r) => setTimeout(r, 2000 - elapsed))
+        if (elapsed < 1000) await new Promise((r) => setTimeout(r, 1000 - elapsed))
       }
 
       // Refresh failed: restore previous services
