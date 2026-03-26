@@ -116,6 +116,7 @@ worker/
     alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts)
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText)
     ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt separation, similar incident matching)
+    daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit)
     probe.ts    # Health check probing — direct RTT measurement (Phase 2 PoC)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
 ```

@@ -467,6 +467,7 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
 import { generateBadgeSvg } from './badge'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert } from './reddit'
+import { buildDailySummary } from './daily-summary'
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
@@ -520,11 +521,69 @@ export default {
 
     // Daily summary at UTC 09:00 (KST 18:00) — purple embed
     if (now.getUTCHours() === 9 && now.getUTCMinutes() < 5) {
-      await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-        title: '📊 Daily Summary',
-        description: `${result.total} services checked\n${result.operational} operational · ${result.issues} issues`,
-        color: 0x9B59B6, // purple
-      })
+      try {
+        // Gather data for expanded daily report
+        const today = now.toISOString().split('T')[0]
+        const [cachedRaw, aiUsageRaw, latRaw] = await Promise.all([
+          env.STATUS_CACHE.get(CACHE_KEY).catch(() => null),
+          env.STATUS_CACHE.get(`ai:usage:${today}`).catch(() => null),
+          env.STATUS_CACHE.get('latency:24h').catch(() => null),
+        ])
+
+        let dailyServices: ServiceStatus[] = []
+        if (cachedRaw) {
+          try {
+            const p = JSON.parse(cachedRaw)
+            dailyServices = Array.isArray(p) ? p : p.services ?? []
+          } catch (err) {
+            console.error('[daily-summary] Failed to parse cached services:', err instanceof Error ? err.message : err)
+          }
+        }
+
+        let aiUsage = null
+        if (aiUsageRaw) {
+          try { aiUsage = JSON.parse(aiUsageRaw) } catch (err) {
+            console.error('[daily-summary] Failed to parse AI usage:', err instanceof Error ? err.message : err)
+          }
+        }
+        let latSnapshots: Array<{ t: string; data: Record<string, number> }> = []
+        if (latRaw) {
+          try { latSnapshots = JSON.parse(latRaw).snapshots ?? [] } catch (err) {
+            console.error('[daily-summary] Failed to parse latency data:', err instanceof Error ? err.message : err)
+          }
+        }
+
+        // Count reddit posts seen today (KV list with prefix)
+        let redditCount = 0
+        try {
+          const listed = await env.STATUS_CACHE.list({ prefix: 'reddit:seen:' })
+          redditCount = listed.keys.length
+        } catch (err) {
+          console.warn('[daily-summary] Failed to list reddit keys:', err instanceof Error ? err.message : err)
+        }
+
+        const description = buildDailySummary({
+          services: dailyServices,
+          aiUsage,
+          latencySnapshots: latSnapshots,
+          incidentCountToday: { newCount: result.newCount, resolvedCount: result.resolvedCount },
+          redditCount,
+        })
+
+        const dateStr = now.toISOString().split('T')[0]
+        await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+          title: `📊 AIWatch Daily Report — ${dateStr}`,
+          description,
+          color: 0x9B59B6, // purple
+        })
+      } catch (err) {
+        console.error('[daily-summary] Expanded report failed:', err instanceof Error ? err.message : err)
+        await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+          title: '📊 Daily Summary',
+          description: `${result.total} services checked\n${result.operational} operational · ${result.issues} issues`,
+          color: 0x9B59B6,
+        })
+      }
     }
   },
 
