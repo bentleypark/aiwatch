@@ -21,8 +21,8 @@ const en = {
   'topbar.refresh.loading': '↻ Loading...',
   'topbar.analyze': 'Analyze',
   'topbar.analyze.soon': 'Coming Soon',
-  'topbar.analyze.tooltip.title': 'Coming Soon',
-  'topbar.analyze.tooltip.body': 'Automatic anomaly detection and analysis notifications are being prepared',
+  'topbar.analyze.tooltip.title': 'AI Analysis (Beta)',
+  'topbar.analyze.tooltip.body': 'When an incident is detected, AI analyzes the cause and estimated recovery time',
   'topbar.refreshed': 'Refreshed',
   'topbar.menu.open': 'Open menu',
 

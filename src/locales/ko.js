@@ -21,8 +21,8 @@ const ko = {
   'topbar.refresh.loading': '↻ 로딩 중...',
   'topbar.analyze': '분석',
   'topbar.analyze.soon': '준비 중',
-  'topbar.analyze.tooltip.title': '준비 중인 기능',
-  'topbar.analyze.tooltip.body': '이상 감지 시 자동으로 원인을 분석하고 알림을 보내는 기능을 준비 중입니다',
+  'topbar.analyze.tooltip.title': 'AI 분석 (Beta)',
+  'topbar.analyze.tooltip.body': '장애 감지 시 AI가 원인을 분석하고 예상 복구 시간을 알려줍니다',
   'topbar.refreshed': '새로고침',
   'topbar.menu.open': '메뉴 열기',
 
