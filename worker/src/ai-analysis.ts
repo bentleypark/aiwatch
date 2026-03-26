@@ -181,18 +181,27 @@ export async function refreshOrReanalyze(
     const raw = await kv.get(key).catch(() => null)
 
     if (raw) {
-      // Refresh TTL if analysis exists and last refresh was 30+ min ago
       try {
         const parsed = JSON.parse(raw)
-        const lastRefresh = parsed._lastRefresh ?? parsed.analyzedAt
-        const elapsed = now - new Date(lastRefresh).getTime()
-        if (elapsed >= 1_800_000) {
-          parsed._lastRefresh = new Date(now).toISOString()
-          await kv.put(key, JSON.stringify(parsed), { expirationTtl: 3600 }).catch(() => {})
-          result.refreshed.push(svc.id)
+        // Check if analysis is for a currently active incident
+        const isStale = parsed.incidentId &&
+          !(svc.incidents ?? []).some(i => i.id === parsed.incidentId && i.status !== 'resolved')
+
+        if (isStale) {
+          // Analysis is for a resolved/missing incident — delete and fall through to re-analysis
+          await kv.put(key, '', { expirationTtl: 1 }).catch(() => {}) // expire immediately
+        } else {
+          // Refresh TTL if last refresh was 30+ min ago
+          const lastRefresh = parsed._lastRefresh ?? parsed.analyzedAt
+          const elapsed = now - new Date(lastRefresh).getTime()
+          if (elapsed >= 1_800_000) {
+            parsed._lastRefresh = new Date(now).toISOString()
+            await kv.put(key, JSON.stringify(parsed), { expirationTtl: 3600 }).catch(() => {})
+            result.refreshed.push(svc.id)
+          }
+          continue
         }
       } catch { /* ignore corrupt data */ }
-      continue
     }
 
     // No analysis — attempt re-analysis

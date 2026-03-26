@@ -348,4 +348,40 @@ describe('refreshOrReanalyze', () => {
     expect(usage.calls).toBe(1)
     expect(usage.success).toBe(1)
   })
+
+  it('detects stale analysis and re-analyzes for new incident', async () => {
+    // Analysis exists for inc-old (resolved), but inc-new is active
+    const staleAnalysis = { ...mockAnalysis, incidentId: 'inc-old' }
+    const store: Record<string, string> = {
+      'ai:analysis:claude': JSON.stringify(staleAnalysis),
+    }
+    const kv = mockKV(store)
+    const svc = mockService('claude', [
+      { id: 'inc-old', status: 'resolved' },
+      { id: 'inc-new', status: 'investigating' },
+    ])
+    const newAnalysis = { ...mockAnalysis, incidentId: 'inc-new' }
+    const analyzeFn = vi.fn().mockResolvedValue(newAnalysis)
+
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2)
+
+    expect(analyzeFn).toHaveBeenCalledOnce()
+    expect(result.reanalyzed).toEqual(['claude'])
+    const stored = JSON.parse(store['ai:analysis:claude'])
+    expect(stored.incidentId).toBe('inc-new')
+  })
+
+  it('keeps analysis when incidentId matches active incident', async () => {
+    const analysis = { ...mockAnalysis, incidentId: 'inc-1', analyzedAt: '2026-03-27T05:00:00Z' }
+    const kv = mockKV({ 'ai:analysis:claude': JSON.stringify(analysis) })
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn()
+
+    const now = new Date('2026-03-27T06:00:00Z').getTime()
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(analyzeFn).not.toHaveBeenCalled()
+    expect(result.refreshed).toEqual(['claude'])
+    expect(result.reanalyzed).toEqual([])
+  })
 })
