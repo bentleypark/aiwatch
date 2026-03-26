@@ -166,8 +166,16 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | `click_cta_alerts` | `location`, `source?` | Is X Down (CTA/footer) | Set Up Alerts click |
 | `click_ranking` | `location`, `source` | Is X Down (header/alternatives) | Ranking link click |
 | `click_service_detail` | `location`, `service_id` | Is X Down (footer) | Service detail page click |
+| `click_reports` | `location`, `source` | Is X Down (alternatives/footer) | Monthly reports link click (Is X Down) |
 
 Is X Down pages (Edge SSR) use inline `gtag()` calls directly since they don't use React.
+
+**Reports site** (`reports.ai-watch.dev`) uses the same GA4 ID (`G-D4ZWVHQ7JK`) with event delegation in `_includes/footer.html`:
+
+| Event | Parameters | Trigger | Purpose |
+|---|---|---|---|
+| `click_dashboard` | `location: reports_site`, `source: footer/body` | ai-watch.dev link click | Dashboard navigation from reports |
+| `click_report` | `location: reports_site`, `report_month: YYYY-MM` | Monthly report link click | Report page view intent |
 
 ### Status Data Flow
 ```
