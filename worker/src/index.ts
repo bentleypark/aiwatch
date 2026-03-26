@@ -429,6 +429,26 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     }
   }
 
+  // Refresh TTL on existing AI analyses for services with active incidents
+  // Prevents analysis from expiring (1h TTL) while incident is still ongoing
+  // Only refresh every ~30min to conserve KV writes (check analyzedAt timestamp)
+  const activeServices = scored.filter(s =>
+    (s.incidents ?? []).some(i => i.status !== 'resolved')
+  )
+  for (const svc of activeServices) {
+    const key = `ai:analysis:${svc.id}`
+    const raw = await kv.get(key).catch(() => null)
+    if (!raw) continue
+    try {
+      const parsed = JSON.parse(raw)
+      const lastRefresh = parsed._lastRefresh ?? parsed.analyzedAt
+      const elapsed = Date.now() - new Date(lastRefresh).getTime()
+      if (elapsed < 1_800_000) continue // skip if refreshed within 30min
+      parsed._lastRefresh = new Date().toISOString()
+      await kv.put(key, JSON.stringify(parsed), { expirationTtl: 3600 }).catch(() => {})
+    } catch { /* ignore corrupt data */ }
+  }
+
   const operational = scored.filter(s => s.status === 'operational').length
   return {
     total: scored.length,
