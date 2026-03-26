@@ -1,7 +1,7 @@
 // AI Analysis — Claude Sonnet API call for incident analysis
 // Triggered only when incidents are detected (not on every cron cycle)
 
-import type { Incident } from './types'
+import type { Incident, ServiceStatus } from './types'
 import { sanitize } from './utils'
 
 export interface AIAnalysisResult {
@@ -145,4 +145,106 @@ export async function analyzeIncident(
     console.error('[ai-analysis] Failed:', err instanceof Error ? err.message : err)
     return null
   }
+}
+
+// ── TTL Refresh + Re-analysis for active incidents ──
+
+export interface KVLike {
+  get(key: string): Promise<string | null>
+  put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>
+}
+
+export interface RefreshResult {
+  refreshed: string[]   // svcIds where TTL was refreshed
+  reanalyzed: string[]  // svcIds where re-analysis was triggered
+  skipped: string[]     // svcIds skipped due to cooldown or cap
+}
+
+/**
+ * For each active service:
+ * - If analysis exists in KV: refresh TTL (every ~30min)
+ * - If analysis missing: re-analyze (max `cap` per call, 30min cooldown on failure)
+ */
+export async function refreshOrReanalyze(
+  activeServices: ServiceStatus[],
+  kv: KVLike,
+  apiKey: string | undefined,
+  analyzeFn: typeof analyzeIncident,
+  cap = 2,
+  now = Date.now(),
+): Promise<RefreshResult> {
+  const result: RefreshResult = { refreshed: [], reanalyzed: [], skipped: [] }
+  let reAnalysisCount = 0
+
+  for (const svc of activeServices) {
+    const key = `ai:analysis:${svc.id}`
+    const raw = await kv.get(key).catch(() => null)
+
+    if (raw) {
+      // Refresh TTL if analysis exists and last refresh was 30+ min ago
+      try {
+        const parsed = JSON.parse(raw)
+        const lastRefresh = parsed._lastRefresh ?? parsed.analyzedAt
+        const elapsed = now - new Date(lastRefresh).getTime()
+        if (elapsed >= 1_800_000) {
+          parsed._lastRefresh = new Date(now).toISOString()
+          await kv.put(key, JSON.stringify(parsed), { expirationTtl: 3600 }).catch(() => {})
+          result.refreshed.push(svc.id)
+        }
+      } catch { /* ignore corrupt data */ }
+      continue
+    }
+
+    // No analysis — attempt re-analysis
+    if (!apiKey || reAnalysisCount >= cap) {
+      result.skipped.push(svc.id)
+      continue
+    }
+
+    const activeInc = (svc.incidents ?? []).find(i => i.status !== 'resolved')
+    if (!activeInc) continue
+
+    // 30min cooldown after failure
+    const skipKey = `ai:reanalysis-skip:${svc.id}`
+    const skipped = await kv.get(skipKey).catch(() => null)
+    if (skipped) {
+      result.skipped.push(svc.id)
+      continue
+    }
+
+    reAnalysisCount++
+    try {
+      const analysis = await analyzeFn(
+        apiKey,
+        svc.name,
+        { id: activeInc.id, title: activeInc.title, status: activeInc.status, startedAt: activeInc.startedAt, impact: activeInc.impact },
+        svc.incidents ?? [],
+      )
+
+      // Track in ai:usage daily counter
+      const today = new Date(now).toISOString().split('T')[0]
+      const usageKey = `ai:usage:${today}`
+      const usageRaw = await kv.get(usageKey).catch(() => null)
+      const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0 }
+      usage.calls++
+
+      if (analysis) {
+        usage.success++
+        await kv.put(key, JSON.stringify(analysis), { expirationTtl: 3600 }).catch(() => {})
+        result.reanalyzed.push(svc.id)
+      } else {
+        usage.failed++
+        console.warn(`[ai] re-analysis returned null for ${svc.id}`)
+        await kv.put(skipKey, '1', { expirationTtl: 1800 }).catch(() => {})
+        result.skipped.push(svc.id)
+      }
+      await kv.put(usageKey, JSON.stringify(usage), { expirationTtl: 172800 }).catch(() => {})
+    } catch (err) {
+      console.warn(`[ai] re-analysis failed for ${svc.id}:`, err instanceof Error ? err.message : err)
+      await kv.put(skipKey, '1', { expirationTtl: 1800 }).catch(() => {})
+      result.skipped.push(svc.id)
+    }
+  }
+
+  return result
 }

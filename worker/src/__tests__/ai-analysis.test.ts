@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident } from '../ai-analysis'
-import type { Incident } from '../types'
+import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident, refreshOrReanalyze, type KVLike } from '../ai-analysis'
+import type { Incident, ServiceStatus } from '../types'
 
 const mockIncident = (overrides: Partial<Incident> = {}): Incident => ({
   id: 'inc1',
@@ -180,5 +180,172 @@ describe('analyzeIncident', () => {
     expect(result).toBeNull()
 
     vi.unstubAllGlobals()
+  })
+})
+
+// ── refreshOrReanalyze tests ──
+
+function mockKV(store: Record<string, string> = {}): KVLike {
+  return {
+    get: vi.fn(async (key: string) => store[key] ?? null),
+    put: vi.fn(async (key: string, value: string) => { store[key] = value }),
+  }
+}
+
+function mockService(id: string, incidents: Partial<Incident>[] = []): ServiceStatus {
+  return {
+    id,
+    name: id.charAt(0).toUpperCase() + id.slice(1),
+    provider: 'Test',
+    status: 'degraded',
+    latency: null,
+    lastChecked: new Date().toISOString(),
+    incidents: incidents.map(i => ({
+      id: i.id ?? 'inc-1',
+      title: i.title ?? 'Test Incident',
+      status: i.status ?? 'investigating',
+      impact: i.impact ?? null,
+      startedAt: i.startedAt ?? '2026-03-27T06:00:00Z',
+      resolvedAt: i.resolvedAt ?? null,
+      duration: i.duration ?? null,
+      timeline: i.timeline ?? [],
+    })),
+  }
+}
+
+const mockAnalysis = {
+  summary: 'Test analysis',
+  estimatedRecovery: '30-60min',
+  affectedScope: ['API'],
+  analyzedAt: '2026-03-27T06:10:00Z',
+  incidentId: 'inc-1',
+}
+
+describe('refreshOrReanalyze', () => {
+  it('refreshes TTL when analysis exists and is older than 30min', async () => {
+    const oldAnalysis = { ...mockAnalysis, analyzedAt: '2026-03-27T05:00:00Z' }
+    const kv = mockKV({ 'ai:analysis:claude': JSON.stringify(oldAnalysis) })
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn()
+
+    const now = new Date('2026-03-27T06:00:00Z').getTime()
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(result.refreshed).toEqual(['claude'])
+    expect(result.reanalyzed).toEqual([])
+    expect(analyzeFn).not.toHaveBeenCalled()
+    expect(kv.put).toHaveBeenCalledWith(
+      'ai:analysis:claude',
+      expect.stringContaining('_lastRefresh'),
+      { expirationTtl: 3600 },
+    )
+  })
+
+  it('skips TTL refresh when analysis is recent (< 30min)', async () => {
+    const recentAnalysis = { ...mockAnalysis, analyzedAt: '2026-03-27T05:50:00Z' }
+    const kv = mockKV({ 'ai:analysis:claude': JSON.stringify(recentAnalysis) })
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn()
+
+    const now = new Date('2026-03-27T06:00:00Z').getTime()
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(result.refreshed).toEqual([])
+    expect(kv.put).not.toHaveBeenCalled()
+  })
+
+  it('re-analyzes when analysis is missing', async () => {
+    const kv = mockKV()
+    const svc = mockService('chatgpt', [{ id: 'inc-2', status: 'investigating' }])
+    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'inc-2' })
+
+    const result = await refreshOrReanalyze([svc], kv, 'api-key', analyzeFn, 2)
+
+    expect(result.reanalyzed).toEqual(['chatgpt'])
+    expect(analyzeFn).toHaveBeenCalledOnce()
+    expect(kv.put).toHaveBeenCalledWith(
+      'ai:analysis:chatgpt',
+      expect.stringContaining('inc-2'),
+      { expirationTtl: 3600 },
+    )
+  })
+
+  it('respects cap — only re-analyzes up to cap services', async () => {
+    const kv = mockKV()
+    const services = [
+      mockService('svc1', [{ id: 'i1', status: 'investigating' }]),
+      mockService('svc2', [{ id: 'i2', status: 'investigating' }]),
+      mockService('svc3', [{ id: 'i3', status: 'investigating' }]),
+    ]
+    const analyzeFn = vi.fn().mockResolvedValue(mockAnalysis)
+
+    const result = await refreshOrReanalyze(services, kv, 'key', analyzeFn, 2)
+
+    expect(analyzeFn).toHaveBeenCalledTimes(2)
+    expect(result.reanalyzed).toHaveLength(2)
+    expect(result.skipped).toContain('svc3')
+  })
+
+  it('skips re-analysis when cooldown key exists', async () => {
+    const kv = mockKV({ 'ai:reanalysis-skip:claude': '1' })
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn()
+
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2)
+
+    expect(analyzeFn).not.toHaveBeenCalled()
+    expect(result.skipped).toEqual(['claude'])
+  })
+
+  it('sets cooldown key when analysis returns null', async () => {
+    const store: Record<string, string> = {}
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn().mockResolvedValue(null)
+
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2)
+
+    expect(result.skipped).toEqual(['claude'])
+    expect(store['ai:reanalysis-skip:claude']).toBe('1')
+  })
+
+  it('sets cooldown key when analysis throws', async () => {
+    const store: Record<string, string> = {}
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn().mockRejectedValue(new Error('API error'))
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2)
+
+    expect(result.skipped).toEqual(['claude'])
+    expect(store['ai:reanalysis-skip:claude']).toBe('1')
+    spy.mockRestore()
+  })
+
+  it('skips re-analysis when no API key', async () => {
+    const kv = mockKV()
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn()
+
+    const result = await refreshOrReanalyze([svc], kv, undefined, analyzeFn, 2)
+
+    expect(analyzeFn).not.toHaveBeenCalled()
+    expect(result.skipped).toEqual(['claude'])
+  })
+
+  it('tracks re-analysis in ai:usage counter', async () => {
+    const store: Record<string, string> = {}
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn().mockResolvedValue(mockAnalysis)
+
+    await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2)
+
+    const usageKey = Object.keys(store).find(k => k.startsWith('ai:usage:'))
+    expect(usageKey).toBeDefined()
+    const usage = JSON.parse(store[usageKey!])
+    expect(usage.calls).toBe(1)
+    expect(usage.success).toBe(1)
   })
 })

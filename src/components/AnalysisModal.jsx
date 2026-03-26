@@ -13,6 +13,14 @@ function timeAgo(date, lang) {
 export default function AnalysisModal({ aiAnalysis, services, onClose }) {
   const { t, lang } = useLang()
   const entries = Object.entries(aiAnalysis)
+    .sort(([aId, aAnalysis], [bId, bAnalysis]) => {
+      // Sort by incident start time (newest first)
+      const aInc = services.find(s => s.id === aId)?.incidents?.find(i => i.id === aAnalysis.incidentId)
+      const bInc = services.find(s => s.id === bId)?.incidents?.find(i => i.id === bAnalysis.incidentId)
+      const aTime = aInc?.startedAt ?? aAnalysis.analyzedAt ?? ''
+      const bTime = bInc?.startedAt ?? bAnalysis.analyzedAt ?? ''
+      return bTime.localeCompare(aTime)
+    })
   if (entries.length === 0) return null
 
   return (

@@ -89,8 +89,9 @@ npm run test:worker # Run Worker unit tests (vitest)
 | `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
 | `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time |
 | `reddit:seen:{postId}` | `"1"` | 24h | ~72 | Reddit post dedup (hourly scan) |
-| `ai:analysis:{svcId}` | `AIAnalysisResult` JSON | 1h | ~5 | Claude Sonnet incident analysis result |
-| `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed }` JSON | 2d | ~5 | Daily AI analysis usage counter |
+| `ai:analysis:{svcId}` | `AIAnalysisResult` JSON | 1h | ~5 | Claude Sonnet incident analysis result (TTL refreshed while active) |
+| `ai:reanalysis-skip:{svcId}` | `"1"` | 30min | ~2 | Re-analysis failure cooldown |
+| `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis) |
 | `kv_limit_alert` | `"1"` | 5min | ~1 | KV write limit exceeded cooldown |
 
 **Free tier budget**: 1,000 writes/day. Estimated total: ~810-920 writes/day (within budget).
