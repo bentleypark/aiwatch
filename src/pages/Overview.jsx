@@ -311,26 +311,50 @@ function getFallbacks(service, allServices) {
 
 // ── Action Banner — shows fallback recommendations during outages ──
 
-function ActionBanner({ services, setPage, setFilter, setCategoryFilter, t }) {
-  const statusPriority = { down: 0, degraded: 1 }
-  const affected = services
-    .filter(s => s.status === 'down' || s.status === 'degraded')
-    .sort((a, b) => (statusPriority[a.status] ?? 2) - (statusPriority[b.status] ?? 2))
+function ActionBanner({ services, setPage, t }) {
+  const affected = services.filter(s => s.status === 'down' || s.status === 'degraded')
   if (affected.length === 0) return null
 
-  const hasDown = affected.some(s => s.status === 'down')
+  const downList = affected.filter(s => s.status === 'down')
+  const degradedList = affected.filter(s => s.status === 'degraded')
+  const hasDown = downList.length > 0
   const borderColor = hasDown ? 'var(--red)' : 'var(--amber)'
-  const icon = hasDown ? '🔴' : '⚠️'
 
-  // 3+ services: summary mode
-  if (affected.length >= 3) {
-    const names = affected.slice(0, 3).map(s => s.name).join(', ')
-    const suffix = affected.length > 3 ? ` +${affected.length - 3}` : ''
-    return (
-      <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg" style={{ padding: '10px 14px', lineHeight: 1.4, borderLeft: `3px solid ${borderColor}` }}>
-        <div className="text-[13px] font-medium text-[var(--text0)]" style={{ marginBottom: '3px' }}>
-          {icon} {t('overview.banner.affected').replace('{n}', affected.length)} — {names}{suffix}
+  // Render clickable service names
+  const renderNames = (list) => list.map((svc, i) => (
+    <span key={svc.id}>
+      {i > 0 && ', '}
+      <span className="hover:underline cursor-pointer" onClick={() => setPage({ name: 'service', serviceId: svc.id })}>{svc.name}</span>
+    </span>
+  ))
+
+  // Collect fallbacks — exclude non-operational + same provider as affected services
+  const nonOperationalIds = new Set(services.filter(s => s.status !== 'operational').map(s => s.id))
+  const affectedProviders = new Set(affected.map(s => s.provider))
+  const seenFb = new Set()
+  const fallbacks = affected.flatMap(svc => getFallbacks(svc, services)).filter(f => {
+    if (nonOperationalIds.has(f.id)) return false
+    // Exclude same provider (e.g. claude.ai down → don't recommend Claude API)
+    const fSvc = services.find(s => s.id === f.id)
+    if (fSvc?.provider && affectedProviders.has(fSvc.provider)) return false
+    if (seenFb.has(f.id)) return false
+    seenFb.add(f.id)
+    return true
+  }).slice(0, 2)
+
+  return (
+    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg" style={{ padding: '10px 14px', lineHeight: 1.5, borderLeft: `3px solid ${borderColor}` }}>
+      {downList.length > 0 && (
+        <div className="text-[13px] font-medium text-[var(--text0)]">
+          🔴 <span className="text-[var(--red)]">{t('overview.banner.downCount').replace('{n}', downList.length)}</span> {renderNames(downList)}
         </div>
+      )}
+      {degradedList.length > 0 && (
+        <div className="text-[13px] font-medium text-[var(--text0)]">
+          ⚠️ <span className="text-[var(--amber)]">{t('overview.banner.degradedCount').replace('{n}', degradedList.length)}</span> {renderNames(degradedList)}
+        </div>
+      )}
+      <div className="flex items-center flex-wrap" style={{ gap: '6px', marginTop: '4px' }}>
         <button
           onClick={() => setPage({ name: 'incidents' })}
           className="mono text-[11px] text-[var(--blue)] hover:underline cursor-pointer"
@@ -338,50 +362,28 @@ function ActionBanner({ services, setPage, setFilter, setCategoryFilter, t }) {
         >
           👉 {t('overview.banner.viewIncidents')}
         </button>
+        {fallbacks.length > 0 ? (
+          <span className="mono text-[11px] text-[var(--text2)]">
+            · ✅ {t('overview.banner.healthy')}{' '}
+            {fallbacks.map((f, i) => (
+              <span key={f.id}>
+                {i > 0 && ', '}
+                <span
+                  className="text-[var(--green)] hover:underline cursor-pointer"
+                  onClick={() => { trackEvent('fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); setPage({ name: 'service', serviceId: f.id }) }}
+                >
+                  {i === 0 && <span className="text-[var(--yellow)]">★ </span>}
+                  {f.name}{f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}
+                </span>
+              </span>
+            ))}
+          </span>
+        ) : (
+          <span className="mono text-[11px] text-[var(--text2)]">
+            · ⚠️ {t('overview.banner.noFallback')}
+          </span>
+        )}
       </div>
-    )
-  }
-
-  // 1-2 services: detailed mode with fallbacks
-  return (
-    <div className="flex flex-col" style={{ gap: '8px' }}>
-      {affected.map(svc => {
-        const fallbacks = getFallbacks(svc, services)
-        const statusLabel = svc.status === 'down' ? t('overview.banner.down') : t('overview.banner.degraded')
-        const svcIcon = svc.status === 'down' ? '🔴' : '⚠️'
-
-        return (
-          <div key={svc.id}
-               className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg cursor-pointer hover:border-[var(--border-hi)] transition-colors"
-               style={{ padding: '10px 14px', lineHeight: 1.4, borderLeft: `3px solid ${svc.status === 'down' ? 'var(--red)' : 'var(--amber)'}` }}
-               onClick={() => setPage({ name: 'service', serviceId: svc.id })}>
-            <div className="text-[13px] font-medium text-[var(--text0)]" style={{ marginBottom: '3px' }}>
-              {svcIcon} {svc.name} — <span className={svc.status === 'down' ? 'text-[var(--red)]' : 'text-[var(--amber)]'}>{statusLabel}</span>
-            </div>
-            <div className="mono text-[11px] text-[var(--text2)]">
-              {fallbacks.length > 0 ? (
-                <>
-                  👉 {t('overview.banner.fallback')}{' '}
-                  {fallbacks.map((f, i) => (
-                    <span key={f.id}>
-                      {i > 0 && ' · '}
-                      <span
-                        className="hover:underline hover:text-[var(--text0)] transition-colors cursor-pointer"
-                        onClick={(e) => { e.stopPropagation(); trackEvent('fallback_click', { from_service: svc.id, to_service: f.id, location: 'action_banner' }); setPage({ name: 'service', serviceId: f.id }) }}
-                      >
-                        {i === 0 && <span className="text-[var(--yellow)]">★ </span>}
-                        {f.name}{f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}
-                      </span>
-                    </span>
-                  ))}
-                </>
-              ) : (
-                `⚠️ ${t('overview.banner.noFallback')}`
-              )}
-            </div>
-          </div>
-        )
-      })}
     </div>
   )
 }
@@ -470,7 +472,7 @@ export default function Overview() {
     <div className="flex flex-col" style={{ gap: '20px' }}>
 
       {/* ── Action Banner (outage fallback) ── */}
-      <ActionBanner services={services} setPage={setPage} setFilter={setFilter} setCategoryFilter={setCategoryFilter} t={t} />
+      <ActionBanner services={services} setPage={setPage} t={t} />
 
       {/* ── Summary Stats ── */}
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>
