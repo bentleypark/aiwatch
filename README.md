@@ -39,7 +39,7 @@ Real-time monitoring dashboard for **25 AI services** — track status, latency,
 - **Regional availability** — Per-region incident status for xAI, Gemini, OpenAI with switch recommendation
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
-- **Is X Down SEO pages** — 6 services with dynamic OG images (PNG), share buttons (X, Threads, KakaoTalk, Copy Link), AIWatch rank, and fallback recommendations
+- **Is X Down SEO pages** — 8 services with dynamic OG images (PNG), share buttons (X, Threads, KakaoTalk, Copy Link), AIWatch rank, and fallback recommendations
 - **Health check probing** — Direct RTT measurement to API endpoints (Gemini PoC)
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 
@@ -259,7 +259,7 @@ src/
   utils/         # analytics, calendar, time, pageContext, constants
   locales/       # ko.js, en.js (flat key→string maps)
 api/
-  is-down.ts           # Vercel Edge Function — "Is X Down?" SSR pages (6 services)
+  is-down.ts           # Vercel Edge Function — "Is X Down?" SSR pages (8 services)
   is-down/
     slug-map.ts        # URL slug ↔ service ID mapping
     seo-content.ts     # Per-service SEO text + FAQ

@@ -38,7 +38,7 @@
 - **리전별 가용성** — xAI, Gemini, OpenAI의 리전별 인시던트 상태 및 전환 추천
 - **스마트 알림** — degraded/down 상태 Discord 알림 (anti-flapping + 인시던트 억제 + 복구 지속 시간)
 - **오프라인 UI** — API 연결 불가 시 안내 화면 (프로덕션 전용)
-- **Is X Down SEO 페이지** — 6개 서비스, 동적 OG 이미지(PNG), 공유 버튼(X, Threads, 카카오톡, 링크 복사), AIWatch 순위, 대체 서비스 추천
+- **Is X Down SEO 페이지** — 8개 서비스, 동적 OG 이미지(PNG), 공유 버튼(X, Threads, 카카오톡, 링크 복사), AIWatch 순위, 대체 서비스 추천
 - **헬스체크 프로빙** — API 엔드포인트 직접 RTT 측정 (Gemini PoC)
 - **페이지별 스켈레톤** — 각 페이지 레이아웃에 맞는 로딩 placeholder
 
@@ -258,7 +258,7 @@ src/
   utils/         # analytics, calendar, time, pageContext, constants
   locales/       # ko.js, en.js (flat key→string 맵)
 api/
-  is-down.ts           # Vercel Edge Function — "Is X Down?" SSR 페이지 (6개 서비스)
+  is-down.ts           # Vercel Edge Function — "Is X Down?" SSR 페이지 (8개 서비스)
   is-down/
     slug-map.ts        # URL slug ↔ service ID 매핑
     seo-content.ts     # 서비스별 SEO 텍스트 + FAQ

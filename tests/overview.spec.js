@@ -15,10 +15,11 @@ test.describe('Overview page', () => {
 
   test('renders all service cards', async ({ page }) => {
     const serviceNames = [
-      'Claude API', 'OpenAI API', 'Gemini API', 'Mistral API',
-      'Cohere API', 'Groq Cloud', 'Together AI', 'Perplexity',
-      'Hugging Face', 'Replicate', 'ElevenLabs', 'xAI (Grok)', 'DeepSeek API',
-      'claude.ai', 'ChatGPT',
+      'claude.ai', 'ChatGPT', 'Character.AI',
+      'Claude API', 'OpenAI API', 'Gemini API', 'Amazon Bedrock', 'Azure OpenAI',
+      'Mistral API', 'Cohere API', 'Groq Cloud', 'Together AI', 'Perplexity',
+      'xAI (Grok)', 'DeepSeek API', 'OpenRouter',
+      'Hugging Face', 'Replicate', 'ElevenLabs', 'Pinecone', 'Stability AI',
       'Claude Code', 'GitHub Copilot', 'Cursor', 'Windsurf',
     ]
     for (const name of serviceNames) {
