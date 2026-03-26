@@ -67,9 +67,11 @@ describe('failedProbe', () => {
 })
 
 describe('PROBE_TARGETS', () => {
-  it('has gemini as PoC target', () => {
-    expect(PROBE_TARGETS).toHaveLength(1)
+  it('has gemini and mistral as probe targets', () => {
+    expect(PROBE_TARGETS).toHaveLength(2)
     expect(PROBE_TARGETS[0].id).toBe('gemini')
     expect(PROBE_TARGETS[0].url).toContain('generativelanguage.googleapis.com')
+    expect(PROBE_TARGETS[1].id).toBe('mistral')
+    expect(PROBE_TARGETS[1].url).toContain('api.mistral.ai')
   })
 })

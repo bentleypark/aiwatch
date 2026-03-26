@@ -7,6 +7,7 @@ export interface ProbeTarget { id: string; url: string }
 
 export const PROBE_TARGETS: ProbeTarget[] = [
   { id: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/models' },
+  { id: 'mistral', url: 'https://api.mistral.ai/v1/models' },
 ]
 
 /** Compute 5-minute aligned slot string from a Date */

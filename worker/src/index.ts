@@ -144,14 +144,15 @@ async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
         signal: AbortSignal.timeout(5000),
       })
       data[id] = { status: res.status, rtt: Date.now() - start }
-    } catch {
+    } catch (err) {
+      console.warn(`[probe] fetch failed for ${id}:`, err instanceof Error ? err.message : err)
       data[id] = failedProbe()
     }
   }))
 
   try {
-    const PROBE_KEY = 'probe:24h'
-    const MAX_SNAPSHOTS = 288 // 24h × 12 per hour (every 5 min)
+    const PROBE_KEY = 'probe:24h' // key name kept for backwards compat; actual retention is 72h
+    const MAX_SNAPSHOTS = 864 // 72h × 12 per hour (every 5 min)
     const existing = await kv.get(PROBE_KEY).catch(() => null)
     const snapshots: ProbeSnapshot[] = existing ? (JSON.parse(existing).snapshots ?? []) : []
     const slotTs = slotToTimestamp(currentSlot)
@@ -159,7 +160,7 @@ async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
     snapshots.push({ t: slotTs, data })
     const trimmed = trimSnapshots(snapshots, MAX_SNAPSHOTS)
     await kv.put(PROBE_KEY, JSON.stringify({ snapshots: trimmed }), {
-      expirationTtl: 90000, // 25 hours
+      expirationTtl: 259200, // 72 hours
     })
     lastProbeSlot = currentSlot
   } catch (err) {

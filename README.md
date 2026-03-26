@@ -123,7 +123,7 @@ Cloudflare KV
   ├── daily:YYYY-MM-DD     (uptime counters, TTL 2d)
   ├── history:YYYY-MM-DD   (archived counters, TTL 90d)
   ├── latency:24h          (30-min snapshots, max 48, TTL 25h)
-  ├── probe:24h            (health check probes, max 48, TTL 25h)
+  ├── probe:24h            (health check probes, max 864, TTL 72h, Gemini + Mistral)
   ├── ai:analysis:{svcId}  (AI incident analysis, TTL 1h)
   ├── ai:usage:{date}      (daily AI usage counter, TTL 2d)
   ├── alerted:*            (alert dedup keys, TTL 2h-7d)

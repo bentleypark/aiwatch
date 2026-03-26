@@ -80,7 +80,7 @@ npm run test:worker # Run Worker unit tests (vitest)
 | `daily:{YYYY-MM-DD}` | `{ [svcId]: { ok, total } }` JSON | 2d | ~288 | Daily uptime counters |
 | `history:{YYYY-MM-DD}` | Same as daily | 90d | 1 | Archived yesterday's counters |
 | `latency:24h` | `{ snapshots: [{ t, data }] }` JSON | 25h | ~48 | 30-min latency snapshots (max 48) |
-| `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 25h | ~288 | 5-min health check probe results |
+| `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 72h | ~288 | 5-min health check probe results (max 864, Gemini + Mistral) |
 | `alerted:new:{incId}` | `"1"` | 7d | ~5 | Incident alert dedup |
 | `alerted:res:{incId}` | `"1"` | 7d | ~2 | Resolved incident alert dedup |
 | `alerted:down:{svcId}` | ISO timestamp | 2h | ~2 | Service down alert dedup + recovery duration |
