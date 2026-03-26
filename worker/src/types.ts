@@ -13,6 +13,7 @@ export interface Incident {
   impact: 'minor' | 'major' | 'critical' | null
   componentNames?: string[]
   startedAt: string
+  resolvedAt?: string | null
   duration: string | null
   timeline: TimelineEntry[]
 }

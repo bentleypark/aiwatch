@@ -58,6 +58,7 @@ export function parseGCloudIncidents(data: GCloudIncident[], productFilter: stri
             : 'investigating' as const,
           impact,
           startedAt: inc.begin,
+          resolvedAt: inc.end ?? null,
           duration,
           timeline,
         }]

@@ -51,6 +51,7 @@ export function parseRssIncidents(xml: string): Incident[] {
       status: isResolved ? 'resolved' : 'investigating',
       impact: null,
       startedAt,
+      resolvedAt: isResolved ? new Date(last.date).toISOString() : null,
       duration,
       timeline: events.map((e, idx) => ({
         stage: (isResolved && idx === events.length - 1) ? 'resolved' as const : 'investigating' as const,
@@ -113,6 +114,7 @@ export function parseXaiRssIncidents(xml: string): Incident[] {
       status: isResolved ? 'resolved' : 'investigating',
       impact: null,
       startedAt,
+      resolvedAt: resolvedAt ? resolvedAt.toISOString() : null,
       duration,
       timeline,
     })

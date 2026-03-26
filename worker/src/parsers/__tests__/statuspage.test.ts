@@ -51,6 +51,7 @@ describe('parseIncidents', () => {
     expect(result[0].status).toBe('resolved')
     expect(result[0].impact).toBe('major')
     expect(result[0].duration).toBe('2h 0m')
+    expect(result[0].resolvedAt).toBe('2026-03-01T12:00:00Z')
     expect(result[0].timeline).toHaveLength(2)
     // Timeline reversed to oldest first: investigating → resolved
     expect(result[0].timeline[0].stage).toBe('investigating')

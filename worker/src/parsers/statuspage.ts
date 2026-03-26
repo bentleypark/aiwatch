@@ -81,6 +81,7 @@ export function parseIncidents(data: StatuspageResponse): Incident[] {
       impact,
       ...(componentNames.length > 0 ? { componentNames } : {}),
       startedAt: inc.created_at,
+      resolvedAt: inc.resolved_at ?? null,
       duration,
       timeline,
     }

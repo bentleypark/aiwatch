@@ -105,6 +105,7 @@ export function parseOnlineOrNotIncidents(html: string): Incident[] {
         : impact === 'PARTIAL_OUTAGE' || impact === 'DEGRADED_PERFORMANCE' ? 'minor'
         : null,
       startedAt: startDate.toISOString(),
+      resolvedAt: isResolved && endDate ? endDate.toISOString() : null,
       duration: isResolved ? formatDuration(startDate, endDate!) : null,
       timeline,
     })

@@ -83,6 +83,7 @@ export function parseAwsRssIncidents(xml: string): Incident[] {
       status,
       impact,
       startedAt,
+      resolvedAt: status === 'resolved' ? startedAt : null,
       duration,
       timeline,
     })
