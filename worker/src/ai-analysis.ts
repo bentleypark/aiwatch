@@ -175,6 +175,8 @@ export async function refreshOrReanalyze(
 ): Promise<RefreshResult> {
   const result: RefreshResult = { refreshed: [], reanalyzed: [], skipped: [] }
   let reAnalysisCount = 0
+  // Track incidentId → KV key for dedup (same incident across multiple services)
+  const analyzedIncidents = new Map<string, string>()
 
   for (const svc of activeServices) {
     const key = `ai:analysis:${svc.id}`
@@ -191,6 +193,8 @@ export async function refreshOrReanalyze(
           // Analysis is for a resolved/missing incident — delete and fall through to re-analysis
           await kv.put(key, '', { expirationTtl: 1 }).catch(() => {}) // expire immediately
         } else {
+          // Valid analysis — register for sibling dedup
+          if (parsed.incidentId) analyzedIncidents.set(parsed.incidentId, key)
           // Refresh TTL if last refresh was 30+ min ago
           const lastRefresh = parsed._lastRefresh ?? parsed.analyzedAt
           const elapsed = now - new Date(lastRefresh).getTime()
@@ -204,14 +208,26 @@ export async function refreshOrReanalyze(
       } catch { /* ignore corrupt data */ }
     }
 
-    // No analysis — attempt re-analysis
+    // No analysis — attempt re-analysis or copy from sibling with same incidentId
+    const activeInc = (svc.incidents ?? []).find(i => i.status !== 'resolved')
+    if (!activeInc) continue
+
+    // Dedup: check if another service already has analysis for the same incidentId
+    const siblingKey = analyzedIncidents.get(activeInc.id)
+    if (siblingKey) {
+      const siblingRaw = await kv.get(siblingKey).catch(() => null)
+      if (siblingRaw) {
+        await kv.put(key, siblingRaw, { expirationTtl: 3600 }).catch(() => {})
+        analyzedIncidents.set(activeInc.id, key)
+        result.reanalyzed.push(svc.id)
+        continue
+      }
+    }
+
     if (!apiKey || reAnalysisCount >= cap) {
       result.skipped.push(svc.id)
       continue
     }
-
-    const activeInc = (svc.incidents ?? []).find(i => i.status !== 'resolved')
-    if (!activeInc) continue
 
     // 30min cooldown after failure
     const skipKey = `ai:reanalysis-skip:${svc.id}`
@@ -240,6 +256,7 @@ export async function refreshOrReanalyze(
       if (analysis) {
         usage.success++
         await kv.put(key, JSON.stringify(analysis), { expirationTtl: 3600 }).catch(() => {})
+        if (activeInc.id) analyzedIncidents.set(activeInc.id, key)
         result.reanalyzed.push(svc.id)
       } else {
         usage.failed++

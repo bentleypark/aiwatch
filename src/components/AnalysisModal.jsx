@@ -12,15 +12,24 @@ function timeAgo(date, lang) {
 
 export default function AnalysisModal({ aiAnalysis, services, onClose }) {
   const { t, lang } = useLang()
-  const entries = Object.entries(aiAnalysis)
-    .sort(([aId, aAnalysis], [bId, bAnalysis]) => {
-      // Sort by incident start time (newest first)
-      const aInc = services.find(s => s.id === aId)?.incidents?.find(i => i.id === aAnalysis.incidentId)
-      const bInc = services.find(s => s.id === bId)?.incidents?.find(i => i.id === bAnalysis.incidentId)
-      const aTime = aInc?.startedAt ?? aAnalysis.analyzedAt ?? ''
-      const bTime = bInc?.startedAt ?? bAnalysis.analyzedAt ?? ''
-      return bTime.localeCompare(aTime)
-    })
+  // Group by incidentId to avoid duplicate analysis cards for shared incidents
+  const grouped = new Map() // incidentId → { analysis, svcIds: [], startedAt }
+  for (const [svcId, analysis] of Object.entries(aiAnalysis)) {
+    const incId = analysis.incidentId ?? svcId
+    if (grouped.has(incId)) {
+      grouped.get(incId).svcIds.push(svcId)
+    } else {
+      const svc = services.find(s => s.id === svcId)
+      const inc = svc?.incidents?.find(i => i.id === analysis.incidentId)
+      grouped.set(incId, {
+        analysis,
+        svcIds: [svcId],
+        startedAt: inc?.startedAt ?? analysis.analyzedAt ?? '',
+      })
+    }
+  }
+  const entries = [...grouped.values()]
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
   if (entries.length === 0) return null
 
   return (
@@ -36,7 +45,7 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
             <span style={{ fontSize: '16px' }}>🤖</span>
             <span className="mono text-[12px] font-medium text-[var(--text0)]">AI Analysis</span>
             <span className="mono text-[9px] rounded" style={{ color: 'var(--purple)', background: 'rgba(124,58,237,0.15)', padding: '2px 6px' }}>Beta</span>
-            <span className="mono text-[9px] text-[var(--text2)]">({entries.length})</span>
+            <span className="mono text-[9px] text-[var(--text2)]">({Object.keys(aiAnalysis).length})</span>
           </div>
           <button
             onClick={onClose}
@@ -49,18 +58,20 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
 
         {/* Analysis entries */}
         <div style={{ padding: '16px' }}>
-          {entries.map(([svcId, analysis]) => {
-            const svc = services.find(s => s.id === svcId)
-            if (!svc) return null
-            const isResolved = svc.status === 'operational'
-            const hasActiveInc = (svc.incidents ?? []).some(i => i.status !== 'resolved' && i.id === analysis.incidentId)
+          {entries.map(({ analysis, svcIds }) => {
+            const svcs = svcIds.map(id => services.find(s => s.id === id)).filter(Boolean)
+            if (svcs.length === 0) return null
+            const worstStatus = svcs.some(s => s.status === 'down') ? 'down'
+              : svcs.some(s => s.status !== 'operational') ? 'degraded' : 'operational'
+            const isAllResolved = svcs.every(s => s.status === 'operational')
+            const hasActiveInc = svcs.some(s => (s.incidents ?? []).some(i => i.status !== 'resolved'))
 
             return (
-              <div key={svcId} className="bg-[var(--bg2)] rounded-lg" style={{ padding: '12px 14px', marginBottom: '10px', opacity: isResolved && !hasActiveInc ? 0.6 : 1 }}>
-                <div className="flex items-center gap-2" style={{ marginBottom: '8px' }}>
-                  <span className="w-[6px] h-[6px] rounded-full" style={{ background: isResolved ? 'var(--green)' : svc.status === 'down' ? 'var(--red)' : 'var(--amber)' }} />
-                  <span className="text-[13px] font-medium text-[var(--text0)]">{svc.name}</span>
-                  {isResolved && !hasActiveInc && (
+              <div key={svcIds.join(',')} className="bg-[var(--bg2)] rounded-lg" style={{ padding: '12px 14px', marginBottom: '10px', opacity: isAllResolved && !hasActiveInc ? 0.6 : 1 }}>
+                <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: '8px' }}>
+                  <span className="w-[6px] h-[6px] rounded-full" style={{ background: worstStatus === 'operational' ? 'var(--green)' : worstStatus === 'down' ? 'var(--red)' : 'var(--amber)' }} />
+                  <span className="text-[13px] font-medium text-[var(--text0)]">{svcs.map(s => s.name).join(', ')}</span>
+                  {isAllResolved && !hasActiveInc && (
                     <span className="mono text-[9px] px-1.5 py-0.5 rounded bg-[var(--status-bg-green)] text-[var(--green)]">Resolved</span>
                   )}
                 </div>

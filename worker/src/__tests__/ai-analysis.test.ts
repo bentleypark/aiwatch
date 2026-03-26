@@ -384,4 +384,49 @@ describe('refreshOrReanalyze', () => {
     expect(result.refreshed).toEqual(['claude'])
     expect(result.reanalyzed).toEqual([])
   })
+
+  it('dedup: copies analysis from sibling with same incidentId instead of API call', async () => {
+    // claude has analysis for inc-shared, claudeai shares same incident but has no analysis
+    const sharedAnalysis = { ...mockAnalysis, incidentId: 'inc-shared' }
+    const store: Record<string, string> = {
+      'ai:analysis:claude': JSON.stringify(sharedAnalysis),
+    }
+    const kv = mockKV(store)
+    const services = [
+      mockService('claude', [{ id: 'inc-shared', status: 'investigating' }]),
+      mockService('claudeai', [{ id: 'inc-shared', status: 'investigating' }]),
+    ]
+    const analyzeFn = vi.fn()
+
+    const now = new Date('2026-03-27T06:00:00Z').getTime()
+    const result = await refreshOrReanalyze(services, kv, 'key', analyzeFn, 2, now)
+
+    expect(analyzeFn).not.toHaveBeenCalled() // no API call needed
+    expect(result.reanalyzed).toContain('claudeai')
+    expect(store['ai:analysis:claudeai']).toBeDefined()
+    const copied = JSON.parse(store['ai:analysis:claudeai'])
+    expect(copied.incidentId).toBe('inc-shared')
+  })
+
+  it('dedup: does not count copied analysis toward re-analysis cap', async () => {
+    const sharedAnalysis = { ...mockAnalysis, incidentId: 'inc-shared' }
+    const store: Record<string, string> = {
+      'ai:analysis:claude': JSON.stringify(sharedAnalysis),
+    }
+    const kv = mockKV(store)
+    const services = [
+      mockService('claude', [{ id: 'inc-shared', status: 'investigating' }]),
+      mockService('claudeai', [{ id: 'inc-shared', status: 'investigating' }]),
+      mockService('together', [{ id: 'inc-other', status: 'investigating' }]),
+    ]
+    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'inc-other' })
+
+    const now = new Date('2026-03-27T06:00:00Z').getTime()
+    const result = await refreshOrReanalyze(services, kv, 'key', analyzeFn, 1, now)
+
+    // claudeai copied (no API), together analyzed (1 API call, within cap=1)
+    expect(analyzeFn).toHaveBeenCalledOnce()
+    expect(result.reanalyzed).toContain('claudeai')
+    expect(result.reanalyzed).toContain('together')
+  })
 })
