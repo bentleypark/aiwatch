@@ -65,6 +65,7 @@ const en = {
   'overview.banner.downCount': 'Down ({n}):',
   'overview.banner.degradedCount': 'Degraded ({n}):',
   'overview.banner.healthy': 'Healthy alternatives:',
+  'overview.card.incidents.compact': ' inc',
   'overview.ai.title': 'AI Analysis',
   'overview.ai.soon': 'Coming Soon',
   'overview.ai.desc': 'Automatic anomaly detection and analysis is being prepared',

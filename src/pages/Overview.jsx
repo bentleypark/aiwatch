@@ -63,18 +63,21 @@ function StatCard({ value, sub, labelKey, colorClass, index, t }) {
 }
 
 // Variable-height history bars matching design mockup (18px container, bars 4-18px)
-function HistoryBars({ history30d }) {
+function HistoryBars({ history30d, compact }) {
+  const h = compact ? 10 : 18
+  const bars = compact ? history30d.slice(-30) : history30d
   return (
-    <div className="flex gap-[2px] items-end" style={{ height: '18px' }} aria-hidden="true">
-      {history30d.map((status, i) => {
+    <div className="flex gap-[2px] items-end" style={{ height: `${h}px` }} aria-hidden="true">
+      {bars.map((status, i) => {
         const cls = HISTORY_CLASS[status] ?? HISTORY_CLASS.operational
-        // Deterministic pseudo-random height based on index
-        const baseH = status === 'operational' ? 12 + ((i * 7 + 3) % 7) : 4 + ((i * 5) % 6)
+        const baseH = compact
+          ? (status === 'operational' ? 6 + ((i * 7 + 3) % 5) : 3 + ((i * 5) % 4))
+          : (status === 'operational' ? 12 + ((i * 7 + 3) % 7) : 4 + ((i * 5) % 6))
         return (
           <div
             key={i}
             className={`flex-1 rounded-sm ${cls}`}
-            style={{ height: `${baseH}px`, opacity: status === 'operational' ? 0.6 : 0.8, minHeight: '4px' }}
+            style={{ height: `${baseH}px`, opacity: status === 'operational' ? 0.6 : 0.8, minHeight: compact ? '3px' : '4px' }}
           />
         )
       })}
@@ -90,6 +93,8 @@ function ServiceCard({ service, index, onClick, t }) {
     : service.latency < 200 ? 'text-[var(--green)]'
     : service.latency < 500 ? 'text-[var(--amber)]'
     : 'text-[var(--red)]'
+  const uptimeStr = hasUptime ? `${service.uptime30d.toFixed(2)}%` : t('uptime.unavailable.short')
+  const scoreStr = service.aiwatchScore != null ? `${service.aiwatchScore} ${service.scoreGrade}` : null
 
   return (
     <button
@@ -97,52 +102,69 @@ function ServiceCard({ service, index, onClick, t }) {
       className="w-full text-left bg-[var(--bg1)] border border-[var(--border)] rounded-lg
                  hover:border-t-[var(--border-hi)] hover:border-r-[var(--border-hi)] hover:border-b-[var(--border-hi)] transition-colors animate-[fade-in_0.3s_ease_both]"
       style={{
-        padding: '14px',
         animationDelay: `${index * 80}ms`,
         borderLeft: `3px solid ${service.status === 'down' ? 'var(--red)' : service.status === 'degraded' ? 'var(--amber)' : 'var(--green)'}`,
       }}
     >
-      <div className="flex justify-between items-start" style={{ marginBottom: '10px' }}>
-        <div>
-          <div className="text-[13px] font-medium text-[var(--text0)]" style={{ marginBottom: '2px' }}>{service.name}</div>
-          <div className="mono text-[10px] text-[var(--text2)]">{service.provider}</div>
+      {/* ── Mobile compact layout ── */}
+      <div className="md:hidden" style={{ padding: '10px 12px' }}>
+        <div className="flex justify-between items-center" style={{ marginBottom: '4px' }}>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[13px] font-medium text-[var(--text0)] truncate">{service.name}</span>
+            <span className="mono text-[10px] text-[var(--text2)] shrink-0">
+              <span className={uptimeColor}>{uptimeStr}</span>
+              {incidentCount > 0 && <>{' · '}<span className="text-[var(--red)]">{incidentCount}{t('overview.card.incidents.compact')}</span></>}
+              {scoreStr && <>{' · '}{scoreStr}</>}
+            </span>
+          </div>
+          <StatusPill status={service.status} />
         </div>
-        <StatusPill status={service.status} />
+        <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact)} compact />
       </div>
 
-      <div className="grid grid-cols-3" style={{ gap: '6px', marginBottom: '10px', textAlign: 'center' }}>
-        <div>
-          <div className={`mono text-[13px] font-medium ${latencyColor}`}>{service.latency != null ? `${service.latency}ms` : '—'}</div>
-          <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.latency')}</div>
-        </div>
-        <div>
-          <div className={`mono text-[13px] font-medium ${uptimeColor}`} title={!hasUptime ? t('uptime.unavailable.tooltip') : undefined}>
-            {hasUptime ? `${service.uptime30d.toFixed(2)}%` : t('uptime.unavailable.short')}
+      {/* ── Desktop full layout ── */}
+      <div className="hidden md:block" style={{ padding: '14px' }}>
+        <div className="flex justify-between items-start" style={{ marginBottom: '10px' }}>
+          <div>
+            <div className="text-[13px] font-medium text-[var(--text0)]" style={{ marginBottom: '2px' }}>{service.name}</div>
+            <div className="mono text-[10px] text-[var(--text2)]">{service.provider}</div>
           </div>
-          <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.uptime')}</div>
+          <StatusPill status={service.status} />
         </div>
-        <div>
-          <div className="mono text-[13px] font-medium text-[var(--text0)]">{incidentCount}</div>
-          <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.incidents')}</div>
+
+        <div className="grid grid-cols-3" style={{ gap: '6px', marginBottom: '10px', textAlign: 'center' }}>
+          <div>
+            <div className={`mono text-[13px] font-medium ${latencyColor}`}>{service.latency != null ? `${service.latency}ms` : '—'}</div>
+            <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.latency')}</div>
+          </div>
+          <div>
+            <div className={`mono text-[13px] font-medium ${uptimeColor}`} title={!hasUptime ? t('uptime.unavailable.tooltip') : undefined}>
+              {uptimeStr}
+            </div>
+            <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.uptime')}</div>
+          </div>
+          <div>
+            <div className="mono text-[13px] font-medium text-[var(--text0)]">{incidentCount}</div>
+            <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.incidents')}</div>
+          </div>
         </div>
+
+        {service.aiwatchScore != null && (
+          <div className="flex items-center gap-2" style={{ marginBottom: '8px' }}>
+            <span className="mono text-[9px] text-[var(--text2)]">{t('score.bar.label')}</span>
+            <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '4px' }}>
+              <div className={`rounded-full ${SCORE_BG_CLASS[service.scoreGrade] ?? 'bg-[var(--bg3)]'}`}
+                   style={{ height: '4px', width: `${service.aiwatchScore}%` }} />
+            </div>
+            <span className={`mono text-[10px] font-medium rounded ${SCORE_BG_CLASS[service.scoreGrade] ?? 'bg-[var(--bg3)]'} text-[var(--bg0)]`}
+                  style={{ padding: '2px 6px' }}>
+              {service.aiwatchScore} {service.scoreGrade}
+            </span>
+          </div>
+        )}
+
+        <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact)} />
       </div>
-
-      {/* AIWatch Score */}
-      {service.aiwatchScore != null && (
-        <div className="flex items-center gap-2" style={{ marginBottom: '8px' }}>
-          <span className="mono text-[9px] text-[var(--text2)]">{t('score.bar.label')}</span>
-          <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '4px' }}>
-            <div className={`rounded-full ${SCORE_BG_CLASS[service.scoreGrade] ?? 'bg-[var(--bg3)]'}`}
-                 style={{ height: '4px', width: `${service.aiwatchScore}%` }} />
-          </div>
-          <span className={`mono text-[10px] font-medium rounded ${SCORE_BG_CLASS[service.scoreGrade] ?? 'bg-[var(--bg3)]'} text-[var(--bg0)]`}
-                style={{ padding: '2px 6px' }}>
-            {service.aiwatchScore} {service.scoreGrade}
-          </span>
-        </div>
-      )}
-
-      <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact)} />
     </button>
   )
 }
@@ -166,6 +188,7 @@ function FilterTabs({ filter, setFilter, total, issueCount, downCount, t }) {
           style={{
             padding: '4px 10px',
             letterSpacing: '0.04em',
+            whiteSpace: 'nowrap',
             background: filter === tab.key ? 'var(--bg4)' : 'transparent',
             color: filter === tab.key ? 'var(--text0)' : 'var(--text2)',
           }}
@@ -363,8 +386,8 @@ function ActionBanner({ services, setPage, t }) {
           👉 {t('overview.banner.viewIncidents')}
         </button>
         {fallbacks.length > 0 ? (
-          <span className="mono text-[11px] text-[var(--text2)]">
-            · ✅ {t('overview.banner.healthy')}{' '}
+          <span className="mono text-[11px] text-[var(--text2)]" style={{ whiteSpace: 'nowrap' }}>
+            · ✅{' '}
             {fallbacks.map((f, i) => (
               <span key={f.id}>
                 {i > 0 && ', '}

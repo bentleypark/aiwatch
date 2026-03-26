@@ -65,6 +65,7 @@ const ko = {
   'overview.banner.downCount': '중단 ({n}):',
   'overview.banner.degradedCount': '성능 저하 ({n}):',
   'overview.banner.healthy': '정상 대안:',
+  'overview.card.incidents.compact': '건',
   'overview.ai.title': 'AI Analysis',
   'overview.ai.soon': '준비 중',
   'overview.ai.desc': '자동 이상 감지 및 분석 기능을 준비 중입니다',

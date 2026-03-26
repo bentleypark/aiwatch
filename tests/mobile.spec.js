@@ -21,6 +21,18 @@ test.describe('Mobile viewport', () => {
     await expect(mobileSidebar.getByText('Claude API')).toBeVisible()
   })
 
+  test('service cards use compact layout on mobile', async ({ page }) => {
+    // Mobile compact: single row with name + metrics
+    const card = page.locator('main button').filter({ hasText: 'Claude API' }).first()
+    await expect(card).toBeVisible()
+    // Desktop layout should be hidden at mobile viewport
+    const desktopLayout = card.locator('.hidden.md\\:block')
+    await expect(desktopLayout).not.toBeVisible()
+    // Mobile layout should be visible
+    const mobileLayout = card.locator('.md\\:hidden')
+    await expect(mobileLayout).toBeVisible()
+  })
+
   test('backdrop click closes sidebar overlay', async ({ page }) => {
     // Open sidebar
     await page.locator('header button').first().click()
