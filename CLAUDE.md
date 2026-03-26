@@ -162,6 +162,10 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | `region_switch_intent` | `service_id`, `recommended_region` | ServiceDetails (Regional) | Region guide link click |
 | `click_reports` | — | Sidebar | Monthly reports link click |
 | `share` | `method` (x/threads/kakao/copy), `item_id` | Is X Down (share buttons) | Social share button click |
+| `click_dashboard` | `location`, `source` | Is X Down (header/footer) | Dashboard link click |
+| `click_cta_alerts` | `location`, `source?` | Is X Down (CTA/footer) | Set Up Alerts click |
+| `click_ranking` | `location`, `source` | Is X Down (header/alternatives) | Ranking link click |
+| `click_service_detail` | `location`, `service_id` | Is X Down (footer) | Service detail page click |
 
 Is X Down pages (Edge SSR) use inline `gtag()` calls directly since they don't use React.
 
