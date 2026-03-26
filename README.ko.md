@@ -116,10 +116,16 @@ Cloudflare Worker
   └── aws.ts             → AWS Health Dashboard RSS
   ↓
 Cloudflare KV
-  ├── services:latest    (상태 캐시, TTL 5분)
-  ├── daily:YYYY-MM-DD   (가동률 카운터, TTL 2일)
-  ├── history:YYYY-MM-DD (아카이브 카운터, TTL 90일)
-  └── latency:24h        (30분 스냅샷, 최대 48개, TTL 25시간)
+  ├── services:latest      (상태 캐시, TTL 5분)
+  ├── daily:YYYY-MM-DD     (가동률 카운터, TTL 2일)
+  ├── history:YYYY-MM-DD   (아카이브 카운터, TTL 90일)
+  ├── latency:24h          (30분 스냅샷, 최대 48개, TTL 25시간)
+  ├── probe:24h            (헬스체크 프로브, 최대 48개, TTL 25시간)
+  ├── ai:analysis:{svcId}  (AI 인시던트 분석, TTL 1시간)
+  ├── ai:usage:{date}      (일별 AI 사용량 카운터, TTL 2일)
+  ├── alerted:*            (알림 중복 방지 키, TTL 2시간-7일)
+  ├── detected:{svcId}     (Detection Lead 타임스탬프, TTL 7일)
+  └── reddit:seen:{postId} (Reddit 게시글 중복 방지, TTL 24시간)
 ```
 
 ## 시작하기

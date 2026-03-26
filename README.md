@@ -117,10 +117,16 @@ Parsers (worker/src/parsers/)
   └── aws.ts             → AWS Health Dashboard RSS
   ↓
 Cloudflare KV
-  ├── services:latest    (status cache, TTL 5min)
-  ├── daily:YYYY-MM-DD   (uptime counters, TTL 2d)
-  ├── history:YYYY-MM-DD (archived counters, TTL 90d)
-  └── latency:24h        (30-min snapshots, max 48, TTL 25h)
+  ├── services:latest      (status cache, TTL 5min)
+  ├── daily:YYYY-MM-DD     (uptime counters, TTL 2d)
+  ├── history:YYYY-MM-DD   (archived counters, TTL 90d)
+  ├── latency:24h          (30-min snapshots, max 48, TTL 25h)
+  ├── probe:24h            (health check probes, max 48, TTL 25h)
+  ├── ai:analysis:{svcId}  (AI incident analysis, TTL 1h)
+  ├── ai:usage:{date}      (daily AI usage counter, TTL 2d)
+  ├── alerted:*            (alert dedup keys, TTL 2h-7d)
+  ├── detected:{svcId}     (Detection Lead timestamp, TTL 7d)
+  └── reddit:seen:{postId} (Reddit post dedup, TTL 24h)
 ```
 
 ## Getting Started
