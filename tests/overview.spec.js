@@ -23,7 +23,7 @@ test.describe('Overview page', () => {
       'Claude Code', 'GitHub Copilot', 'Cursor', 'Windsurf',
     ]
     for (const name of serviceNames) {
-      await expect(page.locator('main').getByText(name).first()).toBeVisible()
+      await expect(page.locator('main button').filter({ hasText: name }).first()).toBeVisible()
     }
   })
 
