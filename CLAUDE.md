@@ -116,7 +116,7 @@ worker/
     og-render.ts # SVG → PNG conversion (resvg-wasm, Inter font from CDN)
     alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts)
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText)
-    ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt separation, similar incident matching)
+    ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt, TTL refresh, re-analysis, incidentId dedup)
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit)
     probe.ts    # Health check probing — direct RTT measurement (Phase 2 PoC)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
@@ -196,6 +196,7 @@ Cron Trigger (*/5 min)
   → KV ID-based dedup → Discord alerts
   → incident detected → Claude Sonnet analysis → KV (ai:analysis:{svcId}) + Discord 🤖 embed
   → recovery detected → delete ai:analysis:{svcId}
+  → active incidents: refresh analysis TTL / re-analyze if expired / dedup sibling services
   → daily summary at UTC 09:00 (KST 18:00)
 ```
 
@@ -205,6 +206,11 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
 ### Key Product Constraints
 - Mobile breakpoint: 768px — sidebar hidden (overlay on hamburger), cards go 1-column
 - Phase 3 AI Analysis (Beta): Claude Sonnet auto-analysis on incidents — triggered by cron, stored in KV, shown in Topbar Analyze modal + Is X Down AI Insight card. Requires `ANTHROPIC_API_KEY` Worker secret
+  - TTL refresh: cron refreshes `ai:analysis:{svcId}` every ~30min while incident is active
+  - Re-analysis: if analysis expired/missing, re-triggers (max 2/cron, 30min cooldown on failure)
+  - Stale detection: re-analyzes when stored incidentId no longer matches active incidents
+  - Dedup: sibling services sharing same incidentId copy analysis from KV (no extra API call)
+  - Modal groups services with same incidentId into single card
 - Status polling proxy: `worker/` directory (monorepo), Cloudflare Workers
   - `cd worker && npm run dev` — local dev (port 8787)
   - **Worker deployment rules** (KV free tier: 1,000 writes/day):
