@@ -2,7 +2,7 @@
 
 import type { Incident, ServiceStatus, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
-import { fetchWithTimeout } from './utils'
+import { fetchWithTimeout, trackFetchFailure, resetFetchFailure } from './utils'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, computeUptimeFromIncidents, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
@@ -272,8 +272,10 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         const latency = Date.now() - start
         const okCount = regionResults.filter((r) => r.ok).length
         if (okCount === 0) {
-          return { ...base, status: 'degraded', latency: config.category === 'api' ? latency : null }
+          const shouldDegrade = await trackFetchFailure(kv, config.id)
+          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], latency: config.category === 'api' ? latency : null }
         }
+        await resetFetchFailure(kv, config.id)
         if (okCount < regionResults.length) {
           console.warn(`[fetchService] ${config.id} AWS RSS: ${okCount}/${regionResults.length} regions responded`)
         }
@@ -319,8 +321,10 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         const latency = Date.now() - start
         if (!rssRes || !rssRes.ok) {
           if (rssRes) console.warn(`[fetchService] ${config.id} Azure RSS HTTP ${rssRes.status}`)
-          return { ...base, status: 'degraded', latency: config.category === 'api' ? latency : null }
+          const shouldDegrade = await trackFetchFailure(kv, config.id)
+          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], latency: config.category === 'api' ? latency : null }
         }
+        await resetFetchFailure(kv, config.id)
         const incidents = parseAwsRssIncidents(await rssRes.text())
         const filtered = filterIncidents(incidents, config)
         const uptimeEst = computeUptimeFromIncidents(filtered) ?? 100
