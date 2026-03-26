@@ -16,7 +16,9 @@
 
 **[https://ai-watch.dev](https://ai-watch.dev)**
 
-![AIWatch 대시보드](docs/screenshot.png?v=2)
+| 데스크탑 | 모바일 |
+|---------|--------|
+| ![AIWatch 대시보드](docs/screenshot.png?v=3) | ![AIWatch 모바일](docs/screenshot-mobile.png?v=1) |
 
 ## 주요 기능
 

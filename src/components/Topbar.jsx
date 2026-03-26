@@ -108,14 +108,25 @@ export default function Topbar({ onMenuToggle }) {
           <span className="hidden md:inline">{refreshing ? t('topbar.refresh.loading').replace('↻ ', '') : t('topbar.refresh').replace('↻ ', '')}</span>
         </button>
 
-        {/* Analyze — active when AI analysis available, disabled otherwise */}
+        {/* Analyze — mobile: icon-only when active, desktop: full button */}
+        {hasAnalysis && (
+          <button
+            className="md:hidden relative"
+            style={{ fontSize: '14px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            onClick={() => { setShowAnalysis(true); trackEvent('click_analyze', { has_analysis: true, count: Object.keys(aiAnalysis).length }) }}
+            aria-label={t('topbar.analyze')}
+          >
+            🤖
+            <span className="absolute rounded-full" style={{ top: '-2px', right: '-2px', width: '6px', height: '6px', background: 'var(--green)' }} />
+          </button>
+        )}
         <div className="hidden md:block relative group">
           {hasAnalysis ? (
             <button
               className="btn-topbar"
               onClick={() => { setShowAnalysis(true); trackEvent('click_analyze', { has_analysis: true, count: Object.keys(aiAnalysis).length }) }}
             >
-              🤖 {t('topbar.analyze')} <span className="mono text-[8px] rounded" style={{ color: 'var(--purple)', background: 'rgba(124,58,237,0.15)', padding: '1px 4px', verticalAlign: 'super' }}>Beta</span>
+              🤖 {t('topbar.analyze')} <span className="mono text-[8px] rounded" style={{ color: 'var(--purple)', background: 'rgba(124,58,237,0.15)', padding: '1px 4px', verticalAlign: 'middle', position: 'relative', top: '-1px' }}>Beta</span>
             </button>
           ) : (
             <button
