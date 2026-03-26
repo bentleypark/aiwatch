@@ -101,7 +101,7 @@ describe('parseInstatusIncidents — Next.js SSR (Perplexity format)', () => {
     expect(result).toHaveLength(20)
   })
 
-  it('includes sub-minute incidents with <1m duration', () => {
+  it('filters out micro-incidents resolved in under 60 seconds', () => {
     const notice = {
       id1: {
         id: 'id1', name: { default: 'Completion API Degraded' },
@@ -112,8 +112,21 @@ describe('parseInstatusIncidents — Next.js SSR (Perplexity format)', () => {
     const escaped = JSON.stringify(notice).slice(1, -1).replace(/"/g, '\\"')
     const html = `<script>self.__next_f.push([1,"notices\\":{${escaped}},\\"metrics"])</script>`
     const result = parseInstatusIncidents(html)
+    expect(result).toHaveLength(0)
+  })
+
+  it('keeps incidents resolved in 60 seconds or more', () => {
+    const notice = {
+      id1: {
+        id: 'id1', name: { default: 'API Outage' },
+        impact: 'MAJOROUTAGE', started: '2026-03-23T14:57:00Z',
+        resolved: '2026-03-23T14:58:00Z', status: 'RESOLVED', // exactly 60 seconds
+      },
+    }
+    const escaped = JSON.stringify(notice).slice(1, -1).replace(/"/g, '\\"')
+    const html = `<script>self.__next_f.push([1,"notices\\":{${escaped}},\\"metrics"])</script>`
+    const result = parseInstatusIncidents(html)
     expect(result).toHaveLength(1)
-    expect(result[0].duration).toBe('<1m')
   })
 
   it('skips notices with invalid dates', () => {
@@ -163,7 +176,7 @@ describe('parseInstatusIncidents — Nuxt SSR (Mistral format)', () => {
     expect(result[0].timeline[0].text).toBe('Issue has been fixed')
   })
 
-  it('includes Nuxt sub-minute incidents with <1m duration', () => {
+  it('filters out Nuxt micro-incidents resolved in under 60 seconds', () => {
     const nuxtData = [
       null,
       { 'incidents-by-date-2026-03': 2 },
@@ -176,8 +189,23 @@ describe('parseInstatusIncidents — Nuxt SSR (Mistral format)', () => {
     ]
     const html = `<script type="application/json" id="__NUXT_DATA__">${JSON.stringify(nuxtData)}</script>`
     const result = parseInstatusIncidents(html)
+    expect(result).toHaveLength(0)
+  })
+
+  it('keeps Nuxt incidents with duration >= 60 seconds', () => {
+    const nuxtData = [
+      null,
+      { 'incidents-by-date-2026-03': 2 },
+      { incidents: 3 },
+      [4],
+      { id: 5, name: 6, lastUpdateStatus: 7, created_at: 8, duration: 9, incidentUpdates: 10 },
+      'inc-ok', 'API Down', 'RESOLVED',
+      '2026-03-23T14:57:00Z', 60, // exactly 60 seconds
+      [],
+    ]
+    const html = `<script type="application/json" id="__NUXT_DATA__">${JSON.stringify(nuxtData)}</script>`
+    const result = parseInstatusIncidents(html)
     expect(result).toHaveLength(1)
-    expect(result[0].duration).toBe('<1m')
   })
 
   it('returns empty for malformed __NUXT_DATA__', () => {

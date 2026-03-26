@@ -24,6 +24,13 @@ function parseInstatusNextIncidents(html: string): Incident[] {
       const resolvedDate = notice.resolved ? new Date(notice.resolved) : null
       const isResolved = notice.status === 'RESOLVED'
 
+      // Filter out micro-incidents (resolved in < 60s) — automated monitoring noise
+      const durationMs = resolvedDate ? resolvedDate.getTime() - startDate.getTime() : -1
+      if (isResolved && durationMs >= 0 && durationMs < 60_000) {
+        console.debug(`[parseInstatusNext] filtered micro-incident ${notice.id} (${durationMs}ms)`)
+        continue
+      }
+
       const timeline: TimelineEntry[] = [
         { stage: 'investigating' as const, text: notice.name.default, at: startDate.toISOString() },
       ]
@@ -94,6 +101,10 @@ export function parseInstatusIncidents(html: string): Incident[] {
             if (svc && typeof svc === 'object') affectedService = (arr[svc.name] as string) ?? ''
           } catch { /* ignore */ }
         }
+
+        // Filter out micro-incidents (resolved in < 60s) — automated monitoring noise
+        // Nuxt payload provides pre-computed duration (seconds), unlike Next.js which computes from timestamps
+        if (status === 'RESOLVED' && durationSec != null && durationSec >= 0 && durationSec < 60) return []
 
         // Build descriptive title: "Completion API Degraded · Chat Completions API"
         const displayTitle = affectedService && !name.toLowerCase().includes(affectedService.toLowerCase())

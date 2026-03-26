@@ -39,6 +39,15 @@ export function parseRssIncidents(xml: string): Incident[] {
     const first = events[0]
     const last = events[events.length - 1]
     const isResolved = last.title.toLowerCase().includes('recovered')
+    const startMs = new Date(first.date).getTime()
+    const endMs = new Date(last.date).getTime()
+
+    // Filter out micro-incidents (resolved in < 60s) — automated monitoring noise
+    if (isResolved && (endMs - startMs) >= 0 && (endMs - startMs) < 60_000) {
+      console.debug(`[parseRssIncidents] filtered micro-incident ${guid} (${endMs - startMs}ms)`)
+      continue
+    }
+
     const startedAt = new Date(first.date).toISOString()
     const duration = isResolved
       ? formatDuration(new Date(first.date), new Date(last.date))
@@ -107,6 +116,15 @@ export function parseXaiRssIncidents(xml: string): Incident[] {
     const duration = (isResolved && resolvedAt && timeline.length > 0)
       ? formatDuration(new Date(startedAt), resolvedAt)
       : null
+
+    // Filter out micro-incidents (resolved in < 60s) — automated monitoring noise
+    if (isResolved && resolvedAt) {
+      const durationMs = resolvedAt.getTime() - new Date(startedAt).getTime()
+      if (durationMs > 0 && durationMs < 60_000) {
+        console.debug(`[parseXaiRssIncidents] filtered micro-incident ${guid} (${durationMs}ms)`)
+        continue
+      }
+    }
 
     incidents.push({
       id: guid,

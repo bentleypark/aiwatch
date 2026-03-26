@@ -2,7 +2,7 @@
 
 export function formatDuration(start: Date, end: Date): string {
   const diffMs = end.getTime() - start.getTime()
-  if (diffMs < 60_000) return '<1m'
+  if (diffMs < 60_000) return '~1m'
   const hours = Math.floor(diffMs / 3_600_000)
   const minutes = Math.floor((diffMs % 3_600_000) / 60_000)
   if (hours > 0) return `${hours}h ${minutes}m`

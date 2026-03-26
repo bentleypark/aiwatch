@@ -41,6 +41,59 @@ describe('parseRssIncidents', () => {
     expect(result[0].duration).toBeNull()
   })
 
+  it('filters out micro-incidents resolved in under 60 seconds', () => {
+    const xml = `
+      <item>
+        <guid>http://example.com#micro</guid>
+        <title>Service C went down</title>
+        <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+        <description>Down</description>
+      </item>
+      <item>
+        <guid>http://example.com#micro</guid>
+        <title>Service C recovered</title>
+        <pubDate>Sat, 01 Mar 2026 10:00:30 GMT</pubDate>
+        <description>Back up</description>
+      </item>
+    `
+    const result = parseRssIncidents(xml)
+    expect(result).toHaveLength(0)
+  })
+
+  it('keeps incidents resolved in 60 seconds or more', () => {
+    const xml = `
+      <item>
+        <guid>http://example.com#ok</guid>
+        <title>Service D went down</title>
+        <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+        <description>Down</description>
+      </item>
+      <item>
+        <guid>http://example.com#ok</guid>
+        <title>Service D recovered</title>
+        <pubDate>Sat, 01 Mar 2026 10:01:00 GMT</pubDate>
+        <description>Back up</description>
+      </item>
+    `
+    const result = parseRssIncidents(xml)
+    expect(result).toHaveLength(1)
+    expect(result[0].status).toBe('resolved')
+  })
+
+  it('keeps ongoing (unresolved) micro-incidents', () => {
+    const xml = `
+      <item>
+        <guid>http://example.com#ongoing</guid>
+        <title>Service E went down</title>
+        <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+        <description>Down</description>
+      </item>
+    `
+    const result = parseRssIncidents(xml)
+    expect(result).toHaveLength(1)
+    expect(result[0].status).toBe('investigating')
+  })
+
   it('returns empty for no items', () => {
     expect(parseRssIncidents('<rss></rss>')).toEqual([])
   })

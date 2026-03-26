@@ -52,7 +52,7 @@ describe('parseAwsRssIncidents', () => {
     expect(result).toHaveLength(1)
     expect(result[0].status).toBe('resolved')
     expect(result[0].resolvedAt).toBe(result[0].startedAt) // AWS RSS: single timestamp
-    expect(result[0].duration).toBe('<1m') // same start/end
+    expect(result[0].duration).toBe('~1m') // same start/end
   })
 
   it('classifies disruption/outage as critical impact', () => {
