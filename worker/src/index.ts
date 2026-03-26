@@ -433,7 +433,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   const activeServices = scored.filter(s =>
     (s.incidents ?? []).some(i => i.status !== 'resolved')
   )
-  await refreshOrReanalyze(activeServices, kv, env.ANTHROPIC_API_KEY, analyzeIncident)
+  await refreshOrReanalyze(activeServices, env.STATUS_CACHE, env.ANTHROPIC_API_KEY, analyzeIncident)
 
   const operational = scored.filter(s => s.status === 'operational').length
   return {
