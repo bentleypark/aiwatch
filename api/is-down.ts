@@ -27,6 +27,7 @@ export default async function handler(req: Request) {
     // Single API call — /api/status always returns real-time data (no KV dependency)
     let serviceData = null
     let fallbacks: Array<{ id: string; name: string; score: number | null; status: string }> = []
+    let aiInsight: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string } | null = null
 
     const result = await Promise.allSettled([
       fetch(`${WORKER_API}/api/status/cached`, { signal: AbortSignal.timeout(3000) }),
@@ -41,6 +42,7 @@ export default async function handler(req: Request) {
             lastChecked: string; incidents: unknown[]; aiwatchScore?: number | null
             scoreGrade?: string | null; scoreConfidence?: string
           }>
+          aiAnalysis?: Record<string, { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; incidentId: string }>
         }
         const allServices = data.services ?? []
 
@@ -66,6 +68,13 @@ export default async function handler(req: Request) {
             .slice(0, 2)
             .map(s => ({ id: s.id, name: s.name, score: s.aiwatchScore ?? null, status: s.status }))
         }
+
+        // Extract AI analysis for this service
+        const analysis = data.aiAnalysis?.[entry.id]
+        // Show AI insight if analysis exists (incident may be active even when status is operational)
+        if (analysis) {
+          aiInsight = analysis
+        }
       } catch (parseErr) {
         console.error(`[is-down/${slug}] JSON parse failed:`, parseErr instanceof Error ? parseErr.message : parseErr)
       }
@@ -76,7 +85,7 @@ export default async function handler(req: Request) {
       console.error(`[is-down/${slug}] API fetch ${err?.name === 'AbortError' ? 'timeout' : 'failed'}:`, err?.message)
     }
 
-    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks)
+    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight)
 
     return new Response(html, {
       status: 200,

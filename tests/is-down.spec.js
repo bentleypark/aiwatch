@@ -126,4 +126,16 @@ test.describe('Is X Down? SSR pages', () => {
     await expect(page.locator('a[href="/is-claude-code-down"]').first()).toBeAttached()
     await expect(page.locator('a[href="/is-openai-down"]').first()).toBeAttached()
   })
+
+  test('AI Insight card shows when analysis available', async ({ page }) => {
+    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    // AI Insight card is conditional — only shows when Worker has analysis data
+    const aiCard = page.locator('text=AI Analysis').or(page.locator('text=Post-Incident Analysis'))
+    if (await aiCard.isVisible({ timeout: 3000 }).catch(() => false)) {
+      // Beta badge present
+      await expect(page.locator('text=Beta').first()).toBeVisible()
+      // Disclaimer present
+      await expect(page.locator('text=AI-generated estimation').first()).toBeAttached()
+    }
+  })
 })

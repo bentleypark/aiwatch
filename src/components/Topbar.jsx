@@ -1,10 +1,11 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { usePage } from '../utils/pageContext'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { useGitHubStars } from '../hooks/useGitHubStars'
 import { formatTime } from '../utils/time'
 import { trackEvent } from '../utils/analytics'
+import AnalysisModal from './AnalysisModal'
 
 const VERSION = `v${__APP_VERSION__}`
 const GITHUB_URL = 'https://github.com/bentleypark/aiwatch'
@@ -32,9 +33,15 @@ function HamburgerIcon() {
 export default function Topbar({ onMenuToggle }) {
   const { page, setPage } = usePage()
   const { lang, t } = useLang()
-  const { lastUpdated, refresh, refreshing } = usePolling()
+  const { services, lastUpdated, refresh, refreshing, aiAnalysis } = usePolling()
   const stars = useGitHubStars()
   const isSettings = page.name === 'settings'
+  const [showAnalysis, setShowAnalysis] = useState(false)
+  // Only show Analyze button as active when there are analyses for services with active incidents
+  const hasAnalysis = Object.entries(aiAnalysis ?? {}).some(([svcId, analysis]) => {
+    const svc = services.find(s => s.id === svcId)
+    return svc && (svc.incidents ?? []).some(i => i.status !== 'resolved' && i.id === analysis.incidentId)
+  })
 
   const handleRefresh = useCallback(() => {
     if (refreshing) return
@@ -101,17 +108,27 @@ export default function Topbar({ onMenuToggle }) {
           <span className="hidden md:inline">{refreshing ? t('topbar.refresh.loading').replace('↻ ', '') : t('topbar.refresh').replace('↻ ', '')}</span>
         </button>
 
-        {/* Analyze — disabled with hover/focus tooltip */}
+        {/* Analyze — active when AI analysis available, disabled otherwise */}
         <div className="hidden md:block relative group">
-          <button
-            aria-disabled="true"
-            tabIndex={0}
-            aria-describedby="analyze-tooltip"
-            className="btn-topbar-disabled"
-            onClick={(e) => { e.preventDefault(); trackEvent('click_analyze') }}
-          >
-            {t('topbar.analyze')} ↗
-          </button>
+          {hasAnalysis ? (
+            <button
+              className="btn-topbar"
+              onClick={() => { setShowAnalysis(true); trackEvent('click_analyze', { has_analysis: true, count: Object.keys(aiAnalysis).length }) }}
+            >
+              🤖 {t('topbar.analyze')} <span className="mono text-[8px] rounded" style={{ color: 'var(--purple)', background: 'rgba(124,58,237,0.15)', padding: '1px 4px', verticalAlign: 'super' }}>Beta</span>
+            </button>
+          ) : (
+            <button
+              aria-disabled="true"
+              tabIndex={0}
+              aria-describedby="analyze-tooltip"
+              className="btn-topbar-disabled"
+              onClick={(e) => { e.preventDefault(); trackEvent('click_analyze') }}
+            >
+              {t('topbar.analyze')} ↗
+            </button>
+          )}
+          {!hasAnalysis && (
           <div
             id="analyze-tooltip"
             role="tooltip"
@@ -127,6 +144,7 @@ export default function Topbar({ onMenuToggle }) {
               {t('topbar.analyze.tooltip.body')}
             </div>
           </div>
+          )}
         </div>
 
         {/* Settings — gear icon + text */}
@@ -142,6 +160,9 @@ export default function Topbar({ onMenuToggle }) {
           <span className="hidden md:inline">{t('nav.settings')}</span>
         </button>
       </div>
+      {showAnalysis && hasAnalysis && (
+        <AnalysisModal aiAnalysis={aiAnalysis} services={services} onClose={() => setShowAnalysis(false)} />
+      )}
     </div>
   )
 }

@@ -86,9 +86,12 @@ export function renderPage(
   service: ServiceData | null,
   seo: ServiceSEO,
   fallbacks: Fallback[],
+  aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string } | null,
 ): string {
   const title = `Is ${seo.displayName} Down? Live Status | AIWatch`
-  const desc = service
+  const desc = (aiInsight && service && service.status !== 'operational')
+    ? `${seo.displayName} is currently ${statusLabel(service.status).toLowerCase()}. AI Analysis: ${aiInsight.summary.slice(0, 120)} Est. recovery: ${aiInsight.estimatedRecovery}.`
+    : service
     ? `Check if ${seo.displayName} is down right now. Current status: ${statusLabel(service.status)}. ${typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d) ? `30-day uptime: ${service.uptime30d.toFixed(2)}%.` : ''} Updated every 60 seconds.`
     : `Check if ${seo.displayName} is down right now. Real-time status monitoring by AIWatch.`
   const canonical = `https://ai-watch.dev/is-${slug}-down`
@@ -188,12 +191,13 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 <div class="container">
 
 ${renderStatusHeader(service, seo)}
+${renderAIInsight(aiInsight, service?.status)}
 ${renderCTA(seo, service?.status ?? 'operational')}
 ${renderIncidents(service)}
 ${renderDescription(seo, service)}
 ${renderFAQ(seo, fallbacks)}
 ${renderFallbacks(seo, fallbacks, service?.id)}
-${renderShareButtons(seo, service, canonical, ogImageUrl)}
+${renderShareButtons(seo, service, canonical, ogImageUrl, aiInsight)}
 ${renderFooter(slug)}
 
 </div>
@@ -235,6 +239,34 @@ function renderFaqJsonLd(seo: ServiceSEO, fallbacks: Fallback[]): string {
     })),
   }
   return `<script type="application/ld+json">${safeJsonLd(data)}</script>`
+}
+
+function renderAIInsight(insight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string } | null, serviceStatus?: string): string {
+  if (!insight) return ''
+  const ago = Math.floor((Date.now() - new Date(insight.analyzedAt).getTime()) / 60000)
+  const agoText = ago < 1 ? 'just now' : ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`
+  const recovery = insight.estimatedRecovery === 'No historical data for estimation'
+    ? 'Monitoring recovery signals...'
+    : insight.estimatedRecovery
+  const isResolved = serviceStatus === 'operational'
+  const resolvedBadge = isResolved
+    ? '<span class="mono" style="font-size:10px;color:#3fb950;background:rgba(63,185,80,0.15);padding:2px 8px;border-radius:4px">Resolved</span>'
+    : ''
+  return `<div class="card" style="border-left:3px solid ${isResolved ? '#3fb950' : '#7C3AED'};margin:16px 0${isResolved ? ';opacity:0.75' : ''}">
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+<span style="font-size:16px">🤖</span>
+<span style="font-size:13px;font-weight:600;color:#e6edf3">${isResolved ? 'Post-Incident Analysis' : 'AI Analysis'}</span>
+<span class="mono" style="font-size:10px;color:#7C3AED;background:rgba(124,58,237,0.15);padding:2px 8px;border-radius:4px">Beta</span>
+${resolvedBadge}
+</div>
+<p style="font-size:13px;color:#c9d1d9;line-height:1.6;margin-bottom:8px">${esc(insight.summary)}</p>
+<div class="mono" style="font-size:11px;color:#8b949e;display:flex;flex-wrap:wrap;gap:12px">
+<span>⏱ ${esc(recovery)}</span>
+${insight.affectedScope.length > 0 ? `<span>📡 ${esc(insight.affectedScope.join(' · '))}</span>` : ''}
+<span>🕐 ${agoText}</span>
+</div>
+<p class="mono" style="font-size:9px;color:#484f58;margin-top:8px;opacity:0.7">⚠️ AI-generated estimation based on historical data. Actual time may vary.</p>
+</div>`
 }
 
 function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): string {
@@ -379,24 +411,26 @@ ${items}
 </div>`
 }
 
-function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canonical: string, ogImageUrl: string): string {
+function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canonical: string, ogImageUrl: string, aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[] } | null): string {
   const status = service ? statusLabel(service.status) : 'Operational'
   const rawStatus = service?.status ?? 'operational'
 
   // Status-based share templates — viral optimized for Reddit/X/community
+  // Include AI analysis when available
   // Down: question-style to drive search + urgency
   // Degraded: uncertainty + "official vs AIWatch" contrast
   // Operational: brand mention only, no link (account trust building)
+  const aiSuffix = aiInsight ? `\nAI Analysis: ${aiInsight.summary.slice(0, 100)}. Est. recovery: ${aiInsight.estimatedRecovery}.` : ''
   const copyText = rawStatus === 'down'
-    ? `Is ${seo.displayName} down? Current status: Major Outage. Check live reports: ${canonical}`
+    ? `Is ${seo.displayName} down? Current status: Major Outage.${aiSuffix}\n${canonical}`
     : rawStatus === 'degraded'
-    ? `Something feels off with ${seo.displayName}... Official says green, but AIWatch sees a spike: ${canonical}`
+    ? `Something feels off with ${seo.displayName}...${aiSuffix}\n${canonical}`
     : `${seo.displayName} is running fine for now. All green on AIWatch.`
 
   const xText = rawStatus === 'down'
-    ? `Is ${seo.displayName} down? \u26A0\uFE0F Current status: Major Outage. Check live reports:`
+    ? `Is ${seo.displayName} down? \u26A0\uFE0F${aiSuffix ? ' AI: ' + aiInsight!.summary.slice(0, 60) : ' Major Outage.'}`
     : rawStatus === 'degraded'
-    ? `Something feels off with ${seo.displayName}... \uD83D\uDC40 Official says green, but AIWatch sees a spike:`
+    ? `Something feels off with ${seo.displayName}... \uD83D\uDC40${aiSuffix ? ' AI: ' + aiInsight!.summary.slice(0, 60) : ''}`
     : `${seo.displayName} is running fine for now. All green on AIWatch. \u2705`
   const encodedText = encodeURIComponent(xText)
   const encodedUrl = rawStatus !== 'operational' ? encodeURIComponent(canonical) : ''

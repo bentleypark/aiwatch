@@ -5,10 +5,12 @@
 import { fetchAllServices, CACHE_KEY, type ServiceStatus } from './services'
 import { calculateAIWatchScore } from './score'
 import { buildIncidentAlerts, buildServiceAlerts } from './alerts'
+import { analyzeIncident, type AIAnalysisResult } from './ai-analysis'
 
 interface Env {
   ALLOWED_ORIGIN: string
   DISCORD_WEBHOOK_URL?: string
+  ANTHROPIC_API_KEY?: string
   STATUS_CACHE: KVNamespace
 }
 
@@ -354,22 +356,76 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
 
   // Send + mark as alerted (down/degraded: 2h TTL, incidents/recovery: 7d TTL)
   const sent = toSend.slice(0, 5)
+  // Send alerts immediately (no AI delay)
+  const aiAnalysisTasks: Array<{ svcId: string; svcName: string; inc: { id: string; title: string; status: string; startedAt: string; impact: string | null }; incidents: typeof scored[0]['incidents'] }> = []
   for (const alert of sent) {
     const isStatusAlert = alert.key.startsWith('alerted:down:') || alert.key.startsWith('alerted:degraded:')
     const isRecoveryAlert = alert.key.startsWith('alerted:recovered:')
     const ttl = (isStatusAlert || isRecoveryAlert) ? 7200 : 604800
     const kvValue = isStatusAlert ? new Date().toISOString() : '1'
     await env.STATUS_CACHE.put(alert.key, kvValue, { expirationTtl: ttl }).catch(() => {})
-    // Clean up recovered key when new degraded/down alert fires, so future recovery can trigger
     if (isStatusAlert) {
       const svcId = alert.key.split(':').pop()!
       await env.STATUS_CACHE.delete(`alerted:recovered:${svcId}`).catch(() => {})
     }
+    // Clean up AI analysis on recovery
+    if (isRecoveryAlert) {
+      const svcId = alert.key.replace('alerted:recovered:', '')
+      await env.STATUS_CACHE.delete(`ai:analysis:${svcId}`).catch(() => {})
+    }
+    // Collect AI analysis tasks for new incidents (run after all alerts sent)
+    if (alert.key.startsWith('alerted:new:') && env.ANTHROPIC_API_KEY) {
+      const incId = alert.key.replace('alerted:new:', '')
+      const svc = scored.find(s => (s.incidents ?? []).some(i => i.id === incId))
+      const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : null
+      if (svc && inc) aiAnalysisTasks.push({ svcId: svc.id, svcName: svc.name, inc: { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact }, incidents: svc.incidents ?? [] })
+    }
+
     await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
       title: alert.title,
       description: `${alert.description}\n[View on AIWatch](${alert.url})`,
       color: alert.color,
     })
+  }
+
+  // AI Analysis — runs after all alerts are sent (non-blocking for alert delivery)
+  for (const task of aiAnalysisTasks) {
+    try {
+      // Track AI analysis usage (daily counter for cost monitoring)
+      const today = new Date().toISOString().split('T')[0]
+      const usageKey = `ai:usage:${today}`
+      const usageRaw = await env.STATUS_CACHE.get(usageKey).catch(() => null)
+      const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0 }
+      usage.calls++
+
+      const analysis = await analyzeIncident(env.ANTHROPIC_API_KEY!, task.svcName, task.inc, task.incidents)
+      if (!analysis) {
+        usage.failed++
+        await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+          title: '⚠️ AI Analysis [Beta] Failed',
+          description: `Service: ${task.svcName}\nAnalysis returned empty (API error or parsing failure)`,
+          color: 0xE86235,
+        }).catch(() => {})
+      } else {
+        usage.success++
+        await env.STATUS_CACHE.put(`ai:analysis:${task.svcId}`, JSON.stringify(analysis), { expirationTtl: 3600 }).catch(() => {})
+        // Send follow-up Discord message with AI analysis
+        await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+          title: `🤖 AI Analysis [Beta]: ${task.svcName}`,
+          description: `${analysis.summary}\n⏱ Est. recovery: ${analysis.estimatedRecovery}${analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''}\n\n_AI-generated estimation based on historical data._`,
+          color: 0x7C3AED, // purple
+        }).catch(() => {})
+      }
+      await env.STATUS_CACHE.put(usageKey, JSON.stringify(usage), { expirationTtl: 172800 }).catch(() => {})
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[cron] AI analysis failed:', msg)
+      await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+        title: '⚠️ AI Analysis [Beta] Failed',
+        description: `Service: ${task.svcName}\nError: ${msg.slice(0, 200)}`,
+        color: 0xE86235, // amber
+      }).catch(() => {})
+    }
   }
 
   const operational = scored.filter(s => s.status === 'operational').length
@@ -707,7 +763,28 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/status/cached') {
       const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
       if (cached) {
-        return new Response(JSON.stringify({ services: cached.services, lastUpdated: cached.cachedAt, cached: true }), {
+        // Read AI analysis for services with active incidents
+        const aiAnalysis: Record<string, AIAnalysisResult> = {}
+        const withActiveInc = cached.services.filter(s =>
+          (s.incidents ?? []).some(i => i.status !== 'resolved')
+        )
+        await Promise.all(withActiveInc.map(async (svc) => {
+          const raw = await env.STATUS_CACHE!.get(`ai:analysis:${svc.id}`).catch(() => null)
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw) as AIAnalysisResult
+              const hasMatchingInc = (svc.incidents ?? []).some(i => i.id === parsed.incidentId && i.status !== 'resolved')
+              if (hasMatchingInc) aiAnalysis[svc.id] = parsed
+            } catch { /* ignore */ }
+          }
+        }))
+
+        return new Response(JSON.stringify({
+          services: cached.services,
+          lastUpdated: cached.cachedAt,
+          cached: true,
+          ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
+        }), {
           status: 200,
           headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
         })
@@ -778,11 +855,31 @@ export default {
         return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, ...(detectedAt ? { detectedAt } : {}) }
       })
 
+      // Read AI analysis from KV for services with active (non-resolved) incidents
+      const aiAnalysis: Record<string, AIAnalysisResult> = {}
+      if (env.STATUS_CACHE) {
+        const withActiveInc = servicesWithScore.filter(s =>
+          (s.incidents ?? []).some(i => i.status !== 'resolved')
+        )
+        await Promise.all(withActiveInc.map(async (svc) => {
+          const raw = await env.STATUS_CACHE!.get(`ai:analysis:${svc.id}`).catch(() => null)
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw) as AIAnalysisResult
+              // Cross-verify: only include if incidentId matches a current incident
+              const hasMatchingInc = (svc.incidents ?? []).some(i => i.id === parsed.incidentId && i.status !== 'resolved')
+              if (hasMatchingInc) aiAnalysis[svc.id] = parsed
+            } catch { /* ignore */ }
+          }
+        }))
+      }
+
       return new Response(JSON.stringify({
         services: servicesWithScore,
         lastUpdated: new Date().toISOString(),
         latency24h,
         ...(probe24h.length > 0 ? { probe24h } : {}),
+        ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
       }), {
         status: 200,
         headers: {

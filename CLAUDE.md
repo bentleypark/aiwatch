@@ -89,14 +89,16 @@ npm run test:worker # Run Worker unit tests (vitest)
 | `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
 | `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time |
 | `reddit:seen:{postId}` | `"1"` | 24h | ~72 | Reddit post dedup (hourly scan) |
+| `ai:analysis:{svcId}` | `AIAnalysisResult` JSON | 1h | ~5 | Claude Sonnet incident analysis result |
+| `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed }` JSON | 2d | ~5 | Daily AI analysis usage counter |
 | `kv_limit_alert` | `"1"` | 5min | ~1 | KV write limit exceeded cooldown |
 
-**Free tier budget**: 1,000 writes/day. Estimated total: ~800-900 writes/day (within budget).
+**Free tier budget**: 1,000 writes/day. Estimated total: ~810-920 writes/day (within budget).
 
 ### Directory Layout
 ```
 src/
-  components/   # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner
+  components/   # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, AnalysisModal
   pages/        # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, AboutScore, Ranking
   hooks/        # usePolling, useTheme, useLang, useSettings, useGitHubStars
   utils/        # analytics, calendar, time, pageContext, constants
@@ -113,6 +115,7 @@ worker/
     og-render.ts # SVG → PNG conversion (resvg-wasm, Inter font from CDN)
     alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts)
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText)
+    ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt separation, similar incident matching)
     probe.ts    # Health check probing — direct RTT measurement (Phase 2 PoC)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
 ```
@@ -125,6 +128,7 @@ All colors are CSS custom properties defined in `src/index.css`. **Never use har
 | `--bg0…--bg4` | Background layers (darkest → lighter) |
 | `--green / --amber / --red` | Operational / Degraded / Down |
 | `--yellow` | Warning / Score fair |
+| `--purple` | AI Analysis accent |
 | `--blue / --teal` | Informational |
 | `--text0…--text2` | Primary → muted text |
 | `--border / --border-hi` | Subtle / prominent borders |
@@ -149,7 +153,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | `navigate_page` | `page` | Sidebar (nav) | Page navigation |
 | `click_refresh` | — | Topbar | Manual refresh |
 | `click_github_header` | — | Topbar | GitHub link click |
-| `click_analyze` | — | Topbar | Analyze button click |
+| `click_analyze` | `has_analysis?`, `count?` | Topbar | Analyze button click (active: has_analysis=true + count, inactive: no params) |
 | `open_legal` | `type` (privacy/terms) | Footer | Legal modal open |
 | `save_settings` | — | Settings | Settings saved |
 | `webhook_register` | `type` (discord/slack) | Settings | Webhook URL added |
@@ -175,6 +179,8 @@ Cron Trigger (*/5 min)
   → read KV cache → detect incidents/status changes
   → record detection timestamps (detected:{serviceId}) for Detection Lead
   → KV ID-based dedup → Discord alerts
+  → incident detected → Claude Sonnet analysis → KV (ai:analysis:{svcId}) + Discord 🤖 embed
+  → recovery detected → delete ai:analysis:{svcId}
   → daily summary at UTC 09:00 (KST 18:00)
 ```
 
@@ -183,7 +189,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
 
 ### Key Product Constraints
 - Mobile breakpoint: 768px — sidebar hidden (overlay on hamburger), cards go 1-column
-- Phase 3 features (AI Analysis) are UI-disabled with "Coming soon" labels — do not remove these placeholders
+- Phase 3 AI Analysis (Beta): Claude Sonnet auto-analysis on incidents — triggered by cron, stored in KV, shown in Topbar Analyze modal + Is X Down AI Insight card. Requires `ANTHROPIC_API_KEY` Worker secret
 - Status polling proxy: `worker/` directory (monorepo), Cloudflare Workers
   - `cd worker && npm run dev` — local dev (port 8787)
   - **Worker deployment rules** (KV free tier: 1,000 writes/day):
@@ -197,7 +203,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
     ```
   - Verify the output says `Uploaded aiwatch-worker` (not `aiwatch`)
   - Endpoints: `GET /api/status`, `GET /api/status/cached` (KV-only, for SSR), `GET /api/uptime?days=30`, `POST /api/alert`, `GET /badge/:serviceId`, `GET /api/og` (dynamic OG image PNG), `GET /api/v1/status`
-  - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res:` keys 7d TTL, `alerted:down/degraded/recovered:` keys 2h TTL). Fallback recommendations only included when service status is degraded/down (not operational)
+  - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res:` keys 7d TTL, `alerted:down/degraded/recovered:` keys 2h TTL). Fallback recommendations only included when service status is degraded/down (not operational). AI analysis runs after alerts (non-blocking), results stored in `ai:analysis:{svcId}` (1h TTL)
 - **Frontend deployment**: Vercel, domain ai-watch.dev — `git push origin main` triggers auto-deploy. `npm run build` is local only; changes are not live until pushed
 - **PWA**: `public/manifest.json` + `public/sw.js` (stale-while-revalidate). CACHE_NAME in `sw.js` must be bumped manually when static assets change. SW excludes `/is-*` (Edge SSR) and `/api/*` (real-time data) from caching
 - **Edge SSR**: `api/is-down.ts` serves "Is X Down?" SEO pages (8 services: claude, chatgpt, gemini, github-copilot, cursor, claude-code, openai, windsurf) via Vercel Edge Functions. Uses `/api/status/cached` (KV-only) for fast SSR (~1.2s). Dynamic OG image via Worker `/api/og` (PNG, resvg-wasm). Share buttons: X, Threads, KakaoTalk (SDK async), Copy Link. `vercel.json` rewrites route `/is-{service}-down` to the handler

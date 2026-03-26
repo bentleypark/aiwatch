@@ -41,6 +41,7 @@
 - **Is X Down SEO 페이지** — 8개 서비스, 동적 OG 이미지(PNG), 공유 버튼(X, Threads, 카카오톡, 링크 복사), AIWatch 순위, 대체 서비스 추천
 - **헬스체크 프로빙** — API 엔드포인트 직접 RTT 측정 (Gemini PoC)
 - **페이지별 스켈레톤** — 각 페이지 레이아웃에 맞는 로딩 placeholder
+- **AI 분석 (Beta)** — 장애 발생 시 Claude Sonnet 자동 분석: 원인 추정, 예상 복구 시간, 영향 범위. Discord 알림(🤖 보라색 embed), Topbar Analyze 모달, Is X Down AI Insight 카드
 
 ## 모니터링 서비스
 
@@ -160,6 +161,7 @@ VITE_GA4_ID=                # 선택: Google Analytics 측정 ID
 ```
 ALLOWED_ORIGIN=https://your-domain.com
 DISCORD_WEBHOOK_URL=        # Worker Secret: Discord 웹훅 URL
+ANTHROPIC_API_KEY=          # Worker Secret: Claude Sonnet API 키 (AI 분석)
 ```
 
 ## 스크립트

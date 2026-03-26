@@ -493,6 +493,7 @@ function usePollingInternal() {
     error: null,
     lastUpdated: null,
     latency24h: [],
+    aiAnalysis: {},
   })
   const cancelledRef = useRef(false)
   const controllerRef = useRef(null)
@@ -554,6 +555,7 @@ function usePollingInternal() {
           error: null,
           lastUpdated: new Date(data.lastUpdated),
           latency24h: data.latency24h ?? [],
+          aiAnalysis: data.aiAnalysis ?? {},
         })
       }
     } catch (err) {

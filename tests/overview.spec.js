@@ -57,6 +57,12 @@ test.describe('Overview page', () => {
     await expect(page.locator('main button').filter({ hasText: 'Claude API' })).toBeVisible()
   })
 
+  test('Analyze button shows Coming Soon or Beta based on analysis data', async ({ page }) => {
+    // Analyze button should exist in topbar (desktop)
+    const analyzeBtn = page.locator('header button, header [aria-disabled]').filter({ hasText: /Analyze/ })
+    await expect(analyzeBtn.first()).toBeAttached()
+  })
+
   test('action banner navigates to Incidents page on click', async ({ page }) => {
     // Banner only shows when services are degraded/down — check if it exists
     const banner = page.locator('main').getByText(/인시던트 상세 확인|View incident details/)

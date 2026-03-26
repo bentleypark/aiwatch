@@ -34,6 +34,7 @@
   /* Informational */
   --blue: #58a6ff;
   --teal: #39c5c8;
+  --purple: #7C3AED;
 
   /* Text */
   --text0: #e6edf3;
@@ -67,6 +68,7 @@
   --red: #cf222e;
   --blue: #0969da;
   --teal: #1b7c83;
+  --purple: #7C3AED;
 
   /* Status pill backgrounds (light mode) */
   --status-bg-green: #dcfce7;
