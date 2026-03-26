@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime } from '../betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact } from '../betterstack'
 
 describe('parseRssIncidents', () => {
   it('groups RSS items by guid into incidents', () => {
@@ -234,5 +234,109 @@ describe('parseBetterStackUptime', () => {
     }
     // 9.99 * 100 = 999% → out of range
     expect(parseBetterStackUptime(data)).toBeNull()
+  })
+})
+
+describe('parseBetterStackDailyImpact', () => {
+  it('returns null when no resources have status_history', () => {
+    expect(parseBetterStackDailyImpact({})).toBeNull()
+    expect(parseBetterStackDailyImpact({ included: [] })).toBeNull()
+    expect(parseBetterStackDailyImpact({
+      included: [{ type: 'status_page_resource', attributes: { status: 'operational' } }],
+    })).toBeNull()
+  })
+
+  it('returns null when all days are operational', () => {
+    const data = {
+      included: [{
+        type: 'status_page_resource',
+        attributes: {
+          status_history: [
+            { day: '2026-03-25', status: 'operational', downtime_duration: 0, maintenance_duration: 0 },
+            { day: '2026-03-26', status: 'operational', downtime_duration: 0, maintenance_duration: 0 },
+          ],
+        },
+      }],
+    }
+    expect(parseBetterStackDailyImpact(data)).toBeNull()
+  })
+
+  it('classifies downtime by duration: critical (1h+), major (10min+), minor (<10min)', () => {
+    const data = {
+      included: [{
+        type: 'status_page_resource',
+        attributes: {
+          status_history: [
+            { day: '2026-03-23', status: 'downtime', downtime_duration: 7200, maintenance_duration: 0 },   // 2h → critical
+            { day: '2026-03-24', status: 'downtime', downtime_duration: 1200, maintenance_duration: 0 },   // 20min → major
+            { day: '2026-03-25', status: 'downtime', downtime_duration: 300, maintenance_duration: 0 },    // 5min → minor
+          ],
+        },
+      }],
+    }
+    const result = parseBetterStackDailyImpact(data)
+    expect(result).toEqual({
+      '2026-03-23': 'critical',
+      '2026-03-24': 'major',
+      '2026-03-25': 'minor',
+    })
+  })
+
+  it('escalates to worst impact when multiple resources have downtime on same day', () => {
+    const data = {
+      included: [
+        {
+          type: 'status_page_resource',
+          attributes: {
+            status_history: [
+              { day: '2026-03-25', status: 'downtime', downtime_duration: 300, maintenance_duration: 0 }, // minor
+            ],
+          },
+        },
+        {
+          type: 'status_page_resource',
+          attributes: {
+            status_history: [
+              { day: '2026-03-25', status: 'downtime', downtime_duration: 7200, maintenance_duration: 0 }, // critical
+            ],
+          },
+        },
+      ],
+    }
+    const result = parseBetterStackDailyImpact(data)
+    expect(result).toEqual({ '2026-03-25': 'critical' })
+  })
+
+  it('ignores non-resource entries in included array', () => {
+    const data = {
+      included: [
+        { type: 'status_page_section', attributes: { name: 'section' } },
+        {
+          type: 'status_page_resource',
+          attributes: {
+            status_history: [
+              { day: '2026-03-25', status: 'downtime', downtime_duration: 3600, maintenance_duration: 0 },
+            ],
+          },
+        },
+      ],
+    }
+    const result = parseBetterStackDailyImpact(data)
+    expect(result).toEqual({ '2026-03-25': 'critical' })
+  })
+
+  it('classifies maintenance-only day (0 downtime) as minor', () => {
+    const data = {
+      included: [{
+        type: 'status_page_resource',
+        attributes: {
+          status_history: [
+            { day: '2026-03-25', status: 'maintenance', downtime_duration: 0, maintenance_duration: 7200 },
+          ],
+        },
+      }],
+    }
+    const result = parseBetterStackDailyImpact(data)
+    expect(result).toEqual({ '2026-03-25': 'minor' })
   })
 })

@@ -1,13 +1,13 @@
 // Service status fetching and parsing for all monitored AI services.
 
-import type { Incident, ServiceStatus, ServiceConfig } from './types'
+import type { Incident, ServiceStatus, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { fetchWithTimeout } from './utils'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, computeUptimeFromIncidents, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import { parseInstatusIncidents } from './parsers/instatus'
-import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime } from './parsers/betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
 import { parseAwsRssIncidents, deriveAwsStatus } from './parsers/aws'
 
@@ -386,11 +386,13 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       // Better Stack uptime + status: parse /index.json for aggregate_state and availability
       let betterStackUptime: number | null = null
       let betterStackStat: 'operational' | 'degraded' | 'down' | null = null
+      let bsDailyImpact: Record<string, DailyImpactLevel> | null = null
       if (betterStackRes?.ok) {
         try {
           const bsData: BetterStackIndex = await betterStackRes.json()
           betterStackUptime = parseBetterStackUptime(bsData)
           betterStackStat = parseBetterStackStatus(bsData)
+          bsDailyImpact = parseBetterStackDailyImpact(bsData)
         } catch (err) {
           console.warn(`[fetchService] ${config.id} BetterStack parse failed:`, err instanceof Error ? err.message : err)
         }
@@ -408,7 +410,8 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         status: derivedStatus,
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
-        calendarDays: 14,
+        calendarDays: bsDailyImpact ? 30 : 14,
+        ...(bsDailyImpact ? { dailyImpact: bsDailyImpact } : {}),
         ...(betterStackUptime != null ? { uptime30d: betterStackUptime, uptimeSource: 'platform_avg' as const } : {}),
       }
     }

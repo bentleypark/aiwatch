@@ -1,6 +1,6 @@
 // Better Stack RSS Feed Parser — for HuggingFace, Together, xAI
 
-import type { TimelineEntry, Incident } from '../types'
+import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import { formatDuration } from '../utils'
 
 function decodeXmlEntities(text: string): string {
@@ -140,13 +140,24 @@ export function parseXaiRssIncidents(xml: string): Incident[] {
   return incidents
 }
 
+export interface BetterStackStatusHistory {
+  day: string
+  status: string
+  downtime_duration: number
+  maintenance_duration: number
+}
+
 export interface BetterStackIndex {
   data?: {
     attributes?: { aggregate_state?: string }
   }
   included?: Array<{
     type: string
-    attributes?: { availability?: number; status?: string }
+    attributes?: {
+      availability?: number
+      status?: string
+      status_history?: BetterStackStatusHistory[]
+    }
   }>
 }
 
@@ -184,4 +195,38 @@ export function parseBetterStackUptime(data: BetterStackIndex): number | null {
     return null
   }
   return avg
+}
+
+/**
+ * Extract daily impact from BetterStack status_history across all resources.
+ * Aggregates worst status per day: downtime on any resource → that day is affected.
+ * Returns Record<YYYY-MM-DD, 'critical' | 'major' | 'minor'> for non-operational days.
+ */
+export function parseBetterStackDailyImpact(data: BetterStackIndex): Record<string, DailyImpactLevel> | null {
+  const resources = (data.included ?? []).filter(
+    (r) => r.type === 'status_page_resource' && Array.isArray(r.attributes?.status_history)
+  )
+  if (resources.length === 0) return null
+
+  const dailyImpact: Record<string, DailyImpactLevel> = {}
+  const RANK: Record<string, number> = { minor: 1, major: 2, critical: 3 }
+
+  for (const resource of resources) {
+    for (const day of resource.attributes!.status_history!) {
+      if (day.status === 'operational') continue
+      // Classify severity by downtime duration (maintenance-only with 0 downtime → minor)
+      const downSec = day.downtime_duration ?? 0
+      let impact: DailyImpactLevel
+      if (downSec >= 3600) impact = 'critical'     // 1h+ → critical (red)
+      else if (downSec >= 600) impact = 'major'     // 10min+ → major (orange)
+      else impact = 'minor'                          // <10min → minor (yellow)
+
+      // Escalate: keep worst impact per day
+      if ((RANK[impact] ?? 0) > (RANK[dailyImpact[day.day]] ?? 0)) {
+        dailyImpact[day.day] = impact
+      }
+    }
+  }
+
+  return Object.keys(dailyImpact).length > 0 ? dailyImpact : null
 }

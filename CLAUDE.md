@@ -119,6 +119,7 @@ worker/
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit)
     probe.ts    # Health check probing — direct RTT measurement (Phase 2 PoC)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
+                # dailyImpact support: statuspage (uptimeData), incident-io (component impacts), betterstack (status_history from index.json)
 ```
 
 ### Design System
