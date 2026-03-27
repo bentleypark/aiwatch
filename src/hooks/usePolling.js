@@ -439,6 +439,11 @@ const MOCK_SERVICES = [
   },
 ]
 
+// Mock AI analysis — must reference an incidentId matching an unresolved incident in MOCK_SERVICES
+const MOCK_AI_ANALYSIS = {
+  openai: { summary: 'Chat endpoint latency elevated due to increased traffic.', estimatedRecovery: '~1h', affectedScope: ['Chat API'], analyzedAt: new Date().toISOString(), incidentId: 'oi-2' },
+}
+
 // ── Merge live Worker data with mock fallback ──
 // Worker provides: id, name, provider, category, status, latency, incidents
 // Mock provides: uptime30d, history30d, history3m (not available from Worker yet)
@@ -608,6 +613,7 @@ function usePollingInternal() {
             refreshing: false,
             error: null,
             lastUpdated: new Date(),
+            aiAnalysis: MOCK_AI_ANALYSIS,
           })
         } else {
           // Real error (prod, or non-network error in dev) — show offline UI

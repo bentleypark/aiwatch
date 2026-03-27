@@ -33,6 +33,26 @@ test.describe('Mobile viewport', () => {
     await expect(mobileLayout).toBeVisible()
   })
 
+  test('topbar icons stay within viewport when analyze button is visible', async ({ page }) => {
+    // Wait for analyze button (🤖) — mock data includes aiAnalysis for openai
+    const analyzeBtn = page.locator('header button[aria-label]').filter({ hasText: '🤖' })
+    await expect(analyzeBtn).toBeVisible({ timeout: 10000 })
+
+    // Verify all topbar action icons are within viewport (375px)
+    const viewportWidth = 375
+    const header = page.locator('header')
+    const headerBox = await header.boundingBox()
+    expect(headerBox.width).toBeLessThanOrEqual(viewportWidth)
+
+    // Ensure no horizontal overflow — header content should not exceed viewport
+    const overflowX = await header.evaluate((el) => el.scrollWidth > el.clientWidth)
+    expect(overflowX).toBe(false)
+
+    // Analyze button should be fully visible (right edge within viewport)
+    const btnBox = await analyzeBtn.boundingBox()
+    expect(btnBox.x + btnBox.width).toBeLessThanOrEqual(viewportWidth)
+  })
+
   test('backdrop click closes sidebar overlay', async ({ page }) => {
     // Open sidebar
     await page.locator('header button').first().click()
