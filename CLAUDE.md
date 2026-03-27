@@ -48,11 +48,14 @@ npm run test:worker # Run Worker unit tests (vitest)
    - `.github/CONTRIBUTING.md`: Project Structure
    - `index.html`: SEO meta tags (service count, description)
    - `aiwatch-reports/`: service count, category breakdown (if applicable)
-7. **Commit** — only after review issues are fixed and tests pass. Include `closes #N` in the message so GitHub links the commit
+7. **Commit** — only after review issues are fixed and tests pass. Include issue reference in the message:
+   - `closes #N` — **only** when ALL checklist items in the issue are complete
+   - `refs #N` — when some items remain (e.g., future phases, deferred work)
 8. **Verify checklist** — read the issue (`gh issue view N`) and confirm every checklist item (`- [ ]`) is actually implemented in code before closing
 9. **Close** — only close the issue after checklist verification: `gh issue close N`
+   - If unchecked items remain for future work, **do not close** — add a label (e.g., `deferred`, `phase-N`) to track instead
 
-> Never close an issue immediately after committing. Always re-read the issue checklist and verify each item against the code first.
+> Never close an issue immediately after committing. Always re-read the issue checklist and verify each item against the code first. If any phase or checklist item is deferred, keep the issue open and manage with labels.
 
 ### Debugging rules
 - Before writing any fix, read all relevant code and identify the root cause
