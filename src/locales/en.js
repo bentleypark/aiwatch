@@ -66,10 +66,6 @@ const en = {
   'overview.banner.degradedCount': 'Degraded ({n}):',
   'overview.banner.healthy': 'Healthy alternatives:',
   'overview.card.incidents.compact': ' inc',
-  'overview.ai.title': 'AI Analysis',
-  'overview.ai.soon': 'Coming Soon',
-  'overview.ai.desc': 'Automatic anomaly detection and analysis is being prepared',
-
   // Empty States
   'empty.issues.title': 'No Issues',
   'empty.issues.desc': 'All services are operating normally',

@@ -66,10 +66,6 @@ const ko = {
   'overview.banner.degradedCount': '성능 저하 ({n}):',
   'overview.banner.healthy': '정상 대안:',
   'overview.card.incidents.compact': '건',
-  'overview.ai.title': 'AI Analysis',
-  'overview.ai.soon': '준비 중',
-  'overview.ai.desc': '자동 이상 감지 및 분석 기능을 준비 중입니다',
-
   // Empty States
   'empty.issues.title': '현재 이슈 없음',
   'empty.issues.desc': '모든 서비스가 정상 운영 중입니다',

@@ -291,36 +291,6 @@ function Panel({ title, dotColor, subtitle, children }) {
   )
 }
 
-// AI Analysis — Phase 3 placeholder with lock icon
-function AIPanel({ t }) {
-  return (
-    <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg2)]" style={{ padding: '10px 14px' }}>
-        <div className="mono text-[9px] text-[var(--text2)] uppercase tracking-wider flex items-center gap-1.5" style={{ letterSpacing: '0.1em' }}>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <rect x="2" y="5.5" width="8" height="5.5" rx="1.5" stroke="currentColor" strokeWidth="1.2" opacity="0.5" />
-            <path d="M4 5.5V4a2 2 0 014 0v1.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.5" />
-          </svg>
-          {t('overview.ai.title')}
-        </div>
-      </div>
-      <div className="flex items-center gap-3" style={{ padding: '16px 14px' }}>
-        <div className="flex items-center justify-center shrink-0"
-             style={{ width: '36px', height: '36px', borderRadius: '6px', background: 'var(--bg2)', border: '1px solid var(--border)', opacity: 0.45 }}>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <rect x="3" y="7.5" width="10" height="7" rx="2" stroke="var(--text1)" strokeWidth="1.3" />
-            <path d="M5.5 7.5V5.5a2.5 2.5 0 015 0v2" stroke="var(--text1)" strokeWidth="1.3" strokeLinecap="round" />
-          </svg>
-        </div>
-        <div>
-          <div className="text-[13px] font-medium text-[var(--text1)]" style={{ marginBottom: '3px' }}>{t('overview.ai.title')}</div>
-          <div className="mono text-[11px] text-[var(--text2)]">{t('overview.ai.desc')}</div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── Fallback logic (mirrors worker/src/fallback.ts) ──
 
 function getFallbacks(service, allServices) {
@@ -576,9 +546,6 @@ export default function Overview() {
           </div>
         </Panel>
       </div>
-
-      {/* ── AI Analysis (Phase 3) ── */}
-      <AIPanel t={t} />
 
     </div>
   )
