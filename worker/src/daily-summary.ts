@@ -8,11 +8,12 @@ export interface DailySummaryData {
   latencySnapshots: Array<{ t: string; data: Record<string, number> }>
   incidentCountToday: { newCount: number; resolvedCount: number }
   alertCounts?: { incidents: number; resolved: number; down: number; degraded: number; recovered: number } | null
+  webhookCounts?: { discord: number; slack: number }
   redditCount: number
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
-  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, redditCount } = data
+  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, redditCount } = data
   const total = services.length
   const operational = services.filter(s => s.status === 'operational').length
   const degraded = services.filter(s => s.status === 'degraded').length
@@ -82,6 +83,12 @@ export function buildDailySummary(data: DailySummaryData): string {
     if (incidentCountToday.newCount > 0) incParts.push(`${incidentCountToday.newCount} new`)
     if (incidentCountToday.resolvedCount > 0) incParts.push(`${incidentCountToday.resolvedCount} resolved`)
     if (incParts.length > 0) lines.push(`\n📬 **Alerts Sent Today**: ${incParts.join(' · ')}`)
+  }
+  if (webhookCounts && (webhookCounts.discord > 0 || webhookCounts.slack > 0)) {
+    const parts: string[] = []
+    if (webhookCounts.discord > 0) parts.push(`${webhookCounts.discord} Discord`)
+    if (webhookCounts.slack > 0) parts.push(`${webhookCounts.slack} Slack`)
+    lines.push(`🔗 **Active Webhooks**: ${parts.join(', ')}`)
   }
   if (redditCount > 0) lines.push(`📢 **Reddit**: ${redditCount} posts detected`)
 

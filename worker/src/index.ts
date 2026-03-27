@@ -23,6 +23,7 @@ let lastArchivedDate = '' // prevent duplicate archival writes within same isola
 let lastKvLimitAlert = 0 // in-memory throttle for KV limit alerts (can't use KV when KV is full)
 let lastLatencySlot = '' // prevent duplicate 30-min latency writes within same isolate
 const alertProxyRate = new Map<string, { start: number; count: number }>() // rate limit for /api/alert
+const webhookPingRate = new Map<string, { start: number; count: number }>() // rate limit for /api/webhook/ping
 const publicApiRate = new Map<string, { start: number; count: number }>() // rate limit for /api/v1/*
 
 interface DailyCounters {
@@ -479,7 +480,7 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
 
   return {
     'Access-Control-Allow-Origin': allowOrigin,
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin',
@@ -579,12 +580,26 @@ export default {
           console.error('[daily-summary] Failed to parse alert counts:', err instanceof Error ? err.message : err)
         }
 
+        // Count active webhook registrations (uses KV metadata — no individual gets needed)
+        let webhookCounts = { discord: 0, slack: 0 }
+        try {
+          const listed = await env.STATUS_CACHE.list({ prefix: 'webhook:reg:' })
+          for (const key of listed.keys) {
+            const meta = key.metadata as { type?: string } | null
+            if (meta?.type === 'discord') webhookCounts.discord++
+            else if (meta?.type === 'slack') webhookCounts.slack++
+          }
+        } catch (err) {
+          console.warn('[daily-summary] Failed to count webhooks:', err instanceof Error ? err.message : err)
+        }
+
         const description = buildDailySummary({
           services: dailyServices,
           aiUsage,
           latencySnapshots: latSnapshots,
           incidentCountToday: { newCount: result.newCount, resolvedCount: result.resolvedCount },
           alertCounts,
+          webhookCounts,
           redditCount,
         })
 
@@ -664,6 +679,62 @@ export default {
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
         return new Response(JSON.stringify({ error: message }), {
+          status: 500, headers: { ...cors, 'Content-Type': 'application/json' },
+        })
+      }
+    }
+
+    // POST/DELETE /api/webhook/ping — track active webhook registrations (hashed, no raw URLs stored)
+    if ((request.method === 'POST' || request.method === 'DELETE') && url.pathname === '/api/webhook/ping') {
+      // Rate limit: 5 per minute per IP
+      const clientIp = request.headers.get('CF-Connecting-IP') || 'unknown'
+      const now = Date.now()
+      const pingEntry = webhookPingRate.get(clientIp)
+      if (pingEntry && pingEntry.count >= 5 && now - pingEntry.start < 60_000) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
+          status: 429, headers: { ...cors, 'Content-Type': 'application/json' },
+        })
+      }
+      if (!pingEntry || now - pingEntry.start >= 60_000) {
+        webhookPingRate.set(clientIp, { start: now, count: 1 })
+      } else {
+        pingEntry.count++
+      }
+
+      try {
+        const body = await request.json() as { hash?: string; type?: string }
+        const { hash, type } = body
+        if (!hash || !/^[a-f0-9]{64}$/.test(hash)) {
+          return new Response(JSON.stringify({ error: 'Invalid hash format' }), {
+            status: 400, headers: { ...cors, 'Content-Type': 'application/json' },
+          })
+        }
+
+        if (request.method === 'POST') {
+          if (!type || (type !== 'discord' && type !== 'slack')) {
+            return new Response(JSON.stringify({ error: 'Invalid type' }), {
+              status: 400, headers: { ...cors, 'Content-Type': 'application/json' },
+            })
+          }
+          if (env.STATUS_CACHE) {
+            await env.STATUS_CACHE.put(
+              `webhook:reg:${hash}`,
+              JSON.stringify({ type, registeredAt: new Date().toISOString() }),
+              { expirationTtl: 2592000, metadata: { type } }, // 30d TTL, metadata for fast list reads
+            )
+          }
+        } else {
+          // DELETE
+          if (env.STATUS_CACHE) {
+            await env.STATUS_CACHE.delete(`webhook:reg:${hash}`)
+          }
+        }
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...cors, 'Content-Type': 'application/json' },
+        })
+      } catch (err) {
+        console.error('[webhook/ping] Error:', err instanceof Error ? err.message : err)
+        return new Response(JSON.stringify({ error: 'Internal error' }), {
           status: 500, headers: { ...cors, 'Content-Type': 'application/json' },
         })
       }

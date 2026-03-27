@@ -9,6 +9,40 @@ import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, SERVICE_AND_WEBAPP_IDS, AGENT
 import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
 
+const WORKER_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')
+
+async function hashWebhookUrl(url) {
+  const data = new TextEncoder().encode(url)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+function pingWebhookRegistration(currentUrl, type, previousUrl) {
+  if (currentUrl === previousUrl) return // no change — skip
+  // Unregister old webhook if URL changed or removed
+  if (previousUrl) {
+    hashWebhookUrl(previousUrl).then(hash => {
+      fetch(`${WORKER_BASE}/api/webhook/ping`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hash }),
+      }).then(r => { if (!r.ok) console.warn(`[webhook-ping] DELETE failed: ${r.status}`) })
+        .catch(err => console.warn('[webhook-ping] DELETE error:', err.message))
+    }).catch(err => console.warn('[webhook-ping] Hash error:', err.message))
+  }
+  // Register new webhook
+  if (currentUrl) {
+    hashWebhookUrl(currentUrl).then(hash => {
+      fetch(`${WORKER_BASE}/api/webhook/ping`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hash, type }),
+      }).then(r => { if (!r.ok) console.warn(`[webhook-ping] POST failed: ${r.status}`) })
+        .catch(err => console.warn('[webhook-ping] POST error:', err.message))
+    }).catch(err => console.warn('[webhook-ping] Hash error:', err.message))
+  }
+}
+
 // ── Styles matching design mockup ────────────────────────
 
 const sectionTitleStyle = { fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text2)', letterSpacing: '0.12em', textTransform: 'uppercase', paddingBottom: '8px', borderBottom: '1px solid var(--border)', marginBottom: '2px' }
@@ -141,6 +175,9 @@ export default function Settings() {
     if (!discordUrl && settings.discordUrl) trackEvent('webhook_remove', { type: 'discord' })
     if (slackUrl && !settings.slackUrl) trackEvent('webhook_register', { type: 'slack' })
     if (!slackUrl && settings.slackUrl) trackEvent('webhook_remove', { type: 'slack' })
+    // Ping server with hashed webhook URL for active webhook tracking
+    pingWebhookRegistration(discordUrl, 'discord', settings.discordUrl)
+    pingWebhookRegistration(slackUrl, 'slack', settings.slackUrl)
     setSaved(true)
     clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => setSaved(false), 1800)
@@ -342,8 +379,8 @@ export default function Settings() {
                 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8788'
                 const apiBase = API_URL.replace('/api/status', '')
                 const targets = []
-                if (slackUrl) targets.push({ url: slackUrl, channel: 'slack', payload: { text: '🧪 AIWatch 테스트 알림 — Webhook 연동 성공' } })
-                if (discordUrl) targets.push({ url: discordUrl, channel: 'discord', payload: { embeds: [{ title: '🧪 AIWatch 테스트 알림', description: 'Webhook 연동 성공', color: 5814783, footer: { text: 'AIWatch Alert — Test' } }] } })
+                if (slackUrl) targets.push({ url: slackUrl, channel: 'slack', payload: { text: `${t('settings.alert.test.title')} — ${t('settings.alert.test.desc')}` } })
+                if (discordUrl) targets.push({ url: discordUrl, channel: 'discord', payload: { embeds: [{ title: t('settings.alert.test.title'), description: t('settings.alert.test.desc'), color: 5814783, footer: { text: 'AIWatch Alert — Test' } }] } })
                 try {
                   const results = await Promise.all(targets.map((t) =>
                     fetch(`${apiBase}/api/alert`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ webhookUrl: t.url, channel: t.channel, payload: t.payload }) }).then((r) => r.ok)

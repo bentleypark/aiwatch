@@ -29,17 +29,22 @@ export function PrivacyContent() {
         · Language preference (ko/en)<br />
         · Dashboard settings (monitoring period, SLA target, enabled services)<br />
         · Cookie consent choice<br />
-        · PWA install banner dismissal</p>
+        · PWA install banner dismissal<br />
+        · Webhook URLs (Discord/Slack) — entered voluntarily for alert notifications. Stored in your browser's localStorage.<br />
+        · Webhook identifier (SHA-256 hash) — a one-way hash of your webhook URL is sent to our server to track active webhook counts. The hash cannot be reversed to recover your original URL.</p>
       <h3 style={headingStyle}>3. Service Worker (PWA)</h3>
       <p style={paraStyle}>AIWatch uses a service worker to cache static assets locally for faster loading and limited offline access. The service worker does not collect or transmit any personal data.</p>
       <h3 style={headingStyle}>4. Data Retention</h3>
-      <p style={paraStyle}>Analytics data collected via GA4 is retained for up to 14 months per GA4 settings. Local storage data is retained in your browser until you clear it manually.</p>
+      <p style={paraStyle}>Analytics data collected via GA4 is retained for up to 14 months per GA4 settings. Local storage data is retained in your browser until you clear it manually. Webhook identifier hashes are retained on the server for up to 30 days and are automatically deleted if you do not visit the site during that period.</p>
       <h3 style={headingStyle}>5. Third-Party Services</h3>
       <p style={paraStyle}>AIWatch uses the following third-party services that may process your data:<br /><br />
         · Google Analytics 4 — usage analytics<br />
         · Cloudflare Workers — API proxy and caching<br />
         · Vercel — web hosting<br />
-        · GitHub API — repository star count display<br /><br />
+        · GitHub API — repository star count display<br />
+        · Discord Webhook API — alert delivery proxy (only when configured by user)<br />
+        · Slack Webhook API — alert delivery proxy (only when configured by user)<br /><br />
+        Webhook alert payloads are proxied through our server to your configured webhook URL. The server does not store your webhook URL.<br /><br />
         Collected information is not shared with any other third parties.</p>
       <h3 style={headingStyle}>6. Your Rights</h3>
       <p style={paraStyle}>You have the right to request access to, correction of, or deletion of your data. Since AIWatch does not collect personally identifiable information, most data is anonymous and cannot be linked to individuals. You can revoke analytics consent at any time via the cookie banner.</p>
@@ -68,17 +73,22 @@ export function PrivacyContent() {
         · 언어 설정 (한국어/영어)<br />
         · 대시보드 설정 (모니터링 기간, SLA 목표, 활성화된 서비스)<br />
         · 쿠키 동의 선택<br />
-        · PWA 설치 배너 닫기 여부</p>
+        · PWA 설치 배너 닫기 여부<br />
+        · Webhook URL (Discord/Slack) — 알림 수신을 위해 사용자가 직접 입력. 브라우저의 localStorage에 저장됩니다.<br />
+        · Webhook 식별자 (SHA-256 해시) — Webhook URL의 단방향 해시값이 활성 Webhook 수 집계를 위해 서버에 전송됩니다. 해시값으로 원본 URL을 복원할 수 없습니다.</p>
       <h3 style={headingStyle}>3. 서비스 워커 (PWA)</h3>
       <p style={paraStyle}>AIWatch는 빠른 로딩과 제한적 오프라인 접근을 위해 서비스 워커를 사용하여 정적 자산을 로컬에 캐싱합니다. 서비스 워커는 개인 정보를 수집하거나 전송하지 않습니다.</p>
       <h3 style={headingStyle}>4. 정보 보유 기간</h3>
-      <p style={paraStyle}>GA4를 통해 수집된 분석 데이터는 GA4 설정에 따라 최대 14개월간 보관됩니다. 로컬 저장소 데이터는 브라우저에서 직접 삭제할 때까지 유지됩니다.</p>
+      <p style={paraStyle}>GA4를 통해 수집된 분석 데이터는 GA4 설정에 따라 최대 14개월간 보관됩니다. 로컬 저장소 데이터는 브라우저에서 직접 삭제할 때까지 유지됩니다. Webhook 식별자 해시값은 서버에 최대 30일간 보관되며, 해당 기간 내 사이트를 방문하지 않으면 자동 삭제됩니다.</p>
       <h3 style={headingStyle}>5. 개인정보 처리 위탁</h3>
       <p style={paraStyle}>AIWatch는 다음 제3자 서비스를 통해 데이터를 처리합니다.<br /><br />
         · Google Analytics 4 — 이용 통계 분석<br />
         · Cloudflare Workers — API 프록시 및 캐싱<br />
         · Vercel — 웹 호스팅<br />
-        · GitHub API — 저장소 별 수 표시<br /><br />
+        · GitHub API — 저장소 별 수 표시<br />
+        · Discord Webhook API — 알림 전달 프록시 (사용자 설정 시에만)<br />
+        · Slack Webhook API — 알림 전달 프록시 (사용자 설정 시에만)<br /><br />
+        Webhook 알림은 서버를 경유하여 사용자가 설정한 Webhook URL로 전달됩니다. 서버는 Webhook URL을 저장하지 않습니다.<br /><br />
         위 서비스 외의 제3자에게 정보를 제공하지 않습니다.</p>
       <h3 style={headingStyle}>6. 이용자의 권리</h3>
       <p style={paraStyle}>이용자는 수집된 정보에 대해 열람, 정정, 삭제를 요청할 수 있습니다. AIWatch는 개인 식별 정보를 수집하지 않으므로, 대부분의 데이터는 익명이며 개인과 연결할 수 없습니다. 쿠키 배너를 통해 분석 동의를 언제든 철회할 수 있습니다.</p>

@@ -213,6 +213,8 @@ const en = {
   'settings.alert.testing': 'Sending...',
   'settings.alert.test.ok': 'Sent ✓',
   'settings.alert.test.error': 'Failed ✗',
+  'settings.alert.test.title': '🧪 AIWatch Test Alert',
+  'settings.alert.test.desc': 'Webhook connected successfully',
   'settings.alert.incidents': 'Incident Alerts',
   'settings.alert.incidents.desc': 'Alert on new incidents and resolutions',
   'settings.alert.condition.desc': 'Select which status changes trigger alerts',

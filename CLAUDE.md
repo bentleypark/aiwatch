@@ -94,6 +94,7 @@ npm run test:worker # Run Worker unit tests (vitest)
 | `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis) |
 | `fetch-fail:{svcId}` | counter string | 30min | ~0 (spikes on outage) | RSS fetch consecutive failure counter (3+ → degraded, capped writes) |
 | `alert:count:{YYYY-MM-DD}` | `{ incidents, resolved, down, degraded, recovered }` JSON | 2d | ~1-5 | Daily alert count aggregated in Daily Summary |
+| `webhook:reg:{sha256hash}` | `{ type, registeredAt }` JSON | 30d | ~1/user/day | Active webhook registration (hashed, refreshed on ping) |
 | `kv_limit_alert` | `"1"` | 5min | ~1 | KV write limit exceeded cooldown |
 
 **Free tier budget**: 1,000 writes/day. Estimated total: ~810-920 writes/day (within budget).

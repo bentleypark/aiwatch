@@ -184,6 +184,32 @@ describe('buildDailySummary', () => {
     expect(result).not.toContain('degraded')  // 0 should be omitted
   })
 
+  it('shows webhook counts when available', () => {
+    const result = buildDailySummary({
+      services: [makeSvc()],
+      aiUsage: null,
+      latencySnapshots: [],
+      incidentCountToday: { newCount: 0, resolvedCount: 0 },
+      webhookCounts: { discord: 5, slack: 2 },
+      redditCount: 0,
+    })
+    expect(result).toContain('Active Webhooks')
+    expect(result).toContain('5 Discord')
+    expect(result).toContain('2 Slack')
+  })
+
+  it('omits webhook section when counts are zero', () => {
+    const result = buildDailySummary({
+      services: [makeSvc()],
+      aiUsage: null,
+      latencySnapshots: [],
+      incidentCountToday: { newCount: 0, resolvedCount: 0 },
+      webhookCounts: { discord: 0, slack: 0 },
+      redditCount: 0,
+    })
+    expect(result).not.toContain('Active Webhooks')
+  })
+
   it('falls back to incidentCountToday when alertCounts is null', () => {
     const result = buildDailySummary({
       services: [makeSvc()],
