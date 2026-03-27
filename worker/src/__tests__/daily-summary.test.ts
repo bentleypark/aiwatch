@@ -198,7 +198,7 @@ describe('buildDailySummary', () => {
     expect(result).toContain('2 Slack')
   })
 
-  it('omits webhook section when counts are zero', () => {
+  it('shows Active Webhooks: 0 when no registrations', () => {
     const result = buildDailySummary({
       services: [makeSvc()],
       aiUsage: null,
@@ -207,7 +207,35 @@ describe('buildDailySummary', () => {
       webhookCounts: { discord: 0, slack: 0 },
       redditCount: 0,
     })
-    expect(result).not.toContain('Active Webhooks')
+    expect(result).toContain('Active Webhooks')
+    expect(result).toContain('0')
+  })
+
+  it('shows delivery counts when available', () => {
+    const result = buildDailySummary({
+      services: [makeSvc()],
+      aiUsage: null,
+      latencySnapshots: [],
+      incidentCountToday: { newCount: 0, resolvedCount: 0 },
+      deliveryCounts: { discord: 10, slack: 3, failed: 1 },
+      redditCount: 0,
+    })
+    expect(result).toContain('User Webhook Delivery')
+    expect(result).toContain('10 Discord')
+    expect(result).toContain('3 Slack')
+    expect(result).toContain('1 failed')
+  })
+
+  it('omits delivery section when all counts are zero', () => {
+    const result = buildDailySummary({
+      services: [makeSvc()],
+      aiUsage: null,
+      latencySnapshots: [],
+      incidentCountToday: { newCount: 0, resolvedCount: 0 },
+      deliveryCounts: { discord: 0, slack: 0, failed: 0 },
+      redditCount: 0,
+    })
+    expect(result).not.toContain('User Webhook Delivery')
   })
 
   it('falls back to incidentCountToday when alertCounts is null', () => {

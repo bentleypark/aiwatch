@@ -23,6 +23,7 @@ let lastArchivedDate = '' // prevent duplicate archival writes within same isola
 let lastKvLimitAlert = 0 // in-memory throttle for KV limit alerts (can't use KV when KV is full)
 let lastLatencySlot = '' // prevent duplicate 30-min latency writes within same isolate
 const alertProxyRate = new Map<string, { start: number; count: number }>() // rate limit for /api/alert
+const deliveryCounter = { discord: 0, slack: 0, failed: 0 } // in-memory counter, flushed to KV by daily summary cron
 const webhookPingRate = new Map<string, { start: number; count: number }>() // rate limit for /api/webhook/ping
 const publicApiRate = new Map<string, { start: number; count: number }>() // rate limit for /api/v1/*
 
@@ -593,6 +594,29 @@ export default {
           console.warn('[daily-summary] Failed to count webhooks:', err instanceof Error ? err.message : err)
         }
 
+        // Flush in-memory delivery counter to KV (merge with any existing counts from prior isolates)
+        let deliveryCounts: { discord: number; slack: number; failed: number } | null = null
+        try {
+          const proxyDateKey = `alert:proxy:${today}`
+          const proxyRaw = await env.STATUS_CACHE.get(proxyDateKey)
+          const prior = proxyRaw ? JSON.parse(proxyRaw) : {}
+          const merged = {
+            discord: (typeof prior.discord === 'number' ? prior.discord : 0) + deliveryCounter.discord,
+            slack: (typeof prior.slack === 'number' ? prior.slack : 0) + deliveryCounter.slack,
+            failed: (typeof prior.failed === 'number' ? prior.failed : 0) + deliveryCounter.failed,
+          }
+          if (merged.discord > 0 || merged.slack > 0 || merged.failed > 0) {
+            await env.STATUS_CACHE.put(proxyDateKey, JSON.stringify(merged), { expirationTtl: 172800 })
+          }
+          deliveryCounts = merged
+          // Reset in-memory counter after flush
+          deliveryCounter.discord = 0
+          deliveryCounter.slack = 0
+          deliveryCounter.failed = 0
+        } catch (err) {
+          console.warn('[daily-summary] Failed to flush delivery counts:', err instanceof Error ? err.message : err)
+        }
+
         const description = buildDailySummary({
           services: dailyServices,
           aiUsage,
@@ -600,6 +624,7 @@ export default {
           incidentCountToday: { newCount: result.newCount, resolvedCount: result.resolvedCount },
           alertCounts,
           webhookCounts,
+          deliveryCounts,
           redditCount,
         })
 
@@ -672,6 +697,9 @@ export default {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         })
+        // Track delivery count in-memory (flushed to KV by daily summary cron)
+        if (resp.ok) deliveryCounter[isDiscord ? 'discord' : 'slack']++
+        else deliveryCounter.failed++
         return new Response(JSON.stringify({ ok: resp.ok, status: resp.status }), {
           status: resp.ok ? 200 : 502,
           headers: { ...cors, 'Content-Type': 'application/json' },

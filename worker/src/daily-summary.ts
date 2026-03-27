@@ -9,11 +9,12 @@ export interface DailySummaryData {
   incidentCountToday: { newCount: number; resolvedCount: number }
   alertCounts?: { incidents: number; resolved: number; down: number; degraded: number; recovered: number } | null
   webhookCounts?: { discord: number; slack: number }
+  deliveryCounts?: { discord: number; slack: number; failed: number } | null
   redditCount: number
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
-  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, redditCount } = data
+  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, deliveryCounts, redditCount } = data
   const total = services.length
   const operational = services.filter(s => s.status === 'operational').length
   const degraded = services.filter(s => s.status === 'degraded').length
@@ -84,11 +85,23 @@ export function buildDailySummary(data: DailySummaryData): string {
     if (incidentCountToday.resolvedCount > 0) incParts.push(`${incidentCountToday.resolvedCount} resolved`)
     if (incParts.length > 0) lines.push(`\n📬 **Alerts Sent Today**: ${incParts.join(' · ')}`)
   }
-  if (webhookCounts && (webhookCounts.discord > 0 || webhookCounts.slack > 0)) {
+  if (deliveryCounts && (deliveryCounts.discord > 0 || deliveryCounts.slack > 0 || deliveryCounts.failed > 0)) {
     const parts: string[] = []
-    if (webhookCounts.discord > 0) parts.push(`${webhookCounts.discord} Discord`)
-    if (webhookCounts.slack > 0) parts.push(`${webhookCounts.slack} Slack`)
-    lines.push(`🔗 **Active Webhooks**: ${parts.join(', ')}`)
+    if (deliveryCounts.discord > 0) parts.push(`${deliveryCounts.discord} Discord`)
+    if (deliveryCounts.slack > 0) parts.push(`${deliveryCounts.slack} Slack`)
+    const failText = deliveryCounts.failed > 0 ? ` (${deliveryCounts.failed} failed)` : ''
+    lines.push(`📨 **User Webhook Delivery**: ${parts.join(', ')}${failText}`)
+  }
+  if (webhookCounts) {
+    const total = webhookCounts.discord + webhookCounts.slack
+    if (total > 0) {
+      const parts: string[] = []
+      if (webhookCounts.discord > 0) parts.push(`${webhookCounts.discord} Discord`)
+      if (webhookCounts.slack > 0) parts.push(`${webhookCounts.slack} Slack`)
+      lines.push(`🔗 **Active Webhooks**: ${parts.join(', ')}`)
+    } else {
+      lines.push(`🔗 **Active Webhooks**: 0`)
+    }
   }
   if (redditCount > 0) lines.push(`📢 **Reddit**: ${redditCount} posts detected`)
 
