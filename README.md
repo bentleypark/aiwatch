@@ -44,7 +44,7 @@ Real-time monitoring dashboard for **25 AI services** — track status, latency,
 - **Is X Down SEO pages** — 8 services with dynamic OG images (PNG), share buttons (X, Threads, KakaoTalk, Copy Link), AIWatch rank, and fallback recommendations
 - **Health check probing** — Direct RTT measurement to API endpoints (Gemini PoC)
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
-- **AI Analysis (Beta)** — Claude Sonnet auto-analysis on incidents: cause estimation, recovery time, affected scope. Discord alerts (🤖 purple embed), Topbar Analyze modal, Is X Down AI Insight card
+- **AI Analysis (Beta)** — Claude Sonnet auto-analysis on incidents: cause estimation, recovery time, affected scope. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 
 ## Monitored Services
 

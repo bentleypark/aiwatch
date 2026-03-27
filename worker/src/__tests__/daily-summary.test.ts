@@ -166,7 +166,25 @@ describe('buildDailySummary', () => {
     expect(result).not.toContain('Latency (24h avg)')
   })
 
-  it('shows incidents and reddit count', () => {
+  it('shows daily alert counts from KV when available', () => {
+    const result = buildDailySummary({
+      services: [makeSvc()],
+      aiUsage: null,
+      latencySnapshots: [],
+      incidentCountToday: { newCount: 0, resolvedCount: 0 },
+      alertCounts: { incidents: 3, resolved: 2, down: 1, degraded: 0, recovered: 1 },
+      redditCount: 0,
+    })
+    expect(result).toContain('Alerts Sent Today')
+    expect(result).toContain('7')  // total
+    expect(result).toContain('3 incidents')
+    expect(result).toContain('2 resolved')
+    expect(result).toContain('1 down')
+    expect(result).toContain('1 recovered')
+    expect(result).not.toContain('degraded')  // 0 should be omitted
+  })
+
+  it('falls back to incidentCountToday when alertCounts is null', () => {
     const result = buildDailySummary({
       services: [makeSvc()],
       aiUsage: null,

@@ -93,6 +93,7 @@ npm run test:worker # Run Worker unit tests (vitest)
 | `ai:reanalysis-skip:{svcId}` | `"1"` | 30min | ~2 | Re-analysis failure cooldown |
 | `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis) |
 | `fetch-fail:{svcId}` | counter string | 30min | ~0 (spikes on outage) | RSS fetch consecutive failure counter (3+ → degraded, capped writes) |
+| `alert:count:{YYYY-MM-DD}` | `{ incidents, resolved, down, degraded, recovered }` JSON | 2d | ~1-5 | Daily alert count aggregated in Daily Summary |
 | `kv_limit_alert` | `"1"` | 5min | ~1 | KV write limit exceeded cooldown |
 
 **Free tier budget**: 1,000 writes/day. Estimated total: ~810-920 writes/day (within budget).
@@ -194,11 +195,12 @@ Cron Trigger (*/5 min)
   → health check probing (direct RTT to API endpoints, stored in probe:24h)
   → read KV cache → detect incidents/status changes
   → record detection timestamps (detected:{serviceId}) for Detection Lead
-  → KV ID-based dedup → Discord alerts
-  → incident detected → Claude Sonnet analysis → KV (ai:analysis:{svcId}) + Discord 🤖 embed
+  → KV ID-based dedup → Discord alerts (single embed per incident)
+  → incident detected → AI analysis (8s timeout) → merged into incident embed
   → recovery detected → delete ai:analysis:{svcId}
   → active incidents: refresh analysis TTL / re-analyze if expired / dedup sibling services
-  → daily summary at UTC 09:00 (KST 18:00)
+  → alert count tracked in KV (alert:count:{date}) for Daily Summary
+  → daily summary at UTC 09:00 (KST 18:00) with alert count aggregation
 ```
 
 ### SPA Navigation
@@ -225,7 +227,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
     ```
   - Verify the output says `Uploaded aiwatch-worker` (not `aiwatch`)
   - Endpoints: `GET /api/status`, `GET /api/status/cached` (KV-only, for SSR), `GET /api/uptime?days=30`, `POST /api/alert`, `GET /badge/:serviceId`, `GET /api/og` (dynamic OG image PNG), `GET /api/v1/status`
-  - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res:` keys 7d TTL, `alerted:down/degraded/recovered:` keys 2h TTL). Fallback recommendations only included when service status is degraded/down (not operational). AI analysis runs after alerts (non-blocking), results stored in `ai:analysis:{svcId}` (1h TTL)
+  - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res:` keys 7d TTL, `alerted:down/degraded/recovered:` keys 2h TTL). Fallback recommendations only included when service status is degraded/down (not operational). AI analysis runs inline with 8s timeout (merged into incident embed), results stored in `ai:analysis:{svcId}` (1h TTL). Daily alert counts tracked in `alert:count:{date}` for Daily Summary
 - **Frontend deployment**: Vercel, domain ai-watch.dev — `git push origin main` triggers auto-deploy. `npm run build` is local only; changes are not live until pushed
 - **PWA**: `public/manifest.json` + `public/sw.js` (stale-while-revalidate). CACHE_NAME in `sw.js` must be bumped manually when static assets change. SW excludes `/is-*` (Edge SSR) and `/api/*` (real-time data) from caching
 - **Edge SSR**: `api/is-down.ts` serves "Is X Down?" SEO pages (8 services: claude, chatgpt, gemini, github-copilot, cursor, claude-code, openai, windsurf) via Vercel Edge Functions. Uses `/api/status/cached` (KV-only) for fast SSR (~1.2s). Dynamic OG image via Worker `/api/og` (PNG, resvg-wasm). Share buttons: X, Threads, KakaoTalk (SDK async), Copy Link. `vercel.json` rewrites route `/is-{service}-down` to the handler

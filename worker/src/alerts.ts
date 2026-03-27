@@ -9,6 +9,7 @@ export interface AlertCandidate {
   key: string
   title: string
   description: string
+  fallbackText?: string
   color: number
   url: string
 }
@@ -42,7 +43,8 @@ export function buildIncidentAlerts(
         alerts.push({
           key: `alerted:new:${inc.id}`,
           title: `🔴 ${svc.name} — New Incident`,
-          description: fallbackText ? `${sanitize(inc.title)}\n${fallbackText}` : sanitize(inc.title),
+          description: sanitize(inc.title),
+          fallbackText,
           color: 0xED4245,
           url: `https://ai-watch.dev/#${svc.id}`,
         })

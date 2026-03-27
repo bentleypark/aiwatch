@@ -356,9 +356,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   }
 
   // Send + mark as alerted (down/degraded: 2h TTL, incidents/recovery: 7d TTL)
+  // For new incidents, run AI analysis with timeout so it can be merged into the embed
   const sent = toSend.slice(0, 5)
-  // Send alerts immediately (no AI delay)
-  const aiAnalysisTasks: Array<{ svcId: string; svcName: string; inc: { id: string; title: string; status: string; startedAt: string; impact: string | null }; incidents: typeof scored[0]['incidents'] }> = []
+  const DIV = '┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈'
   for (const alert of sent) {
     const isStatusAlert = alert.key.startsWith('alerted:down:') || alert.key.startsWith('alerted:degraded:')
     const isRecoveryAlert = alert.key.startsWith('alerted:recovered:')
@@ -374,58 +374,73 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       const svcId = alert.key.replace('alerted:recovered:', '')
       await env.STATUS_CACHE.delete(`ai:analysis:${svcId}`).catch(() => {})
     }
-    // Collect AI analysis tasks for new incidents (run after all alerts sent)
+
+    // For new incidents: run AI analysis with 8s timeout to avoid blocking alert delivery
+    let analysisSection = ''
     if (alert.key.startsWith('alerted:new:') && env.ANTHROPIC_API_KEY) {
       const incId = alert.key.replace('alerted:new:', '')
       const svc = scored.find(s => (s.incidents ?? []).some(i => i.id === incId))
       const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : null
-      if (svc && inc) aiAnalysisTasks.push({ svcId: svc.id, svcName: svc.name, inc: { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact }, incidents: svc.incidents ?? [] })
+      if (svc && inc) {
+        try {
+          const today = new Date().toISOString().split('T')[0]
+          const usageKey = `ai:usage:${today}`
+          const usageRaw = await env.STATUS_CACHE.get(usageKey).catch(() => null)
+          const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0 }
+          usage.calls++
+          const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))
+          const analysis = await Promise.race([
+            analyzeIncident(env.ANTHROPIC_API_KEY!, svc.name, { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact }, svc.incidents ?? []),
+            timeout,
+          ])
+          if (analysis) {
+            usage.success++
+            await env.STATUS_CACHE.put(`ai:analysis:${svc.id}`, JSON.stringify(analysis), { expirationTtl: 3600 }).catch(() => {})
+            analysisSection = `\n${DIV}\n🤖 **AI ANALYSIS** [Beta]\n${analysis.summary}\n⏱ Est. recovery: ${analysis.estimatedRecovery}${analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''}`
+          } else {
+            usage.failed++
+          }
+          await env.STATUS_CACHE.put(usageKey, JSON.stringify(usage), { expirationTtl: 172800 }).catch(() => {})
+        } catch (err) {
+          console.error('[cron] AI analysis failed:', err instanceof Error ? err.message : err)
+        }
+      }
     }
 
+    // Build sectioned description: incident → AI analysis → fallback → link
+    const parts = [alert.description]
+    if (analysisSection) parts.push(analysisSection)
+    if (alert.fallbackText && alert.fallbackText.startsWith('👉')) {
+      const list = alert.fallbackText.replace('👉 Suggested fallback: ', '')
+      parts.push(`${DIV}\n👉 **SUGGESTED FALLBACK**\n• ${list}`)
+    } else if (alert.fallbackText) {
+      parts.push(`${DIV}\n${alert.fallbackText}`)
+    }
+    parts.push(`${DIV}\n[View on AIWatch](${alert.url})`)
     await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
       title: alert.title,
-      description: `${alert.description}\n[View on AIWatch](${alert.url})`,
+      description: parts.join('\n'),
       color: alert.color,
     })
   }
 
-  // AI Analysis — runs after all alerts are sent (non-blocking for alert delivery)
-  for (const task of aiAnalysisTasks) {
+  // Track daily alert count in KV for Daily Summary
+  if (sent.length > 0) {
     try {
-      // Track AI analysis usage (daily counter for cost monitoring)
       const today = new Date().toISOString().split('T')[0]
-      const usageKey = `ai:usage:${today}`
-      const usageRaw = await env.STATUS_CACHE.get(usageKey).catch(() => null)
-      const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0 }
-      usage.calls++
-
-      const analysis = await analyzeIncident(env.ANTHROPIC_API_KEY!, task.svcName, task.inc, task.incidents)
-      if (!analysis) {
-        usage.failed++
-        await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-          title: '⚠️ AI Analysis [Beta] Failed',
-          description: `Service: ${task.svcName}\nAnalysis returned empty (API error or parsing failure)`,
-          color: 0xE86235,
-        }).catch(() => {})
-      } else {
-        usage.success++
-        await env.STATUS_CACHE.put(`ai:analysis:${task.svcId}`, JSON.stringify(analysis), { expirationTtl: 3600 }).catch(() => {})
-        // Send follow-up Discord message with AI analysis
-        await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-          title: `🤖 AI Analysis [Beta]: ${task.svcName}`,
-          description: `${analysis.summary}\n⏱ Est. recovery: ${analysis.estimatedRecovery}${analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''}\n\n_AI-generated estimation based on historical data._`,
-          color: 0x7C3AED, // purple
-        }).catch(() => {})
+      const countKey = `alert:count:${today}`
+      const countRaw = await env.STATUS_CACHE.get(countKey).catch(() => null)
+      const counts = countRaw ? JSON.parse(countRaw) : { incidents: 0, resolved: 0, down: 0, degraded: 0, recovered: 0 }
+      for (const a of sent) {
+        if (a.key.startsWith('alerted:new:')) counts.incidents++
+        else if (a.key.startsWith('alerted:res:')) counts.resolved++
+        else if (a.key.startsWith('alerted:down:')) counts.down++
+        else if (a.key.startsWith('alerted:degraded:')) counts.degraded++
+        else if (a.key.startsWith('alerted:recovered:')) counts.recovered++
       }
-      await env.STATUS_CACHE.put(usageKey, JSON.stringify(usage), { expirationTtl: 172800 }).catch(() => {})
+      await env.STATUS_CACHE.put(countKey, JSON.stringify(counts), { expirationTtl: 172800 }).catch(() => {})
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error('[cron] AI analysis failed:', msg)
-      await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-        title: '⚠️ AI Analysis [Beta] Failed',
-        description: `Service: ${task.svcName}\nError: ${msg.slice(0, 200)}`,
-        color: 0xE86235, // amber
-      }).catch(() => {})
+      console.error('[cron] alert count update failed:', err instanceof Error ? err.message : err)
     }
   }
 
@@ -487,20 +502,6 @@ export default {
 
     const result = await cronAlertCheck(env)
     if (!env.DISCORD_WEBHOOK_URL) return
-
-    // Alert summary when alerts were sent (blue embed)
-    if (result.sent > 0) {
-      const parts = []
-      if (result.newCount) parts.push(`${result.newCount} new`)
-      if (result.resolvedCount) parts.push(`${result.resolvedCount} resolved`)
-      if (result.downCount) parts.push(`${result.downCount} down`)
-      if (result.recoveredCount) parts.push(`${result.recoveredCount} recovered`)
-      await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-        title: `🔔 Cron: ${result.sent} alert(s) sent`,
-        description: parts.join(', '),
-        color: 0x5865F2, // blue
-      })
-    }
 
     // Reddit community monitoring — runs once per hour (minute 0-4) to respect rate limits
     // KV budget: max 3 writes/hour = 72/day (well within 1,000/day free tier)
@@ -569,11 +570,21 @@ export default {
           console.warn('[daily-summary] Failed to list reddit keys:', err instanceof Error ? err.message : err)
         }
 
+        // Read daily alert counter
+        let alertCounts = null
+        try {
+          const alertCountRaw = await env.STATUS_CACHE.get(`alert:count:${today}`).catch(() => null)
+          if (alertCountRaw) alertCounts = JSON.parse(alertCountRaw)
+        } catch (err) {
+          console.error('[daily-summary] Failed to parse alert counts:', err instanceof Error ? err.message : err)
+        }
+
         const description = buildDailySummary({
           services: dailyServices,
           aiUsage,
           latencySnapshots: latSnapshots,
           incidentCountToday: { newCount: result.newCount, resolvedCount: result.resolvedCount },
+          alertCounts,
           redditCount,
         })
 

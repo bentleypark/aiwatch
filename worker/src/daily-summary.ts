@@ -7,11 +7,12 @@ export interface DailySummaryData {
   aiUsage: { calls: number; success: number; failed: number } | null
   latencySnapshots: Array<{ t: string; data: Record<string, number> }>
   incidentCountToday: { newCount: number; resolvedCount: number }
+  alertCounts?: { incidents: number; resolved: number; down: number; degraded: number; recovered: number } | null
   redditCount: number
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
-  const { services, aiUsage, latencySnapshots, incidentCountToday, redditCount } = data
+  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, redditCount } = data
   const total = services.length
   const operational = services.filter(s => s.status === 'operational').length
   const degraded = services.filter(s => s.status === 'degraded').length
@@ -63,11 +64,25 @@ export function buildDailySummary(data: DailySummaryData): string {
     lines.push(`\n⚡ **Latency (24h avg)**\n   Fastest: ${fastest}\n   Slowest: ${slowest}`)
   }
 
-  // Section 6: Incidents + Reddit
-  const incParts: string[] = []
-  if (incidentCountToday.newCount > 0) incParts.push(`${incidentCountToday.newCount} new`)
-  if (incidentCountToday.resolvedCount > 0) incParts.push(`${incidentCountToday.resolvedCount} resolved`)
-  if (incParts.length > 0) lines.push(`\n🔔 **Alerts Sent**: ${incParts.join(' · ')}`)
+  // Section 6: Daily alert count + Reddit
+  if (alertCounts) {
+    const total = alertCounts.incidents + alertCounts.resolved + alertCounts.down + alertCounts.degraded + alertCounts.recovered
+    if (total > 0) {
+      const parts: string[] = []
+      if (alertCounts.incidents > 0) parts.push(`${alertCounts.incidents} incidents`)
+      if (alertCounts.resolved > 0) parts.push(`${alertCounts.resolved} resolved`)
+      if (alertCounts.down > 0) parts.push(`${alertCounts.down} down`)
+      if (alertCounts.degraded > 0) parts.push(`${alertCounts.degraded} degraded`)
+      if (alertCounts.recovered > 0) parts.push(`${alertCounts.recovered} recovered`)
+      lines.push(`\n📬 **Alerts Sent Today**: ${total} (${parts.join(', ')})`)
+    }
+  } else {
+    // Fallback: use current cron cycle counts
+    const incParts: string[] = []
+    if (incidentCountToday.newCount > 0) incParts.push(`${incidentCountToday.newCount} new`)
+    if (incidentCountToday.resolvedCount > 0) incParts.push(`${incidentCountToday.resolvedCount} resolved`)
+    if (incParts.length > 0) lines.push(`\n📬 **Alerts Sent Today**: ${incParts.join(' · ')}`)
+  }
   if (redditCount > 0) lines.push(`📢 **Reddit**: ${redditCount} posts detected`)
 
   return lines.join('\n')
