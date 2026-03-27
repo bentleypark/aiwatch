@@ -359,7 +359,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // Send + mark as alerted (down/degraded: 2h TTL, incidents/recovery: 7d TTL)
   // For new incidents, run AI analysis with timeout so it can be merged into the embed
   const sent = toSend.slice(0, 5)
-  const DIV = '┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈'
+  const DIV = '┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈'
   for (const alert of sent) {
     const isStatusAlert = alert.key.startsWith('alerted:down:') || alert.key.startsWith('alerted:degraded:')
     const isRecoveryAlert = alert.key.startsWith('alerted:recovered:')

@@ -45,13 +45,13 @@ const SYSTEM_PROMPT = `You are an AI service reliability analyst for AIWatch.
 Analyze the incident data provided by the user and respond in JSON format ONLY:
 {
   "summary": "Concise analysis (max 2 sentences). Identify if this is a recurring pattern or a new type of failure (e.g., network vs model).",
-  "estimatedRecovery": "A range based on the average duration of similar past incidents. If no similar patterns exist, return 'No historical data for estimation'.",
+  "estimatedRecovery": "Short range using abbreviations ONLY. Format: '30m–1h' or '1–3h'. Use m for minutes, h for hours. Never write 'minutes' or 'hours' in full. If no data, return 'N/A'.",
   "affectedScope": ["1-3 specific features or related sub-services likely impacted"]
 }
 
 Rules:
 - If the incident title contains specific environment keywords (e.g., 'Chrome', 'Cowork', 'API'), prioritize them in the summary.
-- Recovery estimate must be a realistic range (e.g., '30-60 min') based on the Historical Data provided.
+- Recovery estimate MUST use short format: '30m–1h', '1–3h', '15–45m'. Never write 'minutes' or 'hours' in full words.
 - Keep the tone professional, objective, and data-driven.
 - Do not include any text outside the JSON block.`
 
@@ -134,9 +134,15 @@ export async function analyzeIncident(
       affectedScope?: string[]
     }
 
+    // Normalize recovery time format: "17 minutes to 9 hours" → "17m–9h"
+    let recovery = sanitize(parsed.estimatedRecovery ?? 'N/A')
+    recovery = recovery
+      .replace(/(\d+)\s*minutes?/gi, '$1m')
+      .replace(/(\d+)\s*hours?/gi, '$1h')
+      .replace(/\s*to\s*/g, '–')
     return {
       summary: sanitize(parsed.summary ?? 'Analysis unavailable'),
-      estimatedRecovery: sanitize(parsed.estimatedRecovery ?? 'Unknown'),
+      estimatedRecovery: recovery,
       affectedScope: (parsed.affectedScope ?? []).map(s => sanitize(s)),
       analyzedAt: new Date().toISOString(),
       incidentId: currentIncident.id,
