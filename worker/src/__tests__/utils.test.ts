@@ -10,15 +10,15 @@ function mockKV(store: Record<string, string> = {}): KVLike {
 }
 
 describe('formatDuration', () => {
-  it('returns ~1m for durations under 60 seconds', () => {
+  it('returns 1m for durations under 60 seconds (ceil to 1m)', () => {
     const start = new Date('2026-03-23T10:00:00Z')
     const end = new Date('2026-03-23T10:00:30Z') // 30s
-    expect(formatDuration(start, end)).toBe('~1m')
+    expect(formatDuration(start, end)).toBe('1m')
   })
 
-  it('returns ~1m for 0 second duration', () => {
+  it('returns 1m for 0 second duration', () => {
     const d = new Date('2026-03-23T10:00:00Z')
-    expect(formatDuration(d, d)).toBe('~1m')
+    expect(formatDuration(d, d)).toBe('1m')
   })
 
   it('returns 1m for exactly 60 seconds', () => {
