@@ -260,9 +260,9 @@ function renderAIInsight(insight?: { summary: string; estimatedRecovery: string;
 ${resolvedBadge}
 </div>
 <p style="font-size:13px;color:#c9d1d9;line-height:1.6;margin-bottom:8px">${esc(insight.summary)}</p>
-<div class="mono" style="font-size:11px;color:#8b949e;display:flex;flex-wrap:wrap;gap:12px">
-<span>⏱ ${esc(recovery)}</span>
-${insight.affectedScope.length > 0 ? `<span>📡 ${esc(insight.affectedScope.join(' · '))}</span>` : ''}
+<div class="mono" style="font-size:11px;color:#8b949e;display:flex;flex-direction:column;gap:4px">
+<span>⏱ <strong style="color:#c9d1d9">Est. Recovery:</strong> ${esc(recovery)}</span>
+${insight.affectedScope.length > 0 ? `<span>📡 <strong style="color:#c9d1d9">Scope:</strong> ${esc(insight.affectedScope.join(' · '))}</span>` : ''}
 <span>🕐 ${agoText}</span>
 </div>
 <p class="mono" style="font-size:9px;color:#484f58;margin-top:8px;opacity:0.7">⚠️ AI-generated estimation based on historical data. Actual time may vary.</p>

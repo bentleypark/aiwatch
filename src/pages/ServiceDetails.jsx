@@ -10,13 +10,11 @@ import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
 import { formatDate } from '../utils/time'
 import { buildCalendarFromIncidents } from '../utils/calendar'
-import { Chart, LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip } from 'chart.js'
 import { SCORE_TEXT_CLASS } from '../utils/constants'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import StatusPill from '../components/StatusPill'
-
-Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip)
+import { ensureChart } from '../utils/chartLoader'
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -121,7 +119,10 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
 
   useEffect(() => {
     if (!canvasRef.current || !hasData) return
-    if (chartRef.current) chartRef.current.destroy()
+    let cancelled = false
+    ensureChart().then((Chart) => {
+      if (cancelled || !canvasRef.current) return
+      if (chartRef.current) chartRef.current.destroy()
 
     const labels = hourlyData.map((s) => {
       const d = new Date(s.t)
@@ -174,7 +175,8 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
       },
     })
 
-    return () => { if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null } }
+    }) // ensureChart
+    return () => { cancelled = true; if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null } }
   }, [hasData, hourlyData, service.id])
 
   return (

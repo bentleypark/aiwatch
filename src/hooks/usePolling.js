@@ -7,6 +7,7 @@ const POLL_INTERVAL = 60_000 // 60s
 
 // Worker API URL — defaults to local dev, override via env
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787/api/status'
+const CACHED_URL = API_URL.endsWith('/api/status') ? API_URL + '/cached' : API_URL
 
 // ── Mock data fallback (used when Worker is unavailable) ──
 
@@ -529,7 +530,6 @@ function usePollingInternal() {
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
     } else if (isRefresh) {
       if (!cancelledRef.current) {
-        // Save current services for recovery on fetch failure
         prevServicesRef.current = state.services
         setState((prev) => ({ ...prev, loading: true, refreshing: true, services: [] }))
       }
@@ -537,11 +537,24 @@ function usePollingInternal() {
     }
 
     try {
-      const res = await fetch(API_URL, { signal: controller.signal })
+      // Initial + refresh: try cached endpoint first (~1s), fall back to full fetch
+      // Silent polls: full endpoint for fresh data from all 25 services
+      let res
+      if (isInitial || isRefresh) {
+        try {
+          res = await fetch(CACHED_URL, { signal: controller.signal })
+          if (!res.ok) res = null
+        } catch { res = null }
+      }
+      if (!res) {
+        res = await fetch(API_URL, { signal: controller.signal })
+      }
       clearTimeout(timer)
       if (!res.ok) throw new Error(`Worker responded ${res.status}`)
       const data = await res.json()
-      const merged = mergeWithMock(data.services)
+      const services = Array.isArray(data.services) ? data.services : Array.isArray(data) ? data : []
+      if (services.length === 0) throw new Error('Empty response')
+      const merged = mergeWithMock(services)
 
       // Minimum skeleton display time: 1s to prevent flash
       const elapsed = Date.now() - loadStart

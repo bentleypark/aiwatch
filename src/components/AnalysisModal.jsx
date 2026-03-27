@@ -78,13 +78,13 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                 <p className="text-[12px] text-[var(--text1)]" style={{ lineHeight: 1.6, marginBottom: '8px' }}>
                   {(analysis.summary ?? '').slice(0, 500)}
                 </p>
-                <div className="flex flex-wrap gap-3 mono text-[10px] text-[var(--text2)]">
-                  <span>⏱ {analysis.estimatedRecovery === 'No historical data for estimation'
+                <div className="mono text-[10px] text-[var(--text2)]" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <span>⏱ <strong style={{ color: 'var(--text1)' }}>{lang === 'ko' ? '예상 복구' : 'Est. Recovery'}:</strong> {analysis.estimatedRecovery === 'No historical data for estimation'
                     ? (lang === 'ko' ? '복구 신호 모니터링 중...' : 'Monitoring recovery signals...')
                     : analysis.estimatedRecovery}
                   </span>
                   {analysis.affectedScope?.length > 0 && (
-                    <span>📡 {analysis.affectedScope.join(', ')}</span>
+                    <span>📡 <strong style={{ color: 'var(--text1)' }}>{lang === 'ko' ? '영향 범위' : 'Scope'}:</strong> {analysis.affectedScope.join(', ')}</span>
                   )}
                   <span>🕐 {timeAgo(analysis.analyzedAt, lang)}</span>
                 </div>

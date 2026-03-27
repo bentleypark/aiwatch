@@ -40,3 +40,21 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm run build
+      - name: Verify bundle splitting
+        run: |
+          set -e
+          # chart.js must be in a separate chunk
+          CHART_CHUNK=$(ls dist/assets/chart-*.js 2>/dev/null)
+          if [ -z "$CHART_CHUNK" ]; then
+            echo "::error::chart.js chunk not found — code splitting may be broken"
+            exit 1
+          fi
+          echo "✓ chart.js chunk: $(du -h "$CHART_CHUNK" | cut -f1)"
+
+          # Main bundle should be under 400KB
+          MAIN_CHUNK=$(ls dist/assets/index-*.js)
+          MAIN_SIZE=$(stat -c%s "$MAIN_CHUNK" 2>/dev/null || stat -f%z "$MAIN_CHUNK")
+          echo "✓ Main bundle: $(echo "$MAIN_SIZE / 1024" | bc)KB"
+          if [ "$MAIN_SIZE" -gt 409600 ]; then
+            echo "::warning::Main bundle exceeds 400KB ($MAIN_SIZE bytes) — consider further splitting"
+          fi

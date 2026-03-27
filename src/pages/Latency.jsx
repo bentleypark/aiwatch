@@ -4,11 +4,9 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
-import { Chart, LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip, Legend } from 'chart.js'
 import { LatencySkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
-
-Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip, Legend)
+import { ensureChart } from '../utils/chartLoader'
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -57,7 +55,10 @@ function LatencyTrendSection({ services, t, hourlyData }) {
 
   useEffect(() => {
     if (!canvasRef.current || !hasData) return
-    if (chartRef.current) chartRef.current.destroy()
+    let cancelled = false
+    ensureChart().then((Chart) => {
+      if (cancelled || !canvasRef.current) return
+      if (chartRef.current) chartRef.current.destroy()
 
     const labels = hourlyData.map((s) => {
       const d = new Date(s.t)
@@ -111,7 +112,8 @@ function LatencyTrendSection({ services, t, hourlyData }) {
       },
     })
 
-    return () => { if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null } }
+    }) // ensureChart
+    return () => { cancelled = true; if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null } }
   }, [hasData, hourlyData])
 
   return (
