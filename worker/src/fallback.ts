@@ -28,7 +28,7 @@ export function buildFallbackText(fallbacks: Array<{ name: string; score: number
   if (fallbacks.length === 0) return '⚠️ No operational fallback available. Consider retry logic or caching.'
   const list = fallbacks.map((f, i) => {
     const label = f.score != null ? `${f.name} (Score ${f.score})` : f.name
-    return i === 0 ? `★ ${label}` : label
+    return label
   }).join(' · ')
   return `👉 Suggested fallback: ${list}`
 }
@@ -62,7 +62,7 @@ export function buildGroupedFallbackText(
     const label = CATEGORY_LABEL[svc.category] ?? svc.category
     const list = fallbacks.map((f, i) => {
       const name = f.score != null ? `${f.name} (Score ${f.score})` : f.name
-      return i === 0 ? `★ ${name}` : name
+      return name
     }).join(' · ')
     lines.push(`${label}: ${list}`)
   }

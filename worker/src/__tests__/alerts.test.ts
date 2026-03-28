@@ -123,6 +123,22 @@ describe('buildIncidentAlerts', () => {
     expect(deduped[0].title).toContain('Claude API')
   })
 
+  it('shows same-category fallback only for shared incidents (no cross-category)', () => {
+    const sharedIncident = { id: 'shared2', title: 'Opus errors', status: 'investigating', startedAt: recentDate, impact: 'major' }
+    const claude = mockService({ id: 'claude', name: 'Claude API', category: 'api', status: 'degraded', incidents: [sharedIncident], aiwatchScore: 80 })
+    const claudecode = mockService({ id: 'claude-code', name: 'Claude Code', category: 'agent', status: 'degraded', incidents: [sharedIncident], aiwatchScore: 70 })
+    const openai = mockService({ id: 'openai', name: 'OpenAI API', category: 'api', status: 'operational', aiwatchScore: 90 })
+    const cursor = mockService({ id: 'cursor', name: 'Cursor', category: 'agent', status: 'operational', aiwatchScore: 75 })
+
+    const alerts = buildIncidentAlerts([claude, claudecode, openai, cursor], new Set(), NOW)
+    // Dedup: only first alert for shared2 is sent
+    const first = alerts.find(a => a.key === 'alerted:new:shared2')!
+    // Claude API alert should only have API fallbacks, not Coding Agent
+    expect(first.fallbackText).toContain('OpenAI API')
+    expect(first.fallbackText).not.toContain('Cursor')
+    expect(first.fallbackText).not.toContain('Coding Agent')
+  })
+
   it('handles multiple incidents per service', () => {
     const svc = mockService({
       incidents: [

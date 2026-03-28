@@ -1,7 +1,7 @@
 // Alert detection logic — pure functions for testability
 // Used by cronAlertCheck in index.ts
 
-import { getFallbacks, buildFallbackText, buildGroupedFallbackText } from './fallback'
+import { getFallbacks, buildFallbackText } from './fallback'
 import { sanitize, formatDuration } from './utils'
 import type { ServiceStatus } from './services'
 
@@ -37,14 +37,9 @@ export function buildIncidentAlerts(
       if (incAge > 86_400_000) continue
 
       if (inc.status !== 'resolved' && !alertedNewIds.has(inc.id)) {
-        // Collect all services sharing this incidentId for grouped fallback
-        const siblingIds = services
-          .filter(s => s.status !== 'operational' && (s.incidents ?? []).some(i => i.id === inc.id))
-          .map(s => s.id)
+        // Per-incident alert: show same-category fallbacks only
         const fallbackText = svc.status !== 'operational'
-          ? (siblingIds.length > 1
-            ? buildGroupedFallbackText(siblingIds, services)
-            : buildFallbackText(getFallbacks(svc.id, svc.category, services)))
+          ? buildFallbackText(getFallbacks(svc.id, svc.category, services))
           : ''
         alerts.push({
           key: `alerted:new:${inc.id}`,

@@ -67,12 +67,12 @@ describe('buildFallbackText', () => {
       { name: 'Groq Cloud', score: 93 },
       { name: 'Together AI', score: 89 },
     ])
-    expect(text).toBe('👉 Suggested fallback: ★ Groq Cloud (Score 93) · Together AI (Score 89)')
+    expect(text).toBe('👉 Suggested fallback: Groq Cloud (Score 93) · Together AI (Score 89)')
   })
 
   it('formats fallback without score', () => {
     const text = buildFallbackText([{ name: 'Claude API', score: null }])
-    expect(text).toBe('👉 Suggested fallback: ★ Claude API')
+    expect(text).toBe('👉 Suggested fallback: Claude API')
   })
 
   it('returns no-fallback message when empty', () => {
