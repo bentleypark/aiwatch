@@ -197,28 +197,69 @@ export async function refreshOrReanalyze(
 
         if (isStale) {
           // Analysis is for a resolved/missing incident — delete and fall through to re-analysis
-          await kv.put(key, '', { expirationTtl: 1 }).catch(() => {}) // expire immediately
+          await kv.put(key, '', { expirationTtl: 1 }).catch(() => {})
         } else {
-          // Time-based re-analysis: if analysis content is 2h+ old, re-analyze to capture evolving situations
+          // Time-based re-analysis: if 2h+ old, attempt update without deleting old analysis first
           const analysisAge = now - new Date(parsed.analyzedAt).getTime()
           if (analysisAge >= 7_200_000 && apiKey && reAnalysisCount < cap) {
-            // Delete old analysis and fall through to re-analysis (skip sibling dedup)
-            await kv.put(key, '', { expirationTtl: 1 }).catch(() => {})
-          } else {
-            // Valid analysis — register for sibling dedup
-            if (parsed.incidentId) analyzedIncidents.set(parsed.incidentId, key)
-            // Refresh TTL if last refresh was 30+ min ago
-            const lastRefresh = parsed._lastRefresh ?? parsed.analyzedAt
-            const elapsed = now - new Date(lastRefresh).getTime()
-            if (elapsed >= 1_800_000) {
-              parsed._lastRefresh = new Date(now).toISOString()
-              await kv.put(key, JSON.stringify(parsed), { expirationTtl: 3600 }).catch(() => {})
-              result.refreshed.push(svc.id)
+            const activeInc = (svc.incidents ?? []).find(i => i.status !== 'resolved')
+            if (activeInc) {
+              reAnalysisCount++
+              try {
+                const newAnalysis = await analyzeFn(
+                  apiKey, svc.name,
+                  { id: activeInc.id, title: activeInc.title, status: activeInc.status, startedAt: activeInc.startedAt, impact: activeInc.impact },
+                  svc.incidents ?? [],
+                )
+                // Track usage
+                const today = new Date(now).toISOString().split('T')[0]
+                const usageKey = `ai:usage:${today}`
+                const usageRaw = await kv.get(usageKey).catch(() => null)
+                const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0 }
+                usage.calls++
+                if (newAnalysis) {
+                  usage.success++
+                  await kv.put(key, JSON.stringify(newAnalysis), { expirationTtl: 3600 }).catch(() => {})
+                  if (activeInc.id) analyzedIncidents.set(activeInc.id, key)
+                  result.reanalyzed.push(svc.id)
+                } else {
+                  usage.failed++
+                  // Keep old analysis, just refresh TTL
+                  console.warn(`[ai] time-based re-analysis returned null for ${svc.id}, keeping old`)
+                  parsed._lastRefresh = new Date(now).toISOString()
+                  await kv.put(key, JSON.stringify(parsed), { expirationTtl: 3600 }).catch(() => {})
+                  result.refreshed.push(svc.id)
+                }
+                await kv.put(usageKey, JSON.stringify(usage), { expirationTtl: 172800 }).catch(() => {})
+              } catch (err) {
+                console.warn(`[ai] time-based re-analysis failed for ${svc.id}:`, err instanceof Error ? err.message : err)
+                // Keep old analysis on failure
+                parsed._lastRefresh = new Date(now).toISOString()
+                await kv.put(key, JSON.stringify(parsed), { expirationTtl: 3600 }).catch(() => {})
+                result.refreshed.push(svc.id)
+              }
+              continue
             }
+          } else if (analysisAge >= 7_200_000) {
+            // Cap exhausted or no API key — don't refresh TTL, let it expire for next cycle
+            if (parsed.incidentId) analyzedIncidents.set(parsed.incidentId, key)
             continue
           }
+          // Valid analysis — register for sibling dedup
+          if (parsed.incidentId) analyzedIncidents.set(parsed.incidentId, key)
+          // Refresh TTL if last refresh was 30+ min ago
+          const lastRefresh = parsed._lastRefresh ?? parsed.analyzedAt
+          const elapsed = now - new Date(lastRefresh).getTime()
+          if (elapsed >= 1_800_000) {
+            parsed._lastRefresh = new Date(now).toISOString()
+            await kv.put(key, JSON.stringify(parsed), { expirationTtl: 3600 }).catch(() => {})
+            result.refreshed.push(svc.id)
+          }
+          continue
         }
-      } catch { /* ignore corrupt data */ }
+      } catch (err) {
+        console.warn(`[ai] Failed to parse analysis for ${svc.id}:`, err instanceof Error ? err.message : err)
+      }
     }
 
     // No analysis — attempt re-analysis or copy from sibling with same incidentId

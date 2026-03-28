@@ -402,6 +402,38 @@ describe('refreshOrReanalyze', () => {
     expect(stored.summary).toBe('Updated analysis')
   })
 
+  it('keeps old analysis when 2h+ re-analysis fails', async () => {
+    const oldAnalysis = { ...mockAnalysis, incidentId: 'inc-1', analyzedAt: '2026-03-27T03:00:00Z', summary: 'Old analysis' }
+    const store: Record<string, string> = { 'ai:analysis:claude': JSON.stringify(oldAnalysis) }
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn().mockResolvedValue(null) // re-analysis fails
+
+    const now = new Date('2026-03-27T05:30:00Z').getTime()
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(analyzeFn).toHaveBeenCalledOnce()
+    // Old analysis should be preserved, not deleted
+    const stored = JSON.parse(store['ai:analysis:claude'])
+    expect(stored.summary).toBe('Old analysis')
+    expect(result.refreshed).toEqual(['claude'])
+  })
+
+  it('keeps old analysis when 2h+ re-analysis throws', async () => {
+    const oldAnalysis = { ...mockAnalysis, incidentId: 'inc-1', analyzedAt: '2026-03-27T03:00:00Z', summary: 'Old analysis' }
+    const store: Record<string, string> = { 'ai:analysis:claude': JSON.stringify(oldAnalysis) }
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn().mockRejectedValue(new Error('API timeout'))
+
+    const now = new Date('2026-03-27T05:30:00Z').getTime()
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    const stored = JSON.parse(store['ai:analysis:claude'])
+    expect(stored.summary).toBe('Old analysis')
+    expect(result.refreshed).toEqual(['claude'])
+  })
+
   it('does not re-analyze when analysis is less than 2h old', async () => {
     const recentAnalysis = { ...mockAnalysis, incidentId: 'inc-1', analyzedAt: '2026-03-27T04:00:00Z' }
     const kv = mockKV({ 'ai:analysis:claude': JSON.stringify(recentAnalysis) })
