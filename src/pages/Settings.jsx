@@ -151,6 +151,8 @@ export default function Settings() {
   const [alertIncidents, setAlertIncidents] = useState(settings.alertIncidents)
   const [saved, setSaved] = useState(false)
   const [testResult, setTestResult] = useState(null) // null | 'sending' | 'ok' | 'error'
+  const [monitoringOpen, setMonitoringOpen] = useState(false)
+  const [agentsOpen, setAgentsOpen] = useState(false)
   const saveTimerRef = useRef(null)
 
   useEffect(() => () => clearTimeout(saveTimerRef.current), [])
@@ -263,54 +265,76 @@ export default function Settings() {
 
       {/* ── Monitoring (API + WebApp) ── */}
       <section>
-        <div style={sectionTitleStyle}>{t('settings.monitoring')}</div>
-        <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', padding: '8px 0 10px' }}>
-          {t('settings.monitoring.desc')}
-        </div>
-        <div>
-          {SERVICE_AND_WEBAPP_IDS.map((id) => {
-            const svc = svcMap[id]
-            const dotCls = STATUS_DOT_CLASS[svc?.status] ?? STATUS_DOT_CLASS.unknown
-            return (
-              <div key={id} className="flex items-center justify-between" style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-                <div className="flex items-center" style={{ gap: '8px' }}>
-                  <span className={`rounded-full shrink-0 ${dotCls}`} style={{ width: '6px', height: '6px' }} />
-                  <span style={{ fontSize: '12px', color: 'var(--text0)' }}>{svc?.name ?? id}</span>
-                  <span className="mono" style={{ fontSize: '10px', color: 'var(--text2)', marginLeft: '4px' }}>
-                    {svc?.uptime30d != null ? `${svc.uptime30d.toFixed(2)}%` : ''}
-                  </span>
+        <button
+          type="button"
+          aria-expanded={monitoringOpen}
+          onClick={() => setMonitoringOpen(v => !v)}
+          className="w-full flex items-center justify-between cursor-pointer"
+          style={{ ...sectionTitleStyle, borderBottom: 'none', background: 'none', padding: '0 0 8px', margin: '0 0 2px', textAlign: 'left' }}
+        >
+          <span>{t('settings.monitoring')} ({SERVICE_AND_WEBAPP_IDS.length})</span>
+          <svg width="12" height="12" viewBox="0 0 12 12" style={{ color: 'var(--text2)', transition: 'transform 0.2s', transform: monitoringOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}><path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+        {monitoringOpen && (
+          <div>
+            <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', padding: '8px 0 10px' }}>
+              {t('settings.monitoring.desc')}
+            </div>
+            {SERVICE_AND_WEBAPP_IDS.map((id) => {
+              const svc = svcMap[id]
+              const dotCls = STATUS_DOT_CLASS[svc?.status] ?? STATUS_DOT_CLASS.unknown
+              return (
+                <div key={id} className="flex items-center justify-between" style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                  <div className="flex items-center" style={{ gap: '8px' }}>
+                    <span className={`rounded-full shrink-0 ${dotCls}`} style={{ width: '6px', height: '6px' }} />
+                    <span style={{ fontSize: '12px', color: 'var(--text0)' }}>{svc?.name ?? id}</span>
+                    <span className="mono" style={{ fontSize: '10px', color: 'var(--text2)', marginLeft: '4px' }}>
+                      {svc?.uptime30d != null ? `${svc.uptime30d.toFixed(2)}%` : ''}
+                    </span>
+                  </div>
+                  <Toggle checked={enabledServices.includes(id)} onChange={() => toggleService(id)} />
                 </div>
-                <Toggle checked={enabledServices.includes(id)} onChange={() => toggleService(id)} />
-              </div>
-            )
-          })}
-        </div>
+              )
+            })}
+          </div>
+        )}
       </section>
 
       {/* ── Coding Agents ── */}
       <section>
-        <div style={sectionTitleStyle}>{t('nav.agents')}</div>
-        <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', padding: '8px 0 10px' }}>
-          {t('settings.monitoring.desc')}
-        </div>
-        <div>
-          {AGENT_SERVICE_IDS.map((id) => {
-            const svc = svcMap[id]
-            const dotCls = STATUS_DOT_CLASS[svc?.status] ?? STATUS_DOT_CLASS.unknown
-            return (
-              <div key={id} className="flex items-center justify-between" style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-                <div className="flex items-center" style={{ gap: '8px' }}>
-                  <span className={`rounded-full shrink-0 ${dotCls}`} style={{ width: '6px', height: '6px' }} />
-                  <span style={{ fontSize: '12px', color: 'var(--text0)' }}>{svc?.name ?? id}</span>
-                  <span className="mono" style={{ fontSize: '10px', color: 'var(--text2)', marginLeft: '4px' }}>
-                    {svc?.uptime30d != null ? `${svc.uptime30d.toFixed(2)}%` : ''}
-                  </span>
+        <button
+          type="button"
+          aria-expanded={agentsOpen}
+          onClick={() => setAgentsOpen(v => !v)}
+          className="w-full flex items-center justify-between cursor-pointer"
+          style={{ ...sectionTitleStyle, borderBottom: 'none', background: 'none', padding: '0 0 8px', margin: '0 0 2px', textAlign: 'left' }}
+        >
+          <span>{t('nav.agents')} ({AGENT_SERVICE_IDS.length})</span>
+          <svg width="12" height="12" viewBox="0 0 12 12" style={{ color: 'var(--text2)', transition: 'transform 0.2s', transform: agentsOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}><path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+        {agentsOpen && (
+          <div>
+            <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', padding: '8px 0 10px' }}>
+              {t('settings.monitoring.desc')}
+            </div>
+            {AGENT_SERVICE_IDS.map((id) => {
+              const svc = svcMap[id]
+              const dotCls = STATUS_DOT_CLASS[svc?.status] ?? STATUS_DOT_CLASS.unknown
+              return (
+                <div key={id} className="flex items-center justify-between" style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                  <div className="flex items-center" style={{ gap: '8px' }}>
+                    <span className={`rounded-full shrink-0 ${dotCls}`} style={{ width: '6px', height: '6px' }} />
+                    <span style={{ fontSize: '12px', color: 'var(--text0)' }}>{svc?.name ?? id}</span>
+                    <span className="mono" style={{ fontSize: '10px', color: 'var(--text2)', marginLeft: '4px' }}>
+                      {svc?.uptime30d != null ? `${svc.uptime30d.toFixed(2)}%` : ''}
+                    </span>
+                  </div>
+                  <Toggle checked={enabledServices.includes(id)} onChange={() => toggleService(id)} />
                 </div>
-                <Toggle checked={enabledServices.includes(id)} onChange={() => toggleService(id)} />
-              </div>
-            )
-          })}
-        </div>
+              )
+            })}
+          </div>
+        )}
       </section>
 
       {/* ── Alerts ── */}
