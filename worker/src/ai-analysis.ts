@@ -199,17 +199,24 @@ export async function refreshOrReanalyze(
           // Analysis is for a resolved/missing incident — delete and fall through to re-analysis
           await kv.put(key, '', { expirationTtl: 1 }).catch(() => {}) // expire immediately
         } else {
-          // Valid analysis — register for sibling dedup
-          if (parsed.incidentId) analyzedIncidents.set(parsed.incidentId, key)
-          // Refresh TTL if last refresh was 30+ min ago
-          const lastRefresh = parsed._lastRefresh ?? parsed.analyzedAt
-          const elapsed = now - new Date(lastRefresh).getTime()
-          if (elapsed >= 1_800_000) {
-            parsed._lastRefresh = new Date(now).toISOString()
-            await kv.put(key, JSON.stringify(parsed), { expirationTtl: 3600 }).catch(() => {})
-            result.refreshed.push(svc.id)
+          // Time-based re-analysis: if analysis content is 2h+ old, re-analyze to capture evolving situations
+          const analysisAge = now - new Date(parsed.analyzedAt).getTime()
+          if (analysisAge >= 7_200_000 && apiKey && reAnalysisCount < cap) {
+            // Delete old analysis and fall through to re-analysis (skip sibling dedup)
+            await kv.put(key, '', { expirationTtl: 1 }).catch(() => {})
+          } else {
+            // Valid analysis — register for sibling dedup
+            if (parsed.incidentId) analyzedIncidents.set(parsed.incidentId, key)
+            // Refresh TTL if last refresh was 30+ min ago
+            const lastRefresh = parsed._lastRefresh ?? parsed.analyzedAt
+            const elapsed = now - new Date(lastRefresh).getTime()
+            if (elapsed >= 1_800_000) {
+              parsed._lastRefresh = new Date(now).toISOString()
+              await kv.put(key, JSON.stringify(parsed), { expirationTtl: 3600 }).catch(() => {})
+              result.refreshed.push(svc.id)
+            }
+            continue
           }
-          continue
         }
       } catch { /* ignore corrupt data */ }
     }

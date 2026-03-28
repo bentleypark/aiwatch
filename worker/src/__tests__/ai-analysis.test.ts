@@ -222,13 +222,13 @@ const mockAnalysis = {
 }
 
 describe('refreshOrReanalyze', () => {
-  it('refreshes TTL when analysis exists and is older than 30min', async () => {
-    const oldAnalysis = { ...mockAnalysis, analyzedAt: '2026-03-27T05:00:00Z' }
+  it('refreshes TTL when analysis exists and is 30-59min old', async () => {
+    const oldAnalysis = { ...mockAnalysis, analyzedAt: '2026-03-27T05:10:00Z' }
     const kv = mockKV({ 'ai:analysis:claude': JSON.stringify(oldAnalysis) })
     const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
     const analyzeFn = vi.fn()
 
-    const now = new Date('2026-03-27T06:00:00Z').getTime()
+    const now = new Date('2026-03-27T05:50:00Z').getTime() // 40min elapsed (< 1h, > 30min)
     const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
 
     expect(result.refreshed).toEqual(['claude'])
@@ -371,18 +371,73 @@ describe('refreshOrReanalyze', () => {
     expect(stored.incidentId).toBe('inc-new')
   })
 
-  it('keeps analysis when incidentId matches active incident', async () => {
-    const analysis = { ...mockAnalysis, incidentId: 'inc-1', analyzedAt: '2026-03-27T05:00:00Z' }
+  it('keeps analysis when incidentId matches and analysis is recent (<1h)', async () => {
+    const analysis = { ...mockAnalysis, incidentId: 'inc-1', analyzedAt: '2026-03-27T05:20:00Z' }
     const kv = mockKV({ 'ai:analysis:claude': JSON.stringify(analysis) })
     const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
     const analyzeFn = vi.fn()
 
-    const now = new Date('2026-03-27T06:00:00Z').getTime()
+    const now = new Date('2026-03-27T05:55:00Z').getTime() // 35min elapsed (< 1h)
     const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
 
     expect(analyzeFn).not.toHaveBeenCalled()
     expect(result.refreshed).toEqual(['claude'])
     expect(result.reanalyzed).toEqual([])
+  })
+
+  it('re-analyzes when analysis is 2h+ old for same active incident', async () => {
+    const oldAnalysis = { ...mockAnalysis, incidentId: 'inc-1', analyzedAt: '2026-03-27T03:00:00Z' }
+    const store: Record<string, string> = { 'ai:analysis:claude': JSON.stringify(oldAnalysis) }
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const updatedAnalysis = { ...mockAnalysis, incidentId: 'inc-1', summary: 'Updated analysis' }
+    const analyzeFn = vi.fn().mockResolvedValue(updatedAnalysis)
+
+    const now = new Date('2026-03-27T05:30:00Z').getTime() // 2.5h elapsed
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(analyzeFn).toHaveBeenCalledOnce()
+    expect(result.reanalyzed).toEqual(['claude'])
+    const stored = JSON.parse(store['ai:analysis:claude'])
+    expect(stored.summary).toBe('Updated analysis')
+  })
+
+  it('does not re-analyze when analysis is less than 2h old', async () => {
+    const recentAnalysis = { ...mockAnalysis, incidentId: 'inc-1', analyzedAt: '2026-03-27T04:00:00Z' }
+    const kv = mockKV({ 'ai:analysis:claude': JSON.stringify(recentAnalysis) })
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn()
+
+    const now = new Date('2026-03-27T05:30:00Z').getTime() // 1.5h elapsed (< 2h)
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(analyzeFn).not.toHaveBeenCalled()
+    expect(result.refreshed).toEqual(['claude'])
+  })
+
+  it('respects cap for time-based re-analysis', async () => {
+    const oldAnalysis1 = { ...mockAnalysis, incidentId: 'inc-1', analyzedAt: '2026-03-27T03:00:00Z' }
+    const oldAnalysis2 = { ...mockAnalysis, incidentId: 'inc-2', analyzedAt: '2026-03-27T03:00:00Z' }
+    const oldAnalysis3 = { ...mockAnalysis, incidentId: 'inc-3', analyzedAt: '2026-03-27T03:00:00Z' }
+    const store: Record<string, string> = {
+      'ai:analysis:claude': JSON.stringify(oldAnalysis1),
+      'ai:analysis:openai': JSON.stringify(oldAnalysis2),
+      'ai:analysis:gemini': JSON.stringify(oldAnalysis3),
+    }
+    const kv = mockKV(store)
+    const svcs = [
+      mockService('claude', [{ id: 'inc-1', status: 'investigating' }]),
+      mockService('openai', [{ id: 'inc-2', status: 'investigating' }]),
+      mockService('gemini', [{ id: 'inc-3', status: 'investigating' }]),
+    ]
+    const analyzeFn = vi.fn().mockResolvedValue(mockAnalysis)
+
+    const now = new Date('2026-03-27T05:30:00Z').getTime() // 2.5h elapsed
+    const result = await refreshOrReanalyze(svcs, kv, 'key', analyzeFn, 2, now)
+
+    // Cap is 2 — only 2 should be re-analyzed, 3rd skipped
+    expect(analyzeFn).toHaveBeenCalledTimes(2)
+    expect(result.reanalyzed).toHaveLength(2)
   })
 
   it('dedup: copies analysis from sibling with same incidentId instead of API call', async () => {
