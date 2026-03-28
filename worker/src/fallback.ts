@@ -32,3 +32,40 @@ export function buildFallbackText(fallbacks: Array<{ name: string; score: number
   }).join(' · ')
   return `👉 Suggested fallback: ${list}`
 }
+
+const CATEGORY_LABEL: Record<string, string> = {
+  api: 'API', webapp: 'Web App', agent: 'Coding Agent',
+}
+
+/**
+ * Build fallback text for a group of affected services (possibly spanning multiple categories).
+ * Returns multi-line text when multiple categories are affected.
+ */
+export function buildGroupedFallbackText(
+  affectedServiceIds: string[],
+  services: FallbackCandidate[],
+): string {
+  const seen = new Set<string>()
+  const lines: string[] = []
+  for (const svcId of affectedServiceIds) {
+    if (EXCLUDE_FALLBACK.includes(svcId)) continue
+    const svc = services.find(s => s.id === svcId)
+    if (!svc) {
+      console.warn(`[fallback] buildGroupedFallbackText: service ID "${svcId}" not found`)
+      continue
+    }
+    if (svc.status === 'operational') continue
+    if (seen.has(svc.category)) continue
+    seen.add(svc.category)
+    const fallbacks = getFallbacks(svcId, svc.category, services)
+    if (fallbacks.length === 0) continue
+    const label = CATEGORY_LABEL[svc.category] ?? svc.category
+    const list = fallbacks.map((f, i) => {
+      const name = f.score != null ? `${f.name} (Score ${f.score})` : f.name
+      return i === 0 ? `★ ${name}` : name
+    }).join(' · ')
+    lines.push(`${label}: ${list}`)
+  }
+  if (lines.length === 0) return '⚠️ No operational fallback available. Consider retry logic or caching.'
+  return `👉 Suggested fallback:\n${lines.join('\n')}`
+}

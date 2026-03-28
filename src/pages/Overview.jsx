@@ -321,19 +321,27 @@ function ActionBanner({ services, setPage, t }) {
     </span>
   ))
 
-  // Collect fallbacks — exclude non-operational + same provider as affected services
+  // Collect fallbacks per category — exclude non-operational + same provider
+  const CATEGORY_LABEL = { api: 'API', webapp: 'Web App', agent: 'Coding' }
   const nonOperationalIds = new Set(services.filter(s => s.status !== 'operational').map(s => s.id))
   const affectedProviders = new Set(affected.map(s => s.provider))
-  const seenFb = new Set()
-  const fallbacks = affected.flatMap(svc => getFallbacks(svc, services)).filter(f => {
-    if (nonOperationalIds.has(f.id)) return false
-    // Exclude same provider (e.g. claude.ai down → don't recommend Claude API)
-    const fSvc = services.find(s => s.id === f.id)
-    if (fSvc?.provider && affectedProviders.has(fSvc.provider)) return false
-    if (seenFb.has(f.id)) return false
-    seenFb.add(f.id)
-    return true
-  }).slice(0, 2)
+  const seenCategories = new Set()
+  const categoryGroups = [] // [{ category, label, items: [{ id, name, aiwatchScore }] }]
+  const numCategories = new Set(affected.filter(a => !EXCLUDE_FALLBACK.includes(a.id)).map(a => a.category)).size
+  const perCategory = numCategories === 1 ? 2 : 1
+  for (const svc of affected) {
+    if (EXCLUDE_FALLBACK.includes(svc.id)) continue
+    if (seenCategories.has(svc.category)) continue
+    seenCategories.add(svc.category)
+    const candidates = getFallbacks(svc, services).filter(f => {
+      if (nonOperationalIds.has(f.id)) return false
+      const fSvc = services.find(s => s.id === f.id)
+      if (fSvc?.provider && affectedProviders.has(fSvc.provider)) return false
+      return true
+    })
+    if (candidates.length === 0) continue
+    categoryGroups.push({ category: svc.category, label: CATEGORY_LABEL[svc.category] ?? svc.category, items: candidates.slice(0, perCategory) })
+  }
 
   return (
     <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg" style={{ padding: '10px 14px', lineHeight: 1.5, borderLeft: `3px solid ${borderColor}` }}>
@@ -347,36 +355,41 @@ function ActionBanner({ services, setPage, t }) {
           ⚠️ <span className="text-[var(--amber)]">{t('overview.banner.degradedCount').replace('{n}', degradedList.length)}</span> {renderNames(degradedList)}
         </div>
       )}
-      <div className="flex items-center flex-wrap" style={{ gap: '6px', marginTop: '4px' }}>
+      <div className="mono text-[11px]" style={{ marginTop: '4px' }}>
         <button
           onClick={() => setPage({ name: 'incidents' })}
-          className="mono text-[11px] text-[var(--blue)] hover:underline cursor-pointer"
-          style={{ background: 'none', border: 'none', padding: 0 }}
+          className="text-[var(--blue)] hover:underline cursor-pointer"
+          style={{ background: 'none', border: 'none', padding: 0, font: 'inherit' }}
         >
           👉 {t('overview.banner.viewIncidents')}
         </button>
-        {fallbacks.length > 0 ? (
-          <span className="mono text-[11px] text-[var(--text2)]" style={{ whiteSpace: 'nowrap' }}>
-            · ✅{' '}
-            {fallbacks.map((f, i) => (
-              <span key={f.id}>
-                {i > 0 && ', '}
-                <span
-                  className="text-[var(--green)] hover:underline cursor-pointer"
-                  onClick={() => { trackEvent('fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); setPage({ name: 'service', serviceId: f.id }) }}
-                >
-                  {i === 0 && <span className="text-[var(--yellow)]">★ </span>}
-                  {f.name}{f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}
-                </span>
-              </span>
-            ))}
-          </span>
-        ) : (
-          <span className="mono text-[11px] text-[var(--text2)]">
-            · ⚠️ {t('overview.banner.noFallback')}
-          </span>
-        )}
       </div>
+      {categoryGroups.length > 0 ? (
+        <div className="mono text-[11px] text-[var(--text2)]" style={{ marginTop: '4px' }}>
+          <span>{t('overview.banner.fallback')}</span>
+          {categoryGroups.map((grp, gi) => (
+            <span key={grp.category}>
+              {gi > 0 && ' · '}
+              {' '}<span className="text-[var(--text2)]">{grp.label} → </span>
+              {grp.items.map((f, fi) => (
+                <span key={f.id}>
+                  {fi > 0 && ', '}
+                  <span
+                    className="text-[var(--green)] hover:underline cursor-pointer"
+                    onClick={() => { trackEvent('fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); setPage({ name: 'service', serviceId: f.id }) }}
+                  >
+                    {f.name}{f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}
+                  </span>
+                </span>
+              ))}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div className="mono text-[11px] text-[var(--text2)]" style={{ marginTop: '4px' }}>
+          {t('overview.banner.noFallback')}
+        </div>
+      )}
     </div>
   )
 }

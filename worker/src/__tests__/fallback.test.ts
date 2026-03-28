@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getFallbacks, buildFallbackText, EXCLUDE_FALLBACK } from '../fallback'
+import { getFallbacks, buildFallbackText, buildGroupedFallbackText, EXCLUDE_FALLBACK } from '../fallback'
 
 const mockServices = [
   { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 85 },
@@ -78,6 +78,55 @@ describe('buildFallbackText', () => {
   it('returns no-fallback message when empty', () => {
     const text = buildFallbackText([])
     expect(text).toBe('⚠️ No operational fallback available. Consider retry logic or caching.')
+  })
+})
+
+describe('buildGroupedFallbackText', () => {
+  const services = [
+    { id: 'claude', category: 'api', name: 'Claude API', status: 'down', aiwatchScore: 85 },
+    { id: 'claudeai', category: 'webapp', name: 'claude.ai', status: 'down', aiwatchScore: 60 },
+    { id: 'claude-code', category: 'agent', name: 'Claude Code', status: 'down', aiwatchScore: 70 },
+    { id: 'openai', category: 'api', name: 'OpenAI API', status: 'operational', aiwatchScore: 86 },
+    { id: 'gemini', category: 'api', name: 'Gemini API', status: 'operational', aiwatchScore: 76 },
+    { id: 'chatgpt', category: 'webapp', name: 'ChatGPT', status: 'operational', aiwatchScore: 67 },
+    { id: 'characterai', category: 'webapp', name: 'Character.AI', status: 'operational', aiwatchScore: 79 },
+    { id: 'cursor', category: 'agent', name: 'Cursor', status: 'operational', aiwatchScore: 75 },
+    { id: 'github-copilot', category: 'agent', name: 'GitHub Copilot', status: 'operational', aiwatchScore: 80 },
+  ]
+
+  it('returns multi-category fallback for grouped incident', () => {
+    const text = buildGroupedFallbackText(['claude', 'claudeai', 'claude-code'], services)
+    expect(text).toContain('API:')
+    expect(text).toContain('OpenAI API (Score 86)')
+    expect(text).toContain('Web App:')
+    expect(text).toContain('ChatGPT')
+    expect(text).toContain('Coding Agent:')
+    expect(text).toContain('GitHub Copilot')
+  })
+
+  it('deduplicates categories', () => {
+    const text = buildGroupedFallbackText(['claude', 'claudeai'], services)
+    const apiMatches = text.match(/API:/g)
+    expect(apiMatches).toHaveLength(1)
+  })
+
+  it('skips excluded services', () => {
+    const text = buildGroupedFallbackText(['characterai', 'claudeai'], services)
+    // characterai is in EXCLUDE_FALLBACK, only webapp from claudeai
+    expect(text).toContain('Web App:')
+    expect(text).not.toContain('Character.AI:')
+  })
+
+  it('returns no-fallback message when all excluded', () => {
+    const text = buildGroupedFallbackText(['elevenlabs', 'replicate'], services)
+    expect(text).toContain('No operational fallback')
+  })
+
+  it('returns single category when only one affected', () => {
+    const text = buildGroupedFallbackText(['claude'], services)
+    expect(text).toContain('API:')
+    expect(text).not.toContain('Web App:')
+    expect(text).not.toContain('Coding Agent:')
   })
 })
 
