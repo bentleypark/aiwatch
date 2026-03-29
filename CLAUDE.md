@@ -102,8 +102,9 @@ npm run test:worker # Run Worker unit tests (vitest)
 | `alert:proxy:{YYYY-MM-DD}` | `{ discord, slack, failed }` JSON | 2d | ~1 | User webhook delivery counts (approximate, flushed from in-memory by daily summary cron) |
 | `kv_limit_alert` | `"1"` | 5min | ~1 | KV write limit exceeded cooldown |
 | `vitals:{YYYY-MM-DD}` | `{ count, allValues }` JSON | 2d | ~30 (10% sampling) | Web Vitals daily aggregation (LCP, FCP, TTFB, CLS, INP) |
+| `vitals:history:{YYYY-MM-DD}` | `{ count, p75 }` JSON | 90d | 1 | Archived yesterday's vitals p75 summary |
 
-**Free tier budget**: 1,000 writes/day. Estimated total: ~840-950 writes/day (within budget).
+**Free tier budget**: 1,000 writes/day. Estimated total: ~841-951 writes/day (within budget).
 
 ### Directory Layout
 ```

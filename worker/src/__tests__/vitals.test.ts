@@ -4,6 +4,7 @@ import {
   writeVitalsToKV,
   computeP75,
   readVitalsSummary,
+  archiveVitals,
   formatVitalsSection,
   vitalsGrade,
   type VitalsDaily,
@@ -181,6 +182,71 @@ describe('readVitalsSummary', () => {
     expect(result).toBeNull()
     expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('[vitals] KV read failed'), expect.any(String), expect.any(String))
     consoleSpy.mockRestore()
+  })
+})
+
+describe('archiveVitals', () => {
+  it('archives yesterday p75 summary to history key', async () => {
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().split('T')[0]
+    const srcData = {
+      count: 50,
+      allValues: {
+        LCP: [1000, 2000, 3000, 4000],
+        FCP: [500, 1000, 1500],
+        TTFB: [200, 400],
+        CLS: [30, 60],
+        INP: [100, 200],
+      },
+    }
+    const stored: Record<string, string> = {}
+    const kv = {
+      get: vi.fn().mockImplementation((key: string) => {
+        if (key === `vitals:history:${yesterday}`) return Promise.resolve(null) // not yet archived
+        if (key === `vitals:${yesterday}`) return Promise.resolve(JSON.stringify(srcData))
+        return Promise.resolve(null)
+      }),
+      put: vi.fn().mockImplementation((key: string, value: string) => {
+        stored[key] = value
+        return Promise.resolve()
+      }),
+    }
+
+    const result = await archiveVitals(kv as unknown as KVNamespace)
+    expect(result).toBe(true)
+    expect(kv.put).toHaveBeenCalledTimes(1)
+
+    const histKey = `vitals:history:${yesterday}`
+    expect(stored[histKey]).toBeDefined()
+    const archived = JSON.parse(stored[histKey])
+    expect(archived.count).toBe(50)
+    expect(archived.p75.LCP).toBe(3000) // p75 of [1000,2000,3000,4000]
+    expect(archived.p75).not.toHaveProperty('allValues') // compact, no raw arrays
+  })
+
+  it('skips if already archived', async () => {
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().split('T')[0]
+    const kv = {
+      get: vi.fn().mockImplementation((key: string) => {
+        if (key === `vitals:history:${yesterday}`) return Promise.resolve('{"count":10}')
+        return Promise.resolve(null)
+      }),
+      put: vi.fn(),
+    }
+
+    const result = await archiveVitals(kv as unknown as KVNamespace)
+    expect(result).toBe(false)
+    expect(kv.put).not.toHaveBeenCalled()
+  })
+
+  it('skips if no yesterday data', async () => {
+    const kv = {
+      get: vi.fn().mockResolvedValue(null),
+      put: vi.fn(),
+    }
+
+    const result = await archiveVitals(kv as unknown as KVNamespace)
+    expect(result).toBe(false)
+    expect(kv.put).not.toHaveBeenCalled()
   })
 })
 

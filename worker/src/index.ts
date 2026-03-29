@@ -492,7 +492,7 @@ import { generateBadgeSvg } from './badge'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, isPromotable } from './reddit'
 import { buildDailySummary } from './daily-summary'
-import { parseVitals, writeVitalsToKV, readVitalsSummary } from './vitals'
+import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
@@ -649,6 +649,11 @@ export default {
         } catch (err) {
           console.warn('[daily-summary] Failed to flush delivery counts:', err instanceof Error ? err.message : err)
         }
+
+        // Archive yesterday's vitals as p75 summary (90d retention)
+        await archiveVitals(env.STATUS_CACHE).catch((err) =>
+          console.warn('[daily-summary] vitals archive failed:', err instanceof Error ? err.message : err)
+        )
 
         // Read web vitals summary for today
         const vitalsSummary = await readVitalsSummary(env.STATUS_CACHE).catch((err) => {

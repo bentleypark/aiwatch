@@ -88,6 +88,41 @@ export async function writeVitalsToKV(kv: KVNamespace, metrics: Partial<Record<V
   }), { expirationTtl: 2 * 86400 })
 }
 
+/**
+ * Archive yesterday's vitals as p75 summary (called by daily summary cron).
+ * Stores compact { count, p75 } instead of raw arrays. TTL 90 days.
+ */
+export async function archiveVitals(kv: KVNamespace): Promise<boolean> {
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString().split('T')[0]
+  const srcKey = `vitals:${yesterday}`
+  const destKey = `vitals:history:${yesterday}`
+
+  // Skip if already archived
+  const existing = await kv.get(destKey).catch(() => null)
+  if (existing) return false
+
+  const raw = await kv.get(srcKey).catch(() => null)
+  if (!raw) return false
+
+  try {
+    const data = JSON.parse(raw) as VitalsKVData
+    if (!data.count || !data.allValues) return false
+
+    const p75: Record<string, number> = {}
+    for (const name of VITAL_NAMES) {
+      p75[name] = computeP75(data.allValues[name] ?? [])
+    }
+
+    await kv.put(destKey, JSON.stringify({ count: data.count, p75 }), {
+      expirationTtl: 90 * 86400, // 90 days
+    })
+    return true
+  } catch (err) {
+    console.error('[vitals] archive failed:', err instanceof Error ? err.message : err)
+    return false
+  }
+}
+
 /** Compute p75 from an array of numbers */
 export function computeP75(values: number[]): number {
   if (values.length === 0) return 0
