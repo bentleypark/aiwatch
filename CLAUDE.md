@@ -92,7 +92,7 @@ npm run test:worker # Run Worker unit tests (vitest)
 | `alerted:probe-spike:{svcId}` | `"1"` | 1h | ~2 | Probe RTT spike alert dedup (early detection) |
 | `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
 | `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time |
-| `reddit:seen:{postId}` | `"1"` | 24h | ~72 | Reddit post dedup (hourly scan) |
+| `reddit:seen:{postId}` | `"1"` | 24h | ~120 | Reddit post dedup (hourly scan, max 5/hour) |
 | `ai:analysis:{svcId}` | `AIAnalysisResult` JSON | 1h | ~5 | Claude Sonnet incident analysis result (TTL refreshed while active) |
 | `ai:reanalysis-skip:{svcId}` | `"1"` | 30min | ~2 | Re-analysis failure cooldown |
 | `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis) |

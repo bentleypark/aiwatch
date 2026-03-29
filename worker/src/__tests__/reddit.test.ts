@@ -120,7 +120,7 @@ describe('isPromotable', () => {
 })
 
 describe('formatRedditAlert', () => {
-  it('formats promotable alert with tag and suggested reply', () => {
+  it('formats alert with PROMOTE tag and Is X Down link', () => {
     const alert: RedditAlert = {
       key: 'reddit:seen:abc123',
       subreddit: 'ClaudeAI',
@@ -137,13 +137,24 @@ describe('formatRedditAlert', () => {
     const formatted = formatRedditAlert(alert)
     expect(formatted.title).toBe('📢 Reddit: r/ClaudeAI [🎯 PROMOTE]')
     expect(formatted.description).toContain('Is Claude down?')
-    expect(formatted.description).toContain('Suggested reply')
-    expect(formatted.description).toContain('ai-watch.dev')
-    expect(formatted.description).toContain('Claude')
-    expect(formatted.color).toBe(0x3fb950) // green
+    expect(formatted.description).toContain('ai-watch.dev/is-claude-down')
+    expect(formatted.description).not.toContain('Suggested reply')
+    expect(formatted.color).toBe(0x3fb950)
   })
 
-  it('uses generic service name for unknown subreddit', () => {
+  it('filters promotable alerts from mixed list (integration)', () => {
+    const alerts: RedditAlert[] = [
+      { key: 'k1', subreddit: 'ClaudeAI', post: { id: '1', title: 'Is Claude down?', author: 'a', subreddit: 'ClaudeAI', score: 5, url: '', createdUtc: 0 } },
+      { key: 'k2', subreddit: 'OpenAI', post: { id: '2', title: 'OpenAI outage lasted 3 hours', author: 'b', subreddit: 'OpenAI', score: 20, url: '', createdUtc: 0 } },
+      { key: 'k3', subreddit: 'ChatGPT', post: { id: '3', title: 'Anyone having issues with ChatGPT?', author: 'c', subreddit: 'ChatGPT', score: 8, url: '', createdUtc: 0 } },
+    ]
+    const promotable = alerts.filter(a => isPromotable(a.post.title))
+    expect(promotable).toHaveLength(2)
+    expect(promotable[0].post.id).toBe('1')
+    expect(promotable[1].post.id).toBe('3')
+  })
+
+  it('omits Is X Down link for unknown subreddit', () => {
     const alert: RedditAlert = {
       key: 'reddit:seen:xyz',
       subreddit: 'UnknownSub',
@@ -158,27 +169,7 @@ describe('formatRedditAlert', () => {
       },
     }
     const formatted = formatRedditAlert(alert)
-    expect(formatted.description).toContain('AI services')
-  })
-
-  it('formats non-promotable alert without tag', () => {
-    const alert: RedditAlert = {
-      key: 'reddit:seen:def456',
-      subreddit: 'OpenAI',
-      post: {
-        id: 'def456',
-        title: 'OpenAI outage lasted 3 hours',
-        author: 'reporter',
-        subreddit: 'OpenAI',
-        score: 20,
-        url: 'https://www.reddit.com/r/OpenAI/comments/def456/',
-        createdUtc: Math.floor(Date.now() / 1000) - 300,
-      },
-    }
-    const formatted = formatRedditAlert(alert)
-    expect(formatted.title).toBe('📢 Reddit: r/OpenAI')
-    expect(formatted.description).not.toContain('PROMOTE')
-    expect(formatted.description).not.toContain('Suggested reply')
-    expect(formatted.color).toBe(0xFF4500) // Reddit orange
+    expect(formatted.description).not.toContain('is-')
+    expect(formatted.title).toContain('PROMOTE')
   })
 })

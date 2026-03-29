@@ -490,7 +490,7 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
 
 import { generateBadgeSvg } from './badge'
 import { generateOgSvg } from './og'
-import { detectRedditPosts, formatRedditAlert } from './reddit'
+import { detectRedditPosts, formatRedditAlert, isPromotable } from './reddit'
 import { buildDailySummary } from './daily-summary'
 
 export default {
@@ -538,17 +538,17 @@ export default {
     if (!env.DISCORD_WEBHOOK_URL) return
 
     // Reddit community monitoring — runs once per hour (minute 0-4) to respect rate limits
-    // KV budget: max 3 writes/hour = 72/day (well within 1,000/day free tier)
+    // KV budget: max 5 writes/hour = 120/day (well within 1,000/day free tier)
     const now = new Date()
     if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCMinutes() < 5) {
       try {
         const redditAlerts = await detectRedditPosts(env.STATUS_CACHE)
-        const toNotify = redditAlerts.slice(0, 3)
-        // Batch KV writes for all seen posts
-        for (const alert of toNotify) {
+        // Mark all detected posts as seen (prevents re-checking), but only notify promotable ones
+        for (const alert of redditAlerts.slice(0, 5)) {
           await env.STATUS_CACHE.put(alert.key, '1', { expirationTtl: 86400 }).catch(() => {})
         }
-        for (const alert of toNotify) {
+        const promotable = redditAlerts.filter(a => isPromotable(a.post.title)).slice(0, 3)
+        for (const alert of promotable) {
           const formatted = formatRedditAlert(alert)
           await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
             title: formatted.title,

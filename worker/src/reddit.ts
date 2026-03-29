@@ -148,18 +148,16 @@ export async function detectRedditPosts(
   return alerts
 }
 
-/**
- * Build a suggested reply for promotable posts.
- * Uses the service name from REDDIT_TARGETS to generate a contextual reply.
- */
-function buildSuggestedReply(subreddit: string): string {
-  const target = REDDIT_TARGETS.find(t => t.subreddit === subreddit)
-  const service = target?.service ?? 'AI services'
-  return `"You can check real-time ${service} status at ai-watch.dev — it monitors 25 AI services with live incident tracking and fallback recommendations."`
+// Subreddit → Is X Down slug mapping for share links
+const SUBREDDIT_SLUG: Record<string, string> = {
+  ClaudeAI: 'claude', ClaudeCode: 'claude-code',
+  ChatGPT: 'chatgpt', OpenAI: 'openai',
+  cursor: 'cursor', windsurf: 'windsurf', Codeium: 'windsurf',
 }
 
 /**
- * Format a Reddit alert for Discord
+ * Format a Reddit alert for Discord.
+ * Only called for promotable posts — non-promotable are filtered out upstream.
  */
 export function formatRedditAlert(alert: RedditAlert): { title: string; description: string; color: number; url: string } {
   const ago = Math.floor(Date.now() / 1000 - alert.post.createdUtc)
@@ -167,14 +165,13 @@ export function formatRedditAlert(alert: RedditAlert): { title: string; descript
     : ago < 3600 ? `${Math.floor(ago / 60)}m ago`
     : `${Math.floor(ago / 3600)}h ago`
 
-  const promotable = isPromotable(alert.post.title)
-  const tag = promotable ? ' [🎯 PROMOTE]' : ''
-  const reply = promotable ? `\n\n💬 Suggested reply:\n${buildSuggestedReply(alert.subreddit)}` : ''
+  const slug = SUBREDDIT_SLUG[alert.subreddit]
+  const shareLink = slug ? `\n🔗 https://ai-watch.dev/is-${slug}-down` : ''
 
   return {
-    title: `📢 Reddit: r/${alert.subreddit}${tag}`,
-    description: `"${alert.post.title}"\nby u/${alert.post.author} · ${alert.post.score} upvotes · ${agoText}${reply}`,
-    color: promotable ? 0x3fb950 : 0xFF4500, // green for promotable, Reddit orange for others
+    title: `📢 Reddit: r/${alert.subreddit} [🎯 PROMOTE]`,
+    description: `"${alert.post.title}"\nby u/${alert.post.author} · ${alert.post.score} upvotes · ${agoText}${shareLink}`,
+    color: 0x3fb950, // green
     url: alert.post.url,
   }
 }
