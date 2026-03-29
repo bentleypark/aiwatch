@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseRedditResponse, matchesKeywords, formatRedditAlert } from '../reddit'
+import { parseRedditResponse, matchesKeywords, isPromotable, formatRedditAlert } from '../reddit'
 import type { RedditAlert } from '../reddit'
 
 describe('parseRedditResponse', () => {
@@ -88,8 +88,39 @@ describe('matchesKeywords', () => {
   })
 })
 
+describe('isPromotable', () => {
+  it('detects question-style posts as promotable', () => {
+    expect(isPromotable('Is Claude down right now?')).toBe(true)
+    expect(isPromotable('Anyone else having issues with ChatGPT?')).toBe(true)
+    expect(isPromotable('Claude not working for anyone?')).toBe(true)
+    expect(isPromotable('Does anyone know the status?')).toBe(true)
+    expect(isPromotable('What is going on with OpenAI?')).toBe(true)
+    expect(isPromotable('Is it just me or is Cursor down')).toBe(true)
+  })
+
+  it('detects help-seeking posts as promotable', () => {
+    expect(isPromotable('Help - Claude API returning 500s')).toBe(true)
+    expect(isPromotable('How to check if OpenAI is down')).toBe(true)
+    expect(isPromotable("What's happening with Claude today")).toBe(true)
+  })
+
+  it('rejects statement/rant posts', () => {
+    expect(isPromotable('Claude is terrible today, switching to Gemini')).toBe(false)
+    expect(isPromotable('OpenAI outage lasted 3 hours yesterday')).toBe(false)
+    expect(isPromotable('Moved all my code to Cursor')).toBe(false)
+  })
+
+  it('rejects non-outage posts with ambiguous keywords', () => {
+    expect(isPromotable('Anyone want to share their Claude prompts')).toBe(false)
+    expect(isPromotable('Someone at OpenAI posted an update')).toBe(false)
+    expect(isPromotable('Check out this cool project')).toBe(false)
+    expect(isPromotable('When Claude launched last year it was great')).toBe(false)
+    expect(isPromotable('Why I switched from OpenAI to Anthropic')).toBe(false)
+  })
+})
+
 describe('formatRedditAlert', () => {
-  it('formats alert for Discord', () => {
+  it('formats promotable alert with tag and suggested reply', () => {
     const alert: RedditAlert = {
       key: 'reddit:seen:abc123',
       subreddit: 'ClaudeAI',
@@ -100,16 +131,54 @@ describe('formatRedditAlert', () => {
         subreddit: 'ClaudeAI',
         score: 5,
         url: 'https://www.reddit.com/r/ClaudeAI/comments/abc123/',
-        createdUtc: Math.floor(Date.now() / 1000) - 180, // 3 min ago
+        createdUtc: Math.floor(Date.now() / 1000) - 180,
       },
     }
     const formatted = formatRedditAlert(alert)
-    expect(formatted.title).toBe('📢 Reddit: r/ClaudeAI')
+    expect(formatted.title).toBe('📢 Reddit: r/ClaudeAI [🎯 PROMOTE]')
     expect(formatted.description).toContain('Is Claude down?')
-    expect(formatted.description).toContain('u/testuser')
-    expect(formatted.description).toContain('5 upvotes')
-    expect(formatted.description).toContain('3m ago')
-    expect(formatted.color).toBe(0xFF4500)
-    expect(formatted.url).toContain('abc123')
+    expect(formatted.description).toContain('Suggested reply')
+    expect(formatted.description).toContain('ai-watch.dev')
+    expect(formatted.description).toContain('Claude')
+    expect(formatted.color).toBe(0x3fb950) // green
+  })
+
+  it('uses generic service name for unknown subreddit', () => {
+    const alert: RedditAlert = {
+      key: 'reddit:seen:xyz',
+      subreddit: 'UnknownSub',
+      post: {
+        id: 'xyz',
+        title: 'Is this service down?',
+        author: 'user',
+        subreddit: 'UnknownSub',
+        score: 1,
+        url: 'https://www.reddit.com/r/UnknownSub/comments/xyz/',
+        createdUtc: Math.floor(Date.now() / 1000) - 60,
+      },
+    }
+    const formatted = formatRedditAlert(alert)
+    expect(formatted.description).toContain('AI services')
+  })
+
+  it('formats non-promotable alert without tag', () => {
+    const alert: RedditAlert = {
+      key: 'reddit:seen:def456',
+      subreddit: 'OpenAI',
+      post: {
+        id: 'def456',
+        title: 'OpenAI outage lasted 3 hours',
+        author: 'reporter',
+        subreddit: 'OpenAI',
+        score: 20,
+        url: 'https://www.reddit.com/r/OpenAI/comments/def456/',
+        createdUtc: Math.floor(Date.now() / 1000) - 300,
+      },
+    }
+    const formatted = formatRedditAlert(alert)
+    expect(formatted.title).toBe('📢 Reddit: r/OpenAI')
+    expect(formatted.description).not.toContain('PROMOTE')
+    expect(formatted.description).not.toContain('Suggested reply')
+    expect(formatted.color).toBe(0xFF4500) // Reddit orange
   })
 })

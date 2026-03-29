@@ -70,6 +70,21 @@ export function matchesKeywords(title: string): boolean {
   return WEAK_WITH_CONTEXT.test(title) && CONTEXT.test(title)
 }
 
+// Question indicators — posts seeking help are good promotion opportunities
+// Require question mark, or question-style phrasing with outage context
+const QUESTION_WITH_CONTEXT = /\?|^is\s.+\b(down|working|broken|available)/i
+const ANYONE_WITH_OUTAGE = /\b(anyone|anybody|someone|does anyone)\b.+\b(down|issue|problem|working|error|status|outage)/i
+const SEEKING_HELP = /\b(help|what('s| is) (going on|happening)|how (to|do) (check|tell|know))\b/i
+
+/**
+ * Check if a post is suitable for AIWatch promotion.
+ * Promotable = question-style posts where users are seeking help/status info.
+ * Not promotable = statements, rants, reports where the user already has an answer.
+ */
+export function isPromotable(title: string): boolean {
+  return QUESTION_WITH_CONTEXT.test(title) || ANYONE_WITH_OUTAGE.test(title) || SEEKING_HELP.test(title)
+}
+
 /**
  * Fetch recent posts from a subreddit matching outage keywords
  */
@@ -134,6 +149,16 @@ export async function detectRedditPosts(
 }
 
 /**
+ * Build a suggested reply for promotable posts.
+ * Uses the service name from REDDIT_TARGETS to generate a contextual reply.
+ */
+function buildSuggestedReply(subreddit: string): string {
+  const target = REDDIT_TARGETS.find(t => t.subreddit === subreddit)
+  const service = target?.service ?? 'AI services'
+  return `"You can check real-time ${service} status at ai-watch.dev — it monitors 25 AI services with live incident tracking and fallback recommendations."`
+}
+
+/**
  * Format a Reddit alert for Discord
  */
 export function formatRedditAlert(alert: RedditAlert): { title: string; description: string; color: number; url: string } {
@@ -142,10 +167,14 @@ export function formatRedditAlert(alert: RedditAlert): { title: string; descript
     : ago < 3600 ? `${Math.floor(ago / 60)}m ago`
     : `${Math.floor(ago / 3600)}h ago`
 
+  const promotable = isPromotable(alert.post.title)
+  const tag = promotable ? ' [🎯 PROMOTE]' : ''
+  const reply = promotable ? `\n\n💬 Suggested reply:\n${buildSuggestedReply(alert.subreddit)}` : ''
+
   return {
-    title: `📢 Reddit: r/${alert.subreddit}`,
-    description: `"${alert.post.title}"\nby u/${alert.post.author} · ${alert.post.score} upvotes · ${agoText}`,
-    color: 0xFF4500, // Reddit orange
+    title: `📢 Reddit: r/${alert.subreddit}${tag}`,
+    description: `"${alert.post.title}"\nby u/${alert.post.author} · ${alert.post.score} upvotes · ${agoText}${reply}`,
+    color: promotable ? 0x3fb950 : 0xFF4500, // green for promotable, Reddit orange for others
     url: alert.post.url,
   }
 }
