@@ -6,13 +6,6 @@ interface LandingOptions {
 
 export function renderLandingPage(opts: LandingOptions): string {
   const phDisplay = opts.showPHBanner ? 'block' : 'none'
-  const now = new Date()
-  const reportYear = now.getFullYear()
-  const m = now.getMonth() + 1
-  const reportMonth = m < 10 ? '0' + m : String(m)
-  const reportMonthNum = String(m)
-  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
-  const reportLabel = MONTHS[now.getMonth()] ?? 'January'
   const reportUrl = 'https://reports.ai-watch.dev/'
   return `<!DOCTYPE html>
 <html lang="en">

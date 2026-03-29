@@ -19,7 +19,7 @@ export default async function handler(req: Request) {
         'Cache-Control': fromPH
           ? 'public, s-maxage=600, stale-while-revalidate=3600'
           : 'public, s-maxage=3600, stale-while-revalidate=86400',
-        ...(fromPH ? { 'Vary': 'Referer' } : {}),
+        'Vary': 'Referer',
       },
     })
   } catch (err) {

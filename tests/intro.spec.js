@@ -21,7 +21,7 @@ test.describe('Landing page (/intro)', () => {
   test('dashboard mock shows service cards', async ({ page }) => {
     await page.goto('/intro', { waitUntil: 'domcontentloaded' })
     await expect(page.locator('.dashboard-mock')).toBeVisible()
-    await expect(page.locator('.mock-card')).toHaveCount(4) // 3 services + 1 "more"
+    await expect(page.locator('.mock-cards > .mock-card')).toHaveCount(4) // 3 services + 1 "more"
   })
 
   test('PH banner hidden by default', async ({ page }) => {
@@ -56,9 +56,13 @@ test.describe('Landing page (/intro)', () => {
   test('i18n toggle switches language', async ({ page }) => {
     await page.goto('/intro', { waitUntil: 'domcontentloaded' })
     const toggle = page.locator('.lang-toggle button')
-    const enBtn = toggle.filter({ hasText: 'EN' })
-    await enBtn.click()
-    await expect(page.locator('.hero-left h1')).toContainText(/Claude|down|just you/i)
+    // Playwright Chrome defaults to en-US, so page starts in EN
+    // Switch to KO
+    await toggle.filter({ hasText: 'KO' }).click()
+    await expect(page.locator('.hero-left h1')).toContainText('나만 안 되는 건가요')
+    // Switch back to EN
+    await toggle.filter({ hasText: 'EN' }).click()
+    await expect(page.locator('.hero-left h1')).toContainText('is it just you')
   })
 
   test('flow animation elements exist', async ({ page }) => {
