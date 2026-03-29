@@ -25,9 +25,8 @@ test.describe('Settings', () => {
     const stored = await page.evaluate(() => localStorage.getItem('aiwatch-theme'))
     expect(stored).toBe('light')
 
-    // Reload and verify persistence
-    await page.reload()
-    await waitForDataLoad(page)
+    // Reload and verify persistence (theme applies before API data loads)
+    await page.reload({ waitUntil: 'domcontentloaded' })
     await expect(html).toHaveAttribute('data-theme', 'light')
 
     // Restore dark theme
