@@ -42,7 +42,7 @@ Real-time monitoring dashboard for **25 AI services** — track status, latency,
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
 - **Is X Down SEO pages** — 9 services (Claude, claude.ai, ChatGPT, Gemini, GitHub Copilot, Cursor, Claude Code, OpenAI, Windsurf) with dynamic OG images (PNG), share buttons, AIWatch rank, and fallback recommendations
-- **Health check probing** — Direct RTT measurement to API endpoints (Gemini PoC)
+- **Health check probing** — Direct RTT measurement to API endpoints (Gemini, Mistral) with early outage detection via consecutive spike alerts
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 - **AI Analysis (Beta)** — Claude Sonnet auto-analysis on incidents: cause estimation, recovery time, affected scope. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 - **Landing page** — Product Hunt landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, and GA4 tracking
