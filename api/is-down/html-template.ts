@@ -444,11 +444,14 @@ function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canoni
     `${n} is currently experiencing a major outage.`,
     `Heads up — ${n} appears to be down right now.`,
     `${n} outage detected. Check real-time status:`,
+    `Wait, is ${n} down for everyone or just me?`,
+    `Confirmed: ${n} is having issues. Reports from multiple users.`,
   ]
   const degradedTexts = [
     `Something feels off with ${n}...`,
     `${n} seems to be having issues right now.`,
     `Anyone else noticing ${n} is slow?`,
+    `Seeing some lag on ${n}. Not a total outage, but definitely degraded.`,
   ]
   const operationalTexts = [
     `${n} is running fine for now. All green on AIWatch.`,
@@ -462,16 +465,20 @@ function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canoni
     ? `${pick(degradedTexts)}${aiSuffix}\n${canonical}`
     : pick(operationalTexts)
 
+  // X hashtag from display name (e.g. "Claude" → "#Claude", "GitHub Copilot" → "#GitHubCopilot")
+  const tag = `#${n.replace(/[\s.]/g, '')}Down`
   const xDownTexts = [
-    `Is ${n} down? \u26A0\uFE0F`,
-    `${n} major outage detected \u26A0\uFE0F`,
-    `Heads up — ${n} is down \u26A0\uFE0F`,
+    `Is ${n} down? \uD83D\uDEA8`,
+    `\uD83D\uDEA8 ${n} major outage detected`,
+    `Heads up — ${n} is down right now \uD83D\uDEA8`,
     `${n} outage in progress \u26A0\uFE0F`,
+    `Is ${n} down for everyone or just me? \uD83D\uDEA8`,
   ]
   const xDegradedTexts = [
     `Something feels off with ${n}... \uD83D\uDC40`,
-    `${n} seems slow right now \uD83D\uDC40`,
+    `${n} seems slow right now \u26A0\uFE0F`,
     `Anyone else having issues with ${n}? \uD83D\uDC40`,
+    `${n} is acting up again... \uD83D\uDC40`,
   ]
   const xOperationalTexts = [
     `${n} is running fine for now. All green on AIWatch. \u2705`,
@@ -483,10 +490,12 @@ function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canoni
     : rawStatus === 'degraded'
     ? pick(xDegradedTexts)
     : pick(xOperationalTexts)
+  const aiSnippet = aiSuffix ? ' AI: ' + aiInsight!.summary.slice(0, 60) : ''
+  const xTag = rawStatus !== 'operational' ? ` ${tag} #AIWatch` : ''
   const xText = rawStatus === 'down'
-    ? `${xBase}${aiSuffix ? ' AI: ' + aiInsight!.summary.slice(0, 60) : ''}`
+    ? `${xBase}${aiSnippet}${xTag}`
     : rawStatus === 'degraded'
-    ? `${xBase}${aiSuffix ? ' AI: ' + aiInsight!.summary.slice(0, 60) : ''}`
+    ? `${xBase}${aiSnippet}${xTag}`
     : xBase
   const encodedText = encodeURIComponent(xText)
   const encodedUrl = rawStatus !== 'operational' ? encodeURIComponent(canonical) : ''
