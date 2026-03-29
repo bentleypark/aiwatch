@@ -18,7 +18,7 @@ export function getFallbacks(
 ): Array<{ name: string; score: number | null }> {
   if (EXCLUDE_FALLBACK.includes(serviceId)) return []
   return services
-    .filter(s => s.category === category && s.id !== serviceId && s.status === 'operational')
+    .filter(s => s.category === category && s.id !== serviceId && s.status === 'operational' && !EXCLUDE_FALLBACK.includes(s.id))
     .sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0))
     .slice(0, 2)
     .map(s => ({ name: s.name, score: s.aiwatchScore ?? null }))

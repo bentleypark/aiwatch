@@ -7,7 +7,8 @@ import { renderPage } from './is-down/html-template'
 export const config = { runtime: 'edge' }
 
 const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
-const EXCLUDE_FALLBACK = ['elevenlabs', 'replicate', 'huggingface']
+// Keep in sync with worker/src/fallback.ts and src/utils/constants.js
+const EXCLUDE_FALLBACK = ['elevenlabs', 'replicate', 'huggingface', 'pinecone', 'stability', 'characterai']
 
 export default async function handler(req: Request) {
   try {
@@ -63,7 +64,7 @@ export default async function handler(req: Request) {
         // Build fallbacks from same data
         if (!EXCLUDE_FALLBACK.includes(entry.id)) {
           fallbacks = allServices
-            .filter(s => s.category === entry.category && s.id !== entry.id && s.status === 'operational')
+            .filter(s => s.category === entry.category && s.id !== entry.id && s.status === 'operational' && !EXCLUDE_FALLBACK.includes(s.id))
             .sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0))
             .slice(0, 2)
             .map(s => ({ id: s.id, name: s.name, score: s.aiwatchScore ?? null, status: s.status }))

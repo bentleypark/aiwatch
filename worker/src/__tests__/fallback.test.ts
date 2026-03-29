@@ -38,6 +38,20 @@ describe('getFallbacks', () => {
     expect(getFallbacks('huggingface', 'api', mockServices)).toEqual([])
   })
 
+  it('excludes EXCLUDE_FALLBACK services from candidates', () => {
+    const services = [
+      { id: 'openai', category: 'api', name: 'OpenAI API', status: 'down', aiwatchScore: 86 },
+      { id: 'huggingface', category: 'api', name: 'Hugging Face', status: 'operational', aiwatchScore: 100 },
+      { id: 'cohere', category: 'api', name: 'Cohere API', status: 'operational', aiwatchScore: 100 },
+      { id: 'deepseek', category: 'api', name: 'DeepSeek API', status: 'operational', aiwatchScore: 100 },
+    ]
+    const result = getFallbacks('openai', 'api', services)
+    expect(result).toHaveLength(2)
+    expect(result.every(f => f.name !== 'Hugging Face')).toBe(true)
+    expect(result[0].name).toBe('Cohere API')
+    expect(result[1].name).toBe('DeepSeek API')
+  })
+
   it('only returns services from the same category', () => {
     const result = getFallbacks('chatgpt', 'app', mockServices)
     expect(result).toEqual([{ name: 'claude.ai', score: 60 }])

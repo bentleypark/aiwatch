@@ -296,7 +296,7 @@ function Panel({ title, dotColor, subtitle, children }) {
 function getFallbacks(service, allServices) {
   if (EXCLUDE_FALLBACK.includes(service.id)) return []
   return allServices
-    .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational')
+    .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational' && !EXCLUDE_FALLBACK.includes(s.id))
     .sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0))
     .slice(0, 2)
     .map(s => ({ id: s.id, name: s.name, aiwatchScore: s.aiwatchScore ?? null }))
