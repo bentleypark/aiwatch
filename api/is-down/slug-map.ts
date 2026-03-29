@@ -11,13 +11,15 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'claude-code':     { id: 'claudecode', name: 'Claude Code',     provider: 'Anthropic',   category: 'agent' },
   'openai':          { id: 'openai',    name: 'OpenAI API',      provider: 'OpenAI',      category: 'api' },
   'windsurf':        { id: 'windsurf',  name: 'Windsurf',        provider: 'Codeium',     category: 'agent' },
+  'claude-ai':       { id: 'claudeai',  name: 'claude.ai',       provider: 'Anthropic',   category: 'webapp' },
 }
 
 // Related services for cross-linking (SEO internal links)
 export const RELATED_SLUGS: Record<string, string[]> = {
-  'claude':         ['claude-code', 'openai', 'chatgpt'],
-  'claude-code':    ['claude', 'cursor', 'github-copilot', 'windsurf'],
-  'chatgpt':        ['openai', 'claude', 'gemini'],
+  'claude':         ['claude-ai', 'claude-code', 'openai', 'chatgpt'],
+  'claude-ai':      ['claude', 'chatgpt', 'claude-code'],
+  'claude-code':    ['claude', 'claude-ai', 'cursor', 'github-copilot', 'windsurf'],
+  'chatgpt':        ['claude-ai', 'openai', 'claude', 'gemini'],
   'openai':         ['chatgpt', 'claude', 'gemini'],
   'gemini':         ['openai', 'claude', 'chatgpt'],
   'github-copilot': ['cursor', 'windsurf', 'claude-code'],

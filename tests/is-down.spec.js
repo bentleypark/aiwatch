@@ -6,6 +6,7 @@ const PAGES = [
   { slug: 'gemini', title: 'Is Gemini Down?', displayName: 'Gemini' },
   { slug: 'github-copilot', title: 'Is GitHub Copilot Down?', displayName: 'GitHub Copilot' },
   { slug: 'cursor', title: 'Is Cursor Down?', displayName: 'Cursor' },
+  { slug: 'claude-ai', title: 'Is claude.ai Down?', displayName: 'claude.ai' },
 ]
 
 test.describe('Is X Down? SSR pages', () => {

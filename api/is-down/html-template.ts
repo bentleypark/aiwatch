@@ -81,6 +81,18 @@ function formatDate(iso: string): string {
   return `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`
 }
 
+function formatElapsed(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime()
+  if (ms < 0 || Number.isNaN(ms)) return ''
+  const min = Math.floor(ms / 60000)
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min}m ago`
+  const h = Math.floor(min / 60)
+  if (h < 24) return `${h}h ${min % 60}m ago`
+  const d = Math.floor(h / 24)
+  return `${d}d ${h % 24}h ago`
+}
+
 export function renderPage(
   slug: string,
   service: ServiceData | null,
@@ -311,16 +323,24 @@ function renderIncidents(service: ServiceData | null): string {
   const incidents = Array.isArray(service?.incidents) ? service.incidents : []
   if (!service || incidents.length === 0) return ''
 
-  const items = incidents.slice(0, 5).map(inc => {
+  const sevenDaysAgo = Date.now() - 7 * 86400000
+  const recentIncidents = incidents.filter(inc => new Date(inc.startedAt).getTime() >= sevenDaysAgo)
+  const items = recentIncidents.slice(0, 5).map(inc => {
     const impactCls = inc.impact === 'major' || inc.impact === 'critical' ? 'impact-major' : inc.impact === 'minor' ? 'impact-minor' : ''
+    const statusColor = inc.status === 'resolved' ? '#3fb950' : inc.status === 'monitoring' ? '#58a6ff' : '#e86235'
     const statusText = inc.status === 'resolved' ? 'Resolved' : inc.status === 'monitoring' ? 'Monitoring' : 'Investigating'
     return `<div class="incident-item">
 <div class="incident-title">${esc(inc.title)}</div>
-<div class="incident-meta mono">${esc(formatDate(inc.startedAt))} &middot; ${statusText}${inc.duration ? ` &middot; ${esc(inc.duration)}` : ''}${impactCls ? ` &middot; <span class="${impactCls}">${esc(inc.impact ?? '')}</span>` : ''}</div>
+<div class="incident-meta mono">${esc(formatDate(inc.startedAt))} &middot; <span style="color:${statusColor}">${statusText}</span>${inc.duration ? ` &middot; ${esc(inc.duration)}` : (inc.status !== 'resolved' ? ` &middot; ${formatElapsed(inc.startedAt)}` : '')}${impactCls ? ` &middot; <span class="${impactCls}">${esc(inc.impact ?? '')}</span>` : ''}</div>
 </div>`
   }).join('\n')
 
-  return `<h2>Recent Incidents</h2>
+  if (recentIncidents.length === 0) {
+    return `<h2>Recent Incidents <span class="mono" style="font-size:12px;color:#8b949e;font-weight:400;margin-left:8px">&middot; Last 7 days</span></h2>
+<div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">No incidents in the last 7 days</p></div>`
+  }
+
+  return `<h2>Recent Incidents <span class="mono" style="font-size:12px;color:#8b949e;font-weight:400;margin-left:8px">&middot; Last 7 days</span></h2>
 <div class="card">${items}</div>`
 }
 

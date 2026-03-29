@@ -109,7 +109,7 @@ api/
   intro.ts          # Landing page Edge Function (/intro) — Product Hunt landing
   intro/
     html-template.ts # SSR HTML template (i18n, dashboard mock, GA4)
-  is-down.ts        # "Is X Down?" Edge Function (8 services)
+  is-down.ts        # "Is X Down?" Edge Function (9 services)
 src/
   components/   # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, AnalysisModal
   pages/        # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, AboutScore, Ranking
@@ -243,5 +243,5 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
   - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res:` keys 7d TTL, `alerted:down/degraded/recovered:` keys 2h TTL). Fallback recommendations only included when service status is degraded/down (not operational). AI analysis runs inline with 8s timeout (merged into incident embed), results stored in `ai:analysis:{svcId}` (1h TTL). Daily alert counts tracked in `alert:count:{date}` for Daily Summary
 - **Frontend deployment**: Vercel, domain ai-watch.dev — `git push origin main` triggers auto-deploy. `npm run build` is local only; changes are not live until pushed
 - **PWA**: `public/manifest.json` + `public/sw.js` (stale-while-revalidate). CACHE_NAME in `sw.js` must be bumped manually when static assets change. SW excludes `/is-*` (Edge SSR) and `/api/*` (real-time data) from caching
-- **Edge SSR**: `api/is-down.ts` serves "Is X Down?" SEO pages (8 services: claude, chatgpt, gemini, github-copilot, cursor, claude-code, openai, windsurf) via Vercel Edge Functions. Uses `/api/status/cached` (KV-only) for fast SSR (~1.2s). Dynamic OG image via Worker `/api/og` (PNG, resvg-wasm). Share buttons: X, Threads, KakaoTalk (SDK async), Copy Link. `vercel.json` rewrites route `/is-{service}-down` to the handler
+- **Edge SSR**: `api/is-down.ts` serves "Is X Down?" SEO pages (9 services: claude, chatgpt, gemini, github-copilot, cursor, claude-code, openai, windsurf, claude-ai) via Vercel Edge Functions. Uses `/api/status/cached` (KV-only) for fast SSR (~1.2s). Dynamic OG image via Worker `/api/og` (PNG, resvg-wasm). Share buttons: X, Threads, KakaoTalk (SDK async), Copy Link. `vercel.json` rewrites route `/is-{service}-down` to the handler
 - **Landing page**: `api/intro.ts` + `api/intro/html-template.ts` — Product Hunt landing page via Vercel Edge Function. `/intro` route (or `?ref=producthunt` for PH banner). Self-contained SSR with inline CSS/JS, KO/EN i18n (client-side toggle), GA4 events, dashboard preview mock. No external data fetch (pure template render)

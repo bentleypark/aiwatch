@@ -12,6 +12,8 @@ export function renderLandingPage(opts: LandingOptions): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>AIWatch — Real-time AI Service Monitoring</title>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-D4ZWVHQ7JK"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-D4ZWVHQ7JK');</script>

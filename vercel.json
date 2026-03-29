@@ -9,6 +9,7 @@
     { "source": "/is-claude-code-down", "destination": "/api/is-down?slug=claude-code" },
     { "source": "/is-openai-down", "destination": "/api/is-down?slug=openai" },
     { "source": "/is-windsurf-down", "destination": "/api/is-down?slug=windsurf" },
+    { "source": "/is-claude-ai-down", "destination": "/api/is-down?slug=claude-ai" },
     { "source": "/intro", "destination": "/api/intro" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]

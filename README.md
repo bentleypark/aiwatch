@@ -41,7 +41,7 @@ Real-time monitoring dashboard for **25 AI services** — track status, latency,
 - **Regional availability** — Per-region incident status for xAI, Gemini, OpenAI with switch recommendation
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
-- **Is X Down SEO pages** — 8 services with dynamic OG images (PNG), share buttons (X, Threads, KakaoTalk, Copy Link), AIWatch rank, and fallback recommendations
+- **Is X Down SEO pages** — 9 services (Claude, claude.ai, ChatGPT, Gemini, GitHub Copilot, Cursor, Claude Code, OpenAI, Windsurf) with dynamic OG images (PNG), share buttons, AIWatch rank, and fallback recommendations
 - **Health check probing** — Direct RTT measurement to API endpoints (Gemini PoC)
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 - **AI Analysis (Beta)** — Claude Sonnet auto-analysis on incidents: cause estimation, recovery time, affected scope. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
@@ -276,7 +276,7 @@ api/
   intro.ts             # Vercel Edge Function — Product Hunt landing page (/intro)
   intro/
     html-template.ts   # Landing page SSR template (i18n, dashboard mock, GA4)
-  is-down.ts           # Vercel Edge Function — "Is X Down?" SSR pages (8 services)
+  is-down.ts           # Vercel Edge Function — "Is X Down?" SSR pages (9 services)
   is-down/
     slug-map.ts        # URL slug ↔ service ID mapping
     seo-content.ts     # Per-service SEO text + FAQ

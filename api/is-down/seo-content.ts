@@ -81,6 +81,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Is Claude Code down because of Claude API?', a: 'Yes, Claude Code depends on Claude API models. Check the AIWatch dashboard at ai-watch.dev to see if Claude API is also experiencing issues — they often share the same incidents.' },
     ],
   },
+  'claude-ai': {
+    displayName: 'claude.ai',
+    description: 'claude.ai is Anthropic\'s consumer-facing AI chatbot web application. It provides direct access to Claude models (Opus, Sonnet, Haiku) for conversations, document analysis, coding assistance, and creative tasks — no API key required.',
+    insight: 'claude.ai shares Anthropic\'s status page with Claude API and Claude Code, but is tracked as a separate component. An API-level outage (e.g., model errors on Opus or Sonnet) will typically affect claude.ai as well. However, claude.ai can experience web-specific issues (login, file upload, rendering) independently of the API. AIWatch monitors the claude.ai component separately for accurate status reporting.',
+    whenDown: 'When claude.ai is down, users cannot access the web chat interface for conversations, file uploads, or artifact generation. The mobile app may also be affected. Claude API and Claude Code may still function independently if the issue is web-specific.',
+    faqs: [
+      { q: 'Is claude.ai down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors claude.ai every 60 seconds and shows real-time operational status, uptime percentage, and recent incidents.' },
+      { q: 'Why is claude.ai not working?', a: 'claude.ai may be experiencing web server issues, authentication problems, or upstream Claude API outages. Check this page for current status and the AIWatch dashboard to see if Claude API is also affected.' },
+      { q: 'What can I use instead of claude.ai?', a: 'When claude.ai is down, ChatGPT (chat.openai.com) or Google Gemini (gemini.google.com) are alternative AI chatbots. AIWatch shows which web apps are currently operational.' },
+      { q: 'Is claude.ai down because of Claude API?', a: 'claude.ai depends on Claude API models but can also have web-specific issues. Check the AIWatch dashboard at ai-watch.dev to see if Claude API is also experiencing issues — they often share the same incidents.' },
+    ],
+  },
   openai: {
     displayName: 'OpenAI',
     description: 'OpenAI API powers GPT-4o, o1, DALL-E, Whisper, and other foundation models used by millions of developers. It serves both the ChatGPT consumer product and enterprise API integrations.',
