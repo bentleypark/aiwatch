@@ -44,6 +44,7 @@
 - **헬스체크 프로빙** — API 엔드포인트 직접 RTT 측정 (Gemini PoC)
 - **페이지별 스켈레톤** — 각 페이지 레이아웃에 맞는 로딩 placeholder
 - **AI 분석 (Beta)** — 장애 발생 시 Claude Sonnet 자동 분석: 원인 추정, 예상 복구 시간, 영향 범위. 인시던트 Discord 알림에 통합(단일 embed), Topbar Analyze 모달, Is X Down AI Insight 카드
+- **랜딩 페이지** — Product Hunt 랜딩 페이지(`/intro`), 대시보드 프리뷰 mock, KO/EN 이중 언어, Flow 애니메이션, GA4 트래킹
 
 ## 모니터링 서비스
 
@@ -271,6 +272,9 @@ src/
   utils/         # analytics, calendar, time, pageContext, constants
   locales/       # ko.js, en.js (flat key→string 맵)
 api/
+  intro.ts             # Vercel Edge Function — Product Hunt 랜딩 페이지 (/intro)
+  intro/
+    html-template.ts   # 랜딩 페이지 SSR 템플릿 (i18n, 대시보드 mock, GA4)
   is-down.ts           # Vercel Edge Function — "Is X Down?" SSR 페이지 (8개 서비스)
   is-down/
     slug-map.ts        # URL slug ↔ service ID 매핑

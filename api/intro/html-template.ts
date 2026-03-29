@@ -474,6 +474,7 @@ export function renderLandingPage(opts: LandingOptions): string {
     <p data-i18n="hero.sub">Claude, OpenAI, Gemini, Cursor 등 주요 AI 서비스<span class="hero-sub-line"> 상태를 한눈에 확인하세요.</span> 장애 발생 시 AI가 원인을 분석하고 대안을 즉시 추천합니다.</p>
     <div class="hero-ctas">
       <a href="https://ai-watch.dev" class="btn-primary" data-i18n="hero.cta1" onclick="gtag('event','click_dashboard',{location:'landing_hero',source:'intro'})">지금 장애 확인하기 →</a>
+      <a href="https://github.com/bentleypark/aiwatch" target="_blank" rel="noopener noreferrer" class="btn-secondary" data-i18n="hero.cta2" onclick="gtag('event','click_github_header',{location:'landing_hero',source:'intro'})">GitHub에서 보기</a>
     </div>
     <p class="hero-trust" data-i18n="hero.trust">로그인 없음 · 10초 만에 확인 · 완전 무료 오픈소스</p>
     <div class="hero-pills">

@@ -45,6 +45,7 @@ Real-time monitoring dashboard for **25 AI services** — track status, latency,
 - **Health check probing** — Direct RTT measurement to API endpoints (Gemini PoC)
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 - **AI Analysis (Beta)** — Claude Sonnet auto-analysis on incidents: cause estimation, recovery time, affected scope. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
+- **Landing page** — Product Hunt landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, and GA4 tracking
 
 ## Monitored Services
 
@@ -272,6 +273,9 @@ src/
   utils/         # analytics, calendar, time, pageContext, constants
   locales/       # ko.js, en.js (flat key→string maps)
 api/
+  intro.ts             # Vercel Edge Function — Product Hunt landing page (/intro)
+  intro/
+    html-template.ts   # Landing page SSR template (i18n, dashboard mock, GA4)
   is-down.ts           # Vercel Edge Function — "Is X Down?" SSR pages (8 services)
   is-down/
     slug-map.ts        # URL slug ↔ service ID mapping
