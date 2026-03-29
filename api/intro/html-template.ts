@@ -59,8 +59,9 @@ export function renderLandingPage(opts: LandingOptions): string {
     --font-mono: 'JetBrains Mono', monospace;
     --font-sans: 'Pretendard', -apple-system, sans-serif;
   }
-  html { scroll-behavior: smooth; overflow-x: hidden; }
-  body { background: var(--bg0); color: var(--text0); font-family: var(--font-sans); font-size: 15px; line-height: 1.7; -webkit-font-smoothing: antialiased; overflow-x: hidden; max-width: 100vw; }
+  html { scroll-behavior: smooth; }
+  body { background: var(--bg0); color: var(--text0); font-family: var(--font-sans); font-size: 15px; line-height: 1.7; -webkit-font-smoothing: antialiased; }
+  .page-wrap { overflow-x: clip; max-width: 100vw; }
   a { color: inherit; text-decoration: none; }
 
   /* NAV */
@@ -97,8 +98,21 @@ export function renderLandingPage(opts: LandingOptions): string {
   /* FLOW WIDGET */
   .hero-right { animation: fadeInUp 0.6s ease 0.3s both; }
   .flow-wrap { background: #0d1117; border: 1px solid var(--border); border-radius: 12px; padding: 20px; font-family: var(--font-mono); }
-  .flow-step { opacity: 0; transform: translateY(8px); transition: opacity 0.5s ease, transform 0.5s ease; }
-  .flow-step.show { opacity: 1; transform: translateY(0); }
+  .flow-step { opacity: 0.01; transform: translateY(8px); will-change: opacity, transform; -webkit-backface-visibility: hidden; }
+  /* Cycling animation: staggered fade-in, hold, fade-out, repeat */
+  @keyframes fc1 { 0%{opacity:0.01;transform:translateY(8px)} 5%{opacity:1;transform:translateY(0)} 80%{opacity:1;transform:translateY(0)} 90%{opacity:0.01;transform:translateY(8px)} 100%{opacity:0.01;transform:translateY(8px)} }
+  @keyframes fc2 { 0%,13%{opacity:0.01;transform:translateY(8px)} 18%{opacity:1;transform:translateY(0)} 80%{opacity:1;transform:translateY(0)} 90%{opacity:0.01;transform:translateY(8px)} 100%{opacity:0.01;transform:translateY(8px)} }
+  @keyframes fc3 { 0%,27%{opacity:0.01;transform:translateY(8px)} 32%{opacity:1;transform:translateY(0)} 80%{opacity:1;transform:translateY(0)} 90%{opacity:0.01;transform:translateY(8px)} 100%{opacity:0.01;transform:translateY(8px)} }
+  @keyframes fc4 { 0%,40%{opacity:0.01;transform:translateY(8px)} 45%{opacity:1;transform:translateY(0)} 80%{opacity:1;transform:translateY(0)} 90%{opacity:0.01;transform:translateY(8px)} 100%{opacity:0.01;transform:translateY(8px)} }
+  #fw1.show { animation: fc1 6s ease infinite; }
+  #fw2.show { animation: fc2 6s ease infinite; }
+  #fw3.show { animation: fc3 6s ease infinite; }
+  #fw4.show { animation: fc4 6s ease infinite; }
+  @media (prefers-reduced-motion: reduce) {
+    .flow-step { opacity: 1; transform: none; }
+    .flow-step.show { animation: none; }
+    .fade-up { opacity: 1; transform: none; transition: none; }
+  }
   .flow-card { border-radius: 8px; padding: 12px 14px; margin-bottom: 4px; }
   .flow-connector { display: flex; align-items: center; padding: 3px 16px; gap: 6px; }
   .flow-conn-line { width: 1px; height: 16px; background: #30363d; }
@@ -140,6 +154,7 @@ export function renderLandingPage(opts: LandingOptions): string {
     .hero-left .hero-inline-stats { justify-content: center; }
     .hero-left p { margin: 0 auto 28px; }
     .hero-left .hero-badge { display: inline-flex; }
+    .hero-right { animation: none; opacity: 1; transform: none; }
   }
 
 
@@ -354,7 +369,7 @@ export function renderLandingPage(opts: LandingOptions): string {
 
 
   /* SCROLL ANIMATION */
-  .fade-up { opacity: 0; transform: translateY(24px); transition: opacity 0.6s ease, transform 0.6s ease; }
+  .fade-up { opacity: 0; transform: translateY(24px); transition: opacity 0.6s ease, transform 0.6s ease; will-change: opacity, transform; -webkit-backface-visibility: hidden; }
   .fade-up.visible { opacity: 1; transform: translateY(0); }
   .fade-up.delay-1 { transition-delay: 0.1s; }
   .fade-up.delay-2 { transition-delay: 0.2s; }
@@ -444,6 +459,7 @@ export function renderLandingPage(opts: LandingOptions): string {
 </style>
 </head>
 <body>
+<div class="page-wrap">
 
 <!-- PH BANNER -->
 <div id="ph-banner" style="display:${phDisplay};background:var(--green-dim);border-bottom:1px solid rgba(63,185,80,0.3);padding:10px 24px;text-align:center;">
@@ -1100,6 +1116,7 @@ export function renderLandingPage(opts: LandingOptions): string {
     </div>
   </div>
 </footer>
+</div><!-- .page-wrap -->
 
 <script>
 const i18n = {
@@ -1175,26 +1192,37 @@ function setLang(lang) {
 try {
   setLang(currentLang);
 
-  const _fwSteps = ['fw1','fw2','fw3','fw4'];
-  const _fwDelays = [200, 1000, 2000, 3000];
-  let _fwTimers = [];
-  function runFlow() {
-    _fwTimers.forEach(clearTimeout);
-    _fwTimers = [];
-    _fwSteps.forEach(id => { const el = document.getElementById(id); if(el) el.classList.remove('show'); });
-    _fwSteps.forEach((id, i) => {
-      _fwTimers.push(setTimeout(() => {
-        const el = document.getElementById(id); if(el) el.classList.add('show');
-      }, _fwDelays[i]));
+  // Flow widget: IO detects visibility → add .show to all → CSS transition-delay handles sequencing
+  var _fwStarted = false;
+  var _flowEl = document.querySelector('.flow-wrap');
+  if (_flowEl && 'IntersectionObserver' in window) {
+    new IntersectionObserver(function(entries) {
+      var visible = entries.some(function(e) { return e.isIntersecting; });
+      if (visible && !_fwStarted) {
+        _fwStarted = true;
+        ['fw1','fw2','fw3','fw4'].forEach(function(id) {
+          var el = document.getElementById(id);
+          if (el) el.classList.add('show');
+        });
+      }
+    }, { threshold: 0.15 }).observe(_flowEl);
+  } else {
+    ['fw1','fw2','fw3','fw4'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.add('show');
     });
-    _fwTimers.push(setTimeout(runFlow, 6000));
   }
-  runFlow();
 
+  // Fade-up scroll animations (double rAF for iOS)
   const _fadeEls = document.querySelectorAll('.fade-up');
   if ('IntersectionObserver' in window) {
     const _observer = new IntersectionObserver((entries) => {
-      entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); _observer.unobserve(e.target); } });
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          requestAnimationFrame(() => { requestAnimationFrame(() => { e.target.classList.add('visible'); }); });
+          _observer.unobserve(e.target);
+        }
+      });
     }, { threshold: 0.12 });
     _fadeEls.forEach(el => _observer.observe(el));
   } else {

@@ -71,4 +71,45 @@ test.describe('Landing page (/intro)', () => {
       await expect(page.locator(`#${id}`)).toBeAttached()
     }
   })
+
+  test('page-wrap wrapper has overflow-x:clip (not on html/body)', async ({ page }) => {
+    await page.goto('/intro', { waitUntil: 'domcontentloaded' })
+    // overflow-x must be on .page-wrap, not html/body (iOS IO compatibility)
+    await expect(page.locator('.page-wrap')).toBeAttached()
+    const wrapOverflow = await page.locator('.page-wrap').evaluate(el => getComputedStyle(el).overflowX)
+    expect(wrapOverflow).toBe('clip')
+    const htmlOverflow = await page.locator('html').evaluate(el => getComputedStyle(el).overflowX)
+    expect(htmlOverflow).not.toBe('clip')
+    expect(htmlOverflow).not.toBe('hidden')
+  })
+
+  test('flow steps get .show class via IntersectionObserver', async ({ page }) => {
+    await page.goto('/intro', { waitUntil: 'domcontentloaded' })
+    // Flow widget is in viewport on desktop — IO triggers .show (auto-retry)
+    for (const id of ['fw1', 'fw2', 'fw3', 'fw4']) {
+      await expect(page.locator(`#${id}`)).toHaveClass(/show/, { timeout: 5000 })
+    }
+  })
+
+  test('flow steps have CSS keyframe animation when .show', async ({ page }) => {
+    await page.goto('/intro', { waitUntil: 'domcontentloaded' })
+    await expect(page.locator('#fw1')).toHaveClass(/show/, { timeout: 5000 })
+    const fw1Anim = await page.locator('#fw1').evaluate(el => getComputedStyle(el).animationName)
+    expect(fw1Anim).toContain('fc1')
+  })
+
+  test('mobile: hero-right has no fadeInUp animation', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 })
+    await page.goto('/intro', { waitUntil: 'domcontentloaded' })
+    const heroRight = page.locator('.hero-right')
+    await expect(heroRight).toHaveCSS('animation-name', 'none')
+    await expect(heroRight).toHaveCSS('opacity', '1')
+  })
+
+  test('fade-up sections become visible on scroll', async ({ page }) => {
+    await page.goto('/intro', { waitUntil: 'domcontentloaded' })
+    await page.locator('.features-section').scrollIntoViewIfNeeded()
+    const featureCard = page.locator('.feature-card.fade-up').first()
+    await expect(featureCard).toHaveClass(/visible/, { timeout: 5000 })
+  })
 })
