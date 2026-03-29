@@ -95,15 +95,15 @@ describe('computeMedianRtt', () => {
     expect(computeMedianRtt(snapshots, 'mistral')).toBe(250) // median of [150, 250] → index 1
   })
 
-  it('returns -1 when no valid probes exist', () => {
+  it('returns null when no valid probes exist', () => {
     const snapshots: ProbeSnapshot[] = [
       { t: '2026-03-24T01:00:00Z', data: { gemini: { status: 403, rtt: 50 } } },
     ]
-    expect(computeMedianRtt(snapshots, 'mistral')).toBe(-1)
+    expect(computeMedianRtt(snapshots, 'mistral')).toBeNull()
   })
 
-  it('returns -1 for empty snapshots', () => {
-    expect(computeMedianRtt([], 'mistral')).toBe(-1)
+  it('returns null for empty snapshots', () => {
+    expect(computeMedianRtt([], 'mistral')).toBeNull()
   })
 })
 
@@ -158,11 +158,27 @@ describe('isCorroboratedByProbe', () => {
     )).toBe(true)
   })
 
-  it('returns true when median is 0 (no baseline)', () => {
+  it('returns true when median is null (no baseline)', () => {
     expect(isCorroboratedByProbe(
       baseSnapshots, 'mistral',
       '2026-03-24T01:07:00Z', '2026-03-24T01:07:30Z',
-      -1,
+      null,
+    )).toBe(true)
+  })
+
+  it('returns true when incidentStart is invalid date', () => {
+    expect(isCorroboratedByProbe(
+      baseSnapshots, 'mistral',
+      'not-a-date', null,
+      medianRtt,
+    )).toBe(true)
+  })
+
+  it('returns true when incidentEnd is invalid date', () => {
+    expect(isCorroboratedByProbe(
+      baseSnapshots, 'mistral',
+      '2026-03-24T01:07:00Z', 'bad-date',
+      medianRtt,
     )).toBe(true)
   })
 

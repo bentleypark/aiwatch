@@ -37,12 +37,14 @@ export function failedProbe(): ProbeResult {
   return { status: 0, rtt: -1 }
 }
 
-/** Compute median RTT from probe snapshots for a given service */
-export function computeMedianRtt(snapshots: ProbeSnapshot[], serviceId: string): number {
+/** Compute median RTT from probe snapshots for a given service.
+ *  Uses floor-index median (no averaging for even-length arrays).
+ *  Returns null when no valid probe data exists. */
+export function computeMedianRtt(snapshots: ProbeSnapshot[], serviceId: string): number | null {
   const rtts = snapshots
     .map((s) => s.data[serviceId]?.rtt)
     .filter((r): r is number => typeof r === 'number' && r > 0)
-  if (rtts.length === 0) return -1
+  if (rtts.length === 0) return null
   const sorted = [...rtts].sort((a, b) => a - b)
   return sorted[Math.floor(sorted.length / 2)]
 }
@@ -60,22 +62,36 @@ export function isCorroboratedByProbe(
   serviceId: string,
   incidentStart: string,
   incidentEnd: string | null,
-  medianRtt: number,
+  medianRtt: number | null,
 ): boolean {
-  if (medianRtt <= 0) return true // no baseline → can't validate, assume real
+  if (medianRtt === null || medianRtt <= 0) {
+    console.warn(`[isCorroboratedByProbe] no baseline RTT for ${serviceId}, assuming real`)
+    return true
+  }
   const WINDOW_MS = 600_000 // ±10 minutes
   const spikeThreshold = medianRtt * 3
-  const startMs = new Date(incidentStart).getTime() - WINDOW_MS
-  const endMs = incidentEnd
-    ? new Date(incidentEnd).getTime() + WINDOW_MS
-    : new Date(incidentStart).getTime() + WINDOW_MS
+  const startMs = new Date(incidentStart).getTime()
+  if (Number.isNaN(startMs)) {
+    console.error(`[isCorroboratedByProbe] invalid incidentStart: "${incidentStart}"`)
+    return true
+  }
+  const endMs = incidentEnd ? new Date(incidentEnd).getTime() : NaN
+  if (incidentEnd && Number.isNaN(endMs)) {
+    console.error(`[isCorroboratedByProbe] invalid incidentEnd: "${incidentEnd}"`)
+    return true
+  }
+  const windowStart = startMs - WINDOW_MS
+  const windowEnd = (incidentEnd && !Number.isNaN(endMs) ? endMs : startMs) + WINDOW_MS
 
   const windowProbes = snapshots.filter((s) => {
     const t = new Date(s.t).getTime()
-    return t >= startMs && t <= endMs && serviceId in s.data
+    return !Number.isNaN(t) && t >= windowStart && t <= windowEnd && serviceId in s.data
   })
 
-  if (windowProbes.length === 0) return true // no probe data in window → assume real
+  if (windowProbes.length === 0) {
+    console.warn(`[isCorroboratedByProbe] no probes in window for ${serviceId} (${incidentStart}), assuming real`)
+    return true
+  }
 
   return windowProbes.some((s) => {
     const probe = s.data[serviceId]
