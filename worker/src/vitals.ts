@@ -161,5 +161,42 @@ export function formatVitalsSection(vitals: VitalsDaily): string {
     lines.push(`   ${name.padEnd(5)} ${display.padStart(7)} ${emoji} ${label} — ${VITAL_DESC[name]}`)
   }
   lines.push(`   _p75 = 사용자 75%가 이 값 이하를 경험_`)
+
+  // Analysis status
+  const MIN_SAMPLES = 100
+  if (vitals.count < MIN_SAMPLES) {
+    const remaining = MIN_SAMPLES - vitals.count
+    const estimateDays = Math.max(1, Math.ceil(remaining / 30)) // ~30 samples/day
+    lines.push(`\n   ⏳ 데이터 수집 중 (${vitals.count}/${MIN_SAMPLES}) — 약 ${estimateDays}일 후 분석 가능`)
+  } else {
+    const issues: string[] = []
+    const good: string[] = []
+    for (const name of VITAL_NAMES) {
+      const val = vitals.p75[name]
+      if (!val && val !== 0) continue
+      const grade = vitalsGrade(name, val)
+      const display = name === 'CLS'
+        ? (val / 1000).toFixed(3)
+        : name === 'INP' ? `${val}ms` : `${(val / 1000).toFixed(2)}s`
+      if (grade === 'poor') {
+        issues.push(`   🔴 ${name} ${display} — 기준 초과 (${VITAL_DESC[name]})`)
+      } else if (grade === 'needs-improvement') {
+        issues.push(`   🟡 ${name} ${display} — 기준 미달 (${VITAL_DESC[name]})`)
+      } else {
+        good.push(name)
+      }
+    }
+    if (issues.length > 0) {
+      lines.push(`\n   ⚠️ **주의 지표**`)
+      lines.push(...issues)
+    }
+    if (good.length > 0) {
+      lines.push(`   ✅ ${good.join(', ')} 양호`)
+    }
+    if (issues.length === 0) {
+      lines.push(`\n   ✅ 모든 지표 양호`)
+    }
+  }
+
   return lines.join('\n')
 }

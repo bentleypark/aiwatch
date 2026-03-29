@@ -225,6 +225,39 @@ describe('formatVitalsSection', () => {
     expect(output).toContain('p75 = 사용자 75%')
   })
 
+  it('shows collecting status when n < 100', () => {
+    const vitals: VitalsDaily = {
+      count: 30,
+      p75: { LCP: 2000, FCP: 1000, TTFB: 500, CLS: 50, INP: 100 },
+    }
+    const output = formatVitalsSection(vitals)
+    expect(output).toContain('데이터 수집 중 (30/100)')
+    expect(output).toContain('약')
+    expect(output).not.toContain('분석 결과')
+  })
+
+  it('shows warning metrics when n >= 100 with issues', () => {
+    const vitals: VitalsDaily = {
+      count: 150,
+      p75: { LCP: 5000, FCP: 1000, TTFB: 700, CLS: 50, INP: 150 },
+    }
+    const output = formatVitalsSection(vitals)
+    expect(output).toContain('주의 지표')
+    expect(output).toContain('🔴 LCP')
+    expect(output).toContain('기준 초과')
+    expect(output).toContain('✅ FCP, TTFB, CLS, INP 양호')
+  })
+
+  it('shows all good when n >= 100 with no issues', () => {
+    const vitals: VitalsDaily = {
+      count: 200,
+      p75: { LCP: 2000, FCP: 1000, TTFB: 500, CLS: 50, INP: 100 },
+    }
+    const output = formatVitalsSection(vitals)
+    expect(output).toContain('모든 지표 양호')
+    expect(output).not.toContain('주의 지표')
+  })
+
   it('shows poor metric with red emoji', () => {
     const vitals: VitalsDaily = {
       count: 10,
