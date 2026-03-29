@@ -53,6 +53,10 @@ function emptyValues(): Record<VitalName, number[]> {
 /**
  * Write vitals directly to KV, merging with existing daily data.
  * Called per-request (not buffered). 10% client sampling keeps writes ~30/day.
+ *
+ * KNOWN LIMITATION: KV read-modify-write is not atomic.
+ * At ~30 writes/day, collision probability is negligible (<1%).
+ * If write volume increases, consider Durable Objects or append-only keys.
  */
 export async function writeVitalsToKV(kv: KVNamespace, metrics: Partial<Record<VitalName, number>>): Promise<void> {
   const today = new Date().toISOString().split('T')[0]
@@ -97,11 +101,11 @@ export async function archiveVitals(kv: KVNamespace): Promise<boolean> {
   const srcKey = `vitals:${yesterday}`
   const destKey = `vitals:history:${yesterday}`
 
-  // Skip if already archived
-  const existing = await kv.get(destKey).catch(() => null)
+  // Skip if already archived (let KV errors propagate to caller)
+  const existing = await kv.get(destKey)
   if (existing) return false
 
-  const raw = await kv.get(srcKey).catch(() => null)
+  const raw = await kv.get(srcKey)
   if (!raw) return false
 
   try {
@@ -165,6 +169,7 @@ export function vitalsGrade(name: VitalName, value: number): 'good' | 'needs-imp
     case 'TTFB': return value <= 800 ? 'good' : value <= 1800 ? 'needs-improvement' : 'poor'
     case 'CLS':  return value <= 100 ? 'good' : value <= 250 ? 'needs-improvement' : 'poor'  // ×1000 scale
     case 'INP':  return value <= 200 ? 'good' : value <= 500 ? 'needs-improvement' : 'poor'
+    default: { const _exhaustive: never = name; return _exhaustive }
   }
 }
 

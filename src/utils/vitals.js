@@ -1,6 +1,7 @@
 // Web Vitals collection — sends LCP, FCP, TTFB, CLS, INP to Worker for aggregation
 // Uses fetch+keepalive for reliable cross-origin delivery on page unload
 // 10% sampling to stay within KV write budget (~30 writes/day)
+// Consent-exempt: no PII collected, only anonymous performance metrics (timing values)
 
 import { onLCP, onFCP, onTTFB, onCLS, onINP } from 'web-vitals'
 

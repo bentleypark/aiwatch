@@ -695,40 +695,38 @@ export default {
     const origin = request.headers.get('Origin') ?? ''
     const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)
 
-    // Vitals CORS — open to all origins (public telemetry)
+    // Vitals endpoint — uses main CORS (origin-restricted, not open to all)
     if (url.pathname === '/api/vitals') {
-      const vitalsCors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }
       if (request.method === 'OPTIONS') {
-        return new Response(null, { status: 204, headers: vitalsCors })
+        return new Response(null, { status: 204, headers: cors })
+      }
+      if (request.method === 'POST') {
+        try {
+          const body = await request.json()
+          const metrics = parseVitals(body)
+          if (!metrics) {
+            return new Response(null, { status: 400, headers: cors })
+          }
+          if (!env.STATUS_CACHE) {
+            console.error('[vitals] STATUS_CACHE binding missing — data dropped')
+            return new Response(null, { status: 503, headers: cors })
+          }
+          ctx.waitUntil(writeVitalsToKV(env.STATUS_CACHE, metrics).catch((err) =>
+            console.error('[vitals] KV write failed:', err instanceof Error ? err.message : err)
+          ))
+          return new Response(null, { status: 204, headers: cors })
+        } catch (err) {
+          if (err instanceof SyntaxError) {
+            return new Response(null, { status: 400, headers: cors })
+          }
+          console.error('[vitals] ingest error:', err instanceof Error ? err.message : err)
+          return new Response(null, { status: 500, headers: cors })
+        }
       }
     }
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: cors })
-    }
-
-    // POST /api/vitals — web vitals collection (direct KV write, 10% client sampling)
-    if (request.method === 'POST' && url.pathname === '/api/vitals') {
-      const vitalsCors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type' }
-      try {
-        const body = await request.json()
-        const metrics = parseVitals(body)
-        if (!metrics) {
-          return new Response(null, { status: 400, headers: vitalsCors })
-        }
-        if (env.STATUS_CACHE) {
-          ctx.waitUntil(writeVitalsToKV(env.STATUS_CACHE, metrics).catch((err) =>
-            console.error('[vitals] KV write failed:', err instanceof Error ? err.message : err)
-          ))
-        }
-        return new Response(null, { status: 204, headers: vitalsCors })
-      } catch (err) {
-        if (err instanceof SyntaxError) {
-          return new Response(null, { status: 400, headers: vitalsCors })
-        }
-        console.error('[vitals] ingest error:', err instanceof Error ? err.message : err)
-        return new Response(null, { status: 500, headers: vitalsCors })
-      }
     }
 
     // POST /api/alert — webhook proxy (CORS workaround for Slack/Discord)
