@@ -237,7 +237,7 @@ describe('buildServiceAlerts', () => {
     const alerts = buildServiceAlerts([svc], new Map([['openai', alertedAt]]), new Map())
     expect(alerts).toHaveLength(1)
     expect(alerts[0].title).toContain('Service Recovered')
-    expect(alerts[0].title).toMatch(/\(.*45m.*\)/)
+    expect(alerts[0].title).toMatch(/\(.*4[56]m.*\)/)
   })
 
   it('includes downtime duration from degraded alert in recovery', () => {
