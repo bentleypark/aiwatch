@@ -1,6 +1,8 @@
 // Daily Summary — expanded Discord report at UTC 09:00 (KST 18:00)
 
 import type { ServiceStatus } from './types'
+import type { VitalsDaily } from './vitals'
+import { formatVitalsSection } from './vitals'
 
 export interface DailySummaryData {
   services: ServiceStatus[]
@@ -11,10 +13,11 @@ export interface DailySummaryData {
   webhookCounts?: { discord: number; slack: number }
   deliveryCounts?: { discord: number; slack: number; failed: number } | null
   redditCount: number
+  vitals?: VitalsDaily | null
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
-  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, deliveryCounts, redditCount } = data
+  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, deliveryCounts, redditCount, vitals } = data
   const total = services.length
   const operational = services.filter(s => s.status === 'operational').length
   const degraded = services.filter(s => s.status === 'degraded').length
@@ -104,6 +107,11 @@ export function buildDailySummary(data: DailySummaryData): string {
     }
   }
   if (redditCount > 0) lines.push(`📢 **Reddit**: ${redditCount} posts detected`)
+
+  // Section: Web Vitals
+  if (vitals && vitals.count > 0) {
+    lines.push(formatVitalsSection(vitals))
+  }
 
   return lines.join('\n')
 }

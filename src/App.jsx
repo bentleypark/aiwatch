@@ -23,6 +23,7 @@ import AboutScore from './pages/AboutScore'
 import Ranking from './pages/Ranking'
 
 import { ALL_SERVICE_IDS } from './utils/constants'
+import { initVitals } from './utils/vitals'
 
 const PAGE_NAMES = ['overview', 'latency', 'incidents', 'uptime', 'settings', 'about-score', 'ranking']
 
@@ -91,7 +92,7 @@ function AppInner() {
   }, [])
 
   // Initialize GA4 once on mount
-  useEffect(() => { initConsentDefault(); initGA() }, [])
+  useEffect(() => { initConsentDefault(); initGA(); initVitals() }, [])
 
   // Track page views + scroll to top on SPA navigation
   useEffect(() => {

@@ -101,8 +101,9 @@ npm run test:worker # Run Worker unit tests (vitest)
 | `webhook:reg:{sha256hash}` | `{ type, registeredAt }` JSON | 30d | ~1/user/day | Active webhook registration (hashed, refreshed on ping) |
 | `alert:proxy:{YYYY-MM-DD}` | `{ discord, slack, failed }` JSON | 2d | ~1 | User webhook delivery counts (approximate, flushed from in-memory by daily summary cron) |
 | `kv_limit_alert` | `"1"` | 5min | ~1 | KV write limit exceeded cooldown |
+| `vitals:{YYYY-MM-DD}` | `{ count, allValues }` JSON | 2d | ~30 (10% sampling) | Web Vitals daily aggregation (LCP, FCP, TTFB, CLS, INP) |
 
-**Free tier budget**: 1,000 writes/day. Estimated total: ~811-921 writes/day (within budget).
+**Free tier budget**: 1,000 writes/day. Estimated total: ~840-950 writes/day (within budget).
 
 ### Directory Layout
 ```
@@ -132,7 +133,8 @@ worker/
     alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts)
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText, buildGroupedFallbackText for multi-category incidents)
     ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt, TTL refresh, re-analysis, incidentId dedup)
-    daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit)
+    daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit, Web Vitals)
+    vitals.ts   # Web Vitals aggregation (ingest, KV flush, p75 computation, Discord formatting)
     probe.ts    # Health check probing — direct RTT measurement (Phase 2 PoC)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
                 # dailyImpact support: statuspage (uptimeData), incident-io (component impacts), betterstack (status_history from index.json)
@@ -213,7 +215,11 @@ Cron Trigger (*/5 min)
   → recovery detected → delete ai:analysis:{svcId}
   → active incidents: refresh analysis TTL / re-analyze if expired / dedup sibling services
   → alert count tracked in KV (alert:count:{date}) for Daily Summary
-  → daily summary at UTC 09:00 (KST 18:00) with alert count aggregation
+  → daily summary at UTC 09:00 (KST 18:00) with alert count aggregation + Web Vitals p75
+
+Web Vitals Pipeline (per-request, 10% sampled):
+  Browser (web-vitals) → POST /api/vitals → Worker → KV merge (vitals:{date})
+  Daily Summary cron reads vitals KV → Discord embed (p75 + grade)
 ```
 
 ### SPA Navigation

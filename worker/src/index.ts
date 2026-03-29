@@ -492,6 +492,7 @@ import { generateBadgeSvg } from './badge'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, isPromotable } from './reddit'
 import { buildDailySummary } from './daily-summary'
+import { parseVitals, writeVitalsToKV, readVitalsSummary } from './vitals'
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
@@ -649,6 +650,12 @@ export default {
           console.warn('[daily-summary] Failed to flush delivery counts:', err instanceof Error ? err.message : err)
         }
 
+        // Read web vitals summary for today
+        const vitalsSummary = await readVitalsSummary(env.STATUS_CACHE).catch((err) => {
+          console.error('[daily-summary] vitals read failed:', err instanceof Error ? err.message : err)
+          return null
+        })
+
         const description = buildDailySummary({
           services: dailyServices,
           aiUsage,
@@ -658,6 +665,7 @@ export default {
           webhookCounts,
           deliveryCounts,
           redditCount,
+          vitals: vitalsSummary,
         })
 
         const dateStr = now.toISOString().split('T')[0]
@@ -682,8 +690,40 @@ export default {
     const origin = request.headers.get('Origin') ?? ''
     const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)
 
+    // Vitals CORS — open to all origins (public telemetry)
+    if (url.pathname === '/api/vitals') {
+      const vitalsCors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }
+      if (request.method === 'OPTIONS') {
+        return new Response(null, { status: 204, headers: vitalsCors })
+      }
+    }
+
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: cors })
+    }
+
+    // POST /api/vitals — web vitals collection (direct KV write, 10% client sampling)
+    if (request.method === 'POST' && url.pathname === '/api/vitals') {
+      const vitalsCors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type' }
+      try {
+        const body = await request.json()
+        const metrics = parseVitals(body)
+        if (!metrics) {
+          return new Response(null, { status: 400, headers: vitalsCors })
+        }
+        if (env.STATUS_CACHE) {
+          ctx.waitUntil(writeVitalsToKV(env.STATUS_CACHE, metrics).catch((err) =>
+            console.error('[vitals] KV write failed:', err instanceof Error ? err.message : err)
+          ))
+        }
+        return new Response(null, { status: 204, headers: vitalsCors })
+      } catch (err) {
+        if (err instanceof SyntaxError) {
+          return new Response(null, { status: 400, headers: vitalsCors })
+        }
+        console.error('[vitals] ingest error:', err instanceof Error ? err.message : err)
+        return new Response(null, { status: 500, headers: vitalsCors })
+      }
     }
 
     // POST /api/alert — webhook proxy (CORS workaround for Slack/Discord)
