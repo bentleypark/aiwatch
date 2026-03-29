@@ -21,10 +21,29 @@ export function renderLandingPage(opts: LandingOptions): string {
 <meta property="og:title" content="AIWatch — Real-time AI Service Monitoring">
 <meta property="og:description" content="Track Claude, OpenAI, Gemini, Cursor and more. AI analyzes incidents and recommends fallback options instantly. Free.">
 <meta property="og:image" content="https://ai-watch.dev/og-intro.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_US">
+<meta property="og:site_name" content="AIWatch">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="AIWatch — Real-time AI Service Monitoring">
 <meta name="twitter:description" content="Track Claude, OpenAI, Gemini, Cursor and more. AI analyzes incidents and recommends fallback options instantly. Free.">
 <meta name="twitter:image" content="https://ai-watch.dev/og-intro.png">
+<link rel="canonical" href="https://ai-watch.dev/intro">
+<meta name="theme-color" content="#080c10">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "AIWatch",
+  "url": "https://ai-watch.dev",
+  "description": "Real-time status monitoring for 25 AI services including Claude, ChatGPT, Gemini, and Cursor. AI-powered incident analysis with fallback recommendations.",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Web",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "screenshot": "https://ai-watch.dev/og-intro.png"
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Pretendard:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
