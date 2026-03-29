@@ -89,6 +89,7 @@ npm run test:worker # Run Worker unit tests (vitest)
 | `alerted:down:{svcId}` | ISO timestamp | 2h | ~2 | Service down alert dedup + recovery duration |
 | `alerted:degraded:{svcId}` | ISO timestamp | 2h | ~2 | Service degraded alert dedup |
 | `alerted:recovered:{svcId}` | `"1"` | 2h | ~2 | Recovery alert dedup |
+| `alerted:probe-spike:{svcId}` | `"1"` | 1h | ~2 | Probe RTT spike alert dedup (early detection) |
 | `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
 | `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time |
 | `reddit:seen:{postId}` | `"1"` | 24h | ~72 | Reddit post dedup (hourly scan) |

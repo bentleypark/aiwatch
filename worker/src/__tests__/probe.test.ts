@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, PROBE_TARGETS, computeMedianRtt, isCorroboratedByProbe } from '../probe'
+import { computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, PROBE_TARGETS, computeMedianRtt, isCorroboratedByProbe, detectConsecutiveSpikes } from '../probe'
 import type { ProbeSnapshot } from '../probe'
 
 describe('computeProbeSlot', () => {
@@ -205,5 +205,95 @@ describe('isCorroboratedByProbe', () => {
       '2026-03-24T01:03:00Z', '2026-03-24T01:12:00Z',
       47, // median
     )).toBe(false) // 50 < 141 (3x47) and 45 < 141
+  })
+})
+
+describe('detectConsecutiveSpikes', () => {
+  it('detects 3+ consecutive spikes at tail', () => {
+    // Enough baseline to keep median low (~50ms), so threshold ~150ms
+    const snapshots: ProbeSnapshot[] = Array.from({ length: 10 }, (_, i) => ({
+      t: `2026-03-24T00:${String(i * 5).padStart(2, '0')}:00Z`,
+      data: { gemini: { status: 403, rtt: 45 + (i % 3) * 5 } }, // 45-55ms baseline
+    }))
+    // 3 consecutive spikes well above threshold
+    snapshots.push(
+      { t: '2026-03-24T01:00:00Z', data: { gemini: { status: 403, rtt: 200 } } },
+      { t: '2026-03-24T01:05:00Z', data: { gemini: { status: 403, rtt: 250 } } },
+      { t: '2026-03-24T01:10:00Z', data: { gemini: { status: 403, rtt: 300 } } },
+    )
+    const spikes = detectConsecutiveSpikes(snapshots, ['gemini'], 3)
+    expect(spikes).toHaveLength(1)
+    expect(spikes[0].serviceId).toBe('gemini')
+    expect(spikes[0].consecutiveCount).toBe(3)
+    expect(spikes[0].since).toBe('2026-03-24T01:00:00Z')
+    expect(spikes[0].avgRtt).toBe(250) // (200+250+300)/3
+  })
+
+  it('returns empty when streak is below threshold', () => {
+    const snapshots: ProbeSnapshot[] = Array.from({ length: 10 }, (_, i) => ({
+      t: `2026-03-24T00:${String(i * 5).padStart(2, '0')}:00Z`,
+      data: { gemini: { status: 403, rtt: 50 } },
+    }))
+    // Only 2 spikes — below minConsecutive=3
+    snapshots.push(
+      { t: '2026-03-24T01:00:00Z', data: { gemini: { status: 403, rtt: 200 } } },
+      { t: '2026-03-24T01:05:00Z', data: { gemini: { status: 403, rtt: 250 } } },
+    )
+    expect(detectConsecutiveSpikes(snapshots, ['gemini'], 3)).toHaveLength(0)
+  })
+
+  it('streak broken by normal probe', () => {
+    const snapshots: ProbeSnapshot[] = Array.from({ length: 10 }, (_, i) => ({
+      t: `2026-03-24T00:${String(i * 5).padStart(2, '0')}:00Z`,
+      data: { gemini: { status: 403, rtt: 50 } },
+    }))
+    snapshots.push(
+      { t: '2026-03-24T01:00:00Z', data: { gemini: { status: 403, rtt: 200 } } },
+      { t: '2026-03-24T01:05:00Z', data: { gemini: { status: 403, rtt: 40 } } }, // normal — breaks streak
+      { t: '2026-03-24T01:10:00Z', data: { gemini: { status: 403, rtt: 200 } } },
+      { t: '2026-03-24T01:15:00Z', data: { gemini: { status: 403, rtt: 250 } } },
+    )
+    // Only 2 at tail after break
+    expect(detectConsecutiveSpikes(snapshots, ['gemini'], 3)).toHaveLength(0)
+  })
+
+  it('counts failed probes (rtt=-1) as spikes', () => {
+    const snapshots: ProbeSnapshot[] = Array.from({ length: 10 }, (_, i) => ({
+      t: `2026-03-24T00:${String(i * 5).padStart(2, '0')}:00Z`,
+      data: { gemini: { status: 403, rtt: 50 } },
+    }))
+    snapshots.push(
+      { t: '2026-03-24T01:00:00Z', data: { gemini: { status: 0, rtt: -1 } } },
+      { t: '2026-03-24T01:05:00Z', data: { gemini: { status: 0, rtt: -1 } } },
+      { t: '2026-03-24T01:10:00Z', data: { gemini: { status: 0, rtt: -1 } } },
+    )
+    const spikes = detectConsecutiveSpikes(snapshots, ['gemini'], 3)
+    expect(spikes).toHaveLength(1)
+    expect(spikes[0].consecutiveCount).toBe(3)
+    expect(spikes[0].avgRtt).toBe(0) // all failed, no positive rtt
+  })
+
+  it('handles multiple services independently', () => {
+    // Need enough baseline to keep median low despite spike values
+    const snapshots: ProbeSnapshot[] = [
+      { t: '2026-03-24T00:00:00Z', data: { gemini: { status: 403, rtt: 50 }, mistral: { status: 401, rtt: 180 } } },
+      { t: '2026-03-24T00:05:00Z', data: { gemini: { status: 403, rtt: 45 }, mistral: { status: 401, rtt: 190 } } },
+      { t: '2026-03-24T00:10:00Z', data: { gemini: { status: 403, rtt: 48 }, mistral: { status: 401, rtt: 185 } } },
+      { t: '2026-03-24T00:15:00Z', data: { gemini: { status: 403, rtt: 52 }, mistral: { status: 401, rtt: 175 } } },
+      { t: '2026-03-24T00:20:00Z', data: { gemini: { status: 403, rtt: 47 }, mistral: { status: 401, rtt: 180 } } },
+      { t: '2026-03-24T00:25:00Z', data: { gemini: { status: 403, rtt: 51 }, mistral: { status: 401, rtt: 188 } } },
+      { t: '2026-03-24T00:30:00Z', data: { gemini: { status: 403, rtt: 49 }, mistral: { status: 401, rtt: 182 } } },
+      // gemini spikes (>3x median ~50 = 150), mistral normal
+      { t: '2026-03-24T01:00:00Z', data: { gemini: { status: 403, rtt: 200 }, mistral: { status: 401, rtt: 185 } } },
+      { t: '2026-03-24T01:05:00Z', data: { gemini: { status: 403, rtt: 250 }, mistral: { status: 401, rtt: 175 } } },
+      { t: '2026-03-24T01:10:00Z', data: { gemini: { status: 403, rtt: 300 }, mistral: { status: 401, rtt: 180 } } },
+    ]
+    const spikes = detectConsecutiveSpikes(snapshots, ['gemini', 'mistral'], 3)
+    expect(spikes).toHaveLength(1)
+    expect(spikes[0].serviceId).toBe('gemini')
+  })
+
+  it('returns empty for empty snapshots', () => {
+    expect(detectConsecutiveSpikes([], ['gemini'], 3)).toHaveLength(0)
   })
 })

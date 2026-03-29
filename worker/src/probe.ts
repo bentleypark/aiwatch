@@ -37,6 +37,60 @@ export function failedProbe(): ProbeResult {
   return { status: 0, rtt: -1 }
 }
 
+export interface ProbeSpike {
+  serviceId: string
+  consecutiveCount: number
+  avgRtt: number
+  medianRtt: number
+  threshold: number
+  since: string // ISO timestamp of first spike in the streak
+}
+
+/**
+ * Detect services with consecutive RTT spikes in the most recent probes.
+ * Returns a ProbeSpike for each service that has >= minConsecutive spikes.
+ * A spike is defined as RTT > 3× median or a failed probe (rtt=-1).
+ */
+export function detectConsecutiveSpikes(
+  snapshots: ProbeSnapshot[],
+  serviceIds: string[],
+  minConsecutive: number = 3,
+): ProbeSpike[] {
+  const results: ProbeSpike[] = []
+  for (const serviceId of serviceIds) {
+    const median = computeMedianRtt(snapshots, serviceId)
+    if (median === null) continue
+    const threshold = median * 3
+
+    // Walk backwards from the most recent snapshot
+    let count = 0
+    let rttSum = 0
+    let rttCount = 0
+    let since = ''
+    for (let i = snapshots.length - 1; i >= 0; i--) {
+      const probe = snapshots[i].data[serviceId]
+      if (!probe) break // no data for this service → stop
+      const isSpike = probe.rtt === -1 || probe.rtt > threshold
+      if (!isSpike) break // streak broken
+      count++
+      if (probe.rtt > 0) { rttSum += probe.rtt; rttCount++ }
+      since = snapshots[i].t
+    }
+
+    if (count >= minConsecutive) {
+      results.push({
+        serviceId,
+        consecutiveCount: count,
+        avgRtt: rttCount > 0 ? Math.round(rttSum / rttCount) : 0,
+        medianRtt: median,
+        threshold: Math.round(threshold),
+        since,
+      })
+    }
+  }
+  return results
+}
+
 /** Compute median RTT from probe snapshots for a given service.
  *  Uses floor-index median (no averaging for even-length arrays).
  *  Returns null when no valid probe data exists. */

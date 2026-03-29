@@ -128,7 +128,7 @@ async function writeLatencySnapshot(kv: KVNamespace, services: ServiceStatus[]):
 }
 
 // ── Health Check Probing (Phase 2 PoC) ──
-import { type ProbeResult, type ProbeSnapshot, PROBE_TARGETS, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe } from './probe'
+import { type ProbeResult, type ProbeSnapshot, type ProbeSpike, PROBE_TARGETS, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, detectConsecutiveSpikes } from './probe'
 
 let lastProbeSlot = ''
 
@@ -500,6 +500,38 @@ export default {
       await writeProbeSnapshot(env.STATUS_CACHE).catch((err) =>
         console.warn('[cron] probe failed:', err instanceof Error ? err.message : err)
       )
+    }
+
+    // Probe spike detection — alert on consecutive RTT spikes (early outage detection)
+    if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL) {
+      try {
+        const probeRaw = await env.STATUS_CACHE.get('probe:24h').catch(() => null)
+        if (probeRaw) {
+          const snapshots: ProbeSnapshot[] = JSON.parse(probeRaw).snapshots ?? []
+          const serviceIds = PROBE_TARGETS.map((t) => t.id)
+          const spikes = detectConsecutiveSpikes(snapshots, serviceIds, 3)
+          for (const spike of spikes) {
+            const alertKey = `alerted:probe-spike:${spike.serviceId}`
+            const existing = await env.STATUS_CACHE.get(alertKey).catch(() => null)
+            if (existing) continue
+            await env.STATUS_CACHE.put(alertKey, '1', { expirationTtl: 3600 }).catch(() => {})
+            const svcName = spike.serviceId
+            await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+              title: `📡 ${svcName} — Probe RTT Spike Detected`,
+              description: [
+                `**${spike.consecutiveCount} consecutive** probes above threshold`,
+                `Avg RTT: **${spike.avgRtt}ms** (baseline median: ${spike.medianRtt}ms, threshold: ${spike.threshold}ms)`,
+                `Since: ${spike.since}`,
+                ``,
+                `_RTT spike may indicate performance degradation before official status page reports._`,
+              ].join('\n'),
+              color: 0xe86235, // amber
+            })
+          }
+        }
+      } catch (err) {
+        console.warn('[cron] probe spike detection failed:', err instanceof Error ? err.message : err)
+      }
     }
 
     const result = await cronAlertCheck(env)
