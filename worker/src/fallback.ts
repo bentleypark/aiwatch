@@ -3,6 +3,14 @@
 // Keep in sync with src/utils/constants.js EXCLUDE_FALLBACK
 export const EXCLUDE_FALLBACK = ['elevenlabs', 'replicate', 'huggingface', 'pinecone', 'stability', 'characterai']
 
+// Tier-based priority for API services — major LLMs first, then secondary, then infrastructure
+// Same-tier services are sorted by Score. Higher tier = lower number = higher priority.
+const API_TIER: Record<string, number> = {
+  claude: 1, openai: 1, gemini: 1,
+  mistral: 2, cohere: 2, groq: 2, together: 2, deepseek: 2, xai: 2, perplexity: 2,
+  bedrock: 3, azureopenai: 3, openrouter: 3,
+}
+
 interface FallbackCandidate {
   id: string
   category: string
@@ -17,9 +25,19 @@ export function getFallbacks(
   services: FallbackCandidate[],
 ): Array<{ name: string; score: number | null }> {
   if (EXCLUDE_FALLBACK.includes(serviceId)) return []
+  const sourceTier = API_TIER[serviceId] ?? 99
   return services
     .filter(s => s.category === category && s.id !== serviceId && s.status === 'operational' && !EXCLUDE_FALLBACK.includes(s.id))
-    .sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0))
+    .sort((a, b) => {
+      // Prefer same or adjacent tier to the affected service
+      const tierA = API_TIER[a.id] ?? 99
+      const tierB = API_TIER[b.id] ?? 99
+      const distA = Math.abs(tierA - sourceTier)
+      const distB = Math.abs(tierB - sourceTier)
+      if (distA !== distB) return distA - distB
+      // Within same tier distance, sort by Score descending
+      return (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0)
+    })
     .slice(0, 2)
     .map(s => ({ name: s.name, score: s.aiwatchScore ?? null }))
 }

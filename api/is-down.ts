@@ -61,13 +61,24 @@ export default async function handler(req: Request) {
           (serviceData as any).totalRanked = scored.length
         }
 
-        // Build fallbacks from same data
+        // Build fallbacks from same data (tier-based priority for API services)
+        const API_TIER: Record<string, number> = {
+          claude: 1, openai: 1, gemini: 1,
+          mistral: 2, cohere: 2, groq: 2, together: 2, deepseek: 2, xai: 2, perplexity: 2,
+          bedrock: 3, azureopenai: 3, openrouter: 3,
+        }
         if (!EXCLUDE_FALLBACK.includes(entry.id)) {
+          const sourceTier = API_TIER[entry.id] ?? 99
           fallbacks = allServices
             .filter(s => s.category === entry.category && s.id !== entry.id && s.status === 'operational' && !EXCLUDE_FALLBACK.includes(s.id))
-            .sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0))
+            .sort((a, b) => {
+              const distA = Math.abs((API_TIER[a.id] ?? 99) - sourceTier)
+              const distB = Math.abs((API_TIER[b.id] ?? 99) - sourceTier)
+              if (distA !== distB) return distA - distB
+              return ((b as any).aiwatchScore ?? 0) - ((a as any).aiwatchScore ?? 0)
+            })
             .slice(0, 2)
-            .map(s => ({ id: s.id, name: s.name, score: s.aiwatchScore ?? null, status: s.status }))
+            .map(s => ({ id: s.id, name: s.name, score: (s as any).aiwatchScore ?? null, status: s.status }))
         }
 
         // Extract AI analysis for this service

@@ -7,6 +7,7 @@ const mockServices = [
   { id: 'groq', category: 'api', name: 'Groq Cloud', status: 'operational', aiwatchScore: 93 },
   { id: 'together', category: 'api', name: 'Together AI', status: 'operational', aiwatchScore: 89 },
   { id: 'gemini', category: 'api', name: 'Gemini API', status: 'operational', aiwatchScore: 78 },
+  { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 76 },
   { id: 'elevenlabs', category: 'api', name: 'ElevenLabs', status: 'operational', aiwatchScore: 80 },
   { id: 'claudeai', category: 'app', name: 'claude.ai', status: 'operational', aiwatchScore: 60 },
   { id: 'chatgpt', category: 'app', name: 'ChatGPT', status: 'down', aiwatchScore: 55 },
@@ -14,11 +15,11 @@ const mockServices = [
 ]
 
 describe('getFallbacks', () => {
-  it('returns top 2 operational services in same category sorted by score', () => {
+  it('returns top 2 by tier proximity then score (openai T1 → claude/gemini T1)', () => {
     const result = getFallbacks('openai', 'api', mockServices)
     expect(result).toEqual([
-      { name: 'Groq Cloud', score: 93 },
-      { name: 'Together AI', score: 89 },
+      { name: 'Claude API', score: 85 },
+      { name: 'Gemini API', score: 78 },
     ])
   })
 
@@ -50,6 +51,13 @@ describe('getFallbacks', () => {
     expect(result.every(f => f.name !== 'Hugging Face')).toBe(true)
     expect(result[0].name).toBe('Cohere API')
     expect(result[1].name).toBe('DeepSeek API')
+  })
+
+  it('T2 service recommends T2 peers first', () => {
+    const result = getFallbacks('mistral', 'api', mockServices)
+    // mistral is T2, should prefer T2 peers (groq, together) over T1 (claude, gemini)
+    expect(result[0].name).toBe('Groq Cloud')
+    expect(result[1].name).toBe('Together AI')
   })
 
   it('only returns services from the same category', () => {

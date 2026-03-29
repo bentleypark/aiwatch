@@ -228,6 +228,11 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
   - Dedup: sibling services sharing same incidentId copy analysis from KV (no extra API call)
   - Modal groups services with same incidentId into single card
   - Grouped fallback: when incident affects multiple categories, Discord alerts + dashboard show per-category alternatives via `buildGroupedFallbackText`
+  - **Fallback tier priority** (API services only): same-tier services are recommended first, then adjacent tiers. Within each tier, sorted by AIWatch Score descending. Defined in `worker/src/fallback.ts`, mirrored in `src/pages/Overview.jsx` and `api/is-down.ts`:
+    - **Tier 1** (Major LLM): `claude`, `openai`, `gemini`
+    - **Tier 2** (LLM): `mistral`, `cohere`, `groq`, `together`, `deepseek`, `xai`, `perplexity`
+    - **Tier 3** (Infrastructure): `bedrock`, `azureopenai`, `openrouter`
+  - `EXCLUDE_FALLBACK` services are excluded from both source and candidate lists (keep in sync across `worker/src/fallback.ts`, `src/utils/constants.js`, `api/is-down.ts`)
 - Status polling proxy: `worker/` directory (monorepo), Cloudflare Workers
   - `cd worker && npm run dev` — local dev (port 8787)
   - **Worker deployment rules** (KV free tier: 1,000 writes/day):
