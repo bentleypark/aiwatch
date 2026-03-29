@@ -72,7 +72,7 @@ Real-time monitoring dashboard for **25 AI services** — track status, latency,
 | Stability AI | Stability AI | Atlassian Statuspage |
 | Azure OpenAI | Microsoft | Azure Status RSS |
 
-### AI Web Apps (3)
+### AI Apps (3)
 
 | Service | Provider |
 |---------|----------|

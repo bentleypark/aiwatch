@@ -4,14 +4,14 @@
 export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provider: string; category: string }> = {
   // Phase A
   'claude':          { id: 'claude',    name: 'Claude API',       provider: 'Anthropic',   category: 'api' },
-  'chatgpt':         { id: 'chatgpt',   name: 'ChatGPT',          provider: 'OpenAI',      category: 'webapp' },
+  'chatgpt':         { id: 'chatgpt',   name: 'ChatGPT',          provider: 'OpenAI',      category: 'app' },
   'gemini':          { id: 'gemini',    name: 'Gemini API',       provider: 'Google',      category: 'api' },
   'github-copilot':  { id: 'copilot',   name: 'GitHub Copilot',   provider: 'Microsoft',   category: 'agent' },
   'cursor':          { id: 'cursor',    name: 'Cursor',           provider: 'Anysphere',   category: 'agent' },
   'claude-code':     { id: 'claudecode', name: 'Claude Code',     provider: 'Anthropic',   category: 'agent' },
   'openai':          { id: 'openai',    name: 'OpenAI API',      provider: 'OpenAI',      category: 'api' },
   'windsurf':        { id: 'windsurf',  name: 'Windsurf',        provider: 'Codeium',     category: 'agent' },
-  'claude-ai':       { id: 'claudeai',  name: 'claude.ai',       provider: 'Anthropic',   category: 'webapp' },
+  'claude-ai':       { id: 'claudeai',  name: 'claude.ai',       provider: 'Anthropic',   category: 'app' },
 }
 
 // Related services for cross-linking (SEO internal links)

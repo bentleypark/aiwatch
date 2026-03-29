@@ -66,7 +66,7 @@ npm run test:worker # Run Worker unit tests (vitest)
 
 **AIWatch** is a React SPA that monitors 25 AI services in real time:
 - **18 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Perplexity, HuggingFace, Replicate, ElevenLabs, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, Stability AI
-- **3 AI web apps**: claude.ai, ChatGPT, Character.AI
+- **3 AI apps**: claude.ai, ChatGPT, Character.AI
 - **4 coding agents**: Claude Code, GitHub Copilot, Cursor, Windsurf
 
 ### Tech Stack

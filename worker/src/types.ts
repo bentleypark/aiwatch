@@ -22,7 +22,7 @@ export interface ServiceStatus {
   id: string
   name: string
   provider: string
-  category: 'api' | 'webapp' | 'agent'
+  category: 'api' | 'app' | 'agent'
   status: 'operational' | 'degraded' | 'down'
   latency: number | null
   uptime30d: number | null
@@ -40,7 +40,7 @@ export interface ServiceConfig {
   id: string
   name: string
   provider: string
-  category: 'api' | 'webapp' | 'agent'
+  category: 'api' | 'app' | 'agent'
   statusUrl: string
   apiUrl: string | null
   instatusUrl?: string

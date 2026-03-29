@@ -44,7 +44,7 @@ const en = {
   'filter.all': 'All',
   'filter.llm': 'LLM APIs',
   'filter.agents': 'Coding Agents',
-  'filter.webapps': 'Web Apps',
+  'filter.apps': 'AI Apps',
   'filter.inference': 'Voice & Inference',
   'overview.incidents.title': 'Recent Incidents',
   'overview.latency.title': 'Latency Rankings',

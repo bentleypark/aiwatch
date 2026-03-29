@@ -34,7 +34,7 @@ export function buildFallbackText(fallbacks: Array<{ name: string; score: number
 }
 
 const CATEGORY_LABEL: Record<string, string> = {
-  api: 'API', webapp: 'Web App', agent: 'Coding Agent',
+  api: 'API', app: 'AI Apps', agent: 'Coding Agent',
 }
 
 /**

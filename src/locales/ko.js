@@ -44,7 +44,7 @@ const ko = {
   'filter.all': '전체',
   'filter.llm': 'LLM API',
   'filter.agents': '코딩 에이전트',
-  'filter.webapps': '웹앱',
+  'filter.apps': 'AI 앱',
   'filter.inference': '음성 & 추론',
   'overview.incidents.title': '최근 인시던트',
   'overview.latency.title': '레이턴시 순위',

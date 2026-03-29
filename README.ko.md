@@ -71,7 +71,7 @@
 | Stability AI | Stability AI | Atlassian Statuspage |
 | Azure OpenAI | Microsoft | Azure Status RSS |
 
-### AI 웹 앱 (3개)
+### AI 앱 (3개)
 
 | 서비스 | 제공업체 |
 |--------|----------|

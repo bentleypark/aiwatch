@@ -19,14 +19,14 @@ export const API_SERVICE_IDS = [
 ]
 
 // AI web apps (no latency — web services, ordered before related API)
-export const WEBAPP_SERVICE_IDS = ['claudeai', 'chatgpt', 'characterai']
+export const APP_SERVICE_IDS = ['claudeai', 'chatgpt', 'characterai']
 
 // Coding agents
 export const AGENT_SERVICE_IDS = ['claudecode', 'copilot', 'cursor', 'windsurf']
 
-// Display order: webapp → LLM → inference → agent
-export const SERVICE_AND_WEBAPP_IDS = [
-  // webapp
+// Display order: app → LLM → inference → agent
+export const SERVICE_AND_APP_IDS = [
+  // app
   'claudeai', 'chatgpt', 'characterai',
   // LLM API
   'claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq',
@@ -36,12 +36,12 @@ export const SERVICE_AND_WEBAPP_IDS = [
 ]
 
 // All service IDs
-export const ALL_SERVICE_IDS = [...SERVICE_AND_WEBAPP_IDS, ...AGENT_SERVICE_IDS]
+export const ALL_SERVICE_IDS = [...SERVICE_AND_APP_IDS, ...AGENT_SERVICE_IDS]
 
 // Sidebar category filters — splits Worker's 'api' into LLM vs Voice/Inference
 export const SERVICE_CATEGORIES = {
   all:       { labelKey: 'filter.all',       ids: null }, // null = show all
-  webapps:   { labelKey: 'filter.webapps',   ids: ['claudeai', 'chatgpt', 'characterai'] },
+  apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai'] },
   llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
   inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'elevenlabs', 'pinecone', 'stability'] },
   agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'copilot', 'cursor', 'windsurf'] },

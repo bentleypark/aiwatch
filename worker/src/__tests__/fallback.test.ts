@@ -8,8 +8,8 @@ const mockServices = [
   { id: 'together', category: 'api', name: 'Together AI', status: 'operational', aiwatchScore: 89 },
   { id: 'gemini', category: 'api', name: 'Gemini API', status: 'operational', aiwatchScore: 78 },
   { id: 'elevenlabs', category: 'api', name: 'ElevenLabs', status: 'operational', aiwatchScore: 80 },
-  { id: 'claudeai', category: 'webapp', name: 'claude.ai', status: 'operational', aiwatchScore: 60 },
-  { id: 'chatgpt', category: 'webapp', name: 'ChatGPT', status: 'down', aiwatchScore: 55 },
+  { id: 'claudeai', category: 'app', name: 'claude.ai', status: 'operational', aiwatchScore: 60 },
+  { id: 'chatgpt', category: 'app', name: 'ChatGPT', status: 'down', aiwatchScore: 55 },
   { id: 'cursor', category: 'agent', name: 'Cursor', status: 'operational', aiwatchScore: 70 },
 ]
 
@@ -39,7 +39,7 @@ describe('getFallbacks', () => {
   })
 
   it('only returns services from the same category', () => {
-    const result = getFallbacks('chatgpt', 'webapp', mockServices)
+    const result = getFallbacks('chatgpt', 'app', mockServices)
     expect(result).toEqual([{ name: 'claude.ai', score: 60 }])
   })
 
@@ -54,10 +54,10 @@ describe('getFallbacks', () => {
 
   it('returns empty when all same-category services are down', () => {
     const services = [
-      { id: 'a', category: 'webapp', name: 'A', status: 'down', aiwatchScore: 50 },
-      { id: 'b', category: 'webapp', name: 'B', status: 'degraded', aiwatchScore: 40 },
+      { id: 'a', category: 'app', name: 'A', status: 'down', aiwatchScore: 50 },
+      { id: 'b', category: 'app', name: 'B', status: 'degraded', aiwatchScore: 40 },
     ]
-    expect(getFallbacks('a', 'webapp', services)).toEqual([])
+    expect(getFallbacks('a', 'app', services)).toEqual([])
   })
 })
 
@@ -84,12 +84,12 @@ describe('buildFallbackText', () => {
 describe('buildGroupedFallbackText', () => {
   const services = [
     { id: 'claude', category: 'api', name: 'Claude API', status: 'down', aiwatchScore: 85 },
-    { id: 'claudeai', category: 'webapp', name: 'claude.ai', status: 'down', aiwatchScore: 60 },
+    { id: 'claudeai', category: 'app', name: 'claude.ai', status: 'down', aiwatchScore: 60 },
     { id: 'claude-code', category: 'agent', name: 'Claude Code', status: 'down', aiwatchScore: 70 },
     { id: 'openai', category: 'api', name: 'OpenAI API', status: 'operational', aiwatchScore: 86 },
     { id: 'gemini', category: 'api', name: 'Gemini API', status: 'operational', aiwatchScore: 76 },
-    { id: 'chatgpt', category: 'webapp', name: 'ChatGPT', status: 'operational', aiwatchScore: 67 },
-    { id: 'characterai', category: 'webapp', name: 'Character.AI', status: 'operational', aiwatchScore: 79 },
+    { id: 'chatgpt', category: 'app', name: 'ChatGPT', status: 'operational', aiwatchScore: 67 },
+    { id: 'characterai', category: 'app', name: 'Character.AI', status: 'operational', aiwatchScore: 79 },
     { id: 'cursor', category: 'agent', name: 'Cursor', status: 'operational', aiwatchScore: 75 },
     { id: 'github-copilot', category: 'agent', name: 'GitHub Copilot', status: 'operational', aiwatchScore: 80 },
   ]
@@ -98,7 +98,7 @@ describe('buildGroupedFallbackText', () => {
     const text = buildGroupedFallbackText(['claude', 'claudeai', 'claude-code'], services)
     expect(text).toContain('API:')
     expect(text).toContain('OpenAI API (Score 86)')
-    expect(text).toContain('Web App:')
+    expect(text).toContain('AI Apps:')
     expect(text).toContain('ChatGPT')
     expect(text).toContain('Coding Agent:')
     expect(text).toContain('GitHub Copilot')
@@ -112,8 +112,8 @@ describe('buildGroupedFallbackText', () => {
 
   it('skips excluded services', () => {
     const text = buildGroupedFallbackText(['characterai', 'claudeai'], services)
-    // characterai is in EXCLUDE_FALLBACK, only webapp from claudeai
-    expect(text).toContain('Web App:')
+    // characterai is in EXCLUDE_FALLBACK, only app from claudeai
+    expect(text).toContain('AI Apps:')
     expect(text).not.toContain('Character.AI:')
   })
 
@@ -125,7 +125,7 @@ describe('buildGroupedFallbackText', () => {
   it('returns single category when only one affected', () => {
     const text = buildGroupedFallbackText(['claude'], services)
     expect(text).toContain('API:')
-    expect(text).not.toContain('Web App:')
+    expect(text).not.toContain('AI Apps:')
     expect(text).not.toContain('Coding Agent:')
   })
 })

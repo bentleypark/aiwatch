@@ -27,14 +27,14 @@ function hist(degraded = [], down = []) {
 
 const MOCK_SERVICES = [
   {
-    id: 'claudeai', category: 'webapp', name: 'claude.ai', provider: 'Anthropic', status: 'operational',
+    id: 'claudeai', category: 'app', name: 'claude.ai', provider: 'Anthropic', status: 'operational',
     latency: null, uptime30d: 99.00,
     history30d: hist([3, 9, 13, 19, 27]),
     history3m: [{ month: '2026-01', uptime: 99.40 }, { month: '2026-02', uptime: 99.10 }, { month: '2026-03', uptime: 99.00 }],
     incidents: [],
   },
   {
-    id: 'chatgpt', category: 'webapp', name: 'ChatGPT', provider: 'OpenAI', status: 'operational',
+    id: 'chatgpt', category: 'app', name: 'ChatGPT', provider: 'OpenAI', status: 'operational',
     latency: null, uptime30d: 98.20,
     history30d: hist([1, 4, 8, 12, 18, 22, 28]),
     history3m: [{ month: '2026-01', uptime: 98.90 }, { month: '2026-02', uptime: 97.50 }, { month: '2026-03', uptime: 98.20 }],
@@ -58,7 +58,7 @@ const MOCK_SERVICES = [
     ],
   },
   {
-    id: 'characterai', category: 'webapp', name: 'Character.AI', provider: 'Character AI', status: 'operational',
+    id: 'characterai', category: 'app', name: 'Character.AI', provider: 'Character AI', status: 'operational',
     latency: null, uptime30d: null,
     history30d: hist(),
     history3m: null,

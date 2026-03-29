@@ -322,7 +322,7 @@ function ActionBanner({ services, setPage, t }) {
   ))
 
   // Collect fallbacks per category — exclude non-operational + same provider
-  const CATEGORY_LABEL = { api: 'API', webapp: 'Web App', agent: 'Coding' }
+  const CATEGORY_LABEL = { api: 'API', app: 'AI Apps', agent: 'Coding' }
   const nonOperationalIds = new Set(services.filter(s => s.status !== 'operational').map(s => s.id))
   const affectedProviders = new Set(affected.map(s => s.provider))
   const seenCategories = new Set()

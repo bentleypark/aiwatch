@@ -97,7 +97,7 @@ describe('buildIncidentAlerts', () => {
     // Claude API, claude.ai, Claude Code share Anthropic status page → same inc.id
     const sharedIncident = { id: 'shared1', title: 'Elevated errors', status: 'investigating', startedAt: recentDate, impact: 'major' }
     const claude = mockService({ id: 'claude', name: 'Claude API', category: 'api', incidents: [sharedIncident] })
-    const claudeai = mockService({ id: 'claudeai', name: 'claude.ai', category: 'webapp', incidents: [sharedIncident] })
+    const claudeai = mockService({ id: 'claudeai', name: 'claude.ai', category: 'app', incidents: [sharedIncident] })
     const claudecode = mockService({ id: 'claudecode', name: 'Claude Code', category: 'agent', incidents: [sharedIncident] })
 
     const alerts = buildIncidentAlerts([claude, claudeai, claudecode], new Set(), NOW)

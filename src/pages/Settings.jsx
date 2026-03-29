@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useLang } from '../hooks/useLang'
 import { useTheme } from '../hooks/useTheme'
 import { useSettings } from '../hooks/useSettings'
-import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, SERVICE_AND_WEBAPP_IDS, AGENT_SERVICE_IDS, ALL_SERVICE_IDS, DEFAULT_SETTINGS } from '../utils/constants'
+import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, SERVICE_AND_APP_IDS, AGENT_SERVICE_IDS, ALL_SERVICE_IDS, DEFAULT_SETTINGS } from '../utils/constants'
 import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
 
@@ -272,7 +272,7 @@ export default function Settings() {
           className="w-full flex items-center justify-between cursor-pointer"
           style={{ ...sectionTitleStyle, borderBottom: 'none', background: 'none', padding: '0 0 8px', margin: '0 0 2px', textAlign: 'left' }}
         >
-          <span>{t('settings.monitoring')} ({SERVICE_AND_WEBAPP_IDS.length})</span>
+          <span>{t('settings.monitoring')} ({SERVICE_AND_APP_IDS.length})</span>
           <svg width="12" height="12" viewBox="0 0 12 12" style={{ color: 'var(--text2)', transition: 'transform 0.2s', transform: monitoringOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}><path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </button>
         {monitoringOpen && (
@@ -280,7 +280,7 @@ export default function Settings() {
             <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', padding: '8px 0 10px' }}>
               {t('settings.monitoring.desc')}
             </div>
-            {SERVICE_AND_WEBAPP_IDS.map((id) => {
+            {SERVICE_AND_APP_IDS.map((id) => {
               const svc = svcMap[id]
               const dotCls = STATUS_DOT_CLASS[svc?.status] ?? STATUS_DOT_CLASS.unknown
               return (
