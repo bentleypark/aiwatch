@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, PROBE_TARGETS } from '../probe'
+import { computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, PROBE_TARGETS, computeMedianRtt, isCorroboratedByProbe } from '../probe'
 import type { ProbeSnapshot } from '../probe'
 
 describe('computeProbeSlot', () => {
@@ -73,5 +73,121 @@ describe('PROBE_TARGETS', () => {
     expect(PROBE_TARGETS[0].url).toContain('generativelanguage.googleapis.com')
     expect(PROBE_TARGETS[1].id).toBe('mistral')
     expect(PROBE_TARGETS[1].url).toContain('api.mistral.ai')
+  })
+})
+
+describe('computeMedianRtt', () => {
+  it('returns median RTT for a service', () => {
+    const snapshots: ProbeSnapshot[] = [
+      { t: '2026-03-24T01:00:00Z', data: { mistral: { status: 401, rtt: 100 } } },
+      { t: '2026-03-24T01:05:00Z', data: { mistral: { status: 401, rtt: 200 } } },
+      { t: '2026-03-24T01:10:00Z', data: { mistral: { status: 401, rtt: 300 } } },
+    ]
+    expect(computeMedianRtt(snapshots, 'mistral')).toBe(200)
+  })
+
+  it('ignores failed probes (rtt=-1)', () => {
+    const snapshots: ProbeSnapshot[] = [
+      { t: '2026-03-24T01:00:00Z', data: { mistral: { status: 0, rtt: -1 } } },
+      { t: '2026-03-24T01:05:00Z', data: { mistral: { status: 401, rtt: 150 } } },
+      { t: '2026-03-24T01:10:00Z', data: { mistral: { status: 401, rtt: 250 } } },
+    ]
+    expect(computeMedianRtt(snapshots, 'mistral')).toBe(250) // median of [150, 250] → index 1
+  })
+
+  it('returns -1 when no valid probes exist', () => {
+    const snapshots: ProbeSnapshot[] = [
+      { t: '2026-03-24T01:00:00Z', data: { gemini: { status: 403, rtt: 50 } } },
+    ]
+    expect(computeMedianRtt(snapshots, 'mistral')).toBe(-1)
+  })
+
+  it('returns -1 for empty snapshots', () => {
+    expect(computeMedianRtt([], 'mistral')).toBe(-1)
+  })
+})
+
+describe('isCorroboratedByProbe', () => {
+  const baseSnapshots: ProbeSnapshot[] = [
+    { t: '2026-03-24T01:00:00Z', data: { mistral: { status: 401, rtt: 180 } } },
+    { t: '2026-03-24T01:05:00Z', data: { mistral: { status: 401, rtt: 190 } } },
+    { t: '2026-03-24T01:10:00Z', data: { mistral: { status: 401, rtt: 170 } } },
+    { t: '2026-03-24T01:15:00Z', data: { mistral: { status: 401, rtt: 185 } } },
+  ]
+  const medianRtt = 185 // median of [170, 180, 185, 190]
+
+  it('returns false when no RTT spike in incident window (noise)', () => {
+    // Incident at 01:07 — probes at 01:05 (190ms) and 01:10 (170ms) are normal
+    expect(isCorroboratedByProbe(
+      baseSnapshots, 'mistral',
+      '2026-03-24T01:07:00Z', '2026-03-24T01:07:30Z',
+      medianRtt,
+    )).toBe(false)
+  })
+
+  it('returns true when RTT spike detected (real outage)', () => {
+    const spikeSnapshots: ProbeSnapshot[] = [
+      ...baseSnapshots,
+      { t: '2026-03-24T01:20:00Z', data: { mistral: { status: 401, rtt: 800 } } }, // spike > 3x median
+    ]
+    expect(isCorroboratedByProbe(
+      spikeSnapshots, 'mistral',
+      '2026-03-24T01:18:00Z', '2026-03-24T01:22:00Z',
+      medianRtt,
+    )).toBe(true)
+  })
+
+  it('returns true when probe failed (rtt=-1)', () => {
+    const failSnapshots: ProbeSnapshot[] = [
+      ...baseSnapshots,
+      { t: '2026-03-24T01:20:00Z', data: { mistral: { status: 0, rtt: -1 } } },
+    ]
+    expect(isCorroboratedByProbe(
+      failSnapshots, 'mistral',
+      '2026-03-24T01:18:00Z', '2026-03-24T01:22:00Z',
+      medianRtt,
+    )).toBe(true)
+  })
+
+  it('returns true when no probes in window (conservative)', () => {
+    // Incident at 02:00 — no probes exist around that time
+    expect(isCorroboratedByProbe(
+      baseSnapshots, 'mistral',
+      '2026-03-24T02:00:00Z', '2026-03-24T02:01:00Z',
+      medianRtt,
+    )).toBe(true)
+  })
+
+  it('returns true when median is 0 (no baseline)', () => {
+    expect(isCorroboratedByProbe(
+      baseSnapshots, 'mistral',
+      '2026-03-24T01:07:00Z', '2026-03-24T01:07:30Z',
+      -1,
+    )).toBe(true)
+  })
+
+  it('returns true when incidentEnd is null (ongoing)', () => {
+    // Ongoing incident — window is start ± 10min
+    const spikeSnapshots: ProbeSnapshot[] = [
+      ...baseSnapshots,
+      { t: '2026-03-24T01:20:00Z', data: { mistral: { status: 401, rtt: 700 } } },
+    ]
+    expect(isCorroboratedByProbe(
+      spikeSnapshots, 'mistral',
+      '2026-03-24T01:18:00Z', null,
+      medianRtt,
+    )).toBe(true)
+  })
+
+  it('returns false when service probes exist but all normal', () => {
+    const snapshots: ProbeSnapshot[] = [
+      { t: '2026-03-24T01:05:00Z', data: { gemini: { status: 403, rtt: 50 } } },
+      { t: '2026-03-24T01:10:00Z', data: { gemini: { status: 403, rtt: 45 } } },
+    ]
+    expect(isCorroboratedByProbe(
+      snapshots, 'gemini',
+      '2026-03-24T01:03:00Z', '2026-03-24T01:12:00Z',
+      47, // median
+    )).toBe(false) // 50 < 141 (3x47) and 45 < 141
   })
 })
