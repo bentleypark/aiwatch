@@ -8,13 +8,18 @@ export default async function handler(req: Request) {
   try {
     const url = new URL(req.url)
     const ref = url.searchParams.get('ref') ?? ''
-    const html = renderLandingPage({ showPHBanner: ref === 'producthunt' })
+    const referer = req.headers.get('referer') ?? ''
+    const fromPH = ref === 'producthunt' || referer.includes('producthunt.com')
+    const html = renderLandingPage({ showPHBanner: fromPH })
 
     return new Response(html, {
       status: 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+        'Cache-Control': fromPH
+          ? 'public, s-maxage=600, stale-while-revalidate=3600'
+          : 'public, s-maxage=3600, stale-while-revalidate=86400',
+        ...(fromPH ? { 'Vary': 'Referer' } : {}),
       },
     })
   } catch (err) {
