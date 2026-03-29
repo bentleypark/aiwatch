@@ -27,11 +27,11 @@ export function renderLandingPage(opts: LandingOptions): string {
 <meta property="og:url" content="https://ai-watch.dev/intro">
 <meta property="og:title" content="AIWatch — Real-time AI Service Monitoring">
 <meta property="og:description" content="Track Claude, OpenAI, Gemini, Cursor and more. AI analyzes incidents and recommends fallback options instantly. Free.">
-<meta property="og:image" content="https://ai-watch.dev/og-image.png">
+<meta property="og:image" content="https://ai-watch.dev/og-intro.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="AIWatch — Real-time AI Service Monitoring">
 <meta name="twitter:description" content="Track Claude, OpenAI, Gemini, Cursor and more. AI analyzes incidents and recommends fallback options instantly. Free.">
-<meta name="twitter:image" content="https://ai-watch.dev/og-image.png">
+<meta name="twitter:image" content="https://ai-watch.dev/og-intro.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Pretendard:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
