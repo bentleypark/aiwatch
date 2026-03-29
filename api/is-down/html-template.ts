@@ -435,23 +435,59 @@ function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canoni
   const status = service ? statusLabel(service.status) : 'Operational'
   const rawStatus = service?.status ?? 'operational'
 
-  // Status-based share templates — viral optimized for Reddit/X/community
+  // Status-based share templates — randomly selected per render for variety
   // Include AI analysis when available
-  // Down: question-style to drive search + urgency
-  // Degraded: uncertainty + "official vs AIWatch" contrast
-  // Operational: brand mention only, no link (account trust building)
   const aiSuffix = aiInsight ? `\nAI Analysis: ${aiInsight.summary.slice(0, 100)}. Est. recovery: ${aiInsight.estimatedRecovery}.` : ''
+  const n = seo.displayName
+  const downTexts = [
+    `Is ${n} down? Current status: Major Outage.`,
+    `${n} is currently experiencing a major outage.`,
+    `Heads up — ${n} appears to be down right now.`,
+    `${n} outage detected. Check real-time status:`,
+  ]
+  const degradedTexts = [
+    `Something feels off with ${n}...`,
+    `${n} seems to be having issues right now.`,
+    `Anyone else noticing ${n} is slow?`,
+  ]
+  const operationalTexts = [
+    `${n} is running fine for now. All green on AIWatch.`,
+    `All clear — ${n} is fully operational right now.`,
+    `${n} status: operational. No issues detected.`,
+  ]
+  const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
   const copyText = rawStatus === 'down'
-    ? `Is ${seo.displayName} down? Current status: Major Outage.${aiSuffix}\n${canonical}`
+    ? `${pick(downTexts)}${aiSuffix}\n${canonical}`
     : rawStatus === 'degraded'
-    ? `Something feels off with ${seo.displayName}...${aiSuffix}\n${canonical}`
-    : `${seo.displayName} is running fine for now. All green on AIWatch.`
+    ? `${pick(degradedTexts)}${aiSuffix}\n${canonical}`
+    : pick(operationalTexts)
 
-  const xText = rawStatus === 'down'
-    ? `Is ${seo.displayName} down? \u26A0\uFE0F${aiSuffix ? ' AI: ' + aiInsight!.summary.slice(0, 60) : ' Major Outage.'}`
+  const xDownTexts = [
+    `Is ${n} down? \u26A0\uFE0F`,
+    `${n} major outage detected \u26A0\uFE0F`,
+    `Heads up — ${n} is down \u26A0\uFE0F`,
+    `${n} outage in progress \u26A0\uFE0F`,
+  ]
+  const xDegradedTexts = [
+    `Something feels off with ${n}... \uD83D\uDC40`,
+    `${n} seems slow right now \uD83D\uDC40`,
+    `Anyone else having issues with ${n}? \uD83D\uDC40`,
+  ]
+  const xOperationalTexts = [
+    `${n} is running fine for now. All green on AIWatch. \u2705`,
+    `All clear — ${n} is fully operational \u2705`,
+    `${n} status: all systems go \u2705`,
+  ]
+  const xBase = rawStatus === 'down'
+    ? pick(xDownTexts)
     : rawStatus === 'degraded'
-    ? `Something feels off with ${seo.displayName}... \uD83D\uDC40${aiSuffix ? ' AI: ' + aiInsight!.summary.slice(0, 60) : ''}`
-    : `${seo.displayName} is running fine for now. All green on AIWatch. \u2705`
+    ? pick(xDegradedTexts)
+    : pick(xOperationalTexts)
+  const xText = rawStatus === 'down'
+    ? `${xBase}${aiSuffix ? ' AI: ' + aiInsight!.summary.slice(0, 60) : ''}`
+    : rawStatus === 'degraded'
+    ? `${xBase}${aiSuffix ? ' AI: ' + aiInsight!.summary.slice(0, 60) : ''}`
+    : xBase
   const encodedText = encodeURIComponent(xText)
   const encodedUrl = rawStatus !== 'operational' ? encodeURIComponent(canonical) : ''
   const xUrlParam = encodedUrl ? `&amp;url=${encodedUrl}` : ''
