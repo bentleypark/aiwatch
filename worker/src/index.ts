@@ -1016,11 +1016,12 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/status/cached') {
       const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
       if (cached) {
-        // Read AI analysis for services with active incidents
+        // Read AI analysis + latency 24h in parallel
         const aiAnalysis: Record<string, AIAnalysisResult> = {}
         const withActiveInc = cached.services.filter(s =>
           (s.incidents ?? []).some(i => i.status !== 'resolved')
         )
+        const latencyPromise = env.STATUS_CACHE!.get('latency:24h').catch(() => null)
         await Promise.all(withActiveInc.map(async (svc) => {
           const raw = await env.STATUS_CACHE!.get(`ai:analysis:${svc.id}`).catch(() => null)
           if (raw) {
@@ -1031,6 +1032,11 @@ export default {
             } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, err instanceof Error ? err.message : err) }
           }
         }))
+        let latency24h: Array<{ t: string; data: Record<string, number> }> = []
+        const latRaw = await latencyPromise
+        if (latRaw) {
+          try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached latency24h parse failed:', err instanceof Error ? err.message : err) }
+        }
 
         // Calculate scores for cached services (same as /api/status)
         const scoredCached = cached.services.map((svc) => {
@@ -1042,6 +1048,7 @@ export default {
           services: scoredCached,
           lastUpdated: cached.cachedAt,
           cached: true,
+          latency24h,
           ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
         }), {
           status: 200,
