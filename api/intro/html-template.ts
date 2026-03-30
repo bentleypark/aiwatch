@@ -615,7 +615,7 @@ export function renderLandingPage(opts: LandingOptions): string {
     <div class="mock-body">
       <!-- Stats Cards -->
       <div class="mock-stats-row">
-        <div class="mock-stat-card stat-green"><div class="mock-stat-value" style="color:var(--green);">24</div><div class="mock-stat-sub">services running</div></div>
+        <div class="mock-stat-card stat-green"><div class="mock-stat-value" style="color:var(--green);">26</div><div class="mock-stat-sub">services running</div></div>
         <div class="mock-stat-card stat-amber"><div class="mock-stat-value" style="color:var(--amber);">1</div><div class="mock-stat-sub">partially affected</div></div>
         <div class="mock-stat-card stat-red"><div class="mock-stat-value" style="color:var(--red);">0</div><div class="mock-stat-sub">—</div></div>
         <div class="mock-stat-card stat-blue"><div class="mock-stat-value" style="color:var(--blue);">99.6%</div><div class="mock-stat-sub">Overall average</div></div>
@@ -635,7 +635,7 @@ export function renderLandingPage(opts: LandingOptions): string {
         <div class="mock-section-title"><span class="green-slash">//</span> Services</div>
         <div class="mock-filter-tabs">
           <span class="mock-filter-tab active">All 27</span>
-          <span class="mock-filter-tab">Operational 24</span>
+          <span class="mock-filter-tab">Operational 26</span>
           <span class="mock-filter-tab">Issues 1<span class="mock-filter-dot"></span></span>
         </div>
       </div>
@@ -755,7 +755,7 @@ export function renderLandingPage(opts: LandingOptions): string {
         </div>
         <!-- More services -->
         <div class="mock-card ok" style="opacity:0.4;padding:10px 14px;grid-column:1/-1;">
-          <div style="font-size:12px;color:var(--text2);text-align:center;" data-i18n="demo.more">+ 22개 서비스 더 보기...</div>
+          <div style="font-size:12px;color:var(--text2);text-align:center;" data-i18n="demo.more">+ 24개 서비스 더 보기...</div>
         </div>
       </div>
       <!-- Recent Incidents Panel -->
@@ -1113,7 +1113,7 @@ const i18n = {
     'hero.pill1': 'AI 서비스', 'hero.pill2v': '실시간', 'hero.pill2': '알림', 'hero.pill3': '오픈소스',
     'flow.1.title': '장애 감지', 'flow.2.conn': 'AI 분석 시작', 'flow.2.bar': '패턴 분석 중', 'flow.3.conn': 'Discord · Slack 발송', 'flow.3.title': '알림 발송', 'flow.3.body': 'Discord · Slack 알림 전송 완료', 'flow.4.conn': '대안 추천', 'flow.4.title': 'Fallback 추천',
     'stats.services': '모니터링 서비스', 'stats.interval': '자동 수집', 'stats.free': 'Discord/Slack 알림 포함', 'stats.oss': '오픈소스',
-    'demo.title': '장애 파악부터 대안 선택까지', 'demo.sub': '지금 어떤 서비스가 안정적인지, 장애 중이라면 대안은 무엇인지 한 화면에서 파악합니다', 'demo.more': '+ 22개 서비스 더 보기...',
+    'demo.title': '장애 파악부터 대안 선택까지', 'demo.sub': '지금 어떤 서비스가 안정적인지, 장애 중이라면 대안은 무엇인지 한 화면에서 파악합니다', 'demo.more': '+ 24개 서비스 더 보기...',
     'feat.title': '단순 상태 표시를 넘어', 'feat.sub': '의사결정까지 도와주는 AI 모니터링 대시보드',
     'feat.1.title': 'AIWatch Score', 'feat.1.desc': '27개 서비스의 인시던트 빈도, 복구 시간, 업타임을 종합한 0~100점 AIWatch Score입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다. 단, 공식 데이터가 부족한 일부 서비스는 업계 평균치를 반영합니다.',
     'feat.2.title': 'AI 장애 분석', 'feat.2.desc': '장애 발생 시 Claude Sonnet이 패턴을 분석해 예상 복구 시간과 영향 범위를 알려줍니다. "언제쯤 복구될까?"에 빠르게 답합니다.',
@@ -1139,7 +1139,7 @@ const i18n = {
     'hero.pill1': 'AI Services', 'hero.pill2v': 'Real-time', 'hero.pill2': 'Alerts', 'hero.pill3': 'Open Source',
     'flow.1.title': 'Outage Detected', 'flow.2.conn': 'AI analysis started', 'flow.2.bar': 'Analyzing patterns', 'flow.3.conn': 'Discord · Slack sent', 'flow.3.title': 'Alert Sent', 'flow.3.body': 'Discord · Slack alert delivered', 'flow.4.conn': 'Alternatives suggested', 'flow.4.title': 'Fallback Suggested',
     'stats.services': 'Services monitored', 'stats.interval': 'Auto-collected', 'stats.free': 'Discord/Slack alerts included', 'stats.oss': 'Open source',
-    'demo.title': 'From outage detection to fallback — in one view', 'demo.sub': 'See which services are stable right now — and what to use instead when they\\\'re not', 'demo.more': '+ 22 more services...',
+    'demo.title': 'From outage detection to fallback — in one view', 'demo.sub': 'See which services are stable right now — and what to use instead when they\\\'re not', 'demo.more': '+ 24 more services...',
     'feat.title': 'Beyond status monitoring', 'feat.sub': 'An AI monitoring dashboard that helps you make decisions',
     'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'A 0–100 reliability score based on incident frequency and recovery time.',
     'feat.2.title': 'AI Incident Analysis', 'feat.2.desc': 'When an outage hits, Claude Sonnet analyzes the pattern and tells you the estimated recovery time and impact scope. No more guessing.',
