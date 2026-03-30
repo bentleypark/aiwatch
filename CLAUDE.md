@@ -63,6 +63,56 @@ npm run test:worker # Run Worker unit tests (vitest)
 - Propose ONE fix approach with reasoning — do not shotgun multiple approaches
 - Wait for user confirmation before implementing the fix
 
+### Adding a new service (checklist)
+
+When adding a new monitored service, update ALL of the following:
+
+#### Worker (backend)
+1. `worker/src/services.ts` — add `ServiceConfig` entry (id, name, provider, category, statusUrl, apiUrl, parser-specific fields)
+2. `worker/src/probe.ts` — add `ProbeTarget` if API endpoint exists for RTT measurement
+3. `worker/src/fallback.ts` — add to `API_TIER` if LLM/API service, or remove from `EXCLUDE_FALLBACK` if fallback-eligible
+4. `worker/src/__tests__/` — update probe target count test, add service-specific tests if needed
+
+#### Frontend
+5. `src/utils/constants.js` — update `EXCLUDE_FALLBACK` if applicable (keep in sync with `worker/src/fallback.ts`)
+
+#### Documentation — service count ("N AI services")
+6. `CLAUDE.md` — architecture section (service count, service list, category breakdown), KV schema comment
+7. `README.md` — service count, feature description, API endpoint comment
+8. `README.ko.md` — same as README.md (Korean)
+9. `.github/CONTRIBUTING.md` — if Project Structure section exists
+
+#### SEO & Meta tags
+10. `index.html` — `<meta name="description">`, `og:title`, `og:description`, `twitter:title`, `twitter:description`, JSON-LD description (~6 occurrences)
+
+#### Landing page
+11. `api/intro/html-template.ts` — meta description, hero pill number, mock filter "All N", i18n strings KO/EN (~12 occurrences)
+12. `docs/aiwatch-landing.html` — same as intro template (design draft, ~12 occurrences)
+
+#### Is X Down (if adding a dedicated page)
+13. `api/is-down.ts` — add service to `SERVICES` map
+14. `api/is-down/html-template.ts` — if needed
+15. `vercel.json` — add rewrite rule `/is-{service}-down`
+16. `public/sitemap.xml` — add URL entry
+
+#### Reports site (aiwatch-reports)
+17. `README.md` — service count, category breakdown
+18. `_config.yml` — description
+19. `_templates/monthly-report.md` — service count, category breakdown
+20. Current month report (e.g., `2026-03/index.md`) — service count, category breakdown
+
+#### Assets (after deploy)
+21. `docs/screenshot.png` — recapture desktop dashboard
+22. `docs/screenshot-mobile.png` — recapture mobile dashboard
+23. `public/og-intro.png` — regenerate if service count is baked in
+24. `docs/social-preview.png` — regenerate from og-intro.png
+25. GitHub Settings → Social preview — re-upload
+
+#### Deployment
+26. `npx wrangler deploy --config worker/wrangler.toml --dry-run` — build check
+27. `npm run deploy:worker` — deploy after user approval
+28. `git push origin main` — Vercel auto-deploy for frontend
+
 ## Architecture
 
 **AIWatch** is a React SPA that monitors 25 AI services in real time:
