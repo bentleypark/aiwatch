@@ -74,7 +74,15 @@ When adding a new monitored service, update ALL of the following:
 4. `worker/src/__tests__/` — update probe target count test, add service-specific tests if needed
 
 #### Frontend
-5. `src/utils/constants.js` — update `EXCLUDE_FALLBACK` if applicable (keep in sync with `worker/src/fallback.ts`)
+5. `src/utils/constants.js` — update ALL of the following arrays:
+   - `API_SERVICE_IDS` — add new service ID
+   - `SERVICE_AND_APP_IDS` — add in correct display order (app → LLM → voice → inference → agent)
+   - `SERVICE_CATEGORIES` — add to the correct category filter (e.g., `llm`, `inference`)
+   - `EXCLUDE_FALLBACK` — update if applicable (keep in sync with `worker/src/fallback.ts`)
+6. `src/hooks/usePolling.js` — add mock entry to `MOCK_SERVICES` array at correct position (determines display order via `mergeWithMock`)
+7. `src/pages/ServiceDetails.jsx` — add `STATUS_URL` entry for the official status page link
+8. `src/pages/Overview.jsx` — add to `API_TIER` (keep in sync with `worker/src/fallback.ts`)
+9. `api/is-down.ts` — add to `API_TIER` + `EXCLUDE_FALLBACK` (keep in sync with `worker/src/fallback.ts`)
 
 #### Documentation — service count ("N AI services")
 6. `CLAUDE.md` — architecture section (service count, service list, category breakdown), KV schema comment
@@ -115,8 +123,8 @@ When adding a new monitored service, update ALL of the following:
 
 ## Architecture
 
-**AIWatch** is a React SPA that monitors 25 AI services in real time:
-- **18 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Perplexity, HuggingFace, Replicate, ElevenLabs, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, Stability AI
+**AIWatch** is a React SPA that monitors 27 AI services in real time:
+- **20 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Perplexity, HuggingFace, Replicate, ElevenLabs, AssemblyAI, Deepgram, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, Stability AI
 - **3 AI apps**: claude.ai, ChatGPT, Character.AI
 - **4 coding agents**: Claude Code, GitHub Copilot, Cursor, Windsurf
 
@@ -130,11 +138,11 @@ When adding a new monitored service, update ALL of the following:
 
 | Key Pattern | Value | TTL | Writes/Day | Purpose |
 |---|---|---|---|---|
-| `services:latest` | `{ services, cachedAt }` JSON | 5min | ~288 | Real-time status cache (all 25 services) |
+| `services:latest` | `{ services, cachedAt }` JSON | 5min | ~288 | Real-time status cache (all 27 services) |
 | `daily:{YYYY-MM-DD}` | `{ [svcId]: { ok, total } }` JSON | 2d | ~288 | Daily uptime counters |
 | `history:{YYYY-MM-DD}` | Same as daily | 90d | 1 | Archived yesterday's counters |
 | `latency:24h` | `{ snapshots: [{ t, data }] }` JSON | 25h | ~48 | 30-min latency snapshots (max 48) |
-| `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 72h | ~288 | 5-min health check probe results (max 864, 15 API services) |
+| `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 72h | ~288 | 5-min health check probe results (max 864, 17 API services) |
 | `alerted:new:{incId}` | `"1"` | 7d | ~5 | Incident alert dedup |
 | `alerted:res:{incId}` | `"1"` | 7d | ~2 | Resolved incident alert dedup |
 | `alerted:down:{svcId}` | ISO timestamp | 2h | ~2 | Service down alert dedup + recovery duration |
@@ -187,7 +195,7 @@ worker/
     ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt, TTL refresh, re-analysis, incidentId dedup)
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit, Web Vitals)
     vitals.ts   # Web Vitals aggregation (ingest, KV flush, p75 computation, Discord formatting)
-    probe.ts    # Health check probing — direct RTT measurement (15 API services)
+    probe.ts    # Health check probing — direct RTT measurement (17 API services)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
                 # dailyImpact support: statuspage (uptimeData), incident-io (component impacts), betterstack (status_history from index.json)
 ```
@@ -253,7 +261,7 @@ Is X Down pages (Edge SSR) and Landing page use inline `gtag()` calls directly s
 ```
 Browser (React SPA, 60s polling)
   → Cloudflare Worker (/api/status)
-    → parallel fetch (25 services)
+    → parallel fetch (27 services)
     → normalize to ServiceStatus[]
     → write to KV (cache + daily counters)
   → React state (usePolling hook via PollingContext)
@@ -291,6 +299,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
     - **Tier 1** (Major LLM): `claude`, `openai`, `gemini`
     - **Tier 2** (LLM): `mistral`, `cohere`, `groq`, `together`, `deepseek`, `xai`, `perplexity`
     - **Tier 3** (Infrastructure): `bedrock`, `azureopenai`, `openrouter`
+    - **Tier 4** (Voice): `elevenlabs`, `assemblyai`, `deepgram`
   - `EXCLUDE_FALLBACK` services are excluded from both source and candidate lists (keep in sync across `worker/src/fallback.ts`, `src/utils/constants.js`, `api/is-down.ts`)
 - Status polling proxy: `worker/` directory (monorepo), Cloudflare Workers
   - `cd worker && npm run dev` — local dev (port 8787)

@@ -8,7 +8,7 @@ export const config = { runtime: 'edge' }
 
 const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 // Keep in sync with worker/src/fallback.ts and src/utils/constants.js
-const EXCLUDE_FALLBACK = ['elevenlabs', 'replicate', 'huggingface', 'pinecone', 'stability', 'characterai']
+const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'characterai']
 
 export default async function handler(req: Request) {
   try {
@@ -62,10 +62,12 @@ export default async function handler(req: Request) {
         }
 
         // Build fallbacks from same data (tier-based priority for API services)
+        // Keep in sync with worker/src/fallback.ts API_TIER
         const API_TIER: Record<string, number> = {
           claude: 1, openai: 1, gemini: 1,
           mistral: 2, cohere: 2, groq: 2, together: 2, deepseek: 2, xai: 2, perplexity: 2,
           bedrock: 3, azureopenai: 3, openrouter: 3,
+          elevenlabs: 4, assemblyai: 4, deepgram: 4,
         }
         if (!EXCLUDE_FALLBACK.includes(entry.id)) {
           const sourceTier = API_TIER[entry.id] ?? 99

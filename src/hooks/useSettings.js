@@ -32,9 +32,22 @@ function readStored() {
         : DEFAULT_SETTINGS.sla,
       enabledServices: Array.isArray(parsed.enabledServices)
         ? (() => {
-            const stored = parsed.enabledServices.filter((id) => ALL_SERVICE_IDS.includes(id))
-            const newIds = ALL_SERVICE_IDS.filter((id) => !stored.includes(id))
-            return [...stored, ...newIds]
+            const stored = new Set(parsed.enabledServices.filter((id) => ALL_SERVICE_IDS.includes(id)))
+            const newIds = ALL_SERVICE_IDS.filter((id) => !stored.has(id))
+            if (newIds.length === 0) return [...stored]
+            // Insert new services at their canonical position in ALL_SERVICE_IDS
+            const result = [...stored]
+            for (const id of newIds) {
+              const canonIdx = ALL_SERVICE_IDS.indexOf(id)
+              // Find the best insertion point: after the last existing service that precedes this one in canonical order
+              let insertAt = result.length
+              for (let i = canonIdx - 1; i >= 0; i--) {
+                const prevIdx = result.indexOf(ALL_SERVICE_IDS[i])
+                if (prevIdx !== -1) { insertAt = prevIdx + 1; break }
+              }
+              result.splice(insertAt, 0, id)
+            }
+            return result
           })()
         : DEFAULT_SETTINGS.enabledServices,
       slackUrl: typeof parsed.slackUrl === 'string' ? parsed.slackUrl : DEFAULT_SETTINGS.slackUrl,

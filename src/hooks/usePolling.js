@@ -357,6 +357,20 @@ const MOCK_SERVICES = [
     ],
   },
   {
+    id: 'assemblyai', category: 'api', name: 'AssemblyAI', provider: 'AssemblyAI', status: 'operational',
+    latency: null, uptime30d: null,
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
+  },
+  {
+    id: 'deepgram', category: 'api', name: 'Deepgram', provider: 'Deepgram', status: 'operational',
+    latency: null, uptime30d: null,
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
+  },
+  {
     id: 'pinecone', category: 'api', name: 'Pinecone', provider: 'Pinecone', status: 'operational',
     latency: 320, uptime30d: null,
     history30d: hist(),

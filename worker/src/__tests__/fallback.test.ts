@@ -9,6 +9,8 @@ const mockServices = [
   { id: 'gemini', category: 'api', name: 'Gemini API', status: 'operational', aiwatchScore: 78 },
   { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 76 },
   { id: 'elevenlabs', category: 'api', name: 'ElevenLabs', status: 'operational', aiwatchScore: 80 },
+  { id: 'assemblyai', category: 'api', name: 'AssemblyAI', status: 'operational', aiwatchScore: 90 },
+  { id: 'deepgram', category: 'api', name: 'Deepgram', status: 'operational', aiwatchScore: 85 },
   { id: 'claudeai', category: 'app', name: 'claude.ai', status: 'operational', aiwatchScore: 60 },
   { id: 'chatgpt', category: 'app', name: 'ChatGPT', status: 'down', aiwatchScore: 55 },
   { id: 'cursor', category: 'agent', name: 'Cursor', status: 'operational', aiwatchScore: 70 },
@@ -34,9 +36,15 @@ describe('getFallbacks', () => {
   })
 
   it('returns empty for EXCLUDE_FALLBACK services', () => {
-    expect(getFallbacks('elevenlabs', 'api', mockServices)).toEqual([])
     expect(getFallbacks('replicate', 'api', mockServices)).toEqual([])
     expect(getFallbacks('huggingface', 'api', mockServices)).toEqual([])
+  })
+
+  it('returns voice tier fallbacks for ElevenLabs', () => {
+    const result = getFallbacks('elevenlabs', 'api', mockServices)
+    expect(result).toHaveLength(2)
+    expect(result[0].name).toBe('AssemblyAI')
+    expect(result[1].name).toBe('Deepgram')
   })
 
   it('excludes EXCLUDE_FALLBACK services from candidates', () => {
@@ -118,7 +126,7 @@ describe('buildGroupedFallbackText', () => {
 
   it('returns multi-category fallback for grouped incident', () => {
     const text = buildGroupedFallbackText(['claude', 'claudeai', 'claude-code'], services)
-    expect(text).toContain('API:')
+    expect(text).toContain('LLM:')
     expect(text).toContain('OpenAI API (Score 86)')
     expect(text).toContain('AI Apps:')
     expect(text).toContain('ChatGPT')
@@ -126,10 +134,10 @@ describe('buildGroupedFallbackText', () => {
     expect(text).toContain('GitHub Copilot')
   })
 
-  it('deduplicates categories', () => {
+  it('deduplicates tier groups', () => {
     const text = buildGroupedFallbackText(['claude', 'claudeai'], services)
-    const apiMatches = text.match(/API:/g)
-    expect(apiMatches).toHaveLength(1)
+    const llmMatches = text.match(/LLM:/g)
+    expect(llmMatches).toHaveLength(1)
   })
 
   it('skips excluded services', () => {
@@ -140,22 +148,24 @@ describe('buildGroupedFallbackText', () => {
   })
 
   it('returns no-fallback message when all excluded', () => {
-    const text = buildGroupedFallbackText(['elevenlabs', 'replicate'], services)
+    const text = buildGroupedFallbackText(['replicate', 'huggingface'], services)
     expect(text).toContain('No operational fallback')
   })
 
-  it('returns single category when only one affected', () => {
+  it('returns single tier group when only one affected', () => {
     const text = buildGroupedFallbackText(['claude'], services)
-    expect(text).toContain('API:')
+    expect(text).toContain('LLM:')
     expect(text).not.toContain('AI Apps:')
     expect(text).not.toContain('Coding Agent:')
   })
 })
 
 describe('EXCLUDE_FALLBACK', () => {
-  it('contains voice and inference services', () => {
-    expect(EXCLUDE_FALLBACK).toContain('elevenlabs')
+  it('contains inference services but not voice services', () => {
     expect(EXCLUDE_FALLBACK).toContain('replicate')
     expect(EXCLUDE_FALLBACK).toContain('huggingface')
+    expect(EXCLUDE_FALLBACK).not.toContain('elevenlabs')
+    expect(EXCLUDE_FALLBACK).not.toContain('assemblyai')
+    expect(EXCLUDE_FALLBACK).not.toContain('deepgram')
   })
 })

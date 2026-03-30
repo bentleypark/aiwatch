@@ -1,14 +1,15 @@
 // Fallback recommendation logic for incident alerts
 
 // Keep in sync with src/utils/constants.js EXCLUDE_FALLBACK
-export const EXCLUDE_FALLBACK = ['elevenlabs', 'replicate', 'huggingface', 'pinecone', 'stability', 'characterai']
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'characterai']
 
-// Tier-based priority for API services — major LLMs first, then secondary, then infrastructure
+// Tier-based priority for API services — major LLMs first, then secondary, then infrastructure, then voice
 // Same-tier services are sorted by Score. Higher tier = lower number = higher priority.
 const API_TIER: Record<string, number> = {
   claude: 1, openai: 1, gemini: 1,
   mistral: 2, cohere: 2, groq: 2, together: 2, deepseek: 2, xai: 2, perplexity: 2,
   bedrock: 3, azureopenai: 3, openrouter: 3,
+  elevenlabs: 4, assemblyai: 4, deepgram: 4,
 }
 
 interface FallbackCandidate {
@@ -54,6 +55,7 @@ export function buildFallbackText(fallbacks: Array<{ name: string; score: number
 const CATEGORY_LABEL: Record<string, string> = {
   api: 'API', app: 'AI Apps', agent: 'Coding Agent',
 }
+const TIER_LABEL: Record<number, string> = { 1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice' }
 
 /**
  * Build fallback text for a group of affected services (possibly spanning multiple categories).
@@ -73,11 +75,14 @@ export function buildGroupedFallbackText(
       continue
     }
     if (svc.status === 'operational') continue
-    if (seen.has(svc.category)) continue
-    seen.add(svc.category)
+    const tier = API_TIER[svcId] ?? 99
+    const tierLabel = TIER_LABEL[tier]
+    const groupKey = tierLabel ? `${svc.category}:${tierLabel}` : svc.category
+    if (seen.has(groupKey)) continue
+    seen.add(groupKey)
     const fallbacks = getFallbacks(svcId, svc.category, services)
     if (fallbacks.length === 0) continue
-    const label = CATEGORY_LABEL[svc.category] ?? svc.category
+    const label = tierLabel || CATEGORY_LABEL[svc.category] || svc.category
     const list = fallbacks.map((f, i) => {
       const name = f.score != null ? `${f.name} (Score ${f.score})` : f.name
       return name

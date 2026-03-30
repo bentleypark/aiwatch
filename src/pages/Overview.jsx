@@ -293,10 +293,12 @@ function Panel({ title, dotColor, subtitle, children }) {
 
 // ── Fallback logic (mirrors worker/src/fallback.ts) ──
 
+// Keep in sync with worker/src/fallback.ts API_TIER
 const API_TIER = {
   claude: 1, openai: 1, gemini: 1,
   mistral: 2, cohere: 2, groq: 2, together: 2, deepseek: 2, xai: 2, perplexity: 2,
   bedrock: 3, azureopenai: 3, openrouter: 3,
+  elevenlabs: 4, assemblyai: 4, deepgram: 4,
 }
 
 function getFallbacks(service, allServices) {
@@ -333,18 +335,27 @@ function ActionBanner({ services, setPage, t }) {
     </span>
   ))
 
-  // Collect fallbacks per category — exclude non-operational + same provider
+  // Collect fallbacks per tier group — exclude non-operational + same provider
+  const TIER_LABEL = { 1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice' }
   const CATEGORY_LABEL = { api: 'API', app: 'AI Apps', agent: 'Coding' }
   const nonOperationalIds = new Set(services.filter(s => s.status !== 'operational').map(s => s.id))
   const affectedProviders = new Set(affected.map(s => s.provider))
-  const seenCategories = new Set()
+  const seenGroups = new Set() // category or category:tierLabel for api services
   const categoryGroups = [] // [{ category, label, items: [{ id, name, aiwatchScore }] }]
-  const numCategories = new Set(affected.filter(a => !EXCLUDE_FALLBACK.includes(a.id)).map(a => a.category)).size
-  const perCategory = numCategories === 1 ? 2 : 1
+  const eligibleAffected = affected.filter(a => !EXCLUDE_FALLBACK.includes(a.id))
+  const numGroups = new Set(eligibleAffected.map(a => {
+    const tier = API_TIER[a.id] ?? 99
+    const tierLabel = TIER_LABEL[tier]
+    return tierLabel ? `${a.category}:${tierLabel}` : a.category
+  })).size
+  const perGroup = numGroups === 1 ? 2 : 1
   for (const svc of affected) {
     if (EXCLUDE_FALLBACK.includes(svc.id)) continue
-    if (seenCategories.has(svc.category)) continue
-    seenCategories.add(svc.category)
+    const tier = API_TIER[svc.id] ?? 99
+    const tierLabel = TIER_LABEL[tier]
+    const groupKey = tierLabel ? `${svc.category}:${tierLabel}` : svc.category
+    if (seenGroups.has(groupKey)) continue
+    seenGroups.add(groupKey)
     const candidates = getFallbacks(svc, services).filter(f => {
       if (nonOperationalIds.has(f.id)) return false
       const fSvc = services.find(s => s.id === f.id)
@@ -352,7 +363,8 @@ function ActionBanner({ services, setPage, t }) {
       return true
     })
     if (candidates.length === 0) continue
-    categoryGroups.push({ category: svc.category, label: CATEGORY_LABEL[svc.category] ?? svc.category, items: candidates.slice(0, perCategory) })
+    const label = tierLabel || CATEGORY_LABEL[svc.category] || svc.category
+    categoryGroups.push({ category: svc.category, label, items: candidates.slice(0, perGroup) })
   }
 
   return (
