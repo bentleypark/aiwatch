@@ -30,7 +30,7 @@
   "@type": "WebApplication",
   "name": "AIWatch",
   "url": "https://ai-watch.dev",
-  "description": "Real-time status monitoring for 25 AI services including Claude, ChatGPT, Gemini, and Cursor. AI-powered incident analysis with fallback recommendations.",
+  "description": "Real-time status monitoring for 27 AI services including Claude, ChatGPT, Gemini, and Cursor. AI-powered incident analysis with fallback recommendations.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Web",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
@@ -483,7 +483,7 @@
     </div>
     <p class="hero-trust" data-i18n="hero.trust">로그인 없음 · 10초 만에 확인 · 완전 무료 오픈소스</p>
     <div class="hero-pills">
-      <div class="stat-pill"><span class="stat-pill-num">25</span> <span data-i18n="hero.pill1">AI 서비스</span></div>
+      <div class="stat-pill"><span class="stat-pill-num">27</span> <span data-i18n="hero.pill1">AI 서비스</span></div>
       <div class="stat-pill"><span class="stat-pill-num" data-i18n="hero.pill2v">실시간</span> <span data-i18n="hero.pill2">알림</span></div>
       <div class="stat-pill"><span class="stat-pill-num">AGPL</span> <span data-i18n="hero.pill3">오픈소스</span></div>
     </div>
@@ -620,7 +620,7 @@
       <div class="mock-section-header">
         <div class="mock-section-title"><span class="green-slash">//</span> Services</div>
         <div class="mock-filter-tabs">
-          <span class="mock-filter-tab active">All 25</span>
+          <span class="mock-filter-tab active">All 27</span>
           <span class="mock-filter-tab">Operational 24</span>
           <span class="mock-filter-tab">Issues 1<span class="mock-filter-dot"></span></span>
         </div>
@@ -1026,7 +1026,7 @@
   <div class="report-inner">
   <p class="section-label">// monthly report</p>
   <h2 class="section-title" data-i18n="report.title">월간 AI 서비스 신뢰도 리포트</h2>
-  <p class="section-sub" data-i18n="report.sub">매월 25개 서비스의 AIWatch Score 순위, 인시던트 요약, 공식 업타임, 주요 장애 분석, 프로바이더 추천까지 한 리포트로 공개합니다.</p>
+  <p class="section-sub" data-i18n="report.sub">매월 27개 서비스의 AIWatch Score 순위, 인시던트 요약, 공식 업타임, 주요 장애 분석, 프로바이더 추천까지 한 리포트로 공개합니다.</p>
   <div class="report-chart">
     <svg viewBox="0 0 560 190" xmlns="http://www.w3.org/2000/svg" style="width:100%;font-family:'JetBrains Mono',monospace;">
   <rect width="560" height="190" fill="#0d1117" rx="8"/>
@@ -1045,7 +1045,7 @@
   <text x="120" y="164" text-anchor="end" fill="#768390" font-size="11">OpenAI API</text>
   <rect x="128" y="150" width="258" height="16" rx="3" fill="#3b82f6"/>
   <text x="392" y="163" fill="#adbac7" font-size="11">86  Good</text>
-  <text x="200" y="186" text-anchor="middle" fill="#444" font-size="10">· · · 전체 25개 서비스 보기 → reports.ai-watch.dev</text>
+  <text x="200" y="186" text-anchor="middle" fill="#444" font-size="10">· · · 전체 27개 서비스 보기 → reports.ai-watch.dev</text>
 </svg>
   </div>
   <a href="https://reports.ai-watch.dev/" class="report-link" target="_blank" rel="noopener noreferrer" onclick="gtag('event','click_reports',{location:'landing_report',source:'intro'})">
@@ -1105,19 +1105,19 @@ const i18n = {
     'stats.services': '모니터링 서비스', 'stats.interval': '자동 수집', 'stats.free': 'Discord/Slack 알림 포함', 'stats.oss': '오픈소스',
     'demo.title': '장애 파악부터 대안 선택까지', 'demo.sub': '지금 어떤 서비스가 안정적인지, 장애 중이라면 대안은 무엇인지 한 화면에서 파악합니다', 'demo.more': '+ 22개 서비스 더 보기...',
     'feat.title': '단순 상태 표시를 넘어', 'feat.sub': '의사결정까지 도와주는 AI 모니터링 대시보드',
-    'feat.1.title': 'AIWatch Score', 'feat.1.desc': '25개 서비스의 인시던트 빈도, 복구 시간, 업타임을 종합한 0~100점 AIWatch Score입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다. 단, 공식 데이터가 부족한 일부 서비스는 업계 평균치를 반영합니다.',
+    'feat.1.title': 'AIWatch Score', 'feat.1.desc': '27개 서비스의 인시던트 빈도, 복구 시간, 업타임을 종합한 0~100점 AIWatch Score입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다. 단, 공식 데이터가 부족한 일부 서비스는 업계 평균치를 반영합니다.',
     'feat.2.title': 'AI 장애 분석', 'feat.2.desc': '장애 발생 시 Claude Sonnet이 패턴을 분석해 예상 복구 시간과 영향 범위를 알려줍니다. "언제쯤 복구될까?"에 빠르게 답합니다.',
     'feat.3.title': 'Fallback 추천', 'feat.3.desc': '장애 중인 서비스의 대안을 같은 카테고리 Score 상위 순으로 즉시 제안합니다. 같은 제공사 서비스는 자동 제외됩니다.',
     'feat.4.title': '"Is X Down?" 전용 페이지', 'feat.4.desc': 'ai-watch.dev/is-claude-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다.',
     'how.title': '이렇게 동작합니다', 'how.sub': '각 서비스의 공식 상태 페이지 데이터를 기반으로 동작합니다',
-    'compare.title': '공식 상태 페이지와 무엇이 다른가요?', 'compare.sub': '공식 페이지 데이터를 기반으로, 25개를 한 화면에서 통합합니다', 'compare.col1': '공식 상태 페이지', 'compare.r2': '장애 알림', 'compare.r2a': '직접 확인 필요', 'compare.r2b': 'Discord · Slack 즉시 발송', 'compare.r3': 'AIWatch Score', 'compare.r3a': '서비스별 개별 확인', 'compare.r3b': 'AIWatch Score (0–100)', 'compare.r4': '장애 분석', 'compare.r4b': 'AI가 원인 · 복구 시간 분석', 'compare.r5': '대안 추천', 'compare.r5b': 'Fallback 서비스 즉시 제안', 'compare.r6': '월간 리포트', 'compare.r6b': '매월 리포트 공개', 'compare.r7': '비용', 'compare.r7a': '무료', 'compare.r7b': '완전 무료 · 오픈소스',
-    'how.1.title': '수집', 'how.1.desc': '25개 공식 상태 페이지를 자동으로 수집',
+    'compare.title': '공식 상태 페이지와 무엇이 다른가요?', 'compare.sub': '공식 페이지 데이터를 기반으로, 27개를 한 화면에서 통합합니다', 'compare.col1': '공식 상태 페이지', 'compare.r2': '장애 알림', 'compare.r2a': '직접 확인 필요', 'compare.r2b': 'Discord · Slack 즉시 발송', 'compare.r3': 'AIWatch Score', 'compare.r3a': '서비스별 개별 확인', 'compare.r3b': 'AIWatch Score (0–100)', 'compare.r4': '장애 분석', 'compare.r4b': 'AI가 원인 · 복구 시간 분석', 'compare.r5': '대안 추천', 'compare.r5b': 'Fallback 서비스 즉시 제안', 'compare.r6': '월간 리포트', 'compare.r6b': '매월 리포트 공개', 'compare.r7': '비용', 'compare.r7a': '무료', 'compare.r7b': '완전 무료 · 오픈소스',
+    'how.1.title': '수집', 'how.1.desc': '27개 공식 상태 페이지를 자동으로 수집',
     'how.2.title': '분석', 'how.2.desc': 'Claude Sonnet이 패턴 · 복구 시간 · 영향 범위 분석',
     'how.3.title': '알림', 'how.3.desc': 'Discord · Slack 즉시 발송 + Fallback 추천 포함',
     'how.4.title': '리포트', 'how.4.desc': '월간 업타임 추이 · 인시던트 통계 리포트 공개',
     'cta.title': '지금 바로 확인하세요', 'cta.sub': '완전 무료 · 설치 불필요 · Discord/Slack 알림 무료', 'cta.btn1': '지금 장애 확인하기 →', 'cta.btn2': '알림 설정하기',
     'alert.title': 'Discord · Slack 실시간 알림', 'alert.sub': '장애 발생 즉시 알림 + AI 분석 + Fallback 추천까지 한 번에. 무료입니다.',
-    'report.title': '월간 AI 서비스 신뢰도 리포트', 'report.link': '전체 리포트 보기 →', 'report.sub': '매월 25개 서비스의 AIWatch Score 순위, 인시던트 요약, 공식 업타임, 주요 장애 분석, 프로바이더 추천까지 한 리포트로 공개합니다.', 'ai.title': '장애가 나면 AI가 분석합니다', 'ai.sub': '단순 상태 표시에서 한 발 더 — 장애 패턴, 예상 복구 시간, 영향 범위를 Claude Sonnet이 즉시 분석합니다.',
+    'report.title': '월간 AI 서비스 신뢰도 리포트', 'report.link': '전체 리포트 보기 →', 'report.sub': '매월 27개 서비스의 AIWatch Score 순위, 인시던트 요약, 공식 업타임, 주요 장애 분석, 프로바이더 추천까지 한 리포트로 공개합니다.', 'ai.title': '장애가 나면 AI가 분석합니다', 'ai.sub': '단순 상태 표시에서 한 발 더 — 장애 패턴, 예상 복구 시간, 영향 범위를 Claude Sonnet이 즉시 분석합니다.',
     'footer.report': '월간 리포트', 'footer.alert': '알림 설정'
   },
   en: {
@@ -1136,14 +1136,14 @@ const i18n = {
     'feat.3.title': 'Fallback Recommendations', 'feat.3.desc': 'Get instant alternative suggestions ranked by Score within the same category. Same-provider services are automatically excluded.',
     'feat.4.title': '"Is X Down?" Dedicated Pages', 'feat.4.desc': 'Pages like ai-watch.dev/is-claude-down show real-time status, AI analysis, and fallback recommendations — all in one place.',
     'how.title': 'How it works', 'how.sub': 'Powered by official status page data from each provider',
-    'compare.title': 'How is AIWatch different?', 'compare.sub': 'Built on official status data — aggregated across 25 services in one place', 'compare.col1': 'Official Status Page', 'compare.r2': 'Alerts', 'compare.r2a': 'Manual check required', 'compare.r2b': 'Instant Discord · Slack', 'compare.r3': 'AIWatch Score', 'compare.r3a': 'Per-service, separate pages', 'compare.r3b': 'AIWatch Score (0–100)', 'compare.r4': 'Incident analysis', 'compare.r4b': 'AI analyzes cause & recovery', 'compare.r5': 'Fallback', 'compare.r5b': 'Alternative services suggested', 'compare.r6': 'Monthly report', 'compare.r6b': 'Monthly report published', 'compare.r7': 'Cost', 'compare.r7a': 'Free', 'compare.r7b': 'Free & open source',
-    'how.1.title': 'Collect', 'how.1.desc': '25 official status pages collected automatically',
+    'compare.title': 'How is AIWatch different?', 'compare.sub': 'Built on official status data — aggregated across 27 services in one place', 'compare.col1': 'Official Status Page', 'compare.r2': 'Alerts', 'compare.r2a': 'Manual check required', 'compare.r2b': 'Instant Discord · Slack', 'compare.r3': 'AIWatch Score', 'compare.r3a': 'Per-service, separate pages', 'compare.r3b': 'AIWatch Score (0–100)', 'compare.r4': 'Incident analysis', 'compare.r4b': 'AI analyzes cause & recovery', 'compare.r5': 'Fallback', 'compare.r5b': 'Alternative services suggested', 'compare.r6': 'Monthly report', 'compare.r6b': 'Monthly report published', 'compare.r7': 'Cost', 'compare.r7a': 'Free', 'compare.r7b': 'Free & open source',
+    'how.1.title': 'Collect', 'how.1.desc': '27 official status pages collected automatically',
     'how.2.title': 'Analyze', 'how.2.desc': 'Claude Sonnet analyzes pattern, recovery time & scope',
     'how.3.title': 'Alert', 'how.3.desc': 'Discord · Slack instant alert + fallback recommendations',
     'how.4.title': 'Report', 'how.4.desc': 'Monthly uptime trends · incident statistics report',
     'cta.title': 'Check it out now', 'cta.sub': 'Completely free · No installation · Discord/Slack alerts included', 'cta.btn1': 'Check for Outages Now →', 'cta.btn2': 'Set Up Alerts',
     'alert.title': 'Discord & Slack alerts', 'alert.sub': 'Instant incident alerts with AI analysis and fallback recommendations. Free.',
-    'report.title': 'Monthly AI Reliability Report', 'report.link': 'View All Reports →', 'report.sub': 'AIWatch Score rankings, incident summaries, official uptime, notable outage analysis, and provider recommendations — all in one monthly report for 25 services.', 'ai.title': 'AI analyzes every incident', 'ai.sub': 'One step beyond status monitoring — Claude Sonnet instantly analyzes incident patterns, estimated recovery time, and impact scope.',
+    'report.title': 'Monthly AI Reliability Report', 'report.link': 'View All Reports →', 'report.sub': 'AIWatch Score rankings, incident summaries, official uptime, notable outage analysis, and provider recommendations — all in one monthly report for 27 services.', 'ai.title': 'AI analyzes every incident', 'ai.sub': 'One step beyond status monitoring — Claude Sonnet instantly analyzes incident patterns, estimated recovery time, and impact scope.',
     'footer.report': 'Monthly Report', 'footer.alert': 'Alert Settings'
   }
 };

@@ -552,7 +552,7 @@ function usePollingInternal() {
 
     try {
       // Initial + refresh: try cached endpoint first (~1s), fall back to full fetch
-      // Silent polls: full endpoint for fresh data from all 25 services
+      // Silent polls: full endpoint for fresh data from all 27 services
       let res
       if (isInitial || isRefresh) {
         try {

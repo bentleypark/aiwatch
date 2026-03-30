@@ -13,7 +13,7 @@
 
 **English** | [한국어](README.ko.md)
 
-Real-time monitoring dashboard for **25 AI services** — track status, latency, uptime, and incidents across major AI providers.
+Real-time monitoring dashboard for **27 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[Dashboard](https://ai-watch.dev)** · **[Landing Page](https://ai-watch.dev/intro)**
 
@@ -23,7 +23,7 @@ Real-time monitoring dashboard for **25 AI services** — track status, latency,
 
 ## Features
 
-- **Real-time status** — Operational / Degraded / Down for 25 AI services
+- **Real-time status** — Operational / Degraded / Down for 27 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
 - **Latency monitoring** — Status page response time per API service
 - **24h latency trend** — Chart.js line chart with 30-min snapshots
@@ -50,7 +50,7 @@ Real-time monitoring dashboard for **25 AI services** — track status, latency,
 
 ## Monitored Services
 
-### AI API Services (18)
+### AI API Services (20)
 
 | Service | Provider | Status Source |
 |---------|----------|---------------|
@@ -65,6 +65,8 @@ Real-time monitoring dashboard for **25 AI services** — track status, latency,
 | Hugging Face | HuggingFace | Better Stack RSS + uptime API |
 | Replicate | Replicate | incident.io (Atlassian compat) |
 | ElevenLabs | ElevenLabs | incident.io (Atlassian compat) |
+| AssemblyAI | AssemblyAI | Atlassian Statuspage |
+| Deepgram | Deepgram | Atlassian Statuspage |
 | xAI (Grok) | xAI | RSS feed |
 | DeepSeek API | DeepSeek | Atlassian Statuspage |
 | OpenRouter | OpenRouter | OnlineOrNot (React Router SSR) |
@@ -108,7 +110,7 @@ Real-time monitoring dashboard for **25 AI services** — track status, latency,
 Browser (React SPA, 60s polling)
   ↓
 Cloudflare Worker
-  ├── GET /api/status    → parallel fetch (25 services) → normalize
+  ├── GET /api/status    → parallel fetch (27 services) → normalize
   ├── GET /api/uptime    → daily uptime history
   └── POST /api/alert   → webhook proxy (Slack/Discord, SSRF protected)
   ↓
@@ -263,6 +265,7 @@ Embed real-time status badges in your README, docs, or blog.
 | `elevenlabs` | ElevenLabs | `openrouter` | OpenRouter |
 | `bedrock` | Amazon Bedrock | `pinecone` | Pinecone |
 | `azureopenai` | Azure OpenAI | `stability` | Stability AI |
+| `assemblyai` | AssemblyAI | `deepgram` | Deepgram |
 | `characterai` | Character.AI | | |
 
 ## Project Structure
