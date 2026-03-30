@@ -30,16 +30,19 @@ test.describe('Landing page (/intro)', () => {
     await expect(banner).toHaveCSS('display', 'none')
   })
 
-  test('PH banner visible with ?ref=producthunt', async ({ page }) => {
+  test('PH banner visible with ?ref=producthunt and upvote link', async ({ page }) => {
     await page.goto('/intro?ref=producthunt', { waitUntil: 'domcontentloaded' })
     const banner = page.locator('#ph-banner')
     await expect(banner).not.toHaveCSS('display', 'none')
     await expect(banner).toContainText('Product Hunters')
+    const link = banner.locator('a')
+    await expect(link).toHaveAttribute('href', 'https://www.producthunt.com/posts/ai-watch')
+    await expect(link).toHaveAttribute('target', '_blank')
   })
 
   test('PH banner visible with Referer header', async ({ request }) => {
     const res = await request.get('/intro', {
-      headers: { 'Referer': 'https://www.producthunt.com/posts/aiwatch' },
+      headers: { 'Referer': 'https://www.producthunt.com/posts/ai-watch' },
     })
     expect(res.status()).toBe(200)
     const html = await res.text()
