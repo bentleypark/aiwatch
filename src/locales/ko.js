@@ -11,6 +11,7 @@ const ko = {
   'nav.settings': '설정',
   'nav.dashboard': '대시보드',
   'nav.reports': '월간 리포트',
+  'nav.requestService': '서비스 추가 요청',
   'nav.services': '서비스',
   'nav.agents': '코딩 에이전트',
   // sidebar.footer removed — version now dynamic via __APP_VERSION__

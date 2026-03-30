@@ -11,6 +11,7 @@ const en = {
   'nav.settings': 'Settings',
   'nav.dashboard': 'Dashboard',
   'nav.reports': 'Reports',
+  'nav.requestService': 'Request a Service',
   'nav.services': 'Services',
   'nav.agents': 'Coding Agents',
   // sidebar.footer removed — version now dynamic via __APP_VERSION__

@@ -261,6 +261,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | `webhook_remove` | `type` (discord/slack) | Settings | Webhook URL removed |
 | `region_switch_intent` | `service_id`, `recommended_region` | ServiceDetails (Regional) | Region guide link click |
 | `click_reports` | — | Sidebar | Monthly reports link click |
+| `click_request_service` | — | Sidebar (request link) | Service request link click |
 | `share` | `method` (x/threads/kakao/copy), `item_id` | Is X Down (share buttons) | Social share button click |
 | `click_dashboard` | `location`, `source` | Is X Down (header/footer) | Dashboard link click |
 | `click_cta_alerts` | `location`, `source?` | Is X Down (CTA/footer) | Set Up Alerts click |
@@ -277,6 +278,7 @@ Is X Down pages (Edge SSR) and Landing page use inline `gtag()` calls directly s
 |---|---|---|---|
 | `click_dashboard` | `location: reports_site`, `source: footer/body` | ai-watch.dev link click | Dashboard navigation from reports |
 | `click_report` | `location: reports_site`, `report_month: YYYY-MM` | Monthly report link click | Report page view intent |
+| `click_request_service` | `location: reports_site`, `page` | Service request link click | Request a Service link click |
 
 ### Status Data Flow
 ```
