@@ -332,6 +332,7 @@ export function renderLandingPage(opts: LandingOptions): string {
   .ai-section { border-top: 1px solid var(--border); padding: 64px 24px; }
   .ai-inner { max-width: 900px; margin: 0 auto; }
   .report-chart { background: var(--bg1); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin: 28px 0; overflow-x: auto; }
+  .report-chart svg { display: block; width: 100%; height: auto; }
   .report-link { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-size: 14px; font-weight: 500; border-bottom: 1px solid rgba(63,185,80,0.3); padding-bottom: 2px; transition: border-color 0.2s; }
   .report-link:hover { border-color: var(--green); }
   .ai-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
@@ -343,6 +344,7 @@ export function renderLandingPage(opts: LandingOptions): string {
   .ai-mock-chip span { color: #3fb950; }
   @media (max-width: 768px) {
     .report-section { padding: 40px 20px; }
+    .report-chart { padding: 12px 8px; border-radius: 8px; margin: 20px -8px; }
     .ai-section { padding: 40px 20px; }
   }
 
@@ -1037,24 +1039,24 @@ export function renderLandingPage(opts: LandingOptions): string {
   <h2 class="section-title" data-i18n="report.title">월간 AI 서비스 신뢰도 리포트</h2>
   <p class="section-sub" data-i18n="report.sub">매월 27개 서비스의 AIWatch Score 순위, 인시던트 요약, 공식 업타임, 주요 장애 분석, 프로바이더 추천까지 한 리포트로 공개합니다.</p>
   <div class="report-chart">
-    <svg viewBox="0 0 560 190" xmlns="http://www.w3.org/2000/svg" style="width:100%;font-family:'JetBrains Mono',monospace;">
-  <rect width="560" height="190" fill="#0d1117" rx="8"/>
-  <text x="120" y="36" text-anchor="end" fill="#768390" font-size="11">Cohere API</text>
-  <rect x="128" y="22" width="300" height="16" rx="3" fill="#22c55e"/>
-  <text x="434" y="35" fill="#adbac7" font-size="11">100  Excellent</text>
-  <text x="120" y="68" text-anchor="end" fill="#768390" font-size="11">DeepSeek API</text>
-  <rect x="128" y="54" width="300" height="16" rx="3" fill="#22c55e"/>
-  <text x="434" y="67" fill="#adbac7" font-size="11">100  Excellent</text>
-  <text x="120" y="100" text-anchor="end" fill="#768390" font-size="11">Groq Cloud</text>
-  <rect x="128" y="86" width="279" height="16" rx="3" fill="#22c55e"/>
-  <text x="413" y="99" fill="#adbac7" font-size="11">93  Excellent</text>
-  <text x="120" y="132" text-anchor="end" fill="#768390" font-size="11">Together AI</text>
-  <rect x="128" y="118" width="267" height="16" rx="3" fill="#3b82f6"/>
-  <text x="401" y="131" fill="#adbac7" font-size="11">89  Good</text>
-  <text x="120" y="164" text-anchor="end" fill="#768390" font-size="11">OpenAI API</text>
-  <rect x="128" y="150" width="258" height="16" rx="3" fill="#3b82f6"/>
-  <text x="392" y="163" fill="#adbac7" font-size="11">86  Good</text>
-  <text x="200" y="186" text-anchor="middle" fill="#444" font-size="10">· · · 전체 27개 서비스 보기 → reports.ai-watch.dev</text>
+    <svg viewBox="0 0 320 180" xmlns="http://www.w3.org/2000/svg" style="width:100%;font-family:'JetBrains Mono',monospace;">
+  <rect width="320" height="180" fill="#0d1117" rx="8"/>
+  <text x="68" y="32" text-anchor="end" fill="#768390" font-size="11">Cohere</text>
+  <rect x="76" y="19" width="200" height="16" rx="3" fill="#22c55e"/>
+  <text x="282" y="32" fill="#adbac7" font-size="11">100</text>
+  <text x="68" y="62" text-anchor="end" fill="#768390" font-size="11">DeepSeek</text>
+  <rect x="76" y="49" width="200" height="16" rx="3" fill="#22c55e"/>
+  <text x="282" y="62" fill="#adbac7" font-size="11">100</text>
+  <text x="68" y="92" text-anchor="end" fill="#768390" font-size="11">Groq</text>
+  <rect x="76" y="79" width="186" height="16" rx="3" fill="#22c55e"/>
+  <text x="268" y="92" fill="#adbac7" font-size="11">93</text>
+  <text x="68" y="122" text-anchor="end" fill="#768390" font-size="11">Together</text>
+  <rect x="76" y="109" width="178" height="16" rx="3" fill="#3b82f6"/>
+  <text x="260" y="122" fill="#adbac7" font-size="11">89</text>
+  <text x="68" y="152" text-anchor="end" fill="#768390" font-size="11">OpenAI</text>
+  <rect x="76" y="139" width="172" height="16" rx="3" fill="#3b82f6"/>
+  <text x="254" y="152" fill="#adbac7" font-size="11">86</text>
+  <text x="160" y="174" text-anchor="middle" fill="#444" font-size="9" data-i18n="report.chart.footer">· · · 전체 27개 서비스 보기 → reports.ai-watch.dev</text>
 </svg>
   </div>
   <a href="${reportUrl}" class="report-link" target="_blank" rel="noopener noreferrer" onclick="gtag('event','click_reports',{location:'landing_report',source:'intro'})">
@@ -1153,7 +1155,7 @@ const i18n = {
     'how.4.title': 'Report', 'how.4.desc': 'Monthly uptime trends · incident statistics report',
     'cta.title': 'Check it out now', 'cta.sub': 'Completely free · No installation · Discord/Slack alerts included', 'cta.btn1': 'Check for Outages Now →', 'cta.btn2': 'Set Up Alerts',
     'alert.title': 'Discord & Slack alerts', 'alert.sub': 'Instant incident alerts with AI analysis and fallback recommendations. Free.',
-    'report.title': 'Monthly AI Reliability Report', 'report.link': 'View All Reports →', 'report.sub': 'AIWatch Score rankings, incident summaries, official uptime, notable outage analysis, and provider recommendations — all in one monthly report for 27 services.', 'ai.title': 'AI analyzes every incident', 'ai.sub': 'One step beyond status monitoring — Claude Sonnet instantly analyzes incident patterns, estimated recovery time, and impact scope.',
+    'report.title': 'Monthly AI Reliability Report', 'report.link': 'View All Reports →', 'report.sub': 'AIWatch Score rankings, incident summaries, official uptime, notable outage analysis, and provider recommendations — all in one monthly report for 27 services.', 'report.chart.footer': '· · · View all 27 services → reports.ai-watch.dev', 'ai.title': 'AI analyzes every incident', 'ai.sub': 'One step beyond status monitoring — Claude Sonnet instantly analyzes incident patterns, estimated recovery time, and impact scope.',
     'footer.report': 'Monthly Report', 'footer.alert': 'Alert Settings'
   }
 };
