@@ -126,7 +126,7 @@ describe('buildGroupedFallbackText', () => {
 
   it('returns multi-category fallback for grouped incident', () => {
     const text = buildGroupedFallbackText(['claude', 'claudeai', 'claude-code'], services)
-    expect(text).toContain('LLM:')
+    expect(text).toContain('API:')
     expect(text).toContain('OpenAI API (Score 86)')
     expect(text).toContain('AI Apps:')
     expect(text).toContain('ChatGPT')
@@ -136,8 +136,8 @@ describe('buildGroupedFallbackText', () => {
 
   it('deduplicates tier groups', () => {
     const text = buildGroupedFallbackText(['claude', 'claudeai'], services)
-    const llmMatches = text.match(/LLM:/g)
-    expect(llmMatches).toHaveLength(1)
+    const apiMatches = text.match(/API:/g)
+    expect(apiMatches).toHaveLength(1)
   })
 
   it('skips excluded services', () => {
@@ -154,7 +154,7 @@ describe('buildGroupedFallbackText', () => {
 
   it('returns single tier group when only one affected', () => {
     const text = buildGroupedFallbackText(['claude'], services)
-    expect(text).toContain('LLM:')
+    expect(text).toContain('API:')
     expect(text).not.toContain('AI Apps:')
     expect(text).not.toContain('Coding Agent:')
   })

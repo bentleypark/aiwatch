@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run dev        # Start frontend dev server (localhost:5173)
+npm run dev        # Start frontend dev server (localhost:5173) — dashboard
 npm run dev:worker # Start Worker dev server (localhost:8788)
 npm run dev:all    # Start both simultaneously
 npm run build      # Production build → dist/
@@ -17,6 +17,17 @@ npm run lint       # Run ESLint
 npm test           # Run Playwright E2E tests
 npm run test:worker # Run Worker unit tests (vitest)
 ```
+
+### Local verification by page type
+
+| Page | Command | URL |
+|------|---------|-----|
+| **Dashboard** (SPA) | `npm run dev` | `http://localhost:5173` |
+| **Landing page** (`/intro`) | `npx vercel dev --listen 3333 --yes` | `http://localhost:3333/intro` |
+| **Is X Down** (`/is-*-down`) | `npx vercel dev --listen 3333 --yes` | `http://localhost:3333/is-claude-down` |
+| **Worker API** | `npx wrangler dev --config worker/wrangler.toml --port 8788` | `http://localhost:8788/api/status` |
+
+> **Note**: Dashboard reads Worker API from `VITE_API_URL` in `.env` (default: `localhost:8788`). Run Worker alongside dashboard for live data. Landing page and Is X Down pages are Vercel Edge Functions — use `vercel dev`, not Vite.
 
 ## Development Workflow
 
@@ -30,7 +41,7 @@ npm run test:worker # Run Worker unit tests (vitest)
    - Identify **every** difference (spacing, colors, fonts, layout, icons, text)
    - List differences explicitly before writing any code
 2. **Code** — implement the feature or fix
-2.5. **Local verify** — start dev server (`npm run dev`) and let the user confirm in browser before proceeding. For Worker changes, also start `npx wrangler dev`. Never skip this step.
+2.5. **Local verify** — start the appropriate dev server and let the user confirm in browser before proceeding. See "Local verification by page type" table above for which command to use. Never skip this step.
 3. **Build + Test** — based on change scope:
    - **Frontend changes** (`src/`): `npm run build` + `npm test` (Playwright)
    - **Backend changes** (`worker/`): `npx wrangler deploy --config worker/wrangler.toml --dry-run` + `npm run test:worker` (Vitest)

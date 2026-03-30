@@ -565,8 +565,8 @@ export function renderLandingPage(opts: LandingOptions): string {
           <span class="flow-tag ft-blue">SUGGESTED</span>
         </div>
         <div class="flow-body">
-          <div class="flow-fallback-row"><strong>Cohere API</strong><span class="flow-score">Score 100</span></div>
-          <div class="flow-fallback-row"><strong>DeepSeek API</strong><span class="flow-score">Score 100</span></div>
+          <div class="flow-fallback-row"><strong>OpenAI API</strong><span class="flow-score">Score 88</span></div>
+          <div class="flow-fallback-row"><strong>Gemini API</strong><span class="flow-score">Score 78</span></div>
         </div>
       </div>
     </div>
@@ -627,7 +627,7 @@ export function renderLandingPage(opts: LandingOptions): string {
           👉 <span style="color:var(--blue);cursor:pointer;">View incident details</span>
         </div>
         <div style="font-size:11px;color:var(--text2);font-family:var(--font-mono);margin-top:4px;">
-          Suggested fallback: <span style="color:var(--text2);">API → </span><span style="color:var(--green);">Cohere API (100)</span>, <span style="color:var(--green);">DeepSeek API (100)</span>
+          Suggested fallback: <span style="color:var(--text2);">API → </span><span style="color:var(--green);">OpenAI API (88)</span>, <span style="color:var(--green);">Gemini API (78)</span>
         </div>
       </div>
       <!-- Section Header + Filter -->

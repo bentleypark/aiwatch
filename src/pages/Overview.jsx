@@ -363,7 +363,7 @@ function ActionBanner({ services, setPage, t }) {
       return true
     })
     if (candidates.length === 0) continue
-    const label = tierLabel || CATEGORY_LABEL[svc.category] || svc.category
+    const label = CATEGORY_LABEL[svc.category] || svc.category
     categoryGroups.push({ category: svc.category, label, items: candidates.slice(0, perGroup) })
   }
 
