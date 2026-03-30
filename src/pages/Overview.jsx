@@ -85,7 +85,7 @@ function HistoryBars({ history30d, compact }) {
   )
 }
 
-function ServiceCard({ service, index, onClick, t }) {
+function ServiceCard({ service, index, onClick, t, isRecovered }) {
   const incidentCount = (service.incidents ?? []).filter((i) => i.status !== 'resolved').length
   const hasUptime = service.uptime30d != null
   const uptimeColor = !hasUptime ? 'text-[var(--text2)]' : service.uptime30d >= 99 ? 'text-[var(--green)]' : service.uptime30d >= 97 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
@@ -117,7 +117,10 @@ function ServiceCard({ service, index, onClick, t }) {
               {scoreStr && <>{' · '}{scoreStr}</>}
             </span>
           </div>
-          <StatusPill status={service.status} />
+          <div className="flex items-center gap-1.5">
+            {isRecovered && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
+            <StatusPill status={service.status} />
+          </div>
         </div>
         <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact)} compact />
       </div>
@@ -129,7 +132,10 @@ function ServiceCard({ service, index, onClick, t }) {
             <div className="text-[13px] font-medium text-[var(--text0)]" style={{ marginBottom: '2px' }}>{service.name}</div>
             <div className="mono text-[10px] text-[var(--text2)]">{service.provider}</div>
           </div>
-          <StatusPill status={service.status} />
+          <div className="flex items-center gap-1.5">
+            {isRecovered && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
+            <StatusPill status={service.status} />
+          </div>
         </div>
 
         <div className="grid grid-cols-3" style={{ gap: '6px', marginBottom: '10px', textAlign: 'center' }}>
@@ -423,7 +429,7 @@ function ActionBanner({ services, setPage, t }) {
 export default function Overview() {
   const { t, lang } = useLang()
   const { setPage, categoryFilter, setCategoryFilter } = usePage()
-  const { services: allServices, loading, error, lastUpdated, refresh } = usePolling()
+  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered } = usePolling()
   const { settings } = useSettings()
   const services = allServices.filter((s) => settings.enabledServices.includes(s.id))
   const [filter, setFilter] = useState('all')
@@ -504,6 +510,28 @@ export default function Overview() {
       {/* ── Action Banner (outage fallback) ── */}
       <ActionBanner services={services} setPage={setPage} t={t} />
 
+      {/* ── Recently Resolved Banner ── */}
+      {recentlyRecovered.length > 0 && (
+        <div className="rounded-lg border" style={{ borderColor: 'var(--blue)', background: 'var(--blue-dim)', padding: '12px 16px' }}>
+          <div className="flex items-center gap-2 flex-wrap text-[12px]">
+            <span style={{ color: 'var(--blue)' }}>✓</span>
+            <span className="text-[var(--text0)] font-medium">
+              {t('overview.recentlyResolved')}
+            </span>
+            <span className="text-[var(--text1)]">
+              {recentlyRecovered.map(id => services.find(s => s.id === id)?.name).filter(Boolean).join(', ')}
+            </span>
+            <span
+              className="mono text-[10px] cursor-pointer hover:underline"
+              style={{ color: 'var(--blue)' }}
+              onClick={() => window.dispatchEvent(new CustomEvent('open-analysis'))}
+            >
+              🤖 {t('overview.seeAnalysis')}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* ── Summary Stats ── */}
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>
         <StatCard index={0} value={operationalCount} sub={t('overview.stats.operational')} labelKey="overview.stats.operational" colorClass="text-[var(--green)]" t={t} />
@@ -532,6 +560,7 @@ export default function Overview() {
               service={svc}
               index={i}
               t={t}
+              isRecovered={recentlyRecovered.includes(svc.id)}
               onClick={() => { trackEvent('select_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }) }}
             />
           ))}
@@ -554,6 +583,7 @@ export default function Overview() {
                 service={svc}
                 index={i}
                 t={t}
+                isRecovered={recentlyRecovered.includes(svc.id)}
                 onClick={() => { trackEvent('select_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }) }}
               />
             ))}

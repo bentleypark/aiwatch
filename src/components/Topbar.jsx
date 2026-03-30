@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { usePage } from '../utils/pageContext'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
@@ -37,11 +37,18 @@ export default function Topbar({ onMenuToggle }) {
   const stars = useGitHubStars()
   const isSettings = page.name === 'settings'
   const [showAnalysis, setShowAnalysis] = useState(false)
-  // Only show Analyze button as active when there are analyses for services with active incidents
+  // Show Analyze button when there are active incident analyses OR recently recovered analyses
   const hasAnalysis = Object.entries(aiAnalysis ?? {}).some(([svcId, analysis]) => {
+    if (analysis.resolvedAt) return true
     const svc = services.find(s => s.id === svcId)
     return svc && (svc.incidents ?? []).some(i => i.status !== 'resolved' && i.id === analysis.incidentId)
   })
+
+  useEffect(() => {
+    const handler = () => { if (hasAnalysis) setShowAnalysis(true) }
+    window.addEventListener('open-analysis', handler)
+    return () => window.removeEventListener('open-analysis', handler)
+  }, [hasAnalysis])
 
   const handleRefresh = useCallback(() => {
     if (refreshing) return

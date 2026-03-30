@@ -66,6 +66,10 @@ const en = {
   'overview.banner.degradedCount': 'Degraded ({n}):',
   'overview.banner.healthy': 'Healthy alternatives:',
   'overview.card.incidents.compact': ' inc',
+  'overview.recovered': 'Resolved',
+  'overview.recentlyResolved': 'Recently Resolved',
+  'overview.seeAnalysis': 'See details in Analyze',
+  'analysis.recoveredAt': 'Recovered',
   // Empty States
   'empty.issues.title': 'No Issues',
   'empty.issues.desc': 'All services are operating normally',

@@ -10,6 +10,7 @@ export interface AIAnalysisResult {
   affectedScope: string[]
   analyzedAt: string
   incidentId: string
+  resolvedAt?: string
 }
 
 /**

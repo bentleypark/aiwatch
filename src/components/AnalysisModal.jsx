@@ -65,14 +65,17 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
               : svcs.some(s => s.status !== 'operational') ? 'degraded' : 'operational'
             const isAllResolved = svcs.every(s => s.status === 'operational')
             const hasActiveInc = svcs.some(s => (s.incidents ?? []).some(i => i.status !== 'resolved'))
+            const isRecentlyRecovered = !!analysis.resolvedAt
 
             return (
-              <div key={svcIds.join(',')} className="bg-[var(--bg2)] rounded-lg" style={{ padding: '12px 14px', marginBottom: '10px', opacity: isAllResolved && !hasActiveInc ? 0.6 : 1 }}>
+              <div key={svcIds.join(',')} className="bg-[var(--bg2)] rounded-lg" style={{ padding: '12px 14px', marginBottom: '10px', opacity: isAllResolved && !hasActiveInc && !isRecentlyRecovered ? 0.6 : 1 }}>
                 <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: '8px' }}>
                   <span className="w-[6px] h-[6px] rounded-full" style={{ background: worstStatus === 'operational' ? 'var(--green)' : worstStatus === 'down' ? 'var(--red)' : 'var(--amber)' }} />
                   <span className="text-[13px] font-medium text-[var(--text0)]">{svcs.map(s => s.name).join(', ')}</span>
-                  {isAllResolved && !hasActiveInc && (
-                    <span className="mono text-[9px] px-1.5 py-0.5 rounded bg-[var(--status-bg-green)] text-[var(--green)]">Resolved</span>
+                  {(isRecentlyRecovered || (isAllResolved && !hasActiveInc)) && (
+                    <span className="mono text-[9px] rounded" style={{ color: 'var(--green)', background: 'var(--status-bg-green)', padding: '3px 8px', display: 'inline-block' }}>
+                      Resolved
+                    </span>
                   )}
                 </div>
                 <p className="text-[12px] text-[var(--text1)]" style={{ lineHeight: 1.6, marginBottom: '8px' }}>
@@ -86,6 +89,7 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                   {analysis.affectedScope?.length > 0 && (
                     <span>📡 <strong style={{ color: 'var(--text1)' }}>{lang === 'ko' ? '영향 범위' : 'Scope'}:</strong> {analysis.affectedScope.join(', ')}</span>
                   )}
+                  {isRecentlyRecovered && <span>✅ {t('analysis.recoveredAt')}: {timeAgo(analysis.resolvedAt, lang)}</span>}
                   <span>🕐 {timeAgo(analysis.analyzedAt, lang)}</span>
                 </div>
               </div>

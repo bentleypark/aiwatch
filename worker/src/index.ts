@@ -370,10 +370,19 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       const svcId = alert.key.split(':').pop()!
       await kvDel(env.STATUS_CACHE, `alerted:recovered:${svcId}`)
     }
-    // Clean up AI analysis on recovery
+    // Mark AI analysis as resolved (keep for 2h instead of deleting)
     if (isRecoveryAlert) {
       const svcId = alert.key.replace('alerted:recovered:', '')
-      await kvDel(env.STATUS_CACHE, `ai:analysis:${svcId}`)
+      const analysisRaw = await env.STATUS_CACHE.get(`ai:analysis:${svcId}`).catch(() => null)
+      if (analysisRaw) {
+        try {
+          const analysis = JSON.parse(analysisRaw) as AIAnalysisResult
+          if (!analysis.resolvedAt) {
+            analysis.resolvedAt = new Date().toISOString()
+            await kvPut(env.STATUS_CACHE, `ai:analysis:${svcId}`, JSON.stringify(analysis), { expirationTtl: 7200 })
+          }
+        } catch { await kvDel(env.STATUS_CACHE, `ai:analysis:${svcId}`) }
+      }
     }
 
     // For new incidents: run AI analysis with 8s timeout to avoid blocking alert delivery
@@ -1018,6 +1027,7 @@ export default {
       if (cached) {
         // Read AI analysis + latency 24h in parallel
         const aiAnalysis: Record<string, AIAnalysisResult> = {}
+        const recentlyRecovered: string[] = []
         const withActiveInc = cached.services.filter(s =>
           (s.incidents ?? []).some(i => i.status !== 'resolved')
         )
@@ -1030,6 +1040,20 @@ export default {
               const hasActiveInc = (svc.incidents ?? []).some(i => i.status !== 'resolved')
               if (hasActiveInc) aiAnalysis[svc.id] = parsed
             } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, err instanceof Error ? err.message : err) }
+          }
+        }))
+        // Recently recovered: operational services with resolved analysis
+        const operationalCached = cached.services.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
+        await Promise.all(operationalCached.map(async (svc) => {
+          const raw = await env.STATUS_CACHE!.get(`ai:analysis:${svc.id}`).catch(() => null)
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw) as AIAnalysisResult
+              if (parsed.resolvedAt) {
+                aiAnalysis[svc.id] = parsed
+                recentlyRecovered.push(svc.id)
+              }
+            } catch { /* ignore */ }
           }
         }))
         let latency24h: Array<{ t: string; data: Record<string, number> }> = []
@@ -1050,6 +1074,7 @@ export default {
           cached: true,
           latency24h,
           ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
+          ...(recentlyRecovered.length > 0 ? { recentlyRecovered } : {}),
         }), {
           status: 200,
           headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
@@ -1121,9 +1146,11 @@ export default {
         return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, ...(detectedAt ? { detectedAt } : {}) }
       })
 
-      // Read AI analysis from KV for services with active (non-resolved) incidents
+      // Read AI analysis from KV — active incidents + recently resolved
       const aiAnalysis: Record<string, AIAnalysisResult> = {}
+      const recentlyRecovered: string[] = []
       if (env.STATUS_CACHE) {
+        // Active incidents
         const withActiveInc = servicesWithScore.filter(s =>
           (s.incidents ?? []).some(i => i.status !== 'resolved')
         )
@@ -1132,10 +1159,23 @@ export default {
           if (raw) {
             try {
               const parsed = JSON.parse(raw) as AIAnalysisResult
-              // Include if service has any active incident (analysis is service-level, not incident-specific)
               const hasActiveInc = (svc.incidents ?? []).some(i => i.status !== 'resolved')
               if (hasActiveInc) aiAnalysis[svc.id] = parsed
             } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, err instanceof Error ? err.message : err) }
+          }
+        }))
+        // Recently recovered: services that are now operational but have resolved analysis in KV
+        const operationalSvcs = servicesWithScore.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
+        await Promise.all(operationalSvcs.map(async (svc) => {
+          const raw = await env.STATUS_CACHE!.get(`ai:analysis:${svc.id}`).catch(() => null)
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw) as AIAnalysisResult
+              if (parsed.resolvedAt) {
+                aiAnalysis[svc.id] = parsed
+                recentlyRecovered.push(svc.id)
+              }
+            } catch { /* ignore parse errors */ }
           }
         }))
       }
@@ -1146,6 +1186,7 @@ export default {
         latency24h,
         ...(probe24h.length > 0 ? { probe24h } : {}),
         ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
+        ...(recentlyRecovered.length > 0 ? { recentlyRecovered } : {}),
       }), {
         status: 200,
         headers: {

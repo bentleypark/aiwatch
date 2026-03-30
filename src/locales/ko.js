@@ -66,6 +66,10 @@ const ko = {
   'overview.banner.degradedCount': '성능 저하 ({n}):',
   'overview.banner.healthy': '정상 대안:',
   'overview.card.incidents.compact': '건',
+  'overview.recovered': 'Resolved',
+  'overview.recentlyResolved': '최근 복구됨',
+  'overview.seeAnalysis': '분석 상세 보기',
+  'analysis.recoveredAt': '복구 시각',
   // Empty States
   'empty.issues.title': '현재 이슈 없음',
   'empty.issues.desc': '모든 서비스가 정상 운영 중입니다',

@@ -457,7 +457,9 @@ const MOCK_SERVICES = [
 // Mock AI analysis — must reference an incidentId matching an unresolved incident in MOCK_SERVICES
 const MOCK_AI_ANALYSIS = {
   openai: { summary: 'Chat endpoint latency elevated due to increased traffic.', estimatedRecovery: '~1h', affectedScope: ['Chat API'], analyzedAt: new Date().toISOString(), incidentId: 'oi-2' },
+  together: { summary: 'Moonshot Kimi K2.5 model experienced a brief outage affecting inference endpoints. Service has been restored.', estimatedRecovery: 'Resolved', affectedScope: ['Kimi K2.5 inference', 'Model endpoints'], analyzedAt: new Date(Date.now() - 30 * 60000).toISOString(), incidentId: 'together-mock-1', resolvedAt: new Date(Date.now() - 10 * 60000).toISOString() },
 }
+const MOCK_RECENTLY_RECOVERED = ['together']
 
 // ── Merge live Worker data with mock fallback ──
 // Worker provides: id, name, provider, category, status, latency, incidents
@@ -514,6 +516,7 @@ function usePollingInternal() {
     lastUpdated: null,
     latency24h: [],
     aiAnalysis: {},
+    recentlyRecovered: [],
   })
   const cancelledRef = useRef(false)
   const controllerRef = useRef(null)
@@ -588,6 +591,7 @@ function usePollingInternal() {
           lastUpdated: new Date(data.lastUpdated),
           latency24h: data.latency24h ?? [],
           aiAnalysis: data.aiAnalysis ?? {},
+          recentlyRecovered: data.recentlyRecovered ?? [],
         })
       }
     } catch (err) {
@@ -641,6 +645,7 @@ function usePollingInternal() {
             error: null,
             lastUpdated: new Date(),
             aiAnalysis: MOCK_AI_ANALYSIS,
+            recentlyRecovered: MOCK_RECENTLY_RECOVERED,
           })
         } else {
           // Real error (prod, or non-network error in dev) — show offline UI
