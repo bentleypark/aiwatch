@@ -68,58 +68,68 @@ npm run test:worker # Run Worker unit tests (vitest)
 When adding a new monitored service, update ALL of the following:
 
 #### Worker (backend)
-1. `worker/src/services.ts` — add `ServiceConfig` entry (id, name, provider, category, statusUrl, apiUrl, parser-specific fields)
+1. `worker/src/services.ts` — add `ServiceConfig` entry at correct position in `SERVICES` array (determines API response order: LLM → voice → infra → apps → agents)
 2. `worker/src/probe.ts` — add `ProbeTarget` if API endpoint exists for RTT measurement
-3. `worker/src/fallback.ts` — add to `API_TIER` if LLM/API service, or remove from `EXCLUDE_FALLBACK` if fallback-eligible
-4. `worker/src/__tests__/` — update probe target count test, add service-specific tests if needed
+3. `worker/src/fallback.ts` — update ALL of:
+   - `EXCLUDE_FALLBACK` — remove if fallback-eligible
+   - `API_TIER` — add tier number (1=Major LLM, 2=LLM, 3=Infra, 4=Voice)
+   - `TIER_LABEL` — add label if new tier introduced
+   - `buildGroupedFallbackText` uses tier-based grouping — verify Discord alerts show correct labels
+4. `worker/src/__tests__/` — update probe target count test, fallback tests, add service-specific tests
 
 #### Frontend
-5. `src/utils/constants.js` — update ALL of the following arrays:
+5. `src/utils/constants.js` — update ALL of:
    - `API_SERVICE_IDS` — add new service ID
-   - `SERVICE_AND_APP_IDS` — add in correct display order (app → LLM → voice → inference → agent)
-   - `SERVICE_CATEGORIES` — add to the correct category filter (e.g., `llm`, `inference`)
-   - `EXCLUDE_FALLBACK` — update if applicable (keep in sync with `worker/src/fallback.ts`)
-6. `src/hooks/usePolling.js` — add mock entry to `MOCK_SERVICES` array at correct position (determines display order via `mergeWithMock`)
-7. `src/pages/ServiceDetails.jsx` — add `STATUS_URL` entry for the official status page link
-8. `src/pages/Overview.jsx` — add to `API_TIER` (keep in sync with `worker/src/fallback.ts`)
-9. `api/is-down.ts` — add to `API_TIER` + `EXCLUDE_FALLBACK` (keep in sync with `worker/src/fallback.ts`)
+   - `SERVICE_AND_APP_IDS` — add at correct display position (app → LLM → voice → inference → agent)
+   - `SERVICE_CATEGORIES` — add to correct category filter (e.g., `llm`, `inference`)
+   - `EXCLUDE_FALLBACK` — keep in sync with `worker/src/fallback.ts`
+6. `src/hooks/usePolling.js` — add mock entry to `MOCK_SERVICES` at correct position (determines display order via `mergeWithMock`)
+7. `src/hooks/useSettings.js` — new services auto-inserted at canonical position in `enabledServices` (no change needed, but verify logic works)
+8. `src/pages/ServiceDetails.jsx` — add `STATUS_URL` entry for official status page link
+9. `src/pages/Overview.jsx` — add to `API_TIER` + verify `TIER_LABEL` (keep in sync with `worker/src/fallback.ts`)
+10. `api/is-down.ts` — add to `API_TIER` + `EXCLUDE_FALLBACK` (keep in sync with `worker/src/fallback.ts`)
 
 #### Documentation — service count ("N AI services")
-6. `CLAUDE.md` — architecture section (service count, service list, category breakdown), KV schema comment
-7. `README.md` — service count, feature description, API endpoint comment
-8. `README.ko.md` — same as README.md (Korean)
-9. `.github/CONTRIBUTING.md` — if Project Structure section exists
+11. `CLAUDE.md` — architecture section: service count, service list, category breakdown, KV schema comment, probe count, fallback tier list
+12. `README.md` — service count, service table (add row), API Services header count, feature description, API endpoint comment
+13. `README.ko.md` — same as README.md (Korean)
+14. `.github/CONTRIBUTING.md` — if Project Structure section exists
 
 #### SEO & Meta tags
-10. `index.html` — `<meta name="description">`, `og:title`, `og:description`, `twitter:title`, `twitter:description`, JSON-LD description (~6 occurrences)
+15. `index.html` — `<meta name="description">`, `og:title`, `og:description`, `twitter:title`, `twitter:description`, JSON-LD (~6 occurrences)
 
 #### Landing page
-11. `api/intro/html-template.ts` — meta description, hero pill number, mock filter "All N", i18n strings KO/EN (~12 occurrences)
-12. `docs/aiwatch-landing.html` — same as intro template (design draft, ~12 occurrences)
+16. `api/intro/html-template.ts` — update ALL of:
+    - meta description
+    - hero pill number ("N AI Services")
+    - dashboard preview mock: services running count, "All N", "Operational N", "+ N more" (KO/EN)
+    - i18n strings KO/EN with service count (~12+ occurrences)
+17. `docs/aiwatch-landing.html` — same as intro template (design draft)
 
 #### Is X Down (if adding a dedicated page)
-13. `api/is-down.ts` — add service to `SERVICES` map
-14. `api/is-down/html-template.ts` — if needed
-15. `vercel.json` — add rewrite rule `/is-{service}-down`
-16. `public/sitemap.xml` — add URL entry
+18. `api/is-down.ts` — add service to `SERVICES` map
+19. `api/is-down/html-template.ts` — if needed
+20. `vercel.json` — add rewrite rule `/is-{service}-down`
+21. `public/sitemap.xml` — add URL entry
 
 #### Reports site (aiwatch-reports)
-17. `README.md` — service count, category breakdown
-18. `_config.yml` — description
-19. `_templates/monthly-report.md` — service count, category breakdown
-20. Current month report (e.g., `2026-03/index.md`) — service count, category breakdown
+22. `README.md` — service count, category breakdown (e.g., "N LLM APIs, N voice & inference")
+23. `_config.yml` — description
+24. `_templates/monthly-report.md` — service count, category breakdown
+25. Current month report (e.g., `2026-03/index.md`) — service count, category breakdown
+26. `index.md` — top-level index page
 
 #### Assets (after deploy)
-21. `docs/screenshot.png` — recapture desktop dashboard
-22. `docs/screenshot-mobile.png` — recapture mobile dashboard
-23. `public/og-intro.png` — regenerate if service count is baked in
-24. `docs/social-preview.png` — regenerate from og-intro.png
-25. GitHub Settings → Social preview — re-upload
+27. `public/og-intro.png` — regenerate (service count baked in image)
+28. `docs/social-preview.png` — regenerate from og-intro.png
+29. `docs/screenshot.png` — recapture desktop dashboard
+30. `docs/screenshot-mobile.png` — recapture mobile dashboard
+31. GitHub Settings → Social preview — re-upload
 
 #### Deployment
-26. `npx wrangler deploy --config worker/wrangler.toml --dry-run` — build check
-27. `npm run deploy:worker` — deploy after user approval
-28. `git push origin main` — Vercel auto-deploy for frontend
+32. `npx wrangler deploy --config worker/wrangler.toml --dry-run` — build check
+33. `npm run deploy:worker` — deploy after user approval
+34. `git push origin main` — Vercel auto-deploy for frontend
 
 ## Architecture
 
