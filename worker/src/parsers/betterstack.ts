@@ -199,33 +199,56 @@ export function parseBetterStackUptime(data: BetterStackIndex): number | null {
 
 /**
  * Extract daily impact from BetterStack status_history across all resources.
- * Aggregates worst status per day: downtime on any resource → that day is affected.
+ * Uses 2-pass aggregation to avoid worst-case bias: first collects per-day stats
+ * (max downtime + affected resource count), then classifies using combined criteria.
+ * Skips `not_monitored` status (not actual downtime).
  * Returns Record<YYYY-MM-DD, 'critical' | 'major' | 'minor'> for non-operational days.
  */
+const KNOWN_STATUSES = new Set(['operational', 'not_monitored', 'downtime', 'degraded', 'maintenance', 'under_maintenance', 'recovered'])
+
 export function parseBetterStackDailyImpact(data: BetterStackIndex): Record<string, DailyImpactLevel> | null {
   const resources = (data.included ?? []).filter(
     (r) => r.type === 'status_page_resource' && Array.isArray(r.attributes?.status_history)
   )
   if (resources.length === 0) return null
 
-  const dailyImpact: Record<string, DailyImpactLevel> = {}
-  const RANK: Record<string, number> = { minor: 1, major: 2, critical: 3 }
-
+  // Pass 1: collect per-day stats across all resources (per-day resource count for accurate ratios)
+  const dayStats: Record<string, { maxDownSec: number; affectedCount: number; totalForDay: number }> = {}
   for (const resource of resources) {
     for (const day of resource.attributes!.status_history!) {
-      if (day.status === 'operational') continue
-      // Classify severity by downtime duration (maintenance-only with 0 downtime → minor)
-      const downSec = day.downtime_duration ?? 0
-      let impact: DailyImpactLevel
-      if (downSec >= 3600) impact = 'critical'     // 1h+ → critical (red)
-      else if (downSec >= 600) impact = 'major'     // 10min+ → major (orange)
-      else impact = 'minor'                          // <10min → minor (yellow)
-
-      // Escalate: keep worst impact per day
-      if ((RANK[impact] ?? 0) > (RANK[dailyImpact[day.day]] ?? 0)) {
-        dailyImpact[day.day] = impact
+      if (!dayStats[day.day]) {
+        dayStats[day.day] = { maxDownSec: 0, affectedCount: 0, totalForDay: 0 }
       }
+      const stat = dayStats[day.day]
+      if (day.status === 'not_monitored') continue
+      if (!KNOWN_STATUSES.has(day.status)) {
+        console.warn(`[parseBetterStackDailyImpact] unknown status "${day.status}" on ${day.day} — treating as downtime`)
+      }
+      stat.totalForDay++
+      if (day.status === 'operational') continue
+      // Non-operational with actual downtime (maintenance with 0 downtime is intentionally skipped)
+      const downSec = day.downtime_duration ?? 0
+      if (downSec === 0) continue
+      if (downSec > stat.maxDownSec) stat.maxDownSec = downSec
+      stat.affectedCount++
     }
+  }
+
+  // Pass 2: classify using combined thresholds (duration + affected ratio)
+  const dailyImpact: Record<string, DailyImpactLevel> = {}
+  for (const [day, stat] of Object.entries(dayStats)) {
+    const affectedRatio = stat.totalForDay > 0 ? stat.affectedCount / stat.totalForDay : 0
+    let impact: DailyImpactLevel
+    if (stat.maxDownSec >= 14400 || affectedRatio >= 0.25) {
+      impact = 'critical'   // 4h+ single resource OR 25%+ resources affected
+    } else if (stat.maxDownSec >= 3600 || affectedRatio >= 0.12) {
+      impact = 'major'      // 1h+ single resource OR 12%+ resources affected
+    } else if (stat.maxDownSec >= 600) {
+      impact = 'minor'      // 10min+ single resource
+    } else {
+      continue              // negligible downtime, skip
+    }
+    dailyImpact[day] = impact
   }
 
   return Object.keys(dailyImpact).length > 0 ? dailyImpact : null

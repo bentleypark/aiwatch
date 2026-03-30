@@ -238,6 +238,16 @@ describe('parseBetterStackUptime', () => {
 })
 
 describe('parseBetterStackDailyImpact', () => {
+  // Helper: generate N resources, each with the same status_history for a day
+  function makeResources(count: number, day: string, status: string, downtime: number) {
+    return Array.from({ length: count }, () => ({
+      type: 'status_page_resource',
+      attributes: {
+        status_history: [{ day, status, downtime_duration: downtime, maintenance_duration: 0 }],
+      },
+    }))
+  }
+
   it('returns null when no resources have status_history', () => {
     expect(parseBetterStackDailyImpact({})).toBeNull()
     expect(parseBetterStackDailyImpact({ included: [] })).toBeNull()
@@ -261,50 +271,93 @@ describe('parseBetterStackDailyImpact', () => {
     expect(parseBetterStackDailyImpact(data)).toBeNull()
   })
 
-  it('classifies downtime by duration: critical (1h+), major (10min+), minor (<10min)', () => {
+  it('skips not_monitored status (not actual downtime)', () => {
     const data = {
       included: [{
         type: 'status_page_resource',
         attributes: {
           status_history: [
-            { day: '2026-03-23', status: 'downtime', downtime_duration: 7200, maintenance_duration: 0 },   // 2h → critical
-            { day: '2026-03-24', status: 'downtime', downtime_duration: 1200, maintenance_duration: 0 },   // 20min → major
-            { day: '2026-03-25', status: 'downtime', downtime_duration: 300, maintenance_duration: 0 },    // 5min → minor
+            { day: '2026-03-25', status: 'not_monitored', downtime_duration: 0, maintenance_duration: 0 },
           ],
         },
       }],
     }
-    const result = parseBetterStackDailyImpact(data)
-    expect(result).toEqual({
-      '2026-03-23': 'critical',
-      '2026-03-24': 'major',
-      '2026-03-25': 'minor',
-    })
+    expect(parseBetterStackDailyImpact(data)).toBeNull()
   })
 
-  it('escalates to worst impact when multiple resources have downtime on same day', () => {
+  // --- Duration-based thresholds (single resource) ---
+
+  it('critical when single resource has 4h+ downtime', () => {
     const data = {
-      included: [
-        {
-          type: 'status_page_resource',
-          attributes: {
-            status_history: [
-              { day: '2026-03-25', status: 'downtime', downtime_duration: 300, maintenance_duration: 0 }, // minor
-            ],
-          },
+      included: [{
+        type: 'status_page_resource',
+        attributes: {
+          status_history: [
+            { day: '2026-03-25', status: 'downtime', downtime_duration: 14400, maintenance_duration: 0 },
+          ],
         },
-        {
-          type: 'status_page_resource',
-          attributes: {
-            status_history: [
-              { day: '2026-03-25', status: 'downtime', downtime_duration: 7200, maintenance_duration: 0 }, // critical
-            ],
-          },
-        },
-      ],
+      }],
     }
-    const result = parseBetterStackDailyImpact(data)
-    expect(result).toEqual({ '2026-03-25': 'critical' })
+    expect(parseBetterStackDailyImpact(data)).toEqual({ '2026-03-25': 'critical' })
+  })
+
+  it('major (not critical) when 1 of many resources has 1h-4h downtime', () => {
+    // 1 of 32 resources with 1h downtime: 3% ratio (below 12%), 3600s (below 14400s) → major
+    const affected = makeResources(1, '2026-03-25', 'downtime', 3600)
+    const healthy = makeResources(31, '2026-03-25', 'operational', 0)
+    expect(parseBetterStackDailyImpact({ included: [...affected, ...healthy] }))
+      .toEqual({ '2026-03-25': 'major' })
+  })
+
+  it('minor when 1 of many resources has 10min-1h downtime', () => {
+    // 1 of 32 resources with 20min downtime: 3% ratio, 1200s → minor
+    const affected = makeResources(1, '2026-03-25', 'downtime', 1200)
+    const healthy = makeResources(31, '2026-03-25', 'operational', 0)
+    expect(parseBetterStackDailyImpact({ included: [...affected, ...healthy] }))
+      .toEqual({ '2026-03-25': 'minor' })
+  })
+
+  it('skips negligible downtime (<10min) when few resources affected', () => {
+    // 1 of 32 resources with 5min downtime: 3% ratio, 300s → negligible
+    const affected = makeResources(1, '2026-03-25', 'downtime', 300)
+    const healthy = makeResources(31, '2026-03-25', 'operational', 0)
+    expect(parseBetterStackDailyImpact({ included: [...affected, ...healthy] })).toBeNull()
+  })
+
+  // --- Affected resource ratio thresholds ---
+
+  it('critical when 25%+ resources are affected (even with short downtime)', () => {
+    // 8 of 32 resources (25%) have 15min downtime each
+    const affected = makeResources(8, '2026-03-25', 'downtime', 900)
+    const healthy = makeResources(24, '2026-03-25', 'operational', 0)
+    const data = { included: [...affected, ...healthy] }
+    expect(parseBetterStackDailyImpact(data)).toEqual({ '2026-03-25': 'critical' })
+  })
+
+  it('major when 12-25% resources are affected', () => {
+    // 4 of 32 resources (12.5%) have 15min downtime each
+    const affected = makeResources(4, '2026-03-25', 'downtime', 900)
+    const healthy = makeResources(28, '2026-03-25', 'operational', 0)
+    const data = { included: [...affected, ...healthy] }
+    expect(parseBetterStackDailyImpact(data)).toEqual({ '2026-03-25': 'major' })
+  })
+
+  it('minor when few resources have moderate downtime (below ratio thresholds)', () => {
+    // 1 of 32 resources has 20min downtime (3% affected, below 12%)
+    const affected = makeResources(1, '2026-03-25', 'downtime', 1200)
+    const healthy = makeResources(31, '2026-03-25', 'operational', 0)
+    const data = { included: [...affected, ...healthy] }
+    expect(parseBetterStackDailyImpact(data)).toEqual({ '2026-03-25': 'minor' })
+  })
+
+  // --- Combined: old worst-case bias scenario now correctly handled ---
+
+  it('does not over-escalate: 1 of 32 with 2h downtime → major (not critical)', () => {
+    // Old behavior: critical (1h+ on any resource). New: major (2h < 4h threshold, 3% ratio)
+    const affected = makeResources(1, '2026-03-25', 'downtime', 7200)
+    const healthy = makeResources(31, '2026-03-25', 'operational', 0)
+    const data = { included: [...affected, ...healthy] }
+    expect(parseBetterStackDailyImpact(data)).toEqual({ '2026-03-25': 'major' })
   })
 
   it('ignores non-resource entries in included array', () => {
@@ -315,17 +368,49 @@ describe('parseBetterStackDailyImpact', () => {
           type: 'status_page_resource',
           attributes: {
             status_history: [
-              { day: '2026-03-25', status: 'downtime', downtime_duration: 3600, maintenance_duration: 0 },
+              { day: '2026-03-25', status: 'downtime', downtime_duration: 14400, maintenance_duration: 0 },
             ],
           },
         },
       ],
     }
-    const result = parseBetterStackDailyImpact(data)
-    expect(result).toEqual({ '2026-03-25': 'critical' })
+    expect(parseBetterStackDailyImpact(data)).toEqual({ '2026-03-25': 'critical' })
   })
 
-  it('classifies maintenance-only day (0 downtime) as minor', () => {
+  it('handles missing downtime_duration (undefined) gracefully', () => {
+    const data = {
+      included: [{
+        type: 'status_page_resource',
+        attributes: {
+          status_history: [
+            { day: '2026-03-25', status: 'downtime', maintenance_duration: 0 } as any, // no downtime_duration
+          ],
+        },
+      }],
+    }
+    // downtime_duration ?? 0 → 0 → skipped as negligible
+    expect(parseBetterStackDailyImpact(data)).toBeNull()
+  })
+
+  it('warns on unknown status values', () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const data = {
+      included: [{
+        type: 'status_page_resource',
+        attributes: {
+          status_history: [
+            { day: '2026-03-25', status: 'new_future_status', downtime_duration: 14400, maintenance_duration: 0 },
+          ],
+        },
+      }],
+    }
+    const result = parseBetterStackDailyImpact(data)
+    expect(result).toEqual({ '2026-03-25': 'critical' })
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('unknown status "new_future_status"'))
+    spy.mockRestore()
+  })
+
+  it('maintenance-only with 0 downtime is skipped (negligible)', () => {
     const data = {
       included: [{
         type: 'status_page_resource',
@@ -336,7 +421,31 @@ describe('parseBetterStackDailyImpact', () => {
         },
       }],
     }
-    const result = parseBetterStackDailyImpact(data)
-    expect(result).toEqual({ '2026-03-25': 'minor' })
+    // 0 downtime, 0% ratio → skipped (negligible)
+    expect(parseBetterStackDailyImpact(data)).toBeNull()
+  })
+
+  it('multi-day history on same resources classifies correctly', () => {
+    const resources = Array.from({ length: 32 }, (_, i) => ({
+      type: 'status_page_resource',
+      attributes: {
+        status_history: [
+          // Day 1: 10 of 32 resources down (31%) → critical by ratio
+          { day: '2026-03-20', status: i < 10 ? 'downtime' : 'operational', downtime_duration: i < 10 ? 900 : 0, maintenance_duration: 0 },
+          // Day 2: 1 of 32 resources down 5h → critical by duration
+          { day: '2026-03-21', status: i === 0 ? 'downtime' : 'operational', downtime_duration: i === 0 ? 18000 : 0, maintenance_duration: 0 },
+          // Day 3: 1 of 32 resources down 30min → minor
+          { day: '2026-03-22', status: i === 0 ? 'downtime' : 'operational', downtime_duration: i === 0 ? 1800 : 0, maintenance_duration: 0 },
+          // Day 4: all operational
+          { day: '2026-03-23', status: 'operational', downtime_duration: 0, maintenance_duration: 0 },
+        ],
+      },
+    }))
+    const result = parseBetterStackDailyImpact({ included: resources })
+    expect(result).toEqual({
+      '2026-03-20': 'critical',  // 31% ratio
+      '2026-03-21': 'critical',  // 5h duration
+      '2026-03-22': 'minor',     // 30min, 3% ratio
+    })
   })
 })
