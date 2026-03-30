@@ -6,8 +6,23 @@ export interface ProbeSnapshot { t: string; data: Record<string, ProbeResult> }
 export interface ProbeTarget { id: string; url: string }
 
 export const PROBE_TARGETS: ProbeTarget[] = [
+  // API services — auth not required for RTT measurement (401/403/405 = server alive)
+  { id: 'claude', url: 'https://api.anthropic.com/v1/messages' },
+  { id: 'openai', url: 'https://api.openai.com/v1/models' },
   { id: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/models' },
   { id: 'mistral', url: 'https://api.mistral.ai/v1/models' },
+  { id: 'cohere', url: 'https://api.cohere.ai/v1/models' },
+  { id: 'groq', url: 'https://api.groq.com/openai/v1/models' },
+  { id: 'together', url: 'https://api.together.xyz/v1/models' },
+  { id: 'perplexity', url: 'https://api.perplexity.ai/chat/completions' },
+  { id: 'huggingface', url: 'https://huggingface.co/api/models?limit=1' },
+  { id: 'replicate', url: 'https://api.replicate.com/v1/models' },
+  { id: 'elevenlabs', url: 'https://api.elevenlabs.io/v1/voices' },
+  { id: 'xai', url: 'https://api.x.ai/v1/models' },
+  { id: 'deepseek', url: 'https://api.deepseek.com/v1/models' },
+  { id: 'openrouter', url: 'https://openrouter.ai/api/v1/models' },
+  { id: 'stability', url: 'https://api.stability.ai/v1/engines/list' },
+  // Not feasible: bedrock (no public endpoint), azureopenai (tenant-specific), pinecone (index-specific)
 ]
 
 /** Compute 5-minute aligned slot string from a Date */

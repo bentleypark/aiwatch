@@ -67,12 +67,35 @@ describe('failedProbe', () => {
 })
 
 describe('PROBE_TARGETS', () => {
-  it('has gemini and mistral as probe targets', () => {
-    expect(PROBE_TARGETS).toHaveLength(2)
-    expect(PROBE_TARGETS[0].id).toBe('gemini')
-    expect(PROBE_TARGETS[0].url).toContain('generativelanguage.googleapis.com')
-    expect(PROBE_TARGETS[1].id).toBe('mistral')
-    expect(PROBE_TARGETS[1].url).toContain('api.mistral.ai')
+  const EXPECTED_IDS = [
+    'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq', 'together',
+    'perplexity', 'huggingface', 'replicate', 'elevenlabs', 'xai', 'deepseek',
+    'openrouter', 'stability',
+  ]
+
+  it('has all 15 API service probe targets', () => {
+    expect(PROBE_TARGETS).toHaveLength(15)
+    const ids = PROBE_TARGETS.map((t) => t.id)
+    for (const expected of EXPECTED_IDS) {
+      expect(ids).toContain(expected)
+    }
+  })
+
+  it('all targets have valid HTTPS URLs', () => {
+    for (const target of PROBE_TARGETS) {
+      expect(target.id).toBeTruthy()
+      expect(target.url).toMatch(/^https:\/\//)
+    }
+  })
+
+  it('has no duplicate IDs', () => {
+    const ids = PROBE_TARGETS.map((t) => t.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('has no duplicate URLs', () => {
+    const urls = PROBE_TARGETS.map((t) => t.url)
+    expect(new Set(urls).size).toBe(urls.length)
   })
 })
 
@@ -295,5 +318,40 @@ describe('detectConsecutiveSpikes', () => {
 
   it('returns empty for empty snapshots', () => {
     expect(detectConsecutiveSpikes([], ['gemini'], 3)).toHaveLength(0)
+  })
+
+  it('detects spikes across many services independently', () => {
+    const serviceIds = ['claude', 'openai', 'gemini', 'groq', 'deepseek']
+    // 10 baseline snapshots: all services ~50ms
+    const snapshots: ProbeSnapshot[] = Array.from({ length: 10 }, (_, i) => ({
+      t: `2026-03-24T00:${String(i * 5).padStart(2, '0')}:00Z`,
+      data: Object.fromEntries(serviceIds.map(id => [id, { status: 401, rtt: 50 }])),
+    }))
+    // 3 spike snapshots: only claude and deepseek spike, others normal
+    for (let i = 0; i < 3; i++) {
+      snapshots.push({
+        t: `2026-03-24T01:${String(i * 5).padStart(2, '0')}:00Z`,
+        data: {
+          claude: { status: 405, rtt: 500 },
+          openai: { status: 401, rtt: 55 },
+          gemini: { status: 403, rtt: 48 },
+          groq: { status: 401, rtt: 52 },
+          deepseek: { status: 0, rtt: -1 },
+        },
+      })
+    }
+    const spikes = detectConsecutiveSpikes(snapshots, serviceIds, 3)
+    expect(spikes).toHaveLength(2)
+    const spikeIds = spikes.map(s => s.serviceId).sort()
+    expect(spikeIds).toEqual(['claude', 'deepseek'])
+  })
+
+  it('handles service with no data in snapshots', () => {
+    const snapshots: ProbeSnapshot[] = [
+      { t: '2026-03-24T01:00:00Z', data: { gemini: { status: 403, rtt: 50 } } },
+    ]
+    // 'stability' has no data in any snapshot
+    const spikes = detectConsecutiveSpikes(snapshots, ['gemini', 'stability'], 3)
+    expect(spikes).toHaveLength(0)
   })
 })
