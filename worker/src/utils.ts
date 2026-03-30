@@ -23,6 +23,26 @@ export interface KVLike {
   delete(key: string): Promise<void>
 }
 
+/** Safe KV write with error logging. Returns true on success, false on failure. */
+export async function kvPut(kv: KVLike | KVNamespace, key: string, value: string, opts?: { expirationTtl?: number }): Promise<boolean> {
+  try {
+    await kv.put(key, value, opts)
+    return true
+  } catch (err) {
+    console.warn('[kv] write failed:', key, err instanceof Error ? err.message : err)
+    return false
+  }
+}
+
+/** Safe KV delete with error logging. */
+export async function kvDel(kv: KVLike | KVNamespace, key: string): Promise<void> {
+  try {
+    await kv.delete(key)
+  } catch (err) {
+    console.warn('[kv] delete failed:', key, err instanceof Error ? err.message : err)
+  }
+}
+
 /**
  * Track consecutive RSS fetch failures per service.
  * Returns true if failure count has reached the threshold (service should be degraded).
@@ -34,7 +54,7 @@ export async function trackFetchFailure(kv: KVLike | undefined, svcId: string, t
   const count = parseInt(await kv.get(failKey).catch(() => null) ?? '0', 10) || 0
   const next = count + 1
   if (next <= threshold) {
-    await kv.put(failKey, String(next), { expirationTtl: 1800 }).catch(() => {})
+    await kvPut(kv, failKey, String(next), { expirationTtl: 1800 })
   }
   return next >= threshold
 }
@@ -46,7 +66,7 @@ export async function resetFetchFailure(kv: KVLike | undefined, svcId: string): 
   if (!kv) return
   const key = `fetch-fail:${svcId}`
   const existing = await kv.get(key).catch(() => null)
-  if (existing !== null) await kv.delete(key).catch(() => {})
+  if (existing !== null) await kvDel(kv, key)
 }
 
 export async function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response> {

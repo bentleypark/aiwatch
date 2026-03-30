@@ -189,6 +189,7 @@ function mockKV(store: Record<string, string> = {}): KVLike {
   return {
     get: vi.fn(async (key: string) => store[key] ?? null),
     put: vi.fn(async (key: string, value: string) => { store[key] = value }),
+    delete: vi.fn(async (key: string) => { delete store[key] }),
   }
 }
 

@@ -84,7 +84,7 @@ npm run test:worker # Run Worker unit tests (vitest)
 | `daily:{YYYY-MM-DD}` | `{ [svcId]: { ok, total } }` JSON | 2d | ~288 | Daily uptime counters |
 | `history:{YYYY-MM-DD}` | Same as daily | 90d | 1 | Archived yesterday's counters |
 | `latency:24h` | `{ snapshots: [{ t, data }] }` JSON | 25h | ~48 | 30-min latency snapshots (max 48) |
-| `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 72h | ~288 | 5-min health check probe results (max 864, Gemini + Mistral) |
+| `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 72h | ~288 | 5-min health check probe results (max 864, 15 API services) |
 | `alerted:new:{incId}` | `"1"` | 7d | ~5 | Incident alert dedup |
 | `alerted:res:{incId}` | `"1"` | 7d | ~2 | Resolved incident alert dedup |
 | `alerted:down:{svcId}` | ISO timestamp | 2h | ~2 | Service down alert dedup + recovery duration |
@@ -137,7 +137,7 @@ worker/
     ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt, TTL refresh, re-analysis, incidentId dedup)
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit, Web Vitals)
     vitals.ts   # Web Vitals aggregation (ingest, KV flush, p75 computation, Discord formatting)
-    probe.ts    # Health check probing — direct RTT measurement (Phase 2 PoC)
+    probe.ts    # Health check probing — direct RTT measurement (15 API services)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
                 # dailyImpact support: statuspage (uptimeData), incident-io (component impacts), betterstack (status_history from index.json)
 ```

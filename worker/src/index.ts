@@ -6,6 +6,7 @@ import { fetchAllServices, CACHE_KEY, type ServiceStatus } from './services'
 import { calculateAIWatchScore } from './score'
 import { buildIncidentAlerts, buildServiceAlerts } from './alerts'
 import { analyzeIncident, refreshOrReanalyze, type AIAnalysisResult } from './ai-analysis'
+import { kvPut, kvDel } from './utils'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -48,7 +49,7 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl
   try {
     const existing = await kv.get(dailyKey)
     if (existing) counters = JSON.parse(existing)
-  } catch { /* ignore */ }
+  } catch (err) { console.warn('[kv] daily counter parse failed:', dailyKey, err instanceof Error ? err.message : err) }
 
   // Update counters for all services (official sources take priority in response,
   // but counters serve as fallback if official sources fail)
@@ -79,7 +80,7 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl
           title: '⚠️ KV Write Limit Exceeded',
           description: 'Cloudflare KV 무료 플랜 일일 쓰기 한도(1,000회) 초과.\n배지, API v1, 캐시가 작동하지 않습니다.\nUTC 자정(KST 09:00)에 자동 리셋됩니다.',
           color: 0xFF9800,
-        }).catch(() => {})
+        }).catch((err) => console.warn('[kv] KV limit alert discord failed:', err instanceof Error ? err.message : err))
       }
     }
   })
@@ -90,9 +91,7 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl
     const yesterdayKey = `daily:${yesterday}`
     const yesterdayData = await kv.get(yesterdayKey).catch(() => null)
     if (yesterdayData) {
-      await kv.put(`history:${yesterday}`, yesterdayData, {
-        expirationTtl: 90 * 86400,
-      }).catch(() => {})
+      await kvPut(kv, `history:${yesterday}`, yesterdayData, { expirationTtl: 90 * 86400 })
       lastArchivedDate = yesterday
     }
   }
@@ -173,7 +172,7 @@ async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
 async function cacheRead(kv: KVNamespace): Promise<{ services: ServiceStatus[]; cachedAt: string } | null> {
   const raw = await kv.get(CACHE_KEY).catch(() => null)
   if (!raw) return null
-  try { return JSON.parse(raw) } catch { return null }
+  try { return JSON.parse(raw) } catch (err) { console.warn('[kv] cache parse failed:', err instanceof Error ? err.message : err); return null }
 }
 
 // Read uptime history for last N days (includes today's live counter + archived days)
@@ -192,7 +191,7 @@ export async function readUptimeHistory(kv: KVNamespace, days: number): Promise<
   const results = await Promise.all(keyPairs.map(({ key }) => kv.get(key).catch(() => null)))
   results.forEach((raw, i) => {
     if (raw) {
-      try { history[keyPairs[i].dateStr] = JSON.parse(raw) } catch { /* ignore */ }
+      try { history[keyPairs[i].dateStr] = JSON.parse(raw) } catch (err) { console.warn('[kv] uptime history parse failed:', keyPairs[i].dateStr, err instanceof Error ? err.message : err) }
     }
   })
   return history
@@ -245,7 +244,7 @@ async function alertWorkerError(env: Env, error: string) {
   const key = 'alerted:worker-error'
   const existing = await env.STATUS_CACHE.get(key).catch(() => null)
   if (existing) return
-  await env.STATUS_CACHE.put(key, '1', { expirationTtl: 300 }).catch(() => {}) // 5min cooldown
+  await kvPut(env.STATUS_CACHE, key, '1', { expirationTtl: 300 }) // 5min cooldown
   await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
     title: '🔴 Worker Error — API 장애',
     description: `\`fetchAllServices()\` 전체 실패\n\`\`\`${sanitize(error)}\`\`\``,
@@ -280,7 +279,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     const parsed = JSON.parse(raw)
     services = Array.isArray(parsed) ? parsed : parsed.services
     if (!Array.isArray(services)) return empty
-  } catch { return empty }
+  } catch (err) { console.error('[cron] Failed to parse cached services:', err instanceof Error ? err.message : err); return empty }
 
   // Calculate scores for fallback recommendations
   const scored = services.map((svc) => {
@@ -338,7 +337,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // Write pending keys AFTER filtering (so they exist for the next cron cycle)
   for (const svc of scored) {
     if (svc.status === 'degraded') {
-      await env.STATUS_CACHE.put(`pending:degraded:${svc.id}`, '1', { expirationTtl: 600 }).catch(() => {})
+      await kvPut(env.STATUS_CACHE, `pending:degraded:${svc.id}`, '1', { expirationTtl: 600 })
     }
   }
 
@@ -349,11 +348,11 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       const detectKey = `detected:${svc.id}`
       const existing = await env.STATUS_CACHE.get(detectKey).catch(() => null)
       if (!existing) {
-        await env.STATUS_CACHE.put(detectKey, new Date().toISOString(), { expirationTtl: 604800 }).catch(() => {})
+        await kvPut(env.STATUS_CACHE, detectKey, new Date().toISOString(), { expirationTtl: 604800 })
       }
     } else {
       // Service recovered — clean up detection timestamp
-      await env.STATUS_CACHE.delete(`detected:${svc.id}`).catch(() => {})
+      await kvDel(env.STATUS_CACHE, `detected:${svc.id}`)
     }
   }
 
@@ -366,15 +365,15 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     const isRecoveryAlert = alert.key.startsWith('alerted:recovered:')
     const ttl = (isStatusAlert || isRecoveryAlert) ? 7200 : 604800
     const kvValue = isStatusAlert ? new Date().toISOString() : '1'
-    await env.STATUS_CACHE.put(alert.key, kvValue, { expirationTtl: ttl }).catch(() => {})
+    await kvPut(env.STATUS_CACHE, alert.key, kvValue, { expirationTtl: ttl })
     if (isStatusAlert) {
       const svcId = alert.key.split(':').pop()!
-      await env.STATUS_CACHE.delete(`alerted:recovered:${svcId}`).catch(() => {})
+      await kvDel(env.STATUS_CACHE, `alerted:recovered:${svcId}`)
     }
     // Clean up AI analysis on recovery
     if (isRecoveryAlert) {
       const svcId = alert.key.replace('alerted:recovered:', '')
-      await env.STATUS_CACHE.delete(`ai:analysis:${svcId}`).catch(() => {})
+      await kvDel(env.STATUS_CACHE, `ai:analysis:${svcId}`)
     }
 
     // For new incidents: run AI analysis with 8s timeout to avoid blocking alert delivery
@@ -397,12 +396,14 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
           ])
           if (analysis) {
             usage.success++
-            await env.STATUS_CACHE.put(`ai:analysis:${svc.id}`, JSON.stringify(analysis), { expirationTtl: 3600 }).catch(() => {})
-            analysisSection = `\n${DIV}\n🤖 **AI ANALYSIS** [Beta]\n${analysis.summary}\n⏱ Est. recovery: ${analysis.estimatedRecovery}${analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''}`
+            const kvOk = await kvPut(env.STATUS_CACHE, `ai:analysis:${svc.id}`, JSON.stringify(analysis), { expirationTtl: 3600 })
+            if (kvOk) {
+              analysisSection = `\n${DIV}\n🤖 **AI ANALYSIS** [Beta]\n${analysis.summary}\n⏱ Est. recovery: ${analysis.estimatedRecovery}${analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''}`
+            }
           } else {
             usage.failed++
           }
-          await env.STATUS_CACHE.put(usageKey, JSON.stringify(usage), { expirationTtl: 172800 }).catch(() => {})
+          await kvPut(env.STATUS_CACHE, usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
         } catch (err) {
           console.error('[cron] AI analysis failed:', err instanceof Error ? err.message : err)
         }
@@ -440,7 +441,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
         else if (a.key.startsWith('alerted:degraded:')) counts.degraded++
         else if (a.key.startsWith('alerted:recovered:')) counts.recovered++
       }
-      await env.STATUS_CACHE.put(countKey, JSON.stringify(counts), { expirationTtl: 172800 }).catch(() => {})
+      await kvPut(env.STATUS_CACHE, countKey, JSON.stringify(counts), { expirationTtl: 172800 })
     } catch (err) {
       console.error('[cron] alert count update failed:', err instanceof Error ? err.message : err)
     }
@@ -515,7 +516,7 @@ export default {
             const alertKey = `alerted:probe-spike:${spike.serviceId}`
             const existing = await env.STATUS_CACHE.get(alertKey).catch(() => null)
             if (existing) continue
-            await env.STATUS_CACHE.put(alertKey, '1', { expirationTtl: 3600 }).catch(() => {})
+            await kvPut(env.STATUS_CACHE, alertKey, '1', { expirationTtl: 3600 })
             const svcName = spike.serviceId
             await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
               title: `📡 ${svcName} — Probe RTT Spike Detected`,
@@ -546,7 +547,7 @@ export default {
         const redditAlerts = await detectRedditPosts(env.STATUS_CACHE)
         // Mark all detected posts as seen (prevents re-checking), but only notify promotable ones
         for (const alert of redditAlerts.slice(0, 5)) {
-          await env.STATUS_CACHE.put(alert.key, '1', { expirationTtl: 86400 }).catch(() => {})
+          await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 })
         }
         const promotable = redditAlerts.filter(a => isPromotable(a.post.title)).slice(0, 3)
         for (const alert of promotable) {
@@ -820,16 +821,17 @@ export default {
             })
           }
           if (env.STATUS_CACHE) {
+            // Raw kv.put — kvPut opts don't support metadata, needed for fast list reads
             await env.STATUS_CACHE.put(
               `webhook:reg:${hash}`,
               JSON.stringify({ type, registeredAt: new Date().toISOString() }),
-              { expirationTtl: 2592000, metadata: { type } }, // 30d TTL, metadata for fast list reads
+              { expirationTtl: 2592000, metadata: { type } },
             )
           }
         } else {
           // DELETE
           if (env.STATUS_CACHE) {
-            await env.STATUS_CACHE.delete(`webhook:reg:${hash}`)
+            await kvDel(env.STATUS_CACHE, `webhook:reg:${hash}`)
           }
         }
         return new Response(JSON.stringify({ ok: true }), {
@@ -1026,7 +1028,7 @@ export default {
               const parsed = JSON.parse(raw) as AIAnalysisResult
               const hasActiveInc = (svc.incidents ?? []).some(i => i.status !== 'resolved')
               if (hasActiveInc) aiAnalysis[svc.id] = parsed
-            } catch { /* ignore */ }
+            } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, err instanceof Error ? err.message : err) }
           }
         }))
 
@@ -1089,10 +1091,10 @@ export default {
           env.STATUS_CACHE.get('probe:24h').catch(() => null),
         ])
         if (latRaw) {
-          try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch { /* ignore */ }
+          try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch (err) { console.warn('[kv] latency24h parse failed:', err instanceof Error ? err.message : err) }
         }
         if (probeRaw) {
-          try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch { /* ignore */ }
+          try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] probe24h parse failed:', err instanceof Error ? err.message : err) }
         }
       }
 
@@ -1126,7 +1128,7 @@ export default {
               // Include if service has any active incident (analysis is service-level, not incident-specific)
               const hasActiveInc = (svc.incidents ?? []).some(i => i.status !== 'resolved')
               if (hasActiveInc) aiAnalysis[svc.id] = parsed
-            } catch { /* ignore */ }
+            } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, err instanceof Error ? err.message : err) }
           }
         }))
       }

@@ -41,7 +41,7 @@
 - **스마트 알림** — degraded/down 상태 Discord 알림 (anti-flapping + 인시던트 억제 + 복구 지속 시간)
 - **오프라인 UI** — API 연결 불가 시 안내 화면 (프로덕션 전용)
 - **Is X Down SEO 페이지** — 9개 서비스 (Claude, claude.ai, ChatGPT, Gemini, GitHub Copilot, Cursor, Claude Code, OpenAI, Windsurf), 동적 OG 이미지(PNG), 공유 버튼, AIWatch 순위, 대체 서비스 추천
-- **헬스체크 프로빙** — API 엔드포인트 직접 RTT 측정 (Gemini, Mistral) + 연속 스파이크 조기 장애 감지 알림
+- **헬스체크 프로빙** — API 엔드포인트 직접 RTT 측정 (15개 API 서비스) + 연속 스파이크 조기 장애 감지 알림
 - **페이지별 스켈레톤** — 각 페이지 레이아웃에 맞는 로딩 placeholder
 - **AI 분석 (Beta)** — 장애 발생 시 Claude Sonnet 자동 분석: 원인 추정, 예상 복구 시간, 영향 범위. 인시던트 Discord 알림에 통합(단일 embed), Topbar Analyze 모달, Is X Down AI Insight 카드
 - **랜딩 페이지** — Product Hunt 랜딩 페이지(`/intro`), 대시보드 프리뷰 mock, KO/EN 이중 언어, Flow 애니메이션, GA4 트래킹
@@ -124,7 +124,7 @@ Cloudflare KV
   ├── daily:YYYY-MM-DD     (가동률 카운터, TTL 2일)
   ├── history:YYYY-MM-DD   (아카이브 카운터, TTL 90일)
   ├── latency:24h          (30분 스냅샷, 최대 48개, TTL 25시간)
-  ├── probe:24h            (헬스체크 프로브, 최대 864개, TTL 72시간, Gemini + Mistral)
+  ├── probe:24h            (헬스체크 프로브, 최대 864개, TTL 72시간, 15개 API 서비스)
   ├── ai:analysis:{svcId}  (AI 인시던트 분석, TTL 1시간, 활성 시 갱신)
   ├── ai:reanalysis-skip:* (재분석 실패 쿨다운, TTL 30분)
   ├── ai:usage:{date}      (일별 AI 사용량 카운터, TTL 2일)
