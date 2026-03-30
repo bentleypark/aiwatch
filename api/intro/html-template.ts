@@ -12,7 +12,7 @@ export function renderLandingPage(opts: LandingOptions): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" href="/favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>AIWatch — Real-time AI Service Monitoring</title>
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-D4ZWVHQ7JK"></script>
@@ -471,13 +471,7 @@ export function renderLandingPage(opts: LandingOptions): string {
 <nav>
   <div class="nav-logo">
     <div class="logo-icon">
-      <svg width="16" height="16" viewBox="0 0 32 32" fill="none" role="img" aria-label="AIWatch logo">
-        <polyline points="3,18 7,18 10,9 13,26 16,16 19,26 22,9 25,18 29,18" stroke="#3fb950" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.4"/>
-        <polyline points="10,9 13,26 16,16 19,26 22,9" stroke="#3fb950" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-        <circle cx="10" cy="9" r="1.8" fill="#3fb950"/>
-        <circle cx="16" cy="16" r="1.8" fill="#3fb950"/>
-        <circle cx="22" cy="9" r="1.8" fill="#3fb950"/>
-      </svg>
+      <img src="/favicon.png" alt="AIWatch logo" width="16" height="16" style="border-radius:3px;">
     </div>
     AI<span>Watch</span>
   </div>
@@ -590,12 +584,7 @@ export function renderLandingPage(opts: LandingOptions): string {
     <!-- Topbar -->
     <div class="mock-nav">
       <div class="mock-logo-row">
-        <svg width="22" height="22" viewBox="0 0 32 32" fill="none" style="border-radius:4px;" role="img" aria-label="AIWatch logo">
-          <rect width="32" height="32" rx="6" fill="#080c10"/>
-          <polyline points="3,18 7,18 10,9 13,26 16,16 19,26 22,9 25,18 29,18" stroke="#3fb950" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"/>
-          <polyline points="10,9 13,26 16,16 19,26 22,9" stroke="#3fb950" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-          <circle cx="10" cy="9" r="1.8" fill="#3fb950"/><circle cx="16" cy="16" r="1.8" fill="#3fb950"/><circle cx="22" cy="9" r="1.8" fill="#3fb950"/>
-        </svg>
+        <img src="/favicon.png" alt="AIWatch logo" width="22" height="22" style="border-radius:4px;">
         <span>AI<span class="mock-logo-green">Watch</span></span>
       </div>
       <div class="mock-nav-center">
@@ -909,10 +898,7 @@ export function renderLandingPage(opts: LandingOptions): string {
           <!-- incident + AI Analysis 통합 -->
           <div class="bot-msg">
             <div class="bot-avatar" style="background:#1a3d25;">
-              <svg width="18" height="18" viewBox="0 0 32 32" fill="none">
-                <polyline points="3,18 7,18 10,9 13,26 16,16 19,26 22,9 25,18 29,18" stroke="#3fb950" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.4"/>
-                <polyline points="10,9 13,26 16,16 19,26 22,9" stroke="#3fb950" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
+              <img src="/favicon.png" alt="" width="18" height="18" style="border-radius:3px;">
             </div>
             <div class="bot-body">
               <div class="bot-name" style="color:#dbdee1;">AIWatch Worker <span class="bot-time" style="color:#949ba4;">오후 2:48</span></div>
@@ -936,9 +922,7 @@ export function renderLandingPage(opts: LandingOptions): string {
           <!-- resolved -->
           <div class="bot-msg">
             <div class="bot-avatar" style="background:#0d2818;">
-              <svg width="18" height="18" viewBox="0 0 32 32" fill="none">
-                <polyline points="10,9 13,26 16,16 19,26 22,9" stroke="#3fb950" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
+              <img src="/favicon.png" alt="" width="18" height="18" style="border-radius:3px;">
             </div>
             <div class="bot-body">
               <div class="bot-name" style="color:#dbdee1;">AIWatch Worker <span class="bot-time" style="color:#949ba4;">오후 3:35</span></div>

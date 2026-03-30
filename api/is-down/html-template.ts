@@ -123,7 +123,7 @@ export function renderPage(
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(desc)}">
 <link rel="canonical" href="${esc(canonical)}">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" href="/favicon.png">
 
 <!-- Open Graph -->
 <meta property="og:type" content="website">

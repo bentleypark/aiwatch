@@ -1,8 +1,8 @@
 // AIWatch Service Worker — stale-while-revalidate for static assets
 // Version: bump CACHE_NAME on each deploy that changes static assets
 
-const CACHE_NAME = 'aiwatch-v3'
-const STATIC_ASSETS = ['/', '/index.html', '/manifest.json']
+const CACHE_NAME = 'aiwatch-v4'
+const STATIC_ASSETS = ['/', '/index.html', '/manifest.json', '/favicon.png']
 
 self.addEventListener('install', (e) => {
   e.waitUntil(

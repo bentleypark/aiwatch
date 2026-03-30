@@ -63,7 +63,7 @@ export default function Topbar({ onMenuToggle }) {
         </button>
 
         <a href="/" className="flex items-center gap-2.5 no-underline" onClick={(e) => { e.preventDefault(); window.location.href = window.location.pathname }}>
-          <img src="/favicon.svg" alt="" width={28} height={28} className="rounded-[4px]" />
+          <img src="/favicon.png" alt="" width={28} height={28} className="rounded-[4px]" />
           <span className="mono font-semibold text-[15px] select-none tracking-[-0.3px]">
             <span className="text-[var(--text0)]">AI</span>
             <span className="text-[var(--green)]">Watch</span>

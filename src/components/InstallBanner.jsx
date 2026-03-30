@@ -80,7 +80,7 @@ export default function InstallBanner() {
   }, [])
 
   const logo = (
-    <img src="/favicon.svg" alt="AIWatch" width={28} height={28} style={{ borderRadius: 6 }} />
+    <img src="/favicon.png" alt="AIWatch" width={28} height={28} style={{ borderRadius: 6 }} />
   )
 
   // Android/Desktop: beforeinstallprompt based
