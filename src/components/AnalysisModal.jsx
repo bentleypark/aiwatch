@@ -90,7 +90,7 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                     <span>📡 <strong style={{ color: 'var(--text1)' }}>{lang === 'ko' ? '영향 범위' : 'Scope'}:</strong> {analysis.affectedScope.join(', ')}</span>
                   )}
                   {isRecentlyRecovered && <span>✅ {t('analysis.recoveredAt')}: {timeAgo(analysis.resolvedAt, lang)}</span>}
-                  <span>🕐 {timeAgo(analysis.analyzedAt, lang)}</span>
+                  <span>🕐 {lang === 'ko' ? '분석 업데이트' : 'Analysis updated'} {timeAgo(analysis.analyzedAt, lang)}</span>
                 </div>
               </div>
             )
