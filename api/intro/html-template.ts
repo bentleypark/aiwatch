@@ -471,7 +471,7 @@ export function renderLandingPage(opts: LandingOptions): string {
 <nav>
   <div class="nav-logo">
     <div class="logo-icon">
-      <img src="/favicon.png" alt="AIWatch logo" width="16" height="16" style="border-radius:3px;">
+      <img src="/favicon.png" alt="AIWatch logo" width="24" height="24" style="border-radius:4px;">
     </div>
     AI<span>Watch</span>
   </div>
@@ -584,7 +584,7 @@ export function renderLandingPage(opts: LandingOptions): string {
     <!-- Topbar -->
     <div class="mock-nav">
       <div class="mock-logo-row">
-        <img src="/favicon.png" alt="AIWatch logo" width="22" height="22" style="border-radius:4px;">
+        <img src="/favicon.png" alt="AIWatch logo" width="26" height="26" style="border-radius:4px;">
         <span>AI<span class="mock-logo-green">Watch</span></span>
       </div>
       <div class="mock-nav-center">
@@ -898,7 +898,7 @@ export function renderLandingPage(opts: LandingOptions): string {
           <!-- incident + AI Analysis 통합 -->
           <div class="bot-msg">
             <div class="bot-avatar" style="background:#1a3d25;">
-              <img src="/favicon.png" alt="" width="18" height="18" style="border-radius:3px;">
+              <img src="/favicon.png" alt="" width="22" height="22" style="border-radius:4px;">
             </div>
             <div class="bot-body">
               <div class="bot-name" style="color:#dbdee1;">AIWatch Worker <span class="bot-time" style="color:#949ba4;">오후 2:48</span></div>
@@ -922,7 +922,7 @@ export function renderLandingPage(opts: LandingOptions): string {
           <!-- resolved -->
           <div class="bot-msg">
             <div class="bot-avatar" style="background:#0d2818;">
-              <img src="/favicon.png" alt="" width="18" height="18" style="border-radius:3px;">
+              <img src="/favicon.png" alt="" width="22" height="22" style="border-radius:4px;">
             </div>
             <div class="bot-body">
               <div class="bot-name" style="color:#dbdee1;">AIWatch Worker <span class="bot-time" style="color:#949ba4;">오후 3:35</span></div>
