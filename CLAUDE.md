@@ -173,7 +173,7 @@ When adding a new monitored service, update ALL of the following:
 | `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
 | `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time |
 | `reddit:seen:{postId}` | `"1"` | 24h | ~120 | Reddit post dedup (hourly scan, max 5/hour) |
-| `ai:analysis:{svcId}` | `AIAnalysisResult` JSON | 1h | ~5 | Claude Sonnet incident analysis result (TTL refreshed while active) |
+| `ai:analysis:{svcId}` | `AIAnalysisResult` JSON | 1h (active) / 2h (resolved) | ~5 | Claude Sonnet incident analysis result (TTL refreshed while active; on recovery, `resolvedAt` added instead of deleting — kept 2h for "Recently Resolved" UI) |
 | `ai:reanalysis-skip:{svcId}` | `"1"` | 30min | ~2 | Re-analysis failure cooldown |
 | `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis) |
 | `fetch-fail:{svcId}` | counter string | 30min | ~0 (spikes on outage) | RSS fetch consecutive failure counter (3+ → degraded, capped writes) |
@@ -294,7 +294,7 @@ Cron Trigger (*/5 min)
   → record detection timestamps (detected:{serviceId}) for Detection Lead
   → KV ID-based dedup → Discord alerts (single embed per incident)
   → incident detected → AI analysis (8s timeout) → merged into incident embed
-  → recovery detected → delete ai:analysis:{svcId}
+  → recovery detected → mark ai:analysis:{svcId} with resolvedAt (2h TTL, powers "Recently Resolved" UI)
   → active incidents: refresh analysis TTL / re-analyze if expired / dedup sibling services
   → alert count tracked in KV (alert:count:{date}) for Daily Summary
   → daily summary at UTC 09:00 (KST 18:00) with alert count aggregation + Web Vitals p75
@@ -315,6 +315,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
   - Stale detection: re-analyzes when stored incidentId no longer matches active incidents
   - Dedup: sibling services sharing same incidentId copy analysis from KV (no extra API call)
   - Modal groups services with same incidentId into single card
+  - **Recently Resolved**: on recovery, `ai:analysis:{svcId}` gets `resolvedAt` field (2h TTL instead of deletion). `/api/status` returns `recentlyRecovered[]` for operational services with resolved analysis. Dashboard shows info banner + "Resolved" badge on service cards + Analyze modal remains active
   - Grouped fallback: when incident affects multiple categories, Discord alerts + dashboard show per-category alternatives via `buildGroupedFallbackText`
   - **Fallback tier priority** (API services only): same-tier services are recommended first, then adjacent tiers. Within each tier, sorted by AIWatch Score descending. Defined in `worker/src/fallback.ts`, mirrored in `src/pages/Overview.jsx` and `api/is-down.ts`:
     - **Tier 1** (Major LLM): `claude`, `openai`, `gemini`
