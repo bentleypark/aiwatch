@@ -550,7 +550,7 @@ function BadgeCode({ serviceId, serviceName, t }) {
 export default function ServiceDetails({ serviceId }) {
   const { t, lang } = useLang()
   const { setPage } = usePage()
-  const { services: rawServices, loading, error, latency24h, refresh } = usePolling()
+  const { services: rawServices, loading, error, latency24h, refresh, recentlyRecovered } = usePolling()
   const services = rawServices ?? []
 
   // useMemo must be called before any early returns (Rules of Hooks)
@@ -631,7 +631,10 @@ export default function ServiceDetails({ serviceId }) {
             </a>
           )}
         </div>
-        <StatusPill status={service.status} />
+        <div className="flex items-center gap-1.5">
+          {recentlyRecovered.includes(service.id) && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
+          <StatusPill status={service.status} />
+        </div>
       </div>
 
       {/* ── Metric Cards ── */}

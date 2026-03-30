@@ -110,10 +110,13 @@ export function buildServiceAlerts(
           downtimeText = ` (${formatDuration(start, new Date())})`
         }
       }
+      // Include recent incident title in recovery alert if available
+      const recentInc = (svc.incidents ?? []).filter(i => i.status === 'resolved').sort((a, b) => (b.resolvedAt ?? '').localeCompare(a.resolvedAt ?? '')).at(0)
+      const incTitle = recentInc ? `\n> ${sanitize(recentInc.title).slice(0, 120)}` : ''
       alerts.push({
         key: `alerted:recovered:${svc.id}`,
         title: `🟢 ${svc.name} — Service Recovered${downtimeText}`,
-        description: `**${svc.name}** is back to operational`,
+        description: `**${svc.name}** is back to operational${incTitle}`,
         color: 0x57F287,
         url: `https://ai-watch.dev/#${svc.id}`,
       })

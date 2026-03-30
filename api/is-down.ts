@@ -43,7 +43,7 @@ export default async function handler(req: Request) {
             lastChecked: string; incidents: unknown[]; aiwatchScore?: number | null
             scoreGrade?: string | null; scoreConfidence?: string
           }>
-          aiAnalysis?: Record<string, { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; incidentId: string }>
+          aiAnalysis?: Record<string, { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; incidentId: string; resolvedAt?: string }>
         }
         const allServices = data.services ?? []
 

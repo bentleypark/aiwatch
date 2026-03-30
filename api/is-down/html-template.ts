@@ -253,7 +253,7 @@ function renderFaqJsonLd(seo: ServiceSEO, fallbacks: Fallback[]): string {
   return `<script type="application/ld+json">${safeJsonLd(data)}</script>`
 }
 
-function renderAIInsight(insight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string } | null, serviceStatus?: string): string {
+function renderAIInsight(insight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; resolvedAt?: string } | null, serviceStatus?: string): string {
   if (!insight) return ''
   const ago = Math.floor((Date.now() - new Date(insight.analyzedAt).getTime()) / 60000)
   const agoText = ago < 1 ? 'just now' : ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`
@@ -261,10 +261,11 @@ function renderAIInsight(insight?: { summary: string; estimatedRecovery: string;
     ? 'Monitoring recovery signals...'
     : insight.estimatedRecovery
   const isResolved = serviceStatus === 'operational'
+  const isRecentlyRecovered = isResolved && !!insight.resolvedAt
   const resolvedBadge = isResolved
     ? '<span class="mono" style="font-size:10px;color:#3fb950;background:rgba(63,185,80,0.15);padding:2px 8px;border-radius:4px">Resolved</span>'
     : ''
-  return `<div class="card" style="border-left:3px solid ${isResolved ? '#3fb950' : '#7C3AED'};margin:16px 0${isResolved ? ';opacity:0.75' : ''}">
+  return `<div class="card" style="border-left:3px solid ${isResolved ? '#3fb950' : '#7C3AED'};margin:16px 0${isResolved && !isRecentlyRecovered ? ';opacity:0.75' : ''}">
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
 <span style="font-size:16px">🤖</span>
 <span style="font-size:13px;font-weight:600;color:#e6edf3">${isResolved ? 'Post-Incident Analysis' : 'AI Analysis'}</span>
@@ -275,6 +276,7 @@ ${resolvedBadge}
 <div class="mono" style="font-size:11px;color:#8b949e;display:flex;flex-direction:column;gap:4px">
 <span>⏱ <strong style="color:#c9d1d9">Est. Recovery:</strong> ${esc(recovery)}</span>
 ${insight.affectedScope.length > 0 ? `<span>📡 <strong style="color:#c9d1d9">Scope:</strong> ${esc(insight.affectedScope.join(' · '))}</span>` : ''}
+${insight.resolvedAt ? `<span>✅ Recovered: ${(() => { const m = Math.floor((Date.now() - new Date(insight.resolvedAt).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : Math.floor(m / 60) + 'h ago' })()}</span>` : ''}
 <span>🕐 ${agoText}</span>
 </div>
 <p class="mono" style="font-size:9px;color:#484f58;margin-top:8px;opacity:0.7">⚠️ AI-generated estimation based on historical data. Actual time may vary.</p>
