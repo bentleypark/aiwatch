@@ -49,8 +49,9 @@ npm run test:worker # Run Worker unit tests (vitest)
    - `index.html`: SEO meta tags (service count, description)
    - `aiwatch-reports/`: service count, category breakdown (if applicable)
 7. **Commit** — only after review issues are fixed and tests pass. Include issue reference in the message:
-   - `closes #N` — **only** when ALL checklist items in the issue are complete
-   - `refs #N` — when some items remain (e.g., future phases, deferred work)
+   - **Title must include `(#N)`** at the end — links commit to issue timeline (e.g., `fix: description (#123)`)
+   - Body: `closes #N` — **only** when ALL checklist items in the issue are complete
+   - Body: `refs #N` — when some items remain (e.g., future phases, deferred work)
 8. **Verify checklist** — read the issue (`gh issue view N`) and confirm every checklist item (`- [ ]`) is actually implemented in code before closing
 9. **Close** — only close the issue after checklist verification: `gh issue close N`
    - If unchecked items remain for future work, **do not close** — add a label (e.g., `deferred`, `phase-N`) to track instead

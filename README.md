@@ -15,7 +15,7 @@
 
 Real-time monitoring dashboard for **25 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
-**[https://ai-watch.dev](https://ai-watch.dev)**
+**[Dashboard](https://ai-watch.dev)** · **[Landing Page](https://ai-watch.dev/intro)**
 
 | Desktop | Mobile |
 |---------|--------|

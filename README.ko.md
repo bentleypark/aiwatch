@@ -14,7 +14,7 @@
 
 **25개 AI 서비스**의 상태, 지연시간, 가동률, 인시던트를 실시간으로 모니터링하는 대시보드입니다.
 
-**[https://ai-watch.dev](https://ai-watch.dev)**
+**[대시보드](https://ai-watch.dev)** · **[랜딩 페이지](https://ai-watch.dev/intro)**
 
 | 데스크탑 | 모바일 |
 |---------|--------|
