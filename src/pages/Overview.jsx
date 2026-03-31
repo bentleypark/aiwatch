@@ -326,12 +326,13 @@ function getFallbacks(service, allServices) {
 
 function ActionBanner({ services, setPage, t }) {
   const affected = services.filter(s => s.status === 'down' || s.status === 'degraded')
-  if (affected.length === 0) return null
+  const investigating = services.filter(s => s.status === 'operational' && (s.incidents ?? []).some(i => i.status !== 'resolved'))
+  if (affected.length === 0 && investigating.length === 0) return null
 
   const downList = affected.filter(s => s.status === 'down')
   const degradedList = affected.filter(s => s.status === 'degraded')
   const hasDown = downList.length > 0
-  const borderColor = hasDown ? 'var(--red)' : 'var(--amber)'
+  const borderColor = hasDown ? 'var(--red)' : affected.length > 0 ? 'var(--amber)' : 'var(--blue)'
 
   // Render clickable service names
   const renderNames = (list) => list.map((svc, i) => (
@@ -385,15 +386,22 @@ function ActionBanner({ services, setPage, t }) {
           ⚠️ <span className="text-[var(--amber)]">{t('overview.banner.degradedCount').replace('{n}', degradedList.length)}</span> {renderNames(degradedList)}
         </div>
       )}
-      <div className="mono text-[11px]" style={{ marginTop: '4px' }}>
-        <button
-          onClick={() => setPage({ name: 'incidents' })}
-          className="text-[var(--blue)] hover:underline cursor-pointer"
-          style={{ background: 'none', border: 'none', padding: 0, font: 'inherit' }}
-        >
-          👉 {t('overview.banner.viewIncidents')}
-        </button>
-      </div>
+      {investigating.length > 0 && (
+        <div className="text-[13px] font-medium text-[var(--text0)]">
+          🔍 <span className="text-[var(--blue)]">{t('overview.banner.investigatingCount').replace('{n}', investigating.length)}</span> {renderNames(investigating)}
+        </div>
+      )}
+      {(investigating.length > 0 || affected.some(s => (s.incidents ?? []).some(i => i.status !== 'resolved'))) && (
+        <div className="mono text-[11px]" style={{ marginTop: '4px' }}>
+          <button
+            onClick={() => setPage({ name: 'incidents' })}
+            className="text-[var(--blue)] hover:underline cursor-pointer"
+            style={{ background: 'none', border: 'none', padding: 0, font: 'inherit' }}
+          >
+            👉 {t('overview.banner.viewIncidents')}
+          </button>
+        </div>
+      )}
       {categoryGroups.length > 0 ? (
         <div className="mono text-[11px] text-[var(--text2)]" style={{ marginTop: '4px' }}>
           <span>{t('overview.banner.fallback')}</span>

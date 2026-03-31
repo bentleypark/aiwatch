@@ -39,4 +39,57 @@ test.describe('Offline / API failure (dev mode)', () => {
       await expect(page.locator('main button').filter({ hasText: name }).first()).toBeVisible()
     }
   })
+
+  test('action banner hides incident link when degraded service has no incidents', async ({ page }) => {
+    // Intercept API and return a single degraded service with NO incidents
+    await page.route('**/api/status*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          services: [
+            { id: 'azureopenai', category: 'api', name: 'Azure OpenAI', provider: 'Microsoft', status: 'degraded', latency: 350, uptime30d: null, incidents: [] },
+            { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 145, uptime30d: 99.97, incidents: [] },
+            { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'operational', latency: 200, uptime30d: 99.99, incidents: [] },
+          ],
+          lastUpdated: new Date().toISOString(),
+        }),
+      })
+    )
+    await page.goto('/')
+    await expect(page.locator('main').getByText('Azure OpenAI').first()).toBeVisible({ timeout: 15000 })
+
+    // Banner should show degraded label
+    await expect(page.locator('main').getByText(/Degraded|성능 저하/).first()).toBeVisible()
+
+    // "View incident details" link should NOT appear (no incidents)
+    await expect(page.locator('main').getByText(/View incident details|인시던트 상세 확인/)).not.toBeVisible()
+  })
+
+  test('action banner shows incident link when investigating service has active incidents', async ({ page }) => {
+    // Intercept API and return an operational service with an unresolved incident
+    await page.route('**/api/status*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          services: [
+            { id: 'copilot', category: 'agent', name: 'GitHub Copilot', provider: 'Microsoft', status: 'operational', latency: null, uptime30d: 99.4, incidents: [
+              { id: 'cp-test', title: 'Billing issues', status: 'investigating', impact: 'minor', startedAt: new Date().toISOString(), duration: null },
+            ] },
+            { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 145, uptime30d: 99.97, incidents: [] },
+          ],
+          lastUpdated: new Date().toISOString(),
+        }),
+      })
+    )
+    await page.goto('/')
+    await expect(page.locator('main').getByText('GitHub Copilot').first()).toBeVisible({ timeout: 15000 })
+
+    // Banner should show investigating label
+    await expect(page.locator('main').getByText(/Investigating|조사 중/).first()).toBeVisible()
+
+    // "View incident details" link SHOULD appear (has active incident)
+    await expect(page.locator('main').getByText(/View incident details|인시던트 상세 확인/).first()).toBeVisible()
+  })
 })

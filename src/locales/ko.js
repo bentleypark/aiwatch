@@ -65,6 +65,7 @@ const ko = {
   'overview.banner.viewIncidents': '인시던트 상세 확인',
   'overview.banner.downCount': '중단 ({n}):',
   'overview.banner.degradedCount': '성능 저하 ({n}):',
+  'overview.banner.investigatingCount': '조사 중 ({n}):',
   'overview.banner.healthy': '정상 대안:',
   'overview.card.incidents.compact': '건',
   'overview.recovered': 'Resolved',
