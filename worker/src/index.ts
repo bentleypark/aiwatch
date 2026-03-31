@@ -152,8 +152,8 @@ async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
   }))
 
   try {
-    const PROBE_KEY = 'probe:24h' // key name kept for backwards compat; actual retention is 72h
-    const MAX_SNAPSHOTS = 864 // 72h × 12 per hour (every 5 min)
+    const PROBE_KEY = 'probe:24h' // key name kept for backwards compat; actual retention is 7d
+    const MAX_SNAPSHOTS = 2016 // 7d × 12 per hour (every 5 min)
     const existing = await kv.get(PROBE_KEY).catch(() => null)
     const snapshots: ProbeSnapshot[] = existing ? (JSON.parse(existing).snapshots ?? []) : []
     const slotTs = slotToTimestamp(currentSlot)
@@ -161,7 +161,7 @@ async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
     snapshots.push({ t: slotTs, data })
     const trimmed = trimSnapshots(snapshots, MAX_SNAPSHOTS)
     await kv.put(PROBE_KEY, JSON.stringify({ snapshots: trimmed }), {
-      expirationTtl: 259200, // 72 hours
+      expirationTtl: 604800, // 7 days
     })
     lastProbeSlot = currentSlot
   } catch (err) {
