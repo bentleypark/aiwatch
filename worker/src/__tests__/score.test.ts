@@ -80,11 +80,36 @@ describe('calculateAIWatchScore', () => {
     expect(noUptime.score!).toBeLessThan(withUptime.score!)
   })
 
-  it('returns null score when no data at all', () => {
+  it('returns estimated score when no uptime and no incidents (assumed industry average)', () => {
     const result = calculateAIWatchScore(makeSvc({ uptime30d: null, incidents: [] }))
-    expect(result.score).toBeNull()
-    expect(result.grade).toBeNull()
-    expect(result.confidence).toBe('low')
+    // (45 + 30 + 20) * 0.9 = 85.5 → 86
+    expect(result.score).toBe(86)
+    expect(result.grade).toBe('excellent')
+    expect(result.confidence).toBe('medium')
+    expect(result.breakdown.uptime).toBeNull()
+  })
+
+  it('applies 0.9 penalty for estimate uptimeSource', () => {
+    const official = calculateAIWatchScore(makeSvc({ uptime30d: 99.5 }))
+    const estimate = calculateAIWatchScore(makeSvc({ uptime30d: 99.5, uptimeSource: 'estimate' }))
+
+    expect(estimate.confidence).toBe('medium')
+    expect(estimate.score!).toBeLessThan(official.score!)
+    expect(estimate.score).toBe(Math.round(official.score! * 0.9))
+  })
+
+  it('never returns null score for any input combination', () => {
+    const cases = [
+      makeSvc({ uptime30d: null, incidents: [] }),
+      makeSvc({ uptime30d: null, incidents: [makeIncident(1)] }),
+      makeSvc({ uptime30d: 0, incidents: [] }),
+      makeSvc({ uptime30d: 100, incidents: [] }),
+    ]
+    for (const svc of cases) {
+      const result = calculateAIWatchScore(svc)
+      expect(result.score).not.toBeNull()
+      expect(result.grade).not.toBeNull()
+    }
   })
 
   it('filters incidents to 30 days only', () => {

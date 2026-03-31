@@ -57,15 +57,6 @@ export function calculateAIWatchScore(service: ServiceStatus, cutoffDays = 30): 
     mttrHours = (durations.reduce((s, v) => s + v, 0) / durations.length) / 60
   }
 
-  // No data at all → score unavailable
-  if (incidentCount === 0 && mttrHours === null && service.uptime30d == null) {
-    return {
-      score: null, grade: null, confidence: 'low',
-      breakdown: { uptime: null, incidents: 30, recovery: 20 },
-      metrics: { uptimePct: null, incidents30d: 0, affectedDays30d: 0, mttrHours: null },
-    }
-  }
-
   // uptime_score (0-50): 95% baseline
   const hasUptime = service.uptime30d != null
   let uptimeScore: number | null = null
