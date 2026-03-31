@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident, refreshOrReanalyze, type KVLike } from '../ai-analysis'
+import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident, refreshOrReanalyze, isBoilerplate, type KVLike } from '../ai-analysis'
 import type { Incident, ServiceStatus } from '../types'
 
 const mockIncident = (overrides: Partial<Incident> = {}): Incident => ({
@@ -12,6 +12,51 @@ const mockIncident = (overrides: Partial<Incident> = {}): Incident => ({
   duration: '2h 0m',
   timeline: [],
   ...overrides,
+})
+
+describe('isBoilerplate', () => {
+  it('detects generic investigating messages', () => {
+    expect(isBoilerplate('We are currently investigating this issue.')).toBe(true)
+    expect(isBoilerplate('We are investigating this issue')).toBe(true)
+    expect(isBoilerplate('We are aware of this issue')).toBe(true)
+  })
+
+  it('detects generic resolved messages', () => {
+    expect(isBoilerplate('This incident has been resolved.')).toBe(true)
+    expect(isBoilerplate('The issue has been resolved')).toBe(true)
+    expect(isBoilerplate('This issue is resolved')).toBe(true)
+  })
+
+  it('detects generic monitoring/fix messages', () => {
+    expect(isBoilerplate('A fix has been implemented and we are monitoring the results.')).toBe(true)
+    expect(isBoilerplate('We are continuing to monitor')).toBe(true)
+    expect(isBoilerplate('We are continuing to investigate')).toBe(true)
+  })
+
+  it('detects single-word stage labels', () => {
+    expect(isBoilerplate('Investigating')).toBe(true)
+    expect(isBoilerplate('Resolved.')).toBe(true)
+    expect(isBoilerplate('Monitoring')).toBe(true)
+  })
+
+  it('returns true for null/empty/short text', () => {
+    expect(isBoilerplate(null)).toBe(true)
+    expect(isBoilerplate('')).toBe(true)
+    expect(isBoilerplate('OK')).toBe(true)
+  })
+
+  it('returns false when boilerplate opener has appended technical detail', () => {
+    expect(isBoilerplate('We are currently investigating this issue. Error rates spiked to 40% on /v1/messages endpoint.')).toBe(false)
+    expect(isBoilerplate('We are aware of increased latency affecting Claude Sonnet models in us-east-1')).toBe(false)
+    expect(isBoilerplate('A fix has been implemented for the database connection pool exhaustion issue')).toBe(false)
+  })
+
+  it('returns false for technical detail', () => {
+    expect(isBoilerplate('AWS Bedrock is currently experiencing issues that are leading to an increase in errors for Claude models')).toBe(false)
+    expect(isBoilerplate('The frequency of those errors has gone down. We are continuing to closely monitor')).toBe(false)
+    expect(isBoilerplate('Error rates increased to 15% on us-east-1 region')).toBe(false)
+    expect(isBoilerplate('Root cause identified as a database connection pool exhaustion')).toBe(false)
+  })
 })
 
 describe('findSimilarIncidents', () => {
@@ -99,6 +144,35 @@ describe('buildAnalysisPrompt', () => {
     expect(prompt).not.toContain('JSON format')
   })
 
+  it('includes timeline updates in prompt when provided', () => {
+    const prompt = buildAnalysisPrompt(
+      'AssemblyAI',
+      {
+        title: 'Error rates increase',
+        status: 'identified',
+        startedAt: '2026-03-30T18:41:00Z',
+        impact: 'minor',
+        timeline: [
+          { stage: 'identified', text: 'AWS Bedrock issues leading to errors for Claude models', at: '2026-03-30T18:41:00Z' },
+          { stage: 'identified', text: 'Errors have gone down but still occurring', at: '2026-03-30T21:54:00Z' },
+        ],
+      },
+      [],
+    )
+    expect(prompt).toContain('Timeline Updates:')
+    expect(prompt).toContain('AWS Bedrock issues')
+    expect(prompt).toContain('Errors have gone down')
+  })
+
+  it('omits timeline section when no timeline provided', () => {
+    const prompt = buildAnalysisPrompt(
+      'Test',
+      { title: 'Outage', status: 'investigating', startedAt: '2026-01-01T00:00:00Z', impact: null },
+      [],
+    )
+    expect(prompt).not.toContain('Timeline Updates:')
+  })
+
   it('caps history text length', () => {
     const longIncidents = Array.from({ length: 20 }, (_, i) =>
       mockIncident({ id: `inc${i}`, title: 'A'.repeat(200), duration: '1h' })
@@ -169,6 +243,29 @@ describe('analyzeIncident', () => {
 
     const result = await analyzeIncident('fake-key', 'Test', mockInc, [])
     expect(result).toBeNull()
+
+    vi.unstubAllGlobals()
+  })
+
+  it('stores timelineHash from latest timeline entry', async () => {
+    const mockResponse = {
+      content: [{ type: 'text', text: '{"summary":"Test","estimatedRecovery":"1h","affectedScope":["API"]}' }],
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResponse),
+    }))
+
+    const incWithTimeline = {
+      ...mockInc,
+      timeline: [
+        { stage: 'investigating' as const, text: 'First update', at: '2026-03-26T10:00:00Z' },
+        { stage: 'identified' as const, text: 'Found root cause', at: '2026-03-26T11:30:00Z' },
+      ],
+    }
+    const result = await analyzeIncident('fake-key', 'Test', incWithTimeline, [])
+    expect(result).not.toBeNull()
+    expect(result!.timelineHash).toBe('2026-03-26T11:30:00Z')
 
     vi.unstubAllGlobals()
   })
@@ -494,6 +591,135 @@ describe('refreshOrReanalyze', () => {
     expect(store['ai:analysis:claudeai']).toBeDefined()
     const copied = JSON.parse(store['ai:analysis:claudeai'])
     expect(copied.incidentId).toBe('inc-shared')
+  })
+
+  it('skips re-analysis when timeline has not changed (timelineHash matches)', async () => {
+    const oldAnalysis = {
+      ...mockAnalysis,
+      incidentId: 'inc-1',
+      analyzedAt: '2026-03-27T03:00:00Z',
+      timelineHash: '2026-03-27T03:00:00Z',  // matches latest timeline entry
+    }
+    const store: Record<string, string> = { 'ai:analysis:claude': JSON.stringify(oldAnalysis) }
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{
+      id: 'inc-1',
+      status: 'investigating',
+      timeline: [{ stage: 'investigating', text: 'Looking into it', at: '2026-03-27T03:00:00Z' }],
+    }])
+    const analyzeFn = vi.fn()
+
+    const now = new Date('2026-03-27T05:30:00Z').getTime() // 2.5h elapsed
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(analyzeFn).not.toHaveBeenCalled() // no API call — timeline unchanged
+    expect(result.refreshed).toEqual(['claude'])
+    expect(result.reanalyzed).toEqual([])
+  })
+
+  it('re-analyzes when timeline has new updates (timelineHash differs)', async () => {
+    const oldAnalysis = {
+      ...mockAnalysis,
+      incidentId: 'inc-1',
+      analyzedAt: '2026-03-27T03:00:00Z',
+      timelineHash: '2026-03-27T03:00:00Z',
+    }
+    const store: Record<string, string> = { 'ai:analysis:claude': JSON.stringify(oldAnalysis) }
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{
+      id: 'inc-1',
+      status: 'identified',
+      timeline: [
+        { stage: 'investigating', text: 'Looking into it', at: '2026-03-27T03:00:00Z' },
+        { stage: 'identified', text: 'Root cause found', at: '2026-03-27T04:30:00Z' },  // new update
+      ],
+    }])
+    const updatedAnalysis = { ...mockAnalysis, incidentId: 'inc-1', summary: 'Updated with new timeline' }
+    const analyzeFn = vi.fn().mockResolvedValue(updatedAnalysis)
+
+    const now = new Date('2026-03-27T05:30:00Z').getTime()
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(analyzeFn).toHaveBeenCalledOnce()
+    expect(result.reanalyzed).toEqual(['claude'])
+  })
+
+  it('skips re-analysis when new timeline entries are all boilerplate', async () => {
+    const oldAnalysis = {
+      ...mockAnalysis,
+      incidentId: 'inc-1',
+      analyzedAt: '2026-03-27T03:00:00Z',
+      timelineHash: '2026-03-27T03:00:00Z',
+    }
+    const store: Record<string, string> = { 'ai:analysis:claude': JSON.stringify(oldAnalysis) }
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{
+      id: 'inc-1',
+      status: 'monitoring',
+      timeline: [
+        { stage: 'investigating', text: 'We are investigating this issue', at: '2026-03-27T03:00:00Z' },
+        { stage: 'monitoring', text: 'A fix has been implemented and we are monitoring the results.', at: '2026-03-27T04:00:00Z' },
+      ],
+    }])
+    const analyzeFn = vi.fn()
+
+    const now = new Date('2026-03-27T05:30:00Z').getTime()
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(analyzeFn).not.toHaveBeenCalled() // boilerplate — skip
+    expect(result.refreshed).toEqual(['claude'])
+    // timelineHash should be updated to latest entry
+    const stored = JSON.parse(store['ai:analysis:claude'])
+    expect(stored.timelineHash).toBe('2026-03-27T04:00:00Z')
+  })
+
+  it('re-analyzes when new timeline has mix of boilerplate and technical content', async () => {
+    const oldAnalysis = {
+      ...mockAnalysis,
+      incidentId: 'inc-1',
+      analyzedAt: '2026-03-27T03:00:00Z',
+      timelineHash: '2026-03-27T03:00:00Z',
+    }
+    const store: Record<string, string> = { 'ai:analysis:claude': JSON.stringify(oldAnalysis) }
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{
+      id: 'inc-1',
+      status: 'identified',
+      timeline: [
+        { stage: 'investigating', text: 'We are investigating this issue', at: '2026-03-27T03:00:00Z' },
+        { stage: 'identified', text: 'AWS Bedrock errors affecting Claude Sonnet models in us-east-1', at: '2026-03-27T04:00:00Z' },
+      ],
+    }])
+    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'inc-1' })
+
+    const now = new Date('2026-03-27T05:30:00Z').getTime()
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(analyzeFn).toHaveBeenCalledOnce() // technical content — re-analyze
+    expect(result.reanalyzed).toEqual(['claude'])
+  })
+
+  it('re-analyzes when no timelineHash exists in old analysis (backward compat)', async () => {
+    const oldAnalysis = {
+      ...mockAnalysis,
+      incidentId: 'inc-1',
+      analyzedAt: '2026-03-27T03:00:00Z',
+      // no timelineHash — old analysis before this feature
+    }
+    const store: Record<string, string> = { 'ai:analysis:claude': JSON.stringify(oldAnalysis) }
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{
+      id: 'inc-1',
+      status: 'investigating',
+      timeline: [{ stage: 'investigating', text: 'Looking into it', at: '2026-03-27T03:00:00Z' }],
+    }])
+    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'inc-1' })
+
+    const now = new Date('2026-03-27T05:30:00Z').getTime()
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(analyzeFn).toHaveBeenCalledOnce() // should re-analyze since no hash to compare
+    expect(result.reanalyzed).toEqual(['claude'])
   })
 
   it('dedup: does not count copied analysis toward re-analysis cap', async () => {

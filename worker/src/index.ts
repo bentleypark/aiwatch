@@ -400,7 +400,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
           usage.calls++
           const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))
           const analysis = await Promise.race([
-            analyzeIncident(env.ANTHROPIC_API_KEY!, svc.name, { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact }, svc.incidents ?? []),
+            analyzeIncident(env.ANTHROPIC_API_KEY!, svc.name, { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline }, svc.incidents ?? []),
             timeout,
           ])
           if (analysis) {

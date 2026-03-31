@@ -4,6 +4,34 @@
 import type { Incident, ServiceStatus } from './types'
 import { sanitize, kvPut, kvDel, type KVLike } from './utils'
 
+/**
+ * Detect boilerplate timeline entries that contain no actionable technical detail.
+ * Returns true if the text is generic/templated (e.g., "We are investigating this issue").
+ */
+const BOILERPLATE_PATTERNS = [
+  /^we are (currently )?(investigating|looking into|aware of)/i,
+  /^(this |the )?(incident |issue )?(has been |is being |is )?(resolved|fixed)/i,
+  /^a fix has been (implemented|deployed|applied)(.* (monitor|result|status).*)?/i,
+  /^we (are|have been) (continuing to )?(monitor|investigate)/i,
+  /^(monitoring|investigating|identified|resolved)\.?$/i,
+  /^the (issue|incident|problem) (has been )?(identified|resolved)/i,
+  /^we('re| are) (still )?(working on|looking into)/i,
+  /^(this|the) (incident|issue) is (being )?(monitored|investigated)/i,
+]
+
+export function isBoilerplate(text: string | null | undefined): boolean {
+  if (!text) return true
+  const trimmed = text.trim()
+  if (trimmed.length < 15) return true  // too short to be meaningful
+  // Only boilerplate if the pattern covers most of the text (no appended technical detail)
+  return BOILERPLATE_PATTERNS.some(p => {
+    const m = trimmed.match(p)
+    if (!m) return false
+    const remaining = trimmed.slice(m[0].length).replace(/[.\s,;:!]+/g, '')
+    return remaining.length < 20
+  })
+}
+
 export interface AIAnalysisResult {
   summary: string
   estimatedRecovery: string
@@ -11,6 +39,7 @@ export interface AIAnalysisResult {
   analyzedAt: string
   incidentId: string
   resolvedAt?: string
+  timelineHash?: string  // latest timeline entry timestamp — used to skip re-analysis when unchanged
 }
 
 /**
@@ -53,6 +82,7 @@ Analyze the incident data provided by the user and respond in JSON format ONLY:
 Rules:
 - If the incident title contains specific environment keywords (e.g., 'Chrome', 'Cowork', 'API'), prioritize them in the summary.
 - Recovery estimate MUST use short format: '30m–1h', '1–3h', '15–45m'. Never write 'minutes' or 'hours' in full words.
+- If Timeline Updates are provided, incorporate the LATEST status and progress into your analysis. Reflect whether the situation is improving, worsening, or unchanged.
 - Keep the tone professional, objective, and data-driven.
 - Do not include any text outside the JSON block.`
 
@@ -61,7 +91,7 @@ Rules:
  */
 export function buildAnalysisPrompt(
   serviceName: string,
-  currentIncident: { title: string; status: string; startedAt: string; impact: string | null },
+  currentIncident: { title: string; status: string; startedAt: string; impact: string | null; timeline?: Array<{ stage: string; text: string | null; at: string }> },
   similarIncidents: Incident[],
 ): string {
   const historyText = similarIncidents.length > 0
@@ -75,13 +105,23 @@ export function buildAnalysisPrompt(
   const safeStatus = sanitize(currentIncident.status).slice(0, 20)
   const safeImpact = sanitize(currentIncident.impact ?? 'unknown').slice(0, 20)
 
+  // Include timeline updates for richer re-analysis context (most recent entries, line-safe truncation)
+  const timelineLines = (currentIncident.timeline ?? [])
+    .slice(-10)
+    .map(t => `- [${sanitize(t.stage).slice(0, 20)}] ${sanitize(t.at).slice(0, 30)}: ${sanitize(t.text ?? '').slice(0, 200)}`)
+  let timelineText = ''
+  for (const line of timelineLines) {
+    if (timelineText.length + line.length + 1 > 1500) break
+    timelineText += (timelineText ? '\n' : '') + line
+  }
+
   return `<incident_data>
 Service: ${safeName}
 Current Incident: "${safeTitle}"
 Status: ${safeStatus}
 Started: ${sanitize(currentIncident.startedAt).slice(0, 30)}
 Impact: ${safeImpact}
-
+${timelineText ? `\nTimeline Updates:\n${timelineText}\n` : ''}
 Historical Data (last 30 days):
 ${historyText}
 </incident_data>`
@@ -93,7 +133,7 @@ ${historyText}
 export async function analyzeIncident(
   apiKey: string,
   serviceName: string,
-  currentIncident: { id: string; title: string; status: string; startedAt: string; impact: string | null },
+  currentIncident: { id: string; title: string; status: string; startedAt: string; impact: string | null; timeline?: Array<{ stage: string; text: string | null; at: string }> },
   allIncidents: Incident[],
 ): Promise<AIAnalysisResult | null> {
   const similar = findSimilarIncidents(currentIncident.title, allIncidents)
@@ -141,12 +181,15 @@ export async function analyzeIncident(
       .replace(/(\d+)\s*minutes?/gi, '$1m')
       .replace(/(\d+)\s*hours?/gi, '$1h')
       .replace(/\s*to\s*/g, '–')
+    // Store latest timeline entry timestamp to detect new updates on re-analysis
+    const latestTimelineAt = currentIncident.timeline?.at(-1)?.at ?? ''
     return {
       summary: sanitize(parsed.summary ?? 'Analysis unavailable'),
       estimatedRecovery: recovery,
       affectedScope: (parsed.affectedScope ?? []).map(s => sanitize(s)),
       analyzedAt: new Date().toISOString(),
       incidentId: currentIncident.id,
+      timelineHash: latestTimelineAt,
     }
   } catch (err) {
     console.error('[ai-analysis] Failed:', err instanceof Error ? err.message : err)
@@ -202,11 +245,36 @@ export async function refreshOrReanalyze(
           if (analysisAge >= 7_200_000 && apiKey && reAnalysisCount < cap) {
             const activeInc = (svc.incidents ?? []).find(i => i.status !== 'resolved')
             if (activeInc) {
+              // Skip re-analysis if timeline hasn't changed since last analysis
+              const latestTimelineAt = activeInc.timeline?.at(-1)?.at ?? ''
+              const hashTime = parsed.timelineHash ? new Date(parsed.timelineHash).getTime() : 0
+              const latestTime = latestTimelineAt ? new Date(latestTimelineAt).getTime() : 0
+              if (parsed.timelineHash && hashTime === latestTime) {
+                // No new timeline updates — just refresh TTL, skip API call
+                parsed._lastRefresh = new Date(now).toISOString()
+                await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+                if (activeInc.id) analyzedIncidents.set(activeInc.id, key)
+                result.refreshed.push(svc.id)
+                continue
+              }
+              // Skip if new timeline entries are all boilerplate (no technical detail)
+              if (parsed.timelineHash) {
+                const newEntries = (activeInc.timeline ?? []).filter(t => new Date(t.at).getTime() > hashTime)
+                if (newEntries.length > 0 && newEntries.every(t => isBoilerplate(t.text))) {
+                  // Update timelineHash to avoid rechecking, but skip API call
+                  parsed.timelineHash = latestTimelineAt
+                  parsed._lastRefresh = new Date(now).toISOString()
+                  await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+                  if (activeInc.id) analyzedIncidents.set(activeInc.id, key)
+                  result.refreshed.push(svc.id)
+                  continue
+                }
+              }
               reAnalysisCount++
               try {
                 const newAnalysis = await analyzeFn(
                   apiKey, svc.name,
-                  { id: activeInc.id, title: activeInc.title, status: activeInc.status, startedAt: activeInc.startedAt, impact: activeInc.impact },
+                  { id: activeInc.id, title: activeInc.title, status: activeInc.status, startedAt: activeInc.startedAt, impact: activeInc.impact, timeline: activeInc.timeline },
                   svc.incidents ?? [],
                 )
                 // Track usage
@@ -294,7 +362,7 @@ export async function refreshOrReanalyze(
       const analysis = await analyzeFn(
         apiKey,
         svc.name,
-        { id: activeInc.id, title: activeInc.title, status: activeInc.status, startedAt: activeInc.startedAt, impact: activeInc.impact },
+        { id: activeInc.id, title: activeInc.title, status: activeInc.status, startedAt: activeInc.startedAt, impact: activeInc.impact, timeline: activeInc.timeline },
         svc.incidents ?? [],
       )
 
