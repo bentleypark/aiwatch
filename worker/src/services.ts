@@ -14,7 +14,7 @@ import { parseAwsRssIncidents, deriveAwsStatus } from './parsers/aws'
 const SERVICES: ServiceConfig[] = [
   // AI API Services
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code', 'claude desktop'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp' },
-  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'conversation', 'workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], statusComponent: 'Chat Completions', incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'] },
+  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'conversation', 'workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'] },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B', incidentKeywords: ['vertex', 'gemini', 'us-central1', 'europe-west1', 'asia-northeast1'] },
   { id: 'bedrock', name: 'Amazon Bedrock', provider: 'AWS', category: 'api', statusUrl: 'https://health.aws.amazon.com/health/status', apiUrl: null, awsRssUrls: [
     'https://status.aws.amazon.com/rss/bedrock-us-east-1.rss',
@@ -218,7 +218,15 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       // unrelated incidents that passed through filters but don't affect this component)
       const svcStatus = (() => {
         const overall = normalizeStatus(summaryData.status?.indicator ?? 'none')
-        if (!config.statusComponent && !config.statusComponentId) return overall
+        if (!config.statusComponent && !config.statusComponentId) {
+          // No specific component — use overall, but if no relevant unresolved incidents
+          // matched after filtering, treat as operational (avoids cross-contamination
+          // from unrelated incidents, e.g., ChatGPT incident affecting OpenAI API status)
+          if (overall !== 'operational' && filtered.filter((i) => i.status !== 'resolved').length === 0) {
+            return 'operational'
+          }
+          return overall
+        }
         const comp = config.statusComponent
           ? summaryData.components?.find((c) => c.name.startsWith(config.statusComponent))
           : summaryData.components?.find((c) => c.id === config.statusComponentId)
