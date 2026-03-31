@@ -213,7 +213,7 @@ worker/
     og-render.ts # SVG → PNG conversion (resvg-wasm, Inter font from CDN)
     alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts)
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText, buildGroupedFallbackText for multi-category incidents)
-    ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt, TTL refresh, re-analysis, incidentId dedup)
+    ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt, TTL refresh, re-analysis, incidentId dedup, timeline context, boilerplate filtering)
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit, Web Vitals)
     vitals.ts   # Web Vitals aggregation (ingest, KV flush, p75 computation, Discord formatting)
     probe.ts    # Health check probing — direct RTT measurement (17 API services)
@@ -313,7 +313,8 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
 - Mobile breakpoint: 768px — sidebar hidden (overlay on hamburger), cards go 1-column
 - Phase 3 AI Analysis (Beta): Claude Sonnet auto-analysis on incidents — triggered by cron, stored in KV, shown in Topbar Analyze modal + Is X Down AI Insight card. Requires `ANTHROPIC_API_KEY` Worker secret
   - TTL refresh: cron refreshes `ai:analysis:{svcId}` every ~30min while incident is active
-  - Re-analysis: if analysis expired/missing, re-triggers (max 2/cron, 30min cooldown on failure). Also re-analyzes after 2h for long-running active incidents (safe overwrite: keeps old analysis on failure)
+  - Re-analysis: if analysis expired/missing, re-triggers (max 2/cron, 30min cooldown on failure). Also re-analyzes after 2h for long-running active incidents (safe overwrite: keeps old analysis on failure). Includes incident timeline updates in prompt for richer context
+  - Timeline-aware skip: stores `timelineHash` (latest entry timestamp) — skips re-analysis when timeline unchanged or new entries are all boilerplate (generic "investigating"/"monitoring" messages detected by `isBoilerplate()`)
   - Stale detection: re-analyzes when stored incidentId no longer matches active incidents
   - Dedup: sibling services sharing same incidentId copy analysis from KV (no extra API call)
   - Modal groups services with same incidentId into single card
