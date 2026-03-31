@@ -1065,7 +1065,7 @@ export default {
         // Calculate scores for cached services (same as /api/status)
         const scoredCached = cached.services.map((svc) => {
           const s = calculateAIWatchScore(svc)
-          return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence }
+          return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown }
         })
 
         return new Response(JSON.stringify({

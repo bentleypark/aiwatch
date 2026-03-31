@@ -1,4 +1,4 @@
-// Ranking — AI service reliability ranking based on AIWatch Score
+// Ranking — AI service reliability ranking based on AIWatch Score (responsive)
 
 import { useMemo } from 'react'
 import { useLang } from '../hooks/useLang'
@@ -89,7 +89,7 @@ export default function Ranking() {
         </button>
       </div>
 
-      {/* Full Ranking Table */}
+      {/* Full Ranking */}
       <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
         <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
           <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
@@ -97,7 +97,9 @@ export default function Ranking() {
             {t('ranking.table')}
           </div>
         </div>
-        <div className="overflow-x-auto">
+
+        {/* Desktop: Table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full mono text-[11px]" style={{ borderCollapse: 'collapse' }}>
             <thead>
               <tr className="border-b border-[var(--border)] text-[var(--text2)]">
@@ -110,7 +112,7 @@ export default function Ranking() {
               </tr>
             </thead>
             <tbody>
-              {ranked.scored.map((svc, i) => (
+              {ranked.scored.map((svc) => (
                 <tr
                   key={svc.id}
                   className="border-b border-[var(--border)] hover:bg-[var(--bg3)] cursor-pointer transition-colors"
@@ -138,6 +140,44 @@ export default function Ranking() {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile: Card List */}
+        <div className="md:hidden flex flex-col">
+          {ranked.scored.map((svc, i) => {
+            const affectedDays = svc.scoreBreakdown ? Math.round(30 - svc.scoreBreakdown.incidents) : null
+            const hasUptime = svc.uptime30d != null
+            const hasAffected = affectedDays != null && affectedDays > 0
+            return (
+              <div
+                key={svc.id}
+                onClick={() => setPage({ name: 'service', serviceId: svc.id })}
+                className={`cursor-pointer hover:bg-[var(--bg3)] active:bg-[var(--bg3)] transition-colors${i < ranked.scored.length - 1 ? ' border-b border-[var(--border)]' : ''}`}
+                style={{ padding: '10px 16px' }}
+              >
+                {/* Row 1: Rank + Name + Score + Grade */}
+                <div className="flex items-baseline flex-wrap gap-x-2 gap-y-0.5">
+                  <span className="mono text-[11px] text-[var(--text2)] shrink-0 text-right" style={{ width: '20px' }}>
+                    {svc.isTied ? `${svc.rank}=` : svc.rank}
+                  </span>
+                  <span className="text-[12px] text-[var(--text0)] font-medium">{svc.name}</span>
+                  <span className={`mono text-[13px] font-semibold shrink-0 ${SCORE_TEXT_CLASS[svc.scoreGrade] ?? ''}`}>
+                    {svc.aiwatchScore}
+                  </span>
+                  <span className={`mono text-[9px] rounded shrink-0 ${SCORE_BG_CLASS[svc.scoreGrade] ?? 'bg-[var(--bg3)]'} text-[var(--bg0)]`} style={{ padding: '2px 6px' }}>
+                    {svc.scoreGrade}
+                  </span>
+                  {(hasUptime || hasAffected) && (
+                    <span className="mono text-[10px] text-[var(--text2)]">
+                      {hasUptime ? `${svc.uptime30d.toFixed(2)}%` : ''}
+                      {hasUptime && hasAffected ? ' · ' : ''}
+                      {hasAffected ? `${affectedDays}${t('aboutScore.day')}` : ''}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </div>
       </section>
 

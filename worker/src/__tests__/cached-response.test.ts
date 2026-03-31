@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
+import { calculateAIWatchScore } from '../score'
+import type { ServiceStatus } from '../types'
 
 /**
- * Validates that /api/status/cached response includes latency24h.
+ * Validates that /api/status/cached response includes latency24h and scoreBreakdown.
  * Since the handler runs in Worker runtime, we simulate the KV read + response build
  * logic to verify the contract.
  */
@@ -17,8 +19,14 @@ function buildCachedResponse(
     try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch { /* ignore */ }
   }
 
+  // Simulate score calculation (mirrors index.ts /api/status/cached handler)
+  const scoredCached = cachedServices.map((svc) => {
+    const s = calculateAIWatchScore(svc as ServiceStatus)
+    return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown }
+  })
+
   return {
-    services: cachedServices,
+    services: scoredCached,
     lastUpdated: new Date().toISOString(),
     cached: true,
     latency24h,
@@ -72,5 +80,47 @@ describe('/api/status/cached latency24h', () => {
 
     // Full /api/status also returns { latency24h: snapshots }
     expect(response.latency24h).toEqual(snapshots)
+  })
+})
+
+describe('/api/status/cached scoreBreakdown', () => {
+  it('includes scoreBreakdown for each service', () => {
+    const services = [
+      { id: 'claude', status: 'operational', uptime30d: 99.5, incidents: [] },
+      { id: 'openai', status: 'operational', uptime30d: null, incidents: [] },
+    ]
+    const response = buildCachedResponse({}, services)
+
+    for (const svc of response.services) {
+      expect(svc).toHaveProperty('scoreBreakdown')
+      expect(svc.scoreBreakdown).toHaveProperty('incidents')
+      expect(svc.scoreBreakdown).toHaveProperty('recovery')
+    }
+  })
+
+  it('scoreBreakdown matches full /api/status contract', () => {
+    const services = [
+      { id: 'claude', status: 'operational', uptime30d: 100, incidents: [] },
+    ]
+    const response = buildCachedResponse({}, services)
+    const svc = response.services[0]
+
+    // Full response includes: aiwatchScore, scoreGrade, scoreConfidence, scoreBreakdown
+    expect(svc).toHaveProperty('aiwatchScore')
+    expect(svc).toHaveProperty('scoreGrade')
+    expect(svc).toHaveProperty('scoreConfidence')
+    expect(svc).toHaveProperty('scoreBreakdown')
+    expect(svc.scoreBreakdown).toEqual({ uptime: expect.any(Number), incidents: expect.any(Number), recovery: expect.any(Number) })
+  })
+
+  it('scoreBreakdown.uptime is null when service has no uptime data', () => {
+    const services = [
+      { id: 'gemini', status: 'operational', uptime30d: null, incidents: [] },
+    ]
+    const response = buildCachedResponse({}, services)
+
+    expect(response.services[0].scoreBreakdown.uptime).toBeNull()
+    expect(response.services[0].scoreBreakdown.incidents).toBe(30) // full score, 0 affected days
+    expect(response.services[0].scoreBreakdown.recovery).toBe(20) // full score, no incidents
   })
 })
