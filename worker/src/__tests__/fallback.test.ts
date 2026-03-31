@@ -126,7 +126,7 @@ describe('buildGroupedFallbackText', () => {
 
   it('returns multi-category fallback for grouped incident', () => {
     const text = buildGroupedFallbackText(['claude', 'claudeai', 'claude-code'], services)
-    expect(text).toContain('API:')
+    expect(text).toContain('LLM:')
     expect(text).toContain('OpenAI API (Score 86)')
     expect(text).toContain('AI Apps:')
     expect(text).toContain('ChatGPT')
@@ -136,8 +136,8 @@ describe('buildGroupedFallbackText', () => {
 
   it('deduplicates tier groups', () => {
     const text = buildGroupedFallbackText(['claude', 'claudeai'], services)
-    const apiMatches = text.match(/API:/g)
-    expect(apiMatches).toHaveLength(1)
+    const llmMatches = text.match(/LLM:/g)
+    expect(llmMatches).toHaveLength(1)
   })
 
   it('skips excluded services', () => {
@@ -154,9 +154,20 @@ describe('buildGroupedFallbackText', () => {
 
   it('returns single tier group when only one affected', () => {
     const text = buildGroupedFallbackText(['claude'], services)
-    expect(text).toContain('API:')
+    expect(text).toContain('LLM:')
     expect(text).not.toContain('AI Apps:')
     expect(text).not.toContain('Coding Agent:')
+  })
+
+  it('uses tier label (Voice) instead of category label (API) for voice services', () => {
+    const voiceServices = [
+      { id: 'elevenlabs', category: 'api', name: 'ElevenLabs', status: 'degraded', aiwatchScore: 54 },
+      { id: 'assemblyai', category: 'api', name: 'AssemblyAI', status: 'operational', aiwatchScore: 84 },
+      { id: 'deepgram', category: 'api', name: 'Deepgram', status: 'operational', aiwatchScore: 70 },
+    ]
+    const text = buildGroupedFallbackText(['elevenlabs'], voiceServices)
+    expect(text).toContain('Voice:')
+    expect(text).not.toContain('API:')
   })
 })
 

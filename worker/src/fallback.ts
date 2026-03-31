@@ -82,7 +82,7 @@ export function buildGroupedFallbackText(
     seen.add(groupKey)
     const fallbacks = getFallbacks(svcId, svc.category, services)
     if (fallbacks.length === 0) continue
-    const label = CATEGORY_LABEL[svc.category] || svc.category
+    const label = tierLabel || CATEGORY_LABEL[svc.category] || svc.category
     const list = fallbacks.map((f, i) => {
       const name = f.score != null ? `${f.name} (Score ${f.score})` : f.name
       return name
