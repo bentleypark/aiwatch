@@ -204,7 +204,7 @@ docs/
 worker/
   src/
     index.ts    # Worker entry: CORS, KV, routing, /api/alert, /badge, /api/v1, Cron scheduled handler
-    services.ts # Service configs + fetch orchestrator
+    services.ts # Service configs + fetch orchestrator + status determination
     types.ts    # Shared types (ServiceStatus, Incident, etc.)
     utils.ts    # Shared utilities (formatDuration, fetchWithTimeout, sanitize)
     score.ts    # AIWatch Score calculation
@@ -279,6 +279,12 @@ Is X Down pages (Edge SSR) and Landing page use inline `gtag()` calls directly s
 | `click_dashboard` | `location: reports_site`, `source: footer/body` | ai-watch.dev link click | Dashboard navigation from reports |
 | `click_report` | `location: reports_site`, `report_month: YYYY-MM` | Monthly report link click | Report page view intent |
 | `click_request_service` | `location: reports_site`, `page` | Service request link click | Request a Service link click |
+
+### Service Status Determination
+Per-service status is resolved in `services.ts` with this priority:
+1. **Component match** (`statusComponentId` or `statusComponent`): use that component's status
+2. **Component not found**: fall back to overall page indicator
+3. **No component configured**: use overall indicator, BUT if no relevant unresolved incidents matched after `incidentExclude`/`incidentKeywords` filtering, treat as `operational` (prevents cross-contamination from unrelated incidents on shared status pages, e.g., ChatGPT incident should not affect OpenAI API status)
 
 ### Status Data Flow
 ```

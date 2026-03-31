@@ -41,7 +41,9 @@ test.describe('Offline / API failure (dev mode)', () => {
   })
 
   test('action banner hides incident link when degraded service has no incidents', async ({ page }) => {
-    // Intercept API and return a single degraded service with NO incidents
+    // Intercept API — return degraded Azure OpenAI with NO incidents,
+    // and override all MOCK_SERVICES that have degraded/investigating status to operational
+    const allOperational = (id) => ({ id, category: 'api', name: id, provider: '', status: 'operational', latency: null, uptime30d: null, incidents: [] })
     await page.route('**/api/status*', (route) =>
       route.fulfill({
         status: 200,
@@ -49,8 +51,11 @@ test.describe('Offline / API failure (dev mode)', () => {
         body: JSON.stringify({
           services: [
             { id: 'azureopenai', category: 'api', name: 'Azure OpenAI', provider: 'Microsoft', status: 'degraded', latency: 350, uptime30d: null, incidents: [] },
-            { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 145, uptime30d: 99.97, incidents: [] },
+            // Override mock services that have degraded/monitoring status to prevent interference
             { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'operational', latency: 200, uptime30d: 99.99, incidents: [] },
+            { id: 'xai', category: 'api', name: 'xAI (Grok)', provider: 'xAI', status: 'operational', latency: 100, uptime30d: null, incidents: [] },
+            { id: 'huggingface', category: 'api', name: 'Hugging Face', provider: 'Hugging Face', status: 'operational', latency: 100, uptime30d: null, incidents: [] },
+            { id: 'copilot', category: 'agent', name: 'GitHub Copilot', provider: 'Microsoft', status: 'operational', latency: null, uptime30d: 99.4, incidents: [] },
           ],
           lastUpdated: new Date().toISOString(),
         }),
