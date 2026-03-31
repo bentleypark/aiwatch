@@ -1065,7 +1065,7 @@ export default {
         // Calculate scores for cached services (same as /api/status)
         const scoredCached = cached.services.map((svc) => {
           const s = calculateAIWatchScore(svc)
-          return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown }
+          return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics }
         })
 
         return new Response(JSON.stringify({
@@ -1143,7 +1143,7 @@ export default {
       const servicesWithScore = enriched.map((svc) => {
         const s = calculateAIWatchScore(svc)
         const detectedAt = detectionMap.get(svc.id) ?? null
-        return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, ...(detectedAt ? { detectedAt } : {}) }
+        return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics, ...(detectedAt ? { detectedAt } : {}) }
       })
 
       // Read AI analysis from KV — active incidents + recently resolved

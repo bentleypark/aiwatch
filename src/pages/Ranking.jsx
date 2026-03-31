@@ -134,7 +134,7 @@ export default function Ranking() {
                     {svc.uptime30d != null ? `${svc.uptime30d.toFixed(2)}%` : '—'}
                   </td>
                   <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
-                    {svc.scoreBreakdown ? `${Math.round(30 - svc.scoreBreakdown.incidents)}${t('aboutScore.day')}` : '—'}
+                    {svc.scoreMetrics?.affectedDays30d != null ? `${svc.scoreMetrics.affectedDays30d}${t('aboutScore.day')}` : '—'}
                   </td>
                 </tr>
               ))}
@@ -145,7 +145,7 @@ export default function Ranking() {
         {/* Mobile: Card List */}
         <div className="md:hidden flex flex-col">
           {ranked.scored.map((svc, i) => {
-            const affectedDays = svc.scoreBreakdown ? Math.round(30 - svc.scoreBreakdown.incidents) : null
+            const affectedDays = svc.scoreMetrics?.affectedDays30d ?? null
             const hasUptime = svc.uptime30d != null
             const hasAffected = affectedDays != null && affectedDays > 0
             return (
