@@ -23,7 +23,7 @@ function formatDate(iso, lang) {
   if (isNaN(d.getTime())) return ''
   return d.toLocaleString(lang === 'ko' ? 'ko-KR' : 'en-US', {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    timeZoneName: 'short',
+    hour12: false, timeZoneName: 'short',
   })
 }
 

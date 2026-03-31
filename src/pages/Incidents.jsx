@@ -34,6 +34,52 @@ const PERIODS = [7, 30, 90]
 
 const TABLE_COLS = ['col.time', 'col.title', 'col.service', 'col.duration', 'col.status']
 
+// ── Helpers ──────────────────────────────────────────────────
+
+/** Status group priority: investigating/identified → monitoring → resolved */
+const STATUS_PRIORITY = { ongoing: 0, monitoring: 1, resolved: 2 }
+
+/** Get resolved time: resolvedAt field, or last resolved timeline entry, or null */
+function getResolvedTime(inc) {
+  if (inc.resolvedAt) return inc.resolvedAt
+  const tl = inc.timeline ?? []
+  const resolvedEntry = [...tl].reverse().find(t => t.stage === 'resolved')
+  return resolvedEntry?.at ?? null
+}
+
+/** Last element of array (ES5-safe) */
+function last(arr) { return arr && arr.length > 0 ? arr[arr.length - 1] : undefined }
+
+/** Get the most recent activity time for sorting */
+function getLatestActivity(inc) {
+  if (inc.status === 'resolved') {
+    const resolved = getResolvedTime(inc)
+    if (resolved) return new Date(resolved).getTime()
+  }
+  const lastTimeline = last(inc.timeline)
+  if (lastTimeline?.at) return new Date(lastTimeline.at).getTime()
+  return new Date(inc.startedAt).getTime()
+}
+
+/** Get contextual timestamp label and date based on status */
+function getContextualTime(inc, t) {
+  if (inc.status === 'resolved') {
+    const resolved = getResolvedTime(inc)
+    if (resolved) return { label: t('incidents.time.resolved'), date: resolved }
+  }
+  if (inc.status === 'monitoring') {
+    const lt = last(inc.timeline)
+    if (lt?.at) return { label: t('incidents.time.updated'), date: lt.at }
+  }
+  if (inc.status === 'ongoing') {
+    const lt = last(inc.timeline)
+    if (lt?.at && lt.at !== inc.startedAt) {
+      return { label: t('incidents.time.updated'), date: lt.at }
+    }
+  }
+  return { label: t('incidents.time.started'), date: inc.startedAt }
+}
+
 // ── Sub-components ───────────────────────────────────────────
 
 function StatusBadge({ status, t }) {
@@ -106,6 +152,7 @@ function DetailPanel({ incident, onClose, t, lang }) {
 // Accordion: detail panel renders inline below the selected row
 function IncidentRow({ incident, isSelected, onClick, onClose, t, lang }) {
   const statusCls = STATUS_BADGE_CLASS[incident.status] ?? STATUS_BADGE_CLASS.resolved
+  const ctx = getContextualTime(incident, t)
   return (
     <>
       <div
@@ -116,9 +163,9 @@ function IncidentRow({ incident, isSelected, onClick, onClose, t, lang }) {
         className={`cursor-pointer transition-colors
           focus:outline-none focus:ring-1 focus:ring-[var(--border-hi)]
           ${isSelected ? 'bg-[var(--bg2)] border-l-2 border-l-[var(--blue)]' : 'hover:bg-[var(--bg2)]'}`}
-        style={{ display: 'grid', gridTemplateColumns: '140px 1fr 100px 80px 80px', gap: '12px', padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}
+        style={{ display: 'grid', gridTemplateColumns: '190px 1fr 100px 80px 80px', gap: '12px', padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}
       >
-        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{formatDate(incident.startedAt, lang)}</span>
+        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}><span style={{ color: 'var(--text2)', opacity: 0.7 }}>{ctx.label}</span> {formatDate(ctx.date, lang)}</span>
         <div role="cell" className="flex items-center gap-2 min-w-0">
           <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text0)' }} className="truncate">{incident.title}</span>
           <span className={`shrink-0 mono ${statusCls}`} style={{ fontSize: '9px', letterSpacing: '0.04em', padding: '2px 6px', borderRadius: '3px' }}>
@@ -136,6 +183,7 @@ function IncidentRow({ incident, isSelected, onClick, onClose, t, lang }) {
 
 // Mobile card — accordion detail inline
 function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }) {
+  const ctx = getContextualTime(incident, t)
   return (
     <div>
       <button
@@ -152,7 +200,7 @@ function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }) {
           <StatusBadge status={incident.status} t={t} />
         </div>
         <div className="flex items-center flex-wrap mono text-[var(--text2)]" style={{ fontSize: '10px', gap: '6px' }}>
-          <span>{formatDate(incident.startedAt, lang)}</span>
+          <span>{ctx.label} {formatDate(ctx.date, lang)}</span>
           <span>·</span>
           <span>{incident.serviceName}</span>
           <span>·</span>
@@ -213,11 +261,12 @@ export default function Incidents() {
       .filter((inc) => statusFilter  === 'all' || inc.status    === statusFilter)
       .filter((inc) => !cutoff || inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= cutoff)
       .sort((a, b) => {
-        // Ongoing incidents first, then by startedAt newest
-        const aOngoing = a.status !== 'resolved' ? 1 : 0
-        const bOngoing = b.status !== 'resolved' ? 1 : 0
-        if (aOngoing !== bOngoing) return bOngoing - aOngoing
-        return new Date(b.startedAt) - new Date(a.startedAt)
+        // Priority 1: status group (ongoing → monitoring → resolved)
+        const aPri = STATUS_PRIORITY[a.status] ?? 2
+        const bPri = STATUS_PRIORITY[b.status] ?? 2
+        if (aPri !== bPri) return aPri - bPri
+        // Priority 2: most recent activity (timeline last update, resolvedAt, or startedAt)
+        return getLatestActivity(b) - getLatestActivity(a)
       })
   }, [allIncidents, serviceFilter, statusFilter, period])
 
@@ -275,7 +324,7 @@ export default function Incidents() {
             aria-label={t('nav.incidents')}
           >
             {/* Header row */}
-            <div role="row" style={{ display: 'grid', gridTemplateColumns: '140px 1fr 100px 80px 80px', gap: '12px', padding: '8px 14px', borderBottom: '1px solid var(--border)' }}>
+            <div role="row" style={{ display: 'grid', gridTemplateColumns: '190px 1fr 100px 80px 80px', gap: '12px', padding: '8px 14px', borderBottom: '1px solid var(--border)' }}>
               {TABLE_COLS.map((key) => (
                 <span key={key} role="columnheader" className="mono text-[var(--text2)] uppercase font-medium" style={{ fontSize: '9px', letterSpacing: '0.08em' }}>
                   {t(`incidents.${key}`)}

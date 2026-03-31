@@ -80,4 +80,44 @@ test.describe('Incidents filtering', () => {
       expect(allResolved).toBe(true)
     }
   })
+
+  test('status groups sort as ongoing > monitoring > resolved', async ({ page }) => {
+    const main = page.locator('main')
+    const rows = main.locator('[role="rowgroup"] [role="row"]')
+    const count = await rows.count()
+    if (count < 2) return
+    // Collect status of each row
+    const statuses = []
+    for (let i = 0; i < count; i++) {
+      const text = (await rows.nth(i).textContent())?.toLowerCase() ?? ''
+      if (text.includes('ongoing')) statuses.push(0)
+      else if (text.includes('monitoring')) statuses.push(1)
+      else statuses.push(2)
+    }
+    // Verify non-decreasing order (ongoing=0 → monitoring=1 → resolved=2)
+    for (let i = 1; i < statuses.length; i++) {
+      expect(statuses[i]).toBeGreaterThanOrEqual(statuses[i - 1])
+    }
+  })
+
+  test('incident list and timeline use consistent time format', async ({ page }) => {
+    const main = page.locator('main')
+    const rows = main.locator('[role="rowgroup"] [role="row"]')
+    const count = await rows.count()
+    if (count === 0) return
+    // Get time from first row (first cell)
+    const firstCell = rows.first().locator('[role="cell"]').first()
+    const listTime = await firstCell.textContent()
+    // Both should use 24h format (no AM/PM)
+    expect(listTime).not.toMatch(/AM|PM/i)
+    // Expand row to see timeline
+    await rows.first().click()
+    await page.waitForTimeout(300)
+    // Timeline timestamps should also use 24h format
+    const timelineTexts = await main.locator('.mono.text-\\[10px\\].text-\\[var\\(--text2\\)\\]').allTextContents()
+    const timeEntries = timelineTexts.filter(t => t.match(/\d{1,2}:\d{2}/))
+    for (const entry of timeEntries) {
+      expect(entry).not.toMatch(/AM|PM/i)
+    }
+  })
 })
