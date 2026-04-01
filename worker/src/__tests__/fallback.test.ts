@@ -179,4 +179,22 @@ describe('EXCLUDE_FALLBACK', () => {
     expect(EXCLUDE_FALLBACK).not.toContain('assemblyai')
     expect(EXCLUDE_FALLBACK).not.toContain('deepgram')
   })
+
+  it('excludes all coding agent services', () => {
+    expect(EXCLUDE_FALLBACK).toContain('copilot')
+    expect(EXCLUDE_FALLBACK).toContain('cursor')
+    expect(EXCLUDE_FALLBACK).toContain('claudecode')
+    expect(EXCLUDE_FALLBACK).toContain('windsurf')
+  })
+
+  it('returns empty fallback for agent services', () => {
+    const services = [
+      { id: 'copilot', category: 'agent', name: 'GitHub Copilot', status: 'degraded', aiwatchScore: 67 },
+      { id: 'cursor', category: 'agent', name: 'Cursor', status: 'operational', aiwatchScore: 75 },
+      { id: 'claudecode', category: 'agent', name: 'Claude Code', status: 'operational', aiwatchScore: 61 },
+      { id: 'windsurf', category: 'agent', name: 'Windsurf', status: 'operational', aiwatchScore: 82 },
+    ]
+    const result = getFallbacks('copilot', 'agent', services)
+    expect(result).toEqual([])
+  })
 })

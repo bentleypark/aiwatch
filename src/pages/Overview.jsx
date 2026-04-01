@@ -423,11 +423,11 @@ function ActionBanner({ services, setPage, t }) {
             </span>
           ))}
         </div>
-      ) : (
+      ) : affected.length > 0 ? (
         <div className="mono text-[11px] text-[var(--text2)]" style={{ marginTop: '4px' }}>
           {t('overview.banner.noFallback')}
         </div>
-      )}
+      ) : null}
     </div>
   )
 }
