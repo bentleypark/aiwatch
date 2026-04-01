@@ -2,7 +2,7 @@
 
 import type { Incident, ServiceStatus, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
-import { fetchWithTimeout, trackFetchFailure, resetFetchFailure } from './utils'
+import { fetchWithTimeout, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss } from './utils'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, computeUptimeFromIncidents, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
@@ -232,6 +232,18 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           : summaryData.components?.find((c) => c.id === config.statusComponentId)
         return comp ? normalizeStatus(comp.status) : overall
       })()
+
+      // Track component ID misses for migration detection (#135)
+      if (config.statusComponentId && summaryData.components) {
+        const compFound = summaryData.components.some((c) => c.id === config.statusComponentId)
+        if (!compFound) {
+          const available = summaryData.components.map((c) => `${c.id}:${c.name}`).join(', ')
+          console.warn(`[fetchService] Component ID not found: ${config.id} (${config.statusComponentId}). Available: ${available}`)
+          await trackComponentMiss(kv, config.id)
+        } else {
+          await resetComponentMiss(kv, config.id)
+        }
+      }
       const augmentedImpact = dailyImpact ? { ...dailyImpact } : {}
       if (svcStatus !== 'operational') {
         for (const inc of filtered) {
@@ -442,6 +454,10 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
 // ── Fetch All Services (parallel, with KV fallback) ──
 
 export const CACHE_KEY = 'services:latest'
+
+/** Service IDs that use statusComponentId — used by cron for component mismatch alerts */
+export const COMPONENT_ID_SERVICES: { id: string; name: string; statusComponentId: string }[] =
+  SERVICES.filter((s) => s.statusComponentId).map((s) => ({ id: s.id, name: s.name, statusComponentId: s.statusComponentId! }))
 
 export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[] }> {
   // Pre-fetch unique Atlassian status API endpoints once.

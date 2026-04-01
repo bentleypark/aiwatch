@@ -2,11 +2,11 @@
 // Fetches AI service status pages and returns normalized ServiceStatus[]
 // Uses KV cache to serve last-known-good data on fetch failures
 
-import { fetchAllServices, CACHE_KEY, type ServiceStatus } from './services'
+import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore } from './score'
 import { buildIncidentAlerts, buildServiceAlerts } from './alerts'
 import { analyzeIncident, refreshOrReanalyze, type AIAnalysisResult } from './ai-analysis'
-import { kvPut, kvDel } from './utils'
+import { kvPut, kvDel, detectComponentMismatches } from './utils'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -461,6 +461,21 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     (s.incidents ?? []).some(i => i.status !== 'resolved')
   )
   await refreshOrReanalyze(activeServices, env.STATUS_CACHE, env.ANTHROPIC_API_KEY, analyzeIncident)
+
+  // Component ID mismatch detection (#135) — alert when statusComponentId is not found
+  const mismatches = await detectComponentMismatches(COMPONENT_ID_SERVICES, env.STATUS_CACHE)
+  for (const svc of mismatches) {
+    try {
+      await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+        title: `⚠️ Component ID Mismatch: ${svc.name}`,
+        description: `Configured \`statusComponentId\`: \`${svc.statusComponentId}\`\nComponent not found in status page API for ${svc.missCount}+ consecutive checks.\n\n**Action**: Verify the component ID at the provider's status page and update \`worker/src/services.ts\` if migrated.`,
+        color: 0xFFA500,
+      })
+      await kvPut(env.STATUS_CACHE, svc.alertKey, '1', { expirationTtl: 86400 })
+    } catch (err) {
+      console.error(`[cron] component mismatch alert failed for ${svc.id}:`, err instanceof Error ? err.message : err)
+    }
+  }
 
   const operational = scored.filter(s => s.status === 'operational').length
   return {

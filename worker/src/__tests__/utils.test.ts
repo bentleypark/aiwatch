@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, type KVLike } from '../utils'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, type KVLike } from '../utils'
 
 function mockKV(store: Record<string, string> = {}): KVLike {
   return {
@@ -103,5 +103,65 @@ describe('resetFetchFailure', () => {
 
   it('does nothing when kv is undefined', async () => {
     await resetFetchFailure(undefined, 'azure') // no throw
+  })
+})
+
+describe('trackComponentMiss', () => {
+  it('returns false on first miss (count=1, threshold=3)', async () => {
+    const kv = mockKV()
+    expect(await trackComponentMiss(kv, 'openai')).toBe(false)
+    expect(kv.put).toHaveBeenCalledWith('component-missing:openai', '1', { expirationTtl: 1800 })
+  })
+
+  it('returns false on second miss (count=2, threshold=3)', async () => {
+    const kv = mockKV({ 'component-missing:openai': '1' })
+    expect(await trackComponentMiss(kv, 'openai')).toBe(false)
+  })
+
+  it('returns true on third miss (count=3, threshold=3)', async () => {
+    const kv = mockKV({ 'component-missing:openai': '2' })
+    expect(await trackComponentMiss(kv, 'openai')).toBe(true)
+  })
+
+  it('returns true when already above threshold and skips write', async () => {
+    const kv = mockKV({ 'component-missing:openai': '5' })
+    expect(await trackComponentMiss(kv, 'openai')).toBe(true)
+    expect(kv.put).not.toHaveBeenCalled()
+  })
+
+  it('handles corrupted (non-numeric) KV value gracefully', async () => {
+    const kv = mockKV({ 'component-missing:openai': 'NaN' })
+    expect(await trackComponentMiss(kv, 'openai')).toBe(false) // treats as 0+1=1 < 3
+  })
+
+  it('returns false when kv is undefined', async () => {
+    expect(await trackComponentMiss(undefined, 'openai')).toBe(false)
+  })
+
+  it('supports custom threshold', async () => {
+    const kv = mockKV({ 'component-missing:openai': '3' })
+    expect(await trackComponentMiss(kv, 'openai', 5)).toBe(false) // 3+1=4 < 5
+    const kv2 = mockKV({ 'component-missing:openai': '4' })
+    expect(await trackComponentMiss(kv2, 'openai', 5)).toBe(true) // 4+1=5 >= 5
+  })
+})
+
+describe('resetComponentMiss', () => {
+  it('deletes the miss counter key when it exists', async () => {
+    const store: Record<string, string> = { 'component-missing:openai': '3' }
+    const kv = mockKV(store)
+    await resetComponentMiss(kv, 'openai')
+    expect(store['component-missing:openai']).toBeUndefined()
+    expect(kv.delete).toHaveBeenCalled()
+  })
+
+  it('skips delete when key does not exist (saves KV write)', async () => {
+    const kv = mockKV()
+    await resetComponentMiss(kv, 'openai')
+    expect(kv.delete).not.toHaveBeenCalled()
+  })
+
+  it('does nothing when kv is undefined', async () => {
+    await resetComponentMiss(undefined, 'openai') // no throw
   })
 })

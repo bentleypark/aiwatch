@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { normalizeStatus } from '../parsers/statuspage'
+import { type KVLike } from '../utils'
 
 /**
  * Tests for the svcStatus determination logic in services.ts.
@@ -145,5 +146,88 @@ describe('svcStatus determination', () => {
       }
       expect(determineSvcStatus(config, summary, [])).toBe('degraded')
     })
+  })
+})
+
+/**
+ * Tests for the component miss tracking logic in services.ts (#135).
+ * Mirrors the tracking block at lines 236-246.
+ */
+function mockKV(store: Record<string, string> = {}): KVLike {
+  return {
+    get: vi.fn(async (key: string) => store[key] ?? null),
+    put: vi.fn(async (key: string, value: string) => { store[key] = value }),
+    delete: vi.fn(async (key: string) => { delete store[key] }),
+  }
+}
+
+interface ComponentTrackingConfig {
+  id: string
+  statusComponentId?: string
+}
+
+/**
+ * Mirrors the component miss tracking logic from services.ts
+ */
+async function trackComponentMissLogic(
+  config: ComponentTrackingConfig,
+  components: Array<{ id: string; name: string }> | undefined,
+  kv: KVLike,
+): Promise<'tracked' | 'reset' | 'skipped'> {
+  if (!config.statusComponentId || !components) return 'skipped'
+  const { trackComponentMiss, resetComponentMiss } = await import('../utils')
+  const compFound = components.some((c) => c.id === config.statusComponentId)
+  if (!compFound) {
+    await trackComponentMiss(kv, config.id)
+    return 'tracked'
+  } else {
+    await resetComponentMiss(kv, config.id)
+    return 'reset'
+  }
+}
+
+describe('component miss tracking (#135)', () => {
+  it('tracks miss when statusComponentId is configured but not found', async () => {
+    const kv = mockKV()
+    const result = await trackComponentMissLogic(
+      { id: 'openai', statusComponentId: 'comp-api-123' },
+      [{ id: 'other-comp', name: 'Other' }],
+      kv,
+    )
+    expect(result).toBe('tracked')
+    expect(kv.put).toHaveBeenCalledWith('component-missing:openai', '1', { expirationTtl: 1800 })
+  })
+
+  it('resets miss counter when component is found', async () => {
+    const kv = mockKV({ 'component-missing:openai': '2' })
+    const result = await trackComponentMissLogic(
+      { id: 'openai', statusComponentId: 'comp-api-123' },
+      [{ id: 'comp-api-123', name: 'API' }],
+      kv,
+    )
+    expect(result).toBe('reset')
+    expect(kv.delete).toHaveBeenCalled()
+  })
+
+  it('skips tracking when no statusComponentId configured', async () => {
+    const kv = mockKV()
+    const result = await trackComponentMissLogic(
+      { id: 'openai' },
+      [{ id: 'comp-api-123', name: 'API' }],
+      kv,
+    )
+    expect(result).toBe('skipped')
+    expect(kv.put).not.toHaveBeenCalled()
+    expect(kv.delete).not.toHaveBeenCalled()
+  })
+
+  it('skips tracking when components array is undefined', async () => {
+    const kv = mockKV()
+    const result = await trackComponentMissLogic(
+      { id: 'openai', statusComponentId: 'comp-api-123' },
+      undefined,
+      kv,
+    )
+    expect(result).toBe('skipped')
   })
 })

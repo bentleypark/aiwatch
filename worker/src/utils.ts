@@ -69,6 +69,52 @@ export async function resetFetchFailure(kv: KVLike | undefined, svcId: string): 
   if (existing !== null) await kvDel(kv, key)
 }
 
+/**
+ * Track consecutive component ID misses per service.
+ * Returns true if miss count has reached the threshold (alert should fire).
+ */
+export async function trackComponentMiss(kv: KVLike | undefined, svcId: string, threshold = 3): Promise<boolean> {
+  if (!kv) return false
+  const key = `component-missing:${svcId}`
+  const count = parseInt(await kv.get(key).catch(() => null) ?? '0', 10) || 0
+  const next = count + 1
+  if (next <= threshold) {
+    await kvPut(kv, key, String(next), { expirationTtl: 1800 })
+  }
+  return next >= threshold
+}
+
+/**
+ * Reset component miss counter on successful component lookup.
+ */
+export async function resetComponentMiss(kv: KVLike | undefined, svcId: string): Promise<void> {
+  if (!kv) return
+  const key = `component-missing:${svcId}`
+  const existing = await kv.get(key).catch(() => null)
+  if (existing !== null) await kvDel(kv, key)
+}
+
+/**
+ * Detect component ID mismatches that need alerting.
+ * Returns list of services that have reached the miss threshold and haven't been alerted yet.
+ */
+export async function detectComponentMismatches(
+  services: { id: string; name: string; statusComponentId: string }[],
+  kv: KVLike,
+  threshold = 3,
+): Promise<{ id: string; name: string; statusComponentId: string; missCount: number; alertKey: string }[]> {
+  const results: { id: string; name: string; statusComponentId: string; missCount: number; alertKey: string }[] = []
+  for (const svc of services) {
+    const missCount = parseInt(await kv.get(`component-missing:${svc.id}`).catch(() => null) ?? '0', 10) || 0
+    if (missCount < threshold) continue
+    const alertKey = `alerted:component-missing:${svc.id}`
+    const alreadyAlerted = await kv.get(alertKey).catch(() => null)
+    if (alreadyAlerted) continue
+    results.push({ ...svc, missCount, alertKey })
+  }
+  return results
+}
+
 export async function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
