@@ -326,8 +326,10 @@ function getFallbacks(service, allServices) {
 
 function ActionBanner({ services, setPage, t }) {
   const affected = services.filter(s => s.status === 'down' || s.status === 'degraded')
-  const investigating = services.filter(s => s.status === 'operational' && (s.incidents ?? []).some(i => i.status !== 'resolved'))
-  if (affected.length === 0 && investigating.length === 0) return null
+  const withActiveIncidents = services.filter(s => s.status === 'operational' && (s.incidents ?? []).some(i => i.status !== 'resolved'))
+  const monitoring = withActiveIncidents.filter(s => (s.incidents ?? []).some(i => i.status === 'monitoring') && !(s.incidents ?? []).some(i => i.status === 'investigating' || i.status === 'identified'))
+  const investigating = withActiveIncidents.filter(s => !monitoring.includes(s))
+  if (affected.length === 0 && withActiveIncidents.length === 0) return null
 
   const downList = affected.filter(s => s.status === 'down')
   const degradedList = affected.filter(s => s.status === 'degraded')
@@ -391,7 +393,12 @@ function ActionBanner({ services, setPage, t }) {
           🔍 <span className="text-[var(--blue)]">{t('overview.banner.investigatingCount').replace('{n}', investigating.length)}</span> {renderNames(investigating)}
         </div>
       )}
-      {(investigating.length > 0 || affected.some(s => (s.incidents ?? []).some(i => i.status !== 'resolved'))) && (
+      {monitoring.length > 0 && (
+        <div className="text-[13px] font-medium text-[var(--text0)]">
+          👀 <span className="text-[var(--blue)]">{t('overview.banner.monitoringCount').replace('{n}', monitoring.length)}</span> {renderNames(monitoring)}
+        </div>
+      )}
+      {(withActiveIncidents.length > 0 || affected.some(s => (s.incidents ?? []).some(i => i.status !== 'resolved'))) && (
         <div className="mono text-[11px]" style={{ marginTop: '4px' }}>
           <button
             onClick={() => setPage({ name: 'incidents' })}

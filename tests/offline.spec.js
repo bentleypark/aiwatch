@@ -96,5 +96,39 @@ test.describe('Offline / API failure (dev mode)', () => {
 
     // "View incident details" link SHOULD appear (has active incident)
     await expect(page.locator('main').getByText(/View incident details|인시던트 상세 확인/).first()).toBeVisible()
+
+    // "No direct fallback" should NOT appear for investigating-only state
+    await expect(page.locator('main').getByText(/No direct fallback|대체 서비스 없음/)).not.toBeVisible()
+  })
+
+  test('action banner shows Monitoring label when incident is in monitoring status', async ({ page }) => {
+    await page.route('**/api/status*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          services: [
+            { id: 'copilot', category: 'agent', name: 'GitHub Copilot', provider: 'Microsoft', status: 'operational', latency: null, uptime30d: 99.4, incidents: [
+              { id: 'cp-mon', title: 'Code Completion Degraded', status: 'monitoring', impact: 'minor', startedAt: new Date().toISOString(), duration: null },
+            ] },
+            { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 145, uptime30d: 99.97, incidents: [] },
+            // Override mock services that have active incidents to prevent interference
+            { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'operational', latency: 200, uptime30d: 99.99, incidents: [] },
+            { id: 'xai', category: 'api', name: 'xAI (Grok)', provider: 'xAI', status: 'operational', latency: 100, uptime30d: null, incidents: [] },
+            { id: 'huggingface', category: 'api', name: 'Hugging Face', provider: 'Hugging Face', status: 'operational', latency: 100, uptime30d: null, incidents: [] },
+          ],
+          lastUpdated: new Date().toISOString(),
+        }),
+      })
+    )
+    await page.goto('/')
+    await expect(page.locator('main').getByText('GitHub Copilot').first()).toBeVisible({ timeout: 15000 })
+
+    // Banner should show Monitoring label, not Investigating
+    await expect(page.locator('main').getByText(/Monitoring|모니터링/).first()).toBeVisible()
+    await expect(page.locator('main').getByText(/Investigating|조사 중/)).not.toBeVisible()
+
+    // "No direct fallback" should NOT appear
+    await expect(page.locator('main').getByText(/No direct fallback|대체 서비스 없음/)).not.toBeVisible()
   })
 })

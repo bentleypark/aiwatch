@@ -66,6 +66,7 @@ const en = {
   'overview.banner.downCount': 'Down ({n}):',
   'overview.banner.degradedCount': 'Degraded ({n}):',
   'overview.banner.investigatingCount': 'Investigating ({n}):',
+  'overview.banner.monitoringCount': 'Monitoring ({n}):',
   'overview.banner.healthy': 'Healthy alternatives:',
   'overview.card.incidents.compact': ' inc',
   'overview.recovered': 'Resolved',
