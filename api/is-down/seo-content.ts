@@ -11,9 +11,9 @@ export interface ServiceSEO {
 const SEO_CONTENT: Record<string, ServiceSEO> = {
   claude: {
     displayName: 'Claude',
-    description: 'Claude is a large language model API developed by Anthropic. It powers applications ranging from chatbots to code generation tools, offering models like Opus, Sonnet, and Haiku for different performance and cost trade-offs.',
-    insight: 'Unlike other providers, Anthropic reports incidents per model (Opus, Sonnet, Haiku), resulting in higher incident counts compared to competitors. This does not necessarily indicate lower reliability — it reflects more granular reporting. When evaluating Claude API stability, focus on uptime percentage and recovery time rather than raw incident count.',
-    whenDown: 'When Claude API is down, developers may experience API request failures, increased latency, or model unavailability across Opus, Sonnet, and Haiku variants. Applications built on the Claude API will be unable to generate responses.',
+    description: 'Claude is a large language model API developed by Anthropic. It powers applications ranging from chatbots to code generation tools, offering multiple model tiers for different performance and cost trade-offs.',
+    insight: 'Unlike other providers, Anthropic reports incidents per model tier, resulting in higher incident counts compared to competitors. This does not necessarily indicate lower reliability — it reflects more granular reporting. When evaluating Claude API stability, focus on uptime percentage and recovery time rather than raw incident count.',
+    whenDown: 'When Claude API is down, developers may experience API request failures, increased latency, or model unavailability. Applications built on the Claude API will be unable to generate responses.',
     faqs: [
       { q: 'Is Claude API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Claude API every 60 seconds and shows real-time operational status, uptime percentage, and recent incidents.' },
       { q: 'How do I check Claude API status?', a: 'You can check Claude API status on this page (updated every 60 seconds), on the official Anthropic status page at status.anthropic.com, or on the AIWatch dashboard at ai-watch.dev.' },
@@ -23,7 +23,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   chatgpt: {
     displayName: 'ChatGPT',
-    description: 'ChatGPT is a conversational AI web application by OpenAI, used by millions for writing, research, coding, and creative tasks. It runs on GPT-4o and other OpenAI models.',
+    description: 'ChatGPT is a conversational AI assistant by OpenAI, available on web, iOS, Android, and desktop. Used by millions for writing, research, coding, and creative tasks, it is powered by OpenAI\'s latest language models.',
     insight: 'ChatGPT and OpenAI API share infrastructure but are tracked separately by AIWatch. A ChatGPT outage does not always mean the API is down — and vice versa. OpenAI has historically maintained one of the highest uptime records among AI providers, with most incidents resolved within 30 minutes.',
     whenDown: 'When ChatGPT is down, users cannot access the web interface for conversations, file uploads, or image generation. Mobile apps and API integrations through the OpenAI platform may also be affected.',
     faqs: [
@@ -59,7 +59,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   cursor: {
     displayName: 'Cursor',
-    description: 'Cursor is an AI-native code editor built on VS Code that integrates multiple LLM providers for intelligent code editing, chat, and codebase understanding. It supports Claude, GPT-4, and other models.',
+    description: 'Cursor is an AI-native code editor built on VS Code that integrates multiple LLM providers for intelligent code editing, chat, and codebase understanding.',
     insight: 'Cursor depends on upstream model providers (Claude, OpenAI), so outages can originate from either Cursor infrastructure or its AI backends. AIWatch monitors Cursor independently — when Cursor reports an issue, check the AIWatch dashboard to see if Claude or OpenAI is also down. Cursor has maintained strong uptime with most incidents attributed to upstream provider issues.',
     whenDown: 'When Cursor is down, developers cannot use AI features including code completions, chat, and intelligent editing. The editor itself may still function for basic editing, but AI-powered features will be unavailable.',
     faqs: [
@@ -72,7 +72,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   'claude-code': {
     displayName: 'Claude Code',
     description: 'Claude Code is Anthropic\'s official CLI tool for AI-powered coding. It runs in the terminal, understands entire codebases, and can edit files, run commands, and manage git workflows autonomously using Claude models.',
-    insight: 'Claude Code shares Anthropic\'s status page with Claude API and claude.ai. An incident on Claude API (e.g., Opus or Sonnet errors) will also affect Claude Code since it relies on the same backend models. When evaluating Claude Code reliability, check both the Claude Code status and the Claude API status on AIWatch.',
+    insight: 'Claude Code shares Anthropic\'s status page with Claude API and claude.ai. An incident on Claude API will also affect Claude Code since it relies on the same backend models. When evaluating Claude Code reliability, check both the Claude Code status and the Claude API status on AIWatch.',
     whenDown: 'When Claude Code is down, developers cannot use AI-assisted coding in their terminal. Code generation, file editing, command execution, and codebase Q&A features will be unavailable. Consider using an alternative coding agent until the service recovers.',
     faqs: [
       { q: 'Is Claude Code down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Claude Code every 60 seconds and shows real-time operational status, uptime percentage, and recent incidents.' },
@@ -83,9 +83,9 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   'claude-ai': {
     displayName: 'claude.ai',
-    description: 'claude.ai is Anthropic\'s consumer-facing AI chatbot web application. It provides direct access to Claude models (Opus, Sonnet, Haiku) for conversations, document analysis, coding assistance, and creative tasks — no API key required.',
-    insight: 'claude.ai shares Anthropic\'s status page with Claude API and Claude Code, but is tracked as a separate component. An API-level outage (e.g., model errors on Opus or Sonnet) will typically affect claude.ai as well. However, claude.ai can experience web-specific issues (login, file upload, rendering) independently of the API. AIWatch monitors the claude.ai component separately for accurate status reporting.',
-    whenDown: 'When claude.ai is down, users cannot access the web chat interface for conversations, file uploads, or artifact generation. The mobile app may also be affected. Claude API and Claude Code may still function independently if the issue is web-specific.',
+    description: 'claude.ai is Anthropic\'s AI assistant, available on web, iOS, and Android. It provides direct access to Claude models for conversations, document analysis, coding assistance, and creative tasks — no API key required.',
+    insight: 'claude.ai shares Anthropic\'s status page with Claude API and Claude Code, but is tracked as a separate component. An API-level outage will typically affect claude.ai as well. However, claude.ai can experience app-specific issues (login, file upload, rendering) independently of the API. AIWatch monitors the claude.ai component separately for accurate status reporting.',
+    whenDown: 'When claude.ai is down, users cannot access conversations, file uploads, or artifact generation. Claude API and Claude Code may still function independently if the issue is client-specific.',
     faqs: [
       { q: 'Is claude.ai down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors claude.ai every 60 seconds and shows real-time operational status, uptime percentage, and recent incidents.' },
       { q: 'Why is claude.ai not working?', a: 'claude.ai may be experiencing web server issues, authentication problems, or upstream Claude API outages. Check this page for current status and the AIWatch dashboard to see if Claude API is also affected.' },
@@ -95,9 +95,9 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   },
   openai: {
     displayName: 'OpenAI',
-    description: 'OpenAI API powers GPT-4o, o1, DALL-E, Whisper, and other foundation models used by millions of developers. It serves both the ChatGPT consumer product and enterprise API integrations.',
+    description: 'OpenAI API provides access to OpenAI\'s language, image, and audio models used by millions of developers. It serves both the ChatGPT consumer product and enterprise API integrations.',
     insight: 'OpenAI API and ChatGPT share infrastructure but are monitored separately by AIWatch. An API outage may not affect ChatGPT and vice versa. OpenAI maintains one of the highest uptime records among AI providers, with most incidents resolved within 30 minutes.',
-    whenDown: 'When OpenAI API is down, applications using GPT-4o, o1, embeddings, or image generation will fail. This affects thousands of third-party apps, chatbots, and developer tools that rely on OpenAI as their backend.',
+    whenDown: 'When OpenAI API is down, applications using language, embedding, or image generation models will fail. This affects thousands of third-party apps, chatbots, and developer tools that rely on OpenAI as their backend.',
     faqs: [
       { q: 'Is OpenAI API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors OpenAI API every 60 seconds and shows real-time operational status, uptime percentage, and recent incidents.' },
       { q: 'Is this affecting ChatGPT too?', a: 'OpenAI API and ChatGPT are tracked separately. Check the AIWatch dashboard at ai-watch.dev to see if both are affected or just one.' },
