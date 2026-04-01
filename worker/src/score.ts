@@ -3,8 +3,8 @@
 import type { ServiceStatus } from './types'
 
 export interface AIWatchScore {
-  score: number | null
-  grade: 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable' | null
+  score: number
+  grade: 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
   confidence: 'high' | 'medium' | 'low'
   breakdown: {
     uptime: number | null
@@ -14,6 +14,7 @@ export interface AIWatchScore {
   metrics: {
     uptimePct: number | null
     incidents30d: number
+    affectedDays30d: number
     mttrHours: number | null
   }
 }

@@ -304,7 +304,8 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
 <p style="font-size:20px;font-weight:600;color:${color};margin:12px 0">${statusLabel(service.status)}</p>
 <p class="meta mono">Last checked: ${esc(timeAgo(service.lastChecked))} &middot; Uptime (30d): ${uptimeStr} &middot; AIWatch Score: ${scoreStr}${esc(gradeStr)}</p>
 ${lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}</p>` : '<p class="meta">No recent incidents</p>'}
-${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${service.rank}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'header'})">AIWatch reliability score</a></p>` : ''}
+${/* TODO: update report URL monthly (currently hardcoded to latest report) */ ''}
+${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${service.rank}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'header'})">AIWatch reliability score</a> &middot; <a href="https://reports.ai-watch.dev/2026-03/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'header'})">March 2026 Report &rarr;</a></p>` : ''}
 </div>`
 }
 
