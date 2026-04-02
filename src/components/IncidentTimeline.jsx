@@ -43,7 +43,7 @@ function TimelineStep({ stage, text, at, isLast, t, lang }) {
   )
 }
 
-export default function IncidentTimeline({ title, subtitle, timeline, onClose, t, lang }) {
+export default function IncidentTimeline({ title, subtitle, timeline, onClose, hideHeader, t, lang }) {
   const panelRef = useRef(null)
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -54,21 +54,23 @@ export default function IncidentTimeline({ title, subtitle, timeline, onClose, t
 
   return (
     <div ref={panelRef} className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden mt-2">
-      <div className="flex items-start justify-between border-b border-[var(--border)]" style={{ padding: '14px 16px' }}>
-        <div>
-          <p className="text-sm font-medium text-[var(--text0)] mb-1">{title}</p>
-          <p className="mono text-[10px] text-[var(--text2)]">{subtitle}</p>
+      {!hideHeader && (
+        <div className="flex items-start justify-between border-b border-[var(--border)]" style={{ padding: '14px 16px' }}>
+          <div>
+            <p className="text-sm font-medium text-[var(--text0)] mb-1">{title}</p>
+            <p className="mono text-[10px] text-[var(--text2)]">{subtitle}</p>
+          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); onClose() }}
+            className="shrink-0 mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] border border-[var(--border)] rounded hover:opacity-80 transition-opacity cursor-pointer"
+            style={{ padding: '4px 10px' }}
+            aria-label={t('modal.close')}
+          >
+            ✕ {t('modal.close')}
+          </button>
         </div>
-        <button
-          onClick={(e) => { e.stopPropagation(); onClose() }}
-          className="shrink-0 mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] border border-[var(--border)] rounded hover:opacity-80 transition-opacity cursor-pointer"
-          style={{ padding: '4px 10px' }}
-          aria-label={t('modal.close')}
-        >
-          ✕ {t('modal.close')}
-        </button>
-      </div>
-      <div style={{ padding: '20px 24px' }}>
+      )}
+      <div style={{ padding: hideHeader ? '12px 16px 16px' : '20px 24px' }}>
         {(timeline ?? []).length === 0 ? (
           <p className="text-xs text-[var(--text2)]">{t('incidents.timeline.empty')}</p>
         ) : (

@@ -85,7 +85,7 @@ function getContextualTime(inc, t) {
 function StatusBadge({ status, t }) {
   const cls = STATUS_BADGE_CLASS[status] ?? STATUS_BADGE_CLASS.resolved
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] mono font-medium ${cls}`}>
+    <span className={`inline-flex items-center rounded text-[11px] mono font-medium ${cls}`} style={{ padding: '2px 6px' }}>
       {t(`incidents.status.${status}`)}
     </span>
   )
@@ -135,13 +135,14 @@ function FilterBar({ services, serviceFilter, setServiceFilter, statusFilter, se
   )
 }
 
-function DetailPanel({ incident, onClose, t, lang }) {
+function DetailPanel({ incident, onClose, hideHeader, t, lang }) {
   return (
     <IncidentTimeline
       title={`${incident.serviceName} — ${incident.title}`}
       subtitle={`${formatDate(incident.startedAt, lang)}  ·  ${t('incidents.col.duration')}: ${incident.duration ?? t('incidents.duration.ongoing')}`}
       timeline={incident.timeline}
       onClose={onClose}
+      hideHeader={hideHeader}
       t={t}
       lang={lang}
     />
@@ -188,10 +189,11 @@ function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }) {
     <div>
       <button
         onClick={onClick}
-        className={`w-full text-left rounded border p-3 transition-colors space-y-1
+        className={`w-full text-left rounded border py-3 transition-colors space-y-1
           ${isSelected
             ? 'bg-[var(--bg2)] border-[var(--border-hi)]'
             : 'bg-[var(--bg1)] border-[var(--border)] hover:bg-[var(--bg2)]'}`}
+        style={{ paddingLeft: 10, paddingRight: 10 }}
       >
         <div className="flex items-start justify-between gap-2">
           <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', flex: 1 }}>
@@ -207,7 +209,7 @@ function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }) {
           <span>{incident.duration ?? t('incidents.duration.ongoing')}</span>
         </div>
       </button>
-      {isSelected && <DetailPanel incident={incident} onClose={onClose} t={t} lang={lang} />}
+      {isSelected && <DetailPanel incident={incident} onClose={onClose} hideHeader t={t} lang={lang} />}
     </div>
   )
 }

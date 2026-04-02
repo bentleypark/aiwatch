@@ -252,6 +252,7 @@ function IncidentItem({ incident, lang, t }) {
             subtitle={`${formatDate(incident.startedAt, lang)}  ·  ${incident.duration ?? (incident.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}`}
             timeline={incident.timeline}
             onClose={() => setExpanded(false)}
+            hideHeader
             t={t}
             lang={lang}
           />

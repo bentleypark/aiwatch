@@ -47,22 +47,27 @@ test.describe('Incidents filtering', () => {
     expect(options).toBeGreaterThanOrEqual(3) // 7d, 30d, 90d
   })
 
-  test('clicking incident row expands accordion detail inline', async ({ page }) => {
+  test('clicking incident row expands accordion with header and close button', async ({ page }) => {
     const main = page.locator('main')
     const rows = main.locator('[role="rowgroup"] [role="row"]')
     const count = await rows.count()
     if (count === 0) return // no incidents to test
     // Click first incident row
     await rows.first().click()
-    // Accordion detail should appear: header with service name + close button
-    await expect(main.getByText('✕').first()).toBeVisible({ timeout: 3000 })
-    // Timeline should be visible
-    const timeline = main.locator('.rounded-full.w-2\\.5.h-2\\.5')
-    expect(await timeline.count()).toBeGreaterThan(0)
+    // Accordion detail should appear with header (desktop does not use hideHeader)
+    const timeline = main.locator('.rounded-lg.overflow-hidden.mt-2').first()
+    await expect(timeline).toBeVisible({ timeout: 3000 })
+    // Header section with border-b should be present on desktop
+    const header = timeline.locator('.border-b')
+    await expect(header).toBeVisible()
+    // Close button should be in the header
+    await expect(header.getByText('✕')).toBeVisible()
+    // Timeline dots should be visible
+    const dots = timeline.locator('.rounded-full.w-2\\.5.h-2\\.5')
+    expect(await dots.count()).toBeGreaterThan(0)
     // Click close button
-    await main.getByText('✕').first().click()
-    // Detail panel should disappear
-    await expect(main.locator('.rounded-lg.overflow-hidden.mt-\\[10px\\]')).not.toBeVisible()
+    await header.getByText('✕').click()
+    await page.waitForTimeout(300)
   })
 
   test('ongoing incidents are sorted before resolved', async ({ page }) => {
