@@ -271,7 +271,7 @@ const ko = {
   'aboutScore.sourceUptime': '각 서비스 공식 status 페이지 (단일 주요 컴포넌트 기준)',
   'aboutScore.sourceIncLabel': '인시던트',
   'aboutScore.sourceUpdateLabel': '업데이트 주기',
-  'aboutScore.sourceUpdateUnit': '초',
+  'aboutScore.sourceUpdateValue': '최대 5분 간격 자동 갱신',
   'aboutScore.uptimeSection': 'Uptime Score (0~50)',
   'aboutScore.incidentSection': 'Incident Score (0~30)',
   'aboutScore.recoverySection': 'Recovery Score (0~20)',

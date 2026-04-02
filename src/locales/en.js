@@ -271,7 +271,7 @@ const en = {
   'aboutScore.sourceUptime': 'Official status pages (primary component basis)',
   'aboutScore.sourceIncLabel': 'Incidents',
   'aboutScore.sourceUpdateLabel': 'Update interval',
-  'aboutScore.sourceUpdateUnit': 's',
+  'aboutScore.sourceUpdateValue': 'Auto-refresh up to every 5 min',
   'aboutScore.uptimeSection': 'Uptime Score (0~50)',
   'aboutScore.incidentSection': 'Incident Score (0~30)',
   'aboutScore.recoverySection': 'Recovery Score (0~20)',
