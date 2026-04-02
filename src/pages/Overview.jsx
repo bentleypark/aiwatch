@@ -109,18 +109,18 @@ function ServiceCard({ service, index, onClick, t, isRecovered }) {
       {/* ── Mobile compact layout ── */}
       <div className="md:hidden" style={{ padding: '10px 12px' }}>
         <div className="flex justify-between items-center" style={{ marginBottom: '4px' }}>
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-[13px] font-medium text-[var(--text0)] truncate">{service.name}</span>
-            <span className="mono text-[10px] text-[var(--text2)] shrink-0">
-              <span className={uptimeColor}>{uptimeStr}</span>
-              {incidentCount > 0 && <>{' · '}<span className="text-[var(--red)]">{incidentCount}{t('overview.card.incidents.compact')}</span></>}
-              {scoreStr && <>{' · '}{scoreStr}</>}
-            </span>
-          </div>
+          <span className="text-[13px] font-medium text-[var(--text0)] truncate min-w-0">{service.name}</span>
           <div className="flex items-center gap-1.5">
             {isRecovered && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
             <StatusPill status={service.status} />
           </div>
+        </div>
+        <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
+          <span className="mono text-[10px] text-[var(--text2)]">
+            <span className={uptimeColor}>{uptimeStr}</span>
+            {incidentCount > 0 && <>{' · '}<span className="text-[var(--red)]">{incidentCount}{t('overview.card.incidents.compact')}</span></>}
+            {scoreStr && <>{' · '}{scoreStr}</>}
+          </span>
         </div>
         <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact)} compact />
       </div>
