@@ -1,6 +1,6 @@
 // Web Vitals aggregation — collects metrics from frontend, stores daily p75 in KV
 // Each beacon request writes directly to KV (no in-memory buffer — isolates are ephemeral)
-// 10% client-side sampling keeps writes within budget (~30/day)
+// 100% collection — every page load sends metrics (one KV write per visit)
 
 export interface VitalsPayload {
   metrics: Partial<Record<VitalName, number>>
@@ -12,6 +12,7 @@ export const VITAL_NAMES: VitalName[] = ['LCP', 'FCP', 'TTFB', 'CLS', 'INP']
 
 export interface VitalsDaily {
   count: number
+  cumulativeCount: number // total samples across recent history + today
   p75: Record<VitalName, number>
 }
 
@@ -52,10 +53,10 @@ function emptyValues(): Record<VitalName, number[]> {
 
 /**
  * Write vitals directly to KV, merging with existing daily data.
- * Called per-request (not buffered). 10% client sampling keeps writes ~30/day.
+ * Called per-request (not buffered). 100% collection — one write per page visit.
  *
  * KNOWN LIMITATION: KV read-modify-write is not atomic.
- * At ~30 writes/day, collision probability is negligible (<1%).
+ * At current traffic levels, collision probability is negligible.
  * If write volume increases, consider Durable Objects or append-only keys.
  */
 export async function writeVitalsToKV(kv: KVNamespace, metrics: Partial<Record<VitalName, number>>): Promise<void> {
@@ -135,7 +136,8 @@ export function computeP75(values: number[]): number {
   return sorted[Math.max(0, idx)]
 }
 
-/** Read today's vitals from KV and compute p75 summary for Daily Report */
+/** Read today's vitals from KV and compute p75 summary for Daily Report.
+ *  Also reads recent history keys to compute cumulative sample count. */
 export async function readVitalsSummary(kv: KVNamespace): Promise<VitalsDaily | null> {
   const today = new Date().toISOString().split('T')[0]
   const key = `vitals:${today}`
@@ -153,7 +155,25 @@ export async function readVitalsSummary(kv: KVNamespace): Promise<VitalsDaily | 
     for (const name of VITAL_NAMES) {
       p75[name] = computeP75(data.allValues[name] ?? [])
     }
-    return { count: data.count, p75: p75 as Record<VitalName, number> }
+
+    // Sum cumulative count from recent history (up to 30 days) + today
+    // 31 parallel KV reads — runs once/day at daily summary time
+    let cumulativeCount = data.count
+    const historyReads: Promise<string | null>[] = []
+    for (let d = 1; d <= 30; d++) {
+      const date = new Date(Date.now() - d * 86_400_000).toISOString().split('T')[0]
+      historyReads.push(kv.get(`vitals:history:${date}`).catch(() => null))
+    }
+    const historyResults = await Promise.all(historyReads)
+    for (const h of historyResults) {
+      if (!h) continue
+      try {
+        const parsed = JSON.parse(h) as { count: number }
+        if (parsed.count) cumulativeCount += parsed.count
+      } catch { /* skip corrupt entries */ }
+    }
+
+    return { count: data.count, cumulativeCount, p75: p75 as Record<VitalName, number> }
   } catch (err) {
     console.error('[vitals] parse failed:', key, err instanceof Error ? err.message : err)
     return null
@@ -202,12 +222,14 @@ export function formatVitalsSection(vitals: VitalsDaily): string {
   }
   lines.push(`   _p75 = 사용자 75%가 이 값 이하를 경험_`)
 
-  // Analysis status
+  // Analysis status (cumulative across days)
   const MIN_SAMPLES = 100
-  if (vitals.count < MIN_SAMPLES) {
-    const remaining = MIN_SAMPLES - vitals.count
-    const estimateDays = Math.max(1, Math.ceil(remaining / 30)) // ~30 samples/day
-    lines.push(`\n   ⏳ 데이터 수집 중 (${vitals.count}/${MIN_SAMPLES}) — 약 ${estimateDays}일 후 분석 가능`)
+  const cumulative = vitals.cumulativeCount
+  if (cumulative < MIN_SAMPLES) {
+    const remaining = MIN_SAMPLES - cumulative
+    const dailyRate = Math.max(1, vitals.count) // use today's actual rate
+    const estimateDays = Math.max(1, Math.ceil(remaining / dailyRate))
+    lines.push(`\n   ⏳ 데이터 수집 중 (${cumulative}/${MIN_SAMPLES}) — 약 ${estimateDays}일 후 분석 가능`)
   } else {
     const issues: string[] = []
     const good: string[] = []

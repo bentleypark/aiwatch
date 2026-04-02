@@ -155,7 +155,9 @@ describe('readVitalsSummary', () => {
     expect(await readVitalsSummary(kv as unknown as KVNamespace)).toBeNull()
   })
 
-  it('returns p75 summary from stored data', async () => {
+  it('returns p75 summary with cumulative count from history', async () => {
+    const today = new Date().toISOString().split('T')[0]
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().split('T')[0]
     const data = {
       count: 10,
       allValues: {
@@ -166,13 +168,37 @@ describe('readVitalsSummary', () => {
         INP: [50, 100, 150, 200, 250, 300, 350, 400, 450, 500],
       },
     }
-    const kv = { get: vi.fn().mockResolvedValue(JSON.stringify(data)) }
+    const kv = {
+      get: vi.fn((key: string) => {
+        if (key === `vitals:${today}`) return Promise.resolve(JSON.stringify(data))
+        if (key === `vitals:history:${yesterday}`) return Promise.resolve(JSON.stringify({ count: 25 }))
+        return Promise.resolve(null)
+      }),
+    }
     const result = await readVitalsSummary(kv as unknown as KVNamespace)
 
     expect(result).not.toBeNull()
     expect(result!.count).toBe(10)
+    expect(result!.cumulativeCount).toBe(35) // 10 today + 25 yesterday
     expect(result!.p75.LCP).toBe(4500)
     expect(result!.p75.FCP).toBe(1200)
+  })
+
+  it('returns cumulativeCount equal to today count when no history exists', async () => {
+    const today = new Date().toISOString().split('T')[0]
+    const data = {
+      count: 5,
+      allValues: { LCP: [1000], FCP: [500], TTFB: [200], CLS: [10], INP: [50] },
+    }
+    const kv = {
+      get: vi.fn((key: string) => {
+        if (key === `vitals:${today}`) return Promise.resolve(JSON.stringify(data))
+        return Promise.resolve(null)
+      }),
+    }
+    const result = await readVitalsSummary(kv as unknown as KVNamespace)
+    expect(result).not.toBeNull()
+    expect(result!.cumulativeCount).toBe(5)
   })
 
   it('logs error on KV read failure', async () => {
@@ -277,6 +303,7 @@ describe('formatVitalsSection', () => {
   it('formats all metrics with grades and descriptions', () => {
     const vitals: VitalsDaily = {
       count: 50,
+      cumulativeCount: 50,
       p75: { LCP: 2000, FCP: 1500, TTFB: 700, CLS: 80, INP: 150 },
     }
     const output = formatVitalsSection(vitals)
@@ -291,9 +318,10 @@ describe('formatVitalsSection', () => {
     expect(output).toContain('p75 = 사용자 75%')
   })
 
-  it('shows collecting status when n < 100', () => {
+  it('shows collecting status when cumulative n < 100', () => {
     const vitals: VitalsDaily = {
-      count: 30,
+      count: 10,
+      cumulativeCount: 30,
       p75: { LCP: 2000, FCP: 1000, TTFB: 500, CLS: 50, INP: 100 },
     }
     const output = formatVitalsSection(vitals)
@@ -302,9 +330,10 @@ describe('formatVitalsSection', () => {
     expect(output).not.toContain('분석 결과')
   })
 
-  it('shows warning metrics when n >= 100 with issues', () => {
+  it('shows warning metrics when cumulative n >= 100 with issues', () => {
     const vitals: VitalsDaily = {
-      count: 150,
+      count: 20,
+      cumulativeCount: 150,
       p75: { LCP: 5000, FCP: 1000, TTFB: 700, CLS: 50, INP: 150 },
     }
     const output = formatVitalsSection(vitals)
@@ -314,9 +343,10 @@ describe('formatVitalsSection', () => {
     expect(output).toContain('✅ FCP, TTFB, CLS, INP 양호')
   })
 
-  it('shows all good when n >= 100 with no issues', () => {
+  it('shows all good when cumulative n >= 100 with no issues', () => {
     const vitals: VitalsDaily = {
-      count: 200,
+      count: 30,
+      cumulativeCount: 200,
       p75: { LCP: 2000, FCP: 1000, TTFB: 500, CLS: 50, INP: 100 },
     }
     const output = formatVitalsSection(vitals)
@@ -327,6 +357,7 @@ describe('formatVitalsSection', () => {
   it('shows poor metric with red emoji', () => {
     const vitals: VitalsDaily = {
       count: 10,
+      cumulativeCount: 10,
       p75: { LCP: 5000, FCP: 1000, TTFB: 500, CLS: 50, INP: 100 },
     }
     const output = formatVitalsSection(vitals)
