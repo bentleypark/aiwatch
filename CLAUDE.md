@@ -33,34 +33,34 @@ npm run test:worker # Run Worker unit tests (vitest)
 ## Branch Strategy (GitHub Flow)
 
 ```
-main (항상 배포 가능 — 보호 브랜치, 직접 푸시 금지)
-  └── fix/123-mobile-padding      ← 이슈별 작업 브랜치
+main (always deployable — protected branch, no direct push)
+  └── fix/123-mobile-padding      ← per-issue feature branch
   └── feat/456-new-service
   └── refactor/789-polling
 ```
 
 ### Rules
-- **main**: PR merge만 허용 (force push 금지, 삭제 금지)
-- **작업 브랜치 네이밍**: `{type}/{issue#}-{설명}` (예: `fix/123-mobile-padding`, `feat/456-ranking-page`)
+- **main**: PR merge only (no force push, no deletion)
+- **Branch naming**: `{type}/{issue#}-{description}` (e.g., `fix/123-mobile-padding`, `feat/456-ranking-page`)
   - type: `fix`, `feat`, `refactor`, `docs`, `chore`, `test`
-- **머지 방식**: squash merge (PR 단위로 깔끔한 히스토리)
-- **배포**: main 머지 시 Vercel 자동 배포, Worker는 수동 (`npm run deploy:worker`)
-- **Vercel Preview**: PR 생성 시 프리뷰 URL 자동 생성 — 모바일/데스크톱 확인 활용
+- **Merge method**: squash merge (clean per-PR history)
+- **Deploy**: Vercel auto-deploys on main merge, Worker is manual (`npm run deploy:worker`)
+- **Vercel Preview**: auto-generated preview URL on PR creation — use for mobile/desktop verification
 
 ### Branch workflow
 ```bash
-# 1. 작업 시작
+# 1. Start work
 git checkout main && git pull
 git checkout -b fix/123-description
 
-# 2. 작업 + 커밋 (여러 커밋 OK — squash merge됨)
+# 2. Code + commit (multiple commits OK — will be squash merged)
 git add ... && git commit
 
-# 3. PR 생성
+# 3. Create PR
 git push -u origin fix/123-description
 gh pr create --title "fix: description (#123)" --body "..."
 
-# 4. Vercel Preview 확인 → merge
+# 4. Verify Vercel Preview → merge
 gh pr merge --squash --delete-branch
 ```
 
@@ -71,7 +71,7 @@ gh pr merge --squash --delete-branch
 ### Per-issue process (follow this order every time)
 
 0. **Review rules** — Re-read this Development Workflow section and follow each step in order
-1. **Branch** — create a feature branch from main: `git checkout -b {type}/{issue#}-{설명}`
+1. **Branch** — create a feature branch from main: `git checkout -b {type}/{issue#}-{description}`
 2. **Design check** (UI issues only) — before coding, compare `docs/AIWatch_화면디자인_초안.html` with the current implementation:
    - Open design mockup in browser and take screenshots of the relevant area
    - Identify **every** difference (spacing, colors, fonts, layout, icons, text)
