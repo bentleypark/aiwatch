@@ -1,16 +1,12 @@
 // Web Vitals collection — sends LCP, FCP, TTFB, CLS, INP to Worker for aggregation
 // Uses fetch+keepalive for reliable cross-origin delivery on page unload
-// 10% sampling to stay within KV write budget (~30 writes/day)
+// 100% collection — every page load sends metrics (one KV write per visit)
 // Consent-exempt: no PII collected, only anonymous performance metrics (timing values)
 
 import { onLCP, onFCP, onTTFB, onCLS, onINP } from 'web-vitals'
 
-const SAMPLE_RATE = 0.1 // 10% of page loads
 const WORKER_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8788').replace(/\/api\/status$/, '')
 const ENDPOINT = `${WORKER_BASE}/api/vitals`
-
-// Deterministic per-session: decide once whether this pageload is sampled
-const isSampled = Math.random() < SAMPLE_RATE
 
 let pending = {}
 let flushed = false
@@ -36,8 +32,6 @@ function collect({ name, value }) {
 }
 
 export function initVitals() {
-  if (!isSampled) return
-
   onLCP(collect)
   onFCP(collect)
   onTTFB(collect)
