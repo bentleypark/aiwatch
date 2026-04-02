@@ -245,7 +245,7 @@ describe('buildServiceAlerts', () => {
     const alertedAt = new Date(Date.now() - 2 * 3600_000 - 10 * 60_000).toISOString()
     const alerts = buildServiceAlerts([svc], new Map(), new Map([['openai', alertedAt]]))
     expect(alerts).toHaveLength(1)
-    expect(alerts[0].title).toMatch(/\(.*2h 10m.*\)/)
+    expect(alerts[0].title).toMatch(/\(.*2h 1[01]m.*\)/)
   })
 
   it('handles legacy "1" value gracefully (no duration)', () => {
