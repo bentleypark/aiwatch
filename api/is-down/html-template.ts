@@ -104,7 +104,7 @@ export function renderPage(
   const desc = (aiInsight && service && service.status !== 'operational')
     ? `${seo.displayName} is currently ${statusLabel(service.status).toLowerCase()}. AI Analysis: ${aiInsight.summary.slice(0, 120)} Est. recovery: ${aiInsight.estimatedRecovery}.`
     : service
-    ? `Check if ${seo.displayName} is down right now. Current status: ${statusLabel(service.status)}. ${typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d) ? `30-day uptime: ${service.uptime30d.toFixed(2)}%.` : ''} Updated every 60 seconds.`
+    ? `Check if ${seo.displayName} is down right now. Current status: ${statusLabel(service.status)}. ${typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d) ? `30-day uptime: ${service.uptime30d.toFixed(2)}%.` : ''} Updated every 5 minutes.`
     : `Check if ${seo.displayName} is down right now. Real-time status monitoring by AIWatch.`
   const canonical = `https://ai-watch.dev/is-${slug}-down`
 
@@ -391,7 +391,7 @@ ${summary ? `<p style="font-size:14px;margin-bottom:12px;padding:10px 14px;backg
 <p style="font-size:14px;margin-bottom:12px">${esc(seo.description)}</p>
 ${seo.insight ? `<p style="font-size:14px;margin-bottom:12px;padding:10px 14px;background:#161b22;border-left:3px solid #58a6ff;border-radius:0 4px 4px 0"><strong>AIWatch Insight:</strong> ${esc(seo.insight)}</p>` : ''}
 <p style="font-size:14px;color:#8b949e">${esc(seo.whenDown)}</p>
-<p style="font-size:13px;color:#484f58;margin-top:12px">This page provides real-time status, 30-day uptime history, and recent incident details &mdash; updated every 60 seconds by <a href="https://ai-watch.dev">AIWatch</a>.</p>
+<p style="font-size:13px;color:#484f58;margin-top:12px">This page provides real-time status, 30-day uptime history, and recent incident details &mdash; updated every 5 minutes by <a href="https://ai-watch.dev">AIWatch</a>.</p>
 </div>`
 }
 

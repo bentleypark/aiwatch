@@ -169,7 +169,7 @@ export default function AboutScore() {
         <div className="flex flex-col gap-2 text-[11px] text-[var(--text2)]" style={{ lineHeight: 1.6 }}>
           <div>• <strong className="text-[var(--text1)]">Uptime %</strong> — {t('aboutScore.sourceUptime')}</div>
           <div>• <strong className="text-[var(--text1)]">{t('aboutScore.sourceIncLabel')}</strong> — Atlassian Statuspage, incident.io, Google Cloud Status, Better Stack, RSS</div>
-          <div>• <strong className="text-[var(--text1)]">{t('aboutScore.sourceUpdateLabel')}</strong> — 60{t('aboutScore.sourceUpdateUnit')}</div>
+          <div>• <strong className="text-[var(--text1)]">{t('aboutScore.sourceUpdateLabel')}</strong> — {t('aboutScore.sourceUpdateValue')}</div>
         </div>
       </Section>
 

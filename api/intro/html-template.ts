@@ -795,7 +795,7 @@ export function renderLandingPage(opts: LandingOptions): string {
         </svg>
       </div>
       <div class="how-title" data-i18n="how.1.title">수집</div>
-      <div class="how-desc" data-i18n="how.1.desc">공식 상태 페이지를 5분마다 자동 파싱</div>
+      <div class="how-desc" data-i18n="how.1.desc">공식 상태 페이지를 최대 5분 간격으로 자동 갱신</div>
     </div>
 
     <div class="how-arrow fade-up delay-1">→</div>
@@ -854,7 +854,7 @@ export function renderLandingPage(opts: LandingOptions): string {
         <div class="feature-tag">SCORE</div>
         <div class="feature-icon">📊</div>
         <div class="feature-title" data-i18n="feat.1.title">AIWatch Score</div>
-        <div class="feature-desc" data-i18n="feat.1.desc">업타임 수치만으로는 신뢰도를 알 수 없습니다. 인시던트 빈도와 복구 시간을 종합한 0~100점 지표로 어떤 서비스가 진짜 안정적인지 판단합니다.</div>
+        <div class="feature-desc" data-i18n="feat.1.desc">Uptime(50) + 인시던트 영향 일수(30) + 복구 시간(20)을 종합한 0~100점 신뢰도 지표입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다. 데이터 미제공 서비스는 업계 평균 + 10% 패널티가 적용됩니다.</div>
       </div>
       <div class="feature-card fade-up delay-1">
         <div class="feature-tag">AI ANALYSIS BETA</div>
@@ -1006,7 +1006,7 @@ export function renderLandingPage(opts: LandingOptions): string {
         <tr>
           <td data-i18n="compare.r3">AIWatch Score</td>
           <td class="no" data-i18n="compare.r3a">업타임 % 뿐</td>
-          <td class="yes" data-i18n="compare.r3b">AIWatch Score (0–100)</td>
+          <td class="yes" data-i18n="compare.r3b">AIWatch Score — Uptime + 영향 일수 + 복구 시간</td>
         </tr>
         <tr>
           <td data-i18n="compare.r4">장애 분석</td>
@@ -1136,13 +1136,13 @@ const i18n = {
     'stats.services': '모니터링 서비스', 'stats.interval': '자동 수집', 'stats.free': 'Discord/Slack 알림 포함', 'stats.oss': '오픈소스',
     'demo.title': '장애 파악부터 대안 선택까지', 'demo.sub': '지금 어떤 서비스가 안정적인지, 장애 중이라면 대안은 무엇인지 한 화면에서 파악합니다', 'demo.more': '+ 24개 서비스 더 보기...',
     'feat.title': '단순 상태 표시를 넘어', 'feat.sub': '의사결정까지 도와주는 AI 모니터링 대시보드',
-    'feat.1.title': 'AIWatch Score', 'feat.1.desc': '27개 서비스의 인시던트 빈도, 복구 시간, 업타임을 종합한 0~100점 AIWatch Score입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다. 단, 공식 데이터가 부족한 일부 서비스는 업계 평균치를 반영합니다.',
+    'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'Uptime(50) + 인시던트 영향 일수(30) + 복구 시간(20)을 종합한 0~100점 신뢰도 지표입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다. 데이터 미제공 서비스는 업계 평균 + 10% 패널티가 적용됩니다.',
     'feat.2.title': 'AI 장애 분석', 'feat.2.desc': '장애 발생 시 Claude Sonnet이 패턴을 분석해 예상 복구 시간과 영향 범위를 알려줍니다. "언제쯤 복구될까?"에 빠르게 답합니다.',
     'feat.3.title': 'Fallback 추천', 'feat.3.desc': '장애 중인 서비스의 대안을 같은 카테고리 Score 상위 순으로 즉시 제안합니다. 같은 제공사 서비스는 자동 제외됩니다.',
     'feat.4.title': '"Is X Down?" 전용 페이지', 'feat.4.desc': 'ai-watch.dev/is-claude-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다.',
     'how.title': '이렇게 동작합니다', 'how.sub': '각 서비스의 공식 상태 페이지 데이터를 기반으로 동작합니다',
-    'compare.title': '공식 상태 페이지와 무엇이 다른가요?', 'compare.sub': '공식 페이지 데이터를 기반으로, 27개를 한 화면에서 통합합니다', 'compare.col1': '공식 상태 페이지', 'compare.r2': '장애 알림', 'compare.r2a': '직접 확인 필요', 'compare.r2b': 'Discord · Slack 즉시 발송', 'compare.r3': 'AIWatch Score', 'compare.r3a': '서비스별 개별 확인', 'compare.r3b': 'AIWatch Score (0–100)', 'compare.r4': '장애 분석', 'compare.r4b': 'AI가 원인 · 복구 시간 분석', 'compare.r5': '대안 추천', 'compare.r5b': 'Fallback 서비스 즉시 제안', 'compare.r6': '월간 리포트', 'compare.r6b': '매월 리포트 공개', 'compare.r7': '비용', 'compare.r7a': '무료', 'compare.r7b': '완전 무료 · 오픈소스',
-    'how.1.title': '수집', 'how.1.desc': '27개 공식 상태 페이지를 자동으로 수집',
+    'compare.title': '공식 상태 페이지와 무엇이 다른가요?', 'compare.sub': '공식 페이지 데이터를 기반으로, 27개를 한 화면에서 통합합니다', 'compare.col1': '공식 상태 페이지', 'compare.r2': '장애 알림', 'compare.r2a': '직접 확인 필요', 'compare.r2b': 'Discord · Slack 즉시 발송', 'compare.r3': 'AIWatch Score', 'compare.r3a': '서비스별 개별 확인', 'compare.r3b': 'AIWatch Score — Uptime + 영향 일수 + 복구 시간', 'compare.r4': '장애 분석', 'compare.r4b': 'AI가 원인 · 복구 시간 분석', 'compare.r5': '대안 추천', 'compare.r5b': 'Fallback 서비스 즉시 제안', 'compare.r6': '월간 리포트', 'compare.r6b': '매월 리포트 공개', 'compare.r7': '비용', 'compare.r7a': '무료', 'compare.r7b': '완전 무료 · 오픈소스',
+    'how.1.title': '수집', 'how.1.desc': '공식 상태 페이지를 최대 5분 간격으로 자동 갱신',
     'how.2.title': '분석', 'how.2.desc': 'Claude Sonnet이 패턴 · 복구 시간 · 영향 범위 분석',
     'how.3.title': '알림', 'how.3.desc': 'Discord · Slack 즉시 발송 + Fallback 추천 포함',
     'how.4.title': '리포트', 'how.4.desc': '월간 업타임 추이 · 인시던트 통계 리포트 공개',
@@ -1162,13 +1162,13 @@ const i18n = {
     'stats.services': 'Services monitored', 'stats.interval': 'Auto-collected', 'stats.free': 'Discord/Slack alerts included', 'stats.oss': 'Open source',
     'demo.title': 'From outage detection to fallback — in one view', 'demo.sub': 'See which services are stable right now — and what to use instead when they\\\'re not', 'demo.more': '+ 24 more services...',
     'feat.title': 'Beyond status monitoring', 'feat.sub': 'An AI monitoring dashboard that helps you make decisions',
-    'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'A 0–100 reliability score based on incident frequency and recovery time.',
+    'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'A 0–100 reliability score combining Uptime (50) + Impact days (30) + Recovery time (20). Services without official data use industry averages with a 10% penalty.',
     'feat.2.title': 'AI Incident Analysis', 'feat.2.desc': 'When an outage hits, Claude Sonnet analyzes the pattern and tells you the estimated recovery time and impact scope. No more guessing.',
     'feat.3.title': 'Fallback Recommendations', 'feat.3.desc': 'Get instant alternative suggestions ranked by Score within the same category. Same-provider services are automatically excluded.',
     'feat.4.title': '"Is X Down?" Dedicated Pages', 'feat.4.desc': 'Pages like ai-watch.dev/is-claude-down show real-time status, AI analysis, and fallback recommendations — all in one place.',
     'how.title': 'How it works', 'how.sub': 'Powered by official status page data from each provider',
-    'compare.title': 'How is AIWatch different?', 'compare.sub': 'Built on official status data — aggregated across 27 services in one place', 'compare.col1': 'Official Status Page', 'compare.r2': 'Alerts', 'compare.r2a': 'Manual check required', 'compare.r2b': 'Instant Discord · Slack', 'compare.r3': 'AIWatch Score', 'compare.r3a': 'Per-service, separate pages', 'compare.r3b': 'AIWatch Score (0–100)', 'compare.r4': 'Incident analysis', 'compare.r4b': 'AI analyzes cause & recovery', 'compare.r5': 'Fallback', 'compare.r5b': 'Alternative services suggested', 'compare.r6': 'Monthly report', 'compare.r6b': 'Monthly report published', 'compare.r7': 'Cost', 'compare.r7a': 'Free', 'compare.r7b': 'Free & open source',
-    'how.1.title': 'Collect', 'how.1.desc': '27 official status pages collected automatically',
+    'compare.title': 'How is AIWatch different?', 'compare.sub': 'Built on official status data — aggregated across 27 services in one place', 'compare.col1': 'Official Status Page', 'compare.r2': 'Alerts', 'compare.r2a': 'Manual check required', 'compare.r2b': 'Instant Discord · Slack', 'compare.r3': 'AIWatch Score', 'compare.r3a': 'Per-service, separate pages', 'compare.r3b': 'AIWatch Score — Uptime + Impact days + Recovery', 'compare.r4': 'Incident analysis', 'compare.r4b': 'AI analyzes cause & recovery', 'compare.r5': 'Fallback', 'compare.r5b': 'Alternative services suggested', 'compare.r6': 'Monthly report', 'compare.r6b': 'Monthly report published', 'compare.r7': 'Cost', 'compare.r7a': 'Free', 'compare.r7b': 'Free & open source',
+    'how.1.title': 'Collect', 'how.1.desc': 'Official status pages auto-refreshed up to every 5 min',
     'how.2.title': 'Analyze', 'how.2.desc': 'Claude Sonnet analyzes pattern, recovery time & scope',
     'how.3.title': 'Alert', 'how.3.desc': 'Discord · Slack instant alert + fallback recommendations',
     'how.4.title': 'Report', 'how.4.desc': 'Monthly uptime trends · incident statistics report',
