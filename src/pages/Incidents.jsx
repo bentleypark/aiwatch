@@ -189,11 +189,11 @@ function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }) {
     <div>
       <button
         onClick={onClick}
-        className={`w-full text-left rounded border py-3 transition-colors space-y-1
+        className={`w-full text-left rounded border transition-colors space-y-1
           ${isSelected
             ? 'bg-[var(--bg2)] border-[var(--border-hi)]'
             : 'bg-[var(--bg1)] border-[var(--border)] hover:bg-[var(--bg2)]'}`}
-        style={{ paddingLeft: 10, paddingRight: 10 }}
+        style={{ paddingTop: 10, paddingBottom: 10, paddingLeft: 10, paddingRight: 10 }}
       >
         <div className="flex items-start justify-between gap-2">
           <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', flex: 1 }}>
