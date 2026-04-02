@@ -42,6 +42,11 @@ export interface AIAnalysisResult {
   timelineHash?: string  // latest timeline entry timestamp — used to skip re-analysis when unchanged
 }
 
+/** Centralized KV key for per-incident analysis */
+export function analysisKey(svcId: string, incId: string): string {
+  return `ai:analysis:${svcId}:${incId}`
+}
+
 /**
  * Find similar past incidents by keyword overlap with current incident title.
  * Returns up to 5 most relevant recent incidents.
@@ -208,9 +213,11 @@ export interface RefreshResult {
 }
 
 /**
- * For each active service:
+ * For each active service and each of its active incidents:
  * - If analysis exists in KV: refresh TTL (every ~30min)
  * - If analysis missing: re-analyze (max `cap` per call, 30min cooldown on failure)
+ *
+ * KV key: ai:analysis:{svcId}:{incidentId} (per-incident)
  */
 export async function refreshOrReanalyze(
   activeServices: ServiceStatus[],
@@ -226,93 +233,86 @@ export async function refreshOrReanalyze(
   const analyzedIncidents = new Map<string, string>()
 
   for (const svc of activeServices) {
-    const key = `ai:analysis:${svc.id}`
-    const raw = await kv.get(key).catch(() => null)
+    const activeIncs = (svc.incidents ?? []).filter(i => i.status !== 'resolved')
+    if (activeIncs.length === 0) continue
 
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw)
-        // Check if analysis is for a currently active incident
-        const isStale = parsed.incidentId &&
-          !(svc.incidents ?? []).some(i => i.id === parsed.incidentId && i.status !== 'resolved')
+    for (const inc of activeIncs) {
+      const key = analysisKey(svc.id, inc.id)
+      const raw = await kv.get(key).catch(() => null)
 
-        if (isStale) {
-          // Analysis is for a resolved/missing incident — delete and fall through to re-analysis
-          await kvDel(kv, key)
-        } else {
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw)
           // Time-based re-analysis: if 2h+ old, attempt update without deleting old analysis first
           const analysisAge = now - new Date(parsed.analyzedAt).getTime()
           if (analysisAge >= 7_200_000 && apiKey && reAnalysisCount < cap) {
-            const activeInc = (svc.incidents ?? []).find(i => i.status !== 'resolved')
-            if (activeInc) {
-              // Skip re-analysis if timeline hasn't changed since last analysis
-              const latestTimelineAt = activeInc.timeline?.at(-1)?.at ?? ''
-              const hashTime = parsed.timelineHash ? new Date(parsed.timelineHash).getTime() : 0
-              const latestTime = latestTimelineAt ? new Date(latestTimelineAt).getTime() : 0
-              if (parsed.timelineHash && hashTime === latestTime) {
-                // No new timeline updates — just refresh TTL, skip API call
+            // Skip re-analysis if timeline hasn't changed since last analysis
+            const latestTimelineAt = inc.timeline?.at(-1)?.at ?? ''
+            const hashTime = parsed.timelineHash ? new Date(parsed.timelineHash).getTime() : 0
+            const latestTime = latestTimelineAt ? new Date(latestTimelineAt).getTime() : 0
+            if (parsed.timelineHash && hashTime === latestTime) {
+              // No new timeline updates — just refresh TTL, skip API call
+              parsed._lastRefresh = new Date(now).toISOString()
+              await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+              analyzedIncidents.set(inc.id, key)
+              result.refreshed.push(svc.id)
+              continue
+            }
+            // Skip if new timeline entries are all boilerplate (no technical detail)
+            if (parsed.timelineHash) {
+              const newEntries = (inc.timeline ?? []).filter(t => new Date(t.at).getTime() > hashTime)
+              if (newEntries.length > 0 && newEntries.every(t => isBoilerplate(t.text))) {
+                // Update timelineHash to avoid rechecking, but skip API call
+                parsed.timelineHash = latestTimelineAt
                 parsed._lastRefresh = new Date(now).toISOString()
                 await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
-                if (activeInc.id) analyzedIncidents.set(activeInc.id, key)
+                analyzedIncidents.set(inc.id, key)
                 result.refreshed.push(svc.id)
                 continue
               }
-              // Skip if new timeline entries are all boilerplate (no technical detail)
-              if (parsed.timelineHash) {
-                const newEntries = (activeInc.timeline ?? []).filter(t => new Date(t.at).getTime() > hashTime)
-                if (newEntries.length > 0 && newEntries.every(t => isBoilerplate(t.text))) {
-                  // Update timelineHash to avoid rechecking, but skip API call
-                  parsed.timelineHash = latestTimelineAt
-                  parsed._lastRefresh = new Date(now).toISOString()
-                  await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
-                  if (activeInc.id) analyzedIncidents.set(activeInc.id, key)
-                  result.refreshed.push(svc.id)
-                  continue
-                }
-              }
-              reAnalysisCount++
-              try {
-                const newAnalysis = await analyzeFn(
-                  apiKey, svc.name,
-                  { id: activeInc.id, title: activeInc.title, status: activeInc.status, startedAt: activeInc.startedAt, impact: activeInc.impact, timeline: activeInc.timeline },
-                  svc.incidents ?? [],
-                )
-                // Track usage
-                const today = new Date(now).toISOString().split('T')[0]
-                const usageKey = `ai:usage:${today}`
-                const usageRaw = await kv.get(usageKey).catch(() => null)
-                const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0 }
-                usage.calls++
-                if (newAnalysis) {
-                  usage.success++
-                  await kvPut(kv, key, JSON.stringify(newAnalysis), { expirationTtl: 3600 })
-                  if (activeInc.id) analyzedIncidents.set(activeInc.id, key)
-                  result.reanalyzed.push(svc.id)
-                } else {
-                  usage.failed++
-                  // Keep old analysis, just refresh TTL
-                  console.warn(`[ai] time-based re-analysis returned null for ${svc.id}, keeping old`)
-                  parsed._lastRefresh = new Date(now).toISOString()
-                  await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
-                  result.refreshed.push(svc.id)
-                }
-                await kvPut(kv, usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
-              } catch (err) {
-                console.warn(`[ai] time-based re-analysis failed for ${svc.id}:`, err instanceof Error ? err.message : err)
-                // Keep old analysis on failure
+            }
+            reAnalysisCount++
+            try {
+              const newAnalysis = await analyzeFn(
+                apiKey, svc.name,
+                { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline },
+                svc.incidents ?? [],
+              )
+              // Track usage
+              const today = new Date(now).toISOString().split('T')[0]
+              const usageKey = `ai:usage:${today}`
+              const usageRaw = await kv.get(usageKey).catch(() => null)
+              const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0 }
+              usage.calls++
+              if (newAnalysis) {
+                usage.success++
+                await kvPut(kv, key, JSON.stringify(newAnalysis), { expirationTtl: 3600 })
+                analyzedIncidents.set(inc.id, key)
+                result.reanalyzed.push(svc.id)
+              } else {
+                usage.failed++
+                // Keep old analysis, just refresh TTL
+                console.warn(`[ai] time-based re-analysis returned null for ${svc.id}:${inc.id}, keeping old`)
                 parsed._lastRefresh = new Date(now).toISOString()
                 await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
                 result.refreshed.push(svc.id)
               }
-              continue
+              await kvPut(kv, usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
+            } catch (err) {
+              console.warn(`[ai] time-based re-analysis failed for ${svc.id}:${inc.id}:`, err instanceof Error ? err.message : err)
+              // Keep old analysis on failure
+              parsed._lastRefresh = new Date(now).toISOString()
+              await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+              result.refreshed.push(svc.id)
             }
+            continue
           } else if (analysisAge >= 7_200_000) {
             // Cap exhausted or no API key — don't refresh TTL, let it expire for next cycle
-            if (parsed.incidentId) analyzedIncidents.set(parsed.incidentId, key)
+            analyzedIncidents.set(inc.id, key)
             continue
           }
           // Valid analysis — register for sibling dedup
-          if (parsed.incidentId) analyzedIncidents.set(parsed.incidentId, key)
+          analyzedIncidents.set(inc.id, key)
           // Refresh TTL if last refresh was 30+ min ago
           const lastRefresh = parsed._lastRefresh ?? parsed.analyzedAt
           const elapsed = now - new Date(lastRefresh).getTime()
@@ -322,73 +322,70 @@ export async function refreshOrReanalyze(
             result.refreshed.push(svc.id)
           }
           continue
+        } catch (err) {
+          console.warn(`[ai] Failed to parse analysis for ${svc.id}:${inc.id}:`, err instanceof Error ? err.message : err)
         }
-      } catch (err) {
-        console.warn(`[ai] Failed to parse analysis for ${svc.id}:`, err instanceof Error ? err.message : err)
       }
-    }
 
-    // No analysis — attempt re-analysis or copy from sibling with same incidentId
-    const activeInc = (svc.incidents ?? []).find(i => i.status !== 'resolved')
-    if (!activeInc) continue
+      // No analysis — attempt re-analysis or copy from sibling with same incidentId
+      // Dedup: check if another service already has analysis for the same incidentId
+      const siblingKey = analyzedIncidents.get(inc.id)
+      if (siblingKey) {
+        const siblingRaw = await kv.get(siblingKey).catch(() => null)
+        if (siblingRaw) {
+          await kvPut(kv, key, siblingRaw, { expirationTtl: 3600 })
+          analyzedIncidents.set(inc.id, key)
+          result.reanalyzed.push(svc.id)
+          continue
+        }
+      }
 
-    // Dedup: check if another service already has analysis for the same incidentId
-    const siblingKey = analyzedIncidents.get(activeInc.id)
-    if (siblingKey) {
-      const siblingRaw = await kv.get(siblingKey).catch(() => null)
-      if (siblingRaw) {
-        await kvPut(kv, key, siblingRaw, { expirationTtl: 3600 })
-        analyzedIncidents.set(activeInc.id, key)
-        result.reanalyzed.push(svc.id)
+      if (!apiKey || reAnalysisCount >= cap) {
+        result.skipped.push(svc.id)
         continue
       }
-    }
 
-    if (!apiKey || reAnalysisCount >= cap) {
-      result.skipped.push(svc.id)
-      continue
-    }
+      // 30min cooldown after failure (per-incident)
+      const skipKey = `ai:reanalysis-skip:${svc.id}:${inc.id}`
+      const skipped = await kv.get(skipKey).catch(() => null)
+      if (skipped) {
+        result.skipped.push(svc.id)
+        continue
+      }
 
-    // 30min cooldown after failure
-    const skipKey = `ai:reanalysis-skip:${svc.id}`
-    const skipped = await kv.get(skipKey).catch(() => null)
-    if (skipped) {
-      result.skipped.push(svc.id)
-      continue
-    }
+      reAnalysisCount++
+      try {
+        const analysis = await analyzeFn(
+          apiKey,
+          svc.name,
+          { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline },
+          svc.incidents ?? [],
+        )
 
-    reAnalysisCount++
-    try {
-      const analysis = await analyzeFn(
-        apiKey,
-        svc.name,
-        { id: activeInc.id, title: activeInc.title, status: activeInc.status, startedAt: activeInc.startedAt, impact: activeInc.impact, timeline: activeInc.timeline },
-        svc.incidents ?? [],
-      )
+        // Track in ai:usage daily counter
+        const today = new Date(now).toISOString().split('T')[0]
+        const usageKey = `ai:usage:${today}`
+        const usageRaw = await kv.get(usageKey).catch(() => null)
+        const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0 }
+        usage.calls++
 
-      // Track in ai:usage daily counter
-      const today = new Date(now).toISOString().split('T')[0]
-      const usageKey = `ai:usage:${today}`
-      const usageRaw = await kv.get(usageKey).catch(() => null)
-      const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0 }
-      usage.calls++
-
-      if (analysis) {
-        usage.success++
-        await kvPut(kv, key, JSON.stringify(analysis), { expirationTtl: 3600 })
-        if (activeInc.id) analyzedIncidents.set(activeInc.id, key)
-        result.reanalyzed.push(svc.id)
-      } else {
-        usage.failed++
-        console.warn(`[ai] re-analysis returned null for ${svc.id}`)
+        if (analysis) {
+          usage.success++
+          await kvPut(kv, key, JSON.stringify(analysis), { expirationTtl: 3600 })
+          analyzedIncidents.set(inc.id, key)
+          result.reanalyzed.push(svc.id)
+        } else {
+          usage.failed++
+          console.warn(`[ai] re-analysis returned null for ${svc.id}:${inc.id}`)
+          await kvPut(kv, skipKey, '1', { expirationTtl: 1800 })
+          result.skipped.push(svc.id)
+        }
+        await kvPut(kv, usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
+      } catch (err) {
+        console.warn(`[ai] re-analysis failed for ${svc.id}:${inc.id}:`, err instanceof Error ? err.message : err)
         await kvPut(kv, skipKey, '1', { expirationTtl: 1800 })
         result.skipped.push(svc.id)
       }
-      await kvPut(kv, usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
-    } catch (err) {
-      console.warn(`[ai] re-analysis failed for ${svc.id}:`, err instanceof Error ? err.message : err)
-      await kvPut(kv, skipKey, '1', { expirationTtl: 1800 })
-      result.skipped.push(svc.id)
     }
   }
 

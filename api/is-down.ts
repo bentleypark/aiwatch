@@ -83,8 +83,9 @@ export default async function handler(req: Request) {
             .map(s => ({ id: s.id, name: s.name, score: (s as any).aiwatchScore ?? null, status: s.status }))
         }
 
-        // Extract AI analysis for this service
-        const analysis = data.aiAnalysis?.[entry.id]
+        // Extract AI analysis for this service (first active analysis from array)
+        const analyses = data.aiAnalysis?.[entry.id]
+        const analysis = Array.isArray(analyses) ? analyses[0] : analyses
         // Show AI insight if analysis exists (incident may be active even when status is operational)
         if (analysis) {
           aiInsight = analysis
