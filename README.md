@@ -46,7 +46,7 @@ Real-time monitoring dashboard for **27 AI services** — track status, latency,
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 - **AI Analysis (Beta)** — Claude Sonnet auto-analysis on incidents: cause estimation, recovery time, affected scope. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 - **Landing page** — Product Hunt landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, and GA4 tracking
-- **Web Vitals monitoring** — Real user LCP, FCP, TTFB, CLS, INP collection (10% sampling) with p75 aggregation and threshold-based alerts in Discord Daily Report
+- **Web Vitals monitoring** — Real user LCP, FCP, TTFB, CLS, INP collection with p75 aggregation and threshold-based alerts in Discord Daily Report
 
 ## Monitored Services
 

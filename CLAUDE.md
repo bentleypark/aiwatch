@@ -349,7 +349,7 @@ Cron Trigger (*/5 min)
   → alert count tracked in KV (alert:count:{date}) for Daily Summary
   → daily summary at UTC 09:00 (KST 18:00) with alert count aggregation + Web Vitals p75
 
-Web Vitals Pipeline (per-request, 10% sampled):
+Web Vitals Pipeline (per-request, 100% collection):
   Browser (web-vitals) → POST /api/vitals → Worker → KV merge (vitals:{date})
   Daily Summary cron reads vitals KV → Discord embed (p75 + grade)
 ```
