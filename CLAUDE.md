@@ -213,8 +213,8 @@ When adding a new monitored service, update ALL of the following:
 | `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
 | `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time |
 | `reddit:seen:{postId}` | `"1"` | 24h | ~120 | Reddit post dedup (hourly scan, max 5/hour) |
-| `ai:analysis:{svcId}` | `AIAnalysisResult` JSON | 1h (active) / 2h (resolved) | ~5 | Claude Sonnet incident analysis result (TTL refreshed while active; on recovery, `resolvedAt` added instead of deleting — kept 2h for "Recently Resolved" UI) |
-| `ai:reanalysis-skip:{svcId}` | `"1"` | 30min | ~2 | Re-analysis failure cooldown |
+| `ai:analysis:{svcId}:{incId}` | `AIAnalysisResult` JSON | 1h (active) / 2h (resolved) | ~5 per incident | Claude Sonnet per-incident analysis result (TTL refreshed while active; on recovery, `resolvedAt` added instead of deleting — kept 2h for "Recently Resolved" UI) |
+| `ai:reanalysis-skip:{svcId}:{incId}` | `"1"` | 30min | ~2 per incident | Per-incident re-analysis failure cooldown |
 | `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis) |
 | `fetch-fail:{svcId}` | counter string | 30min | ~0 (spikes on outage) | RSS fetch consecutive failure counter (3+ → degraded, capped writes) |
 | `component-missing:{svcId}` | counter string | 30min | ~0 (spikes on migration) | Component ID consecutive miss counter (3+ → Discord alert) |
@@ -344,7 +344,7 @@ Cron Trigger (*/5 min)
   → record detection timestamps (detected:{serviceId}) for Detection Lead
   → KV ID-based dedup → Discord alerts (single embed per incident)
   → incident detected → AI analysis (8s timeout) → merged into incident embed
-  → recovery detected → mark ai:analysis:{svcId} with resolvedAt (2h TTL, powers "Recently Resolved" UI)
+  → recovery detected → mark ai:analysis:{svcId}:{incId} with resolvedAt (2h TTL, powers "Recently Resolved" UI)
   → active incidents: refresh analysis TTL / re-analyze if expired / dedup sibling services
   → alert count tracked in KV (alert:count:{date}) for Daily Summary
   → daily summary at UTC 09:00 (KST 18:00) with alert count aggregation + Web Vitals p75
@@ -360,13 +360,14 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
 ### Key Product Constraints
 - Mobile breakpoint: 768px — sidebar hidden (overlay on hamburger), cards go 1-column
 - Phase 3 AI Analysis (Beta): Claude Sonnet auto-analysis on incidents — triggered by cron, stored in KV, shown in Topbar Analyze modal + Is X Down AI Insight card. Requires `ANTHROPIC_API_KEY` Worker secret
-  - TTL refresh: cron refreshes `ai:analysis:{svcId}` every ~30min while incident is active
+  - Per-incident KV keys: `ai:analysis:{svcId}:{incId}` — each incident analyzed independently, supports multiple simultaneous incidents per service
+  - TTL refresh: cron refreshes per-incident analysis keys every ~30min while incident is active
   - Re-analysis: if analysis expired/missing, re-triggers (max 2/cron, 30min cooldown on failure). Also re-analyzes after 2h for long-running active incidents (safe overwrite: keeps old analysis on failure). Includes incident timeline updates in prompt for richer context
   - Timeline-aware skip: stores `timelineHash` (latest entry timestamp) — skips re-analysis when timeline unchanged or new entries are all boilerplate (generic "investigating"/"monitoring" messages detected by `isBoilerplate()`)
-  - Stale detection: re-analyzes when stored incidentId no longer matches active incidents
   - Dedup: sibling services sharing same incidentId copy analysis from KV (no extra API call)
   - Modal groups services with same incidentId into single card
-  - **Recently Resolved**: on recovery, `ai:analysis:{svcId}` gets `resolvedAt` field (2h TTL instead of deletion). `/api/status` returns `recentlyRecovered[]` for operational services with resolved analysis. Dashboard shows info banner + "Resolved" badge on service cards + Analyze modal remains active
+  - API response: `aiAnalysis: Record<svcId, AIAnalysisResult[]>` — array per service
+  - **Recently Resolved**: on recovery, per-incident analysis keys get `resolvedAt` field (2h TTL instead of deletion). `/api/status` returns `recentlyRecovered[]` for operational services with resolved analysis. Dashboard shows info banner + "Resolved" badge on service cards + Analyze modal remains active
   - Grouped fallback: when incident affects multiple categories, Discord alerts + dashboard show per-category alternatives via `buildGroupedFallbackText`
   - **Fallback tier priority** (API services only): same-tier services are recommended first, then adjacent tiers. Within each tier, sorted by AIWatch Score descending. Defined in `worker/src/fallback.ts`, mirrored in `src/pages/Overview.jsx` and `api/is-down.ts`:
     - **Tier 1** (Major LLM): `claude`, `openai`, `gemini`
@@ -387,7 +388,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
     ```
   - Verify the output says `Uploaded aiwatch-worker` (not `aiwatch`)
   - Endpoints: `GET /api/status`, `GET /api/status/cached` (KV-only, for SSR), `GET /api/uptime?days=30`, `POST /api/alert`, `GET /badge/:serviceId`, `GET /api/og` (dynamic OG image PNG), `GET /api/v1/status`
-  - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res:` keys 7d TTL, `alerted:down/degraded/recovered:` keys 2h TTL). Fallback recommendations only included when service status is degraded/down (not operational). AI analysis runs inline with 8s timeout (merged into incident embed), results stored in `ai:analysis:{svcId}` (1h TTL). Daily alert counts tracked in `alert:count:{date}` for Daily Summary
+  - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res:` keys 7d TTL, `alerted:down/degraded/recovered:` keys 2h TTL). Fallback recommendations only included when service status is degraded/down (not operational). AI analysis runs inline with 8s timeout (merged into incident embed), results stored in `ai:analysis:{svcId}:{incId}` (1h TTL, per-incident). Daily alert counts tracked in `alert:count:{date}` for Daily Summary
 - **Frontend deployment**: Vercel, domain ai-watch.dev — `git push origin main` triggers auto-deploy. `npm run build` is local only; changes are not live until pushed
 - **PWA**: `public/manifest.json` + `public/sw.js` (stale-while-revalidate). CACHE_NAME in `sw.js` must be bumped manually when static assets change. SW excludes `/is-*` (Edge SSR) and `/api/*` (real-time data) from caching
 - **Edge SSR**: `api/is-down.ts` serves "Is X Down?" SEO pages (9 services: claude, chatgpt, gemini, github-copilot, cursor, claude-code, openai, windsurf, claude-ai) via Vercel Edge Functions. Uses `/api/status/cached` (KV-only) for fast SSR (~1.2s). Dynamic OG image via Worker `/api/og` (PNG, resvg-wasm). Share buttons: X, Threads, KakaoTalk (SDK async), Copy Link. `vercel.json` rewrites route `/is-{service}-down` to the handler

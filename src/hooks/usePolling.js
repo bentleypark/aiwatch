@@ -344,12 +344,21 @@ const MOCK_SERVICES = [
     ],
   },
   {
-    id: 'elevenlabs', category: 'api', name: 'ElevenLabs', provider: 'ElevenLabs', status: 'operational',
+    id: 'elevenlabs', category: 'api', name: 'ElevenLabs', provider: 'ElevenLabs', status: 'degraded',
     latency: 156, uptime30d: 99.80,
-    history30d: hist(),
+    history30d: hist([0]),
     history3m: [{ month: '2026-01', uptime: 99.90 }, { month: '2026-02', uptime: 99.85 }, { month: '2026-03', uptime: 99.80 }],
     incidents: [
-      { id: 'el-1', title: 'Voice Cloning Failures', startedAt: ago(3 * D + 9 * H), duration: '48m', status: 'resolved',
+      { id: 'el-1', title: 'TTS API Latency Spike', startedAt: ago(2 * H), status: 'investigating',
+        timeline: [
+          { stage: 'investigating', text: 'TTS API 응답 시간이 평소보다 3배 이상 증가하고 있습니다.', at: ago(2 * H) },
+          { stage: 'identified', text: 'GPU 클러스터 과부하로 원인 파악.', at: ago(1 * H) },
+        ] },
+      { id: 'el-2', title: 'Voice Cloning Service Errors', startedAt: ago(1 * H + 30 * M), status: 'investigating',
+        timeline: [
+          { stage: 'investigating', text: '보이스 클로닝 요청 시 500 에러가 발생하고 있습니다.', at: ago(1 * H + 30 * M) },
+        ] },
+      { id: 'el-3', title: 'Voice Cloning Failures', startedAt: ago(3 * D + 9 * H), duration: '48m', status: 'resolved',
         timeline: [
           { stage: 'investigating', text: '보이스 클로닝 요청이 실패하고 있습니다.', at: ago(3 * D + 9 * H) },
           { stage: 'resolved', text: 'GPU 워커 재시작 후 정상화.', at: ago(3 * D + 9 * H - 48 * M) },
@@ -455,9 +464,14 @@ const MOCK_SERVICES = [
 ]
 
 // Mock AI analysis — must reference an incidentId matching an unresolved incident in MOCK_SERVICES
+// API returns Record<svcId, AIAnalysisResult[]> — each service may have multiple analyses
 const MOCK_AI_ANALYSIS = {
-  openai: { summary: 'Chat endpoint latency elevated due to increased traffic.', estimatedRecovery: '~1h', affectedScope: ['Chat API'], analyzedAt: new Date().toISOString(), incidentId: 'oi-2' },
-  together: { summary: 'Moonshot Kimi K2.5 model experienced a brief outage affecting inference endpoints. Service has been restored.', estimatedRecovery: 'Resolved', affectedScope: ['Kimi K2.5 inference', 'Model endpoints'], analyzedAt: new Date(Date.now() - 30 * 60000).toISOString(), incidentId: 'together-mock-1', resolvedAt: new Date(Date.now() - 10 * 60000).toISOString() },
+  openai: [{ summary: 'Chat endpoint latency elevated due to increased traffic.', estimatedRecovery: '~1h', affectedScope: ['Chat API'], analyzedAt: new Date().toISOString(), incidentId: 'oi-2' }],
+  elevenlabs: [
+    { summary: 'TTS API response times are 3x higher than normal due to GPU cluster overload. The team has identified the bottleneck and is scaling resources.', estimatedRecovery: '30m–1h', affectedScope: ['TTS API', 'Real-time synthesis'], analyzedAt: new Date().toISOString(), incidentId: 'el-1' },
+    { summary: 'Voice cloning endpoint returning 500 errors. Likely related to the GPU cluster overload affecting TTS, but impacting a separate service pipeline.', estimatedRecovery: '1–2h', affectedScope: ['Voice Cloning API', 'Custom voice creation'], analyzedAt: new Date(Date.now() - 15 * 60000).toISOString(), incidentId: 'el-2' },
+  ],
+  together: [{ summary: 'Moonshot Kimi K2.5 model experienced a brief outage affecting inference endpoints. Service has been restored.', estimatedRecovery: 'Resolved', affectedScope: ['Kimi K2.5 inference', 'Model endpoints'], analyzedAt: new Date(Date.now() - 30 * 60000).toISOString(), incidentId: 'together-mock-1', resolvedAt: new Date(Date.now() - 10 * 60000).toISOString() }],
 }
 const MOCK_RECENTLY_RECOVERED = ['together']
 

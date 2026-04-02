@@ -5,7 +5,7 @@
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore } from './score'
 import { buildIncidentAlerts, buildServiceAlerts } from './alerts'
-import { analyzeIncident, refreshOrReanalyze, type AIAnalysisResult } from './ai-analysis'
+import { analyzeIncident, refreshOrReanalyze, analysisKey, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches } from './utils'
 
 interface Env {
@@ -370,19 +370,23 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       const svcId = alert.key.split(':').pop()!
       await kvDel(env.STATUS_CACHE, `alerted:recovered:${svcId}`)
     }
-    // Mark AI analysis as resolved (keep for 2h instead of deleting)
+    // Mark AI analyses as resolved (keep for 2h instead of deleting) — per-incident keys
     if (isRecoveryAlert) {
       const svcId = alert.key.replace('alerted:recovered:', '')
-      const analysisRaw = await env.STATUS_CACHE.get(`ai:analysis:${svcId}`).catch(() => null)
-      if (analysisRaw) {
+      const svc = scored.find(s => s.id === svcId)
+      const incidentIds = (svc?.incidents ?? []).map(i => i.id)
+      await Promise.all(incidentIds.map(async (incId) => {
+        const key = analysisKey(svcId, incId)
+        const analysisRaw = await env.STATUS_CACHE.get(key).catch(() => null)
+        if (!analysisRaw) return
         try {
           const analysis = JSON.parse(analysisRaw) as AIAnalysisResult
           if (!analysis.resolvedAt) {
             analysis.resolvedAt = new Date().toISOString()
-            await kvPut(env.STATUS_CACHE, `ai:analysis:${svcId}`, JSON.stringify(analysis), { expirationTtl: 7200 })
+            await kvPut(env.STATUS_CACHE, key, JSON.stringify(analysis), { expirationTtl: 7200 })
           }
-        } catch { await kvDel(env.STATUS_CACHE, `ai:analysis:${svcId}`) }
-      }
+        } catch { await kvDel(env.STATUS_CACHE, key) }
+      }))
     }
 
     // For new incidents: run AI analysis with 8s timeout to avoid blocking alert delivery
@@ -405,7 +409,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
           ])
           if (analysis) {
             usage.success++
-            const kvOk = await kvPut(env.STATUS_CACHE, `ai:analysis:${svc.id}`, JSON.stringify(analysis), { expirationTtl: 3600 })
+            const kvOk = await kvPut(env.STATUS_CACHE, analysisKey(svc.id, inc.id), JSON.stringify(analysis), { expirationTtl: 3600 })
             if (kvOk) {
               analysisSection = `\n${DIV}\n🤖 **AI ANALYSIS** [Beta]\n${analysis.summary}\n⏱ Est. recovery: ${analysis.estimatedRecovery}${analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''}`
             }
@@ -1040,37 +1044,41 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/status/cached') {
       const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
       if (cached) {
-        // Read AI analysis + latency 24h in parallel
-        const aiAnalysis: Record<string, AIAnalysisResult> = {}
+        // Read AI analysis + latency 24h in parallel (per-incident keys)
+        const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
         const recentlyRecovered: string[] = []
+        const latencyPromise = env.STATUS_CACHE!.get('latency:24h').catch(() => null)
+        // Active incidents: read ai:analysis:{svcId}:{incId} for each
         const withActiveInc = cached.services.filter(s =>
           (s.incidents ?? []).some(i => i.status !== 'resolved')
         )
-        const latencyPromise = env.STATUS_CACHE!.get('latency:24h').catch(() => null)
-        await Promise.all(withActiveInc.map(async (svc) => {
-          const raw = await env.STATUS_CACHE!.get(`ai:analysis:${svc.id}`).catch(() => null)
-          if (raw) {
+        await Promise.all(withActiveInc.flatMap(svc =>
+          (svc.incidents ?? []).filter(i => i.status !== 'resolved').map(async (inc) => {
+            const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
+            if (!raw) return
             try {
               const parsed = JSON.parse(raw) as AIAnalysisResult
-              const hasActiveInc = (svc.incidents ?? []).some(i => i.status !== 'resolved')
-              if (hasActiveInc) aiAnalysis[svc.id] = parsed
-            } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, err instanceof Error ? err.message : err) }
-          }
-        }))
-        // Recently recovered: operational services with resolved analysis
+              if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
+              aiAnalysis[svc.id].push(parsed)
+            } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
+          })
+        ))
+        // Recently recovered: operational services with resolved analysis in per-incident keys
         const operationalCached = cached.services.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
-        await Promise.all(operationalCached.map(async (svc) => {
-          const raw = await env.STATUS_CACHE!.get(`ai:analysis:${svc.id}`).catch(() => null)
-          if (raw) {
+        await Promise.all(operationalCached.flatMap(svc =>
+          (svc.incidents ?? []).map(async (inc) => {
+            const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
+            if (!raw) return
             try {
               const parsed = JSON.parse(raw) as AIAnalysisResult
               if (parsed.resolvedAt) {
-                aiAnalysis[svc.id] = parsed
-                recentlyRecovered.push(svc.id)
+                if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
+                aiAnalysis[svc.id].push(parsed)
+                if (!recentlyRecovered.includes(svc.id)) recentlyRecovered.push(svc.id)
               }
             } catch { /* ignore */ }
-          }
-        }))
+          })
+        ))
         let latency24h: Array<{ t: string; data: Record<string, number> }> = []
         const latRaw = await latencyPromise
         if (latRaw) {
@@ -1161,38 +1169,41 @@ export default {
         return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics, ...(detectedAt ? { detectedAt } : {}) }
       })
 
-      // Read AI analysis from KV — active incidents + recently resolved
-      const aiAnalysis: Record<string, AIAnalysisResult> = {}
+      // Read AI analysis from KV — per-incident keys, active incidents + recently resolved
+      const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
       const recentlyRecovered: string[] = []
       if (env.STATUS_CACHE) {
-        // Active incidents
+        // Active incidents: read ai:analysis:{svcId}:{incId} for each
         const withActiveInc = servicesWithScore.filter(s =>
           (s.incidents ?? []).some(i => i.status !== 'resolved')
         )
-        await Promise.all(withActiveInc.map(async (svc) => {
-          const raw = await env.STATUS_CACHE!.get(`ai:analysis:${svc.id}`).catch(() => null)
-          if (raw) {
+        await Promise.all(withActiveInc.flatMap(svc =>
+          (svc.incidents ?? []).filter(i => i.status !== 'resolved').map(async (inc) => {
+            const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
+            if (!raw) return
             try {
               const parsed = JSON.parse(raw) as AIAnalysisResult
-              const hasActiveInc = (svc.incidents ?? []).some(i => i.status !== 'resolved')
-              if (hasActiveInc) aiAnalysis[svc.id] = parsed
-            } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, err instanceof Error ? err.message : err) }
-          }
-        }))
-        // Recently recovered: services that are now operational but have resolved analysis in KV
+              if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
+              aiAnalysis[svc.id].push(parsed)
+            } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
+          })
+        ))
+        // Recently recovered: operational services with resolved analysis in per-incident keys
         const operationalSvcs = servicesWithScore.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
-        await Promise.all(operationalSvcs.map(async (svc) => {
-          const raw = await env.STATUS_CACHE!.get(`ai:analysis:${svc.id}`).catch(() => null)
-          if (raw) {
+        await Promise.all(operationalSvcs.flatMap(svc =>
+          (svc.incidents ?? []).map(async (inc) => {
+            const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
+            if (!raw) return
             try {
               const parsed = JSON.parse(raw) as AIAnalysisResult
               if (parsed.resolvedAt) {
-                aiAnalysis[svc.id] = parsed
-                recentlyRecovered.push(svc.id)
+                if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
+                aiAnalysis[svc.id].push(parsed)
+                if (!recentlyRecovered.includes(svc.id)) recentlyRecovered.push(svc.id)
               }
             } catch { /* ignore parse errors */ }
-          }
-        }))
+          })
+        ))
       }
 
       return new Response(JSON.stringify({

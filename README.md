@@ -128,7 +128,7 @@ Cloudflare KV
   ├── history:YYYY-MM-DD   (archived counters, TTL 90d)
   ├── latency:24h          (30-min snapshots, max 48, TTL 25h)
   ├── probe:24h            (health check probes, max 864, TTL 72h, 15 API services)
-  ├── ai:analysis:{svcId}  (AI incident analysis, TTL 1h, refreshed while active)
+  ├── ai:analysis:{svcId}:{incId}  (AI per-incident analysis, TTL 1h, refreshed while active)
   ├── ai:reanalysis-skip:* (re-analysis failure cooldown, TTL 30min)
   ├── ai:usage:{date}      (daily AI usage counter, TTL 2d)
   ├── alerted:*            (alert dedup keys, TTL 2h-7d)

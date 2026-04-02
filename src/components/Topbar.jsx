@@ -38,10 +38,13 @@ export default function Topbar({ onMenuToggle }) {
   const isSettings = page.name === 'settings'
   const [showAnalysis, setShowAnalysis] = useState(false)
   // Show Analyze button when there are active incident analyses OR recently recovered analyses
-  const hasAnalysis = Object.entries(aiAnalysis ?? {}).some(([svcId, analysis]) => {
-    if (analysis.resolvedAt) return true
-    const svc = services.find(s => s.id === svcId)
-    return svc && (svc.incidents ?? []).some(i => i.status !== 'resolved' && i.id === analysis.incidentId)
+  const hasAnalysis = Object.entries(aiAnalysis ?? {}).some(([svcId, analyses]) => {
+    const arr = Array.isArray(analyses) ? analyses : [analyses]
+    return arr.some(analysis => {
+      if (analysis.resolvedAt) return true
+      const svc = services.find(s => s.id === svcId)
+      return svc && (svc.incidents ?? []).some(i => i.status !== 'resolved' && i.id === analysis.incidentId)
+    })
   })
 
   useEffect(() => {
@@ -120,7 +123,7 @@ export default function Topbar({ onMenuToggle }) {
           <button
             className="md:hidden relative"
             style={{ fontSize: '14px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-            onClick={() => { setShowAnalysis(true); trackEvent('click_analyze', { has_analysis: true, count: Object.keys(aiAnalysis).length }) }}
+            onClick={() => { setShowAnalysis(true); trackEvent('click_analyze', { has_analysis: true, count: Object.values(aiAnalysis).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 1), 0) }) }}
             aria-label={t('topbar.analyze')}
           >
             🤖
@@ -131,7 +134,7 @@ export default function Topbar({ onMenuToggle }) {
           {hasAnalysis ? (
             <button
               className="btn-topbar"
-              onClick={() => { setShowAnalysis(true); trackEvent('click_analyze', { has_analysis: true, count: Object.keys(aiAnalysis).length }) }}
+              onClick={() => { setShowAnalysis(true); trackEvent('click_analyze', { has_analysis: true, count: Object.values(aiAnalysis).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 1), 0) }) }}
             >
               🤖 {t('topbar.analyze')} <span className="mono text-[8px] rounded" style={{ color: 'var(--purple)', background: 'rgba(124,58,237,0.15)', padding: '1px 4px', verticalAlign: 'middle', position: 'relative', top: '-1px' }}>Beta</span>
             </button>
