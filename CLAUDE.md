@@ -30,6 +30,40 @@ npm run test:worker # Run Worker unit tests (vitest)
 
 > **Note**: Dashboard reads Worker API from `VITE_API_URL` in `.env` (default: `localhost:8788`). Run Worker alongside dashboard for live data. Landing page and Is X Down pages are Vercel Edge Functions — use `vercel dev`, not Vite. Monthly Reports require Homebrew Ruby + `bundle install` in the aiwatch-reports repo (one-time setup).
 
+## Branch Strategy (GitHub Flow)
+
+```
+main (항상 배포 가능 — 보호 브랜치, 직접 푸시 금지)
+  └── fix/123-mobile-padding      ← 이슈별 작업 브랜치
+  └── feat/456-new-service
+  └── refactor/789-polling
+```
+
+### Rules
+- **main**: PR merge만 허용 (force push 금지, 삭제 금지)
+- **작업 브랜치 네이밍**: `{type}/{issue#}-{설명}` (예: `fix/123-mobile-padding`, `feat/456-ranking-page`)
+  - type: `fix`, `feat`, `refactor`, `docs`, `chore`, `test`
+- **머지 방식**: squash merge (PR 단위로 깔끔한 히스토리)
+- **배포**: main 머지 시 Vercel 자동 배포, Worker는 수동 (`npm run deploy:worker`)
+- **Vercel Preview**: PR 생성 시 프리뷰 URL 자동 생성 — 모바일/데스크톱 확인 활용
+
+### Branch workflow
+```bash
+# 1. 작업 시작
+git checkout main && git pull
+git checkout -b fix/123-description
+
+# 2. 작업 + 커밋 (여러 커밋 OK — squash merge됨)
+git add ... && git commit
+
+# 3. PR 생성
+git push -u origin fix/123-description
+gh pr create --title "fix: description (#123)" --body "..."
+
+# 4. Vercel Preview 확인 → merge
+gh pr merge --squash --delete-branch
+```
+
 ## Development Workflow
 
 > **IMPORTANT**: Always re-read this section before starting any task. Never skip code review (step 4) or tests (step 3).
@@ -37,38 +71,43 @@ npm run test:worker # Run Worker unit tests (vitest)
 ### Per-issue process (follow this order every time)
 
 0. **Review rules** — Re-read this Development Workflow section and follow each step in order
-1. **Design check** (UI issues only) — before coding, compare `docs/AIWatch_화면디자인_초안.html` with the current implementation:
+1. **Branch** — create a feature branch from main: `git checkout -b {type}/{issue#}-{설명}`
+2. **Design check** (UI issues only) — before coding, compare `docs/AIWatch_화면디자인_초안.html` with the current implementation:
    - Open design mockup in browser and take screenshots of the relevant area
    - Identify **every** difference (spacing, colors, fonts, layout, icons, text)
    - List differences explicitly before writing any code
-2. **Code** — implement the feature or fix
-2.5. **Local verify** — start the appropriate dev server and let the user confirm in browser before proceeding. See "Local verification by page type" table above for which command to use. Never skip this step.
-3. **Build + Test** — based on change scope:
+3. **Code** — implement the feature or fix
+3.5. **Local verify** — start the appropriate dev server and let the user confirm in browser before proceeding. See "Local verification by page type" table above for which command to use. Never skip this step.
+4. **Build + Test** — based on change scope:
    - **Frontend changes** (`src/`): `npm run build` + `npm test` (Playwright)
    - **Backend changes** (`worker/`): `npx wrangler deploy --config worker/wrangler.toml --dry-run` + `npm run test:worker` (Vitest)
    - **Both**: run all of the above
    - **Worker logic additions**: new functions must have unit tests — extract to separate files with exports, test in `worker/src/__tests__/` or `worker/src/parsers/__tests__/`
    - **Bug fixes**: every bug fix must include a test that would have caught the bug — E2E (Playwright) for frontend, Vitest for worker
-4. **Review** — run PR review **before** committing:
+5. **Review** — run PR review **before** creating PR:
    ```
    /pr-review-toolkit:review-pr
    ```
-5. **Fix review issues** — address all **Critical** and **Important** findings. Re-run Build + Test after fixes
-6. **Docs update** — update documentation affected by the change:
+6. **Fix review issues** — address all **Critical** and **Important** findings. Re-run Build + Test after fixes
+7. **Docs update** — update documentation affected by the change:
    - `CLAUDE.md`: architecture, service count, directory layout, constraints
    - `README.md` / `README.ko.md`: features, service tables, Project Structure, Available Service IDs
    - `.github/CONTRIBUTING.md`: Project Structure
    - `index.html`: SEO meta tags (service count, description)
    - `aiwatch-reports/`: service count, category breakdown (if applicable)
-7. **Commit** — only after review issues are fixed and tests pass. Include issue reference in the message:
-   - **Title must include `(#N)`** at the end — links commit to issue timeline (e.g., `fix: description (#123)`)
+8. **Commit + PR** — only after review issues are fixed and tests pass:
+   - Commit on feature branch (multiple commits OK — will be squash merged)
+   - Push branch: `git push -u origin {branch}`
+   - Create PR: `gh pr create --title "{type}: description (#N)" --body "closes #N"`
    - Body: `closes #N` — **only** when ALL checklist items in the issue are complete
    - Body: `refs #N` — when some items remain (e.g., future phases, deferred work)
-8. **Verify checklist** — read the issue (`gh issue view N`) and confirm every checklist item (`- [ ]`) is actually implemented in code before closing
-9. **Close** — only close the issue after checklist verification: `gh issue close N`
-   - If unchecked items remain for future work, **do not close** — add a label (e.g., `deferred`, `phase-N`) to track instead
+9. **Verify Vercel Preview** — check the Vercel preview deployment URL from the PR
+10. **Merge** — squash merge: `gh pr merge --squash --delete-branch`
+11. **Verify checklist** — read the issue (`gh issue view N`) and confirm every checklist item (`- [ ]`) is actually implemented in code before closing
+12. **Close** — only close the issue after checklist verification: `gh issue close N`
+    - If unchecked items remain for future work, **do not close** — add a label (e.g., `deferred`, `phase-N`) to track instead
 
-> Never close an issue immediately after committing. Always re-read the issue checklist and verify each item against the code first. If any phase or checklist item is deferred, keep the issue open and manage with labels.
+> Never close an issue immediately after merging. Always re-read the issue checklist and verify each item against the code first. If any phase or checklist item is deferred, keep the issue open and manage with labels.
 
 ### Debugging rules
 - Before writing any fix, read all relevant code and identify the root cause
