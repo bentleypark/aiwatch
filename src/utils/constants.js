@@ -13,7 +13,7 @@ export const VALID_PERIODS = ['7d', '30d', '90d']
 // API services (latency tracked)
 export const API_SERVICE_IDS = [
   'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq',
-  'together', 'perplexity', 'huggingface', 'replicate',
+  'together', 'fireworks', 'perplexity', 'huggingface', 'replicate',
   'elevenlabs', 'xai', 'deepseek', 'openrouter', 'bedrock', 'azureopenai',
   'pinecone', 'stability', 'assemblyai', 'deepgram',
 ]
@@ -30,7 +30,7 @@ export const SERVICE_AND_APP_IDS = [
   'claudeai', 'chatgpt', 'characterai',
   // LLM API
   'claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq',
-  'together', 'perplexity', 'xai', 'deepseek', 'openrouter',
+  'together', 'fireworks', 'perplexity', 'xai', 'deepseek', 'openrouter',
   // voice & speech AI
   'elevenlabs', 'assemblyai', 'deepgram',
   // inference / infrastructure
@@ -44,7 +44,7 @@ export const ALL_SERVICE_IDS = [...SERVICE_AND_APP_IDS, ...AGENT_SERVICE_IDS]
 export const SERVICE_CATEGORIES = {
   all:       { labelKey: 'filter.all',       ids: null }, // null = show all
   apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai'] },
-  llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
+  llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
   inference: { labelKey: 'filter.inference', ids: ['elevenlabs', 'assemblyai', 'deepgram', 'huggingface', 'replicate', 'pinecone', 'stability'] },
   agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'copilot', 'cursor', 'windsurf'] },
 }

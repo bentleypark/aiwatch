@@ -181,16 +181,16 @@ function SummaryCard({ label, value, sub, colorClass }) {
 function RankingBar({ service, maxLatency, rank }) {
   const widthPct = maxLatency > 0 ? Math.round((service.latency / maxLatency) * 100) : 0
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-1.5 md:gap-3 min-w-0">
       <span className="w-4 shrink-0 text-right text-[10px] mono text-[var(--text2)]">{rank}</span>
-      <span className="w-28 shrink-0 truncate text-xs text-[var(--text1)]">{service.name}</span>
-      <div className="flex-1 bg-[var(--bg3)] rounded-full h-2">
+      <span className="w-[72px] md:w-28 shrink-0 truncate text-xs text-[var(--text1)]">{service.name}</span>
+      <div className="flex-1 min-w-0 bg-[var(--bg3)] rounded-full h-2 overflow-hidden">
         <div
           className={`h-2 rounded-full ${latencyColorClass(service.latency)}`}
           style={{ width: `${widthPct}%` }}
         />
       </div>
-      <span className={`w-16 shrink-0 text-right text-xs mono font-medium ${latencyTextClass(service.latency)}`}>
+      <span className={`w-[52px] md:w-16 shrink-0 text-right text-[10px] md:text-xs mono font-medium ${latencyTextClass(service.latency)}`}>
         {service.latency} ms
       </span>
     </div>

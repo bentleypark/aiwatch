@@ -235,6 +235,19 @@ const MOCK_SERVICES = [
     ],
   },
   {
+    id: 'fireworks', category: 'api', name: 'Fireworks AI', provider: 'Fireworks', status: 'operational',
+    latency: 145, uptime30d: 99.80,
+    history30d: hist([22]),
+    history3m: [{ month: '2026-01', uptime: 99.90 }, { month: '2026-02', uptime: 99.85 }, { month: '2026-03', uptime: 99.80 }],
+    incidents: [
+      { id: 'fw-1', title: 'Embedding API Latency Spike', startedAt: ago(3 * D + 5 * H), duration: '25m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: 'Embedding API 응답 지연이 발생하고 있습니다.', at: ago(3 * D + 5 * H) },
+          { stage: 'resolved', text: '인스턴스 스케일아웃 후 정상화.', at: ago(3 * D + 5 * H - 25 * M) },
+        ] },
+    ],
+  },
+  {
     id: 'perplexity', category: 'api', name: 'Perplexity', provider: 'Perplexity AI', status: 'operational',
     latency: 420, uptime30d: 99.33,
     history30d: hist([5, 6]),

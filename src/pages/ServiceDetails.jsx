@@ -47,6 +47,7 @@ const STATUS_URL = {
   cohere:      'https://status.cohere.ai',
   groq:        'https://status.groq.com',
   together:    'https://status.together.ai',
+  fireworks:   'https://status.fireworks.ai',
   perplexity:  'https://status.perplexity.ai',
   huggingface: 'https://status.huggingface.co',
   replicate:   'https://www.replicatestatus.com',

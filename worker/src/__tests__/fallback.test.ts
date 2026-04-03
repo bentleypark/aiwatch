@@ -68,6 +68,25 @@ describe('getFallbacks', () => {
     expect(result[1].name).toBe('Together AI')
   })
 
+  it('Fireworks AI appears as T2 fallback when higher-score T2 peers are down', () => {
+    const services = [
+      { id: 'together', category: 'api', name: 'Together AI', status: 'degraded', aiwatchScore: 89 },
+      { id: 'groq', category: 'api', name: 'Groq Cloud', status: 'degraded', aiwatchScore: 93 },
+      { id: 'fireworks', category: 'api', name: 'Fireworks AI', status: 'operational', aiwatchScore: 85 },
+      { id: 'cohere', category: 'api', name: 'Cohere API', status: 'operational', aiwatchScore: 76 },
+      { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 90 },
+      { id: 'deepseek', category: 'api', name: 'DeepSeek API', status: 'operational', aiwatchScore: 80 },
+    ]
+    const result = getFallbacks('together', 'api', services)
+    // together is T2 → prefer operational T2 peers by Score: fireworks(85) > deepseek(80) > cohere(76)
+    expect(result[0].name).toBe('Fireworks AI')
+    expect(result[1].name).toBe('DeepSeek API')
+  })
+
+  it('Fireworks AI is not excluded from fallback candidates', () => {
+    expect(EXCLUDE_FALLBACK).not.toContain('fireworks')
+  })
+
   it('only returns services from the same category', () => {
     const result = getFallbacks('chatgpt', 'app', mockServices)
     expect(result).toEqual([{ name: 'claude.ai', score: 60 }])
