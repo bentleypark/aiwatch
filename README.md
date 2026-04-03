@@ -25,8 +25,8 @@ Real-time monitoring dashboard for **27 AI services** — track status, latency,
 
 - **Real-time status** — Operational / Degraded / Down for 27 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
-- **Latency monitoring** — Status page response time per API service
-- **24h latency trend** — Chart.js line chart with 30-min snapshots
+- **Latency monitoring** — Direct API endpoint response time (RTT) for 17 probe-capable services, status page timing as fallback
+- **24h latency trend** — Chart.js line chart with 5-min probe snapshots
 - **Incident history** — Timeline with details from multiple status page formats
 - **Official uptime** — Per-component uptime from Statuspage, incident.io, Better Stack
 - **Status calendar** — 30-day (Statuspage) or 14-day (incident.io) daily status visualization
@@ -42,7 +42,7 @@ Real-time monitoring dashboard for **27 AI services** — track status, latency,
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
 - **Is X Down SEO pages** — 9 services (Claude, claude.ai, ChatGPT, Gemini, GitHub Copilot, Cursor, Claude Code, OpenAI, Windsurf) with dynamic OG images (PNG), share buttons, AIWatch rank, and fallback recommendations
-- **Health check probing** — Direct RTT measurement to API endpoints (15 API services) with early outage detection via consecutive spike alerts
+- **Health check probing** — Direct RTT measurement to API endpoints (17 API services) with early outage detection via consecutive spike alerts and Detection Lead tracking
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 - **AI Analysis (Beta)** — Claude Sonnet auto-analysis on incidents: cause estimation, recovery time, affected scope. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 - **Landing page** — Product Hunt landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, and GA4 tracking
@@ -127,7 +127,7 @@ Cloudflare KV
   ├── daily:YYYY-MM-DD     (uptime counters, TTL 2d)
   ├── history:YYYY-MM-DD   (archived counters, TTL 90d)
   ├── latency:24h          (30-min snapshots, max 48, TTL 25h)
-  ├── probe:24h            (health check probes, max 864, TTL 72h, 15 API services)
+  ├── probe:24h            (health check probes, max 2016, TTL 7d, 17 API services)
   ├── ai:analysis:{svcId}:{incId}  (AI per-incident analysis, TTL 1h, refreshed while active)
   ├── ai:reanalysis-skip:* (re-analysis failure cooldown, TTL 30min)
   ├── ai:usage:{date}      (daily AI usage counter, TTL 2d)
