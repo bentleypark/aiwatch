@@ -7,12 +7,13 @@ import { usePolling } from '../hooks/usePolling'
 import { LatencySkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import { ensureChart } from '../utils/chartLoader'
+import { filterLast24h } from '../utils/time'
 
 // ── Constants ────────────────────────────────────────────────
 
 // Latency thresholds for bar color coding
-const FAST_MS   = 300  // ≤ 300ms → green
-const NORMAL_MS = 500  // 301–500ms → amber  /  > 500ms → red
+const FAST_MS   = 500  // ≤ 500ms → green
+const NORMAL_MS = 800  // 501–800ms → amber  /  > 800ms → red
 
 // Per-service chart line colors (visualization palette — not design tokens).
 // Canvas-based charts cannot use CSS custom properties directly.
@@ -30,6 +31,10 @@ const SERVICE_COLOR = {
   elevenlabs:  '#6be5e2',
   xai:         '#e0e0e0',
   deepseek:    '#ff6b6b',
+  openrouter:  '#ffa657',
+  stability:   '#c9d1d9',
+  assemblyai:  '#79dfc1',
+  deepgram:    '#a5b4fc',
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -65,14 +70,25 @@ function LatencyTrendSection({ services, t, hourlyData }) {
       return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
     })
 
-    const apiServices = services.filter((s) => s.category === 'api' && s.latency != null)
+    // Detect data format: probe snapshots have { status, rtt } objects, latency snapshots have plain numbers
+    const isProbeData = hourlyData.length > 0 && typeof Object.values(hourlyData[0].data ?? {})[0] === 'object'
+    // For probe data, show only services present in probe snapshots
+    const probeServiceIds = isProbeData ? Object.keys(hourlyData[hourlyData.length - 1]?.data ?? {}) : null
+    const apiServices = probeServiceIds
+      ? services.filter((s) => probeServiceIds.includes(s.id))
+      : services.filter((s) => s.category === 'api' && s.latency != null)
     const styles = getComputedStyle(document.documentElement)
     const textMuted = styles.getPropertyValue('--text2').trim() || '#6b7280'
     const borderClr = styles.getPropertyValue('--border').trim() || 'rgba(107,114,128,0.1)'
 
     const datasets = apiServices.map((svc) => ({
       label: svc.name,
-      data: hourlyData.map((s) => s.data[svc.id] ?? null),
+      data: hourlyData.map((s) => {
+        const val = s.data[svc.id]
+        if (val == null) return null
+        if (typeof val === 'object') return val.rtt > 0 ? val.rtt : null
+        return val
+      }),
       borderColor: SERVICE_COLOR[svc.id] ?? '#8b949e',
       borderWidth: 1.5,
       pointRadius: 1.5,
@@ -185,7 +201,7 @@ function RankingBar({ service, maxLatency, rank }) {
 
 export default function Latency() {
   const { t } = useLang()
-  const { services: rawServices, loading, error, latency24h, refresh } = usePolling()
+  const { services: rawServices, loading, error, probe24h, latency24h, probeServiceIds, refresh } = usePolling()
 
   // Defensive default — handles transient undefined state
   const services = rawServices ?? []
@@ -194,13 +210,17 @@ export default function Latency() {
   if (!loading && services.length === 0 && error) return <EmptyState type="offline" onAction={refresh} />
   if (error)   return <EmptyState type="error" onAction={() => window.location.reload()} />
 
-  // Only include services with latency data (exclude web apps and coding agents)
+  // Split services: probe RTT (ranked) vs status page only (separate section)
+  // When no probe data (mock/dev mode), show all services in ranked list
+  const hasProbeData = probeServiceIds.length > 0
   const withLatency = services.filter((s) => s.latency != null)
-  const sorted = [...withLatency].sort((a, b) => a.latency - b.latency)
+  const probeServices = hasProbeData ? withLatency.filter((s) => probeServiceIds.includes(s.id)) : withLatency
+  const statusPageOnly = hasProbeData ? withLatency.filter((s) => !probeServiceIds.includes(s.id)) : []
+  const sorted = [...probeServices].sort((a, b) => a.latency - b.latency)
   const fastest = sorted[0]
   const slowest = sorted[sorted.length - 1]
-  const avg = withLatency.length
-    ? Math.round(withLatency.reduce((s, v) => s + v.latency, 0) / withLatency.length)
+  const avg = probeServices.length
+    ? Math.round(probeServices.reduce((s, v) => s + v.latency, 0) / probeServices.length)
     : 0
   const maxLatency = slowest?.latency ?? 1
 
@@ -222,7 +242,7 @@ export default function Latency() {
       {/* ── Summary Cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-3" style={{ gap: '10px' }}>
         <SummaryCard label={t('latency.fastest')} value={fastest?.latency ?? '—'} sub={fastest?.name ?? ''} colorClass="text-[var(--green)]" />
-        <SummaryCard label={t('latency.average')} value={avg}                      sub={`${services.length} ${t('latency.avg.services')}`}  colorClass="text-[var(--blue)]" />
+        <SummaryCard label={t('latency.average')} value={avg}                      sub={`${probeServices.length} ${t('latency.avg.services')}`}  colorClass="text-[var(--blue)]" />
         <SummaryCard label={t('latency.slowest')} value={slowest?.latency ?? '—'} sub={slowest?.name ?? ''} colorClass="text-[var(--red)]" />
       </div>
 
@@ -242,13 +262,23 @@ export default function Latency() {
             {sorted.map((svc, i) => (
               <RankingBar key={svc.id} service={svc} maxLatency={maxLatency} rank={i + 1} />
             ))}
+            {statusPageOnly.length > 0 && (
+              <>
+                <div className="mono text-[9px] text-[var(--text2)] uppercase" style={{ marginTop: '8px', letterSpacing: '0.08em' }}>
+                  {t('svc.latency.statusPage')}
+                </div>
+                {[...statusPageOnly].sort((a, b) => a.latency - b.latency).map((svc) => (
+                  <RankingBar key={svc.id} service={svc} maxLatency={maxLatency} rank="—" />
+                ))}
+              </>
+            )}
           </div>
         )}
         </div>
       </section>
 
       {/* ── 24h Trend — shows badges + chart when hourly KV data exists ── */}
-      <LatencyTrendSection services={sorted} t={t} hourlyData={latency24h} />
+      <LatencyTrendSection services={sorted} t={t} hourlyData={probe24h.length > 0 ? filterLast24h(probe24h) : latency24h} />
 
     </div>
   )

@@ -90,8 +90,8 @@ function ServiceCard({ service, index, onClick, t, isRecovered }) {
   const hasUptime = service.uptime30d != null
   const uptimeColor = !hasUptime ? 'text-[var(--text2)]' : service.uptime30d >= 99 ? 'text-[var(--green)]' : service.uptime30d >= 97 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
   const latencyColor = service.latency == null ? 'text-[var(--text2)]'
-    : service.latency < 200 ? 'text-[var(--green)]'
-    : service.latency < 500 ? 'text-[var(--amber)]'
+    : service.latency < 500 ? 'text-[var(--green)]'
+    : service.latency < 800 ? 'text-[var(--amber)]'
     : 'text-[var(--red)]'
   const uptimeStr = hasUptime ? `${service.uptime30d.toFixed(2)}%` : t('uptime.unavailable.short')
   const scoreStr = service.aiwatchScore != null ? `${service.aiwatchScore} ${service.scoreGrade}` : null
@@ -265,8 +265,8 @@ function IncidentItem({ incident, lang, t }) {
 // Latency bar with colored fill per speed tier
 function LatencyBar({ service, maxLatency }) {
   const widthPct = maxLatency > 0 ? Math.round((service.latency / maxLatency) * 100) : 0
-  const fillCls = service.latency < 200 ? 'bg-[var(--green)]' : service.latency < 400 ? 'bg-[var(--amber)]' : 'bg-[var(--red)]'
-  const valColor = service.latency < 200 ? '' : service.latency < 400 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
+  const fillCls = service.latency < 500 ? 'bg-[var(--green)]' : service.latency < 800 ? 'bg-[var(--amber)]' : 'bg-[var(--red)]'
+  const valColor = service.latency < 500 ? '' : service.latency < 800 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
   return (
     <div className="flex items-center" style={{ gap: '10px' }}>
       <span className="mono text-[10px] text-[var(--text1)] shrink-0 whitespace-nowrap truncate" style={{ width: '90px' }}>{service.name}</span>

@@ -1048,6 +1048,7 @@ export default {
         const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
         const recentlyRecovered: string[] = []
         const latencyPromise = env.STATUS_CACHE!.get('latency:24h').catch(() => null)
+        const probePromise = env.STATUS_CACHE!.get('probe:24h').catch(() => null)
         // Active incidents: read ai:analysis:{svcId}:{incId} for each
         const withActiveInc = cached.services.filter(s =>
           (s.incidents ?? []).some(i => i.status !== 'resolved')
@@ -1080,9 +1081,14 @@ export default {
           })
         ))
         let latency24h: Array<{ t: string; data: Record<string, number> }> = []
+        let probe24h: ProbeSnapshot[] = []
         const latRaw = await latencyPromise
+        const probeRaw = await probePromise
         if (latRaw) {
           try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached latency24h parse failed:', err instanceof Error ? err.message : err) }
+        }
+        if (probeRaw) {
+          try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached probe24h parse failed:', err instanceof Error ? err.message : err) }
         }
 
         // Calculate scores for cached services (same as /api/status)
@@ -1096,6 +1102,7 @@ export default {
           lastUpdated: cached.cachedAt,
           cached: true,
           latency24h,
+          ...(probe24h.length > 0 ? { probe24h } : {}),
           ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
           ...(recentlyRecovered.length > 0 ? { recentlyRecovered } : {}),
         }), {

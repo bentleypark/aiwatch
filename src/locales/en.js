@@ -86,7 +86,7 @@ const en = {
 
   // Latency
   'latency.rankings': 'Current Rankings',
-  'latency.disclaimer': 'Measures each service\'s official status page response time.',
+  'latency.disclaimer': 'Measures direct API endpoint response time (RTT). Services without a public endpoint show status page timing.',
   'latency.fastest': 'Fastest',
   'latency.average': 'Average',
   'latency.slowest': 'Slowest',
@@ -138,7 +138,8 @@ const en = {
   'uptime.collecting': 'Collecting data',
 
   // Service Details
-  'svc.latency': 'Status Page Latency',
+  'svc.latency': 'API Response Time',
+  'svc.latency.statusPage': 'Status Page Latency',
   'svc.uptime30d': '30-Day Uptime',
   'uptime.label.official': 'Official Uptime',
   'uptime.sub.official': 'Official status page',

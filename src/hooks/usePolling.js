@@ -529,6 +529,8 @@ function usePollingInternal() {
     error: null,
     lastUpdated: null,
     latency24h: [],
+    probe24h: [],
+    probeServiceIds: [],
     aiAnalysis: {},
     recentlyRecovered: [],
   })
@@ -594,6 +596,19 @@ function usePollingInternal() {
       // Status/incident alerts handled server-side (Worker detectAndAlertIncidents)
       // to avoid duplicate alerts when both browser and Worker are running
 
+      // Overlay probe RTT onto service.latency (replaces status page timing with real API RTT)
+      // Non-probe API services keep status page latency with different label in UI
+      const probeSnapshots = data.probe24h ?? []
+      let probeServiceIds = []
+      if (probeSnapshots.length > 0) {
+        const latestProbe = probeSnapshots[probeSnapshots.length - 1].data ?? {}
+        probeServiceIds = Object.keys(latestProbe)
+        merged.forEach((svc) => {
+          const p = latestProbe[svc.id]
+          if (p?.rtt > 0) svc.latency = p.rtt
+        })
+      }
+
       hasDataRef.current = true
       refreshingRef.current = false
       if (!cancelledRef.current) {
@@ -604,6 +619,8 @@ function usePollingInternal() {
           error: null,
           lastUpdated: new Date(data.lastUpdated),
           latency24h: data.latency24h ?? [],
+          probe24h: probeSnapshots,
+          probeServiceIds,
           aiAnalysis: data.aiAnalysis ?? {},
           recentlyRecovered: data.recentlyRecovered ?? [],
         })
@@ -658,6 +675,9 @@ function usePollingInternal() {
             refreshing: false,
             error: null,
             lastUpdated: new Date(),
+            latency24h: [],
+            probe24h: [],
+            probeServiceIds: [],
             aiAnalysis: MOCK_AI_ANALYSIS,
             recentlyRecovered: MOCK_RECENTLY_RECOVERED,
           })
@@ -669,6 +689,9 @@ function usePollingInternal() {
             refreshing: false,
             error: err || new Error('Failed to fetch'),
             lastUpdated: null,
+            latency24h: [],
+            probe24h: [],
+            probeServiceIds: [],
           })
         }
       }
