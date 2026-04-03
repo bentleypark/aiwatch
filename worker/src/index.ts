@@ -545,6 +545,13 @@ export default {
             const existing = await env.STATUS_CACHE.get(alertKey).catch(() => null)
             if (existing) continue
             await kvPut(env.STATUS_CACHE, alertKey, '1', { expirationTtl: 3600 })
+            // Record probe spike as earliest detection (Detection Lead feature)
+            // Probe often detects issues before official status page updates
+            const detectKey = `detected:${spike.serviceId}`
+            const existingDetect = await env.STATUS_CACHE.get(detectKey).catch(() => null)
+            if (!existingDetect || new Date(spike.since).getTime() < new Date(existingDetect).getTime()) {
+              await kvPut(env.STATUS_CACHE, detectKey, spike.since, { expirationTtl: 604800 })
+            }
             const svcName = spike.serviceId
             await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
               title: `📡 ${svcName} — Probe RTT Spike Detected`,
