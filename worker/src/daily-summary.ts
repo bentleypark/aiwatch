@@ -1,8 +1,10 @@
 // Daily Summary — expanded Discord report at UTC 09:00 (KST 18:00)
 
 import type { ServiceStatus } from './types'
+import type { ProbeSnapshot } from './probe'
 import type { VitalsDaily } from './vitals'
 import { formatVitalsSection } from './vitals'
+import { aggregateProbeDaily } from './probe-archival'
 
 export interface DailySummaryData {
   services: ServiceStatus[]
@@ -14,6 +16,7 @@ export interface DailySummaryData {
   deliveryCounts?: { discord: number; slack: number; failed: number } | null
   redditCount: number
   vitals?: VitalsDaily | null
+  probeSnapshots?: ProbeSnapshot[]
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
@@ -58,15 +61,33 @@ export function buildDailySummary(data: DailySummaryData): string {
     lines.push(`\n📈 **Uptime (30d)**\n   Best: ${best}\n   Worst: ${worst}`)
   }
 
-  // Section 5: Latency Best/Worst (24h avg)
-  const latencyAvg = computeLatencyAvg(latencySnapshots)
-  const latencyEntries = Object.entries(latencyAvg).filter(([, v]) => v > 0)
-  if (latencyEntries.length >= 3) {
-    const sorted = latencyEntries.sort((a, b) => a[1] - b[1])
-    const nameMap = new Map(services.map(s => [s.id, s.name]))
-    const fastest = sorted.slice(0, 2).map(([id, ms]) => `${nameMap.get(id) ?? id} ${Math.round(ms)}ms`).join(' · ')
-    const slowest = sorted.slice(-2).reverse().map(([id, ms]) => `${nameMap.get(id) ?? id} ${Math.round(ms)}ms`).join(' · ')
-    lines.push(`\n⚡ **Latency (24h avg)**\n   Fastest: ${fastest}\n   Slowest: ${slowest}`)
+  // Section 5: Probe RTT (24h) — replaces status page latency with direct API endpoint measurement
+  const probeSnaps = data.probeSnapshots ?? []
+  if (probeSnaps.length > 0) {
+    const probeDaily = aggregateProbeDaily(probeSnaps)
+    const probeEntries = Object.entries(probeDaily).filter(([, v]) => v.p75 > 0)
+    if (probeEntries.length >= 3) {
+      const sorted = probeEntries.sort((a, b) => a[1].p75 - b[1].p75)
+      const nameMap = new Map(services.map(s => [s.id, s.name]))
+      const fastest = sorted.slice(0, 3).map(([id, s]) => `${nameMap.get(id) ?? id} ${s.p75}ms`).join(' · ')
+      const slowest = sorted.slice(-2).reverse().map(([id, s]) => `${nameMap.get(id) ?? id} ${s.p75}ms`).join(' · ')
+      const spikeServices = probeEntries.filter(([, s]) => s.spikes > 0)
+      const spikeLine = spikeServices.length > 0
+        ? `\n   Spikes: ${spikeServices.map(([id, s]) => `${nameMap.get(id) ?? id} (${s.spikes})`).join(', ')}`
+        : ''
+      lines.push(`\n⚡ **API Response Time (p75)**\n   Fastest: ${fastest}\n   Slowest: ${slowest}${spikeLine}`)
+    }
+  } else {
+    // Fallback to status page latency if no probe data
+    const latencyAvg = computeLatencyAvg(latencySnapshots)
+    const latencyEntries = Object.entries(latencyAvg).filter(([, v]) => v > 0)
+    if (latencyEntries.length >= 3) {
+      const sorted = latencyEntries.sort((a, b) => a[1] - b[1])
+      const nameMap = new Map(services.map(s => [s.id, s.name]))
+      const fastest = sorted.slice(0, 2).map(([id, ms]) => `${nameMap.get(id) ?? id} ${Math.round(ms)}ms`).join(' · ')
+      const slowest = sorted.slice(-2).reverse().map(([id, ms]) => `${nameMap.get(id) ?? id} ${Math.round(ms)}ms`).join(' · ')
+      lines.push(`\n⚡ **Latency (24h avg)**\n   Fastest: ${fastest}\n   Slowest: ${slowest}`)
+    }
   }
 
   // Section 6: Daily alert count + Reddit
