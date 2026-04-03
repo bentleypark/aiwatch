@@ -197,6 +197,24 @@ export async function readUptimeHistory(kv: KVNamespace, days: number): Promise<
   return history
 }
 
+// Read probe RTT daily history for last N days
+export async function readProbeHistory(kv: KVNamespace, days: number): Promise<Record<string, ProbeDailyData>> {
+  const history: Record<string, ProbeDailyData> = {}
+  const today = new Date()
+  const keyPairs = Array.from({ length: days }, (_, i) => {
+    const dateStr = new Date(today.getTime() - i * 86_400_000).toISOString().split('T')[0]
+    return { dateStr, key: `probe:daily:${dateStr}` }
+  })
+
+  const results = await Promise.all(keyPairs.map(({ key }) => kv.get(key).catch(() => null)))
+  results.forEach((raw, i) => {
+    if (raw) {
+      try { history[keyPairs[i].dateStr] = JSON.parse(raw) } catch (err) { console.warn('[kv] probe history parse failed:', keyPairs[i].dateStr, err instanceof Error ? err.message : err) }
+    }
+  })
+  return history
+}
+
 // Calculate per-service uptime% from accumulated daily counters
 function computeUptime(history: Record<string, DailyCounters>): Record<string, number> {
   const totals: Record<string, { ok: number; total: number }> = {}
@@ -522,7 +540,7 @@ import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, isPromotable } from './reddit'
 import { buildDailySummary } from './daily-summary'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
-import { archiveProbeDaily } from './probe-archival'
+import { archiveProbeDaily, type ProbeDailyData } from './probe-archival'
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
@@ -1124,6 +1142,17 @@ export default {
       })
     }
 
+    // GET /api/probe/history — return daily probe RTT history
+    if (url.pathname === '/api/probe/history') {
+      const rawDays = Number(url.searchParams.get('days') ?? 30)
+      const days = Math.max(1, Math.min(Number.isNaN(rawDays) ? 30 : rawDays, 90))
+      const history = env.STATUS_CACHE ? await readProbeHistory(env.STATUS_CACHE, days) : {}
+      return new Response(JSON.stringify({ history, days }), {
+        status: 200,
+        headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' },
+      })
+    }
+
     // GET /api/uptime — return daily uptime history
     if (url.pathname === '/api/uptime') {
       const rawDays = Number(url.searchParams.get('days') ?? 30)
@@ -1135,7 +1164,7 @@ export default {
       })
     }
 
-    if (request.method !== 'GET' || (url.pathname !== '/api/status' && url.pathname !== '/api/uptime')) {
+    if (request.method !== 'GET' || (url.pathname !== '/api/status' && url.pathname !== '/api/uptime' && url.pathname !== '/api/probe/history')) {
       return new Response(JSON.stringify({ error: 'Not Found' }), {
         status: 404,
         headers: { ...cors, 'Content-Type': 'application/json' },
