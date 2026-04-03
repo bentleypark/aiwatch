@@ -687,7 +687,7 @@ export default {
         )
 
         // Archive yesterday's probe RTT as daily summary (90d retention for monthly reports)
-        await archiveProbeDaily(env.STATUS_CACHE).catch((err) =>
+        await archiveProbeDaily(env.STATUS_CACHE, now).catch((err) =>
           console.warn('[daily-summary] probe archive failed:', err instanceof Error ? err.message : err)
         )
 
