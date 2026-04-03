@@ -86,7 +86,7 @@ const ko = {
 
   // Latency
   'latency.rankings': '현재 순위',
-  'latency.disclaimer': '각 서비스의 공식 상태 페이지 응답 시간을 측정합니다.',
+  'latency.disclaimer': 'API 엔드포인트 응답 시간(RTT)을 직접 측정합니다. 공개 엔드포인트가 없는 서비스는 상태 페이지 응답 시간을 표시합니다.',
   'latency.fastest': '가장 빠름',
   'latency.average': '평균',
   'latency.slowest': '가장 느림',
@@ -138,7 +138,8 @@ const ko = {
   'uptime.collecting': '데이터 수집 중',
 
   // Service Details
-  'svc.latency': '상태 페이지 레이턴시',
+  'svc.latency': 'API 응답 시간',
+  'svc.latency.statusPage': '상태 페이지 레이턴시',
   'svc.uptime30d': '30일 업타임',
   'uptime.label.official': '공식 Uptime',
   'uptime.sub.official': '공식 status page 기준',

@@ -15,6 +15,7 @@ import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import StatusPill from '../components/StatusPill'
 import { ensureChart } from '../utils/chartLoader'
+import { filterLast24h } from '../utils/time'
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -130,7 +131,12 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
       const d = new Date(s.t)
       return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
     })
-    const values = hourlyData.map((s) => s.data[service.id] ?? null)
+    const values = hourlyData.map((s) => {
+      const val = s.data[service.id]
+      if (val == null) return null
+      if (typeof val === 'object') return val.rtt > 0 ? val.rtt : null
+      return val
+    })
     const color = SERVICE_COLOR[service.id] ?? '#8b949e'
 
     const styles = getComputedStyle(document.documentElement)
@@ -550,7 +556,7 @@ function BadgeCode({ serviceId, serviceName, t }) {
 export default function ServiceDetails({ serviceId }) {
   const { t, lang } = useLang()
   const { setPage } = usePage()
-  const { services: rawServices, loading, error, latency24h, refresh, recentlyRecovered } = usePolling()
+  const { services: rawServices, loading, error, probe24h, latency24h, probeServiceIds, refresh, recentlyRecovered } = usePolling()
   const services = rawServices ?? []
 
   // useMemo must be called before any early returns (Rules of Hooks)
@@ -640,7 +646,7 @@ export default function ServiceDetails({ serviceId }) {
       {/* ── Metric Cards ── */}
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>
         <MetricCard
-          label={t('svc.latency')}
+          label={probeServiceIds.includes(service.id) ? t('svc.latency') : t('svc.latency.statusPage')}
           value={service.latency != null ? `${service.latency} ms` : '—'}
           sub={service.latency != null ? t('svc.latency.sub') : t('uptime.collecting')}
           colorClass="text-[var(--blue)]"
@@ -717,7 +723,7 @@ export default function ServiceDetails({ serviceId }) {
       )}
 
       {/* ── 24h Latency Trend — shows chart when hourly KV data exists ── */}
-      {service.category === 'api' && <ServiceLatencyTrend service={service} t={t} hourlyData={latency24h} />}
+      {service.category === 'api' && <ServiceLatencyTrend service={service} t={t} hourlyData={probe24h.length > 0 ? filterLast24h(probe24h) : latency24h} />}
 
       {/* ── Regional Availability (only for services with defined regions) ── */}
       {SERVICE_REGIONS[service.id] && <RegionalAvailability service={service} t={t} />}

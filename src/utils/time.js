@@ -23,3 +23,8 @@ export function formatDate(date, lang) {
     timeZoneName: 'short',
   }).format(new Date(date))
 }
+
+export function filterLast24h(snapshots) {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000
+  return snapshots.filter((s) => new Date(s.t).getTime() >= cutoff)
+}
