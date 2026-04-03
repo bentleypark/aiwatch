@@ -533,8 +533,8 @@ export default {
       )
     }
 
-    // Probe spike detection — alert on consecutive RTT spikes (early outage detection)
-    if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL) {
+    // Probe spike detection — record earliest detection for Detection Lead (no Discord alert, aggregated in daily report)
+    if (env.STATUS_CACHE) {
       try {
         const probeRaw = await env.STATUS_CACHE.get('probe:24h').catch(() => null)
         if (probeRaw) {
@@ -547,24 +547,11 @@ export default {
             if (existing) continue
             await kvPut(env.STATUS_CACHE, alertKey, '1', { expirationTtl: 3600 })
             // Record probe spike as earliest detection (Detection Lead feature)
-            // Probe often detects issues before official status page updates
             const detectKey = `detected:${spike.serviceId}`
             const existingDetect = await env.STATUS_CACHE.get(detectKey).catch(() => null)
             if (!existingDetect || new Date(spike.since).getTime() < new Date(existingDetect).getTime()) {
               await kvPut(env.STATUS_CACHE, detectKey, spike.since, { expirationTtl: 604800 })
             }
-            const svcName = spike.serviceId
-            await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-              title: `📡 ${svcName} — Probe RTT Spike Detected`,
-              description: [
-                `**${spike.consecutiveCount} consecutive** probes above threshold`,
-                `Avg RTT: **${spike.avgRtt}ms** (baseline median: ${spike.medianRtt}ms, threshold: ${spike.threshold}ms)`,
-                `Since: ${spike.since}`,
-                ``,
-                `_RTT spike may indicate performance degradation before official status page reports._`,
-              ].join('\n'),
-              color: 0xe86235, // amber
-            })
           }
         }
       } catch (err) {
@@ -604,10 +591,11 @@ export default {
       try {
         // Gather data for expanded daily report
         const today = now.toISOString().split('T')[0]
-        const [cachedRaw, aiUsageRaw, latRaw] = await Promise.all([
+        const [cachedRaw, aiUsageRaw, latRaw, probeRaw] = await Promise.all([
           env.STATUS_CACHE.get(CACHE_KEY).catch(() => null),
           env.STATUS_CACHE.get(`ai:usage:${today}`).catch(() => null),
           env.STATUS_CACHE.get('latency:24h').catch(() => null),
+          env.STATUS_CACHE.get('probe:24h').catch(() => null),
         ])
 
         let dailyServices: ServiceStatus[] = []
@@ -630,6 +618,12 @@ export default {
         if (latRaw) {
           try { latSnapshots = JSON.parse(latRaw).snapshots ?? [] } catch (err) {
             console.error('[daily-summary] Failed to parse latency data:', err instanceof Error ? err.message : err)
+          }
+        }
+        let probeSnapshots: ProbeSnapshot[] = []
+        if (probeRaw) {
+          try { probeSnapshots = JSON.parse(probeRaw).snapshots ?? [] } catch (err) {
+            console.error('[daily-summary] Failed to parse probe data:', err instanceof Error ? err.message : err)
           }
         }
 
@@ -713,6 +707,7 @@ export default {
           deliveryCounts,
           redditCount,
           vitals: vitalsSummary,
+          probeSnapshots,
         })
 
         const dateStr = now.toISOString().split('T')[0]
