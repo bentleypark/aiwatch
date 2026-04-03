@@ -522,6 +522,7 @@ import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, isPromotable } from './reddit'
 import { buildDailySummary } from './daily-summary'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
+import { archiveProbeDaily } from './probe-archival'
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
@@ -689,6 +690,11 @@ export default {
         // Archive yesterday's vitals as p75 summary (90d retention)
         await archiveVitals(env.STATUS_CACHE).catch((err) =>
           console.warn('[daily-summary] vitals archive failed:', err instanceof Error ? err.message : err)
+        )
+
+        // Archive yesterday's probe RTT as daily summary (90d retention for monthly reports)
+        await archiveProbeDaily(env.STATUS_CACHE).catch((err) =>
+          console.warn('[daily-summary] probe archive failed:', err instanceof Error ? err.message : err)
         )
 
         // Read web vitals summary for today
