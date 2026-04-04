@@ -94,6 +94,48 @@ describe('parseRssIncidents', () => {
     expect(result[0].status).toBe('investigating')
   })
 
+  it('detects resolved status from description when title unchanged (Modal pattern)', () => {
+    const xml = `
+      <item>
+        <guid>http://example.com#modal1</guid>
+        <title>Web endpoint degradation</title>
+        <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+        <description>Web endpoints are experiencing degradation</description>
+      </item>
+      <item>
+        <guid>http://example.com#modal1</guid>
+        <title>Web endpoint degradation</title>
+        <pubDate>Sat, 01 Mar 2026 10:30:00 GMT</pubDate>
+        <description>Things have recovered</description>
+      </item>
+    `
+    const result = parseRssIncidents(xml)
+    expect(result).toHaveLength(1)
+    expect(result[0].status).toBe('resolved')
+    expect(result[0].duration).toBe('30m')
+  })
+
+  it('detects resolved status from description with "resolved" keyword', () => {
+    const xml = `
+      <item>
+        <guid>http://example.com#modal2</guid>
+        <title>Sandbox scheduling degraded</title>
+        <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+        <description>Sandbox scheduling is degraded</description>
+      </item>
+      <item>
+        <guid>http://example.com#modal2</guid>
+        <title>Sandbox scheduling degraded</title>
+        <pubDate>Sat, 01 Mar 2026 11:00:00 GMT</pubDate>
+        <description>We have resolved the issue</description>
+      </item>
+    `
+    const result = parseRssIncidents(xml)
+    expect(result).toHaveLength(1)
+    expect(result[0].status).toBe('resolved')
+    expect(result[0].duration).toBe('1h 0m')
+  })
+
   it('returns empty for no items', () => {
     expect(parseRssIncidents('<rss></rss>')).toEqual([])
   })

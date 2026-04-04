@@ -38,7 +38,8 @@ export function parseRssIncidents(xml: string): Incident[] {
     events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     const first = events[0]
     const last = events[events.length - 1]
-    const isResolved = last.title.toLowerCase().includes('recovered')
+    const lastText = `${last.title} ${last.desc}`.toLowerCase()
+    const isResolved = lastText.includes('recovered') || lastText.includes('resolved')
     const startMs = new Date(first.date).getTime()
     const endMs = new Date(last.date).getTime()
 
