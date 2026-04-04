@@ -58,6 +58,8 @@ const STATUS_URL = {
   bedrock:     'https://health.aws.amazon.com/health/status',
   pinecone:    'https://status.pinecone.io',
   stability:   'https://status.stability.ai',
+  voyageai:    'https://voyageai-status.statuspage.io',
+  modal:       'https://status.modal.com',
   assemblyai:  'https://status.assemblyai.com',
   deepgram:    'https://status.deepgram.com',
   azureopenai: 'https://azure.status.microsoft/en-us/status',

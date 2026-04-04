@@ -25,7 +25,8 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   { id: 'stability', url: 'https://api.stability.ai/v1/engines/list' },
   { id: 'assemblyai', url: 'https://api.assemblyai.com/v2/transcript' },
   { id: 'deepgram', url: 'https://api.deepgram.com/v1/models' },
-  // Not feasible: bedrock (no public endpoint), azureopenai (tenant-specific), pinecone (index-specific)
+  { id: 'voyageai', url: 'https://api.voyageai.com/v1/embeddings' },
+  // Not feasible: bedrock (no public endpoint), azureopenai (tenant-specific), pinecone (index-specific), modal (no public API)
 ]
 
 /** Compute 5-minute aligned slot string from a Date */

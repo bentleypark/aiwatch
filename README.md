@@ -13,7 +13,7 @@
 
 **English** | [한국어](README.ko.md)
 
-Real-time monitoring dashboard for **28 AI services** — track status, latency, uptime, and incidents across major AI providers.
+Real-time monitoring dashboard for **30 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[Dashboard](https://ai-watch.dev)** · **[Landing Page](https://ai-watch.dev/intro)**
 
@@ -23,9 +23,9 @@ Real-time monitoring dashboard for **28 AI services** — track status, latency,
 
 ## Features
 
-- **Real-time status** — Operational / Degraded / Down for 28 AI services
+- **Real-time status** — Operational / Degraded / Down for 30 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
-- **Latency monitoring** — Direct API endpoint response time (RTT) for 18 probe-capable services, status page timing as fallback
+- **Latency monitoring** — Direct API endpoint response time (RTT) for 19 probe-capable services, status page timing as fallback
 - **24h latency trend** — Chart.js line chart with 5-min probe snapshots
 - **Incident history** — Timeline with details from multiple status page formats
 - **Official uptime** — Per-component uptime from Statuspage, incident.io, Better Stack
@@ -42,7 +42,7 @@ Real-time monitoring dashboard for **28 AI services** — track status, latency,
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
 - **Is X Down SEO pages** — 9 services (Claude, claude.ai, ChatGPT, Gemini, GitHub Copilot, Cursor, Claude Code, OpenAI, Windsurf) with dynamic OG images (PNG), share buttons, AIWatch rank, and fallback recommendations
-- **Health check probing** — Direct RTT measurement to API endpoints (18 API services) with early outage detection via consecutive spike alerts and Detection Lead tracking
+- **Health check probing** — Direct RTT measurement to API endpoints (19 API services) with early outage detection via consecutive spike alerts and Detection Lead tracking
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 - **AI Analysis (Beta)** — Claude Sonnet auto-analysis on incidents: cause estimation, recovery time, affected scope. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 - **Landing page** — Product Hunt landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, and GA4 tracking
@@ -50,7 +50,7 @@ Real-time monitoring dashboard for **28 AI services** — track status, latency,
 
 ## Monitored Services
 
-### AI API Services (21)
+### AI API Services (23)
 
 | Service | Provider | Status Source |
 |---------|----------|---------------|
@@ -74,6 +74,8 @@ Real-time monitoring dashboard for **28 AI services** — track status, latency,
 | Amazon Bedrock | AWS | AWS Health Dashboard |
 | Pinecone | Pinecone | Atlassian Statuspage |
 | Stability AI | Stability AI | Atlassian Statuspage |
+| Voyage AI | Voyage AI | Atlassian Statuspage |
+| Modal | Modal | Better Stack RSS + uptime API |
 | Azure OpenAI | Microsoft | Azure Status RSS |
 
 ### AI Apps (3)
@@ -111,7 +113,7 @@ Real-time monitoring dashboard for **28 AI services** — track status, latency,
 Browser (React SPA, 60s polling)
   ↓
 Cloudflare Worker
-  ├── GET /api/status    → parallel fetch (28 services) → normalize
+  ├── GET /api/status    → parallel fetch (30 services) → normalize
   ├── GET /api/uptime    → daily uptime history
   └── POST /api/alert   → webhook proxy (Slack/Discord, SSRF protected)
   ↓
@@ -128,7 +130,7 @@ Cloudflare KV
   ├── daily:YYYY-MM-DD     (uptime counters, TTL 2d)
   ├── history:YYYY-MM-DD   (archived counters, TTL 90d)
   ├── latency:24h          (30-min snapshots, max 48, TTL 25h)
-  ├── probe:24h            (health check probes, max 2016, TTL 7d, 18 API services)
+  ├── probe:24h            (health check probes, max 2016, TTL 7d, 19 API services)
   ├── ai:analysis:{svcId}:{incId}  (AI per-incident analysis, TTL 1h, refreshed while active)
   ├── ai:reanalysis-skip:* (re-analysis failure cooldown, TTL 30min)
   ├── ai:usage:{date}      (daily AI usage counter, TTL 2d)
@@ -268,6 +270,7 @@ Embed real-time status badges in your README, docs, or blog.
 | `azureopenai` | Azure OpenAI | `stability` | Stability AI |
 | `assemblyai` | AssemblyAI | `deepgram` | Deepgram |
 | `characterai` | Character.AI | `fireworks` | Fireworks AI |
+| `voyageai` | Voyage AI | `modal` | Modal |
 
 ## Project Structure
 

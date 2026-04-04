@@ -191,9 +191,11 @@ describe('buildGroupedFallbackText', () => {
 })
 
 describe('EXCLUDE_FALLBACK', () => {
-  it('contains inference services but not voice services', () => {
+  it('contains inference/embedding/infra services but not voice services', () => {
     expect(EXCLUDE_FALLBACK).toContain('replicate')
     expect(EXCLUDE_FALLBACK).toContain('huggingface')
+    expect(EXCLUDE_FALLBACK).toContain('voyageai')
+    expect(EXCLUDE_FALLBACK).toContain('modal')
     expect(EXCLUDE_FALLBACK).not.toContain('elevenlabs')
     expect(EXCLUDE_FALLBACK).not.toContain('assemblyai')
     expect(EXCLUDE_FALLBACK).not.toContain('deepgram')
