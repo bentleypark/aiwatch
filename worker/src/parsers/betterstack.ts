@@ -42,7 +42,7 @@ export function parseRssIncidents(xml: string): Incident[] {
     const first = events[0]
     const last = events[events.length - 1]
     const lastText = `${last.title} ${last.desc}`.toLowerCase()
-    const isResolved = lastText.includes('recovered') || lastText.includes('resolved')
+    const isResolved = /recover|resolved|fixed|restored|mitigated|healthy again|back to normal|operational/.test(lastText)
     const startMs = new Date(first.date).getTime()
     const endMs = new Date(last.date).getTime()
 
