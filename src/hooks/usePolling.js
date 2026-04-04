@@ -235,6 +235,19 @@ const MOCK_SERVICES = [
     ],
   },
   {
+    id: 'fireworks', category: 'api', name: 'Fireworks AI', provider: 'Fireworks', status: 'operational',
+    latency: 145, uptime30d: 99.80,
+    history30d: hist([22]),
+    history3m: [{ month: '2026-01', uptime: 99.90 }, { month: '2026-02', uptime: 99.85 }, { month: '2026-03', uptime: 99.80 }],
+    incidents: [
+      { id: 'fw-1', title: 'Embedding API Latency Spike', startedAt: ago(3 * D + 5 * H), duration: '25m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: 'Embedding API 응답 지연이 발생하고 있습니다.', at: ago(3 * D + 5 * H) },
+          { stage: 'resolved', text: '인스턴스 스케일아웃 후 정상화.', at: ago(3 * D + 5 * H - 25 * M) },
+        ] },
+    ],
+  },
+  {
     id: 'perplexity', category: 'api', name: 'Perplexity', provider: 'Perplexity AI', status: 'operational',
     latency: 420, uptime30d: 99.33,
     history30d: hist([5, 6]),
@@ -392,6 +405,26 @@ const MOCK_SERVICES = [
     history30d: hist(),
     history3m: null,
     incidents: [],
+  },
+  {
+    id: 'voyageai', category: 'api', name: 'Voyage AI', provider: 'Voyage AI', status: 'operational',
+    latency: 95, uptime30d: 99.95,
+    history30d: hist(),
+    history3m: [{ month: '2026-01', uptime: 99.99 }, { month: '2026-02', uptime: 99.97 }, { month: '2026-03', uptime: 99.95 }],
+    incidents: [],
+  },
+  {
+    id: 'modal', category: 'api', name: 'Modal', provider: 'Modal', status: 'operational',
+    latency: 210, uptime30d: 99.60,
+    history30d: hist([12, 25]),
+    history3m: [{ month: '2026-01', uptime: 99.75 }, { month: '2026-02', uptime: 99.68 }, { month: '2026-03', uptime: 99.60 }],
+    incidents: [
+      { id: 'md-1', title: 'Web Endpoint Degradation', startedAt: ago(2 * D + 4 * H), duration: '35m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: '웹 엔드포인트 응답 지연이 발생하고 있습니다.', at: ago(2 * D + 4 * H) },
+          { stage: 'resolved', text: '입력 플레인 스케일링 후 정상화.', at: ago(2 * D + 4 * H - 35 * M) },
+        ] },
+    ],
   },
   // ── Coding Agents ──
   {
