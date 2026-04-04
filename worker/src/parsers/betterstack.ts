@@ -18,22 +18,25 @@ export function parseRssIncidents(xml: string): Incident[] {
   const items = xml.match(/<item>([\s\S]*?)<\/item>/g)
   if (!items) return []
 
-  // Group by guid (same guid = same incident)
+  // Group by incident key: use <link> if available (stable per incident),
+  // fall back to guid prefix before '#' (Modal uses per-update hashes in guid)
   const groups = new Map<string, Array<{ title: string; date: string; desc: string }>>()
   for (const item of items) {
-    const guid = item.match(/<guid>(.*?)<\/guid>/)?.[1]
+    const guid = item.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1]
     if (!guid) continue // skip items without guid
+    const link = item.match(/<link>(.*?)<\/link>/)?.[1]
+    const groupKey = link || guid.split('#')[0] || guid
     const date = item.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] ?? ''
     if (!isValidDate(date)) continue // skip malformed dates
     const title = decodeXmlEntities(item.match(/<title>(.*?)<\/title>/)?.[1] ?? '')
     const desc = decodeXmlEntities(item.match(/<description>(.*?)<\/description>/)?.[1] ?? '')
-    if (!groups.has(guid)) groups.set(guid, [])
-    groups.get(guid)!.push({ title, date, desc })
+    if (!groups.has(groupKey)) groups.set(groupKey, [])
+    groups.get(groupKey)!.push({ title, date, desc })
   }
 
   // Convert each group to an Incident (limit to 20)
   const incidents: Incident[] = []
-  for (const [guid, events] of groups) {
+  for (const [groupKey, events] of groups) {
     if (incidents.length >= 20) break
     events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     const first = events[0]
@@ -45,7 +48,7 @@ export function parseRssIncidents(xml: string): Incident[] {
 
     // Filter out micro-incidents (resolved in < 60s) — automated monitoring noise
     if (isResolved && (endMs - startMs) >= 0 && (endMs - startMs) < 60_000) {
-      console.debug(`[parseRssIncidents] filtered micro-incident ${guid} (${endMs - startMs}ms)`)
+      console.debug(`[parseRssIncidents] filtered micro-incident ${groupKey} (${endMs - startMs}ms)`)
       continue
     }
 
@@ -56,7 +59,7 @@ export function parseRssIncidents(xml: string): Incident[] {
     const component = first.title.replace(/ went down$/i, '').replace(/ recovered$/i, '')
 
     incidents.push({
-      id: guid.split('#')[1] ?? guid,
+      id: groupKey.split('/').pop() ?? groupKey,
       title: `${component} — ${isResolved ? 'recovered' : 'down'}`,
       status: isResolved ? 'resolved' : 'investigating',
       impact: null,

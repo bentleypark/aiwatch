@@ -97,13 +97,15 @@ describe('parseRssIncidents', () => {
   it('detects resolved status from description when title unchanged (Modal pattern)', () => {
     const xml = `
       <item>
-        <guid>http://example.com#modal1</guid>
+        <guid>http://example.com/incident/1#hash1</guid>
+        <link>http://example.com/incident/1</link>
         <title>Web endpoint degradation</title>
         <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
         <description>Web endpoints are experiencing degradation</description>
       </item>
       <item>
-        <guid>http://example.com#modal1</guid>
+        <guid>http://example.com/incident/1#hash2</guid>
+        <link>http://example.com/incident/1</link>
         <title>Web endpoint degradation</title>
         <pubDate>Sat, 01 Mar 2026 10:30:00 GMT</pubDate>
         <description>Things have recovered</description>
@@ -118,13 +120,15 @@ describe('parseRssIncidents', () => {
   it('detects resolved status from description with "resolved" keyword', () => {
     const xml = `
       <item>
-        <guid>http://example.com#modal2</guid>
+        <guid>http://example.com/incident/2#hash1</guid>
+        <link>http://example.com/incident/2</link>
         <title>Sandbox scheduling degraded</title>
         <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
         <description>Sandbox scheduling is degraded</description>
       </item>
       <item>
-        <guid>http://example.com#modal2</guid>
+        <guid>http://example.com/incident/2#hash2</guid>
+        <link>http://example.com/incident/2</link>
         <title>Sandbox scheduling degraded</title>
         <pubDate>Sat, 01 Mar 2026 11:00:00 GMT</pubDate>
         <description>We have resolved the issue</description>
@@ -143,7 +147,8 @@ describe('parseRssIncidents', () => {
   it('limits to 20 incidents', () => {
     const items = Array.from({ length: 25 }, (_, i) => `
       <item>
-        <guid>http://example.com#${i}</guid>
+        <guid>http://example.com/incident/${i}#hash</guid>
+        <link>http://example.com/incident/${i}</link>
         <title>Svc ${i} went down</title>
         <pubDate>Sat, 01 Mar 2026 ${String(i).padStart(2, '0')}:00:00 GMT</pubDate>
         <description>Down</description>
