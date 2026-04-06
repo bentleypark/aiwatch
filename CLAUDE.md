@@ -337,6 +337,7 @@ Browser (React SPA, 60s polling)
     → parallel fetch (30 services)
     → normalize to ServiceStatus[]
     → write to KV (cache + daily counters)
+    → probe cross-validation: filter Mistral micro-incident noise (no RTT spike → excluded)
   → React state (usePolling hook via PollingContext)
     → overlay probe RTT onto service.latency (19 probe services)
     → non-probe services (bedrock, azureopenai, pinecone) keep status page latency
