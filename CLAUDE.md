@@ -171,21 +171,20 @@ When adding a new monitored service, update ALL of the following:
 26. `index.md` — top-level index page
 
 #### Assets (after deploy)
-27. `public/og-intro.png` — regenerate (service count baked in image)
-28. `docs/social-preview.png` — regenerate from og-intro.png
-29. `docs/screenshot.png` — recapture desktop dashboard
-30. `docs/screenshot-mobile.png` — recapture mobile dashboard
-31. GitHub Settings → Social preview — re-upload
+27. `scripts/generate-og-intro.mjs` — update `SERVICE_COUNT`, run `node scripts/generate-og-intro.mjs` (generates both `public/og-intro.png` + `docs/social-preview.png`)
+28. `docs/screenshot.png` — recapture desktop dashboard
+29. `docs/screenshot-mobile.png` — recapture mobile dashboard
+30. GitHub Settings → Social preview — re-upload
 
 #### Deployment
-32. `npx wrangler deploy --config worker/wrangler.toml --dry-run` — build check
-33. `npm run deploy:worker` — deploy after user approval
-34. `git push origin main` — Vercel auto-deploy for frontend
+31. `npx wrangler deploy --config worker/wrangler.toml --dry-run` — build check
+32. `npm run deploy:worker` — deploy after user approval
+33. `git push origin main` — Vercel auto-deploy for frontend
 
 ## Architecture
 
-**AIWatch** is a React SPA that monitors 27 AI services in real time:
-- **20 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Perplexity, HuggingFace, Replicate, ElevenLabs, AssemblyAI, Deepgram, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, Stability AI
+**AIWatch** is a React SPA that monitors 30 AI services in real time:
+- **23 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Fireworks, Perplexity, HuggingFace, Replicate, ElevenLabs, AssemblyAI, Deepgram, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, Stability AI, Voyage AI, Modal
 - **3 AI apps**: claude.ai, ChatGPT, Character.AI
 - **4 coding agents**: Claude Code, GitHub Copilot, Cursor, Windsurf
 
@@ -199,11 +198,11 @@ When adding a new monitored service, update ALL of the following:
 
 | Key Pattern | Value | TTL | Writes/Day | Purpose |
 |---|---|---|---|---|
-| `services:latest` | `{ services, cachedAt }` JSON | 5min | ~288 | Real-time status cache (all 27 services) |
+| `services:latest` | `{ services, cachedAt }` JSON | 5min | ~288 | Real-time status cache (all 30 services) |
 | `daily:{YYYY-MM-DD}` | `{ [svcId]: { ok, total } }` JSON | 2d | ~288 | Daily uptime counters |
 | `history:{YYYY-MM-DD}` | Same as daily | 90d | 1 | Archived yesterday's counters |
 | `latency:24h` | `{ snapshots: [{ t, data }] }` JSON | 25h | ~48 | 30-min latency snapshots (max 48) |
-| `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 7d | ~288 | 5-min health check probe results (max 2016, 17 API services) |
+| `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 7d | ~288 | 5-min health check probe results (max 2016, 19 API services) |
 | `probe:daily:{YYYY-MM-DD}` | `{ [svcId]: { p50, p75, p95, min, max, count, spikes } }` JSON | 90d | 1 | Daily probe RTT summary for monthly reports |
 | `alerted:new:{incId}` | `"1"` | 7d | ~5 | Incident alert dedup |
 | `alerted:res:{incId}` | `"1"` | 7d | ~2 | Resolved incident alert dedup |
@@ -244,6 +243,8 @@ src/
   locales/      # ko.js, en.js — flat key→string maps (default exports)
 docs/
   aiwatch-landing.html # Landing page design draft (not deployed)
+scripts/
+  generate-og-intro.mjs # OG intro image generator (uses icon-192.png + sharp)
 worker/
   src/
     index.ts    # Worker entry: CORS, KV, routing, /api/alert, /badge, /api/v1, Cron scheduled handler
@@ -259,7 +260,7 @@ worker/
     ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt, TTL refresh, re-analysis, incidentId dedup, timeline context, boilerplate filtering)
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit, Web Vitals)
     vitals.ts   # Web Vitals aggregation (ingest, KV flush, p75 computation, Discord formatting)
-    probe.ts    # Health check probing — direct RTT measurement (17 API services)
+    probe.ts    # Health check probing — direct RTT measurement (19 API services)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
                 # dailyImpact support: statuspage (uptimeData), incident-io (component impacts), betterstack (status_history from index.json)
 ```
@@ -333,11 +334,11 @@ Per-service status is resolved in `services.ts` with this priority:
 ```
 Browser (React SPA, 60s polling)
   → Cloudflare Worker (/api/status)
-    → parallel fetch (27 services)
+    → parallel fetch (30 services)
     → normalize to ServiceStatus[]
     → write to KV (cache + daily counters)
   → React state (usePolling hook via PollingContext)
-    → overlay probe RTT onto service.latency (17 probe services)
+    → overlay probe RTT onto service.latency (19 probe services)
     → non-probe services (bedrock, azureopenai, pinecone) keep status page latency
   → all pages read from context
 
@@ -375,7 +376,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
   - Grouped fallback: when incident affects multiple categories, Discord alerts + dashboard show per-category alternatives via `buildGroupedFallbackText`
   - **Fallback tier priority** (API services only): same-tier services are recommended first, then adjacent tiers. Within each tier, sorted by AIWatch Score descending. Defined in `worker/src/fallback.ts`, mirrored in `src/pages/Overview.jsx` and `api/is-down.ts`:
     - **Tier 1** (Major LLM): `claude`, `openai`, `gemini`
-    - **Tier 2** (LLM): `mistral`, `cohere`, `groq`, `together`, `deepseek`, `xai`, `perplexity`
+    - **Tier 2** (LLM): `mistral`, `cohere`, `groq`, `together`, `fireworks`, `deepseek`, `xai`, `perplexity`
     - **Tier 3** (Infrastructure): `bedrock`, `azureopenai`, `openrouter`
     - **Tier 4** (Voice): `elevenlabs`, `assemblyai`, `deepgram`
   - `EXCLUDE_FALLBACK` services are excluded from both source and candidate lists (keep in sync across `worker/src/fallback.ts`, `src/utils/constants.js`, `api/is-down.ts`)

@@ -137,8 +137,9 @@ export function parseUptimeData(html: string, componentId: string): UptimeDataRe
     }
 
     // Compute uptime%: (1 - weightedOutage / totalWindow) × 100
+    // Use floor to avoid overstating uptime (e.g. 99.998% should not round to 100%)
     if (validDays > 0) {
-      result.uptimePercent = Math.round((1 - totalWeightedSec / (validDays * 86400)) * 10000) / 100
+      result.uptimePercent = Math.floor((1 - totalWeightedSec / (validDays * 86400)) * 10000) / 100
     }
   } catch (err) {
     console.warn('[parseUptimeData] failed to parse uptimeData:', err instanceof Error ? err.message : err)

@@ -7,7 +7,7 @@ import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeDa
 import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, computeUptimeFromIncidents, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import { parseInstatusIncidents } from './parsers/instatus'
-import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact } from './parsers/betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
 import { parseAwsRssIncidents, deriveAwsStatus } from './parsers/aws'
 
@@ -27,6 +27,7 @@ const SERVICES: ServiceConfig[] = [
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE' },
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM' },
   { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed', betterStackUrl: 'https://status.together.ai' },
+  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: null, rssFeedUrl: 'https://status.fireworks.ai/feed', betterStackUrl: 'https://status.fireworks.ai' },
   { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com' },
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
   { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://status.deepseek.com/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x', incidentKeywords: ['api'] },
@@ -40,6 +41,8 @@ const SERVICES: ServiceConfig[] = [
   { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: '01JRJYHBWCXHFZ0NHMP1N7T2G3' },
   { id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', statusUrl: 'https://status.pinecone.io', apiUrl: 'https://status.pinecone.io/api/v2/summary.json', statusComponentId: 'r7tngp2p3sjd' },
   { id: 'stability', name: 'Stability AI', provider: 'Stability AI', category: 'api', statusUrl: 'https://status.stability.ai', apiUrl: 'https://status.stability.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.stability.ai/incidents', incidentIoComponentId: '01JW9J39X55NDFZTZT3K5NYR48' },
+  { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr' },
+  { id: 'modal', name: 'Modal', provider: 'Modal', category: 'api', statusUrl: 'https://status.modal.com', apiUrl: null, rssFeedUrl: 'https://status.modal.com/feed', betterStackUrl: 'https://status.modal.com' },
   // AI Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl' },
@@ -421,6 +424,30 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           betterStackUptime = parseBetterStackUptime(bsData)
           betterStackStat = parseBetterStackStatus(bsData)
           bsDailyImpact = parseBetterStackDailyImpact(bsData)
+          // Reconcile RSS incidents with index.json resolved status (authoritative)
+          const resolvedIds = parseBetterStackResolvedIds(bsData)
+          if (resolvedIds.size > 0) {
+            let matched = 0
+            for (const inc of incidents) {
+              if (inc.status !== 'resolved' && resolvedIds.has(inc.id)) {
+                matched++
+                inc.status = 'resolved'
+                if (!inc.resolvedAt && inc.timeline?.length) {
+                  inc.resolvedAt = inc.timeline[inc.timeline.length - 1].at
+                  const last = inc.timeline[inc.timeline.length - 1]
+                  if (last.stage !== 'resolved') last.stage = 'resolved'
+                }
+                if (!inc.duration && inc.startedAt && inc.resolvedAt) {
+                  inc.duration = formatDuration(new Date(inc.startedAt), new Date(inc.resolvedAt))
+                }
+                inc.title = inc.title.replace(/ — down$/, ' — recovered')
+              }
+            }
+            const unresolved = incidents.filter(i => i.status !== 'resolved')
+            if (matched === 0 && unresolved.length > 0) {
+              console.debug(`[fetchService] ${config.id} resolvedIds=[${[...resolvedIds].join(',')}] but no RSS IDs matched (RSS IDs: ${incidents.map(i => i.id).join(',')})`)
+            }
+          }
         } catch (err) {
           console.warn(`[fetchService] ${config.id} BetterStack parse failed:`, err instanceof Error ? err.message : err)
         }

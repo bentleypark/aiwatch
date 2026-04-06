@@ -14,6 +14,7 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   { id: 'cohere', url: 'https://api.cohere.ai/v1/models' },
   { id: 'groq', url: 'https://api.groq.com/openai/v1/models' },
   { id: 'together', url: 'https://api.together.xyz/v1/models' },
+  { id: 'fireworks', url: 'https://api.fireworks.ai/inference/v1/models' },
   { id: 'perplexity', url: 'https://api.perplexity.ai/chat/completions' },
   { id: 'huggingface', url: 'https://huggingface.co/api/models?limit=1' },
   { id: 'replicate', url: 'https://api.replicate.com/v1/models' },
@@ -24,7 +25,8 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   { id: 'stability', url: 'https://api.stability.ai/v1/engines/list' },
   { id: 'assemblyai', url: 'https://api.assemblyai.com/v2/transcript' },
   { id: 'deepgram', url: 'https://api.deepgram.com/v1/models' },
-  // Not feasible: bedrock (no public endpoint), azureopenai (tenant-specific), pinecone (index-specific)
+  { id: 'voyageai', url: 'https://api.voyageai.com/v1/embeddings' },
+  // Not feasible: bedrock (no public endpoint), azureopenai (tenant-specific), pinecone (index-specific), modal (no public API)
 ]
 
 /** Compute 5-minute aligned slot string from a Date */

@@ -91,6 +91,7 @@ const en = {
   'latency.average': 'Average',
   'latency.slowest': 'Slowest',
   'latency.trend': '24h Trend',
+  'latency.excludeNote': '* AI Apps (claude.ai, ChatGPT, etc.) and Coding Agents are excluded — no public API endpoint to measure.',
   'latency.dummy': 'Collecting data (switches to real data after 24h)',
   'latency.avg.services': 'services',
 

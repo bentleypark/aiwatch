@@ -1,5 +1,10 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readProbeHistory } from '../index'
+
+/** Helper: YYYY-MM-DD for N days ago */
+function daysAgo(n: number): string {
+  return new Date(Date.now() - n * 86_400_000).toISOString().split('T')[0]
+}
 
 function mockKV(store: Record<string, string> = {}) {
   return {
@@ -10,9 +15,11 @@ function mockKV(store: Record<string, string> = {}) {
 
 describe('readProbeHistory', () => {
   it('reads probe:daily keys for the requested number of days', async () => {
+    const today = daysAgo(0)
+    const yesterday = daysAgo(1)
     const store: Record<string, string> = {
-      'probe:daily:2026-04-02': JSON.stringify({ claude: { p50: 25, p75: 30, p95: 45, min: 20, max: 50, count: 288, spikes: 0 } }),
-      'probe:daily:2026-04-01': JSON.stringify({ claude: { p50: 28, p75: 32, p95: 48, min: 22, max: 55, count: 280, spikes: 1 } }),
+      [`probe:daily:${today}`]: JSON.stringify({ claude: { p50: 25, p75: 30, p95: 45, min: 20, max: 50, count: 288, spikes: 0 } }),
+      [`probe:daily:${yesterday}`]: JSON.stringify({ claude: { p50: 28, p75: 32, p95: 48, min: 22, max: 55, count: 280, spikes: 1 } }),
     }
     const kv = mockKV(store)
     const history = await readProbeHistory(kv, 3)
@@ -21,10 +28,10 @@ describe('readProbeHistory', () => {
     expect(kv.get).toHaveBeenCalledTimes(3)
     // Should contain the 2 days that have data
     const dates = Object.keys(history)
-    expect(dates).toContain('2026-04-02')
-    expect(dates).toContain('2026-04-01')
-    expect(history['2026-04-02'].claude.p75).toBe(30)
-    expect(history['2026-04-01'].claude.spikes).toBe(1)
+    expect(dates).toContain(today)
+    expect(dates).toContain(yesterday)
+    expect(history[today].claude.p75).toBe(30)
+    expect(history[yesterday].claude.spikes).toBe(1)
   })
 
   it('returns empty object when no probe data exists', async () => {
@@ -42,22 +49,25 @@ describe('readProbeHistory', () => {
   })
 
   it('skips entries with invalid JSON gracefully', async () => {
+    const today = daysAgo(0)
+    const yesterday = daysAgo(1)
     const store: Record<string, string> = {
-      'probe:daily:2026-04-02': '{ invalid json',
-      'probe:daily:2026-04-01': JSON.stringify({ openai: { p50: 100, p75: 150, p95: 200, min: 80, max: 300, count: 288, spikes: 2 } }),
+      [`probe:daily:${today}`]: '{ invalid json',
+      [`probe:daily:${yesterday}`]: JSON.stringify({ openai: { p50: 100, p75: 150, p95: 200, min: 80, max: 300, count: 288, spikes: 2 } }),
     }
     const kv = mockKV(store)
     const history = await readProbeHistory(kv, 3)
 
     // Invalid JSON day should be skipped
-    expect(history['2026-04-02']).toBeUndefined()
-    expect(history['2026-04-01'].openai.p75).toBe(150)
+    expect(history[today]).toBeUndefined()
+    expect(history[yesterday].openai.p75).toBe(150)
   })
 
   it('handles KV get failures gracefully', async () => {
+    const today = daysAgo(0)
     const kv = {
       get: vi.fn(async (key: string) => {
-        if (key.includes('04-02')) throw new Error('KV error')
+        if (key.includes(today)) throw new Error('KV error')
         return null
       }),
       put: vi.fn(),

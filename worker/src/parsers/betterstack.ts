@@ -18,33 +18,37 @@ export function parseRssIncidents(xml: string): Incident[] {
   const items = xml.match(/<item>([\s\S]*?)<\/item>/g)
   if (!items) return []
 
-  // Group by guid (same guid = same incident)
+  // Group by incident key: use <link> if available (stable per incident),
+  // fall back to guid prefix before '#' (Modal uses per-update hashes in guid)
   const groups = new Map<string, Array<{ title: string; date: string; desc: string }>>()
   for (const item of items) {
-    const guid = item.match(/<guid>(.*?)<\/guid>/)?.[1]
+    const guid = item.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1]
     if (!guid) continue // skip items without guid
+    const link = item.match(/<link>(.*?)<\/link>/)?.[1]
+    const groupKey = link || guid.split('#')[0] || guid
     const date = item.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] ?? ''
     if (!isValidDate(date)) continue // skip malformed dates
     const title = decodeXmlEntities(item.match(/<title>(.*?)<\/title>/)?.[1] ?? '')
     const desc = decodeXmlEntities(item.match(/<description>(.*?)<\/description>/)?.[1] ?? '')
-    if (!groups.has(guid)) groups.set(guid, [])
-    groups.get(guid)!.push({ title, date, desc })
+    if (!groups.has(groupKey)) groups.set(groupKey, [])
+    groups.get(groupKey)!.push({ title, date, desc })
   }
 
   // Convert each group to an Incident (limit to 20)
   const incidents: Incident[] = []
-  for (const [guid, events] of groups) {
+  for (const [groupKey, events] of groups) {
     if (incidents.length >= 20) break
     events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     const first = events[0]
     const last = events[events.length - 1]
-    const isResolved = last.title.toLowerCase().includes('recovered')
+    const lastText = `${last.title} ${last.desc}`.toLowerCase()
+    const isResolved = /\brecover(?:ed)?\b|\bresolved\b|\bfixed\b|\brestor(?:ed)?\b|\bmitigated\b|\bhealthy again\b|\bis back\b|\bback to normal\b|\bback up\b|\boperational\b/.test(lastText)
     const startMs = new Date(first.date).getTime()
     const endMs = new Date(last.date).getTime()
 
     // Filter out micro-incidents (resolved in < 60s) — automated monitoring noise
     if (isResolved && (endMs - startMs) >= 0 && (endMs - startMs) < 60_000) {
-      console.debug(`[parseRssIncidents] filtered micro-incident ${guid} (${endMs - startMs}ms)`)
+      console.debug(`[parseRssIncidents] filtered micro-incident ${groupKey} (${endMs - startMs}ms)`)
       continue
     }
 
@@ -55,7 +59,7 @@ export function parseRssIncidents(xml: string): Incident[] {
     const component = first.title.replace(/ went down$/i, '').replace(/ recovered$/i, '')
 
     incidents.push({
-      id: guid.split('#')[1] ?? guid,
+      id: groupKey.split('/').pop() ?? groupKey,
       title: `${component} — ${isResolved ? 'recovered' : 'down'}`,
       status: isResolved ? 'resolved' : 'investigating',
       impact: null,
@@ -153,12 +157,27 @@ export interface BetterStackIndex {
   }
   included?: Array<{
     type: string
+    id?: string
     attributes?: {
       availability?: number
       status?: string
       status_history?: BetterStackStatusHistory[]
+      aggregate_state?: string
+      title?: string
+      starts_at?: string
     }
   }>
+}
+
+/** Extract resolved incident IDs from index.json status_reports */
+export function parseBetterStackResolvedIds(data: BetterStackIndex): Set<string> {
+  const resolved = new Set<string>()
+  for (const r of data.included ?? []) {
+    if (r.type === 'status_report' && r.attributes?.aggregate_state === 'resolved' && r.id) {
+      resolved.add(r.id)
+    }
+  }
+  return resolved
 }
 
 export function parseBetterStackStatus(data: BetterStackIndex): 'operational' | 'degraded' | 'down' | null {

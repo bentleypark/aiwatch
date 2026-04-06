@@ -47,6 +47,7 @@ const STATUS_URL = {
   cohere:      'https://status.cohere.ai',
   groq:        'https://status.groq.com',
   together:    'https://status.together.ai',
+  fireworks:   'https://status.fireworks.ai',
   perplexity:  'https://status.perplexity.ai',
   huggingface: 'https://status.huggingface.co',
   replicate:   'https://www.replicatestatus.com',
@@ -57,6 +58,8 @@ const STATUS_URL = {
   bedrock:     'https://health.aws.amazon.com/health/status',
   pinecone:    'https://status.pinecone.io',
   stability:   'https://status.stability.ai',
+  voyageai:    'https://voyageai-status.statuspage.io',
+  modal:       'https://status.modal.com',
   assemblyai:  'https://status.assemblyai.com',
   deepgram:    'https://status.deepgram.com',
   azureopenai: 'https://azure.status.microsoft/en-us/status',
@@ -283,6 +286,7 @@ function IncidentRow({ incident, detectedAt, t, lang }) {
             subtitle={`${formatDate(incident.startedAt, lang)}  ·  ${incident.duration ?? t('incidents.duration.ongoing')}`}
             timeline={incident.timeline}
             onClose={() => setExpanded(false)}
+            hideHeader
             t={t}
             lang={lang}
           />
@@ -648,7 +652,7 @@ export default function ServiceDetails({ serviceId }) {
         <MetricCard
           label={probeServiceIds.includes(service.id) ? t('svc.latency') : t('svc.latency.statusPage')}
           value={service.latency != null ? `${service.latency} ms` : '—'}
-          sub={service.latency != null ? t('svc.latency.sub') : t('uptime.collecting')}
+          sub={service.latency != null ? t('svc.latency.sub') : service.category !== 'api' ? '' : t('uptime.collecting')}
           colorClass="text-[var(--blue)]"
         />
         <MetricCard

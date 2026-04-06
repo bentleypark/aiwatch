@@ -1,13 +1,13 @@
 // Fallback recommendation logic for incident alerts
 
 // Keep in sync with src/utils/constants.js EXCLUDE_FALLBACK
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'characterai']
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai']
 
 // Tier-based priority for API services — major LLMs first, then secondary, then infrastructure, then voice
 // Same-tier services are sorted by Score. Higher tier = lower number = higher priority.
 const API_TIER: Record<string, number> = {
   claude: 1, openai: 1, gemini: 1,
-  mistral: 2, cohere: 2, groq: 2, together: 2, deepseek: 2, xai: 2, perplexity: 2,
+  mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, deepseek: 2, xai: 2, perplexity: 2,
   bedrock: 3, azureopenai: 3, openrouter: 3,
   elevenlabs: 4, assemblyai: 4, deepgram: 4,
 }

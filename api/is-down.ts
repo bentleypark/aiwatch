@@ -8,7 +8,7 @@ export const config = { runtime: 'edge' }
 
 const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 // Keep in sync with worker/src/fallback.ts and src/utils/constants.js
-const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'characterai']
+const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai']
 
 export default async function handler(req: Request) {
   try {
@@ -65,7 +65,7 @@ export default async function handler(req: Request) {
         // Keep in sync with worker/src/fallback.ts API_TIER
         const API_TIER: Record<string, number> = {
           claude: 1, openai: 1, gemini: 1,
-          mistral: 2, cohere: 2, groq: 2, together: 2, deepseek: 2, xai: 2, perplexity: 2,
+          mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, deepseek: 2, xai: 2, perplexity: 2,
           bedrock: 3, azureopenai: 3, openrouter: 3,
           elevenlabs: 4, assemblyai: 4, deepgram: 4,
         }

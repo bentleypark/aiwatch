@@ -103,8 +103,22 @@ describe('parseUptimeData', () => {
     expect(result.uptimePercent).not.toBeNull()
     // 3 valid days, weighted outage = 0 + 300 (1000*0.3) = 300
     // uptime = (1 - 300 / (3 * 86400)) * 100
-    const expected = Math.round((1 - 300 / (3 * 86400)) * 10000) / 100
+    const expected = Math.floor((1 - 300 / (3 * 86400)) * 10000) / 100
     expect(result.uptimePercent).toBe(expected)
+  })
+
+  it('uses floor to avoid overstating uptime (tiny outage should not round to 100%)', () => {
+    // 90 days with a single 302s partial outage → weighted = 90.6s
+    // round: (1 - 90.6 / 7776000) * 10000 = 9999.88... → round = 10000 → 100.00% (wrong)
+    // floor: 9999.88... → floor = 9999 → 99.99% (correct)
+    const days = Array.from({ length: 90 }, (_, i) => ({
+      date: `2026-${String(Math.floor(i / 28) + 1).padStart(2, '0')}-${String((i % 28) + 1).padStart(2, '0')}`,
+      outages: i === 0 ? { p: 302, m: 0 } : { p: 0, m: 0 },
+    }))
+    const html = makeHtml({ comp1: { days } })
+    const result = parseUptimeData(html, 'comp1')
+    expect(result.uptimePercent).toBe(99.99)
+    expect(result.uptimePercent).toBeLessThan(100)
   })
 
   it('sets dailyImpact correctly — critical when m > p', () => {
