@@ -115,6 +115,20 @@ export async function detectComponentMismatches(
   return results
 }
 
+/** Check if cached data is stale (strictly older than threshold, or missing cachedAt). */
+export function isCacheStale(raw: string | null, thresholdMs: number, now = Date.now()): { stale: boolean; services: unknown[] } {
+  if (!raw) return { stale: true, services: [] }
+  try {
+    const parsed = JSON.parse(raw)
+    const services = Array.isArray(parsed) ? parsed : parsed?.services
+    if (!Array.isArray(services) || services.length === 0) return { stale: true, services: [] }
+    const cachedAt = parsed?.cachedAt ? new Date(parsed.cachedAt).getTime() : 0
+    return { stale: now - cachedAt > thresholdMs, services }
+  } catch {
+    return { stale: true, services: [] }
+  }
+}
+
 export async function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
