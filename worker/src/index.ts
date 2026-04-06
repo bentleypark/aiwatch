@@ -127,7 +127,7 @@ async function writeLatencySnapshot(kv: KVNamespace, services: ServiceStatus[]):
 }
 
 // ── Health Check Probing (Phase 2 PoC) ──
-import { type ProbeResult, type ProbeSnapshot, type ProbeSpike, PROBE_TARGETS, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, detectConsecutiveSpikes } from './probe'
+import { type ProbeResult, type ProbeSnapshot, type ProbeSpike, PROBE_TARGETS, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, detectConsecutiveSpikes, computeMedianRtt, isCorroboratedByProbe } from './probe'
 
 let lastProbeSlot = ''
 
@@ -1082,11 +1082,37 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/status/cached') {
       const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
       if (cached) {
-        // Read AI analysis + latency 24h in parallel (per-incident keys)
+        // Read latency + probe data first (needed for Mistral noise filtering before AI analysis)
+        let latency24h: Array<{ t: string; data: Record<string, number> }> = []
+        let probe24h: ProbeSnapshot[] = []
+        const [latRaw, probeRaw] = await Promise.all([
+          env.STATUS_CACHE!.get('latency:24h').catch(() => null),
+          env.STATUS_CACHE!.get('probe:24h').catch(() => null),
+        ])
+        if (latRaw) {
+          try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached latency24h parse failed:', err instanceof Error ? err.message : err) }
+        }
+        if (probeRaw) {
+          try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached probe24h parse failed:', err instanceof Error ? err.message : err) }
+        }
+
+        // Filter Mistral micro-incident noise via probe cross-validation (#91)
+        // Must run BEFORE AI analysis reads — otherwise filtered incidents still have analysis data
+        if (probe24h.length > 0) {
+          const mistralMedian = computeMedianRtt(probe24h, 'mistral')
+          if (mistralMedian !== null) {
+            for (const svc of cached.services) {
+              if (svc.id !== 'mistral' || !svc.incidents?.length) continue
+              svc.incidents = svc.incidents.filter((inc) =>
+                isCorroboratedByProbe(probe24h, 'mistral', inc.startedAt, inc.resolvedAt ?? null, mistralMedian),
+              )
+            }
+          }
+        }
+
+        // Read AI analysis (per-incident keys) — uses filtered incident list
         const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
         const recentlyRecovered: string[] = []
-        const latencyPromise = env.STATUS_CACHE!.get('latency:24h').catch(() => null)
-        const probePromise = env.STATUS_CACHE!.get('probe:24h').catch(() => null)
         // Active incidents: read ai:analysis:{svcId}:{incId} for each
         const withActiveInc = cached.services.filter(s =>
           (s.incidents ?? []).some(i => i.status !== 'resolved')
@@ -1118,16 +1144,6 @@ export default {
             } catch { /* ignore */ }
           })
         ))
-        let latency24h: Array<{ t: string; data: Record<string, number> }> = []
-        let probe24h: ProbeSnapshot[] = []
-        const latRaw = await latencyPromise
-        const probeRaw = await probePromise
-        if (latRaw) {
-          try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached latency24h parse failed:', err instanceof Error ? err.message : err) }
-        }
-        if (probeRaw) {
-          try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached probe24h parse failed:', err instanceof Error ? err.message : err) }
-        }
 
         // Calculate scores for cached services (same as /api/status)
         const scoredCached = cached.services.map((svc) => {
@@ -1206,6 +1222,19 @@ export default {
         }
         if (probeRaw) {
           try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] probe24h parse failed:', err instanceof Error ? err.message : err) }
+        }
+      }
+
+      // Filter Mistral micro-incident noise via probe cross-validation (#91)
+      if (probe24h.length > 0) {
+        const mistralMedian = computeMedianRtt(probe24h, 'mistral')
+        if (mistralMedian !== null) {
+          for (const svc of enriched) {
+            if (svc.id !== 'mistral' || !svc.incidents?.length) continue
+            svc.incidents = svc.incidents.filter((inc) =>
+              isCorroboratedByProbe(probe24h, 'mistral', inc.startedAt, inc.resolvedAt ?? null, mistralMedian),
+            )
+          }
         }
       }
 

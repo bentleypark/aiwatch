@@ -231,6 +231,79 @@ describe('isCorroboratedByProbe', () => {
   })
 })
 
+describe('Mistral noise filtering pipeline (#91)', () => {
+  // Simulates the filtering logic in /api/status handler:
+  // compute median → filter incidents where isCorroboratedByProbe is false
+  const probeSnapshots: ProbeSnapshot[] = [
+    // Baseline: ~170ms median (20 normal probes)
+    ...Array.from({ length: 20 }, (_, i) => ({
+      t: `2026-04-05T${String(12 + Math.floor(i * 5 / 60)).padStart(2, '0')}:${String((i * 5) % 60).padStart(2, '0')}:00Z`,
+      data: { mistral: { status: 401, rtt: 160 + (i % 5) * 5 } }, // 160-180ms
+    })),
+    // Spike at 13:40 (600ms — real outage)
+    { t: '2026-04-05T13:40:00Z', data: { mistral: { status: 401, rtt: 600 } } },
+    // Normal at 17:55 (170ms — no spike during noise incident)
+    { t: '2026-04-05T17:55:00Z', data: { mistral: { status: 401, rtt: 170 } } },
+    { t: '2026-04-05T18:00:00Z', data: { mistral: { status: 401, rtt: 165 } } },
+  ]
+
+  function filterMistralIncidents(incidents: { id: string; title: string; startedAt: string; resolvedAt: string | null }[]) {
+    const median = computeMedianRtt(probeSnapshots, 'mistral')
+    if (median === null) return incidents
+    return incidents.filter((inc) =>
+      isCorroboratedByProbe(probeSnapshots, 'mistral', inc.startedAt, inc.resolvedAt, median),
+    )
+  }
+
+  it('filters noise incidents with no RTT spike', () => {
+    const incidents = [
+      { id: 'noise-1', title: 'Completion API Degraded', startedAt: '2026-04-05T17:53:00Z', resolvedAt: '2026-04-05T17:56:00Z' },
+    ]
+    expect(filterMistralIncidents(incidents)).toHaveLength(0)
+  })
+
+  it('keeps real incidents with RTT spike', () => {
+    const incidents = [
+      { id: 'real-1', title: 'Audio API Degraded', startedAt: '2026-04-05T13:35:00Z', resolvedAt: '2026-04-05T13:50:00Z' },
+    ]
+    const result = filterMistralIncidents(incidents)
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('real-1')
+  })
+
+  it('filters mixed noise and real incidents correctly', () => {
+    const incidents = [
+      { id: 'real-1', title: 'Audio API Degraded', startedAt: '2026-04-05T13:35:00Z', resolvedAt: '2026-04-05T13:50:00Z' },
+      { id: 'noise-1', title: 'Completion API Degraded', startedAt: '2026-04-05T17:53:00Z', resolvedAt: '2026-04-05T17:56:00Z' },
+      { id: 'noise-2', title: 'Audio API TTS Degraded', startedAt: '2026-04-05T17:58:00Z', resolvedAt: '2026-04-05T18:01:00Z' },
+    ]
+    const result = filterMistralIncidents(incidents)
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('real-1')
+  })
+
+  it('keeps all incidents when no probe data exists', () => {
+    const emptyProbes: ProbeSnapshot[] = []
+    const median = computeMedianRtt(emptyProbes, 'mistral')
+    expect(median).toBeNull()
+    const incidents = [
+      { id: 'inc-1', title: 'API Degraded', startedAt: '2026-04-05T17:53:00Z', resolvedAt: '2026-04-05T17:56:00Z' },
+    ]
+    // When median is null, all incidents pass through (conservative — no filtering without baseline)
+    const result = incidents.filter((inc) => {
+      if (median === null) return true
+      return isCorroboratedByProbe(emptyProbes, 'mistral', inc.startedAt, inc.resolvedAt, median)
+    })
+    expect(result).toHaveLength(1)
+  })
+
+  it('does not affect non-mistral services', () => {
+    // Probe data only has mistral — computing median for other services returns null
+    const otherMedian = computeMedianRtt(probeSnapshots, 'openai')
+    expect(otherMedian).toBeNull()
+  })
+})
+
 describe('detectConsecutiveSpikes', () => {
   it('detects 3+ consecutive spikes at tail', () => {
     // Enough baseline to keep median low (~50ms), so threshold ~150ms
