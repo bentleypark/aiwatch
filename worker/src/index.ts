@@ -6,7 +6,7 @@ import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, type ServiceStatus 
 import { calculateAIWatchScore } from './score'
 import { buildIncidentAlerts, buildServiceAlerts } from './alerts'
 import { analyzeIncident, refreshOrReanalyze, analysisKey, type AIAnalysisResult } from './ai-analysis'
-import { kvPut, kvDel, detectComponentMismatches } from './utils'
+import { kvPut, kvDel, detectComponentMismatches, isCacheStale } from './utils'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -289,15 +289,27 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   const empty: CronResult = { total: 0, operational: 0, issues: 0, sent: 0, newCount: 0, resolvedCount: 0, downCount: 0, recoveredCount: 0 }
   if (!env.DISCORD_WEBHOOK_URL || !env.STATUS_CACHE) return empty
 
-  // Read cached service data (written by /api/status handler)
+  // Read cached service data — fetch live if cache is stale or missing
   const raw = await env.STATUS_CACHE.get(CACHE_KEY).catch(() => null)
-  if (!raw) return empty
-  let services: ServiceStatus[]
-  try {
-    const parsed = JSON.parse(raw)
-    services = Array.isArray(parsed) ? parsed : parsed.services
-    if (!Array.isArray(services)) return empty
-  } catch (err) { console.error('[cron] Failed to parse cached services:', err instanceof Error ? err.message : err); return empty }
+  const STALE_THRESHOLD_MS = 10 * 60 * 1000
+  const { stale, services: cachedServices } = isCacheStale(raw, STALE_THRESHOLD_MS)
+  let services = cachedServices as ServiceStatus[]
+
+  // If cache is stale (>10min) or empty, fetch live data to avoid alert decisions on outdated status.
+  // Does NOT write to KV — cache writes are handled exclusively by /api/status handler's cacheWrite()
+  // to respect the 10-min KV write throttle and stay within the 1,000 writes/day free tier.
+  if (stale) {
+    try {
+      const { raw: freshServices } = await fetchAllServices(env.STATUS_CACHE)
+      if (freshServices.length > 0) {
+        services = freshServices
+      }
+    } catch (err) {
+      console.error('[cron] live fetch failed, using stale cache:', err instanceof Error ? err.message : err)
+      // Fall through with whatever we have (stale data better than nothing for alerts)
+    }
+  }
+  if (services.length === 0) return empty
 
   // Calculate scores for fallback recommendations
   const scored = services.map((svc) => {
