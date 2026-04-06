@@ -142,7 +142,8 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         latency = Date.now() - start
         if (!summaryRes.ok) {
           console.error(`[fetchService] ${config.id} summary.json returned HTTP ${summaryRes.status}`)
-          return { ...base, status: 'degraded' }
+          const shouldDegrade = await trackFetchFailure(kv, config.id)
+          return { ...base, status: shouldDegrade ? 'degraded' : 'operational' }
         }
         summaryData = await summaryRes.json()
         rawIncData = incidentsRes?.ok ? await incidentsRes.json() : null
@@ -259,6 +260,9 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           }
         }
       }
+
+      // Successful fetch — reset consecutive failure counter
+      await resetFetchFailure(kv, config.id)
 
       return {
         ...base,
@@ -460,6 +464,9 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       const httpStatus = res.ok || res.status === 403 ? 'operational' : 'degraded'
       const derivedStatus = betterStackStat ?? (hasOngoing ? 'degraded' : httpStatus)
 
+      // Successful fetch — reset consecutive failure counter
+      await resetFetchFailure(kv, config.id)
+
       return {
         ...base,
         status: derivedStatus,
@@ -471,10 +478,12 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       }
     }
   } catch (err) {
-    // Fetch failure (timeout/network) ≠ confirmed outage → degraded, not down
-    // Only Statuspage API indicator 'major'/'critical' should produce 'down'
+    // Fetch failure (timeout/network) ≠ confirmed outage.
+    // Require 3 consecutive failures before marking degraded to avoid transient timeout noise
+    // (e.g., Together's status page is slow ~3s, intermittent timeouts under load).
     console.error(`[fetchService] ${config.id} failed:`, err)
-    return { ...base, status: 'degraded' }
+    const shouldDegrade = await trackFetchFailure(kv, config.id)
+    return { ...base, status: shouldDegrade ? 'degraded' : 'operational' }
   }
 }
 
