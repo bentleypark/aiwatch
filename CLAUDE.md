@@ -163,23 +163,24 @@ When adding a new monitored service, update ALL of the following:
 20. `vercel.json` — add rewrite rule `/is-{service}-down`
 21. `public/sitemap.xml` — add URL entry
 
-#### Reports site (aiwatch-reports)
+#### Reports site (aiwatch-reports) — commit + push to deploy (GitHub Pages auto-build)
 22. `README.md` — service count, category breakdown (e.g., "N LLM APIs, N voice & inference")
 23. `_config.yml` — description
 24. `_templates/monthly-report.md` — service count, category breakdown
 25. Current month report (e.g., `2026-03/index.md`) — service count, category breakdown
 26. `index.md` — top-level index page
+27. `scripts/generate-charts.js` — service count in comments
 
 #### Assets (after deploy)
-27. `scripts/generate-og-intro.mjs` — update `SERVICE_COUNT`, run `node scripts/generate-og-intro.mjs` (generates both `public/og-intro.png` + `docs/social-preview.png`)
-28. `docs/screenshot.png` — recapture desktop dashboard
-29. `docs/screenshot-mobile.png` — recapture mobile dashboard
-30. GitHub Settings → Social preview — re-upload
+28. `scripts/generate-og-intro.mjs` — update `SERVICE_COUNT`, run `node scripts/generate-og-intro.mjs` (generates both `public/og-intro.png` + `docs/social-preview.png`), then commit + push
+29. `docs/screenshot.png` — recapture desktop dashboard
+30. `docs/screenshot-mobile.png` — recapture mobile dashboard
+31. GitHub Settings → Social preview — re-upload
 
 #### Deployment
-31. `npx wrangler deploy --config worker/wrangler.toml --dry-run` — build check
-32. `npm run deploy:worker` — deploy after user approval
-33. `git push origin main` — Vercel auto-deploy for frontend
+32. `npx wrangler deploy --config worker/wrangler.toml --dry-run` — build check
+33. `npm run deploy:worker` — deploy after user approval
+34. `git push origin main` — Vercel auto-deploy for frontend
 
 ## Architecture
 
