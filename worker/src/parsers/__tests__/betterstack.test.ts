@@ -438,19 +438,21 @@ describe('parseBetterStackStatus', () => {
     expect(parseBetterStackStatus({ data: { attributes: { aggregate_state: 'maintenance' } } })).toBe('degraded')
   })
 
-  it('returns operational for "degraded" when <10% of resources are non-operational (#159)', () => {
-    // Together AI scenario: 1 out of 28 models down → should be operational
+  it('returns operational for "degraded" when <15% of resources are non-operational (#159)', () => {
+    // Together AI scenario: 3 out of 28 models down (10.7%) → below 15% threshold
     const resources = Array.from({ length: 28 }, () => ({
       type: 'status_page_resource', attributes: { status: 'operational' },
     }))
     resources[0] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
+    resources[1] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
+    resources[2] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
     expect(parseBetterStackStatus({
       data: { attributes: { aggregate_state: 'degraded' } },
       included: resources,
     })).toBe('operational')
   })
 
-  it('returns degraded for "degraded" when ≥10% of resources are non-operational', () => {
+  it('returns degraded for "degraded" when ≥15% of resources are non-operational', () => {
     // 3 out of 10 down = 30% → genuinely degraded
     const resources = Array.from({ length: 10 }, () => ({
       type: 'status_page_resource', attributes: { status: 'operational' },
@@ -464,11 +466,12 @@ describe('parseBetterStackStatus', () => {
     })).toBe('degraded')
   })
 
-  it('returns operational for "downtime" when <10% of resources are non-operational (#159)', () => {
+  it('returns operational for "downtime" when <15% of resources are non-operational (#159)', () => {
     const resources = Array.from({ length: 20 }, () => ({
       type: 'status_page_resource', attributes: { status: 'operational' },
     }))
     resources[0] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
+    resources[1] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
     expect(parseBetterStackStatus({
       data: { attributes: { aggregate_state: 'downtime' } },
       included: resources,
