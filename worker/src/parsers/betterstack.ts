@@ -189,19 +189,19 @@ export function parseBetterStackStatus(data: BetterStackIndex): 'operational' | 
   if (!state) return null
   if (state === 'operational') return 'operational'
 
-  // Resource-level threshold: if <10% of resources are non-operational, treat as operational
-  // (e.g., Together AI has 28 model monitors — 1 model down ≠ service-level degradation)
+  // Resource-level threshold: if <15% of resources are non-operational, treat as operational
+  // (e.g., Together AI has 28 model monitors — individual model churn ≠ service-level degradation)
   const resources = (data.included ?? []).filter(
     (r) => r.type === 'status_page_resource' && r.attributes?.status
   )
   const nonOpCount = resources.filter((r) => r.attributes?.status !== 'operational').length
 
   if (state === 'degraded' || state === 'maintenance') {
-    if (resources.length > 0 && nonOpCount / resources.length < 0.1) return 'operational'
+    if (resources.length > 0 && nonOpCount / resources.length < 0.15) return 'operational'
     return 'degraded'
   }
   if (state === 'downtime') {
-    if (resources.length > 0 && nonOpCount / resources.length < 0.1) return 'operational'
+    if (resources.length > 0 && nonOpCount / resources.length < 0.15) return 'operational'
     if (resources.length > 0) {
       const downCount = resources.filter((r) => r.attributes?.status === 'downtime').length
       return downCount > resources.length / 2 ? 'down' : 'degraded'
