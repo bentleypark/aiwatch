@@ -170,6 +170,173 @@ describe('parseRssIncidents', () => {
     expect(result[0].status).toBe('resolved')
   })
 
+  it('separates incidents when link is homepage URL (Fireworks/Together/HuggingFace pattern)', () => {
+    // BetterStack RSS: all <link> tags point to homepage, guid hash is per-incident
+    const xml = `
+      <item>
+        <guid>https://status.fireworks.ai/#aaa111</guid>
+        <link>https://status.fireworks.ai/</link>
+        <title>Service A went down</title>
+        <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+        <description>Down</description>
+      </item>
+      <item>
+        <guid>https://status.fireworks.ai/#aaa111</guid>
+        <link>https://status.fireworks.ai/</link>
+        <title>Service A recovered</title>
+        <pubDate>Sat, 01 Mar 2026 10:30:00 GMT</pubDate>
+        <description>Back up</description>
+      </item>
+      <item>
+        <guid>https://status.fireworks.ai/#bbb222</guid>
+        <link>https://status.fireworks.ai/</link>
+        <title>Service B went down</title>
+        <pubDate>Sat, 01 Mar 2026 12:00:00 GMT</pubDate>
+        <description>Down</description>
+      </item>
+      <item>
+        <guid>https://status.fireworks.ai/#bbb222</guid>
+        <link>https://status.fireworks.ai/</link>
+        <title>Service B recovered</title>
+        <pubDate>Sat, 01 Mar 2026 12:15:00 GMT</pubDate>
+        <description>Back up</description>
+      </item>
+    `
+    const result = parseRssIncidents(xml)
+    expect(result).toHaveLength(2)
+    expect(result[0].title).toContain('Service A')
+    expect(result[0].status).toBe('resolved')
+    expect(result[1].title).toContain('Service B')
+    expect(result[1].status).toBe('resolved')
+  })
+
+  it('groups by link when link is a unique incident URL (Modal pattern)', () => {
+    // Modal RSS: <link> has unique incident URLs, guid hash varies per update
+    const xml = `
+      <item>
+        <guid>https://status.modal.com/incident/100#hash1</guid>
+        <link>https://status.modal.com/incident/100</link>
+        <title>Web endpoint degradation</title>
+        <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+        <description>Degraded</description>
+      </item>
+      <item>
+        <guid>https://status.modal.com/incident/100#hash2</guid>
+        <link>https://status.modal.com/incident/100</link>
+        <title>Web endpoint degradation</title>
+        <pubDate>Sat, 01 Mar 2026 10:30:00 GMT</pubDate>
+        <description>Recovered</description>
+      </item>
+      <item>
+        <guid>https://status.modal.com/incident/200#hash3</guid>
+        <link>https://status.modal.com/incident/200</link>
+        <title>API latency spike</title>
+        <pubDate>Sat, 01 Mar 2026 14:00:00 GMT</pubDate>
+        <description>Spike detected</description>
+      </item>
+    `
+    const result = parseRssIncidents(xml)
+    expect(result).toHaveLength(2)
+    expect(result[0].title).toContain('Web endpoint')
+    expect(result[0].status).toBe('resolved')
+    expect(result[1].title).toContain('API latency')
+    expect(result[1].status).toBe('investigating')
+  })
+
+  it('does not merge different incidents into mega-incident when all links are homepage', () => {
+    // Regression test: the actual bug — resolved + unresolved incidents from different dates
+    // were merged into one 1712h mega-incident, causing false degraded status
+    const xml = `
+      <item>
+        <guid>https://status.fireworks.ai/#old111</guid>
+        <link>https://status.fireworks.ai/</link>
+        <title>Llama API went down</title>
+        <pubDate>Thu, 12 Mar 2026 18:02:55 GMT</pubDate>
+        <description>Down</description>
+      </item>
+      <item>
+        <guid>https://status.fireworks.ai/#old111</guid>
+        <link>https://status.fireworks.ai/</link>
+        <title>Llama API recovered</title>
+        <pubDate>Thu, 12 Mar 2026 18:08:55 GMT</pubDate>
+        <description>Back up</description>
+      </item>
+      <item>
+        <guid>https://status.fireworks.ai/#new222</guid>
+        <link>https://status.fireworks.ai/</link>
+        <title>Embed API went down</title>
+        <pubDate>Tue, 01 Apr 2026 03:05:14 GMT</pubDate>
+        <description>Down</description>
+      </item>
+      <item>
+        <guid>https://status.fireworks.ai/#new222</guid>
+        <link>https://status.fireworks.ai/</link>
+        <title>Embed API recovered</title>
+        <pubDate>Tue, 01 Apr 2026 03:08:03 GMT</pubDate>
+        <description>Back up</description>
+      </item>
+    `
+    const result = parseRssIncidents(xml)
+    expect(result).toHaveLength(2)
+    // Each incident has correct short duration, not a merged 1712h duration
+    expect(result[0].duration).toBe('6m')
+    expect(result[1].duration).toBe('3m')
+    expect(result.every(i => i.status === 'resolved')).toBe(true)
+  })
+
+  it('unresolved incident with homepage link does not infect resolved ones', () => {
+    // An active "went down" should be its own incident, not merge with recovered ones
+    const xml = `
+      <item>
+        <guid>https://status.together.ai/#resolved1</guid>
+        <link>https://status.together.ai/</link>
+        <title>Service X went down</title>
+        <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+        <description>Down</description>
+      </item>
+      <item>
+        <guid>https://status.together.ai/#resolved1</guid>
+        <link>https://status.together.ai/</link>
+        <title>Service X recovered</title>
+        <pubDate>Sat, 01 Mar 2026 10:30:00 GMT</pubDate>
+        <description>Back up</description>
+      </item>
+      <item>
+        <guid>https://status.together.ai/#active2</guid>
+        <link>https://status.together.ai/</link>
+        <title>Service Y went down</title>
+        <pubDate>Mon, 06 Apr 2026 12:00:00 GMT</pubDate>
+        <description>Down</description>
+      </item>
+    `
+    const result = parseRssIncidents(xml)
+    expect(result).toHaveLength(2)
+    expect(result[0].status).toBe('resolved')
+    expect(result[1].status).toBe('investigating')
+    expect(result[1].title).toContain('Service Y')
+  })
+
+  it('handles homepage link without trailing slash', () => {
+    const xml = `
+      <item>
+        <guid>https://status.example.com/#inc1</guid>
+        <link>https://status.example.com</link>
+        <title>API went down</title>
+        <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+        <description>Down</description>
+      </item>
+      <item>
+        <guid>https://status.example.com/#inc2</guid>
+        <link>https://status.example.com</link>
+        <title>DB went down</title>
+        <pubDate>Sat, 01 Mar 2026 12:00:00 GMT</pubDate>
+        <description>Down</description>
+      </item>
+    `
+    const result = parseRssIncidents(xml)
+    expect(result).toHaveLength(2)
+  })
+
   it('returns empty for no items', () => {
     expect(parseRssIncidents('<rss></rss>')).toEqual([])
   })

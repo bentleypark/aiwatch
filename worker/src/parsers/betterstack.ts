@@ -1,4 +1,4 @@
-// Better Stack RSS Feed Parser — for HuggingFace, Together, xAI
+// Better Stack RSS Feed Parser — for HuggingFace, Together, Fireworks, Modal, xAI
 
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import { formatDuration } from '../utils'
@@ -18,14 +18,18 @@ export function parseRssIncidents(xml: string): Incident[] {
   const items = xml.match(/<item>([\s\S]*?)<\/item>/g)
   if (!items) return []
 
-  // Group by incident key: use <link> if available (stable per incident),
-  // fall back to guid prefix before '#' (Modal uses per-update hashes in guid)
+  // Group by incident key:
+  // - Modal: <link> has unique incident URL (/incident/ID) → use link
+  // - Together/HuggingFace/Fireworks: <link> is just homepage, guid hash is per-incident → use full guid
+  // - Modal guid has per-update hashes (incident/ID#updateHash) → split('#')[0] groups correctly
   const groups = new Map<string, Array<{ title: string; date: string; desc: string }>>()
   for (const item of items) {
     const guid = item.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1]
     if (!guid) continue // skip items without guid
     const link = item.match(/<link>(.*?)<\/link>/)?.[1]
-    const groupKey = link || guid.split('#')[0] || guid
+    // Only use <link> if it points to a specific incident (has path beyond /)
+    const linkIsIncident = link ? !/^https?:\/\/[^/]+\/?$/.test(link) : false
+    const groupKey = linkIsIncident ? link! : guid
     const date = item.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] ?? ''
     if (!isValidDate(date)) continue // skip malformed dates
     const title = decodeXmlEntities(item.match(/<title>(.*?)<\/title>/)?.[1] ?? '')
