@@ -295,6 +295,8 @@ public/
   sw.js                # Service Worker (stale-while-revalidate)
   icon-192.png         # PWA icon 192x192
   icon-512.png         # PWA icon 512x512
+scripts/
+  generate-og-intro.mjs  # OG intro image generator (node scripts/generate-og-intro.mjs)
 worker/
   src/
     index.ts     # Worker entry: CORS, KV cache, alerts, routing, /api/alert, /badge, /api/v1

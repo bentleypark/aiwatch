@@ -294,6 +294,8 @@ public/
   sw.js                # Service Worker (stale-while-revalidate)
   icon-192.png         # PWA 아이콘 192x192
   icon-512.png         # PWA 아이콘 512x512
+scripts/
+  generate-og-intro.mjs  # OG 인트로 이미지 생성기 (node scripts/generate-og-intro.mjs)
 worker/
   src/
     index.ts     # Worker 진입점: CORS, KV, 알림, 라우팅, /api/alert, /badge, /api/v1
