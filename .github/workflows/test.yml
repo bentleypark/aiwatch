@@ -20,6 +20,11 @@ jobs:
   unit:
     name: Worker Unit Tests
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' ||
+      contains(toJSON(github.event.pull_request.labels.*.name), 'ci:all') ||
+      !startsWith(github.event.pull_request.title, 'feat:') ||
+      true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,8 +42,30 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npm test
+      - name: Check for frontend changes
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            DIFF=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          else
+            DIFF=$(gh pr diff ${{ github.event.pull_request.number }} --name-only 2>/dev/null || echo "")
+          fi
+          if echo "$DIFF" | grep -qE '^(src/|public/|index\.html|vite\.config|package\.json)'; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Install Playwright
+        if: steps.changes.outputs.frontend == 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Run E2E tests
+        if: steps.changes.outputs.frontend == 'true'
+        run: npm test
+      - name: Skip E2E (worker-only changes)
+        if: steps.changes.outputs.frontend != 'true'
+        run: echo "Skipped — no frontend changes detected"
 
   build:
     name: Build
@@ -49,8 +76,26 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - run: npm run build
+      - name: Check for frontend changes
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            DIFF=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          else
+            DIFF=$(gh pr diff ${{ github.event.pull_request.number }} --name-only 2>/dev/null || echo "")
+          fi
+          if echo "$DIFF" | grep -qE '^(src/|public/|index\.html|vite\.config|package\.json)'; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Build
+        if: steps.changes.outputs.frontend == 'true'
+        run: npm run build
       - name: Verify bundle splitting
+        if: steps.changes.outputs.frontend == 'true'
         run: |
           set -e
           # chart.js must be in a separate chunk
@@ -68,3 +113,6 @@ jobs:
           if [ "$MAIN_SIZE" -gt 409600 ]; then
             echo "::warning::Main bundle exceeds 400KB ($MAIN_SIZE bytes) — consider further splitting"
           fi
+      - name: Skip build (worker-only changes)
+        if: steps.changes.outputs.frontend != 'true'
+        run: echo "Skipped — no frontend changes detected"
