@@ -27,18 +27,18 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.
   <image x="564" y="120" width="72" height="72" href="data:image/png;base64,${iconB64}"/>
 
   <!-- AI Watch text -->
-  <text x="582" y="218" text-anchor="end" fill="#8b949e" font-size="16" font-family="Arial, Helvetica, sans-serif" letter-spacing="0.3">AI</text>
-  <text x="588" y="218" text-anchor="start" fill="#3fb950" font-size="16" font-weight="600" font-family="Arial, Helvetica, sans-serif" letter-spacing="0.3">Watch</text>
+  <text x="582" y="218" text-anchor="end" fill="#e6edf3" font-size="16" font-weight="700" font-family="Arial, Helvetica, sans-serif" letter-spacing="0.3">AI</text>
+  <text x="588" y="218" text-anchor="start" fill="#3fb950" font-size="16" font-weight="700" font-family="Arial, Helvetica, sans-serif" letter-spacing="0.3">Watch</text>
 
   <!-- Title -->
   <text x="600" y="296" text-anchor="middle" fill="#e6edf3" font-size="40" font-weight="700" font-family="Arial, Helvetica, sans-serif" letter-spacing="-0.5">Real-time AI Service Monitoring</text>
 
   <!-- Subtitle -->
-  <text x="600" y="340" text-anchor="middle" fill="#8b949e" font-size="18" font-family="Arial, Helvetica, sans-serif">Track ${SERVICE_COUNT} AI services · AI-powered incident analysis · Instant fallback</text>
+  <text x="600" y="345" text-anchor="middle" fill="#8b949e" font-size="22" font-family="Arial, Helvetica, sans-serif">Track ${SERVICE_COUNT} AI services · AI-powered incident analysis · Instant fallback</text>
 
   <!-- Footer -->
-  <text x="600" y="520" text-anchor="middle" fill="#3fb950" font-size="16" font-family="Arial, Helvetica, sans-serif">Free &amp; Open Source</text>
-  <text x="600" y="548" text-anchor="middle" fill="#484f58" font-size="14" font-family="Arial, Helvetica, sans-serif">ai-watch.dev/intro</text>
+  <text x="600" y="518" text-anchor="middle" fill="#3fb950" font-size="20" font-family="Arial, Helvetica, sans-serif">Free &amp; Open Source</text>
+  <text x="600" y="550" text-anchor="middle" fill="#484f58" font-size="18" font-family="Arial, Helvetica, sans-serif">ai-watch.dev/intro</text>
 </svg>`
 
 const targets = [
