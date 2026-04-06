@@ -180,6 +180,7 @@ describe('readVitalsSummary', () => {
     expect(result).not.toBeNull()
     expect(result!.count).toBe(10)
     expect(result!.cumulativeCount).toBe(35) // 10 today + 25 yesterday
+    expect(result!.daysWithData).toBe(2) // today + yesterday
     expect(result!.p75.LCP).toBe(4500)
     expect(result!.p75.FCP).toBe(1200)
   })
@@ -199,6 +200,7 @@ describe('readVitalsSummary', () => {
     const result = await readVitalsSummary(kv as unknown as KVNamespace)
     expect(result).not.toBeNull()
     expect(result!.cumulativeCount).toBe(5)
+    expect(result!.daysWithData).toBe(1) // today only
   })
 
   it('logs error on KV read failure', async () => {
@@ -304,6 +306,7 @@ describe('formatVitalsSection', () => {
     const vitals: VitalsDaily = {
       count: 50,
       cumulativeCount: 50,
+      daysWithData: 1,
       p75: { LCP: 2000, FCP: 1500, TTFB: 700, CLS: 80, INP: 150 },
     }
     const output = formatVitalsSection(vitals)
@@ -322,11 +325,13 @@ describe('formatVitalsSection', () => {
     const vitals: VitalsDaily = {
       count: 10,
       cumulativeCount: 30,
+      daysWithData: 10,
       p75: { LCP: 2000, FCP: 1000, TTFB: 500, CLS: 50, INP: 100 },
     }
     const output = formatVitalsSection(vitals)
     expect(output).toContain('데이터 수집 중 (30/100)')
-    expect(output).toContain('약')
+    // dailyRate = round(30/10) = 3, remaining = 70, ceil(70/3) = 24
+    expect(output).toContain('약 24일 후 분석 가능')
     expect(output).not.toContain('분석 결과')
   })
 
@@ -334,6 +339,7 @@ describe('formatVitalsSection', () => {
     const vitals: VitalsDaily = {
       count: 20,
       cumulativeCount: 150,
+      daysWithData: 10,
       p75: { LCP: 5000, FCP: 1000, TTFB: 700, CLS: 50, INP: 150 },
     }
     const output = formatVitalsSection(vitals)
@@ -347,6 +353,7 @@ describe('formatVitalsSection', () => {
     const vitals: VitalsDaily = {
       count: 30,
       cumulativeCount: 200,
+      daysWithData: 15,
       p75: { LCP: 2000, FCP: 1000, TTFB: 500, CLS: 50, INP: 100 },
     }
     const output = formatVitalsSection(vitals)
@@ -358,6 +365,7 @@ describe('formatVitalsSection', () => {
     const vitals: VitalsDaily = {
       count: 10,
       cumulativeCount: 10,
+      daysWithData: 1,
       p75: { LCP: 5000, FCP: 1000, TTFB: 500, CLS: 50, INP: 100 },
     }
     const output = formatVitalsSection(vitals)

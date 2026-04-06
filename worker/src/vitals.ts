@@ -13,6 +13,7 @@ export const VITAL_NAMES: VitalName[] = ['LCP', 'FCP', 'TTFB', 'CLS', 'INP']
 export interface VitalsDaily {
   count: number
   cumulativeCount: number // total samples across recent history + today
+  daysWithData: number    // days with vitals data (for daily rate estimation)
   p75: Record<VitalName, number>
 }
 
@@ -157,8 +158,10 @@ export async function readVitalsSummary(kv: KVNamespace): Promise<VitalsDaily | 
     }
 
     // Sum cumulative count from recent history (up to 30 days) + today
+    // Also count days with data for accurate daily rate estimation
     // 31 parallel KV reads — runs once/day at daily summary time
     let cumulativeCount = data.count
+    let daysWithData = 1 // today counts as 1
     const historyReads: Promise<string | null>[] = []
     for (let d = 1; d <= 30; d++) {
       const date = new Date(Date.now() - d * 86_400_000).toISOString().split('T')[0]
@@ -169,11 +172,14 @@ export async function readVitalsSummary(kv: KVNamespace): Promise<VitalsDaily | 
       if (!h) continue
       try {
         const parsed = JSON.parse(h) as { count: number }
-        if (parsed.count) cumulativeCount += parsed.count
+        if (parsed.count) {
+          cumulativeCount += parsed.count
+          daysWithData++
+        }
       } catch { /* skip corrupt entries */ }
     }
 
-    return { count: data.count, cumulativeCount, p75: p75 as Record<VitalName, number> }
+    return { count: data.count, cumulativeCount, daysWithData, p75: p75 as Record<VitalName, number> }
   } catch (err) {
     console.error('[vitals] parse failed:', key, err instanceof Error ? err.message : err)
     return null
@@ -227,7 +233,7 @@ export function formatVitalsSection(vitals: VitalsDaily): string {
   const cumulative = vitals.cumulativeCount
   if (cumulative < MIN_SAMPLES) {
     const remaining = MIN_SAMPLES - cumulative
-    const dailyRate = Math.max(1, vitals.count) // use today's actual rate
+    const dailyRate = Math.max(1, Math.round(cumulative / vitals.daysWithData)) // average across all days with data
     const estimateDays = Math.max(1, Math.ceil(remaining / dailyRate))
     lines.push(`\n   ⏳ 데이터 수집 중 (${cumulative}/${MIN_SAMPLES}) — 약 ${estimateDays}일 후 분석 가능`)
   } else {
