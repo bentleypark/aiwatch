@@ -189,19 +189,21 @@ export function parseBetterStackStatus(data: BetterStackIndex): 'operational' | 
   if (!state) return null
   if (state === 'operational') return 'operational'
 
-  // Resource-level threshold: if <15% of resources are non-operational, treat as operational
-  // (e.g., Together AI has 28 model monitors — individual model churn ≠ service-level degradation)
+  // Resource-level threshold: if <30% of resources are non-operational, treat as operational
+  // BetterStack services (Together, Fireworks, HuggingFace, Modal) have many individual monitors.
+  // Individual model churn (e.g., 5/28 = 17%) ≠ service-level degradation.
+  // This is a backup signal — RSS incidents take priority in services.ts derivedStatus.
   const resources = (data.included ?? []).filter(
     (r) => r.type === 'status_page_resource' && r.attributes?.status
   )
   const nonOpCount = resources.filter((r) => r.attributes?.status !== 'operational').length
 
   if (state === 'degraded' || state === 'maintenance') {
-    if (resources.length > 0 && nonOpCount / resources.length < 0.15) return 'operational'
+    if (resources.length > 0 && nonOpCount / resources.length < 0.3) return 'operational'
     return 'degraded'
   }
   if (state === 'downtime') {
-    if (resources.length > 0 && nonOpCount / resources.length < 0.15) return 'operational'
+    if (resources.length > 0 && nonOpCount / resources.length < 0.3) return 'operational'
     if (resources.length > 0) {
       const downCount = resources.filter((r) => r.attributes?.status === 'downtime').length
       return downCount > resources.length / 2 ? 'down' : 'degraded'
