@@ -46,7 +46,7 @@ const SERVICES: ServiceConfig[] = [
   // AI Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl' },
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG' },
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG' },
   // Coding Agents
   { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'], statusComponent: 'Claude Code', statusComponentId: 'yyzkbfz2thpt' },
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2' },
@@ -54,7 +54,7 @@ const SERVICES: ServiceConfig[] = [
   { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m' },
 ]
 
-function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
+export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
   const { incidentKeywords, incidentExclude } = config
   return incidents.filter((inc) => {
     const title = inc.title.toLowerCase()
@@ -69,6 +69,42 @@ function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident
     }
     return true
   })
+}
+
+/**
+ * Include untagged incidents when keyword-filtered service has no active incidents
+ * but the service's status is non-operational. Checks component-specific status when
+ * available to prevent cross-contamination (e.g., API incident on ChatGPT).
+ */
+export function includeUntaggedIncidents(
+  filtered: Incident[],
+  allIncidents: Incident[],
+  config: ServiceConfig,
+  components: Array<{ id: string; name: string; status: string }>,
+  overallIndicator: string,
+): Incident[] {
+  if (filtered.some((i) => i.status !== 'resolved')) return filtered
+  if (!config.incidentKeywords || config.incidentKeywords.length === 0) return filtered
+
+  // Use component-specific status when available, otherwise overall page status
+  const comp = config.statusComponent
+    ? components?.find((c) => c.name.startsWith(config.statusComponent!))
+    : config.statusComponentId
+      ? components?.find((c) => c.id === config.statusComponentId)
+      : null
+  const svcStatus = comp
+    ? normalizeStatus(comp.status)
+    : normalizeStatus(overallIndicator)
+  if (svcStatus === 'operational') return filtered
+
+  const untagged = allIncidents.filter((inc) =>
+    inc.status !== 'resolved' &&
+    (inc.componentNames ?? []).length === 0 &&
+    !config.incidentExclude?.some((kw) => inc.title.toLowerCase().includes(kw.toLowerCase()))
+  )
+  return [...filtered, ...untagged].sort((a, b) =>
+    new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+  )
 }
 
 // Retry once on failure to reduce false-positive 'down' from transient network issues
@@ -166,21 +202,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       }
 
       let filtered = filterIncidents(incidents, config)
-      // If service has keyword filters, is degraded/down, but no ongoing incidents matched,
-      // include untagged incidents (provider didn't tag components on the incident)
-      if (filtered.filter((i) => i.status !== 'resolved').length === 0 && config.incidentKeywords) {
-        const svcStatus = normalizeStatus(summaryData.status?.indicator ?? 'none')
-        if (svcStatus !== 'operational') {
-          const untagged = incidents.filter((inc) =>
-            inc.status !== 'resolved' &&
-            (inc.componentNames ?? []).length === 0 &&
-            !config.incidentExclude?.some((kw) => inc.title.toLowerCase().includes(kw.toLowerCase()))
-          )
-          filtered = [...filtered, ...untagged].sort((a, b) =>
-            new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
-          )
-        }
-      }
+      filtered = includeUntaggedIncidents(filtered, incidents, config, summaryData.components ?? [], summaryData.status?.indicator ?? 'none')
       if (config.incidentIoBaseUrl) {
         filtered = await enrichIncidentIoText(filtered, config.incidentIoBaseUrl, pageUrls, kv)
       }
