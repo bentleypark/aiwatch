@@ -438,40 +438,36 @@ describe('parseBetterStackStatus', () => {
     expect(parseBetterStackStatus({ data: { attributes: { aggregate_state: 'maintenance' } } })).toBe('degraded')
   })
 
-  it('returns operational for "degraded" when <15% of resources are non-operational (#159)', () => {
-    // Together AI scenario: 3 out of 28 models down (10.7%) → below 15% threshold
+  it('returns operational for "degraded" when <30% of resources are non-operational (#162)', () => {
+    // Together AI scenario: 7 out of 28 models down (25%) → below 30% threshold
     const resources = Array.from({ length: 28 }, () => ({
       type: 'status_page_resource', attributes: { status: 'operational' },
     }))
-    resources[0] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
-    resources[1] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
-    resources[2] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
+    for (let i = 0; i < 7; i++) resources[i] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
     expect(parseBetterStackStatus({
       data: { attributes: { aggregate_state: 'degraded' } },
       included: resources,
     })).toBe('operational')
   })
 
-  it('returns degraded for "degraded" when ≥15% of resources are non-operational', () => {
-    // 3 out of 10 down = 30% → genuinely degraded
+  it('returns degraded for "degraded" when ≥30% of resources are non-operational', () => {
+    // 4 out of 10 down = 40% → genuinely degraded
     const resources = Array.from({ length: 10 }, () => ({
       type: 'status_page_resource', attributes: { status: 'operational' },
     }))
-    resources[0] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
-    resources[1] = { type: 'status_page_resource', attributes: { status: 'degraded' } }
-    resources[2] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
+    for (let i = 0; i < 4; i++) resources[i] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
     expect(parseBetterStackStatus({
       data: { attributes: { aggregate_state: 'degraded' } },
       included: resources,
     })).toBe('degraded')
   })
 
-  it('returns operational for "downtime" when <15% of resources are non-operational (#159)', () => {
+  it('returns operational for "downtime" when <30% of resources are non-operational (#162)', () => {
+    // 5 out of 20 down = 25% → below 30% threshold
     const resources = Array.from({ length: 20 }, () => ({
       type: 'status_page_resource', attributes: { status: 'operational' },
     }))
-    resources[0] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
-    resources[1] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
+    for (let i = 0; i < 5; i++) resources[i] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
     expect(parseBetterStackStatus({
       data: { attributes: { aggregate_state: 'downtime' } },
       included: resources,

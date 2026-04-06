@@ -480,11 +480,11 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       }
 
       const filtered = filterIncidents(incidents, config)
-      // Prefer BetterStack aggregate_state (authoritative platform status),
-      // then fall back to RSS incident check, then HTTP check
+      // RSS incidents first (explicit provider-reported issues), then BetterStack
+      // aggregate_state as backup (resource-level threshold filters model churn noise)
       const hasOngoing = filtered.some((i) => i.status !== 'resolved')
       const httpStatus = res.ok || res.status === 403 ? 'operational' : 'degraded'
-      const derivedStatus = betterStackStat ?? (hasOngoing ? 'degraded' : httpStatus)
+      const derivedStatus = hasOngoing ? 'degraded' : (betterStackStat ?? httpStatus)
 
       // Successful fetch — reset consecutive failure counter
       await resetFetchFailure(kv, config.id)
