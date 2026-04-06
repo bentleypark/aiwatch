@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact } from '../betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds } from '../betterstack'
 
 describe('parseRssIncidents', () => {
   it('groups RSS items by guid into incidents', () => {
@@ -138,6 +138,36 @@ describe('parseRssIncidents', () => {
     expect(result).toHaveLength(1)
     expect(result[0].status).toBe('resolved')
     expect(result[0].duration).toBe('1h 0m')
+  })
+
+  it.each([
+    ['is back', 'Our GPU capacity is back.'],
+    ['back up', 'Everything is back up.'],
+    ['fixed', 'We have identified and fixed the issue.'],
+    ['restored', 'Service is fully restored.'],
+    ['mitigated', 'The issue has been mitigated.'],
+    ['healthy again', 'Web endpoints are healthy again.'],
+    ['operational', 'All services operational.'],
+  ])('detects resolved via "%s" keyword in description', (_, desc) => {
+    const xml = `
+      <item>
+        <guid>http://example.com/incident/kw#h1</guid>
+        <link>http://example.com/incident/kw</link>
+        <title>Service outage</title>
+        <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+        <description>Something went wrong</description>
+      </item>
+      <item>
+        <guid>http://example.com/incident/kw#h2</guid>
+        <link>http://example.com/incident/kw</link>
+        <title>Service outage</title>
+        <pubDate>Sat, 01 Mar 2026 10:30:00 GMT</pubDate>
+        <description>${desc}</description>
+      </item>
+    `
+    const result = parseRssIncidents(xml)
+    expect(result).toHaveLength(1)
+    expect(result[0].status).toBe('resolved')
   })
 
   it('returns empty for no items', () => {
@@ -494,5 +524,25 @@ describe('parseBetterStackDailyImpact', () => {
       '2026-03-21': 'critical',  // 5h duration
       '2026-03-22': 'minor',     // 30min, 3% ratio
     })
+  })
+})
+
+describe('parseBetterStackResolvedIds', () => {
+  it('extracts resolved status_report IDs', () => {
+    const data = {
+      included: [
+        { type: 'status_report', id: '123', attributes: { aggregate_state: 'resolved' } },
+        { type: 'status_report', id: '456', attributes: { aggregate_state: 'investigating' } },
+        { type: 'status_report', id: '789', attributes: { aggregate_state: 'resolved' } },
+        { type: 'status_page_resource', id: '999', attributes: { status: 'operational' } },
+      ],
+    }
+    const result = parseBetterStackResolvedIds(data)
+    expect(result).toEqual(new Set(['123', '789']))
+  })
+
+  it('returns empty set when no status_reports', () => {
+    expect(parseBetterStackResolvedIds({})).toEqual(new Set())
+    expect(parseBetterStackResolvedIds({ included: [] })).toEqual(new Set())
   })
 })

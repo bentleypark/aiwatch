@@ -272,6 +272,9 @@ export default function Latency() {
                 ))}
               </>
             )}
+            <p className="text-[10px] text-[var(--text2)] mono" style={{ marginTop: '12px' }}>
+              {t('latency.excludeNote')}
+            </p>
           </div>
         )}
         </div>

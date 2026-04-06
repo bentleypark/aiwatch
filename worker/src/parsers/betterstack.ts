@@ -42,7 +42,7 @@ export function parseRssIncidents(xml: string): Incident[] {
     const first = events[0]
     const last = events[events.length - 1]
     const lastText = `${last.title} ${last.desc}`.toLowerCase()
-    const isResolved = /recover|resolved|fixed|restored|mitigated|healthy again|back to normal|operational/.test(lastText)
+    const isResolved = /\brecover(?:ed)?\b|\bresolved\b|\bfixed\b|\brestor(?:ed)?\b|\bmitigated\b|\bhealthy again\b|\bis back\b|\bback to normal\b|\bback up\b|\boperational\b/.test(lastText)
     const startMs = new Date(first.date).getTime()
     const endMs = new Date(last.date).getTime()
 
@@ -157,12 +157,27 @@ export interface BetterStackIndex {
   }
   included?: Array<{
     type: string
+    id?: string
     attributes?: {
       availability?: number
       status?: string
       status_history?: BetterStackStatusHistory[]
+      aggregate_state?: string
+      title?: string
+      starts_at?: string
     }
   }>
+}
+
+/** Extract resolved incident IDs from index.json status_reports */
+export function parseBetterStackResolvedIds(data: BetterStackIndex): Set<string> {
+  const resolved = new Set<string>()
+  for (const r of data.included ?? []) {
+    if (r.type === 'status_report' && r.attributes?.aggregate_state === 'resolved' && r.id) {
+      resolved.add(r.id)
+    }
+  }
+  return resolved
 }
 
 export function parseBetterStackStatus(data: BetterStackIndex): 'operational' | 'degraded' | 'down' | null {

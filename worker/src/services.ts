@@ -7,7 +7,7 @@ import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeDa
 import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, computeUptimeFromIncidents, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import { parseInstatusIncidents } from './parsers/instatus'
-import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact } from './parsers/betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
 import { parseAwsRssIncidents, deriveAwsStatus } from './parsers/aws'
 
@@ -424,6 +424,30 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           betterStackUptime = parseBetterStackUptime(bsData)
           betterStackStat = parseBetterStackStatus(bsData)
           bsDailyImpact = parseBetterStackDailyImpact(bsData)
+          // Reconcile RSS incidents with index.json resolved status (authoritative)
+          const resolvedIds = parseBetterStackResolvedIds(bsData)
+          if (resolvedIds.size > 0) {
+            let matched = 0
+            for (const inc of incidents) {
+              if (inc.status !== 'resolved' && resolvedIds.has(inc.id)) {
+                matched++
+                inc.status = 'resolved'
+                if (!inc.resolvedAt && inc.timeline?.length) {
+                  inc.resolvedAt = inc.timeline[inc.timeline.length - 1].at
+                  const last = inc.timeline[inc.timeline.length - 1]
+                  if (last.stage !== 'resolved') last.stage = 'resolved'
+                }
+                if (!inc.duration && inc.startedAt && inc.resolvedAt) {
+                  inc.duration = formatDuration(new Date(inc.startedAt), new Date(inc.resolvedAt))
+                }
+                inc.title = inc.title.replace(/ — down$/, ' — recovered')
+              }
+            }
+            const unresolved = incidents.filter(i => i.status !== 'resolved')
+            if (matched === 0 && unresolved.length > 0) {
+              console.debug(`[fetchService] ${config.id} resolvedIds=[${[...resolvedIds].join(',')}] but no RSS IDs matched (RSS IDs: ${incidents.map(i => i.id).join(',')})`)
+            }
+          }
         } catch (err) {
           console.warn(`[fetchService] ${config.id} BetterStack parse failed:`, err instanceof Error ? err.message : err)
         }

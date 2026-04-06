@@ -286,6 +286,7 @@ function IncidentRow({ incident, detectedAt, t, lang }) {
             subtitle={`${formatDate(incident.startedAt, lang)}  ·  ${incident.duration ?? t('incidents.duration.ongoing')}`}
             timeline={incident.timeline}
             onClose={() => setExpanded(false)}
+            hideHeader
             t={t}
             lang={lang}
           />
@@ -651,7 +652,7 @@ export default function ServiceDetails({ serviceId }) {
         <MetricCard
           label={probeServiceIds.includes(service.id) ? t('svc.latency') : t('svc.latency.statusPage')}
           value={service.latency != null ? `${service.latency} ms` : '—'}
-          sub={service.latency != null ? t('svc.latency.sub') : t('uptime.collecting')}
+          sub={service.latency != null ? t('svc.latency.sub') : service.category !== 'api' ? '' : t('uptime.collecting')}
           colorClass="text-[var(--blue)]"
         />
         <MetricCard
