@@ -426,7 +426,10 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         }
       } else if (config.onlineOrNotUrl && !res.ok) {
         console.warn(`[fetchService] ${config.id} OnlineOrNot status page returned ${res.status}`)
+        res.body?.cancel()
       } else if (scrapeRes?.ok) {
+        // Cancel statusUrl response body — only res.ok/status is needed for BetterStack/RSS services
+        res.body?.cancel()
         if (config.instatusUrl) {
           incidents = parseInstatusIncidents(await scrapeRes.text())
         } else if (config.rssFeedUrl) {
@@ -438,12 +441,17 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           const data: GCloudIncident[] = await scrapeRes.json()
           incidents = parseGCloudIncidents(data, config.gcloudProduct, config.gcloudProductId)
         }
+      } else {
+        // No parser matched — cancel unconsumed response bodies to free connections
+        res.body?.cancel()
+        scrapeRes?.body?.cancel()
       }
 
       // Better Stack uptime + status: parse /index.json for aggregate_state and availability
       let betterStackUptime: number | null = null
       let betterStackStat: 'operational' | 'degraded' | 'down' | null = null
       let bsDailyImpact: Record<string, DailyImpactLevel> | null = null
+      if (betterStackRes && !betterStackRes.ok) betterStackRes.body?.cancel()
       if (betterStackRes?.ok) {
         try {
           const bsData: BetterStackIndex = await betterStackRes.json()
@@ -542,6 +550,8 @@ export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: Service
       const latency = Date.now() - start
       if (!summaryRes.ok) {
         console.warn(`[prefetch] ${apiUrl} returned HTTP ${summaryRes.status} — skipping; fetchService will fetch directly`)
+        summaryRes.body?.cancel()
+        incidentsRes?.body?.cancel()
         return
       }
       const summary: StatuspageResponse = await summaryRes.json()
@@ -563,9 +573,18 @@ export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: Service
     }
   }))
 
-  const results = await Promise.allSettled(
-    SERVICES.map((config) => fetchService(config, config.apiUrl ? prefetchMap.get(config.apiUrl) : undefined, kv))
-  )
+  // Batch services to avoid exceeding Cloudflare Workers concurrent connection limit.
+  // BetterStack services use 3 connections each (statusUrl + RSS + index.json);
+  // 30 services in parallel would create ~60-90 concurrent connections.
+  const BATCH_SIZE = 10
+  const results: PromiseSettledResult<ServiceStatus>[] = []
+  for (let i = 0; i < SERVICES.length; i += BATCH_SIZE) {
+    const batch = SERVICES.slice(i, i + BATCH_SIZE)
+    const batchResults = await Promise.allSettled(
+      batch.map((config) => fetchService(config, config.apiUrl ? prefetchMap.get(config.apiUrl) : undefined, kv))
+    )
+    results.push(...batchResults)
+  }
 
   // Raw results (for caching — no fallback substitution)
   const raw: ServiceStatus[] = results.map((result, i) => {
