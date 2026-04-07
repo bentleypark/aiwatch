@@ -341,6 +341,17 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     if (existing) await kvDel(env.STATUS_CACHE, 'alerted:service-drop')
   }
 
+  // Enrich with probe summaries for Responsiveness scoring (optional — graceful degradation on failure)
+  try {
+    const probeSummaries = await computeProbeSummaries(env.STATUS_CACHE)
+    for (const svc of services) {
+      const summary = probeSummaries.get(svc.id)
+      if (summary) svc.probeSummary = summary
+    }
+  } catch (err) {
+    console.warn('[cron] probe summary enrichment failed:', err instanceof Error ? err.message : err)
+  }
+
   // Calculate scores for fallback recommendations
   const scored = services.map((svc) => {
     const s = calculateAIWatchScore(svc)
@@ -644,7 +655,7 @@ import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { collectChangelogs } from './changelog'
 import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
-import { archiveProbeDaily, type ProbeDailyData } from './probe-archival'
+import { archiveProbeDaily, computeProbeSummaries, type ProbeDailyData } from './probe-archival'
 import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateMonthlyIncidents, type MonthlyIncidents, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
@@ -1423,6 +1434,19 @@ export default {
         'Cache-Control': 'public, max-age=30',
       }
 
+      // Enrich with probe summaries for Responsiveness scoring (optional — graceful degradation on failure)
+      if (env.STATUS_CACHE) {
+        try {
+          const probeSummaries = await computeProbeSummaries(env.STATUS_CACHE)
+          for (const svc of cached.services) {
+            const summary = probeSummaries.get(svc.id)
+            if (summary) svc.probeSummary = summary
+          }
+        } catch (err) {
+          console.warn('[v1] probe summary enrichment failed:', err instanceof Error ? err.message : err)
+        }
+      }
+
       // Individual service: /api/v1/status/:serviceId
       const segments = url.pathname.split('/')
       const serviceId = segments[4] ?? ''
@@ -1553,6 +1577,19 @@ export default {
           })
         ))
 
+        // Enrich with probe summaries for Responsiveness scoring (optional — graceful degradation on failure)
+        if (env.STATUS_CACHE) {
+          try {
+            const probeSummaries = await computeProbeSummaries(env.STATUS_CACHE)
+            for (const svc of cached.services) {
+              const summary = probeSummaries.get(svc.id)
+              if (summary) svc.probeSummary = summary
+            }
+          } catch (err) {
+            console.warn('[cached] probe summary enrichment failed:', err instanceof Error ? err.message : err)
+          }
+        }
+
         // Calculate scores for cached services (same as /api/status)
         const scoredCached = cached.services.map((svc) => {
           const s = calculateAIWatchScore(svc)
@@ -1680,6 +1717,19 @@ export default {
               !isMistralProbedEndpoint(inc.title) || isCorroboratedByProbe(probe24h, 'mistral', inc.startedAt, inc.resolvedAt ?? null, mistralMedian),
             )
           }
+        }
+      }
+
+      // Enrich services with probe summaries for Responsiveness scoring (optional — graceful degradation on failure)
+      if (env.STATUS_CACHE) {
+        try {
+          const probeSummaries = await computeProbeSummaries(env.STATUS_CACHE)
+          for (const svc of enriched) {
+            const summary = probeSummaries.get(svc.id)
+            if (summary) svc.probeSummary = summary
+          }
+        } catch (err) {
+          console.warn('[status] probe summary enrichment failed:', err instanceof Error ? err.message : err)
         }
       }
 

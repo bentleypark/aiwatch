@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { aggregateProbeDaily, archiveProbeDaily } from '../probe-archival'
+import { aggregateProbeDaily, archiveProbeDaily, computeProbeSummaries } from '../probe-archival'
 import type { ProbeSnapshot } from '../probe'
 
 describe('aggregateProbeDaily', () => {
@@ -141,5 +141,96 @@ describe('archiveProbeDaily', () => {
     })
     const result = await archiveProbeDaily(kv, now)
     expect(result).toBe(false)
+  })
+})
+
+describe('computeProbeSummaries', () => {
+  function mockKV(store: Record<string, string> = {}) {
+    return {
+      get: vi.fn(async (key: string) => store[key] ?? null),
+      put: vi.fn(async (key: string, value: string) => { store[key] = value }),
+    } as unknown as KVNamespace
+  }
+
+  function dayKey(daysAgo: number): string {
+    return `probe:daily:${new Date(Date.now() - daysAgo * 86_400_000).toISOString().split('T')[0]}`
+  }
+
+  it('computes p50 average, p95 average, and combined CV from daily archives', async () => {
+    const store: Record<string, string> = {
+      [dayKey(1)]: JSON.stringify({
+        claude: { p50: 10, p75: 12, p95: 20, min: 8, max: 30, count: 288, spikes: 0 },
+        openai: { p50: 200, p75: 250, p95: 400, min: 100, max: 500, count: 288, spikes: 2 },
+      }),
+      [dayKey(2)]: JSON.stringify({
+        claude: { p50: 8, p75: 10, p95: 16, min: 6, max: 25, count: 288, spikes: 0 },
+        openai: { p50: 180, p75: 230, p95: 360, min: 90, max: 480, count: 288, spikes: 1 },
+      }),
+      [dayKey(3)]: JSON.stringify({
+        claude: { p50: 12, p75: 14, p95: 22, min: 9, max: 35, count: 288, spikes: 1 },
+        openai: { p50: 220, p75: 270, p95: 440, min: 110, max: 520, count: 288, spikes: 3 },
+      }),
+    }
+    const kv = mockKV(store)
+    const summaries = await computeProbeSummaries(kv)
+
+    expect(summaries.has('claude')).toBe(true)
+    expect(summaries.has('openai')).toBe(true)
+
+    const claude = summaries.get('claude')!
+    expect(claude.p50).toBe(10) // avg of [10, 8, 12] = 10
+    expect(claude.p95).toBe(19) // avg of [20, 16, 22] = 19.33 → 19
+
+    const openai = summaries.get('openai')!
+    expect(openai.p50).toBe(200) // avg of [200, 180, 220] = 200
+    expect(openai.p95).toBe(400) // avg of [400, 360, 440] = 400
+
+    // CV combined = 0.5 * dayToDay_CV + 0.5 * (p95-p50)/p50 spread
+    // OpenAI day-to-day p50: [200, 180, 220], mean=200, std=16.33, CV=0.0816
+    // Spread: (400-200)/200 = 1.0
+    // Combined: 0.5*0.0816 + 0.5*1.0 = 0.5408
+    expect(openai.cvCombined).toBeGreaterThan(0.5)
+    expect(openai.cvCombined).toBeLessThan(0.6)
+  })
+
+  it('returns empty map when fewer than 2 days of data', async () => {
+    const store: Record<string, string> = {
+      [dayKey(1)]: JSON.stringify({
+        claude: { p50: 10, p75: 12, p95: 20, min: 8, max: 30, count: 288, spikes: 0 },
+      }),
+    }
+    const kv = mockKV(store)
+    const summaries = await computeProbeSummaries(kv)
+    expect(summaries.size).toBe(0)
+  })
+
+  it('skips services with p50=0 (no valid data)', async () => {
+    const store: Record<string, string> = {
+      [dayKey(1)]: JSON.stringify({
+        down: { p50: 0, p75: 0, p95: 0, min: 0, max: 0, count: 288, spikes: 288 },
+      }),
+      [dayKey(2)]: JSON.stringify({
+        down: { p50: 0, p75: 0, p95: 0, min: 0, max: 0, count: 288, spikes: 288 },
+      }),
+    }
+    const kv = mockKV(store)
+    const summaries = await computeProbeSummaries(kv)
+    expect(summaries.has('down')).toBe(false)
+  })
+
+  it('handles malformed daily data gracefully', async () => {
+    const store: Record<string, string> = {
+      [dayKey(1)]: '{ invalid json',
+      [dayKey(2)]: JSON.stringify({
+        claude: { p50: 10, p75: 12, p95: 20, min: 8, max: 30, count: 288, spikes: 0 },
+      }),
+      [dayKey(3)]: JSON.stringify({
+        claude: { p50: 12, p75: 14, p95: 22, min: 9, max: 35, count: 288, spikes: 1 },
+      }),
+    }
+    const kv = mockKV(store)
+    const summaries = await computeProbeSummaries(kv)
+    // 2 valid days → still enough for computation
+    expect(summaries.has('claude')).toBe(true)
   })
 })

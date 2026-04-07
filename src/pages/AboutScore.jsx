@@ -70,11 +70,12 @@ export default function AboutScore() {
         <div className="mono text-[13px] text-[var(--text0)] font-medium" style={{ marginBottom: '16px' }}>
           {t('aboutScore.formulaStr')}
         </div>
-        <div className="grid grid-cols-3" style={{ gap: '10px' }}>
+        <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>
           {[
-            { label: 'Uptime', max: 50, color: 'var(--green)' },
-            { label: 'Incidents', max: 30, color: 'var(--blue)' },
-            { label: 'Recovery', max: 20, color: 'var(--teal)' },
+            { label: 'Uptime', max: 40, color: 'var(--green)' },
+            { label: 'Incidents', max: 25, color: 'var(--blue)' },
+            { label: 'Recovery', max: 15, color: 'var(--teal)' },
+            { label: 'Responsiveness', max: 20, color: 'var(--purple)' },
           ].map(({ label, max, color }) => (
             <div key={label} className="bg-[var(--bg2)] border border-[var(--border)] rounded-lg text-center" style={{ padding: '12px' }}>
               <div className="mono text-[18px] font-semibold" style={{ color }}>{max}</div>
@@ -87,13 +88,13 @@ export default function AboutScore() {
       {/* Uptime Score */}
       <Section title={t('aboutScore.uptimeSection')}>
         <div className="mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] rounded p-3" style={{ marginBottom: '12px' }}>
-          (uptime% − 95%) / 5% × 50
+          (uptime% − 95%) / 5% × 40
         </div>
         <FormulaTable rows={[
-          ['100% uptime', '50'],
-          ['99.5% uptime', '45'],
-          ['99.0% uptime', '40'],
-          ['97.0% uptime', '20'],
+          ['100% uptime', '40'],
+          ['99.5% uptime', '36'],
+          ['99.0% uptime', '32'],
+          ['97.0% uptime', '16'],
           [`95% ${t('aboutScore.below')}`, '0'],
         ]} />
       </Section>
@@ -101,14 +102,14 @@ export default function AboutScore() {
       {/* Incident Score */}
       <Section title={t('aboutScore.incidentSection')}>
         <div className="mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] rounded p-3" style={{ marginBottom: '12px' }}>
-          30 × exp(−affected_days / 10)
+          25 × exp(−affected_days / 10)
         </div>
         <FormulaTable rows={[
-          [d(0), '30.0'],
-          [d(5), '18.2'],
-          [d(10), '11.0'],
-          [d(18), '5.0'],
-          [d(30), '1.5'],
+          [d(0), '25.0'],
+          [d(5), '15.2'],
+          [d(10), '9.2'],
+          [d(18), '4.1'],
+          [d(30), '1.2'],
         ]} />
         <div className="bg-[var(--bg2)] border border-[var(--border)] rounded-lg" style={{ padding: '12px', marginTop: '12px' }}>
           <div className="mono text-[10px] text-[var(--teal)] font-medium" style={{ marginBottom: '6px' }}>
@@ -123,15 +124,44 @@ export default function AboutScore() {
       {/* Recovery Score */}
       <Section title={t('aboutScore.recoverySection')}>
         <div className="mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] rounded p-3" style={{ marginBottom: '12px' }}>
-          20 × exp(−MTTR_hours / 4)
+          15 × exp(−MTTR_hours / 4)
         </div>
         <FormulaTable rows={[
-          [m(30), '17.6'],
-          [h(1), '15.6'],
-          [h(2), '12.1'],
-          [h(4), '7.4'],
-          [h(10), '1.6'],
+          [m(30), '13.2'],
+          [h(1), '11.7'],
+          [h(2), '9.1'],
+          [h(4), '5.5'],
+          [h(10), '1.2'],
         ]} />
+      </Section>
+
+      {/* Responsiveness Score */}
+      <Section title={t('aboutScore.responsivenessSection')}>
+        <p className="text-[11px] text-[var(--text2)]" style={{ lineHeight: 1.6, marginBottom: '12px' }}>
+          {t('aboutScore.responsivenessIntro')}
+        </p>
+        <div className="flex flex-col gap-2" style={{ marginBottom: '12px' }}>
+          <div className="mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] rounded p-3">
+            {t('aboutScore.speedFormula')}
+          </div>
+          <div className="mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] rounded p-3">
+            {t('aboutScore.stabilityFormula')}
+          </div>
+        </div>
+        <FormulaTable rows={[
+          ['p50=50ms, CV=0.1', '17.0'],
+          ['p50=200ms, CV=0.3', '11.6'],
+          ['p50=400ms, CV=0.5', '7.4'],
+          ['p50=800ms, CV=0.8', '3.4'],
+        ]} />
+        <div className="bg-[var(--bg2)] border border-[var(--border)] rounded-lg" style={{ padding: '12px', marginTop: '12px' }}>
+          <div className="mono text-[10px] text-[var(--purple)] font-medium" style={{ marginBottom: '6px' }}>
+            CV (Coefficient of Variation)
+          </div>
+          <p className="text-[11px] text-[var(--text2)]" style={{ lineHeight: 1.6 }}>
+            {t('aboutScore.cvExplain')}
+          </p>
+        </div>
       </Section>
 
       {/* Grade Table */}
@@ -150,13 +180,24 @@ export default function AboutScore() {
         </div>
       </Section>
 
+      {/* No Probe Data */}
+      <Section title={t('aboutScore.noProbe')}>
+        <p className="text-[11px] text-[var(--text2)]" style={{ lineHeight: 1.6, marginBottom: '10px' }}>
+          {t('aboutScore.noProbeDesc')}
+        </p>
+        <div className="mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] rounded p-3">
+          Score = (Uptime + Incidents + Recovery) / 80 × 100 × 0.95<br />
+          Max: 95 · Confidence: Low
+        </div>
+      </Section>
+
       {/* No Uptime Data */}
       <Section title={t('aboutScore.noUptime')}>
         <p className="text-[11px] text-[var(--text2)]" style={{ lineHeight: 1.6, marginBottom: '10px' }}>
           {t('aboutScore.noUptimeDesc')}
         </p>
         <div className="mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] rounded" style={{ padding: '12px 16px' }}>
-          Score = (Uptime_45 + Incidents + Recovery) × 0.9<br />
+          Score = (Uptime_36 + Incidents + Recovery + Responsiveness) × 0.9<br />
           Confidence: Medium
         </div>
         <p className="text-[11px] text-[var(--text2)]" style={{ lineHeight: 1.6, marginTop: '10px' }}>
@@ -179,6 +220,7 @@ export default function AboutScore() {
         <div className="flex flex-col gap-2 text-[11px] text-[var(--text2)]" style={{ lineHeight: 1.6 }}>
           <div>• <strong className="text-[var(--text1)]">Uptime %</strong> — {t('aboutScore.sourceUptime')}</div>
           <div>• <strong className="text-[var(--text1)]">{t('aboutScore.sourceIncLabel')}</strong> — Atlassian Statuspage, incident.io, Google Cloud Status, Better Stack, RSS</div>
+          <div>• <strong className="text-[var(--text1)]">{t('aboutScore.sourceProbeLabel')}</strong> — {t('aboutScore.sourceProbeValue')}</div>
           <div>• <strong className="text-[var(--text1)]">{t('aboutScore.sourceUpdateLabel')}</strong> — {t('aboutScore.sourceUpdateValue')}</div>
         </div>
       </Section>

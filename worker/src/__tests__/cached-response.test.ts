@@ -110,7 +110,7 @@ describe('/api/status/cached scoreBreakdown', () => {
     expect(svc).toHaveProperty('scoreGrade')
     expect(svc).toHaveProperty('scoreConfidence')
     expect(svc).toHaveProperty('scoreBreakdown')
-    expect(svc.scoreBreakdown).toEqual({ uptime: expect.any(Number), incidents: expect.any(Number), recovery: expect.any(Number) })
+    expect(svc.scoreBreakdown).toEqual({ uptime: expect.any(Number), incidents: expect.any(Number), recovery: expect.any(Number), responsiveness: null })
   })
 
   it('scoreBreakdown.uptime is null when service has no uptime data', () => {
@@ -120,7 +120,7 @@ describe('/api/status/cached scoreBreakdown', () => {
     const response = buildCachedResponse({}, services)
 
     expect(response.services[0].scoreBreakdown.uptime).toBeNull()
-    expect(response.services[0].scoreBreakdown.incidents).toBe(30) // full score, 0 affected days
-    expect(response.services[0].scoreBreakdown.recovery).toBe(20) // full score, no incidents
+    expect(response.services[0].scoreBreakdown.incidents).toBe(25) // full score, 0 affected days (max 25)
+    expect(response.services[0].scoreBreakdown.recovery).toBe(15) // full score, no incidents (max 15)
   })
 })
