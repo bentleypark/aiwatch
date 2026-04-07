@@ -270,6 +270,7 @@ export async function enrichIncidentIoText(incidents: Incident[], baseUrl: strin
       const res = await fetchWithTimeout(url, 5000)
       if (!res.ok) {
         console.warn(`[enrichIncidentIoText] ${inc.id} returned HTTP ${res.status}`)
+        res.body?.cancel()
         return
       }
       const html = await res.text()
