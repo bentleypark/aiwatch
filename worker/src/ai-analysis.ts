@@ -277,8 +277,10 @@ export async function refreshOrReanalyze(
           const analysisAge = now - new Date(parsed.analyzedAt).getTime()
           if (analysisAge >= 7_200_000 && apiKey && reAnalysisCount < cap) {
             // Check if estimated recovery time has been exceeded (relative to incident start, not analysis time)
+            // Fallback: if estimatedRecoveryHours not stored (pre-deployment data), parse from estimatedRecovery string
             const estHours = typeof parsed.estimatedRecoveryHours === 'number' && parsed.estimatedRecoveryHours > 0
-              ? parsed.estimatedRecoveryHours : null
+              ? parsed.estimatedRecoveryHours
+              : (parsed.estimatedRecovery ? parseRecoveryHours(parsed.estimatedRecovery) : null)
             const incidentAge = now - new Date(inc.startedAt).getTime()
             const recoveryExceeded = estHours != null && incidentAge > estHours * 3_600_000
 
