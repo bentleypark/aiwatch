@@ -15,7 +15,7 @@ describe('aggregateProbeDaily', () => {
     expect(result.claude).toBeDefined()
     expect(result.claude.count).toBe(20)
     expect(result.claude.min).toBe(100)
-    expect(result.claude.max).toBe(290)
+    expect(result.claude.max).toBeLessThanOrEqual(290) // top 1% trimmed
     expect(result.claude.p50).toBeGreaterThanOrEqual(180)
     expect(result.claude.p50).toBeLessThanOrEqual(200)
     expect(result.claude.p75).toBeGreaterThanOrEqual(240)
@@ -35,7 +35,7 @@ describe('aggregateProbeDaily', () => {
     expect(result.openai.count).toBe(4)
     expect(result.openai.spikes).toBe(1) // 1 failure
     expect(result.openai.min).toBe(190)
-    expect(result.openai.max).toBe(210)
+    expect(result.openai.max).toBeLessThanOrEqual(210) // top 1% trimmed
   })
 
   it('counts RTT spikes (>3x median)', () => {
@@ -77,6 +77,24 @@ describe('aggregateProbeDaily', () => {
 
   it('returns empty object for empty snapshots', () => {
     expect(aggregateProbeDaily([])).toEqual({})
+  })
+
+  it('applies warm-up filtering: excludes spike RTTs from percentile calculation', () => {
+    // 20 normal RTTs (100-290) + 1 extreme spike (5000 > 3×median)
+    const snapshots: ProbeSnapshot[] = [
+      ...Array.from({ length: 20 }, (_, i) => ({
+        t: `2026-04-02T${String(i).padStart(2, '0')}:00:00Z`,
+        data: { svc: { status: 200, rtt: 100 + i * 10 } }, // 100-290
+      })),
+      { t: '2026-04-02T20:00:00Z', data: { svc: { status: 200, rtt: 5000 } } }, // extreme spike
+    ]
+
+    const result = aggregateProbeDaily(snapshots)
+    // Spike (5000) should be excluded from p50/p95 by warm-up filtering
+    // Without filtering: p95 would be near 5000
+    // With filtering: p95 stays within normal range
+    expect(result.svc.p95).toBeLessThan(300)
+    expect(result.svc.spikes).toBe(1) // raw spike count preserved
   })
 })
 
@@ -232,5 +250,43 @@ describe('computeProbeSummaries', () => {
     const summaries = await computeProbeSummaries(kv)
     // 2 valid days → still enough for computation
     expect(summaries.has('claude')).toBe(true)
+  })
+
+  it('skips spike-dominated days (>= 50% spikes)', async () => {
+    const store: Record<string, string> = {
+      [dayKey(1)]: JSON.stringify({
+        gemini: { p50: 25, p75: 30, p95: 40, min: 16, max: 100, count: 288, spikes: 2 },
+      }),
+      [dayKey(2)]: JSON.stringify({
+        gemini: { p50: 80, p75: 500, p95: 900, min: 20, max: 1200, count: 288, spikes: 150 }, // 52% spikes → skip
+      }),
+      [dayKey(3)]: JSON.stringify({
+        gemini: { p50: 30, p75: 35, p95: 50, min: 18, max: 120, count: 288, spikes: 5 },
+      }),
+    }
+    const kv = mockKV(store)
+    const summaries = await computeProbeSummaries(kv)
+    const gemini = summaries.get('gemini')!
+    // Day 2 skipped → avg of day 1 (25) and day 3 (30) = 27.5 → 28
+    expect(gemini.p50).toBe(28)
+  })
+
+  it('skips extreme spread days (p95/p50 > 10×)', async () => {
+    const store: Record<string, string> = {
+      [dayKey(1)]: JSON.stringify({
+        gemini: { p50: 27, p75: 35, p95: 49, min: 17, max: 1403, count: 288, spikes: 10 },
+      }),
+      [dayKey(2)]: JSON.stringify({
+        gemini: { p50: 78, p75: 863, p95: 1026, min: 22, max: 1176, count: 288, spikes: 114 }, // p95/p50=13.2× → skip
+      }),
+      [dayKey(3)]: JSON.stringify({
+        gemini: { p50: 54, p75: 60, p95: 82, min: 17, max: 392, count: 288, spikes: 2 },
+      }),
+    }
+    const kv = mockKV(store)
+    const summaries = await computeProbeSummaries(kv)
+    const gemini = summaries.get('gemini')!
+    // Day 2 skipped (p95/p50 = 1026/78 = 13.2×) → avg of day 1 (27) and day 3 (54)
+    expect(gemini.p50).toBe(41) // (27+54)/2 = 40.5 → 41
   })
 })

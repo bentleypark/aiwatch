@@ -22,7 +22,10 @@ function percentile(sorted: number[], p: number): number {
   return sorted[Math.max(0, idx)]
 }
 
-/** Aggregate probe snapshots into per-service daily stats */
+/** Aggregate probe snapshots into per-service daily stats.
+ *  Applies warm-up filtering: removes top 1% extreme RTTs (cold-start spikes)
+ *  and spike RTTs (>3×median) before computing p50/p75/p95.
+ *  Raw spike count is preserved for downstream filtering. */
 export function aggregateProbeDaily(snapshots: ProbeSnapshot[]): ProbeDailyData {
   // Collect RTT values per service
   const rttMap: Record<string, number[]> = {}
@@ -48,14 +51,22 @@ export function aggregateProbeDaily(snapshots: ProbeSnapshot[]): ProbeDailyData 
     const threshold = median * 3
     const spikeCount = failures + valid.filter(r => r > threshold).length
 
+    // Warm-up filtering: remove top 1% extreme RTTs + spike RTTs (>3×median)
+    // Uses trimmed dataset for p50/p75/p95 to avoid cold-start/incident noise
+    const trimIdx = Math.max(1, Math.floor(valid.length * 0.99))
+    const trimmed = valid.slice(0, trimIdx).filter(r => r <= threshold)
+
+    // Fall back to full valid set if trimming removes too many samples (<50%)
+    const cleaned = trimmed.length >= valid.length * 0.5 ? trimmed : valid
+
     result[svcId] = {
-      p50: percentile(valid, 50),
-      p75: percentile(valid, 75),
-      p95: percentile(valid, 95),
-      min: valid[0],
-      max: valid[valid.length - 1],
+      p50: percentile(cleaned, 50),
+      p75: percentile(cleaned, 75),
+      p95: percentile(cleaned, 95),
+      min: cleaned[0],
+      max: cleaned[cleaned.length - 1],
       count: allRtt.length,
-      spikes: spikeCount,
+      spikes: spikeCount, // raw spike count preserved for downstream filtering
     }
   }
 
@@ -83,10 +94,13 @@ export async function computeProbeSummaries(kv: KVNamespace, days = 7): Promise<
   if (dailyData.length < 2) return result // need at least 2 days for CV
 
   // Collect per-service daily p50 and p95 values
+  // Skip unreliable days: spike ratio >= 50% OR p95/p50 spread > 10× (extreme outlier day)
   const svcStats: Record<string, { p50s: number[]; p95s: number[] }> = {}
   for (const day of dailyData) {
     for (const [svcId, stat] of Object.entries(day)) {
       if (stat.p50 <= 0) continue // skip days with no valid data
+      if (stat.count > 0 && stat.spikes / stat.count >= 0.5) continue // skip spike-dominated days
+      if (stat.p50 > 0 && stat.p95 / stat.p50 > 10) continue // skip extreme spread days (e.g., Gemini 4/4: p95/p50=13×)
       if (!svcStats[svcId]) svcStats[svcId] = { p50s: [], p95s: [] }
       svcStats[svcId].p50s.push(stat.p50)
       svcStats[svcId].p95s.push(stat.p95)
