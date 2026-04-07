@@ -35,11 +35,33 @@ export function isBoilerplate(text: string | null | undefined): boolean {
 export interface AIAnalysisResult {
   summary: string
   estimatedRecovery: string
+  estimatedRecoveryHours?: number  // upper bound parsed from estimatedRecovery (e.g., "4–6h" → 6)
   affectedScope: string[]
   analyzedAt: string
   incidentId: string
   resolvedAt?: string
   timelineHash?: string  // latest timeline entry timestamp — used to skip re-analysis when unchanged
+}
+
+/**
+ * Parse estimated recovery string to hours (upper bound).
+ * "4–6h" → 6, "30m–1h" → 1, "2h" → 2, "15–45m" → 0.75, "N/A" → null
+ */
+export function parseRecoveryHours(recovery: string): number | null {
+  if (!recovery || recovery === 'N/A') return null
+  // Split on range separator (–, -, ~) and take the last (upper bound) part
+  const parts = recovery.split(/[–\-~]/).map(s => s.trim()).filter(Boolean)
+  const upper = parts[parts.length - 1]
+  if (!upper) return null
+  const hMatch = upper.match(/(\d+(?:\.\d+)?)\s*h/i)
+  const mMatch = upper.match(/(\d+(?:\.\d+)?)\s*m/i)
+  let hours = 0
+  if (hMatch) hours += parseFloat(hMatch[1])
+  if (mMatch) hours += parseFloat(mMatch[1]) / 60
+  if (hours <= 0) {
+    console.warn(`[ai-analysis] Could not parse recovery hours from: "${recovery}"`)
+  }
+  return hours > 0 ? Math.round(hours * 100) / 100 : null
 }
 
 /** Centralized KV key for per-incident analysis */
@@ -98,6 +120,7 @@ export function buildAnalysisPrompt(
   serviceName: string,
   currentIncident: { title: string; status: string; startedAt: string; impact: string | null; timeline?: Array<{ stage: string; text: string | null; at: string }> },
   similarIncidents: Incident[],
+  prevPrediction?: { estimatedRecoveryHours: number; elapsedHours: number },
 ): string {
   const historyText = similarIncidents.length > 0
     ? similarIncidents.map(i =>
@@ -120,13 +143,17 @@ export function buildAnalysisPrompt(
     timelineText += (timelineText ? '\n' : '') + line
   }
 
+  const prevPredictionText = prevPrediction
+    ? `\nPrevious Prediction: Estimated recovery in ${prevPrediction.estimatedRecoveryHours}h, but ${Math.round(prevPrediction.elapsedHours)}h have elapsed and the incident remains unresolved. The previous prediction was incorrect — re-evaluate with updated context.\n`
+    : ''
+
   return `<incident_data>
 Service: ${safeName}
 Current Incident: "${safeTitle}"
 Status: ${safeStatus}
 Started: ${sanitize(currentIncident.startedAt).slice(0, 30)}
 Impact: ${safeImpact}
-${timelineText ? `\nTimeline Updates:\n${timelineText}\n` : ''}
+${prevPredictionText}${timelineText ? `\nTimeline Updates:\n${timelineText}\n` : ''}
 Historical Data (last 30 days):
 ${historyText}
 </incident_data>`
@@ -140,9 +167,10 @@ export async function analyzeIncident(
   serviceName: string,
   currentIncident: { id: string; title: string; status: string; startedAt: string; impact: string | null; timeline?: Array<{ stage: string; text: string | null; at: string }> },
   allIncidents: Incident[],
+  prevPrediction?: { estimatedRecoveryHours: number; elapsedHours: number },
 ): Promise<AIAnalysisResult | null> {
   const similar = findSimilarIncidents(currentIncident.title, allIncidents)
-  const prompt = buildAnalysisPrompt(serviceName, currentIncident, similar)
+  const prompt = buildAnalysisPrompt(serviceName, currentIncident, similar, prevPrediction)
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -188,9 +216,11 @@ export async function analyzeIncident(
       .replace(/\s*to\s*/g, '–')
     // Store latest timeline entry timestamp to detect new updates on re-analysis
     const latestTimelineAt = currentIncident.timeline?.at(-1)?.at ?? ''
+    const recoveryHours = parseRecoveryHours(recovery)
     return {
       summary: sanitize(parsed.summary ?? 'Analysis unavailable'),
       estimatedRecovery: recovery,
+      ...(recoveryHours != null && { estimatedRecoveryHours: recoveryHours }),
       affectedScope: (parsed.affectedScope ?? []).map(s => sanitize(s)),
       analyzedAt: new Date().toISOString(),
       incidentId: currentIncident.id,
@@ -246,11 +276,18 @@ export async function refreshOrReanalyze(
           // Time-based re-analysis: if 2h+ old, attempt update without deleting old analysis first
           const analysisAge = now - new Date(parsed.analyzedAt).getTime()
           if (analysisAge >= 7_200_000 && apiKey && reAnalysisCount < cap) {
+            // Check if estimated recovery time has been exceeded (relative to incident start, not analysis time)
+            const estHours = typeof parsed.estimatedRecoveryHours === 'number' && parsed.estimatedRecoveryHours > 0
+              ? parsed.estimatedRecoveryHours : null
+            const incidentAge = now - new Date(inc.startedAt).getTime()
+            const recoveryExceeded = estHours != null && incidentAge > estHours * 3_600_000
+
             // Skip re-analysis if timeline hasn't changed since last analysis
+            // UNLESS recovery time has been exceeded (stale prediction must be updated)
             const latestTimelineAt = inc.timeline?.at(-1)?.at ?? ''
             const hashTime = parsed.timelineHash ? new Date(parsed.timelineHash).getTime() : 0
             const latestTime = latestTimelineAt ? new Date(latestTimelineAt).getTime() : 0
-            if (parsed.timelineHash && hashTime === latestTime) {
+            if (parsed.timelineHash && hashTime === latestTime && !recoveryExceeded) {
               // No new timeline updates — just refresh TTL, skip API call
               parsed._lastRefresh = new Date(now).toISOString()
               await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
@@ -259,7 +296,8 @@ export async function refreshOrReanalyze(
               continue
             }
             // Skip if new timeline entries are all boilerplate (no technical detail)
-            if (parsed.timelineHash) {
+            // UNLESS recovery time has been exceeded
+            if (parsed.timelineHash && !recoveryExceeded) {
               const newEntries = (inc.timeline ?? []).filter(t => new Date(t.at).getTime() > hashTime)
               if (newEntries.length > 0 && newEntries.every(t => isBoilerplate(t.text))) {
                 // Update timelineHash to avoid rechecking, but skip API call
@@ -271,12 +309,17 @@ export async function refreshOrReanalyze(
                 continue
               }
             }
+            // Build previous prediction context for re-analysis prompt
+            const prevPrediction = recoveryExceeded && estHours
+              ? { estimatedRecoveryHours: estHours, elapsedHours: incidentAge / 3_600_000 }
+              : undefined
             reAnalysisCount++
             try {
               const newAnalysis = await analyzeFn(
                 apiKey, svc.name,
                 { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline },
                 svc.incidents ?? [],
+                prevPrediction,
               )
               // Track usage
               const today = new Date(now).toISOString().split('T')[0]

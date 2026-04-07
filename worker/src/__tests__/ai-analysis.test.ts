@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, type KVLike } from '../ai-analysis'
+import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, parseRecoveryHours, type KVLike } from '../ai-analysis'
 import type { Incident, ServiceStatus } from '../types'
 
 const mockIncident = (overrides: Partial<Incident> = {}): Incident => ({
@@ -180,6 +180,24 @@ describe('buildAnalysisPrompt', () => {
     const prompt = buildAnalysisPrompt('Test', { title: 'error', status: 's', startedAt: '2026-01-01T00:00:00Z', impact: null }, longIncidents)
     // History text capped at 1000 chars
     expect(prompt.length).toBeLessThan(2000)
+  })
+
+  it('includes previous prediction context when prevPrediction is provided', () => {
+    const prompt = buildAnalysisPrompt(
+      'Deepgram', { title: 'Voice API Error', status: 'investigating', startedAt: '2026-03-27T03:00:00Z', impact: 'major' },
+      [], { estimatedRecoveryHours: 6, elapsedHours: 14 },
+    )
+    expect(prompt).toContain('Previous Prediction')
+    expect(prompt).toContain('6h')
+    expect(prompt).toContain('14h')
+    expect(prompt).toContain('incorrect')
+  })
+
+  it('omits previous prediction context when prevPrediction is not provided', () => {
+    const prompt = buildAnalysisPrompt(
+      'Deepgram', { title: 'Voice API Error', status: 'investigating', startedAt: '2026-03-27T03:00:00Z', impact: 'major' }, [],
+    )
+    expect(prompt).not.toContain('Previous Prediction')
   })
 })
 
@@ -878,5 +896,149 @@ describe('refreshOrReanalyze', () => {
     expect(store[analysisKey('claudecode', 'inc-shared')]).toBeDefined()
     expect(result.reanalyzed).toContain('claudeai')
     expect(result.reanalyzed).toContain('claudecode')
+  })
+
+  it('re-analyzes when estimated recovery time is exceeded despite unchanged timeline', async () => {
+    const oldAnalysis = {
+      ...mockAnalysis,
+      incidentId: 'inc-1',
+      analyzedAt: '2026-03-27T03:00:00Z',
+      estimatedRecoveryHours: 6, // predicted 6h recovery
+      timelineHash: '2026-03-27T03:00:00Z',
+    }
+    const store: Record<string, string> = { [analysisKey('deepgram', 'inc-1')]: JSON.stringify(oldAnalysis) }
+    const kv = mockKV(store)
+    const svc = mockService('deepgram', [{
+      id: 'inc-1',
+      status: 'investigating',
+      startedAt: '2026-03-27T02:00:00Z', // incident started 1h before analysis
+      timeline: [{ stage: 'investigating', text: 'Looking into it', at: '2026-03-27T03:00:00Z' }],
+    }])
+    const updatedAnalysis = { ...mockAnalysis, incidentId: 'inc-1', summary: 'Recovery exceeded re-analysis' }
+    const analyzeFn = vi.fn().mockResolvedValue(updatedAnalysis)
+
+    // 15h since incident start — well beyond 6h estimate
+    const now = new Date('2026-03-27T17:00:00Z').getTime()
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(analyzeFn).toHaveBeenCalledOnce()
+    expect(result.reanalyzed).toEqual(['deepgram'])
+    const stored = JSON.parse(store[analysisKey('deepgram', 'inc-1')])
+    expect(stored.summary).toBe('Recovery exceeded re-analysis')
+  })
+
+  it('does not trigger recovery-exceeded re-analysis when within estimated time', async () => {
+    const oldAnalysis = {
+      ...mockAnalysis,
+      incidentId: 'inc-1',
+      analyzedAt: '2026-03-27T03:00:00Z',
+      estimatedRecoveryHours: 6,
+      timelineHash: '2026-03-27T03:00:00Z',
+    }
+    const store: Record<string, string> = { [analysisKey('deepgram', 'inc-1')]: JSON.stringify(oldAnalysis) }
+    const kv = mockKV(store)
+    const svc = mockService('deepgram', [{
+      id: 'inc-1',
+      status: 'investigating',
+      startedAt: '2026-03-27T02:00:00Z',
+      timeline: [{ stage: 'investigating', text: 'Looking into it', at: '2026-03-27T03:00:00Z' }],
+    }])
+    const analyzeFn = vi.fn()
+
+    // 5h since incident start — within 6h estimate
+    const now = new Date('2026-03-27T07:00:00Z').getTime()
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(analyzeFn).not.toHaveBeenCalled()
+    expect(result.refreshed).toEqual(['deepgram'])
+  })
+
+  it('passes prevPrediction context to analyzeFn when recovery exceeded', async () => {
+    const oldAnalysis = {
+      ...mockAnalysis,
+      incidentId: 'inc-1',
+      analyzedAt: '2026-03-27T03:00:00Z',
+      estimatedRecoveryHours: 4,
+      timelineHash: '2026-03-27T03:00:00Z',
+    }
+    const store: Record<string, string> = { [analysisKey('deepgram', 'inc-1')]: JSON.stringify(oldAnalysis) }
+    const kv = mockKV(store)
+    const svc = mockService('deepgram', [{
+      id: 'inc-1',
+      status: 'investigating',
+      startedAt: '2026-03-27T02:00:00Z', // incident started 1h before analysis
+      timeline: [{ stage: 'investigating', text: 'Looking into it', at: '2026-03-27T03:00:00Z' }],
+    }])
+    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'inc-1' })
+
+    // 11h since incident start — 2.75× the 4h estimate
+    const now = new Date('2026-03-27T13:00:00Z').getTime()
+    await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    // elapsedHours should be incident age (11h), not analysis age (10h)
+    expect(analyzeFn).toHaveBeenCalledWith(
+      'key', expect.any(String), expect.any(Object), expect.any(Array),
+      expect.objectContaining({ estimatedRecoveryHours: 4, elapsedHours: expect.closeTo(11, 0.1) }),
+    )
+  })
+
+  it('re-analyzes on recovery exceeded even when new timeline entries are boilerplate', async () => {
+    const oldAnalysis = {
+      ...mockAnalysis,
+      incidentId: 'inc-1',
+      analyzedAt: '2026-03-27T03:00:00Z',
+      estimatedRecoveryHours: 2,
+      timelineHash: '2026-03-27T03:00:00Z',
+    }
+    const store: Record<string, string> = { [analysisKey('deepgram', 'inc-1')]: JSON.stringify(oldAnalysis) }
+    const kv = mockKV(store)
+    const svc = mockService('deepgram', [{
+      id: 'inc-1',
+      status: 'monitoring',
+      startedAt: '2026-03-27T02:00:00Z',
+      timeline: [
+        { stage: 'investigating', text: 'We are investigating this issue', at: '2026-03-27T03:00:00Z' },
+        { stage: 'monitoring', text: 'We are continuing to monitor', at: '2026-03-27T04:00:00Z' },
+      ],
+    }])
+    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'inc-1' })
+
+    // 9h since incident start — 4.5× the 2h estimate
+    const now = new Date('2026-03-27T11:00:00Z').getTime()
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    // Should re-analyze despite boilerplate, because recovery exceeded
+    expect(analyzeFn).toHaveBeenCalledOnce()
+    expect(result.reanalyzed).toEqual(['deepgram'])
+  })
+})
+
+describe('parseRecoveryHours', () => {
+  it('parses range format with hours', () => {
+    expect(parseRecoveryHours('4–6h')).toBe(6)
+    expect(parseRecoveryHours('1–3h')).toBe(3)
+  })
+
+  it('parses range format with mixed units', () => {
+    expect(parseRecoveryHours('30m–1h')).toBe(1)
+    expect(parseRecoveryHours('15m–45m')).toBe(0.75)
+  })
+
+  it('parses single value', () => {
+    expect(parseRecoveryHours('2h')).toBe(2)
+    expect(parseRecoveryHours('30m')).toBe(0.5)
+    expect(parseRecoveryHours('1h 30m')).toBe(1.5)
+  })
+
+  it('returns null for N/A', () => {
+    expect(parseRecoveryHours('N/A')).toBeNull()
+  })
+
+  it('returns null for empty string', () => {
+    expect(parseRecoveryHours('')).toBeNull()
+  })
+
+  it('handles hyphen as range separator', () => {
+    expect(parseRecoveryHours('2-4h')).toBe(4)
   })
 })
