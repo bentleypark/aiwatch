@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calculateAIWatchScore, REFERENCE_MS, REFERENCE_CV } from '../score'
+import { calculateAIWatchScore, REFERENCE_MS, REFERENCE_CV, P50_FLOOR_MS } from '../score'
 import type { ServiceStatus } from '../types'
 
 function makeSvc(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
@@ -263,6 +263,33 @@ describe('calculateAIWatchScore', () => {
   it('reference constants are exported', () => {
     expect(REFERENCE_MS).toBe(400)
     expect(REFERENCE_CV).toBe(0.5)
+    expect(P50_FLOOR_MS).toBe(50)
+  })
+
+  it('applies p50 floor: services below 50ms get same speed score', () => {
+    const claude = calculateAIWatchScore(makeSvc({
+      uptime30d: 100,
+      probeSummary: { p50: 9, p95: 20, cvCombined: 0.1 },
+    }))
+    const gemini = calculateAIWatchScore(makeSvc({
+      uptime30d: 100,
+      probeSummary: { p50: 46, p95: 80, cvCombined: 0.1 },
+    }))
+    // Both below floor (50ms) → same speed component → same responsiveness
+    expect(claude.breakdown.responsiveness).toBe(gemini.breakdown.responsiveness)
+  })
+
+  it('p50 floor does not affect services above 50ms', () => {
+    const above = calculateAIWatchScore(makeSvc({
+      uptime30d: 100,
+      probeSummary: { p50: 200, p95: 400, cvCombined: 0.3 },
+    }))
+    const atFloor = calculateAIWatchScore(makeSvc({
+      uptime30d: 100,
+      probeSummary: { p50: 50, p95: 100, cvCombined: 0.3 },
+    }))
+    // 200ms should score lower speed than 50ms
+    expect(atFloor.breakdown.responsiveness!).toBeGreaterThan(above.breakdown.responsiveness!)
   })
 
   // ── Edge cases: corrupted probe data ──

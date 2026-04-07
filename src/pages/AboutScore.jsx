@@ -142,7 +142,8 @@ export default function AboutScore() {
         </p>
         <div className="flex flex-col gap-2" style={{ marginBottom: '12px' }}>
           <div className="mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] rounded p-3">
-            {t('aboutScore.speedFormula')}
+            {t('aboutScore.speedFormula')}<br />
+            <span className="text-[var(--text2)]">{t('aboutScore.speedFloor')}</span>
           </div>
           <div className="mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] rounded p-3">
             {t('aboutScore.stabilityFormula')}

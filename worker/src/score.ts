@@ -5,6 +5,7 @@ import type { ServiceStatus } from './types'
 // Responsiveness reference values (calibrated against 4-day probe data 2026-04-02~05)
 export const REFERENCE_MS = 400   // p50 RTT reference for exponential decay
 export const REFERENCE_CV = 0.5   // combined CV reference for stability decay
+export const P50_FLOOR_MS = 50    // p50 floor: below this, RTT reflects gateway/network, not service quality
 
 export interface AIWatchScore {
   score: number
@@ -86,7 +87,8 @@ export function calculateAIWatchScore(service: ServiceStatus, cutoffDays = 30): 
     const cv = Number.isFinite(probe.cvCombined) && probe.cvCombined >= 0 ? probe.cvCombined : null
     if (p50 !== null && cv !== null) {
       // Speed (0-10): exponential decay — lower RTT = higher score
-      const speedScore = 10 * Math.exp(-p50 / REFERENCE_MS)
+      // Floor applied: below P50_FLOOR_MS, RTT reflects gateway/network characteristics, not service quality
+      const speedScore = 10 * Math.exp(-Math.max(p50, P50_FLOOR_MS) / REFERENCE_MS)
       // Stability (0-10): exponential decay — lower CV = higher score
       const stabilityScore = 10 * Math.exp(-cv / REFERENCE_CV)
       responsivenessScore = Math.round((speedScore + stabilityScore) * 10) / 10
