@@ -184,7 +184,13 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           return { ...base, status: shouldDegrade ? 'degraded' : 'operational' }
         }
         summaryData = await summaryRes.json()
-        rawIncData = incidentsRes?.ok ? await incidentsRes.json() : (incidentsRes?.body?.cancel(), null)
+        if (incidentsRes?.ok) {
+          rawIncData = await incidentsRes.json()
+        } else {
+          if (incidentsRes) console.warn(`[fetchService] ${config.id} incidents.json returned HTTP ${incidentsRes.status}`)
+          incidentsRes?.body?.cancel()
+          rawIncData = null
+        }
       }
 
       // incidents.json has full history; summary.json only has active ones
@@ -454,7 +460,10 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       let betterStackUptime: number | null = null
       let betterStackStat: 'operational' | 'degraded' | 'down' | null = null
       let bsDailyImpact: Record<string, DailyImpactLevel> | null = null
-      if (betterStackRes && !betterStackRes.ok) betterStackRes.body?.cancel()
+      if (betterStackRes && !betterStackRes.ok) {
+        console.warn(`[fetchService] ${config.id} BetterStack index.json returned HTTP ${betterStackRes.status}`)
+        betterStackRes.body?.cancel()
+      }
       if (betterStackRes?.ok) {
         try {
           const bsData: BetterStackIndex = await betterStackRes.json()
@@ -558,7 +567,12 @@ export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: Service
         return
       }
       const summary: StatuspageResponse = await summaryRes.json()
-      const incidents: StatuspageResponse | null = incidentsRes?.ok ? await incidentsRes.json() : (incidentsRes?.body?.cancel(), null)
+      let incidents: StatuspageResponse | null = null
+      if (incidentsRes?.ok) {
+        incidents = await incidentsRes.json()
+      } else {
+        incidentsRes?.body?.cancel()
+      }
       // Fetch status page HTML for uptimeData/component_uptimes parsing
       const statusUrl = baseUrl.replace('/api/v2', '')
       const needsHtml = SERVICES.some((s) => s.apiUrl === apiUrl && (s.statusComponentId || s.incidentIoComponentId))
@@ -568,7 +582,7 @@ export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: Service
           const htmlRes = await fetchWithTimeout(statusUrl, 5000)
           if (htmlRes.ok) uptimeHtml = await htmlRes.text()
           else htmlRes.body?.cancel()
-        } catch { /* non-critical — fallback to incidents API */ }
+        } catch (err) { console.warn(`[prefetch] HTML fetch failed for ${statusUrl}:`, err instanceof Error ? err.message : err) }
       }
       prefetchMap.set(apiUrl, { summary, incidents, latency, uptimeHtml })
     } catch (err) {
@@ -582,12 +596,20 @@ export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: Service
   // 30 services in parallel would create ~60-90 concurrent connections.
   const BATCH_SIZE = 10
   const results: PromiseSettledResult<ServiceStatus>[] = []
-  for (let i = 0; i < SERVICES.length; i += BATCH_SIZE) {
-    const batch = SERVICES.slice(i, i + BATCH_SIZE)
-    const batchResults = await Promise.allSettled(
-      batch.map((config) => fetchService(config, config.apiUrl ? prefetchMap.get(config.apiUrl) : undefined, kv))
-    )
-    results.push(...batchResults)
+  try {
+    for (let i = 0; i < SERVICES.length; i += BATCH_SIZE) {
+      const batch = SERVICES.slice(i, i + BATCH_SIZE)
+      const batchResults = await Promise.allSettled(
+        batch.map((config) => fetchService(config, config.apiUrl ? prefetchMap.get(config.apiUrl) : undefined, kv))
+      )
+      results.push(...batchResults)
+    }
+  } catch (err) {
+    console.error(`[fetchAllServices] batch loop failed at index ${results.length}/${SERVICES.length}:`, err)
+    // Fill remaining with rejected results to maintain index alignment
+    while (results.length < SERVICES.length) {
+      results.push({ status: 'rejected' as const, reason: err })
+    }
   }
 
   // Raw results (for caching — no fallback substitution)
