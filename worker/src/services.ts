@@ -178,11 +178,13 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         latency = Date.now() - start
         if (!summaryRes.ok) {
           console.error(`[fetchService] ${config.id} summary.json returned HTTP ${summaryRes.status}`)
+          summaryRes.body?.cancel()
+          incidentsRes?.body?.cancel()
           const shouldDegrade = await trackFetchFailure(kv, config.id)
           return { ...base, status: shouldDegrade ? 'degraded' : 'operational' }
         }
         summaryData = await summaryRes.json()
-        rawIncData = incidentsRes?.ok ? await incidentsRes.json() : null
+        rawIncData = incidentsRes?.ok ? await incidentsRes.json() : (incidentsRes?.body?.cancel(), null)
       }
 
       // incidents.json has full history; summary.json only has active ones
@@ -308,6 +310,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
               const res = await fetchWithTimeout(url, 5000)
               if (!res.ok) {
                 console.warn(`[fetchService] ${config.id} AWS RSS ${region} HTTP ${res.status}`)
+                res.body?.cancel()
                 return { region, incidents: [] as Incident[], ok: false }
               }
               const incidents = parseAwsRssIncidents(await res.text())
@@ -373,7 +376,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         })
         const latency = Date.now() - start
         if (!rssRes || !rssRes.ok) {
-          if (rssRes) console.warn(`[fetchService] ${config.id} Azure RSS HTTP ${rssRes.status}`)
+          if (rssRes) { console.warn(`[fetchService] ${config.id} Azure RSS HTTP ${rssRes.status}`); rssRes.body?.cancel() }
           const shouldDegrade = await trackFetchFailure(kv, config.id)
           return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], latency: config.category === 'api' ? latency : null }
         }
@@ -555,7 +558,7 @@ export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: Service
         return
       }
       const summary: StatuspageResponse = await summaryRes.json()
-      const incidents: StatuspageResponse | null = incidentsRes?.ok ? await incidentsRes.json() : null
+      const incidents: StatuspageResponse | null = incidentsRes?.ok ? await incidentsRes.json() : (incidentsRes?.body?.cancel(), null)
       // Fetch status page HTML for uptimeData/component_uptimes parsing
       const statusUrl = baseUrl.replace('/api/v2', '')
       const needsHtml = SERVICES.some((s) => s.apiUrl === apiUrl && (s.statusComponentId || s.incidentIoComponentId))
@@ -564,6 +567,7 @@ export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: Service
         try {
           const htmlRes = await fetchWithTimeout(statusUrl, 5000)
           if (htmlRes.ok) uptimeHtml = await htmlRes.text()
+          else htmlRes.body?.cancel()
         } catch { /* non-critical — fallback to incidents API */ }
       }
       prefetchMap.set(apiUrl, { summary, incidents, latency, uptimeHtml })
