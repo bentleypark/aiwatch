@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts } from '../alerts'
-import type { ScoredService } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts } from '../alerts'
+import type { AlertCandidate, ScoredService } from '../alerts'
 
 const NOW = 1742860800000 // fixed timestamp for deterministic tests
 const recentDate = new Date(NOW - 3600_000).toISOString() // 1h ago
@@ -253,5 +253,142 @@ describe('buildServiceAlerts', () => {
     const alerts = buildServiceAlerts([svc], new Map([['openai', '1']]), new Map())
     expect(alerts).toHaveLength(1)
     expect(alerts[0].title).toBe('🟢 OpenAI API — Service Recovered')
+  })
+})
+
+describe('mergeTogetherAlerts', () => {
+  function togetherNewAlert(incId: string, model: string): AlertCandidate {
+    return {
+      key: `alerted:new:${incId}`,
+      title: '🔴 Together AI — New Incident',
+      description: `${model} — down`,
+      fallbackText: '👉 Suggested fallback: Fireworks AI',
+      color: 0xED4245,
+      url: `https://ai-watch.dev/#together`,
+    }
+  }
+
+  function togetherResAlert(incId: string, model: string): AlertCandidate {
+    return {
+      key: `alerted:res:${incId}`,
+      title: '🟢 Together AI — Incident Resolved (15m)',
+      description: `${model} — recovered`,
+      color: 0x57F287,
+      url: `https://ai-watch.dev/#together`,
+    }
+  }
+
+  it('merges multiple new Together AI alerts into one', () => {
+    const alerts = [
+      togetherNewAlert('inc1', 'FLUX.1 Krea [dev]'),
+      togetherNewAlert('inc2', 'ZAI GLM 5 FP4'),
+      togetherNewAlert('inc3', 'Kokoro-82M'),
+    ]
+    const result = mergeTogetherAlerts(alerts)
+    expect(result).toHaveLength(1)
+    expect(result[0].title).toBe('🔴 Together AI — 3 New Incidents')
+    expect(result[0].description).toContain('FLUX.1 Krea [dev]')
+    expect(result[0].description).toContain('ZAI GLM 5 FP4')
+    expect(result[0].description).toContain('Kokoro-82M')
+    expect(result[0]._mergedKeys).toEqual(['alerted:new:inc1', 'alerted:new:inc2', 'alerted:new:inc3'])
+    expect(result[0].fallbackText).toContain('Suggested fallback')
+  })
+
+  it('merges multiple resolved Together AI alerts into one', () => {
+    const alerts = [
+      togetherResAlert('inc1', 'FLUX.1 Krea [dev]'),
+      togetherResAlert('inc2', 'ZAI GLM 5 FP4'),
+    ]
+    const result = mergeTogetherAlerts(alerts)
+    expect(result).toHaveLength(1)
+    expect(result[0].title).toBe('🟢 Together AI — 2 Incidents Resolved')
+    expect(result[0]._mergedKeys).toEqual(['alerted:res:inc1', 'alerted:res:inc2'])
+  })
+
+  it('passes through single Together AI alert unchanged', () => {
+    const alerts = [togetherNewAlert('inc1', 'FLUX.1 Krea [dev]')]
+    const result = mergeTogetherAlerts(alerts)
+    expect(result).toHaveLength(1)
+    expect(result[0].title).toBe('🔴 Together AI — New Incident')
+    expect(result[0]._mergedKeys).toBeUndefined()
+  })
+
+  it('does not merge non-Together alerts', () => {
+    const alerts: AlertCandidate[] = [
+      { key: 'alerted:new:abc', title: '🔴 OpenAI API — New Incident', description: 'API Error', color: 0xED4245, url: 'https://ai-watch.dev/#openai' },
+      { key: 'alerted:new:def', title: '🔴 Claude API — New Incident', description: 'Timeout', color: 0xED4245, url: 'https://ai-watch.dev/#claude' },
+    ]
+    const result = mergeTogetherAlerts(alerts)
+    expect(result).toHaveLength(2)
+    expect(result[0].title).toContain('OpenAI')
+    expect(result[1].title).toContain('Claude')
+  })
+
+  it('merges Together alerts while preserving non-Together alerts', () => {
+    const alerts: AlertCandidate[] = [
+      { key: 'alerted:new:abc', title: '🔴 OpenAI API — New Incident', description: 'API Error', color: 0xED4245, url: 'https://ai-watch.dev/#openai' },
+      togetherNewAlert('inc1', 'FLUX.1 Krea [dev]'),
+      togetherNewAlert('inc2', 'ZAI GLM 5 FP4'),
+    ]
+    const result = mergeTogetherAlerts(alerts)
+    expect(result).toHaveLength(2)
+    expect(result[0].title).toContain('OpenAI')
+    expect(result[1].title).toBe('🔴 Together AI — 2 New Incidents')
+  })
+
+  it('handles mix of new and resolved Together alerts', () => {
+    const alerts = [
+      togetherNewAlert('inc1', 'FLUX.1 Krea [dev]'),
+      togetherNewAlert('inc2', 'ZAI GLM 5 FP4'),
+      togetherResAlert('inc3', 'Kokoro-82M'),
+      togetherResAlert('inc4', 'Orpheus TTS'),
+    ]
+    const result = mergeTogetherAlerts(alerts)
+    expect(result).toHaveLength(2)
+    const newAlert = result.find(a => a.title.includes('New Incidents'))!
+    const resAlert = result.find(a => a.title.includes('Resolved'))!
+    expect(newAlert._mergedKeys).toHaveLength(2)
+    expect(resAlert._mergedKeys).toHaveLength(2)
+  })
+
+  it('returns original array when no Together alerts present', () => {
+    const alerts: AlertCandidate[] = [
+      { key: 'alerted:new:abc', title: '🔴 OpenAI API — New Incident', description: 'Error', color: 0xED4245, url: '' },
+    ]
+    const result = mergeTogetherAlerts(alerts)
+    expect(result).toBe(alerts) // same reference — no transformation
+  })
+
+  it('correctly merges alerts generated by buildIncidentAlerts (integration)', () => {
+    const together = mockService({
+      id: 'together', name: 'Together AI', status: 'degraded', category: 'api',
+      incidents: [
+        { id: 'inc1', title: 'FLUX.1 Krea [dev] — down', status: 'investigating', startedAt: recentDate, impact: 'major' },
+        { id: 'inc2', title: 'ZAI GLM 5 FP4 — down', status: 'investigating', startedAt: recentDate, impact: 'major' },
+        { id: 'inc3', title: 'Kokoro-82M — down', status: 'investigating', startedAt: recentDate, impact: 'major' },
+      ],
+    })
+    const alerts = buildIncidentAlerts([together], new Set(), NOW)
+    expect(alerts).toHaveLength(3)
+    const merged = mergeTogetherAlerts(alerts)
+    expect(merged).toHaveLength(1)
+    expect(merged[0].title).toContain('3 New Incidents')
+    expect(merged[0]._mergedKeys).toHaveLength(3)
+  })
+
+  it('correctly merges resolved alerts generated by buildIncidentAlerts (integration)', () => {
+    const together = mockService({
+      id: 'together', name: 'Together AI', status: 'operational', category: 'api',
+      incidents: [
+        { id: 'inc1', title: 'FLUX.1 Krea [dev]', status: 'resolved', startedAt: recentDate, duration: '13m', impact: 'major' },
+        { id: 'inc2', title: 'ZAI GLM 5 FP4', status: 'resolved', startedAt: recentDate, duration: '15m', impact: 'major' },
+      ],
+    })
+    const alerts = buildIncidentAlerts([together], new Set(['inc1', 'inc2']), NOW)
+    expect(alerts).toHaveLength(2)
+    const merged = mergeTogetherAlerts(alerts)
+    expect(merged).toHaveLength(1)
+    expect(merged[0].title).toContain('2 Incidents Resolved')
+    expect(merged[0]._mergedKeys).toHaveLength(2)
   })
 })
