@@ -622,9 +622,9 @@ function usePollingInternal() {
       if (services.length === 0) throw new Error('Empty response')
       const merged = mergeWithMock(services)
 
-      // Minimum skeleton display time: 1s to prevent flash
+      // Minimum skeleton display time: 500ms to prevent flash
       const elapsed = Date.now() - loadStart
-      if ((isInitial || isRefresh) && elapsed < 1000) await new Promise((r) => setTimeout(r, 1000 - elapsed))
+      if ((isInitial || isRefresh) && elapsed < 500) await new Promise((r) => setTimeout(r, 500 - elapsed))
 
       // Status/incident alerts handled server-side (Worker detectAndAlertIncidents)
       // to avoid duplicate alerts when both browser and Worker are running
