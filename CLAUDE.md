@@ -134,10 +134,11 @@ When adding a new monitored service, update ALL of the following:
    - `SERVICE_AND_APP_IDS` — add at correct display position (app → LLM → voice → inference → agent)
    - `SERVICE_CATEGORIES` — add to correct category filter (e.g., `llm`, `inference`)
    - `EXCLUDE_FALLBACK` — keep in sync with `worker/src/fallback.ts`
+   - `API_TIER` — add tier number (keep in sync with `worker/src/fallback.ts`)
 6. `src/hooks/usePolling.js` — add mock entry to `MOCK_SERVICES` at correct position (determines display order via `mergeWithMock`)
 7. `src/hooks/useSettings.js` — new services auto-inserted at canonical position in `enabledServices` (no change needed, but verify logic works)
 8. `src/pages/ServiceDetails.jsx` — add `STATUS_URL` entry for official status page link
-9. `src/pages/Overview.jsx` — add to `API_TIER` + verify `TIER_LABEL` (keep in sync with `worker/src/fallback.ts`)
+9. `src/pages/Overview.jsx` — verify `TIER_LABEL` (keep in sync with `worker/src/fallback.ts`; `API_TIER` + `getFallbacks` imported from `src/utils/constants.js`)
 10. `api/is-down.ts` — add to `API_TIER` + `EXCLUDE_FALLBACK` (keep in sync with `worker/src/fallback.ts`)
 
 #### Documentation — service count ("N AI services")
@@ -259,7 +260,7 @@ worker/
     og-render.ts # SVG → PNG conversion (resvg-wasm, Inter font from CDN)
     alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts, formatDetectionLead)
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText, buildGroupedFallbackText for multi-category incidents)
-    ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt, TTL refresh, re-analysis, incidentId dedup, timeline context, boilerplate filtering)
+    ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt, needsFallback assessment, TTL refresh, re-analysis, incidentId dedup, timeline context, boilerplate filtering)
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit, Web Vitals)
     vitals.ts   # Web Vitals aggregation (ingest, KV flush, p75 computation, Discord formatting)
     probe.ts    # Health check probing — direct RTT measurement (19 API services)
@@ -376,8 +377,9 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
   - Modal groups services with same incidentId into single card
   - API response: `aiAnalysis: Record<svcId, AIAnalysisResult[]>` — array per service
   - **Recently Resolved**: on recovery, per-incident analysis keys get `resolvedAt` field (2h TTL instead of deletion). `/api/status` returns `recentlyRecovered[]` for operational services with resolved analysis. Dashboard shows info banner + "Resolved" badge on service cards + Analyze modal remains active
+  - **Contextual fallback** (`needsFallback`): AI analysis includes boolean flag assessing if incident warrants switching to alternative. When true, AnalysisModal + Is X Down AI Insight card show Score-based fallback list. Shared `getFallbacks()` utility in `src/utils/constants.js` (used by AnalysisModal + Overview)
   - Grouped fallback: when incident affects multiple categories, Discord alerts + dashboard show per-category alternatives via `buildGroupedFallbackText`
-  - **Fallback tier priority** (API services only): same-tier services are recommended first, then adjacent tiers. Within each tier, sorted by AIWatch Score descending. Defined in `worker/src/fallback.ts`, mirrored in `src/pages/Overview.jsx` and `api/is-down.ts`:
+  - **Fallback tier priority** (API services only): same-tier services are recommended first, then adjacent tiers. Within each tier, sorted by AIWatch Score descending. Defined in `worker/src/fallback.ts`, mirrored in `src/utils/constants.js` and `api/is-down.ts`:
     - **Tier 1** (Major LLM): `claude`, `openai`, `gemini`
     - **Tier 2** (LLM): `mistral`, `cohere`, `groq`, `together`, `fireworks`, `deepseek`, `xai`, `perplexity`
     - **Tier 3** (Infrastructure): `bedrock`, `azureopenai`, `openrouter`

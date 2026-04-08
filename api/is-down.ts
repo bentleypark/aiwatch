@@ -28,7 +28,7 @@ export default async function handler(req: Request) {
     // Single API call — /api/status always returns real-time data (no KV dependency)
     let serviceData = null
     let fallbacks: Array<{ id: string; name: string; score: number | null; status: string }> = []
-    let aiInsight: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string } | null = null
+    let aiInsight: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string } | null = null
 
     const result = await Promise.allSettled([
       fetch(`${WORKER_API}/api/status/cached`, { signal: AbortSignal.timeout(3000) }),
@@ -43,7 +43,7 @@ export default async function handler(req: Request) {
             lastChecked: string; incidents: unknown[]; aiwatchScore?: number | null
             scoreGrade?: string | null; scoreConfidence?: string
           }>
-          aiAnalysis?: Record<string, { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; incidentId: string; resolvedAt?: string }>
+          aiAnalysis?: Record<string, { summary: string; estimatedRecovery: string; affectedScope: string[]; needsFallback?: boolean; analyzedAt: string; incidentId: string; resolvedAt?: string }>
         }
         const allServices = data.services ?? []
 

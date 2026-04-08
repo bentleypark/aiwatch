@@ -37,6 +37,7 @@ export interface AIAnalysisResult {
   estimatedRecovery: string
   estimatedRecoveryHours?: number  // upper bound parsed from estimatedRecovery (e.g., "4–6h" → 6)
   affectedScope: string[]
+  needsFallback: boolean  // AI-assessed: true if incident warrants switching to alternative service
   analyzedAt: string
   incidentId: string
   resolvedAt?: string
@@ -103,13 +104,15 @@ Analyze the incident data provided by the user and respond in JSON format ONLY:
 {
   "summary": "Concise analysis (max 2 sentences). Identify if this is a recurring pattern or a new type of failure (e.g., network vs model).",
   "estimatedRecovery": "Short range using abbreviations ONLY. Format: '30m–1h' or '1–3h'. Use m for minutes, h for hours. Never write 'minutes' or 'hours' in full. If no data, return 'N/A'.",
-  "affectedScope": ["1-3 specific features or related sub-services likely impacted"]
+  "affectedScope": ["1-3 specific features or related sub-services likely impacted"],
+  "needsFallback": true/false
 }
 
 Rules:
 - If the incident title contains specific environment keywords (e.g., 'Chrome', 'Cowork', 'API'), prioritize them in the summary.
 - Recovery estimate MUST use short format: '30m–1h', '1–3h', '15–45m'. Never write 'minutes' or 'hours' in full words.
 - If Timeline Updates are provided, incorporate the LATEST status and progress into your analysis. Reflect whether the situation is improving, worsening, or unchanged.
+- needsFallback: true if the incident significantly impacts primary service availability (e.g., major outage, API errors, authentication failure). false for cosmetic issues, partial feature degradation, or scheduled maintenance.
 - Keep the tone professional, objective, and data-driven.
 - Do not include any text outside the JSON block.`
 
@@ -206,6 +209,7 @@ export async function analyzeIncident(
       summary?: string
       estimatedRecovery?: string
       affectedScope?: string[]
+      needsFallback?: boolean
     }
 
     // Normalize recovery time format: "17 minutes to 9 hours" → "17m–9h"
@@ -222,6 +226,7 @@ export async function analyzeIncident(
       estimatedRecovery: recovery,
       ...(recoveryHours != null && { estimatedRecoveryHours: recoveryHours }),
       affectedScope: (parsed.affectedScope ?? []).map(s => sanitize(s)),
+      needsFallback: parsed.needsFallback === true || (parsed.needsFallback as unknown) === 'true',
       analyzedAt: new Date().toISOString(),
       incidentId: currentIncident.id,
       timelineHash: latestTimelineAt,
