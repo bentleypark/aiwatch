@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 
 const NOW = 1742860800000 // fixed timestamp for deterministic tests
@@ -390,5 +390,56 @@ describe('mergeTogetherAlerts', () => {
     expect(merged).toHaveLength(1)
     expect(merged[0].title).toContain('2 Incidents Resolved')
     expect(merged[0]._mergedKeys).toHaveLength(2)
+  })
+})
+
+describe('formatDetectionLead', () => {
+  it('returns lead text when detected before official report', () => {
+    const detected = new Date(NOW - 10 * 60_000).toISOString() // 10min before startedAt
+    const started = new Date(NOW).toISOString()
+    const result = formatDetectionLead(detected, started)
+    expect(result).toContain('Detection Lead: 10m')
+    expect(result).toContain('AIWatch detected')
+  })
+
+  it('returns empty when detectedAt is null', () => {
+    expect(formatDetectionLead(null, new Date(NOW).toISOString())).toBe('')
+  })
+
+  it('returns empty when detected after official report', () => {
+    const detected = new Date(NOW + 5 * 60_000).toISOString()
+    const started = new Date(NOW).toISOString()
+    expect(formatDetectionLead(detected, started)).toBe('')
+  })
+
+  it('returns empty when lead is less than 1 minute', () => {
+    const detected = new Date(NOW - 59_000).toISOString() // 59s before (floor → 0m)
+    const started = new Date(NOW).toISOString()
+    expect(formatDetectionLead(detected, started)).toBe('')
+  })
+
+  it('returns empty when lead exceeds 60 minutes (stale detection)', () => {
+    const detected = new Date(NOW - 90 * 60_000).toISOString() // 90min before
+    const started = new Date(NOW).toISOString()
+    expect(formatDetectionLead(detected, started)).toBe('')
+  })
+
+  it('handles invalid date strings', () => {
+    expect(formatDetectionLead('not-a-date', new Date(NOW).toISOString())).toBe('')
+    expect(formatDetectionLead(new Date(NOW).toISOString(), 'not-a-date')).toBe('')
+  })
+
+  it('formats hour+minute label for exactly 60 min lead', () => {
+    const detected = new Date(NOW - 60 * 60_000).toISOString()
+    const started = new Date(NOW).toISOString()
+    const result = formatDetectionLead(detected, started)
+    expect(result).toContain('1h 0m')
+  })
+
+  it('returns result for 60.5 min (floor to 60, still within range)', () => {
+    const detected = new Date(NOW - 60.5 * 60_000).toISOString()
+    const started = new Date(NOW).toISOString()
+    const result = formatDetectionLead(detected, started)
+    expect(result).toContain('1h 0m')
   })
 })

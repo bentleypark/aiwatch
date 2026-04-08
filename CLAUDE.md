@@ -257,7 +257,7 @@ worker/
     badge.ts    # SVG badge generator
     og.ts       # OG image SVG generator (1200×630 for social share)
     og-render.ts # SVG → PNG conversion (resvg-wasm, Inter font from CDN)
-    alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts)
+    alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts, formatDetectionLead)
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText, buildGroupedFallbackText for multi-category incidents)
     ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt, TTL refresh, re-analysis, incidentId dedup, timeline context, boilerplate filtering)
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit, Web Vitals)
@@ -350,8 +350,8 @@ Cron Trigger (*/5 min)
   → probe spike detection (3+ consecutive RTT spikes) → record to detected:{svcId} as earliest detection
   → read KV cache → detect incidents/status changes
   → record detection timestamps (detected:{serviceId}) for Detection Lead (probe spike time preferred if earlier)
-  → KV ID-based dedup → Discord alerts (single embed per incident)
-  → incident detected → AI analysis (8s timeout) → merged into incident embed
+  → KV ID-based dedup → Discord alerts (single embed per incident, with Detection Lead if probe detected first)
+  → incident detected → AI analysis (8s timeout) + Detection Lead (1-60min advance detection → "⚡ Detection Lead: Xm") → merged into incident embed
   → recovery detected → mark ai:analysis:{svcId}:{incId} with resolvedAt (2h TTL, powers "Recently Resolved" UI)
   → active incidents: refresh analysis TTL / re-analyze if expired / dedup sibling services
   → alert count tracked in KV (alert:count:{date}) for Daily Summary
