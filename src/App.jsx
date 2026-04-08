@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, lazy, Suspense, Component } from 'react'
 import { useTheme } from './hooks/useTheme'
 import { useLang, LangProvider } from './hooks/useLang'
 import { initConsentDefault, initGA, trackPageView, trackEvent } from './utils/analytics'
@@ -14,13 +14,46 @@ import CookieBanner from './components/CookieBanner'
 import InstallBanner from './components/InstallBanner'
 import { PrivacyContent, TermsContent } from './components/LegalContent'
 import Overview from './pages/Overview'
-import Latency from './pages/Latency'
-import Incidents from './pages/Incidents'
-import Uptime from './pages/Uptime'
-import ServiceDetails from './pages/ServiceDetails'
-import Settings from './pages/Settings'
-import AboutScore from './pages/AboutScore'
-import Ranking from './pages/Ranking'
+
+function lazyWithRetry(importFn) {
+  return lazy(() =>
+    importFn().catch(() =>
+      new Promise((resolve) => setTimeout(resolve, 1500)).then(importFn)
+    )
+  )
+}
+
+const Latency = lazyWithRetry(() => import('./pages/Latency'))
+const Incidents = lazyWithRetry(() => import('./pages/Incidents'))
+const Uptime = lazyWithRetry(() => import('./pages/Uptime'))
+const ServiceDetails = lazyWithRetry(() => import('./pages/ServiceDetails'))
+const Settings = lazyWithRetry(() => import('./pages/Settings'))
+const AboutScore = lazyWithRetry(() => import('./pages/AboutScore'))
+const Ranking = lazyWithRetry(() => import('./pages/Ranking'))
+
+class ChunkErrorBoundary extends Component {
+  state = { hasError: false }
+  static getDerivedStateFromError() { return { hasError: true } }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '2rem', textAlign: 'center' }}>
+          <p className="text-[var(--text1)]" style={{ marginBottom: '1rem' }}>
+            Failed to load this page.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mono text-[12px] text-[var(--text0)] bg-[var(--bg3)] border border-[var(--border)] rounded-md hover:bg-[var(--bg4)] transition-colors cursor-pointer"
+            style={{ padding: '6px 16px' }}
+          >
+            Reload
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 import { ALL_SERVICE_IDS } from './utils/constants'
 import { initVitals } from './utils/vitals'
@@ -154,7 +187,11 @@ function AppInner() {
         sidebarOpen={sidebarOpen}
         onSidebarClose={() => setSidebarOpen(false)}
       >
-        {resolvePage(page)}
+        <ChunkErrorBoundary>
+          <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center' }}><span className="text-[var(--text2)] mono text-[12px]">Loading…</span></div>}>
+            {resolvePage(page)}
+          </Suspense>
+        </ChunkErrorBoundary>
       </Layout>
 
       {/* Legal modals */}

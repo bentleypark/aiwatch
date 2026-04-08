@@ -6,6 +6,8 @@ test.describe('Incidents filtering', () => {
     await page.goto('/')
     await waitForDataLoad(page)
     await navigateVia(page, 'Incidents')
+    // Wait for lazy-loaded Incidents page to render
+    await page.locator('main select').first().waitFor({ state: 'visible', timeout: 5000 })
   })
 
   test('service filter narrows incident list', async ({ page }) => {
