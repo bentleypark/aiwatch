@@ -91,7 +91,7 @@ export async function writeVitalsToKV(kv: KVNamespace, metrics: Partial<Record<V
   await kv.put(key, JSON.stringify({
     count: (existing?.count ?? 0) + 1,
     allValues,
-  }), { expirationTtl: 2 * 86400 })
+  }), { expirationTtl: 3 * 86400 })
 }
 
 /**
