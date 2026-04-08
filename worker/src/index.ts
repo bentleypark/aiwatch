@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore } from './score'
-import { buildIncidentAlerts, buildServiceAlerts } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts } from './alerts'
 import { analyzeIncident, refreshOrReanalyze, analysisKey, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale } from './utils'
 
@@ -386,16 +386,21 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     }
   }
 
+  // Merge concurrent Together AI model-level alerts into single grouped alerts
+  const mergedToSend = mergeTogetherAlerts(toSend)
+
   // Send + mark as alerted (down/degraded: 2h TTL, incidents/recovery: 7d TTL)
   // For new incidents, run AI analysis with timeout so it can be merged into the embed
-  const sent = toSend.slice(0, 5)
+  const sent = mergedToSend.slice(0, 5)
   const DIV = '┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈'
   for (const alert of sent) {
     const isStatusAlert = alert.key.startsWith('alerted:down:') || alert.key.startsWith('alerted:degraded:')
     const isRecoveryAlert = alert.key.startsWith('alerted:recovered:')
     const ttl = (isStatusAlert || isRecoveryAlert) ? 7200 : 604800
     const kvValue = isStatusAlert ? new Date().toISOString() : '1'
-    await kvPut(env.STATUS_CACHE, alert.key, kvValue, { expirationTtl: ttl })
+    // Write dedup keys for all merged alerts (Together AI grouping)
+    const keysToWrite = alert._mergedKeys ?? [alert.key]
+    await Promise.all(keysToWrite.map(k => kvPut(env.STATUS_CACHE, k, kvValue, { expirationTtl: ttl })))
     if (isStatusAlert) {
       const svcId = alert.key.split(':').pop()!
       await kvDel(env.STATUS_CACHE, `alerted:recovered:${svcId}`)
@@ -420,8 +425,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     }
 
     // For new incidents: run AI analysis with 8s timeout to avoid blocking alert delivery
+    // Skip AI analysis for merged alerts (Together AI model-level grouping — individual model incidents don't need deep analysis)
     let analysisSection = ''
-    if (alert.key.startsWith('alerted:new:') && env.ANTHROPIC_API_KEY) {
+    if (alert.key.startsWith('alerted:new:') && !alert._mergedKeys && env.ANTHROPIC_API_KEY) {
       const incId = alert.key.replace('alerted:new:', '')
       const svc = scored.find(s => (s.incidents ?? []).some(i => i.id === incId))
       const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : null
@@ -478,8 +484,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       const countRaw = await env.STATUS_CACHE.get(countKey).catch(() => null)
       const counts = countRaw ? JSON.parse(countRaw) : { incidents: 0, resolved: 0, down: 0, degraded: 0, recovered: 0 }
       for (const a of sent) {
-        if (a.key.startsWith('alerted:new:')) counts.incidents++
-        else if (a.key.startsWith('alerted:res:')) counts.resolved++
+        const n = a._mergedKeys?.length ?? 1
+        if (a.key.startsWith('alerted:new:')) counts.incidents += n
+        else if (a.key.startsWith('alerted:res:')) counts.resolved += n
         else if (a.key.startsWith('alerted:down:')) counts.down++
         else if (a.key.startsWith('alerted:degraded:')) counts.degraded++
         else if (a.key.startsWith('alerted:recovered:')) counts.recovered++
@@ -517,8 +524,8 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     operational,
     issues: scored.length - operational,
     sent: sent.length,
-    newCount: sent.filter(a => a.key.startsWith('alerted:new:')).length,
-    resolvedCount: sent.filter(a => a.key.startsWith('alerted:res:')).length,
+    newCount: sent.filter(a => a.key.startsWith('alerted:new:')).reduce((sum, a) => sum + (a._mergedKeys?.length ?? 1), 0),
+    resolvedCount: sent.filter(a => a.key.startsWith('alerted:res:')).reduce((sum, a) => sum + (a._mergedKeys?.length ?? 1), 0),
     downCount: sent.filter(a => a.key.startsWith('alerted:down:')).length,
     recoveredCount: sent.filter(a => a.key.startsWith('alerted:recovered:')).length,
   }

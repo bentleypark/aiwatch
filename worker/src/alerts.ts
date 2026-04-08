@@ -12,6 +12,8 @@ export interface AlertCandidate {
   fallbackText?: string
   color: number
   url: string
+  /** When alerts are merged (e.g., Together AI), contains all original dedup keys */
+  _mergedKeys?: string[]
 }
 
 export interface ScoredService extends ServiceStatus {
@@ -63,6 +65,64 @@ export function buildIncidentAlerts(
   }
 
   return alerts
+}
+
+/**
+ * Merge concurrent Together AI model-level alerts into single grouped alerts.
+ * Together AI reports individual model incidents (e.g., "FLUX.1 Krea [dev] — down").
+ * When multiple models go down/recover in the same cron cycle, merge into one alert.
+ * Non-Together alerts pass through unchanged.
+ */
+export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] {
+  const together: AlertCandidate[] = []
+  const rest: AlertCandidate[] = []
+
+  for (const a of alerts) {
+    if (a.title.startsWith('🔴 Together AI — New Incident') || a.title.startsWith('🟢 Together AI — Incident Resolved')) {
+      together.push(a)
+    } else {
+      rest.push(a)
+    }
+  }
+
+  if (together.length <= 1) return alerts
+
+  // Group by alert type (new vs resolved)
+  const newAlerts = together.filter(a => a.key.startsWith('alerted:new:'))
+  const resAlerts = together.filter(a => a.key.startsWith('alerted:res:'))
+
+  const merged: AlertCandidate[] = []
+
+  if (newAlerts.length > 1) {
+    const descriptions = newAlerts.map(a => a.description)
+    merged.push({
+      key: newAlerts[0].key,
+      title: `🔴 Together AI — ${newAlerts.length} New Incidents`,
+      description: descriptions.join('\n'),
+      fallbackText: newAlerts[0].fallbackText,
+      color: 0xED4245,
+      url: 'https://ai-watch.dev/#together',
+      _mergedKeys: newAlerts.map(a => a.key),
+    })
+  } else {
+    merged.push(...newAlerts)
+  }
+
+  if (resAlerts.length > 1) {
+    const descriptions = resAlerts.map(a => a.description)
+    merged.push({
+      key: resAlerts[0].key,
+      title: `🟢 Together AI — ${resAlerts.length} Incidents Resolved`,
+      description: descriptions.join('\n'),
+      color: 0x57F287,
+      url: 'https://ai-watch.dev/#together',
+      _mergedKeys: resAlerts.map(a => a.key),
+    })
+  } else {
+    merged.push(...resAlerts)
+  }
+
+  return [...rest, ...merged]
 }
 
 /**
