@@ -137,6 +137,21 @@ export function buildDailySummary(data: DailySummaryData): string {
   return lines.join('\n')
 }
 
+/**
+ * Check if the current time falls within a daily summary window.
+ * Normal window: UTC 09:00-09:04. Catch-up window: UTC 10:00-10:04.
+ * Pure function — KV dedup is handled separately by the caller.
+ */
+export function isInSummaryWindow(
+  utcHours: number,
+  utcMinutes: number,
+): { inWindow: boolean; isCatchUp: boolean } {
+  const isNormalWindow = utcHours === 9 && utcMinutes < 5
+  const isCatchUpWindow = utcHours === 10 && utcMinutes < 5
+  if (!isNormalWindow && !isCatchUpWindow) return { inWindow: false, isCatchUp: false }
+  return { inWindow: true, isCatchUp: !isNormalWindow }
+}
+
 function formatDurationFromStart(startedAt: string): string {
   const diff = Date.now() - new Date(startedAt).getTime()
   if (isNaN(diff) || diff < 0) return ''
