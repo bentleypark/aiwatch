@@ -7,7 +7,7 @@ export interface ProbeTarget { id: string; url: string }
 
 export const PROBE_TARGETS: ProbeTarget[] = [
   // API services — auth not required for RTT measurement (401/403/405 = server alive)
-  { id: 'claude', url: 'https://api.anthropic.com/v1/messages' },
+  { id: 'claude', url: 'https://api.anthropic.com/v1/models' },
   { id: 'openai', url: 'https://api.openai.com/v1/models' },
   { id: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/models' },
   { id: 'mistral', url: 'https://api.mistral.ai/v1/models' },
