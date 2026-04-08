@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead } from './alerts'
 import { analyzeIncident, refreshOrReanalyze, analysisKey, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale } from './utils'
 
@@ -424,43 +424,55 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       }))
     }
 
-    // For new incidents: run AI analysis with 8s timeout to avoid blocking alert delivery
+    // For new incidents: lookup service/incident once, then run AI analysis + Detection Lead
     // Skip AI analysis for merged alerts (Together AI model-level grouping — individual model incidents don't need deep analysis)
     let analysisSection = ''
-    if (alert.key.startsWith('alerted:new:') && !alert._mergedKeys && env.ANTHROPIC_API_KEY) {
+    let detectionLeadSection = ''
+    if (alert.key.startsWith('alerted:new:')) {
       const incId = alert.key.replace('alerted:new:', '')
       const svc = scored.find(s => (s.incidents ?? []).some(i => i.id === incId))
       const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : null
       if (svc && inc) {
-        try {
-          const today = new Date().toISOString().split('T')[0]
-          const usageKey = `ai:usage:${today}`
-          const usageRaw = await env.STATUS_CACHE.get(usageKey).catch(() => null)
-          const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0 }
-          usage.calls++
-          const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))
-          const analysis = await Promise.race([
-            analyzeIncident(env.ANTHROPIC_API_KEY!, svc.name, { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline }, svc.incidents ?? []),
-            timeout,
-          ])
-          if (analysis) {
-            usage.success++
-            const kvOk = await kvPut(env.STATUS_CACHE, analysisKey(svc.id, inc.id), JSON.stringify(analysis), { expirationTtl: 3600 })
-            if (kvOk) {
-              analysisSection = `\n${DIV}\n🤖 **AI ANALYSIS** [Beta]\n${analysis.summary}\n⏱ Est. recovery: ${analysis.estimatedRecovery}${analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''}`
+        // AI analysis (8s timeout)
+        if (!alert._mergedKeys && env.ANTHROPIC_API_KEY) {
+          try {
+            const today = new Date().toISOString().split('T')[0]
+            const usageKey = `ai:usage:${today}`
+            const usageRaw = await env.STATUS_CACHE.get(usageKey).catch(() => null)
+            const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0 }
+            usage.calls++
+            const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))
+            const analysis = await Promise.race([
+              analyzeIncident(env.ANTHROPIC_API_KEY!, svc.name, { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline }, svc.incidents ?? []),
+              timeout,
+            ])
+            if (analysis) {
+              usage.success++
+              const kvOk = await kvPut(env.STATUS_CACHE, analysisKey(svc.id, inc.id), JSON.stringify(analysis), { expirationTtl: 3600 })
+              if (kvOk) {
+                analysisSection = `\n${DIV}\n🤖 **AI ANALYSIS** [Beta]\n${analysis.summary}\n⏱ Est. recovery: ${analysis.estimatedRecovery}${analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''}`
+              }
+            } else {
+              usage.failed++
             }
-          } else {
-            usage.failed++
+            await kvPut(env.STATUS_CACHE, usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
+          } catch (err) {
+            console.error('[cron] AI analysis failed:', err instanceof Error ? err.message : err)
           }
-          await kvPut(env.STATUS_CACHE, usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
+        }
+        // Detection Lead: show early detection advantage in Discord alert
+        try {
+          const detectedAt = await env.STATUS_CACHE.get(`detected:${svc.id}`).catch(() => null)
+          detectionLeadSection = formatDetectionLead(detectedAt, inc.startedAt)
         } catch (err) {
-          console.error('[cron] AI analysis failed:', err instanceof Error ? err.message : err)
+          console.error('[cron] detection lead failed:', err instanceof Error ? err.message : err)
         }
       }
     }
 
-    // Build sectioned description: incident → AI analysis → fallback → link
+    // Build sectioned description: incident → detection lead → AI analysis → fallback → link
     const parts = [alert.description]
+    if (detectionLeadSection) parts.push(detectionLeadSection)
     if (analysisSection) parts.push(analysisSection)
     if (alert.fallbackText && alert.fallbackText.startsWith('👉')) {
       const list = alert.fallbackText.replace('👉 Suggested fallback: ', '')

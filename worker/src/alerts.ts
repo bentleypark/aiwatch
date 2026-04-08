@@ -185,3 +185,20 @@ export function buildServiceAlerts(
 
   return alerts
 }
+
+/**
+ * Compute Detection Lead text for Discord alerts.
+ * Returns formatted string if AIWatch detected the issue before the official report (1-60 min lead).
+ */
+export function formatDetectionLead(detectedAt: string | null, incidentStartedAt: string): string {
+  if (!detectedAt) return ''
+  const detected = new Date(detectedAt).getTime()
+  const started = new Date(incidentStartedAt).getTime()
+  if (isNaN(detected) || isNaN(started)) return ''
+  const diffMs = started - detected
+  if (diffMs <= 0) return ''
+  const mins = Math.floor(diffMs / 60_000)
+  if (mins < 1 || mins > 60) return ''
+  const label = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`
+  return `⚡ **Detection Lead: ${label}** — AIWatch detected this before the official report`
+}
