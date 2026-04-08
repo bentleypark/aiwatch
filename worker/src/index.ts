@@ -557,7 +557,7 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
 import { generateBadgeSvg } from './badge'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, isPromotable } from './reddit'
-import { buildDailySummary } from './daily-summary'
+import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { archiveProbeDaily, type ProbeDailyData } from './probe-archival'
 
@@ -623,143 +623,161 @@ export default {
       }
     }
 
+    // Archive yesterday's data every cron cycle (idempotent — skips if already done)
+    // Runs independently of daily summary to prevent data loss from missed summary windows
+    if (env.STATUS_CACHE) {
+      await archiveVitals(env.STATUS_CACHE).catch((err) =>
+        console.warn('[cron] vitals archive failed:', err instanceof Error ? err.message : err)
+      )
+      await archiveProbeDaily(env.STATUS_CACHE, now).catch((err) =>
+        console.warn('[cron] probe archive failed:', err instanceof Error ? err.message : err)
+      )
+    }
+
     // Daily summary at UTC 09:00 (KST 18:00) — purple embed
-    if (now.getUTCHours() === 9 && now.getUTCMinutes() < 5) {
-      try {
-        // Gather data for expanded daily report
-        const today = now.toISOString().split('T')[0]
-        const [cachedRaw, aiUsageRaw, latRaw, probeRaw] = await Promise.all([
-          env.STATUS_CACHE.get(CACHE_KEY).catch(() => null),
-          env.STATUS_CACHE.get(`ai:usage:${today}`).catch(() => null),
-          env.STATUS_CACHE.get('latency:24h').catch(() => null),
-          env.STATUS_CACHE.get('probe:24h').catch(() => null),
-        ])
+    // Also catches up if yesterday's summary was missed (e.g., deploy during the window)
+    const { inWindow: inSummaryWindow, isCatchUp } = isInSummaryWindow(now.getUTCHours(), now.getUTCMinutes())
+    if (inSummaryWindow) {
+      const today = now.toISOString().split('T')[0]
+      const summaryMarker = env.STATUS_CACHE
+        ? await env.STATUS_CACHE.get(`daily-summary:${today}`).catch((err) => {
+            console.warn('[daily-summary] marker read failed, will retry:', err instanceof Error ? err.message : err)
+            return null
+          })
+        : null
+      if (!summaryMarker) {
+        try {
+          // Gather data for expanded daily report
+          const [cachedRaw, aiUsageRaw, latRaw, probeRaw] = await Promise.all([
+            env.STATUS_CACHE.get(CACHE_KEY).catch(() => null),
+            env.STATUS_CACHE.get(`ai:usage:${today}`).catch(() => null),
+            env.STATUS_CACHE.get('latency:24h').catch(() => null),
+            env.STATUS_CACHE.get('probe:24h').catch(() => null),
+          ])
 
-        let dailyServices: ServiceStatus[] = []
-        if (cachedRaw) {
+          let dailyServices: ServiceStatus[] = []
+          if (cachedRaw) {
+            try {
+              const p = JSON.parse(cachedRaw)
+              dailyServices = Array.isArray(p) ? p : p.services ?? []
+            } catch (err) {
+              console.error('[daily-summary] Failed to parse cached services:', err instanceof Error ? err.message : err)
+            }
+          }
+
+          let aiUsage = null
+          if (aiUsageRaw) {
+            try { aiUsage = JSON.parse(aiUsageRaw) } catch (err) {
+              console.error('[daily-summary] Failed to parse AI usage:', err instanceof Error ? err.message : err)
+            }
+          }
+          let latSnapshots: Array<{ t: string; data: Record<string, number> }> = []
+          if (latRaw) {
+            try { latSnapshots = JSON.parse(latRaw).snapshots ?? [] } catch (err) {
+              console.error('[daily-summary] Failed to parse latency data:', err instanceof Error ? err.message : err)
+            }
+          }
+          let probeSnapshots: ProbeSnapshot[] = []
+          if (probeRaw) {
+            try { probeSnapshots = JSON.parse(probeRaw).snapshots ?? [] } catch (err) {
+              console.error('[daily-summary] Failed to parse probe data:', err instanceof Error ? err.message : err)
+            }
+          }
+
+          // Count reddit posts seen today (KV list with prefix)
+          let redditCount = 0
           try {
-            const p = JSON.parse(cachedRaw)
-            dailyServices = Array.isArray(p) ? p : p.services ?? []
+            const listed = await env.STATUS_CACHE.list({ prefix: 'reddit:seen:' })
+            redditCount = listed.keys.length
           } catch (err) {
-            console.error('[daily-summary] Failed to parse cached services:', err instanceof Error ? err.message : err)
+            console.warn('[daily-summary] Failed to list reddit keys:', err instanceof Error ? err.message : err)
           }
-        }
 
-        let aiUsage = null
-        if (aiUsageRaw) {
-          try { aiUsage = JSON.parse(aiUsageRaw) } catch (err) {
-            console.error('[daily-summary] Failed to parse AI usage:', err instanceof Error ? err.message : err)
+          // Read daily alert counter
+          let alertCounts = null
+          try {
+            const alertCountRaw = await env.STATUS_CACHE.get(`alert:count:${today}`).catch(() => null)
+            if (alertCountRaw) alertCounts = JSON.parse(alertCountRaw)
+          } catch (err) {
+            console.error('[daily-summary] Failed to parse alert counts:', err instanceof Error ? err.message : err)
           }
-        }
-        let latSnapshots: Array<{ t: string; data: Record<string, number> }> = []
-        if (latRaw) {
-          try { latSnapshots = JSON.parse(latRaw).snapshots ?? [] } catch (err) {
-            console.error('[daily-summary] Failed to parse latency data:', err instanceof Error ? err.message : err)
-          }
-        }
-        let probeSnapshots: ProbeSnapshot[] = []
-        if (probeRaw) {
-          try { probeSnapshots = JSON.parse(probeRaw).snapshots ?? [] } catch (err) {
-            console.error('[daily-summary] Failed to parse probe data:', err instanceof Error ? err.message : err)
-          }
-        }
 
-        // Count reddit posts seen today (KV list with prefix)
-        let redditCount = 0
-        try {
-          const listed = await env.STATUS_CACHE.list({ prefix: 'reddit:seen:' })
-          redditCount = listed.keys.length
+          // Count active webhook registrations (uses KV metadata — no individual gets needed)
+          let webhookCounts = { discord: 0, slack: 0 }
+          try {
+            const listed = await env.STATUS_CACHE.list({ prefix: 'webhook:reg:' })
+            for (const key of listed.keys) {
+              const meta = key.metadata as { type?: string } | null
+              if (meta?.type === 'discord') webhookCounts.discord++
+              else if (meta?.type === 'slack') webhookCounts.slack++
+            }
+          } catch (err) {
+            console.warn('[daily-summary] Failed to count webhooks:', err instanceof Error ? err.message : err)
+          }
+
+          // Flush in-memory delivery counter to KV (merge with any existing counts from prior isolates)
+          let deliveryCounts: { discord: number; slack: number; failed: number } | null = null
+          try {
+            const proxyDateKey = `alert:proxy:${today}`
+            const proxyRaw = await env.STATUS_CACHE.get(proxyDateKey)
+            const prior = proxyRaw ? JSON.parse(proxyRaw) : {}
+            const merged = {
+              discord: (typeof prior.discord === 'number' ? prior.discord : 0) + deliveryCounter.discord,
+              slack: (typeof prior.slack === 'number' ? prior.slack : 0) + deliveryCounter.slack,
+              failed: (typeof prior.failed === 'number' ? prior.failed : 0) + deliveryCounter.failed,
+            }
+            if (merged.discord > 0 || merged.slack > 0 || merged.failed > 0) {
+              await env.STATUS_CACHE.put(proxyDateKey, JSON.stringify(merged), { expirationTtl: 172800 })
+            }
+            deliveryCounts = merged
+            // Reset in-memory counter after flush
+            deliveryCounter.discord = 0
+            deliveryCounter.slack = 0
+            deliveryCounter.failed = 0
+          } catch (err) {
+            console.warn('[daily-summary] Failed to flush delivery counts:', err instanceof Error ? err.message : err)
+          }
+
+          // Read web vitals summary for today
+          const vitalsSummary = await readVitalsSummary(env.STATUS_CACHE).catch((err) => {
+            console.error('[daily-summary] vitals read failed:', err instanceof Error ? err.message : err)
+            return null
+          })
+
+          const description = buildDailySummary({
+            services: dailyServices,
+            aiUsage,
+            latencySnapshots: latSnapshots,
+            incidentCountToday: { newCount: result.newCount, resolvedCount: result.resolvedCount },
+            alertCounts,
+            webhookCounts,
+            deliveryCounts,
+            redditCount,
+            vitals: vitalsSummary,
+            probeSnapshots,
+          })
+
+          if (isCatchUp) console.log(`[daily-summary] catch-up run for ${today}`)
+          await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+            title: `📊 AIWatch Daily Report — ${today}`,
+            description,
+            color: 0x9B59B6, // purple
+          })
+          // Mark today's summary as done (prevents re-send on subsequent cron cycles)
+          await kvPut(env.STATUS_CACHE, `daily-summary:${today}`, '1', { expirationTtl: 604800 })
         } catch (err) {
-          console.warn('[daily-summary] Failed to list reddit keys:', err instanceof Error ? err.message : err)
-        }
-
-        // Read daily alert counter
-        let alertCounts = null
-        try {
-          const alertCountRaw = await env.STATUS_CACHE.get(`alert:count:${today}`).catch(() => null)
-          if (alertCountRaw) alertCounts = JSON.parse(alertCountRaw)
-        } catch (err) {
-          console.error('[daily-summary] Failed to parse alert counts:', err instanceof Error ? err.message : err)
-        }
-
-        // Count active webhook registrations (uses KV metadata — no individual gets needed)
-        let webhookCounts = { discord: 0, slack: 0 }
-        try {
-          const listed = await env.STATUS_CACHE.list({ prefix: 'webhook:reg:' })
-          for (const key of listed.keys) {
-            const meta = key.metadata as { type?: string } | null
-            if (meta?.type === 'discord') webhookCounts.discord++
-            else if (meta?.type === 'slack') webhookCounts.slack++
+          // NOTE: marker intentionally NOT written — allows retry on catch-up window (UTC 10:00)
+          console.error('[daily-summary] Expanded report failed:', err instanceof Error ? err.message : err)
+          try {
+            await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+              title: '📊 Daily Summary',
+              description: `${result.total} services checked\n${result.operational} operational · ${result.issues} issues`,
+              color: 0x9B59B6,
+            })
+          } catch (discordErr) {
+            console.error('[daily-summary] Fallback Discord send also failed:', discordErr instanceof Error ? discordErr.message : discordErr)
           }
-        } catch (err) {
-          console.warn('[daily-summary] Failed to count webhooks:', err instanceof Error ? err.message : err)
         }
-
-        // Flush in-memory delivery counter to KV (merge with any existing counts from prior isolates)
-        let deliveryCounts: { discord: number; slack: number; failed: number } | null = null
-        try {
-          const proxyDateKey = `alert:proxy:${today}`
-          const proxyRaw = await env.STATUS_CACHE.get(proxyDateKey)
-          const prior = proxyRaw ? JSON.parse(proxyRaw) : {}
-          const merged = {
-            discord: (typeof prior.discord === 'number' ? prior.discord : 0) + deliveryCounter.discord,
-            slack: (typeof prior.slack === 'number' ? prior.slack : 0) + deliveryCounter.slack,
-            failed: (typeof prior.failed === 'number' ? prior.failed : 0) + deliveryCounter.failed,
-          }
-          if (merged.discord > 0 || merged.slack > 0 || merged.failed > 0) {
-            await env.STATUS_CACHE.put(proxyDateKey, JSON.stringify(merged), { expirationTtl: 172800 })
-          }
-          deliveryCounts = merged
-          // Reset in-memory counter after flush
-          deliveryCounter.discord = 0
-          deliveryCounter.slack = 0
-          deliveryCounter.failed = 0
-        } catch (err) {
-          console.warn('[daily-summary] Failed to flush delivery counts:', err instanceof Error ? err.message : err)
-        }
-
-        // Archive yesterday's vitals as p75 summary (90d retention)
-        await archiveVitals(env.STATUS_CACHE).catch((err) =>
-          console.warn('[daily-summary] vitals archive failed:', err instanceof Error ? err.message : err)
-        )
-
-        // Archive yesterday's probe RTT as daily summary (90d retention for monthly reports)
-        await archiveProbeDaily(env.STATUS_CACHE, now).catch((err) =>
-          console.warn('[daily-summary] probe archive failed:', err instanceof Error ? err.message : err)
-        )
-
-        // Read web vitals summary for today
-        const vitalsSummary = await readVitalsSummary(env.STATUS_CACHE).catch((err) => {
-          console.error('[daily-summary] vitals read failed:', err instanceof Error ? err.message : err)
-          return null
-        })
-
-        const description = buildDailySummary({
-          services: dailyServices,
-          aiUsage,
-          latencySnapshots: latSnapshots,
-          incidentCountToday: { newCount: result.newCount, resolvedCount: result.resolvedCount },
-          alertCounts,
-          webhookCounts,
-          deliveryCounts,
-          redditCount,
-          vitals: vitalsSummary,
-          probeSnapshots,
-        })
-
-        const dateStr = now.toISOString().split('T')[0]
-        await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-          title: `📊 AIWatch Daily Report — ${dateStr}`,
-          description,
-          color: 0x9B59B6, // purple
-        })
-      } catch (err) {
-        console.error('[daily-summary] Expanded report failed:', err instanceof Error ? err.message : err)
-        await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-          title: '📊 Daily Summary',
-          description: `${result.total} services checked\n${result.operational} operational · ${result.issues} issues`,
-          color: 0x9B59B6,
-        })
       }
     }
   },

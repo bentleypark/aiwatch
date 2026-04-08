@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow } from '../daily-summary'
 import type { ServiceStatus } from '../types'
 
 function makeSvc(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
@@ -250,6 +250,27 @@ describe('buildDailySummary', () => {
     expect(result).toContain('2 resolved')
     expect(result).toContain('Alerts Sent')
     expect(result).toContain('5 posts detected')
+  })
+})
+
+describe('isInSummaryWindow', () => {
+  it('returns inWindow=true in normal window (UTC 09:00-09:04)', () => {
+    expect(isInSummaryWindow(9, 0)).toEqual({ inWindow: true, isCatchUp: false })
+    expect(isInSummaryWindow(9, 4)).toEqual({ inWindow: true, isCatchUp: false })
+  })
+
+  it('returns inWindow=true with isCatchUp in catch-up window (UTC 10:00-10:04)', () => {
+    expect(isInSummaryWindow(10, 0)).toEqual({ inWindow: true, isCatchUp: true })
+    expect(isInSummaryWindow(10, 4)).toEqual({ inWindow: true, isCatchUp: true })
+  })
+
+  it('returns inWindow=false outside both windows', () => {
+    expect(isInSummaryWindow(8, 59)).toEqual({ inWindow: false, isCatchUp: false })
+    expect(isInSummaryWindow(9, 5)).toEqual({ inWindow: false, isCatchUp: false })
+    expect(isInSummaryWindow(10, 5)).toEqual({ inWindow: false, isCatchUp: false })
+    expect(isInSummaryWindow(11, 0)).toEqual({ inWindow: false, isCatchUp: false })
+    expect(isInSummaryWindow(0, 0)).toEqual({ inWindow: false, isCatchUp: false })
+    expect(isInSummaryWindow(23, 59)).toEqual({ inWindow: false, isCatchUp: false })
   })
 })
 
