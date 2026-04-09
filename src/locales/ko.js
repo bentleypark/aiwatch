@@ -290,7 +290,7 @@ const ko = {
   'aboutScore.speedFormula': '속도 (0~10): 10 × exp(−max(p50, 50) / 400)',
   'aboutScore.speedFloor': '* p50 < 50ms는 50ms로 처리 (네트워크/게이트웨이 특성, 서비스 품질과 무관)',
   'aboutScore.stabilityFormula': '안정성 (0~10): 10 × exp(−CV / 0.5)',
-  'aboutScore.cvExplain': 'CV는 일별 p50 변동(50%)과 p95/p50 스프레드 비율(50%)을 결합한 안정성 지표입니다.',
+  'aboutScore.cvExplain': 'CV는 일별 p50 변동(30%)과 p95/p50 스프레드 비율(70%)을 결합한 안정성 지표입니다.',
   'aboutScore.noProbe': 'Probe 데이터 미제공 서비스',
   'aboutScore.noProbeDesc': '공개 API 엔드포인트가 없는 서비스(Bedrock, Azure OpenAI, Pinecone, Modal, 앱, 에이전트)는 Probe가 불가능합니다. Responsiveness를 제외하고 나머지 항목(80점)을 100점으로 재배분하되, 5% 감점이 적용됩니다(최대 95점).',
   'aboutScore.formulaStr': 'AIWatch Score = Uptime + Incidents + Recovery + Responsiveness',

@@ -2,7 +2,7 @@
 
 import type { ServiceStatus } from './types'
 
-// Responsiveness reference values (calibrated against 4-day probe data 2026-04-02~05)
+// Responsiveness reference values (validated against 7-day probe data 2026-04-02~09)
 export const REFERENCE_MS = 400   // p50 RTT reference for exponential decay
 export const REFERENCE_CV = 0.5   // combined CV reference for stability decay
 export const P50_FLOOR_MS = 50    // p50 floor: below this, RTT reflects gateway/network, not service quality

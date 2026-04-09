@@ -290,7 +290,7 @@ const en = {
   'aboutScore.speedFormula': 'Speed (0~10): 10 × exp(−max(p50, 50) / 400)',
   'aboutScore.speedFloor': '* p50 < 50ms is treated as 50ms (network/gateway overhead, not service quality)',
   'aboutScore.stabilityFormula': 'Stability (0~10): 10 × exp(−CV / 0.5)',
-  'aboutScore.cvExplain': 'CV combines day-to-day p50 variance (50%) and p95/p50 spread ratio (50%) for robust stability measurement.',
+  'aboutScore.cvExplain': 'CV combines day-to-day p50 variance (30%) and p95/p50 spread ratio (70%) for robust stability measurement.',
   'aboutScore.noProbe': 'Services Without Probe Data',
   'aboutScore.noProbeDesc': 'Services without public API endpoints (Bedrock, Azure OpenAI, Pinecone, Modal, Apps, Agents) cannot be probed. Their scores are calculated without the Responsiveness component (80→100 redistribution × 0.95, max 95 points).',
   'aboutScore.formulaStr': 'AIWatch Score = Uptime + Incidents + Recovery + Responsiveness',

@@ -92,6 +92,7 @@ export async function computeProbeSummaries(kv: KVNamespace, days = 7): Promise<
   }
 
   if (dailyData.length < 2) return result // need at least 2 days for CV
+  const MIN_DAYS = Math.min(days, 7) // require 7 days for reliable CV (or less if requested)
 
   // Collect per-service daily p50 and p95 values
   // Skip unreliable days: spike ratio >= 50% OR p95/p50 spread > 10× (extreme outlier day)
@@ -108,7 +109,7 @@ export async function computeProbeSummaries(kv: KVNamespace, days = 7): Promise<
   }
 
   for (const [svcId, stats] of Object.entries(svcStats)) {
-    if (stats.p50s.length < 2) continue
+    if (stats.p50s.length < MIN_DAYS) continue // require MIN_DAYS valid days for reliable Responsiveness
 
     const p50Avg = stats.p50s.reduce((a, b) => a + b, 0) / stats.p50s.length
     const p95Avg = stats.p95s.reduce((a, b) => a + b, 0) / stats.p95s.length
@@ -120,8 +121,9 @@ export async function computeProbeSummaries(kv: KVNamespace, days = 7): Promise<
     // p95/p50 spread ratio
     const spreadRatio = p50Avg > 0 ? (p95Avg - p50Avg) / p50Avg : 0
 
-    // Combined CV: 50% day-to-day + 50% spread
-    const cvCombined = 0.5 * cvDaily + 0.5 * spreadRatio
+    // Combined CV: 30% day-to-day + 70% spread
+    // Spread-weighted to reduce bimodal CV penalty (e.g., Claude: CV=1.6 from CDN routing, not instability)
+    const cvCombined = 0.3 * cvDaily + 0.7 * spreadRatio
 
     result.set(svcId, {
       p50: Math.round(p50Avg),
