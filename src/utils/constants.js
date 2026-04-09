@@ -53,6 +53,36 @@ export const SERVICE_CATEGORIES = {
 // Keep in sync with worker/src/fallback.ts EXCLUDE_FALLBACK
 export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai']
 
+// Fallback tier priority for API services
+// Keep in sync with worker/src/fallback.ts API_TIER
+export const API_TIER = {
+  claude: 1, openai: 1, gemini: 1,
+  mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, deepseek: 2, xai: 2, perplexity: 2,
+  bedrock: 3, azureopenai: 3, openrouter: 3,
+  elevenlabs: 4, assemblyai: 4, deepgram: 4,
+}
+
+/**
+ * Get top 2 fallback recommendations for a service, sorted by tier proximity + AIWatch Score.
+ * @param {object} service - Source service (needs .id, .category)
+ * @param {object[]} allServices - All services (needs .id, .category, .status, .aiwatchScore)
+ * @returns {{ id: string, name: string, aiwatchScore: number | null }[]}
+ */
+export function getFallbacks(service, allServices) {
+  if (!service || !Array.isArray(allServices) || EXCLUDE_FALLBACK.includes(service.id)) return []
+  const sourceTier = API_TIER[service.id] ?? 99
+  return allServices
+    .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational' && !EXCLUDE_FALLBACK.includes(s.id))
+    .sort((a, b) => {
+      const distA = Math.abs((API_TIER[a.id] ?? 99) - sourceTier)
+      const distB = Math.abs((API_TIER[b.id] ?? 99) - sourceTier)
+      if (distA !== distB) return distA - distB
+      return (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0)
+    })
+    .slice(0, 2)
+    .map(s => ({ id: s.id, name: s.name, aiwatchScore: s.aiwatchScore ?? null }))
+}
+
 export const VALID_ALERT_CONDITIONS = ['down', 'degraded', 'all']
 
 export const DEFAULT_SETTINGS = {

@@ -207,7 +207,7 @@ describe('analyzeIncident', () => {
 
   it('returns parsed analysis on successful API response', async () => {
     const mockResponse = {
-      content: [{ type: 'text', text: '{"summary":"Test analysis","estimatedRecovery":"30-60 min","affectedScope":["API"]}' }],
+      content: [{ type: 'text', text: '{"summary":"Test analysis","estimatedRecovery":"30-60 min","affectedScope":["API"],"needsFallback":true}' }],
     }
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -219,7 +219,72 @@ describe('analyzeIncident', () => {
     expect(result!.summary).toBe('Test analysis')
     expect(result!.estimatedRecovery).toBe('30-60 min')
     expect(result!.affectedScope).toEqual(['API'])
+    expect(result!.needsFallback).toBe(true)
     expect(result!.incidentId).toBe('inc1')
+
+    vi.unstubAllGlobals()
+  })
+
+  it('defaults needsFallback to false when AI omits it', async () => {
+    const mockResponse = {
+      content: [{ type: 'text', text: '{"summary":"Minor issue","estimatedRecovery":"15m","affectedScope":[]}' }],
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResponse),
+    }))
+
+    const result = await analyzeIncident('fake-key', 'Test', mockInc, [])
+    expect(result).not.toBeNull()
+    expect(result!.needsFallback).toBe(false)
+
+    vi.unstubAllGlobals()
+  })
+
+  it('parses needsFallback: false correctly', async () => {
+    const mockResponse = {
+      content: [{ type: 'text', text: '{"summary":"Scheduled maintenance","estimatedRecovery":"1h","affectedScope":["Dashboard"],"needsFallback":false}' }],
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResponse),
+    }))
+
+    const result = await analyzeIncident('fake-key', 'Test', mockInc, [])
+    expect(result).not.toBeNull()
+    expect(result!.needsFallback).toBe(false)
+
+    vi.unstubAllGlobals()
+  })
+
+  it('coerces needsFallback string "true" to true', async () => {
+    const mockResponse = {
+      content: [{ type: 'text', text: '{"summary":"Outage","estimatedRecovery":"2h","affectedScope":["API"],"needsFallback":"true"}' }],
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResponse),
+    }))
+
+    const result = await analyzeIncident('fake-key', 'Test', mockInc, [])
+    expect(result).not.toBeNull()
+    expect(result!.needsFallback).toBe(true)
+
+    vi.unstubAllGlobals()
+  })
+
+  it('treats needsFallback non-boolean values as false', async () => {
+    const mockResponse = {
+      content: [{ type: 'text', text: '{"summary":"Issue","estimatedRecovery":"1h","affectedScope":[],"needsFallback":"yes"}' }],
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResponse),
+    }))
+
+    const result = await analyzeIncident('fake-key', 'Test', mockInc, [])
+    expect(result).not.toBeNull()
+    expect(result!.needsFallback).toBe(false)
 
     vi.unstubAllGlobals()
   })

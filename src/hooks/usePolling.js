@@ -499,12 +499,12 @@ const MOCK_SERVICES = [
 // Mock AI analysis — must reference an incidentId matching an unresolved incident in MOCK_SERVICES
 // API returns Record<svcId, AIAnalysisResult[]> — each service may have multiple analyses
 const MOCK_AI_ANALYSIS = {
-  openai: [{ summary: 'Chat endpoint latency elevated due to increased traffic.', estimatedRecovery: '~1h', affectedScope: ['Chat API'], analyzedAt: new Date().toISOString(), incidentId: 'oi-2' }],
+  openai: [{ summary: 'Chat endpoint latency elevated due to increased traffic.', estimatedRecovery: '~1h', affectedScope: ['Chat API'], needsFallback: true, analyzedAt: new Date().toISOString(), incidentId: 'oi-2' }],
   elevenlabs: [
-    { summary: 'TTS API response times are 3x higher than normal due to GPU cluster overload. The team has identified the bottleneck and is scaling resources.', estimatedRecovery: '30m–1h', affectedScope: ['TTS API', 'Real-time synthesis'], analyzedAt: new Date().toISOString(), incidentId: 'el-1' },
-    { summary: 'Voice cloning endpoint returning 500 errors. Likely related to the GPU cluster overload affecting TTS, but impacting a separate service pipeline.', estimatedRecovery: '1–2h', affectedScope: ['Voice Cloning API', 'Custom voice creation'], analyzedAt: new Date(Date.now() - 15 * 60000).toISOString(), incidentId: 'el-2' },
+    { summary: 'TTS API response times are 3x higher than normal due to GPU cluster overload. The team has identified the bottleneck and is scaling resources.', estimatedRecovery: '30m–1h', affectedScope: ['TTS API', 'Real-time synthesis'], needsFallback: true, analyzedAt: new Date().toISOString(), incidentId: 'el-1' },
+    { summary: 'Voice cloning endpoint returning 500 errors. Likely related to the GPU cluster overload affecting TTS, but impacting a separate service pipeline.', estimatedRecovery: '1–2h', affectedScope: ['Voice Cloning API', 'Custom voice creation'], needsFallback: false, analyzedAt: new Date(Date.now() - 15 * 60000).toISOString(), incidentId: 'el-2' },
   ],
-  together: [{ summary: 'Moonshot Kimi K2.5 model experienced a brief outage affecting inference endpoints. Service has been restored.', estimatedRecovery: 'Resolved', affectedScope: ['Kimi K2.5 inference', 'Model endpoints'], analyzedAt: new Date(Date.now() - 30 * 60000).toISOString(), incidentId: 'together-mock-1', resolvedAt: new Date(Date.now() - 10 * 60000).toISOString() }],
+  together: [{ summary: 'Moonshot Kimi K2.5 model experienced a brief outage affecting inference endpoints. Service has been restored.', estimatedRecovery: 'Resolved', affectedScope: ['Kimi K2.5 inference', 'Model endpoints'], needsFallback: false, analyzedAt: new Date(Date.now() - 30 * 60000).toISOString(), incidentId: 'together-mock-1', resolvedAt: new Date(Date.now() - 10 * 60000).toISOString() }],
 }
 const MOCK_RECENTLY_RECOVERED = ['together']
 

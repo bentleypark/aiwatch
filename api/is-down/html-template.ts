@@ -98,7 +98,7 @@ export function renderPage(
   service: ServiceData | null,
   seo: ServiceSEO,
   fallbacks: Fallback[],
-  aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string } | null,
+  aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string } | null,
 ): string {
   const title = `Is ${seo.displayName} Down? Live Status | AIWatch`
   const desc = (aiInsight && service && service.status !== 'operational')
@@ -203,7 +203,7 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 <div class="container">
 
 ${renderStatusHeader(service, seo)}
-${renderAIInsight(aiInsight, service?.status)}
+${renderAIInsight(aiInsight, service?.status, fallbacks)}
 ${renderCTA(seo, service?.status ?? 'operational')}
 ${renderIncidents(service)}
 ${renderDescription(seo, service)}
@@ -253,7 +253,7 @@ function renderFaqJsonLd(seo: ServiceSEO, fallbacks: Fallback[]): string {
   return `<script type="application/ld+json">${safeJsonLd(data)}</script>`
 }
 
-function renderAIInsight(insight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; resolvedAt?: string } | null, serviceStatus?: string): string {
+function renderAIInsight(insight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string } | null, serviceStatus?: string, fallbacks?: Fallback[]): string {
   if (!insight) return ''
   const ago = Math.floor((Date.now() - new Date(insight.analyzedAt).getTime()) / 60000)
   const agoText = ago < 1 ? 'just now' : ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`
@@ -264,6 +264,14 @@ function renderAIInsight(insight?: { summary: string; estimatedRecovery: string;
   const isRecentlyRecovered = isResolved && !!insight.resolvedAt
   const resolvedBadge = isResolved
     ? '<span class="mono" style="font-size:10px;color:#3fb950;background:rgba(63,185,80,0.15);padding:2px 8px;border-radius:4px">Resolved</span>'
+    : ''
+  const fallbackHtml = insight.needsFallback && !isResolved && fallbacks
+    ? `<div style="margin-top:8px;padding:8px 10px;background:#0d1117;border-radius:6px;border-left:3px solid #d29922">
+<span class="mono" style="font-size:11px;color:#c9d1d9;font-weight:600">🔄 Alternatives</span>
+${fallbacks.length > 0
+    ? fallbacks.map(f => `<div class="mono" style="font-size:11px;color:#c9d1d9;margin-top:3px">• ${esc(f.name)}${f.score != null ? ` (Score: ${f.score})` : ''}</div>`).join('')
+    : '<div class="mono" style="font-size:11px;color:#8b949e;margin-top:3px">No operational alternatives currently available</div>'}
+</div>`
     : ''
   return `<div class="card" style="border-left:3px solid ${isResolved ? '#3fb950' : '#7C3AED'};margin:16px 0${isResolved && !isRecentlyRecovered ? ';opacity:0.75' : ''}">
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
@@ -279,6 +287,7 @@ ${insight.affectedScope.length > 0 ? `<span>📡 <strong style="color:#c9d1d9">S
 ${insight.resolvedAt ? `<span>✅ Recovered: ${(() => { const m = Math.floor((Date.now() - new Date(insight.resolvedAt).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : Math.floor(m / 60) + 'h ago' })()}</span>` : ''}
 <span>🕐 ${agoText}</span>
 </div>
+${fallbackHtml}
 <p class="mono" style="font-size:9px;color:#484f58;margin-top:8px;opacity:0.7">⚠️ AI-generated estimation based on historical data. Actual time may vary.</p>
 </div>`
 }

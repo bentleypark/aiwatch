@@ -1,5 +1,6 @@
 // AI Analysis Modal — shows incident analysis results from Claude
 import { useLang } from '../hooks/useLang'
+import { getFallbacks } from '../utils/constants'
 
 function timeAgo(date, lang) {
   const diff = Date.now() - new Date(date).getTime()
@@ -124,6 +125,29 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                         {isRecovered && <span>✅ {t('analysis.recoveredAt')}: {timeAgo(analysis.resolvedAt, lang)}</span>}
                         <span>🕐 {lang === 'ko' ? '분석 업데이트' : 'Analysis updated'} {timeAgo(analysis.analyzedAt, lang)}</span>
                       </div>
+                      {/* Contextual fallback recommendation */}
+                      {analysis.needsFallback && !isRecovered && (() => {
+                        const primarySvc = svcs[0]
+                        const fallbacks = getFallbacks(primarySvc, services)
+                        return (
+                          <div className="mono text-[10px]" style={{ marginTop: '8px', padding: '8px 10px', background: 'var(--bg1)', borderRadius: '6px', borderLeft: '3px solid var(--amber)' }}>
+                            <span style={{ color: 'var(--text1)', fontWeight: 600 }}>🔄 {lang === 'ko' ? '대안 서비스' : 'Alternatives'}</span>
+                            {fallbacks.length > 0 ? (
+                              <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                {fallbacks.map(f => (
+                                  <span key={f.id} style={{ color: 'var(--text1)' }}>
+                                    • {f.name}{f.aiwatchScore != null ? ` (Score: ${f.aiwatchScore})` : ''}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <div style={{ marginTop: '4px', color: 'var(--text2)' }}>
+                                {lang === 'ko' ? '현재 운영 중인 대안 서비스가 없습니다' : 'No operational alternatives currently available'}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
                     </div>
                   )
                 })}

@@ -8,7 +8,7 @@ import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
-import { SCORE_BG_CLASS, SERVICE_CATEGORIES, EXCLUDE_FALLBACK } from '../utils/constants'
+import { SCORE_BG_CLASS, SERVICE_CATEGORIES, EXCLUDE_FALLBACK, API_TIER, getFallbacks } from '../utils/constants'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
@@ -296,31 +296,6 @@ function Panel({ title, dotColor, subtitle, children }) {
       </div>
     </div>
   )
-}
-
-// ── Fallback logic (mirrors worker/src/fallback.ts) ──
-
-// Keep in sync with worker/src/fallback.ts API_TIER
-const API_TIER = {
-  claude: 1, openai: 1, gemini: 1,
-  mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, deepseek: 2, xai: 2, perplexity: 2,
-  bedrock: 3, azureopenai: 3, openrouter: 3,
-  elevenlabs: 4, assemblyai: 4, deepgram: 4,
-}
-
-function getFallbacks(service, allServices) {
-  if (EXCLUDE_FALLBACK.includes(service.id)) return []
-  const sourceTier = API_TIER[service.id] ?? 99
-  return allServices
-    .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational' && !EXCLUDE_FALLBACK.includes(s.id))
-    .sort((a, b) => {
-      const distA = Math.abs((API_TIER[a.id] ?? 99) - sourceTier)
-      const distB = Math.abs((API_TIER[b.id] ?? 99) - sourceTier)
-      if (distA !== distB) return distA - distB
-      return (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0)
-    })
-    .slice(0, 2)
-    .map(s => ({ id: s.id, name: s.name, aiwatchScore: s.aiwatchScore ?? null }))
 }
 
 // ── Action Banner — shows fallback recommendations during outages ──
