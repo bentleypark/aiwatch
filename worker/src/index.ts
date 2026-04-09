@@ -372,13 +372,27 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   }
 
   // Record detection timestamps for non-operational services (Detection Lead feature)
-  // Only store if no existing detection — preserves earliest detection time
+  // Stores JSON { t: ISO timestamp, incId: incident ID } — resets when incident ID changes
+  // to prevent inflated Detection Lead during consecutive incidents (#189)
   for (const svc of scored) {
     if (svc.status !== 'operational') {
       const detectKey = `detected:${svc.id}`
       const existing = await env.STATUS_CACHE.get(detectKey).catch(() => null)
-      if (!existing) {
-        await kvPut(env.STATUS_CACHE, detectKey, new Date().toISOString(), { expirationTtl: 604800 })
+      const activeInc = (svc.incidents ?? []).find(i => i.status !== 'resolved')
+      const activeIncId = activeInc?.id ?? null
+      if (existing) {
+        // Check if incident changed — if so, reset detection for fresh lead calculation
+        try {
+          const prev = JSON.parse(existing)
+          if (prev.incId && activeIncId && prev.incId !== activeIncId) {
+            await kvPut(env.STATUS_CACHE, detectKey, JSON.stringify({ t: new Date().toISOString(), incId: activeIncId }), { expirationTtl: 604800 })
+          }
+        } catch {
+          // Legacy format (plain ISO string) — overwrite with new format
+          await kvPut(env.STATUS_CACHE, detectKey, JSON.stringify({ t: existing, incId: activeIncId }), { expirationTtl: 604800 })
+        }
+      } else {
+        await kvPut(env.STATUS_CACHE, detectKey, JSON.stringify({ t: new Date().toISOString(), incId: activeIncId }), { expirationTtl: 604800 })
       }
     } else {
       // Service recovered — clean up detection timestamp
@@ -462,7 +476,16 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
         }
         // Detection Lead: show early detection advantage in Discord alert
         try {
-          const detectedAt = await env.STATUS_CACHE.get(`detected:${svc.id}`).catch(() => null)
+          const detectRaw = await env.STATUS_CACHE.get(`detected:${svc.id}`).catch(() => null)
+          let detectedAt: string | null = null
+          if (detectRaw) {
+            try {
+              const parsed = JSON.parse(detectRaw)
+              detectedAt = parsed.t ?? null
+            } catch {
+              detectedAt = detectRaw // Legacy plain ISO string format
+            }
+          }
           detectionLeadSection = formatDetectionLead(detectedAt, inc.startedAt)
         } catch (err) {
           console.error('[cron] detection lead failed:', err instanceof Error ? err.message : err)
@@ -596,10 +619,16 @@ export default {
             if (existing) continue
             await kvPut(env.STATUS_CACHE, alertKey, '1', { expirationTtl: 3600 })
             // Record probe spike as earliest detection (Detection Lead feature)
+            // Uses JSON format { t, incId } — incId null for probe-only detection (no incident yet)
             const detectKey = `detected:${spike.serviceId}`
             const existingDetect = await env.STATUS_CACHE.get(detectKey).catch(() => null)
-            if (!existingDetect || new Date(spike.since).getTime() < new Date(existingDetect).getTime()) {
-              await kvPut(env.STATUS_CACHE, detectKey, spike.since, { expirationTtl: 604800 })
+            let existingTime = 0
+            if (existingDetect) {
+              try { existingTime = new Date(JSON.parse(existingDetect).t).getTime() } catch { existingTime = new Date(existingDetect).getTime() }
+            }
+            const spikeTime = new Date(spike.since).getTime()
+            if (!existingDetect || (spikeTime < existingTime && !isNaN(spikeTime))) {
+              await kvPut(env.STATUS_CACHE, detectKey, JSON.stringify({ t: spike.since, incId: null }), { expirationTtl: 604800 })
             }
           }
         }
