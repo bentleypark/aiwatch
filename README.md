@@ -47,6 +47,7 @@ Real-time monitoring dashboard for **30 AI services** — track status, latency,
 - **AI Analysis (Beta)** — Claude Sonnet auto-analysis on incidents: cause estimation, recovery time, affected scope, contextual fallback recommendations. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 - **Landing page** — Product Hunt landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, and GA4 tracking
 - **Web Vitals monitoring** — Real user LCP, FCP, TTFB, CLS, INP collection with p75 aggregation and threshold-based alerts in Discord Daily Report
+- **Status page cross-validation** — Probe RTT + platform quorum + metastatuspage monitoring to prevent false positives during status page infrastructure outages
 
 ## Monitored Services
 
@@ -311,6 +312,7 @@ worker/
     alerts.ts    # Alert detection logic (incident + service alerts)
     fallback.ts  # Fallback recommendation
     probe.ts     # Health check probing — direct RTT measurement
+    platform-monitor.ts # Status page platform health monitoring (metastatuspage.com)
     monthly-archive.ts # Monthly reliability archive (permanent KV)
     parsers/     # Platform-specific parsers
       statuspage.ts   # Atlassian Statuspage (7 services)

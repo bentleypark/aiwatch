@@ -45,7 +45,8 @@
 - **페이지별 스켈레톤** — 각 페이지 레이아웃에 맞는 로딩 placeholder
 - **AI 분석 (Beta)** — 장애 발생 시 Claude Sonnet 자동 분석: 원인 추정, 예상 복구 시간, 영향 범위, 대체 서비스 추천. 인시던트 Discord 알림에 통합(단일 embed), Topbar Analyze 모달, Is X Down AI Insight 카드
 - **랜딩 페이지** — Product Hunt 랜딩 페이지(`/intro`), 대시보드 프리뷰 mock, KO/EN 이중 언어, Flow 애니메이션, GA4 트래킹
-- **Web Vitals 모니터링** — 실사용자 LCP, FCP, TTFB, CLS, INP 수집 (10% 샘플링), p75 집계 및 Discord Daily Report 임계값 알림
+- **Web Vitals 모니터링** — 실사용자 LCP, FCP, TTFB, CLS, INP 수집, p75 집계 및 Discord Daily Report 임계값 알림
+- **상태 페이지 교차 검증** — Probe RTT + 플랫폼 쿼럼 + metastatuspage 모니터링으로 상태 페이지 인프라 장애 시 오탐 방지
 
 ## 모니터링 서비스
 
@@ -310,6 +311,7 @@ worker/
     alerts.ts    # 알림 감지 로직 (인시던트 + 서비스 알림)
     fallback.ts  # 대체 서비스 추천
     probe.ts     # 헬스체크 프로빙 — 직접 RTT 측정
+    platform-monitor.ts # 상태 페이지 플랫폼 모니터링 (metastatuspage.com)
     monthly-archive.ts # 월간 안정성 아카이브 (영구 KV 보존)
     parsers/     # 플랫폼별 파서
       statuspage.ts   # Atlassian Statuspage (7개 서비스)
