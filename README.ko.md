@@ -204,6 +204,7 @@ npm run deploy:worker  # Cloudflare 배포 (npm 스크립트만 사용)
 | `/api/status` | GET | 전체 서비스 상태 + 인시던트 + 가동률 + latency24h + aiAnalysis |
 | `/api/status/cached` | GET | KV 캐시 전용 (Edge SSR용, ~1.2초) |
 | `/api/uptime?days=30` | GET | 일별 가동률 이력 (1-90일) |
+| `/api/report?month=YYYY-MM` | GET | 월간 안정성 아카이브 (가동률, 점수, 인시던트, 레이턴시) |
 | `/api/alert` | POST | Webhook 프록시 (Slack/Discord만, SSRF 보호) |
 | `/badge/:serviceId` | GET | SVG 상태 배지 (shields.io 스타일) |
 | `/api/og` | GET | 동적 OG 이미지 PNG (1200×630, resvg-wasm) |
@@ -309,6 +310,7 @@ worker/
     alerts.ts    # 알림 감지 로직 (인시던트 + 서비스 알림)
     fallback.ts  # 대체 서비스 추천
     probe.ts     # 헬스체크 프로빙 — 직접 RTT 측정
+    monthly-archive.ts # 월간 안정성 아카이브 (영구 KV 보존)
     parsers/     # 플랫폼별 파서
       statuspage.ts   # Atlassian Statuspage (7개 서비스)
       incident-io.ts  # incident.io (6개 서비스)

@@ -572,6 +572,7 @@ import { detectRedditPosts, formatRedditAlert, isPromotable } from './reddit'
 import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { archiveProbeDaily, type ProbeDailyData } from './probe-archival'
+import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateMonthlyIncidents, type MonthlyIncidents, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
@@ -644,6 +645,46 @@ export default {
       await archiveProbeDaily(env.STATUS_CACHE, now).catch((err) =>
         console.warn('[cron] probe archive failed:', err instanceof Error ? err.message : err)
       )
+    }
+
+    // Monthly archive on 1st of each month (UTC 00:00-00:14, catch-up 01:00-01:14)
+    // Aggregates previous month's daily data into permanent archive:monthly:{YYYY-MM} KV key
+    const { inWindow: inArchiveWindow, isCatchUp: isArchiveCatchUp } = isInMonthlyArchiveWindow(now.getUTCDate(), now.getUTCHours(), now.getUTCMinutes())
+    if (inArchiveWindow && env.STATUS_CACHE) {
+      const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      const prevYear = prevMonth.getFullYear()
+      const prevMon = prevMonth.getMonth() + 1
+      const archiveKey = `archive:monthly:${prevYear}-${String(prevMon).padStart(2, '0')}`
+      const existing = await env.STATUS_CACHE.get(archiveKey).catch(() => null)
+      if (!existing) {
+        try {
+          // Read latest cached services for Score data only (incidents come from accumulated KV data)
+          let scoreData: ArchiveScoreInput[] = []
+          const cachedRaw = await env.STATUS_CACHE.get('services:latest').catch(() => null)
+          if (cachedRaw) {
+            try {
+              const p = JSON.parse(cachedRaw)
+              scoreData = (Array.isArray(p) ? p : p.services ?? []).map((s: any) => ({
+                id: s.id, aiwatchScore: s.aiwatchScore ?? null, scoreGrade: s.scoreGrade ?? null,
+              }))
+            } catch (parseErr) {
+              console.error('[monthly-archive] Failed to parse services:latest — archive will lack Score data:',
+                parseErr instanceof Error ? parseErr.message : parseErr)
+            }
+          }
+
+          const archive = await buildMonthlyArchive(env.STATUS_CACHE, prevYear, prevMon, scoreData)
+          const writeOk = await kvPut(env.STATUS_CACHE, archiveKey, JSON.stringify(archive))
+          if (!writeOk) {
+            console.error(`[monthly-archive] KV write failed for ${archive.period} — archive NOT persisted`)
+          } else {
+            if (isArchiveCatchUp) console.log(`[monthly-archive] catch-up run for ${archive.period}`)
+            console.log(`[monthly-archive] Archived ${archive.period}: ${Object.keys(archive.services).length} services, ${archive.daysCollected} days`)
+          }
+        } catch (err) {
+          console.error('[monthly-archive] Failed:', err)
+        }
+      }
     }
 
     // Daily summary at UTC 09:00 (KST 18:00) — purple embed
@@ -777,6 +818,29 @@ export default {
           })
           // Mark today's summary as done (prevents re-send on subsequent cron cycles)
           await kvPut(env.STATUS_CACHE, `daily-summary:${today}`, '1', { expirationTtl: 604800 })
+
+          // Accumulate monthly incident data (runs daily alongside summary)
+          if (dailyServices.length > 0) {
+            try {
+              const currentMonth = today.slice(0, 7) // YYYY-MM
+              const incKey = `incidents:monthly:${currentMonth}`
+              const existingRaw = await env.STATUS_CACHE.get(incKey).catch(() => null)
+              let existingInc: MonthlyIncidents | null = null
+              if (existingRaw) {
+                try { existingInc = JSON.parse(existingRaw) } catch (parseErr) {
+                  console.warn('[daily-summary] corrupt incident accumulation data, resetting:',
+                    parseErr instanceof Error ? parseErr.message : parseErr)
+                }
+              }
+              const updated = accumulateMonthlyIncidents(existingInc, dailyServices, currentMonth)
+              const incWriteOk = await kvPut(env.STATUS_CACHE, incKey, JSON.stringify(updated), { expirationTtl: 60 * 86400 })
+              if (!incWriteOk) {
+                console.error(`[daily-summary] incident accumulation KV write failed for ${currentMonth}`)
+              }
+            } catch (err) {
+              console.error('[daily-summary] incident accumulation failed:', err instanceof Error ? err.message : err)
+            }
+          }
         } catch (err) {
           // NOTE: marker intentionally NOT written — allows retry on catch-up window (UTC 10:00)
           console.error('[daily-summary] Expanded report failed:', err instanceof Error ? err.message : err)
@@ -1218,6 +1282,43 @@ export default {
       })
     }
 
+    // GET /api/report — return monthly archive data
+    if (url.pathname === '/api/report') {
+      const month = url.searchParams.get('month')
+      if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+        return new Response(JSON.stringify({ error: 'Missing or invalid month parameter (YYYY-MM)' }), {
+          status: 400,
+          headers: { ...cors, 'Content-Type': 'application/json' },
+        })
+      }
+      if (!env.STATUS_CACHE) {
+        return new Response(JSON.stringify({ error: 'Service unavailable' }), {
+          status: 503,
+          headers: { ...cors, 'Content-Type': 'application/json' },
+        })
+      }
+      let raw: string | null
+      try {
+        raw = await env.STATUS_CACHE.get(`archive:monthly:${month}`)
+      } catch (err) {
+        console.error('[api/report] KV read failed:', err instanceof Error ? err.message : err)
+        return new Response(JSON.stringify({ error: 'Failed to read archive data' }), {
+          status: 502,
+          headers: { ...cors, 'Content-Type': 'application/json' },
+        })
+      }
+      if (!raw) {
+        return new Response(JSON.stringify({ error: `No archive found for ${month}` }), {
+          status: 404,
+          headers: { ...cors, 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(raw, {
+        status: 200,
+        headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=86400' },
+      })
+    }
+
     // GET /api/uptime — return daily uptime history
     if (url.pathname === '/api/uptime') {
       const rawDays = Number(url.searchParams.get('days') ?? 30)
@@ -1229,7 +1330,7 @@ export default {
       })
     }
 
-    if (request.method !== 'GET' || (url.pathname !== '/api/status' && url.pathname !== '/api/uptime' && url.pathname !== '/api/probe/history')) {
+    if (request.method !== 'GET' || (url.pathname !== '/api/status' && url.pathname !== '/api/uptime' && url.pathname !== '/api/probe/history' && url.pathname !== '/api/report')) {
       return new Response(JSON.stringify({ error: 'Not Found' }), {
         status: 404,
         headers: { ...cors, 'Content-Type': 'application/json' },
