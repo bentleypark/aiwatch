@@ -311,15 +311,21 @@ worker/
     og-render.ts # SVG → PNG conversion (resvg-wasm)
     alerts.ts    # Alert detection logic (incident + service alerts)
     fallback.ts  # Fallback recommendation
-    probe.ts     # Health check probing — direct RTT measurement
-    platform-monitor.ts # Status page platform health monitoring (metastatuspage.com)
+    ai-analysis.ts # Claude Sonnet incident analysis
+    daily-summary.ts # Daily Discord report (uptime, latency, AI usage)
     monthly-archive.ts # Monthly reliability archive (permanent KV)
+    vitals.ts    # Web Vitals aggregation (p75, Discord formatting)
+    probe.ts     # Health check probing — direct RTT measurement
+    probe-archival.ts # Daily probe RTT archival + 7-day summary
+    platform-monitor.ts # Status page platform health monitoring (metastatuspage.com)
+    detection.ts # Detection Lead entry parsing + reset logic
+    reddit.ts    # Reddit outage chatter monitoring
     parsers/     # Platform-specific parsers
       statuspage.ts   # Atlassian Statuspage (7 services)
       incident-io.ts  # incident.io (6 services)
       gcloud.ts       # Google Cloud (1 service)
       instatus.ts     # Instatus (2 services)
-      betterstack.ts  # Better Stack (3 services)
+      betterstack.ts  # Better Stack (4 services)
       onlineornot.ts  # OnlineOrNot (1 service — OpenRouter)
       aws.ts          # AWS Health Dashboard (1 service — Bedrock)
     parsers/__tests__/ # Vitest unit tests

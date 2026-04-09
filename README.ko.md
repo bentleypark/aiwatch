@@ -310,15 +310,21 @@ worker/
     og-render.ts # SVG → PNG 변환 (resvg-wasm)
     alerts.ts    # 알림 감지 로직 (인시던트 + 서비스 알림)
     fallback.ts  # 대체 서비스 추천
-    probe.ts     # 헬스체크 프로빙 — 직접 RTT 측정
-    platform-monitor.ts # 상태 페이지 플랫폼 모니터링 (metastatuspage.com)
+    ai-analysis.ts # Claude Sonnet 장애 분석
+    daily-summary.ts # 일일 Discord 리포트 (가동률, 지연시간, AI 사용량)
     monthly-archive.ts # 월간 안정성 아카이브 (영구 KV 보존)
+    vitals.ts    # Web Vitals 집계 (p75, Discord 포맷)
+    probe.ts     # 헬스체크 프로빙 — 직접 RTT 측정
+    probe-archival.ts # 일별 probe RTT 아카이브 + 7일 요약
+    platform-monitor.ts # 상태 페이지 플랫폼 모니터링 (metastatuspage.com)
+    detection.ts # Detection Lead 파싱 + 리셋 로직
+    reddit.ts    # Reddit 장애 감지 모니터링
     parsers/     # 플랫폼별 파서
       statuspage.ts   # Atlassian Statuspage (7개 서비스)
       incident-io.ts  # incident.io (6개 서비스)
       gcloud.ts       # Google Cloud (1개 서비스)
       instatus.ts     # Instatus (2개 서비스)
-      betterstack.ts  # Better Stack (3개 서비스)
+      betterstack.ts  # Better Stack (4개 서비스)
       onlineornot.ts  # OnlineOrNot (1개 서비스 — OpenRouter)
       aws.ts          # AWS Health Dashboard (1개 서비스 — Bedrock)
     parsers/__tests__/ # Vitest 단위 테스트

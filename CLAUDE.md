@@ -269,7 +269,10 @@ worker/
     monthly-archive.ts # Monthly reliability archive (uptime, score, incidents, latency per service, permanent KV)
     vitals.ts   # Web Vitals aggregation (ingest, KV flush, p75 computation, Discord formatting)
     probe.ts    # Health check probing — direct RTT measurement (19 API services)
+    probe-archival.ts # Daily probe RTT archival + 7-day summary (p50, p95, cvCombined)
     platform-monitor.ts # Status page platform health monitoring (metastatuspage.com for Atlassian)
+    detection.ts # Detection Lead entry parsing + incident-aware reset logic
+    reddit.ts   # Reddit r/ChatGPT monitoring for outage chatter
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
                 # dailyImpact support: statuspage (uptimeData), incident-io (component impacts), betterstack (status_history from index.json)
 ```
