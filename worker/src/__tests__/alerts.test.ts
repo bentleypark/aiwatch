@@ -429,17 +429,16 @@ describe('formatDetectionLead', () => {
     expect(formatDetectionLead(new Date(NOW).toISOString(), 'not-a-date')).toBe('')
   })
 
-  it('formats hour+minute label for exactly 60 min lead', () => {
+  it('returns empty for exactly 60 min lead (capped at 59m, #189)', () => {
     const detected = new Date(NOW - 60 * 60_000).toISOString()
     const started = new Date(NOW).toISOString()
-    const result = formatDetectionLead(detected, started)
-    expect(result).toContain('1h 0m')
+    expect(formatDetectionLead(detected, started)).toBe('')
   })
 
-  it('returns result for 60.5 min (floor to 60, still within range)', () => {
-    const detected = new Date(NOW - 60.5 * 60_000).toISOString()
+  it('returns result for 59 min lead (max valid)', () => {
+    const detected = new Date(NOW - 59 * 60_000).toISOString()
     const started = new Date(NOW).toISOString()
     const result = formatDetectionLead(detected, started)
-    expect(result).toContain('1h 0m')
+    expect(result).toContain('59m')
   })
 })

@@ -7,6 +7,7 @@ import { calculateAIWatchScore } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead } from './alerts'
 import { analyzeIncident, refreshOrReanalyze, analysisKey, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale } from './utils'
+import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -378,16 +379,19 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   }
 
   // Record detection timestamps for non-operational services (Detection Lead feature)
-  // Only store if no existing detection — preserves earliest detection time
+  // Uses detection.ts helpers — resets when incident ID changes to prevent inflated leads (#189)
   for (const svc of scored) {
     if (svc.status !== 'operational') {
       const detectKey = `detected:${svc.id}`
-      const existing = await env.STATUS_CACHE.get(detectKey).catch(() => null)
-      if (!existing) {
-        await kvPut(env.STATUS_CACHE, detectKey, new Date().toISOString(), { expirationTtl: 604800 })
+      const existingRaw = await env.STATUS_CACHE.get(detectKey).catch(() => null)
+      const activeInc = (svc.incidents ?? []).find(i => i.status !== 'resolved')
+      const activeIncId = activeInc?.id ?? null
+      const existing = parseDetectionEntry(existingRaw)
+      const update = resolveDetectionUpdate(existing, activeIncId, new Date().toISOString())
+      if (update) {
+        await kvPut(env.STATUS_CACHE, detectKey, serializeDetectionEntry(update.entry), { expirationTtl: 604800 })
       }
     } else {
-      // Service recovered — clean up detection timestamp
       await kvDel(env.STATUS_CACHE, `detected:${svc.id}`)
     }
   }
@@ -468,7 +472,8 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
         }
         // Detection Lead: show early detection advantage in Discord alert
         try {
-          const detectedAt = await env.STATUS_CACHE.get(`detected:${svc.id}`).catch(() => null)
+          const detectRaw = await env.STATUS_CACHE.get(`detected:${svc.id}`).catch(() => null)
+          const detectedAt = getDetectionTimestamp(detectRaw)
           detectionLeadSection = formatDetectionLead(detectedAt, inc.startedAt)
         } catch (err) {
           console.error('[cron] detection lead failed:', err instanceof Error ? err.message : err)
@@ -606,8 +611,8 @@ export default {
             // Record probe spike as earliest detection (Detection Lead feature)
             const detectKey = `detected:${spike.serviceId}`
             const existingDetect = await env.STATUS_CACHE.get(detectKey).catch(() => null)
-            if (!existingDetect || new Date(spike.since).getTime() < new Date(existingDetect).getTime()) {
-              await kvPut(env.STATUS_CACHE, detectKey, spike.since, { expirationTtl: 604800 })
+            if (isProbeEarlier(existingDetect, spike.since)) {
+              await kvPut(env.STATUS_CACHE, detectKey, serializeDetectionEntry({ t: spike.since, incId: null }), { expirationTtl: 604800 })
             }
           }
         }
@@ -1436,7 +1441,8 @@ export default {
       if (env.STATUS_CACHE) {
         await Promise.all(enriched.map(async (svc) => {
           if (svc.status !== 'operational') {
-            const ts = await env.STATUS_CACHE!.get(`detected:${svc.id}`).catch(() => null)
+            const raw = await env.STATUS_CACHE!.get(`detected:${svc.id}`).catch(() => null)
+            const ts = getDetectionTimestamp(raw)
             if (ts) detectionMap.set(svc.id, ts)
           }
         }))
