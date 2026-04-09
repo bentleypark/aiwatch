@@ -12,8 +12,8 @@ export const VITAL_NAMES: VitalName[] = ['LCP', 'FCP', 'TTFB', 'CLS', 'INP']
 
 export interface VitalsDaily {
   count: number
-  cumulativeCount: number // total samples across recent history + today
-  daysWithData: number    // days with vitals data (for daily rate estimation)
+  cumulativeCount: number // kept for interface compat — equals count (history reads removed)
+  daysWithData: number    // kept for interface compat — always 1
   p75: Record<VitalName, number>
 }
 
@@ -97,6 +97,8 @@ export async function writeVitalsToKV(kv: KVNamespace, metrics: Partial<Record<V
 /**
  * Archive yesterday's vitals as p75 summary (called by daily summary cron).
  * Stores compact { count, p75 } instead of raw arrays. TTL 90 days.
+ * Note: readVitalsSummary no longer reads history keys (daily n≥30 threshold),
+ * but archival is kept for monthly reports and long-term trend analysis.
  */
 export async function archiveVitals(kv: KVNamespace): Promise<boolean> {
   const yesterday = new Date(Date.now() - 86_400_000).toISOString().split('T')[0]
@@ -138,7 +140,7 @@ export function computeP75(values: number[]): number {
 }
 
 /** Read today's vitals from KV and compute p75 summary for Daily Report.
- *  Also reads recent history keys to compute cumulative sample count. */
+ *  Analysis confidence is based on today's sample count (n≥30 for reliable p75). */
 export async function readVitalsSummary(kv: KVNamespace): Promise<VitalsDaily | null> {
   const today = new Date().toISOString().split('T')[0]
   const key = `vitals:${today}`
@@ -157,29 +159,7 @@ export async function readVitalsSummary(kv: KVNamespace): Promise<VitalsDaily | 
       p75[name] = computeP75(data.allValues[name] ?? [])
     }
 
-    // Sum cumulative count from recent history (up to 30 days) + today
-    // Also count days with data for accurate daily rate estimation
-    // 31 parallel KV reads — runs once/day at daily summary time
-    let cumulativeCount = data.count
-    let daysWithData = 1 // today counts as 1
-    const historyReads: Promise<string | null>[] = []
-    for (let d = 1; d <= 30; d++) {
-      const date = new Date(Date.now() - d * 86_400_000).toISOString().split('T')[0]
-      historyReads.push(kv.get(`vitals:history:${date}`).catch(() => null))
-    }
-    const historyResults = await Promise.all(historyReads)
-    for (const h of historyResults) {
-      if (!h) continue
-      try {
-        const parsed = JSON.parse(h) as { count: number }
-        if (parsed.count) {
-          cumulativeCount += parsed.count
-          daysWithData++
-        }
-      } catch { /* skip corrupt entries */ }
-    }
-
-    return { count: data.count, cumulativeCount, daysWithData, p75: p75 as Record<VitalName, number> }
+    return { count: data.count, cumulativeCount: data.count, daysWithData: 1, p75: p75 as Record<VitalName, number> }
   } catch (err) {
     console.error('[vitals] parse failed:', key, err instanceof Error ? err.message : err)
     return null
@@ -228,14 +208,10 @@ export function formatVitalsSection(vitals: VitalsDaily): string {
   }
   lines.push(`   _p75 = 사용자 75%가 이 값 이하를 경험_`)
 
-  // Analysis status (cumulative across days)
-  const MIN_SAMPLES = 100
-  const cumulative = vitals.cumulativeCount
-  if (cumulative < MIN_SAMPLES) {
-    const remaining = MIN_SAMPLES - cumulative
-    const dailyRate = Math.max(1, Math.round(cumulative / vitals.daysWithData)) // average across all days with data
-    const estimateDays = Math.max(1, Math.ceil(remaining / dailyRate))
-    lines.push(`\n   ⏳ 데이터 수집 중 (${cumulative}/${MIN_SAMPLES}) — 약 ${estimateDays}일 후 분석 가능`)
+  // Analysis confidence based on today's sample size (n≥30 for reliable p75)
+  const MIN_DAILY_SAMPLES = 30
+  if (vitals.count < MIN_DAILY_SAMPLES) {
+    lines.push(`\n   ⚠️ 표본 부족 (n=${vitals.count}, 최소 ${MIN_DAILY_SAMPLES} 필요) — 분석 판단 보류`)
   } else {
     const issues: string[] = []
     const good: string[] = []
