@@ -4,6 +4,7 @@ import type { Incident, ServiceStatus, ServiceConfig, DailyImpactLevel } from '.
 export type { ServiceStatus } from './types'
 import { fetchWithTimeout, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss } from './utils'
 import { isProbeHealthy, type ProbeSnapshot } from './probe'
+import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, computeUptimeFromIncidents, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
@@ -12,7 +13,7 @@ import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBe
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
 import { parseAwsRssIncidents, deriveAwsStatus } from './parsers/aws'
 
-const SERVICES: ServiceConfig[] = [
+export const SERVICES: ServiceConfig[] = [
   // AI API Services
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp' },
   { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'conversation', 'workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'] },
@@ -680,11 +681,42 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   })
 
   // Cross-validate: override false-positive degraded status when probe RTT confirms service is healthy.
-  // Phase 2 runs BEFORE Phase 1 — quorum detection must see original degraded counts before probe overrides.
+  // Order: Phase 3 (metastatuspage) → Phase 2 (quorum) → Phase 1 (probe)
+  // Earlier phases see original degraded counts before later phases mutate them.
   const degradedFromFetch = raw.filter(s => s.status === 'degraded' && s.incidents.length === 0)
   if (degradedFromFetch.length > 0) {
+    // Phase 3: Metastatuspage preemptive signal (if platform status was cached by cron)
+    // Only overrides services where probe also confirms healthy (or no probe data exists).
+    // This prevents hiding real outages that coincide with platform issues.
+    if (kv) {
+      try {
+        const atlassianRaw = await kv.get(platformStatusKey('atlassian')).catch(() => null)
+        if (atlassianRaw) {
+          const platformStatus: PlatformStatus = JSON.parse(atlassianRaw)
+          if (platformStatus.status !== 'operational') {
+            for (const svc of raw) {
+              if (svc.status !== 'degraded' || svc.incidents.length > 0) continue
+              const config = SERVICES.find(c => c.id === svc.id)
+              if (!config || getServicePlatform(config) !== 'atlassian') continue
+              // If probe data shows spike, this is a real outage — don't override
+              if (probeSnapshots && probeSnapshots.length > 0 && svc.id in (probeSnapshots[probeSnapshots.length - 1]?.data ?? {})) {
+                if (!isProbeHealthy(probeSnapshots, svc.id)) {
+                  console.log(`[cross-validation] ${svc.id}: metastatuspage degraded but probe confirms issue — keeping degraded`)
+                  continue
+                }
+              }
+              console.log(`[cross-validation] ${svc.id}: metastatuspage reports ${platformStatus.status} — holding operational`)
+              svc.status = 'operational'
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[cross-validation] metastatuspage KV read/parse failed, falling back to Phase 2:', err instanceof Error ? err.message : err)
+      }
+    }
+
     // Phase 2: Platform quorum detection (independent of probe data)
-    // Must run first — Phase 1 mutations would reduce degraded count and undermine quorum threshold
+    // Runs after Phase 3 — catches cases where metastatuspage itself is unreachable
     const platformAffected = detectPlatformOutage(raw, SERVICES)
     if (platformAffected.size > 0) {
       for (const svc of raw) {

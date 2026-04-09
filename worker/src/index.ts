@@ -2,7 +2,7 @@
 // Fetches AI service status pages and returns normalized ServiceStatus[]
 // Uses KV cache to serve last-known-good data on fetch failures
 
-import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, type ServiceStatus } from './services'
+import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead } from './alerts'
 import { analyzeIncident, refreshOrReanalyze, analysisKey, type AIAnalysisResult } from './ai-analysis'
@@ -579,6 +579,7 @@ import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { archiveProbeDaily, type ProbeDailyData } from './probe-archival'
 import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateMonthlyIncidents, type MonthlyIncidents, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
+import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
@@ -612,6 +613,54 @@ export default {
         }
       } catch (err) {
         console.warn('[cron] probe spike detection failed:', err instanceof Error ? err.message : err)
+      }
+    }
+
+    // Platform health monitoring — check metastatuspage.com for Atlassian Statuspage platform status
+    // Runs every cron cycle (~5min). Stores status in KV for cross-validation + sends Discord alerts.
+    if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL) {
+      try {
+        const platformStatus = await checkPlatformStatus('atlassian')
+        if (platformStatus) {
+          const kvKey = platformStatusKey('atlassian')
+          const alertKey = platformAlertKey('atlassian')
+
+          if (platformStatus.status !== 'operational') {
+            // Store non-operational status (10min TTL) — used by cross-validation in fetchAllServices
+            const stored = await kvPut(env.STATUS_CACHE, kvKey, JSON.stringify(platformStatus), { expirationTtl: 600 })
+            if (!stored) console.warn('[platform-monitor] Failed to store platform status in KV')
+
+            // Send outage alert if not already alerted
+            const alreadyAlerted = await env.STATUS_CACHE.get(alertKey).catch(() => null)
+            if (!alreadyAlerted) {
+              const affectedCount = countPlatformServices(SERVICES, 'atlassian')
+              const alert = formatPlatformOutageAlert(platformStatus, affectedCount, SERVICES.length)
+              await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, alert)
+              await kvPut(env.STATUS_CACHE, alertKey, '1', { expirationTtl: 7200 })
+              console.log(`[platform-monitor] Atlassian outage alert sent: ${platformStatus.status}`)
+            }
+          } else {
+            // Platform operational — send recovery alert if we previously alerted
+            // Uses alertKey (not prevStatus) as recovery signal — immune to KV TTL expiry
+            const alertExists = await env.STATUS_CACHE.get(alertKey).catch(() => null)
+            if (alertExists) {
+              const affectedCount = countPlatformServices(SERVICES, 'atlassian')
+              const alert = formatPlatformRecoveryAlert('Atlassian Statuspage', affectedCount)
+              try {
+                await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, alert)
+                await kvDel(env.STATUS_CACHE, alertKey)
+                console.log('[platform-monitor] Atlassian recovery alert sent')
+              } catch (alertErr) {
+                console.warn('[platform-monitor] Recovery alert send failed — will retry next cycle:', alertErr instanceof Error ? alertErr.message : alertErr)
+                // Keep alertKey so retry works next cycle
+              }
+            }
+            // Clear platform status KV (platform is healthy now)
+            await kvDel(env.STATUS_CACHE, kvKey)
+          }
+        }
+      } catch (err) {
+        console.warn('[cron] platform monitor failed:', err instanceof Error ? err.message : err)
       }
     }
 
