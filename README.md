@@ -205,6 +205,7 @@ npm run deploy:worker  # Deploy to Cloudflare (use npm script only)
 | `/api/status` | GET | All service statuses + incidents + uptime + latency24h + aiAnalysis |
 | `/api/status/cached` | GET | KV-only cached status (for Edge SSR, fast ~1.2s) |
 | `/api/uptime?days=30` | GET | Daily uptime history (1-90 days) |
+| `/api/report?month=YYYY-MM` | GET | Monthly reliability archive (uptime, score, incidents, latency) |
 | `/api/alert` | POST | Webhook proxy (Slack/Discord only, SSRF protected) |
 | `/badge/:serviceId` | GET | SVG status badge (shields.io style) |
 | `/api/og` | GET | Dynamic OG image PNG (1200×630, resvg-wasm) |
@@ -310,6 +311,7 @@ worker/
     alerts.ts    # Alert detection logic (incident + service alerts)
     fallback.ts  # Fallback recommendation
     probe.ts     # Health check probing — direct RTT measurement
+    monthly-archive.ts # Monthly reliability archive (permanent KV)
     parsers/     # Platform-specific parsers
       statuspage.ts   # Atlassian Statuspage (7 services)
       incident-io.ts  # incident.io (6 services)

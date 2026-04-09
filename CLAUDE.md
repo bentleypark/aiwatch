@@ -228,8 +228,10 @@ When adding a new monitored service, update ALL of the following:
 | `daily-summary:{YYYY-MM-DD}` | `"1"` | 7d | 1 | Daily summary execution marker (prevents duplicate send + enables catch-up) |
 | `vitals:{YYYY-MM-DD}` | `{ count, allValues }` JSON | 3d | per visit (100%) | Web Vitals daily aggregation (LCP, FCP, TTFB, CLS, INP) |
 | `vitals:history:{YYYY-MM-DD}` | `{ count, p75 }` JSON | 90d | 1 | Archived yesterday's vitals p75 summary |
+| `incidents:monthly:{YYYY-MM}` | `MonthlyIncidents` JSON | 60d | 1/day | Monthly incident accumulation (deduped by ID, updated in daily summary cron) |
+| `archive:monthly:{YYYY-MM}` | `MonthlyArchive` JSON | none (permanent) | 1/month | Monthly reliability snapshot (uptime, score, incidents, latency per service) |
 
-**Free tier budget**: 1,000 writes/day. Estimated total: ~841-951 writes/day + vitals (1 per visit). Monitor if daily visits exceed ~50.
+**Free tier budget**: 1,000 writes/day. Estimated total: ~842-952 writes/day + vitals (1 per visit). Monitor if daily visits exceed ~50.
 
 ### Directory Layout
 ```
@@ -262,6 +264,7 @@ worker/
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText, buildGroupedFallbackText for multi-category incidents)
     ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt, needsFallback assessment, TTL refresh, re-analysis, incidentId dedup, timeline context, boilerplate filtering)
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit, Web Vitals)
+    monthly-archive.ts # Monthly reliability archive (uptime, score, incidents, latency per service, permanent KV)
     vitals.ts   # Web Vitals aggregation (ingest, KV flush, p75 computation, Discord formatting)
     probe.ts    # Health check probing — direct RTT measurement (19 API services)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
@@ -357,6 +360,8 @@ Cron Trigger (*/5 min)
   → active incidents: refresh analysis TTL / re-analyze if expired / dedup sibling services
   → alert count tracked in KV (alert:count:{date}) for Daily Summary
   → daily summary at UTC 09:00 (KST 18:00) with alert count aggregation + Web Vitals p75
+  → daily summary also accumulates incidents:monthly:{YYYY-MM} (dedup by incident ID, 60d TTL)
+  → monthly archive on 1st of month (UTC 00:00) → aggregate history:* + probe:daily:* + incidents:monthly:* → archive:monthly:{YYYY-MM} (permanent)
 
 Web Vitals Pipeline (per-request, 100% collection):
   Browser (web-vitals) → POST /api/vitals → Worker → KV merge (vitals:{date})
@@ -397,7 +402,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
     npm run deploy:worker
     ```
   - Verify the output says `Uploaded aiwatch-worker` (not `aiwatch`)
-  - Endpoints: `GET /api/status`, `GET /api/status/cached` (KV-only, includes probe24h, for SSR + initial load), `GET /api/uptime?days=30`, `GET /api/probe/history?days=30` (daily probe RTT summaries, 90d max), `POST /api/alert`, `GET /badge/:serviceId`, `GET /api/og` (dynamic OG image PNG), `GET /api/v1/status`
+  - Endpoints: `GET /api/status`, `GET /api/status/cached` (KV-only, includes probe24h, for SSR + initial load), `GET /api/uptime?days=30`, `GET /api/probe/history?days=30` (daily probe RTT summaries, 90d max), `GET /api/report?month=YYYY-MM` (monthly archive JSON, permanent), `POST /api/alert`, `GET /badge/:serviceId`, `GET /api/og` (dynamic OG image PNG), `GET /api/v1/status`
   - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res:` keys 7d TTL, `alerted:down/degraded/recovered:` keys 2h TTL). Fallback recommendations only included when service status is degraded/down (not operational). AI analysis runs inline with 8s timeout (merged into incident embed), results stored in `ai:analysis:{svcId}:{incId}` (1h TTL, per-incident). Daily alert counts tracked in `alert:count:{date}` for Daily Summary
 - **Frontend deployment**: Vercel, domain ai-watch.dev — `git push origin main` triggers auto-deploy. `npm run build` is local only; changes are not live until pushed
 - **PWA**: `public/manifest.json` + `public/sw.js` (stale-while-revalidate). CACHE_NAME in `sw.js` must be bumped manually when static assets change. SW excludes `/is-*` (Edge SSR) and `/api/*` (real-time data) from caching
