@@ -230,8 +230,10 @@ When adding a new monitored service, update ALL of the following:
 | `vitals:history:{YYYY-MM-DD}` | `{ count, p75 }` JSON | 90d | 1 | Archived yesterday's vitals p75 summary |
 | `incidents:monthly:{YYYY-MM}` | `MonthlyIncidents` JSON | 60d | 1/day | Monthly incident accumulation (deduped by ID, updated in daily summary cron) |
 | `archive:monthly:{YYYY-MM}` | `MonthlyArchive` JSON | none (permanent) | 1/month | Monthly reliability snapshot (uptime, score, incidents, latency per service) |
+| `platform:status:{platformId}` | `PlatformStatus` JSON | 10min | ~288 | Status page platform health (metastatuspage.com for Atlassian) |
+| `alerted:platform:{platformId}` | `"1"` | 2h | ~1 | Platform outage alert dedup |
 
-**Free tier budget**: 1,000 writes/day. Estimated total: ~842-952 writes/day + vitals (1 per visit). Monitor if daily visits exceed ~50.
+**Free tier budget**: 1,000 writes/day. Estimated total: ~843-953 writes/day + vitals (1 per visit) + platform status (~1/cycle when changed). Monitor if daily visits exceed ~50.
 
 ### Directory Layout
 ```
@@ -267,6 +269,7 @@ worker/
     monthly-archive.ts # Monthly reliability archive (uptime, score, incidents, latency per service, permanent KV)
     vitals.ts   # Web Vitals aggregation (ingest, KV flush, p75 computation, Discord formatting)
     probe.ts    # Health check probing — direct RTT measurement (19 API services)
+    platform-monitor.ts # Status page platform health monitoring (metastatuspage.com for Atlassian)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
                 # dailyImpact support: statuspage (uptimeData), incident-io (component impacts), betterstack (status_history from index.json)
 ```
@@ -335,6 +338,10 @@ Per-service status is resolved in `services.ts` with this priority:
 1. **Component match** (`statusComponentId` or `statusComponent`): use that component's status
 2. **Component not found**: fall back to overall page indicator
 3. **No component configured**: use overall indicator, BUT if no relevant unresolved incidents matched after `incidentExclude`/`incidentKeywords` filtering, treat as `operational` (prevents cross-contamination from unrelated incidents on shared status pages, e.g., ChatGPT incident should not affect OpenAI API status)
+4. **Status page fetch failure cross-validation** (post-processing in `fetchAllServices`):
+   - If service is `degraded` from fetch failure (no incidents) AND probe RTT is normal → override to `operational`
+   - If 70%+ of services on the same platform (Atlassian/incident.io/etc.) fail simultaneously → platform outage → override all to `operational`
+   - Conservative: only overrides when evidence is strong (≥2 recent probes healthy, or quorum failure detected)
 
 ### Status Data Flow
 ```
@@ -344,6 +351,9 @@ Browser (React SPA, 60s polling)
     → normalize to ServiceStatus[]
     → write to KV (cache + daily counters)
     → probe cross-validation: filter Mistral micro-incident noise (no RTT spike → excluded)
+    → metastatuspage preemptive signal: platform:status:atlassian KV non-operational → hold all Atlassian services operational
+    → platform quorum detection: 70%+ same-platform fetch failures → platform outage → hold operational for all affected services
+    → probe cross-validation: individual probe RTT normal → hold operational (prevents false positives during status page failures)
   → React state (usePolling hook via PollingContext)
     → overlay probe RTT onto service.latency (19 probe services)
     → non-probe services (bedrock, azureopenai, pinecone) keep status page latency
@@ -352,6 +362,7 @@ Browser (React SPA, 60s polling)
 Cron Trigger (*/5 min)
   → health check probing (direct RTT to API endpoints, stored in probe:24h)
   → probe spike detection (3+ consecutive RTT spikes) → record to detected:{svcId} as earliest detection
+  → platform monitor: check metastatuspage.com → store platform:status:atlassian → Discord alert on outage/recovery
   → read KV cache → detect incidents/status changes
   → record detection timestamps (detected:{serviceId}) for Detection Lead (probe spike time preferred if earlier)
   → KV ID-based dedup → Discord alerts (single embed per incident, with Detection Lead if probe detected first)

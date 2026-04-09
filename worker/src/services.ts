@@ -3,6 +3,8 @@
 import type { Incident, ServiceStatus, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { fetchWithTimeout, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss } from './utils'
+import { isProbeHealthy, type ProbeSnapshot } from './probe'
+import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, computeUptimeFromIncidents, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
@@ -11,7 +13,7 @@ import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBe
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
 import { parseAwsRssIncidents, deriveAwsStatus } from './parsers/aws'
 
-const SERVICES: ServiceConfig[] = [
+export const SERVICES: ServiceConfig[] = [
   // AI API Services
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp' },
   { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'conversation', 'workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'] },
@@ -540,7 +542,57 @@ export const CACHE_KEY = 'services:latest'
 export const COMPONENT_ID_SERVICES: { id: string; name: string; statusComponentId: string }[] =
   SERVICES.filter((s) => s.statusComponentId).map((s) => ({ id: s.id, name: s.name, statusComponentId: s.statusComponentId! }))
 
-export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[] }> {
+// ── Platform grouping for quorum-based outage detection ──
+// When 70%+ of services on the same status page platform fail simultaneously,
+// it's likely a platform outage (e.g., Atlassian Statuspage down), not individual service failures.
+
+type StatusPlatform = 'atlassian' | 'incident-io' | 'betterstack' | 'instatus' | 'other'
+
+function getServicePlatform(config: ServiceConfig): StatusPlatform {
+  if (config.apiUrl?.includes('/api/v2/summary.json')) return 'atlassian'
+  if (config.incidentIoBaseUrl) return 'incident-io'
+  if (config.betterStackUrl) return 'betterstack'
+  if (config.instatusUrl) return 'instatus'
+  return 'other'
+}
+
+/** Detect platform-level outage: 70%+ simultaneous fetch failures on a platform.
+ *  Returns set of service IDs affected by platform outage. */
+export function detectPlatformOutage(
+  services: ServiceStatus[],
+  configs: ServiceConfig[],
+  threshold = 0.7,
+): Set<string> {
+  if (services.length !== configs.length) {
+    console.error(`[detectPlatformOutage] array length mismatch: ${services.length} services vs ${configs.length} configs — skipping`)
+    return new Set<string>()
+  }
+  const platformGroups = new Map<StatusPlatform, { total: number; degraded: number; ids: string[] }>()
+
+  for (let i = 0; i < services.length; i++) {
+    const platform = getServicePlatform(configs[i])
+    if (platform === 'other') continue
+    if (!platformGroups.has(platform)) platformGroups.set(platform, { total: 0, degraded: 0, ids: [] })
+    const group = platformGroups.get(platform)!
+    group.total++
+    group.ids.push(services[i].id)
+    if (services[i].status === 'degraded' && services[i].incidents.length === 0) {
+      // degraded with no incidents = likely fetch failure, not real incident
+      group.degraded++
+    }
+  }
+
+  const affected = new Set<string>()
+  for (const [platform, group] of platformGroups) {
+    if (group.total >= 3 && group.degraded / group.total >= threshold) {
+      console.warn(`[platform-outage] ${platform}: ${group.degraded}/${group.total} services failed — platform outage detected`)
+      for (const id of group.ids) affected.add(id)
+    }
+  }
+  return affected
+}
+
+export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeSnapshot[]): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[] }> {
   // Pre-fetch unique Atlassian status API endpoints once.
   // Services sharing a status page (claude+claudeai+claudecode, openai+chatgpt) would each fetch
   // the same URLs independently. Deduplicating saves 6 subrequests, freeing budget for enrichment.
@@ -627,6 +679,64 @@ export async function fetchAllServices(kv?: KVNamespace): Promise<{ raw: Service
       incidents: [],
     }
   })
+
+  // Cross-validate: override false-positive degraded status when probe RTT confirms service is healthy.
+  // Order: Phase 3 (metastatuspage) → Phase 2 (quorum) → Phase 1 (probe)
+  // Earlier phases see original degraded counts before later phases mutate them.
+  const degradedFromFetch = raw.filter(s => s.status === 'degraded' && s.incidents.length === 0)
+  if (degradedFromFetch.length > 0) {
+    // Phase 3: Metastatuspage preemptive signal (if platform status was cached by cron)
+    // Only overrides services where probe also confirms healthy (or no probe data exists).
+    // This prevents hiding real outages that coincide with platform issues.
+    if (kv) {
+      try {
+        const atlassianRaw = await kv.get(platformStatusKey('atlassian')).catch(() => null)
+        if (atlassianRaw) {
+          const platformStatus: PlatformStatus = JSON.parse(atlassianRaw)
+          if (platformStatus.status !== 'operational') {
+            for (const svc of raw) {
+              if (svc.status !== 'degraded' || svc.incidents.length > 0) continue
+              const config = SERVICES.find(c => c.id === svc.id)
+              if (!config || getServicePlatform(config) !== 'atlassian') continue
+              // If probe data shows spike, this is a real outage — don't override
+              if (probeSnapshots && probeSnapshots.length > 0 && svc.id in (probeSnapshots[probeSnapshots.length - 1]?.data ?? {})) {
+                if (!isProbeHealthy(probeSnapshots, svc.id)) {
+                  console.log(`[cross-validation] ${svc.id}: metastatuspage degraded but probe confirms issue — keeping degraded`)
+                  continue
+                }
+              }
+              console.log(`[cross-validation] ${svc.id}: metastatuspage reports ${platformStatus.status} — holding operational`)
+              svc.status = 'operational'
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[cross-validation] metastatuspage KV read/parse failed, falling back to Phase 2:', err instanceof Error ? err.message : err)
+      }
+    }
+
+    // Phase 2: Platform quorum detection (independent of probe data)
+    // Runs after Phase 3 — catches cases where metastatuspage itself is unreachable
+    const platformAffected = detectPlatformOutage(raw, SERVICES)
+    if (platformAffected.size > 0) {
+      for (const svc of raw) {
+        if (svc.status === 'degraded' && svc.incidents.length === 0 && platformAffected.has(svc.id)) {
+          console.log(`[cross-validation] ${svc.id}: platform outage detected — holding operational`)
+          svc.status = 'operational'
+        }
+      }
+    }
+
+    // Phase 1: Probe-based cross-validation (requires probe data)
+    if (probeSnapshots && probeSnapshots.length > 0) {
+      for (const svc of degradedFromFetch) {
+        if (svc.status === 'degraded' && isProbeHealthy(probeSnapshots, svc.id)) {
+          console.log(`[cross-validation] ${svc.id}: status page down but probe RTT normal — holding operational`)
+          svc.status = 'operational'
+        }
+      }
+    }
+  }
 
   // Read cached snapshot for fallback (only if needed)
   let cachedServices: ServiceStatus[] | null = null

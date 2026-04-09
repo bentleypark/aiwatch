@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, PROBE_TARGETS, computeMedianRtt, isCorroboratedByProbe, detectConsecutiveSpikes } from '../probe'
+import { computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, PROBE_TARGETS, computeMedianRtt, isCorroboratedByProbe, detectConsecutiveSpikes, isProbeHealthy } from '../probe'
 import type { ProbeSnapshot } from '../probe'
 
 describe('computeProbeSlot', () => {
@@ -426,5 +426,66 @@ describe('detectConsecutiveSpikes', () => {
     // 'stability' has no data in any snapshot
     const spikes = detectConsecutiveSpikes(snapshots, ['gemini', 'stability'], 3)
     expect(spikes).toHaveLength(0)
+  })
+})
+
+describe('isProbeHealthy', () => {
+  const now = Date.now()
+  const recentTime = (minAgo: number) => new Date(now - minAgo * 60_000).toISOString()
+
+  it('returns true when recent probes show normal RTT', () => {
+    const snapshots: ProbeSnapshot[] = Array.from({ length: 10 }, (_, i) => ({
+      t: recentTime(i * 5), // 0, 5, 10, ... minutes ago
+      data: { claude: { status: 200, rtt: 200 + i * 5 } },
+    }))
+    expect(isProbeHealthy(snapshots, 'claude')).toBe(true)
+  })
+
+  it('returns false when recent probes show RTT spike', () => {
+    const snapshots: ProbeSnapshot[] = [
+      { t: recentTime(0), data: { claude: { status: 200, rtt: 2000 } } }, // spike
+      { t: recentTime(5), data: { claude: { status: 200, rtt: 200 } } },
+      { t: recentTime(10), data: { claude: { status: 200, rtt: 210 } } },
+      { t: recentTime(15), data: { claude: { status: 200, rtt: 190 } } },
+      { t: recentTime(20), data: { claude: { status: 200, rtt: 205 } } },
+    ]
+    expect(isProbeHealthy(snapshots, 'claude')).toBe(false)
+  })
+
+  it('returns false when probe has failures (rtt=-1)', () => {
+    const snapshots: ProbeSnapshot[] = [
+      { t: recentTime(0), data: { claude: { status: 0, rtt: -1 } } },
+      { t: recentTime(5), data: { claude: { status: 200, rtt: 200 } } },
+      { t: recentTime(10), data: { claude: { status: 200, rtt: 210 } } },
+      { t: recentTime(15), data: { claude: { status: 200, rtt: 190 } } },
+    ]
+    expect(isProbeHealthy(snapshots, 'claude')).toBe(false)
+  })
+
+  it('returns false when no snapshots exist', () => {
+    expect(isProbeHealthy([], 'claude')).toBe(false)
+  })
+
+  it('returns false when service has no data in recent snapshots', () => {
+    const snapshots: ProbeSnapshot[] = [
+      { t: recentTime(0), data: { openai: { status: 200, rtt: 200 } } },
+      { t: recentTime(5), data: { openai: { status: 200, rtt: 210 } } },
+    ]
+    expect(isProbeHealthy(snapshots, 'claude')).toBe(false)
+  })
+
+  it('returns false when fewer than 2 recent probes', () => {
+    const snapshots: ProbeSnapshot[] = [
+      { t: recentTime(0), data: { claude: { status: 200, rtt: 200 } } },
+    ]
+    expect(isProbeHealthy(snapshots, 'claude')).toBe(false)
+  })
+
+  it('returns false when probes are too old', () => {
+    const snapshots: ProbeSnapshot[] = [
+      { t: recentTime(20), data: { claude: { status: 200, rtt: 200 } } },
+      { t: recentTime(25), data: { claude: { status: 200, rtt: 210 } } },
+    ]
+    expect(isProbeHealthy(snapshots, 'claude', 900_000)).toBe(false) // 15min max age
   })
 })
