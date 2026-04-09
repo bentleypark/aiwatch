@@ -171,3 +171,40 @@ export function isCorroboratedByProbe(
     return probe.rtt === -1 || probe.rtt > spikeThreshold
   })
 }
+
+/**
+ * Check if a service's recent probe data indicates it is healthy.
+ * Used to cross-validate status page fetch failures — if the API responds normally
+ * but the status page is down, the service is likely operational (false positive).
+ *
+ * Returns true if recent probes show normal RTT (service is healthy).
+ * Returns false if probes show spikes/failures or no recent data exists.
+ * Conservative: returns false (don't override) when data is insufficient.
+ */
+export function isProbeHealthy(
+  snapshots: ProbeSnapshot[],
+  serviceId: string,
+  maxAgeMs = 900_000, // 15 minutes — probes run every 5min, so 3 cycles
+): boolean {
+  if (snapshots.length === 0) return false
+
+  const now = Date.now()
+  // Get recent snapshots with data for this service
+  const recent = snapshots.filter(s => {
+    const age = now - new Date(s.t).getTime()
+    return age >= 0 && age < maxAgeMs && serviceId in s.data
+  })
+
+  // Need at least 2 recent probes for confidence
+  if (recent.length < 2) return false
+
+  const median = computeMedianRtt(snapshots, serviceId)
+  if (median === null || median <= 0) return false
+
+  const threshold = median * 3
+  // All recent probes must be healthy (no failures, no spikes)
+  return recent.every(s => {
+    const probe = s.data[serviceId]
+    return probe.rtt > 0 && probe.rtt <= threshold
+  })
+}

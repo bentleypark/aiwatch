@@ -335,6 +335,10 @@ Per-service status is resolved in `services.ts` with this priority:
 1. **Component match** (`statusComponentId` or `statusComponent`): use that component's status
 2. **Component not found**: fall back to overall page indicator
 3. **No component configured**: use overall indicator, BUT if no relevant unresolved incidents matched after `incidentExclude`/`incidentKeywords` filtering, treat as `operational` (prevents cross-contamination from unrelated incidents on shared status pages, e.g., ChatGPT incident should not affect OpenAI API status)
+4. **Status page fetch failure cross-validation** (post-processing in `fetchAllServices`):
+   - If service is `degraded` from fetch failure (no incidents) AND probe RTT is normal → override to `operational`
+   - If 70%+ of services on the same platform (Atlassian/incident.io/etc.) fail simultaneously → platform outage → override all to `operational`
+   - Conservative: only overrides when evidence is strong (≥2 recent probes healthy, or quorum failure detected)
 
 ### Status Data Flow
 ```
@@ -344,6 +348,8 @@ Browser (React SPA, 60s polling)
     → normalize to ServiceStatus[]
     → write to KV (cache + daily counters)
     → probe cross-validation: filter Mistral micro-incident noise (no RTT spike → excluded)
+    → status page failure cross-validation: probe RTT normal → hold operational (prevents false positives during status page platform outages)
+    → platform quorum detection: 70%+ same-platform fetch failures → platform outage → hold operational for all affected services
   → React state (usePolling hook via PollingContext)
     → overlay probe RTT onto service.latency (19 probe services)
     → non-probe services (bedrock, azureopenai, pinecone) keep status page latency

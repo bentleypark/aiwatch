@@ -300,7 +300,13 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // to respect the 10-min KV write throttle and stay within the 1,000 writes/day free tier.
   if (stale) {
     try {
-      const { raw: freshServices } = await fetchAllServices(env.STATUS_CACHE)
+      // Read probe data for cross-validation of status page failures
+      let cronProbes: ProbeSnapshot[] = []
+      const probeRaw = await env.STATUS_CACHE.get('probe:24h').catch(() => null)
+      if (probeRaw) {
+        try { cronProbes = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[cron] probe24h parse failed:', err instanceof Error ? err.message : err) }
+      }
+      const { raw: freshServices } = await fetchAllServices(env.STATUS_CACHE, cronProbes)
       if (freshServices.length > 0) {
         services = freshServices
       }
@@ -1338,16 +1344,7 @@ export default {
     }
 
     try {
-      const { raw, enriched } = await fetchAllServices(env.STATUS_CACHE)
-
-      // Cache raw results only (no fallback substitution — prevents cache poisoning)
-      // Await cacheWrite so badge/v1 endpoints see data immediately
-      if (env.STATUS_CACHE) {
-        await cacheWrite(env.STATUS_CACHE, raw, env.DISCORD_WEBHOOK_URL)
-        ctx.waitUntil(writeLatencySnapshot(env.STATUS_CACHE, raw))
-      }
-
-      // Read hourly latency snapshots + probe data (2 KV reads)
+      // Read probe data BEFORE fetchAllServices — needed for cross-validation of status page failures
       let latency24h: Array<{ t: string; data: Record<string, number> }> = []
       let probe24h: ProbeSnapshot[] = []
       if (env.STATUS_CACHE) {
@@ -1361,6 +1358,15 @@ export default {
         if (probeRaw) {
           try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] probe24h parse failed:', err instanceof Error ? err.message : err) }
         }
+      }
+
+      const { raw, enriched } = await fetchAllServices(env.STATUS_CACHE, probe24h)
+
+      // Cache results after cross-validation (probe-verified, no fallback substitution — prevents cache poisoning)
+      // Await cacheWrite so badge/v1 endpoints see data immediately
+      if (env.STATUS_CACHE) {
+        await cacheWrite(env.STATUS_CACHE, raw, env.DISCORD_WEBHOOK_URL)
+        ctx.waitUntil(writeLatencySnapshot(env.STATUS_CACHE, raw))
       }
 
       // Filter Mistral micro-incident noise via probe cross-validation (#91)
