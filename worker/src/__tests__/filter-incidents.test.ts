@@ -62,6 +62,23 @@ describe('filterIncidents', () => {
     const config = mockConfig({ incidentKeywords: ['api'], incidentExclude: ['chatgpt'] })
     expect(filterIncidents(incidents, config)).toHaveLength(0)
   })
+
+  it('OpenAI API excludes login incidents', () => {
+    const incidents = [mockIncident({ title: 'Elevated Errors with Login' })]
+    const config = mockConfig({
+      incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'],
+      incidentExclude: ['chatgpt', 'sign-in', 'login'],
+    })
+    expect(filterIncidents(incidents, config)).toHaveLength(0)
+  })
+
+  it('ChatGPT includes login incidents via keyword', () => {
+    const incidents = [mockIncident({ title: 'Elevated Errors with Login' })]
+    const config = mockConfig({
+      incidentKeywords: ['chatgpt', 'conversation', 'login'],
+    })
+    expect(filterIncidents(incidents, config)).toHaveLength(1)
+  })
 })
 
 describe('includeUntaggedIncidents', () => {
