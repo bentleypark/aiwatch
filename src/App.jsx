@@ -14,6 +14,7 @@ import CookieBanner from './components/CookieBanner'
 import InstallBanner from './components/InstallBanner'
 import { PrivacyContent, TermsContent } from './components/LegalContent'
 import Overview from './pages/Overview'
+import SkeletonUI, { LatencySkeleton, IncidentsSkeleton, UptimeSkeleton, ServiceDetailsSkeleton } from './components/SkeletonUI'
 
 function lazyWithRetry(importFn) {
   return lazy(() =>
@@ -79,13 +80,13 @@ function pageToHash(page) {
 function resolvePage(page) {
   switch (page.name) {
     case 'overview':  return <Overview />
-    case 'latency':   return <Latency />
-    case 'incidents': return <Incidents />
-    case 'uptime':    return <Uptime />
-    case 'service':   return <ServiceDetails serviceId={page.serviceId} />
-    case 'settings':  return <Settings />
-    case 'about-score': return <AboutScore />
-    case 'ranking':     return <Ranking />
+    case 'latency':   return <Suspense fallback={<LatencySkeleton />}><Latency /></Suspense>
+    case 'incidents': return <Suspense fallback={<IncidentsSkeleton />}><Incidents /></Suspense>
+    case 'uptime':    return <Suspense fallback={<UptimeSkeleton />}><Uptime /></Suspense>
+    case 'service':   return <Suspense fallback={<ServiceDetailsSkeleton />}><ServiceDetails serviceId={page.serviceId} /></Suspense>
+    case 'settings':  return <Suspense fallback={<SkeletonUI />}><Settings /></Suspense>
+    case 'about-score': return <Suspense fallback={<SkeletonUI />}><AboutScore /></Suspense>
+    case 'ranking':     return <Suspense fallback={<SkeletonUI />}><Ranking /></Suspense>
     default:          return <Overview />
   }
 }
@@ -188,9 +189,7 @@ function AppInner() {
         onSidebarClose={() => setSidebarOpen(false)}
       >
         <ChunkErrorBoundary>
-          <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center' }}><span className="text-[var(--text2)] mono text-[12px]">Loading…</span></div>}>
-            {resolvePage(page)}
-          </Suspense>
+          {resolvePage(page)}
         </ChunkErrorBoundary>
       </Layout>
 
