@@ -23,7 +23,6 @@ test.describe('Uptime page', () => {
   test('renders uptime matrix', async ({ page }) => {
     const main = page.locator('main')
     // Matrix section should show service names in a grid
-    const serviceCount = await main.getByText(/API|Cloud|AI|Copilot|Cursor|Windsurf/).count()
-    expect(serviceCount).toBeGreaterThan(0)
+    await expect(main.getByText(/API|Cloud|AI|Copilot|Cursor|Windsurf/).first()).toBeVisible({ timeout: 10000 })
   })
 })
