@@ -22,4 +22,10 @@ test.describe('Latency page', () => {
     await expect(main.getByText('Claude API').first()).toBeVisible()
     await expect(main.getByText('OpenAI API').first()).toBeVisible()
   })
+
+  test('renders 24h trend section', async ({ page }) => {
+    const main = page.locator('main')
+    // Trend section header should be visible (canvas or "Collecting data" depending on data availability)
+    await expect(main.getByText(/trend/i).first()).toBeVisible({ timeout: 10000 })
+  })
 })

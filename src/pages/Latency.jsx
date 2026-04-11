@@ -65,33 +65,68 @@ function LatencyTrendSection({ services, t, hourlyData }) {
       if (cancelled || !canvasRef.current) return
       if (chartRef.current) chartRef.current.destroy()
 
-    const labels = hourlyData.map((s) => {
-      const d = new Date(s.t)
-      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-    })
-
     // Detect data format: probe snapshots have { status, rtt } objects, latency snapshots have plain numbers
     const isProbeData = hourlyData.length > 0 && typeof Object.values(hourlyData[0].data ?? {})[0] === 'object'
     // For probe data, show only services present in probe snapshots
     const probeServiceIds = isProbeData ? Object.keys(hourlyData[hourlyData.length - 1]?.data ?? {}) : null
-    const apiServices = probeServiceIds
+    const isMobile = window.innerWidth < 768
+
+    // Downsample 5-min probe data → 30-min slot averages (:00–:29, :30–:59)
+    const needsDownsample = isProbeData && hourlyData.length > 60
+    let chartData = hourlyData
+    if (needsDownsample) {
+      const slotMap = new Map()
+      for (const s of hourlyData) {
+        const d = new Date(s.t)
+        const h = d.getHours()
+        const half = d.getMinutes() < 30 ? 0 : 30
+        const key = `${h}:${half}`
+        if (!slotMap.has(key)) slotMap.set(key, { points: [], h, half })
+        slotMap.get(key).points.push(s)
+      }
+      chartData = [...slotMap.values()].map(({ points, h, half }) => {
+        const mid = points[Math.floor(points.length / 2)]
+        const merged = {}
+        const svcIds = new Set(points.flatMap((s) => Object.keys(s.data ?? {})))
+        for (const id of svcIds) {
+          const vals = points.map((s) => {
+            const v = s.data?.[id]
+            return v && typeof v === 'object' ? (v.rtt > 0 ? v.rtt : null) : v
+          }).filter((v) => v != null)
+          if (vals.length > 0) merged[id] = { rtt: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length), status: 'ok' }
+        }
+        const hh = String(h).padStart(2, '0')
+        const endHalf = half === 0 ? '30' : '00'
+        const endH = half === 0 ? hh : String((h + 1) % 24).padStart(2, '0')
+        return { t: mid.t, data: merged, _rangeLabel: `${hh}:${String(half).padStart(2, '0')}–${endH}:${endHalf}` }
+      })
+    }
+
+    const labels = chartData.map((s) => {
+      const d = new Date(s.t)
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    })
+    const rangeLabels = needsDownsample ? chartData.map((s) => s._rangeLabel) : null
+
+    let apiServices = probeServiceIds
       ? services.filter((s) => probeServiceIds.includes(s.id))
       : services.filter((s) => s.category === 'api' && s.latency != null)
+    if (isMobile) apiServices = [...apiServices].sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0)).slice(0, 8)
     const styles = getComputedStyle(document.documentElement)
     const textMuted = styles.getPropertyValue('--text2').trim() || '#6b7280'
     const borderClr = styles.getPropertyValue('--border').trim() || 'rgba(107,114,128,0.1)'
 
     const datasets = apiServices.map((svc) => ({
       label: svc.name,
-      data: hourlyData.map((s) => {
+      data: chartData.map((s) => {
         const val = s.data[svc.id]
         if (val == null) return null
         if (typeof val === 'object') return val.rtt > 0 ? val.rtt : null
         return val
       }),
       borderColor: SERVICE_COLOR[svc.id] ?? '#8b949e',
-      borderWidth: 1.5,
-      pointRadius: 1.5,
+      borderWidth: isMobile ? 1 : 1.5,
+      pointRadius: isMobile ? 0 : 1.5,
       pointHoverRadius: 3,
       tension: 0.3,
       fill: false,
@@ -107,17 +142,26 @@ function LatencyTrendSection({ services, t, hourlyData }) {
         interaction: { mode: 'index', intersect: false },
         plugins: {
           legend: {
-            display: true,
+            display: !isMobile,
             position: 'bottom',
             labels: { font: { size: 9, family: 'var(--font-mono)' }, color: textMuted, boxWidth: 8, padding: 8 },
           },
           tooltip: {
-            callbacks: { label: (ctx) => ctx.parsed.y != null ? `${ctx.dataset.label}: ${ctx.parsed.y}ms` : null },
+            filter: (item) => item.parsed.y != null,
+            itemSort: (a, b) => b.parsed.y - a.parsed.y,
+            callbacks: {
+              title: (items) => {
+                if (!items.length) return ''
+                const i = items[0].dataIndex
+                return rangeLabels ? `${rangeLabels[i]} avg` : labels[i]
+              },
+              label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}ms`,
+            },
           },
         },
         scales: {
           x: {
-            ticks: { font: { size: 9, family: 'var(--font-mono)' }, color: textMuted, maxTicksLimit: 12, callback: (_, i) => { const l = labels[i]; return l ? l.slice(0, 3) + '00' : '' } },
+            ticks: { font: { size: 9, family: 'var(--font-mono)' }, color: textMuted, maxTicksLimit: isMobile ? 6 : 12, callback: (_, i) => { const l = labels[i]; return l ? l.slice(0, 3) + '00' : '' } },
             grid: { display: false },
           },
           y: {
@@ -134,15 +178,16 @@ function LatencyTrendSection({ services, t, hourlyData }) {
 
   return (
     <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
-      <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+      <div className="border-b border-[var(--border)] flex items-center justify-between" style={{ padding: '12px 16px' }}>
         <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
           <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
           {t('latency.trend')}
         </div>
+        <span className="md:hidden mono text-[9px] text-[var(--text2)]">{t('latency.top8')}</span>
       </div>
       {hasData ? (
-        <div style={{ padding: '16px' }}>
-          <div style={{ height: '320px' }}>
+        <div className="p-2 md:p-4">
+          <div className="h-[240px] md:h-[320px]">
             <canvas ref={canvasRef} />
           </div>
         </div>
