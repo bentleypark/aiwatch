@@ -91,6 +91,7 @@ const ko = {
   'latency.average': '평균',
   'latency.slowest': '가장 느림',
   'latency.trend': '24시간 추세',
+  'latency.top8': 'Score 상위 8개',
   'latency.excludeNote': '* AI Apps(claude.ai, ChatGPT 등)와 Coding Agent는 API 엔드포인트가 없어 측정 대상에서 제외됩니다.',
   'latency.dummy': '데이터 수집 중 (24시간 후 실데이터로 전환)',
   'latency.avg.services': '개 서비스',

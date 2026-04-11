@@ -128,6 +128,13 @@ test.describe('Mobile viewport', () => {
     expect(hasCloseBtn).toBe(false)
   })
 
+  test('latency chart shows Top 8 by Score badge on mobile', async ({ page }) => {
+    // Navigate to Latency page
+    await page.goto('/#latency')
+    const main = page.locator('main')
+    await expect(main.getByText(/Top 8 by Score|Score 상위 8개/)).toBeVisible({ timeout: 10000 })
+  })
+
   test('backdrop click closes sidebar overlay', async ({ page }) => {
     // Open sidebar
     await page.locator('header button').first().click()
