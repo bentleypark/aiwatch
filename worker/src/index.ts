@@ -580,7 +580,8 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
 
 import { generateBadgeSvg } from './badge'
 import { generateOgSvg } from './og'
-import { detectRedditPosts, formatRedditAlert, isPromotable } from './reddit'
+import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, isPromotable } from './reddit'
+import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { archiveProbeDaily, type ProbeDailyData } from './probe-archival'
@@ -679,11 +680,14 @@ export default {
     if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCMinutes() < 5) {
       try {
         const redditAlerts = await detectRedditPosts(env.STATUS_CACHE)
+        // Split: service outage alerts vs competitive monitoring
+        const outageAlerts = redditAlerts.filter(a => !a.competitive)
+        const competitiveAlerts = redditAlerts.filter(a => a.competitive)
         // Mark all detected posts as seen (prevents re-checking), but only notify promotable ones
-        for (const alert of redditAlerts.slice(0, 5)) {
+        for (const alert of outageAlerts.slice(0, 5)) {
           await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 })
         }
-        const promotable = redditAlerts.filter(a => isPromotable(a.post.title)).slice(0, 3)
+        const promotable = outageAlerts.filter(a => isPromotable(a.post.title)).slice(0, 3)
         for (const alert of promotable) {
           const formatted = formatRedditAlert(alert)
           await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
@@ -692,8 +696,36 @@ export default {
             color: formatted.color,
           })
         }
+        // Competitive alerts — mark seen + notify (max 2 per hour)
+        for (const alert of competitiveAlerts.slice(0, 2)) {
+          await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 })
+          const formatted = formatCompetitiveAlert(alert)
+          await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+            title: formatted.title,
+            description: `${formatted.description}\n[View Post](${formatted.url})`,
+            color: formatted.color,
+          })
+        }
       } catch (err) {
         console.warn('[cron] Reddit monitoring failed:', err instanceof Error ? err.message : err)
+      }
+    }
+
+    // GitHub competitive monitoring — weekly on Monday UTC 00:00-00:05
+    if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCDay() === 1 && now.getUTCHours() === 0 && now.getUTCMinutes() < 5) {
+      try {
+        const ghAlerts = await detectNewRepos(env.STATUS_CACHE)
+        for (const alert of ghAlerts.slice(0, 3)) {
+          await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 2_592_000 }) // 30d TTL
+          const formatted = formatGitHubAlert(alert)
+          await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+            title: formatted.title,
+            description: `${formatted.description}\n[View Repo](${formatted.url})`,
+            color: formatted.color,
+          })
+        }
+      } catch (err) {
+        console.warn('[cron] GitHub competitive monitoring failed:', err instanceof Error ? err.message : err)
       }
     }
 

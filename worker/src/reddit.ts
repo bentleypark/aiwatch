@@ -15,10 +15,12 @@ export interface RedditAlert {
   key: string       // KV dedup key: reddit:seen:{postId}
   subreddit: string
   post: RedditPost
+  competitive: boolean  // true = competitive monitoring, false = outage detection
 }
 
 // Subreddit → search keywords mapping
 const REDDIT_TARGETS: Array<{ subreddit: string; service: string }> = [
+  // Service-specific subreddits (outage detection + promotion)
   { subreddit: 'ClaudeAI',        service: 'Claude' },
   { subreddit: 'ClaudeCode',      service: 'Claude Code' },
   { subreddit: 'ChatGPT',         service: 'ChatGPT' },
@@ -26,6 +28,10 @@ const REDDIT_TARGETS: Array<{ subreddit: string; service: string }> = [
   { subreddit: 'cursor',          service: 'Cursor' },
   { subreddit: 'windsurf',        service: 'Windsurf' },
   { subreddit: 'Codeium',         service: 'Windsurf' },
+  // Competitive monitoring — broader AI/DevOps communities
+  { subreddit: 'devops',          service: '_competitive' },
+  { subreddit: 'artificial',      service: '_competitive' },
+  { subreddit: 'LocalLLaMA',      service: '_competitive' },
 ]
 
 // Strong signals: always match. Weak signals (issues/errors/slow): require context words
@@ -85,11 +91,24 @@ export function isPromotable(title: string): boolean {
   return QUESTION_WITH_CONTEXT.test(title) || ANYONE_WITH_OUTAGE.test(title) || SEEKING_HELP.test(title)
 }
 
+// Competitive monitoring keywords — match posts about status monitoring tools
+const COMPETITIVE_STRONG = /\b(status monitor|status page|uptime dashboard|api status|ai status|llm status)\b/i
+const COMPETITIVE_CONTEXT = /\b(monitor|track|alert|notification|dashboard|real.?time)\b/i
+const COMPETITIVE_WEAK = /\b(down.?detector|statuspage|statusgator|isdown)\b/i
+
+export function matchesCompetitiveKeywords(title: string): boolean {
+  if (COMPETITIVE_STRONG.test(title)) return true
+  if (COMPETITIVE_WEAK.test(title)) return true
+  return COMPETITIVE_CONTEXT.test(title) && /\b(ai|llm|api|openai|claude|gpt)\b/i.test(title)
+}
+
 /**
  * Fetch recent posts from a subreddit matching outage keywords
  */
-async function fetchSubreddit(subreddit: string): Promise<RedditPost[]> {
-  const query = encodeURIComponent('down OR "not working" OR outage OR issues OR error')
+async function fetchSubreddit(subreddit: string, competitive = false): Promise<RedditPost[]> {
+  const query = competitive
+    ? encodeURIComponent('"status monitor" OR "uptime dashboard" OR "api status" OR "is down" OR "status page"')
+    : encodeURIComponent('down OR "not working" OR outage OR issues OR error')
   const url = `https://www.reddit.com/r/${subreddit}/search.json?q=${query}&sort=new&restrict_sr=on&t=day&limit=5`
 
   const res = await fetch(url, {
@@ -99,6 +118,7 @@ async function fetchSubreddit(subreddit: string): Promise<RedditPost[]> {
 
   if (!res.ok) {
     console.warn(`[reddit] r/${subreddit} returned HTTP ${res.status}`)
+    res.body?.cancel()
     return []
   }
 
@@ -119,18 +139,19 @@ export async function detectRedditPosts(
   // Fetch all subreddits in parallel
   const results = await Promise.allSettled(
     REDDIT_TARGETS.map(async (target) => {
-      const posts = await fetchSubreddit(target.subreddit)
-      return { target, posts }
+      const isCompetitive = target.service === '_competitive'
+      const posts = await fetchSubreddit(target.subreddit, isCompetitive)
+      return { target, posts, isCompetitive }
     }),
   )
 
   for (const result of results) {
     if (result.status !== 'fulfilled') continue
-    const { target, posts } = result.value
+    const { target, posts, isCompetitive } = result.value
 
     for (const post of posts) {
       // Double-check keywords (Reddit search can be fuzzy)
-      if (!matchesKeywords(post.title)) continue
+      if (isCompetitive ? !matchesCompetitiveKeywords(post.title) : !matchesKeywords(post.title)) continue
 
       // Skip old posts (>6h)
       const age = Date.now() / 1000 - post.createdUtc
@@ -141,7 +162,7 @@ export async function detectRedditPosts(
       const seen = await kv.get(key).catch(() => null)
       if (seen) continue
 
-      alerts.push({ key, subreddit: target.subreddit, post })
+      alerts.push({ key, subreddit: target.subreddit, post, competitive: isCompetitive })
     }
   }
 
@@ -172,6 +193,20 @@ export function formatRedditAlert(alert: RedditAlert): { title: string; descript
     title: `📢 Reddit: r/${alert.subreddit} [🎯 PROMOTE]`,
     description: `"${alert.post.title}"\nby u/${alert.post.author} · ${alert.post.score} upvotes · ${agoText}${shareLink}`,
     color: 0x3fb950, // green
+    url: alert.post.url,
+  }
+}
+
+export function formatCompetitiveAlert(alert: RedditAlert): { title: string; description: string; color: number; url: string } {
+  const ago = Math.floor(Date.now() / 1000 - alert.post.createdUtc)
+  const agoText = ago < 60 ? 'just now'
+    : ago < 3600 ? `${Math.floor(ago / 60)}m ago`
+    : `${Math.floor(ago / 3600)}h ago`
+
+  return {
+    title: `🔍 Competitive: r/${alert.subreddit}`,
+    description: `"${alert.post.title}"\nby u/${alert.post.author} · ${alert.post.score} upvotes · ${agoText}`,
+    color: 0x8b949e, // gray
     url: alert.post.url,
   }
 }
