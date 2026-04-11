@@ -378,7 +378,10 @@ function RegionalAvailability({ service, t }) {
 
     const incidents = Array.isArray(service.incidents) ? service.incidents : []
     const ongoing = incidents.filter(i => i && typeof i.title === 'string' && i.status !== 'resolved')
-    if (ongoing.length === 0) return null
+    // Services with componentNames-based region matching (e.g., Bedrock AWS RSS) always show regional status
+    const ALWAYS_SHOW_REGIONS = ['bedrock']
+    const alwaysShow = ALWAYS_SHOW_REGIONS.includes(service.id)
+    if (ongoing.length === 0 && !alwaysShow) return null
 
     const regionStatus = {}
     let hasRegionSpecific = false
@@ -399,7 +402,7 @@ function RegionalAvailability({ service, t }) {
       }
     }
 
-    if (!hasRegionSpecific) {
+    if (!hasRegionSpecific && ongoing.length > 0) {
       const globalType = classifyIncident(ongoing[0].title)
       for (const r of regions) {
         regionStatus[r.key] = { status: 'incident', type: globalType }
@@ -415,7 +418,7 @@ function RegionalAvailability({ service, t }) {
       <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
         <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
           <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
-            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--amber)' }} />
+            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: ongoing.length > 0 ? 'var(--amber)' : 'var(--green)' }} />
             {t('svc.region.title')}
           </div>
         </div>
@@ -437,7 +440,7 @@ function RegionalAvailability({ service, t }) {
               )
             })}
           </div>
-          {!allDown && okRegions.length > 0 && (
+          {!allDown && okRegions.length > 0 && ongoing.length > 0 && (
             <div className="mono text-[10px] text-[var(--blue)] mt-3 flex items-center justify-between" style={{ padding: '6px 8px', background: 'var(--bg2)', borderRadius: '4px' }}>
               <span>{recommendText}</span>
               {docsUrl && (

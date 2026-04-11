@@ -171,6 +171,51 @@ test.describe('OpenAI Regional Availability', () => {
   })
 })
 
+test.describe('Bedrock Regional Availability (always visible)', () => {
+  test('shows all regions operational when no incidents', async ({ page }) => {
+    await page.route('**/api/status', async (route) => {
+      await route.fulfill({ json: {
+        services: [
+          { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
+          { id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational', latency: 175, uptime30d: 100, calendarDays: 14, incidents: [] },
+        ],
+        lastUpdated: new Date().toISOString(),
+      } })
+    })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    await page.locator('main button').filter({ hasText: 'Amazon Bedrock' }).first().evaluate((el) => el.click())
+    await expect(page.locator('main').getByText(/Regional Availability|리전별 가용성/)).toBeVisible({ timeout: 5000 })
+    // All 4 regions should show "No Active Incidents"
+    await expect(page.locator('main').getByText(/No Active Incidents|활성 장애 없음/)).toHaveCount(4)
+  })
+
+  test('shows region-specific incident via componentNames', async ({ page }) => {
+    await page.route('**/api/status', async (route) => {
+      await route.fulfill({ json: {
+        services: [
+          { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
+          {
+            id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'degraded',
+            latency: 200, uptime30d: 99.9, calendarDays: 14,
+            incidents: [
+              { id: 'br-1', title: 'Increased API Error Rates', startedAt: new Date(Date.now() - 3600000).toISOString(), duration: null, status: 'investigating', impact: null, timeline: [], componentNames: ['us-east-1'] },
+            ],
+          },
+        ],
+        lastUpdated: new Date().toISOString(),
+      } })
+    })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    await page.locator('main button').filter({ hasText: 'Amazon Bedrock' }).first().evaluate((el) => el.click())
+    await expect(page.locator('main').getByText(/Regional Availability|리전별 가용성/)).toBeVisible({ timeout: 5000 })
+    // us-east-1 should show incident, other 3 should be ok
+    await expect(page.locator('main').getByText(/No Active Incidents|활성 장애 없음/)).toHaveCount(3)
+    await expect(page.locator('main').getByText(/Incident Detected|장애 감지/)).toHaveCount(1)
+  })
+})
+
 test.describe('Detection Lead badge', () => {
   test('shows lead badge for OpenAI ongoing incident', async ({ page }) => {
     await page.goto('/')
