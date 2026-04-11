@@ -80,7 +80,7 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
             const worstStatus = svcs.some(s => s.status === 'down') ? 'down'
               : svcs.some(s => s.status !== 'operational') ? 'degraded' : 'operational'
             const isAllResolved = svcs.every(s => s.status === 'operational')
-            const hasActiveInc = svcs.some(s => (s.incidents ?? []).some(i => i.status !== 'resolved'))
+            const hasActiveInc = svcs.some(s => (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring'))
             const allRecovered = analyses.every(a => !!a.resolvedAt)
 
             return (

@@ -521,8 +521,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   }
 
   // Refresh TTL on existing AI analyses / re-analyze missing ones (max 2 per cron)
+  // monitoring = "recovery confirmed, verifying" — treat as inactive (no TTL refresh)
   const activeServices = scored.filter(s =>
-    (s.incidents ?? []).some(i => i.status !== 'resolved')
+    (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring')
   )
   await refreshOrReanalyze(activeServices, env.STATUS_CACHE, env.ANTHROPIC_API_KEY, analyzeIncident)
 
@@ -1275,11 +1276,12 @@ export default {
         const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
         const recentlyRecovered: string[] = []
         // Active incidents: read ai:analysis:{svcId}:{incId} for each
+        // monitoring = "recovery confirmed" — exclude from active analysis display
         const withActiveInc = cached.services.filter(s =>
-          (s.incidents ?? []).some(i => i.status !== 'resolved')
+          (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring')
         )
         await Promise.all(withActiveInc.flatMap(svc =>
-          (svc.incidents ?? []).filter(i => i.status !== 'resolved').map(async (inc) => {
+          (svc.incidents ?? []).filter(i => i.status !== 'resolved' && i.status !== 'monitoring').map(async (inc) => {
             const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
             if (!raw) return
             try {
@@ -1458,11 +1460,12 @@ export default {
       const recentlyRecovered: string[] = []
       if (env.STATUS_CACHE) {
         // Active incidents: read ai:analysis:{svcId}:{incId} for each
+        // monitoring = "recovery confirmed" — exclude from active analysis display
         const withActiveInc = servicesWithScore.filter(s =>
-          (s.incidents ?? []).some(i => i.status !== 'resolved')
+          (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring')
         )
         await Promise.all(withActiveInc.flatMap(svc =>
-          (svc.incidents ?? []).filter(i => i.status !== 'resolved').map(async (inc) => {
+          (svc.incidents ?? []).filter(i => i.status !== 'resolved' && i.status !== 'monitoring').map(async (inc) => {
             const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
             if (!raw) return
             try {

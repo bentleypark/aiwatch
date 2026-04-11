@@ -43,7 +43,7 @@ export default function Topbar({ onMenuToggle }) {
     return arr.some(analysis => {
       if (analysis.resolvedAt) return true
       const svc = services.find(s => s.id === svcId)
-      return svc && (svc.incidents ?? []).some(i => i.status !== 'resolved' && i.id === analysis.incidentId)
+      return svc && (svc.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring' && i.id === analysis.incidentId)
     })
   })
 
