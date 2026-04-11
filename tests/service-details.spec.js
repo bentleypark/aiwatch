@@ -216,6 +216,50 @@ test.describe('Bedrock Regional Availability (always visible)', () => {
   })
 })
 
+test.describe('Azure OpenAI Regional Availability (always visible)', () => {
+  test('shows all 7 regions operational when no incidents', async ({ page }) => {
+    await page.route('**/api/status', async (route) => {
+      await route.fulfill({ json: {
+        services: [
+          { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
+          { id: 'azureopenai', category: 'api', name: 'Azure OpenAI', provider: 'Microsoft', status: 'operational', latency: 150, uptime30d: 100, calendarDays: 14, incidents: [] },
+        ],
+        lastUpdated: new Date().toISOString(),
+      } })
+    })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    await page.locator('main button').filter({ hasText: 'Azure OpenAI' }).first().evaluate((el) => el.click())
+    await expect(page.locator('main').getByText(/Regional Availability|리전별 가용성/)).toBeVisible({ timeout: 5000 })
+    // All 7 regions should show "No Active Incidents"
+    await expect(page.locator('main').getByText(/No Active Incidents|활성 장애 없음/)).toHaveCount(7)
+  })
+
+  test('shows region-specific incident for Azure OpenAI', async ({ page }) => {
+    await page.route('**/api/status', async (route) => {
+      await route.fulfill({ json: {
+        services: [
+          { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
+          {
+            id: 'azureopenai', category: 'api', name: 'Azure OpenAI', provider: 'Microsoft', status: 'degraded',
+            latency: 200, uptime30d: 99.9, calendarDays: 14,
+            incidents: [
+              { id: 'az-1', title: 'Azure OpenAI - East US 2 elevated error rates', startedAt: new Date(Date.now() - 3600000).toISOString(), duration: null, status: 'investigating', impact: null, timeline: [], componentNames: [] },
+            ],
+          },
+        ],
+        lastUpdated: new Date().toISOString(),
+      } })
+    })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    await page.locator('main button').filter({ hasText: 'Azure OpenAI' }).first().evaluate((el) => el.click())
+    await expect(page.locator('main').getByText(/Regional Availability|리전별 가용성/)).toBeVisible({ timeout: 5000 })
+    // East US 2 should show incident (matched from title), other 6 should be ok
+    await expect(page.locator('main').getByText(/No Active Incidents|활성 장애 없음/)).toHaveCount(6)
+  })
+})
+
 test.describe('Detection Lead badge', () => {
   test('shows lead badge for OpenAI ongoing incident', async ({ page }) => {
     await page.goto('/')

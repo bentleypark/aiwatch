@@ -76,7 +76,7 @@ const STATUS_URL = {
 const NO_INCIDENT_SUPPORT = new Set([])
 
 // Services with real-time-only incident data (no historical archive)
-const REALTIME_ONLY = new Set(['bedrock'])
+const REALTIME_ONLY = new Set(['bedrock', 'azureopenai'])
 
 // 30-day calendar status → Tailwind color class
 const CALENDAR_CLASS = {
@@ -314,6 +314,15 @@ const SERVICE_REGIONS = {
     { key: 'us-west-2', label: 'US West (us-west-2)' },
     { key: 'eu-central-1', label: 'Europe Central (eu-central-1)' },
   ],
+  azureopenai: [
+    { key: 'East US 2', label: 'East US 2' },
+    { key: 'Central US', label: 'Central US' },
+    { key: 'Sweden Central', label: 'Sweden Central' },
+    { key: 'UK South', label: 'UK South' },
+    { key: 'Australia East', label: 'Australia East' },
+    { key: 'Korea Central', label: 'Korea Central' },
+    { key: 'Norway East', label: 'Norway East' },
+  ],
   bedrock: [
     { key: 'us-east-1', label: 'US East (N. Virginia)' },
     { key: 'us-west-2', label: 'US West (Oregon)' },
@@ -367,6 +376,7 @@ const REGION_DOCS_URL = {
   gemini: 'https://cloud.google.com/vertex-ai/docs/general/locations',
   openai: 'https://platform.openai.com/docs/guides/production-best-practices',
   chatgpt: 'https://status.openai.com',
+  azureopenai: 'https://learn.microsoft.com/azure/ai-services/openai/concepts/models',
   bedrock: 'https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-regions.html',
   pinecone: 'https://docs.pinecone.io/troubleshooting/available-cloud-regions',
 }
@@ -379,7 +389,7 @@ function RegionalAvailability({ service, t }) {
     const incidents = Array.isArray(service.incidents) ? service.incidents : []
     const ongoing = incidents.filter(i => i && typeof i.title === 'string' && i.status !== 'resolved')
     // Services with componentNames-based region matching (e.g., Bedrock AWS RSS) always show regional status
-    const ALWAYS_SHOW_REGIONS = ['bedrock']
+    const ALWAYS_SHOW_REGIONS = ['bedrock', 'azureopenai']
     const alwaysShow = ALWAYS_SHOW_REGIONS.includes(service.id)
     if (ongoing.length === 0 && !alwaysShow) return null
 
