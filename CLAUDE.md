@@ -238,6 +238,8 @@ When adding a new monitored service, update ALL of the following:
 | `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
 | `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time (probe spike or status page, whichever is earlier) |
 | `reddit:seen:{postId}` | `"1"` | 24h | ~120 | Reddit post dedup (hourly scan, max 5/hour) |
+| `security:seen:hn:{objectId}` | `"1"` | 24h | ~0 | HN security post dedup |
+| `security:seen:osv:{vulnId}` | `"1"` | 24h | ~0 | OSV.dev vulnerability dedup |
 | `ai:analysis:{svcId}:{incId}` | `AIAnalysisResult` JSON | 1h (active) / 2h (resolved) | ~5 per incident | Claude Sonnet per-incident analysis result (TTL refreshed while active; on recovery, `resolvedAt` added instead of deleting — kept 2h for "Recently Resolved" UI) |
 | `ai:reanalysis-skip:{svcId}:{incId}` | `"1"` | 30min | ~2 per incident | Per-incident re-analysis failure cooldown |
 | `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis) |
@@ -300,7 +302,8 @@ worker/
     probe-archival.ts # Daily probe RTT archival + 7-day summary (p50, p95, cvCombined)
     platform-monitor.ts # Status page platform health monitoring (metastatuspage.com for Atlassian)
     detection.ts # Detection Lead entry parsing + incident-aware reset logic
-    reddit.ts   # Reddit r/ChatGPT monitoring for outage chatter
+    reddit.ts   # Reddit r/ChatGPT + r/netsec + r/cybersecurity monitoring
+    security-monitor.ts # AI service security monitoring (HN Algolia, OSV.dev SDK vulnerabilities)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
                 # dailyImpact support: statuspage (uptimeData), incident-io (component impacts), betterstack (status_history from index.json)
 ```
@@ -405,6 +408,7 @@ Cron Trigger (*/5 min)
   → daily summary also accumulates incidents:monthly:{YYYY-MM} (dedup by incident ID, 60d TTL)
   → monthly archive on 1st of month (UTC 00:00) → aggregate history:* + probe:daily:* + incidents:monthly:* → archive:monthly:{YYYY-MM} (permanent)
   → changelog RSS/HTML collection (hourly at :00) → KV accumulate new entries from OpenAI/Google/Anthropic
+  → security monitoring (hourly at :00) → HN Algolia + OSV.dev SDK vulnerability scan → Discord digest on findings
   → weekly briefing on Sunday UTC 00:00 (KST 09:00) → aggregate changelog + incidents + stability → Discord embed
 
 Web Vitals Pipeline (per-request, 100% collection):
