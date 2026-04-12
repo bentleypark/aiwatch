@@ -663,9 +663,13 @@ export default function ServiceDetails({ serviceId }) {
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>
         <MetricCard
           label={probeServiceIds.includes(service.id) ? t('svc.latency') : t('svc.latency.statusPage')}
-          value={service.latency != null ? `${service.latency} ms` : '—'}
-          sub={service.latency != null ? t('svc.latency.sub') : service.category !== 'api' ? '' : t('uptime.collecting')}
-          colorClass="text-[var(--blue)]"
+          value={probeServiceIds.includes(service.id)
+            ? (service.latency != null ? `${service.latency} ms` : '—')
+            : '—'}
+          sub={probeServiceIds.includes(service.id)
+            ? (service.latency != null ? t('svc.latency.sub') : t('uptime.collecting'))
+            : t('uptime.unavailable')}
+          colorClass={probeServiceIds.includes(service.id) ? 'text-[var(--blue)]' : 'text-[var(--text2)]'}
         />
         <MetricCard
           label={isEstimateNoData
