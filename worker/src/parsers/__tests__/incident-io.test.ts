@@ -29,6 +29,14 @@ describe('parseIncidentIoUptime', () => {
     const html = '<html>no data</html>'
     expect(parseIncidentIoUptime(html, 'missing')).toBeNull()
   })
+
+  it('does not cross-match componentId from component_impacts section', () => {
+    // Simulates real OpenAI status page: same componentId appears in both
+    // component_impacts (incident data) and component_uptimes (uptime data).
+    // The regex must only match within component_uptimes to get the correct value.
+    const html = `<script>self.__next_f.push([1,"component_impacts\\":[{\\"component_id\\":\\"target\\",\\"status\\":\\"degraded\\"}],\\"component_uptimes\\":[{\\"component_id\\":\\"other\\",\\"uptime\\":\\"100.00\\"},{\\"component_id\\":\\"target\\",\\"uptime\\":\\"99.98\\"}]"])</script>`
+    expect(parseIncidentIoUptime(html, 'target')).toBe(99.98)
+  })
 })
 
 describe('parseIncidentIoComponentImpacts', () => {

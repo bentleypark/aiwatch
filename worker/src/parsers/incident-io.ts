@@ -7,12 +7,15 @@ export function parseIncidentIoUptime(html: string, componentId: string): number
   const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
   for (const chunk of chunks) {
     if (!chunk.includes('component_uptimes')) continue
-    // Find our componentId and its uptime value in escaped JSON
-    // Format: \"component_id\":\"<id>\",...,\"uptime\":\"99.99\"
+    // Search only within the component_uptimes section to avoid matching the same
+    // componentId in component_impacts (incident data) which would then greedily
+    // skip ahead to the wrong uptime value from a different component.
+    const uptimesIdx = chunk.indexOf('component_uptimes')
+    const uptimesSection = chunk.substring(uptimesIdx)
     const re = new RegExp(
       `\\\\"component_id\\\\":\\\\"${componentId}\\\\"[\\s\\S]*?\\\\"uptime\\\\":\\\\"([^\\\\"]*)\\\\"`
     )
-    const match = chunk.match(re)
+    const match = uptimesSection.match(re)
     if (!match) continue
     const raw = match[1]
     if (raw === '$undefined' || raw === '') return null
