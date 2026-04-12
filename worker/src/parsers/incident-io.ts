@@ -3,7 +3,7 @@
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import { fetchWithTimeout } from '../utils'
 
-export function parseIncidentIoUptime(html: string, componentId: string): number | null {
+export function parseIncidentIoUptime(html: string, componentId: string, groupId?: string): number | null {
   const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
   for (const chunk of chunks) {
     if (!chunk.includes('component_uptimes')) continue
@@ -12,6 +12,21 @@ export function parseIncidentIoUptime(html: string, componentId: string): number
     // skip ahead to the wrong uptime value from a different component.
     const uptimesIdx = chunk.indexOf('component_uptimes')
     const uptimesSection = chunk.substring(uptimesIdx)
+
+    // 1. Try group uptime first (e.g. "APIs 99.99%" aggregate)
+    //    Group uptimes have component_id=$undefined with a status_page_component_group_id
+    if (groupId) {
+      const groupRe = new RegExp(
+        `\\\\"component_id\\\\":\\\\"\\$undefined\\\\"[\\s\\S]*?\\\\"status_page_component_group_id\\\\":\\\\"${groupId}\\\\"[\\s\\S]*?\\\\"uptime\\\\":\\\\"([^\\\\"]*)\\\\"`
+      )
+      const groupMatch = uptimesSection.match(groupRe)
+      if (groupMatch) {
+        const pct = parseFloat(groupMatch[1])
+        if (!isNaN(pct) && pct >= 0 && pct <= 100) return pct
+      }
+    }
+
+    // 2. Fall back to individual component uptime
     const re = new RegExp(
       `\\\\"component_id\\\\":\\\\"${componentId}\\\\"[\\s\\S]*?\\\\"uptime\\\\":\\\\"([^\\\\"]*)\\\\"`
     )

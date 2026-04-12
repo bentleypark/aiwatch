@@ -1,7 +1,7 @@
 // Fallback recommendation logic for incident alerts
 
 // Keep in sync with src/utils/constants.js EXCLUDE_FALLBACK
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai']
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
 
 // Tier-based priority for API services — major LLMs first, then secondary, then infrastructure, then voice
 // Same-tier services are sorted by Score. Higher tier = lower number = higher priority.

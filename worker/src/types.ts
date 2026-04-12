@@ -53,6 +53,7 @@ export interface ServiceConfig {
   statusComponent?: string
   statusComponentId?: string
   incidentIoComponentId?: string
+  incidentIoGroupId?: string       // incident.io group uptime (e.g. "APIs" aggregate)
   betterStackUrl?: string
   onlineOrNotUrl?: string
   onlineOrNotComponent?: string
