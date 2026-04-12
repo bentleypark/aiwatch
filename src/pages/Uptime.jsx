@@ -107,7 +107,8 @@ export default function Uptime() {
 
   if (services.length === 0) return <EmptyState type="neutral" />
 
-  const uptimeServices = services.filter((s) => s.uptime30d != null)
+  const hasReliableUptime = (s) => s.uptime30d != null && !(s.uptimeSource === 'estimate' && (s.incidents ?? []).length === 0)
+  const uptimeServices = services.filter(hasReliableUptime)
   const hasUptimeData = uptimeServices.length > 0
   const mostStable = hasUptimeData
     ? uptimeServices.reduce((max, s) => s.uptime30d > max.uptime30d ? s : max)

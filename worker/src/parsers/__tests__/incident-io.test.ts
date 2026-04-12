@@ -29,6 +29,23 @@ describe('parseIncidentIoUptime', () => {
     const html = '<html>no data</html>'
     expect(parseIncidentIoUptime(html, 'missing')).toBeNull()
   })
+
+  it('does not cross-match componentId from component_impacts section', () => {
+    // Simulates real OpenAI status page: same componentId appears in both
+    // component_impacts (incident data) and component_uptimes (uptime data).
+    // The regex must only match within component_uptimes to get the correct value.
+    const html = `<script>self.__next_f.push([1,"component_impacts\\":[{\\"component_id\\":\\"target\\",\\"status\\":\\"degraded\\"}],\\"component_uptimes\\":[{\\"component_id\\":\\"other\\",\\"uptime\\":\\"100.00\\"},{\\"component_id\\":\\"target\\",\\"uptime\\":\\"99.98\\"}]"])</script>`
+    expect(parseIncidentIoUptime(html, 'target')).toBe(99.98)
+  })
+
+  it('prefers group uptime over individual component uptime when groupId provided', () => {
+    // OpenAI "APIs" group has aggregate uptime 99.99% with $undefined component_id
+    const html = `<script>self.__next_f.push([1,"component_uptimes\\":[{\\"component_id\\":\\"comp1\\",\\"data_available_since\\":\\"2021-01-01\\",\\"status_page_component_group_id\\":\\"$undefined\\",\\"uptime\\":\\"100.00\\"},{\\"component_id\\":\\"$undefined\\",\\"data_available_since\\":\\"2021-01-01\\",\\"status_page_component_group_id\\":\\"group1\\",\\"uptime\\":\\"99.99\\"}]"])</script>`
+    // With groupId → returns group aggregate (99.99%)
+    expect(parseIncidentIoUptime(html, 'comp1', 'group1')).toBe(99.99)
+    // Without groupId → returns individual component (100%)
+    expect(parseIncidentIoUptime(html, 'comp1')).toBe(100)
+  })
 })
 
 describe('parseIncidentIoComponentImpacts', () => {

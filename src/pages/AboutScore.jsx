@@ -155,13 +155,23 @@ export default function AboutScore() {
         <p className="text-[11px] text-[var(--text2)]" style={{ lineHeight: 1.6, marginBottom: '10px' }}>
           {t('aboutScore.noUptimeDesc')}
         </p>
-        <div className="mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] rounded p-3">
+        <div className="mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] rounded" style={{ padding: '12px 16px' }}>
           Score = (Uptime_45 + Incidents + Recovery) × 0.9<br />
           Confidence: Medium
         </div>
         <p className="text-[11px] text-[var(--text2)]" style={{ lineHeight: 1.6, marginTop: '10px' }}>
           {t('aboutScore.naDesc')}
         </p>
+      </Section>
+
+      {/* Ranking Exclusion */}
+      <Section title={t('aboutScore.rankExclude')}>
+        <p className="text-[11px] text-[var(--text2)]" style={{ lineHeight: 1.6, marginBottom: '10px' }}>
+          {t('aboutScore.rankExcludeDesc')}
+        </p>
+        <div className="mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] rounded" style={{ padding: '12px 16px' }}>
+          {t('aboutScore.rankExcludeExample')}
+        </div>
       </Section>
 
       {/* Data Sources */}

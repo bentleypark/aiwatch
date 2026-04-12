@@ -20,7 +20,9 @@ export default function Ranking() {
   const services = (rawServices ?? []).filter((s) => settings.enabledServices.includes(s.id))
 
   const ranked = useMemo(() => {
-    const scored = services.filter((s) => s.aiwatchScore != null)
+    // Exclude services with insufficient data (estimate uptime + no incidents = unreliable score)
+    const hasReliableData = (s) => !(s.uptimeSource === 'estimate' && (s.incidents ?? []).length === 0)
+    const scored = services.filter((s) => s.aiwatchScore != null && hasReliableData(s))
       .sort((a, b) => b.aiwatchScore - a.aiwatchScore)
       .map((svc, i, arr) => {
         const score = Math.round(svc.aiwatchScore)
@@ -28,7 +30,7 @@ export default function Ranking() {
         const isTied = arr.filter((s) => Math.round(s.aiwatchScore) === score).length > 1
         return { ...svc, rank, isTied }
       })
-    const na = services.filter((s) => s.aiwatchScore == null)
+    const na = services.filter((s) => s.aiwatchScore == null || !hasReliableData(s))
     return { scored, na }
   }, [services])
 

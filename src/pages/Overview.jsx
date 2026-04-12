@@ -87,7 +87,8 @@ function HistoryBars({ history30d, compact }) {
 
 function ServiceCard({ service, index, onClick, t, isRecovered }) {
   const incidentCount = (service.incidents ?? []).filter((i) => i.status !== 'resolved').length
-  const hasUptime = service.uptime30d != null
+  const isEstimateOnly = service.uptimeSource === 'estimate' && (service.incidents ?? []).length === 0
+  const hasUptime = service.uptime30d != null && !isEstimateOnly
   const uptimeColor = !hasUptime ? 'text-[var(--text2)]' : service.uptime30d >= 99 ? 'text-[var(--green)]' : service.uptime30d >= 97 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
   const latencyColor = service.latency == null ? 'text-[var(--text2)]'
     : service.latency < 500 ? 'text-[var(--green)]'
@@ -118,8 +119,8 @@ function ServiceCard({ service, index, onClick, t, isRecovered }) {
         <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
           <span className="mono text-[10px] text-[var(--text2)]">
             <span className={uptimeColor}>{uptimeStr}</span>
-            {incidentCount > 0 && <>{' · '}<span className="text-[var(--red)]">{incidentCount}{t('overview.card.incidents.compact')}</span></>}
-            {scoreStr && <>{' · '}{scoreStr}</>}
+            {!isEstimateOnly && incidentCount > 0 && <>{' · '}<span className="text-[var(--red)]">{incidentCount}{t('overview.card.incidents.compact')}</span></>}
+            {!isEstimateOnly && scoreStr && <>{' · '}{scoreStr}</>}
           </span>
         </div>
         <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact)} compact />
@@ -150,12 +151,12 @@ function ServiceCard({ service, index, onClick, t, isRecovered }) {
             <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.uptime')}</div>
           </div>
           <div>
-            <div className="mono text-[13px] font-medium text-[var(--text0)]">{incidentCount}</div>
+            <div className={`mono text-[13px] font-medium ${isEstimateOnly ? 'text-[var(--text2)]' : 'text-[var(--text0)]'}`}>{isEstimateOnly ? '—' : incidentCount}</div>
             <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.incidents')}</div>
           </div>
         </div>
 
-        {service.aiwatchScore != null && (
+        {service.aiwatchScore != null && !isEstimateOnly && (
           <div className="flex items-center gap-2" style={{ marginBottom: '8px' }}>
             <span className="mono text-[9px] text-[var(--text2)]">{t('score.bar.label')}</span>
             <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '4px' }}>
@@ -453,7 +454,7 @@ export default function Overview() {
   const degradedCount    = catServices.filter((s) => s.status === 'degraded').length
   const downCount        = catServices.filter((s) => s.status === 'down').length
   const issueCount       = degradedCount + downCount
-  const uptimeServices = catServices.filter((s) => s.uptime30d != null)
+  const uptimeServices = catServices.filter((s) => s.uptime30d != null && !(s.uptimeSource === 'estimate' && (s.incidents ?? []).length === 0))
   const avgUptime = uptimeServices.length
     ? (uptimeServices.reduce((sum, s) => sum + s.uptime30d, 0) / uptimeServices.length).toFixed(1)
     : '—'

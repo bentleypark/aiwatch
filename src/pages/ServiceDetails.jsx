@@ -75,9 +75,6 @@ const STATUS_URL = {
 // Services that cannot provide incident data (no API, bot-protected, etc.)
 const NO_INCIDENT_SUPPORT = new Set([])
 
-// Services with real-time-only incident data (no historical archive)
-const REALTIME_ONLY = new Set(['bedrock', 'azureopenai'])
-
 // 30-day calendar status → Tailwind color class
 const CALENDAR_CLASS = {
   operational:    'bg-[var(--green)]',
@@ -615,6 +612,8 @@ export default function ServiceDetails({ serviceId }) {
     return new Date(b.startedAt) - new Date(a.startedAt)
   })
   const incidentCount = recentIncidents.length
+  const totalIncidents = (service.incidents ?? []).length
+  const isEstimateNoData = service.uptimeSource === 'estimate' && totalIncidents === 0
   const calendarDays = service.calendarDays ?? 14
 
   const calendarData = buildCalendarFromIncidents(service.incidents, service.dailyImpact, calendarDays)
@@ -664,32 +663,42 @@ export default function ServiceDetails({ serviceId }) {
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>
         <MetricCard
           label={probeServiceIds.includes(service.id) ? t('svc.latency') : t('svc.latency.statusPage')}
-          value={service.latency != null ? `${service.latency} ms` : '—'}
-          sub={service.latency != null ? t('svc.latency.sub') : service.category !== 'api' ? '' : t('uptime.collecting')}
-          colorClass="text-[var(--blue)]"
+          value={probeServiceIds.includes(service.id)
+            ? (service.latency != null ? `${service.latency} ms` : '—')
+            : '—'}
+          sub={probeServiceIds.includes(service.id)
+            ? (service.latency != null ? t('svc.latency.sub') : t('uptime.collecting'))
+            : t('uptime.unavailable')}
+          colorClass={probeServiceIds.includes(service.id) ? 'text-[var(--blue)]' : 'text-[var(--text2)]'}
         />
         <MetricCard
-          label={t({ official: 'uptime.label.official', platform_avg: 'uptime.label.platform_avg', estimate: 'uptime.label.estimate' }[service.uptimeSource] ?? 'svc.uptime30d')}
-          value={service.uptime30d != null ? `${service.uptime30d.toFixed(2)}%` : '—'}
-          sub={t({ official: 'uptime.sub.official', platform_avg: 'uptime.sub.platform_avg', estimate: 'uptime.sub.estimate' }[service.uptimeSource] ?? 'uptime.unavailable')}
+          label={isEstimateNoData
+            ? t('svc.uptime30d')
+            : t({ official: 'uptime.label.official', platform_avg: 'uptime.label.platform_avg', estimate: 'uptime.label.estimate' }[service.uptimeSource] ?? 'svc.uptime30d')}
+          value={isEstimateNoData
+            ? '—'
+            : service.uptime30d != null ? `${service.uptime30d.toFixed(2)}%` : '—'}
+          sub={isEstimateNoData
+            ? t('uptime.unavailable')
+            : t({ official: 'uptime.sub.official', platform_avg: 'uptime.sub.platform_avg', estimate: 'uptime.sub.estimate' }[service.uptimeSource] ?? 'uptime.unavailable')}
           colorClass="text-[var(--green)]"
         />
         <MetricCard
           label={t('svc.incidents')}
-          value={incidentCount}
-          sub={t('svc.incidents.sub')}
-          colorClass={incidentCount > 0 ? 'text-[var(--amber)]' : 'text-[var(--text1)]'}
+          value={isEstimateNoData ? '—' : incidentCount}
+          sub={isEstimateNoData ? t('uptime.unavailable') : t('svc.incidents.sub')}
+          colorClass={isEstimateNoData ? 'text-[var(--text2)]' : incidentCount > 0 ? 'text-[var(--amber)]' : 'text-[var(--text1)]'}
         />
         <MetricCard
           label={t('svc.mttr')}
-          value={mttr ?? '—'}
-          sub={mttr ? t('svc.incidents.sub') : t('svc.mttr.none')}
-          colorClass={mttr ? 'text-[var(--amber)]' : 'text-[var(--text2)]'}
+          value={isEstimateNoData ? '—' : (mttr ?? '—')}
+          sub={isEstimateNoData ? t('uptime.unavailable') : mttr ? t('svc.incidents.sub') : t('svc.mttr.none')}
+          colorClass={isEstimateNoData ? 'text-[var(--text2)]' : mttr ? 'text-[var(--amber)]' : 'text-[var(--text2)]'}
         />
       </div>
 
       {/* ── AIWatch Score Breakdown ── */}
-      {service.aiwatchScore != null && (
+      {service.aiwatchScore != null && !isEstimateNoData && (
         <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
             <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
@@ -740,7 +749,7 @@ export default function ServiceDetails({ serviceId }) {
       )}
 
       {/* ── 24h Latency Trend — shows chart when hourly KV data exists ── */}
-      {service.category === 'api' && <ServiceLatencyTrend service={service} t={t} hourlyData={probe24h.length > 0 ? filterLast24h(probe24h) : latency24h} />}
+      {service.category === 'api' && probeServiceIds.includes(service.id) && <ServiceLatencyTrend service={service} t={t} hourlyData={probe24h.length > 0 ? filterLast24h(probe24h) : latency24h} />}
 
       {/* ── Regional Availability (only for services with defined regions) ── */}
       {SERVICE_REGIONS[service.id] && <RegionalAvailability service={service} t={t} />}
@@ -758,15 +767,15 @@ export default function ServiceDetails({ serviceId }) {
             <span className="mono text-[10px] text-[var(--text2)]">{t('incidents.period.7d')}</span>
           </div>
           <div style={{ padding: '16px' }}>
-            {NO_INCIDENT_SUPPORT.has(service.id) ? (
+            {isEstimateNoData || NO_INCIDENT_SUPPORT.has(service.id) ? (
               <div className="flex items-center gap-2 py-4">
                 <span className="text-[var(--text2)] text-sm" aria-hidden="true">—</span>
-                <span className="text-xs text-[var(--text2)]">{t('svc.incidents.unsupported')}</span>
+                <span className="text-xs text-[var(--text2)]">{t('uptime.unavailable')}</span>
               </div>
             ) : incidentCount === 0 ? (
               <div className="flex items-center gap-2 py-4">
                 <span className="text-[var(--green)] text-sm" aria-hidden="true">✓</span>
-                <span className="text-xs text-[var(--text2)]">{t(REALTIME_ONLY.has(service.id) ? 'svc.no.incidents.realtime' : 'svc.no.incidents')}</span>
+                <span className="text-xs text-[var(--text2)]">{t('svc.no.incidents')}</span>
               </div>
             ) : (
               <div className="flex flex-col" style={{ gap: '8px' }}>
@@ -818,7 +827,7 @@ export default function ServiceDetails({ serviceId }) {
         <div style={{ padding: '16px' }}>
           <div className="flex items-center gap-3" style={{ marginBottom: '12px' }}>
             <img src={`${(import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')}/badge/${service.id}`} alt={`${service.name} status`} height="20" />
-            {service.uptime30d != null && <img src={`${(import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')}/badge/${service.id}?uptime=true`} alt={`${service.name} uptime`} height="20" />}
+            {service.uptime30d != null && !isEstimateNoData && <img src={`${(import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')}/badge/${service.id}?uptime=true`} alt={`${service.name} uptime`} height="20" />}
           </div>
           <BadgeCode serviceId={service.id} serviceName={service.name} t={t} />
         </div>

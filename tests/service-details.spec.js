@@ -17,12 +17,12 @@ test.describe('ServiceDetails page', () => {
     await expect(main.getByText('Anthropic')).toBeVisible()
   })
 
-  test('renders 4 metric cards', async ({ page }) => {
+  test('renders metric cards with uptime', async ({ page }) => {
     const main = page.locator('main')
-    // Latency card should show ms value
-    await expect(main.getByText(/ms/).first()).toBeVisible()
     // Uptime card should show percentage
     await expect(main.getByText(/%/).first()).toBeVisible()
+    // Latency card should exist (probe: "API Response Time", non-probe: "Status Page Latency")
+    await expect(main.getByText(/API Response Time|Status Page Latency|API 응답 시간|상태 페이지 레이턴시/).first()).toBeVisible()
   })
 
   test('renders status calendar with legend', async ({ page }) => {
@@ -288,5 +288,101 @@ test.describe('Incident accordion in ServiceDetails', () => {
       // Click close
       await page.locator('main').getByText('✕').first().click()
     }
+  })
+})
+
+test.describe('Non-probe service latency card', () => {
+  test('shows "Not provided" latency for non-probe API service', async ({ page }) => {
+    await page.route('**/api/status', async (route) => {
+      await route.fulfill({ json: {
+        services: [
+          { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, uptimeSource: 'official', calendarDays: 30, incidents: [], aiwatchScore: 92 },
+          { id: 'modal', category: 'api', name: 'Modal', provider: 'Modal', status: 'operational', latency: null, uptime30d: 99.99, uptimeSource: 'platform_avg', calendarDays: 30, incidents: [{ id: 'm1', title: 'Test', startedAt: new Date().toISOString(), duration: '10m', status: 'resolved', impact: 'minor', timeline: [] }] },
+        ],
+        lastUpdated: new Date().toISOString(),
+      } })
+    })
+    // Modal: non-probe → latency card shows "—" + "Not provided"
+    await page.goto('/#modal')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+    const main = page.locator('main')
+    await expect(main.getByText(/Status Page Latency|상태 페이지 레이턴시/)).toBeVisible()
+    // Should show "Not provided" under latency (not a ms value)
+    await expect(main.getByText(/Not provided|공식 데이터 미제공/).first()).toBeVisible()
+    // Should NOT show 24h Trend chart
+    await expect(main.getByText(/24h Trend|24시간 추이/)).not.toBeVisible()
+  })
+
+  test('shows RTT latency for probe API service', async ({ page }) => {
+    await page.route('**/api/status', async (route) => {
+      await route.fulfill({ json: {
+        services: [
+          { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 142, uptime30d: 99.95, uptimeSource: 'official', calendarDays: 30, incidents: [] },
+        ],
+        lastUpdated: new Date().toISOString(),
+        probe24h: [{ t: new Date().toISOString(), data: { claude: { rtt: 142, status: 200 } } }],
+      } })
+    })
+    await page.goto('/#claude')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+    const main = page.locator('main')
+    // Should show "API Response Time" label (not "Status Page Latency")
+    await expect(main.getByText(/API Response Time|API 응답 시간/).first()).toBeVisible()
+    // Should show ms value
+    await expect(main.getByText(/142 ms/)).toBeVisible()
+  })
+})
+
+test.describe('Estimate-only services (Bedrock, Azure OpenAI)', () => {
+  const ESTIMATE_MOCK = {
+    services: [
+      { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, uptimeSource: 'official', calendarDays: 30, incidents: [], aiwatchScore: 92, scoreGrade: 'excellent', scoreConfidence: 'high' },
+      { id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational', latency: 280, uptime30d: 100, uptimeSource: 'estimate', calendarDays: 14, incidents: [], aiwatchScore: 85, scoreGrade: 'excellent', scoreConfidence: 'medium' },
+      { id: 'azureopenai', category: 'api', name: 'Azure OpenAI', provider: 'Microsoft', status: 'operational', latency: 350, uptime30d: 100, uptimeSource: 'estimate', calendarDays: 14, incidents: [], aiwatchScore: 85, scoreGrade: 'excellent', scoreConfidence: 'medium' },
+      { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'operational', latency: 200, uptime30d: 99.99, uptimeSource: 'official', calendarDays: 30, incidents: [], aiwatchScore: 90, scoreGrade: 'excellent', scoreConfidence: 'high' },
+    ],
+    lastUpdated: new Date().toISOString(),
+  }
+
+  test('shows "Not provided" for estimate service with no incidents', async ({ page }) => {
+    await page.route('**/api/status', async (route) => {
+      await route.fulfill({ json: ESTIMATE_MOCK })
+    })
+    await page.goto('/#bedrock')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+    // Should NOT show 100.00% uptime
+    await expect(page.locator('main').getByText('100.00%')).not.toBeVisible()
+    // "Not provided" should appear in multiple metric cards (uptime, incidents, MTTR) + incident history
+    const notProvided = page.locator('main').getByText(/Not provided|제공되지 않음/)
+    await expect(notProvided.first()).toBeVisible()
+    expect(await notProvided.count()).toBeGreaterThanOrEqual(3)
+    // AIWatch Score section should be hidden
+    await expect(page.locator('main').getByText(/AIWatch Score/)).not.toBeVisible()
+  })
+
+  test('hides 24h Trend chart for non-probe services', async ({ page }) => {
+    await page.route('**/api/status', async (route) => {
+      await route.fulfill({ json: ESTIMATE_MOCK })
+    })
+    await page.goto('/#bedrock')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+    // 24h Trend section should not exist for non-probe services
+    await expect(page.locator('main').getByText(/24h Trend|24시간 추이/)).not.toBeVisible()
+  })
+
+  test('excludes estimate services from Ranking scored list', async ({ page }) => {
+    await page.route('**/api/status', async (route) => {
+      await route.fulfill({ json: ESTIMATE_MOCK })
+    })
+    await page.goto('/#ranking')
+    await expect(page.locator('h2').filter({ hasText: /랭킹|Ranking/i })).toBeVisible({ timeout: 20000 })
+    // Claude and OpenAI should be ranked in the table
+    const rankingTable = page.locator('table').first()
+    await expect(rankingTable).toBeVisible({ timeout: 10000 })
+    await expect(rankingTable.getByText('Claude API')).toBeVisible()
+    await expect(rankingTable.getByText('OpenAI API')).toBeVisible()
+    // Bedrock and Azure OpenAI should NOT be in the scored ranking table
+    await expect(rankingTable.getByText('Amazon Bedrock')).not.toBeVisible()
+    await expect(rankingTable.getByText('Azure OpenAI')).not.toBeVisible()
   })
 })

@@ -107,7 +107,8 @@ const uptimeBadgeStyle = { ...badgeStyle, whiteSpace: 'nowrap', minWidth: '46px'
 function ServiceNavItem({ svc, page, setPage, onNavigate }) {
   const active = page.name === 'service' && page.serviceId === svc.id
   const dotClass = STATUS_DOT_CLASS[svc.status] ?? STATUS_DOT_CLASS.operational
-  const hasUptime = svc.uptime30d != null
+  const isEstimateOnly = svc.uptimeSource === 'estimate' && (svc.incidents ?? []).length === 0
+  const hasUptime = svc.uptime30d != null && !isEstimateOnly
   const badgeCls = hasUptime ? uptimeBadgeCls(svc.uptime30d) : 'bg-[var(--bg3)] text-[var(--text2)]'
   const statusTextCls = svc.status === 'degraded' ? 'text-[var(--amber)]'
     : svc.status === 'down' ? 'text-[var(--red)]' : null
