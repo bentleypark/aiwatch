@@ -47,6 +47,7 @@
 - **랜딩 페이지** — Product Hunt 랜딩 페이지(`/intro`), 대시보드 프리뷰 mock, KO/EN 이중 언어, Flow 애니메이션, GA4 트래킹
 - **Web Vitals 모니터링** — 실사용자 LCP, FCP, TTFB, CLS, INP 수집, p75 집계 및 Discord Daily Report 임계값 알림
 - **주간 브리핑** — 매주 일요일 Discord 다이제스트: AI 서비스 변경 감지(OpenAI, Google, Anthropic), 인시던트 요약, 안정성 트렌드
+- **보안 모니터링** — Hacker News, Reddit(r/netsec, r/cybersecurity), OSV.dev를 통한 AI 서비스 보안 사고 감지 및 SDK 취약점 스캔, Discord 다이제스트 알림
 - **상태 페이지 교차 검증** — Probe RTT + 플랫폼 쿼럼 + metastatuspage 모니터링으로 상태 페이지 인프라 장애 시 오탐 방지
 
 ## 모니터링 서비스
@@ -314,6 +315,7 @@ worker/
     ai-analysis.ts # Claude Sonnet 장애 분석
     changelog.ts # 변경사항/뉴스 수집 (OpenAI RSS, Google RSS, Anthropic HTML)
     weekly-briefing.ts # 주간 Discord 브리핑 (변경사항 + 인시던트 + 안정성)
+    security-monitor.ts # AI 서비스 보안 모니터링 (HN Algolia, OSV.dev SDK 취약점)
     daily-summary.ts # 일일 Discord 리포트 (가동률, 지연시간, AI 사용량)
     monthly-archive.ts # 월간 안정성 아카이브 (영구 KV 보존)
     vitals.ts    # Web Vitals 집계 (p75, Discord 포맷)
