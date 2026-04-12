@@ -143,4 +143,27 @@ describe('formatSecurityDigest', () => {
     }]
     expect(formatSecurityDigest(alerts).color).toBe(0x8b949e)
   })
+
+  it('includes service name tag in OSV alert format', () => {
+    const alerts: SecurityAlert[] = [{
+      source: 'osv', id: 'GHSA-test', title: 'Vuln in transformers',
+      url: 'https://osv.dev/test', severity: 'medium', kvKey: 'k',
+      service: 'Hugging Face', affectedPackage: 'PyPI/transformers',
+    }]
+    const digest = formatSecurityDigest(alerts)
+    expect(digest.description).toContain('[Hugging Face]')
+    expect(digest.description).toContain('GHSA-test')
+  })
+
+  it('omits service tag when service is undefined', () => {
+    const alerts: SecurityAlert[] = [{
+      source: 'osv', id: 'GHSA-noservice', title: 'Generic vuln',
+      url: 'https://osv.dev/x', severity: 'low', kvKey: 'k',
+      affectedPackage: 'PyPI/unknown',
+    }]
+    const digest = formatSecurityDigest(alerts)
+    // Should not contain a service tag like [Hugging Face], but [Details]/[HN] links are expected
+    expect(digest.description).not.toMatch(/\[(?!Details|HN|Source)[A-Z][a-zA-Z ]+\]/)
+    expect(digest.description).toContain('GHSA-noservice')
+  })
 })

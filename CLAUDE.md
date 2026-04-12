@@ -238,8 +238,8 @@ When adding a new monitored service, update ALL of the following:
 | `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
 | `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time (probe spike or status page, whichever is earlier) |
 | `reddit:seen:{postId}` | `"1"` | 24h | ~120 | Reddit post dedup (hourly scan, max 5/hour) |
-| `security:seen:hn:{objectId}` | `"1"` | 24h | ~0 | HN security post dedup |
-| `security:seen:osv:{vulnId}` | `"1"` | 24h | ~0 | OSV.dev vulnerability dedup |
+| `security:seen:hn:{objectId}` | `"1"` | 7d | ~0 | HN security post dedup |
+| `security:seen:osv:{vulnId}` | `"1"` | 7d | ~0 | OSV.dev vulnerability dedup |
 | `ai:analysis:{svcId}:{incId}` | `AIAnalysisResult` JSON | 1h (active) / 2h (resolved) | ~5 per incident | Claude Sonnet per-incident analysis result (TTL refreshed while active; on recovery, `resolvedAt` added instead of deleting — kept 2h for "Recently Resolved" UI) |
 | `ai:reanalysis-skip:{svcId}:{incId}` | `"1"` | 30min | ~2 per incident | Per-incident re-analysis failure cooldown |
 | `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis) |
