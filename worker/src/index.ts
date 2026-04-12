@@ -1368,9 +1368,12 @@ export default {
           })
         ))
         // Recently recovered: operational services with resolved analysis in per-incident keys
+        // Only check recently resolved incidents — ai:analysis keys have max 2h TTL after resolvedAt,
+        // so only incidents resolved in the last 3h could still have analysis data in KV
+        const recoveryCutoff = Date.now() - 3 * 3600_000
         const operationalCached = cached.services.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
         await Promise.all(operationalCached.flatMap(svc =>
-          (svc.incidents ?? []).map(async (inc) => {
+          (svc.incidents ?? []).filter(i => i.resolvedAt && new Date(i.resolvedAt).getTime() >= recoveryCutoff).map(async (inc) => {
             const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
             if (!raw) return
             try {

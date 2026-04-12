@@ -31,7 +31,7 @@ export default async function handler(req: Request) {
     let aiInsight: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string } | null = null
 
     const result = await Promise.allSettled([
-      fetch(`${WORKER_API}/api/status/cached`, { signal: AbortSignal.timeout(8000) }),
+      fetch(`${WORKER_API}/api/status/cached`, { signal: AbortSignal.timeout(5000) }),
     ])
 
     if (result[0].status === 'fulfilled' && result[0].value.ok) {
