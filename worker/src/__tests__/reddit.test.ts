@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseRedditResponse, matchesKeywords, isPromotable, formatRedditAlert } from '../reddit'
+import { parseRedditResponse, matchesKeywords, matchesSecurityKeywords, isPromotable, formatRedditAlert, formatSecurityAlert } from '../reddit'
 import type { RedditAlert } from '../reddit'
 
 describe('parseRedditResponse', () => {
@@ -88,6 +88,71 @@ describe('matchesKeywords', () => {
   })
 })
 
+describe('matchesSecurityKeywords', () => {
+  it('matches AI service security incidents', () => {
+    expect(matchesSecurityKeywords('OpenAI data breach exposes user emails')).toBe(true)
+    expect(matchesSecurityKeywords('Claude Code RCE vulnerability CVE-2025-59536')).toBe(true)
+    expect(matchesSecurityKeywords('Anthropic API key leak found on GitHub')).toBe(true)
+    expect(matchesSecurityKeywords('HuggingFace credentials leaked in breach')).toBe(true)
+    expect(matchesSecurityKeywords('DeepSeek database compromised with unauthorized access')).toBe(true)
+    expect(matchesSecurityKeywords('Gemini prompt injection exploit discovered')).toBe(true)
+    expect(matchesSecurityKeywords('xAI Grok hacked — data exfiltration confirmed')).toBe(true)
+  })
+
+  it('matches strong security signals with AI-adjacent keywords', () => {
+    expect(matchesSecurityKeywords('Major breach at AI cloud provider')).toBe(true)
+    expect(matchesSecurityKeywords('CVE-2025-12345 remote code execution in LLM API')).toBe(true)
+    expect(matchesSecurityKeywords('Data leak exposes GPT model weights')).toBe(true)
+  })
+
+  it('does not match strong security signals without AI context', () => {
+    expect(matchesSecurityKeywords('Major breach at cloud provider')).toBe(false)
+    expect(matchesSecurityKeywords('CVE-2025-12345 remote code execution in Linux kernel')).toBe(false)
+    expect(matchesSecurityKeywords('Data leak exposes millions of records')).toBe(false)
+  })
+
+  it('matches security context + AI service', () => {
+    expect(matchesSecurityKeywords('OpenAI security vulnerability patched')).toBe(true)
+    expect(matchesSecurityKeywords('Anthropic disclosure of exploit')).toBe(true)
+    expect(matchesSecurityKeywords('Copilot malicious injection attack')).toBe(true)
+  })
+
+  it('does not match unrelated posts', () => {
+    expect(matchesSecurityKeywords('How to use Claude for coding')).toBe(false)
+    expect(matchesSecurityKeywords('Best security practices for web apps')).toBe(false)
+    expect(matchesSecurityKeywords('New feature announcement from Google')).toBe(false)
+    expect(matchesSecurityKeywords('Pricing comparison of AI services')).toBe(false)
+  })
+
+  it('is case insensitive', () => {
+    expect(matchesSecurityKeywords('OPENAI BREACH CONFIRMED')).toBe(true)
+    expect(matchesSecurityKeywords('Claude vulnerability DISCLOSURE')).toBe(true)
+  })
+})
+
+describe('formatSecurityAlert', () => {
+  it('formats Reddit security alert with red color and lock icon', () => {
+    const alert: RedditAlert = {
+      key: 'reddit:seen:sec123',
+      subreddit: 'netsec',
+      post: {
+        id: 'sec123',
+        title: 'OpenAI API key leak discovered',
+        author: 'secresearcher',
+        subreddit: 'netsec',
+        score: 42,
+        url: 'https://www.reddit.com/r/netsec/comments/sec123/',
+        createdUtc: Math.floor(Date.now() / 1000) - 300,
+      },
+      type: 'security',
+    }
+    const formatted = formatSecurityAlert(alert)
+    expect(formatted.title).toBe('🔒 Security: r/netsec')
+    expect(formatted.description).toContain('OpenAI API key leak')
+    expect(formatted.color).toBe(0xf85149) // red
+  })
+})
+
 describe('isPromotable', () => {
   it('detects question-style posts as promotable', () => {
     expect(isPromotable('Is Claude down right now?')).toBe(true)
@@ -124,6 +189,7 @@ describe('formatRedditAlert', () => {
     const alert: RedditAlert = {
       key: 'reddit:seen:abc123',
       subreddit: 'ClaudeAI',
+      type: 'outage',
       post: {
         id: 'abc123',
         title: 'Is Claude down?',
@@ -144,9 +210,9 @@ describe('formatRedditAlert', () => {
 
   it('filters promotable alerts from mixed list (integration)', () => {
     const alerts: RedditAlert[] = [
-      { key: 'k1', subreddit: 'ClaudeAI', post: { id: '1', title: 'Is Claude down?', author: 'a', subreddit: 'ClaudeAI', score: 5, url: '', createdUtc: 0 } },
-      { key: 'k2', subreddit: 'OpenAI', post: { id: '2', title: 'OpenAI outage lasted 3 hours', author: 'b', subreddit: 'OpenAI', score: 20, url: '', createdUtc: 0 } },
-      { key: 'k3', subreddit: 'ChatGPT', post: { id: '3', title: 'Anyone having issues with ChatGPT?', author: 'c', subreddit: 'ChatGPT', score: 8, url: '', createdUtc: 0 } },
+      { key: 'k1', subreddit: 'ClaudeAI', type: 'outage' as const, post: { id: '1', title: 'Is Claude down?', author: 'a', subreddit: 'ClaudeAI', score: 5, url: '', createdUtc: 0 } },
+      { key: 'k2', subreddit: 'OpenAI', type: 'outage' as const, post: { id: '2', title: 'OpenAI outage lasted 3 hours', author: 'b', subreddit: 'OpenAI', score: 20, url: '', createdUtc: 0 } },
+      { key: 'k3', subreddit: 'ChatGPT', type: 'outage' as const, post: { id: '3', title: 'Anyone having issues with ChatGPT?', author: 'c', subreddit: 'ChatGPT', score: 8, url: '', createdUtc: 0 } },
     ]
     const promotable = alerts.filter(a => isPromotable(a.post.title))
     expect(promotable).toHaveLength(2)
@@ -158,6 +224,7 @@ describe('formatRedditAlert', () => {
     const alert: RedditAlert = {
       key: 'reddit:seen:xyz',
       subreddit: 'UnknownSub',
+      type: 'outage',
       post: {
         id: 'xyz',
         title: 'Is this service down?',

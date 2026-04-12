@@ -15,6 +15,7 @@ export interface DailySummaryData {
   webhookCounts?: { discord: number; slack: number }
   deliveryCounts?: { discord: number; slack: number; failed: number } | null
   redditCount: number
+  securityCount?: number
   vitals?: VitalsDaily | null
   probeSnapshots?: ProbeSnapshot[]
 }
@@ -128,6 +129,7 @@ export function buildDailySummary(data: DailySummaryData): string {
     }
   }
   if (redditCount > 0) lines.push(`📢 **Reddit**: ${redditCount} posts detected`)
+  if (data.securityCount && data.securityCount > 0) lines.push(`🔒 **Security**: ${data.securityCount} alerts detected`)
 
   // Section: Web Vitals
   if (vitals && vitals.count > 0) {
