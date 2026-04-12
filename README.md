@@ -47,6 +47,7 @@ Real-time monitoring dashboard for **30 AI services** — track status, latency,
 - **AI Analysis (Beta)** — Claude Sonnet auto-analysis on incidents: cause estimation, recovery time, affected scope, contextual fallback recommendations. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 - **Landing page** — Product Hunt landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, and GA4 tracking
 - **Web Vitals monitoring** — Real user LCP, FCP, TTFB, CLS, INP collection with p75 aggregation and threshold-based alerts in Discord Daily Report
+- **Weekly briefing** — Sunday Discord digest with AI service changelog detection (OpenAI, Google, Anthropic), incident summary, and stability trends
 - **Status page cross-validation** — Probe RTT + platform quorum + metastatuspage monitoring to prevent false positives during status page infrastructure outages
 
 ## Monitored Services
@@ -312,6 +313,8 @@ worker/
     alerts.ts    # Alert detection logic (incident + service alerts)
     fallback.ts  # Fallback recommendation
     ai-analysis.ts # Claude Sonnet incident analysis
+    changelog.ts # Changelog/news collection (OpenAI RSS, Google RSS, Anthropic HTML)
+    weekly-briefing.ts # Weekly Discord briefing (changelog + incidents + stability)
     daily-summary.ts # Daily Discord report (uptime, latency, AI usage)
     monthly-archive.ts # Monthly reliability archive (permanent KV)
     vitals.ts    # Web Vitals aggregation (p75, Discord formatting)

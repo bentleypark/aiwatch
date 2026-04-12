@@ -627,6 +627,8 @@ import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, isPromotable } from './reddit'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow } from './daily-summary'
+import { collectChangelogs } from './changelog'
+import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { archiveProbeDaily, type ProbeDailyData } from './probe-archival'
 import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateMonthlyIncidents, type MonthlyIncidents, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
@@ -770,6 +772,98 @@ export default {
         }
       } catch (err) {
         console.warn('[cron] GitHub competitive monitoring failed:', err instanceof Error ? err.message : err)
+      }
+    }
+
+    // Changelog RSS collection — every hour at :00 (3 sources, write only on new entries)
+    if (env.STATUS_CACHE && now.getUTCMinutes() === 0) {
+      try {
+        const newEntries = await collectChangelogs(env.STATUS_CACHE)
+        if (newEntries.length > 0) {
+          console.log(`[cron] changelog: ${newEntries.length} new entries detected`)
+        }
+      } catch (err) {
+        console.warn('[cron] changelog collection failed:', err instanceof Error ? err.message : err)
+      }
+    }
+
+    // Weekly briefing — Sunday UTC 00:00-00:04 (KST 09:00)
+    if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCDay() === 0 && now.getUTCHours() === 0 && now.getUTCMinutes() < 5) {
+      try {
+        const weeklyKey = `weekly-briefing:${todayUTC()}`
+        const alreadySent = await env.STATUS_CACHE.get(weeklyKey).catch(() => null)
+        if (!alreadySent) {
+          const { start: weekStart, end: weekEnd } = getWeekRange(now)
+
+          // Read changelog entries accumulated this week
+          const changelogRaw = await env.STATUS_CACHE.get('changelog:entries').catch(() => null)
+          let changelog: unknown[] = []
+          if (changelogRaw) { try { changelog = JSON.parse(changelogRaw) } catch { console.warn('[cron] changelog entries parse failed') } }
+
+          // Read monthly incidents for incident summary (check both current and previous month for week spanning month boundary)
+          const allMonthlyIncidents: unknown[] = []
+          const currMonthKey = `incidents:monthly:${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+          const prevMonth = new Date(now); prevMonth.setUTCMonth(prevMonth.getUTCMonth() - 1)
+          const prevMonthKey = `incidents:monthly:${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`
+          for (const mk of [currMonthKey, prevMonthKey]) {
+            const mRaw = await env.STATUS_CACHE.get(mk).catch(() => null)
+            if (mRaw) { try { allMonthlyIncidents.push(...(JSON.parse(mRaw).incidents ?? [])) } catch { console.warn(`[cron] ${mk} parse failed`) } }
+          }
+          const incidents = buildIncidentSummary(allMonthlyIncidents as Parameters<typeof buildIncidentSummary>[0], weekStart, weekEnd)
+
+          // Read daily uptime counters for stability comparison
+          const thisWeekCounters: Record<string, { ok: number; total: number }> = {}
+          const prevWeekCounters: Record<string, { ok: number; total: number }> = {}
+          for (let i = 0; i < 7; i++) {
+            const d = new Date(now)
+            d.setUTCDate(d.getUTCDate() - i)
+            const key = `history:${d.toISOString().split('T')[0]}`
+            const raw = await env.STATUS_CACHE.get(key).catch(() => null)
+            if (raw) {
+              try {
+                const data = JSON.parse(raw)
+                for (const [svcId, counts] of Object.entries(data) as [string, { ok: number; total: number }][]) {
+                  const c = thisWeekCounters[svcId] ?? { ok: 0, total: 0 }
+                  c.ok += counts.ok; c.total += counts.total
+                  thisWeekCounters[svcId] = c
+                }
+              } catch { console.warn(`[cron] ${key} parse failed`) }
+            }
+            // Previous week
+            const pd = new Date(now)
+            pd.setUTCDate(pd.getUTCDate() - i - 7)
+            const pkey = `history:${pd.toISOString().split('T')[0]}`
+            const praw = await env.STATUS_CACHE.get(pkey).catch(() => null)
+            if (praw) {
+              try {
+                const pdata = JSON.parse(praw)
+                for (const [svcId, counts] of Object.entries(pdata) as [string, { ok: number; total: number }][]) {
+                  const c = prevWeekCounters[svcId] ?? { ok: 0, total: 0 }
+                  c.ok += counts.ok; c.total += counts.total
+                  prevWeekCounters[svcId] = c
+                }
+              } catch { console.warn(`[cron] ${pkey} parse failed`) }
+            }
+          }
+          const serviceNames: Record<string, string> = {}
+          for (const svc of SERVICES) serviceNames[svc.id] = svc.name
+          const stabilityChanges = buildStabilityChanges(thisWeekCounters, prevWeekCounters, serviceNames)
+
+          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges })
+          await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+            title: `📋 Weekly Briefing (${weekStart} ~ ${weekEnd})`,
+            description: briefing,
+            color: 0x58a6ff, // blue
+          })
+          await kvPut(env.STATUS_CACHE, weeklyKey, '1', { expirationTtl: 604_800 }) // 7d dedup
+
+          // Clear accumulated changelog entries after sending
+          await env.STATUS_CACHE.delete('changelog:entries').catch((err) =>
+            console.warn('[cron] changelog entries cleanup failed:', err instanceof Error ? err.message : err),
+          )
+        }
+      } catch (err) {
+        console.error('[cron] weekly briefing failed:', err instanceof Error ? err.message : err)
       }
     }
 
