@@ -421,7 +421,7 @@ function ActionBanner({ services, setPage, t }) {
 export default function Overview() {
   const { t, lang } = useLang()
   const { setPage, categoryFilter, setCategoryFilter } = usePage()
-  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered } = usePolling()
+  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis } = usePolling()
   const { settings } = useSettings()
   const services = allServices.filter((s) => settings.enabledServices.includes(s.id))
   const [filter, setFilter] = useState('all')
@@ -503,7 +503,7 @@ export default function Overview() {
       <ActionBanner services={services} setPage={setPage} t={t} />
 
       {/* ── Recently Resolved Banner ── */}
-      {recentlyRecovered.length > 0 && (
+      {Object.keys(recentlyRecovered).some(id => services.find(s => s.id === id)) && (
         <div className="rounded-lg border" style={{ borderColor: 'var(--blue)', background: 'var(--blue-dim)', padding: '12px 16px' }}>
           <div className="flex items-center gap-2 flex-wrap text-[12px]">
             <span style={{ color: 'var(--blue)' }}>✓</span>
@@ -511,15 +511,28 @@ export default function Overview() {
               {t('overview.recentlyResolved')}
             </span>
             <span className="text-[var(--text1)]">
-              {recentlyRecovered.map(id => services.find(s => s.id === id)?.name).filter(Boolean).join(', ')}
+              {Object.keys(recentlyRecovered).map(id => {
+                const svc = services.find(s => s.id === id)
+                if (!svc) return null
+                return (
+                  <span
+                    key={id}
+                    className="cursor-pointer hover:underline"
+                    style={{ color: 'var(--blue)' }}
+                    onClick={() => setPage({ name: 'service', serviceId: id })}
+                  >{svc.name}</span>
+                )
+              }).filter(Boolean).reduce((acc, el, i) => i === 0 ? [el] : [...acc, ', ', el], [])}
             </span>
-            <span
-              className="mono text-[10px] cursor-pointer hover:underline"
-              style={{ color: 'var(--blue)' }}
-              onClick={() => window.dispatchEvent(new CustomEvent('open-analysis'))}
-            >
-              🤖 {t('overview.seeAnalysis')}
-            </span>
+            {Object.keys(recentlyRecovered).some(id => aiAnalysis[id]) && (
+              <span
+                className="mono text-[10px] cursor-pointer hover:underline"
+                style={{ color: 'var(--blue)' }}
+                onClick={() => window.dispatchEvent(new CustomEvent('open-analysis'))}
+              >
+                🤖 {t('overview.seeAnalysis')}
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -552,7 +565,7 @@ export default function Overview() {
               service={svc}
               index={i}
               t={t}
-              isRecovered={recentlyRecovered.includes(svc.id)}
+              isRecovered={!!recentlyRecovered[svc.id]}
               onClick={() => { trackEvent('select_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }) }}
             />
           ))}
@@ -575,7 +588,7 @@ export default function Overview() {
                 service={svc}
                 index={i}
                 t={t}
-                isRecovered={recentlyRecovered.includes(svc.id)}
+                isRecovered={!!recentlyRecovered[svc.id]}
                 onClick={() => { trackEvent('select_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }) }}
               />
             ))}

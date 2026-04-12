@@ -69,7 +69,7 @@ const ko = {
   'overview.banner.monitoringCount': '모니터링 ({n}):',
   'overview.banner.healthy': '정상 대안:',
   'overview.card.incidents.compact': '건',
-  'overview.recovered': 'Resolved',
+  'overview.recovered': '최근 복구',
   'overview.recentlyResolved': '최근 복구됨',
   'overview.seeAnalysis': '분석 상세 보기',
   'analysis.recoveredAt': '복구 시각',

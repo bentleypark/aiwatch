@@ -210,7 +210,7 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
   )
 }
 
-function IncidentRow({ incident, detectedAt, t, lang }) {
+function IncidentRow({ incident, detectedAt, isRecentlyRecovered, t, lang }) {
   const [expanded, setExpanded] = useState(false)
   const STATUS_CLS = {
     investigating: 'text-[var(--red)]',
@@ -272,9 +272,15 @@ function IncidentRow({ incident, detectedAt, t, lang }) {
             {incident.duration ? ` · ${incident.duration}` : ''}
           </p>
         </div>
-        <span className={`shrink-0 text-[10px] mono ${dotCls}`}>
-          {t(`incidents.status.${displayStatus}`)}
-        </span>
+        {isRecentlyRecovered ? (
+          <span className="shrink-0 mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '1px 5px' }}>
+            {t('overview.recovered')}
+          </span>
+        ) : (
+          <span className={`shrink-0 text-[10px] mono ${dotCls}`}>
+            {t(`incidents.status.${displayStatus}`)}
+          </span>
+        )}
       </div>
       {expanded && (
         <div className="ml-6">
@@ -654,7 +660,7 @@ export default function ServiceDetails({ serviceId }) {
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          {recentlyRecovered.includes(service.id) && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
+          {!!recentlyRecovered[service.id] && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
           <StatusPill status={service.status} />
         </div>
       </div>
@@ -780,7 +786,7 @@ export default function ServiceDetails({ serviceId }) {
             ) : (
               <div className="flex flex-col" style={{ gap: '8px' }}>
                 {recentIncidents.map((inc) => (
-                  <IncidentRow key={inc.id} incident={inc} detectedAt={service.detectedAt} t={t} lang={lang} />
+                  <IncidentRow key={inc.id} incident={inc} detectedAt={service.detectedAt} isRecentlyRecovered={!!(recentlyRecovered[service.id] ?? []).includes(inc.id)} t={t} lang={lang} />
                 ))}
               </div>
             )}
