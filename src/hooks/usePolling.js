@@ -506,7 +506,7 @@ const MOCK_AI_ANALYSIS = {
   ],
   together: [{ summary: 'Moonshot Kimi K2.5 model experienced a brief outage affecting inference endpoints. Service has been restored.', estimatedRecovery: 'Resolved', affectedScope: ['Kimi K2.5 inference', 'Model endpoints'], needsFallback: false, analyzedAt: new Date(Date.now() - 30 * 60000).toISOString(), incidentId: 'together-mock-1', resolvedAt: new Date(Date.now() - 10 * 60000).toISOString() }],
 }
-const MOCK_RECENTLY_RECOVERED = ['together']
+const MOCK_RECENTLY_RECOVERED = { together: ['together-mock-1'] }
 
 // ── Merge live Worker data with mock fallback ──
 // Worker provides: id, name, provider, category, status, latency, incidents
@@ -565,7 +565,7 @@ function usePollingInternal() {
     probe24h: [],
     probeServiceIds: [],
     aiAnalysis: {},
-    recentlyRecovered: [],
+    recentlyRecovered: {},
   })
   const cancelledRef = useRef(false)
   const controllerRef = useRef(null)
@@ -655,7 +655,7 @@ function usePollingInternal() {
           probe24h: probeSnapshots,
           probeServiceIds,
           aiAnalysis: data.aiAnalysis ?? {},
-          recentlyRecovered: data.recentlyRecovered ?? [],
+          recentlyRecovered: data.recentlyRecovered ?? {},
         })
       }
     } catch (err) {

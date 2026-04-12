@@ -234,6 +234,7 @@ When adding a new monitored service, update ALL of the following:
 | `alerted:down:{svcId}` | ISO timestamp | 2h | ~2 | Service down alert dedup + recovery duration |
 | `alerted:degraded:{svcId}` | ISO timestamp | 2h | ~2 | Service degraded alert dedup |
 | `alerted:recovered:{svcId}` | `"1"` | 2h | ~2 | Recovery alert dedup |
+| `recovered:{svcId}:{incId}` | `{ resolvedAt, incidentTitle, duration }` JSON | 2h | ~2 | Independent recovery marker (powers Recently Resolved banner without AI analysis) |
 | `alerted:probe-spike:{svcId}` | `"1"` | 1h | ~2 | Probe RTT spike alert dedup (early detection) |
 | `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
 | `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time (probe spike or status page, whichever is earlier) |
@@ -261,7 +262,7 @@ When adding a new monitored service, update ALL of the following:
 | `platform:status:{platformId}` | `PlatformStatus` JSON | 10min | ~288 | Status page platform health (metastatuspage.com for Atlassian) |
 | `alerted:platform:{platformId}` | `"1"` | 2h | ~1 | Platform outage alert dedup |
 
-**Free tier budget**: 1,000 writes/day. Estimated total: ~843-953 writes/day + changelog (~3/day) + weekly briefing (~1/week) + vitals (1 per visit) + platform status (~1/cycle when changed). Monitor if daily visits exceed ~50.
+**Free tier budget**: 1,000 writes/day. Estimated total: ~845-958 writes/day + changelog (~3/day) + weekly briefing (~1/week) + vitals (1 per visit) + platform status (~1/cycle when changed) + recovery markers (~2-5/day). Monitor if daily visits exceed ~50.
 
 ### Directory Layout
 ```
@@ -429,7 +430,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
   - Dedup: sibling services sharing same incidentId copy analysis from KV (no extra API call)
   - Modal groups services with same incidentId into single card
   - API response: `aiAnalysis: Record<svcId, AIAnalysisResult[]>` — array per service
-  - **Recently Resolved**: on recovery, per-incident analysis keys get `resolvedAt` field (2h TTL instead of deletion). `/api/status` returns `recentlyRecovered[]` for operational services with resolved analysis. Dashboard shows info banner + "Resolved" badge on service cards + Analyze modal remains active
+  - **Recently Resolved**: on recovery, cron writes independent `recovered:{svcId}:{incId}` KV (2h TTL) regardless of AI analysis. Also marks per-incident analysis keys with `resolvedAt` field if they exist. `/api/status` returns `recentlyRecovered: Record<svcId, incId[]>` for operational services with recovery markers. Dashboard shows info banner (service names link to detail page) + "Recently Resolved" badge on specific incidents in ServiceDetails + Analyze modal link only when AI analysis exists. "See details in Analyze" hidden when no AI analysis data
   - **Contextual fallback** (`needsFallback`): AI analysis includes boolean flag assessing if incident warrants switching to alternative. When true, AnalysisModal + Is X Down AI Insight card show Score-based fallback list. Shared `getFallbacks()` utility in `src/utils/constants.js` (used by AnalysisModal + Overview)
   - Grouped fallback: when incident affects multiple categories, Discord alerts + dashboard show per-category alternatives via `buildGroupedFallbackText`
   - **Fallback tier priority** (API services only): same-tier services are recommended first, then adjacent tiers. Within each tier, sorted by AIWatch Score descending. Defined in `worker/src/fallback.ts`, mirrored in `src/utils/constants.js` and `api/is-down.ts`:

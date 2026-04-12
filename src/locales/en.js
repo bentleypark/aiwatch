@@ -69,7 +69,7 @@ const en = {
   'overview.banner.monitoringCount': 'Monitoring ({n}):',
   'overview.banner.healthy': 'Healthy alternatives:',
   'overview.card.incidents.compact': ' inc',
-  'overview.recovered': 'Resolved',
+  'overview.recovered': 'Recently Resolved',
   'overview.recentlyResolved': 'Recently Resolved',
   'overview.seeAnalysis': 'See details in Analyze',
   'analysis.recoveredAt': 'Recovered',

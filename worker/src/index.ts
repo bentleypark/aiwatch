@@ -6,7 +6,7 @@ import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type Serv
 import { calculateAIWatchScore } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop } from './alerts'
 import { analyzeIncident, refreshOrReanalyze, analysisKey, type AIAnalysisResult } from './ai-analysis'
-import { kvPut, kvDel, detectComponentMismatches, isCacheStale } from './utils'
+import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration } from './utils'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 
 interface Env {
@@ -459,22 +459,35 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       const svcId = alert.key.split(':').pop()!
       await kvDel(env.STATUS_CACHE, `alerted:recovered:${svcId}`)
     }
-    // Mark AI analyses as resolved (keep for 2h instead of deleting) — per-incident keys
+    // Mark recovery: write independent recovered:{svcId}:{incId} KV + update AI analysis if exists
     if (isRecoveryAlert) {
       const svcId = alert.key.replace('alerted:recovered:', '')
       const svc = scored.find(s => s.id === svcId)
-      const incidentIds = (svc?.incidents ?? []).map(i => i.id)
-      await Promise.all(incidentIds.map(async (incId) => {
-        const key = analysisKey(svcId, incId)
+      const now = new Date().toISOString()
+      const incidents = svc?.incidents ?? []
+      await Promise.all(incidents.map(async (inc) => {
+        // Independent recovery marker (works even without AI analysis)
+        const duration = inc.startedAt ? formatDuration(new Date(inc.startedAt), new Date(now)) : undefined
+        const recoveredOk = await kvPut(env.STATUS_CACHE, `recovered:${svcId}:${inc.id}`, JSON.stringify({
+          resolvedAt: now,
+          incidentTitle: inc.title ?? '',
+          duration: duration ?? '',
+        }), { expirationTtl: 7200 })
+        if (!recoveredOk) console.error('[cron] failed to write recovery marker:', svcId, inc.id)
+        // Also mark AI analysis as resolved if it exists
+        const key = analysisKey(svcId, inc.id)
         const analysisRaw = await env.STATUS_CACHE.get(key).catch(() => null)
         if (!analysisRaw) return
         try {
           const analysis = JSON.parse(analysisRaw) as AIAnalysisResult
           if (!analysis.resolvedAt) {
-            analysis.resolvedAt = new Date().toISOString()
+            analysis.resolvedAt = now
             await kvPut(env.STATUS_CACHE, key, JSON.stringify(analysis), { expirationTtl: 7200 })
           }
-        } catch { await kvDel(env.STATUS_CACHE, key) }
+        } catch (err) {
+          console.warn('[kv] ai:analysis parse failed during recovery mark:', svcId, inc.id, err instanceof Error ? err.message : err)
+          await kvDel(env.STATUS_CACHE, key)
+        }
       }))
     }
 
@@ -1496,7 +1509,7 @@ export default {
 
         // Read AI analysis (per-incident keys) — uses filtered incident list
         const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
-        const recentlyRecovered: string[] = []
+        const recentlyRecovered: Record<string, string[]> = {}
         // Active incidents: read ai:analysis:{svcId}:{incId} for each
         // monitoring = "recovery confirmed" — exclude from active analysis display
         const withActiveInc = cached.services.filter(s =>
@@ -1513,13 +1526,19 @@ export default {
             } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
           })
         ))
-        // Recently recovered: operational services with resolved analysis in per-incident keys
-        // Only check recently resolved incidents — ai:analysis keys have max 2h TTL after resolvedAt,
-        // so only incidents resolved in the last 3h could still have analysis data in KV
+        // Recently recovered: operational services with recovered:{svcId}:{incId} KV (independent of AI analysis)
+        // Also check ai:analysis keys for enrichment (resolved analysis data for modal display)
         const recoveryCutoff = Date.now() - 3 * 3600_000
         const operationalCached = cached.services.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
         await Promise.all(operationalCached.flatMap(svc =>
           (svc.incidents ?? []).filter(i => i.resolvedAt && new Date(i.resolvedAt).getTime() >= recoveryCutoff).map(async (inc) => {
+            // Check independent recovery marker first
+            const recoveredRaw = await env.STATUS_CACHE!.get(`recovered:${svc.id}:${inc.id}`).catch(() => null)
+            if (recoveredRaw) {
+              if (!recentlyRecovered[svc.id]) recentlyRecovered[svc.id] = []
+              if (!recentlyRecovered[svc.id].includes(inc.id)) recentlyRecovered[svc.id].push(inc.id)
+            }
+            // Also check AI analysis for enrichment (optional — banner shows regardless)
             const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
             if (!raw) return
             try {
@@ -1527,9 +1546,10 @@ export default {
               if (parsed.resolvedAt) {
                 if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
                 aiAnalysis[svc.id].push(parsed)
-                if (!recentlyRecovered.includes(svc.id)) recentlyRecovered.push(svc.id)
+                if (!recentlyRecovered[svc.id]) recentlyRecovered[svc.id] = []
+                if (!recentlyRecovered[svc.id].includes(inc.id)) recentlyRecovered[svc.id].push(inc.id)
               }
-            } catch { /* ignore */ }
+            } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
           })
         ))
 
@@ -1546,7 +1566,7 @@ export default {
           latency24h,
           ...(probe24h.length > 0 ? { probe24h } : {}),
           ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
-          ...(recentlyRecovered.length > 0 ? { recentlyRecovered } : {}),
+          ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),
         }), {
           status: 200,
           headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
@@ -1682,7 +1702,7 @@ export default {
 
       // Read AI analysis from KV — per-incident keys, active incidents + recently resolved
       const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
-      const recentlyRecovered: string[] = []
+      const recentlyRecovered: Record<string, string[]> = {}
       if (env.STATUS_CACHE) {
         // Active incidents: read ai:analysis:{svcId}:{incId} for each
         // monitoring = "recovery confirmed" — exclude from active analysis display
@@ -1700,10 +1720,19 @@ export default {
             } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
           })
         ))
-        // Recently recovered: operational services with resolved analysis in per-incident keys
+        // Recently recovered: operational services with recovered:{svcId}:{incId} KV (independent of AI analysis)
+        // Only check recently resolved incidents — recovered: keys have 2h TTL, 3h cutoff for safety margin
+        const recoveryCutoff = Date.now() - 3 * 3600_000
         const operationalSvcs = servicesWithScore.filter(s => s.status === 'operational' && !aiAnalysis[s.id])
         await Promise.all(operationalSvcs.flatMap(svc =>
-          (svc.incidents ?? []).map(async (inc) => {
+          (svc.incidents ?? []).filter(i => i.resolvedAt && new Date(i.resolvedAt).getTime() >= recoveryCutoff).map(async (inc) => {
+            // Check independent recovery marker first
+            const recoveredRaw = await env.STATUS_CACHE!.get(`recovered:${svc.id}:${inc.id}`).catch(() => null)
+            if (recoveredRaw) {
+              if (!recentlyRecovered[svc.id]) recentlyRecovered[svc.id] = []
+              if (!recentlyRecovered[svc.id].includes(inc.id)) recentlyRecovered[svc.id].push(inc.id)
+            }
+            // Also check AI analysis for enrichment (optional — banner shows regardless)
             const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
             if (!raw) return
             try {
@@ -1711,9 +1740,10 @@ export default {
               if (parsed.resolvedAt) {
                 if (!aiAnalysis[svc.id]) aiAnalysis[svc.id] = []
                 aiAnalysis[svc.id].push(parsed)
-                if (!recentlyRecovered.includes(svc.id)) recentlyRecovered.push(svc.id)
+                if (!recentlyRecovered[svc.id]) recentlyRecovered[svc.id] = []
+                if (!recentlyRecovered[svc.id].includes(inc.id)) recentlyRecovered[svc.id].push(inc.id)
               }
-            } catch { /* ignore parse errors */ }
+            } catch (err) { console.warn('[kv] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
           })
         ))
       }
@@ -1724,7 +1754,7 @@ export default {
         latency24h,
         ...(probe24h.length > 0 ? { probe24h } : {}),
         ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
-        ...(recentlyRecovered.length > 0 ? { recentlyRecovered } : {}),
+        ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),
       }), {
         status: 200,
         headers: {
