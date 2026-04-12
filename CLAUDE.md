@@ -244,6 +244,7 @@ When adding a new monitored service, update ALL of the following:
 | `fetch-fail:{svcId}` | counter string | 30min | ~0 (spikes on outage) | RSS fetch consecutive failure counter (3+ → degraded, capped writes) |
 | `component-missing:{svcId}` | counter string | 30min | ~0 (spikes on migration) | Component ID consecutive miss counter (3+ → Discord alert) |
 | `alerted:component-missing:{svcId}` | `"1"` | 24h | ~0 | Component ID mismatch alert dedup |
+| `alerted:service-drop` | `"1"` | 2h | ~0 | Service count drop alert dedup (< 80% of expected) |
 | `alert:count:{YYYY-MM-DD}` | `{ incidents, resolved, down, degraded, recovered }` JSON | 2d | ~1-5 | Daily alert count aggregated in Daily Summary |
 | `webhook:reg:{sha256hash}` | `{ type, registeredAt }` JSON | 30d | ~1/user/day | Active webhook registration (hashed, refreshed on ping) |
 | `alert:proxy:{YYYY-MM-DD}` | `{ discord, slack, failed }` JSON | 2d | ~1 | User webhook delivery counts (approximate, flushed from in-memory by daily summary cron) |

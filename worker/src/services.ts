@@ -2,7 +2,7 @@
 
 import type { Incident, ServiceStatus, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
-import { fetchWithTimeout, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss } from './utils'
+import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss } from './utils'
 import { isProbeHealthy, type ProbeSnapshot } from './probe'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
@@ -147,6 +147,7 @@ interface PrefetchedData {
 
 async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
   const now = new Date().toISOString()
+  let parseErrors = 0 // Track internal parse/fetch failures — prevents resetFetchFailure from masking repeated errors
   const base: ServiceStatus = {
     id: config.id,
     name: config.name,
@@ -175,7 +176,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         const start = Date.now()
         const [summaryRes, incidentsRes] = await Promise.all([
           fetchWithRetry(config.apiUrl),
-          fetchWithRetry(`${baseUrl}/incidents.json`).catch((err) => { console.warn(`[fetchService] ${config.id} incidents.json failed:`, err.message); return null }),
+          fetchWithRetry(`${baseUrl}/incidents.json`).catch((err) => { console.warn(`[fetchService] ${config.id} incidents.json failed:`, err.message); parseErrors++; return null }),
         ])
         latency = Date.now() - start
         if (!summaryRes.ok) {
@@ -293,8 +294,13 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         }
       }
 
-      // Successful fetch — reset consecutive failure counter
-      await resetFetchFailure(kv, config.id)
+      // Successful fetch — reset or track based on parse errors
+      if (parseErrors > 0) {
+        console.warn(`[fetchService] ${config.id} completed with ${parseErrors} parse error(s)`)
+        await trackFetchFailure(kv, config.id)
+      } else {
+        await resetFetchFailure(kv, config.id)
+      }
 
       return {
         ...base,
@@ -410,12 +416,14 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         scrapeUrl
           ? fetchWithTimeout(scrapeUrl).catch((err) => {
               console.warn(`[fetchService] ${config.id} scrape failed:`, err instanceof Error ? err.message : err)
+              parseErrors++
               return null
             })
           : Promise.resolve(null),
         config.betterStackUrl
           ? fetchWithTimeout(`${config.betterStackUrl}/index.json`, 5000).catch((err) => {
               console.warn(`[fetchService] ${config.id} BetterStack uptime fetch failed:`, err instanceof Error ? err.message : err)
+              parseErrors++
               return null
             })
           : Promise.resolve(null),
@@ -498,6 +506,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           }
         } catch (err) {
           console.warn(`[fetchService] ${config.id} BetterStack parse failed:`, err instanceof Error ? err.message : err)
+          parseErrors++
         }
       }
 
@@ -511,8 +520,13 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         ? (betterStackStat ?? httpStatus)
         : (hasOngoing ? 'degraded' : httpStatus)
 
-      // Successful fetch — reset consecutive failure counter
-      await resetFetchFailure(kv, config.id)
+      // Successful fetch — reset or track based on parse errors
+      if (parseErrors > 0) {
+        console.warn(`[fetchService] ${config.id} completed with ${parseErrors} parse error(s)`)
+        await trackFetchFailure(kv, config.id)
+      } else {
+        await resetFetchFailure(kv, config.id)
+      }
 
       return {
         ...base,

@@ -202,3 +202,16 @@ export function formatDetectionLead(detectedAt: string | null, incidentStartedAt
   if (mins < 1 || mins >= 60) return ''
   return `⚡ **Detection Lead: ${mins}m** — AIWatch detected this before the official report`
 }
+
+/** Detect service count drop — returns missing service IDs if below threshold */
+export function detectServiceCountDrop(
+  returnedIds: string[],
+  expectedConfigs: Array<{ id: string }>,
+  thresholdRatio = 0.8,
+): { dropped: boolean; missing: string[] } {
+  const threshold = Math.floor(expectedConfigs.length * thresholdRatio)
+  if (returnedIds.length >= threshold) return { dropped: false, missing: [] }
+  const returnedSet = new Set(returnedIds)
+  const missing = expectedConfigs.filter(c => !returnedSet.has(c.id)).map(c => c.id)
+  return { dropped: true, missing }
+}
