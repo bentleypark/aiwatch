@@ -226,6 +226,8 @@ When adding a new monitored service, update ALL of the following:
 | `alert:proxy:{YYYY-MM-DD}` | `{ discord, slack, failed }` JSON | 2d | ~1 | User webhook delivery counts (approximate, flushed from in-memory by daily summary cron) |
 | `kv_limit_alert` | `"1"` | 5min | ~1 | KV write limit exceeded cooldown |
 | `daily-summary:{YYYY-MM-DD}` | `"1"` | 7d | 1 | Daily summary execution marker (prevents duplicate send + enables catch-up) |
+| `changelog:entries` | `ChangelogEntry[]` JSON | 14d | ~3 | Accumulated changelog entries from RSS/Atom feeds (cleared after weekly briefing) |
+| `weekly-briefing:{YYYY-MM-DD}` | `"1"` | 7d | 1/week | Weekly briefing execution dedup marker |
 | `vitals:{YYYY-MM-DD}` | `{ count, allValues }` JSON | 3d | per visit (100%) | Web Vitals daily aggregation (LCP, FCP, TTFB, CLS, INP) |
 | `vitals:history:{YYYY-MM-DD}` | `{ count, p75 }` JSON | 90d | 1 | Archived yesterday's vitals p75 summary |
 | `incidents:monthly:{YYYY-MM}` | `MonthlyIncidents` JSON | 60d | 1/day | Monthly incident accumulation (deduped by ID, updated in daily summary cron) |
@@ -233,7 +235,7 @@ When adding a new monitored service, update ALL of the following:
 | `platform:status:{platformId}` | `PlatformStatus` JSON | 10min | ~288 | Status page platform health (metastatuspage.com for Atlassian) |
 | `alerted:platform:{platformId}` | `"1"` | 2h | ~1 | Platform outage alert dedup |
 
-**Free tier budget**: 1,000 writes/day. Estimated total: ~843-953 writes/day + vitals (1 per visit) + platform status (~1/cycle when changed). Monitor if daily visits exceed ~50.
+**Free tier budget**: 1,000 writes/day. Estimated total: ~843-953 writes/day + changelog (~3/day) + weekly briefing (~1/week) + vitals (1 per visit) + platform status (~1/cycle when changed). Monitor if daily visits exceed ~50.
 
 ### Directory Layout
 ```
@@ -265,6 +267,8 @@ worker/
     alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts, formatDetectionLead)
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText, buildGroupedFallbackText for multi-category incidents)
     ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt, needsFallback assessment, TTL refresh, re-analysis, incidentId dedup, timeline context, boilerplate filtering)
+    changelog.ts # Changelog RSS/Atom collection (OpenAI blog, Google AI blog, Anthropic SDK releases)
+    weekly-briefing.ts # Weekly Discord briefing (changelog + incidents + stability trends)
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit, Web Vitals)
     monthly-archive.ts # Monthly reliability archive (uptime, score, incidents, latency per service, permanent KV)
     vitals.ts   # Web Vitals aggregation (ingest, KV flush, p75 computation, Discord formatting)
