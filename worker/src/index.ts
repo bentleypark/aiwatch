@@ -128,7 +128,7 @@ async function writeLatencySnapshot(kv: KVNamespace, services: ServiceStatus[]):
 }
 
 // ── Health Check Probing (Phase 2 PoC) ──
-import { type ProbeResult, type ProbeSnapshot, type ProbeSpike, PROBE_TARGETS, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, detectConsecutiveSpikes, computeMedianRtt, isCorroboratedByProbe } from './probe'
+import { type ProbeResult, type ProbeSnapshot, type ProbeSpike, PROBE_TARGETS, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, detectConsecutiveSpikes, computeMedianRtt, isCorroboratedByProbe, isMistralProbedEndpoint } from './probe'
 
 let lastProbeSlot = ''
 
@@ -339,7 +339,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       for (const svc of scored) {
         if (svc.id !== 'mistral' || !svc.incidents?.length) continue
         svc.incidents = svc.incidents.filter((inc) =>
-          isCorroboratedByProbe(cronProbes, 'mistral', inc.startedAt, inc.resolvedAt ?? null, mistralMedian),
+          !isMistralProbedEndpoint(inc.title) || isCorroboratedByProbe(cronProbes, 'mistral', inc.startedAt, inc.resolvedAt ?? null, mistralMedian),
         )
       }
     }
@@ -1319,7 +1319,7 @@ export default {
             for (const svc of cached.services) {
               if (svc.id !== 'mistral' || !svc.incidents?.length) continue
               svc.incidents = svc.incidents.filter((inc) =>
-                isCorroboratedByProbe(probe24h, 'mistral', inc.startedAt, inc.resolvedAt ?? null, mistralMedian),
+                !isMistralProbedEndpoint(inc.title) || isCorroboratedByProbe(probe24h, 'mistral', inc.startedAt, inc.resolvedAt ?? null, mistralMedian),
               )
             }
           }
@@ -1485,7 +1485,7 @@ export default {
           for (const svc of enriched) {
             if (svc.id !== 'mistral' || !svc.incidents?.length) continue
             svc.incidents = svc.incidents.filter((inc) =>
-              isCorroboratedByProbe(probe24h, 'mistral', inc.startedAt, inc.resolvedAt ?? null, mistralMedian),
+              !isMistralProbedEndpoint(inc.title) || isCorroboratedByProbe(probe24h, 'mistral', inc.startedAt, inc.resolvedAt ?? null, mistralMedian),
             )
           }
         }

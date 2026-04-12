@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, PROBE_TARGETS, computeMedianRtt, isCorroboratedByProbe, detectConsecutiveSpikes, isProbeHealthy } from '../probe'
+import { computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, PROBE_TARGETS, computeMedianRtt, isCorroboratedByProbe, detectConsecutiveSpikes, isProbeHealthy, isMistralProbedEndpoint } from '../probe'
 import type { ProbeSnapshot } from '../probe'
 
 describe('computeProbeSlot', () => {
@@ -510,5 +510,44 @@ describe('isProbeHealthy', () => {
       { t: recentTime(25), data: { claude: { status: 200, rtt: 210 } } },
     ]
     expect(isProbeHealthy(snapshots, 'claude', 900_000)).toBe(false) // 15min max age
+  })
+})
+
+describe('isMistralProbedEndpoint', () => {
+  it('returns true for Chat Completions / Completion API incidents', () => {
+    expect(isMistralProbedEndpoint('Completion API Degraded')).toBe(true)
+    expect(isMistralProbedEndpoint('Chat Completions API Degraded')).toBe(true)
+    expect(isMistralProbedEndpoint('API Latency Issues')).toBe(true)
+    expect(isMistralProbedEndpoint('Elevated Error Rates')).toBe(true)
+  })
+
+  it('returns false for non-probed sub-services (Batch, Files, Audio, etc.)', () => {
+    expect(isMistralProbedEndpoint('Batch API Degraded')).toBe(false)
+    expect(isMistralProbedEndpoint('Files API Degraded')).toBe(false)
+    expect(isMistralProbedEndpoint('File API Degraded')).toBe(false)
+    expect(isMistralProbedEndpoint('Audio API Degraded')).toBe(false)
+    expect(isMistralProbedEndpoint('Audio API Text-to-Speech Degraded')).toBe(false)
+    expect(isMistralProbedEndpoint('OCR API Degraded')).toBe(false)
+    expect(isMistralProbedEndpoint('Embedding API Degraded')).toBe(false)
+    expect(isMistralProbedEndpoint('Fine-tuning API Degraded')).toBe(false)
+    expect(isMistralProbedEndpoint('Fine Tuning Jobs Degraded')).toBe(false)
+  })
+
+  it('bypass ensures non-probed incidents survive cross-validation filter', () => {
+    // Simulate the filter logic used in index.ts:
+    // svc.incidents.filter(inc => !isMistralProbedEndpoint(inc.title) || isCorroboratedByProbe(...))
+    const incidents = [
+      { title: 'Batch API Degraded', startedAt: '2026-04-12T03:29:00Z', resolvedAt: null },
+      { title: 'Files API Degraded', startedAt: '2026-04-12T02:41:00Z', resolvedAt: null },
+      { title: 'Completion API Degraded', startedAt: '2026-04-12T03:00:00Z', resolvedAt: null },
+    ]
+    // Mock: no probe spike → isCorroboratedByProbe returns false for all
+    const mockCorroborated = () => false
+    const filtered = incidents.filter((inc) =>
+      !isMistralProbedEndpoint(inc.title) || mockCorroborated(),
+    )
+    // Batch + Files should survive (bypass), Completion should be filtered
+    expect(filtered).toHaveLength(2)
+    expect(filtered.map((i) => i.title)).toEqual(['Batch API Degraded', 'Files API Degraded'])
   })
 })

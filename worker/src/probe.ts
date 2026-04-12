@@ -173,6 +173,16 @@ export function isCorroboratedByProbe(
 }
 
 /**
+ * Check if a Mistral incident title affects the probed endpoint (/v1/models → Chat Completions).
+ * Non-probed sub-services (Batch API, Files API, Audio API, etc.) bypass cross-validation
+ * because their outages don't cause RTT spikes on the main models endpoint.
+ */
+const MISTRAL_NON_PROBED = /\b(batch|files?|audio|ocr|embedding|fine.?tun)/i
+export function isMistralProbedEndpoint(title: string): boolean {
+  return !MISTRAL_NON_PROBED.test(title)
+}
+
+/**
  * Check if a service's recent probe data indicates it is healthy.
  * Used to cross-validate status page fetch failures — if the API responds normally
  * but the status page is down, the service is likely operational (false positive).
