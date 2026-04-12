@@ -299,10 +299,10 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // If cache is stale (>10min) or empty, fetch live data to avoid alert decisions on outdated status.
   // Does NOT write to KV — cache writes are handled exclusively by /api/status handler's cacheWrite()
   // to respect the 10-min KV write throttle and stay within the 1,000 writes/day free tier.
+  let cronProbes: ProbeSnapshot[] = []
   if (stale) {
     try {
       // Read probe data for cross-validation of status page failures
-      let cronProbes: ProbeSnapshot[] = []
       const probeRaw = await env.STATUS_CACHE.get('probe:24h').catch(() => null)
       if (probeRaw) {
         try { cronProbes = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[cron] probe24h parse failed:', err instanceof Error ? err.message : err) }
@@ -323,6 +323,27 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     const s = calculateAIWatchScore(svc)
     return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
   })
+
+  // Mistral probe cross-validation — filter micro-incident noise BEFORE alert detection
+  // Ensures Discord alerts and dashboard display are consistent (#209)
+  // Reuse cronProbes if already fetched (stale path), otherwise read from KV
+  if (cronProbes.length === 0) {
+    const probeRaw = await env.STATUS_CACHE.get('probe:24h').catch(() => null)
+    if (probeRaw) {
+      try { cronProbes = JSON.parse(probeRaw).snapshots ?? [] } catch { /* ignore */ }
+    }
+  }
+  if (cronProbes.length > 0) {
+    const mistralMedian = computeMedianRtt(cronProbes, 'mistral')
+    if (mistralMedian !== null) {
+      for (const svc of scored) {
+        if (svc.id !== 'mistral' || !svc.incidents?.length) continue
+        svc.incidents = svc.incidents.filter((inc) =>
+          isCorroboratedByProbe(cronProbes, 'mistral', inc.startedAt, inc.resolvedAt ?? null, mistralMedian),
+        )
+      }
+    }
+  }
 
   // Collect previously alerted IDs from KV for dedup context
   const alertedNewIds = new Set<string>()

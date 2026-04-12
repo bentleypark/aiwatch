@@ -302,6 +302,29 @@ describe('Mistral noise filtering pipeline (#91)', () => {
     const otherMedian = computeMedianRtt(probeSnapshots, 'openai')
     expect(otherMedian).toBeNull()
   })
+
+  it('cron + API consistency: same filter produces same result (#209)', () => {
+    // Simulates the exact filtering pattern used in both cron alert detection
+    // and /api/status response handler — must produce identical results
+    const incidents = [
+      { id: 'real-1', title: 'Audio API Degraded', startedAt: '2026-04-05T13:35:00Z', resolvedAt: '2026-04-05T13:50:00Z' },
+      { id: 'noise-1', title: 'Files API Degraded', startedAt: '2026-04-05T17:53:00Z', resolvedAt: null }, // ongoing, no spike
+    ]
+    // Cron path filter (same as index.ts cronAlertCheck)
+    const cronMedian = computeMedianRtt(probeSnapshots, 'mistral')
+    const cronFiltered = incidents.filter((inc) =>
+      isCorroboratedByProbe(probeSnapshots, 'mistral', inc.startedAt, inc.resolvedAt, cronMedian!),
+    )
+    // API path filter (same as index.ts /api/status handler)
+    const apiMedian = computeMedianRtt(probeSnapshots, 'mistral')
+    const apiFiltered = incidents.filter((inc) =>
+      isCorroboratedByProbe(probeSnapshots, 'mistral', inc.startedAt, inc.resolvedAt, apiMedian!),
+    )
+    // Both must produce identical results
+    expect(cronFiltered).toEqual(apiFiltered)
+    expect(cronFiltered).toHaveLength(1)
+    expect(cronFiltered[0].id).toBe('real-1')
+  })
 })
 
 describe('detectConsecutiveSpikes', () => {
