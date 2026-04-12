@@ -767,7 +767,7 @@ export default {
             color: 0xf85149,
           })
           for (const alert of secReddit) {
-            await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 }).catch(err => {
+            await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 604800 }).catch(err => { // 7d dedup
               console.error('[cron] Failed to mark Reddit security alert as seen:', alert.key, err instanceof Error ? err.message : err)
             })
           }
@@ -789,7 +789,7 @@ export default {
           })
           // Then mark as seen
           for (const alert of securityAlerts) {
-            await kvPut(env.STATUS_CACHE, alert.kvKey, '1', { expirationTtl: 86400 }).catch(err => {
+            await kvPut(env.STATUS_CACHE, alert.kvKey, '1', { expirationTtl: 604800 }).catch(err => { // 7d dedup
               console.error('[cron] Failed to mark security alert as seen:', alert.kvKey, err instanceof Error ? err.message : err)
             })
           }

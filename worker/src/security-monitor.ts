@@ -12,6 +12,7 @@ export interface SecurityAlert {
   severity?: 'critical' | 'high' | 'medium' | 'low'
   kvKey: string          // KV dedup key
   // OSV-specific remediation info
+  service?: string            // e.g. "Hugging Face" — mapped AIWatch service name
   affectedPackage?: string   // e.g. "PyPI/anthropic"
   affectedRange?: string     // e.g. ">= 0.86.0"
   fixedVersion?: string      // e.g. "0.87.0"
@@ -86,16 +87,16 @@ export async function fetchHNSecurityPosts(): Promise<SecurityAlert[]> {
 // ---------- OSV.dev (AI SDK vulnerabilities) ----------
 
 const OSV_PACKAGES = [
-  { name: 'openai', ecosystem: 'PyPI' },
-  { name: 'anthropic', ecosystem: 'PyPI' },
-  { name: 'google-generativeai', ecosystem: 'PyPI' },
-  { name: 'cohere', ecosystem: 'PyPI' },
-  { name: 'mistralai', ecosystem: 'PyPI' },
-  { name: 'langchain', ecosystem: 'PyPI' },
-  { name: 'transformers', ecosystem: 'PyPI' },
-  { name: 'openai', ecosystem: 'npm' },
-  { name: '@anthropic-ai/sdk', ecosystem: 'npm' },
-  { name: '@google/generative-ai', ecosystem: 'npm' },
+  { name: 'openai', ecosystem: 'PyPI', service: 'OpenAI' },
+  { name: 'anthropic', ecosystem: 'PyPI', service: 'Anthropic (Claude)' },
+  { name: 'google-generativeai', ecosystem: 'PyPI', service: 'Google (Gemini)' },
+  { name: 'cohere', ecosystem: 'PyPI', service: 'Cohere' },
+  { name: 'mistralai', ecosystem: 'PyPI', service: 'Mistral' },
+  { name: 'langchain', ecosystem: 'PyPI', service: 'LangChain' },
+  { name: 'transformers', ecosystem: 'PyPI', service: 'Hugging Face' },
+  { name: 'openai', ecosystem: 'npm', service: 'OpenAI' },
+  { name: '@anthropic-ai/sdk', ecosystem: 'npm', service: 'Anthropic (Claude)' },
+  { name: '@google/generative-ai', ecosystem: 'npm', service: 'Google (Gemini)' },
 ]
 
 interface OSVVuln {
@@ -187,6 +188,7 @@ export async function fetchOSVAlerts(): Promise<SecurityAlert[]> {
           || `https://osv.dev/vulnerability/${v.id}`,
         severity: mapOSVSeverity(v),
         kvKey: `security:seen:osv:${v.id}`,
+        service: pkg.service,
         affectedPackage: `${pkg.ecosystem}/${pkg.name}`,
         affectedRange: introduced ? `>= ${introduced}` : undefined,
         fixedVersion: fixed,
@@ -248,7 +250,8 @@ const SEVERITY_EMOJI: Record<string, string> = {
 
 function formatOSVLine(alert: SecurityAlert): string {
   const emoji = SEVERITY_EMOJI[alert.severity || 'medium']
-  const parts = [`${emoji} **${alert.id}** · ${alert.affectedPackage || 'unknown'}`]
+  const serviceTag = alert.service ? `[${alert.service}] ` : ''
+  const parts = [`${emoji} ${serviceTag}**${alert.id}** · ${alert.affectedPackage || 'unknown'}`]
   parts.push(alert.title)
   if (alert.fixedVersion) {
     const cmd = alert.affectedPackage?.startsWith('npm/')
