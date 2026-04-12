@@ -43,3 +43,9 @@ blob-report/
 !.dev.vars.example
 !.env.example
 .vercel
+
+# MemPalace
+.mempalace/
+entities.json
+mempalace.yaml
+.claude/mcp.json

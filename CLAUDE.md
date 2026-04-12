@@ -2,6 +2,29 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Persistent Memory (MemPalace MCP)
+
+This project uses MemPalace MCP server for persistent memory that survives context compaction and session boundaries.
+
+### Session Start
+- Call `mempalace_status` on session start to load palace state
+- Call `mempalace_search` before answering questions about past decisions, architecture history, or debugging context
+
+### When to Store
+- **Decisions**: architecture choices, trade-off reasoning → `mempalace_add_drawer`
+- **Debugging**: root cause findings, non-obvious fixes → `mempalace_add_drawer`
+- **Feedback**: user corrections and confirmed approaches → `mempalace_add_drawer`
+- **Milestones**: PR merges, deploys, major feature completions → `mempalace_diary_write`
+
+### When to Search
+- Before proposing changes to areas with prior decisions
+- When user references past work ("지난번에", "이전에", "아까")
+- When context was compacted and details were lost
+
+### Palace Structure
+- **Wing**: `aiwatch` (this project)
+- **Rooms**: `architecture`, `debugging`, `feedback`, `decisions`, `deployments`
+
 ## Commands
 
 ```bash
