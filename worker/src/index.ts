@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop } from './alerts'
 import { analyzeIncident, refreshOrReanalyze, analysisKey, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale } from './utils'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
@@ -317,6 +317,29 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     }
   }
   if (services.length === 0) return empty
+
+  // Service count drop detection (#221) — alert when significantly fewer services than expected
+  const { dropped, missing } = detectServiceCountDrop(services.map(s => s.id), SERVICES)
+  if (dropped) {
+    const dropKey = 'alerted:service-drop'
+    const alreadyAlerted = await env.STATUS_CACHE.get(dropKey).catch(() => null)
+    if (!alreadyAlerted) {
+      try {
+        await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+          title: `⚠️ Service Count Drop: ${services.length}/${SERVICES.length}`,
+          description: `Only ${services.length} of ${SERVICES.length} services returned.\n\n**Missing (${missing.length}):** ${missing.join(', ')}`,
+          color: 0xFF6600,
+        })
+      } catch (err) {
+        console.error('[cron] service count drop alert failed:', err instanceof Error ? err.message : err)
+      }
+      await kvPut(env.STATUS_CACHE, dropKey, '1', { expirationTtl: 7200 }) // 2h dedup
+    }
+  } else {
+    // Recovery: clear dedup key only if it exists (avoid unnecessary KV writes)
+    const existing = await env.STATUS_CACHE.get('alerted:service-drop').catch(() => null)
+    if (existing) await kvDel(env.STATUS_CACHE, 'alerted:service-drop')
+  }
 
   // Calculate scores for fallback recommendations
   const scored = services.map((svc) => {
