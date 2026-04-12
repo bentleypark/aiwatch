@@ -601,7 +601,8 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
 
 import { generateBadgeSvg } from './badge'
 import { generateOgSvg } from './og'
-import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, isPromotable } from './reddit'
+import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable } from './reddit'
+import { detectSecurityAlerts, formatSecurityDigest } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
@@ -701,9 +702,10 @@ export default {
     if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCMinutes() < 5) {
       try {
         const redditAlerts = await detectRedditPosts(env.STATUS_CACHE)
-        // Split: service outage alerts vs competitive monitoring
-        const outageAlerts = redditAlerts.filter(a => !a.competitive)
-        const competitiveAlerts = redditAlerts.filter(a => a.competitive)
+        // Split: service outage alerts vs competitive vs security monitoring
+        const outageAlerts = redditAlerts.filter(a => a.type === 'outage')
+        const competitiveAlerts = redditAlerts.filter(a => a.type === 'competitive')
+        const redditSecurityAlerts = redditAlerts.filter(a => a.type === 'security')
         // Mark all detected posts as seen (prevents re-checking), but only notify promotable ones
         for (const alert of outageAlerts.slice(0, 5)) {
           await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 })
@@ -727,8 +729,48 @@ export default {
             color: formatted.color,
           })
         }
+        // Security alerts from Reddit — notify first, then mark seen (max 5 per hour)
+        const secReddit = redditSecurityAlerts.slice(0, 5)
+        if (secReddit.length > 0) {
+          const secLines = secReddit.map(a => {
+            const formatted = formatRedditSecurityAlert(a)
+            return `${formatted.description}\n[View Post](${formatted.url})`
+          })
+          await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+            title: `🔒 Reddit Security — ${secReddit.length} post${secReddit.length > 1 ? 's' : ''}`,
+            description: secLines.join('\n\n'),
+            color: 0xf85149,
+          })
+          for (const alert of secReddit) {
+            await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 }).catch(err => {
+              console.error('[cron] Failed to mark Reddit security alert as seen:', alert.key, err instanceof Error ? err.message : err)
+            })
+          }
+        }
       } catch (err) {
-        console.warn('[cron] Reddit monitoring failed:', err instanceof Error ? err.message : err)
+        console.error('[cron] Reddit monitoring failed:', err instanceof Error ? err.message : err)
+      }
+
+      // HN + OSV security monitoring (independent of Reddit — separate try/catch)
+      try {
+        const securityAlerts = await detectSecurityAlerts(env.STATUS_CACHE)
+        if (securityAlerts.length > 0) {
+          // Send notification first — duplicate is better than lost alert
+          const digest = formatSecurityDigest(securityAlerts)
+          await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+            title: digest.title,
+            description: digest.description,
+            color: digest.color,
+          })
+          // Then mark as seen
+          for (const alert of securityAlerts) {
+            await kvPut(env.STATUS_CACHE, alert.kvKey, '1', { expirationTtl: 86400 }).catch(err => {
+              console.error('[cron] Failed to mark security alert as seen:', alert.kvKey, err instanceof Error ? err.message : err)
+            })
+          }
+        }
+      } catch (err) {
+        console.error('[cron] Security monitoring (HN/OSV) failed:', err instanceof Error ? err.message : err)
       }
     }
 
@@ -860,6 +902,15 @@ export default {
             console.warn('[daily-summary] Failed to list reddit keys:', err instanceof Error ? err.message : err)
           }
 
+          // Count security alerts seen today (HN + OSV)
+          let securityCount = 0
+          try {
+            const listed = await env.STATUS_CACHE.list({ prefix: 'security:seen:' })
+            securityCount = listed.keys.length
+          } catch (err) {
+            console.warn('[daily-summary] Failed to list security keys:', err instanceof Error ? err.message : err)
+          }
+
           // Read daily alert counter
           let alertCounts = null
           try {
@@ -920,6 +971,7 @@ export default {
             webhookCounts,
             deliveryCounts,
             redditCount,
+            securityCount,
             vitals: vitalsSummary,
             probeSnapshots,
           })

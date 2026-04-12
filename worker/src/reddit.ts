@@ -11,11 +11,13 @@ export interface RedditPost {
   createdUtc: number
 }
 
+export type RedditAlertType = 'outage' | 'competitive' | 'security'
+
 export interface RedditAlert {
   key: string       // KV dedup key: reddit:seen:{postId}
   subreddit: string
   post: RedditPost
-  competitive: boolean  // true = competitive monitoring, false = outage detection
+  type: RedditAlertType
 }
 
 // Subreddit → search keywords mapping
@@ -32,6 +34,9 @@ const REDDIT_TARGETS: Array<{ subreddit: string; service: string }> = [
   { subreddit: 'devops',          service: '_competitive' },
   { subreddit: 'artificial',      service: '_competitive' },
   { subreddit: 'LocalLLaMA',      service: '_competitive' },
+  // Security monitoring — security communities for AI service breach/vulnerability chatter
+  { subreddit: 'netsec',          service: '_security' },
+  { subreddit: 'cybersecurity',   service: '_security' },
 ]
 
 // Strong signals: always match. Weak signals (issues/errors/slow): require context words
@@ -102,12 +107,30 @@ export function matchesCompetitiveKeywords(title: string): boolean {
   return COMPETITIVE_CONTEXT.test(title) && /\b(ai|llm|api|openai|claude|gpt)\b/i.test(title)
 }
 
+// Security monitoring keywords — match posts about AI service security incidents
+const AI_SERVICE = /\b(openai|claude|anthropic|gemini|google ai|mistral|cohere|deepseek|hugging\s?face|replicate|elevenlabs|cursor|copilot|windsurf|xai|grok)\b/i
+const SECURITY_STRONG = /\b(breach|data leak|hacked|compromised|unauthorized access|CVE-\d{4}|credentials? (leak|expos)|API key (leak|expos)|RCE|remote code execution)\b/i
+const SECURITY_CONTEXT = /\b(security|vulnerab|exploit|injection|exfiltrat|malicious|patch|disclosure)\b/i
+
+const AI_ADJACENT = /\b(ai|llm|model|api|gpt|chatbot|machine learning)\b/i
+
+export function matchesSecurityKeywords(title: string): boolean {
+  // Strong security signal + AI service mention = always match
+  if (SECURITY_STRONG.test(title) && AI_SERVICE.test(title)) return true
+  // Security context + AI service mention = match
+  if (SECURITY_CONTEXT.test(title) && AI_SERVICE.test(title)) return true
+  // Strong security signal + broader AI-adjacent keyword = match (reduces noise from non-AI posts)
+  return SECURITY_STRONG.test(title) && AI_ADJACENT.test(title)
+}
+
 /**
  * Fetch recent posts from a subreddit matching outage keywords
  */
-async function fetchSubreddit(subreddit: string, competitive = false): Promise<RedditPost[]> {
-  const query = competitive
+async function fetchSubreddit(subreddit: string, mode: 'outage' | 'competitive' | 'security' = 'outage'): Promise<RedditPost[]> {
+  const query = mode === 'competitive'
     ? encodeURIComponent('"status monitor" OR "uptime dashboard" OR "api status" OR "is down" OR "status page"')
+    : mode === 'security'
+    ? encodeURIComponent('breach OR leak OR hacked OR vulnerability OR CVE OR "unauthorized access" OR exploit OR "security incident"')
     : encodeURIComponent('down OR "not working" OR outage OR issues OR error')
   const url = `https://www.reddit.com/r/${subreddit}/search.json?q=${query}&sort=new&restrict_sr=on&t=day&limit=5`
 
@@ -139,19 +162,26 @@ export async function detectRedditPosts(
   // Fetch all subreddits in parallel
   const results = await Promise.allSettled(
     REDDIT_TARGETS.map(async (target) => {
-      const isCompetitive = target.service === '_competitive'
-      const posts = await fetchSubreddit(target.subreddit, isCompetitive)
-      return { target, posts, isCompetitive }
+      const mode: RedditAlertType = target.service === '_competitive' ? 'competitive'
+        : target.service === '_security' ? 'security' : 'outage'
+      const posts = await fetchSubreddit(target.subreddit, mode)
+      return { target, posts, mode }
     }),
   )
 
   for (const result of results) {
-    if (result.status !== 'fulfilled') continue
-    const { target, posts, isCompetitive } = result.value
+    if (result.status === 'rejected') {
+      console.error('[reddit] Subreddit fetch failed:', result.reason instanceof Error ? result.reason.message : result.reason)
+      continue
+    }
+    const { target, posts, mode } = result.value
 
     for (const post of posts) {
       // Double-check keywords (Reddit search can be fuzzy)
-      if (isCompetitive ? !matchesCompetitiveKeywords(post.title) : !matchesKeywords(post.title)) continue
+      const matched = mode === 'competitive' ? matchesCompetitiveKeywords(post.title)
+        : mode === 'security' ? matchesSecurityKeywords(post.title)
+        : matchesKeywords(post.title)
+      if (!matched) continue
 
       // Skip old posts (>6h)
       const age = Date.now() / 1000 - post.createdUtc
@@ -159,10 +189,13 @@ export async function detectRedditPosts(
 
       // KV dedup
       const key = `reddit:seen:${post.id}`
-      const seen = await kv.get(key).catch(() => null)
+      const seen = await kv.get(key).catch((err) => {
+        console.error('[reddit] KV dedup read failed:', key, err instanceof Error ? err.message : err)
+        return null  // favor sending potential duplicate over silently dropping alert
+      })
       if (seen) continue
 
-      alerts.push({ key, subreddit: target.subreddit, post, competitive: isCompetitive })
+      alerts.push({ key, subreddit: target.subreddit, post, type: mode })
     }
   }
 
@@ -207,6 +240,20 @@ export function formatCompetitiveAlert(alert: RedditAlert): { title: string; des
     title: `🔍 Competitive: r/${alert.subreddit}`,
     description: `"${alert.post.title}"\nby u/${alert.post.author} · ${alert.post.score} upvotes · ${agoText}`,
     color: 0x8b949e, // gray
+    url: alert.post.url,
+  }
+}
+
+export function formatSecurityAlert(alert: RedditAlert): { title: string; description: string; color: number; url: string } {
+  const ago = Math.floor(Date.now() / 1000 - alert.post.createdUtc)
+  const agoText = ago < 60 ? 'just now'
+    : ago < 3600 ? `${Math.floor(ago / 60)}m ago`
+    : `${Math.floor(ago / 3600)}h ago`
+
+  return {
+    title: `🔒 Security: r/${alert.subreddit}`,
+    description: `"${alert.post.title}"\nby u/${alert.post.author} · ${alert.post.score} upvotes · ${agoText}`,
+    color: 0xf85149, // red — security alerts are high-priority
     url: alert.post.url,
   }
 }
