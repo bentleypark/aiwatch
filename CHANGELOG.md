@@ -44,6 +44,3 @@
 - Fix `Promise.all` → `Promise.allSettled` for resilient probe KV reads
 - Fix mobile layout: Topbar overflow, incident card padding, Latency chart density (#201, #202)
 
-## v1.2.0
-
-Initial public release with AI-powered incident analysis, real-time monitoring dashboard, Discord/Slack alerts, and health check probing.
