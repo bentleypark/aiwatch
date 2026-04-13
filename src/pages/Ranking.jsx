@@ -110,7 +110,6 @@ export default function Ranking() {
                 <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.score')}</th>
                 <th style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 500 }}>{t('ranking.grade')}</th>
                 <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.uptime')}</th>
-                <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('score.responsiveness')}</th>
                 <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.affectedDays')}</th>
               </tr>
             </thead>
@@ -135,9 +134,6 @@ export default function Ranking() {
                   </td>
                   <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
                     {svc.uptime30d != null ? `${svc.uptime30d.toFixed(2)}%` : '—'}
-                  </td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
-                    {svc.scoreBreakdown?.responsiveness != null ? `${svc.scoreBreakdown.responsiveness}/20` : <span className="text-[var(--text2)]">N/A</span>}
                   </td>
                   <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
                     {svc.scoreMetrics?.affectedDays30d != null ? `${svc.scoreMetrics.affectedDays30d}${t('aboutScore.day')}` : '—'}

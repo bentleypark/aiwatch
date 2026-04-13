@@ -82,12 +82,13 @@ export async function computeProbeSummaries(kv: KVNamespace, days = 7): Promise<
   const keys = Array.from({ length: days }, (_, i) => {
     return `probe:daily:${new Date(Date.now() - (i + 1) * 86_400_000).toISOString().split('T')[0]}`
   })
-  const rawValues = await Promise.all(keys.map(k => kv.get(k)))
+  const settled = await Promise.allSettled(keys.map(k => kv.get(k)))
   const dailyData: ProbeDailyData[] = []
-  for (const raw of rawValues) {
-    if (!raw) continue
+  for (const res of settled) {
+    if (res.status === 'rejected') { console.warn('[probe-archival] KV read failed:', res.reason); continue }
+    if (!res.value) continue
     try {
-      dailyData.push(JSON.parse(raw))
+      dailyData.push(JSON.parse(res.value))
     } catch (err) { console.warn('[probe-archival] malformed daily data:', err instanceof Error ? err.message : err) }
   }
 
@@ -116,7 +117,7 @@ export async function computeProbeSummaries(kv: KVNamespace, days = 7): Promise<
 
     // Day-to-day CV of p50 values (σ/μ)
     const p50Variance = stats.p50s.reduce((acc, v) => acc + (v - p50Avg) ** 2, 0) / stats.p50s.length
-    const cvDaily = Math.sqrt(p50Variance) / p50Avg
+    const cvDaily = p50Avg > 0 ? Math.sqrt(p50Variance) / p50Avg : 0
 
     // p95/p50 spread ratio
     const spreadRatio = p50Avg > 0 ? (p95Avg - p50Avg) / p50Avg : 0

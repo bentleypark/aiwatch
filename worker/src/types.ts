@@ -32,13 +32,6 @@ export interface ServiceStatus {
   calendarDays?: number
   uptimeSource?: 'official' | 'platform_avg' | 'estimate'
   detectedAt?: string
-  probeSummary?: ProbeSummary
-}
-
-export interface ProbeSummary {
-  p50: number      // average daily p50 RTT (ms) over 7 days
-  p95: number      // average daily p95 RTT (ms) over 7 days
-  cvCombined: number // 0.3 × day-to-day CV + 0.7 × (p95-p50)/p50 spread
 }
 
 export type DailyImpactLevel = 'minor' | 'major' | 'critical'

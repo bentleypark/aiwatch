@@ -720,44 +720,32 @@ export default function ServiceDetails({ serviceId }) {
             <div className="flex flex-col gap-3">
               {service.scoreBreakdown?.uptime != null ? (
                 <div className="flex items-center gap-3">
-                  <span className="w-24 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.uptime')}</span>
+                  <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.uptime')}</span>
                   <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
-                    <div className="bg-[var(--teal)] rounded-full" style={{ height: '6px', width: `${(service.scoreBreakdown.uptime / 40) * 100}%` }} />
+                    <div className="bg-[var(--teal)] rounded-full" style={{ height: '6px', width: `${(service.scoreBreakdown.uptime / 50) * 100}%` }} />
                   </div>
-                  <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{service.scoreBreakdown.uptime}/40</span>
+                  <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{service.scoreBreakdown.uptime}/50</span>
                 </div>
               ) : (
                 <div className="flex items-center gap-3">
-                  <span className="w-24 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.uptime')}</span>
+                  <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.uptime')}</span>
                   <span className="mono text-[10px] text-[var(--text2)]">{t('uptime.unavailable')}</span>
                 </div>
               )}
               {[
-                { label: t('score.incidents'), value: service.scoreBreakdown?.incidents, max: 25, color: 'var(--teal)' },
-                { label: t('score.recovery'), value: service.scoreBreakdown?.recovery, max: 15, color: 'var(--teal)' },
-                { label: t('score.responsiveness'), value: service.scoreBreakdown?.responsiveness, max: 20, color: 'var(--purple)' },
-              ].map(({ label, value, max, color }) => (
+                { label: t('score.incidents'), value: service.scoreBreakdown?.incidents, max: 30 },
+                { label: t('score.recovery'), value: service.scoreBreakdown?.recovery, max: 20 },
+              ].map(({ label, value, max }) => (
                 <div key={label} className="flex items-center gap-3">
-                  <span className="w-24 shrink-0 mono text-[10px] text-[var(--text2)]">{label}</span>
-                  {value != null ? (
-                    <>
-                      <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
-                        <div className="rounded-full" style={{ height: '6px', width: `${((value ?? 0) / max) * 100}%`, background: color }} />
-                      </div>
-                      <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{value}/{max}</span>
-                    </>
-                  ) : (
-                    <span className="mono text-[10px] text-[var(--text2)]">N/A</span>
-                  )}
+                  <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{label}</span>
+                  <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
+                    <div className="bg-[var(--teal)] rounded-full" style={{ height: '6px', width: `${((value ?? 0) / max) * 100}%` }} />
+                  </div>
+                  <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{value != null ? value : '—'}/{max}</span>
                 </div>
               ))}
             </div>
-            {service.scoreConfidence === 'low' && (
-              <div className="mono text-[9px] text-[var(--text2)]" style={{ marginTop: '10px' }}>
-                * {t('score.no_probe')}
-              </div>
-            )}
-            {service.scoreConfidence === 'medium' && (
+            {service.scoreConfidence !== 'high' && (
               <div className="mono text-[9px] text-[var(--text2)]" style={{ marginTop: '10px' }}>
                 * {t('score.no_uptime')}
               </div>
