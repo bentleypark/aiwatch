@@ -2,6 +2,7 @@
 // Called by Daily Summary cron (UTC 09:00). Stored with 90d TTL for monthly reports.
 
 import type { ProbeSnapshot } from './probe'
+import type { ProbeSummary } from './types'
 
 export interface ProbeDailyStat {
   p50: number
@@ -21,7 +22,10 @@ function percentile(sorted: number[], p: number): number {
   return sorted[Math.max(0, idx)]
 }
 
-/** Aggregate probe snapshots into per-service daily stats */
+/** Aggregate probe snapshots into per-service daily stats.
+ *  Applies warm-up filtering: removes top 1% extreme RTTs (cold-start spikes)
+ *  and spike RTTs (>3×median) before computing p50/p75/p95.
+ *  Raw spike count is preserved for downstream filtering. */
 export function aggregateProbeDaily(snapshots: ProbeSnapshot[]): ProbeDailyData {
   // Collect RTT values per service
   const rttMap: Record<string, number[]> = {}
@@ -47,15 +51,86 @@ export function aggregateProbeDaily(snapshots: ProbeSnapshot[]): ProbeDailyData 
     const threshold = median * 3
     const spikeCount = failures + valid.filter(r => r > threshold).length
 
+    // Warm-up filtering: remove top 1% extreme RTTs + spike RTTs (>3×median)
+    // Uses trimmed dataset for p50/p75/p95 to avoid cold-start/incident noise
+    const trimIdx = Math.max(1, Math.floor(valid.length * 0.99))
+    const trimmed = valid.slice(0, trimIdx).filter(r => r <= threshold)
+
+    // Fall back to full valid set if trimming removes too many samples (<50%)
+    const cleaned = trimmed.length >= valid.length * 0.5 ? trimmed : valid
+
     result[svcId] = {
-      p50: percentile(valid, 50),
-      p75: percentile(valid, 75),
-      p95: percentile(valid, 95),
-      min: valid[0],
-      max: valid[valid.length - 1],
+      p50: percentile(cleaned, 50),
+      p75: percentile(cleaned, 75),
+      p95: percentile(cleaned, 95),
+      min: cleaned[0],
+      max: cleaned[cleaned.length - 1],
       count: allRtt.length,
-      spikes: spikeCount,
+      spikes: spikeCount, // raw spike count preserved for downstream filtering
     }
+  }
+
+  return result
+}
+
+/** Compute 7-day probe summary per service from daily archives.
+ *  Returns Map<serviceId, ProbeSummary> for Responsiveness scoring. */
+export async function computeProbeSummaries(kv: KVNamespace, days = 7): Promise<Map<string, ProbeSummary>> {
+  const result = new Map<string, ProbeSummary>()
+
+  // Read daily archives in parallel (skip today — not yet archived)
+  const keys = Array.from({ length: days }, (_, i) => {
+    return `probe:daily:${new Date(Date.now() - (i + 1) * 86_400_000).toISOString().split('T')[0]}`
+  })
+  const settled = await Promise.allSettled(keys.map(k => kv.get(k)))
+  const dailyData: ProbeDailyData[] = []
+  for (const res of settled) {
+    if (res.status === 'rejected') { console.warn('[probe-archival] KV read failed:', res.reason); continue }
+    if (!res.value) continue
+    try {
+      dailyData.push(JSON.parse(res.value))
+    } catch (err) { console.warn('[probe-archival] malformed daily data:', err instanceof Error ? err.message : err) }
+  }
+
+  if (dailyData.length < 2) return result // need at least 2 days for CV
+  const MIN_DAYS = Math.min(days, 7) // require 7 days for reliable CV (or less if requested)
+
+  // Collect per-service daily p50 and p95 values
+  // Skip unreliable days: spike ratio >= 50% OR p95/p50 spread > 10× (extreme outlier day)
+  const svcStats: Record<string, { p50s: number[]; p95s: number[] }> = {}
+  for (const day of dailyData) {
+    for (const [svcId, stat] of Object.entries(day)) {
+      if (stat.p50 <= 0) continue // skip days with no valid data
+      if (stat.count > 0 && stat.spikes / stat.count >= 0.5) continue // skip spike-dominated days
+      if (stat.p50 > 0 && stat.p95 / stat.p50 > 10) continue // skip extreme spread days (e.g., Gemini 4/4: p95/p50=13×)
+      if (!svcStats[svcId]) svcStats[svcId] = { p50s: [], p95s: [] }
+      svcStats[svcId].p50s.push(stat.p50)
+      svcStats[svcId].p95s.push(stat.p95)
+    }
+  }
+
+  for (const [svcId, stats] of Object.entries(svcStats)) {
+    if (stats.p50s.length < MIN_DAYS) continue // require MIN_DAYS valid days for reliable Responsiveness
+
+    const p50Avg = stats.p50s.reduce((a, b) => a + b, 0) / stats.p50s.length
+    const p95Avg = stats.p95s.reduce((a, b) => a + b, 0) / stats.p95s.length
+
+    // Day-to-day CV of p50 values (σ/μ)
+    const p50Variance = stats.p50s.reduce((acc, v) => acc + (v - p50Avg) ** 2, 0) / stats.p50s.length
+    const cvDaily = p50Avg > 0 ? Math.sqrt(p50Variance) / p50Avg : 0
+
+    // p95/p50 spread ratio
+    const spreadRatio = p50Avg > 0 ? (p95Avg - p50Avg) / p50Avg : 0
+
+    // Combined CV: 30% day-to-day + 70% spread
+    // Spread-weighted to reduce bimodal CV penalty (e.g., Claude: CV=1.6 from CDN routing, not instability)
+    const cvCombined = 0.3 * cvDaily + 0.7 * spreadRatio
+
+    result.set(svcId, {
+      p50: Math.round(p50Avg),
+      p95: Math.round(p95Avg),
+      cvCombined: Math.round(cvCombined * 1000) / 1000, // 3 decimal places
+    })
   }
 
   return result
