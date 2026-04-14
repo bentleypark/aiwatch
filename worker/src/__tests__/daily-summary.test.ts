@@ -141,6 +141,42 @@ describe('buildDailySummary', () => {
     expect(result).toContain('X (investigating)')
   })
 
+  it('excludes estimate-only services from uptime best/worst', () => {
+    const result = buildDailySummary({
+      services: [
+        makeSvc({ id: 'bedrock', name: 'Amazon Bedrock', uptime30d: 100.0, uptimeSource: 'estimate' as const, incidents: [] }),
+        makeSvc({ id: 'azureopenai', name: 'Azure OpenAI', uptime30d: 100.0, uptimeSource: 'estimate' as const, incidents: [] }),
+        makeSvc({ id: 'openai', name: 'OpenAI API', uptime30d: 99.99 }),
+        makeSvc({ id: 'claude', name: 'Claude API', uptime30d: 99.50 }),
+        makeSvc({ id: 'elevenlabs', name: 'ElevenLabs', uptime30d: 97.54 }),
+      ],
+      aiUsage: null,
+      latencySnapshots: [],
+      incidentCountToday: { newCount: 0, resolvedCount: 0 },
+      redditCount: 0,
+    })
+    expect(result).toContain('Uptime (30d)')
+    expect(result).not.toContain('Amazon Bedrock')
+    expect(result).not.toContain('Azure OpenAI')
+    expect(result).toContain('OpenAI API 99.99%')
+    expect(result).toContain('ElevenLabs 97.54%')
+  })
+
+  it('includes estimate services with incidents in uptime best/worst', () => {
+    const result = buildDailySummary({
+      services: [
+        makeSvc({ id: 'bedrock', name: 'Amazon Bedrock', uptime30d: 99.80, uptimeSource: 'estimate' as const, incidents: [{ id: 'i1', title: 'Outage', status: 'resolved', startedAt: '2026-04-01T00:00:00Z', impact: 'major', updates: [] }] }),
+        makeSvc({ id: 'openai', name: 'OpenAI API', uptime30d: 99.99 }),
+        makeSvc({ id: 'claude', name: 'Claude API', uptime30d: 99.50 }),
+      ],
+      aiUsage: null,
+      latencySnapshots: [],
+      incidentCountToday: { newCount: 0, resolvedCount: 0 },
+      redditCount: 0,
+    })
+    expect(result).toContain('Amazon Bedrock')
+  })
+
   it('skips uptime section when fewer than 3 services have data', () => {
     const result = buildDailySummary({
       services: [

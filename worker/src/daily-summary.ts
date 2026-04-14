@@ -53,8 +53,8 @@ export function buildDailySummary(data: DailySummaryData): string {
     lines.push(`\n🤖 **AI Analysis Usage**\n   Today: ${aiUsage.calls} calls (${aiUsage.success} success, ${aiUsage.failed} failed)\n   Est. cost: $${cost}`)
   }
 
-  // Section 4: Uptime Best/Worst
-  const withUptime = services.filter(s => s.uptime30d != null && !isNaN(s.uptime30d!))
+  // Section 4: Uptime Best/Worst (exclude estimate-only services — misleading 100%)
+  const withUptime = services.filter(s => s.uptime30d != null && !isNaN(s.uptime30d!) && !(s.uptimeSource === 'estimate' && (s.incidents ?? []).length === 0))
   if (withUptime.length >= 3) {
     const sorted = [...withUptime].sort((a, b) => (b.uptime30d ?? 0) - (a.uptime30d ?? 0))
     const best = sorted.slice(0, 2).map(s => `${s.name} ${s.uptime30d!.toFixed(2)}%`).join(' · ')
