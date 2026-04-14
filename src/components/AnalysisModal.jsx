@@ -117,7 +117,9 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                       <div className="mono text-[10px] text-[var(--text2)]" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         <span>⏱ <strong style={{ color: 'var(--text1)' }}>{lang === 'ko' ? '예상 복구' : 'Est. Recovery'}:</strong> {analysis.estimatedRecovery === 'No historical data for estimation'
                           ? (lang === 'ko' ? '복구 신호 모니터링 중...' : 'Monitoring recovery signals...')
-                          : analysis.estimatedRecovery}
+                          : analysis.estimatedRecovery === 'N/A'
+                            ? (lang === 'ko' ? '일반 패턴 초과 — 예측 불가' : 'Exceeded typical pattern')
+                            : analysis.estimatedRecovery}
                         </span>
                         {analysis.affectedScope?.length > 0 && (
                           <span>📡 <strong style={{ color: 'var(--text1)' }}>{lang === 'ko' ? '영향 범위' : 'Scope'}:</strong> {analysis.affectedScope.join(', ')}</span>

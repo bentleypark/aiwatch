@@ -65,6 +65,16 @@ export function parseRecoveryHours(recovery: string): number | null {
   return hours > 0 ? Math.round(hours * 100) / 100 : null
 }
 
+/**
+ * Format recovery display text — replaces raw AI output with user-friendly text.
+ * "N/A" → "Exceeded typical pattern", "No historical data..." → "Monitoring recovery signals..."
+ */
+export function formatRecoveryDisplay(recovery: string): string {
+  if (recovery === 'No historical data for estimation') return 'Monitoring recovery signals...'
+  if (recovery === 'N/A') return 'Exceeded typical pattern'
+  return recovery
+}
+
 /** Centralized KV key for per-incident analysis */
 export function analysisKey(svcId: string, incId: string): string {
   return `ai:analysis:${svcId}:${incId}`

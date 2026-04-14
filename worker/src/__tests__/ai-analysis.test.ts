@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, parseRecoveryHours, type KVLike } from '../ai-analysis'
+import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, parseRecoveryHours, formatRecoveryDisplay, type KVLike } from '../ai-analysis'
 import type { Incident, ServiceStatus } from '../types'
 
 const mockIncident = (overrides: Partial<Incident> = {}): Incident => ({
@@ -1105,5 +1105,26 @@ describe('parseRecoveryHours', () => {
 
   it('handles hyphen as range separator', () => {
     expect(parseRecoveryHours('2-4h')).toBe(4)
+  })
+})
+
+describe('formatRecoveryDisplay', () => {
+  it('replaces N/A with user-friendly text', () => {
+    expect(formatRecoveryDisplay('N/A')).toBe('Exceeded typical pattern')
+  })
+
+  it('replaces no-historical-data text', () => {
+    expect(formatRecoveryDisplay('No historical data for estimation')).toBe('Monitoring recovery signals...')
+  })
+
+  it('passes through normal recovery times', () => {
+    expect(formatRecoveryDisplay('1–3h')).toBe('1–3h')
+    expect(formatRecoveryDisplay('30m–1h')).toBe('30m–1h')
+    expect(formatRecoveryDisplay('5–10m')).toBe('5–10m')
+  })
+
+  it('passes through single values', () => {
+    expect(formatRecoveryDisplay('~1h')).toBe('~1h')
+    expect(formatRecoveryDisplay('Resolved')).toBe('Resolved')
   })
 })
