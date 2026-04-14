@@ -74,6 +74,17 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
 }
 
 /**
+ * Filter out active incidents when the service's component is operational (#228).
+ * Providers like Anthropic bulk-link incidents to all components even when only one is affected.
+ * If this service's component is operational, remove unresolved incidents to prevent cross-contamination.
+ */
+export function filterByComponentStatus(incidents: Incident[], componentStatus: string, config: ServiceConfig): Incident[] {
+  if (componentStatus !== 'operational') return incidents
+  if (!config.statusComponentId && !config.statusComponent) return incidents
+  return incidents.filter(i => i.status === 'resolved' || i.status === 'monitoring')
+}
+
+/**
  * Include untagged incidents when keyword-filtered service has no active incidents
  * but the service's status is non-operational. Checks component-specific status when
  * available to prevent cross-contamination (e.g., API incident on ChatGPT).
@@ -269,6 +280,9 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           : summaryData.components?.find((c) => c.id === config.statusComponentId)
         return comp ? normalizeStatus(comp.status) : overall
       })()
+
+      // Filter out active incidents when component is operational (#228)
+      filtered = filterByComponentStatus(filtered, svcStatus, config)
 
       // Track component ID misses for migration detection (#135)
       if (config.statusComponentId && summaryData.components) {
