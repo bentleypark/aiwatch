@@ -3,6 +3,13 @@
 import type { ServiceSEO } from './seo-content'
 import { SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE, RELATED_SLUGS } from './slug-map'
 
+/** Format recovery display — shared with worker/src/ai-analysis.ts */
+function formatRecoveryDisplay(recovery: string): string {
+  if (recovery === 'No historical data for estimation') return 'Monitoring recovery signals...'
+  if (recovery === 'N/A') return 'Exceeded typical pattern'
+  return recovery
+}
+
 interface ServiceData {
   id: string
   name: string
@@ -102,7 +109,7 @@ export function renderPage(
 ): string {
   const title = `Is ${seo.displayName} Down? Live Status | AIWatch`
   const desc = (aiInsight && service && service.status !== 'operational')
-    ? `${seo.displayName} is currently ${statusLabel(service.status).toLowerCase()}. AI Analysis: ${aiInsight.summary.slice(0, 120)} Est. recovery: ${aiInsight.estimatedRecovery}.`
+    ? `${seo.displayName} is currently ${statusLabel(service.status).toLowerCase()}. AI Analysis: ${aiInsight.summary.slice(0, 120)} Est. recovery: ${formatRecoveryDisplay(aiInsight.estimatedRecovery)}.`
     : service
     ? `Check if ${seo.displayName} is down right now. Current status: ${statusLabel(service.status)}. ${typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d) ? `30-day uptime: ${service.uptime30d.toFixed(2)}%.` : ''} Updated every 5 minutes.`
     : `Check if ${seo.displayName} is down right now. Real-time status monitoring by AIWatch.`
@@ -257,9 +264,7 @@ function renderAIInsight(insight?: { summary: string; estimatedRecovery: string;
   if (!insight) return ''
   const ago = Math.floor((Date.now() - new Date(insight.analyzedAt).getTime()) / 60000)
   const agoText = ago < 1 ? 'just now' : ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`
-  const recovery = insight.estimatedRecovery === 'No historical data for estimation'
-    ? 'Monitoring recovery signals...'
-    : insight.estimatedRecovery
+  const recovery = formatRecoveryDisplay(insight.estimatedRecovery)
   const isResolved = serviceStatus === 'operational'
   const isRecentlyRecovered = isResolved && !!insight.resolvedAt
   const resolvedBadge = isResolved
@@ -449,7 +454,7 @@ function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canoni
 
   // Status-based share templates — randomly selected per render for variety
   // Include AI analysis when available
-  const aiSuffix = aiInsight ? `\nAI Analysis: ${aiInsight.summary.slice(0, 100)}. Est. recovery: ${aiInsight.estimatedRecovery}.` : ''
+  const aiSuffix = aiInsight ? `\nAI Analysis: ${aiInsight.summary.slice(0, 100)}. Est. recovery: ${formatRecoveryDisplay(aiInsight.estimatedRecovery)}.` : ''
   const n = seo.displayName
   const downTexts = [
     `Is ${n} down? Current status: Major Outage.`,
