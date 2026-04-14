@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { filterIncidents, includeUntaggedIncidents } from '../services'
+import { filterIncidents, includeUntaggedIncidents, filterByComponentStatus } from '../services'
 import type { Incident, ServiceConfig } from '../types'
 
 function mockIncident(overrides: Partial<Incident> = {}): Incident {
@@ -183,5 +183,80 @@ describe('includeUntaggedIncidents', () => {
     const result = includeUntaggedIncidents([], [resolved, active], config, [], 'major')
     expect(result).toHaveLength(1)
     expect(result[0].id).toBe('new')
+  })
+})
+
+describe('filterByComponentStatus (#228)', () => {
+  it('removes active incidents when component is operational', () => {
+    const incidents = [
+      mockIncident({ id: 'active-1', status: 'investigating' }),
+      mockIncident({ id: 'resolved-1', status: 'resolved', resolvedAt: '2026-04-14T00:00:00Z' }),
+      mockIncident({ id: 'monitoring-1', status: 'monitoring' }),
+    ]
+    const config = mockConfig({ statusComponentId: 'k8w3r06qmzrp' })
+    const result = filterByComponentStatus(incidents, 'operational', config)
+    expect(result).toHaveLength(2)
+    expect(result.map(i => i.id)).toEqual(['resolved-1', 'monitoring-1'])
+  })
+
+  it('keeps all incidents when component is degraded', () => {
+    const incidents = [
+      mockIncident({ id: 'active-1', status: 'investigating' }),
+      mockIncident({ id: 'resolved-1', status: 'resolved' }),
+    ]
+    const config = mockConfig({ statusComponentId: 'k8w3r06qmzrp' })
+    const result = filterByComponentStatus(incidents, 'degraded', config)
+    expect(result).toHaveLength(2)
+  })
+
+  it('keeps all incidents when component is down', () => {
+    const incidents = [
+      mockIncident({ id: 'active-1', status: 'investigating' }),
+    ]
+    const config = mockConfig({ statusComponentId: 'abc123' })
+    const result = filterByComponentStatus(incidents, 'down', config)
+    expect(result).toHaveLength(1)
+  })
+
+  it('skips filtering when no statusComponentId or statusComponent', () => {
+    const incidents = [
+      mockIncident({ id: 'active-1', status: 'investigating' }),
+    ]
+    const config = mockConfig({}) // no component config
+    const result = filterByComponentStatus(incidents, 'operational', config)
+    expect(result).toHaveLength(1)
+  })
+
+  it('works with statusComponent (name-based) config', () => {
+    const incidents = [
+      mockIncident({ id: 'active-1', status: 'investigating' }),
+      mockIncident({ id: 'resolved-1', status: 'resolved' }),
+    ]
+    const config = mockConfig({ statusComponent: 'claude.ai' })
+    const result = filterByComponentStatus(incidents, 'operational', config)
+    expect(result).toHaveLength(1)
+    expect(result[0].id).toBe('resolved-1')
+  })
+
+  it('real-world: Anthropic bulk-links incident to all components', () => {
+    // Simulates the actual scenario: admin API incident linked to claude.ai, Claude Code, etc.
+    const adminApiIncident = mockIncident({
+      id: 'w3389p5qg7kp',
+      title: 'Degraded service on usage and analytics admin API endpoints',
+      status: 'investigating',
+      componentNames: ['claude.ai', 'Claude API', 'Claude Code', 'Claude Cowork'],
+    })
+    const oldResolved = mockIncident({ id: 'old-1', status: 'resolved', resolvedAt: '2026-04-10T00:00:00Z' })
+
+    // claude.ai component is operational — should filter out active incident
+    const claudeAiConfig = mockConfig({ id: 'claudeai', statusComponentId: 'rwppv331jlwc', incidentKeywords: ['claude.ai'] })
+    const claudeAiResult = filterByComponentStatus([adminApiIncident, oldResolved], 'operational', claudeAiConfig)
+    expect(claudeAiResult).toHaveLength(1)
+    expect(claudeAiResult[0].id).toBe('old-1')
+
+    // Claude API component is degraded — should keep all incidents
+    const claudeApiConfig = mockConfig({ id: 'claude', statusComponentId: 'k8w3r06qmzrp' })
+    const claudeApiResult = filterByComponentStatus([adminApiIncident, oldResolved], 'degraded', claudeApiConfig)
+    expect(claudeApiResult).toHaveLength(2)
   })
 })

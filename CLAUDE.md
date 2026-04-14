@@ -373,7 +373,8 @@ Per-service status is resolved in `services.ts` with this priority:
 1. **Component match** (`statusComponentId` or `statusComponent`): use that component's status
 2. **Component not found**: fall back to overall page indicator
 3. **No component configured**: use overall indicator, BUT if no relevant unresolved incidents matched after `incidentExclude`/`incidentKeywords` filtering, treat as `operational` (prevents cross-contamination from unrelated incidents on shared status pages, e.g., ChatGPT incident should not affect OpenAI API status)
-4. **Status page fetch failure cross-validation** (post-processing in `fetchAllServices`):
+4. **Component-status incident filter** (`filterByComponentStatus`): if component is `operational` but provider bulk-linked incidents to all components, remove unresolved incidents (keep resolved + monitoring). Prevents e.g., Anthropic admin API incident from showing on claude.ai/Claude Code when their components are healthy
+5. **Status page fetch failure cross-validation** (post-processing in `fetchAllServices`):
    - If service is `degraded` from fetch failure (no incidents) AND probe RTT is normal → override to `operational`
    - If 70%+ of services on the same platform (Atlassian/incident.io/etc.) fail simultaneously → platform outage → override all to `operational`
    - Conservative: only overrides when evidence is strong (≥2 recent probes healthy, or quorum failure detected)
