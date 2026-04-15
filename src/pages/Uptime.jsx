@@ -12,6 +12,7 @@ import EmptyState from '../components/EmptyState'
 // ── Constants ────────────────────────────────────────────────
 
 const WARN_THRESHOLD = 95.0 // < 95% → red
+const isEstimateNoData = (s) => s.uptimeSource === 'estimate' && (s.incidents ?? []).length === 0
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -55,7 +56,7 @@ function UptimeBar({ service, sla, t }) {
   const MIN_DISPLAY = 95
   const range = 100 - MIN_DISPLAY
   const uptime = service.uptime30d ?? 0
-  const hasUptime = service.uptime30d != null
+  const hasUptime = service.uptime30d != null && !isEstimateNoData(service)
   const clampedPct = Math.max(MIN_DISPLAY, uptime)
   const widthPct = hasUptime ? Math.round(((clampedPct - MIN_DISPLAY) / range) * 100) : 0
   const slaPos = Math.round(((sla - MIN_DISPLAY) / range) * 100)
@@ -81,7 +82,7 @@ function UptimeBar({ service, sla, t }) {
             title={service.uptimeSource === 'official' ? t('uptime.sub.official')
               : service.uptimeSource === 'platform_avg' ? t('uptime.sub.platform_avg')
               : service.uptimeSource === 'estimate' ? t('uptime.sub.estimate') : undefined}>
-        {service.uptimeSource === 'official' ? 'off' : service.uptimeSource === 'platform_avg' ? 'avg' : service.uptimeSource === 'estimate' ? 'est' : ''}
+        {!hasUptime ? '' : service.uptimeSource === 'official' ? 'off' : service.uptimeSource === 'platform_avg' ? 'avg' : service.uptimeSource === 'estimate' ? 'est' : ''}
       </span>
     </div>
   )
@@ -96,8 +97,17 @@ export default function Uptime() {
   const sla = settings.sla
   const services = (rawServices ?? []).filter((s) => settings.enabledServices.includes(s.id))
 
+  const hasReliableUptime = (s) => s.uptime30d != null && !isEstimateNoData(s)
   const sortedByUptime = useMemo(
-    () => [...services].sort((a, b) => (b.uptime30d ?? 0) - (a.uptime30d ?? 0)),
+    () => [...services]
+      .sort((a, b) => {
+        const aUp = isEstimateNoData(a) ? null : a.uptime30d
+        const bUp = isEstimateNoData(b) ? null : b.uptime30d
+        if (aUp == null && bUp == null) return 0
+        if (aUp == null) return 1
+        if (bUp == null) return -1
+        return bUp - aUp
+      }),
     [services]
   )
 
@@ -107,7 +117,6 @@ export default function Uptime() {
 
   if (services.length === 0) return <EmptyState type="neutral" />
 
-  const hasReliableUptime = (s) => s.uptime30d != null && !(s.uptimeSource === 'estimate' && (s.incidents ?? []).length === 0)
   const uptimeServices = services.filter(hasReliableUptime)
   const hasUptimeData = uptimeServices.length > 0
   const mostStable = hasUptimeData
