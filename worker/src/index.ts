@@ -146,6 +146,7 @@ async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
         signal: AbortSignal.timeout(5000),
       })
       data[id] = { status: res.status, rtt: Date.now() - start }
+      res.body?.cancel()
     } catch (err) {
       console.warn(`[probe] fetch failed for ${id}:`, err instanceof Error ? err.message : err)
       data[id] = failedProbe()
@@ -252,6 +253,8 @@ async function sendDiscordAlert(webhookUrl: string, embed: { title: string; desc
     })
     if (!resp.ok) {
       console.error(`[discord] webhook returned ${resp.status}: ${await resp.text().catch(() => '')}`)
+    } else {
+      resp.body?.cancel()
     }
   } catch (err) {
     console.error('[discord] webhook failed:', err instanceof Error ? err.message : err)
@@ -1239,6 +1242,7 @@ export default {
         // Track delivery count in-memory (flushed to KV by daily summary cron)
         if (resp.ok) deliveryCounter[isDiscord ? 'discord' : 'slack']++
         else deliveryCounter.failed++
+        resp.body?.cancel()
         return new Response(JSON.stringify({ ok: resp.ok, status: resp.status }), {
           status: resp.ok ? 200 : 502,
           headers: { ...cors, 'Content-Type': 'application/json' },
