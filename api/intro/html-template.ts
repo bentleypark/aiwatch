@@ -465,8 +465,9 @@ export function renderLandingPage(opts: LandingOptions): string {
 
 <!-- PH BANNER -->
 <div id="ph-banner" style="display:${phDisplay};background:var(--green-dim);border-bottom:1px solid rgba(63,185,80,0.3);padding:10px 24px;text-align:center;">
-  <a href="https://www.producthunt.com/products/aiwatch-2" target="_blank" rel="noopener" onclick="typeof gtag==='function'&&gtag('event','click_ph_upvote',{location:'landing_banner'})" style="font-size:13px;color:var(--green);font-family:var(--font-mono);text-decoration:none;">
-    👋 Welcome, Product Hunters! &nbsp;·&nbsp; If AIWatch is useful, <strong style="text-decoration:underline;text-underline-offset:3px;">an upvote means the world to us</strong> 🙏
+  <a href="https://www.producthunt.com/products/aiwatch-2?utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-aiwatch-2" target="_blank" rel="noopener" onclick="typeof gtag==='function'&&gtag('event','click_ph_upvote',{location:'landing_banner'})" style="display:inline-flex;align-items:center;gap:12px;font-size:13px;color:var(--green);font-family:var(--font-mono);text-decoration:none;">
+    <img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1124212&theme=dark" alt="AIWatch on Product Hunt" width="250" height="54" style="vertical-align:middle;" />
+    <span>👋 Welcome, Product Hunters! If AIWatch is useful, <strong style="text-decoration:underline;text-underline-offset:3px;">an upvote means the world to us</strong> 🙏</span>
   </a>
 </div>
 
