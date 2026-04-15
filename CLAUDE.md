@@ -293,7 +293,7 @@ worker/
     og-render.ts # SVG → PNG conversion (resvg-wasm, Inter font from CDN)
     alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts, formatDetectionLead)
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText, buildGroupedFallbackText for multi-category incidents)
-    ai-analysis.ts # Claude Sonnet incident analysis (system/user prompt, needsFallback assessment, TTL refresh, re-analysis, incidentId dedup, timeline context, boilerplate filtering)
+    ai-analysis.ts # Claude Sonnet incident analysis via Cloudflare AI Gateway (system/user prompt, needsFallback assessment, TTL refresh, re-analysis, incidentId dedup, timeline context, boilerplate filtering, formatRecoveryDisplay)
     changelog.ts # Changelog/news collection (OpenAI blog RSS, Google AI blog RSS, Anthropic /news HTML parsing)
     weekly-briefing.ts # Weekly Discord briefing (changelog + incidents + stability trends)
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit, Web Vitals)
@@ -402,7 +402,7 @@ Cron Trigger (*/5 min)
   → read KV cache → detect incidents/status changes
   → record detection timestamps (detected:{serviceId}) for Detection Lead (probe spike time preferred if earlier)
   → KV ID-based dedup → Discord alerts (single embed per incident, with Detection Lead if probe detected first)
-  → incident detected → AI analysis (8s timeout) + Detection Lead (1-60min advance detection → "⚡ Detection Lead: Xm") → merged into incident embed
+  → incident detected → AI analysis via Cloudflare AI Gateway (8s timeout) + Detection Lead (1-60min advance detection → "⚡ Detection Lead: Xm") → merged into incident embed
   → recovery detected → mark ai:analysis:{svcId}:{incId} with resolvedAt (2h TTL, powers "Recently Resolved" UI)
   → active incidents: refresh analysis TTL / re-analyze if expired / dedup sibling services
   → alert count tracked in KV (alert:count:{date}) for Daily Summary
@@ -423,7 +423,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
 
 ### Key Product Constraints
 - Mobile breakpoint: 768px — sidebar hidden (overlay on hamburger), cards go 1-column
-- Phase 3 AI Analysis (Beta): Claude Sonnet auto-analysis on incidents — triggered by cron, stored in KV, shown in Topbar Analyze modal + Is X Down AI Insight card. Requires `ANTHROPIC_API_KEY` Worker secret
+- Phase 3 AI Analysis (Beta): Claude Sonnet auto-analysis on incidents — triggered by cron, routed through Cloudflare AI Gateway (`gateway.ai.cloudflare.com/.../aiwatch/anthropic`), stored in KV, shown in Topbar Analyze modal + Is X Down AI Insight card. Requires `ANTHROPIC_API_KEY` Worker secret. Recovery time "N/A" displayed as "Exceeded typical pattern" via `formatRecoveryDisplay()`
   - Per-incident KV keys: `ai:analysis:{svcId}:{incId}` — each incident analyzed independently, supports multiple simultaneous incidents per service
   - TTL refresh: cron refreshes per-incident analysis keys every ~30min while incident is active
   - Re-analysis: if analysis expired/missing, re-triggers (max 2/cron, 30min cooldown on failure). Also re-analyzes after 2h for long-running active incidents (safe overwrite: keeps old analysis on failure). Includes incident timeline updates in prompt for richer context
