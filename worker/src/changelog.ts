@@ -4,7 +4,7 @@
 import { kvPut } from './utils'
 
 export interface ChangelogEntry {
-  source: string    // 'openai' | 'google' | 'anthropic'
+  source: string    // 'openai' | 'google' | 'anthropic' | 'copilot'
   title: string
   url: string
   date: string      // ISO date
