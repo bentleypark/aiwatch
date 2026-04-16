@@ -9,7 +9,7 @@ ALLOWED_ORIGIN = "https://ai-watch.dev,https://www.ai-watch.dev,https://aiwatch-
 
 [[kv_namespaces]]
 binding = "STATUS_CACHE"
-id = "e49508d80bb144e9a7ff872f2be771a4"
+id = "e49508d80bb144e9a7ff872f2be771a4" # Not a secret — KV namespace IDs are public identifiers, inaccessible without API token
 
 [triggers]
 crons = ["*/5 * * * *"]

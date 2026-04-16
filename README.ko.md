@@ -357,6 +357,10 @@ worker/
 - 커밋 메시지에 `closes #N` 포함
 - PR 체크리스트 작성
 
+## 보안
+
+취약점을 발견하셨나요? [SECURITY.md](SECURITY.md)를 참고하여 책임감 있게 신고해 주세요.
+
 ## 라이선스
 
 [AGPL-3.0](LICENSE)

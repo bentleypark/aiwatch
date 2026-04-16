@@ -1,0 +1,8 @@
+# Allowed origins for CORS (use * for local development)
+ALLOWED_ORIGIN=*
+
+# Discord webhook URL for alert testing (optional — alerts skip if empty)
+DISCORD_WEBHOOK_URL=
+
+# Anthropic API key for AI incident analysis (optional — analysis disabled if empty)
+ANTHROPIC_API_KEY=

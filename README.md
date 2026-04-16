@@ -358,6 +358,10 @@ See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for detailed guidelines.
 - Include `closes #N` in commit messages
 - Fill out the PR checklist
 
+## Security
+
+Found a vulnerability? Please report it responsibly — see [SECURITY.md](SECURITY.md) for details.
+
 ## License
 
 [AGPL-3.0](LICENSE)
