@@ -1,8 +1,10 @@
-// AI Analysis — Claude Sonnet API call for incident analysis
+// AI Analysis — Hybrid: Gemma 4 (Workers AI) primary + Claude Sonnet fallback
 // Triggered only when incidents are detected (not on every cron cycle)
 
 import type { Incident, ServiceStatus } from './types'
 import { sanitize, kvPut, kvDel, type KVLike } from './utils'
+
+const GEMMA_MODEL = '@cf/google/gemma-4-26b-a4b-it'
 
 /**
  * Detect boilerplate timeline entries that contain no actionable technical detail.
@@ -40,6 +42,7 @@ export interface AIAnalysisResult {
   needsFallback: boolean  // AI-assessed: true if incident warrants switching to alternative service
   analyzedAt: string
   incidentId: string
+  model?: 'gemma' | 'sonnet'  // which model produced this analysis
   resolvedAt?: string
   timelineHash?: string  // latest timeline entry timestamp — used to skip re-analysis when unchanged
 }
@@ -173,7 +176,120 @@ ${historyText}
 }
 
 /**
- * Call Claude Sonnet API and parse the response.
+ * Parse raw AI response text into AIAnalysisResult.
+ * Shared between Gemma and Sonnet — both return JSON (possibly wrapped in markdown).
+ */
+export function parseAnalysisResponse(
+  text: string,
+  incidentId: string,
+  model: 'gemma' | 'sonnet',
+  timelineAt: string,
+): AIAnalysisResult | null {
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) return null
+
+  let parsed: { summary?: string; estimatedRecovery?: string; affectedScope?: string[]; needsFallback?: boolean }
+  try {
+    parsed = JSON.parse(jsonMatch[0])
+  } catch (err) {
+    console.warn(`[ai-analysis] ${model} JSON parse failed:`, err instanceof Error ? err.message : err)
+    return null
+  }
+
+  if (!parsed.summary || typeof parsed.summary !== 'string') return null
+
+  // Normalize recovery time format: "17 minutes to 9 hours" → "17m–9h"
+  let recovery = sanitize(parsed.estimatedRecovery ?? 'N/A')
+  recovery = recovery
+    .replace(/(\d+)\s*minutes?/gi, '$1m')
+    .replace(/(\d+)\s*hours?/gi, '$1h')
+    .replace(/\s*to\s*/g, '–')
+  const recoveryHours = parseRecoveryHours(recovery)
+  return {
+    summary: sanitize(parsed.summary),
+    estimatedRecovery: recovery,
+    ...(recoveryHours != null && { estimatedRecoveryHours: recoveryHours }),
+    affectedScope: (parsed.affectedScope ?? []).map(s => sanitize(s)),
+    needsFallback: parsed.needsFallback === true || (parsed.needsFallback as unknown) === 'true',
+    analyzedAt: new Date().toISOString(),
+    incidentId,
+    model,
+    timelineHash: timelineAt,
+  }
+}
+
+/**
+ * Analyze incident using Gemma 4 via Workers AI binding.
+ */
+async function analyzeWithGemma(
+  ai: Ai,
+  prompt: string,
+  incidentId: string,
+  timelineAt: string,
+): Promise<AIAnalysisResult | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- model ID may not be in type union yet
+  const res: any = await (ai as any).run(GEMMA_MODEL, {
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: prompt },
+    ],
+    max_tokens: 500,
+    chat_template_kwargs: { enable_thinking: false },
+  })
+
+  // Workers AI returns OpenAI-compatible format or legacy format
+  const text = typeof res === 'string'
+    ? res
+    : res?.response                                        // legacy Workers AI format
+      ?? res?.choices?.[0]?.message?.content                // OpenAI-compatible: content
+      ?? res?.choices?.[0]?.message?.reasoning              // thinking mode fallback
+  if (!text) {
+    console.warn(`[ai-analysis] Gemma: unexpected response shape`, JSON.stringify(res).slice(0, 300))
+    return null
+  }
+
+  return parseAnalysisResponse(text, incidentId, 'gemma', timelineAt)
+}
+
+/**
+ * Analyze incident using Claude Sonnet via AI Gateway (fallback).
+ */
+async function analyzeWithSonnet(
+  apiKey: string,
+  prompt: string,
+  incidentId: string,
+  timelineAt: string,
+): Promise<AIAnalysisResult | null> {
+  const res = await fetch('https://gateway.ai.cloudflare.com/v1/11485987aa7d4639df5ba09d671b5615/aiwatch/anthropic/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 300,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+    signal: AbortSignal.timeout(10000),
+  })
+
+  if (!res.ok) {
+    console.error(`[ai-analysis] Claude API returned ${res.status}: ${await res.text().catch(() => '')}`)
+    return null
+  }
+
+  const data = await res.json() as { content: Array<{ type: string; text?: string }> }
+  const text = data.content?.find(c => c.type === 'text')?.text
+  if (!text) return null
+
+  return parseAnalysisResponse(text, incidentId, 'sonnet', timelineAt)
+}
+
+/**
+ * Hybrid analysis: try Gemma first (Workers AI), fall back to Sonnet on failure.
  */
 export async function analyzeIncident(
   apiKey: string,
@@ -181,68 +297,32 @@ export async function analyzeIncident(
   currentIncident: { id: string; title: string; status: string; startedAt: string; impact: string | null; timeline?: Array<{ stage: string; text: string | null; at: string }> },
   allIncidents: Incident[],
   prevPrediction?: { estimatedRecoveryHours: number; elapsedHours: number },
+  ai?: Ai,
 ): Promise<AIAnalysisResult | null> {
   const similar = findSimilarIncidents(currentIncident.title, allIncidents)
   const prompt = buildAnalysisPrompt(serviceName, currentIncident, similar, prevPrediction)
+  const timelineAt = currentIncident.timeline?.at(-1)?.at ?? ''
 
+  // Primary: Gemma via Workers AI
+  if (ai) {
+    try {
+      const result = await analyzeWithGemma(ai, prompt, currentIncident.id, timelineAt)
+      if (result) {
+        console.log(`[ai-analysis] Gemma success for ${serviceName}`)
+        return result
+      }
+      console.warn(`[ai-analysis] Gemma returned unparseable response for ${serviceName}, falling back to Sonnet`)
+    } catch (err) {
+      console.warn(`[ai-analysis] Gemma failed for ${serviceName}: ${err instanceof Error ? err.message : err}, falling back to Sonnet`)
+    }
+  }
+
+  // Fallback: Claude Sonnet via AI Gateway (requires API key)
+  if (!apiKey) return null
   try {
-    const res = await fetch('https://gateway.ai.cloudflare.com/v1/11485987aa7d4639df5ba09d671b5615/aiwatch/anthropic/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 300,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-      signal: AbortSignal.timeout(10000),
-    })
-
-    if (!res.ok) {
-      console.error(`[ai-analysis] Claude API returned ${res.status}: ${await res.text().catch(() => '')}`)
-      return null
-    }
-
-    const data = await res.json() as { content: Array<{ type: string; text?: string }> }
-    const text = data.content?.find(c => c.type === 'text')?.text
-    if (!text) return null
-
-    // Extract JSON from response (may be wrapped in markdown code block)
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) return null
-
-    const parsed = JSON.parse(jsonMatch[0]) as {
-      summary?: string
-      estimatedRecovery?: string
-      affectedScope?: string[]
-      needsFallback?: boolean
-    }
-
-    // Normalize recovery time format: "17 minutes to 9 hours" → "17m–9h"
-    let recovery = sanitize(parsed.estimatedRecovery ?? 'N/A')
-    recovery = recovery
-      .replace(/(\d+)\s*minutes?/gi, '$1m')
-      .replace(/(\d+)\s*hours?/gi, '$1h')
-      .replace(/\s*to\s*/g, '–')
-    // Store latest timeline entry timestamp to detect new updates on re-analysis
-    const latestTimelineAt = currentIncident.timeline?.at(-1)?.at ?? ''
-    const recoveryHours = parseRecoveryHours(recovery)
-    return {
-      summary: sanitize(parsed.summary ?? 'Analysis unavailable'),
-      estimatedRecovery: recovery,
-      ...(recoveryHours != null && { estimatedRecoveryHours: recoveryHours }),
-      affectedScope: (parsed.affectedScope ?? []).map(s => sanitize(s)),
-      needsFallback: parsed.needsFallback === true || (parsed.needsFallback as unknown) === 'true',
-      analyzedAt: new Date().toISOString(),
-      incidentId: currentIncident.id,
-      timelineHash: latestTimelineAt,
-    }
+    return await analyzeWithSonnet(apiKey, prompt, currentIncident.id, timelineAt)
   } catch (err) {
-    console.error('[ai-analysis] Failed:', err instanceof Error ? err.message : err)
+    console.error('[ai-analysis] Sonnet fallback failed:', err instanceof Error ? err.message : err)
     return null
   }
 }
@@ -271,6 +351,7 @@ export async function refreshOrReanalyze(
   analyzeFn: typeof analyzeIncident,
   cap = 2,
   now = Date.now(),
+  ai?: Ai,
 ): Promise<RefreshResult> {
   const result: RefreshResult = { refreshed: [], reanalyzed: [], skipped: [] }
   let reAnalysisCount = 0
@@ -290,7 +371,7 @@ export async function refreshOrReanalyze(
           const parsed = JSON.parse(raw)
           // Time-based re-analysis: if 2h+ old, attempt update without deleting old analysis first
           const analysisAge = now - new Date(parsed.analyzedAt).getTime()
-          if (analysisAge >= 7_200_000 && apiKey && reAnalysisCount < cap) {
+          if (analysisAge >= 7_200_000 && (apiKey || ai) && reAnalysisCount < cap) {
             // Check if estimated recovery time has been exceeded (relative to incident start, not analysis time)
             // Fallback: if estimatedRecoveryHours not stored (pre-deployment data), parse from estimatedRecovery string
             const estHours = typeof parsed.estimatedRecoveryHours === 'number' && parsed.estimatedRecoveryHours > 0
@@ -337,6 +418,7 @@ export async function refreshOrReanalyze(
                 { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline },
                 svc.incidents ?? [],
                 prevPrediction,
+                ai,
               )
               // Track usage
               const today = new Date(now).toISOString().split('T')[0]
@@ -346,6 +428,8 @@ export async function refreshOrReanalyze(
               usage.calls++
               if (newAnalysis) {
                 usage.success++
+                if (newAnalysis.model === 'gemma') usage.gemma = (usage.gemma ?? 0) + 1
+                else if (newAnalysis.model === 'sonnet') usage.sonnet = (usage.sonnet ?? 0) + 1
                 await kvPut(kv, key, JSON.stringify(newAnalysis), { expirationTtl: 3600 })
                 analyzedIncidents.set(inc.id, key)
                 result.reanalyzed.push(svc.id)
@@ -400,7 +484,7 @@ export async function refreshOrReanalyze(
         }
       }
 
-      if (!apiKey || reAnalysisCount >= cap) {
+      if (!(apiKey || ai) || reAnalysisCount >= cap) {
         result.skipped.push(svc.id)
         continue
       }
@@ -420,6 +504,8 @@ export async function refreshOrReanalyze(
           svc.name,
           { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline },
           svc.incidents ?? [],
+          undefined,
+          ai,
         )
 
         // Track in ai:usage daily counter
@@ -431,6 +517,8 @@ export async function refreshOrReanalyze(
 
         if (analysis) {
           usage.success++
+          if (analysis.model === 'gemma') usage.gemma = (usage.gemma ?? 0) + 1
+          else if (analysis.model === 'sonnet') usage.sonnet = (usage.sonnet ?? 0) + 1
           await kvPut(kv, key, JSON.stringify(analysis), { expirationTtl: 3600 })
           analyzedIncidents.set(inc.id, key)
           result.reanalyzed.push(svc.id)

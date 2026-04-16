@@ -68,14 +68,16 @@ describe('buildDailySummary', () => {
   it('shows AI usage section', () => {
     const result = buildDailySummary({
       services: [makeSvc()],
-      aiUsage: { calls: 5, success: 4, failed: 1 },
+      aiUsage: { calls: 5, success: 4, failed: 1, gemma: 3, sonnet: 1 },
       latencySnapshots: [],
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       redditCount: 0,
     })
     expect(result).toContain('AI Analysis Usage')
     expect(result).toContain('5 calls (4 success, 1 failed)')
-    expect(result).toContain('$0.030')
+    expect(result).toContain('Gemma: 3, Sonnet: 1')
+    expect(result).toContain('$0.006')
+    expect(result).toContain('Sonnet only')
   })
 
   it('omits AI usage section when no calls', () => {
