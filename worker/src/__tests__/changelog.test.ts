@@ -2,9 +2,15 @@ import { describe, it, expect } from 'vitest'
 import { parseRssEntries, parseAnthropicNews, isRelevantEntry, formatChangelogSection, CHANGELOG_SOURCES, type ChangelogEntry } from '../changelog'
 
 describe('CHANGELOG_SOURCES', () => {
-  it('has 3 pilot sources', () => {
-    expect(CHANGELOG_SOURCES).toHaveLength(3)
-    expect(CHANGELOG_SOURCES.map((s) => s.id)).toEqual(['openai', 'google', 'anthropic'])
+  it('has 4 sources (3 pilot + copilot)', () => {
+    expect(CHANGELOG_SOURCES).toHaveLength(4)
+    expect(CHANGELOG_SOURCES.map((s) => s.id)).toEqual(['openai', 'google', 'anthropic', 'copilot'])
+  })
+
+  it('copilot source uses rss type with pre-filtered changelog feed', () => {
+    const copilot = CHANGELOG_SOURCES.find((s) => s.id === 'copilot')!
+    expect(copilot.type).toBe('rss')
+    expect(copilot.feedUrl).toContain('github.blog/changelog/label/copilot')
   })
 
   it('anthropic source uses html type', () => {
@@ -191,6 +197,14 @@ describe('isRelevantEntry', () => {
     it('generic posts without keywords are filtered', () => {
       expect(isRelevantEntry('Our thoughts on responsible AI', 'openai')).toBe(false)
       expect(isRelevantEntry('Partnering with schools in Kenya', 'google')).toBe(false)
+    })
+  })
+
+  describe('GitHub Copilot changelog', () => {
+    it('all entries are relevant (pre-filtered feed)', () => {
+      expect(isRelevantEntry('Enable Copilot cloud agent via custom properties', 'copilot')).toBe(true)
+      expect(isRelevantEntry('Model selection for Claude and Codex agents on github.com', 'copilot')).toBe(true)
+      expect(isRelevantEntry('Copilot now supports multi-file edits', 'copilot')).toBe(true)
     })
   })
 })

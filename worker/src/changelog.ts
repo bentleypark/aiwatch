@@ -21,6 +21,7 @@ export const CHANGELOG_SOURCES: ChangelogSource[] = [
   { id: 'openai', name: 'OpenAI', feedUrl: 'https://openai.com/blog/rss.xml', type: 'rss' },
   { id: 'google', name: 'Google AI', feedUrl: 'https://blog.google/technology/ai/rss/', type: 'rss' },
   { id: 'anthropic', name: 'Anthropic', feedUrl: 'https://www.anthropic.com/news', type: 'html' },
+  { id: 'copilot', name: 'GitHub Copilot', feedUrl: 'https://github.blog/changelog/label/copilot/feed/', type: 'rss' },
 ]
 
 // OpenAI/Google blog RSS contains non-API content — filter to relevant items
@@ -36,6 +37,8 @@ export function isRelevantEntry(title: string, source: string): boolean {
     if (ANTHROPIC_NOISE.test(title)) return false
     return ANTHROPIC_RELEVANCE.test(title)
   }
+  // Pre-filtered changelog sources — all entries are relevant
+  if (source === 'copilot') return true
   // Blog posts: require relevance keyword, reject noise
   if (NOISE_KEYWORDS.test(title)) return false
   return RELEVANCE_KEYWORDS.test(title)
@@ -197,6 +200,7 @@ export function formatChangelogSection(entries: ChangelogEntry[]): string {
     openai: 'OpenAI',
     google: 'Google AI',
     anthropic: 'Anthropic',
+    copilot: 'GitHub Copilot',
   }
 
   return entries
