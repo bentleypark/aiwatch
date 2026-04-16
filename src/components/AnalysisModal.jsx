@@ -1,6 +1,6 @@
 // AI Analysis Modal — shows incident analysis results from Claude
 import { useLang } from '../hooks/useLang'
-import { getFallbacks } from '../utils/constants'
+import { getFallbacks, EXCLUDE_FALLBACK } from '../utils/constants'
 
 function timeAgo(date, lang) {
   const diff = Date.now() - new Date(date).getTime()
@@ -127,9 +127,9 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                         {isRecovered && <span>✅ {t('analysis.recoveredAt')}: {timeAgo(analysis.resolvedAt, lang)}</span>}
                         <span>🕐 {lang === 'ko' ? '분석 업데이트' : 'Analysis updated'} {timeAgo(analysis.analyzedAt, lang)}</span>
                       </div>
-                      {/* Contextual fallback recommendation */}
-                      {analysis.needsFallback && !isRecovered && (() => {
-                        const primarySvc = svcs[0]
+                      {/* Contextual fallback recommendation — skip for EXCLUDE_FALLBACK services */}
+                      {analysis.needsFallback && !isRecovered && !svcs.every(s => EXCLUDE_FALLBACK.includes(s.id)) && (() => {
+                        const primarySvc = svcs.find(s => !EXCLUDE_FALLBACK.includes(s.id)) ?? svcs[0]
                         const fallbacks = getFallbacks(primarySvc, services)
                         return (
                           <div className="mono text-[10px]" style={{ marginTop: '8px', padding: '8px 10px', background: 'var(--bg1)', borderRadius: '6px', borderLeft: '3px solid var(--amber)' }}>
