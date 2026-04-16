@@ -421,7 +421,7 @@ function ActionBanner({ services, setPage, t }) {
 export default function Overview() {
   const { t, lang } = useLang()
   const { setPage, categoryFilter, setCategoryFilter } = usePage()
-  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis } = usePolling()
+  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis, securityAlerts } = usePolling()
   const { settings } = useSettings()
   const services = allServices.filter((s) => settings.enabledServices.includes(s.id))
   const [filter, setFilter] = useState('all')
@@ -536,6 +536,35 @@ export default function Overview() {
           </div>
         </div>
       )}
+
+      {/* ── Security Alerts Banner (24h only) ── */}
+      {(() => {
+        const cutoff = Date.now() - 24 * 3600_000
+        const recent = securityAlerts.filter(a => a.detectedAt && new Date(a.detectedAt).getTime() > cutoff)
+        if (recent.length === 0) return null
+        return (
+          <div className="rounded-lg border border-[var(--purple)]" style={{ background: 'color-mix(in srgb, var(--purple) 8%, transparent)', padding: '12px 16px' }}>
+            <div className="flex items-start gap-2 text-[12px]">
+              <span>🔒</span>
+              <div className="flex flex-col gap-1 min-w-0">
+                <span className="text-[var(--text0)] font-medium mono text-[11px]">
+                  {t('overview.security.title')} ({recent.length})
+                </span>
+                {recent.slice(0, 3).map((a, i) => {
+                  const safeUrl = a.url?.startsWith('https://') ? a.url : '#'
+                  return (
+                    <a key={i} href={safeUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-[var(--text1)] hover:text-[var(--purple)] truncate text-[11px]"
+                    >
+                      {a.severity === 'critical' ? '🔴' : a.severity === 'high' ? '🟠' : '🟡'} {a.title}
+                    </a>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── Summary Stats ── */}
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>

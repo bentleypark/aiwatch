@@ -72,6 +72,7 @@ const ko = {
   'overview.recovered': '최근 복구',
   'overview.recentlyResolved': '최근 복구됨',
   'overview.seeAnalysis': '분석 상세 보기',
+  'overview.security.title': '최근 보안 알림',
   'analysis.recoveredAt': '복구 시각',
   // Empty States
   'empty.issues.title': '현재 이슈 없음',

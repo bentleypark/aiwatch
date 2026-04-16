@@ -566,6 +566,7 @@ function usePollingInternal() {
     probeServiceIds: [],
     aiAnalysis: {},
     recentlyRecovered: {},
+    securityAlerts: [],
   })
   const cancelledRef = useRef(false)
   const controllerRef = useRef(null)
@@ -656,6 +657,7 @@ function usePollingInternal() {
           probeServiceIds,
           aiAnalysis: data.aiAnalysis ?? {},
           recentlyRecovered: data.recentlyRecovered ?? {},
+          securityAlerts: data.securityAlerts ?? state.securityAlerts ?? [],
         })
       }
     } catch (err) {
