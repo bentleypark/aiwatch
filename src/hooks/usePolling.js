@@ -650,7 +650,7 @@ function usePollingInternal() {
           loading: false,
           refreshing: false,
           error: null,
-          lastUpdated: new Date(data.lastUpdated),
+          lastUpdated: new Date(),
           latency24h: data.latency24h ?? [],
           probe24h: probeSnapshots,
           probeServiceIds,
