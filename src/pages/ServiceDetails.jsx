@@ -576,7 +576,7 @@ function BadgeCode({ serviceId, serviceName, t }) {
 export default function ServiceDetails({ serviceId }) {
   const { t, lang } = useLang()
   const { setPage } = usePage()
-  const { services: rawServices, loading, error, probe24h, latency24h, probeServiceIds, refresh, recentlyRecovered } = usePolling()
+  const { services: rawServices, loading, error, probe24h, latency24h, probeServiceIds, refresh, recentlyRecovered, securityAlerts } = usePolling()
   const services = rawServices ?? []
 
   // useMemo must be called before any early returns (Rules of Hooks)
@@ -821,6 +821,49 @@ export default function ServiceDetails({ serviceId }) {
             </div>
           </div>
         </section>}
+
+      {/* ── Security Alerts (service-specific) ── */}
+      {(() => {
+        if (!securityAlerts?.length) return null
+        const nameLC = service.name.toLowerCase()
+        // Map OSV service field → specific AIWatch service ID (SDK alerts are API-specific)
+        // Keep in sync with OSV_PACKAGES in worker/src/security-monitor.ts
+        const OSV_SERVICE_MAP = {
+          'OpenAI': 'openai', 'Anthropic (Claude)': 'claude', 'Google (Gemini)': 'gemini',
+          'Cohere': 'cohere', 'Mistral': 'mistral', 'Hugging Face': 'huggingface', 'LangChain': '',
+        }
+        const filtered = securityAlerts.filter(a => {
+          // OSV: match by mapped service ID (e.g., "Anthropic (Claude)" → only "claude", not "claudeai")
+          if (a.service) return OSV_SERVICE_MAP[a.service] === service.id
+          // HN: match by service name in title (exact service, not provider-wide)
+          const titleLC = a.title?.toLowerCase() ?? ''
+          return titleLC.includes(nameLC)
+        })
+        if (filtered.length === 0) return null
+        return (
+          <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+            <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+              <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+                <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--purple)' }} />
+                {t('svc.security')}
+              </div>
+            </div>
+            <div style={{ padding: '16px' }} className="flex flex-col gap-2">
+              {filtered.map((a, i) => {
+                const safeUrl = a.url?.startsWith('https://') ? a.url : '#'
+                return (
+                  <a key={i} href={safeUrl} target="_blank" rel="noopener noreferrer"
+                    className="flex items-start gap-2 text-[12px] text-[var(--text1)] hover:text-[var(--purple)]"
+                  >
+                    <span className="shrink-0">{a.severity === 'critical' ? '🔴' : a.severity === 'high' ? '🟠' : '🟡'}</span>
+                    <span className="truncate">{a.title}</span>
+                  </a>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })()}
 
       {/* ── Badge Embed ── */}
       <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">

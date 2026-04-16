@@ -8,6 +8,15 @@ const RECENT_ALERT = {
   detectedAt: new Date().toISOString(),
 }
 
+const OSV_ALERT = {
+  title: 'Command injection in anthropic SDK',
+  url: 'https://osv.dev/vulnerability/GHSA-test',
+  source: 'osv',
+  severity: 'high',
+  service: 'Anthropic (Claude)',
+  detectedAt: new Date().toISOString(),
+}
+
 const OLD_ALERT = {
   title: 'Old vulnerability from last week',
   url: 'https://osv.dev/vulnerability/OLD-001',
@@ -19,7 +28,9 @@ const OLD_ALERT = {
 const MOCK = {
   services: [
     { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, incidents: [] },
+    { id: 'claudeai', category: 'app', name: 'claude.ai', provider: 'Anthropic', status: 'operational', latency: 0, incidents: [] },
     { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'operational', latency: 200, incidents: [] },
+    { id: 'xai', category: 'api', name: 'xAI (Grok)', provider: 'xAI', status: 'operational', latency: 150, incidents: [] },
   ],
   lastUpdated: new Date().toISOString(),
 }
@@ -70,5 +81,48 @@ test.describe('Security Alerts Banner', () => {
 
     await expect(page.getByText(/security finding/i)).not.toBeVisible()
     await expect(page.getByText(/보안 알림/)).not.toBeVisible()
+  })
+
+  test('overview banner shows service tag for all alerts', async ({ page }) => {
+    const alerts = [RECENT_ALERT, OSV_ALERT]
+    await page.route('**/api/status', async (route) => {
+      await route.fulfill({ json: { ...MOCK, securityAlerts: alerts } })
+    })
+    await page.route('**/api/status/cached', async (route) => {
+      await route.fulfill({ json: { ...MOCK, securityAlerts: alerts } })
+    })
+
+    await page.goto('/')
+    await expect(page.getByText('Claude API').first()).toBeVisible({ timeout: 20000 })
+
+    // OSV alert: service tag from service field
+    await expect(page.getByText(/\[Anthropic.*Claude.*\]/).first()).toBeVisible()
+    // HN alert: service tag extracted from title
+    await expect(page.getByText(/\[xAI.*\]/).first()).toBeVisible()
+  })
+})
+
+test.describe('Security Alerts in ServiceDetails', () => {
+  const ALERTS = [OSV_ALERT, RECENT_ALERT]
+
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/status', async (route) => {
+      await route.fulfill({ json: { ...MOCK, securityAlerts: ALERTS } })
+    })
+    await page.route('**/api/status/cached', async (route) => {
+      await route.fulfill({ json: { ...MOCK, securityAlerts: ALERTS } })
+    })
+  })
+
+  test('Claude API detail shows Anthropic SDK alert', async ({ page }) => {
+    await page.goto('/#claude')
+    await expect(page.getByText('Claude API').first()).toBeVisible({ timeout: 20000 })
+    await expect(page.getByText('Command injection in anthropic SDK').first()).toBeVisible()
+  })
+
+  test('claude.ai detail does NOT show Anthropic SDK alert (API-specific)', async ({ page }) => {
+    await page.goto('/#claudeai')
+    await expect(page.getByText('claude.ai').first()).toBeVisible({ timeout: 20000 })
+    await expect(page.getByText('Command injection in anthropic SDK')).not.toBeVisible()
   })
 })

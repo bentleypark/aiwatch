@@ -540,7 +540,7 @@ export default function Overview() {
       {/* ── Security Alerts Banner (24h only) ── */}
       {(() => {
         const cutoff = Date.now() - 24 * 3600_000
-        const recent = securityAlerts.filter(a => a.detectedAt && new Date(a.detectedAt).getTime() > cutoff)
+        const recent = (securityAlerts ?? []).filter(a => a.detectedAt && new Date(a.detectedAt).getTime() > cutoff)
         if (recent.length === 0) return null
         return (
           <div className="rounded-lg border border-[var(--purple)]" style={{ background: 'color-mix(in srgb, var(--purple) 8%, transparent)', padding: '12px 16px' }}>
@@ -552,11 +552,18 @@ export default function Overview() {
                 </span>
                 {recent.slice(0, 3).map((a, i) => {
                   const safeUrl = a.url?.startsWith('https://') ? a.url : '#'
+                  // Derive service tag: use service field (OSV) or detect from title (HN)
+                  let tag = a.service || ''
+                  if (!tag) {
+                    const titleLC = a.title?.toLowerCase() ?? ''
+                    const match = services.find(s => titleLC.includes(s.name.toLowerCase()) || titleLC.includes(s.provider.toLowerCase()))
+                    if (match) tag = match.name
+                  }
                   return (
                     <a key={i} href={safeUrl} target="_blank" rel="noopener noreferrer"
                       className="text-[var(--text1)] hover:text-[var(--purple)] truncate text-[11px]"
                     >
-                      {a.severity === 'critical' ? '🔴' : a.severity === 'high' ? '🟠' : '🟡'} {a.title}
+                      {a.severity === 'critical' ? '🔴' : a.severity === 'high' ? '🟠' : '🟡'} {tag ? `[${tag}] ` : ''}{a.title}
                     </a>
                   )
                 })}

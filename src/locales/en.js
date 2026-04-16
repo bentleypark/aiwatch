@@ -159,6 +159,7 @@ const en = {
   'score.tooltip': 'Based on uptime, incident affected days, and recovery time',
   'uptime.sla.label': 'SLA threshold',
   'svc.mttr.none': 'No incidents in 7 days',
+  'svc.security': 'Security Alerts',
   'svc.badge': 'Status Badge',
   'svc.badge.copy': 'Copy',
   'svc.badge.copied': 'Copied ✓',

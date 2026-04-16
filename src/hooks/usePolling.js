@@ -657,7 +657,7 @@ function usePollingInternal() {
           probeServiceIds,
           aiAnalysis: data.aiAnalysis ?? {},
           recentlyRecovered: data.recentlyRecovered ?? {},
-          securityAlerts: data.securityAlerts ?? state.securityAlerts ?? [],
+          securityAlerts: data.securityAlerts ?? [],
         })
       }
     } catch (err) {
