@@ -4,6 +4,7 @@
 import { getFallbacks, buildFallbackText } from './fallback'
 import { sanitize, formatDuration } from './utils'
 import type { ServiceStatus } from './services'
+import type { Incident } from './types'
 
 export interface AlertCandidate {
   key: string
@@ -31,7 +32,9 @@ export function buildIncidentAlerts(
   alertedNewIds: Set<string>,
   now: number = Date.now(),
 ): AlertCandidate[] {
-  const alerts: AlertCandidate[] = []
+  // Group services by incidentId to show all affected services in one alert
+  const newIncidents = new Map<string, { names: string[]; ids: string[]; inc: Incident; category: string; firstSvc: ScoredService }>()
+  const resolvedIncidents = new Map<string, { names: string[]; ids: string[]; inc: Incident; firstSvc: ScoredService }>()
 
   for (const svc of services) {
     for (const inc of svc.incidents ?? []) {
@@ -39,29 +42,52 @@ export function buildIncidentAlerts(
       if (incAge > 86_400_000) continue
 
       if (inc.status !== 'resolved' && !alertedNewIds.has(inc.id)) {
-        // Per-incident alert: show same-category fallbacks only
-        const fallbackText = svc.status !== 'operational'
-          ? buildFallbackText(getFallbacks(svc.id, svc.category, services))
-          : ''
-        alerts.push({
-          key: `alerted:new:${inc.id}`,
-          title: `🔴 ${svc.name} — New Incident`,
-          description: sanitize(inc.title),
-          fallbackText,
-          color: 0xED4245,
-          url: `https://ai-watch.dev/#${svc.id}`,
-        })
+        const existing = newIncidents.get(inc.id)
+        if (existing) {
+          if (!existing.names.includes(svc.name)) existing.names.push(svc.name)
+          if (!existing.ids.includes(svc.id)) existing.ids.push(svc.id)
+        } else {
+          newIncidents.set(inc.id, { names: [svc.name], ids: [svc.id], inc, category: svc.category, firstSvc: svc })
+        }
       } else if (inc.status === 'resolved' && alertedNewIds.has(inc.id)) {
-        const durationText = inc.duration ? ` (${inc.duration})` : ''
-        alerts.push({
-          key: `alerted:res:${inc.id}`,
-          title: `🟢 ${svc.name} — Incident Resolved${durationText}`,
-          description: sanitize(inc.title),
-          color: 0x57F287,
-          url: `https://ai-watch.dev/#${svc.id}`,
-        })
+        const existing = resolvedIncidents.get(inc.id)
+        if (existing) {
+          if (!existing.names.includes(svc.name)) existing.names.push(svc.name)
+          if (!existing.ids.includes(svc.id)) existing.ids.push(svc.id)
+        } else {
+          resolvedIncidents.set(inc.id, { names: [svc.name], ids: [svc.id], inc, firstSvc: svc })
+        }
       }
     }
+  }
+
+  const alerts: AlertCandidate[] = []
+
+  for (const [incId, { names, ids, inc, category, firstSvc }] of newIncidents) {
+    const displayName = names.length > 1 ? `${firstSvc.provider} (${names.join(', ')})` : names[0]
+    const fallbackText = firstSvc.status !== 'operational'
+      ? buildFallbackText(getFallbacks(firstSvc.id, category, services))
+      : ''
+    alerts.push({
+      key: `alerted:new:${incId}`,
+      title: `🔴 ${displayName} — New Incident`,
+      description: sanitize(inc.title),
+      fallbackText,
+      color: 0xED4245,
+      url: `https://ai-watch.dev/#${ids[0]}`,
+    })
+  }
+
+  for (const [incId, { names, ids, inc, firstSvc }] of resolvedIncidents) {
+    const displayName = names.length > 1 ? `${firstSvc.provider} (${names.join(', ')})` : names[0]
+    const durationText = inc.duration ? ` (${inc.duration})` : ''
+    alerts.push({
+      key: `alerted:res:${incId}`,
+      title: `🟢 ${displayName} — Incident Resolved${durationText}`,
+      description: sanitize(inc.title),
+      color: 0x57F287,
+      url: `https://ai-watch.dev/#${ids[0]}`,
+    })
   }
 
   return alerts
