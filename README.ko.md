@@ -43,7 +43,7 @@
 - **Is X Down SEO 페이지** — 9개 서비스 (Claude, claude.ai, ChatGPT, Gemini, GitHub Copilot, Cursor, Claude Code, OpenAI, Windsurf), 동적 OG 이미지(PNG), 공유 버튼, AIWatch 순위, 대체 서비스 추천
 - **헬스체크 프로빙** — API 엔드포인트 직접 RTT 측정 (19개 API 서비스) + 연속 스파이크 조기 장애 감지 및 Detection Lead 추적
 - **페이지별 스켈레톤** — 각 페이지 레이아웃에 맞는 로딩 placeholder
-- **AI 분석 (Beta)** — 장애 발생 시 Claude Sonnet 자동 분석: 원인 추정, 예상 복구 시간, 영향 범위, 대체 서비스 추천. 인시던트 Discord 알림에 통합(단일 embed), Topbar Analyze 모달, Is X Down AI Insight 카드
+- **AI 분석 (Beta)** — 장애 발생 시 하이브리드 AI 자동 분석 (Gemma 4 primary + Sonnet fallback): 원인 추정, 예상 복구 시간, 영향 범위, 대체 서비스 추천. 인시던트 Discord 알림에 통합(단일 embed), Topbar Analyze 모달, Is X Down AI Insight 카드
 - **랜딩 페이지** — Product Hunt 랜딩 페이지(`/intro`), 대시보드 프리뷰 mock, KO/EN 이중 언어, Flow 애니메이션, GA4 트래킹
 - **Web Vitals 모니터링** — 실사용자 LCP, FCP, TTFB, CLS, INP 수집, p75 집계 및 Discord Daily Report 임계값 알림
 - **주간 브리핑** — 매주 일요일 Discord 다이제스트: AI 서비스 변경 감지(OpenAI, Google, Anthropic), 인시던트 요약, 안정성 트렌드
@@ -181,7 +181,7 @@ VITE_GA4_ID=                # 선택: Google Analytics 측정 ID
 ```
 ALLOWED_ORIGIN=https://your-domain.com
 DISCORD_WEBHOOK_URL=        # Worker Secret: Discord 웹훅 URL
-ANTHROPIC_API_KEY=          # Worker Secret: Claude Sonnet API 키 (AI 분석)
+ANTHROPIC_API_KEY=          # Worker Secret: Claude Sonnet API 키 (AI 분석 fallback)
 ```
 
 ## 스크립트
@@ -312,7 +312,7 @@ worker/
     og-render.ts # SVG → PNG 변환 (resvg-wasm)
     alerts.ts    # 알림 감지 로직 (인시던트 + 서비스 알림)
     fallback.ts  # 대체 서비스 추천
-    ai-analysis.ts # Claude Sonnet 장애 분석
+    ai-analysis.ts # 하이브리드 AI 장애 분석 (Gemma 4 primary + Sonnet fallback)
     changelog.ts # 변경사항/뉴스 수집 (OpenAI RSS, Google RSS, Anthropic HTML)
     weekly-briefing.ts # 주간 Discord 브리핑 (변경사항 + 인시던트 + 안정성)
     security-monitor.ts # AI 서비스 보안 모니터링 (HN Algolia, OSV.dev SDK 취약점)

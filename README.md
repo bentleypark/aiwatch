@@ -44,7 +44,7 @@ Real-time monitoring dashboard for **30 AI services** — track status, latency,
 - **Is X Down SEO pages** — 9 services (Claude, claude.ai, ChatGPT, Gemini, GitHub Copilot, Cursor, Claude Code, OpenAI, Windsurf) with dynamic OG images (PNG), share buttons, AIWatch rank, and fallback recommendations
 - **Health check probing** — Direct RTT measurement to API endpoints (19 API services) with early outage detection via consecutive spike alerts and Detection Lead tracking
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
-- **AI Analysis (Beta)** — Claude Sonnet auto-analysis on incidents: cause estimation, recovery time, affected scope, contextual fallback recommendations. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
+- **AI Analysis (Beta)** — Hybrid AI auto-analysis on incidents (Gemma 4 primary + Sonnet fallback): cause estimation, recovery time, affected scope, contextual fallback recommendations. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 - **Landing page** — Product Hunt landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, and GA4 tracking
 - **Web Vitals monitoring** — Real user LCP, FCP, TTFB, CLS, INP collection with p75 aggregation and threshold-based alerts in Discord Daily Report
 - **Weekly briefing** — Sunday Discord digest with AI service changelog detection (OpenAI, Google, Anthropic), incident summary, and stability trends
@@ -182,7 +182,7 @@ VITE_GA4_ID=                # Optional: Google Analytics measurement ID
 ```
 ALLOWED_ORIGIN=https://your-domain.com
 DISCORD_WEBHOOK_URL=        # Worker Secret: Discord webhook for alerts
-ANTHROPIC_API_KEY=          # Worker Secret: Claude Sonnet API key (AI Analysis)
+ANTHROPIC_API_KEY=          # Worker Secret: Claude Sonnet API key (AI Analysis fallback)
 ```
 
 ## Scripts
@@ -313,7 +313,7 @@ worker/
     og-render.ts # SVG → PNG conversion (resvg-wasm)
     alerts.ts    # Alert detection logic (incident + service alerts)
     fallback.ts  # Fallback recommendation
-    ai-analysis.ts # Claude Sonnet incident analysis
+    ai-analysis.ts # Hybrid AI incident analysis (Gemma 4 primary + Sonnet fallback)
     changelog.ts # Changelog/news collection (OpenAI RSS, Google RSS, Anthropic HTML)
     weekly-briefing.ts # Weekly Discord briefing (changelog + incidents + stability)
     security-monitor.ts # AI service security monitoring (HN Algolia, OSV.dev SDK vulnerabilities)

@@ -226,6 +226,7 @@ When adding a new monitored service, update ALL of the following:
 - **React 19 + Vite 6** — SPA, no router library
 - **TailwindCSS v4** — utility classes + CSS custom properties for design tokens (see below)
 - **Cloudflare Workers** — status polling proxy with KV cache
+- **Cloudflare Workers AI** — Gemma 4 26B incident analysis (primary, via `[ai]` binding)
 - **Cloudflare KV** — daily uptime counters, status cache, history archival
 
 ### KV Key Schema (STATUS_CACHE namespace)
@@ -252,9 +253,9 @@ When adding a new monitored service, update ALL of the following:
 | `security:seen:hn:{objectId}` | `SecurityAlertMeta` JSON | 7d | ~0 | HN security post dedup + dashboard display |
 | `security:seen:osv:{vulnId}` | `SecurityAlertMeta` JSON | 7d | ~0 | OSV.dev vulnerability dedup + dashboard display |
 | `security:monthly:{YYYY-MM}` | `SecurityAlertMeta[]` JSON | 60d | ~1/day | Monthly security alert accumulation for reports |
-| `ai:analysis:{svcId}:{incId}` | `AIAnalysisResult` JSON | 1h (active) / 2h (resolved) | ~5 per incident | Claude Sonnet per-incident analysis result (TTL refreshed while active; on recovery, `resolvedAt` added instead of deleting — kept 2h for "Recently Resolved" UI) |
+| `ai:analysis:{svcId}:{incId}` | `AIAnalysisResult` JSON | 1h (active) / 2h (resolved) | ~5 per incident | Hybrid AI analysis result — Gemma 4 primary + Sonnet fallback (TTL refreshed while active; on recovery, `resolvedAt` added instead of deleting — kept 2h for "Recently Resolved" UI). `model` field tracks which model produced the analysis |
 | `ai:reanalysis-skip:{svcId}:{incId}` | `"1"` | 30min | ~2 per incident | Per-incident re-analysis failure cooldown |
-| `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis) |
+| `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed, gemma?, sonnet? }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis, model breakdown) |
 | `fetch-fail:{svcId}` | counter string | 30min | ~0 (spikes on outage) | RSS fetch consecutive failure counter (3+ → degraded, capped writes) |
 | `component-missing:{svcId}` | counter string | 30min | ~0 (spikes on migration) | Component ID consecutive miss counter (3+ → Discord alert) |
 | `alerted:component-missing:{svcId}` | `"1"` | 24h | ~0 | Component ID mismatch alert dedup |
@@ -304,7 +305,7 @@ worker/
     og-render.ts # SVG → PNG conversion (resvg-wasm, Inter font from CDN)
     alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts, formatDetectionLead)
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText, buildGroupedFallbackText for multi-category incidents)
-    ai-analysis.ts # Claude Sonnet incident analysis via Cloudflare AI Gateway (system/user prompt, needsFallback assessment, TTL refresh, re-analysis, incidentId dedup, timeline context, boilerplate filtering, formatRecoveryDisplay)
+    ai-analysis.ts # Hybrid AI incident analysis — Gemma 4 26B (Workers AI) primary + Claude Sonnet (AI Gateway) fallback (system/user prompt, needsFallback assessment, TTL refresh, re-analysis, incidentId dedup, timeline context, boilerplate filtering, formatRecoveryDisplay)
     changelog.ts # Changelog/news collection (OpenAI blog RSS, Google AI blog RSS, Anthropic /news HTML parsing)
     weekly-briefing.ts # Weekly Discord briefing (changelog + incidents + stability trends)
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit, Web Vitals)
@@ -413,7 +414,7 @@ Cron Trigger (*/5 min)
   → read KV cache → detect incidents/status changes
   → record detection timestamps (detected:{serviceId}) for Detection Lead (probe spike time preferred if earlier)
   → KV ID-based dedup → Discord alerts (single embed per incident, with Detection Lead if probe detected first)
-  → incident detected → AI analysis via Cloudflare AI Gateway (8s timeout) + Detection Lead (1-60min advance detection → "⚡ Detection Lead: Xm") → merged into incident embed
+  → incident detected → AI analysis via Gemma 4 (Workers AI, primary) or Sonnet (AI Gateway, fallback) (8s timeout) + Detection Lead (1-60min advance detection → "⚡ Detection Lead: Xm") → merged into incident embed
   → recovery detected → mark ai:analysis:{svcId}:{incId} with resolvedAt (2h TTL, powers "Recently Resolved" UI)
   → active incidents: refresh analysis TTL / re-analyze if expired / dedup sibling services
   → alert count tracked in KV (alert:count:{date}) for Daily Summary
@@ -434,7 +435,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
 
 ### Key Product Constraints
 - Mobile breakpoint: 768px — sidebar hidden (overlay on hamburger), cards go 1-column
-- Phase 3 AI Analysis (Beta): Claude Sonnet auto-analysis on incidents — triggered by cron, routed through Cloudflare AI Gateway (`gateway.ai.cloudflare.com/.../aiwatch/anthropic`), stored in KV, shown in Topbar Analyze modal + Is X Down AI Insight card. Requires `ANTHROPIC_API_KEY` Worker secret. Recovery time "N/A" displayed as "Exceeded typical pattern" via `formatRecoveryDisplay()`
+- Phase 3 AI Analysis (Beta): Hybrid AI auto-analysis on incidents — Gemma 4 26B via Workers AI binding (primary, zero API key, free tier) + Claude Sonnet via Cloudflare AI Gateway (fallback). Triggered by cron, stored in KV (`model` field tracks source), shown in Topbar Analyze modal + Is X Down AI Insight card. `ANTHROPIC_API_KEY` Worker secret required for Sonnet fallback. Recovery time "N/A" displayed as "Exceeded typical pattern" via `formatRecoveryDisplay()`
   - Per-incident KV keys: `ai:analysis:{svcId}:{incId}` — each incident analyzed independently, supports multiple simultaneous incidents per service
   - TTL refresh: cron refreshes per-incident analysis keys every ~30min while incident is active
   - Re-analysis: if analysis expired/missing, re-triggers (max 2/cron, 30min cooldown on failure). Also re-analyzes after 2h for long-running active incidents (safe overwrite: keeps old analysis on failure). Includes incident timeline updates in prompt for richer context
@@ -465,7 +466,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
     ```
   - Verify the output says `Uploaded aiwatch-worker` (not `aiwatch`)
   - Endpoints: `GET /api/status`, `GET /api/status/cached` (KV-only, includes probe24h, for SSR + initial load), `GET /api/uptime?days=30`, `GET /api/probe/history?days=30` (daily probe RTT summaries, 90d max), `GET /api/report?month=YYYY-MM` (monthly archive JSON, permanent), `POST /api/alert`, `GET /badge/:serviceId`, `GET /api/og` (dynamic OG image PNG), `GET /api/v1/status`
-  - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res:` keys 7d TTL, `alerted:down/degraded/recovered:` keys 2h TTL). Fallback recommendations only included when service status is degraded/down (not operational). AI analysis runs inline with 8s timeout (merged into incident embed), results stored in `ai:analysis:{svcId}:{incId}` (1h TTL, per-incident). Daily alert counts tracked in `alert:count:{date}` for Daily Summary
+  - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res:` keys 7d TTL, `alerted:down/degraded/recovered:` keys 2h TTL). Fallback recommendations only included when service status is degraded/down (not operational). AI analysis runs inline with 8s timeout — Gemma 4 26B (Workers AI) primary, Sonnet (AI Gateway) fallback — results stored in `ai:analysis:{svcId}:{incId}` (1h TTL, per-incident). Daily alert counts tracked in `alert:count:{date}` for Daily Summary
 - **Frontend deployment**: Vercel, domain ai-watch.dev — `git push origin main` triggers auto-deploy. `npm run build` is local only; changes are not live until pushed
 - **PWA**: `public/manifest.json` + `public/sw.js` (stale-while-revalidate). CACHE_NAME in `sw.js` must be bumped manually when static assets change. SW excludes `/is-*` (Edge SSR) and `/api/*` (real-time data) from caching
 - **Edge SSR**: `api/is-down.ts` serves "Is X Down?" SEO pages (9 services: claude, chatgpt, gemini, github-copilot, cursor, claude-code, openai, windsurf, claude-ai) via Vercel Edge Functions. Uses `/api/status/cached` (KV-only) for fast SSR (~1.2s). Dynamic OG image via Worker `/api/og` (PNG, resvg-wasm). Share buttons: X, Threads, KakaoTalk (SDK async), Copy Link. `vercel.json` rewrites route `/is-{service}-down` to the handler

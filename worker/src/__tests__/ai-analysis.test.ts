@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, isGenericIncident, parseRecoveryHours, formatRecoveryDisplay, type KVLike } from '../ai-analysis'
+import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, isGenericIncident, parseRecoveryHours, formatRecoveryDisplay, parseAnalysisResponse, type KVLike } from '../ai-analysis'
 import type { Incident, ServiceStatus } from '../types'
 
 const mockIncident = (overrides: Partial<Incident> = {}): Incident => ({
@@ -1078,6 +1078,7 @@ describe('refreshOrReanalyze', () => {
     expect(analyzeFn).toHaveBeenCalledWith(
       'key', expect.any(String), expect.any(Object), expect.any(Array),
       expect.objectContaining({ estimatedRecoveryHours: 4, elapsedHours: expect.closeTo(11, 0.1) }),
+      undefined,
     )
   })
 
@@ -1160,5 +1161,133 @@ describe('formatRecoveryDisplay', () => {
   it('passes through single values', () => {
     expect(formatRecoveryDisplay('~1h')).toBe('~1h')
     expect(formatRecoveryDisplay('Resolved')).toBe('Resolved')
+  })
+})
+
+// ── New: parseAnalysisResponse + hybrid fallback tests ──
+
+describe('parseAnalysisResponse', () => {
+  const incId = 'inc-123'
+  const timelineAt = '2026-04-17T10:00:00Z'
+
+  it('parses valid JSON and sets model field', () => {
+    const text = JSON.stringify({
+      summary: 'API errors spiked.',
+      estimatedRecovery: '30m–1h',
+      affectedScope: ['Chat completions'],
+      needsFallback: true,
+    })
+    const result = parseAnalysisResponse(text, incId, 'gemma', timelineAt)
+    expect(result).not.toBeNull()
+    expect(result!.model).toBe('gemma')
+    expect(result!.summary).toBe('API errors spiked.')
+    expect(result!.incidentId).toBe(incId)
+    expect(result!.timelineHash).toBe(timelineAt)
+  })
+
+  it('parses JSON wrapped in markdown code block', () => {
+    const text = '```json\n{"summary":"Test","estimatedRecovery":"1–2h","affectedScope":[],"needsFallback":false}\n```'
+    const result = parseAnalysisResponse(text, incId, 'sonnet', timelineAt)
+    expect(result!.model).toBe('sonnet')
+  })
+
+  it('normalizes full word recovery format', () => {
+    const text = JSON.stringify({ summary: 'Degraded.', estimatedRecovery: '30 minutes to 2 hours', affectedScope: [], needsFallback: false })
+    const result = parseAnalysisResponse(text, incId, 'gemma', timelineAt)
+    expect(result!.estimatedRecovery).toBe('30m–2h')
+    expect(result!.estimatedRecoveryHours).toBe(2)
+  })
+
+  it('returns null for non-JSON text', () => {
+    expect(parseAnalysisResponse('No JSON here.', incId, 'gemma', timelineAt)).toBeNull()
+  })
+
+  it('returns null when summary is missing', () => {
+    const text = JSON.stringify({ estimatedRecovery: '1h', affectedScope: [], needsFallback: false })
+    expect(parseAnalysisResponse(text, incId, 'gemma', timelineAt)).toBeNull()
+  })
+
+  it('returns null for invalid JSON', () => {
+    expect(parseAnalysisResponse('{ summary: bad json }', incId, 'gemma', timelineAt)).toBeNull()
+  })
+
+  it('handles needsFallback as string "true"', () => {
+    const text = JSON.stringify({ summary: 'Outage.', estimatedRecovery: 'N/A', affectedScope: [], needsFallback: 'true' })
+    expect(parseAnalysisResponse(text, incId, 'gemma', timelineAt)!.needsFallback).toBe(true)
+  })
+})
+
+describe('analyzeIncident — hybrid fallback', () => {
+  const incident = {
+    id: 'inc-1',
+    title: 'Elevated error rates',
+    status: 'investigating',
+    startedAt: '2026-04-17T08:00:00Z',
+    impact: 'major' as const,
+    timeline: [],
+  }
+
+  it('uses Gemma when AI binding succeeds', async () => {
+    const mockAi = {
+      run: vi.fn().mockResolvedValue({
+        response: JSON.stringify({ summary: 'Gemma result.', estimatedRecovery: '1–2h', affectedScope: ['API'], needsFallback: true }),
+      }),
+    }
+    const result = await analyzeIncident('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
+    expect(result!.model).toBe('gemma')
+    expect(mockAi.run).toHaveBeenCalledOnce()
+  })
+
+  it('falls back to Sonnet when Gemma returns unparseable response', async () => {
+    const mockAi = { run: vi.fn().mockResolvedValue({ response: 'Cannot analyze.' }) }
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify({ summary: 'Sonnet fallback.', estimatedRecovery: '30m', affectedScope: [], needsFallback: false }) }] }),
+    }) as unknown as typeof fetch
+    try {
+      const result = await analyzeIncident('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
+      expect(result!.model).toBe('sonnet')
+    } finally { globalThis.fetch = originalFetch }
+  })
+
+  it('falls back to Sonnet when Gemma throws', async () => {
+    const mockAi = { run: vi.fn().mockRejectedValue(new Error('rate limit')) }
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify({ summary: 'Sonnet.', estimatedRecovery: '2h', affectedScope: [], needsFallback: true }) }] }),
+    }) as unknown as typeof fetch
+    try {
+      const result = await analyzeIncident('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
+      expect(result!.model).toBe('sonnet')
+    } finally { globalThis.fetch = originalFetch }
+  })
+
+  it('uses Sonnet directly when no AI binding', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify({ summary: 'Sonnet only.', estimatedRecovery: '1h', affectedScope: [], needsFallback: false }) }] }),
+    }) as unknown as typeof fetch
+    try {
+      const result = await analyzeIncident('key', 'Claude API', incident, [])
+      expect(result!.model).toBe('sonnet')
+    } finally { globalThis.fetch = originalFetch }
+  })
+
+  it('returns null when both Gemma and Sonnet fail', async () => {
+    const mockAi = { run: vi.fn().mockRejectedValue(new Error('err')) }
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500, text: () => Promise.resolve('') }) as unknown as typeof fetch
+    try {
+      expect(await analyzeIncident('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)).toBeNull()
+    } finally { globalThis.fetch = originalFetch }
+  })
+
+  it('skips Sonnet fallback when apiKey is empty', async () => {
+    const mockAi = { run: vi.fn().mockRejectedValue(new Error('err')) }
+    const result = await analyzeIncident('', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
+    expect(result).toBeNull()
   })
 })

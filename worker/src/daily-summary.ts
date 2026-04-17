@@ -8,7 +8,7 @@ import { aggregateProbeDaily } from './probe-archival'
 
 export interface DailySummaryData {
   services: ServiceStatus[]
-  aiUsage: { calls: number; success: number; failed: number } | null
+  aiUsage: { calls: number; success: number; failed: number; gemma?: number; sonnet?: number } | null
   latencySnapshots: Array<{ t: string; data: Record<string, number> }>
   incidentCountToday: { newCount: number; resolvedCount: number }
   alertCounts?: { incidents: number; resolved: number; down: number; degraded: number; recovered: number } | null
@@ -49,8 +49,11 @@ export function buildDailySummary(data: DailySummaryData): string {
 
   // Section 3: AI Analysis usage
   if (aiUsage && aiUsage.calls > 0) {
-    const cost = (aiUsage.calls * 0.006).toFixed(3)
-    lines.push(`\n🤖 **AI Analysis Usage**\n   Today: ${aiUsage.calls} calls (${aiUsage.success} success, ${aiUsage.failed} failed)\n   Est. cost: $${cost}`)
+    const gemma = aiUsage.gemma ?? 0
+    const sonnet = aiUsage.sonnet ?? 0
+    const sonnetCost = (sonnet * 0.006).toFixed(3)
+    const modelBreakdown = gemma || sonnet ? ` (Gemma: ${gemma}, Sonnet: ${sonnet})` : ''
+    lines.push(`\n🤖 **AI Analysis Usage**\n   Today: ${aiUsage.calls} calls (${aiUsage.success} success, ${aiUsage.failed} failed)${modelBreakdown}\n   Est. cost: $${sonnetCost} (Sonnet only)`)
   }
 
   // Section 4: Uptime Best/Worst (exclude estimate-only services — misleading 100%)

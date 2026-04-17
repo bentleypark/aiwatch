@@ -13,6 +13,7 @@ interface Env {
   ALLOWED_ORIGIN: string
   DISCORD_WEBHOOK_URL?: string
   ANTHROPIC_API_KEY?: string
+  AI?: Ai
   STATUS_CACHE: KVNamespace
 }
 
@@ -503,21 +504,23 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       const svc = scored.find(s => (s.incidents ?? []).some(i => i.id === incId))
       const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : null
       if (svc && inc) {
-        // AI analysis (8s timeout)
-        if (!alert._mergedKeys && env.ANTHROPIC_API_KEY) {
+        // AI analysis (8s timeout) — Gemma primary + Sonnet fallback
+        if (!alert._mergedKeys && (env.AI || env.ANTHROPIC_API_KEY)) {
           try {
             const today = new Date().toISOString().split('T')[0]
             const usageKey = `ai:usage:${today}`
             const usageRaw = await env.STATUS_CACHE.get(usageKey).catch(() => null)
-            const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0 }
+            const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0, gemma: 0, sonnet: 0 }
             usage.calls++
             const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))
             const analysis = await Promise.race([
-              analyzeIncident(env.ANTHROPIC_API_KEY!, svc.name, { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline }, svc.incidents ?? []),
+              analyzeIncident(env.ANTHROPIC_API_KEY ?? '', svc.name, { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline }, svc.incidents ?? [], undefined, env.AI),
               timeout,
             ])
             if (analysis) {
               usage.success++
+              if (analysis.model === 'gemma') usage.gemma = (usage.gemma ?? 0) + 1
+              else if (analysis.model === 'sonnet') usage.sonnet = (usage.sonnet ?? 0) + 1
               const kvOk = await kvPut(env.STATUS_CACHE, analysisKey(svc.id, inc.id), JSON.stringify(analysis), { expirationTtl: 3600 })
               if (kvOk) {
                 analysisSection = `\n${DIV}\n🤖 **AI ANALYSIS** [Beta]\n${analysis.summary}\n⏱ Est. recovery: ${formatRecoveryDisplay(analysis.estimatedRecovery)}${analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''}`
@@ -585,7 +588,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   const activeServices = scored.filter(s =>
     (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring')
   )
-  await refreshOrReanalyze(activeServices, env.STATUS_CACHE, env.ANTHROPIC_API_KEY, analyzeIncident)
+  await refreshOrReanalyze(activeServices, env.STATUS_CACHE, env.ANTHROPIC_API_KEY, analyzeIncident, 2, Date.now(), env.AI)
 
   // Component ID mismatch detection (#135) — alert when statusComponentId is not found
   const mismatches = await detectComponentMismatches(COMPONENT_ID_SERVICES, env.STATUS_CACHE)
