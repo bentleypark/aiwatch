@@ -7,23 +7,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This project uses MemPalace MCP server for persistent memory that survives context compaction and session boundaries.
 
 ### Session Start
-- Call `mempalace_status` on session start to load palace state
+- `SessionStart` hook auto-injects a reminder to call `mempalace_status` — call it on first turn
 - Call `mempalace_search` before answering questions about past decisions, architecture history, or debugging context
 
 ### When to Store
-- **Decisions**: architecture choices, trade-off reasoning → `mempalace_add_drawer`
-- **Debugging**: root cause findings, non-obvious fixes → `mempalace_add_drawer`
-- **Feedback**: user corrections and confirmed approaches → `mempalace_add_drawer`
-- **Milestones**: PR merges, deploys, major feature completions → `mempalace_diary_write`
+Each drawer save specifies **wing + room + hall**. Hall is the memory type (fixed 5). Room is the topic (project-defined).
+
+| Store Type | Room | Hall | Tool |
+|---|---|---|---|
+| Architecture choice, trade-off reasoning | `decisions` | `events` | `mempalace_add_drawer` |
+| Root cause findings, non-obvious fixes | `debugging` | `discoveries` | `mempalace_add_drawer` |
+| User corrections, confirmed approaches | `feedback` | `preferences` or `advice` | `mempalace_add_drawer` |
+| Stable facts (API schema, service count) | `architecture` | `facts` | `mempalace_add_drawer` |
+| PR merges, deploys, major completions | `deployments` | `events` | `mempalace_diary_write` |
 
 ### When to Search
 - Before proposing changes to areas with prior decisions
 - When user references past work ("지난번에", "이전에", "아까")
 - When context was compacted and details were lost
 
+### PreCompact Hook
+`PreCompact` hook auto-injects a reminder to save important decisions/debugging/feedback to MemPalace before context is lost. Scan the conversation and save what matches the table above — skip ephemeral task state.
+
 ### Palace Structure
 - **Wing**: `aiwatch` (this project)
-- **Rooms**: `architecture`, `debugging`, `feedback`, `decisions`, `deployments`
+- **Rooms** (topics): `architecture`, `debugging`, `feedback`, `decisions`, `deployments`
+- **Halls** (memory types, fixed): `facts`, `events`, `discoveries`, `preferences`, `advice`
 
 ## Commands
 
