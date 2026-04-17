@@ -239,7 +239,7 @@ When adding a new monitored service, update ALL of the following:
 | `latency:24h` | `{ snapshots: [{ t, data }] }` JSON | 25h | ~48 | 30-min latency snapshots (max 48) |
 | `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 7d | ~288 | 5-min health check probe results (max 2016, 19 API services) |
 | `probe:daily:{YYYY-MM-DD}` | `{ [svcId]: { p50, p75, p95, min, max, count, spikes } }` JSON | 90d | 1 | Daily probe RTT summary for monthly reports |
-| `probe:summaries` | `[svcId, ProbeSummary][]` JSON | 80min | ~48 | Cron-cached 7-day probe summaries (p50, p95, cvCombined, validDays); refreshed every 30min via in-memory slot guard, TTL covers up to 2 missed cron ticks |
+| `probe:summaries` | `[svcId, ProbeSummary][]` JSON | 80min | ~48 | Cron-cached 7-day probe summaries (p50, p95, cvCombined, validDays); refreshed every 30min via in-memory slot guard, TTL covers up to 2 missed 30-min refresh cycles |
 | `alerted:new:{incId}` | `"1"` | 7d | ~5 | Incident alert dedup |
 | `alerted:res:{incId}` | `"1"` | 7d | ~2 | Resolved incident alert dedup |
 | `alerted:down:{svcId}` | ISO timestamp | 2h | ~2 | Service down alert dedup + recovery duration |
