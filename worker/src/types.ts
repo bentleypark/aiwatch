@@ -60,3 +60,10 @@ export interface ServiceConfig {
   awsRssUrls?: string[]
   azureRssUrl?: string
 }
+
+export interface ProbeSummary {
+  p50: number
+  p95: number
+  cvCombined: number
+  validDays: number // how many days contributed to this summary
+}

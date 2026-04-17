@@ -25,12 +25,23 @@ function percentile(sorted: number[], p: number): number {
 /** Aggregate probe snapshots into per-service daily stats.
  *  Applies warm-up filtering: removes top 1% extreme RTTs (cold-start spikes)
  *  and spike RTTs (>3×median) before computing p50/p75/p95.
- *  Raw spike count is preserved for downstream filtering. */
-export function aggregateProbeDaily(snapshots: ProbeSnapshot[]): ProbeDailyData {
-  // Collect RTT values per service
+ *  Raw spike count is preserved for downstream filtering.
+ *  Optional incidentWindows: skip RTT measurements during active incidents per service. */
+export function aggregateProbeDaily(
+  snapshots: ProbeSnapshot[],
+  incidentWindows?: Record<string, { startedAt: string; resolvedAt?: string }[]>,
+): ProbeDailyData {
+  // Collect RTT values per service, excluding incident time windows
   const rttMap: Record<string, number[]> = {}
   for (const snap of snapshots) {
+    const snapTime = new Date(snap.t).getTime()
     for (const [svcId, result] of Object.entries(snap.data)) {
+      // Skip if snapshot falls within an active incident window for this service
+      if (incidentWindows?.[svcId]?.some(w => {
+        const start = new Date(w.startedAt).getTime()
+        const end = w.resolvedAt ? new Date(w.resolvedAt).getTime() : Date.now()
+        return snapTime >= start && snapTime <= end
+      })) continue
       if (!rttMap[svcId]) rttMap[svcId] = []
       rttMap[svcId].push(result.rtt)
     }
@@ -93,7 +104,6 @@ export async function computeProbeSummaries(kv: KVNamespace, days = 7): Promise<
   }
 
   if (dailyData.length < 2) return result // need at least 2 days for CV
-  const MIN_DAYS = Math.min(days, 7) // require 7 days for reliable CV (or less if requested)
 
   // Collect per-service daily p50 and p95 values
   // Skip unreliable days: spike ratio >= 50% OR p95/p50 spread > 10× (extreme outlier day)
@@ -110,7 +120,7 @@ export async function computeProbeSummaries(kv: KVNamespace, days = 7): Promise<
   }
 
   for (const [svcId, stats] of Object.entries(svcStats)) {
-    if (stats.p50s.length < MIN_DAYS) continue // require MIN_DAYS valid days for reliable Responsiveness
+    if (stats.p50s.length < 2) continue // need at least 2 valid days
 
     const p50Avg = stats.p50s.reduce((a, b) => a + b, 0) / stats.p50s.length
     const p95Avg = stats.p95s.reduce((a, b) => a + b, 0) / stats.p95s.length
@@ -130,10 +140,32 @@ export async function computeProbeSummaries(kv: KVNamespace, days = 7): Promise<
       p50: Math.round(p50Avg),
       p95: Math.round(p95Avg),
       cvCombined: Math.round(cvCombined * 1000) / 1000, // 3 decimal places
+      validDays: stats.p50s.length,
     })
   }
 
   return result
+}
+
+/** Get probe summaries from KV cache, or compute and cache if missing.
+ *  Cron stores summaries once daily; API handlers read from cache (1 KV read vs 7). */
+export async function getCachedProbeSummaries(kv: KVNamespace, days = 7): Promise<Map<string, ProbeSummary>> {
+  const cached = await kv.get('probe:summaries')
+  if (cached) {
+    try {
+      const entries: [string, ProbeSummary][] = JSON.parse(cached)
+      return new Map(entries)
+    } catch { /* fall through to recompute */ }
+  }
+  return computeProbeSummaries(kv, days)
+}
+
+/** Compute and store probe summaries in KV (called by cron). */
+export async function cacheProbeSummaries(kv: KVNamespace, days = 7): Promise<void> {
+  const summaries = await computeProbeSummaries(kv, days)
+  if (summaries.size > 0) {
+    await kv.put('probe:summaries', JSON.stringify([...summaries]), { expirationTtl: 600 }) // 10min TTL
+  }
 }
 
 /** Archive yesterday's probe data to KV (called by daily summary cron)
