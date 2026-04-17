@@ -18,12 +18,19 @@ export interface WeeklyStabilityChange {
   currUptime: number
 }
 
+export interface WeeklySecuritySummary {
+  hnCount: number
+  osvCount: number
+  highlights: string[] // top security alert titles (max 5)
+}
+
 export interface WeeklyBriefingData {
   weekStart: string // ISO date (Mon)
   weekEnd: string   // ISO date (Sun)
   changelog: ChangelogEntry[]
   incidents: WeeklyIncidentSummary[]
   stabilityChanges: WeeklyStabilityChange[]
+  security?: WeeklySecuritySummary
 }
 
 /**
@@ -157,5 +164,36 @@ export function buildWeeklyBriefing(data: WeeklyBriefingData): string {
     }
   }
 
+  // Section 4: Security
+  if (data.security && (data.security.hnCount > 0 || data.security.osvCount > 0)) {
+    lines.push(`\n🔒 **Security**`)
+    const parts: string[] = []
+    if (data.security.osvCount > 0) parts.push(`${data.security.osvCount} SDK vulnerabilities`)
+    if (data.security.hnCount > 0) parts.push(`${data.security.hnCount} security news`)
+    lines.push(parts.join(', '))
+    if (data.security.highlights.length > 0) {
+      for (const h of data.security.highlights.slice(0, 5)) {
+        lines.push(`• ${h}`)
+      }
+    }
+  }
+
   return lines.join('\n')
+}
+
+/**
+ * Build security summary from KV keys list (security:seen:hn:*, security:seen:osv:*).
+ * Called by cron with the list of security KV keys created this week.
+ */
+export function buildSecuritySummary(
+  keys: Array<{ name: string; metadata?: unknown }>,
+  highlights: string[],
+): WeeklySecuritySummary {
+  let hnCount = 0
+  let osvCount = 0
+  for (const k of keys) {
+    if (k.name.startsWith('security:seen:hn:')) hnCount++
+    else if (k.name.startsWith('security:seen:osv:')) osvCount++
+  }
+  return { hnCount, osvCount, highlights: highlights.slice(0, 5) }
 }

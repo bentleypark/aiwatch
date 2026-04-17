@@ -173,7 +173,9 @@ function IncidentRow({ incident, isSelected, onClick, onClose, t, lang }) {
             {t(`incidents.status.${incident.status}`)}
           </span>
         </div>
-        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text1)' }}>{incident.serviceName}</span>
+        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text1)' }}>
+          {incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName}
+        </span>
         <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{incident.duration ?? t('incidents.duration.ongoing')}</span>
         <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{t(`incidents.status.${incident.status}`)}</span>
       </div>
@@ -204,7 +206,7 @@ function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }) {
         <div className="flex items-center flex-wrap mono text-[var(--text2)]" style={{ fontSize: '10px', gap: '6px' }}>
           <span>{ctx.label} {formatDate(ctx.date, lang)}</span>
           <span>·</span>
-          <span>{incident.serviceName}</span>
+          <span>{incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName}</span>
           <span>·</span>
           <span>{incident.duration ?? t('incidents.duration.ongoing')}</span>
         </div>
@@ -233,14 +235,10 @@ export default function Incidents() {
   // incidents belonging to that service so none get hidden by earlier-processed services.
   const allIncidents = useMemo(
     () => {
-      const seenOriginalIds = serviceFilter === 'all' ? new Set() : null
-      return services.flatMap((svc) =>
-        (svc.incidents ?? []).flatMap((inc) => {
-          if (seenOriginalIds) {
-            if (seenOriginalIds.has(inc.id)) return []
-            seenOriginalIds.add(inc.id)
-          }
-          return [{
+      if (serviceFilter !== 'all') {
+        // With service filter: show all incidents for that service
+        return services.flatMap((svc) =>
+          (svc.incidents ?? []).flatMap((inc) => [{
             ...inc,
             id: `${svc.id}:${inc.id}`,
             status: inc.status === 'resolved' ? 'resolved'
@@ -248,9 +246,31 @@ export default function Incidents() {
               : 'ongoing',
             serviceName: svc.name,
             serviceId: svc.id,
-          }]
-        })
-      )
+          }])
+        )
+      }
+      // Without filter: dedup by incidentId, collect all affected service names
+      const incMap = new Map() // incidentId → merged incident
+      for (const svc of services) {
+        for (const inc of svc.incidents ?? []) {
+          const existing = incMap.get(inc.id)
+          if (existing) {
+            if (!existing.affectedNames.includes(svc.name)) existing.affectedNames.push(svc.name)
+          } else {
+            incMap.set(inc.id, {
+              ...inc,
+              id: `${svc.id}:${inc.id}`,
+              status: inc.status === 'resolved' ? 'resolved'
+                : inc.status === 'monitoring' ? 'monitoring'
+                : 'ongoing',
+              serviceName: svc.name,
+              serviceId: svc.id,
+              affectedNames: [svc.name],
+            })
+          }
+        }
+      }
+      return [...incMap.values()]
     },
     [services, serviceFilter]
   )

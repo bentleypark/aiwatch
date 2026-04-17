@@ -48,7 +48,7 @@ Real-time monitoring dashboard for **30 AI services** — track status, latency,
 - **Landing page** — Product Hunt landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, and GA4 tracking
 - **Web Vitals monitoring** — Real user LCP, FCP, TTFB, CLS, INP collection with p75 aggregation and threshold-based alerts in Discord Daily Report
 - **Weekly briefing** — Sunday Discord digest with AI service changelog detection (OpenAI, Google, Anthropic), incident summary, and stability trends
-- **Security monitoring** — AI service security incident detection via Hacker News, Reddit (r/netsec, r/cybersecurity), and OSV.dev SDK vulnerability scanning with Discord digest alerts
+- **Security monitoring** — AI service security incident detection via Hacker News, Reddit (r/netsec, r/cybersecurity), and OSV.dev SDK vulnerability scanning with dashboard alerts + Discord digest
 - **Status page cross-validation** — Probe RTT + platform quorum + metastatuspage monitoring to prevent false positives during status page infrastructure outages
 
 ## Monitored Services

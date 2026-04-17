@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, type WeeklyBriefingData } from '../weekly-briefing'
+import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, type WeeklyBriefingData } from '../weekly-briefing'
 
 describe('getWeekRange', () => {
   it('returns Mon–Sun for a Wednesday', () => {
@@ -115,5 +115,61 @@ describe('buildWeeklyBriefing', () => {
     expect(result).toContain('No service changes detected')
     expect(result).toContain('No incidents this week')
     expect(result).toContain('No significant changes')
+  })
+
+  it('includes security section when security data is present', () => {
+    const data: WeeklyBriefingData = {
+      weekStart: '2026-04-06',
+      weekEnd: '2026-04-12',
+      changelog: [],
+      incidents: [],
+      stabilityChanges: [],
+      security: { hnCount: 3, osvCount: 2, highlights: ['xAI API key leaked on GitHub', 'CVE-2026-1234 in anthropic SDK'] },
+    }
+    const result = buildWeeklyBriefing(data)
+    expect(result).toContain('🔒 **Security**')
+    expect(result).toContain('2 SDK vulnerabilities')
+    expect(result).toContain('3 security news')
+    expect(result).toContain('xAI API key leaked')
+    expect(result).toContain('CVE-2026-1234')
+  })
+
+  it('omits security section when no security data', () => {
+    const data: WeeklyBriefingData = {
+      weekStart: '2026-04-06',
+      weekEnd: '2026-04-12',
+      changelog: [],
+      incidents: [],
+      stabilityChanges: [],
+    }
+    const result = buildWeeklyBriefing(data)
+    expect(result).not.toContain('Security')
+  })
+})
+
+describe('buildSecuritySummary', () => {
+  it('counts HN and OSV keys separately', () => {
+    const keys = [
+      { name: 'security:seen:hn:12345' },
+      { name: 'security:seen:hn:67890' },
+      { name: 'security:seen:osv:GHSA-abc' },
+    ]
+    const result = buildSecuritySummary(keys, ['Some highlight'])
+    expect(result.hnCount).toBe(2)
+    expect(result.osvCount).toBe(1)
+    expect(result.highlights).toEqual(['Some highlight'])
+  })
+
+  it('returns zero counts for empty keys', () => {
+    const result = buildSecuritySummary([], [])
+    expect(result.hnCount).toBe(0)
+    expect(result.osvCount).toBe(0)
+    expect(result.highlights).toEqual([])
+  })
+
+  it('limits highlights to 5', () => {
+    const highlights = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+    const result = buildSecuritySummary([], highlights)
+    expect(result.highlights).toHaveLength(5)
   })
 })

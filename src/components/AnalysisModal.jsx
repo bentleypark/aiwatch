@@ -1,6 +1,6 @@
 // AI Analysis Modal — shows incident analysis results from Claude
 import { useLang } from '../hooks/useLang'
-import { getFallbacks } from '../utils/constants'
+import { getFallbacks, EXCLUDE_FALLBACK } from '../utils/constants'
 
 function timeAgo(date, lang) {
   const diff = Date.now() - new Date(date).getTime()
@@ -16,31 +16,21 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
   // Group by service, then dedup shared incidentIds across sibling services
   // aiAnalysis: Record<svcId, AIAnalysisResult[]>
   // Result: array of { svcIds, analyses[] } — one entry per service group
-  const seenIncidents = new Set() // dedup shared incidentIds across services
-  const groups = [] // { svcIds: string[], analyses: analysis[], startedAt }
+  const groups = [] // { svcIds: string[], incIds: Set<string>, analyses: analysis[], startedAt }
   for (const [svcId, rawAnalyses] of Object.entries(aiAnalysis)) {
     const arr = Array.isArray(rawAnalyses) ? rawAnalyses : [rawAnalyses]
-    const validAnalyses = arr.filter(a => {
+    for (const a of arr) {
       const incId = a.incidentId ?? svcId
-      if (seenIncidents.has(incId)) return false
-      seenIncidents.add(incId)
-      return true
-    })
-    if (validAnalyses.length === 0) continue
-    // Check if another group already covers this service (shared incidentId → merge svcIds)
-    const existingGroup = groups.find(g =>
-      g.analyses.some(a => validAnalyses.some(v => v.incidentId === a.incidentId))
-    )
-    if (existingGroup) {
-      if (!existingGroup.svcIds.includes(svcId)) existingGroup.svcIds.push(svcId)
-    } else {
-      const svc = services.find(s => s.id === svcId)
-      const earliestInc = validAnalyses.reduce((earliest, a) => {
-        const inc = svc?.incidents?.find(i => i.id === a.incidentId)
-        const t = inc?.startedAt ?? a.analyzedAt ?? ''
-        return t < earliest ? t : earliest
-      }, validAnalyses[0].analyzedAt ?? '')
-      groups.push({ svcIds: [svcId], analyses: validAnalyses, startedAt: earliestInc })
+      // Find existing group that already has this incidentId
+      const existingGroup = groups.find(g => g.incIds.has(incId))
+      if (existingGroup) {
+        if (!existingGroup.svcIds.includes(svcId)) existingGroup.svcIds.push(svcId)
+      } else {
+        const svc = services.find(s => s.id === svcId)
+        const inc = svc?.incidents?.find(i => i.id === incId)
+        const startedAt = inc?.startedAt ?? a.analyzedAt ?? ''
+        groups.push({ svcIds: [svcId], incIds: new Set([incId]), analyses: [a], startedAt })
+      }
     }
   }
   groups.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
@@ -127,9 +117,9 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                         {isRecovered && <span>✅ {t('analysis.recoveredAt')}: {timeAgo(analysis.resolvedAt, lang)}</span>}
                         <span>🕐 {lang === 'ko' ? '분석 업데이트' : 'Analysis updated'} {timeAgo(analysis.analyzedAt, lang)}</span>
                       </div>
-                      {/* Contextual fallback recommendation */}
-                      {analysis.needsFallback && !isRecovered && (() => {
-                        const primarySvc = svcs[0]
+                      {/* Contextual fallback recommendation — skip for EXCLUDE_FALLBACK services */}
+                      {analysis.needsFallback && !isRecovered && !svcs.every(s => EXCLUDE_FALLBACK.includes(s.id)) && (() => {
+                        const primarySvc = svcs.find(s => !EXCLUDE_FALLBACK.includes(s.id)) ?? svcs[0]
                         const fallbacks = getFallbacks(primarySvc, services)
                         return (
                           <div className="mono text-[10px]" style={{ marginTop: '8px', padding: '8px 10px', background: 'var(--bg1)', borderRadius: '6px', borderLeft: '3px solid var(--amber)' }}>

@@ -72,6 +72,7 @@ const ko = {
   'overview.recovered': '최근 복구',
   'overview.recentlyResolved': '최근 복구됨',
   'overview.seeAnalysis': '분석 상세 보기',
+  'overview.security.title': '최근 보안 알림',
   'analysis.recoveredAt': '복구 시각',
   // Empty States
   'empty.issues.title': '현재 이슈 없음',
@@ -158,6 +159,7 @@ const ko = {
   'score.tooltip': 'Uptime, 인시던트 영향 일수, 복구 시간 기반 종합 점수',
   'uptime.sla.label': 'SLA 기준',
   'svc.mttr.none': '최근 7일 인시던트 없음',
+  'svc.security': '보안 알림',
   'svc.badge': '상태 배지',
   'svc.badge.copy': '복사',
   'svc.badge.copied': '복사됨 ✓',

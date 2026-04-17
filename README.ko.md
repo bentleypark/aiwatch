@@ -47,7 +47,7 @@
 - **랜딩 페이지** — Product Hunt 랜딩 페이지(`/intro`), 대시보드 프리뷰 mock, KO/EN 이중 언어, Flow 애니메이션, GA4 트래킹
 - **Web Vitals 모니터링** — 실사용자 LCP, FCP, TTFB, CLS, INP 수집, p75 집계 및 Discord Daily Report 임계값 알림
 - **주간 브리핑** — 매주 일요일 Discord 다이제스트: AI 서비스 변경 감지(OpenAI, Google, Anthropic), 인시던트 요약, 안정성 트렌드
-- **보안 모니터링** — Hacker News, Reddit(r/netsec, r/cybersecurity), OSV.dev를 통한 AI 서비스 보안 사고 감지 및 SDK 취약점 스캔, Discord 다이제스트 알림
+- **보안 모니터링** — Hacker News, Reddit(r/netsec, r/cybersecurity), OSV.dev를 통한 AI 서비스 보안 사고 감지 및 SDK 취약점 스캔, 대시보드 알림 + Discord 다이제스트
 - **상태 페이지 교차 검증** — Probe RTT + 플랫폼 쿼럼 + metastatuspage 모니터링으로 상태 페이지 인프라 장애 시 오탐 방지
 
 ## 모니터링 서비스

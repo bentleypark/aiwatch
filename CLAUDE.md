@@ -7,23 +7,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This project uses MemPalace MCP server for persistent memory that survives context compaction and session boundaries.
 
 ### Session Start
-- Call `mempalace_status` on session start to load palace state
+- `SessionStart` hook auto-injects a reminder to call `mempalace_status` — call it on first turn
 - Call `mempalace_search` before answering questions about past decisions, architecture history, or debugging context
 
 ### When to Store
-- **Decisions**: architecture choices, trade-off reasoning → `mempalace_add_drawer`
-- **Debugging**: root cause findings, non-obvious fixes → `mempalace_add_drawer`
-- **Feedback**: user corrections and confirmed approaches → `mempalace_add_drawer`
-- **Milestones**: PR merges, deploys, major feature completions → `mempalace_diary_write`
+Each drawer save specifies **wing + room + hall**. Hall is the memory type (fixed 5). Room is the topic (project-defined).
+
+| Store Type | Room | Hall | Tool |
+|---|---|---|---|
+| Architecture choice, trade-off reasoning | `decisions` | `events` | `mempalace_add_drawer` |
+| Root cause findings, non-obvious fixes | `debugging` | `discoveries` | `mempalace_add_drawer` |
+| User corrections, confirmed approaches | `feedback` | `preferences` or `advice` | `mempalace_add_drawer` |
+| Stable facts (API schema, service count) | `architecture` | `facts` | `mempalace_add_drawer` |
+| PR merges, deploys, major completions | `deployments` | `events` | `mempalace_diary_write` |
 
 ### When to Search
 - Before proposing changes to areas with prior decisions
 - When user references past work ("지난번에", "이전에", "아까")
 - When context was compacted and details were lost
 
+### PreCompact Hook
+`PreCompact` hook auto-injects a reminder to save important decisions/debugging/feedback to MemPalace before context is lost. Scan the conversation and save what matches the table above — skip ephemeral task state.
+
 ### Palace Structure
 - **Wing**: `aiwatch` (this project)
-- **Rooms**: `architecture`, `debugging`, `feedback`, `decisions`, `deployments`
+- **Rooms** (topics): `architecture`, `debugging`, `feedback`, `decisions`, `deployments`
+- **Halls** (memory types, fixed): `facts`, `events`, `discoveries`, `preferences`, `advice`
 
 ## Commands
 
@@ -230,6 +239,7 @@ When adding a new monitored service, update ALL of the following:
 | `latency:24h` | `{ snapshots: [{ t, data }] }` JSON | 25h | ~48 | 30-min latency snapshots (max 48) |
 | `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 7d | ~288 | 5-min health check probe results (max 2016, 19 API services) |
 | `probe:daily:{YYYY-MM-DD}` | `{ [svcId]: { p50, p75, p95, min, max, count, spikes } }` JSON | 90d | 1 | Daily probe RTT summary for monthly reports |
+| `probe:summaries` | `[svcId, ProbeSummary][]` JSON | 10min | ~1 | Cron-cached 7-day probe summaries (p50, p95, cvCombined, validDays) |
 | `alerted:new:{incId}` | `"1"` | 7d | ~5 | Incident alert dedup |
 | `alerted:res:{incId}` | `"1"` | 7d | ~2 | Resolved incident alert dedup |
 | `alerted:down:{svcId}` | ISO timestamp | 2h | ~2 | Service down alert dedup + recovery duration |
@@ -240,8 +250,9 @@ When adding a new monitored service, update ALL of the following:
 | `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
 | `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time (probe spike or status page, whichever is earlier) |
 | `reddit:seen:{postId}` | `"1"` | 24h | ~120 | Reddit post dedup (hourly scan, max 5/hour) |
-| `security:seen:hn:{objectId}` | `"1"` | 7d | ~0 | HN security post dedup |
-| `security:seen:osv:{vulnId}` | `"1"` | 7d | ~0 | OSV.dev vulnerability dedup |
+| `security:seen:hn:{objectId}` | `SecurityAlertMeta` JSON | 7d | ~0 | HN security post dedup + dashboard display |
+| `security:seen:osv:{vulnId}` | `SecurityAlertMeta` JSON | 7d | ~0 | OSV.dev vulnerability dedup + dashboard display |
+| `security:monthly:{YYYY-MM}` | `SecurityAlertMeta[]` JSON | 60d | ~1/day | Monthly security alert accumulation for reports |
 | `ai:analysis:{svcId}:{incId}` | `AIAnalysisResult` JSON | 1h (active) / 2h (resolved) | ~5 per incident | Hybrid AI analysis result — Gemma 4 primary + Sonnet fallback (TTL refreshed while active; on recovery, `resolvedAt` added instead of deleting — kept 2h for "Recently Resolved" UI). `model` field tracks which model produced the analysis |
 | `ai:reanalysis-skip:{svcId}:{incId}` | `"1"` | 30min | ~2 per incident | Per-incident re-analysis failure cooldown |
 | `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed, gemma?, sonnet? }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis, model breakdown) |

@@ -648,7 +648,7 @@ import { detectSecurityAlerts, formatSecurityDigest } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { collectChangelogs } from './changelog'
-import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing } from './weekly-briefing'
+import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { archiveProbeDaily, type ProbeDailyData } from './probe-archival'
 import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateMonthlyIncidents, type MonthlyIncidents, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
@@ -806,11 +806,29 @@ export default {
             description: digest.description,
             color: digest.color,
           })
-          // Then mark as seen
+          // Then mark as seen — store alert metadata for dashboard display
+          const nowISO = new Date().toISOString()
           for (const alert of securityAlerts) {
-            await kvPut(env.STATUS_CACHE, alert.kvKey, '1', { expirationTtl: 604800 }).catch(err => { // 7d dedup
+            const meta = JSON.stringify({ title: alert.title, url: alert.url, source: alert.source, severity: alert.severity, service: alert.service, detectedAt: nowISO })
+            await kvPut(env.STATUS_CACHE, alert.kvKey, meta, { expirationTtl: 604800 }).catch(err => { // 7d dedup
               console.error('[cron] Failed to mark security alert as seen:', alert.kvKey, err instanceof Error ? err.message : err)
             })
+          }
+
+          // Accumulate for monthly reports (security:monthly:{YYYY-MM}, 60d TTL)
+          const monthKey = `security:monthly:${nowISO.slice(0, 7)}`
+          try {
+            const monthRaw = await env.STATUS_CACHE.get(monthKey).catch(() => null)
+            const monthly: Array<{ title: string; url: string; source: string; severity?: string; service?: string; detectedAt: string }> = monthRaw ? JSON.parse(monthRaw) : []
+            const existingIds = new Set(monthly.map(m => m.url))
+            for (const alert of securityAlerts) {
+              if (!existingIds.has(alert.url)) {
+                monthly.push({ title: alert.title, url: alert.url, source: alert.source, severity: alert.severity, service: alert.service, detectedAt: nowISO })
+              }
+            }
+            await kvPut(env.STATUS_CACHE, monthKey, JSON.stringify(monthly.slice(-100)), { expirationTtl: 5_184_000 }) // 60d
+          } catch (err) {
+            console.warn('[cron] security monthly accumulation failed:', err instanceof Error ? err.message : err)
           }
         }
       } catch (err) {
@@ -910,7 +928,19 @@ export default {
           for (const svc of SERVICES) serviceNames[svc.id] = svc.name
           const stabilityChanges = buildStabilityChanges(thisWeekCounters, prevWeekCounters, serviceNames)
 
-          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges })
+          // Security summary: count security:seen:* keys (7d TTL — approximate week coverage, ±1d)
+          // KV list returns max 1000 keys — sufficient for weekly security alerts (~50-100 typical)
+          let security
+          try {
+            const secKeys = await env.STATUS_CACHE.list({ prefix: 'security:seen:' })
+            if (secKeys.keys.length > 0) {
+              // TODO: highlights require storing alert titles in KV values or a dedicated accumulation key
+              // KV list() only returns key names — pass empty for now
+              security = buildSecuritySummary(secKeys.keys, [])
+            }
+          } catch { console.warn('[cron] security summary list failed') }
+
+          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, security })
           await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
             title: `📋 Weekly Briefing (${weekStart} ~ ${weekEnd})`,
             description: briefing,
@@ -1560,6 +1590,22 @@ export default {
           })
         ))
 
+        // Read recent security alerts from KV (7d TTL, stores metadata JSON)
+        interface SecurityAlertMeta { title: string; url: string; source: string; severity?: string; service?: string; detectedAt?: string }
+        let securityAlerts: SecurityAlertMeta[] = []
+        try {
+          const secKeys = await env.STATUS_CACHE!.list({ prefix: 'security:seen:', limit: 20 })
+          if (secKeys.keys.length > 0) {
+            const secResults = await Promise.allSettled(
+              secKeys.keys.map(k => env.STATUS_CACHE!.get(k.name)),
+            )
+            for (const r of secResults) {
+              if (r.status !== 'fulfilled' || !r.value || r.value === '1') continue
+              try { securityAlerts.push(JSON.parse(r.value)) } catch { /* skip malformed */ }
+            }
+          }
+        } catch { /* security data is optional — don't fail the response */ }
+
         // Calculate scores for cached services (same as /api/status)
         const scoredCached = cached.services.map((svc) => {
           const s = calculateAIWatchScore(svc)
@@ -1574,6 +1620,7 @@ export default {
           ...(probe24h.length > 0 ? { probe24h } : {}),
           ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
           ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),
+          ...(securityAlerts.length > 0 ? { securityAlerts } : {}),
         }), {
           status: 200,
           headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },

@@ -21,6 +21,29 @@ const BOILERPLATE_PATTERNS = [
   /^(this|the) (incident|issue) is (being )?(monitored|investigated)/i,
 ]
 
+/** Generic incident title patterns — no actionable detail to analyze */
+const GENERIC_TITLE_PATTERNS = [
+  /^investigating (an |the |this )?issue$/i,
+  /^(service |system )?(disruption|outage|issue|incident)$/i,
+  /^we are (currently )?(investigating|aware)/i,
+  /^(scheduled |planned )?maintenance$/i,
+  /^(partial |minor |major )?(service )?(degradation|interruption)$/i,
+]
+
+/**
+ * Check if an incident has no actionable detail — generic title + all boilerplate timeline.
+ * AI analysis would produce unhelpful output for such incidents.
+ */
+export function isGenericIncident(
+  title: string,
+  timeline?: Array<{ text: string | null }>,
+): boolean {
+  const genericTitle = GENERIC_TITLE_PATTERNS.some(p => p.test(title.trim()))
+  if (!genericTitle) return false
+  if (!timeline || timeline.length === 0) return true
+  return timeline.every(t => isBoilerplate(t.text))
+}
+
 export function isBoilerplate(text: string | null | undefined): boolean {
   if (!text) return true
   const trimmed = text.trim()
@@ -485,6 +508,12 @@ export async function refreshOrReanalyze(
       }
 
       if (!(apiKey || ai) || reAnalysisCount >= cap) {
+        result.skipped.push(svc.id)
+        continue
+      }
+
+      // Skip generic incidents with no actionable detail (e.g., "Investigating an issue")
+      if (isGenericIncident(inc.title, inc.timeline)) {
         result.skipped.push(svc.id)
         continue
       }
