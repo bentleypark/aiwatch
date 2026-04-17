@@ -645,7 +645,7 @@ import { detectSecurityAlerts, formatSecurityDigest } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { collectChangelogs } from './changelog'
-import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing } from './weekly-briefing'
+import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { archiveProbeDaily, type ProbeDailyData } from './probe-archival'
 import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateMonthlyIncidents, type MonthlyIncidents, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
@@ -907,7 +907,19 @@ export default {
           for (const svc of SERVICES) serviceNames[svc.id] = svc.name
           const stabilityChanges = buildStabilityChanges(thisWeekCounters, prevWeekCounters, serviceNames)
 
-          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges })
+          // Security summary: count security:seen:* keys (7d TTL — approximate week coverage, ±1d)
+          // KV list returns max 1000 keys — sufficient for weekly security alerts (~50-100 typical)
+          let security
+          try {
+            const secKeys = await env.STATUS_CACHE.list({ prefix: 'security:seen:' })
+            if (secKeys.keys.length > 0) {
+              // TODO: highlights require storing alert titles in KV values or a dedicated accumulation key
+              // KV list() only returns key names — pass empty for now
+              security = buildSecuritySummary(secKeys.keys, [])
+            }
+          } catch { console.warn('[cron] security summary list failed') }
+
+          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, security })
           await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
             title: `📋 Weekly Briefing (${weekStart} ~ ${weekEnd})`,
             description: briefing,
