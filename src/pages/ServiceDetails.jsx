@@ -722,9 +722,9 @@ export default function ServiceDetails({ serviceId }) {
                 <div className="flex items-center gap-3">
                   <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.uptime')}</span>
                   <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
-                    <div className="bg-[var(--teal)] rounded-full" style={{ height: '6px', width: `${(service.scoreBreakdown.uptime / 50) * 100}%` }} />
+                    <div className="bg-[var(--teal)] rounded-full" style={{ height: '6px', width: `${(service.scoreBreakdown.uptime / 40) * 100}%` }} />
                   </div>
-                  <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{service.scoreBreakdown.uptime}/50</span>
+                  <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{service.scoreBreakdown.uptime}/40</span>
                 </div>
               ) : (
                 <div className="flex items-center gap-3">
@@ -733,8 +733,8 @@ export default function ServiceDetails({ serviceId }) {
                 </div>
               )}
               {[
-                { label: t('score.incidents'), value: service.scoreBreakdown?.incidents, max: 30 },
-                { label: t('score.recovery'), value: service.scoreBreakdown?.recovery, max: 20 },
+                { label: t('score.incidents'), value: service.scoreBreakdown?.incidents, max: 25 },
+                { label: t('score.recovery'), value: service.scoreBreakdown?.recovery, max: 15 },
               ].map(({ label, value, max }) => (
                 <div key={label} className="flex items-center gap-3">
                   <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{label}</span>
@@ -744,6 +744,24 @@ export default function ServiceDetails({ serviceId }) {
                   <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{value != null ? value : '—'}/{max}</span>
                 </div>
               ))}
+              {service.scoreBreakdown?.responsivenessStatus === 'available' && service.scoreBreakdown?.responsiveness != null && (
+                <div className="flex items-center gap-3">
+                  <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.responsiveness')}</span>
+                  <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '6px' }}>
+                    <div className="bg-[var(--purple)] rounded-full" style={{ height: '6px', width: `${(service.scoreBreakdown.responsiveness / 20) * 100}%` }} />
+                  </div>
+                  <span className="w-10 shrink-0 text-right mono text-[10px] text-[var(--text1)]">{service.scoreBreakdown.responsiveness}/20</span>
+                </div>
+              )}
+              {/* 'insufficient' has actionable info ("data accumulating <7d"); 'unavailable' is a transient
+                  KV race window of seconds — surfacing it as user-visible text would be alarmist with no recourse,
+                  so we collapse it to the 'unsupported' (hidden row) branch. */}
+              {service.scoreBreakdown?.responsivenessStatus === 'insufficient' && (
+                <div className="flex items-center gap-3">
+                  <span className="w-16 shrink-0 mono text-[10px] text-[var(--text2)]">{t('score.responsiveness')}</span>
+                  <span className="mono text-[10px] text-[var(--text2)]">{t('score.responsiveness.insufficient')}</span>
+                </div>
+              )}
             </div>
             {service.scoreConfidence !== 'high' && (
               <div className="mono text-[9px] text-[var(--text2)]" style={{ marginTop: '10px' }}>

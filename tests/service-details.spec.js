@@ -49,6 +49,109 @@ test.describe('ServiceDetails page', () => {
   })
 })
 
+test.describe('AIWatch Score Breakdown denominators (#132)', () => {
+  // Regression guards for the weight redistribution: 40/25/15 + 20 (Responsiveness).
+  // Routes are set up before navigation — no beforeEach interference.
+
+  test('probed service with available probe data shows /40, /25, /15, /20', async ({ page }) => {
+    const probedMock = { json: {
+      services: [
+        {
+          id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic',
+          status: 'operational', latency: 120, uptime30d: 99.95, uptimeSource: 'official',
+          calendarDays: 30, incidents: [],
+          aiwatchScore: 92, scoreGrade: 'excellent', scoreConfidence: 'high',
+          scoreBreakdown: { uptime: 39.6, incidents: 25, recovery: 15, responsiveness: 12.4, responsivenessStatus: 'available' },
+          scoreMetrics: { uptimePct: 99.95, incidents30d: 0, affectedDays30d: 0, mttrHours: null, probe: { p50: 178, p95: 311, cvCombined: 0.5, validDays: 7 } },
+        },
+      ],
+      lastUpdated: new Date().toISOString(),
+    } }
+    await page.route('**/api/status', async (route) => { await route.fulfill(probedMock) })
+    await page.route('**/api/status/cached', async (route) => { await route.fulfill(probedMock) })
+    await page.goto('/#claude')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+    // Use regex anchored on the new max values — locks the denominators against revert
+    const main = page.locator('main')
+    await expect(main.getByText(/39\.6\s*\/\s*40/)).toBeVisible()
+    await expect(main.getByText(/\b25\s*\/\s*25\b/)).toBeVisible()
+    await expect(main.getByText(/\b15\s*\/\s*15\b/)).toBeVisible()
+    await expect(main.getByText(/12\.4\s*\/\s*20/)).toBeVisible()
+    // Old denominators must not appear
+    await expect(main.getByText(/\/\s*50\b/)).not.toBeVisible()
+    await expect(main.getByText(/\/\s*30\b/)).not.toBeVisible()
+  })
+
+  test('unsupported service hides Responsiveness row entirely', async ({ page }) => {
+    const unsupportedMock = { json: {
+      services: [
+        {
+          id: 'chatgpt', category: 'app', name: 'ChatGPT', provider: 'OpenAI',
+          status: 'operational', latency: null, uptime30d: 99.99, uptimeSource: 'official',
+          calendarDays: 30, incidents: [],
+          aiwatchScore: 100, scoreGrade: 'excellent', scoreConfidence: 'high',
+          scoreBreakdown: { uptime: 40, incidents: 25, recovery: 15, responsiveness: null, responsivenessStatus: 'unsupported' },
+          scoreMetrics: { uptimePct: 99.99, incidents30d: 0, affectedDays30d: 0, mttrHours: null, probe: null },
+        },
+      ],
+      lastUpdated: new Date().toISOString(),
+    } }
+    await page.route('**/api/status', async (route) => { await route.fulfill(unsupportedMock) })
+    await page.route('**/api/status/cached', async (route) => { await route.fulfill(unsupportedMock) })
+    await page.goto('/#chatgpt')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+    // No /20 denominator should render
+    await expect(page.locator('main').getByText('/20')).not.toBeVisible()
+  })
+
+  test('unavailable status (transient KV race) hides row — locks deliberate-collapse contract', async ({ page }) => {
+    // Intentional UI behavior: 'unavailable' is a seconds-long KV race. Surfacing alarmist text would
+    // be useless to users with no recourse. This test fails if a future contributor renders text for it.
+    const unavailableMock = { json: {
+      services: [
+        {
+          id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic',
+          status: 'operational', latency: 120, uptime30d: 99.95, uptimeSource: 'official',
+          calendarDays: 30, incidents: [],
+          aiwatchScore: 92, scoreGrade: 'excellent', scoreConfidence: 'high',
+          scoreBreakdown: { uptime: 39.6, incidents: 25, recovery: 15, responsiveness: null, responsivenessStatus: 'unavailable' },
+          scoreMetrics: { uptimePct: 99.95, incidents30d: 0, affectedDays30d: 0, mttrHours: null, probe: null },
+        },
+      ],
+      lastUpdated: new Date().toISOString(),
+    } }
+    await page.route('**/api/status', async (route) => { await route.fulfill(unavailableMock) })
+    await page.route('**/api/status/cached', async (route) => { await route.fulfill(unavailableMock) })
+    await page.goto('/#claude')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+    // Responsiveness row hidden — same treatment as 'unsupported'
+    await expect(page.locator('main').getByText('/20')).not.toBeVisible()
+    await expect(page.locator('main').getByText(/unavailable|일시적 불가/i)).not.toBeVisible()
+  })
+
+  test('insufficient status renders text fallback (locks i18n key)', async ({ page }) => {
+    const insufficientMock = { json: {
+      services: [
+        {
+          id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic',
+          status: 'operational', latency: 120, uptime30d: 99.95, uptimeSource: 'official',
+          calendarDays: 30, incidents: [],
+          aiwatchScore: 95, scoreGrade: 'excellent', scoreConfidence: 'high',
+          scoreBreakdown: { uptime: 39.6, incidents: 25, recovery: 15, responsiveness: null, responsivenessStatus: 'insufficient' },
+          scoreMetrics: { uptimePct: 99.95, incidents30d: 0, affectedDays30d: 0, mttrHours: null, probe: null },
+        },
+      ],
+      lastUpdated: new Date().toISOString(),
+    } }
+    await page.route('**/api/status', async (route) => { await route.fulfill(insufficientMock) })
+    await page.route('**/api/status/cached', async (route) => { await route.fulfill(insufficientMock) })
+    await page.goto('/#claude')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+    // i18n key score.responsiveness.insufficient — KO/EN
+    await expect(page.locator('main').getByText(/Building data|데이터 누적 중/)).toBeVisible()
+  })
+})
+
 test.describe('xAI Regional Availability', () => {
   // Inject mock xAI data with EU region ongoing incident via API intercept
   const XAI_MOCK = {

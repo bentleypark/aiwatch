@@ -3,7 +3,7 @@
 // Uses KV cache to serve last-known-good data on fetch failures
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
-import { calculateAIWatchScore } from './score'
+import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop } from './alerts'
 import { analyzeIncident, refreshOrReanalyze, analysisKey, formatRecoveryDisplay, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration } from './utils'
@@ -131,7 +131,28 @@ async function writeLatencySnapshot(kv: KVNamespace, services: ServiceStatus[]):
 // ── Health Check Probing (Phase 2 PoC) ──
 import { type ProbeResult, type ProbeSnapshot, type ProbeSpike, PROBE_TARGETS, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, detectConsecutiveSpikes, computeMedianRtt, isCorroboratedByProbe, isMistralProbedEndpoint } from './probe'
 
+const PROBED_SERVICE_IDS = new Set(PROBE_TARGETS.map((t) => t.id))
+
+// summaries is required (not optional) — every caller must explicitly pass either the cached map
+// or `undefined` (signalling KV-degraded → 'unavailable'). Forgotten args would silently classify
+// every probed service as 'unavailable' (no responsiveness scoring) — same footgun the union was
+// meant to prevent. Callers: 4 fetch handlers + 1 cron, each constructs its own summaries via readProbeSummaries.
+function scoreFor(svc: ServiceStatus, summaries: Map<string, ProbeSummary> | undefined) {
+  return calculateAIWatchScore(svc, 30, classifyProbe(svc.id, PROBED_SERVICE_IDS.has(svc.id), summaries))
+}
+
+// Read probe summaries from KV with logging — distinguishes infra failure from genuine missing data.
+// Exported for direct testing of the catch behavior — the .catch is the load-bearing translation
+// from KV-degraded throws to undefined, which classifyProbe maps to 'unavailable' (no penalty).
+export async function readProbeSummaries(kv: KVNamespace, callsite: string): Promise<Map<string, ProbeSummary> | undefined> {
+  return getCachedProbeSummaries(kv).catch((err) => {
+    console.warn(`[${callsite}] probe summary read failed:`, err instanceof Error ? err.message : err)
+    return undefined
+  })
+}
+
 let lastProbeSlot = ''
+let lastProbeSummaryCacheSlot = ''
 
 async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
   const currentSlot = computeProbeSlot(new Date())
@@ -346,8 +367,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   }
 
   // Calculate scores for fallback recommendations
+  const cronProbeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'cron')
   const scored = services.map((svc) => {
-    const s = calculateAIWatchScore(svc)
+    const s = scoreFor(svc, cronProbeSummaries)
     return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
   })
 
@@ -650,7 +672,8 @@ import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { collectChangelogs } from './changelog'
 import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
-import { archiveProbeDaily, type ProbeDailyData } from './probe-archival'
+import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
+import type { ProbeSummary } from './types'
 import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateMonthlyIncidents, type MonthlyIncidents, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
@@ -967,6 +990,19 @@ export default {
       await archiveProbeDaily(env.STATUS_CACHE, now).catch((err) =>
         console.warn('[cron] probe archive failed:', err instanceof Error ? err.message : err)
       )
+      // Refresh probe summaries cache. Probe daily archives change once per day at UTC 00:00, so a
+      // 30-min refresh slot is plenty fresh and keeps writes to ~48/day (vs ~288/day every cron tick).
+      // In-memory dedup mirrors the lastKvWrite/lastProbeSlot pattern used elsewhere in this file.
+      // Only update the slot when an actual write occurred — empty no-op (transient archive miss)
+      // shouldn't block the next 30 min of recovery attempts.
+      const probeSummarySlot = `${now.toISOString().slice(0, 13)}-${Math.floor(now.getUTCMinutes() / 30)}`
+      if (probeSummarySlot !== lastProbeSummaryCacheSlot) {
+        const wrote = await cacheProbeSummaries(env.STATUS_CACHE).catch((err) => {
+          console.warn('[cron] probe summary cache failed:', err instanceof Error ? err.message : err)
+          return false
+        })
+        if (wrote) lastProbeSummaryCacheSlot = probeSummarySlot
+      }
     }
 
     // Monthly archive on 1st of each month (UTC 00:00-00:14, catch-up 01:00-01:14)
@@ -1460,6 +1496,8 @@ export default {
         'Cache-Control': 'public, max-age=30',
       }
 
+      const v1ProbeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'v1')
+
       // Individual service: /api/v1/status/:serviceId
       const segments = url.pathname.split('/')
       const serviceId = segments[4] ?? ''
@@ -1476,7 +1514,7 @@ export default {
             status: 404, headers: publicHeaders,
           })
         }
-        const scoreData = calculateAIWatchScore(svc)
+        const scoreData = scoreFor(svc, v1ProbeSummaries)
         return new Response(JSON.stringify({
           service: {
             id: svc.id, name: svc.name, provider: svc.provider, category: svc.category,
@@ -1499,7 +1537,7 @@ export default {
       // All services: /api/v1/status
       return new Response(JSON.stringify({
         services: cached.services.map((svc) => {
-          const scoreData = calculateAIWatchScore(svc)
+          const scoreData = scoreFor(svc, v1ProbeSummaries)
           return {
             id: svc.id, name: svc.name, provider: svc.provider, category: svc.category,
             status: svc.status, latency: svc.latency, uptime30d: svc.uptime30d,
@@ -1607,8 +1645,9 @@ export default {
         } catch { /* security data is optional — don't fail the response */ }
 
         // Calculate scores for cached services (same as /api/status)
+        const cachedProbeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'status-cached')
         const scoredCached = cached.services.map((svc) => {
-          const s = calculateAIWatchScore(svc)
+          const s = scoreFor(svc, cachedProbeSummaries)
           return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics }
         })
 
@@ -1748,8 +1787,9 @@ export default {
           }
         }))
       }
+      const liveProbeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'status-live')
       const servicesWithScore = enriched.map((svc) => {
-        const s = calculateAIWatchScore(svc)
+        const s = scoreFor(svc, liveProbeSummaries)
         const detectedAt = detectionMap.get(svc.id) ?? null
         return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics, ...(detectedAt ? { detectedAt } : {}) }
       })

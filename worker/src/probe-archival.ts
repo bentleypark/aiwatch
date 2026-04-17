@@ -94,6 +94,12 @@ export async function computeProbeSummaries(kv: KVNamespace, days = 7): Promise<
     return `probe:daily:${new Date(Date.now() - (i + 1) * 86_400_000).toISOString().split('T')[0]}`
   })
   const settled = await Promise.allSettled(keys.map(k => kv.get(k)))
+  // If every read rejected, KV is degraded — propagate as throw so caller maps to 'unavailable'
+  // (no penalty), not silent empty Map (which would 5%-penalize every probed service).
+  if (settled.every(r => r.status === 'rejected')) {
+    const reasons = settled.map(r => (r as PromiseRejectedResult).reason)
+    throw new Error(`all ${days} probe:daily KV reads failed: ${reasons[0] instanceof Error ? reasons[0].message : reasons[0]}`)
+  }
   const dailyData: ProbeDailyData[] = []
   for (const res of settled) {
     if (res.status === 'rejected') { console.warn('[probe-archival] KV read failed:', res.reason); continue }
@@ -106,13 +112,16 @@ export async function computeProbeSummaries(kv: KVNamespace, days = 7): Promise<
   if (dailyData.length < 2) return result // need at least 2 days for CV
 
   // Collect per-service daily p50 and p95 values
-  // Skip unreliable days: spike ratio >= 50% OR p95/p50 spread > 10× (extreme outlier day)
+  // Skip unreliable days: <200 snapshots (partial day) OR spike ratio >= 50% OR p95/p50 spread > 10×
+  // Probe runs every 5 min = 288 snapshots/day max — 200 = ~70% coverage threshold (#132 Robustness)
+  const MIN_DAILY_SNAPSHOTS = 200
   const svcStats: Record<string, { p50s: number[]; p95s: number[] }> = {}
   for (const day of dailyData) {
     for (const [svcId, stat] of Object.entries(day)) {
       if (stat.p50 <= 0) continue // skip days with no valid data
-      if (stat.count > 0 && stat.spikes / stat.count >= 0.5) continue // skip spike-dominated days
-      if (stat.p50 > 0 && stat.p95 / stat.p50 > 10) continue // skip extreme spread days (e.g., Gemini 4/4: p95/p50=13×)
+      if (stat.count < MIN_DAILY_SNAPSHOTS) continue // skip partial-day data (newly added services, deploy windows)
+      if (stat.spikes / stat.count >= 0.5) continue // skip spike-dominated days
+      if (stat.p95 / stat.p50 > 10) continue // skip extreme spread days (e.g., Gemini 4/4: p95/p50=13×)
       if (!svcStats[svcId]) svcStats[svcId] = { p50s: [], p95s: [] }
       svcStats[svcId].p50s.push(stat.p50)
       svcStats[svcId].p95s.push(stat.p95)
@@ -154,18 +163,28 @@ export async function getCachedProbeSummaries(kv: KVNamespace, days = 7): Promis
   if (cached) {
     try {
       const entries: [string, ProbeSummary][] = JSON.parse(cached)
+      if (!Array.isArray(entries)) throw new Error('cached probe:summaries is not an array')
       return new Map(entries)
-    } catch { /* fall through to recompute */ }
+    } catch (err) {
+      console.warn('[probe-archival] cache parse failed, recomputing:', err instanceof Error ? err.message : err)
+    }
   }
   return computeProbeSummaries(kv, days)
 }
 
-/** Compute and store probe summaries in KV (called by cron). */
-export async function cacheProbeSummaries(kv: KVNamespace, days = 7): Promise<void> {
+/** Compute and store probe summaries in KV (called by cron).
+ *  Returns true if a write occurred — caller uses this to gate the in-memory dedup slot,
+ *  so an empty no-op (transient archive miss) doesn't lock out recovery for 30 min. */
+export async function cacheProbeSummaries(kv: KVNamespace, days = 7): Promise<boolean> {
   const summaries = await computeProbeSummaries(kv, days)
-  if (summaries.size > 0) {
-    await kv.put('probe:summaries', JSON.stringify([...summaries]), { expirationTtl: 600 }) // 10min TTL
+  if (summaries.size === 0) {
+    console.warn('[probe-archival] computed empty probe summaries — nothing cached (daily archives may be missing)')
+    return false
   }
+  // 80min TTL — covers up to two missed 30-min refresh cycles before the cache expires.
+  // Cloudflare cron is best-effort with no SLA; tighter TTLs caused transient cache gaps.
+  await kv.put('probe:summaries', JSON.stringify([...summaries]), { expirationTtl: 4800 })
+  return true
 }
 
 /** Archive yesterday's probe data to KV (called by daily summary cron)
@@ -190,6 +209,9 @@ export async function archiveProbeDaily(kv: KVNamespace, now?: Date): Promise<bo
     const yesterdaySnapshots = snapshots.filter(s => s.t.startsWith(yesterday))
     if (yesterdaySnapshots.length === 0) return false
 
+    // TODO(#132): pass per-service incident windows to exclude RTT during outages — capability
+    // exists in aggregateProbeDaily(snapshots, incidentWindows?) but yesterday's incident data
+    // isn't yet collected at this point. Wire when monthly-archive accumulation is extended.
     const daily = aggregateProbeDaily(yesterdaySnapshots)
     await kv.put(destKey, JSON.stringify(daily), { expirationTtl: 90 * 86400 }) // 90 days
     return true

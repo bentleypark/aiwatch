@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { calculateAIWatchScore } from '../score'
-import type { ServiceStatus } from '../types'
+import { calculateAIWatchScore, classifyProbe } from '../score'
+import type { ProbeSummary, ServiceStatus } from '../types'
 
 /**
  * Validates that /api/status/cached response includes latency24h and scoreBreakdown.
@@ -19,9 +19,11 @@ function buildCachedResponse(
     try { latency24h = JSON.parse(latRaw).snapshots ?? [] } catch { /* ignore */ }
   }
 
-  // Simulate score calculation (mirrors index.ts /api/status/cached handler)
+  // Simulate score calculation. Production mirrors index.ts /api/status/cached, which calls
+  // scoreFor(svc, cachedProbeSummaries). This fixture passes 'unsupported' to keep test scope narrow
+  // — covers the probe-less projection of the response shape (latency24h + scoreBreakdown).
   const scoredCached = cachedServices.map((svc) => {
-    const s = calculateAIWatchScore(svc as ServiceStatus)
+    const s = calculateAIWatchScore(svc as ServiceStatus, 30, { kind: 'unsupported' })
     return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown }
   })
 
@@ -83,7 +85,11 @@ describe('/api/status/cached latency24h', () => {
   })
 })
 
-describe('/api/status/cached scoreBreakdown', () => {
+describe('/api/status/cached scoreBreakdown (probe-less projection)', () => {
+  // These tests use 'unsupported' probe context to lock the response shape that probe-less
+  // services (apps, agents, infra) emit. Probed-service shape with non-null responsiveness
+  // is covered by score.test.ts.
+
   it('includes scoreBreakdown for each service', () => {
     const services = [
       { id: 'claude', status: 'operational', uptime30d: 99.5, incidents: [] },
@@ -98,19 +104,24 @@ describe('/api/status/cached scoreBreakdown', () => {
     }
   })
 
-  it('scoreBreakdown matches full /api/status contract', () => {
+  it('scoreBreakdown shape matches contract for probe-less services', () => {
     const services = [
       { id: 'claude', status: 'operational', uptime30d: 100, incidents: [] },
     ]
     const response = buildCachedResponse({}, services)
     const svc = response.services[0]
 
-    // Full response includes: aiwatchScore, scoreGrade, scoreConfidence, scoreBreakdown
     expect(svc).toHaveProperty('aiwatchScore')
     expect(svc).toHaveProperty('scoreGrade')
     expect(svc).toHaveProperty('scoreConfidence')
     expect(svc).toHaveProperty('scoreBreakdown')
-    expect(svc.scoreBreakdown).toEqual({ uptime: expect.any(Number), incidents: expect.any(Number), recovery: expect.any(Number) })
+    expect(svc.scoreBreakdown).toEqual({
+      uptime: expect.any(Number),
+      incidents: expect.any(Number),
+      recovery: expect.any(Number),
+      responsiveness: null,
+      responsivenessStatus: 'unsupported',
+    })
   })
 
   it('scoreBreakdown.uptime is null when service has no uptime data', () => {
@@ -120,7 +131,41 @@ describe('/api/status/cached scoreBreakdown', () => {
     const response = buildCachedResponse({}, services)
 
     expect(response.services[0].scoreBreakdown.uptime).toBeNull()
-    expect(response.services[0].scoreBreakdown.incidents).toBe(30) // full score, 0 affected days
-    expect(response.services[0].scoreBreakdown.recovery).toBe(20) // full score, no incidents
+    expect(response.services[0].scoreBreakdown.incidents).toBe(25)
+    expect(response.services[0].scoreBreakdown.recovery).toBe(15)
+  })
+})
+
+describe('/api/status/cached scoreBreakdown (probed services)', () => {
+  // Mirrors production: handler uses scoreFor(svc, cachedProbeSummaries) — for probed services
+  // (Claude, OpenAI, etc.) the response shape includes non-null responsiveness + metrics.probe.
+
+  function buildProbedResponse(summary: ProbeSummary | null) {
+    const svc = { id: 'claude', status: 'operational', uptime30d: 100, incidents: [] }
+    const summaries = summary ? new Map([['claude', summary]]) : undefined
+    const probe = classifyProbe(svc.id, true, summaries)
+    const s = calculateAIWatchScore(svc as ServiceStatus, 30, probe)
+    return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics }
+  }
+
+  it('available probe summary → responsiveness number + metrics.probe payload', () => {
+    const result = buildProbedResponse({ p50: 178, p95: 311, cvCombined: 0.596, validDays: 7 })
+    expect(result.scoreBreakdown.responsivenessStatus).toBe('available')
+    expect(result.scoreBreakdown.responsiveness).not.toBeNull()
+    expect(result.scoreMetrics.probe).toEqual({ p50: 178, p95: 311, cvCombined: 0.596, validDays: 7 })
+  })
+
+  it('insufficient probe (validDays<7) → responsiveness null + 0.95 penalty + status flag', () => {
+    const result = buildProbedResponse({ p50: 178, p95: 311, cvCombined: 0.596, validDays: 3 })
+    expect(result.scoreBreakdown.responsivenessStatus).toBe('insufficient')
+    expect(result.scoreBreakdown.responsiveness).toBeNull()
+    expect(result.scoreMetrics.probe).toBeNull()
+  })
+
+  it('unavailable (KV failure → undefined summaries) → responsiveness null + no penalty', () => {
+    const result = buildProbedResponse(null) // null sentinel → classifyProbe receives undefined
+    expect(result.scoreBreakdown.responsivenessStatus).toBe('unavailable')
+    expect(result.scoreBreakdown.responsiveness).toBeNull()
+    expect(result.scoreMetrics.probe).toBeNull()
   })
 })

@@ -181,7 +181,8 @@ describe('computeProbeSummaries', () => {
     } as unknown as KVNamespace
   }
 
-  function makeDailyData(p50: number, p95: number, count = 50, spikes = 0) {
+  // count defaults above 200-snapshot guard threshold so existing tests aren't filtered out (#132)
+  function makeDailyData(p50: number, p95: number, count = 250, spikes = 0) {
     return { p50, p75: (p50 + p95) / 2, p95, min: p50 * 0.9, max: p95 * 1.1, count, spikes }
   }
 
@@ -217,13 +218,65 @@ describe('computeProbeSummaries', () => {
     expect(result.size).toBe(0)
   })
 
+  it('partial KV rejection: 6 of 7 reject + 1 succeeds → empty Map (insufficient days), no throw', async () => {
+    // Realistic Cloudflare KV degradation pattern. Locks the per-key continue behavior — a refactor
+    // to early-exit on first failure would silently lose surviving days.
+    const date = new Date(Date.now() - 86_400_000).toISOString().split('T')[0]
+    const surviving = JSON.stringify({
+      claude: { p50: 120, p75: 185, p95: 250, min: 108, max: 275, count: 250, spikes: 2 },
+    })
+    const kv = {
+      get: vi.fn(async (key: string) => {
+        if (key === `probe:daily:${date}`) return surviving
+        throw new Error('KV timeout')
+      }),
+    } as unknown as KVNamespace
+    const result = await computeProbeSummaries(kv, 7)
+    expect(result.size).toBe(0) // 1 valid day < required 2 → empty
+  })
+
+  it('partial KV rejection: 5 succeed + 2 reject → non-empty result with surviving days', async () => {
+    const today = Date.now()
+    const validKeys = new Set(
+      Array.from({ length: 5 }, (_, i) =>
+        `probe:daily:${new Date(today - (i + 1) * 86_400_000).toISOString().split('T')[0]}`
+      ),
+    )
+    const validValue = JSON.stringify({
+      claude: { p50: 120, p75: 185, p95: 250, min: 108, max: 275, count: 250, spikes: 2 },
+    })
+    const kv = {
+      get: vi.fn(async (key: string) => {
+        if (validKeys.has(key)) return validValue
+        throw new Error('KV timeout')
+      }),
+    } as unknown as KVNamespace
+    const result = await computeProbeSummaries(kv, 7)
+    expect(result.has('claude')).toBe(true)
+    expect(result.get('claude')!.validDays).toBe(5)
+  })
+
+  it('skips partial-day data (count < 200 snapshots)', async () => {
+    const store: Record<string, string> = {}
+    for (let i = 1; i <= 4; i++) {
+      const date = new Date(Date.now() - i * 86_400_000).toISOString().split('T')[0]
+      const count = i === 2 ? 100 : 250 // day 2 is partial (under 200 threshold)
+      store[`probe:daily:${date}`] = JSON.stringify({
+        claude: makeDailyData(120, 250, count, 2),
+      })
+    }
+    const kv = mockKV(store)
+    const result = await computeProbeSummaries(kv, 4)
+    expect(result.get('claude')!.validDays).toBe(3) // day 2 excluded by snapshot guard
+  })
+
   it('skips spike-dominated days (spikes >= 50% of count)', async () => {
     const store: Record<string, string> = {}
     for (let i = 1; i <= 4; i++) {
       const date = new Date(Date.now() - i * 86_400_000).toISOString().split('T')[0]
-      const spikes = i === 2 ? 30 : 2 // day 2 is spike-dominated
+      const spikes = i === 2 ? 150 : 5 // day 2 is spike-dominated (>50% of 250)
       store[`probe:daily:${date}`] = JSON.stringify({
-        claude: makeDailyData(120, 250, 50, spikes),
+        claude: makeDailyData(120, 250, 250, spikes),
       })
     }
 
@@ -262,6 +315,35 @@ describe('getCachedProbeSummaries', () => {
     // Should have attempted probe:summaries + 7 daily keys
     expect(kv.get).toHaveBeenCalledTimes(8) // 1 cache miss + 7 daily reads
   })
+
+  it('recomputes when cached value is a non-array (corrupted shape)', async () => {
+    // Locks the Array.isArray guard — defends against accidental Object.fromEntries serialization
+    const kv = mockKV({ 'probe:summaries': JSON.stringify({ claude: { p50: 120 } }) })
+    const result = await getCachedProbeSummaries(kv)
+    expect(result.size).toBe(0) // fell through to compute (no daily data in fixture)
+    expect(kv.get).toHaveBeenCalledTimes(8) // 1 cache attempt + 7 recompute reads
+  })
+
+  it('recomputes when cached value is unparseable JSON', async () => {
+    const kv = mockKV({ 'probe:summaries': 'not-json' })
+    const result = await getCachedProbeSummaries(kv)
+    expect(result.size).toBe(0)
+    expect(kv.get).toHaveBeenCalledTimes(8)
+  })
+
+  it('throws when ALL probe:daily KV reads fail (KV degraded → caller maps to unavailable, no penalty)', async () => {
+    // Critical regression guard: silent empty Map would 5%-penalize every probed service.
+    // Throw lets readProbeSummaries() in index.ts catch and propagate undefined → 'unavailable'.
+    const kv = {
+      get: vi.fn(async (key: string) => {
+        if (key === 'probe:summaries') return null // cache miss → fall through to compute
+        throw new Error('KV unavailable')
+      }),
+      put: vi.fn(),
+    } as unknown as KVNamespace
+
+    await expect(getCachedProbeSummaries(kv, 7)).rejects.toThrow(/all 7 probe:daily KV reads failed/)
+  })
 })
 
 describe('cacheProbeSummaries', () => {
@@ -272,22 +354,23 @@ describe('cacheProbeSummaries', () => {
     } as unknown as KVNamespace
   }
 
-  it('stores computed summaries in KV with 10min TTL', async () => {
+  it('stores computed summaries in KV with 80min TTL and returns true', async () => {
     const store: Record<string, string> = {}
     for (let i = 1; i <= 3; i++) {
       const date = new Date(Date.now() - i * 86_400_000).toISOString().split('T')[0]
       store[`probe:daily:${date}`] = JSON.stringify({
-        claude: { p50: 120, p75: 185, p95: 250, min: 108, max: 275, count: 50, spikes: 2 },
+        claude: { p50: 120, p75: 185, p95: 250, min: 108, max: 275, count: 250, spikes: 2 },
       })
     }
 
     const kv = mockKV(store)
-    await cacheProbeSummaries(kv, 3)
+    const wrote = await cacheProbeSummaries(kv, 3)
 
+    expect(wrote).toBe(true)
     expect(kv.put).toHaveBeenCalledWith(
       'probe:summaries',
       expect.any(String),
-      { expirationTtl: 600 },
+      { expirationTtl: 4800 },
     )
     const stored = JSON.parse(store['probe:summaries'])
     expect(stored).toHaveLength(1)
@@ -295,9 +378,10 @@ describe('cacheProbeSummaries', () => {
     expect(stored[0][1].validDays).toBe(3)
   })
 
-  it('does not write to KV when no summaries computed', async () => {
+  it('returns false and does not write when no summaries computed (caller skips slot dedup)', async () => {
     const kv = mockKV({})
-    await cacheProbeSummaries(kv)
+    const wrote = await cacheProbeSummaries(kv)
+    expect(wrote).toBe(false)
     expect(kv.put).not.toHaveBeenCalled()
   })
 })
