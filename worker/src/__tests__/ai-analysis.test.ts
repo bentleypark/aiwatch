@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, parseRecoveryHours, formatRecoveryDisplay, type KVLike } from '../ai-analysis'
+import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, isGenericIncident, parseRecoveryHours, formatRecoveryDisplay, type KVLike } from '../ai-analysis'
 import type { Incident, ServiceStatus } from '../types'
 
 const mockIncident = (overrides: Partial<Incident> = {}): Incident => ({
@@ -56,6 +56,40 @@ describe('isBoilerplate', () => {
     expect(isBoilerplate('The frequency of those errors has gone down. We are continuing to closely monitor')).toBe(false)
     expect(isBoilerplate('Error rates increased to 15% on us-east-1 region')).toBe(false)
     expect(isBoilerplate('Root cause identified as a database connection pool exhaustion')).toBe(false)
+  })
+})
+
+describe('isGenericIncident', () => {
+  it('detects generic title + boilerplate timeline', () => {
+    expect(isGenericIncident('Investigating an issue', [
+      { text: 'We are currently investigating this issue.' },
+    ])).toBe(true)
+  })
+
+  it('detects generic title with no timeline', () => {
+    expect(isGenericIncident('Investigating an issue', [])).toBe(true)
+    expect(isGenericIncident('Service disruption')).toBe(true)
+    expect(isGenericIncident('Scheduled maintenance', undefined)).toBe(true)
+  })
+
+  it('detects various generic title patterns', () => {
+    expect(isGenericIncident('Investigating the issue', [])).toBe(true)
+    expect(isGenericIncident('Service outage', [])).toBe(true)
+    expect(isGenericIncident('System disruption', [])).toBe(true)
+    expect(isGenericIncident('Partial degradation', [])).toBe(true)
+  })
+
+  it('returns false for specific titles', () => {
+    expect(isGenericIncident('Opus 4.6 elevated rate of errors', [])).toBe(false)
+    expect(isGenericIncident('TTS API Latency Spike', [])).toBe(false)
+    expect(isGenericIncident('Database connection pool exhaustion', [])).toBe(false)
+  })
+
+  it('returns false when generic title has technical timeline detail', () => {
+    expect(isGenericIncident('Investigating an issue', [
+      { text: 'We are currently investigating this issue.' },
+      { text: 'Error rates spiked to 40% on /v1/messages endpoint.' },
+    ])).toBe(false)
   })
 })
 
