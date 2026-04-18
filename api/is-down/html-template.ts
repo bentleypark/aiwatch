@@ -32,6 +32,7 @@ interface ServiceData {
   scoreGrade: string | null
   scoreConfidence?: string
   rank?: number
+  rankTied?: boolean
   totalRanked?: number
 }
 
@@ -307,19 +308,21 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
   }
 
   const color = statusColor(service.status)
-  const uptimeStr = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d) ? `${service.uptime30d.toFixed(2)}%` : 'N/A'
-  const scoreStr = service.aiwatchScore != null ? `${service.aiwatchScore}` : 'N/A'
+  const hasUptime = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d)
   const gradeStr = service.scoreGrade ? ` (${service.scoreGrade.charAt(0).toUpperCase() + service.scoreGrade.slice(1)})` : ''
+  const metaParts = [`Last checked: ${esc(timeAgo(service.lastChecked))}`]
+  if (hasUptime) metaParts.push(`Uptime (30d): ${service.uptime30d!.toFixed(2)}%`)
+  if (service.aiwatchScore != null) metaParts.push(`AIWatch Score: ${service.aiwatchScore}${esc(gradeStr)}`)
   const incidents = Array.isArray(service.incidents) ? service.incidents : []
   const lastIncident = incidents.length > 0 ? incidents[0] : null
 
   return `<div class="header">
 <h1>${statusEmoji(service.status)} Is ${esc(seo.displayName)} Down?</h1>
 <p style="font-size:20px;font-weight:600;color:${color};margin:12px 0">${statusLabel(service.status)}</p>
-<p class="meta mono">Last checked: ${esc(timeAgo(service.lastChecked))} &middot; Uptime (30d): ${uptimeStr} &middot; AIWatch Score: ${scoreStr}${esc(gradeStr)}</p>
+<p class="meta mono">${metaParts.join(' &middot; ')}</p>
 ${lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}</p>` : '<p class="meta">No recent incidents</p>'}
 ${/* TODO: update report URL monthly (currently hardcoded to latest report) */ ''}
-${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${service.rank}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'header'})">AIWatch reliability score</a> &middot; <a href="https://reports.ai-watch.dev/2026-03/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'header'})">March 2026 Report &rarr;</a></p>` : ''}
+${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${service.rank}${service.rankTied ? ' (tied)' : ''}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'header'})">AIWatch reliability score</a> &middot; <a href="https://reports.ai-watch.dev/2026-03/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'header'})">March 2026 Report &rarr;</a></p>` : ''}
 </div>`
 }
 

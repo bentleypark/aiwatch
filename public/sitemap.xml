@@ -66,6 +66,27 @@
     <priority>0.9</priority>
   </url>
 
+  <!-- Phase B — additional 19 services (#263) -->
+  <url><loc>https://ai-watch.dev/is-mistral-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-cohere-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-groq-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-together-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-fireworks-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-perplexity-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-xai-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-deepseek-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-openrouter-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-elevenlabs-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-assemblyai-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-deepgram-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-huggingface-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-replicate-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-pinecone-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-stability-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-voyageai-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-modal-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ai-watch.dev/is-character-ai-down</loc><lastmod>2026-04-18</lastmod><changefreq>hourly</changefreq><priority>0.8</priority></url>
+
   <!-- Landing page (Edge SSR) -->
   <url>
     <loc>https://ai-watch.dev/intro</loc>

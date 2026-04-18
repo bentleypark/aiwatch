@@ -40,7 +40,7 @@
 - **리전별 가용성** — xAI, Gemini, OpenAI의 리전별 인시던트 상태 및 전환 추천
 - **스마트 알림** — degraded/down 상태 Discord 알림 (anti-flapping + 인시던트 억제 + 복구 지속 시간)
 - **오프라인 UI** — API 연결 불가 시 안내 화면 (프로덕션 전용)
-- **Is X Down SEO 페이지** — 9개 서비스 (Claude, claude.ai, ChatGPT, Gemini, GitHub Copilot, Cursor, Claude Code, OpenAI, Windsurf), 동적 OG 이미지(PNG), 공유 버튼, AIWatch 순위, 대체 서비스 추천
+- **Is X Down SEO 페이지** — 28개 서비스 (Bedrock/Azure OpenAI 제외한 모든 모니터링 대상), 동적 OG 이미지(PNG), 공유 버튼, AIWatch 순위 (대시보드와 동일한 동률 표기), 대체 서비스 추천
 - **헬스체크 프로빙** — API 엔드포인트 직접 RTT 측정 (19개 API 서비스) + 연속 스파이크 조기 장애 감지 및 Detection Lead 추적
 - **페이지별 스켈레톤** — 각 페이지 레이아웃에 맞는 로딩 placeholder
 - **AI 분석 (Beta)** — 장애 발생 시 하이브리드 AI 자동 분석 (Gemma 4 primary + Sonnet fallback): 원인 추정, 예상 복구 시간, 영향 범위, 대체 서비스 추천. 인시던트 Discord 알림에 통합(단일 embed), Topbar Analyze 모달, Is X Down AI Insight 카드
@@ -290,7 +290,7 @@ api/
   intro.ts             # Vercel Edge Function — Product Hunt 랜딩 페이지 (/intro)
   intro/
     html-template.ts   # 랜딩 페이지 SSR 템플릿 (i18n, 대시보드 mock, GA4)
-  is-down.ts           # Vercel Edge Function — "Is X Down?" SSR 페이지 (9개 서비스)
+  is-down.ts           # Vercel Edge Function — "Is X Down?" SSR 페이지 (28개 서비스)
   is-down/
     slug-map.ts        # URL slug ↔ service ID 매핑
     seo-content.ts     # 서비스별 SEO 텍스트 + FAQ
