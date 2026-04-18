@@ -3,8 +3,10 @@
 import type { ServiceStatus } from './types'
 import type { ProbeSnapshot } from './probe'
 import type { VitalsDaily } from './vitals'
+import type { DetectionLeadEntry } from './detection-lead-log'
 import { formatVitalsSection } from './vitals'
 import { aggregateProbeDaily } from './probe-archival'
+import { formatDetectionLeadSection } from './detection-lead-log'
 
 export interface DailySummaryData {
   services: ServiceStatus[]
@@ -18,10 +20,11 @@ export interface DailySummaryData {
   securityCount?: number
   vitals?: VitalsDaily | null
   probeSnapshots?: ProbeSnapshot[]
+  detectionLeadEntries?: DetectionLeadEntry[]
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
-  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, deliveryCounts, redditCount, vitals } = data
+  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, deliveryCounts, redditCount, vitals, detectionLeadEntries } = data
   const total = services.length
   const operational = services.filter(s => s.status === 'operational').length
   const degraded = services.filter(s => s.status === 'degraded').length
@@ -138,6 +141,13 @@ export function buildDailySummary(data: DailySummaryData): string {
   // Section: Web Vitals
   if (vitals && vitals.count > 0) {
     lines.push(formatVitalsSection(vitals))
+  }
+
+  // Section: Detection Lead audit log (today's events) — verifies the feature is working day-to-day
+  if (detectionLeadEntries && detectionLeadEntries.length > 0) {
+    const nameMap = new Map(services.map(s => [s.id, s.name]))
+    const section = formatDetectionLeadSection(detectionLeadEntries, nameMap)
+    if (section) lines.push(section)
   }
 
   return lines.join('\n')

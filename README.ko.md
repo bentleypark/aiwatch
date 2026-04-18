@@ -36,7 +36,7 @@
 - **한국어/영어** — 이중 언어 지원
 - **모바일 반응형** — 사이드바 오버레이, 모바일 액션 바
 - **AIWatch Score** — uptime, 인시던트, 복구 시간, probe 기반 응답성을 결합한 종합 신뢰도 점수 ([계산 방식](https://ai-watch.dev/#about-score))
-- **Detection Lead** — 공식 발표 대비 AIWatch의 조기 감지 시간 표시 (대시보드 배지 + Discord 알림 임베드)
+- **Detection Lead** — 공식 발표 대비 AIWatch의 조기 감지 시간 표시 (대시보드 배지 + Discord 알림 임베드 + 일일 요약에 최근 24시간 감지 audit 표시)
 - **리전별 가용성** — xAI, Gemini, OpenAI의 리전별 인시던트 상태 및 전환 추천
 - **스마트 알림** — degraded/down 상태 Discord 알림 (anti-flapping + 인시던트 억제 + 복구 지속 시간)
 - **오프라인 UI** — API 연결 불가 시 안내 화면 (프로덕션 전용)
@@ -139,6 +139,7 @@ Cloudflare KV
   ├── ai:usage:{date}      (일별 AI 사용량 카운터, TTL 2일)
   ├── alerted:*            (알림 중복 방지 키, TTL 2시간-7일)
   ├── detected:{svcId}     (Detection Lead 타임스탬프, TTL 7일)
+  ├── detection:lead:{date} (Detection Lead audit 로그, UTC 일별, TTL 7일, 일일 요약에 24h 슬라이딩 윈도우)
   ├── reddit:seen:{postId} (Reddit 게시글 중복 방지, TTL 24시간)
   └── vitals:{YYYY-MM-DD}  (Web Vitals 일별 집계, TTL 2일)
 ```
@@ -324,6 +325,7 @@ worker/
     probe-archival.ts # 일별 probe RTT 아카이브 + 7일 요약
     platform-monitor.ts # 상태 페이지 플랫폼 모니터링 (metastatuspage.com)
     detection.ts # Detection Lead 파싱 + 리셋 로직
+    detection-lead-log.ts # Detection Lead audit 로그 (#256, 일일 요약)
     reddit.ts    # Reddit 장애 감지 모니터링
     parsers/     # 플랫폼별 파서
       statuspage.ts   # Atlassian Statuspage (7개 서비스)
