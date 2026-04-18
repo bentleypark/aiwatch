@@ -305,7 +305,7 @@ worker/
     services.ts # Service configs + fetch orchestrator + status determination
     types.ts    # Shared types (ServiceStatus, Incident, etc.)
     utils.ts    # Shared utilities (formatDuration, fetchWithTimeout, sanitize)
-    score.ts    # AIWatch Score calculation
+    score.ts    # AIWatch Score — composite reliability (Uptime 40 + Incidents 25 + Recovery 15 + Responsiveness 20 from probe p50/CV; 80→100 rescale + 5% penalty for probe-less services, insufficient-data penalty for <7d probe samples)
     badge.ts    # SVG badge generator
     og.ts       # OG image SVG generator (1200×630 for social share)
     og-render.ts # SVG → PNG conversion (resvg-wasm, Inter font from CDN)
