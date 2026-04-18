@@ -376,6 +376,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | `click_service_detail` | `location`, `service_id` | Is X Down (footer) | Service detail page click |
 | `click_reports` | `location`, `source` | Is X Down (alternatives/footer) | Monthly reports link click (Is X Down) |
 | `click_ph_upvote` | `location` | Landing page (PH banner) | Product Hunt upvote link click |
+| `font_load_failed` | `transport_type: 'beacon'` | index.html `<link>` onerror | Google Fonts CSS preload failed (CDN outage, ad blocker, network) — surfaces silent fallback to system fonts (refs #191) |
 
 Is X Down pages (Edge SSR) and Landing page use inline `gtag()` calls directly since they don't use React.
 

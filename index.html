@@ -45,10 +45,24 @@
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Async Google Fonts load: preload as 'style' (non-blocking), swap to stylesheet on load.
+         Combined with display=swap, text renders immediately in fallback then swaps to web font.
+         Saves ~450ms LCP per Lighthouse audit (refs #191).
+         onerror reports CDN/network failures via GA4 — without this, font load failure is silent
+         (page renders in system fallback indefinitely with no signal). -->
     <link
+      rel="preload"
+      as="style"
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap"
-      rel="stylesheet"
+      onload="this.onload=null;this.rel='stylesheet'"
+      onerror="this.onerror=null;window.gtag&&gtag('event','font_load_failed',{transport_type:'beacon'})"
     />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap"
+      />
+    </noscript>
   </head>
   <body>
     <script>
