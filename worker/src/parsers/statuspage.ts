@@ -2,6 +2,7 @@
 
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import { formatDuration } from '../utils'
+import { MAJOR_WEIGHT, MINOR_WEIGHT } from './impact-weights'
 
 export interface StatuspageResponse {
   status: { indicator: string; description: string }
@@ -130,8 +131,8 @@ export function parseUptimeData(html: string, componentId: string): UptimeDataRe
       if (!day.outages) continue
       const m = day.outages.m ?? 0
       const p = day.outages.p ?? 0
-      // Statuspage weights: major=100%, partial=30% (Atlassian default)
-      totalWeightedSec += m + 0.3 * p
+      // Atlassian weights — see ./impact-weights.ts (shared with incident-io.ts)
+      totalWeightedSec += MAJOR_WEIGHT * m + MINOR_WEIGHT * p
       if (m > 0 && m > p) result.dailyImpact[day.date] = 'critical'  // major outage dominant → red
       else if (p > 0 || m > 0) result.dailyImpact[day.date] = 'major'  // partial outage dominant → orange
     }

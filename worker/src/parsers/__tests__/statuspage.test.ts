@@ -133,6 +133,10 @@ describe('parseUptimeData', () => {
     const result = parseUptimeData(html, 'comp1')
     expect(result.dailyImpact['2026-03-01']).toBe('critical') // m > p
     expect(result.dailyImpact['2026-03-02']).toBe('major')    // p >= m
+    // Lock the combined-impact uptime% formula: MAJOR_WEIGHT(1.0) × m + MINOR_WEIGHT(0.3) × p
+    // Day 1: 1.0×200 + 0.3×100 = 230s ; Day 2: 1.0×100 + 0.3×300 = 190s ; total = 420s over 2 days
+    const expected = Math.floor((1 - 420 / (2 * 86400)) * 10000) / 100
+    expect(result.uptimePercent).toBe(expected)
   })
 
   it('returns empty when component not found', () => {
