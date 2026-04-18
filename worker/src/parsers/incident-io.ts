@@ -2,6 +2,7 @@
 
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import { fetchWithTimeout } from '../utils'
+import { INCIDENT_IO_IMPACT_WEIGHTS } from './impact-weights'
 
 export function parseIncidentIoUptime(html: string, componentId: string, groupId?: string): number | null {
   const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
@@ -102,6 +103,14 @@ export function parseIncidentIoComponentImpacts(html: string, componentId: strin
   return result
 }
 
+/** Resolve impact severity → weight. Returns null for informational/null impact;
+ *  -1 sentinel for unknown levels (caller should warn + skip). */
+function resolveImpactWeight(impact: Incident['impact']): number | null {
+  if (impact === null) return null
+  if (impact in INCIDENT_IO_IMPACT_WEIGHTS) return INCIDENT_IO_IMPACT_WEIGHTS[impact]
+  return -1
+}
+
 export function computeUptimeFromIncidents(incidents: Incident[]): number | null {
   // No incidents at all → return null (no data) rather than asserting 100%
   if (incidents.length === 0) return null
@@ -110,63 +119,129 @@ export function computeUptimeFromIncidents(incidents: Incident[]): number | null
   const windowMs = 90 * 86_400_000
   const windowStart = now - windowMs
 
-  // Collect outage intervals, then merge overlapping ones to avoid double-counting
-  const intervals: Array<{ start: number; end: number }> = []
+  // Collect weighted intervals; track skip categories so we can return null (vs. 100)
+  // when the entire impactful feed is unusable.
+  //   parseErrorSkips: structural errors (unknown impact, bad date, future date)
+  //   noEndSkips: incident.io data-quality cases (resolved status, no recoverable end)
+  // Both categories indicate "we can't measure outage" and should suppress a misleading
+  // 100% claim when no usable intervals remain.
+  const intervals: Array<{ start: number; end: number; weight: number }> = []
+  let parseErrorSkips = 0
+  let noEndSkips = 0
+  let noEndSampleId: string | null = null
+  // Dedup per-call to prevent Logpush spam when upstream emits a new impact level
+  // or many malformed entries across many incidents.
+  const unknownImpacts = new Set<string>()
   for (const inc of incidents) {
+    const weight = resolveImpactWeight(inc.impact)
+    if (weight === null) continue // informational
+    if (weight === -1) {
+      unknownImpacts.add(String(inc.impact))
+      parseErrorSkips++
+      continue
+    }
     const start = new Date(inc.startedAt).getTime()
-    if (isNaN(start)) continue
+    if (isNaN(start)) {
+      console.warn(`[computeUptimeFromIncidents] invalid startedAt "${inc.startedAt}" for ${inc.id} — skipping`)
+      parseErrorSkips++
+      continue
+    }
+    if (start >= now) {
+      console.warn(`[computeUptimeFromIncidents] future-dated startedAt for ${inc.id} (clock skew?) — skipping`)
+      parseErrorSkips++
+      continue
+    }
 
-    let endMs: number
+    // Defensive: timeline is typed as required but parser contracts vary; optional
+    // chaining prevents a single malformed incident from throwing and aborting the
+    // whole batch (which would lose the post-loop dedup warns).
+    let endMs: number | null = null
     if (inc.status === 'resolved' && inc.duration) {
       const hours = parseInt(inc.duration.match(/(\d+)h/)?.[1] ?? '0')
       const mins = parseInt(inc.duration.match(/(\d+)m/)?.[1] ?? '0')
-      endMs = start + (hours * 3600 + mins * 60) * 1000
-      // Fallback: if duration parsed to 0, try resolved timestamp from timeline
-      if (endMs === start) {
-        const resolvedEntry = inc.timeline.find((t) => t.stage === 'resolved')
+      const parsed = start + (hours * 3600 + mins * 60) * 1000
+      if (parsed > start) {
+        endMs = parsed
+      } else {
+        // Duration parsed to 0 — try resolved timestamp from timeline
+        const resolvedEntry = inc.timeline?.find((t) => t.stage === 'resolved')
         if (resolvedEntry) {
           const resolvedMs = new Date(resolvedEntry.at).getTime()
           if (!isNaN(resolvedMs) && resolvedMs > start) endMs = resolvedMs
         }
       }
     } else if (inc.status === 'resolved') {
-      // No duration string — try resolved timestamp from timeline
-      const resolvedEntry = inc.timeline.find((t) => t.stage === 'resolved')
+      // No duration string — fall back to resolved timestamp
+      const resolvedEntry = inc.timeline?.find((t) => t.stage === 'resolved')
       if (resolvedEntry) {
         const resolvedMs = new Date(resolvedEntry.at).getTime()
         if (!isNaN(resolvedMs) && resolvedMs > start) endMs = resolvedMs
-        else continue
-      } else {
-        continue
       }
     } else {
       endMs = now // unresolved → ongoing outage
     }
 
-    // Clamp to 90-day window
-    if (endMs > windowStart && start < now) {
-      intervals.push({ start: Math.max(start, windowStart), end: Math.min(endMs, now) })
+    if (endMs === null || endMs <= start) {
+      noEndSkips++
+      if (noEndSampleId === null) noEndSampleId = inc.id
+      continue
+    }
+
+    // Clamp to 90-day window; guard against zero-length intervals after clamping
+    if (endMs > windowStart) {
+      const clampedStart = Math.max(start, windowStart)
+      const clampedEnd = Math.min(endMs, now)
+      if (clampedEnd > clampedStart) {
+        intervals.push({ start: clampedStart, end: clampedEnd, weight })
+      }
     }
   }
 
-  // Merge overlapping intervals to prevent double-counting
-  if (intervals.length === 0) return 100
-  intervals.sort((a, b) => a.start - b.start)
-  let totalOutageMs = 0
-  let curStart = intervals[0].start
-  let curEnd = intervals[0].end
-  for (let i = 1; i < intervals.length; i++) {
-    if (intervals[i].start <= curEnd) {
-      curEnd = Math.max(curEnd, intervals[i].end)
+  if (unknownImpacts.size > 0) {
+    console.warn(`[computeUptimeFromIncidents] unknown impact level(s): ${[...unknownImpacts].join(', ')} — update INCIDENT_IO_IMPACT_WEIGHTS`)
+  }
+  if (noEndSkips > 0) {
+    console.warn(`[computeUptimeFromIncidents] ${noEndSkips} resolved incident(s) had no recoverable end timestamp (first of ${noEndSkips}: ${noEndSampleId}) — likely upstream data-quality issue`)
+  }
+
+  if (intervals.length === 0) {
+    // Distinguish informational-only feed (genuinely no outages → 100) from a feed
+    // where every impactful entry was unusable (return null — claiming 100 would mislead).
+    const totalSkips = parseErrorSkips + noEndSkips
+    const impactfulCount = incidents.filter(i => i.impact !== null).length
+    return totalSkips > 0 && totalSkips === impactfulCount ? null : 100
+  }
+
+  // Sweep events to compute weighted outage with max-weight-wins overlap handling.
+  // E.g. minor (0.3) overlapping major (1.0) contributes 1.0 weight in the overlap window —
+  // matches Atlassian's behavior where the more severe component status dominates.
+  const events: Array<{ t: number; weight: number; type: 'start' | 'end' }> = []
+  for (const iv of intervals) {
+    events.push({ t: iv.start, weight: iv.weight, type: 'start' })
+    events.push({ t: iv.end, weight: iv.weight, type: 'end' })
+  }
+  events.sort((a, b) => a.t - b.t || (a.type === 'end' ? -1 : 1))
+
+  let weightedOutageMs = 0
+  let lastT = events[0].t
+  const active: number[] = []
+  for (const ev of events) {
+    if (ev.t > lastT && active.length > 0) {
+      const maxWeight = Math.max(...active)
+      weightedOutageMs += (ev.t - lastT) * maxWeight
+    }
+    if (ev.type === 'start') {
+      active.push(ev.weight)
     } else {
-      totalOutageMs += curEnd - curStart
-      curStart = intervals[i].start
-      curEnd = intervals[i].end
+      const idx = active.indexOf(ev.weight)
+      if (idx >= 0) active.splice(idx, 1)
     }
+    lastT = ev.t
   }
-  totalOutageMs += curEnd - curStart
 
-  return Math.max(0, Math.round((1 - totalOutageMs / windowMs) * 10000) / 100)
+  // Use Math.floor (not round) to match statuspage.ts and avoid overstating uptime
+  // (e.g. 99.998% must not appear as 100%).
+  return Math.max(0, Math.floor((1 - weightedOutageMs / windowMs) * 10000) / 100)
 }
 
 interface IncidentIoUpdate {

@@ -120,8 +120,9 @@ Cloudflare Worker
   └── POST /api/alert   → Webhook 프록시 (Slack/Discord, SSRF 보호)
   ↓
 파서 (worker/src/parsers/)
-  ├── statuspage.ts      → Atlassian Statuspage API + uptimeData HTML
-  ├── incident-io.ts     → incident.io 호환 API + component_uptimes/impacts
+  ├── impact-weights.ts  → 공유 MAJOR_WEIGHT/MINOR_WEIGHT (Atlassian 공식, 두 파서 공통)
+  ├── statuspage.ts      → Atlassian Statuspage API + uptimeData HTML (가중치 적용 공식 uptime)
+  ├── incident-io.ts     → incident.io 호환 API + component_uptimes/impacts (인시던트 추정 uptime도 동일 가중치 공식 사용)
   ├── gcloud.ts          → Google Cloud incidents.json
   ├── instatus.ts        → Instatus Nuxt/Next.js SSR
   ├── betterstack.ts     → Better Stack RSS + /index.json 가동률 API + dailyImpact (status_history)

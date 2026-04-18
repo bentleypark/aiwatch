@@ -121,8 +121,9 @@ Cloudflare Worker
   └── POST /api/alert   → webhook proxy (Slack/Discord, SSRF protected)
   ↓
 Parsers (worker/src/parsers/)
-  ├── statuspage.ts      → Atlassian Statuspage API + uptimeData HTML
-  ├── incident-io.ts     → incident.io compat API + component_uptimes/impacts
+  ├── impact-weights.ts  → shared MAJOR_WEIGHT/MINOR_WEIGHT (Atlassian formula, used by both)
+  ├── statuspage.ts      → Atlassian Statuspage API + uptimeData HTML (weighted official uptime)
+  ├── incident-io.ts     → incident.io compat API + component_uptimes/impacts (estimate from durations uses the same weighted formula)
   ├── gcloud.ts          → Google Cloud incidents.json
   ├── instatus.ts        → Instatus Nuxt/Next.js SSR
   ├── betterstack.ts     → Better Stack RSS + /index.json uptime API + dailyImpact (status_history)

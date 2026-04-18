@@ -382,16 +382,19 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         }
         allIncidents.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
         const filtered = filterIncidents(allIncidents, config)
-        // Estimate uptime from incidents; no incidents = 100% (RSS confirmed reachable)
-        const uptimeEst = computeUptimeFromIncidents(filtered) ?? 100
+        // Uptime semantics — match the main incident.io path (line 326):
+        //   - 0 incidents → 100% (RSS confirmed reachable, no measurable outage)
+        //   - >0 incidents but all unparseable → null (omit uptime30d to avoid claiming 100%)
+        //   - otherwise → computed weighted uptime
+        const uptimeRaw = computeUptimeFromIncidents(filtered)
+        const uptimeEst = filtered.length === 0 ? 100 : uptimeRaw
         return {
           ...base,
           status: deriveAwsStatus(filtered),
           latency: config.category === 'api' ? latency : null,
           incidents: filtered,
           calendarDays: 14,
-          uptime30d: uptimeEst,
-          uptimeSource: 'estimate' as const,
+          ...(uptimeEst != null ? { uptime30d: uptimeEst, uptimeSource: 'estimate' as const } : {}),
         }
       }
 
@@ -411,15 +414,17 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         await resetFetchFailure(kv, config.id)
         const incidents = parseAwsRssIncidents(await rssRes.text())
         const filtered = filterIncidents(incidents, config)
-        const uptimeEst = computeUptimeFromIncidents(filtered) ?? 100
+        // Same uptime semantics as the AWS RSS path above — propagate null instead of
+        // silently claiming 100% when all incidents were unparseable.
+        const uptimeRaw = computeUptimeFromIncidents(filtered)
+        const uptimeEst = filtered.length === 0 ? 100 : uptimeRaw
         return {
           ...base,
           status: deriveAwsStatus(filtered),
           latency: config.category === 'api' ? latency : null,
           incidents: filtered,
           calendarDays: 14,
-          uptime30d: uptimeEst,
-          uptimeSource: 'estimate' as const,
+          ...(uptimeEst != null ? { uptime30d: uptimeEst, uptimeSource: 'estimate' as const } : {}),
         }
       }
 
