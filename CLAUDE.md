@@ -319,6 +319,7 @@ worker/
     security-monitor.ts # AI service security monitoring (HN Algolia, OSV.dev SDK vulnerabilities)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
                 # dailyImpact support: statuspage (uptimeData), incident-io (component impacts), betterstack (status_history from index.json)
+                # impact-weights.ts: shared MAJOR_WEIGHT=1.0, MINOR_WEIGHT=0.3 — used by both statuspage.ts (official) and incident-io.ts (estimate from durations) for Atlassian-aligned uptime%
 ```
 
 ### Design System
