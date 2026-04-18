@@ -3,6 +3,7 @@
 
 import { getFallbacks, buildFallbackText } from './fallback'
 import { sanitize, formatDuration } from './utils'
+import { computeLeadMs } from './detection-lead-log'
 import type { ServiceStatus } from './services'
 import type { Incident } from './types'
 
@@ -219,13 +220,11 @@ export function buildServiceAlerts(
  */
 export function formatDetectionLead(detectedAt: string | null, incidentStartedAt: string): string {
   if (!detectedAt) return ''
-  const detected = new Date(detectedAt).getTime()
-  const started = new Date(incidentStartedAt).getTime()
-  if (isNaN(detected) || isNaN(started)) return ''
-  const diffMs = started - detected
-  if (diffMs <= 0) return ''
-  const mins = Math.floor(diffMs / 60_000)
-  if (mins < 1 || mins >= 60) return ''
+  // Use computeLeadMs as single source of truth — guarantees Discord display + audit log share the same window.
+  // Math.floor (not round) ensures display never claims 60m when leadMs is in [59m30s, 60m) — the cap is exclusive.
+  const leadMs = computeLeadMs(detectedAt, incidentStartedAt)
+  if (leadMs === null) return ''
+  const mins = Math.floor(leadMs / 60_000)
   return `⚡ **Detection Lead: ${mins}m** — AIWatch detected this before the official report`
 }
 

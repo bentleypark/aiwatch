@@ -289,6 +289,33 @@ describe('buildDailySummary', () => {
     expect(result).toContain('Alerts Sent')
     expect(result).toContain('5 posts detected')
   })
+
+  it('appends Detection Lead section when entries present', () => {
+    const result = buildDailySummary({
+      services: [makeSvc({ id: 'together', name: 'Together AI' })],
+      aiUsage: null,
+      latencySnapshots: [],
+      incidentCountToday: { newCount: 1, resolvedCount: 0 },
+      redditCount: 0,
+      detectionLeadEntries: [
+        { svcId: 'together', incId: 'i1', leadMs: 7 * 60_000, detectedAt: '2026-04-18T11:53:00Z', officialAt: '2026-04-18T12:00:00Z' },
+      ],
+    })
+    expect(result).toContain('Detection Lead (last 24h)')
+    expect(result).toContain('Together AI: 7m lead')
+  })
+
+  it('omits Detection Lead section when entries empty', () => {
+    const result = buildDailySummary({
+      services: [makeSvc({ id: 'a' })],
+      aiUsage: null,
+      latencySnapshots: [],
+      incidentCountToday: { newCount: 0, resolvedCount: 0 },
+      redditCount: 0,
+      detectionLeadEntries: [],
+    })
+    expect(result).not.toContain('Detection Lead')
+  })
 })
 
 describe('isInSummaryWindow', () => {

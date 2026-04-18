@@ -37,7 +37,7 @@ Real-time monitoring dashboard for **30 AI services** — track status, latency,
 - **Bilingual** — Korean / English
 - **Mobile responsive** — Sidebar overlay, mobile action bar
 - **AIWatch Score** — Composite reliability score combining uptime, incidents, recovery time, and probe-based responsiveness ([how it works](https://ai-watch.dev/#about-score))
-- **Detection Lead** — Shows how much earlier AIWatch detected an incident vs official report (dashboard badge + Discord alert embed)
+- **Detection Lead** — Shows how much earlier AIWatch detected an incident vs official report (dashboard badge + Discord alert embed + daily summary audit log surfacing 24h of events)
 - **Regional availability** — Per-region incident status for xAI, Gemini, OpenAI with switch recommendation
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
@@ -140,6 +140,7 @@ Cloudflare KV
   ├── ai:usage:{date}      (daily AI usage counter, TTL 2d)
   ├── alerted:*            (alert dedup keys, TTL 2h-7d)
   ├── detected:{svcId}     (Detection Lead timestamp, TTL 7d)
+  ├── detection:lead:{date} (Detection Lead audit log per UTC day, TTL 7d, 24h sliding window in daily summary)
   ├── reddit:seen:{postId} (Reddit post dedup, TTL 24h)
   └── vitals:{YYYY-MM-DD}  (Web Vitals daily aggregation, TTL 2d)
 ```
@@ -325,6 +326,7 @@ worker/
     probe-archival.ts # Daily probe RTT archival + 7-day summary
     platform-monitor.ts # Status page platform health monitoring (metastatuspage.com)
     detection.ts # Detection Lead entry parsing + reset logic
+    detection-lead-log.ts # Detection Lead audit log (#256, daily summary)
     reddit.ts    # Reddit outage chatter monitoring
     parsers/     # Platform-specific parsers
       statuspage.ts   # Atlassian Statuspage (7 services)
