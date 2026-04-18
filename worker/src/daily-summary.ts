@@ -68,6 +68,7 @@ export function buildDailySummary(data: DailySummaryData): string {
   // Section 5: Probe RTT (24h) — replaces status page latency with direct API endpoint measurement
   const probeSnaps = data.probeSnapshots ?? []
   if (probeSnaps.length > 0) {
+    // TODO(#132): pass incident windows to exclude RTT during outages — see probe-archival.ts:202
     const probeDaily = aggregateProbeDaily(probeSnaps)
     const probeEntries = Object.entries(probeDaily).filter(([, v]) => v.p75 > 0)
     if (probeEntries.length >= 3) {

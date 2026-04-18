@@ -110,6 +110,7 @@ export default function Ranking() {
                 <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.score')}</th>
                 <th style={{ padding: '8px 12px', textAlign: 'center', fontWeight: 500 }}>{t('ranking.grade')}</th>
                 <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.uptime')}</th>
+                <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.responsiveness')}</th>
                 <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 500 }}>{t('ranking.affectedDays')}</th>
               </tr>
             </thead>
@@ -136,6 +137,9 @@ export default function Ranking() {
                     {svc.uptime30d != null ? `${svc.uptime30d.toFixed(2)}%` : '—'}
                   </td>
                   <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
+                    {svc.scoreMetrics?.probe?.p50 != null ? `${svc.scoreMetrics.probe.p50}ms` : '—'}
+                  </td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
                     {svc.scoreMetrics?.affectedDays30d != null ? `${svc.scoreMetrics.affectedDays30d}${t('aboutScore.day')}` : '—'}
                   </td>
                 </tr>
@@ -148,8 +152,15 @@ export default function Ranking() {
         <div className="md:hidden flex flex-col">
           {ranked.scored.map((svc, i) => {
             const affectedDays = svc.scoreMetrics?.affectedDays30d ?? null
+            const probeP50 = svc.scoreMetrics?.probe?.p50 ?? null
             const hasUptime = svc.uptime30d != null
             const hasAffected = affectedDays != null && affectedDays > 0
+            const hasProbe = probeP50 != null
+            const metaParts = [
+              hasUptime ? `${svc.uptime30d.toFixed(2)}%` : null,
+              hasProbe ? `${probeP50}ms` : null,
+              hasAffected ? `${affectedDays}${t('aboutScore.day')}` : null,
+            ].filter(Boolean)
             return (
               <div
                 key={svc.id}
@@ -169,11 +180,9 @@ export default function Ranking() {
                   <span className={`mono text-[9px] rounded shrink-0 ${SCORE_BG_CLASS[svc.scoreGrade] ?? 'bg-[var(--bg3)]'} text-[var(--bg0)]`} style={{ padding: '2px 6px' }}>
                     {svc.scoreGrade}
                   </span>
-                  {(hasUptime || hasAffected) && (
+                  {metaParts.length > 0 && (
                     <span className="mono text-[10px] text-[var(--text2)]">
-                      {hasUptime ? `${svc.uptime30d.toFixed(2)}%` : ''}
-                      {hasUptime && hasAffected ? ' · ' : ''}
-                      {hasAffected ? `${affectedDays}${t('aboutScore.day')}` : ''}
+                      {metaParts.join(' · ')}
                     </span>
                   )}
                 </div>

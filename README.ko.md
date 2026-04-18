@@ -35,7 +35,7 @@
 - **다크/라이트 테마** — 시스템 설정 감지 + 수동 전환
 - **한국어/영어** — 이중 언어 지원
 - **모바일 반응형** — 사이드바 오버레이, 모바일 액션 바
-- **AIWatch Score** — 종합 신뢰도 점수 ([계산 방식](https://ai-watch.dev/#about-score))
+- **AIWatch Score** — uptime, 인시던트, 복구 시간, probe 기반 응답성을 결합한 종합 신뢰도 점수 ([계산 방식](https://ai-watch.dev/#about-score))
 - **Detection Lead** — 공식 발표 대비 AIWatch의 조기 감지 시간 표시 (대시보드 배지 + Discord 알림 임베드)
 - **리전별 가용성** — xAI, Gemini, OpenAI의 리전별 인시던트 상태 및 전환 추천
 - **스마트 알림** — degraded/down 상태 Discord 알림 (anti-flapping + 인시던트 억제 + 복구 지속 시간)

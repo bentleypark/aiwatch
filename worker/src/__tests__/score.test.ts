@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { calculateAIWatchScore } from '../score'
-import type { ServiceStatus } from '../types'
+import { calculateAIWatchScore, classifyProbe, MIN_VALID_DAYS, type ProbeContext } from '../score'
+import type { ProbeSummary, ServiceStatus } from '../types'
 
 function makeSvc(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
   return {
@@ -20,69 +20,79 @@ function makeIncident(daysAgo: number, duration = '1h 0m', status = 'resolved' a
   }
 }
 
+function makeProbeSummary(overrides: Partial<ProbeSummary> = {}): ProbeSummary {
+  return { p50: 200, p95: 400, cvCombined: 0.5, validDays: 7, ...overrides }
+}
+
+const probeAvailable = (overrides?: Partial<ProbeSummary>): ProbeContext => ({
+  kind: 'available',
+  summary: makeProbeSummary(overrides),
+})
+const probeInsufficient: ProbeContext = { kind: 'insufficient' }
+const probeUnavailable: ProbeContext = { kind: 'unavailable' }
+const probeUnsupported: ProbeContext = { kind: 'unsupported' }
+
+// Test helpers. No default — naming makes the probe context choice explicit at every callsite,
+// so a future probed-service test can't silently get 'unsupported' behavior by forgetting an arg.
+const scoreUnprobed = (svc: ServiceStatus, cutoffDays = 30) =>
+  calculateAIWatchScore(svc, cutoffDays, probeUnsupported)
+const scoreWithProbe = (svc: ServiceStatus, probe: ProbeContext, cutoffDays = 30) =>
+  calculateAIWatchScore(svc, cutoffDays, probe)
+
 describe('calculateAIWatchScore', () => {
-  it('returns 100 for perfect service (100% uptime, 0 incidents)', () => {
-    const result = calculateAIWatchScore(makeSvc({ uptime30d: 100 }))
+  // ── Probe-less (unsupported) baseline ──
+
+  it('returns 100 for perfect probe-less service (100% uptime, 0 incidents)', () => {
+    const result = scoreUnprobed(makeSvc({ uptime30d: 100 }))
     expect(result.score).toBe(100)
     expect(result.grade).toBe('excellent')
     expect(result.confidence).toBe('high')
   })
 
-  it('calculates uptime_score with 95% baseline', () => {
-    const r100 = calculateAIWatchScore(makeSvc({ uptime30d: 100 }))
-    const r99 = calculateAIWatchScore(makeSvc({ uptime30d: 99 }))
-    const r95 = calculateAIWatchScore(makeSvc({ uptime30d: 95 }))
-    const r90 = calculateAIWatchScore(makeSvc({ uptime30d: 90 }))
-
-    expect(r100.breakdown.uptime).toBe(50)
-    expect(r99.breakdown.uptime).toBe(40)
-    expect(r95.breakdown.uptime).toBe(0)
-    expect(r90.breakdown.uptime).toBe(0) // clamped
+  it('calculates uptime_score on 40-pt scale with 95% baseline', () => {
+    expect(scoreUnprobed(makeSvc({ uptime30d: 100 })).breakdown.uptime).toBe(40)
+    expect(scoreUnprobed(makeSvc({ uptime30d: 99 })).breakdown.uptime).toBe(32)
+    expect(scoreUnprobed(makeSvc({ uptime30d: 95 })).breakdown.uptime).toBe(0)
+    expect(scoreUnprobed(makeSvc({ uptime30d: 90 })).breakdown.uptime).toBe(0) // clamped
   })
 
-  it('calculates incident_score based on affected days (not raw count)', () => {
-    const r0 = calculateAIWatchScore(makeSvc())
-    // 5 incidents on 5 different days
-    const r5days = calculateAIWatchScore(makeSvc({ incidents: Array.from({ length: 5 }, (_, i) => makeIncident(i + 1)) }))
-    // 5 incidents on same day → 1 affected day
-    const r5same = calculateAIWatchScore(makeSvc({ incidents: Array.from({ length: 5 }, () => makeIncident(1)) }))
+  it('calculates incident_score on 25-pt scale based on affected days', () => {
+    const r0 = scoreUnprobed(makeSvc())
+    const r5days = scoreUnprobed(makeSvc({ incidents: Array.from({ length: 5 }, (_, i) => makeIncident(i + 1)) }))
+    const r5same = scoreUnprobed(makeSvc({ incidents: Array.from({ length: 5 }, () => makeIncident(1)) }))
 
-    expect(r0.breakdown.incidents).toBe(30)
-    expect(r5days.breakdown.incidents).toBeLessThan(r5same.breakdown.incidents) // more days = lower score
-    expect(r5same.metrics.affectedDays30d).toBe(1) // same day deduped
+    expect(r0.breakdown.incidents).toBe(25)
+    expect(r5days.breakdown.incidents).toBeLessThan(r5same.breakdown.incidents)
+    expect(r5same.metrics.affectedDays30d).toBe(1)
     expect(r5days.metrics.affectedDays30d).toBe(5)
   })
 
+  it('calculates recovery_score on 15-pt scale', () => {
+    expect(scoreUnprobed(makeSvc({ incidents: [] })).breakdown.recovery).toBe(15)
+  })
+
   it('uses median MTTR for 3+ samples', () => {
-    const incidents = [
-      makeIncident(1, '30m'),
-      makeIncident(2, '1h 0m'),
-      makeIncident(3, '10h 0m'), // outlier
-    ]
-    const result = calculateAIWatchScore(makeSvc({ incidents }))
-    // Median of [30, 60, 600] = 60 min = 1h
-    expect(result.metrics.mttrHours).toBe(1)
+    const incidents = [makeIncident(1, '30m'), makeIncident(2, '1h 0m'), makeIncident(3, '10h 0m')]
+    expect(scoreUnprobed(makeSvc({ incidents })).metrics.mttrHours).toBe(1)
   })
 
   it('uses mean MTTR for <3 samples', () => {
     const incidents = [makeIncident(1, '2h 0m'), makeIncident(2, '4h 0m')]
-    const result = calculateAIWatchScore(makeSvc({ incidents }))
-    // Mean of [120, 240] = 180 min = 3h
-    expect(result.metrics.mttrHours).toBe(3)
+    expect(scoreUnprobed(makeSvc({ incidents })).metrics.mttrHours).toBe(3)
   })
 
   it('applies fallback + 0.9 penalty when uptime is null', () => {
-    const withUptime = calculateAIWatchScore(makeSvc({ uptime30d: 100, incidents: [makeIncident(1)] }))
-    const noUptime = calculateAIWatchScore(makeSvc({ uptime30d: null, incidents: [makeIncident(1)] }))
+    const withUptime = scoreUnprobed(makeSvc({ uptime30d: 100, incidents: [makeIncident(1)] }))
+    const noUptime = scoreUnprobed(makeSvc({ uptime30d: null, incidents: [makeIncident(1)] }))
 
     expect(noUptime.confidence).toBe('medium')
     expect(noUptime.breakdown.uptime).toBeNull()
     expect(noUptime.score!).toBeLessThan(withUptime.score!)
   })
 
-  it('returns estimated score when no uptime and no incidents (assumed industry average)', () => {
-    const result = calculateAIWatchScore(makeSvc({ uptime30d: null, incidents: [] }))
-    // (45 + 30 + 20) * 0.9 = 85.5 → 86
+  it('returns estimated score when no uptime and no incidents', () => {
+    // Base = (36 + 25 + 15) * 0.9 = 68.4 → scaled to 100: 68.4 * 1.25 = 85.5 → 86
+    const result = scoreUnprobed(makeSvc({ uptime30d: null, incidents: [] }))
     expect(result.score).toBe(86)
     expect(result.grade).toBe('excellent')
     expect(result.confidence).toBe('medium')
@@ -90,8 +100,8 @@ describe('calculateAIWatchScore', () => {
   })
 
   it('applies 0.9 penalty for estimate uptimeSource', () => {
-    const official = calculateAIWatchScore(makeSvc({ uptime30d: 99.5 }))
-    const estimate = calculateAIWatchScore(makeSvc({ uptime30d: 99.5, uptimeSource: 'estimate' }))
+    const official = scoreUnprobed(makeSvc({ uptime30d: 99.5 }))
+    const estimate = scoreUnprobed(makeSvc({ uptime30d: 99.5, uptimeSource: 'estimate' }))
 
     expect(estimate.confidence).toBe('medium')
     expect(estimate.score!).toBeLessThan(official.score!)
@@ -106,62 +116,194 @@ describe('calculateAIWatchScore', () => {
       makeSvc({ uptime30d: 100, incidents: [] }),
     ]
     for (const svc of cases) {
-      const result = calculateAIWatchScore(svc)
+      const result = scoreUnprobed(svc)
       expect(result.score).not.toBeNull()
       expect(result.grade).not.toBeNull()
     }
   })
 
   it('filters incidents to 30 days only', () => {
-    const oldIncident = makeIncident(60) // 60 days ago
+    const oldIncident = makeIncident(60)
     const recentIncident = makeIncident(5)
-    const result = calculateAIWatchScore(makeSvc({ incidents: [oldIncident, recentIncident] }))
+    const result = scoreUnprobed(makeSvc({ incidents: [oldIncident, recentIncident] }))
     expect(result.metrics.incidents30d).toBe(1)
   })
 
   it('clamps score between 0 and 100', () => {
-    const result = calculateAIWatchScore(makeSvc({ uptime30d: 100 }))
+    const result = scoreUnprobed(makeSvc({ uptime30d: 100 }))
     expect(result.score).toBeLessThanOrEqual(100)
     expect(result.score).toBeGreaterThanOrEqual(0)
   })
 
-  it('assigns correct grades', () => {
-    expect(calculateAIWatchScore(makeSvc({ uptime30d: 100 })).grade).toBe('excellent')
-    expect(calculateAIWatchScore(makeSvc({
-      uptime30d: 99, incidents: Array.from({ length: 10 }, (_, i) => makeIncident(i + 1))
-    })).grade).not.toBe('excellent')
-  })
-
-  it('recovery_score is 20 when no resolved incidents', () => {
-    const result = calculateAIWatchScore(makeSvc({ incidents: [] }))
-    expect(result.breakdown.recovery).toBe(20)
-  })
-
   it('handles duration edge cases correctly', () => {
-    // "1h" without minutes
-    const r1 = calculateAIWatchScore(makeSvc({ incidents: [makeIncident(1, '1h')] }))
-    expect(r1.metrics.mttrHours).toBe(1)
-
-    // "30m" without hours
-    const r2 = calculateAIWatchScore(makeSvc({ incidents: [makeIncident(1, '30m')] }))
-    expect(r2.metrics.mttrHours).toBe(0.5)
-
-    // "2h 30m" standard
-    const r3 = calculateAIWatchScore(makeSvc({ incidents: [makeIncident(1, '2h 30m')] }))
-    expect(r3.metrics.mttrHours).toBe(2.5)
+    expect(scoreUnprobed(makeSvc({ incidents: [makeIncident(1, '1h')] })).metrics.mttrHours).toBe(1)
+    expect(scoreUnprobed(makeSvc({ incidents: [makeIncident(1, '30m')] })).metrics.mttrHours).toBe(0.5)
+    expect(scoreUnprobed(makeSvc({ incidents: [makeIncident(1, '2h 30m')] })).metrics.mttrHours).toBe(2.5)
   })
 
   it('gives 0 recovery score for unresolved incidents', () => {
-    const result = calculateAIWatchScore(makeSvc({
-      incidents: [makeIncident(1, '1h 0m', 'investigating' as any)],
-    }))
+    const result = scoreUnprobed(makeSvc({ incidents: [makeIncident(1, '1h 0m', 'investigating' as any)] }))
     expect(result.breakdown.recovery).toBe(0)
   })
 
   it('skips 0-duration incidents in MTTR', () => {
     const incidents = [makeIncident(1, '0m'), makeIncident(2, '2h 0m')]
-    const result = calculateAIWatchScore(makeSvc({ incidents }))
-    // Only 2h counted, 0m skipped
-    expect(result.metrics.mttrHours).toBe(2)
+    expect(scoreUnprobed(makeSvc({ incidents })).metrics.mttrHours).toBe(2)
+  })
+
+  // ── Responsiveness component (probe-supported services) ──
+
+  it('adds Responsiveness when probe context is "available"', () => {
+    const result = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeAvailable({ p50: 200, cvCombined: 0.3 }))
+
+    expect(result.breakdown.responsiveness).not.toBeNull()
+    // speed = 10 * exp(-200/400) = 6.07; stability = 10 * exp(-0.3/0.5) = 5.49 → ~11.6
+    expect(result.breakdown.responsiveness!).toBeGreaterThan(10)
+    expect(result.breakdown.responsiveness!).toBeLessThan(13)
+    expect(result.breakdown.responsivenessStatus).toBe('available')
+  })
+
+  it('floors p50 at 50ms in Speed calculation (bimodal protection)', () => {
+    // p50=10ms (Claude-like bimodal) should not score higher than p50=50ms
+    const fast = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeAvailable({ p50: 10, cvCombined: 0.2 }))
+    const floored = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeAvailable({ p50: 50, cvCombined: 0.2 }))
+    // 10ms gets floored to 50ms — Speed component is identical
+    expect(fast.metrics.probe?.p50).toBe(10) // raw value preserved
+    expect(floored.metrics.probe?.p50).toBe(50)
+    expect(fast.breakdown.responsiveness).toBe(floored.breakdown.responsiveness)
+  })
+
+  it('penalizes high CV in Stability score', () => {
+    const stable = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeAvailable({ cvCombined: 0.1 }))
+    const unstable = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeAvailable({ cvCombined: 2.0 }))
+    expect(stable.breakdown.responsiveness!).toBeGreaterThan(unstable.breakdown.responsiveness!)
+  })
+
+  it('insufficient probe → 0.95 penalty applied to scaled base', () => {
+    const result = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeInsufficient)
+    expect(result.breakdown.responsiveness).toBeNull()
+    expect(result.breakdown.responsivenessStatus).toBe('insufficient')
+    // perfect base = 80, scaled = 100, × 0.95 = 95
+    expect(result.score).toBe(95)
+  })
+
+  it('unavailable (KV failure) → no penalty, behaves like unsupported for math but distinct status', () => {
+    const insufficient = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeInsufficient)
+    const unavailable = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeUnavailable)
+    const unsupported = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeUnsupported)
+
+    expect(unavailable.score).toBe(100)
+    expect(unsupported.score).toBe(100)
+    expect(insufficient.score).toBe(95)
+    expect(unavailable.breakdown.responsiveness).toBeNull()
+    expect(unavailable.metrics.probe).toBeNull()
+    // Status field distinguishes the three cases that all show responsiveness=null
+    expect(unavailable.breakdown.responsivenessStatus).toBe('unavailable')
+    expect(unsupported.breakdown.responsivenessStatus).toBe('unsupported')
+    expect(insufficient.breakdown.responsivenessStatus).toBe('insufficient')
+  })
+
+  it('unsupported (no probe endpoint) → no penalty', () => {
+    const result = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeUnsupported)
+    expect(result.breakdown.responsiveness).toBeNull()
+    expect(result.score).toBe(100)
+  })
+
+  it('exposes raw probe metrics as a single nullable summary when available', () => {
+    const result = scoreWithProbe(makeSvc(), probeAvailable({ p50: 178, p95: 311, cvCombined: 0.596, validDays: 7 }))
+    expect(result.metrics.probe).toEqual({ p50: 178, p95: 311, cvCombined: 0.596, validDays: 7 })
+  })
+
+  it('returns null probe metrics when probe context has no summary', () => {
+    expect(scoreWithProbe(makeSvc(), probeUnsupported).metrics.probe).toBeNull()
+    expect(scoreWithProbe(makeSvc(), probeUnavailable).metrics.probe).toBeNull()
+    expect(scoreWithProbe(makeSvc(), probeInsufficient).metrics.probe).toBeNull()
+  })
+
+  it('full Responsiveness path scores lower than probe-less perfect service when probe metrics are weak', () => {
+    const probed = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeAvailable({ p50: 500, p95: 1000, cvCombined: 0.8, validDays: 7 }))
+    const probeLess = scoreUnprobed(makeSvc({ uptime30d: 100 }))
+    expect(probed.score).toBeLessThan(probeLess.score)
+  })
+
+  // ── Real-world calibration locks (issue #132 reference data) ──
+
+  it('Claude-like profile (p50=10ms bimodal, low CV) reaches "excellent" grade', () => {
+    // p50 floored to 50ms → speed=10*exp(-50/400)=8.82, stability=10*exp(-0.3/0.5)=5.49
+    // Total = 40 (uptime) + 25 (no incidents) + 15 (no incidents) + ~14.3 = ~94
+    const result = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeAvailable({ p50: 10, p95: 193, cvCombined: 0.3, validDays: 7 }))
+    expect(result.score).toBeGreaterThanOrEqual(90)
+    expect(result.grade).toBe('excellent')
+  })
+
+  it('Deepgram-like profile (p50=1409ms, low CV) scores measurably lower than fast probe', () => {
+    // speed=10*exp(-1409/400)≈0.30, stability=10*exp(-0.44/0.5)≈4.14 → ~4.4
+    const slow = scoreWithProbe(makeSvc({ uptime30d: 99.0, incidents: [makeIncident(2, '4h')] }), probeAvailable({ p50: 1409, p95: 2860, cvCombined: 0.44, validDays: 7 }))
+    const fast = scoreWithProbe(makeSvc({ uptime30d: 99.0, incidents: [makeIncident(2, '4h')] }), probeAvailable({ p50: 100, p95: 200, cvCombined: 0.44, validDays: 7 }))
+    expect(slow.score).toBeLessThan(fast.score)
+  })
+
+  // ── Boundary tests ──
+
+  it('validDays=7 boundary — at MIN_VALID_DAYS exactly, treated as available by caller', () => {
+    const at = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeAvailable({ validDays: MIN_VALID_DAYS }))
+    expect(at.breakdown.responsiveness).not.toBeNull()
+  })
+
+  // ── Grade transitions ──
+  it('assigns correct grades', () => {
+    expect(scoreUnprobed(makeSvc({ uptime30d: 100 })).grade).toBe('excellent')
+    expect(scoreUnprobed(makeSvc({
+      uptime30d: 99, incidents: Array.from({ length: 10 }, (_, i) => makeIncident(i + 1))
+    })).grade).not.toBe('excellent')
+  })
+})
+
+describe('classifyProbe', () => {
+  const validSummary: ProbeSummary = { p50: 200, p95: 400, cvCombined: 0.5, validDays: 7 }
+
+  it('returns unsupported when service is not probed (apps, agents, infra)', () => {
+    const ctx = classifyProbe('chatgpt', false, new Map())
+    expect(ctx).toEqual({ kind: 'unsupported' })
+  })
+
+  it('returns unavailable when summaries map is undefined (KV read failure)', () => {
+    const ctx = classifyProbe('claude', true, undefined)
+    expect(ctx).toEqual({ kind: 'unavailable' })
+  })
+
+  it('returns insufficient (NOT unavailable) when summaries is an empty Map', () => {
+    // Locks the distinction: undefined = KV failure (no penalty), empty Map = real "no data" (penalty).
+    // Regression guard against a future refactor returning Map() instead of undefined on error.
+    const ctx = classifyProbe('claude', true, new Map())
+    expect(ctx).toEqual({ kind: 'insufficient' })
+  })
+
+  it('returns insufficient when probed but svcId missing from summaries (newly added)', () => {
+    const ctx = classifyProbe('newservice', true, new Map([['claude', validSummary]]))
+    expect(ctx).toEqual({ kind: 'insufficient' })
+  })
+
+  it('returns insufficient when probed but validDays < MIN_VALID_DAYS', () => {
+    const partial = { ...validSummary, validDays: 6 }
+    const ctx = classifyProbe('claude', true, new Map([['claude', partial]]))
+    expect(ctx).toEqual({ kind: 'insufficient' })
+  })
+
+  it('returns insufficient when p50 is 0 (degenerate summary)', () => {
+    const broken = { ...validSummary, p50: 0 }
+    const ctx = classifyProbe('claude', true, new Map([['claude', broken]]))
+    expect(ctx).toEqual({ kind: 'insufficient' })
+  })
+
+  it('returns available with summary when probed + valid', () => {
+    const ctx = classifyProbe('claude', true, new Map([['claude', validSummary]]))
+    expect(ctx).toEqual({ kind: 'available', summary: validSummary })
+  })
+
+  it('non-probed service ignores summaries map (returns unsupported even if entry exists)', () => {
+    // Defensive: even if a probe-less service somehow has a summary entry, classifier ignores it
+    const ctx = classifyProbe('chatgpt', false, new Map([['chatgpt', validSummary]]))
+    expect(ctx).toEqual({ kind: 'unsupported' })
   })
 })

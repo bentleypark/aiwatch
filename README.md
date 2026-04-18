@@ -36,7 +36,7 @@ Real-time monitoring dashboard for **30 AI services** — track status, latency,
 - **Dark/Light theme** — System-aware with manual toggle
 - **Bilingual** — Korean / English
 - **Mobile responsive** — Sidebar overlay, mobile action bar
-- **AIWatch Score** — Composite reliability score ([how it works](https://ai-watch.dev/#about-score))
+- **AIWatch Score** — Composite reliability score combining uptime, incidents, recovery time, and probe-based responsiveness ([how it works](https://ai-watch.dev/#about-score))
 - **Detection Lead** — Shows how much earlier AIWatch detected an incident vs official report (dashboard badge + Discord alert embed)
 - **Regional availability** — Per-region incident status for xAI, Gemini, OpenAI with switch recommendation
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
