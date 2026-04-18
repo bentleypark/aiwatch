@@ -120,7 +120,13 @@ gh pr merge --squash --delete-branch
    ```
    /pr-review-toolkit:review-pr
    ```
-6. **Fix review issues** — address all **Critical** and **Important** findings. Re-run Build + Test after fixes
+6. **Fix review issues — auto-loop until convergence**:
+   - Address all **Critical** and **Important** findings
+   - Re-run Build + Test after fixes
+   - **Auto-run another review round** without waiting for user prompt
+   - Repeat (fix → test → re-review) until a round produces zero new Critical/Important findings (Suggestions only = converged)
+   - Each round must focus on issues *introduced by the previous round's fixes* — agents should not repeat already-resolved items
+   - Only proceed to commit (step 8) after convergence
 7. **Docs update** — update documentation affected by the change:
    - `CLAUDE.md`: architecture, service count, directory layout, constraints
    - `README.md` / `README.ko.md`: features, service tables, Project Structure, Available Service IDs
