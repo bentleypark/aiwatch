@@ -249,6 +249,7 @@ When adding a new monitored service, update ALL of the following:
 | `alerted:probe-spike:{svcId}` | `"1"` | 1h | ~2 | Probe RTT spike alert dedup (early detection) |
 | `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
 | `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time (probe spike or status page, whichever is earlier) |
+| `detection:lead:{YYYY-MM-DD}` | `DetectionLeadEntry[]` JSON | 7d | ~0-5 | Detection Lead audit log — appended on each new incident with positive lead, dedup by incId, surfaced in Daily Summary Discord embed (#256) |
 | `reddit:seen:{postId}` | `"1"` | 24h | ~120 | Reddit post dedup (hourly scan, max 5/hour) |
 | `security:seen:hn:{objectId}` | `SecurityAlertMeta` JSON | 7d | ~0 | HN security post dedup + dashboard display |
 | `security:seen:osv:{vulnId}` | `SecurityAlertMeta` JSON | 7d | ~0 | OSV.dev vulnerability dedup + dashboard display |
@@ -315,6 +316,7 @@ worker/
     probe-archival.ts # Daily probe RTT archival + 7-day summary (p50, p95, cvCombined)
     platform-monitor.ts # Status page platform health monitoring (metastatuspage.com for Atlassian)
     detection.ts # Detection Lead entry parsing + incident-aware reset logic
+    detection-lead-log.ts # Detection Lead audit log — per-day KV array (#256), tagged AppendResult, 24h sliding window for daily summary
     reddit.ts   # Reddit r/ChatGPT + r/netsec + r/cybersecurity monitoring
     security-monitor.ts # AI service security monitoring (HN Algolia, OSV.dev SDK vulnerabilities)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
@@ -414,11 +416,11 @@ Cron Trigger (*/5 min)
   → read KV cache → detect incidents/status changes
   → record detection timestamps (detected:{serviceId}) for Detection Lead (probe spike time preferred if earlier)
   → KV ID-based dedup → Discord alerts (single embed per incident, with Detection Lead if probe detected first)
-  → incident detected → AI analysis via Gemma 4 (Workers AI, primary) or Sonnet (AI Gateway, fallback) (8s timeout) + Detection Lead (1-60min advance detection → "⚡ Detection Lead: Xm") → merged into incident embed
+  → incident detected → AI analysis via Gemma 4 (Workers AI, primary) or Sonnet (AI Gateway, fallback) (8s timeout) + Detection Lead (1-60min advance detection → "⚡ Detection Lead: Xm") → merged into incident embed + persisted to detection:lead:{date} audit log (#256, dedup by incId, surfaced in daily summary)
   → recovery detected → mark ai:analysis:{svcId}:{incId} with resolvedAt (2h TTL, powers "Recently Resolved" UI)
   → active incidents: refresh analysis TTL / re-analyze if expired / dedup sibling services
   → alert count tracked in KV (alert:count:{date}) for Daily Summary
-  → daily summary at UTC 09:00 (KST 18:00) with alert count aggregation + Web Vitals p75
+  → daily summary at UTC 09:00 (KST 18:00) with alert count aggregation + Web Vitals p75 + Detection Lead audit log (24h sliding window from today + yesterday keys)
   → daily summary also accumulates incidents:monthly:{YYYY-MM} (dedup by incident ID, 60d TTL)
   → monthly archive on 1st of month (UTC 00:00) → aggregate history:* + probe:daily:* + incidents:monthly:* → archive:monthly:{YYYY-MM} (permanent)
   → changelog RSS/HTML collection (hourly at :00) → KV accumulate new entries from OpenAI/Google/Anthropic

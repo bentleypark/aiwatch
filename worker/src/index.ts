@@ -8,6 +8,7 @@ import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDet
 import { analyzeIncident, refreshOrReanalyze, analysisKey, formatRecoveryDisplay, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration } from './utils'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
+import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -555,11 +556,26 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
             console.error('[cron] AI analysis failed:', err instanceof Error ? err.message : err)
           }
         }
-        // Detection Lead: show early detection advantage in Discord alert
+        // Detection Lead: show early detection advantage in Discord alert + persist to audit log
         try {
           const detectRaw = await env.STATUS_CACHE.get(`detected:${svc.id}`).catch(() => null)
           const detectedAt = getDetectionTimestamp(detectRaw)
           detectionLeadSection = formatDetectionLead(detectedAt, inc.startedAt)
+          // Persist to audit log: computeLeadMs returns null outside [1m, 60m) — single source of truth
+          // shared with formatDetectionLead, so audit log can never drift from Discord display rules.
+          if (detectedAt) {
+            const leadMs = computeLeadMs(detectedAt, inc.startedAt)
+            if (leadMs !== null) {
+              const result = await appendDetectionLead(env.STATUS_CACHE, {
+                svcId: svc.id, incId: inc.id, leadMs, detectedAt, officialAt: inc.startedAt,
+              })
+              // Tagged return ('persisted' | 'duplicate' | 'failed') — only 'failed' is a real drift signal;
+              // 'duplicate' fires on legitimate idempotent re-runs of the same incident across cron ticks.
+              if (result === 'failed') {
+                console.warn('[cron] detection lead displayed in Discord but NOT persisted to audit log:', { svcId: svc.id, incId: inc.id, leadMs })
+              }
+            }
+          }
         } catch (err) {
           console.error('[cron] detection lead failed:', err instanceof Error ? err.message : err)
         }
@@ -1164,6 +1180,19 @@ export default {
             return null
           })
 
+          // Detection Lead audit log — read today + yesterday keys (DAYS_FOR_DAILY_SUMMARY=2) so entries
+          // from yesterday's 09:00–24:00 window are surfaced. windowMs=24h filters the union to a sliding
+          // 24h window ending now, preventing entries already shown in yesterday's 09:00 summary from being
+          // re-reported today. Internal dedup by (svcId, incId) handles same-incident overlap.
+          // .catch boundary: defensive — readDetectionLeadEntries returns [] internally on every error
+          // path today, but a future refactor introducing a synchronous throw would otherwise crash the
+          // entire daily summary cron. Cheap to keep.
+          const detectionLeadEntries = await readDetectionLeadEntries(env.STATUS_CACHE, new Date(), { days: DAYS_FOR_DAILY_SUMMARY, windowMs: 24 * 3_600_000 })
+            .catch((err) => {
+              console.error('[daily-summary] detection lead read failed:', err instanceof Error ? err.message : err)
+              return []
+            })
+
           const description = buildDailySummary({
             services: dailyServices,
             aiUsage,
@@ -1176,6 +1205,7 @@ export default {
             securityCount,
             vitals: vitalsSummary,
             probeSnapshots,
+            detectionLeadEntries,
           })
 
           if (isCatchUp) console.log(`[daily-summary] catch-up run for ${today}`)
