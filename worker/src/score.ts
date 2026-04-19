@@ -1,6 +1,7 @@
 // AIWatch Score — service reliability composite score (0-100)
 
 import type { ProbeSummary, ServiceStatus } from './types'
+import { INCIDENT_IO_IMPACT_WEIGHTS } from './parsers/impact-weights'
 
 export interface AIWatchScore {
   score: number
@@ -57,8 +58,11 @@ function parseDurationMin(d: string): number {
 }
 
 function scoreToGrade(score: number): 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable' {
-  if (score >= 85) return 'excellent'
-  if (score >= 70) return 'good'
+  // Tightened in #260/#261: excellent 85→90, good 70→75. Counters score inflation
+  // from the weighted+filtered affectedDays — uniform shift up of ~5-15 points needs
+  // the grade ladder to move in lockstep, otherwise everyone drifts to "excellent".
+  if (score >= 90) return 'excellent'
+  if (score >= 75) return 'good'
   if (score >= 55) return 'fair'
   if (score >= 40) return 'degrading'
   return 'unstable'
@@ -105,8 +109,38 @@ export function calculateAIWatchScore(
   const incidents30d = (service.incidents ?? []).filter((i) => i.startedAt >= cutoff)
   const incidentCount = incidents30d.length
 
-  // Affected days: unique dates with incidents (component-structure agnostic)
-  const affectedDays = new Set(incidents30d.map((i) => i.startedAt.slice(0, 10))).size
+  // Affected days — only count incidents with measurable impact (#261).
+  // null-impact entries are informational (component renames, post-mortems) — including
+  // them in affected_days inflates services like cohere/groq whose feeds mix info posts
+  // with real incidents, producing scores ~10pts lower than reality.
+  const impactfulDays = new Set(
+    incidents30d.filter((i) => i.impact != null).map((i) => i.startedAt.slice(0, 10)),
+  )
+  const affectedDays = impactfulDays.size
+
+  // Weighted-day calculation for incidentScore (#260) — keeps consistency with the
+  // Atlassian uptime formula (#259). Per day: take the MAX impact weight (a critical
+  // outage on a day with minor advisories should count as critical, not 1.3 days).
+  // Sum across days yields fractional "effective days" (e.g., 5 minor-only days = 1.5).
+  // Unknown-impact telemetry: parsers other than incident-io don't warn on schema drift,
+  // so this is the catch-all log for new Atlassian impact levels reaching score calc.
+  const dailyMaxWeight = new Map<string, number>()
+  const unknownImpacts = new Set<string>()
+  for (const inc of incidents30d) {
+    if (inc.impact == null) continue
+    const weight = INCIDENT_IO_IMPACT_WEIGHTS[inc.impact]
+    if (weight === undefined) {
+      unknownImpacts.add(String(inc.impact))
+      continue
+    }
+    const day = inc.startedAt.slice(0, 10)
+    const existing = dailyMaxWeight.get(day) ?? 0
+    if (weight > existing) dailyMaxWeight.set(day, weight)
+  }
+  if (unknownImpacts.size > 0) {
+    console.warn(`[calculateAIWatchScore] ${service.id}: unknown impact level(s): ${[...unknownImpacts].join(', ')} — update INCIDENT_IO_IMPACT_WEIGHTS`)
+  }
+  const weightedAffectedDays = Array.from(dailyMaxWeight.values()).reduce((a, b) => a + b, 0)
 
   // MTTR calculation (resolved incidents with positive duration only)
   const durations = incidents30d
@@ -129,7 +163,9 @@ export function calculateAIWatchScore(
     uptimeScore = Math.max(0, Math.min(40, (service.uptime30d! / 100 - 0.95) / 0.05 * 40))
   }
 
-  const incidentScore = 25 * Math.exp(-affectedDays / 10)
+  // Use weighted days so a service with N minor-only days gets less penalty than
+  // a service with N critical days — symmetric with the uptime weight in #259.
+  const incidentScore = 25 * Math.exp(-weightedAffectedDays / 10)
 
   const recoveryScore = mttrHours != null
     ? 15 * Math.exp(-mttrHours / 4)
