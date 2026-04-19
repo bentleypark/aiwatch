@@ -131,6 +131,44 @@ describe('parseAnthropicNews', () => {
   it('returns empty for non-Anthropic HTML', () => {
     expect(parseAnthropicNews('<html><body>Hello</body></html>')).toEqual([])
   })
+
+  it('rejects featured-grid items where the regex matches an inline image URL (sanity.io) instead of the article URL (#275)', () => {
+    // Real production case: featured grid item with an inline `image.url` that
+    // appears before the article `url`. The non-greedy regex captures the image URL,
+    // so we must reject anything that isn't an anthropic.com path.
+    const sanityImageHtml = `<html><script>self.__next_f.push([1,"
+      \\"_type\\":\\"featuredGridLink\\",\\"date\\":\\"2026-04-07\\",\\"summary\\":\\"intro\\",\\"title\\":\\"Introducing Claude Opus 4.7\\",\\"url\\":\\"https://cdn.sanity.io/images/abc/c0af2a56-1000x1000.svg\\"
+      \\"publishedOn\\":\\"2026-04-16T14:30:00.000Z\\",\\"slug\\":{\\"_type\\":\\"slug\\",\\"current\\":\\"claude-opus-4-7\\"},\\"subjects\\":[],\\"title\\":\\"Introducing Claude Opus 4.7\\"
+    "])</script></html>`
+    const entries = parseAnthropicNews(sanityImageHtml)
+    // Only the slug-based news-list entry should be present, with the canonical /news/ URL
+    expect(entries).toHaveLength(1)
+    expect(entries[0].url).toBe('https://www.anthropic.com/news/claude-opus-4-7')
+    // No CDN asset URL leaks through
+    for (const e of entries) {
+      expect(e.url).not.toMatch(/cdn\.sanity\.io|\.svg$/)
+    }
+  })
+
+  it('rejects featured-grid item with sanity.io URL even when no slug-list fallback exists (#275 isolation)', () => {
+    // Locks down the featRe rejection path independently — without a slug-list entry
+    // to recover via, a regression that disables the URL filter would produce a bogus
+    // entry instead of cleanly returning 0. The combined-fallback test alone would
+    // still pass length=1 if the filter broke and slug recovered.
+    const featuredOnlyBadUrl = `<html><script>self.__next_f.push([1,"
+      \\"_type\\":\\"featuredGridLink\\",\\"date\\":\\"2026-04-07\\",\\"summary\\":\\"x\\",\\"title\\":\\"Bad URL Item\\",\\"url\\":\\"https://cdn.sanity.io/images/abc/x.svg\\"
+    "])</script></html>`
+    expect(parseAnthropicNews(featuredOnlyBadUrl)).toHaveLength(0)
+  })
+
+  it('rejects protocol-relative URLs (//host/path) — would otherwise produce double-prefixed broken URL', () => {
+    // Without the `!startsWith('//')` guard, `urlPath = '//evil.com/x'` passes the
+    // `startsWith('/')` check, then gets prefixed to `https://www.anthropic.com//evil.com/x`.
+    const protocolRelHtml = `<html><script>self.__next_f.push([1,"
+      \\"_type\\":\\"featuredGridLink\\",\\"date\\":\\"2026-04-07\\",\\"summary\\":\\"x\\",\\"title\\":\\"Bad PR URL\\",\\"url\\":\\"//evil.com/news/x\\"
+    "])</script></html>`
+    expect(parseAnthropicNews(protocolRelHtml)).toHaveLength(0)
+  })
 })
 
 describe('isRelevantEntry', () => {
@@ -210,14 +248,56 @@ describe('isRelevantEntry', () => {
 })
 
 describe('formatChangelogSection', () => {
-  it('formats entries with date and source', () => {
+  it('renders titles as Discord markdown links to the source URL (#273)', () => {
     const entries: ChangelogEntry[] = [
-      { source: 'openai', title: 'GPT-5 released', url: 'https://openai.com', date: '2026-04-10T00:00:00Z' },
-      { source: 'anthropic', title: 'Introducing Claude Sonnet 4.6', url: 'https://anthropic.com', date: '2026-04-09T00:00:00Z' },
+      { source: 'openai', title: 'GPT-5 released', url: 'https://openai.com/blog/gpt-5', date: '2026-04-10T00:00:00Z' },
+      { source: 'anthropic', title: 'Introducing Claude Sonnet 4.6', url: 'https://www.anthropic.com/news/claude-sonnet-4-6', date: '2026-04-09T00:00:00Z' },
     ]
     const result = formatChangelogSection(entries)
-    expect(result).toContain('OpenAI: GPT-5 released (4/10)')
-    expect(result).toContain('Anthropic: Introducing Claude Sonnet 4.6 (4/9)')
+    // Markdown link format: [title](url)
+    expect(result).toContain('OpenAI: [GPT-5 released](https://openai.com/blog/gpt-5) (4/10)')
+    expect(result).toContain('Anthropic: [Introducing Claude Sonnet 4.6](https://www.anthropic.com/news/claude-sonnet-4-6) (4/9)')
+  })
+
+  it('falls back to plain title when url is empty (defensive)', () => {
+    const entries: ChangelogEntry[] = [
+      { source: 'openai', title: 'No URL entry', url: '', date: '2026-04-10T00:00:00Z' },
+    ]
+    const result = formatChangelogSection(entries)
+    expect(result).toContain('OpenAI: No URL entry (4/10)')
+    // No empty markdown link rendered
+    expect(result).not.toContain('](')
+  })
+
+  it('falls back to plain title when url is whitespace-only (would render broken markdown)', () => {
+    const entries: ChangelogEntry[] = [
+      { source: 'openai', title: 'Whitespace URL', url: '   ', date: '2026-04-10T00:00:00Z' },
+    ]
+    const result = formatChangelogSection(entries)
+    expect(result).toContain('OpenAI: Whitespace URL (4/10)')
+    expect(result).not.toContain('](')
+  })
+
+  it('escapes ] in title to prevent markdown link-text early termination', () => {
+    const entries: ChangelogEntry[] = [
+      { source: 'openai', title: '[Update] GPT-5 ships', url: 'https://openai.com/blog/x', date: '2026-04-10T00:00:00Z' },
+    ]
+    const result = formatChangelogSection(entries)
+    // The literal `]` must be escaped so Discord doesn't terminate the link at "Update]"
+    expect(result).toContain('[[Update\\] GPT-5 ships](https://openai.com/blog/x)')
+  })
+
+  it('falls back to plain title when url contains ( ) or whitespace (would break Discord link parser)', () => {
+    const entries: ChangelogEntry[] = [
+      { source: 'openai', title: 'URL with paren', url: 'https://en.wikipedia.org/wiki/Foo_(bar)', date: '2026-04-10T00:00:00Z' },
+      { source: 'openai', title: 'URL with space', url: 'https://example.com/has space', date: '2026-04-09T00:00:00Z' },
+    ]
+    const result = formatChangelogSection(entries)
+    // Neither URL should appear inside markdown link syntax
+    expect(result).toContain('OpenAI: URL with paren (4/10)')
+    expect(result).toContain('OpenAI: URL with space (4/9)')
+    expect(result).not.toContain('wikipedia.org')
+    expect(result).not.toContain('example.com')
   })
 
   it('returns fallback message for empty entries', () => {
