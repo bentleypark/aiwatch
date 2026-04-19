@@ -273,6 +273,7 @@ When adding a new monitored service, update ALL of the following:
 | `kv_limit_alert` | `"1"` | 5min | ~1 | KV write limit exceeded cooldown |
 | `daily-summary:{YYYY-MM-DD}` | `"1"` | 7d | 1 | Daily summary execution marker (prevents duplicate send + enables catch-up) |
 | `changelog:entries` | `ChangelogEntry[]` JSON | 14d | ~3 | Accumulated changelog entries from RSS + HTML sources (cleared after weekly briefing) |
+| `changelog:last-fetch:{source}` | ISO timestamp string | 7d | ~96 | Per-source last-successful-fetch marker (#274) — weekly briefing surfaces sources stale >2d so silent collection gaps don't go unnoticed |
 | `weekly-briefing:{YYYY-MM-DD}` | `"1"` | 7d | 1/week | Weekly briefing execution dedup marker |
 | `vitals:{YYYY-MM-DD}` | `{ count, allValues }` JSON | 3d | per visit (100%) | Web Vitals daily aggregation (LCP, FCP, TTFB, CLS, INP) |
 | `vitals:history:{YYYY-MM-DD}` | `{ count, p75 }` JSON | 90d | 1 | Archived yesterday's vitals p75 summary |
@@ -281,7 +282,7 @@ When adding a new monitored service, update ALL of the following:
 | `platform:status:{platformId}` | `PlatformStatus` JSON | 10min | ~288 | Status page platform health (metastatuspage.com for Atlassian) |
 | `alerted:platform:{platformId}` | `"1"` | 2h | ~1 | Platform outage alert dedup |
 
-**Free tier budget**: 1,000 writes/day. Estimated total: ~845-958 writes/day + changelog (~3/day) + weekly briefing (~1/week) + vitals (1 per visit) + platform status (~1/cycle when changed) + recovery markers (~2-5/day). Monitor if daily visits exceed ~50.
+**Free tier budget**: 1,000 writes/day. Estimated total: ~845-958 writes/day + changelog (~3/day) + changelog last-fetch markers (~96/day, 4 sources × 24 hourly cron, #274) + weekly briefing (~1/week) + vitals (1 per visit) + platform status (~1/cycle when changed) + recovery markers (~2-5/day). Monitor if daily visits exceed ~50.
 
 ### Directory Layout
 ```
@@ -313,7 +314,7 @@ worker/
     alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts, formatDetectionLead)
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText, buildGroupedFallbackText for multi-category incidents)
     ai-analysis.ts # Hybrid AI incident analysis — Gemma 4 26B (Workers AI) primary + Claude Sonnet (AI Gateway) fallback (system/user prompt, needsFallback assessment, TTL refresh, re-analysis, incidentId dedup, timeline context, boilerplate filtering, formatRecoveryDisplay)
-    changelog.ts # Changelog/news collection (OpenAI blog RSS, Google AI blog RSS, Anthropic /news HTML parsing)
+    changelog.ts # Changelog/news collection (OpenAI blog RSS, Google AI blog RSS, Anthropic /news HTML parsing) — 15s timeout + 1 retry on transient errors, per-source last-fetch KV markers for stale-source detection (#274)
     weekly-briefing.ts # Weekly Discord briefing (changelog + incidents + stability trends)
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit, Web Vitals)
     monthly-archive.ts # Monthly reliability archive (uptime, score, incidents, latency per service, permanent KV)
