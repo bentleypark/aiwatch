@@ -10,6 +10,13 @@ const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 // Keep in sync with worker/src/fallback.ts and src/utils/constants.js
 const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
 
+// Per-isolate dedup for repeated ops signals — re-fires on cold start / per isolate in
+// the fleet, which gives operators enough visibility on deploy without log-volume
+// scaling with request rate.
+const warnedExcludedSlugs = new Set<string>()       // target passed isFinite but failed hasReliableData
+const warnedMissingSlugs = new Set<string>()        // SLUG_TO_SERVICE id not present in API response
+const warnedDroppedScoreKeys = new Set<string>()    // services with non-finite aiwatchScore in API response
+
 export default async function handler(req: Request) {
   try {
     const url = new URL(req.url)
@@ -51,14 +58,62 @@ export default async function handler(req: Request) {
         const target = allServices.find(s => s.id === entry.id)
         if (target) {
           serviceData = target
+        } else if (!warnedMissingSlugs.has(slug)) {
+          // Hard config drift: slug references an id that doesn't exist in the API response.
+          // Page renders degraded (no status/rank/fallbacks) — log so operators can reconcile.
+          warnedMissingSlugs.add(slug)
+          console.error(`[is-down/${slug}] service id "${entry.id}" not in API response — SLUG_TO_SERVICE is out of sync with worker/src/services.ts`)
         }
 
-        // Calculate rank by AIWatch Score
-        if (target?.aiwatchScore != null) {
-          const scored = allServices.filter(s => s.aiwatchScore != null).sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0))
-          const rank = scored.findIndex(s => s.id === entry.id) + 1
-          if (rank > 0) (serviceData as any).rank = rank;
-          (serviceData as any).totalRanked = scored.length
+        // Calculate rank by AIWatch Score — match dashboard logic (src/pages/Ranking.jsx):
+        // 1. Exclude estimate-only services with 0 incidents (insufficient data)
+        // 2. Use competition ranking (1, 2, 4=, 4=, 4=, 7=, ...) based on rounded score,
+        //    not array index — otherwise tied services display different ranks per service
+        if (Number.isFinite(target?.aiwatchScore)) {
+          const hasReliableData = (s: { uptimeSource?: string; incidents?: unknown[] }) =>
+            !(s.uptimeSource === 'estimate' && (s.incidents ?? []).length === 0)
+          const targetScore = Math.round(target!.aiwatchScore as number)
+          if (!hasReliableData(target!)) {
+            // Target itself fails the reliability filter — dedup'd to avoid log spam
+            if (!warnedExcludedSlugs.has(slug)) {
+              warnedExcludedSlugs.add(slug)
+              console.warn(`[is-down/${slug}] target excluded from ranked set (estimate source with 0 incidents) — check SLUG_TO_SERVICE vs uptimeSource`)
+            }
+          } else {
+            // Use Number.isFinite instead of != null so NaN scores (from a corrupt pipeline)
+            // don't silently corrupt the sort order or tie-count. Dedup by dropped-ids set
+            // so a persistently-NaN service doesn't spam logs on every request.
+            const dropped = allServices.filter(s => s.aiwatchScore != null && !Number.isFinite(s.aiwatchScore))
+            if (dropped.length > 0) {
+              const key = dropped.map(d => d.id).sort().join(',')
+              if (!warnedDroppedScoreKeys.has(key)) {
+                warnedDroppedScoreKeys.add(key)
+                console.error(`[is-down] non-finite aiwatchScore for: ${key}`)
+              }
+            }
+            const scored = allServices
+              .filter(s => Number.isFinite(s.aiwatchScore) && hasReliableData(s))
+              .sort((a, b) => (b.aiwatchScore as number) - (a.aiwatchScore as number))
+            // findIndex by rounded score (not id) — gives the first-tied position, matching competition ranking
+            const rank = scored.findIndex(s => Math.round(s.aiwatchScore as number) === targetScore) + 1
+            const isTied = scored.filter(s => Math.round(s.aiwatchScore as number) === targetScore).length > 1
+            if (rank > 0) {
+              (serviceData as any).rank = rank;
+              (serviceData as any).rankTied = isTied;
+              (serviceData as any).totalRanked = scored.length
+            } else {
+              // Should be unreachable — target passed all filters but isn't in scored.
+              // Log so the asymmetry between target-check and filter-check is visible.
+              console.error(
+                `[is-down/${slug}] rank lookup failed despite passing filters: ` +
+                `targetScore=${targetScore}, scoredLen=${scored.length}, ` +
+                `sampleScores=${scored.slice(0, 5).map(s => Math.round(s.aiwatchScore as number)).join(',')}`,
+              )
+            }
+          }
+        } else if (target?.aiwatchScore != null) {
+          // Target has a non-null but non-finite score (NaN/Infinity) — hard pipeline bug.
+          console.error(`[is-down/${slug}] target.aiwatchScore is not finite:`, target.aiwatchScore)
         }
 
         // Build fallbacks from same data (tier-based priority for API services)

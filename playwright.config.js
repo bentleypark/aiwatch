@@ -25,12 +25,13 @@ export default defineConfig({
     },
     {
       name: 'is-down',
-      use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:3000' },
+      // Port matches CLAUDE.md "Local verification by page type" table — `vercel dev --listen 3333`
+      use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:3333' },
       testMatch: /is-down\.spec/,
     },
     {
       name: 'intro',
-      use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:3000' },
+      use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:3333' },
       testMatch: /intro\.spec/,
     },
   ],
