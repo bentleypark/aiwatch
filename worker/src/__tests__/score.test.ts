@@ -67,6 +67,72 @@ describe('calculateAIWatchScore', () => {
     expect(r5days.metrics.affectedDays30d).toBe(5)
   })
 
+  it('excludes null-impact incidents from affectedDays (#261)', () => {
+    // Mix: 3 informational (null) + 2 major. Only the major days should count.
+    const incidents = [
+      { ...makeIncident(1), impact: null as const },
+      { ...makeIncident(2), impact: null as const },
+      { ...makeIncident(3), impact: null as const },
+      makeIncident(10), // major
+      makeIncident(11), // major
+    ]
+    const r = scoreUnprobed(makeSvc({ incidents }))
+    // affectedDays30d should reflect the 2 impactful days, NOT 5
+    expect(r.metrics.affectedDays30d).toBe(2)
+    // incidentScore should match a 2-major-day calculation: 25 × exp(-2/10) ≈ 20.5
+    expect(r.breakdown.incidents).toBeCloseTo(25 * Math.exp(-2 / 10), 1)
+  })
+
+  it('null-only feed treats incidents as if there were none (#261)', () => {
+    const incidents = [
+      { ...makeIncident(1), impact: null as const },
+      { ...makeIncident(2), impact: null as const },
+      { ...makeIncident(5), impact: null as const },
+    ]
+    const r = scoreUnprobed(makeSvc({ incidents }))
+    expect(r.metrics.affectedDays30d).toBe(0)
+    expect(r.breakdown.incidents).toBe(25) // full credit
+  })
+
+  it('weights minor-only days at 0.3 vs major-only days at 1.0 (#260)', () => {
+    // 5 days of minor incidents vs 5 days of major incidents.
+    // Weighted: minor-only = 5 × 0.3 = 1.5 effective days; major-only = 5 × 1.0 = 5.
+    // incidentScore: minor 25×exp(-1.5/10)=21.5, major 25×exp(-5/10)=15.2 → minor higher.
+    const minorIncidents = Array.from({ length: 5 }, (_, i) => ({ ...makeIncident(i + 1), impact: 'minor' as const }))
+    const majorIncidents = Array.from({ length: 5 }, (_, i) => makeIncident(i + 1))
+    const minorR = scoreUnprobed(makeSvc({ incidents: minorIncidents }))
+    const majorR = scoreUnprobed(makeSvc({ incidents: majorIncidents }))
+    expect(minorR.breakdown.incidents).toBeGreaterThan(majorR.breakdown.incidents)
+    // Same affectedDays30d (raw count of impactful days) — only the score weight differs
+    expect(minorR.metrics.affectedDays30d).toBe(5)
+    expect(majorR.metrics.affectedDays30d).toBe(5)
+    // Weighted formula: 5 × 0.3 = 1.5 → 25 × exp(-1.5/10) ≈ 21.52
+    expect(minorR.breakdown.incidents).toBeCloseTo(25 * Math.exp(-1.5 / 10), 1)
+  })
+
+  it('per day uses MAX impact weight (a critical+minor day counts as critical, #260)', () => {
+    // Two services each with 3 days of incidents:
+    // A: 3 days of minor only → 3 × 0.3 = 0.9 effective
+    // B: 3 days each with both critical AND minor → max-wins → 3 × 1.0 = 3.0 effective
+    const minorOnly = [
+      { ...makeIncident(1), impact: 'minor' as const },
+      { ...makeIncident(2), impact: 'minor' as const },
+      { ...makeIncident(3), impact: 'minor' as const },
+    ]
+    const criticalPlusMinor = [
+      makeIncident(1), { ...makeIncident(1), impact: 'minor' as const },
+      makeIncident(2), { ...makeIncident(2), impact: 'minor' as const },
+      makeIncident(3), { ...makeIncident(3), impact: 'minor' as const },
+    ]
+    const a = scoreUnprobed(makeSvc({ incidents: minorOnly }))
+    const b = scoreUnprobed(makeSvc({ incidents: criticalPlusMinor }))
+    // Minor-only must score better than mixed major+minor on the same days
+    expect(a.breakdown.incidents).toBeGreaterThan(b.breakdown.incidents)
+    // Both report affectedDays30d=3 (raw day count)
+    expect(a.metrics.affectedDays30d).toBe(3)
+    expect(b.metrics.affectedDays30d).toBe(3)
+  })
+
   it('calculates recovery_score on 15-pt scale', () => {
     expect(scoreUnprobed(makeSvc({ incidents: [] })).breakdown.recovery).toBe(15)
   })
@@ -92,9 +158,10 @@ describe('calculateAIWatchScore', () => {
 
   it('returns estimated score when no uptime and no incidents', () => {
     // Base = (36 + 25 + 15) * 0.9 = 68.4 → scaled to 100: 68.4 * 1.25 = 85.5 → 86
+    // After #260/#261 threshold tightening (excellent ≥90), 86 is 'good' not 'excellent'
     const result = scoreUnprobed(makeSvc({ uptime30d: null, incidents: [] }))
     expect(result.score).toBe(86)
-    expect(result.grade).toBe('excellent')
+    expect(result.grade).toBe('good')
     expect(result.confidence).toBe('medium')
     expect(result.breakdown.uptime).toBeNull()
   })
@@ -251,11 +318,24 @@ describe('calculateAIWatchScore', () => {
   })
 
   // ── Grade transitions ──
-  it('assigns correct grades', () => {
+  it('assigns correct grades with #260/#261 thresholds (excellent ≥90, good ≥75)', () => {
     expect(scoreUnprobed(makeSvc({ uptime30d: 100 })).grade).toBe('excellent')
     expect(scoreUnprobed(makeSvc({
       uptime30d: 99, incidents: Array.from({ length: 10 }, (_, i) => makeIncident(i + 1))
     })).grade).not.toBe('excellent')
+
+    // Boundary: score 89 → good, score 90 → excellent
+    // Boundary: score 74 → fair, score 75 → good
+    // Construct precise scores via uptime tuning. baseScore × 1.25 for unprobed.
+    // For 90: need baseScore=72. uptime=32 (99%) + incidents=25 + recovery=15 = 72 ✓
+    const ninetyExact = scoreUnprobed(makeSvc({ uptime30d: 99 }))
+    expect(ninetyExact.score).toBe(90)
+    expect(ninetyExact.grade).toBe('excellent')
+
+    // 89: baseScore=71.2. Get there via uptime=31.2 (98.9%) + 25 + 15
+    const eightyNine = scoreUnprobed(makeSvc({ uptime30d: 98.9 }))
+    expect(eightyNine.score).toBe(89)
+    expect(eightyNine.grade).toBe('good')
   })
 })
 

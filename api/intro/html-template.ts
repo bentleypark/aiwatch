@@ -695,8 +695,8 @@ export function renderLandingPage(opts: LandingOptions): string {
           </div>
           <div class="mock-card-score">
             <span class="mock-card-score-label">Score</span>
-            <div class="mock-card-score-bar"><div class="mock-card-score-fill" style="width:86%;background:var(--green);"></div></div>
-            <span class="mock-card-score-badge" style="background:var(--green);color:var(--bg0);">86 excellent</span>
+            <div class="mock-card-score-bar"><div class="mock-card-score-fill" style="width:92%;background:var(--green);"></div></div>
+            <span class="mock-card-score-badge" style="background:var(--green);color:var(--bg0);">92 excellent</span>
           </div>
           <div class="mock-history">
             <span style="height:17px;background:var(--green);opacity:0.6;"></span><span style="height:13px;background:var(--green);opacity:0.6;"></span>
@@ -716,7 +716,7 @@ export function renderLandingPage(opts: LandingOptions): string {
             <span style="height:14px;background:var(--green);opacity:0.6;"></span><span style="height:18px;background:var(--green);opacity:0.6;"></span>
           </div>
           <div class="mock-card-compact" style="display:none;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:10px;color:var(--text2);">
-            <span>99.99% · 0 inc · 86 excellent</span>
+            <span>99.99% · 0 inc · 92 excellent</span>
           </div>
         </div>
         <!-- Gemini API — operational -->

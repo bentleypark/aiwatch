@@ -306,7 +306,7 @@ worker/
     services.ts # Service configs + fetch orchestrator + status determination
     types.ts    # Shared types (ServiceStatus, Incident, etc.)
     utils.ts    # Shared utilities (formatDuration, fetchWithTimeout, sanitize)
-    score.ts    # AIWatch Score — composite reliability (Uptime 40 + Incidents 25 + Recovery 15 + Responsiveness 20 from probe p50/CV; 80→100 rescale + 5% penalty for probe-less services, insufficient-data penalty for <7d probe samples)
+    score.ts    # AIWatch Score — composite reliability (Uptime 40 + Incidents 25 + Recovery 15 + Responsiveness 20 from probe p50/CV; 80→100 rescale + 5% penalty for probe-less services, insufficient-data penalty for <7d probe samples). Incidents component uses Atlassian-weighted affected days (#260/#261): null impact excluded, per-day max impact weight (critical/major=1.0, minor=0.3) — symmetric with uptime weighting. Grade thresholds tightened to absorb the upward score shift: excellent ≥90, good ≥75, fair ≥55, degrading ≥40, unstable <40
     badge.ts    # SVG badge generator
     og.ts       # OG image SVG generator (1200×630 for social share)
     og-render.ts # SVG → PNG conversion (resvg-wasm, Inter font from CDN)

@@ -40,8 +40,8 @@ export default function AboutScore() {
   const { t } = useLang()
 
   const grades = [
-    { min: 85, key: 'excellent' },
-    { min: 70, key: 'good' },
+    { min: 90, key: 'excellent' },
+    { min: 75, key: 'good' },
     { min: 55, key: 'fair' },
     { min: 40, key: 'degrading' },
     { min: 0, key: 'unstable' },
@@ -102,7 +102,7 @@ export default function AboutScore() {
       {/* Incident Score */}
       <Section title={t('aboutScore.incidentSection')}>
         <div className="mono text-[11px] text-[var(--text1)] bg-[var(--bg2)] rounded p-3" style={{ marginBottom: '12px' }}>
-          25 × exp(−affected_days / 10)
+          25 × exp(−weighted_days / 10)
         </div>
         <FormulaTable rows={[
           [d(0), '25.0'],
@@ -111,6 +111,9 @@ export default function AboutScore() {
           [d(18), '4.1'],
           [d(30), '1.2'],
         ]} />
+        <p className="text-[10px] text-[var(--text2)]" style={{ lineHeight: 1.5, marginTop: '8px', fontStyle: 'italic' }}>
+          {t('aboutScore.incidentTableNote')}
+        </p>
         <div className="bg-[var(--bg2)] border border-[var(--border)] rounded-lg" style={{ padding: '12px', marginTop: '12px' }}>
           <div className="mono text-[10px] text-[var(--teal)] font-medium" style={{ marginBottom: '6px' }}>
             {t('aboutScore.whyDays')}
