@@ -1,5 +1,17 @@
-import { describe, it, expect } from 'vitest'
-import { parseRssEntries, parseAnthropicNews, isRelevantEntry, formatChangelogSection, CHANGELOG_SOURCES, type ChangelogEntry } from '../changelog'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import {
+  parseRssEntries,
+  parseAnthropicNews,
+  isRelevantEntry,
+  formatChangelogSection,
+  fetchWithRetry,
+  getStaleSources,
+  formatStaleSourcesWarning,
+  lastFetchKey,
+  CHANGELOG_SOURCES,
+  type ChangelogEntry,
+  type StaleSourceInfo,
+} from '../changelog'
 
 describe('CHANGELOG_SOURCES', () => {
   it('has 4 sources (3 pilot + copilot)', () => {
@@ -232,5 +244,180 @@ describe('formatChangelogSection', () => {
     expect(lines).toHaveLength(8)
     // First line should be most recent
     expect(lines[0]).toContain('4/12')
+  })
+})
+
+describe('fetchWithRetry (#274)', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('returns the response on first success without retrying', async () => {
+    const mock = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }))
+    vi.stubGlobal('fetch', mock)
+    const res = await fetchWithRetry('https://example.com', {})
+    expect(res.status).toBe(200)
+    expect(mock).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries once on 5xx then returns the second response', async () => {
+    const mock = vi.fn()
+      .mockResolvedValueOnce(new Response('upstream', { status: 503 }))
+      .mockResolvedValueOnce(new Response('ok', { status: 200 }))
+    vi.stubGlobal('fetch', mock)
+    const res = await fetchWithRetry('https://example.com', {})
+    expect(res.status).toBe(200)
+    expect(mock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does NOT retry on 4xx — those are permanent', async () => {
+    const mock = vi.fn().mockResolvedValue(new Response('not found', { status: 404 }))
+    vi.stubGlobal('fetch', mock)
+    const res = await fetchWithRetry('https://example.com', {})
+    expect(res.status).toBe(404)
+    expect(mock).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries once on network error then rethrows if second attempt also fails', async () => {
+    const mock = vi.fn().mockRejectedValue(new Error('network reset'))
+    vi.stubGlobal('fetch', mock)
+    await expect(fetchWithRetry('https://example.com', {})).rejects.toThrow('network reset')
+    expect(mock).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries once on AbortError (timeout) then succeeds', async () => {
+    const mock = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error('timeout'), { name: 'AbortError' }))
+      .mockResolvedValueOnce(new Response('ok', { status: 200 }))
+    vi.stubGlobal('fetch', mock)
+    const res = await fetchWithRetry('https://example.com', {})
+    expect(res.status).toBe(200)
+    expect(mock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does NOT retry on permanent errors (TypeError) — those are bugs, retry just doubles waste', async () => {
+    const mock = vi.fn().mockRejectedValue(new TypeError('Failed to construct URL'))
+    vi.stubGlobal('fetch', mock)
+    await expect(fetchWithRetry('bad url', {})).rejects.toThrow('Failed to construct URL')
+    expect(mock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does NOT retry on Worker runtime hard limits (CPU/subrequest depth/script will never generate)', async () => {
+    const mock = vi.fn().mockRejectedValue(new Error('Worker exceeded CPU time limit'))
+    vi.stubGlobal('fetch', mock)
+    await expect(fetchWithRetry('https://example.com', {})).rejects.toThrow('CPU time limit')
+    expect(mock).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries on transient runtime errors NOT covered by old narrow regex (e.g., DNS, "Internal error 1042")', async () => {
+    // Cloudflare workers often surface transient upstream issues with messages
+    // like "Internal error 1042" or "Connection refused" that don't include
+    // the words "network/reset/socket". Inverse policy treats these as transient.
+    const mock = vi.fn()
+      .mockRejectedValueOnce(new Error('Internal error 1042'))
+      .mockResolvedValueOnce(new Response('ok', { status: 200 }))
+    vi.stubGlobal('fetch', mock)
+    const res = await fetchWithRetry('https://example.com', {})
+    expect(res.status).toBe(200)
+    expect(mock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('getStaleSources / formatStaleSourcesWarning (#274)', () => {
+  // Minimal in-memory KV mock — only needs `.get()` for getStaleSources
+  const makeKV = (data: Record<string, string>): KVNamespace =>
+    ({ get: async (key: string) => data[key] ?? null } as unknown as KVNamespace)
+
+  it('returns empty when all sources have a recent last-fetch timestamp', async () => {
+    const now = Date.now()
+    const recentIso = new Date(now - 3600_000).toISOString() // 1h ago
+    const data: Record<string, string> = {}
+    for (const src of CHANGELOG_SOURCES) data[lastFetchKey(src.id)] = recentIso
+    const stale = await getStaleSources(makeKV(data))
+    expect(stale).toEqual([])
+  })
+
+  it('reports source as stale when last-fetch is older than the threshold', async () => {
+    const oldIso = new Date(Date.now() - 3 * 86_400_000).toISOString() // 3 days ago
+    const recentIso = new Date(Date.now() - 3600_000).toISOString()
+    const data: Record<string, string> = {
+      [lastFetchKey('openai')]: recentIso,
+      [lastFetchKey('google')]: recentIso,
+      [lastFetchKey('anthropic')]: oldIso, // 3d > 2d threshold → stale
+      [lastFetchKey('copilot')]: recentIso,
+    }
+    const stale = await getStaleSources(makeKV(data))
+    expect(stale).toHaveLength(1)
+    expect(stale[0].source).toBe('anthropic')
+    expect(stale[0].hoursStale).toBeGreaterThanOrEqual(72)
+  })
+
+  it('reports source with no record at all (TTL expired or never fetched)', async () => {
+    const stale = await getStaleSources(makeKV({}))
+    // All 4 sources missing → all stale with hoursStale=null
+    expect(stale).toHaveLength(CHANGELOG_SOURCES.length)
+    for (const s of stale) expect(s.hoursStale).toBeNull()
+  })
+
+  it('skips source (does not report stale) when KV read throws — distinguishes read failure from missing record', async () => {
+    // KV mock that throws for every get — simulates KV rate-limit / replication error
+    const throwingKV: KVNamespace = {
+      get: () => Promise.reject(new Error('KV temporary failure')),
+    } as unknown as KVNamespace
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const stale = await getStaleSources(throwingKV)
+      // Read failures must NOT raise false alarms — log + skip
+      expect(stale).toHaveLength(0)
+      // But must still log so the failure is visible
+      expect(warnSpy).toHaveBeenCalled()
+      const messages = warnSpy.mock.calls.map(c => String(c[0]))
+      expect(messages.some(m => m.includes('stale check kv read failed'))).toBe(true)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('logs and reports stale (no record) when last-fetch timestamp is corrupt', async () => {
+    const data: Record<string, string> = {
+      [lastFetchKey('openai')]: 'not-a-valid-iso',
+      [lastFetchKey('google')]: new Date(Date.now() - 3600_000).toISOString(),
+      [lastFetchKey('anthropic')]: new Date(Date.now() - 3600_000).toISOString(),
+      [lastFetchKey('copilot')]: new Date(Date.now() - 3600_000).toISOString(),
+    }
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const stale = await getStaleSources(makeKV(data))
+      // Corrupt openai is reported as stale with hoursStale=null
+      const openai = stale.find((s) => s.source === 'openai')
+      expect(openai).toBeDefined()
+      expect(openai!.hoursStale).toBeNull()
+      // Corruption is logged distinctly so operators can investigate
+      const corruptLogs = warnSpy.mock.calls
+        .map(c => String(c[0]))
+        .filter(m => m.includes('corrupted last-fetch ts'))
+      expect(corruptLogs).toHaveLength(1)
+      expect(corruptLogs[0]).toContain('openai')
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('returns empty when KV is null (no environment)', async () => {
+    expect(await getStaleSources(null)).toEqual([])
+  })
+
+  it('formatStaleSourcesWarning returns empty string when nothing is stale', () => {
+    expect(formatStaleSourcesWarning([])).toBe('')
+  })
+
+  it('formatStaleSourcesWarning produces a single-line warning with names + ages', () => {
+    const stale: StaleSourceInfo[] = [
+      { source: 'anthropic', name: 'Anthropic', hoursStale: 72 },
+      { source: 'google', name: 'Google AI', hoursStale: null },
+    ]
+    const out = formatStaleSourcesWarning(stale)
+    expect(out).toContain('⚠️')
+    expect(out).toContain('Anthropic (last fetched 3d 0h ago)')
+    expect(out).toContain('Google AI (no fetch record)')
+    expect(out).toContain('entries may be missing')
   })
 })

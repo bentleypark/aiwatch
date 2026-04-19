@@ -1,8 +1,8 @@
 // Weekly Briefing — Discord summary every Sunday UTC 00:00 (KST 09:00)
 // Combines changelog RSS detection + incident summary + stability trends
 
-import type { ChangelogEntry } from './changelog'
-import { formatChangelogSection } from './changelog'
+import type { ChangelogEntry, StaleSourceInfo } from './changelog'
+import { formatChangelogSection, formatStaleSourcesWarning } from './changelog'
 
 export interface WeeklyIncidentSummary {
   serviceId: string
@@ -31,6 +31,8 @@ export interface WeeklyBriefingData {
   incidents: WeeklyIncidentSummary[]
   stabilityChanges: WeeklyStabilityChange[]
   security?: WeeklySecuritySummary
+  /** Per-source last-fetch staleness — surfaces silent collection gaps (#274) */
+  staleSources?: StaleSourceInfo[]
 }
 
 /**
@@ -125,8 +127,10 @@ export function buildWeeklyBriefing(data: WeeklyBriefingData): string {
   const lines: string[] = []
   const dateRange = formatDateRange(data.weekStart, data.weekEnd)
 
-  // Section 1: Changelog
+  // Section 1: Changelog (with stale-source warning when applicable, #274)
   lines.push(`\n🔄 **Service Changes**`)
+  const staleWarning = formatStaleSourcesWarning(data.staleSources ?? [])
+  if (staleWarning) lines.push(staleWarning)
   lines.push(formatChangelogSection(data.changelog))
 
   // Section 2: Incident Summary

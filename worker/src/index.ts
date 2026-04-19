@@ -685,7 +685,7 @@ import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSec
 import { detectSecurityAlerts, formatSecurityDigest } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow } from './daily-summary'
-import { collectChangelogs } from './changelog'
+import { collectChangelogs, getStaleSources } from './changelog'
 import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
@@ -979,7 +979,9 @@ export default {
             }
           } catch { console.warn('[cron] security summary list failed') }
 
-          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, security })
+          // Per-source last-fetch staleness check — surfaces silent collection gaps (#274)
+          const staleSources = await getStaleSources(env.STATUS_CACHE).catch(() => [])
+          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, security, staleSources })
           await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
             title: `📋 Weekly Briefing (${weekStart} ~ ${weekEnd})`,
             description: briefing,

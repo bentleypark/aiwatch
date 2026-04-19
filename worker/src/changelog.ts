@@ -117,14 +117,61 @@ export function parseAnthropicNews(html: string): ChangelogEntry[] {
   return entries
 }
 
+/** Per-source fetch timeout. Anthropic /news is ~350KB Next.js SSR — 8s was too aggressive (#274). */
+const FETCH_TIMEOUT_MS = 15_000
+
+/**
+ * Inverse policy: maintain a small allowlist of *permanent* errors and treat
+ * everything else as transient. Cost of an extra retry on a non-retriable error
+ * is one wasted fetch (~15s); cost of NOT retrying a transient runtime error
+ * (DNS blip, "Internal error 1042", connect refused, etc.) is a silently dropped
+ * source for the cycle, which silently propagates into stale-source warnings.
+ */
+function isTransientError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  // Programming bugs — never retry, would just double the wall-clock waste
+  if (err instanceof TypeError || err instanceof SyntaxError || err instanceof RangeError) return false
+  // Worker runtime hard limits — retry would either repeat or be killed by the runtime
+  if (/subrequest depth|CPU time limit|script will never generate/i.test(err.message)) return false
+  // Everything else (Abort/Timeout/NetworkError, DNS, connect-refused, transient 1042, etc.)
+  return true
+}
+
+/**
+ * Fetch with one retry on transient failure (timeout / 5xx / network error).
+ * 4xx fails fast — those are permanent (auth/path bugs that retry won't fix).
+ * Permanent thrown errors (TypeError, RangeError, etc.) also fail fast — retrying
+ * a programming bug just doubles the wall-clock waste.
+ */
+export async function fetchWithRetry(url: string, headers: Record<string, string>): Promise<Response> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+      if (res.status >= 500 && attempt === 0) {
+        // Log so we have forensic trail when retries quietly mask flapping upstreams.
+        console.warn(`[changelog] ${url} returned HTTP ${res.status} on attempt 0, retrying`)
+        res.body?.cancel()
+        continue
+      }
+      return res
+    } catch (err) {
+      if (attempt === 0 && isTransientError(err)) {
+        console.warn(`[changelog] transient fetch error on attempt 0, retrying:`, err instanceof Error ? err.message : err)
+        continue
+      }
+      throw err
+    }
+  }
+  throw new Error('unreachable') // satisfies TS — loop above always returns or throws
+}
+
 /**
  * Fetch and parse a single changelog source.
  * Returns relevant entries from the last 7 days.
  */
 async function fetchSource(src: ChangelogSource): Promise<ChangelogEntry[]> {
-  const res = await fetch(src.feedUrl, {
-    headers: { 'User-Agent': 'AIWatch/1.0 (ai-watch.dev; changelog monitoring)' },
-    signal: AbortSignal.timeout(8000),
+  const res = await fetchWithRetry(src.feedUrl, {
+    'User-Agent': 'AIWatch/1.0 (ai-watch.dev; changelog monitoring)',
   })
   if (!res.ok) {
     res.body?.cancel()
@@ -148,17 +195,54 @@ async function fetchSource(src: ChangelogSource): Promise<ChangelogEntry[]> {
   })
 }
 
+/** KV key for per-source last-successful-fetch ISO timestamp (#274). */
+export function lastFetchKey(sourceId: string): string {
+  return `changelog:last-fetch:${sourceId}`
+}
+
+/** TTL for last-fetch markers — 7d covers a missed weekly briefing cycle with margin. */
+const LAST_FETCH_TTL = 7 * 86_400
+
 /**
  * Collect changelog entries from all sources.
  * Dedup against KV (only return new entries not seen before).
+ * Records per-source last-successful-fetch timestamp so the weekly briefing
+ * can flag stale sources whose entries may be silently missing.
  */
 export async function collectChangelogs(
   kv: KVNamespace | null,
 ): Promise<ChangelogEntry[]> {
   if (!kv) return []
 
+  // Cap per-source wall-clock at 25s (15s timeout × 2 attempts max = 30s, but the
+  // outer cron has a 30s budget shared with other tasks). 25s leaves margin for
+  // dedup + KV writes after Promise.allSettled returns.
+  const PER_SOURCE_BUDGET_MS = 25_000
   const results = await Promise.allSettled(
-    CHANGELOG_SOURCES.map((src) => fetchSource(src)),
+    CHANGELOG_SOURCES.map(async (src) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      // Suppress unhandled rejection if the budget timer wins — fetchSource may still
+      // reject later (e.g., body read failure), but the race result has already
+      // propagated to Promise.allSettled so the late rejection has nowhere to go.
+      const fetchPromise = fetchSource(src)
+      fetchPromise.catch(() => {})
+      try {
+        return await Promise.race([
+          fetchPromise,
+          new Promise<ChangelogEntry[]>((_, reject) => {
+            // clearTimeout in finally prevents the timer from firing after the race
+            // settles — otherwise it'd produce an unhandled rejection log and hold
+            // the isolate alive for the full budget on a fast successful fetch.
+            timer = setTimeout(
+              () => reject(new Error(`${src.id} fetch budget (${PER_SOURCE_BUDGET_MS}ms) exceeded`)),
+              PER_SOURCE_BUDGET_MS,
+            )
+          }),
+        ])
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
+    }),
   )
 
   // Read previously seen entries
@@ -167,12 +251,18 @@ export async function collectChangelogs(
   const seenKeys = new Set(seen.map((e) => `${e.source}:${e.title}`))
 
   const newEntries: ChangelogEntry[] = []
+  const nowIso = new Date().toISOString()
+  const lastFetchWrites: Promise<boolean>[] = []
   for (let i = 0; i < results.length; i++) {
     const result = results[i]
+    const src = CHANGELOG_SOURCES[i]
     if (result.status === 'rejected') {
-      console.warn(`[changelog] ${CHANGELOG_SOURCES[i].id} fetch failed:`, result.reason instanceof Error ? result.reason.message : result.reason)
+      console.warn(`[changelog] ${src.id} fetch failed:`, result.reason instanceof Error ? result.reason.message : result.reason)
       continue
     }
+    // Record successful fetch (independent of how many entries it produced —
+    // fetching the page successfully is the signal that the source is reachable).
+    lastFetchWrites.push(kvPut(kv, lastFetchKey(src.id), nowIso, { expirationTtl: LAST_FETCH_TTL }))
     for (const entry of result.value) {
       const key = `${entry.source}:${entry.title}`
       if (seenKeys.has(key)) continue
@@ -187,7 +277,83 @@ export async function collectChangelogs(
     await kvPut(kv, 'changelog:entries', JSON.stringify(updated), { expirationTtl: 1_209_600 }) // 14d
   }
 
+  // Wait for last-fetch writes to settle and aggregate-log failures —
+  // a partial-failure batch silently mis-reports stale sources next week, so it's
+  // worth one summary line per cron tick (kvPut already logs each failure individually).
+  // Count BOTH rejected (defensive: kvPut shouldn't throw but might in future)
+  // AND fulfilled-with-false (kvPut returned false on caught failure).
+  if (lastFetchWrites.length > 0) {
+    const settled = await Promise.allSettled(lastFetchWrites)
+    const rejected = settled.filter((r) => r.status === 'rejected').length
+    const failed = settled.filter((r) => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === false)).length
+    if (failed > 0) {
+      console.warn(
+        `[changelog] ${failed}/${lastFetchWrites.length} last-fetch markers failed to persist ` +
+        `(${rejected} threw, ${failed - rejected} returned false) — next stale check may false-positive`,
+      )
+    }
+  }
+
   return newEntries
+}
+
+/**
+ * For each source that has not produced a successful fetch in the past
+ * `staleAfterMs` window, return how many hours stale it is. Sources missing
+ * from KV (never fetched, or TTL expired) are reported as a special "no fetch
+ * record" state. Used by the weekly briefing to surface silent collection gaps.
+ */
+export interface StaleSourceInfo {
+  source: string
+  name: string
+  hoursStale: number | null // null = no record at all
+}
+export async function getStaleSources(
+  kv: KVNamespace | null,
+  staleAfterMs = 2 * 86_400_000,
+): Promise<StaleSourceInfo[]> {
+  if (!kv) return []
+  const now = Date.now()
+  const stale: StaleSourceInfo[] = []
+  for (const src of CHANGELOG_SOURCES) {
+    let ts: string | null = null
+    try {
+      ts = await kv.get(lastFetchKey(src.id))
+    } catch (err) {
+      // Distinguish KV read failure from "no record" — log + skip so we don't
+      // raise false alarms when KV is rate-limited or replicating.
+      console.warn(`[changelog] stale check kv read failed for ${src.id}:`, err instanceof Error ? err.message : err)
+      continue
+    }
+    if (!ts) {
+      stale.push({ source: src.id, name: src.name, hoursStale: null })
+      continue
+    }
+    const parsed = new Date(ts).getTime()
+    if (isNaN(parsed)) {
+      // Corrupted / non-ISO value in KV — distinct class of bug from "TTL expired".
+      console.warn(`[changelog] stale check: corrupted last-fetch ts for ${src.id}: ${JSON.stringify(ts)}`)
+      stale.push({ source: src.id, name: src.name, hoursStale: null })
+      continue
+    }
+    const ms = now - parsed
+    if (ms > staleAfterMs) {
+      stale.push({ source: src.id, name: src.name, hoursStale: Math.floor(ms / 3_600_000) })
+    }
+  }
+  return stale
+}
+
+/** Format stale-source warning for Discord briefing. Returns empty string when nothing is stale. */
+export function formatStaleSourcesWarning(stale: StaleSourceInfo[]): string {
+  if (stale.length === 0) return ''
+  const items = stale.map((s) => {
+    if (s.hoursStale === null) return `${s.name} (no fetch record)`
+    const days = Math.floor(s.hoursStale / 24)
+    const hrs = s.hoursStale % 24
+    return `${s.name} (last fetched ${days > 0 ? `${days}d ` : ''}${hrs}h ago)`
+  })
+  return `⚠️ Changelog sources behind: ${items.join(', ')} — entries may be missing this week.`
 }
 
 /**
