@@ -70,7 +70,10 @@ export function parseRssEntries(xml: string, source: string): ChangelogEntry[] {
  * Parse Anthropic /news HTML page (Next.js SSR payload).
  * Extracts from two data structures:
  * 1. Featured grid items: {"_type":"featuredGridLink","date":"...","title":"...","url":"..."}
- * 2. News list items: publishedOn + slug + title pattern
+ *    URL must be relative (`/...`) or anthropic.com — rejects image-asset URLs
+ *    (e.g. `cdn.sanity.io/...svg`) that the non-greedy regex would otherwise match
+ *    when an inline `image.url` precedes the article `url` in the JSON. (#275)
+ * 2. News list items: publishedOn + slug + title pattern (canonical /news/{slug})
  */
 export function parseAnthropicNews(html: string): ChangelogEntry[] {
   const entries: ChangelogEntry[] = []
@@ -81,16 +84,41 @@ export function parseAnthropicNews(html: string): ChangelogEntry[] {
   // 1. Featured grid items (e.g. Project Glasswing — published at /glasswing, not /news/)
   const featRe = /"_type":"featuredGridLink","date":"([^"]+)","(?:subject":"[^"]*",")?(summary":"[^"]*",")?title":"([^"]+)","url":"([^"]+)"/g
   let m
+  // Track filter outcomes for schema-drift detection. featRe's non-greedy match
+  // can grab an inline `image.url` (sanity.io CDN .svg) before the actual article
+  // `url` (#275); the filter rejects these. In normal operation N rejected per fetch
+  // is expected — only escalate to a warn if EVERY match was rejected (i.e., the
+  // regex is firing but our gate is letting nothing through, indicating drift).
+  let featAccepted = 0
+  let featRejected = 0
+  let featRejectedSample = ''
   while ((m = featRe.exec(u)) !== null) {
     const date = m[1]
     const title = m[3]
     const urlPath = m[4]
+    // Article URLs are absolute paths (`/foo`) or full anthropic.com URLs.
+    // Explicitly reject protocol-relative `//host/path` (would double-prefix to
+    // `https://www.anthropic.com//host/path`) and external CDN/asset URLs.
+    const isAbsolutePath = urlPath.startsWith('/') && !urlPath.startsWith('//')
+    const isAnthropicUrl = urlPath.startsWith('https://www.anthropic.com')
+    if (!(isAbsolutePath || isAnthropicUrl)) {
+      if (featRejected === 0) featRejectedSample = urlPath.slice(0, 120)
+      featRejected++
+      continue
+    }
     const parsed = new Date(date)
     if (isNaN(parsed.getTime())) continue
-    const fullUrl = urlPath.startsWith('http') ? urlPath : `https://www.anthropic.com${urlPath}`
+    const fullUrl = isAnthropicUrl ? urlPath : `https://www.anthropic.com${urlPath}`
     if (seen.has(fullUrl)) continue
     seen.add(fullUrl)
     entries.push({ source: 'anthropic', title, url: fullUrl, date: parsed.toISOString() })
+    featAccepted++
+  }
+  // Only warn when the regex matched but EVERY match was filtered — that's the
+  // signal that something changed upstream (e.g., article URL field renamed).
+  // Steady-state log noise (per-hour) would dilute the regression signal.
+  if (featRejected > 0 && featAccepted === 0) {
+    console.warn(`[changelog] anthropic featRe: rejected ${featRejected} URL(s), accepted 0 — possible schema drift (sample: ${featRejectedSample})`)
   }
 
   // 2. News list items: publishedOn + slug pairs
@@ -203,14 +231,34 @@ export function formatChangelogSection(entries: ChangelogEntry[]): string {
     copilot: 'GitHub Copilot',
   }
 
-  return entries
+  const sorted = entries
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, 8) // max 8 items in Discord embed
-    .map((e) => {
-      const date = new Date(e.date)
-      const dateStr = `${date.getMonth() + 1}/${date.getDate()}`
-      const name = sourceNames[e.source] ?? e.source
-      return `• ${name}: ${e.title} (${dateStr})`
-    })
-    .join('\n')
+
+  const droppedSamples: string[] = []
+  const lines = sorted.map((e) => {
+    const date = new Date(e.date)
+    const dateStr = `${date.getMonth() + 1}/${date.getDate()}`
+    const name = sourceNames[e.source] ?? e.source
+    // Discord embed description supports [text](url) markdown — make titles clickable (#273).
+    // Sanitize against markdown injection: escape `]` in title (would close link text early)
+    // and reject URLs that contain `(`/`)` or whitespace (would break Discord's link parser).
+    const url = (e.url ?? '').trim()
+    const safeUrl = url && !/[()\s]/.test(url) ? url : ''
+    if (url && !safeUrl && droppedSamples.length < 3) {
+      droppedSamples.push(`${e.source}:${url.slice(0, 80)}`)
+    }
+    const titleLink = safeUrl
+      ? `[${e.title.replace(/]/g, '\\]')}](${safeUrl})`
+      : e.title
+    return `• ${name}: ${titleLink} (${dateStr})`
+  })
+
+  // Surface dropped URLs so a systematic upstream change (e.g., new tracking-param
+  // format with parens) doesn't silently degrade every entry to plain text.
+  if (droppedSamples.length > 0) {
+    console.warn(`[changelog] dropped ${droppedSamples.length} unsafe URL(s) from briefing markdown — samples: ${droppedSamples.join(' | ')}`)
+  }
+
+  return lines.join('\n')
 }
