@@ -311,3 +311,19 @@ export function formatSecurityDigest(alerts: SecurityAlert[]): {
     color,
   }
 }
+
+// #288: daily counter for "security alerts detected today" in the daily summary.
+// security:seen:* has 7d TTL for dedup — conflating it with "today's count" inflates the
+// number by up to a factor of 7. This counter is incremented per new alert in the cron
+// dispatch path and read fresh by the daily summary.
+
+/** KV key for the daily detected-alert counter, scoped to UTC date. */
+export function securityDetectedKey(dateUtc: string): string {
+  return `security:detected:${dateUtc}`
+}
+
+/** Parse the stored counter and add N. Treats missing/corrupt values as 0 to avoid NaN propagation. */
+export function incrementSecurityCount(raw: string | null, addBy: number): number {
+  const prev = raw ? parseInt(raw, 10) : 0
+  return (Number.isFinite(prev) ? prev : 0) + addBy
+}

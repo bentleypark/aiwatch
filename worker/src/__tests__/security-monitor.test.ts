@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mapOSVSeverity, detectSecurityAlerts, formatSecurityDigest } from '../security-monitor'
+import { mapOSVSeverity, detectSecurityAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount } from '../security-monitor'
 import type { SecurityAlert } from '../security-monitor'
 
 describe('mapOSVSeverity', () => {
@@ -165,5 +165,33 @@ describe('formatSecurityDigest', () => {
     // Should not contain a service tag like [Hugging Face], but [Details]/[HN] links are expected
     expect(digest.description).not.toMatch(/\[(?!Details|HN|Source)[A-Z][a-zA-Z ]+\]/)
     expect(digest.description).toContain('GHSA-noservice')
+  })
+})
+
+describe('securityDetectedKey + incrementSecurityCount (#288)', () => {
+  it('scopes key to UTC date', () => {
+    expect(securityDetectedKey('2026-04-20')).toBe('security:detected:2026-04-20')
+  })
+
+  it('starts at N when no prior value exists', () => {
+    expect(incrementSecurityCount(null, 3)).toBe(3)
+    expect(incrementSecurityCount('', 2)).toBe(2)
+  })
+
+  it('adds to an existing integer value', () => {
+    expect(incrementSecurityCount('5', 2)).toBe(7)
+  })
+
+  it('treats corrupt values as 0 to avoid NaN propagation', () => {
+    // Defensive: KV could return a non-numeric string from a prior schema migration
+    // or user-facing debug write. The daily summary should never display NaN.
+    expect(incrementSecurityCount('not-a-number', 3)).toBe(3)
+    expect(incrementSecurityCount('1.5.3', 2)).toBe(3) // parseInt stops at first non-digit → 1
+  })
+
+  it('add-by-zero read pattern returns the current value', () => {
+    // Daily summary uses incrementSecurityCount(raw, 0) to parse without mutating.
+    expect(incrementSecurityCount('14', 0)).toBe(14)
+    expect(incrementSecurityCount(null, 0)).toBe(0)
   })
 })
