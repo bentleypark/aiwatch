@@ -260,6 +260,7 @@ When adding a new monitored service, update ALL of the following:
 | `security:seen:hn:{objectId}` | `SecurityAlertMeta` JSON | 7d | ~0 | HN security post dedup + dashboard display |
 | `security:seen:osv:{vulnId}` | `SecurityAlertMeta` JSON | 7d | ~0 | OSV.dev vulnerability dedup + dashboard display |
 | `security:monthly:{YYYY-MM}` | `SecurityAlertMeta[]` JSON | 60d | ~1/day | Monthly security alert accumulation for reports |
+| `security:detected:{YYYY-MM-DD}` | integer string | 3d | ~0-3/day | Daily counter of newly-detected security alerts (#288). Incremented by `securityAlerts.length` when HN/OSV detection fires. Daily summary reads this instead of counting `security:seen:*` (which accumulates over 7d and inflates the figure) |
 | `ai:analysis:{svcId}:{incId}` | `AIAnalysisResult` JSON | 1h (active) / 2h (resolved) | ~5 per incident | Hybrid AI analysis result — Gemma 4 primary + Sonnet fallback (TTL refreshed while active; on recovery, `resolvedAt` added instead of deleting — kept 2h for "Recently Resolved" UI). `model` field tracks which model produced the analysis |
 | `ai:reanalysis-skip:{svcId}:{incId}` | `"1"` | 30min | ~2 per incident | Per-incident re-analysis failure cooldown |
 | `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed, gemma?, sonnet? }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis, model breakdown) |

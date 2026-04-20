@@ -682,7 +682,7 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
 import { generateBadgeSvg } from './badge'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable } from './reddit'
-import { detectSecurityAlerts, formatSecurityDigest } from './security-monitor'
+import { detectSecurityAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { collectChangelogs, getStaleSources } from './changelog'
@@ -852,6 +852,17 @@ export default {
             await kvPut(env.STATUS_CACHE, alert.kvKey, meta, { expirationTtl: 604800 }).catch(err => { // 7d dedup
               console.error('[cron] Failed to mark security alert as seen:', alert.kvKey, err instanceof Error ? err.message : err)
             })
+          }
+
+          // #288: purpose-built daily counter for the daily summary. security:seen:* has a
+          // 7d TTL for dedup semantics and shouldn't double as a "today's count" source.
+          const detectedKey = securityDetectedKey(nowISO.slice(0, 10))
+          try {
+            const prevRaw = await env.STATUS_CACHE.get(detectedKey).catch(() => null)
+            const next = incrementSecurityCount(prevRaw, securityAlerts.length)
+            await kvPut(env.STATUS_CACHE, detectedKey, String(next), { expirationTtl: 259200 }) // 3d TTL
+          } catch (err) {
+            console.warn('[cron] security daily counter increment failed:', err instanceof Error ? err.message : err)
           }
 
           // Accumulate for monthly reports (security:monthly:{YYYY-MM}, 60d TTL)
@@ -1122,13 +1133,15 @@ export default {
             console.warn('[daily-summary] Failed to list reddit keys:', err instanceof Error ? err.message : err)
           }
 
-          // Count security alerts seen today (HN + OSV)
+          // #288: read the purpose-built daily counter instead of counting security:seen:*
+          // keys (that prefix has 7d TTL and accumulates across the week, inflating the number).
+          // Fallback to 0 if missing (e.g., first run of the day before any detections fire).
           let securityCount = 0
           try {
-            const listed = await env.STATUS_CACHE.list({ prefix: 'security:seen:' })
-            securityCount = listed.keys.length
+            const raw = await env.STATUS_CACHE.get(securityDetectedKey(today)).catch(() => null)
+            securityCount = incrementSecurityCount(raw, 0)
           } catch (err) {
-            console.warn('[daily-summary] Failed to list security keys:', err instanceof Error ? err.message : err)
+            console.warn('[daily-summary] Failed to read security daily counter:', err instanceof Error ? err.message : err)
           }
 
           // Read daily alert counter
