@@ -211,8 +211,8 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 <div class="container">
 
 ${renderStatusHeader(service, seo)}
-${renderAIInsight(aiInsight, service?.status, fallbacks)}
 ${renderCTA(seo, service?.status ?? 'operational')}
+${renderAIInsight(aiInsight, service?.status, fallbacks)}
 ${renderIncidents(service)}
 ${renderDescription(seo, service)}
 ${renderFAQ(seo, fallbacks)}
@@ -328,13 +328,18 @@ ${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${s
 
 function renderCTA(seo: ServiceSEO, status: string): string {
   const isDown = status === 'down' || status === 'degraded'
+  // Positioned directly below the status header (#297) so the alert-subscription
+  // prompt catches the visitor at peak intent — before they bounce after reading
+  // the status. GA4 source='status_banner' distinguishes this placement from the
+  // footer CTA for the 2-week conversion comparison.
   const message = isDown
-    ? `${seo.displayName} is currently experiencing issues \u2014 get notified when it recovers`
+    ? 'Get notified when it recovers \u2014 takes 1 minute'
     : `Get notified when ${seo.displayName} goes down`
+  const buttonLabel = isDown ? 'Get Alerts When Fixed' : 'Set Up Alerts'
   return `<div class="cta">
 <p class="cta-title">${esc(message)}</p>
 <div class="cta-buttons">
-<a href="https://ai-watch.dev/#settings" class="btn btn-primary" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page'})">Set Up Alerts &rarr;</a>
+<a href="https://ai-watch.dev/#settings" class="btn btn-primary" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'status_banner'})">${esc(buttonLabel)} &rarr;</a>
 </div>
 </div>`
 }
