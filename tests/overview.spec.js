@@ -74,6 +74,33 @@ test.describe('Overview page', () => {
     }
   })
 
+  test('Recent Incidents shows all affected services for bulk-linked incident (#285)', async ({ page }) => {
+    // Regression: Anthropic bulk-links one incident ID to claude.ai + Claude API + Claude Code.
+    // Overview previously showed only the first service's name via Set-based dedup.
+    // Fix: collect affectedNames[], render joined when length > 1.
+    const sharedId = 'shared-anthropic-incident-285'
+    // status: 'investigating' (unresolved) + recent startedAt keeps this incident above any
+    // mock incidents in MOCK_SERVICES that mergeWithMock leaves in place for services we
+    // don't override here. Overview sorts non-resolved ahead of resolved, then by newest.
+    const inc = { id: sharedId, title: 'Claude Sonnet 4.5 error spike', status: 'investigating', impact: 'major', startedAt: new Date(Date.now() - 60_000).toISOString(), duration: null, timeline: [] }
+    const mkSvc = (id, cat, name) => ({ id, category: cat, name, provider: 'Anthropic', status: 'degraded', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [inc] })
+    const bulkLinkedMock = { json: {
+      services: [mkSvc('claude', 'api', 'Claude API'), mkSvc('claudeai', 'app', 'claude.ai'), mkSvc('claudecode', 'agent', 'Claude Code')],
+      lastUpdated: new Date().toISOString(),
+    } }
+    await page.route('**/api/status', async (route) => { await route.fulfill(bulkLinkedMock) })
+    await page.route('**/api/status/cached', async (route) => { await route.fulfill(bulkLinkedMock) })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    const entry = page.locator('main').getByText(/Claude Sonnet 4\.5 error spike/).first()
+    await expect(entry).toBeVisible({ timeout: 10000 })
+    const entryText = await entry.textContent()
+    // All 3 affected service names must appear in the Recent Incidents entry
+    expect(entryText).toContain('Claude API')
+    expect(entryText).toContain('claude.ai')
+    expect(entryText).toContain('Claude Code')
+  })
+
   test('action banner shows severity labels and excludes affected from alternatives', async ({ page }) => {
     // Banner only shows when services are degraded/down (requires Worker data or dev mock)
     const banner = page.locator('main').getByText(/Degraded|성능 저하|Down|서비스 중단/)
