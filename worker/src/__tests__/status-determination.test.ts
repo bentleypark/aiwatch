@@ -280,6 +280,105 @@ describe('ChatGPT without statusComponentId (#292)', () => {
   })
 })
 
+/**
+ * Regression tests for #294: OpenAI Codex is a coding agent monitored via
+ * status.openai.com with the same no-umbrella-component structure as ChatGPT.
+ * Keywords cover all 4 surface components (Codex Web/API, CLI, VS Code ext)
+ * via title OR componentNames match. Cross-contamination from OpenAI API /
+ * ChatGPT incidents is blocked by the guard in fetchService.
+ */
+describe('OpenAI Codex without statusComponentId (#294)', () => {
+  function mockIncident(overrides: Partial<Incident> = {}): Incident {
+    return {
+      id: 'cdx-1',
+      title: 'Test incident',
+      status: 'investigating',
+      impact: 'major',
+      startedAt: '2026-04-20T10:00:00Z',
+      resolvedAt: null,
+      duration: null,
+      timeline: [],
+      ...overrides,
+    }
+  }
+
+  const codexConfig = SERVICES.find((s) => s.id === 'codex') as ServiceConfig
+
+  it('config: agent category, no component IDs, keyword coverage for all 4 surfaces', () => {
+    expect(codexConfig).toBeDefined()
+    expect(codexConfig.category).toBe('agent')
+    expect(codexConfig.provider).toBe('OpenAI')
+    expect(codexConfig.statusComponentId).toBeUndefined()
+    expect(codexConfig.statusComponent).toBeUndefined()
+    expect(codexConfig.incidentIoComponentId).toBeUndefined()
+    expect(codexConfig.incidentExclude).toBeUndefined()
+    expect(codexConfig.incidentKeywords).toContain('codex')
+    expect(codexConfig.incidentKeywords).toContain('cli')
+    expect(codexConfig.incidentKeywords).toContain('vs code')
+  })
+
+  it('Codex-titled incident → degraded', () => {
+    const incidents = [
+      mockIncident({ id: 'cdx-load', title: 'Users unable to load ChatGPT and Codex' }),
+    ]
+    const filtered = filterIncidents(incidents, codexConfig)
+    expect(filtered).toHaveLength(1)
+
+    const summary: SummaryData = { status: { indicator: 'minor' } }
+    expect(determineSvcStatus({}, summary, filtered)).toBe('degraded')
+  })
+
+  it('CLI-only component incident with no keyword in title → matched via componentNames', () => {
+    const incidents = [
+      mockIncident({ id: 'cli-inc', title: 'Authentication failing', componentNames: ['CLI'] }),
+    ]
+    const filtered = filterIncidents(incidents, codexConfig)
+    expect(filtered).toHaveLength(1) // matched via componentNames
+
+    const summary: SummaryData = { status: { indicator: 'minor' } }
+    expect(determineSvcStatus({}, summary, filtered)).toBe('degraded')
+  })
+
+  it('VS Code extension-only incident → matched', () => {
+    const incidents = [
+      mockIncident({ id: 'vsc-inc', title: 'Extension not loading', componentNames: ['VS Code extension'] }),
+    ]
+    expect(filterIncidents(incidents, codexConfig)).toHaveLength(1)
+  })
+
+  it('OpenAI API-only incident with overall=minor → operational (cross-contamination guard)', () => {
+    const incidents = [
+      mockIncident({ id: 'api-inc', title: 'Elevated latency on /v1/responses', componentNames: ['Responses'] }),
+    ]
+    const filtered = filterIncidents(incidents, codexConfig)
+    expect(filtered).toHaveLength(0)
+
+    const summary: SummaryData = { status: { indicator: 'minor' } }
+    expect(determineSvcStatus({}, summary, filtered)).toBe('operational')
+  })
+
+  it('ChatGPT-only incident with overall=minor → operational (not leaked into Codex)', () => {
+    const incidents = [
+      mockIncident({ id: 'chat-inc', title: 'ChatGPT conversation errors', componentNames: ['Feed'] }),
+    ]
+    const filtered = filterIncidents(incidents, codexConfig)
+    // 'codex' keyword doesn't match 'chatgpt', no overlap with 'cli'/'vs code'
+    expect(filtered).toHaveLength(0)
+
+    const summary: SummaryData = { status: { indicator: 'minor' } }
+    expect(determineSvcStatus({}, summary, filtered)).toBe('operational')
+  })
+
+  it('major overall + Codex-matched unresolved incident → down', () => {
+    const incidents = [
+      mockIncident({ id: 'cdx-major', title: 'Codex Web completely down', status: 'identified' }),
+    ]
+    const filtered = filterIncidents(incidents, codexConfig)
+    const summary: SummaryData = { status: { indicator: 'major' } }
+    expect(determineSvcStatus({}, summary, filtered)).toBe('down')
+  })
+})
+
 describe('component miss tracking (#135)', () => {
   it('tracks miss when statusComponentId is configured but not found', async () => {
     const kv = mockKV()

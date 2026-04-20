@@ -225,10 +225,10 @@ When adding a new monitored service, update ALL of the following:
 
 ## Architecture
 
-**AIWatch** is a React SPA that monitors 30 AI services in real time:
+**AIWatch** is a React SPA that monitors 31 AI services in real time:
 - **23 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Fireworks, Perplexity, HuggingFace, Replicate, ElevenLabs, AssemblyAI, Deepgram, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, Stability AI, Voyage AI, Modal
 - **3 AI apps**: claude.ai, ChatGPT, Character.AI
-- **4 coding agents**: Claude Code, GitHub Copilot, Cursor, Windsurf
+- **5 coding agents**: Claude Code, GitHub Copilot, Cursor, Windsurf, OpenAI Codex
 
 ### Tech Stack
 - **React 19 + Vite 6** — SPA, no router library
@@ -241,7 +241,7 @@ When adding a new monitored service, update ALL of the following:
 
 | Key Pattern | Value | TTL | Writes/Day | Purpose |
 |---|---|---|---|---|
-| `services:latest` | `{ services, cachedAt }` JSON | 5min | ~288 | Real-time status cache (all 30 services) |
+| `services:latest` | `{ services, cachedAt }` JSON | 5min | ~288 | Real-time status cache (all 31 services) |
 | `daily:{YYYY-MM-DD}` | `{ [svcId]: { ok, total } }` JSON | 2d | ~288 | Daily uptime counters |
 | `history:{YYYY-MM-DD}` | Same as daily | 90d | 1 | Archived yesterday's counters |
 | `latency:24h` | `{ snapshots: [{ t, data }] }` JSON | 25h | ~48 | 30-min latency snapshots (max 48) |
@@ -410,7 +410,7 @@ Per-service status is resolved in `services.ts` with this priority:
 ```
 Browser (React SPA, 60s polling)
   → Cloudflare Worker (/api/status)
-    → parallel fetch (30 services)
+    → parallel fetch (31 services)
     → normalize to ServiceStatus[]
     → write to KV (cache + daily counters)
     → probe cross-validation: filter Mistral micro-incident noise (no RTT spike → excluded)
