@@ -235,7 +235,7 @@ function IncidentItem({ incident, lang, t }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <div className="text-[12px] font-medium text-[var(--text0)] truncate" style={{ marginBottom: '2px' }}>
-              {incident.serviceName} — {incident.title}
+              {(incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName)} — {incident.title}
             </div>
             {hasTimeline && expanded && (
               <span className="shrink-0 text-[9px] text-[var(--text2)]">▾</span>
@@ -249,7 +249,7 @@ function IncidentItem({ incident, lang, t }) {
       {expanded && (
         <div className="ml-[66px]">
           <IncidentTimeline
-            title={`${incident.serviceName} — ${incident.title}`}
+            title={`${incident.affectedNames?.length > 1 ? incident.affectedNames.join(', ') : incident.serviceName} — ${incident.title}`}
             subtitle={`${formatDate(incident.startedAt, lang)}  ·  ${incident.duration ?? (incident.status === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}`}
             timeline={incident.timeline}
             onClose={() => setExpanded(false)}
@@ -476,13 +476,20 @@ export default function Overview() {
     : agentServices
 
   const sevenDaysAgo = Date.now() - 7 * 86_400_000
-  const seenIncIds = new Set()
-  const recentIncidents = catServices
-    .flatMap((s) => s.incidents.flatMap((inc) => {
-      if (seenIncIds.has(inc.id)) return []
-      seenIncIds.add(inc.id)
-      return [{ ...inc, serviceName: s.name }]
-    }))
+  // Dedup by incident ID (Anthropic bulk-links one incident to claude.ai + Claude API + Claude Code)
+  // while collecting every affected service name. Mirrors the Incidents.jsx aggregation pattern.
+  const incMap = new Map()
+  for (const s of catServices) {
+    for (const inc of s.incidents ?? []) {
+      const existing = incMap.get(inc.id)
+      if (existing) {
+        if (!existing.affectedNames.includes(s.name)) existing.affectedNames.push(s.name)
+      } else {
+        incMap.set(inc.id, { ...inc, serviceName: s.name, affectedNames: [s.name] })
+      }
+    }
+  }
+  const recentIncidents = [...incMap.values()]
     .filter((inc) => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= sevenDaysAgo)
     .sort((a, b) => {
       const aActive = a.status !== 'resolved' ? 1 : 0
