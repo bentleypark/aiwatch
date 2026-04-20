@@ -253,6 +253,7 @@ When adding a new monitored service, update ALL of the following:
 | `alerted:recovered:{svcId}` | `"1"` | 2h | ~2 | Recovery alert dedup |
 | `recovered:{svcId}:{incId}` | `{ resolvedAt, incidentTitle, duration }` JSON | 2h | ~2 | Independent recovery marker (powers Recently Resolved banner without AI analysis) |
 | `alerted:probe-spike:{svcId}` | `"1"` | 1h | ~2 | Probe RTT spike alert dedup (early detection) |
+| `alerted:flap:{svcId}:{normalizedTitle}` | `"1"` | 1h | ~5-20 | BetterStack auto-recovery flap suppression (#283) — 60-min window per service + title. Written on the `alerted:res:` fire of the first flap; checked on next cron cycle to drop both down + resolved halves of subsequent identical flaps. Opt-in via `ServiceConfig.flapSuppression: true`; applies to `together`, `fireworks`, `huggingface`, `modal`. Tier-1 (`claude`/`openai`/`gemini`) never suppressed as defense-in-depth |
 | `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
 | `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time (probe spike or status page, whichever is earlier) |
 | `detection:lead:{YYYY-MM-DD}` | `DetectionLeadEntry[]` JSON | 7d | ~0-5 | Detection Lead audit log — appended on each new incident with positive lead, dedup by incId, surfaced in Daily Summary Discord embed (#256) |
