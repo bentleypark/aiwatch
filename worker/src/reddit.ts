@@ -20,8 +20,11 @@ export interface RedditAlert {
   type: RedditAlertType
 }
 
-// Subreddit → search keywords mapping
-const REDDIT_TARGETS: Array<{ subreddit: string; service: string }> = [
+// Subreddit → search keywords mapping.
+// service value semantics: '_competitive' / '_security' → those modes; anything else → outage mode.
+// Exported for tests — presence/mode assertions enforce that the playbook's engagement list
+// stays in sync with the cron (#280).
+export const REDDIT_TARGETS: ReadonlyArray<{ subreddit: string; service: string }> = [
   // Service-specific subreddits (outage detection + promotion)
   { subreddit: 'ClaudeAI',        service: 'Claude' },
   { subreddit: 'ClaudeCode',      service: 'Claude Code' },
@@ -30,10 +33,16 @@ const REDDIT_TARGETS: Array<{ subreddit: string; service: string }> = [
   { subreddit: 'cursor',          service: 'Cursor' },
   { subreddit: 'windsurf',        service: 'Windsurf' },
   { subreddit: 'Codeium',         service: 'Windsurf' },
+  // Broader AI communities in outage mode — playbook engagement targets (#280).
+  // r/LocalLLaMA was previously competitive mode; switched to outage so API-reliability
+  // threads (the playbook's actual engagement hook) are caught. r/AINews added for
+  // press-adjacent outage threads. Promotion filter (isPromotable) still gates Discord
+  // alerts, so news-flavored posts that aren't question-seeking won't spam.
+  { subreddit: 'LocalLLaMA',      service: 'AI Community' },
+  { subreddit: 'AINews',          service: 'AI Community' },
   // Competitive monitoring — broader AI/DevOps communities
   { subreddit: 'devops',          service: '_competitive' },
   { subreddit: 'artificial',      service: '_competitive' },
-  { subreddit: 'LocalLLaMA',      service: '_competitive' },
   // Security monitoring — security communities for AI service breach/vulnerability chatter
   { subreddit: 'netsec',          service: '_security' },
   { subreddit: 'cybersecurity',   service: '_security' },

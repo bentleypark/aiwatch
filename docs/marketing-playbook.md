@@ -130,13 +130,13 @@ Reddit communities discuss AI outages in real time. AIWatch is useful in those t
 | r/ClaudeAI | Strict — mods remove obvious promo | Active Claude outage thread on front page of sub | ✅ outage mode |
 | r/ChatGPT | Permissive on outage threads | Active OpenAI / ChatGPT outage thread | ✅ outage mode |
 | r/OpenAI | Moderate — outage posts allowed | Active OpenAI outage | ✅ outage mode |
-| r/LocalLLaMA | Strict technical bar — no fluff posts | Only when discussion already cites API reliability as a local-vs-hosted argument | ⚠️ competitive mode only (status-monitor keywords) — outage posts are not auto-detected; check manually |
+| r/LocalLLaMA | Strict technical bar — no fluff posts | Only when discussion already cites API reliability as a local-vs-hosted argument | ✅ outage mode |
+| r/AINews | Permissive | Major outage with journalist coverage | ✅ outage mode (Discord 🎯 PROMOTE alert only fires if the title passes the question-style promotable filter — news-style headlines still require manual engagement) |
 | r/MachineLearning | Very strict — must be research-relevant | Do not post unless AIWatch shipped a methodology writeup | ❌ not monitored by cron — check manually |
-| r/AINews | Permissive | Major outage with journalist coverage | ❌ not monitored by cron — check manually |
 
 Before each first post to any of these, **read the sub's rules page** — `/wiki/rules` or the sidebar. Rule changes are not tracked here.
 
-**Cron coverage caveat.** `worker/src/reddit.ts` watches r/ClaudeAI, r/ChatGPT, r/OpenAI (+ r/ClaudeCode / r/cursor / r/windsurf / r/Codeium for coding agents) in outage mode — matches on "down / not working / outage / broken / offline / unavailable / degraded" keywords and sends a Discord alert with a "🎯 PROMOTE" tag when a promotable post appears. The subs marked ⚠️ / ❌ above require manual monitoring via the Reddit search RSS feeds listed below. Expanding cron outage-mode coverage to r/AINews and r/LocalLLaMA is tracked in issue #280. r/MachineLearning is out of scope for that issue — the sub's research-heavy posts need a stricter keyword matcher before it can be added without false positives.
+**Cron coverage caveat.** `worker/src/reddit.ts` watches r/ClaudeAI, r/ChatGPT, r/OpenAI, r/LocalLLaMA, r/AINews (+ r/ClaudeCode / r/cursor / r/windsurf / r/Codeium for coding agents) in outage mode — matches on "down / not working / outage / broken / offline / unavailable / degraded" keywords and sends a Discord alert with a "🎯 PROMOTE" tag when the post's title is question-style (per the `isPromotable` filter). News-flavored headlines on r/AINews still require manual engagement because they don't trigger PROMOTE. r/MachineLearning remains out of scope — research posts use outage keywords in methodology contexts ("what's wrong with this loss curve"), and adding it without a service-name-required matcher would spam Discord.
 
 ### When to engage
 
