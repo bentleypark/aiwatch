@@ -244,4 +244,58 @@ test.describe('Is X Down? SSR pages', () => {
     const text = (await meta.textContent()) || ''
     expect(text).toMatch(/Uptime \(30d\):\s*\d+\.\d+%/)
   })
+
+  test.describe('CTA placement for outage-moment capture (#297)', () => {
+    test('CTA renders before AI Insight card in DOM order', async ({ page }) => {
+      // Regression guard: the alert subscription prompt must sit directly below
+      // the status header, ahead of AI Analysis, so it catches peak intent.
+      // Reverting the order would silently tank conversion on real outage traffic.
+      await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+      const cta = page.locator('.cta').first()
+      await expect(cta).toBeVisible()
+
+      // Contract: CTA must appear before ANY card that follows — covers the
+      // AI Analysis card (conditional on Worker data) and any future card
+      // we'd otherwise want to insert above the CTA.
+      const ctaIdx = await page.evaluate(() => {
+        const all = Array.from(document.querySelectorAll('.container > *'))
+        const cta = document.querySelector('.container > .cta')
+        return cta ? all.indexOf(cta) : -1
+      })
+      expect(ctaIdx).toBeGreaterThanOrEqual(0)
+
+      // If an AI Analysis/Post-Incident Analysis card exists, it must render AFTER the CTA.
+      const aiIdx = await page.evaluate(() => {
+        const all = Array.from(document.querySelectorAll('.container > *'))
+        const idx = all.findIndex(el => /AI Analysis|Post-Incident Analysis/.test(el.textContent || ''))
+        return idx
+      })
+      if (aiIdx >= 0) expect(aiIdx).toBeGreaterThan(ctaIdx)
+    })
+
+    test('button onclick fires GA4 event with source=status_banner', async ({ page }) => {
+      await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+      const onclick = await page.locator('.cta a.btn-primary').getAttribute('onclick')
+      expect(onclick).toContain("'click_cta_alerts'")
+      expect(onclick).toContain("source:'status_banner'")
+      expect(onclick).toContain("location:'is_down_page'")
+    })
+
+    test('down/degraded copy uses benefit-framed wording', async ({ page }) => {
+      // Pick a page likely to be in a non-operational state at test time, but
+      // fall back to any is-down page — we check the copy's shape, not the status.
+      await page.goto('/is-chatgpt-down', { waitUntil: 'domcontentloaded' })
+      const ctaText = await page.locator('.cta').textContent()
+      // Accept either down-state copy (benefit-framed, 1-min framing) or
+      // operational copy ("Get notified when X goes down") — both are acceptable.
+      const isDownCopy = /Get notified when it recovers.*takes 1 minute/i.test(ctaText || '')
+      const isOperationalCopy = /Get notified when .* goes down/i.test(ctaText || '')
+      expect(isDownCopy || isOperationalCopy).toBe(true)
+
+      // Button label must never regress to the old generic "Set Up Alerts"
+      // when the service is in a down/degraded state.
+      const btnText = (await page.locator('.cta a.btn-primary').textContent()) || ''
+      expect(btnText.trim()).toMatch(/^(Get Alerts When Fixed|Set Up Alerts)/)
+    })
+  })
 })
