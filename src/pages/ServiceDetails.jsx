@@ -10,6 +10,7 @@ import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
 import { formatDate } from '../utils/time'
 import { buildCalendarFromIncidents } from '../utils/calendar'
+import { groupIncidents } from '../utils/incidentGrouping'
 import { SCORE_TEXT_CLASS } from '../utils/constants'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
@@ -293,6 +294,75 @@ function IncidentRow({ incident, detectedAt, isRecentlyRecovered, t, lang }) {
             t={t}
             lang={lang}
           />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function IncidentGroupRow({ group, t, lang }) {
+  const [expanded, setExpanded] = useState(false)
+  // BetterStack-flap groups are always null-impact; the visible status is whatever the entries
+  // share. When mixed, render the highest-priority status.
+  const dominantStatus = group.uniformStatus
+    ? Object.keys(group.statusCounts)[0]
+    : (['investigating', 'identified', 'monitoring', 'resolved'].find(s => group.statusCounts[s]))
+  const STATUS_CLS = {
+    investigating: 'text-[var(--red)]',
+    identified:    'text-[var(--red)]',
+    monitoring:    'text-[var(--amber)]',
+    resolved:      'text-[var(--text2)]',
+  }
+  const dotCls = STATUS_CLS[dominantStatus] ?? STATUS_CLS.resolved
+  const statusLabel = group.uniformStatus
+    ? t('incidents.group.statusUniform').replace('{status}', t(`incidents.status.${dominantStatus === 'investigating' || dominantStatus === 'identified' ? 'ongoing' : dominantStatus}`).toLowerCase())
+    : Object.entries(group.statusCounts).map(([s, n]) => `${n} ${t(`incidents.status.${s === 'investigating' || s === 'identified' ? 'ongoing' : s}`).toLowerCase()}`).join(' · ')
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-label={expanded ? t('incidents.group.collapse') : t('incidents.group.expand')}
+        className="w-full text-left flex items-start gap-[10px] cursor-pointer hover:bg-[var(--bg2)] rounded transition-colors"
+        style={{ padding: '8px 4px', margin: '-2px -4px', minHeight: '44px' }}
+      >
+        <span className={`shrink-0 mt-0.5 text-[10px] mono ${dotCls}`} aria-hidden="true">●</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-xs text-[var(--text1)] truncate">{group.normalizedTitle}</p>
+            <span
+              className="shrink-0 mono text-[9px] text-[var(--text2)] bg-[var(--bg2)] rounded"
+              style={{ padding: '1px 5px' }}
+            >
+              {t('incidents.group.flaps').replace('{n}', String(group.count))}
+            </span>
+            <span className="shrink-0 text-[9px] text-[var(--text2)]">{expanded ? '▾' : '▸'}</span>
+          </div>
+          <p className="text-[10px] text-[var(--text2)] mono mt-0.5">
+            {formatDate(group.rangeStart, lang)} → {formatDate(group.rangeEnd, lang)} · {statusLabel}
+          </p>
+        </div>
+      </button>
+      {expanded && (
+        <div
+          className="flex flex-col bg-[var(--bg2)]"
+          style={{
+            gap: '6px',
+            marginLeft: '12px',
+            marginTop: '4px',
+            paddingLeft: '12px',
+            paddingTop: '8px',
+            paddingBottom: '8px',
+            paddingRight: '8px',
+            borderLeft: '2px solid var(--border-hi)',
+            borderRadius: '0 4px 4px 0',
+          }}
+        >
+          {group.entries.map((inc) => (
+            <IncidentRow key={inc.id} incident={inc} detectedAt={null} isRecentlyRecovered={false} t={t} lang={lang} />
+          ))}
         </div>
       )}
     </div>
@@ -803,8 +873,10 @@ export default function ServiceDetails({ serviceId }) {
               </div>
             ) : (
               <div className="flex flex-col" style={{ gap: '8px' }}>
-                {recentIncidents.map((inc) => (
-                  <IncidentRow key={inc.id} incident={inc} detectedAt={service.detectedAt} isRecentlyRecovered={!!(recentlyRecovered[service.id] ?? []).includes(inc.id)} t={t} lang={lang} />
+                {groupIncidents(recentIncidents).map((row) => row.kind === 'group' ? (
+                  <IncidentGroupRow key={`group:${row.dayKey}:${row.normalizedTitle}`} group={row} t={t} lang={lang} />
+                ) : (
+                  <IncidentRow key={row.incident.id} incident={row.incident} detectedAt={service.detectedAt} isRecentlyRecovered={!!(recentlyRecovered[service.id] ?? []).includes(row.incident.id)} t={t} lang={lang} />
                 ))}
               </div>
             )}

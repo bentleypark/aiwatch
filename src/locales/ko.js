@@ -126,6 +126,10 @@ const ko = {
   'incidents.timeline.monitoring': '모니터링',
   'incidents.timeline.resolved': '해결됨',
   'incidents.timeline.empty': '타임라인 데이터가 없습니다',
+  'incidents.group.flaps': '× {n}회 반복',
+  'incidents.group.expand': '전체 항목 보기',
+  'incidents.group.collapse': '항목 숨기기',
+  'incidents.group.statusUniform': '모두 {status}',
 
   // Uptime
   'uptime.stable': '가장 안정적',

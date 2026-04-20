@@ -15,7 +15,8 @@
     "deploy": "npm run build && wrangler deploy",
     "deploy:worker": "npx wrangler deploy --config worker/wrangler.toml",
     "dev:worker": "npx wrangler dev --config worker/wrangler.toml --port 8788",
-    "dev:all": "npx wrangler dev --config worker/wrangler.toml --port 8788 & vite"
+    "dev:all": "npx wrangler dev --config worker/wrangler.toml --port 8788 & vite",
+    "test:src": "npx vitest run --config vitest.config.js"
   },
   "dependencies": {
     "chart.js": "^4.4.7",

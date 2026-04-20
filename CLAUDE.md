@@ -47,6 +47,7 @@ npm run lint       # Run ESLint
 
 ```bash
 npm test           # Run Playwright E2E tests
+npm run test:src   # Run frontend unit tests (vitest, src/**/*.test.js)
 npm run test:worker # Run Worker unit tests (vitest)
 ```
 
@@ -111,11 +112,12 @@ gh pr merge --squash --delete-branch
 3. **Code** — implement the feature or fix
 3.5. **Local verify** — start the appropriate dev server and let the user confirm in browser before proceeding. See "Local verification by page type" table above for which command to use. Never skip this step.
 4. **Build + Test** — based on change scope:
-   - **Frontend changes** (`src/`): `npm run build` + `npm test` (Playwright)
+   - **Frontend changes** (`src/`): `npm run build` + `npm run test:src` (Vitest, if utility/logic tests exist) + `npm test` (Playwright E2E)
    - **Backend changes** (`worker/`): `npx wrangler deploy --config worker/wrangler.toml --dry-run` + `npm run test:worker` (Vitest)
    - **Both**: run all of the above
    - **Worker logic additions**: new functions must have unit tests — extract to separate files with exports, test in `worker/src/__tests__/` or `worker/src/parsers/__tests__/`
-   - **Bug fixes**: every bug fix must include a test that would have caught the bug — E2E (Playwright) for frontend, Vitest for worker
+   - **Frontend utility additions** (`src/utils/`): pure-function utilities should have unit tests in `src/utils/__tests__/*.test.js` (Vitest)
+   - **Bug fixes**: every bug fix must include a test that would have caught the bug — E2E (Playwright) or Vitest for frontend, Vitest for worker
 5. **Review** — run PR review **before** creating PR:
    ```
    /pr-review-toolkit:review-pr
