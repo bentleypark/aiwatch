@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
+import type { Incident } from '../types'
 
 const NOW = 1742860800000 // fixed timestamp for deterministic tests
 const recentDate = new Date(NOW - 3600_000).toISOString() // 1h ago
@@ -429,5 +430,132 @@ describe('formatDetectionLead', () => {
     const started = new Date(NOW).toISOString()
     const result = formatDetectionLead(detected, started)
     expect(result).toContain('59m')
+  })
+})
+
+describe('flap suppression (#283)', () => {
+  const mkInc = (overrides: Partial<Incident> = {}): Incident => ({
+    id: 'inc1',
+    title: 'Nomic Embed Text v1.5 embeddings API — recovered',
+    status: 'resolved',
+    impact: null,
+    startedAt: new Date(NOW - 300_000).toISOString(),
+    duration: '5m',
+    timeline: [],
+    ...overrides,
+  })
+
+  describe('isFlapNotice', () => {
+    it('matches BetterStack-style " — recovered" titles (resolved half of a flap)', () => {
+      expect(isFlapNotice(mkInc({ title: 'Embedding API — recovered' }))).toBe(true)
+      expect(isFlapNotice(mkInc({ title: 'Llama 3.3 70B chat completion API — recovered' }))).toBe(true)
+    })
+
+    it('matches BetterStack-style " — down" titles (down half of a flap)', () => {
+      // BetterStack parser emits both halves; suppression must cover the down phase too
+      // so the 2nd flap's down alert is dropped along with its resolved counterpart.
+      expect(isFlapNotice(mkInc({ status: 'investigating', title: 'Embedding API — down' }))).toBe(true)
+    })
+
+    it('ignores titles without the exact " — down" or " — recovered" suffix', () => {
+      expect(isFlapNotice(mkInc({ title: 'Service recovered after outage' }))).toBe(false)
+      expect(isFlapNotice(mkInc({ title: 'API — investigating' }))).toBe(false)
+      expect(isFlapNotice(mkInc({ title: 'Major Outage' }))).toBe(false)
+    })
+
+    it('never matches non-null impact, even with matching suffix', () => {
+      expect(isFlapNotice(mkInc({ impact: 'major', title: 'X — recovered' }))).toBe(false)
+      expect(isFlapNotice(mkInc({ impact: 'minor', title: 'X — down' }))).toBe(false)
+    })
+  })
+
+  describe('normalizeFlapTitle', () => {
+    it('strips " — recovered" suffix for KV key stability', () => {
+      expect(normalizeFlapTitle('Nomic Embed Text v1.5 embeddings API — recovered'))
+        .toBe('Nomic Embed Text v1.5 embeddings API')
+    })
+    it('strips " — down" suffix so the down + res halves share the same key', () => {
+      expect(normalizeFlapTitle('Nomic Embed Text v1.5 embeddings API — down'))
+        .toBe('Nomic Embed Text v1.5 embeddings API')
+    })
+    it('trims whitespace around separators', () => {
+      expect(normalizeFlapTitle('X —  recovered  ')).toBe('X')
+    })
+    it('leaves titles without the suffix unchanged', () => {
+      expect(normalizeFlapTitle('Major Outage')).toBe('Major Outage')
+    })
+  })
+
+  describe('flapSuppressionKey', () => {
+    it('scopes key to svcId + normalized title', () => {
+      const key = flapSuppressionKey('fireworks', mkInc({ title: 'Embed API — recovered' }))
+      expect(key).toBe('alerted:flap:fireworks:Embed API')
+    })
+    it('returns different keys for different services with identical titles', () => {
+      const inc = mkInc({ title: 'Shared Title — recovered' })
+      expect(flapSuppressionKey('fireworks', inc)).not.toEqual(flapSuppressionKey('together', inc))
+    })
+  })
+
+  describe('isFlapSuppressible', () => {
+    const config = { flapSuppression: true }
+
+    it('returns true for a flap notice on an opted-in service', () => {
+      expect(isFlapSuppressible('fireworks', config, mkInc())).toBe(true)
+    })
+
+    it('returns false for opted-out services (flag absent or false)', () => {
+      expect(isFlapSuppressible('fireworks', {}, mkInc())).toBe(false)
+      expect(isFlapSuppressible('fireworks', { flapSuppression: false }, mkInc())).toBe(false)
+    })
+
+    it('returns false for non-null impact incidents (real outages never suppressed)', () => {
+      expect(isFlapSuppressible('fireworks', config, mkInc({ impact: 'major' }))).toBe(false)
+    })
+
+    it('returns false for titles without the " — recovered" suffix', () => {
+      expect(isFlapSuppressible('fireworks', config, mkInc({ title: 'API Outage' }))).toBe(false)
+    })
+
+    it('Tier-1 guard: never suppresses claude / openai / gemini even if flag set', () => {
+      // Defense-in-depth: a configuration mistake enabling flapSuppression on a Tier-1
+      // service would silently swallow real outage alerts. Hard-coded exclusion.
+      expect(isFlapSuppressible('claude', config, mkInc())).toBe(false)
+      expect(isFlapSuppressible('openai', config, mkInc())).toBe(false)
+      expect(isFlapSuppressible('gemini', config, mkInc())).toBe(false)
+    })
+  })
+
+  describe('buildIncidentAlerts — suppressedIncIds integration', () => {
+    // End-to-end: proves the plumbing from pre-collection (suppressedIncIds) into
+    // buildIncidentAlerts actually drops the Discord alert. The reviewer of the first
+    // draft caught a silent no-op here; this test locks the contract.
+    it('drops both new and resolved alerts for suppressed incident IDs', () => {
+      const svc = mockService({
+        id: 'fireworks',
+        status: 'operational',
+        incidents: [
+          // Down half of a second flap in the same 60min window
+          { id: 'flap2-down', title: 'X — down', status: 'investigating', impact: null, startedAt: recentDate },
+          // Resolved half of the same flap (would normally fire alerted:res if alertedNewIds had it)
+          { id: 'flap2-res', title: 'X — recovered', status: 'resolved', impact: null, startedAt: recentDate, duration: '5m' },
+        ],
+      })
+      const suppressed = new Set(['flap2-down', 'flap2-res'])
+      const alerts = buildIncidentAlerts([svc], new Set(['flap2-res']), NOW, suppressed)
+      expect(alerts).toHaveLength(0)
+    })
+
+    it('does not affect non-suppressed incidents on the same service', () => {
+      const svc = mockService({
+        incidents: [
+          { id: 'suppressed', title: 'X — down', status: 'investigating', impact: null, startedAt: recentDate },
+          { id: 'real', title: 'Actual Outage', status: 'investigating', impact: 'major', startedAt: recentDate },
+        ],
+      })
+      const alerts = buildIncidentAlerts([svc], new Set(), NOW, new Set(['suppressed']))
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].key).toBe('alerted:new:real')
+    })
   })
 })

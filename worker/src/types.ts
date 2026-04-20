@@ -59,6 +59,10 @@ export interface ServiceConfig {
   onlineOrNotComponent?: string
   awsRssUrls?: string[]
   azureRssUrl?: string
+  // BetterStack RSS emits "<model> — recovered" per auto-recovery blip; a single day can
+  // produce 10-20 alerts per affected model. Opt-in suppression dedups by normalized title
+  // in a 60-minute window. See #283 and isFlapSuppressible() in alerts.ts.
+  flapSuppression?: boolean
 }
 
 export interface ProbeSummary {
