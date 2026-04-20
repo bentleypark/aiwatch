@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { normalizeStatus } from '../parsers/statuspage'
+import { filterIncidents, SERVICES } from '../services'
+import type { Incident, ServiceConfig } from '../types'
 import { type KVLike } from '../utils'
 
 /**
@@ -185,6 +187,98 @@ async function trackComponentMissLogic(
     return 'reset'
   }
 }
+
+/**
+ * Regression tests for #292: ChatGPT has no umbrella component on
+ * status.openai.com, so its config omits statusComponentId / incidentIoComponentId
+ * and status is resolved from the overall page indicator + incidentKeywords filter
+ * alone. Covers both directions (keyword match → degraded/down, unmatched overall
+ * → operational via cross-contamination guard) so a future status-page change that
+ * silently breaks this path is caught.
+ */
+describe('ChatGPT without statusComponentId (#292)', () => {
+  function mockIncident(overrides: Partial<Incident> = {}): Incident {
+    return {
+      id: 'inc-1',
+      title: 'Test incident',
+      status: 'investigating',
+      impact: 'major',
+      startedAt: '2026-04-20T10:00:00Z',
+      resolvedAt: null,
+      duration: null,
+      timeline: [],
+      ...overrides,
+    }
+  }
+
+  const chatgptConfig = SERVICES.find((s) => s.id === 'chatgpt') as ServiceConfig
+
+  it('config has no statusComponentId or incidentIoComponentId (post-migration)', () => {
+    // Guard against accidental reintroduction of the stale IDs. incidentExclude
+    // must stay absent too — the cross-contamination guard in fetchService
+    // relies on incidentKeywords being the sole filter.
+    expect(chatgptConfig).toBeDefined()
+    expect(chatgptConfig.statusComponentId).toBeUndefined()
+    expect(chatgptConfig.statusComponent).toBeUndefined()
+    expect(chatgptConfig.incidentIoComponentId).toBeUndefined()
+    expect(chatgptConfig.incidentExclude).toBeUndefined()
+    expect(chatgptConfig.incidentKeywords).toContain('chatgpt')
+    expect(chatgptConfig.incidentKeywords).toContain('conversation')
+  })
+
+  it('keyword-matched ChatGPT incident → degraded', () => {
+    const incidents = [
+      mockIncident({ id: 'chat-1', title: 'Elevated conversation errors' }),
+    ]
+    const filtered = filterIncidents(incidents, chatgptConfig)
+    expect(filtered).toHaveLength(1)
+
+    const summary: SummaryData = { status: { indicator: 'minor' } }
+    expect(determineSvcStatus({}, summary, filtered)).toBe('degraded')
+  })
+
+  it('OpenAI API-only incident with overall=minor → operational (cross-contamination guard)', () => {
+    // Overall page shows "minor" because an OpenAI API incident is active, but
+    // the incident title has no ChatGPT keyword → keyword filter drops it →
+    // the "no component + no matching incidents → operational" guard kicks in.
+    const incidents = [
+      mockIncident({ id: 'api-1', title: 'Elevated latency on /v1/responses' }),
+    ]
+    const filtered = filterIncidents(incidents, chatgptConfig)
+    expect(filtered).toHaveLength(0) // keyword filter drops non-ChatGPT incident
+
+    const summary: SummaryData = { status: { indicator: 'minor' } }
+    expect(determineSvcStatus({}, summary, filtered)).toBe('operational')
+  })
+
+  it('major overall + ChatGPT-matched unresolved incident → down', () => {
+    const incidents = [
+      mockIncident({ id: 'chat-2', title: 'ChatGPT login failures', status: 'identified' }),
+    ]
+    const filtered = filterIncidents(incidents, chatgptConfig)
+    expect(filtered).toHaveLength(1)
+
+    const summary: SummaryData = { status: { indicator: 'major' } }
+    expect(determineSvcStatus({}, summary, filtered)).toBe('down')
+  })
+
+  it('stale "minor" overall + all ChatGPT incidents resolved → operational', () => {
+    const incidents = [
+      mockIncident({ id: 'chat-old', title: 'ChatGPT conversation errors', status: 'resolved' }),
+    ]
+    const filtered = filterIncidents(incidents, chatgptConfig)
+    expect(filtered).toHaveLength(1)
+
+    const summary: SummaryData = { status: { indicator: 'minor' } }
+    // Overall stale but no unresolved keyword-matched incident → operational
+    expect(determineSvcStatus({}, summary, filtered)).toBe('operational')
+  })
+
+  it('overall operational → operational regardless of filter output', () => {
+    const summary: SummaryData = { status: { indicator: 'none' } }
+    expect(determineSvcStatus({}, summary, [])).toBe('operational')
+  })
+})
 
 describe('component miss tracking (#135)', () => {
   it('tracks miss when statusComponentId is configured but not found', async () => {
