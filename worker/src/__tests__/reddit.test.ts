@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseRedditResponse, matchesKeywords, matchesSecurityKeywords, isPromotable, formatRedditAlert, formatSecurityAlert } from '../reddit'
+import { parseRedditResponse, matchesKeywords, matchesSecurityKeywords, isPromotable, formatRedditAlert, formatSecurityAlert, REDDIT_TARGETS } from '../reddit'
 import type { RedditAlert } from '../reddit'
 
 describe('parseRedditResponse', () => {
@@ -238,5 +238,72 @@ describe('formatRedditAlert', () => {
     const formatted = formatRedditAlert(alert)
     expect(formatted.description).not.toContain('is-')
     expect(formatted.title).toContain('PROMOTE')
+  })
+})
+
+describe('REDDIT_TARGETS — playbook coverage (#280)', () => {
+  // Locks the playbook Subreddit list ↔ cron coverage mapping. If this table diverges from
+  // docs/marketing-playbook.md, either update this test or the playbook — whichever reflects
+  // the intent. Do not silently drop a playbook engagement target.
+  const modeOf = (service: string) =>
+    service === '_competitive' ? 'competitive'
+      : service === '_security' ? 'security' : 'outage'
+
+  it('includes all playbook engagement targets in outage mode', () => {
+    const subsInOutageMode = REDDIT_TARGETS
+      .filter(t => modeOf(t.service) === 'outage')
+      .map(t => t.subreddit)
+    // Playbook-listed subs where cron should auto-detect outage posts for Discord 🎯 PROMOTE
+    expect(subsInOutageMode).toContain('ClaudeAI')
+    expect(subsInOutageMode).toContain('ChatGPT')
+    expect(subsInOutageMode).toContain('OpenAI')
+    // #280: r/LocalLLaMA switched from competitive → outage to match the playbook's
+    // "API reliability in local-vs-hosted threads" engagement hook.
+    expect(subsInOutageMode).toContain('LocalLLaMA')
+    // #280: r/AINews added for press-adjacent outage threads.
+    expect(subsInOutageMode).toContain('AINews')
+  })
+
+  it('keeps coding agent subs in outage mode (existing coverage)', () => {
+    const subsInOutageMode = REDDIT_TARGETS
+      .filter(t => modeOf(t.service) === 'outage')
+      .map(t => t.subreddit)
+    expect(subsInOutageMode).toContain('ClaudeCode')
+    expect(subsInOutageMode).toContain('cursor')
+    expect(subsInOutageMode).toContain('windsurf')
+    expect(subsInOutageMode).toContain('Codeium')
+  })
+
+  it('keeps competitive-only subs in competitive mode (not outage)', () => {
+    const competitive = REDDIT_TARGETS.filter(t => modeOf(t.service) === 'competitive').map(t => t.subreddit)
+    expect(competitive).toContain('devops')
+    expect(competitive).toContain('artificial')
+    // Guard against regression: LocalLLaMA must not be demoted back to competitive
+    expect(competitive).not.toContain('LocalLLaMA')
+  })
+
+  it('keeps security subs in security mode', () => {
+    const security = REDDIT_TARGETS.filter(t => modeOf(t.service) === 'security').map(t => t.subreddit)
+    expect(security).toContain('netsec')
+    expect(security).toContain('cybersecurity')
+  })
+
+  it('does not monitor r/MachineLearning yet — deferred pending stricter matcher (#280)', () => {
+    const subs = REDDIT_TARGETS.map(t => t.subreddit)
+    // Playbook says r/MachineLearning is out-of-scope for auto-detection because
+    // research posts naturally contain outage keywords ("broken loss curve", etc.).
+    // Adding it without a service-name-required matcher would spam Discord.
+    expect(subs).not.toContain('MachineLearning')
+  })
+
+  it('uses only known service-field conventions', () => {
+    // _competitive and _security are special markers; everything else falls to outage mode.
+    // A typo like '_competetive' would silently route to outage — this test catches that.
+    const specialMarkers = new Set(['_competitive', '_security'])
+    for (const target of REDDIT_TARGETS) {
+      if (target.service.startsWith('_')) {
+        expect(specialMarkers.has(target.service)).toBe(true)
+      }
+    }
   })
 })
