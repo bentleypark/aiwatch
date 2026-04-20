@@ -126,6 +126,10 @@ const en = {
   'incidents.timeline.monitoring': 'Monitoring',
   'incidents.timeline.resolved': 'Resolved',
   'incidents.timeline.empty': 'No timeline data available',
+  'incidents.group.flaps': '× {n} flaps',
+  'incidents.group.expand': 'Show all entries',
+  'incidents.group.collapse': 'Hide entries',
+  'incidents.group.statusUniform': 'all {status}',
 
   // Uptime
   'uptime.stable': 'Most Stable',
