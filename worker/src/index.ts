@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey } from './alerts'
 import { analyzeIncident, refreshOrReanalyze, analysisKey, formatRecoveryDisplay, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration } from './utils'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
@@ -399,10 +399,24 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   const alertedNewIds = new Set<string>()
   const alertedDownMap = new Map<string, string>()
   const alertedDegradedMap = new Map<string, string>()
+  // #283: flap suppression state.
+  // - suppressedIncIds: incidents whose same-titled prior flap already fired its res alert
+  //   within the past 60min → buildIncidentAlerts drops both new and res paths.
+  // - flapKeysToWrite: incidents eligible for flap suppression but no active window yet;
+  //   post-send writes the flap key on the res alert to start the window for the NEXT flap.
+  const suppressedIncIds = new Set<string>()
+  const flapKeysToWrite = new Map<string, string>()
   for (const svc of scored) {
+    const config = SERVICES.find(c => c.id === svc.id)
     for (const inc of svc.incidents ?? []) {
       const wasAlerted = await env.STATUS_CACHE.get(`alerted:new:${inc.id}`).catch(() => null)
       if (wasAlerted) alertedNewIds.add(inc.id)
+      if (config && isFlapSuppressible(svc.id, config, inc)) {
+        const flapKey = flapSuppressionKey(svc.id, inc)
+        const flapActive = await env.STATUS_CACHE.get(flapKey).catch(() => null)
+        if (flapActive) suppressedIncIds.add(inc.id)
+        else flapKeysToWrite.set(inc.id, flapKey)
+      }
     }
     const wasDown = await env.STATUS_CACHE.get(`alerted:down:${svc.id}`).catch(() => null)
     if (wasDown) alertedDownMap.set(svc.id, wasDown)
@@ -422,7 +436,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   }
 
   // Build alerts using pure functions
-  const incidentAlerts = buildIncidentAlerts(scored, alertedNewIds)
+  const incidentAlerts = buildIncidentAlerts(scored, alertedNewIds, Date.now(), suppressedIncIds)
   const serviceAlerts = buildServiceAlerts(scored, alertedDownMap, alertedDegradedMap)
   const allAlerts = [...incidentAlerts, ...serviceAlerts]
 
@@ -482,6 +496,16 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     // Write dedup keys for all merged alerts (Together AI grouping)
     const keysToWrite = alert._mergedKeys ?? [alert.key]
     await Promise.all(keysToWrite.map(k => kvPut(env.STATUS_CACHE, k, kvValue, { expirationTtl: ttl })))
+    // #283: write flap-suppression key when a flap-candidate *resolved* alert fires
+    // (BetterStack emits "— recovered" only on resolved). This marks the end of the
+    // first flap cycle and starts a 60-min window that silently drops subsequent
+    // identical flaps (both down and resolved halves).
+    for (const k of keysToWrite) {
+      if (!k.startsWith('alerted:res:')) continue
+      const incId = k.slice('alerted:res:'.length)
+      const flapKey = flapKeysToWrite.get(incId)
+      if (flapKey) await kvPut(env.STATUS_CACHE, flapKey, '1', { expirationTtl: 3600 })
+    }
     if (isStatusAlert) {
       const svcId = alert.key.split(':').pop()!
       await kvDel(env.STATUS_CACHE, `alerted:recovered:${svcId}`)

@@ -7,6 +7,53 @@ import { computeLeadMs } from './detection-lead-log'
 import type { ServiceStatus } from './services'
 import type { Incident } from './types'
 
+// #283: Discord alert flap suppression for BetterStack auto-recovery noise.
+// BetterStack-backed feeds emit paired "<model> — down" / "<model> — recovered" incidents
+// per transient blip; a single model can produce ~2 Discord alerts × 10-14 flaps/day.
+// Opt-in per ServiceConfig (flapSuppression: true). Tier-1 services (claude/openai/gemini)
+// are excluded as defense-in-depth — their alert volume is low and suppressing a real
+// outage would be costly.
+//
+// Flow: first flap's down + res alerts both fire normally; flap KV key is written when
+// the first flap's res alert fires. Subsequent flaps (same normalized title, within 60min)
+// are suppressed on both down and res via suppressedIncIds passed to buildIncidentAlerts.
+const TIER1_IDS = new Set(['claude', 'openai', 'gemini'])
+
+// BetterStack emits the literal em-dash (U+2014); guard against both "— recovered" and
+// "— down" since a flap cycle can be caught mid-state, and the suppression window should
+// cover both halves.
+const FLAP_TITLE_RE = /\s*—\s*(down|recovered)\s*$/
+
+/** Matches either half of a BetterStack flap cycle. Null-impact only — real incidents tagged with severity are never treated as flaps. */
+export function isFlapNotice(inc: Incident): boolean {
+  if (inc.impact != null) return false
+  return FLAP_TITLE_RE.test(inc.title)
+}
+
+export function normalizeFlapTitle(title: string): string {
+  return title.replace(FLAP_TITLE_RE, '').trim()
+}
+
+/** KV key for a 60-min suppression window, scoped to svcId + normalized title. */
+export function flapSuppressionKey(svcId: string, inc: Incident): string {
+  return `alerted:flap:${svcId}:${normalizeFlapTitle(inc.title)}`
+}
+
+/**
+ * Whether this incident should be considered for flap suppression.
+ * Returning true means: caller should check the KV key; if the key exists, skip the
+ * Discord alert; if not, send the alert AND write the key to start the window.
+ */
+export function isFlapSuppressible(
+  svcId: string,
+  config: { flapSuppression?: boolean },
+  inc: Incident,
+): boolean {
+  if (TIER1_IDS.has(svcId)) return false
+  if (!config.flapSuppression) return false
+  return isFlapNotice(inc)
+}
+
 export interface AlertCandidate {
   key: string
   title: string
@@ -27,11 +74,14 @@ export interface ScoredService extends ServiceStatus {
  * Build incident alerts (new + resolved) from service data.
  * Does NOT check KV dedup — caller is responsible for filtering already-sent alerts.
  * @param alertedNewIds Set of incident IDs that were previously alerted as new
+ * @param suppressedIncIds Set of incident IDs to silently drop (both new and resolved paths).
+ *                        Used by #283 flap suppression to skip a repeat flap within the window.
  */
 export function buildIncidentAlerts(
   services: ScoredService[],
   alertedNewIds: Set<string>,
   now: number = Date.now(),
+  suppressedIncIds: Set<string> = new Set(),
 ): AlertCandidate[] {
   // Group services by incidentId to show all affected services in one alert
   const newIncidents = new Map<string, { names: string[]; ids: string[]; inc: Incident; category: string; firstSvc: ScoredService }>()
@@ -39,6 +89,7 @@ export function buildIncidentAlerts(
 
   for (const svc of services) {
     for (const inc of svc.incidents ?? []) {
+      if (suppressedIncIds.has(inc.id)) continue // #283 flap suppression — skip both new + resolved
       const incAge = now - new Date(inc.startedAt).getTime()
       if (incAge > 86_400_000) continue
 
