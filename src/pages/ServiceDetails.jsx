@@ -71,6 +71,7 @@ const STATUS_URL = {
   copilot:     'https://githubstatus.com',
   cursor:      'https://status.cursor.com',
   windsurf:    'https://status.windsurf.com',
+  codex:       'https://status.openai.com',
 }
 
 // Services that cannot provide incident data (no API, bot-protected, etc.)
