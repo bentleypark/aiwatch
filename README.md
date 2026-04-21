@@ -13,7 +13,7 @@
 
 **English** | [한국어](README.ko.md)
 
-Real-time monitoring dashboard for **30 AI services** — track status, latency, uptime, and incidents across major AI providers.
+Real-time monitoring dashboard for **31 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[Dashboard](https://ai-watch.dev)** · **[Landing Page](https://ai-watch.dev/intro)**
 
@@ -23,7 +23,7 @@ Real-time monitoring dashboard for **30 AI services** — track status, latency,
 
 ## Features
 
-- **Real-time status** — Operational / Degraded / Down for 30 AI services
+- **Real-time status** — Operational / Degraded / Down for 31 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
 - **Latency monitoring** — Direct API endpoint response time (RTT) for 19 probe-capable services, status page timing as fallback
 - **24h latency trend** — Chart.js line chart with 5-min probe snapshots
@@ -89,7 +89,7 @@ Real-time monitoring dashboard for **30 AI services** — track status, latency,
 | ChatGPT | OpenAI |
 | Character.AI | Character AI |
 
-### Coding Agents (4)
+### Coding Agents (5)
 
 | Service | Provider |
 |---------|----------|
@@ -97,6 +97,7 @@ Real-time monitoring dashboard for **30 AI services** — track status, latency,
 | GitHub Copilot | Microsoft |
 | Cursor | Anysphere |
 | Windsurf | Codeium |
+| OpenAI Codex | OpenAI |
 
 ## Tech Stack
 
@@ -277,6 +278,7 @@ Embed real-time status badges in your README, docs, or blog.
 | `assemblyai` | AssemblyAI | `deepgram` | Deepgram |
 | `characterai` | Character.AI | `fireworks` | Fireworks AI |
 | `voyageai` | Voyage AI | `modal` | Modal |
+| `codex` | OpenAI Codex | | |
 
 ## Project Structure
 
