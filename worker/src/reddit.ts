@@ -53,6 +53,15 @@ const STRONG = /\b(down|not working|outage|broken|offline|unavailable|degraded)\
 const WEAK_WITH_CONTEXT = /\b(issues?|errors?|slow)\b/i
 const CONTEXT = /\b(anyone|right now|today|currently|status|server|api|service)\b/i
 
+// Subset of STRONG used by the megathread promotion path. Excludes `not working` —
+// statement phrasing like "Claude Code not working properly after update" too often
+// reads as a single-user complaint rather than a live outage megathread (#296).
+const PROMOTABLE_STRONG = /\b(down|outage|broken|offline|unavailable|degraded)\b/i
+
+// Age ceiling for megathread promotion. Older threads are post-incident retrospectives
+// or off-topic, and re-promoting them would surface stale content.
+const MEGATHREAD_MAX_AGE_SEC = 7200
+
 /**
  * Parse Reddit JSON search response into RedditPost[]
  */
@@ -83,11 +92,19 @@ export function parseRedditResponse(json: unknown): RedditPost[] {
 }
 
 /**
- * Check if a post title matches outage-related keywords
+ * Check if a post title matches outage-related keywords.
+ * WEAK keywords (issues/errors/slow) accept either a CONTEXT word or a `?` as the
+ * outage-context signal — `"Error while signing in?"` is a legitimate status query
+ * whose context lives in the question mark, not a keyword list (#296).
+ *
+ * The `?` relaxation also admits coding-question FPs like `"Why is sampling so slow?"`;
+ * downstream `isPromotable` gates Discord, so the cost is an extra `reddit:seen:*` KV
+ * write. Tighten with a service-name-token requirement only if data shows noise.
  */
 export function matchesKeywords(title: string): boolean {
   if (STRONG.test(title)) return true
-  return WEAK_WITH_CONTEXT.test(title) && CONTEXT.test(title)
+  if (WEAK_WITH_CONTEXT.test(title) && (CONTEXT.test(title) || /\?/.test(title))) return true
+  return false
 }
 
 // Question indicators — posts seeking help are good promotion opportunities
@@ -98,11 +115,24 @@ const SEEKING_HELP = /\b(help|what('s| is) (going on|happening)|how (to|do) (che
 
 /**
  * Check if a post is suitable for AIWatch promotion.
- * Promotable = question-style posts where users are seeking help/status info.
- * Not promotable = statements, rants, reports where the user already has an answer.
+ *
+ * Promotion paths:
+ *   1. Question / help-seeking posts (original contract) — 1-on-1 answer value
+ *   2. Live outage megathread — declarative posts with a strong outage keyword
+ *      (`down`/`outage`/`broken`/`offline`/`unavailable`/`degraded`) AND age < 2h.
+ *      Captures high-engagement threads like "Every single AI app is down" during
+ *      live outages, where every reader sees the AIWatch comment's status link.
+ *
+ * `ageSec` defaults to `Infinity` so title-only callers (tests, ad-hoc use)
+ * keep the original three-path behavior (question / anyone-outage / help) —
+ * the megathread path only activates when the caller passes real post age.
  */
-export function isPromotable(title: string): boolean {
-  return QUESTION_WITH_CONTEXT.test(title) || ANYONE_WITH_OUTAGE.test(title) || SEEKING_HELP.test(title)
+export function isPromotable(title: string, ageSec: number = Infinity): boolean {
+  if (QUESTION_WITH_CONTEXT.test(title)) return true
+  if (ANYONE_WITH_OUTAGE.test(title)) return true
+  if (SEEKING_HELP.test(title)) return true
+  if (PROMOTABLE_STRONG.test(title) && ageSec < MEGATHREAD_MAX_AGE_SEC) return true
+  return false
 }
 
 // Competitive monitoring keywords — match posts about status monitoring tools

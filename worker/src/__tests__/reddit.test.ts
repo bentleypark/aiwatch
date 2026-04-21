@@ -86,6 +86,21 @@ describe('matchesKeywords', () => {
     expect(matchesKeywords('IS CLAUDE DOWN?')).toBe(true)
     expect(matchesKeywords('Not Working at all')).toBe(true)
   })
+
+  describe('WEAK + ? bypass (#296)', () => {
+    // Live sample from 2026-04-20 ChatGPT outage: "Error while signing in?" fell through
+    // because "signing in" has no CONTEXT word, even though the ? marks it as a status query.
+    it('matches WEAK keyword + ? without a CONTEXT word', () => {
+      expect(matchesKeywords('Error while signing in?')).toBe(true)
+      expect(matchesKeywords('Errors loading the page?')).toBe(true)
+      expect(matchesKeywords('Issues sending messages?')).toBe(true)
+    })
+
+    it('still requires WEAK keyword — ? alone is not enough', () => {
+      expect(matchesKeywords('How do I fine-tune a model?')).toBe(false)
+      expect(matchesKeywords('Best prompts for GPT-4?')).toBe(false)
+    })
+  })
 })
 
 describe('matchesSecurityKeywords', () => {
@@ -181,6 +196,65 @@ describe('isPromotable', () => {
     expect(isPromotable('Check out this cool project')).toBe(false)
     expect(isPromotable('When Claude launched last year it was great')).toBe(false)
     expect(isPromotable('Why I switched from OpenAI to Anthropic')).toBe(false)
+  })
+
+  describe('megathread path (#296)', () => {
+    const HOUR = 3600
+
+    it('promotes declarative outage posts under 2h (live sample: ChatGPT 2026-04-20)', () => {
+      // Threads that were missed during the 2026-04-20 outage — the exact conversion window.
+      expect(isPromotable('Every single AI app is down', 1.2 * HOUR)).toBe(true)
+      expect(isPromotable('ChatGPT outage update', 0.6 * HOUR)).toBe(true)
+      expect(isPromotable('Services currently unavailable', 1.5 * HOUR)).toBe(true)
+    })
+
+    it('rejects the same declarative posts once they age past 2h', () => {
+      // Stale threads are post-incident retrospectives; promoting them surfaces old content.
+      expect(isPromotable('Every single AI app is down', 3 * HOUR)).toBe(false)
+      expect(isPromotable('ChatGPT outage update', 5 * HOUR)).toBe(false)
+    })
+
+    it('pins the 2h boundary with strict < (guards against refactor drift)', () => {
+      // Locks `ageSec < MEGATHREAD_MAX_AGE_SEC` so a future `<=` or constant change
+      // can't silently shift the cutoff.
+      expect(isPromotable('Every single AI app is down', 7199)).toBe(true)
+      expect(isPromotable('Every single AI app is down', 7200)).toBe(false)
+      expect(isPromotable('Every single AI app is down', 7201)).toBe(false)
+    })
+
+    it('regression — keeps existing statement-only titles non-promotable when age gate fails', () => {
+      // Title-only call (default ageSec = Infinity) must preserve the original contract.
+      expect(isPromotable('OpenAI outage lasted 3 hours yesterday')).toBe(false)
+      // Same with an explicit old age — the age branch must not fire.
+      expect(isPromotable('OpenAI outage lasted 3 hours yesterday', 10 * HOUR)).toBe(false)
+    })
+
+    it('excludes "not working" from the megathread path', () => {
+      // "not working" is in STRONG for matchesKeywords but deliberately omitted from
+      // PROMOTABLE_STRONG — statement phrasing too often reads as a single-user complaint.
+      expect(isPromotable('Claude Code not working properly after update', 0.5 * HOUR)).toBe(false)
+    })
+
+    it('rejects rant/statement titles lacking any PROMOTABLE_STRONG keyword', () => {
+      expect(isPromotable('Rant about AI quality lately', 0.3 * HOUR)).toBe(false)
+      expect(isPromotable('Switching providers because reasons', 0.3 * HOUR)).toBe(false)
+    })
+
+    it('callsite integration — filter with age passed mirrors the cron callsite in index.ts', () => {
+      const nowSec = Date.now() / 1000
+      const alerts: RedditAlert[] = [
+        // Live sample 1 — declarative, fresh → promotable via megathread path
+        { key: 'k1', subreddit: 'ChatGPT', type: 'outage' as const, post: { id: '1', title: 'Every single AI app is down', author: 'a', subreddit: 'ChatGPT', score: 42, url: '', createdUtc: nowSec - 1.2 * HOUR } },
+        // Live sample 2 — question with WEAK + ? → promotable via QUESTION path
+        { key: 'k2', subreddit: 'ChatGPT', type: 'outage' as const, post: { id: '2', title: 'Error while signing in?', author: 'b', subreddit: 'ChatGPT', score: 42, url: '', createdUtc: nowSec - 1.4 * HOUR } },
+        // Live sample 3 — declarative, fresh → promotable via megathread path
+        { key: 'k3', subreddit: 'ChatGPT', type: 'outage' as const, post: { id: '3', title: 'ChatGPT outage update', author: 'c', subreddit: 'ChatGPT', score: 10, url: '', createdUtc: nowSec - 0.6 * HOUR } },
+        // Retrospective — declarative but old → excluded by age gate
+        { key: 'k4', subreddit: 'OpenAI', type: 'outage' as const, post: { id: '4', title: 'OpenAI outage lasted 3 hours', author: 'd', subreddit: 'OpenAI', score: 20, url: '', createdUtc: nowSec - 10 * HOUR } },
+      ]
+      const promotable = alerts.filter(a => isPromotable(a.post.title, nowSec - a.post.createdUtc))
+      expect(promotable.map(a => a.post.id)).toEqual(['1', '2', '3'])
+    })
   })
 })
 

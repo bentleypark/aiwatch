@@ -817,7 +817,10 @@ export default {
         for (const alert of outageAlerts.slice(0, 5)) {
           await kvPut(env.STATUS_CACHE, alert.key, '1', { expirationTtl: 86400 })
         }
-        const promotable = outageAlerts.filter(a => isPromotable(a.post.title)).slice(0, 3)
+        const nowSec = Date.now() / 1000
+        const promotable = outageAlerts
+          .filter(a => isPromotable(a.post.title, nowSec - a.post.createdUtc))
+          .slice(0, 3)
         for (const alert of promotable) {
           const formatted = formatRedditAlert(alert)
           await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
