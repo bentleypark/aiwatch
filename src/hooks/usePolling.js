@@ -495,7 +495,7 @@ const MOCK_SERVICES = [
     ],
   },
   {
-    id: 'codex', category: 'agent', name: 'OpenAI Codex', provider: 'OpenAI', status: 'operational',
+    id: 'codex', category: 'agent', name: 'Codex', provider: 'OpenAI', status: 'operational',
     latency: null, uptime30d: null,
     history30d: hist([]),
     history3m: [],

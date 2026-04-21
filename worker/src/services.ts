@@ -64,7 +64,7 @@ export const SERVICES: ServiceConfig[] = [
   // umbrella component. Same #292 pattern as chatgpt — overall indicator +
   // incidentKeywords filter, cross-contamination guard in fetchService blocks
   // OpenAI API / ChatGPT incidents from bleeding through.
-  { id: 'codex', name: 'OpenAI Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
+  { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
 ]
 
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {

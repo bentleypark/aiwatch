@@ -16,7 +16,7 @@ const PAGES = [
   { slug: 'replicate', title: 'Is Replicate Down?', displayName: 'Replicate' },   // EXCLUDE_FALLBACK
   { slug: 'pinecone', title: 'Is Pinecone Down?', displayName: 'Pinecone' },      // top-ranked vector DB
   { slug: 'character-ai', title: 'Is Character.AI Down?', displayName: 'Character.AI' }, // dashed slug, app category
-  { slug: 'codex', title: 'Is OpenAI Codex Down?', displayName: 'OpenAI Codex' }, // coding agent, no umbrella component (#294)
+  { slug: 'codex', title: 'Is Codex Down?', displayName: 'Codex' }, // coding agent, no umbrella component (#294)
 ]
 
 test.describe('Is X Down? SSR pages', () => {
