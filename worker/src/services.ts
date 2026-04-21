@@ -56,9 +56,6 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
   // Coding Agents
   { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'], statusComponent: 'Claude Code', statusComponentId: 'yyzkbfz2thpt' },
-  { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2' },
-  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2' },
-  { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m' },
   // OpenAI Codex (coding agent): published across 4 distinct surface components on
   // status.openai.com (Codex Web / Codex API / CLI / VS Code extension) with no
   // umbrella component. Same #292 pattern as chatgpt — overall indicator +
@@ -71,6 +68,9 @@ export const SERVICES: ServiceConfig[] = [
   // frontend only) surface via incidentKeywords in Recent Incidents, not in
   // the uptime%. Is Codex Down SEO page documents this scoping.
   { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV' },
+  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2' },
+  { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2' },
+  { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m' },
 ]
 
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
