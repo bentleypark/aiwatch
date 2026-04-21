@@ -37,7 +37,7 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'character-ai':    { id: 'characterai', name: 'Character.AI',    provider: 'Character.AI', category: 'app' },
   // Coding agents (#294) — OpenAI Codex is the current coding-agent product,
   // distinct from the deprecated 2023 Codex code-generation API.
-  'codex':           { id: 'codex',       name: 'OpenAI Codex',    provider: 'OpenAI',      category: 'agent' },
+  'codex':           { id: 'codex',       name: 'Codex',           provider: 'OpenAI',      category: 'agent' },
 }
 
 // Related services for cross-linking (SEO internal links)

@@ -97,7 +97,7 @@ Real-time monitoring dashboard for **31 AI services** — track status, latency,
 | GitHub Copilot | Microsoft |
 | Cursor | Anysphere |
 | Windsurf | Codeium |
-| OpenAI Codex | OpenAI |
+| Codex | OpenAI |
 
 ## Tech Stack
 
@@ -278,7 +278,7 @@ Embed real-time status badges in your README, docs, or blog.
 | `assemblyai` | AssemblyAI | `deepgram` | Deepgram |
 | `characterai` | Character.AI | `fireworks` | Fireworks AI |
 | `voyageai` | Voyage AI | `modal` | Modal |
-| `codex` | OpenAI Codex | | |
+| `codex` | Codex | | |
 
 ## Project Structure
 

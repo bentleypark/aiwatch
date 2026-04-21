@@ -96,7 +96,7 @@
 | GitHub Copilot | Microsoft |
 | Cursor | Anysphere |
 | Windsurf | Codeium |
-| OpenAI Codex | OpenAI |
+| Codex | OpenAI |
 
 ## 기술 스택
 
@@ -277,7 +277,7 @@ README, 문서, 블로그에 실시간 상태 배지를 임베드할 수 있습�
 | `assemblyai` | AssemblyAI | `deepgram` | Deepgram |
 | `characterai` | Character.AI | `fireworks` | Fireworks AI |
 | `voyageai` | Voyage AI | `modal` | Modal |
-| `codex` | OpenAI Codex | | |
+| `codex` | Codex | | |
 
 ## 프로젝트 구조
 
