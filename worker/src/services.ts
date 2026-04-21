@@ -64,7 +64,13 @@ export const SERVICES: ServiceConfig[] = [
   // umbrella component. Same #292 pattern as chatgpt — overall indicator +
   // incidentKeywords filter, cross-contamination guard in fetchService blocks
   // OpenAI API / ChatGPT incidents from bleeding through.
-  { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
+  //
+  // Uptime source: Codex API component only (#301). Chosen because it backs
+  // the CLI and VS Code extension — API availability is the strongest proxy
+  // for developer-use availability. Surface-specific outages (e.g., Codex Web
+  // frontend only) surface via incidentKeywords in Recent Incidents, not in
+  // the uptime%. Is Codex Down SEO page documents this scoping.
+  { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV' },
 ]
 
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {

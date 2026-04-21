@@ -304,14 +304,20 @@ describe('OpenAI Codex without statusComponentId (#294)', () => {
 
   const codexConfig = SERVICES.find((s) => s.id === 'codex') as ServiceConfig
 
-  it('config: agent category, no component IDs, keyword coverage for all 4 surfaces', () => {
+  it('config: agent category, Codex API component ID for uptime, keyword coverage for all 4 surfaces', () => {
     expect(codexConfig).toBeDefined()
     expect(codexConfig.category).toBe('agent')
     expect(codexConfig.provider).toBe('OpenAI')
+    // statusComponentId stays absent — status determination still uses the
+    // overall indicator + cross-contamination guard (#294).
     expect(codexConfig.statusComponentId).toBeUndefined()
     expect(codexConfig.statusComponent).toBeUndefined()
-    expect(codexConfig.incidentIoComponentId).toBeUndefined()
     expect(codexConfig.incidentExclude).toBeUndefined()
+    // incidentIoComponentId = Codex API (#301) — sourcing official uptime
+    // from the surface that backs CLI + VS Code extension. Guard against
+    // accidental removal; if this assertion ever fails, either the ID was
+    // renamed upstream or someone reverted #301.
+    expect(codexConfig.incidentIoComponentId).toBe('01KMP3KP5MGE23B80K1EK4S8PV')
     expect(codexConfig.incidentKeywords).toContain('codex')
     expect(codexConfig.incidentKeywords).toContain('cli')
     expect(codexConfig.incidentKeywords).toContain('vs code')
