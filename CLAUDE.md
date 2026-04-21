@@ -228,7 +228,7 @@ When adding a new monitored service, update ALL of the following:
 **AIWatch** is a React SPA that monitors 31 AI services in real time:
 - **23 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Fireworks, Perplexity, HuggingFace, Replicate, ElevenLabs, AssemblyAI, Deepgram, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, Stability AI, Voyage AI, Modal
 - **3 AI apps**: claude.ai, ChatGPT, Character.AI
-- **5 coding agents**: Claude Code, GitHub Copilot, Cursor, Windsurf, Codex
+- **5 coding agents**: Claude Code, Codex, Cursor, GitHub Copilot, Windsurf
 
 ### Tech Stack
 - **React 19 + Vite 6** — SPA, no router library

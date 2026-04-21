@@ -93,10 +93,10 @@
 | 서비스 | 제공업체 |
 |--------|----------|
 | Claude Code | Anthropic |
-| GitHub Copilot | Microsoft |
-| Cursor | Anysphere |
-| Windsurf | Codeium |
 | Codex | OpenAI |
+| Cursor | Anysphere |
+| GitHub Copilot | Microsoft |
+| Windsurf | Codeium |
 
 ## 기술 스택
 
