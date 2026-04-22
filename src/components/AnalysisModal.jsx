@@ -13,24 +13,68 @@ function timeAgo(date, lang) {
 
 export default function AnalysisModal({ aiAnalysis, services, onClose }) {
   const { t, lang } = useLang()
-  // Group by service, then dedup shared incidentIds across sibling services
   // aiAnalysis: Record<svcId, AIAnalysisResult[]>
-  // Result: array of { svcIds, analyses[] } — one entry per service group
-  const groups = [] // { svcIds: string[], incIds: Set<string>, analyses: analysis[], startedAt }
+  //
+  // Two-pass grouping (avoids cross-service bleed — see #315):
+  //   Pass 1: bucket by incidentId to collect which svcIds each incident affects.
+  //           Sibling services sharing an incident (e.g. Claude API + claude.ai + Claude Code
+  //           pointing at the same incidentId) collapse into one bucket here.
+  //   Pass 2: a multi-svc bucket becomes its own card. Single-svc buckets for the same svcId
+  //           merge into a single card so the service header and fallback block render once
+  //           even when a service has multiple distinct incidents (e.g. Together AI with two
+  //           concurrent model outages).
+  const byIncident = new Map()
   for (const [svcId, rawAnalyses] of Object.entries(aiAnalysis)) {
     const arr = Array.isArray(rawAnalyses) ? rawAnalyses : [rawAnalyses]
     for (const a of arr) {
       const incId = a.incidentId ?? svcId
-      // Find existing group that already has this incidentId
-      const existingGroup = groups.find(g => g.incIds.has(incId))
-      if (existingGroup) {
-        if (!existingGroup.svcIds.includes(svcId)) existingGroup.svcIds.push(svcId)
-      } else {
-        const svc = services.find(s => s.id === svcId)
-        const inc = svc?.incidents?.find(i => i.id === incId)
-        const startedAt = inc?.startedAt ?? a.analyzedAt ?? ''
-        groups.push({ svcIds: [svcId], incIds: new Set([incId]), analyses: [a], startedAt })
+      const bucket = byIncident.get(incId)
+      if (bucket) {
+        if (!bucket.svcIds.includes(svcId)) bucket.svcIds.push(svcId)
+        continue
       }
+      const svc = services.find(s => s.id === svcId)
+      const inc = svc?.incidents?.find(i => i.id === incId)
+      byIncident.set(incId, {
+        incId,
+        svcIds: [svcId],
+        analysis: a,
+        startedAt: inc?.startedAt ?? a.analyzedAt ?? '',
+      })
+    }
+  }
+
+  const groups = []
+  const singleSvcGroupByOwner = new Map() // svcId → group
+  for (const bucket of byIncident.values()) {
+    if (bucket.svcIds.length > 1) {
+      groups.push({
+        svcIds: bucket.svcIds,
+        incIds: new Set([bucket.incId]),
+        analyses: [bucket.analysis],
+        startedAt: bucket.startedAt,
+      })
+      continue
+    }
+    const ownerSvcId = bucket.svcIds[0]
+    const existing = singleSvcGroupByOwner.get(ownerSvcId)
+    if (existing) {
+      existing.incIds.add(bucket.incId)
+      existing.analyses.push(bucket.analysis)
+      // Keep the card anchored to the most recent incident in the group so sort places
+      // freshly erupting issues above long-running ones.
+      if (bucket.startedAt && bucket.startedAt > existing.startedAt) {
+        existing.startedAt = bucket.startedAt
+      }
+    } else {
+      const g = {
+        svcIds: [ownerSvcId],
+        incIds: new Set([bucket.incId]),
+        analyses: [bucket.analysis],
+        startedAt: bucket.startedAt,
+      }
+      singleSvcGroupByOwner.set(ownerSvcId, g)
+      groups.push(g)
     }
   }
   groups.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
@@ -72,6 +116,22 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
             const isAllResolved = svcs.every(s => s.status === 'operational')
             const hasActiveInc = svcs.some(s => (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring'))
             const allRecovered = analyses.every(a => !!a.resolvedAt)
+            // Surface the gap between the operational status dot and active analyses
+            // (e.g. BetterStack per-model churn below the <30% threshold leaves the service
+            // operational while individual model incidents are still being analyzed).
+            // Restrict to single-service groups — a sibling-shared incident that happens to
+            // show operational on every surface is a real cross-service incident, not an
+            // isolated one.
+            const isolatedModelIssue = svcs.length === 1
+              && isAllResolved
+              && !allRecovered
+              && analyses.some(a => !a.resolvedAt)
+            const showFallback = !allRecovered
+              && analyses.some(a => a.needsFallback && !a.resolvedAt)
+              && !svcs.every(s => EXCLUDE_FALLBACK.includes(s.id))
+            const fallbacks = showFallback
+              ? getFallbacks(svcs.find(s => !EXCLUDE_FALLBACK.includes(s.id)) ?? svcs[0], services)
+              : []
 
             return (
               <div key={svcIds.join(',')} className="bg-[var(--bg2)] rounded-lg" style={{ padding: '12px 14px', marginBottom: '10px', opacity: isAllResolved && !hasActiveInc && !allRecovered ? 0.6 : 1 }}>
@@ -85,6 +145,17 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                   {(allRecovered || (isAllResolved && !hasActiveInc)) && (
                     <span className="mono text-[9px] rounded" style={{ color: 'var(--green)', background: 'var(--status-bg-green)', padding: '3px 8px', display: 'inline-block' }}>
                       Resolved
+                    </span>
+                  )}
+                  {isolatedModelIssue && (
+                    <span
+                      className="mono text-[9px] rounded"
+                      style={{ color: 'var(--amber)', background: 'var(--status-bg-amber)', padding: '3px 8px', display: 'inline-block' }}
+                      title={lang === 'ko'
+                        ? '서비스 전체는 정상이지만 일부 모델/컴포넌트에서 이슈가 감지되었습니다'
+                        : 'Service operational — isolated model/component issues detected'}
+                    >
+                      {lang === 'ko' ? '부분 이슈' : 'Isolated issue'}
                     </span>
                   )}
                 </div>
@@ -117,32 +188,29 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                         {isRecovered && <span>✅ {t('analysis.recoveredAt')}: {timeAgo(analysis.resolvedAt, lang)}</span>}
                         <span>🕐 {lang === 'ko' ? '분석 업데이트' : 'Analysis updated'} {timeAgo(analysis.analyzedAt, lang)}</span>
                       </div>
-                      {/* Contextual fallback recommendation — skip for EXCLUDE_FALLBACK services */}
-                      {analysis.needsFallback && !isRecovered && !svcs.every(s => EXCLUDE_FALLBACK.includes(s.id)) && (() => {
-                        const primarySvc = svcs.find(s => !EXCLUDE_FALLBACK.includes(s.id)) ?? svcs[0]
-                        const fallbacks = getFallbacks(primarySvc, services)
-                        return (
-                          <div className="mono text-[10px]" style={{ marginTop: '8px', padding: '8px 10px', background: 'var(--bg1)', borderRadius: '6px', borderLeft: '3px solid var(--amber)' }}>
-                            <span style={{ color: 'var(--text1)', fontWeight: 600 }}>🔄 {lang === 'ko' ? '대안 서비스' : 'Alternatives'}</span>
-                            {fallbacks.length > 0 ? (
-                              <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                                {fallbacks.map(f => (
-                                  <span key={f.id} style={{ color: 'var(--text1)' }}>
-                                    • {f.name}{f.aiwatchScore != null ? ` (Score: ${f.aiwatchScore})` : ''}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <div style={{ marginTop: '4px', color: 'var(--text2)' }}>
-                                {lang === 'ko' ? '현재 운영 중인 대안 서비스가 없습니다' : 'No operational alternatives currently available'}
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })()}
                     </div>
                   )
                 })}
+
+                {/* Contextual fallback recommendation — one per service group */}
+                {showFallback && (
+                  <div className="mono text-[10px]" style={{ marginTop: '10px', padding: '8px 10px', background: 'var(--bg1)', borderRadius: '6px', borderLeft: '3px solid var(--amber)' }}>
+                    <span style={{ color: 'var(--text1)', fontWeight: 600 }}>🔄 {lang === 'ko' ? '대안 서비스' : 'Alternatives'}</span>
+                    {fallbacks.length > 0 ? (
+                      <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        {fallbacks.map(f => (
+                          <span key={f.id} style={{ color: 'var(--text1)' }}>
+                            • {f.name}{f.aiwatchScore != null ? ` (Score: ${f.aiwatchScore})` : ''}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: '4px', color: 'var(--text2)' }}>
+                        {lang === 'ko' ? '현재 운영 중인 대안 서비스가 없습니다' : 'No operational alternatives currently available'}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )
           })}
