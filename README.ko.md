@@ -12,7 +12,7 @@
 
 [English](README.md) | **한국어**
 
-**30개 AI 서비스**의 상태, 지연시간, 가동률, 인시던트를 실시간으로 모니터링하는 대시보드입니다.
+**31개 AI 서비스**의 상태, 지연시간, 가동률, 인시던트를 실시간으로 모니터링하는 대시보드입니다.
 
 **[대시보드](https://ai-watch.dev)** · **[랜딩 페이지](https://ai-watch.dev/intro)**
 
@@ -22,7 +22,7 @@
 
 ## 주요 기능
 
-- **실시간 상태 모니터링** — 30개 AI 서비스의 정상 / 성능 저하 / 장애 상태
+- **실시간 상태 모니터링** — 31개 AI 서비스의 정상 / 성능 저하 / 장애 상태
 - **PWA 지원** — 홈 화면 추가, Service Worker 오프라인 캐시
 - **지연시간 측정** — 19개 probe 대상 서비스의 API 엔드포인트 직접 RTT 측정, 나머지는 상태 페이지 응답 시간
 - **24시간 지연시간 추세** — Chart.js 라인 차트 (5분 간격 probe 스냅샷)
@@ -88,7 +88,7 @@
 | ChatGPT | OpenAI |
 | Character.AI | Character AI |
 
-### 코딩 에이전트 (4개)
+### 코딩 에이전트 (5개)
 
 | 서비스 | 제공업체 |
 |--------|----------|
@@ -96,6 +96,7 @@
 | GitHub Copilot | Microsoft |
 | Cursor | Anysphere |
 | Windsurf | Codeium |
+| Codex | OpenAI |
 
 ## 기술 스택
 
@@ -115,7 +116,7 @@
 브라우저 (React SPA, 60초 폴링)
   ↓
 Cloudflare Worker
-  ├── GET /api/status    → 병렬 fetch (30개 서비스) → 정규화
+  ├── GET /api/status    → 병렬 fetch (31개 서비스) → 정규화
   ├── GET /api/uptime    → 일별 가동률 이력
   └── POST /api/alert   → Webhook 프록시 (Slack/Discord, SSRF 보호)
   ↓
@@ -276,6 +277,7 @@ README, 문서, 블로그에 실시간 상태 배지를 임베드할 수 있습�
 | `assemblyai` | AssemblyAI | `deepgram` | Deepgram |
 | `characterai` | Character.AI | `fireworks` | Fireworks AI |
 | `voyageai` | Voyage AI | `modal` | Modal |
+| `codex` | Codex | | |
 
 ## 프로젝트 구조
 

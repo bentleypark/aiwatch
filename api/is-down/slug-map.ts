@@ -35,6 +35,9 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'modal':           { id: 'modal',      name: 'Modal',            provider: 'Modal',       category: 'api' },
   // AI apps (#263)
   'character-ai':    { id: 'characterai', name: 'Character.AI',    provider: 'Character.AI', category: 'app' },
+  // Coding agents (#294) — OpenAI Codex is the current coding-agent product,
+  // distinct from the deprecated 2023 Codex code-generation API.
+  'codex':           { id: 'codex',       name: 'Codex',           provider: 'OpenAI',      category: 'agent' },
 }
 
 // Related services for cross-linking (SEO internal links)
@@ -42,13 +45,14 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   // Phase A
   'claude':         ['claude-ai', 'claude-code', 'openai', 'chatgpt'],
   'claude-ai':      ['claude', 'chatgpt', 'claude-code'],
-  'claude-code':    ['claude', 'claude-ai', 'cursor', 'github-copilot', 'windsurf'],
+  'claude-code':    ['claude', 'cursor', 'github-copilot', 'windsurf', 'codex'],
   'chatgpt':        ['claude-ai', 'openai', 'claude', 'gemini'],
   'openai':         ['chatgpt', 'claude', 'gemini', 'mistral', 'cohere'],
   'gemini':         ['openai', 'claude', 'chatgpt'],
-  'github-copilot': ['cursor', 'windsurf', 'claude-code'],
-  'cursor':         ['windsurf', 'github-copilot', 'claude-code'],
-  'windsurf':       ['cursor', 'github-copilot', 'claude-code'],
+  'github-copilot': ['cursor', 'windsurf', 'claude-code', 'codex'],
+  'cursor':         ['windsurf', 'github-copilot', 'claude-code', 'codex'],
+  'windsurf':       ['cursor', 'github-copilot', 'claude-code', 'codex'],
+  'codex':          ['github-copilot', 'cursor', 'windsurf', 'claude-code'],
   // LLM APIs — same-tier alternatives
   'mistral':        ['cohere', 'groq', 'together', 'openai', 'claude'],
   'cohere':         ['mistral', 'groq', 'together', 'openai'],

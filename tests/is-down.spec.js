@@ -16,6 +16,7 @@ const PAGES = [
   { slug: 'replicate', title: 'Is Replicate Down?', displayName: 'Replicate' },   // EXCLUDE_FALLBACK
   { slug: 'pinecone', title: 'Is Pinecone Down?', displayName: 'Pinecone' },      // top-ranked vector DB
   { slug: 'character-ai', title: 'Is Character.AI Down?', displayName: 'Character.AI' }, // dashed slug, app category
+  { slug: 'codex', title: 'Is Codex Down?', displayName: 'Codex' }, // coding agent, no umbrella component (#294)
 ]
 
 test.describe('Is X Down? SSR pages', () => {
@@ -188,7 +189,7 @@ test.describe('Is X Down? SSR pages', () => {
     const m = text.match(/is ranked #(\d+)(\s*\(tied\))? of (\d+) AI services/)
     expect(m).not.toBeNull()
     expect(Number(m[1])).toBeGreaterThanOrEqual(1)
-    expect(Number(m[3])).toBeLessThanOrEqual(28) // bedrock+azureopenai filtered
+    expect(Number(m[3])).toBeLessThanOrEqual(29) // 31 total − bedrock − azureopenai filtered
   })
 
   test('tied rank shows "(tied)" marker for services in a stable tie cluster', async ({ page }) => {
@@ -211,14 +212,14 @@ test.describe('Is X Down? SSR pages', () => {
   test('rank excludes estimate-only services with zero incidents', async ({ page }) => {
     // Bedrock + Azure OpenAI are uptimeSource=estimate + 0 incidents → hidden from
     // dashboard ranking. SEO page must use the same filter so totalRanked matches
-    // the dashboard count (28, not 30).
+    // the dashboard count (29, not 31 — bedrock+azureopenai filtered).
     await page.goto('/is-pinecone-down', { waitUntil: 'domcontentloaded' })
     const rankLine = page.locator('p.meta', { hasText: /is ranked #\d+/ })
     await expect(rankLine).toBeVisible()
     const text = (await rankLine.textContent()) || ''
     const m = text.match(/of (\d+) AI services/)
     expect(m).not.toBeNull()
-    expect(Number(m && m[1])).toBeLessThanOrEqual(28)
+    expect(Number(m && m[1])).toBeLessThanOrEqual(29)
   })
 
   test('hides "Uptime (30d): N/A" when no uptime data is available', async ({ page }) => {

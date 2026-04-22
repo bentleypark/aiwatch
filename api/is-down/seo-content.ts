@@ -349,6 +349,21 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How long do Character.AI outages usually last?', a: 'Character.AI outage durations vary by cause. Check the recent incidents section on this page for typical resolution times.' },
     ],
   },
+  // Coding agents (#294) — "OpenAI Codex" on this page means the current coding
+  // agent product (CLI, Codex Web, VS Code extension), not the deprecated 2023
+  // Codex code-generation API.
+  codex: {
+    displayName: 'Codex',
+    description: 'Codex is a coding agent from OpenAI that runs across web, CLI, and a VS Code extension, using frontier OpenAI models to plan and execute multi-step code changes. This is the current Codex coding-agent product, not the deprecated 2023 Codex code-generation API.',
+    insight: 'Codex shares its backend infrastructure with ChatGPT and the OpenAI API. When OpenAI has a broad platform incident, Codex is almost always affected — AIWatch tracks Codex independently so the impact scope is visible per surface (Codex Web, Codex API, CLI, VS Code extension). Codex-specific incidents that do not also affect ChatGPT are less common but do occur.',
+    whenDown: 'When Codex is down, developers lose the coding agent across the CLI, web, and VS Code extension — multi-step planning, file edits, and task execution all fail. The underlying OpenAI models may still be reachable via the API for other uses.',
+    faqs: [
+      { q: 'Is Codex down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Codex every 5 minutes across its four published surfaces (Codex Web, Codex API, CLI, VS Code extension) and shows real-time operational status.' },
+      { q: 'Is this the old Codex API from 2023?', a: 'No. This page tracks the current OpenAI Codex coding agent released as part of OpenAI\'s agent products. The 2023 Codex code-generation API was deprecated and is not what AIWatch monitors here.' },
+      { q: 'Why is Codex not working?', a: 'Codex outages usually stem from one of: a broader OpenAI platform incident (also affects ChatGPT and the API), a Codex-specific backend issue, or an upstream model outage. Check the Recent Incidents section for current context.' },
+      { q: 'What are alternatives to Codex?', a: 'When Codex is down, Claude Code, GitHub Copilot, Cursor, or Windsurf are alternative coding agents. AIWatch shows which are currently operational.' },
+    ],
+  },
 }
 
 export function getSEOContent(slug: string): ServiceSEO | null {
