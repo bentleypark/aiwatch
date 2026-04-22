@@ -327,3 +327,42 @@ export function incrementSecurityCount(raw: string | null, addBy: number): numbe
   const prev = raw ? parseInt(raw, 10) : 0
   return (Number.isFinite(prev) ? prev : 0) + addBy
 }
+
+/**
+ * Shape of dashboard-surfaced security alert metadata stored in KV under `security:seen:*`.
+ * Separate from `SecurityAlert` (which is the detection-time shape with `id`) — once an alert
+ * is dedup-stored, only the display fields matter. `detectedAt` is added at write time so the
+ * dashboard can filter to a 24h window.
+ */
+export interface SecurityAlertMeta {
+  title: string
+  url: string
+  source: string
+  severity?: string
+  service?: string
+  detectedAt?: string
+}
+
+/**
+ * Invariant: `/api/status` and `/api/status/cached` must emit the same `securityAlerts`
+ * shape. Asymmetric responses would flap the dashboard banner on 60s silent polls (#304).
+ *
+ * Returns at most 20 alerts; malformed entries and legacy `"1"` marker values are skipped.
+ * Swallows KV list/get errors — security data is optional display, not a hard dependency.
+ */
+export async function readRecentSecurityAlerts(kv: KVNamespace | null): Promise<SecurityAlertMeta[]> {
+  if (!kv) return []
+  const alerts: SecurityAlertMeta[] = []
+  try {
+    const secKeys = await kv.list({ prefix: 'security:seen:', limit: 20 })
+    if (secKeys.keys.length === 0) return alerts
+    const results = await Promise.allSettled(
+      secKeys.keys.map(k => kv.get(k.name)),
+    )
+    for (const r of results) {
+      if (r.status !== 'fulfilled' || !r.value || r.value === '1') continue
+      try { alerts.push(JSON.parse(r.value)) } catch { /* skip malformed */ }
+    }
+  } catch { /* security data is optional — don't fail the response */ }
+  return alerts
+}

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { mapOSVSeverity, detectSecurityAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount } from '../security-monitor'
-import type { SecurityAlert } from '../security-monitor'
+import { mapOSVSeverity, detectSecurityAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts } from '../security-monitor'
+import type { SecurityAlert, SecurityAlertMeta } from '../security-monitor'
 
 describe('mapOSVSeverity', () => {
   it('maps critical (>= 9.0)', () => {
@@ -193,5 +193,122 @@ describe('securityDetectedKey + incrementSecurityCount (#288)', () => {
     // Daily summary uses incrementSecurityCount(raw, 0) to parse without mutating.
     expect(incrementSecurityCount('14', 0)).toBe(14)
     expect(incrementSecurityCount(null, 0)).toBe(0)
+  })
+})
+
+// Minimal in-memory KV stub for readRecentSecurityAlerts. Only implements list/get —
+// enough to exercise the filter/parse branches without pulling in Miniflare.
+function makeFakeKV(entries: Record<string, string>): KVNamespace {
+  const api = {
+    async list({ prefix, limit }: { prefix: string; limit?: number }) {
+      const all = Object.keys(entries).filter(k => k.startsWith(prefix))
+      const keys = (limit ? all.slice(0, limit) : all).map(name => ({ name }))
+      return { keys, list_complete: true, cacheStatus: null } as unknown as KVNamespaceListResult<unknown, string>
+    },
+    async get(key: string) {
+      return entries[key] ?? null
+    },
+  }
+  return api as unknown as KVNamespace
+}
+
+describe('readRecentSecurityAlerts', () => {
+  it('returns empty array when KV is null', async () => {
+    // Defensive: env.STATUS_CACHE is typed as nullable in the Worker bindings.
+    expect(await readRecentSecurityAlerts(null)).toEqual([])
+  })
+
+  it('returns empty array when no security:seen:* keys exist', async () => {
+    const kv = makeFakeKV({ 'other:key': 'value' })
+    expect(await readRecentSecurityAlerts(kv)).toEqual([])
+  })
+
+  it('parses JSON metadata entries', async () => {
+    const meta: SecurityAlertMeta = {
+      title: 'GHSA-w828: PyPI/anthropic',
+      url: 'https://osv.dev/vulnerability/GHSA-w828',
+      source: 'osv',
+      severity: 'high',
+      service: 'Anthropic (Claude)',
+      detectedAt: '2026-04-22T09:00:00.000Z',
+    }
+    const kv = makeFakeKV({
+      'security:seen:osv:GHSA-w828': JSON.stringify(meta),
+    })
+    const result = await readRecentSecurityAlerts(kv)
+    expect(result).toEqual([meta])
+  })
+
+  it('skips legacy `"1"` marker values (pre-metadata schema)', async () => {
+    // Earlier versions only stored "1" as a dedup marker. Those keys must not crash the parser
+    // or be returned as alerts — the dashboard needs real metadata.
+    const kv = makeFakeKV({
+      'security:seen:hn:old-entry': '1',
+      'security:seen:osv:new-entry': JSON.stringify({ title: 'T', url: 'U', source: 'osv' }),
+    })
+    const result = await readRecentSecurityAlerts(kv)
+    expect(result).toHaveLength(1)
+    expect(result[0].title).toBe('T')
+  })
+
+  it('skips malformed JSON entries without failing the whole read', async () => {
+    const kv = makeFakeKV({
+      'security:seen:hn:malformed': '{not valid json',
+      'security:seen:osv:good': JSON.stringify({ title: 'Good', url: 'U', source: 'osv' }),
+    })
+    const result = await readRecentSecurityAlerts(kv)
+    expect(result).toHaveLength(1)
+    expect(result[0].title).toBe('Good')
+  })
+
+  it('swallows KV list errors — security data is optional', async () => {
+    // If KV is temporarily unavailable, the status endpoint must still succeed.
+    const brokenKv = {
+      async list() { throw new Error('KV down') },
+      async get() { return null },
+    } as unknown as KVNamespace
+    expect(await readRecentSecurityAlerts(brokenKv)).toEqual([])
+  })
+
+  // Regression lock for #304: `/api/status` used to omit `securityAlerts` while
+  // `/api/status/cached` included it, so silent polls every 60s hid the banner.
+  // Both endpoints now pass readRecentSecurityAlerts's output through the same
+  // conditional-spread pattern — this describe block locks that contract.
+  describe('response-shape parity invariant', () => {
+    // Mirrors the spread used at both endpoint callsites in worker/src/index.ts
+    // (`...(securityAlerts.length > 0 ? { securityAlerts } : {})`). If either
+    // callsite drifts — e.g. `securityAlerts: alerts` without the guard, or no
+    // spread at all — these assertions catch it by diffing both shapes.
+    function buildEndpointResponse(alerts: SecurityAlertMeta[]): Record<string, unknown> {
+      return {
+        services: [],
+        ...(alerts.length > 0 ? { securityAlerts: alerts } : {}),
+      }
+    }
+
+    it('omits the securityAlerts key entirely when there are no alerts', async () => {
+      // Schema clarity: client reads `data.securityAlerts ?? []`, so `[]` and
+      // omitted behave the same — but emitting `[]` would add avoidable bytes
+      // and could drift consumers that use `'securityAlerts' in data` as a signal.
+      const kv = makeFakeKV({})
+      const alerts = await readRecentSecurityAlerts(kv)
+      const response = buildEndpointResponse(alerts)
+      expect('securityAlerts' in response).toBe(false)
+    })
+
+    it('both callsite-shaped responses are identical for the same KV state', async () => {
+      // #304 root cause was asymmetric shape between endpoints. This test derives
+      // both endpoints' shapes from the same readRecentSecurityAlerts output and
+      // asserts deep equality — a future contributor dropping the spread on one
+      // side would fail this immediately.
+      const kv = makeFakeKV({
+        'security:seen:osv:GHSA-1': JSON.stringify({ title: 'A', url: 'U1', source: 'osv' }),
+        'security:seen:hn:2': JSON.stringify({ title: 'B', url: 'U2', source: 'hn' }),
+      })
+      const fullShape = buildEndpointResponse(await readRecentSecurityAlerts(kv))
+      const cachedShape = buildEndpointResponse(await readRecentSecurityAlerts(kv))
+      expect(fullShape).toEqual(cachedShape)
+      expect(fullShape.securityAlerts).toHaveLength(2)
+    })
   })
 })

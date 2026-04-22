@@ -706,7 +706,7 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
 import { generateBadgeSvg } from './badge'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable } from './reddit'
-import { detectSecurityAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount } from './security-monitor'
+import { detectSecurityAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { collectChangelogs, getStaleSources } from './changelog'
@@ -1697,21 +1697,8 @@ export default {
           })
         ))
 
-        // Read recent security alerts from KV (7d TTL, stores metadata JSON)
-        interface SecurityAlertMeta { title: string; url: string; source: string; severity?: string; service?: string; detectedAt?: string }
-        let securityAlerts: SecurityAlertMeta[] = []
-        try {
-          const secKeys = await env.STATUS_CACHE!.list({ prefix: 'security:seen:', limit: 20 })
-          if (secKeys.keys.length > 0) {
-            const secResults = await Promise.allSettled(
-              secKeys.keys.map(k => env.STATUS_CACHE!.get(k.name)),
-            )
-            for (const r of secResults) {
-              if (r.status !== 'fulfilled' || !r.value || r.value === '1') continue
-              try { securityAlerts.push(JSON.parse(r.value)) } catch { /* skip malformed */ }
-            }
-          }
-        } catch { /* security data is optional — don't fail the response */ }
+        // See readRecentSecurityAlerts — both endpoints must emit this field.
+        const securityAlerts = await readRecentSecurityAlerts(env.STATUS_CACHE!)
 
         // Calculate scores for cached services (same as /api/status)
         const cachedProbeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'status-cached')
@@ -1911,6 +1898,9 @@ export default {
         ))
       }
 
+      // See readRecentSecurityAlerts — both endpoints must emit this field.
+      const securityAlerts = env.STATUS_CACHE ? await readRecentSecurityAlerts(env.STATUS_CACHE) : []
+
       return new Response(JSON.stringify({
         services: servicesWithScore,
         lastUpdated: new Date().toISOString(),
@@ -1918,6 +1908,7 @@ export default {
         ...(probe24h.length > 0 ? { probe24h } : {}),
         ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
         ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),
+        ...(securityAlerts.length > 0 ? { securityAlerts } : {}),
       }), {
         status: 200,
         headers: {
