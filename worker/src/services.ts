@@ -14,6 +14,7 @@ import {
   AISTUDIO_BODY,
   AISTUDIO_COMPONENT,
   parseAistudioIncidents,
+  computeDailyImpactFromIncidents,
 } from './parsers/aistudio'
 import { parseInstatusIncidents } from './parsers/instatus'
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds } from './parsers/betterstack'
@@ -642,13 +643,22 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         await resetFetchFailure(kv, config.id)
       }
 
+      // aistudio has no uptime/impact RPC — derive dailyImpact from the
+      // post-filter incident list so gemini's 30-day calendar renders.
+      const aistudioDailyImpact = config.aistudioStatus
+        ? computeDailyImpactFromIncidents(filtered)
+        : null
+
+      const dailyImpact = bsDailyImpact ?? aistudioDailyImpact
+      const has30dCalendar = bsDailyImpact != null || aistudioDailyImpact != null
+
       return {
         ...base,
         status: derivedStatus,
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
-        calendarDays: bsDailyImpact ? 30 : 14,
-        ...(bsDailyImpact ? { dailyImpact: bsDailyImpact } : {}),
+        calendarDays: has30dCalendar ? 30 : 14,
+        ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
         ...(betterStackUptime != null ? { uptime30d: betterStackUptime, uptimeSource: 'platform_avg' as const } : {}),
       }
     }

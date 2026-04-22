@@ -3,7 +3,7 @@
 // Fixture / shape verification: worker/src/parsers/__tests__/fixtures/aistudio-sample.json
 // Tests under worker/src/parsers/__tests__/aistudio.test.ts lock the enum mapping.
 
-import type { TimelineEntry, Incident } from '../types'
+import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import { formatDuration } from '../utils'
 
 // Public API key extracted from the aistudio.google.com/status JS bundle. The
@@ -103,6 +103,50 @@ export interface ParseAistudioOptions {
   componentFilter?: AistudioComponent[]
   // Prefix applied to incident IDs for cross-source dedup (default: 'aistudio:').
   idPrefix?: string
+}
+
+// aistudio has no uptime/impact RPC — UI renders its 90-day bar client-side from
+// the incident list. Mirror that here so gemini's 30-day calendar shows real
+// impact bars instead of the fallback binary ok/incident markers.
+// Drops incidents shorter than 10 min (matches the incident.io calendar
+// convention in parseIncidentIoComponentImpacts for visual consistency).
+export function computeDailyImpactFromIncidents(
+  incidents: Incident[],
+  calendarDays = 30,
+  now: Date = new Date(),
+): Record<string, DailyImpactLevel> {
+  const result: Record<string, DailyImpactLevel> = {}
+  const rank: Record<DailyImpactLevel, number> = { minor: 1, major: 2, critical: 3 }
+  const FLAP_THRESHOLD_MS = 10 * 60_000
+  const DAY_MS = 86_400_000
+
+  const windowStart = new Date(now)
+  windowStart.setUTCDate(now.getUTCDate() - calendarDays + 1)
+  windowStart.setUTCHours(0, 0, 0, 0)
+
+  for (const inc of incidents) {
+    const impact = inc.impact
+    if (!impact) continue
+    const start = new Date(inc.startedAt)
+    const end = inc.resolvedAt ? new Date(inc.resolvedAt) : now
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) continue
+    if (end.getTime() - start.getTime() < FLAP_THRESHOLD_MS) continue
+
+    const iterStart = start < windowStart ? windowStart : start
+    const iterEnd = end > now ? now : end
+    if (iterStart > iterEnd) continue
+
+    const startDay = new Date(iterStart.toISOString().substring(0, 10)).getTime()
+    const endDay = new Date(iterEnd.toISOString().substring(0, 10)).getTime()
+    for (let d = startDay; d <= endDay; d += DAY_MS) {
+      const key = new Date(d).toISOString().substring(0, 10)
+      const existing = result[key]
+      if (!existing || rank[impact] > rank[existing]) {
+        result[key] = impact
+      }
+    }
+  }
+  return result
 }
 
 export function parseAistudioIncidents(

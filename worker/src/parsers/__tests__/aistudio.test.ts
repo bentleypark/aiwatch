@@ -3,10 +3,12 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   parseAistudioIncidents,
+  computeDailyImpactFromIncidents,
   AISTUDIO_COMPONENT,
   AISTUDIO_ENDPOINT,
   AISTUDIO_HEADERS,
 } from '../aistudio'
+import type { Incident } from '../../types'
 
 // Helper: build a minimal incident entry [id, title, severity, updates, category, components]
 const entry = (
@@ -175,6 +177,82 @@ describe('parseAistudioIncidents', () => {
     const data = wrap([bad, good])
     const result = parseAistudioIncidents(data)
     expect(result.map((i) => i.id)).toEqual(['aistudio:good'])
+  })
+
+  describe('computeDailyImpactFromIncidents', () => {
+    const mkInc = (over: Partial<Incident>): Incident => ({
+      id: 'x',
+      title: 't',
+      status: 'resolved',
+      impact: 'minor',
+      startedAt: '2026-04-20T10:00:00.000Z',
+      resolvedAt: '2026-04-20T14:00:00.000Z',
+      duration: '4h',
+      timeline: [],
+      ...over,
+    })
+    const now = new Date('2026-04-22T12:00:00.000Z')
+
+    it('marks every UTC day the incident spans', () => {
+      const out = computeDailyImpactFromIncidents(
+        [mkInc({ startedAt: '2026-04-19T22:00:00Z', resolvedAt: '2026-04-21T02:00:00Z', impact: 'major' })],
+        30,
+        now,
+      )
+      expect(Object.keys(out).sort()).toEqual(['2026-04-19', '2026-04-20', '2026-04-21'])
+      expect(out['2026-04-20']).toBe('major')
+    })
+
+    it('escalates to the worst impact when multiple incidents overlap one day', () => {
+      const incs = [
+        mkInc({ id: 'a', startedAt: '2026-04-20T10:00Z', resolvedAt: '2026-04-20T11:00Z', impact: 'minor' }),
+        mkInc({ id: 'b', startedAt: '2026-04-20T14:00Z', resolvedAt: '2026-04-20T15:00Z', impact: 'major' }),
+      ]
+      const out = computeDailyImpactFromIncidents(incs, 30, now)
+      expect(out['2026-04-20']).toBe('major') // worst of minor+major
+    })
+
+    it('drops flaps shorter than 10 minutes', () => {
+      const out = computeDailyImpactFromIncidents(
+        [mkInc({ startedAt: '2026-04-20T10:00:00Z', resolvedAt: '2026-04-20T10:05:00Z' })],
+        30,
+        now,
+      )
+      expect(out).toEqual({})
+    })
+
+    it('skips incidents with null impact (informational)', () => {
+      const out = computeDailyImpactFromIncidents(
+        [mkInc({ impact: null })],
+        30,
+        now,
+      )
+      expect(out).toEqual({})
+    })
+
+    it('treats unresolved incidents as spanning up to now', () => {
+      const out = computeDailyImpactFromIncidents(
+        [mkInc({ startedAt: '2026-04-21T10:00Z', resolvedAt: null, status: 'investigating' })],
+        30,
+        now,
+      )
+      expect(out['2026-04-21']).toBe('minor')
+      expect(out['2026-04-22']).toBe('minor')
+    })
+
+    it('clamps incidents older than calendarDays to the window', () => {
+      // calendarDays=5 → window starts 2026-04-18
+      const out = computeDailyImpactFromIncidents(
+        [mkInc({ startedAt: '2026-03-01T10:00Z', resolvedAt: '2026-04-19T10:00Z', impact: 'major' })],
+        5,
+        now,
+      )
+      expect(Object.keys(out).sort()).toEqual(['2026-04-18', '2026-04-19'])
+    })
+
+    it('returns empty record for empty input', () => {
+      expect(computeDailyImpactFromIncidents([], 30, now)).toEqual({})
+    })
   })
 
   it('fixture matches the expected proto shape (drift guard)', () => {
