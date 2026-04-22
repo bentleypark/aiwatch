@@ -22,7 +22,7 @@ interface Env {
 
 const CACHE_TTL_SECONDS = 900 // 15 min — must exceed KV_WRITE_INTERVAL_MS (10 min) to avoid cache gaps
 let lastKvWrite = 0
-const KV_WRITE_INTERVAL_MS = 600_000 // 10 minutes — 2 writes per interval = ~288/day within free tier
+const KV_WRITE_INTERVAL_MS = 600_000 // 10 minutes — 2 writes per interval = ~288/day (cost hygiene on Workers Paid 1M/month inclusion)
 let lastArchivedDate = '' // prevent duplicate archival writes within same isolate
 let lastKvLimitAlert = 0 // in-memory throttle for KV limit alerts (can't use KV when KV is full)
 let lastLatencySlot = '' // prevent duplicate 30-min latency writes within same isolate
@@ -324,7 +324,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
 
   // If cache is stale (>10min) or empty, fetch live data to avoid alert decisions on outdated status.
   // Does NOT write to KV — cache writes are handled exclusively by /api/status handler's cacheWrite()
-  // to respect the 10-min KV write throttle and stay within the 1,000 writes/day free tier.
+  // so the 10-min KV write throttle keeps us well inside the Workers Paid 1M writes/month inclusion.
   let cronProbes: ProbeSnapshot[] = []
   if (stale) {
     try {
@@ -804,7 +804,7 @@ export default {
     if (!env.DISCORD_WEBHOOK_URL) return
 
     // Reddit community monitoring — runs once per hour (minute 0-4) to respect rate limits
-    // KV budget: max 5 writes/hour = 120/day (well within 1,000/day free tier)
+    // KV budget: max 5 writes/hour = 120/day (trivial against the Workers Paid 1M/month inclusion)
     const now = new Date()
     if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCMinutes() < 5) {
       try {

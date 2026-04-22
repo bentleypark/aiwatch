@@ -329,7 +329,7 @@ export function buildTextCache(inc: Incident): IncidentTextCache {
 // may differ from the native ULID used in detail page URLs.
 export async function enrichIncidentIoText(incidents: Incident[], baseUrl: string, pageUrls: Map<string, string>, kv?: KVNamespace): Promise<Incident[]> {
   // Phase 1: Apply cached text from KV for all incidents that have null-text entries.
-  // KV reads do not count toward the 50 subrequest limit, so we read for all candidates freely.
+  // KV reads do not count against the per-invocation subrequest cap, so we read for all candidates freely.
   let workingIncidents = incidents
   const needsText = incidents.filter((inc) => inc.timeline.some((t) => !t.text))
   if (kv && needsText.length > 0) {
@@ -343,7 +343,8 @@ export async function enrichIncidentIoText(incidents: Incident[], baseUrl: strin
   }
 
   // Phase 2: Scrape incidents still missing text after cache application (up to budget=1).
-  // Budget = 1 per service: 44 base requests + 6 services × 1 = 50 (at Cloudflare free tier limit).
+  // Budget = 1 per service: 44 base requests + 6 services × 1 = 50 (kept as a self-imposed cap
+  // for CPU-time hygiene — well under the 1,000 subrequest cap on Workers Paid / Standard).
   // Prioritise: non-resolved first (may get new updates), then most recently started.
   const toEnrich = workingIncidents
     .filter((inc) => inc.timeline.some((t) => !t.text))
