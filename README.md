@@ -94,10 +94,10 @@ Real-time monitoring dashboard for **31 AI services** — track status, latency,
 | Service | Provider |
 |---------|----------|
 | Claude Code | Anthropic |
-| GitHub Copilot | Microsoft |
-| Cursor | Anysphere |
-| Windsurf | Codeium |
 | Codex | OpenAI |
+| Cursor | Anysphere |
+| GitHub Copilot | Microsoft |
+| Windsurf | Codeium |
 
 ## Tech Stack
 

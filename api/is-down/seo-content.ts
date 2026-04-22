@@ -362,6 +362,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Is this the old Codex API from 2023?', a: 'No. This page tracks the current OpenAI Codex coding agent released as part of OpenAI\'s agent products. The 2023 Codex code-generation API was deprecated and is not what AIWatch monitors here.' },
       { q: 'Why is Codex not working?', a: 'Codex outages usually stem from one of: a broader OpenAI platform incident (also affects ChatGPT and the API), a Codex-specific backend issue, or an upstream model outage. Check the Recent Incidents section for current context.' },
       { q: 'What are alternatives to Codex?', a: 'When Codex is down, Claude Code, GitHub Copilot, Cursor, or Windsurf are alternative coding agents. AIWatch shows which are currently operational.' },
+      { q: 'Which Codex surface does the uptime percentage track?', a: 'The 30-day uptime shown on this page reflects the Codex API component specifically, which backs the CLI and VS Code extension. Codex Web frontend outages may not be counted in that percentage — check the Recent Incidents section for surface-specific events across all four Codex surfaces (Codex Web, Codex API, CLI, VS Code extension).' },
     ],
   },
 }

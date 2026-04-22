@@ -442,23 +442,11 @@ const MOCK_SERVICES = [
     ],
   },
   {
-    id: 'copilot', category: 'agent', name: 'GitHub Copilot', provider: 'Microsoft', status: 'operational',
-    latency: null, uptime30d: 99.40,
-    history30d: hist([9, 24]),
-    history3m: [{ month: '2026-01', uptime: 99.60 }, { month: '2026-02', uptime: 99.50 }, { month: '2026-03', uptime: 99.40 }],
-    incidents: [
-      { id: 'cp-1', title: 'Code Completion Degraded', startedAt: ago(1 * D + 2 * H), duration: null, status: 'monitoring',
-        timeline: [
-          { stage: 'investigating', text: '코드 자동 완성 품질이 저하되고 있습니다.', at: ago(1 * D + 2 * H) },
-          { stage: 'identified', text: '모델 서빙 레이어 이슈로 확인.', at: ago(1 * D + 2 * H - 45 * M) },
-          { stage: 'monitoring', text: '모델 롤백을 적용했습니다. 모니터링 중.', at: ago(1 * D + 2 * H - 90 * M) },
-        ] },
-      { id: 'cp-2', title: 'GitHub Actions Integration Error', startedAt: ago(3 * D + 7 * H), duration: '1h 50m', status: 'resolved',
-        timeline: [
-          { stage: 'investigating', text: 'GitHub Actions에서 Copilot 연동 오류가 발생.', at: ago(3 * D + 7 * H) },
-          { stage: 'resolved', text: 'API 엔드포인트 수정으로 정상화.', at: ago(3 * D + 7 * H - 110 * M) },
-        ] },
-    ],
+    id: 'codex', category: 'agent', name: 'Codex', provider: 'OpenAI', status: 'operational',
+    latency: null, uptime30d: null,
+    history30d: hist([]),
+    history3m: [],
+    incidents: [],
   },
   {
     id: 'cursor', category: 'agent', name: 'Cursor', provider: 'Anysphere', status: 'operational',
@@ -480,6 +468,25 @@ const MOCK_SERVICES = [
     ],
   },
   {
+    id: 'copilot', category: 'agent', name: 'GitHub Copilot', provider: 'Microsoft', status: 'operational',
+    latency: null, uptime30d: 99.40,
+    history30d: hist([9, 24]),
+    history3m: [{ month: '2026-01', uptime: 99.60 }, { month: '2026-02', uptime: 99.50 }, { month: '2026-03', uptime: 99.40 }],
+    incidents: [
+      { id: 'cp-1', title: 'Code Completion Degraded', startedAt: ago(1 * D + 2 * H), duration: null, status: 'monitoring',
+        timeline: [
+          { stage: 'investigating', text: '코드 자동 완성 품질이 저하되고 있습니다.', at: ago(1 * D + 2 * H) },
+          { stage: 'identified', text: '모델 서빙 레이어 이슈로 확인.', at: ago(1 * D + 2 * H - 45 * M) },
+          { stage: 'monitoring', text: '모델 롤백을 적용했습니다. 모니터링 중.', at: ago(1 * D + 2 * H - 90 * M) },
+        ] },
+      { id: 'cp-2', title: 'GitHub Actions Integration Error', startedAt: ago(3 * D + 7 * H), duration: '1h 50m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: 'GitHub Actions에서 Copilot 연동 오류가 발생.', at: ago(3 * D + 7 * H) },
+          { stage: 'resolved', text: 'API 엔드포인트 수정으로 정상화.', at: ago(3 * D + 7 * H - 110 * M) },
+        ] },
+    ],
+  },
+  {
     id: 'windsurf', category: 'agent', name: 'Windsurf', provider: 'Codeium', status: 'operational',
     latency: null, uptime30d: 98.80,
     history30d: hist([10, 27]),
@@ -493,13 +500,6 @@ const MOCK_SERVICES = [
           { stage: 'resolved', text: '서비스가 정상화되었습니다.', at: ago(3 * D + 3 * H - 128 * M) },
         ] },
     ],
-  },
-  {
-    id: 'codex', category: 'agent', name: 'Codex', provider: 'OpenAI', status: 'operational',
-    latency: null, uptime30d: null,
-    history30d: hist([]),
-    history3m: [],
-    incidents: [],
   },
 ]
 
