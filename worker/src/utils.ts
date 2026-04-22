@@ -129,11 +129,15 @@ export function isCacheStale(raw: string | null, thresholdMs: number, now = Date
   }
 }
 
-export async function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response> {
+export async function fetchWithTimeout(
+  url: string,
+  timeoutMs = 8000,
+  init?: RequestInit,
+): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    return await fetch(url, { signal: controller.signal, redirect: 'follow' })
+    return await fetch(url, { ...init, signal: controller.signal, redirect: 'follow' })
   } finally {
     clearTimeout(timer)
   }

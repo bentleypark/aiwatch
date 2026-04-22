@@ -125,7 +125,8 @@ Parsers (worker/src/parsers/)
   ├── impact-weights.ts  → shared MAJOR_WEIGHT/MINOR_WEIGHT (Atlassian formula, used by both)
   ├── statuspage.ts      → Atlassian Statuspage API + uptimeData HTML (weighted official uptime)
   ├── incident-io.ts     → incident.io compat API + component_uptimes/impacts (estimate from durations uses the same weighted formula)
-  ├── gcloud.ts          → Google Cloud incidents.json
+  ├── gcloud.ts          → Google Cloud incidents.json (Vertex Gemini)
+  ├── aistudio.ts        → Google AI Studio + direct Gemini API (secondary source, merged with gcloud — #310)
   ├── instatus.ts        → Instatus Nuxt/Next.js SSR
   ├── betterstack.ts     → Better Stack RSS + /index.json uptime API + dailyImpact (status_history)
   └── aws.ts             → AWS Health Dashboard RSS
@@ -333,7 +334,8 @@ worker/
     parsers/     # Platform-specific parsers
       statuspage.ts   # Atlassian Statuspage (7 services)
       incident-io.ts  # incident.io (6 services)
-      gcloud.ts       # Google Cloud (1 service)
+      gcloud.ts       # Google Cloud Vertex (gemini primary source)
+      aistudio.ts     # Google AI Studio + direct Gemini API (gemini secondary, #310)
       instatus.ts     # Instatus (2 services)
       betterstack.ts  # Better Stack (4 services)
       onlineornot.ts  # OnlineOrNot (1 service — OpenRouter)

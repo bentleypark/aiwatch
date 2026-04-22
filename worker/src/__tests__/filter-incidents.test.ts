@@ -63,6 +63,39 @@ describe('filterIncidents', () => {
     expect(filterIncidents(incidents, config)).toHaveLength(0)
   })
 
+  it('bypasses keyword filter for aistudio-prefixed incidents (#310)', () => {
+    const incidents = [
+      mockIncident({ id: 'aistudio:batch-api-outage', title: 'Batch API outage' }),
+      mockIncident({ id: 'aistudio:file-api', title: 'File API document processing outage' }),
+      mockIncident({ id: 'vertex:non-gemini', title: 'Speech-to-Text throttling' }),
+    ]
+    const config = mockConfig({
+      id: 'gemini',
+      incidentKeywords: ['vertex', 'gemini', 'us-central1'],
+      aistudioStatus: true,
+    })
+    const result = filterIncidents(incidents, config)
+    // aistudio: incidents pass the gate even without 'gemini' in title;
+    // vertex: incident without a keyword match is still dropped.
+    expect(result.map((i) => i.id)).toEqual([
+      'aistudio:batch-api-outage',
+      'aistudio:file-api',
+    ])
+  })
+
+  it('still drops aistudio incidents that match incidentExclude', () => {
+    const incidents = [
+      mockIncident({ id: 'aistudio:drive-link', title: 'AI Studio Drive link issue' }),
+    ]
+    const config = mockConfig({
+      id: 'gemini',
+      incidentExclude: ['drive link'],
+      aistudioStatus: true,
+    })
+    // exclude runs before the aistudio bypass
+    expect(filterIncidents(incidents, config)).toHaveLength(0)
+  })
+
   it('OpenAI API excludes login incidents', () => {
     const incidents = [mockIncident({ title: 'Elevated Errors with Login' })]
     const config = mockConfig({

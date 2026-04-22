@@ -330,9 +330,10 @@ worker/
     detection-lead-log.ts # Detection Lead audit log — per-day KV array (#256), tagged AppendResult, 24h sliding window for daily summary
     reddit.ts   # Reddit r/ChatGPT + r/netsec + r/cybersecurity monitoring
     security-monitor.ts # AI service security monitoring (HN Algolia, OSV.dev SDK vulnerabilities)
-    parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, instatus, betterstack, aws)
+    parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, aistudio, instatus, betterstack, aws)
                 # dailyImpact support: statuspage (uptimeData), incident-io (component impacts), betterstack (status_history from index.json)
                 # impact-weights.ts: shared MAJOR_WEIGHT=1.0, MINOR_WEIGHT=0.3 — used by both statuspage.ts (official) and incident-io.ts (estimate from durations) for Atlassian-aligned uptime%
+                # aistudio.ts (#310): parses aistudio.google.com/status MakerSuite gRPC-web JSON. API key + Referer gated; component filter at source (API=1). Merged via mergeAistudioIncidents() in services.ts with vertex:/aistudio: ID prefixes; filterIncidents() bypasses incidentKeywords for aistudio: IDs since they're already component-scoped. Fetch/parse failures silently fall back to vertex-only output.
 ```
 
 ### Design System
@@ -411,6 +412,7 @@ Per-service status is resolved in `services.ts` with this priority:
 Browser (React SPA, 60s polling)
   → Cloudflare Worker (/api/status)
     → parallel fetch (31 services)
+    → gemini dual-source (#310): gcloud Vertex feed + aistudio.google.com/status MakerSuite RPC — merged with vertex:/aistudio: ID prefixes
     → normalize to ServiceStatus[]
     → write to KV (cache + daily counters)
     → probe cross-validation: filter Mistral micro-incident noise (no RTT spike → excluded)

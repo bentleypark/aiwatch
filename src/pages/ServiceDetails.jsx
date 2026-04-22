@@ -461,7 +461,19 @@ function RegionalAvailability({ service, t }) {
     if (!regions) return null
 
     const incidents = Array.isArray(service.incidents) ? service.incidents : []
-    const ongoing = incidents.filter(i => i && typeof i.title === 'string' && i.status !== 'resolved')
+    // aistudio:-prefixed incidents come from the global direct Gemini API
+    // surface, which has no per-region breakdown — including them would trigger
+    // the "no region match → mark all regions affected" fallback and overstate
+    // the impact. Region breakdown only makes sense for Vertex (gcloud) feed
+    // entries, whose titles include region keywords. See #310.
+    const ongoing = incidents.filter(
+      (i) =>
+        i &&
+        typeof i.title === 'string' &&
+        i.status !== 'resolved' &&
+        typeof i.id === 'string' &&
+        !i.id.startsWith('aistudio:'),
+    )
     // Services with componentNames-based region matching (e.g., Bedrock AWS RSS) always show regional status
     const ALWAYS_SHOW_REGIONS = ['bedrock', 'azureopenai']
     const alwaysShow = ALWAYS_SHOW_REGIONS.includes(service.id)

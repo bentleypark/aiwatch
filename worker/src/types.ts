@@ -46,6 +46,10 @@ export interface ServiceConfig {
   instatusUrl?: string
   gcloudProduct?: string
   gcloudProductId?: string
+  // Dual-source flag: fetch aistudio.google.com/status in parallel with
+  // the gcloud Vertex feed. Incidents from both sources are merged; IDs get
+  // 'vertex:' / 'aistudio:' prefixes to avoid collision (#310).
+  aistudioStatus?: boolean
   rssFeedUrl?: string
   incidentKeywords?: string[]
   incidentExclude?: string[]
