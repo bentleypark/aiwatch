@@ -59,6 +59,12 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2' },
   { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2' },
   { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m' },
+  // OpenAI Codex (coding agent): published across 4 distinct surface components on
+  // status.openai.com (Codex Web / Codex API / CLI / VS Code extension) with no
+  // umbrella component. Same #292 pattern as chatgpt — overall indicator +
+  // incidentKeywords filter, cross-contamination guard in fetchService blocks
+  // OpenAI API / ChatGPT incidents from bleeding through.
+  { id: 'codex', name: 'OpenAI Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
 ]
 
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
