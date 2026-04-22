@@ -25,6 +25,38 @@ export interface MonthlyArchive {
   generatedAt: string            // ISO timestamp
   daysCollected: number          // number of days with actual uptime data
   services: Record<string, MonthlyServiceData>
+  // Optional — null for months before this feature shipped (or no detections).
+  // Sourced from security:monthly:{period} at archive build time before its 60d TTL lapses (#290).
+  security?: MonthlySecuritySummary | null
+}
+
+// ── Monthly security summary ─────────────────────────────────────────
+//
+// Shape stored in security:monthly:{YYYY-MM} (60d TTL) by the hourly security cron.
+// The archive snapshots this into a permanent summary before TTL expiry (#290).
+
+export type SecuritySeverityBucket = 'critical' | 'high' | 'medium' | 'low'
+
+export interface MonthlySecurityEntry {
+  title: string
+  url: string
+  source: 'osv' | 'hackernews'
+  severity?: string
+  service?: string
+  detectedAt: string             // ISO 8601
+}
+
+export interface MonthlySecurityTopFinding extends MonthlySecurityEntry {
+  // Identical fields to MonthlySecurityEntry today. Kept as a distinct type so #291 can
+  // extend only top findings with an optional `timeline` array without widening the raw entry.
+}
+
+export interface MonthlySecuritySummary {
+  totalAlerts: number
+  bySource: { osv: number; hackernews: number }
+  bySeverity: Record<SecuritySeverityBucket, number>
+  byService: Record<string, number>                // service name → count
+  topFindings: MonthlySecurityTopFinding[]         // sorted by severity desc, max 10
 }
 
 // ── Incident accumulation (written daily by daily summary cron) ──────
@@ -157,6 +189,51 @@ export function computeMonthlyLatency(
   return result
 }
 
+// ── Security summary builder ─────────────────────────────────────────
+
+const SEVERITY_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 }
+
+function normalizeSeverity(raw: string | undefined): SecuritySeverityBucket | null {
+  if (!raw) return null
+  const lower = raw.toLowerCase()
+  return lower === 'critical' || lower === 'high' || lower === 'medium' || lower === 'low'
+    ? lower
+    : null
+}
+
+/**
+ * Summarize a month's accumulated security alerts into the permanent archive shape.
+ * Pure function — takes the parsed `security:monthly:{period}` contents, returns the summary.
+ *
+ * Top findings are sorted by severity descending (critical → low); unknown severities rank
+ * below "low". Max 10 entries. Stable tie-breaker on detectedAt (more recent first) so a
+ * re-generation of the same month always yields the same archive.
+ */
+export function summarizeSecurityAlerts(entries: MonthlySecurityEntry[]): MonthlySecuritySummary {
+  const bySource: MonthlySecuritySummary['bySource'] = { osv: 0, hackernews: 0 }
+  const bySeverity: MonthlySecuritySummary['bySeverity'] = { critical: 0, high: 0, medium: 0, low: 0 }
+  const byService: Record<string, number> = {}
+
+  for (const e of entries) {
+    if (e.source === 'osv') bySource.osv++
+    else if (e.source === 'hackernews') bySource.hackernews++
+    const sev = normalizeSeverity(e.severity)
+    if (sev) bySeverity[sev]++
+    if (e.service) byService[e.service] = (byService[e.service] ?? 0) + 1
+  }
+
+  const topFindings = [...entries]
+    .sort((a, b) => {
+      const rankA = SEVERITY_RANK[normalizeSeverity(a.severity) ?? ''] ?? 0
+      const rankB = SEVERITY_RANK[normalizeSeverity(b.severity) ?? ''] ?? 0
+      if (rankA !== rankB) return rankB - rankA
+      return b.detectedAt.localeCompare(a.detectedAt) // recent first on severity tie
+    })
+    .slice(0, 10)
+
+  return { totalAlerts: entries.length, bySource, bySeverity, byService, topFindings }
+}
+
 /** Get all dates in a given month (YYYY-MM-DD strings) */
 export function getMonthDates(year: number, month: number): string[] {
   const dates: string[] = []
@@ -232,6 +309,21 @@ export async function buildMonthlyArchive(
     }
   }
 
+  // Snapshot accumulated security alerts before their 60d TTL lapses (#290). Missing
+  // or malformed data must not fail the archive — security is optional enrichment.
+  const secRaw = await kv.get(`security:monthly:${period}`).catch(() => null)
+  let security: MonthlySecuritySummary | null = null
+  if (secRaw) {
+    try {
+      const parsed = JSON.parse(secRaw) as MonthlySecurityEntry[]
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        security = summarizeSecurityAlerts(parsed)
+      }
+    } catch (err) {
+      console.warn(`[monthly-archive] corrupt security accumulation for ${period}:`, err instanceof Error ? err.message : err)
+    }
+  }
+
   const uptimeMap = computeMonthlyUptime(dailyData)
   const latencyMap = computeMonthlyLatency(probeData)
 
@@ -275,6 +367,7 @@ export async function buildMonthlyArchive(
     generatedAt: new Date().toISOString(),
     daysCollected,
     services,
+    security,
   }
 }
 

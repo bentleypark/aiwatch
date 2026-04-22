@@ -7,8 +7,10 @@ import {
   buildMonthlyArchive,
   accumulateMonthlyIncidents,
   parseDurationMin,
+  summarizeSecurityAlerts,
 } from '../monthly-archive'
 import type { ServiceStatus } from '../types'
+import type { MonthlySecurityEntry } from '../monthly-archive'
 
 // ── parseDurationMin ─────────────────────────────────────────────────
 
@@ -275,6 +277,82 @@ describe('accumulateMonthlyIncidents', () => {
   })
 })
 
+// ── summarizeSecurityAlerts (#290) ───────────────────────────────────
+
+describe('summarizeSecurityAlerts', () => {
+  it('counts by source, severity, service; preserves all fields on top findings', () => {
+    const entries: MonthlySecurityEntry[] = [
+      { title: 'A', url: 'u1', source: 'osv',        severity: 'critical', service: 'OpenAI',             detectedAt: '2026-03-01T00:00:00Z' },
+      { title: 'B', url: 'u2', source: 'osv',        severity: 'high',     service: 'OpenAI',             detectedAt: '2026-03-02T00:00:00Z' },
+      { title: 'C', url: 'u3', source: 'osv',        severity: 'medium',   service: 'Anthropic (Claude)', detectedAt: '2026-03-03T00:00:00Z' },
+      { title: 'D', url: 'u4', source: 'hackernews',                                                      detectedAt: '2026-03-04T00:00:00Z' },
+    ]
+    const s = summarizeSecurityAlerts(entries)
+    expect(s.totalAlerts).toBe(4)
+    expect(s.bySource).toEqual({ osv: 3, hackernews: 1 })
+    expect(s.bySeverity).toEqual({ critical: 1, high: 1, medium: 1, low: 0 })
+    expect(s.byService).toEqual({ OpenAI: 2, 'Anthropic (Claude)': 1 })
+    // Regression guard: a refactor that narrows the projection to {title, url, severity}
+    // would quietly break the report template that renders service + detectedAt.
+    expect(s.topFindings[0]).toEqual(entries[0])
+  })
+
+  it('sorts topFindings by severity desc with recent-first tie-break', () => {
+    const entries: MonthlySecurityEntry[] = [
+      { title: 'old-critical', url: 'u1', source: 'osv', severity: 'critical', detectedAt: '2026-03-01T00:00:00Z' },
+      { title: 'new-critical', url: 'u2', source: 'osv', severity: 'critical', detectedAt: '2026-03-30T00:00:00Z' },
+      { title: 'high',         url: 'u3', source: 'osv', severity: 'high',     detectedAt: '2026-03-15T00:00:00Z' },
+      { title: 'medium',       url: 'u4', source: 'osv', severity: 'medium',   detectedAt: '2026-03-20T00:00:00Z' },
+    ]
+    const s = summarizeSecurityAlerts(entries)
+    expect(s.topFindings.map(f => f.title)).toEqual(['new-critical', 'old-critical', 'high', 'medium'])
+  })
+
+  it('ranks missing/unknown severity below low', () => {
+    const entries: MonthlySecurityEntry[] = [
+      { title: 'no-sev',  url: 'u1', source: 'hackernews', detectedAt: '2026-03-10T00:00:00Z' },
+      { title: 'low',     url: 'u2', source: 'osv', severity: 'low',            detectedAt: '2026-03-11T00:00:00Z' },
+      { title: 'weird',   url: 'u3', source: 'osv', severity: 'SUPERCRITICAL',  detectedAt: '2026-03-12T00:00:00Z' },
+    ]
+    const s = summarizeSecurityAlerts(entries)
+    // low outranks both no-severity and the unrecognized label
+    expect(s.topFindings[0].title).toBe('low')
+    // bySeverity should only count recognized buckets
+    expect(s.bySeverity).toEqual({ critical: 0, high: 0, medium: 0, low: 1 })
+  })
+
+  it('caps topFindings at 10', () => {
+    const entries: MonthlySecurityEntry[] = Array.from({ length: 15 }, (_, i) => ({
+      title: `entry-${i}`,
+      url: `u${i}`,
+      source: 'osv' as const,
+      severity: 'medium',
+      detectedAt: `2026-03-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+    }))
+    const s = summarizeSecurityAlerts(entries)
+    expect(s.totalAlerts).toBe(15)
+    expect(s.topFindings).toHaveLength(10)
+  })
+
+  it('is case-insensitive on severity normalization', () => {
+    const entries: MonthlySecurityEntry[] = [
+      { title: 'A', url: 'u1', source: 'osv', severity: 'CRITICAL', detectedAt: '2026-03-01T00:00:00Z' },
+      { title: 'B', url: 'u2', source: 'osv', severity: 'High',     detectedAt: '2026-03-02T00:00:00Z' },
+    ]
+    const s = summarizeSecurityAlerts(entries)
+    expect(s.bySeverity).toEqual({ critical: 1, high: 1, medium: 0, low: 0 })
+  })
+
+  it('returns zero-filled summary with empty topFindings for empty input', () => {
+    const s = summarizeSecurityAlerts([])
+    expect(s.totalAlerts).toBe(0)
+    expect(s.bySource).toEqual({ osv: 0, hackernews: 0 })
+    expect(s.bySeverity).toEqual({ critical: 0, high: 0, medium: 0, low: 0 })
+    expect(s.byService).toEqual({})
+    expect(s.topFindings).toEqual([])
+  })
+})
+
 // ── buildMonthlyArchive ──────────────────────────────────────────────
 
 describe('buildMonthlyArchive', () => {
@@ -379,6 +457,84 @@ describe('buildMonthlyArchive', () => {
     expect(archive.period).toBe('2026-12')
     expect(archive.services.claude.incidents).toBe(2)
     expect(archive.services.claude.uptime).toBe(100)
+  })
+
+  it('snapshots security summary from security:monthly:{period} (#290)', async () => {
+    const secEntries: MonthlySecurityEntry[] = [
+      { title: 'RCE in openai', url: 'u1', source: 'osv', severity: 'critical', service: 'OpenAI', detectedAt: '2026-03-10T00:00:00Z' },
+      { title: 'HN breach story', url: 'u2', source: 'hackernews', detectedAt: '2026-03-15T00:00:00Z' },
+      { title: 'Path traversal', url: 'u3', source: 'osv', severity: 'high', service: 'Anthropic (Claude)', detectedAt: '2026-03-20T00:00:00Z' },
+    ]
+    const kvWithSecurity = {
+      get: async (key: string) => {
+        if (key === `security:monthly:2026-03`) return JSON.stringify(secEntries)
+        return null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(kvWithSecurity, 2026, 3)
+    expect(archive.security).not.toBeNull()
+    expect(archive.security?.totalAlerts).toBe(3)
+    expect(archive.security?.bySource).toEqual({ osv: 2, hackernews: 1 })
+    expect(archive.security?.topFindings[0].title).toBe('RCE in openai') // critical first
+  })
+
+  it('leaves archive.security = null when security:monthly key is missing', async () => {
+    // Months predating this feature (and months with zero detections) must not crash.
+    const archive = await buildMonthlyArchive(mockKV, 2026, 3)
+    expect(archive.security).toBeNull()
+  })
+
+  it('leaves archive.security = null on malformed security:monthly JSON', async () => {
+    const corruptSecurityKV = {
+      get: async (key: string) => {
+        if (key === 'security:monthly:2026-03') return '{not valid json'
+        return null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(corruptSecurityKV, 2026, 3)
+    expect(archive.security).toBeNull()
+  })
+
+  it('leaves archive.security = null when the security:monthly KV get rejects', async () => {
+    // Pairs with the `.catch(() => null)` guard on the security read — if a future refactor
+    // drops the catch, this test fails before the archive rejection propagates to the cron.
+    const rejectingKV = {
+      get: async (key: string) => {
+        if (key === 'security:monthly:2026-03') throw new Error('KV read rejected')
+        return null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(rejectingKV, 2026, 3)
+    expect(archive.security).toBeNull()
+  })
+
+  it('leaves archive.security = null on empty security:monthly array', async () => {
+    // A month with the key present but no detections shouldn't produce a zero-valued summary —
+    // null is the signal "no security data for this month" for downstream rendering.
+    const emptyArrayKV = {
+      get: async (key: string) => {
+        if (key === 'security:monthly:2026-03') return '[]'
+        return null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(emptyArrayKV, 2026, 3)
+    expect(archive.security).toBeNull()
   })
 
   it('sets avgResolutionMin to null when totalMinutes is 0', async () => {
