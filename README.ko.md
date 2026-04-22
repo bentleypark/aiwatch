@@ -124,7 +124,8 @@ Cloudflare Worker
   ├── impact-weights.ts  → 공유 MAJOR_WEIGHT/MINOR_WEIGHT (Atlassian 공식, 두 파서 공통)
   ├── statuspage.ts      → Atlassian Statuspage API + uptimeData HTML (가중치 적용 공식 uptime)
   ├── incident-io.ts     → incident.io 호환 API + component_uptimes/impacts (인시던트 추정 uptime도 동일 가중치 공식 사용)
-  ├── gcloud.ts          → Google Cloud incidents.json
+  ├── gcloud.ts          → Google Cloud incidents.json (Vertex Gemini)
+  ├── aistudio.ts        → Google AI Studio + Gemini API (gcloud와 병합되는 2차 소스 — #310)
   ├── instatus.ts        → Instatus Nuxt/Next.js SSR
   ├── betterstack.ts     → Better Stack RSS + /index.json 가동률 API + dailyImpact (status_history)
   └── aws.ts             → AWS Health Dashboard RSS
@@ -332,7 +333,8 @@ worker/
     parsers/     # 플랫폼별 파서
       statuspage.ts   # Atlassian Statuspage (7개 서비스)
       incident-io.ts  # incident.io (6개 서비스)
-      gcloud.ts       # Google Cloud (1개 서비스)
+      gcloud.ts       # Google Cloud Vertex (gemini 1차 소스)
+      aistudio.ts     # Google AI Studio + Gemini API (gemini 2차 소스, #310)
       instatus.ts     # Instatus (2개 서비스)
       betterstack.ts  # Better Stack (4개 서비스)
       onlineornot.ts  # OnlineOrNot (1개 서비스 — OpenRouter)

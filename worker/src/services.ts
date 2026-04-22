@@ -8,6 +8,13 @@ import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, computeUptimeFromIncidents, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
+import {
+  AISTUDIO_ENDPOINT,
+  AISTUDIO_HEADERS,
+  AISTUDIO_BODY,
+  AISTUDIO_COMPONENT,
+  parseAistudioIncidents,
+} from './parsers/aistudio'
 import { parseInstatusIncidents } from './parsers/instatus'
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
@@ -17,7 +24,7 @@ export const SERVICES: ServiceConfig[] = [
   // AI API Services
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp' },
   { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'login', 'conversation', 'workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMQM1K5', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'] },
-  { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B', incidentKeywords: ['vertex', 'gemini', 'us-central1', 'europe-west1', 'asia-northeast1'] },
+  { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://status.cloud.google.com', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B', aistudioStatus: true, incidentKeywords: ['vertex', 'gemini', 'us-central1', 'europe-west1', 'asia-northeast1'] },
   { id: 'bedrock', name: 'Amazon Bedrock', provider: 'AWS', category: 'api', statusUrl: 'https://health.aws.amazon.com/health/status', apiUrl: null, awsRssUrls: [
     'https://status.aws.amazon.com/rss/bedrock-us-east-1.rss',
     'https://status.aws.amazon.com/rss/bedrock-us-west-2.rss',
@@ -73,11 +80,59 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m' },
 ]
 
+/**
+ * Merge aistudio incidents into the primary (vertex) list for gemini (#310).
+ * Never throws: HTTP errors, invalid JSON, and parser exceptions all fall
+ * back silently to the primary list and increment `parseErrors` so the
+ * fetch-failure counter can degrade the service after repeated failures.
+ * Response body is cancelled on every non-consumed path.
+ */
+export async function mergeAistudioIncidents(
+  primary: Incident[],
+  aistudioRes: Response,
+  serviceId: string,
+): Promise<{ incidents: Incident[]; merged: number; parseErrors: number }> {
+  const cancelBody = () => {
+    aistudioRes.body?.cancel().catch((e) =>
+      console.warn(`[fetchService] ${serviceId} aistudio body cancel failed:`, e),
+    )
+  }
+  if (!aistudioRes.ok) {
+    console.warn(`[fetchService] ${serviceId} aistudio HTTP ${aistudioRes.status}`)
+    cancelBody()
+    return { incidents: primary, merged: 0, parseErrors: 0 }
+  }
+  try {
+    const raw = await aistudioRes.json()
+    const extras = parseAistudioIncidents(raw, {
+      componentFilter: [AISTUDIO_COMPONENT.API],
+    })
+    // Cross-source audit trail (helps diagnose divergence / shape drift in tail logs)
+    if (primary.length > 0 || extras.length > 0) {
+      console.info(`[${serviceId}] merged vertex=${primary.length} aistudio=${extras.length}`)
+    }
+    return { incidents: [...primary, ...extras], merged: extras.length, parseErrors: 0 }
+  } catch (err) {
+    console.warn(
+      `[fetchService] ${serviceId} aistudio parse failed:`,
+      err instanceof Error ? err.message : err,
+    )
+    cancelBody()
+    return { incidents: primary, merged: 0, parseErrors: 1 }
+  }
+}
+
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
   const { incidentKeywords, incidentExclude } = config
   return incidents.filter((inc) => {
     const title = inc.title.toLowerCase()
     if (incidentExclude?.some((kw) => title.includes(kw.toLowerCase()))) return false
+    // aistudio incidents are component-filtered at the parser (components: [API])
+    // so the keyword filter — designed to disambiguate the shared gcloud Vertex
+    // feed — doesn't apply and would drop legitimate Gemini events whose titles
+    // don't mention "gemini" (e.g. "Batch API outage", "File API document
+    // processing outage"). See #310.
+    if (inc.id.startsWith('aistudio:')) return true
     if (incidentKeywords && incidentKeywords.length > 0) {
       // Match against title OR affected component names
       const compNames = (inc.componentNames ?? []).map((n) => n.toLowerCase())
@@ -447,7 +502,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
 
       const start = Date.now()
       const scrapeUrl = config.instatusUrl || config.rssFeedUrl || (config.gcloudProduct ? 'https://status.cloud.google.com/incidents.json' : null)
-      const [res, scrapeRes, betterStackRes] = await Promise.all([
+      const [res, scrapeRes, betterStackRes, aistudioRes] = await Promise.all([
         fetchWithTimeout(config.statusUrl),
         scrapeUrl
           ? fetchWithTimeout(scrapeUrl).catch((err) => {
@@ -460,6 +515,19 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           ? fetchWithTimeout(`${config.betterStackUrl}/index.json`, 5000).catch((err) => {
               console.warn(`[fetchService] ${config.id} BetterStack uptime fetch failed:`, err instanceof Error ? err.message : err)
               parseErrors++
+              return null
+            })
+          : Promise.resolve(null),
+        // aistudio.google.com/status is a secondary source for the gemini service (#310).
+        // Failure is silent — never break the primary gcloud Vertex feed if Google
+        // rotates the public API key or tightens referer enforcement.
+        config.aistudioStatus
+          ? fetchWithTimeout(AISTUDIO_ENDPOINT, 5000, {
+              method: 'POST',
+              headers: AISTUDIO_HEADERS,
+              body: AISTUDIO_BODY,
+            }).catch((err) => {
+              console.warn(`[fetchService] ${config.id} aistudio fetch failed:`, err instanceof Error ? err.message : err)
               return null
             })
           : Promise.resolve(null),
@@ -494,12 +562,22 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
             : parseRssIncidents(rssText)
         } else if (config.gcloudProduct) {
           const data: GCloudIncident[] = await scrapeRes.json()
-          incidents = parseGCloudIncidents(data, config.gcloudProduct, config.gcloudProductId)
+          const vertexIncidents = parseGCloudIncidents(data, config.gcloudProduct, config.gcloudProductId)
+          if (config.aistudioStatus) {
+            for (const inc of vertexIncidents) inc.id = `vertex:${inc.id}`
+          }
+          incidents = vertexIncidents
         }
       } else {
         // No parser matched — cancel unconsumed response bodies to free connections
         res.body?.cancel()
         scrapeRes?.body?.cancel()
+      }
+
+      if (config.aistudioStatus && aistudioRes) {
+        const merge = await mergeAistudioIncidents(incidents, aistudioRes, config.id)
+        incidents = merge.incidents
+        parseErrors += merge.parseErrors
       }
 
       // Better Stack uptime + status: parse /index.json for aggregate_state and availability

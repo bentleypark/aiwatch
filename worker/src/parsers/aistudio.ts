@@ -1,0 +1,179 @@
+// Google AI Studio / Gemini API Status Parser (#310)
+// Source: aistudio.google.com/status (MakerSuite gRPC-web endpoint).
+// Fixture / shape verification: worker/src/parsers/__tests__/fixtures/aistudio-sample.json
+// Tests under worker/src/parsers/__tests__/aistudio.test.ts lock the enum mapping.
+
+import type { TimelineEntry, Incident } from '../types'
+import { formatDuration } from '../utils'
+
+// Public API key extracted from the aistudio.google.com/status JS bundle. The
+// endpoint rejects callers without Referer: https://aistudio.google.com/ (HTTP
+// 403 "Method doesn't allow unregistered callers"). If Google rotates this key
+// or starts returning 401/403 consistently, re-harvest by loading
+// aistudio.google.com/status in a browser devtools Network tab and copying the
+// X-Goog-Api-Key header off the ListIncidentsHistory POST.
+export const AISTUDIO_API_KEY = 'AIzaSyDdP816MREB3SkjZO04QXbjsigfcI0GWOs'
+export const AISTUDIO_ENDPOINT =
+  'https://alkalimakersuite-pa.clients6.google.com/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/ListIncidentsHistory'
+
+export const AISTUDIO_HEADERS: Record<string, string> = {
+  'Content-Type': 'application/json+protobuf',
+  'X-Goog-Api-Key': AISTUDIO_API_KEY,
+  Referer: 'https://aistudio.google.com/',
+  'X-User-Agent': 'grpc-web-javascript/0.1',
+}
+export const AISTUDIO_BODY = '[]'
+
+// Component enum. API/MULTIMODAL_LIVE/AI_STUDIO values are locked by
+// `aistudio.test.ts` fixture assertions — change them and the tests fail.
+export const AISTUDIO_COMPONENT = { API: 1, MULTIMODAL_LIVE: 2, AI_STUDIO: 3 } as const
+export type AistudioComponent =
+  (typeof AISTUDIO_COMPONENT)[keyof typeof AISTUDIO_COMPONENT]
+
+// Proto-as-array entry shapes
+type UpdateEntry = [number, string, readonly [string], string]
+type IncidentEntry = [string, string, number, UpdateEntry[], number, number[]]
+
+// Plausible unix-seconds range: 2001-09-09 → 2096-10-02. Values outside this
+// window are almost always a unit mistake (ms vs s) or a corrupted field.
+const UNIX_SECONDS_MIN = 1_000_000_000
+const UNIX_SECONDS_MAX = 4_000_000_000
+
+// Max descent depth for the proto wrapper. Observed shape is [[[entries]]] so
+// 3 suffices; keep 4 as slack. Increase only after re-verifying the fixture.
+const MAX_UNWRAP_DEPTH = 4
+
+function mapStage(updateType: number): TimelineEntry['stage'] | null {
+  // 1=Detected, 2=Identified, 3=Monitoring/Update, 4=Resolved, 5=Mitigation update
+  if (updateType === 1) return 'investigating'
+  if (updateType === 2) return 'identified'
+  if (updateType === 3 || updateType === 5) return 'monitoring'
+  if (updateType === 4) return 'resolved'
+  return null
+}
+
+function mapImpact(severity: number): Incident['impact'] {
+  if (severity === 1) return 'minor'
+  if (severity === 2) return 'major'
+  if (severity !== 0 && severity != null) {
+    console.warn(`[aistudio] unknown severity=${severity} — mapping to null impact`)
+  }
+  return null
+}
+
+function extractUnixTimestamp(u: UpdateEntry, incidentId?: string): string | null {
+  const ts = u[2]?.[0]
+  if (!ts) return null
+  const num = Number(ts)
+  if (!Number.isFinite(num)) {
+    console.warn(`[aistudio] non-finite timestamp=${ts} in incident=${incidentId ?? '?'}`)
+    return null
+  }
+  if (num < UNIX_SECONDS_MIN || num > UNIX_SECONDS_MAX) {
+    console.warn(
+      `[aistudio] timestamp=${num} out of plausible range [${UNIX_SECONDS_MIN},${UNIX_SECONDS_MAX}] ` +
+        `in incident=${incidentId ?? '?'} — likely ms/s unit drift`,
+    )
+    return null
+  }
+  return new Date(num * 1000).toISOString()
+}
+
+function unwrap(data: unknown): IncidentEntry[] {
+  let node: unknown = data
+  for (let i = 0; i < MAX_UNWRAP_DEPTH; i++) {
+    if (!Array.isArray(node)) return []
+    if (node.length > 0 && Array.isArray(node[0]) && typeof (node[0] as unknown[])[0] === 'string') {
+      return node as IncidentEntry[]
+    }
+    node = node[0]
+  }
+  // Non-empty response but descent failed → schema drift, surface it.
+  if (Array.isArray(data) && data.length > 0) {
+    console.warn(
+      `[aistudio] unwrap exhausted MAX_UNWRAP_DEPTH=${MAX_UNWRAP_DEPTH} on non-empty response — shape drift?`,
+    )
+  }
+  return []
+}
+
+export interface ParseAistudioOptions {
+  // Restrict incidents to those affecting at least one of these components.
+  // Use AISTUDIO_COMPONENT values (e.g. [AISTUDIO_COMPONENT.API]).
+  componentFilter?: AistudioComponent[]
+  // Prefix applied to incident IDs for cross-source dedup (default: 'aistudio:').
+  idPrefix?: string
+}
+
+export function parseAistudioIncidents(
+  data: unknown,
+  opts: ParseAistudioOptions = {},
+): Incident[] {
+  const entries = unwrap(data)
+  const { componentFilter, idPrefix = 'aistudio:' } = opts
+
+  return entries.flatMap<Incident>((entry) => {
+    const rawId = entry?.[0]
+    try {
+      const [, title, severity, updates, , components] = entry
+      if (!Array.isArray(updates) || updates.length === 0) return []
+
+      if (componentFilter) {
+        if (!components?.length) {
+          // No components = cannot verify API scope. Drop rather than fall
+          // through, otherwise Multimodal Live / AI Studio UI shape drift
+          // would contaminate gemini status.
+          console.warn(`[aistudio] incident=${rawId} has empty components — excluded by filter`)
+          return []
+        }
+        const overlap = components.some((c) => (componentFilter as number[]).includes(c))
+        if (!overlap) return []
+      }
+
+      // Normalize update order (fixture ships oldest→newest; defend against drift).
+      const sorted = [...updates].sort((a, b) => {
+        const ta = Number(a?.[2]?.[0] ?? 0)
+        const tb = Number(b?.[2]?.[0] ?? 0)
+        return ta - tb
+      })
+
+      // Unknown updateType inherits the previous stage so a new Google enum
+      // value can never silently mark an incident resolved.
+      let lastKnownStage: TimelineEntry['stage'] = 'investigating'
+      const timeline: TimelineEntry[] = sorted.flatMap((u) => {
+        const at = extractUnixTimestamp(u, rawId)
+        if (!at) return []
+        const stage = mapStage(u[0]) ?? lastKnownStage
+        lastKnownStage = stage
+        return [{ stage, text: (u[3] || '').trim().substring(0, 500) || null, at }]
+      })
+      if (timeline.length === 0) return []
+
+      const startedAt = timeline[0].at
+      const last = timeline[timeline.length - 1]
+      const isResolved = last.stage === 'resolved'
+      const resolvedAt = isResolved ? last.at : null
+      const duration =
+        resolvedAt && startedAt ? formatDuration(new Date(startedAt), new Date(resolvedAt)) : null
+
+      return [
+        {
+          id: `${idPrefix}${rawId}`,
+          title,
+          status: last.stage,
+          impact: mapImpact(severity),
+          startedAt,
+          resolvedAt,
+          duration,
+          timeline,
+        },
+      ]
+    } catch (err) {
+      console.warn(
+        `[aistudio] entry parse failed id=${rawId}:`,
+        err instanceof Error ? err.message : err,
+      )
+      return []
+    }
+  })
+}
