@@ -550,31 +550,28 @@ export default function Overview() {
         const recent = (securityAlerts ?? []).filter(a => a.detectedAt && new Date(a.detectedAt).getTime() > cutoff)
         if (recent.length === 0) return null
         return (
-          <div className="rounded-lg border border-[var(--purple)]" style={{ background: 'color-mix(in srgb, var(--purple) 8%, transparent)', padding: '12px 16px' }}>
-            <div className="flex items-start gap-2 text-[12px]">
-              <span>🔒</span>
-              <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[var(--text0)] font-medium mono text-[11px]">
-                  {t('overview.security.title')} ({recent.length})
-                </span>
-                {recent.slice(0, 3).map((a, i) => {
-                  const safeUrl = a.url?.startsWith('https://') ? a.url : '#'
-                  // Derive service tag: use service field (OSV) or detect from title (HN)
-                  let tag = a.service || ''
-                  if (!tag) {
-                    const titleLC = a.title?.toLowerCase() ?? ''
-                    const match = services.find(s => titleLC.includes(s.name.toLowerCase()) || titleLC.includes(s.provider.toLowerCase()))
-                    if (match) tag = match.name
-                  }
-                  return (
-                    <a key={i} href={safeUrl} target="_blank" rel="noopener noreferrer"
-                      className="text-[var(--text1)] hover:text-[var(--purple)] truncate text-[11px]"
-                    >
-                      {a.severity === 'critical' ? '🔴' : a.severity === 'high' ? '🟠' : '🟡'} {tag ? `[${tag}] ` : ''}{a.title}
-                    </a>
-                  )
-                })}
-              </div>
+          <div className="rounded-lg border border-[var(--purple)]" style={{ background: 'color-mix(in srgb, var(--purple) 8%, transparent)', padding: '8px 12px' }}>
+            <div className="flex flex-col gap-0.5 text-[12px] min-w-0">
+              <span className="text-[var(--text0)] font-medium mono text-[11px]">
+                🔒 {t('overview.security.title')} ({recent.length})
+              </span>
+              {recent.slice(0, 3).map((a, i) => {
+                const safeUrl = a.url?.startsWith('https://') ? a.url : '#'
+                // Derive service tag: use service field (OSV) or detect from title (HN)
+                let tag = a.service || ''
+                if (!tag) {
+                  const titleLC = a.title?.toLowerCase() ?? ''
+                  const match = services.find(s => titleLC.includes(s.name.toLowerCase()) || titleLC.includes(s.provider.toLowerCase()))
+                  if (match) tag = match.name
+                }
+                return (
+                  <a key={i} href={safeUrl} target="_blank" rel="noopener noreferrer"
+                    className="text-[var(--text1)] hover:text-[var(--purple)] truncate text-[11px]"
+                  >
+                    {a.severity === 'critical' ? '🔴' : a.severity === 'high' ? '🟠' : '🟡'} {tag ? `[${tag}] ` : ''}{a.title}
+                  </a>
+                )
+              })}
             </div>
           </div>
         )
