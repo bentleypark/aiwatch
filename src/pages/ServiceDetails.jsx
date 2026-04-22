@@ -43,7 +43,7 @@ const SERVICE_COLOR = {
 const STATUS_URL = {
   claude:      'https://status.claude.com',
   openai:      'https://status.openai.com',
-  gemini:      'https://status.cloud.google.com/',
+  gemini:      'https://aistudio.google.com/status',
   mistral:     'https://status.mistral.ai',
   cohere:      'https://status.cohere.ai',
   groq:        'https://status.groq.com',
