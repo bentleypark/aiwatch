@@ -286,7 +286,7 @@ When adding a new monitored service, update ALL of the following:
 | `platform:status:{platformId}` | `PlatformStatus` JSON | 10min | ~288 | Status page platform health (metastatuspage.com for Atlassian) |
 | `alerted:platform:{platformId}` | `"1"` | 2h | ~1 | Platform outage alert dedup |
 
-**Free tier budget**: 1,000 writes/day. Estimated total: ~845-958 writes/day + changelog (~3/day) + changelog last-fetch markers (~96/day, 4 sources × 24 hourly cron, #274) + weekly briefing (~1/week) + vitals (1 per visit) + platform status (~1/cycle when changed) + recovery markers (~2-5/day). Monitor if daily visits exceed ~50.
+**KV write budget** (Workers Paid / Standard plan): 1,000,000 writes/month included (~33,333/day); overage billed at $0.50 per additional 1M. Current estimated usage: ~845-958 writes/day + changelog (~3/day) + changelog last-fetch markers (~96/day, 4 sources × 24 hourly cron, #274) + weekly briefing (~1/week) + vitals (1 per visit) + platform status (~1/cycle when changed) + recovery markers (~2-5/day) ≈ **~3% of monthly inclusion**. Existing throttling constants (e.g., `KV_WRITE_INTERVAL_MS = 600_000`) are retained for cost hygiene even though the hard free-tier limit no longer applies.
 
 ### Directory Layout
 ```
@@ -472,7 +472,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
   - **Estimate-only services** (`uptimeSource === 'estimate'` + 0 incidents): `bedrock`, `azureopenai` — hidden from Ranking, Uptime rankings, fallback recommendations, category averages. Dashboard shows "— Not provided" instead of misleading 100% uptime
 - Status polling proxy: `worker/` directory (monorepo), Cloudflare Workers
   - `cd worker && npm run dev` — local dev (port 8787)
-  - **Worker deployment rules** (KV free tier: 1,000 writes/day):
+  - **Worker deployment rules** (Workers Paid / Standard — 1M KV writes/month included; repeated deploys still reset per-isolate throttling, so minimize unnecessary redeploys to stay well inside the monthly allowance):
     1. During development → `npx wrangler dev --config worker/wrangler.toml --port 8788` (local test only, never deploy)
     2. Before deploy → `npx wrangler deploy --config worker/wrangler.toml --dry-run` (build check)
     3. Deploy → after commit + user approval, **once only** `npm run deploy:worker`
