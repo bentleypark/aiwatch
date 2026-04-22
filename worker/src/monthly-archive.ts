@@ -8,6 +8,8 @@
 
 import type { ProbeDailyData } from './probe-archival'
 import type { ServiceStatus, Incident } from './types'
+import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
+import { osvTimelineKey } from './security-monitor'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
 
@@ -47,8 +49,10 @@ export interface MonthlySecurityEntry {
 }
 
 export interface MonthlySecurityTopFinding extends MonthlySecurityEntry {
-  // Identical fields to MonthlySecurityEntry today. Kept as a distinct type so #291 can
-  // extend only top findings with an optional `timeline` array without widening the raw entry.
+  // #291: optional per-alert timeline ("detected → fix_released → severity_changed").
+  // Populated only for OSV findings that have a permanent security:timeline:osv:{id} KV
+  // entry at archive build time; HN findings never carry this field.
+  timeline?: OsvTimelineEntry[]
 }
 
 export interface MonthlySecuritySummary {
@@ -234,6 +238,45 @@ export function summarizeSecurityAlerts(entries: MonthlySecurityEntry[]): Monthl
   return { totalAlerts: entries.length, bySource, bySeverity, byService, topFindings }
 }
 
+/**
+ * Extract the OSV vuln ID (GHSA-* or CVE-*) from a finding URL.
+ * Works for the two shapes our writer currently produces: osv.dev/vulnerability/{id}
+ * and github.com/advisories/{id}. Returns null if the URL doesn't carry a recognizable id.
+ */
+export function extractOsvVulnId(url: string | undefined): string | null {
+  if (!url) return null
+  const m = url.match(/(GHSA-[a-z0-9-]+|CVE-\d{4}-\d+)/i)
+  return m ? m[1] : null
+}
+
+/**
+ * For each OSV top finding, attach its permanent timeline (#291) when a
+ * security:timeline:osv:{id} KV entry exists. HN findings and findings without a
+ * resolvable vuln id pass through unchanged.
+ */
+export async function enrichTopFindingsWithTimelines(
+  kv: KVNamespace,
+  summary: MonthlySecuritySummary,
+): Promise<MonthlySecuritySummary> {
+  const enrichedTop = await Promise.all(
+    summary.topFindings.map(async (f): Promise<MonthlySecurityTopFinding> => {
+      if (f.source !== 'osv') return f
+      const vulnId = extractOsvVulnId(f.url)
+      if (!vulnId) return f
+      const raw = await kv.get(osvTimelineKey(vulnId)).catch(() => null)
+      if (!raw) return f
+      try {
+        const timeline = JSON.parse(raw) as OsvTimeline
+        if (Array.isArray(timeline.entries) && timeline.entries.length > 0) {
+          return { ...f, timeline: timeline.entries }
+        }
+      } catch { /* malformed timeline — skip enrichment, don't fail archive */ }
+      return f
+    }),
+  )
+  return { ...summary, topFindings: enrichedTop }
+}
+
 /** Get all dates in a given month (YYYY-MM-DD strings) */
 export function getMonthDates(year: number, month: number): string[] {
   const dates: string[] = []
@@ -318,6 +361,8 @@ export async function buildMonthlyArchive(
       const parsed = JSON.parse(secRaw) as MonthlySecurityEntry[]
       if (Array.isArray(parsed) && parsed.length > 0) {
         security = summarizeSecurityAlerts(parsed)
+        // Attach permanent per-alert timelines to OSV top findings (#291).
+        security = await enrichTopFindingsWithTimelines(kv, security)
       }
     } catch (err) {
       console.warn(`[monthly-archive] corrupt security accumulation for ${period}:`, err instanceof Error ? err.message : err)

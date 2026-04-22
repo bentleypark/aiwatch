@@ -8,9 +8,12 @@ import {
   accumulateMonthlyIncidents,
   parseDurationMin,
   summarizeSecurityAlerts,
+  extractOsvVulnId,
+  enrichTopFindingsWithTimelines,
 } from '../monthly-archive'
 import type { ServiceStatus } from '../types'
-import type { MonthlySecurityEntry } from '../monthly-archive'
+import type { MonthlySecurityEntry, MonthlySecuritySummary } from '../monthly-archive'
+import type { OsvTimeline } from '../security-monitor'
 
 // ── parseDurationMin ─────────────────────────────────────────────────
 
@@ -353,6 +356,97 @@ describe('summarizeSecurityAlerts', () => {
   })
 })
 
+// ── OSV vuln id extraction + archive timeline enrichment (#291) ──────
+
+describe('extractOsvVulnId', () => {
+  it('picks GHSA ids out of osv.dev URLs', () => {
+    expect(extractOsvVulnId('https://osv.dev/vulnerability/GHSA-abc-def-ghi')).toBe('GHSA-abc-def-ghi')
+  })
+
+  it('picks GHSA ids out of github.com advisory URLs', () => {
+    expect(extractOsvVulnId('https://github.com/advisories/GHSA-69w3-r845-3855')).toBe('GHSA-69w3-r845-3855')
+  })
+
+  it('picks CVE ids out of URLs', () => {
+    expect(extractOsvVulnId('https://nvd.nist.gov/vuln/detail/CVE-2026-12345')).toBe('CVE-2026-12345')
+  })
+
+  it('is case-insensitive on the GHSA/CVE prefix', () => {
+    // Some downstream tooling lowercases path segments; the regex uses /i to tolerate that.
+    expect(extractOsvVulnId('https://osv.dev/vulnerability/ghsa-aaa-bbb-ccc')).toBe('ghsa-aaa-bbb-ccc')
+    expect(extractOsvVulnId('https://example.com/cve-2026-12345')).toBe('cve-2026-12345')
+  })
+
+  it('returns null for URLs without a recognizable id', () => {
+    expect(extractOsvVulnId('https://example.com/advisory/random')).toBeNull()
+    expect(extractOsvVulnId(undefined)).toBeNull()
+    expect(extractOsvVulnId('')).toBeNull()
+  })
+})
+
+describe('enrichTopFindingsWithTimelines', () => {
+  const baseSummary: MonthlySecuritySummary = {
+    totalAlerts: 3,
+    bySource: { osv: 2, hackernews: 1 },
+    bySeverity: { critical: 0, high: 1, medium: 1, low: 0 },
+    byService: {},
+    topFindings: [
+      { title: 'OSV A', url: 'https://osv.dev/vulnerability/GHSA-aaa-bbb-ccc', source: 'osv',        severity: 'high',   detectedAt: '2026-03-01T00:00:00Z' },
+      { title: 'OSV B', url: 'https://osv.dev/vulnerability/GHSA-xxx-yyy-zzz', source: 'osv',        severity: 'medium', detectedAt: '2026-03-02T00:00:00Z' },
+      { title: 'HN C',  url: 'https://news.ycombinator.com/item?id=1',         source: 'hackernews',                     detectedAt: '2026-03-03T00:00:00Z' },
+    ],
+  }
+  const timelineA: OsvTimeline = {
+    vulnId: 'GHSA-aaa-bbb-ccc',
+    createdAt: '2026-03-01T00:00:00Z',
+    lastSeen: '2026-03-15T00:00:00Z',
+    entries: [
+      { stage: 'detected',     at: '2026-03-01T00:00:00Z', severity: 'medium' },
+      { stage: 'severity_changed', at: '2026-03-10T00:00:00Z', severity: 'high' },
+      { stage: 'fix_released', at: '2026-03-15T00:00:00Z', fixedVersion: '1.2.3' },
+    ],
+  }
+
+  it('attaches timeline entries to OSV findings when the KV key exists', async () => {
+    const kv = {
+      get: async (key: string) => key === 'security:timeline:osv:GHSA-aaa-bbb-ccc' ? JSON.stringify(timelineA) : null,
+    } as unknown as KVNamespace
+    const enriched = await enrichTopFindingsWithTimelines(kv, baseSummary)
+    expect(enriched.topFindings[0].timeline).toHaveLength(3)
+    expect(enriched.topFindings[0].timeline![2].stage).toBe('fix_released')
+    // Findings without a KV entry pass through unchanged
+    expect(enriched.topFindings[1].timeline).toBeUndefined()
+    // HN findings never get enriched
+    expect(enriched.topFindings[2].timeline).toBeUndefined()
+  })
+
+  it('skips enrichment on missing / malformed / empty timeline', async () => {
+    const kv = {
+      get: async (key: string) => {
+        if (key === 'security:timeline:osv:GHSA-aaa-bbb-ccc') return '{not valid json'
+        if (key === 'security:timeline:osv:GHSA-xxx-yyy-zzz') return JSON.stringify({ ...timelineA, entries: [] })
+        return null
+      },
+    } as unknown as KVNamespace
+    const enriched = await enrichTopFindingsWithTimelines(kv, baseSummary)
+    expect(enriched.topFindings[0].timeline).toBeUndefined()  // malformed
+    expect(enriched.topFindings[1].timeline).toBeUndefined()  // empty entries array
+  })
+
+  it('tolerates KV get rejection per finding (one failure does not poison the batch)', async () => {
+    const kv = {
+      get: async (key: string) => {
+        if (key === 'security:timeline:osv:GHSA-aaa-bbb-ccc') throw new Error('KV read failed')
+        if (key === 'security:timeline:osv:GHSA-xxx-yyy-zzz') return JSON.stringify({ ...timelineA, vulnId: 'GHSA-xxx-yyy-zzz' })
+        return null
+      },
+    } as unknown as KVNamespace
+    const enriched = await enrichTopFindingsWithTimelines(kv, baseSummary)
+    expect(enriched.topFindings[0].timeline).toBeUndefined()
+    expect(enriched.topFindings[1].timeline).toHaveLength(3)
+  })
+})
+
 // ── buildMonthlyArchive ──────────────────────────────────────────────
 
 describe('buildMonthlyArchive', () => {
@@ -501,6 +595,40 @@ describe('buildMonthlyArchive', () => {
 
     const archive = await buildMonthlyArchive(corruptSecurityKV, 2026, 3)
     expect(archive.security).toBeNull()
+  })
+
+  it('archive.security enriches OSV top findings with per-alert timelines (#291)', async () => {
+    const secEntries: MonthlySecurityEntry[] = [
+      { title: 'OSV with timeline', url: 'https://osv.dev/vulnerability/GHSA-aaa-bbb-ccc', source: 'osv', severity: 'high', detectedAt: '2026-03-10T00:00:00Z' },
+      { title: 'HN no timeline',    url: 'https://news.ycombinator.com/item?id=99',          source: 'hackernews',             detectedAt: '2026-03-11T00:00:00Z' },
+    ]
+    const timeline: OsvTimeline = {
+      vulnId: 'GHSA-aaa-bbb-ccc',
+      createdAt: '2026-03-10T00:00:00Z',
+      lastSeen: '2026-03-20T00:00:00Z',
+      entries: [
+        { stage: 'detected',     at: '2026-03-10T00:00:00Z', severity: 'medium' },
+        { stage: 'fix_released', at: '2026-03-20T00:00:00Z', fixedVersion: '2.0.0' },
+      ],
+    }
+    const kv = {
+      get: async (key: string) => {
+        if (key === 'security:monthly:2026-03') return JSON.stringify(secEntries)
+        if (key === 'security:timeline:osv:GHSA-aaa-bbb-ccc') return JSON.stringify(timeline)
+        return null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(kv, 2026, 3)
+    expect(archive.security).not.toBeNull()
+    const osvFinding = archive.security!.topFindings.find(f => f.source === 'osv')
+    const hnFinding = archive.security!.topFindings.find(f => f.source === 'hackernews')
+    expect(osvFinding?.timeline).toHaveLength(2)
+    expect(osvFinding?.timeline?.[1].stage).toBe('fix_released')
+    expect(hnFinding?.timeline).toBeUndefined()
   })
 
   it('leaves archive.security = null when the security:monthly KV get rejects', async () => {
