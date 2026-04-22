@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { mapOSVSeverity, detectSecurityAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts } from '../security-monitor'
-import type { SecurityAlert, SecurityAlertMeta } from '../security-monitor'
+import { mapOSVSeverity, detectSecurityAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, shouldAppendTimeline, appendTimelineEntry, osvTimelineKey, planOsvTimelineCycle } from '../security-monitor'
+import type { SecurityAlert, SecurityAlertMeta, OsvTimeline } from '../security-monitor'
 
 describe('mapOSVSeverity', () => {
   it('maps critical (>= 9.0)', () => {
@@ -310,5 +310,221 @@ describe('readRecentSecurityAlerts', () => {
       expect(fullShape).toEqual(cachedShape)
       expect(fullShape.securityAlerts).toHaveLength(2)
     })
+  })
+})
+
+// ── OSV timeline tracking (#291) ─────────────────────────────────────
+
+describe('osvTimelineKey', () => {
+  it('scopes the key to the vuln id', () => {
+    expect(osvTimelineKey('GHSA-abc-123')).toBe('security:timeline:osv:GHSA-abc-123')
+    expect(osvTimelineKey('CVE-2026-0001')).toBe('security:timeline:osv:CVE-2026-0001')
+  })
+})
+
+describe('shouldAppendTimeline', () => {
+  const baseAlert: SecurityAlert = {
+    source: 'osv',
+    id: 'GHSA-test-001',
+    title: 'Test vuln',
+    url: 'https://osv.dev/vulnerability/GHSA-test-001',
+    severity: 'high',
+    kvKey: 'security:seen:osv:GHSA-test-001',
+    service: 'OpenAI',
+    affectedPackage: 'PyPI/openai',
+  }
+
+  it('emits a detected entry on first observation (existing is null)', () => {
+    const entry = shouldAppendTimeline(null, baseAlert, '2026-04-22T10:00:00Z')
+    expect(entry).not.toBeNull()
+    expect(entry!.stage).toBe('detected')
+    expect(entry!.at).toBe('2026-04-22T10:00:00Z')
+    expect(entry!.severity).toBe('high')
+  })
+
+  it('returns null when nothing changed since last observation', () => {
+    const existing: OsvTimeline = {
+      vulnId: baseAlert.id,
+      createdAt: '2026-04-20T00:00:00Z',
+      lastSeen: '2026-04-22T09:00:00Z',
+      entries: [{ stage: 'detected', at: '2026-04-20T00:00:00Z', severity: 'high' }],
+    }
+    expect(shouldAppendTimeline(existing, baseAlert, '2026-04-22T10:00:00Z')).toBeNull()
+  })
+
+  it('emits severity_changed when the current severity differs from the last observed', () => {
+    const existing: OsvTimeline = {
+      vulnId: baseAlert.id,
+      createdAt: '2026-04-20T00:00:00Z',
+      lastSeen: '2026-04-22T09:00:00Z',
+      entries: [{ stage: 'detected', at: '2026-04-20T00:00:00Z', severity: 'medium' }],
+    }
+    const entry = shouldAppendTimeline(existing, { ...baseAlert, severity: 'critical' }, '2026-04-22T10:00:00Z')
+    expect(entry).not.toBeNull()
+    expect(entry!.stage).toBe('severity_changed')
+    expect(entry!.severity).toBe('critical')
+  })
+
+  it('emits fix_released when a fixedVersion appears where none was known', () => {
+    const existing: OsvTimeline = {
+      vulnId: baseAlert.id,
+      createdAt: '2026-04-20T00:00:00Z',
+      lastSeen: '2026-04-22T09:00:00Z',
+      entries: [{ stage: 'detected', at: '2026-04-20T00:00:00Z', severity: 'high' }],
+    }
+    const entry = shouldAppendTimeline(existing, { ...baseAlert, fixedVersion: '1.2.3' }, '2026-04-22T10:00:00Z')
+    expect(entry).not.toBeNull()
+    expect(entry!.stage).toBe('fix_released')
+    expect(entry!.fixedVersion).toBe('1.2.3')
+  })
+
+  it('does not re-emit fix_released when the fix was already recorded', () => {
+    // Prevents a runaway timeline — once a fixedVersion is known, later observations with
+    // the same fix should be a no-op, not a second fix_released entry.
+    const existing: OsvTimeline = {
+      vulnId: baseAlert.id,
+      createdAt: '2026-04-20T00:00:00Z',
+      lastSeen: '2026-04-22T09:00:00Z',
+      entries: [
+        { stage: 'detected', at: '2026-04-20T00:00:00Z', severity: 'high' },
+        { stage: 'fix_released', at: '2026-04-21T00:00:00Z', fixedVersion: '1.2.3' },
+      ],
+    }
+    expect(shouldAppendTimeline(existing, { ...baseAlert, fixedVersion: '1.2.3' }, '2026-04-22T10:00:00Z')).toBeNull()
+  })
+
+  it('severity_changed preempts fix_released when both would fire in the same cycle', () => {
+    // Current implementation checks severity first; the single-entry-per-cycle model
+    // means the next cycle's observation still sees the new fixedVersion as "newly present"
+    // and emits fix_released then. This test locks that ordering.
+    const existing: OsvTimeline = {
+      vulnId: baseAlert.id,
+      createdAt: '2026-04-20T00:00:00Z',
+      lastSeen: '2026-04-22T09:00:00Z',
+      entries: [{ stage: 'detected', at: '2026-04-20T00:00:00Z', severity: 'high' }],
+    }
+    const entry = shouldAppendTimeline(existing, { ...baseAlert, severity: 'critical', fixedVersion: '1.2.3' }, '2026-04-22T10:00:00Z')
+    expect(entry!.stage).toBe('severity_changed')
+    // On the next cycle, severity matches; fix_released fires.
+    const after = appendTimelineEntry(existing, baseAlert, entry!, '2026-04-22T10:00:00Z')
+    const second = shouldAppendTimeline(after, { ...baseAlert, severity: 'critical', fixedVersion: '1.2.3' }, '2026-04-22T11:00:00Z')
+    expect(second!.stage).toBe('fix_released')
+  })
+
+  it('walks the timeline back when the most recent entry lacks the field being compared', () => {
+    // A severity is recorded on `detected`, then a later `fix_released` entry omits severity.
+    // When a severity observation arrives and equals the last KNOWN severity (not the most
+    // recent-entry severity, which is undefined), we must NOT emit a spurious severity_changed.
+    const existing: OsvTimeline = {
+      vulnId: baseAlert.id,
+      createdAt: '2026-04-20T00:00:00Z',
+      lastSeen: '2026-04-21T00:00:00Z',
+      entries: [
+        { stage: 'detected', at: '2026-04-20T00:00:00Z', severity: 'high' },
+        { stage: 'fix_released', at: '2026-04-21T00:00:00Z', fixedVersion: '1.2.3' },  // no severity field
+      ],
+    }
+    expect(shouldAppendTimeline(existing, { ...baseAlert, severity: 'high', fixedVersion: '1.2.3' }, '2026-04-22T10:00:00Z')).toBeNull()
+  })
+
+  it('treats a missing current severity as "no change" (does not spurious-emit)', () => {
+    // Some OSV fetches may return an entry without a numeric CVSS or a readable text label —
+    // in that case mapOSVSeverity falls back to 'medium'. But if the alert object is built
+    // without a severity field at all, we must not spuriously emit severity_changed.
+    const existing: OsvTimeline = {
+      vulnId: baseAlert.id,
+      createdAt: '2026-04-20T00:00:00Z',
+      lastSeen: '2026-04-22T09:00:00Z',
+      entries: [{ stage: 'detected', at: '2026-04-20T00:00:00Z', severity: 'high' }],
+    }
+    const noSevAlert = { ...baseAlert, severity: undefined }
+    expect(shouldAppendTimeline(existing, noSevAlert, '2026-04-22T10:00:00Z')).toBeNull()
+  })
+})
+
+describe('appendTimelineEntry', () => {
+  const baseAlert: SecurityAlert = {
+    source: 'osv', id: 'GHSA-001', title: 't', url: 'u', kvKey: 'k',
+    service: 'OpenAI', affectedPackage: 'PyPI/openai',
+  }
+
+  it('constructs a new timeline with createdAt = lastSeen when no prior exists', () => {
+    const entry = { stage: 'detected' as const, at: '2026-04-22T10:00:00Z', severity: 'high' as const }
+    const timeline = appendTimelineEntry(null, baseAlert, entry, '2026-04-22T10:00:00Z')
+    expect(timeline.vulnId).toBe('GHSA-001')
+    expect(timeline.createdAt).toBe('2026-04-22T10:00:00Z')
+    expect(timeline.lastSeen).toBe('2026-04-22T10:00:00Z')
+    expect(timeline.entries).toHaveLength(1)
+    expect(timeline.service).toBe('OpenAI')
+    expect(timeline.affectedPackage).toBe('PyPI/openai')
+  })
+
+  it('appends to an existing timeline and updates only lastSeen', () => {
+    const existing: OsvTimeline = {
+      vulnId: 'GHSA-001', service: 'OpenAI', affectedPackage: 'PyPI/openai',
+      createdAt: '2026-04-20T00:00:00Z', lastSeen: '2026-04-21T00:00:00Z',
+      entries: [{ stage: 'detected', at: '2026-04-20T00:00:00Z', severity: 'high' }],
+    }
+    const entry = { stage: 'severity_changed' as const, at: '2026-04-22T10:00:00Z', severity: 'critical' as const }
+    const next = appendTimelineEntry(existing, baseAlert, entry, '2026-04-22T10:00:00Z')
+    expect(next.createdAt).toBe('2026-04-20T00:00:00Z')  // preserved
+    expect(next.lastSeen).toBe('2026-04-22T10:00:00Z')   // updated
+    expect(next.entries).toHaveLength(2)
+    expect(next.entries[1].stage).toBe('severity_changed')
+  })
+})
+
+describe('planOsvTimelineCycle', () => {
+  const alertA: SecurityAlert = {
+    source: 'osv', id: 'GHSA-aaa', title: 't', url: 'u', severity: 'high',
+    kvKey: 'security:seen:osv:GHSA-aaa', service: 'S', affectedPackage: 'PyPI/a',
+  }
+  const alertB: SecurityAlert = {
+    source: 'osv', id: 'GHSA-bbb', title: 't', url: 'u', severity: 'medium',
+    kvKey: 'security:seen:osv:GHSA-bbb', service: 'S', affectedPackage: 'PyPI/b',
+  }
+
+  it('plans a `detected` write for each alert on first observation', async () => {
+    const reader = async () => null
+    const plans = await planOsvTimelineCycle([alertA, alertB], reader, '2026-04-22T10:00:00Z')
+    expect(plans).toHaveLength(2)
+    expect(plans[0].key).toBe('security:timeline:osv:GHSA-aaa')
+    expect(plans[0].next.entries[0].stage).toBe('detected')
+    expect(plans[1].key).toBe('security:timeline:osv:GHSA-bbb')
+  })
+
+  it('emits zero plans when no alerts transitioned', async () => {
+    const existing: OsvTimeline = {
+      vulnId: 'GHSA-aaa', createdAt: '2026-04-20T00:00:00Z', lastSeen: '2026-04-21T00:00:00Z',
+      entries: [{ stage: 'detected', at: '2026-04-20T00:00:00Z', severity: 'high' }],
+    }
+    const reader = async (key: string) => key === 'security:timeline:osv:GHSA-aaa' ? JSON.stringify(existing) : null
+    const plans = await planOsvTimelineCycle([alertA], reader, '2026-04-22T10:00:00Z')
+    expect(plans).toHaveLength(0)
+  })
+
+  it('skips the write entirely when the existing timeline is corrupt — preserves historical createdAt', async () => {
+    // Overwriting a corrupt blob with a fresh `detected` entry would reset createdAt to
+    // today, erasing the real first-detection timestamp the monthly report depends on.
+    const reader = async () => '{not valid json'
+    const parseFails: string[] = []
+    const plans = await planOsvTimelineCycle(
+      [alertA],
+      reader,
+      '2026-04-22T10:00:00Z',
+      (key) => parseFails.push(key),
+    )
+    expect(plans).toHaveLength(0)
+    expect(parseFails).toEqual(['security:timeline:osv:GHSA-aaa'])
+  })
+
+  it('ignores non-OSV alerts in the input mix', async () => {
+    const hnAlert: SecurityAlert = {
+      source: 'hackernews', id: '1', title: 't', url: 'u', kvKey: 'k',
+    }
+    const reader = async () => null
+    const plans = await planOsvTimelineCycle([hnAlert, alertA], reader, '2026-04-22T10:00:00Z')
+    expect(plans).toHaveLength(1)
+    expect(plans[0].key).toBe('security:timeline:osv:GHSA-aaa')
   })
 })

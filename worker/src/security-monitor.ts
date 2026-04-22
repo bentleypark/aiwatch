@@ -366,3 +366,160 @@ export async function readRecentSecurityAlerts(kv: KVNamespace | null): Promise<
   } catch { /* security data is optional — don't fail the response */ }
   return alerts
 }
+
+// ── OSV per-alert timeline tracking (#291) ─────────────────────────────────
+//
+// Captures real transitions — patch availability, severity shifts — against an
+// OSV alert so the monthly report can show progression ("T+0 detected → T+6h
+// fix released → T+26h severity raised"). Stored under security:timeline:osv:{id}
+// with NO TTL (permanent); the dedup-oriented security:seen:osv:* key (7d TTL)
+// is unchanged and kept separate.
+
+export type OsvTimelineStage = 'detected' | 'severity_changed' | 'fix_released' | 'cve_merged' | 'withdrawn'
+
+export interface OsvTimelineEntry {
+  stage: OsvTimelineStage
+  at: string                      // ISO 8601 — when AIWatch observed the transition
+  severity?: SecurityAlert['severity']
+  fixedVersion?: string
+  cveIds?: string[]
+  osvModified?: string            // OSV's own modified timestamp at snapshot time
+}
+
+export interface OsvTimeline {
+  vulnId: string
+  affectedPackage?: string
+  service?: string
+  createdAt: string               // first AIWatch observation
+  lastSeen: string                // refreshed when a new entry is appended
+  entries: OsvTimelineEntry[]     // chronological, at least one (the initial `detected`)
+}
+
+/** KV key for the permanent per-alert OSV timeline (#291). */
+export function osvTimelineKey(vulnId: string): string {
+  return `security:timeline:osv:${vulnId}`
+}
+
+/**
+ * Walk the timeline backwards to find the most recently observed severity.
+ * Returns undefined if no entry ever recorded one.
+ */
+function lastKnownSeverity(timeline: OsvTimeline): SecurityAlert['severity'] | undefined {
+  for (let i = timeline.entries.length - 1; i >= 0; i--) {
+    const sev = timeline.entries[i].severity
+    if (sev) return sev
+  }
+  return undefined
+}
+
+/** Same walk for fixedVersion — treats empty string as "no fix yet known". */
+function lastKnownFixedVersion(timeline: OsvTimeline): string | undefined {
+  for (let i = timeline.entries.length - 1; i >= 0; i--) {
+    const fv = timeline.entries[i].fixedVersion
+    if (fv) return fv
+  }
+  return undefined
+}
+
+/**
+ * Decide whether the current observation of an OSV alert warrants a new timeline entry.
+ * Pure function — callers provide existing timeline (null on first sight), the current
+ * alert payload, and the current ISO timestamp.
+ *
+ * Stages this function emits today:
+ *   - `detected`          existing is null (first observation)
+ *   - `severity_changed`  current severity differs from the last observed severity
+ *   - `fix_released`      current has a fixedVersion where the last observation had none
+ *
+ * `cve_merged` and `withdrawn` are reserved in the type for forward compat but not
+ * detected yet — they require fetch-layer fields (OSV aliases, withdrawn) the current
+ * SecurityAlert doesn't carry. Extend the fetcher first, then add branches here.
+ */
+export function shouldAppendTimeline(
+  existing: OsvTimeline | null,
+  current: SecurityAlert,
+  now: string,
+): OsvTimelineEntry | null {
+  if (!existing) {
+    return {
+      stage: 'detected',
+      at: now,
+      severity: current.severity,
+      fixedVersion: current.fixedVersion,
+    }
+  }
+  const lastSeverity = lastKnownSeverity(existing)
+  if (current.severity && current.severity !== lastSeverity) {
+    return { stage: 'severity_changed', at: now, severity: current.severity }
+  }
+  const lastFixed = lastKnownFixedVersion(existing)
+  if (current.fixedVersion && !lastFixed) {
+    return { stage: 'fix_released', at: now, fixedVersion: current.fixedVersion }
+  }
+  return null
+}
+
+/**
+ * Append a new entry to an existing timeline, or construct a new one. Pure — the
+ * cron integration handles the KV write.
+ */
+export function appendTimelineEntry(
+  existing: OsvTimeline | null,
+  alert: SecurityAlert,
+  entry: OsvTimelineEntry,
+  now: string,
+): OsvTimeline {
+  if (existing) {
+    return { ...existing, lastSeen: now, entries: [...existing.entries, entry] }
+  }
+  return {
+    vulnId: alert.id,
+    affectedPackage: alert.affectedPackage,
+    service: alert.service,
+    createdAt: now,
+    lastSeen: now,
+    entries: [entry],
+  }
+}
+
+/**
+ * Plan the KV writes for a full cycle of OSV timeline updates. Pure — callers provide
+ * the current OSV alert list and a reader for existing timelines; receive the list of
+ * timelines that need to be persisted. Extracted from the cron loop so the branching
+ * (no-op, first observation, transition, corrupt-existing) is directly testable.
+ *
+ * Corrupt existing timelines (parse failure) are preserved, NOT overwritten: resetting
+ * `createdAt` on corruption would erase the historical first-detection timestamp that
+ * the monthly report depends on. A skip+log stance favors manual repair.
+ */
+export interface TimelineCyclePlan {
+  key: string
+  next: OsvTimeline
+}
+
+export async function planOsvTimelineCycle(
+  alerts: SecurityAlert[],
+  readExisting: (key: string) => Promise<string | null>,
+  now: string,
+  onParseFail?: (key: string, err: unknown) => void,
+): Promise<TimelineCyclePlan[]> {
+  const plans: TimelineCyclePlan[] = []
+  for (const alert of alerts) {
+    if (alert.source !== 'osv') continue
+    const key = osvTimelineKey(alert.id)
+    const raw = await readExisting(key)
+    let existing: OsvTimeline | null = null
+    let corrupt = false
+    if (raw) {
+      try { existing = JSON.parse(raw) as OsvTimeline } catch (err) {
+        corrupt = true
+        onParseFail?.(key, err)
+      }
+    }
+    if (corrupt) continue  // preserve the blob for manual repair; don't overwrite createdAt
+    const entry = shouldAppendTimeline(existing, alert, now)
+    if (!entry) continue
+    plans.push({ key, next: appendTimelineEntry(existing, alert, entry, now) })
+  }
+  return plans
+}

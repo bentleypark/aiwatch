@@ -706,7 +706,7 @@ function corsHeaders(origin: string, allowedOrigin: string | undefined): Headers
 import { generateBadgeSvg } from './badge'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable } from './reddit'
-import { detectSecurityAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts } from './security-monitor'
+import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { collectChangelogs, getStaleSources } from './changelog'
@@ -910,6 +910,26 @@ export default {
         }
       } catch (err) {
         console.error('[cron] Security monitoring (HN/OSV) failed:', err instanceof Error ? err.message : err)
+      }
+
+      // OSV timeline tracking (#291) — runs hourly alongside the dedup path.
+      // Separate from detectSecurityAlerts because timeline needs the CURRENT state
+      // of every tracked OSV alert (to detect severity_changed / fix_released),
+      // not just the new-this-hour ones. Writes only on stage transitions, so
+      // steady-state KV cost is near zero.
+      try {
+        const osvAlerts = await fetchOSVAlerts()
+        const plans = await planOsvTimelineCycle(
+          osvAlerts,
+          (key) => env.STATUS_CACHE.get(key).catch(() => null),
+          new Date().toISOString(),
+          (key, err) => console.warn('[cron] OSV timeline parse failed, preserving blob:', key, err instanceof Error ? err.message : err),
+        )
+        for (const p of plans) {
+          await kvPut(env.STATUS_CACHE, p.key, JSON.stringify(p.next))
+        }
+      } catch (err) {
+        console.error('[cron] OSV timeline tracking failed:', err instanceof Error ? err.message : err)
       }
     }
 
