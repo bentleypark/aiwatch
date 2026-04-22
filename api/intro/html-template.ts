@@ -618,7 +618,7 @@ export function renderLandingPage(opts: LandingOptions): string {
     <div class="mock-body">
       <!-- Stats Cards -->
       <div class="mock-stats-row">
-        <div class="mock-stat-card stat-green"><div class="mock-stat-value" style="color:var(--green);">29</div><div class="mock-stat-sub">services running</div></div>
+        <div class="mock-stat-card stat-green"><div class="mock-stat-value" style="color:var(--green);">30</div><div class="mock-stat-sub">services running</div></div>
         <div class="mock-stat-card stat-amber"><div class="mock-stat-value" style="color:var(--amber);">1</div><div class="mock-stat-sub">partially affected</div></div>
         <div class="mock-stat-card stat-red"><div class="mock-stat-value" style="color:var(--red);">0</div><div class="mock-stat-sub">—</div></div>
         <div class="mock-stat-card stat-blue"><div class="mock-stat-value" style="color:var(--blue);">99.6%</div><div class="mock-stat-sub">Overall average</div></div>
