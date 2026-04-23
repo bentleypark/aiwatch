@@ -7,8 +7,10 @@ import {
   buildMonthlyArchive,
   accumulateMonthlyIncidents,
   parseDurationMin,
+  summarizeSecurityMonth,
 } from '../monthly-archive'
 import type { ServiceStatus } from '../types'
+import type { SecurityAlertMeta } from '../security-monitor'
 
 // ── parseDurationMin ─────────────────────────────────────────────────
 
@@ -275,6 +277,103 @@ describe('accumulateMonthlyIncidents', () => {
   })
 })
 
+// ── summarizeSecurityMonth (#290) ───────────────────────────────────
+
+describe('summarizeSecurityMonth', () => {
+  function meta(partial: Partial<SecurityAlertMeta> & { title: string; url: string; source: string }): SecurityAlertMeta {
+    return { ...partial }
+  }
+
+  it('returns zeroed summary for empty input', () => {
+    const s = summarizeSecurityMonth([])
+    expect(s.totalAlerts).toBe(0)
+    expect(s.bySource).toEqual({ osv: 0, hackernews: 0 })
+    expect(s.bySeverity).toEqual({ critical: 0, high: 0, medium: 0, low: 0 })
+    expect(s.byService).toEqual({})
+    expect(s.topFindings).toEqual([])
+  })
+
+  it('counts by source, severity, and service', () => {
+    const alerts: SecurityAlertMeta[] = [
+      meta({ title: 'a', url: 'u1', source: 'osv', severity: 'critical', service: 'OpenAI', detectedAt: '2026-04-01T00:00:00Z' }),
+      meta({ title: 'b', url: 'u2', source: 'osv', severity: 'high', service: 'OpenAI', detectedAt: '2026-04-02T00:00:00Z' }),
+      meta({ title: 'c', url: 'u3', source: 'hackernews', severity: 'medium', service: 'Anthropic (Claude)', detectedAt: '2026-04-03T00:00:00Z' }),
+    ]
+    const s = summarizeSecurityMonth(alerts)
+    expect(s.totalAlerts).toBe(3)
+    expect(s.bySource).toEqual({ osv: 2, hackernews: 1 })
+    expect(s.bySeverity).toEqual({ critical: 1, high: 1, medium: 1, low: 0 })
+    expect(s.byService).toEqual({ 'OpenAI': 2, 'Anthropic (Claude)': 1 })
+  })
+
+  it('orders topFindings by severity desc, then by detectedAt desc', () => {
+    const alerts: SecurityAlertMeta[] = [
+      meta({ title: 'old-critical',   url: 'u1', source: 'osv', severity: 'critical', detectedAt: '2026-04-01T00:00:00Z' }),
+      meta({ title: 'new-critical',   url: 'u2', source: 'osv', severity: 'critical', detectedAt: '2026-04-15T00:00:00Z' }),
+      meta({ title: 'low',            url: 'u3', source: 'osv', severity: 'low',      detectedAt: '2026-04-20T00:00:00Z' }),
+      meta({ title: 'mid',            url: 'u4', source: 'osv', severity: 'medium',   detectedAt: '2026-04-10T00:00:00Z' }),
+    ]
+    const titles = summarizeSecurityMonth(alerts).topFindings.map(f => f.title)
+    expect(titles).toEqual(['new-critical', 'old-critical', 'mid', 'low'])
+  })
+
+  it('truncates topFindings to 10 entries even with more alerts present', () => {
+    // Generate 15 alerts — the constant is 10, so 5 must be dropped.
+    const alerts: SecurityAlertMeta[] = Array.from({ length: 15 }, (_, i) => meta({
+      title: `alert-${i}`,
+      url: `https://osv.dev/${i}`,
+      source: 'osv',
+      severity: 'high',
+      detectedAt: `2026-04-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+    }))
+    const s = summarizeSecurityMonth(alerts)
+    expect(s.totalAlerts).toBe(15)     // full count preserved
+    expect(s.topFindings).toHaveLength(10)
+  })
+
+  it('skips unknown severity and source values without throwing', () => {
+    // Defensive: a future schema might introduce a new severity label. We drop it
+    // from the counter buckets but still include it in topFindings with raw string.
+    const alerts: SecurityAlertMeta[] = [
+      meta({ title: 'x', url: 'u', source: 'osv', severity: 'bogus', detectedAt: '2026-04-01T00:00:00Z' }),
+      meta({ title: 'y', url: 'u2', source: 'new-source' as string, severity: 'low', detectedAt: '2026-04-02T00:00:00Z' }),
+    ]
+    const s = summarizeSecurityMonth(alerts)
+    expect(s.totalAlerts).toBe(2)
+    expect(s.bySource).toEqual({ osv: 1, hackernews: 0 }) // new-source dropped
+    expect(s.bySeverity.low).toBe(1)
+    expect(s.bySeverity.critical).toBe(0) // 'bogus' dropped, not mis-bucketed
+    // Low severity sorts above unknown in topFindings.
+    expect(s.topFindings[0].severity).toBe('low')
+  })
+
+  it('handles missing severity + service fields gracefully', () => {
+    const alerts: SecurityAlertMeta[] = [
+      meta({ title: 'no-sev', url: 'u', source: 'hackernews', detectedAt: '2026-04-01T00:00:00Z' }),
+    ]
+    const s = summarizeSecurityMonth(alerts)
+    expect(s.bySource).toEqual({ osv: 0, hackernews: 1 })
+    expect(s.byService).toEqual({})
+    expect(s.topFindings).toHaveLength(1)
+    expect(s.topFindings[0].severity).toBeUndefined()
+  })
+
+  it('sorts deterministically when one alert has no detectedAt (guards against localeCompare(undefined))', () => {
+    // `localeCompare` throws if its argument is literally `undefined` in some JS engines.
+    // The implementation uses `a.detectedAt ?? ''` so this is currently safe — this test
+    // is the tripwire if a future refactor drops the nullish coalescing.
+    const alerts: SecurityAlertMeta[] = [
+      meta({ title: 'timestamped', url: 'u1', source: 'osv', severity: 'high', detectedAt: '2026-04-10T00:00:00Z' }),
+      meta({ title: 'no-date',     url: 'u2', source: 'osv', severity: 'high' }), // detectedAt omitted
+    ]
+    expect(() => summarizeSecurityMonth(alerts)).not.toThrow()
+    const findings = summarizeSecurityMonth(alerts).topFindings
+    // Real timestamp sorts above '' under localeCompare desc — proves the fallback applies.
+    expect(findings[0].title).toBe('timestamped')
+    expect(findings[1].detectedAt).toBe('') // omitted becomes '' in the emitted shape
+  })
+})
+
 // ── buildMonthlyArchive ──────────────────────────────────────────────
 
 describe('buildMonthlyArchive', () => {
@@ -379,6 +478,104 @@ describe('buildMonthlyArchive', () => {
     expect(archive.period).toBe('2026-12')
     expect(archive.services.claude.incidents).toBe(2)
     expect(archive.services.claude.uptime).toBe(100)
+  })
+
+  it('populates security summary when security:monthly:{period} is present', async () => {
+    // Regression guard for #290: archive schema now carries the security summary.
+    // Verifies the KV read path + JSON parse + summarizeSecurityMonth all compose.
+    const kvWithSec = {
+      get: async (key: string) => {
+        if (key === 'security:monthly:2026-04') return JSON.stringify([
+          { title: 'Critical RCE in anthropic', url: 'https://osv.dev/1', source: 'osv', severity: 'critical', service: 'Anthropic (Claude)', detectedAt: '2026-04-05T10:00:00Z' },
+          { title: 'HN breach rumor', url: 'https://news.ycombinator.com/item?id=1', source: 'hackernews', detectedAt: '2026-04-10T08:00:00Z' },
+          { title: 'Medium path traversal', url: 'https://osv.dev/2', source: 'osv', severity: 'medium', service: 'OpenAI', detectedAt: '2026-04-02T14:00:00Z' },
+        ])
+        return null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(kvWithSec, 2026, 4)
+    expect(archive.security).not.toBeNull()
+    expect(archive.security?.totalAlerts).toBe(3)
+    expect(archive.security?.bySource).toEqual({ osv: 2, hackernews: 1 })
+    expect(archive.security?.bySeverity.critical).toBe(1)
+    expect(archive.security?.bySeverity.medium).toBe(1)
+    // Critical should sort above medium in topFindings
+    expect(archive.security?.topFindings[0].severity).toBe('critical')
+  })
+
+  it('sets security to null when security:monthly key is missing', async () => {
+    // Older archives (pre-#290) never wrote the key; the archive build must still succeed.
+    const noSecKV = {
+      get: async (key: string) => {
+        if (key === 'history:2026-04-01') return JSON.stringify({ claude: { ok: 288, total: 288 } })
+        return null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(noSecKV, 2026, 4)
+    expect(archive.security).toBeNull()
+    // Rest of the archive still populates normally.
+    expect(archive.daysCollected).toBe(1)
+  })
+
+  it('sets security to null when KV value is malformed JSON', async () => {
+    // Don't fail the whole monthly archive over optional security data.
+    const badSecKV = {
+      get: async (key: string) => {
+        if (key === 'security:monthly:2026-04') return '{corrupt'
+        return null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(badSecKV, 2026, 4)
+    expect(archive.security).toBeNull()
+  })
+
+  it('sets security to null when security:monthly KV.get rejects', async () => {
+    // The .catch(() => null) at the read site must swallow transient KV outages
+    // so the monthly archive — a once-a-month, foundational cron — still ships.
+    // Other archive fields (uptime/latency/incidents) should populate normally.
+    const rejectSecKV = {
+      get: async (key: string) => {
+        if (key === 'security:monthly:2026-04') throw new Error('KV temporarily unavailable')
+        if (key === 'history:2026-04-01') return JSON.stringify({ claude: { ok: 288, total: 288 } })
+        return null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(rejectSecKV, 2026, 4)
+    expect(archive.security).toBeNull()
+    expect(archive.daysCollected).toBe(1) // other reads succeeded
+  })
+
+  it('sets security to null when KV value is valid JSON but not an array', async () => {
+    // Future schema drift where someone writes an object-shaped payload must not
+    // crash on `.map` / `.sort` inside summarizeSecurityMonth.
+    const objSecKV = {
+      get: async (key: string) => {
+        if (key === 'security:monthly:2026-04') return '{"not":"an array"}'
+        return null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(objSecKV, 2026, 4)
+    expect(archive.security).toBeNull()
   })
 
   it('sets avgResolutionMin to null when totalMinutes is 0', async () => {
