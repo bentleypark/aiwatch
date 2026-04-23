@@ -93,17 +93,45 @@ export async function fetchHNSecurityPosts(): Promise<SecurityAlert[]> {
 
 // ---------- OSV.dev (AI SDK vulnerabilities) ----------
 
-const OSV_PACKAGES = [
+// Keep the OSV_SERVICE_MAP in src/pages/ServiceDetails.jsx in sync when editing
+// — its keys must cover every `service` label used here or the Security Alerts
+// card will silently drop entries for the unmapped service.
+// Exported for invariant tests only; production callers never import it directly.
+export const OSV_PACKAGES = [
+  // Major LLM providers — PyPI
   { name: 'openai', ecosystem: 'PyPI', service: 'OpenAI' },
   { name: 'anthropic', ecosystem: 'PyPI', service: 'Anthropic (Claude)' },
   { name: 'google-generativeai', ecosystem: 'PyPI', service: 'Google (Gemini)' },
   { name: 'cohere', ecosystem: 'PyPI', service: 'Cohere' },
   { name: 'mistralai', ecosystem: 'PyPI', service: 'Mistral' },
+  // Inference / cloud LLM — PyPI
+  { name: 'together', ecosystem: 'PyPI', service: 'Together' },
+  { name: 'groq', ecosystem: 'PyPI', service: 'Groq' },
+  { name: 'replicate', ecosystem: 'PyPI', service: 'Replicate' },
+  // Voice — PyPI
+  { name: 'assemblyai', ecosystem: 'PyPI', service: 'AssemblyAI' },
+  { name: 'deepgram-sdk', ecosystem: 'PyPI', service: 'Deepgram' },
+  // LangChain ecosystem — per-provider adapters live in separate PyPI packages
+  // since LangChain 0.1; tracking the meta-package alone misses CVEs like
+  // GHSA-3hjh-jh2h-vrg6 (DoS in langchain-community, 2024-06).
   { name: 'langchain', ecosystem: 'PyPI', service: 'LangChain' },
+  { name: 'langchain-community', ecosystem: 'PyPI', service: 'LangChain' },
+  { name: 'langchain-core', ecosystem: 'PyPI', service: 'LangChain' },
+  { name: 'langchain-openai', ecosystem: 'PyPI', service: 'LangChain' },
+  { name: 'langchain-anthropic', ecosystem: 'PyPI', service: 'LangChain' },
+  { name: 'langchain-google-genai', ecosystem: 'PyPI', service: 'LangChain' },
+  // ML infra — PyPI
   { name: 'transformers', ecosystem: 'PyPI', service: 'Hugging Face' },
+  // npm
   { name: 'openai', ecosystem: 'npm', service: 'OpenAI' },
   { name: '@anthropic-ai/sdk', ecosystem: 'npm', service: 'Anthropic (Claude)' },
   { name: '@google/generative-ai', ecosystem: 'npm', service: 'Google (Gemini)' },
+  { name: 'replicate', ecosystem: 'npm', service: 'Replicate' },
+  { name: 'groq-sdk', ecosystem: 'npm', service: 'Groq' },
+  { name: 'assemblyai', ecosystem: 'npm', service: 'AssemblyAI' },
+  { name: '@deepgram/sdk', ecosystem: 'npm', service: 'Deepgram' },
+  // Intentionally NOT included: `npm/together` — that name is a pre-existing
+  // unrelated HTML utility, not the Together AI SDK (as of 2026-04).
 ]
 
 interface OSVVuln {
