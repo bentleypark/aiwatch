@@ -261,8 +261,9 @@ When adding a new monitored service, update ALL of the following:
 | `detection:lead:{YYYY-MM-DD}` | `DetectionLeadEntry[]` JSON | 7d | ~0-5 | Detection Lead audit log — appended on each new incident with positive lead, dedup by incId, surfaced in Daily Summary Discord embed (#256) |
 | `reddit:seen:{postId}` | `"1"` | 24h | ~120 | Reddit post dedup (hourly scan, max 5/hour) |
 | `security:seen:hn:{objectId}` | `SecurityAlertMeta` JSON | 7d | ~0 | HN security post dedup + dashboard display |
-| `security:seen:osv:{vulnId}` | `SecurityAlertMeta` JSON | 7d | ~0 | OSV.dev vulnerability dedup + dashboard display |
-| `security:monthly:{YYYY-MM}` | `SecurityAlertMeta[]` JSON | 60d | ~1/day | Monthly security alert accumulation for reports |
+| `security:seen:osv:{vulnId}` | `SecurityAlertMeta` JSON | 7d | ~0 | OSV.dev vulnerability dedup + dashboard display (includes `epssPercentile` / `epssPercentage` from #326 when GitHub Advisories enrichment succeeded) |
+| `security:monthly:{YYYY-MM}` | `SecurityAlertMeta[]` JSON | 60d | ~1/day | Monthly security alert accumulation for reports (entries carry EPSS fields when available, #326) |
+| `enrich:epss:{ghsaId}` | `EpssScore` JSON (`{percentile, percentage}`) | 24h | ~0-15/day | EPSS (Exploit Prediction Scoring System) cache (#326). Hit once per new OSV vuln against GitHub Advisories API, cached 24h (EPSS recomputes daily). Missing = enrichment unavailable → alert still surfaces without the exploit-probability tag. Rate-limited to 60/hr unauth (not a practical concern given 24h cache + #323 15-per-cycle cap) |
 | `security:detected:{YYYY-MM-DD}` | integer string | 3d | ~0-3/day | Daily counter of newly-detected security alerts (#288). Incremented by `securityAlerts.length` when HN/OSV detection fires. Daily summary reads this instead of counting `security:seen:*` (which accumulates over 7d and inflates the figure) |
 | `ai:analysis:{svcId}:{incId}` | `AIAnalysisResult` JSON | 1h (active) / 2h (resolved) | ~5 per incident | Hybrid AI analysis result — Gemma 4 primary + Sonnet fallback (TTL refreshed while active; on recovery, `resolvedAt` added instead of deleting — kept 2h for "Recently Resolved" UI). `model` field tracks which model produced the analysis. `sticky: true` (#299) marks a manual operator override — cron skips re-analysis and only refreshes TTL; cleared naturally when incident resolves |
 | `ai:reanalysis-skip:{svcId}:{incId}` | `"1"` | 30min | ~2 per incident | Per-incident re-analysis failure cooldown |
@@ -440,7 +441,7 @@ Cron Trigger (*/5 min)
   → daily summary also accumulates incidents:monthly:{YYYY-MM} (dedup by incident ID, 60d TTL)
   → monthly archive on 1st of month (UTC 00:00) → aggregate history:* + probe:daily:* + incidents:monthly:* → archive:monthly:{YYYY-MM} (permanent)
   → changelog RSS/HTML collection (hourly at :00) → KV accumulate new entries from OpenAI/Google/Anthropic
-  → security monitoring (hourly at :00) → HN Algolia + OSV.dev SDK vulnerability scan (two-phase: querybatch → KV dedup → per-vuln GET enrichment; #323) → Discord digest on findings
+  → security monitoring (hourly at :00) → HN Algolia + OSV.dev SDK vulnerability scan (two-phase: querybatch → KV dedup → per-vuln GET enrichment; #323) → EPSS enrichment via GitHub Advisories (24h KV cache, #326) → Discord digest on findings
   → weekly briefing on Sunday UTC 00:00 (KST 09:00) → aggregate changelog + incidents + stability → Discord embed
 
 Web Vitals Pipeline (per-request, 100% collection):

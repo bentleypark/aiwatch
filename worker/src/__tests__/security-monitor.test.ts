@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { mapOSVSeverity, detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts } from '../security-monitor'
+import { mapOSVSeverity, detectSecurityAlerts, fetchOSVAlerts, fetchEPSS, enrichAlertsWithEPSS, formatEpssTag, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, EPSS_ACTIVE, EPSS_ELEVATED } from '../security-monitor'
 import type { SecurityAlert, SecurityAlertMeta } from '../security-monitor'
 
 describe('mapOSVSeverity', () => {
@@ -549,5 +549,282 @@ describe('readRecentSecurityAlerts', () => {
       expect(fullShape).toEqual(cachedShape)
       expect(fullShape.securityAlerts).toHaveLength(2)
     })
+  })
+})
+
+// #326 — EPSS enrichment against GitHub Advisories API. Fail-open contract:
+// no EPSS field means enrichment unavailable (cache miss + HTTP failure, rate
+// limit, or advisory without EPSS). Alerts must still surface regardless.
+describe('fetchEPSS (#326)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  function stubFetch(response: Response | Error | (() => Response | Promise<Response>)): ReturnType<typeof vi.fn> {
+    const mock = vi.fn(async () => {
+      if (response instanceof Error) throw response
+      if (typeof response === 'function') return response()
+      return response
+    })
+    vi.stubGlobal('fetch', mock)
+    return mock
+  }
+
+  function resp(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+  }
+
+  it('returns parsed epss when cache miss + 200 response', async () => {
+    stubFetch(resp({ epss: { percentile: 0.81596, percentage: 0.01583 } }))
+    const kvStore: Record<string, string> = {}
+    const kv = {
+      get: async (k: string) => kvStore[k] ?? null,
+      put: async (k: string, v: string) => { kvStore[k] = v },
+    } as unknown as KVNamespace
+
+    const score = await fetchEPSS('GHSA-f73w-4m7g-ch9x', kv)
+    expect(score).toEqual({ percentile: 0.81596, percentage: 0.01583 })
+    // Cache is populated so the next call short-circuits.
+    expect(kvStore['enrich:epss:GHSA-f73w-4m7g-ch9x']).toBe(JSON.stringify({ percentile: 0.81596, percentage: 0.01583 }))
+  })
+
+  it('returns cached value without fetching', async () => {
+    const mock = stubFetch(resp({}, 500))  // would fail if actually called
+    const kv = {
+      get: async () => JSON.stringify({ percentile: 0.42, percentage: 0.003 }),
+      put: async () => {},
+    } as unknown as KVNamespace
+
+    const score = await fetchEPSS('GHSA-cached', kv)
+    expect(score).toEqual({ percentile: 0.42, percentage: 0.003 })
+    expect(mock).not.toHaveBeenCalled()
+  })
+
+  it('falls through to HTTP when cache JSON is corrupt', async () => {
+    stubFetch(resp({ epss: { percentile: 0.1, percentage: 0.001 } }))
+    const kv = {
+      get: async () => '{broken',
+      put: async () => {},
+    } as unknown as KVNamespace
+    const score = await fetchEPSS('GHSA-corrupt', kv)
+    expect(score).toEqual({ percentile: 0.1, percentage: 0.001 })
+  })
+
+  it('returns undefined on HTTP 404 without throwing', async () => {
+    stubFetch(resp({ message: 'Not found' }, 404))
+    const score = await fetchEPSS('GHSA-missing', null)
+    expect(score).toBeUndefined()
+  })
+
+  it('logs rate-limit specifically on HTTP 403 / 429', async () => {
+    stubFetch(resp({ message: 'API rate limit exceeded' }, 429))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const score = await fetchEPSS('GHSA-rate-limited', null)
+    expect(score).toBeUndefined()
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('rate-limited'))
+  })
+
+  it('returns undefined on fetch timeout / network error', async () => {
+    stubFetch(new Error('network down'))
+    const score = await fetchEPSS('GHSA-network-fail', null)
+    expect(score).toBeUndefined()
+  })
+
+  it('returns undefined when advisory has no epss field', async () => {
+    // GitHub advisory objects can legitimately lack epss (historical entries, private advisories).
+    stubFetch(resp({ ghsa_id: 'GHSA-no-epss', summary: 'x' }))
+    const score = await fetchEPSS('GHSA-no-epss', null)
+    expect(score).toBeUndefined()
+  })
+
+  it('returns undefined when epss field exists but has non-numeric values', async () => {
+    stubFetch(resp({ epss: { percentile: 'high' as unknown, percentage: null } }))
+    const score = await fetchEPSS('GHSA-malformed-epss', null)
+    expect(score).toBeUndefined()
+  })
+
+  it('continues when KV.put rejects (write-through best-effort)', async () => {
+    stubFetch(resp({ epss: { percentile: 0.5, percentage: 0.01 } }))
+    const kv = {
+      get: async () => null,
+      put: async () => { throw new Error('KV write down') },
+    } as unknown as KVNamespace
+    // Should still return the fetched score — cache write is non-blocking.
+    const score = await fetchEPSS('GHSA-kv-write-fail', kv)
+    expect(score).toEqual({ percentile: 0.5, percentage: 0.01 })
+  })
+
+  it('falls through to HTTP when KV.get rejects (fail-open read)', async () => {
+    // Parity with OSV pre-dedup: a transient KV outage must not block enrichment.
+    // Without this test, a future refactor that drops the `.catch` would currently
+    // go unnoticed — unit tests would pass while prod quietly burned rate limit.
+    stubFetch(resp({ epss: { percentile: 0.6, percentage: 0.02 } }))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const kv = {
+      get: async () => { throw new Error('KV read down') },
+      put: async () => {},
+    } as unknown as KVNamespace
+    const score = await fetchEPSS('GHSA-kv-read-fail', kv)
+    expect(score).toEqual({ percentile: 0.6, percentage: 0.02 })
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('EPSS cache read failed'),
+      'GHSA-kv-read-fail',
+      expect.anything(),
+    )
+  })
+
+  it('writes cache with 24h TTL (expirationTtl: 86400)', async () => {
+    // Silent-regression guard: dropping the TTL or typoing it (e.g. 8640 = 2.4h)
+    // would invisibly change cache behavior. Assert on the put-options payload.
+    stubFetch(resp({ epss: { percentile: 0.3, percentage: 0.001 } }))
+    const captured: Array<{ key: string; value: string; opts?: unknown }> = []
+    const kv = {
+      get: async () => null,
+      put: async (key: string, value: string, opts?: unknown) => {
+        captured.push({ key, value, opts })
+      },
+    } as unknown as KVNamespace
+    await fetchEPSS('GHSA-ttl-check', kv)
+    expect(captured).toHaveLength(1)
+    expect(captured[0].opts).toEqual({ expirationTtl: 86_400 })
+  })
+})
+
+describe('enrichAlertsWithEPSS (#326)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  function resp(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+  }
+
+  it('enriches only OSV alerts; HN alerts pass through untouched', async () => {
+    const alerts: SecurityAlert[] = [
+      { source: 'osv', id: 'GHSA-1', title: 'Vuln', url: 'u1', kvKey: 'k1', severity: 'high' },
+      { source: 'hackernews', id: '42', title: 'HN post', url: 'u2', kvKey: 'k2' },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      // HN alerts must never hit GitHub Advisories — they have no CVE.
+      if (url.includes('api.github.com/advisories/42')) throw new Error('enriched HN alert!')
+      return resp({ epss: { percentile: 0.9, percentage: 0.1 } })
+    }))
+    const enriched = await enrichAlertsWithEPSS(alerts, null)
+    expect(enriched[0]).toMatchObject({ id: 'GHSA-1', epssPercentile: 0.9, epssPercentage: 0.1 })
+    expect(enriched[1]).toEqual(alerts[1]) // HN alert untouched, no EPSS fields
+    expect(enriched[1]).not.toHaveProperty('epssPercentile')
+  })
+
+  it('preserves alerts when enrichment fails for some', async () => {
+    const alerts: SecurityAlert[] = [
+      { source: 'osv', id: 'GHSA-ok', title: 'A', url: 'u', kvKey: 'k1' },
+      { source: 'osv', id: 'GHSA-fail', title: 'B', url: 'u', kvKey: 'k2' },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.includes('GHSA-ok')) return resp({ epss: { percentile: 0.6, percentage: 0.01 } })
+      return resp({}, 500)
+    }))
+    const enriched = await enrichAlertsWithEPSS(alerts, null)
+    expect(enriched[0].epssPercentile).toBe(0.6)
+    // GHSA-fail survives without EPSS fields.
+    expect(enriched[1].id).toBe('GHSA-fail')
+    expect(enriched[1].epssPercentile).toBeUndefined()
+  })
+
+  it('returns all alerts even if every enrichment throws', async () => {
+    const alerts: SecurityAlert[] = [
+      { source: 'osv', id: 'GHSA-x', title: 'A', url: 'u', kvKey: 'k1' },
+      { source: 'osv', id: 'GHSA-y', title: 'B', url: 'u', kvKey: 'k2' },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('total outage') }))
+    const enriched = await enrichAlertsWithEPSS(alerts, null)
+    expect(enriched).toHaveLength(2)
+    expect(enriched[0].epssPercentile).toBeUndefined()
+    expect(enriched[1].epssPercentile).toBeUndefined()
+  })
+
+  it('returns empty array on empty input without making any fetch call', async () => {
+    // Guard against a future refactor adding an unconditional prefetch/rate-limit
+    // probe that would fire on no-op calls and burn subrequests.
+    const mock = vi.fn()
+    vi.stubGlobal('fetch', mock)
+    const result = await enrichAlertsWithEPSS([], null)
+    expect(result).toEqual([])
+    expect(mock).not.toHaveBeenCalled()
+  })
+})
+
+describe('formatEpssTag (#326)', () => {
+  it('returns null when percentile is undefined (pre-enrichment / missing data)', () => {
+    expect(formatEpssTag(undefined)).toBeNull()
+  })
+
+  it('returns null for percentiles below EPSS_ELEVATED (low-signal floor)', () => {
+    expect(formatEpssTag(0)).toBeNull()
+    expect(formatEpssTag(0.49)).toBeNull()
+  })
+
+  it('returns elevated tag between EPSS_ELEVATED and EPSS_ACTIVE', () => {
+    expect(formatEpssTag(EPSS_ELEVATED)).toContain('Elevated')
+    expect(formatEpssTag(EPSS_ACTIVE - 0.01)).toContain('Elevated')
+    expect(formatEpssTag(0.5)).toContain('50%ile')
+  })
+
+  it('returns actively-exploited tag at EPSS_ACTIVE and above', () => {
+    expect(formatEpssTag(EPSS_ACTIVE)).toContain('Actively exploited')
+    expect(formatEpssTag(0.95)).toContain('95%ile')
+    expect(formatEpssTag(1)).toContain('100%ile')
+  })
+
+  it('threshold constants match dashboard source of truth', () => {
+    // Frontend (src/pages/ServiceDetails.jsx) hardcodes 0.5 and 0.8 because it
+    // cannot import from worker. If these constants move, the dashboard silently
+    // drifts — this test is the drift tripwire. Update ServiceDetails.jsx too.
+    expect(EPSS_ELEVATED).toBe(0.5)
+    expect(EPSS_ACTIVE).toBe(0.8)
+  })
+})
+
+describe('detectSecurityAlerts — EPSS wiring (#326)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  // Regression guard: verifies detectSecurityAlerts actually plumbs alerts through
+  // enrichAlertsWithEPSS before returning. A refactor that drops the enrichment
+  // call would silently lose EPSS tags downstream — unit tests on fetchEPSS /
+  // enrichAlertsWithEPSS alone would not catch it.
+  it('returns OSV alerts with epssPercentile populated end-to-end', async () => {
+    const nowISO = new Date().toISOString()
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.includes('hn.algolia.com')) {
+        return new Response(JSON.stringify({ hits: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('querybatch')) {
+        // OSV_PACKAGES index 1 = PyPI/anthropic (same as #323 tests)
+        return new Response(JSON.stringify({
+          results: [{}, { vulns: [{ id: 'GHSA-epss-wired', modified: nowISO }] }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('osv.dev/v1/vulns/GHSA-epss-wired')) {
+        return new Response(JSON.stringify({
+          id: 'GHSA-epss-wired', modified: nowISO, summary: 'Wired alert',
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('api.github.com/advisories/GHSA-epss-wired')) {
+        return new Response(JSON.stringify({
+          epss: { percentile: 0.88, percentage: 0.12 },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`unmocked: ${url}`)
+    }))
+
+    const kv = {
+      get: async () => null,
+      put: async () => {},
+    } as unknown as KVNamespace
+
+    const alerts = await detectSecurityAlerts(kv)
+    const wired = alerts.find(a => a.id === 'GHSA-epss-wired')
+    expect(wired).toBeDefined()
+    expect(wired?.epssPercentile).toBe(0.88)
+    expect(wired?.epssPercentage).toBe(0.12)
   })
 })
