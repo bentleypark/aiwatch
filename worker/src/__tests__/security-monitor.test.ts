@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { mapOSVSeverity, detectSecurityAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts } from '../security-monitor'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { mapOSVSeverity, detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts } from '../security-monitor'
 import type { SecurityAlert, SecurityAlertMeta } from '../security-monitor'
 
 describe('mapOSVSeverity', () => {
@@ -61,6 +61,245 @@ describe('detectSecurityAlerts', () => {
   it('returns empty when kv is null', async () => {
     const result = await detectSecurityAlerts(null)
     expect(result).toEqual([])
+  })
+})
+
+// Regression guard for #323: OSV's /v1/querybatch only returns { id, modified } —
+// summary/severity/references/affected are NOT in the batch response. Without a
+// Phase-2 detail fetch, titles fall back to "GHSA-...: PyPI/name" and severity
+// defaults to 'medium' regardless of the real CVSS score. These tests lock in the
+// two-phase flow: querybatch → dedup → per-vuln GET.
+describe('fetchOSVAlerts — two-phase flow (#323)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  // Minimal response factory — matches what the Workers runtime passes back from fetch().
+  function resp(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+  }
+
+  // Routes fetch by URL so both querybatch (POST) and per-vuln GET share one stub.
+  function stubFetchByUrl(routes: Record<string, unknown>): ReturnType<typeof vi.fn> {
+    const mock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      for (const [pattern, body] of Object.entries(routes)) {
+        if (url.includes(pattern)) return resp(body)
+      }
+      throw new Error(`unmocked fetch: ${url}`)
+    })
+    vi.stubGlobal('fetch', mock)
+    return mock
+  }
+
+  it('enriches alerts with summary/severity/patch via per-vuln GET', async () => {
+    const nowISO = new Date().toISOString()
+    // Place the vuln under whatever position OSV_PACKAGES has the Anthropic-PyPI entry,
+    // so a future reorder of that array doesn't silently point this test at a different package.
+    const ANTHROPIC_PYPI_IDX = 1
+    const mock = stubFetchByUrl({
+      'querybatch': {
+        results: Array.from({ length: ANTHROPIC_PYPI_IDX + 1 }, (_, i) =>
+          i === ANTHROPIC_PYPI_IDX
+            ? { vulns: [{ id: 'GHSA-w828-4qhx-vxx3', modified: nowISO }] }
+            : {},
+        ),
+      },
+      'GHSA-w828-4qhx-vxx3': {
+        id: 'GHSA-w828-4qhx-vxx3',
+        modified: nowISO,
+        summary: 'Claude SDK for Python: Memory Tool Path Validation Race Condition Allows Sandbox Escape',
+        severity: [{ type: 'CVSS_V3', score: '7.1' }],
+        references: [
+          { type: 'ADVISORY', url: 'https://github.com/anthropics/anthropic-sdk-python/security/advisories/GHSA-w828-4qhx-vxx3' },
+          { type: 'WEB', url: 'https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.87.0' },
+        ],
+        affected: [{
+          package: { name: 'anthropic', ecosystem: 'PyPI' },
+          ranges: [{ type: 'ECOSYSTEM', events: [{ introduced: '0.81.0' }, { fixed: '0.87.0' }] }],
+        }],
+        database_specific: { severity: 'HIGH', cwe_ids: ['CWE-367'] },
+      },
+    })
+
+    const alerts = await fetchOSVAlerts(null)
+
+    expect(alerts).toHaveLength(1)
+    const a = alerts[0]!
+    expect(a.title).toBe('Claude SDK for Python: Memory Tool Path Validation Race Condition Allows Sandbox Escape')
+    expect(a.severity).toBe('high') // CVSS 7.1 → high, NOT the 'medium' fallback
+    expect(a.service).toBe('Anthropic (Claude)')
+    expect(a.affectedPackage).toBe('PyPI/anthropic')
+    expect(a.affectedRange).toBe('>= 0.81.0')
+    expect(a.fixedVersion).toBe('0.87.0')
+    expect(a.patchUrl).toBe('https://github.com/anthropics/anthropic-sdk-python/releases/tag/v0.87.0')
+    expect(a.cweIds).toEqual(['CWE-367'])
+    // Two HTTP calls: one querybatch + one detail fetch.
+    expect(mock).toHaveBeenCalledTimes(2)
+  })
+
+  it('skips Phase-2 detail fetch for candidates already in KV dedup', async () => {
+    const nowISO = new Date().toISOString()
+    const mock = stubFetchByUrl({
+      'querybatch': {
+        results: [
+          {},
+          { vulns: [
+            { id: 'GHSA-already-seen', modified: nowISO },
+            { id: 'GHSA-new-one', modified: nowISO },
+          ] },
+        ],
+      },
+      'GHSA-new-one': {
+        id: 'GHSA-new-one',
+        modified: nowISO,
+        summary: 'New vuln',
+        severity: [{ type: 'CVSS_V3', score: '5.0' }],
+      },
+    })
+
+    // Mark one as seen; the dedup pre-filter must skip its detail fetch.
+    const kv = {
+      async get(key: string) {
+        return key === 'security:seen:osv:GHSA-already-seen' ? '1' : null
+      },
+    } as unknown as KVNamespace
+
+    const alerts = await fetchOSVAlerts(kv)
+
+    expect(alerts.map(a => a.id)).toEqual(['GHSA-new-one'])
+    // 1 querybatch + 1 detail fetch (the seen one is skipped). If the skip were
+    // broken, the stub would throw on 'GHSA-already-seen' (no route defined).
+    expect(mock).toHaveBeenCalledTimes(2)
+  })
+
+  it('filters vulns older than 7 days before any detail fetch', async () => {
+    const old = new Date(Date.now() - 10 * 86400 * 1000).toISOString()
+    const mock = stubFetchByUrl({
+      'querybatch': { results: [{ vulns: [{ id: 'GHSA-old', modified: old }] }] },
+    })
+
+    const alerts = await fetchOSVAlerts(null)
+    expect(alerts).toEqual([])
+    // Only the querybatch call — no detail fetch for the aged-out vuln.
+    expect(mock).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops a single failed detail fetch without failing the batch', async () => {
+    const nowISO = new Date().toISOString()
+    // Route the successful detail but leave 'GHSA-broken' unmocked so it throws.
+    const mock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.includes('querybatch')) {
+        return resp({ results: [
+          {},
+          { vulns: [
+            { id: 'GHSA-broken', modified: nowISO },
+            { id: 'GHSA-good', modified: nowISO },
+          ] },
+        ] })
+      }
+      if (url.includes('GHSA-good')) {
+        return resp({ id: 'GHSA-good', modified: nowISO, summary: 'Recoverable' })
+      }
+      throw new Error('simulated network error')
+    })
+    vi.stubGlobal('fetch', mock)
+
+    const alerts = await fetchOSVAlerts(null)
+    expect(alerts.map(a => a.id)).toEqual(['GHSA-good'])
+  })
+
+  it('throws when querybatch itself fails so detectSecurityAlerts can log it', async () => {
+    // Returning [] here would be indistinguishable from a legitimate quiet day;
+    // throwing lets Promise.allSettled in detectSecurityAlerts surface the failure.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('server error', { status: 500 })))
+    await expect(fetchOSVAlerts(null)).rejects.toThrow(/HTTP 500/)
+  })
+
+  it('returns [] with no detail fetches when querybatch yields zero vulns', async () => {
+    // Quiet day — all tracked packages return empty result blocks. Must short-circuit
+    // before Phase 2 so the cron doesn't burn subrequests on nothing.
+    const mock = stubFetchByUrl({ 'querybatch': { results: [{}, {}, {}] } })
+    const alerts = await fetchOSVAlerts(null)
+    expect(alerts).toEqual([])
+    expect(mock).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats a KV.get rejection during pre-dedup as unseen and proceeds to detail fetch', async () => {
+    // Fail-open: a transient KV outage must not mask new CVEs. Regression guard — if a
+    // future refactor flipped the ternary, rejected reads would be silently marked "seen".
+    const nowISO = new Date().toISOString()
+    const mock = stubFetchByUrl({
+      'querybatch': { results: [{}, { vulns: [{ id: 'GHSA-kv-error', modified: nowISO }] }] },
+      'GHSA-kv-error': { id: 'GHSA-kv-error', modified: nowISO, summary: 'Recovered after KV error' },
+    })
+    const kv = {
+      async get() { throw new Error('KV read failed') },
+    } as unknown as KVNamespace
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const alerts = await fetchOSVAlerts(kv)
+
+    expect(alerts.map(a => a.id)).toEqual(['GHSA-kv-error'])
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining('OSV pre-dedup KV read failed for GHSA-kv-error'),
+      expect.anything(),
+    )
+  })
+
+  it('caps detail fetches to OSV_MAX_DETAIL_FETCH and warns on overflow', async () => {
+    // Post-deploy / post-KV-wipe scenario: many candidates pass dedup on the first cycle.
+    // Cap keeps the Workers subrequest budget safe; overflow vulns are re-offered next cycle
+    // since the seen-marker is only written for alerts that are actually surfaced.
+    const nowISO = new Date().toISOString()
+    const manyVulns = Array.from({ length: 20 }, (_, i) => ({ id: `GHSA-many-${i}`, modified: nowISO }))
+    const routes: Record<string, unknown> = { 'querybatch': { results: [{ vulns: manyVulns }] } }
+    for (let i = 0; i < 20; i++) {
+      routes[`GHSA-many-${i}`] = { id: `GHSA-many-${i}`, modified: nowISO, summary: `Vuln ${i}` }
+    }
+    const mock = stubFetchByUrl(routes)
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const alerts = await fetchOSVAlerts(null)
+
+    expect(alerts.length).toBe(15)
+    // 1 querybatch + 15 detail fetches (not 20)
+    expect(mock).toHaveBeenCalledTimes(16)
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('capped at 15'))
+  })
+})
+
+describe('detectSecurityAlerts — HN dedup integration (#323 refactor)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  // Regression guard: the #323 refactor moved OSV dedup upstream into fetchOSVAlerts,
+  // leaving detectSecurityAlerts responsible only for HN dedup. This test makes sure
+  // the HN path still filters against KV and doesn't break under the new structure.
+  it('filters HN alerts whose kvKey is already in KV', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.includes('hn.algolia.com')) {
+        return new Response(JSON.stringify({
+          hits: [
+            { objectID: 'hn-seen', title: 'OpenAI breach disclosed', url: 'https://example.com/a', points: 10, created_at_i: Math.floor(Date.now() / 1000) },
+            { objectID: 'hn-new',  title: 'Anthropic vulnerability CVE', url: 'https://example.com/b', points: 20, created_at_i: Math.floor(Date.now() / 1000) },
+          ],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      // OSV path: return zero candidates so this test isolates the HN dedup behavior.
+      if (url.includes('querybatch')) {
+        return new Response(JSON.stringify({ results: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`unmocked: ${url}`)
+    }))
+
+    const kv = {
+      async get(key: string) {
+        return key === 'security:seen:hn:hn-seen' ? '1' : null
+      },
+    } as unknown as KVNamespace
+
+    const alerts = await detectSecurityAlerts(kv)
+    expect(alerts.map(a => a.id)).toEqual(['hn-new'])
   })
 })
 

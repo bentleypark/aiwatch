@@ -140,10 +140,22 @@ export function mapOSVSeverity(vuln: OSVVuln): SecurityAlert['severity'] {
   return 'medium'
 }
 
-export async function fetchOSVAlerts(): Promise<SecurityAlert[]> {
+// Phase-1 candidate — see fetchOSVAlerts for the two-phase rationale.
+// `modified` is consumed by the 7-day filter inside listOSVCandidates and
+// intentionally not carried forward (candidates only need routing info).
+interface OSVCandidate {
+  id: string
+  packageIndex: number
+}
+
+// Phase 1 — single batch request instead of N per-package calls; OSV's querybatch
+// is designed for bulk dedup/scan and avoids per-package rate-limit pressure.
+// Throws on HTTP error so the outer Promise.allSettled in detectSecurityAlerts
+// logs it via `[security] OSV.dev fetch failed` — a silent `return []` would be
+// indistinguishable from a legitimate "no vulns this cycle".
+export async function listOSVCandidates(): Promise<OSVCandidate[]> {
   const sevenDaysAgo = new Date(Date.now() - 7 * 86400 * 1000).toISOString()
 
-  // Use batch endpoint — single request for all packages
   const queries = OSV_PACKAGES.map(pkg => ({ package: { name: pkg.name, ecosystem: pkg.ecosystem } }))
 
   const res = await fetch('https://api.osv.dev/v1/querybatch', {
@@ -154,50 +166,133 @@ export async function fetchOSVAlerts(): Promise<SecurityAlert[]> {
   })
 
   if (!res.ok) {
-    console.error(`[security] OSV.dev returned HTTP ${res.status}`)
     res.body?.cancel()
-    return []
+    throw new Error(`OSV querybatch HTTP ${res.status}`)
   }
 
-  const json = await res.json() as { results?: Array<{ vulns?: OSVVuln[] }> }
+  const json = await res.json() as { results?: Array<{ vulns?: Array<{ id: string; modified: string }> }> }
   if (!json.results) return []
 
-  const alerts: SecurityAlert[] = []
+  const candidates: OSVCandidate[] = []
   for (let i = 0; i < json.results.length; i++) {
     const vulns = json.results[i]?.vulns
     if (!vulns) continue
-    const pkg = OSV_PACKAGES[i]
-
     for (const v of vulns) {
       if (v.modified < sevenDaysAgo) continue
-
-      // Extract remediation info from affected ranges
-      const aff = v.affected?.[0]
-      const range = aff?.ranges?.[0]
-      const introduced = range?.events?.find(e => e.introduced)?.introduced
-      const fixed = range?.events?.find(e => e.fixed)?.fixed
-      const patchUrl = v.references?.find(r =>
-        r.url.includes('/commit/') || r.url.includes('/releases/tag/'),
-      )?.url
-
-      alerts.push({
-        source: 'osv' as const,
-        id: v.id,
-        title: v.summary || `${v.id}: ${pkg.ecosystem}/${pkg.name}`,
-        url: v.references?.find(r => r.type === 'WEB' || r.type === 'ADVISORY')?.url
-          || `https://osv.dev/vulnerability/${v.id}`,
-        severity: mapOSVSeverity(v),
-        kvKey: `security:seen:osv:${v.id}`,
-        service: pkg.service,
-        affectedPackage: `${pkg.ecosystem}/${pkg.name}`,
-        affectedRange: introduced ? `>= ${introduced}` : undefined,
-        fixedVersion: fixed,
-        patchUrl,
-        cweIds: v.database_specific?.cwe_ids,
-      })
+      candidates.push({ id: v.id, packageIndex: i })
     }
   }
+  return candidates
+}
 
+// Phase 2 — fetch the full vuln document for a single candidate.
+// Returns null on network/HTTP failure so the orchestrator can drop just this alert
+// rather than fail the whole batch (Promise.allSettled also catches throws).
+export async function fetchOSVVulnDetails(candidate: OSVCandidate): Promise<SecurityAlert | null> {
+  const res = await fetch(`https://api.osv.dev/v1/vulns/${candidate.id}`, {
+    headers: { 'User-Agent': 'AIWatch/1.0 (ai-watch.dev; security monitoring)' },
+    signal: AbortSignal.timeout(8000),
+  })
+
+  if (!res.ok) {
+    console.error(`[security] OSV.dev vuln fetch returned HTTP ${res.status} for ${candidate.id}`)
+    res.body?.cancel()
+    return null
+  }
+
+  const v = await res.json() as OSVVuln
+  const pkg = OSV_PACKAGES[candidate.packageIndex]
+  if (!pkg) {
+    console.error(`[security] OSV_PACKAGES index ${candidate.packageIndex} out of bounds for ${candidate.id}`)
+    return null
+  }
+
+  const aff = v.affected?.[0]
+  const range = aff?.ranges?.[0]
+  const introduced = range?.events?.find(e => e.introduced)?.introduced
+  const fixed = range?.events?.find(e => e.fixed)?.fixed
+  const patchUrl = v.references?.find(r =>
+    r.url.includes('/commit/') || r.url.includes('/releases/tag/'),
+  )?.url
+
+  return {
+    source: 'osv' as const,
+    id: v.id,
+    title: v.summary || `${v.id}: ${pkg.ecosystem}/${pkg.name}`,
+    url: v.references?.find(r => r.type === 'WEB' || r.type === 'ADVISORY')?.url
+      || `https://osv.dev/vulnerability/${v.id}`,
+    severity: mapOSVSeverity(v),
+    kvKey: `security:seen:osv:${v.id}`,
+    service: pkg.service,
+    affectedPackage: `${pkg.ecosystem}/${pkg.name}`,
+    affectedRange: introduced ? `>= ${introduced}` : undefined,
+    fixedVersion: fixed,
+    patchUrl,
+    cweIds: v.database_specific?.cwe_ids,
+  }
+}
+
+// Cap per-cycle detail fetches to protect the Workers subrequest budget on first
+// deploy, KV wipe, or post-outage catch-up (where `unseen` can be a large batch).
+// Over-cap vulns aren't lost — the `security:seen:*` write happens in the caller
+// (worker/src/index.ts cron handler) only for surfaced alerts, so truncated
+// candidates stay unseen and re-appear next cycle. If dedup-write ever moves
+// inside fetchOSVAlerts, this guarantee breaks — update both sides together.
+const OSV_MAX_DETAIL_FETCH = 15
+
+// Two-phase OSV fetch (#323): querybatch returns only id + modified, so we must
+// GET /v1/vulns/{id} per candidate to get summary/severity/references/affected.
+// Dedup runs between phases so vulns already marked seen by a prior cron cycle
+// skip the per-vuln detail fetch.
+// `kv = null` default is for test ergonomics; production always passes env.STATUS_CACHE.
+export async function fetchOSVAlerts(kv: KVNamespace | null = null): Promise<SecurityAlert[]> {
+  const candidates = await listOSVCandidates()
+  if (candidates.length === 0) return []
+
+  // Phase 1.5 — pre-dedup against seen-markers from prior cycles.
+  let unseen: OSVCandidate[] = candidates
+  if (kv) {
+    const seenFlags = await Promise.allSettled(
+      candidates.map(c => kv.get(`security:seen:osv:${c.id}`)),
+    )
+    unseen = candidates.filter((c, i) => {
+      const r = seenFlags[i]
+      if (r?.status === 'rejected') {
+        // Fail open: treat as unseen so transient KV outages don't mask new CVEs,
+        // but surface the failure — silent fail-open hides prolonged KV issues.
+        console.error(
+          `[security] OSV pre-dedup KV read failed for ${c.id}; treating as unseen:`,
+          r.reason instanceof Error ? r.reason.message : r.reason,
+        )
+        return true
+      }
+      return !(r?.status === 'fulfilled' && r.value)
+    })
+  }
+  if (unseen.length === 0) return []
+
+  if (unseen.length > OSV_MAX_DETAIL_FETCH) {
+    console.warn(`[security] OSV unseen=${unseen.length} capped at ${OSV_MAX_DETAIL_FETCH} for this cycle; overflow retried next cron`)
+    unseen = unseen.slice(0, OSV_MAX_DETAIL_FETCH)
+  }
+
+  // Phase 2 — parallel per-vuln detail fetch. allSettled so one failure doesn't drop the batch.
+  const settled = await Promise.allSettled(unseen.map(fetchOSVVulnDetails))
+  const alerts: SecurityAlert[] = []
+  let droppedHttp = 0
+  let droppedThrew = 0
+  for (const r of settled) {
+    if (r.status === 'fulfilled' && r.value) alerts.push(r.value)
+    else if (r.status === 'fulfilled') droppedHttp++  // null → HTTP error already logged in fetchOSVVulnDetails
+    else {
+      droppedThrew++
+      console.error('[security] OSV.dev vuln fetch threw:', r.reason instanceof Error ? r.reason.message : r.reason)
+    }
+  }
+  // Single aggregate line so a scatter of per-id HTTP errors produces one actionable signal.
+  if (droppedHttp + droppedThrew > 0) {
+    console.warn(`[security] OSV detail fetch dropped ${droppedHttp + droppedThrew}/${unseen.length} (http=${droppedHttp}, threw=${droppedThrew})`)
+  }
   return alerts
 }
 
@@ -208,9 +303,12 @@ export async function detectSecurityAlerts(
 ): Promise<SecurityAlert[]> {
   if (!kv) return []
 
+  // OSV alerts are pre-deduped inside fetchOSVAlerts (avoids per-vuln detail fetches
+  // for already-seen entries). HN still needs dedup here since fetchHNSecurityPosts
+  // doesn't touch KV.
   const [hnAlerts, osvAlerts] = await Promise.allSettled([
     fetchHNSecurityPosts(),
-    fetchOSVAlerts(),
+    fetchOSVAlerts(kv),
   ])
 
   if (hnAlerts.status === 'rejected') {
@@ -220,23 +318,22 @@ export async function detectSecurityAlerts(
     console.error('[security] OSV.dev fetch failed:', osvAlerts.reason instanceof Error ? osvAlerts.reason.message : osvAlerts.reason)
   }
 
-  const allAlerts = [
-    ...(hnAlerts.status === 'fulfilled' ? hnAlerts.value : []),
-    ...(osvAlerts.status === 'fulfilled' ? osvAlerts.value : []),
-  ]
-
-  // KV dedup
-  const newAlerts: SecurityAlert[] = []
-  for (const alert of allAlerts) {
-    const seen = await kv.get(alert.kvKey).catch((err) => {
-      console.error('[security] KV dedup read failed:', alert.kvKey, err instanceof Error ? err.message : err)
-      return null
-    })
-    if (seen) continue
-    newAlerts.push(alert)
+  const hnFinal: SecurityAlert[] = []
+  if (hnAlerts.status === 'fulfilled') {
+    for (const alert of hnAlerts.value) {
+      const seen = await kv.get(alert.kvKey).catch((err) => {
+        console.error('[security] KV dedup read failed:', alert.kvKey, err instanceof Error ? err.message : err)
+        return null
+      })
+      if (seen) continue
+      hnFinal.push(alert)
+    }
   }
 
-  return newAlerts
+  return [
+    ...hnFinal,
+    ...(osvAlerts.status === 'fulfilled' ? osvAlerts.value : []),
+  ]
 }
 
 // ---------- Discord formatting ----------
