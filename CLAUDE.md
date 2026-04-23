@@ -329,7 +329,7 @@ worker/
     detection.ts # Detection Lead entry parsing + incident-aware reset logic
     detection-lead-log.ts # Detection Lead audit log — per-day KV array (#256), tagged AppendResult, 24h sliding window for daily summary
     reddit.ts   # Reddit r/ChatGPT + r/netsec + r/cybersecurity monitoring
-    security-monitor.ts # AI service security monitoring (HN Algolia, OSV.dev SDK vulnerabilities)
+    security-monitor.ts # AI service security monitoring (HN Algolia, OSV.dev SDK vulnerabilities — two-phase flow: querybatch bulk scan + per-vuln GET enrichment, capped at OSV_MAX_DETAIL_FETCH=15/cycle to protect the Workers subrequest budget; overflow re-offered next cron since seen-markers are only written for surfaced alerts)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, aistudio, instatus, betterstack, aws)
                 # dailyImpact support: statuspage (uptimeData), incident-io (component impacts), betterstack (status_history from index.json)
                 # impact-weights.ts: shared MAJOR_WEIGHT=1.0, MINOR_WEIGHT=0.3 — used by both statuspage.ts (official) and incident-io.ts (estimate from durations) for Atlassian-aligned uptime%
@@ -439,7 +439,7 @@ Cron Trigger (*/5 min)
   → daily summary also accumulates incidents:monthly:{YYYY-MM} (dedup by incident ID, 60d TTL)
   → monthly archive on 1st of month (UTC 00:00) → aggregate history:* + probe:daily:* + incidents:monthly:* → archive:monthly:{YYYY-MM} (permanent)
   → changelog RSS/HTML collection (hourly at :00) → KV accumulate new entries from OpenAI/Google/Anthropic
-  → security monitoring (hourly at :00) → HN Algolia + OSV.dev SDK vulnerability scan → Discord digest on findings
+  → security monitoring (hourly at :00) → HN Algolia + OSV.dev SDK vulnerability scan (two-phase: querybatch → KV dedup → per-vuln GET enrichment; #323) → Discord digest on findings
   → weekly briefing on Sunday UTC 00:00 (KST 09:00) → aggregate changelog + incidents + stability → Discord embed
 
 Web Vitals Pipeline (per-request, 100% collection):
