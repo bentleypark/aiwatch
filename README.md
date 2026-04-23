@@ -48,7 +48,7 @@ Real-time monitoring dashboard for **31 AI services** — track status, latency,
 - **Landing page** — Product Hunt landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, and GA4 tracking
 - **Web Vitals monitoring** — Real user LCP, FCP, TTFB, CLS, INP collection with p75 aggregation and threshold-based alerts in Discord Daily Report
 - **Weekly briefing** — Sunday Discord digest with AI service changelog detection (OpenAI, Google, Anthropic), incident summary, and stability trends
-- **Security monitoring** — AI service security incident detection via Hacker News, Reddit (r/netsec, r/cybersecurity), and OSV.dev SDK vulnerability scanning with dashboard alerts + Discord digest
+- **Security monitoring** — AI service security incident detection via Hacker News, Reddit (r/netsec, r/cybersecurity), and OSV.dev SDK vulnerability scanning across 24 AI SDK packages (PyPI + npm, including Langchain ecosystem adapters) with dashboard alerts + Discord digest
 - **Status page cross-validation** — Probe RTT + platform quorum + metastatuspage monitoring to prevent false positives during status page infrastructure outages
 
 ## Monitored Services
@@ -321,7 +321,7 @@ worker/
     ai-analysis.ts # Hybrid AI incident analysis (Gemma 4 primary + Sonnet fallback)
     changelog.ts # Changelog/news collection (OpenAI RSS, Google RSS, Anthropic HTML)
     weekly-briefing.ts # Weekly Discord briefing (changelog + incidents + stability)
-    security-monitor.ts # AI service security monitoring (HN Algolia, OSV.dev SDK vulnerabilities)
+    security-monitor.ts # AI service security monitoring (HN Algolia, OSV.dev SDK vulnerabilities — 24 tracked packages)
     daily-summary.ts # Daily Discord report (uptime, latency, AI usage)
     monthly-archive.ts # Monthly reliability archive (permanent KV)
     vitals.ts    # Web Vitals aggregation (p75, Discord formatting)
