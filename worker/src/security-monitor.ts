@@ -18,6 +18,13 @@ export interface SecurityAlert {
   fixedVersion?: string      // e.g. "0.87.0"
   patchUrl?: string          // commit or release URL
   cweIds?: string[]          // e.g. ["CWE-276"]
+  // EPSS (Exploit Prediction Scoring System) — from GitHub Advisories API (#326).
+  // Proxy for real-world exploitation likelihood. Both fields are 0..1 floats.
+  // Thresholds for the UI/Discord tag live on `EPSS_ELEVATED` / `EPSS_ACTIVE`
+  // (single source of truth — do not duplicate the numbers in field comments).
+  // Missing = enrichment unavailable (pre-#326, cache miss + HTTP failure, or rate-limited).
+  epssPercentile?: number
+  epssPercentage?: number    // absolute probability of exploit in next 30d
 }
 
 // ---------- Hacker News Algolia ----------
@@ -296,6 +303,124 @@ export async function fetchOSVAlerts(kv: KVNamespace | null = null): Promise<Sec
   return alerts
 }
 
+// ---------- EPSS enrichment (#326) ----------
+//
+// EPSS (Exploit Prediction Scoring System) is published by FIRST.org and surfaces
+// the probability a given CVE will be exploited in the wild within 30 days. GitHub's
+// Advisories API embeds it inline on every GHSA response, so we get it with one HTTP
+// call per vuln. A 🟠 "high" CVSS alert at EPSS 2%ile is lab-only; the same severity
+// at 80%ile means active scanning — this signal changes operator prioritization.
+//
+// Enrichment is fail-open: if GitHub rejects, rate-limits, or returns no EPSS field,
+// the alert still surfaces — just without the elevation tag. Missing is the default.
+
+// Single source of truth for the display/alert thresholds. Tuning these values
+// takes effect across formatEpssTag (Discord + tests) and the dashboard prefix
+// rendering (src/pages/ServiceDetails.jsx mirrors these — keep in sync).
+// Both fields are an EPSS **percentile** (0..1), not a raw probability.
+export const EPSS_ELEVATED = 0.5
+export const EPSS_ACTIVE = 0.8
+
+export interface EpssScore {
+  // Invariant: `fetchEPSS` only returns an EpssScore if BOTH fields are numeric
+  // (see type guard in fetchEPSS). Downstream consumers can rely on either being
+  // defined without checking the other.
+  percentile: number  // 0..1
+  percentage: number  // 0..1
+}
+
+// Cache 24h — EPSS is recomputed daily, so same-day re-fetches are wasteful.
+// Corrupt cache (parse error) is treated as miss; no retry-storm protection needed
+// because HTTP fetch caps itself at the outer rate-limit log.
+export async function fetchEPSS(ghsaId: string, kv: KVNamespace | null): Promise<EpssScore | undefined> {
+  const cacheKey = `enrich:epss:${ghsaId}`
+  if (kv) {
+    // Match observability parity with OSV pre-dedup / HN dedup: a silent KV outage
+    // here would masquerade as "always cache miss → always hit GitHub" and quietly
+    // burn the 60 req/h unauth rate limit with no correlating log.
+    const cached = await kv.get(cacheKey).catch(err => {
+      console.warn('[security] EPSS cache read failed:', ghsaId, err instanceof Error ? err.message : err)
+      return null
+    })
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as EpssScore
+        if (typeof parsed.percentile === 'number' && typeof parsed.percentage === 'number') {
+          return parsed
+        }
+      } catch {
+        // Persistent corruption means the writer is producing bad JSON or a
+        // schema migration left stale entries. Log once (length, not content —
+        // could be large) so operators can correlate with writer changes.
+        console.warn(`[security] EPSS cache corrupt for ${ghsaId}, refetching (len=${cached.length})`)
+      }
+    }
+  }
+
+  let res: Response
+  try {
+    res = await fetch(`https://api.github.com/advisories/${ghsaId}`, {
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'AIWatch/1.0 (ai-watch.dev; epss enrichment)',
+      },
+      signal: AbortSignal.timeout(5000),
+    })
+  } catch (err) {
+    console.warn(`[security] EPSS fetch for ${ghsaId} threw:`, err instanceof Error ? err.message : err)
+    return undefined
+  }
+
+  if (!res.ok) {
+    res.body?.cancel()
+    if (res.status === 403 || res.status === 429) {
+      console.warn(`[security] GitHub Advisories rate-limited during EPSS enrichment (HTTP ${res.status}); remaining vulns this cycle will surface without EPSS`)
+    } else {
+      console.warn(`[security] GitHub Advisories HTTP ${res.status} for ${ghsaId}`)
+    }
+    return undefined
+  }
+
+  let data: { epss?: { percentile?: unknown; percentage?: unknown } | null }
+  try {
+    data = await res.json()
+  } catch (err) {
+    console.warn(`[security] GitHub Advisories JSON parse failed for ${ghsaId}:`, err instanceof Error ? err.message : err)
+    return undefined
+  }
+  const epss = data?.epss
+  if (!epss || typeof epss.percentile !== 'number' || typeof epss.percentage !== 'number') {
+    return undefined
+  }
+
+  const score: EpssScore = { percentile: epss.percentile, percentage: epss.percentage }
+  if (kv) {
+    await kv.put(cacheKey, JSON.stringify(score), { expirationTtl: 86400 }).catch(err =>
+      console.warn('[security] EPSS cache write failed:', ghsaId, err instanceof Error ? err.message : err),
+    )
+  }
+  return score
+}
+
+// Parallel EPSS enrichment across a batch of alerts. OSV-only — HN alerts have
+// no CVE identifier so there's nothing to enrich. Fail-open per alert: any
+// enrichment failure (HTTP, timeout, rate-limit) drops the score but preserves
+// the alert.
+export async function enrichAlertsWithEPSS(
+  alerts: SecurityAlert[],
+  kv: KVNamespace | null,
+): Promise<SecurityAlert[]> {
+  const settled = await Promise.allSettled(
+    alerts.map(async (alert) => {
+      if (alert.source !== 'osv') return alert
+      const score = await fetchEPSS(alert.id, kv)
+      if (!score) return alert
+      return { ...alert, epssPercentile: score.percentile, epssPercentage: score.percentage }
+    }),
+  )
+  return settled.map((r, i) => r.status === 'fulfilled' ? r.value : alerts[i]!)
+}
+
 // ---------- Orchestrator ----------
 
 export async function detectSecurityAlerts(
@@ -330,10 +455,14 @@ export async function detectSecurityAlerts(
     }
   }
 
-  return [
+  const combined = [
     ...hnFinal,
     ...(osvAlerts.status === 'fulfilled' ? osvAlerts.value : []),
   ]
+  // #326: enrich OSV alerts with EPSS (fail-open). Inside detectSecurityAlerts so
+  // everything downstream (Discord format, KV meta write, dashboard display) sees
+  // the enriched shape without each caller needing to re-run the enrichment.
+  return enrichAlertsWithEPSS(combined, kv)
 }
 
 // ---------- Discord formatting ----------
@@ -345,10 +474,23 @@ const SEVERITY_EMOJI: Record<string, string> = {
   low: '🟢',
 }
 
+// Promote EPSS into the header line (#326) — operators scan the emoji + label combo
+// to triage which findings need action this week vs background noise. Thresholds
+// live on EPSS_ELEVATED / EPSS_ACTIVE above; below the elevated line we skip the
+// tag entirely to avoid crowding low-signal advisories.
+export function formatEpssTag(percentile: number | undefined): string | null {
+  if (percentile == null) return null
+  if (percentile >= EPSS_ACTIVE) return `🔥 Actively exploited (EPSS ${Math.round(percentile * 100)}%ile)`
+  if (percentile >= EPSS_ELEVATED) return `⚠️ Elevated exploit risk (EPSS ${Math.round(percentile * 100)}%ile)`
+  return null
+}
+
 function formatOSVLine(alert: SecurityAlert): string {
   const emoji = SEVERITY_EMOJI[alert.severity || 'medium']
   const serviceTag = alert.service ? `[${alert.service}] ` : ''
-  const parts = [`${emoji} ${serviceTag}**${alert.id}** · ${alert.affectedPackage || 'unknown'}`]
+  const epssTag = formatEpssTag(alert.epssPercentile)
+  const header = `${emoji} ${serviceTag}**${alert.id}** · ${alert.affectedPackage || 'unknown'}`
+  const parts = [epssTag ? `${header} · ${epssTag}` : header]
   parts.push(alert.title)
   if (alert.fixedVersion) {
     const cmd = alert.affectedPackage?.startsWith('npm/')
@@ -438,6 +580,12 @@ export interface SecurityAlertMeta {
   severity?: string
   service?: string
   detectedAt?: string
+  // #326 — EPSS fields mirror SecurityAlert so the dashboard can render exploit
+  // probability without re-fetching. Snapshotted at detection time; a later EPSS
+  // change doesn't update the meta (dedup key is 7d TTL — stale enough to matter
+  // only if EPSS shifts drastically, at which point the alert re-surfaces anyway).
+  epssPercentile?: number
+  epssPercentage?: number
 }
 
 /**

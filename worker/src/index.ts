@@ -875,7 +875,13 @@ export default {
           // Then mark as seen — store alert metadata for dashboard display
           const nowISO = new Date().toISOString()
           for (const alert of securityAlerts) {
-            const meta = JSON.stringify({ title: alert.title, url: alert.url, source: alert.source, severity: alert.severity, service: alert.service, detectedAt: nowISO })
+            // #326: persist EPSS fields so dashboard/readRecentSecurityAlerts
+            // can render the exploit-probability tag without a re-fetch.
+            const meta = JSON.stringify({
+              title: alert.title, url: alert.url, source: alert.source,
+              severity: alert.severity, service: alert.service, detectedAt: nowISO,
+              epssPercentile: alert.epssPercentile, epssPercentage: alert.epssPercentage,
+            })
             await kvPut(env.STATUS_CACHE, alert.kvKey, meta, { expirationTtl: 604800 }).catch(err => { // 7d dedup
               console.error('[cron] Failed to mark security alert as seen:', alert.kvKey, err instanceof Error ? err.message : err)
             })
@@ -896,11 +902,15 @@ export default {
           const monthKey = `security:monthly:${nowISO.slice(0, 7)}`
           try {
             const monthRaw = await env.STATUS_CACHE.get(monthKey).catch(() => null)
-            const monthly: Array<{ title: string; url: string; source: string; severity?: string; service?: string; detectedAt: string }> = monthRaw ? JSON.parse(monthRaw) : []
+            const monthly: Array<{ title: string; url: string; source: string; severity?: string; service?: string; detectedAt: string; epssPercentile?: number; epssPercentage?: number }> = monthRaw ? JSON.parse(monthRaw) : []
             const existingIds = new Set(monthly.map(m => m.url))
             for (const alert of securityAlerts) {
               if (!existingIds.has(alert.url)) {
-                monthly.push({ title: alert.title, url: alert.url, source: alert.source, severity: alert.severity, service: alert.service, detectedAt: nowISO })
+                monthly.push({
+                  title: alert.title, url: alert.url, source: alert.source,
+                  severity: alert.severity, service: alert.service, detectedAt: nowISO,
+                  epssPercentile: alert.epssPercentile, epssPercentage: alert.epssPercentage,
+                })
               }
             }
             await kvPut(env.STATUS_CACHE, monthKey, JSON.stringify(monthly.slice(-100)), { expirationTtl: 5_184_000 }) // 60d
