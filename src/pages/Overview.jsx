@@ -564,11 +564,27 @@ export default function Overview() {
                   const match = services.find(s => titleLC.includes(s.name.toLowerCase()) || titleLC.includes(s.provider.toLowerCase()))
                   if (match) tag = match.name
                 }
+                // #326: EPSS prefix mirroring ServiceDetails. Thresholds duplicated
+                // here because the frontend bundle cannot import from worker — keep
+                // in sync with EPSS_ACTIVE (0.8) / EPSS_ELEVATED (0.5) in
+                // worker/src/security-monitor.ts.
+                const epss = a.epssPercentile
+                let epssTag = null
+                if (typeof epss === 'number') {
+                  if (epss >= 0.8) epssTag = { icon: '🔥', color: 'var(--red)' }
+                  else if (epss >= 0.5) epssTag = { icon: '⚠️', color: 'var(--amber)' }
+                }
                 return (
                   <a key={i} href={safeUrl} target="_blank" rel="noopener noreferrer"
                     className="text-[var(--text1)] hover:text-[var(--purple)] truncate text-[11px]"
                   >
-                    {a.severity === 'critical' ? '🔴' : a.severity === 'high' ? '🟠' : '🟡'} {tag ? `[${tag}] ` : ''}{a.title}
+                    {a.severity === 'critical' ? '🔴' : a.severity === 'high' ? '🟠' : '🟡'}
+                    {epssTag && (
+                      <span style={{ color: epssTag.color, marginLeft: '4px' }}
+                        title={`EPSS ${Math.round(epss * 100)}th percentile — ${epss >= 0.8 ? 'actively exploited' : 'elevated exploit risk'}`}
+                      >{epssTag.icon}</span>
+                    )}
+                    {' '}{tag ? `[${tag}] ` : ''}{a.title}
                   </a>
                 )
               })}
