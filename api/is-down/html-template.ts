@@ -2,6 +2,7 @@
 
 import type { ServiceSEO } from './seo-content'
 import { SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE, RELATED_SLUGS } from './slug-map'
+import { groupIncidents, type GroupingIncident, type GroupRow, type SingleRow } from './incident-grouping'
 
 /** Format recovery display — shared with worker/src/ai-analysis.ts */
 function formatRecoveryDisplay(recovery: string): string {
@@ -10,7 +11,7 @@ function formatRecoveryDisplay(recovery: string): string {
   return recovery
 }
 
-interface ServiceData {
+export interface ServiceData {
   id: string
   name: string
   provider: string
@@ -109,11 +110,7 @@ export function renderPage(
   aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string } | null,
 ): string {
   const title = `Is ${seo.displayName} Down? Live Status | AIWatch`
-  const desc = (aiInsight && service && service.status !== 'operational')
-    ? `${seo.displayName} is currently ${statusLabel(service.status).toLowerCase()}. AI Analysis: ${aiInsight.summary.slice(0, 120)} Est. recovery: ${formatRecoveryDisplay(aiInsight.estimatedRecovery)}.`
-    : service
-    ? `Check if ${seo.displayName} is down right now. Current status: ${statusLabel(service.status)}. ${typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d) ? `30-day uptime: ${service.uptime30d.toFixed(2)}%.` : ''} Updated every 5 minutes.`
-    : `Check if ${seo.displayName} is down right now. Real-time status monitoring by AIWatch.`
+  const desc = buildMetaDescription(seo, service, aiInsight ?? null)
   const canonical = `https://ai-watch.dev/is-${slug}-down`
 
   // Dynamic OG image URL — cache busted per 10-min window
@@ -179,6 +176,16 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 .incident-title{font-size:14px;font-weight:500}
 .incident-meta{font-size:12px;color:#8b949e;margin-top:4px}
 .impact-major{color:#f85149}.impact-minor{color:#e86235}
+.incident-group{padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.07)}
+.incident-group:last-child{border-bottom:none}
+.incident-group>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.incident-group>summary::-webkit-details-marker{display:none}
+.incident-group>summary::before{content:"▸";display:inline-block;color:#8b949e;margin-right:6px;transition:transform 0.15s}
+.incident-group[open]>summary::before{transform:rotate(90deg)}
+.incident-group-title{font-size:14px;font-weight:500;flex:1;min-width:0}
+.incident-group-meta{font-size:12px;color:#8b949e;white-space:nowrap}
+.incident-group-entries{margin:6px 0 0 20px;padding-left:10px;border-left:1px solid rgba(255,255,255,0.08)}
+.incident-group-entries .incident-item{padding:6px 0}
 .faq-item{margin:16px 0}
 .faq-q{font-weight:600;font-size:15px;margin-bottom:6px}
 .faq-a{font-size:14px;color:#8b949e}
@@ -344,29 +351,83 @@ function renderCTA(seo: ServiceSEO, status: string): string {
 </div>`
 }
 
-function renderIncidents(service: ServiceData | null): string {
+// Upper bound on rendered rows (after grouping) — defense against pathological
+// API responses. Real data (live /api/status on 2026-04-23) shows ≤35 rows pre-group
+// for the busiest service (claudeai), and grouping further compresses high-churn feeds.
+const INCIDENT_ROW_CAP = 20
+
+function renderIncidentSingle(inc: GroupingIncident): string {
+  const impactCls = inc.impact === 'major' || inc.impact === 'critical' ? 'impact-major' : inc.impact === 'minor' ? 'impact-minor' : ''
+  const statusColor = inc.status === 'resolved' ? '#3fb950' : inc.status === 'monitoring' ? '#58a6ff' : '#e86235'
+  const statusText = inc.status === 'resolved' ? 'Resolved' : inc.status === 'monitoring' ? 'Monitoring' : 'Investigating'
+  const durationOrElapsed = inc.duration
+    ? ` &middot; ${esc(inc.duration)}`
+    : inc.status !== 'resolved' ? ` &middot; ${formatElapsed(inc.startedAt)}` : ''
+  const impactMeta = impactCls ? ` &middot; <span class="${impactCls}">${esc(inc.impact ?? '')}</span>` : ''
+  return `<div class="incident-item">
+<div class="incident-title">${esc(inc.title)}</div>
+<div class="incident-meta mono">${esc(formatDate(inc.startedAt))} &middot; <span style="color:${statusColor}">${statusText}</span>${durationOrElapsed}${impactMeta}</div>
+</div>`
+}
+
+function renderIncidentGroup(g: GroupRow): string {
+  // <details open> so crawlers always read the full entries. CSS in renderPage
+  // styles the expanded/collapsed state; noscript users retain full access.
+  const summary = `${esc(g.normalizedTitle)} <span class="mono" style="color:#8b949e">&middot; ${g.count}×</span>`
+  const headMeta = g.uniformStatus
+    ? `${esc(formatDate(g.rangeEnd))}`
+    : `${esc(formatDate(g.rangeStart))} &rarr; ${esc(formatDate(g.rangeEnd))}`
+  const entries = g.entries.map(renderIncidentSingle).join('\n')
+  return `<details open class="incident-group">
+<summary><span class="incident-group-title">${summary}</span><span class="incident-group-meta mono">${headMeta}</span></summary>
+<div class="incident-group-entries">${entries}</div>
+</details>`
+}
+
+/**
+ * SERP-facing meta description — the copy Google displays below the page title.
+ * Numbers lift CTR so uptime% and 30-day incident count are inlined when available.
+ * Extracted from renderPage for unit-testability.
+ */
+export function buildMetaDescription(
+  seo: ServiceSEO,
+  service: ServiceData | null,
+  aiInsight: { summary: string; estimatedRecovery: string } | null,
+): string {
+  if (aiInsight && service && service.status !== 'operational') {
+    return `${seo.displayName} is currently ${statusLabel(service.status).toLowerCase()}. AI Analysis: ${aiInsight.summary.slice(0, 120)} Est. recovery: ${formatRecoveryDisplay(aiInsight.estimatedRecovery)}.`
+  }
+  if (!service) {
+    return `Check if ${seo.displayName} is down right now. Real-time status monitoring by AIWatch.`
+  }
+  const thirtyDayIncidentCount = Array.isArray(service.incidents)
+    ? service.incidents.filter((i) => new Date(i.startedAt).getTime() >= Date.now() - 30 * 86_400_000).length
+    : 0
+  const uptimeStr = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d)
+    ? `${service.uptime30d.toFixed(2)}%`
+    : null
+  const uptimeClause = uptimeStr ? ` 30-day uptime: ${uptimeStr}.` : ''
+  const incidentClause = thirtyDayIncidentCount > 0 ? ` ${thirtyDayIncidentCount} incidents tracked (30d).` : ''
+  return `Check if ${seo.displayName} is down right now. Current status: ${statusLabel(service.status)}.${uptimeClause}${incidentClause} Updated every 5 minutes.`
+}
+
+export function renderIncidents(service: ServiceData | null): string {
   const incidents = Array.isArray(service?.incidents) ? service.incidents : []
   if (!service || incidents.length === 0) return ''
 
-  const sevenDaysAgo = Date.now() - 7 * 86400000
-  const recentIncidents = incidents.filter(inc => new Date(inc.startedAt).getTime() >= sevenDaysAgo)
-  const items = recentIncidents.slice(0, 5).map(inc => {
-    const impactCls = inc.impact === 'major' || inc.impact === 'critical' ? 'impact-major' : inc.impact === 'minor' ? 'impact-minor' : ''
-    const statusColor = inc.status === 'resolved' ? '#3fb950' : inc.status === 'monitoring' ? '#58a6ff' : '#e86235'
-    const statusText = inc.status === 'resolved' ? 'Resolved' : inc.status === 'monitoring' ? 'Monitoring' : 'Investigating'
-    return `<div class="incident-item">
-<div class="incident-title">${esc(inc.title)}</div>
-<div class="incident-meta mono">${esc(formatDate(inc.startedAt))} &middot; <span style="color:${statusColor}">${statusText}</span>${inc.duration ? ` &middot; ${esc(inc.duration)}` : (inc.status !== 'resolved' ? ` &middot; ${formatElapsed(inc.startedAt)}` : '')}${impactCls ? ` &middot; <span class="${impactCls}">${esc(inc.impact ?? '')}</span>` : ''}</div>
-</div>`
-  }).join('\n')
+  const cutoff = Date.now() - 30 * 86_400_000
+  const recent = incidents.filter((inc) => new Date(inc.startedAt).getTime() >= cutoff) as GroupingIncident[]
+  const heading = `<h2>Recent Incidents <span class="mono" style="font-size:12px;color:#8b949e;font-weight:400;margin-left:8px">&middot; Last 30 days</span></h2>`
 
-  if (recentIncidents.length === 0) {
-    return `<h2>Recent Incidents <span class="mono" style="font-size:12px;color:#8b949e;font-weight:400;margin-left:8px">&middot; Last 7 days</span></h2>
-<div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">No incidents in the last 7 days</p></div>`
+  if (recent.length === 0) {
+    return `${heading}
+<div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">No incidents in the last 30 days</p></div>`
   }
 
-  return `<h2>Recent Incidents <span class="mono" style="font-size:12px;color:#8b949e;font-weight:400;margin-left:8px">&middot; Last 7 days</span></h2>
-<div class="card">${items}</div>`
+  const rows = groupIncidents(recent, { timeZone: 'UTC' }).slice(0, INCIDENT_ROW_CAP)
+  const body = rows.map((row) => row.kind === 'group' ? renderIncidentGroup(row) : renderIncidentSingle((row as SingleRow).incident)).join('\n')
+  return `${heading}
+<div class="card">${body}</div>`
 }
 
 function buildDataSummary(service: ServiceData | null, displayName: string): string {

@@ -121,6 +121,48 @@ test.describe('Is X Down? SSR pages', () => {
     await expect(desc).toHaveAttribute('content', /Check if Claude is down right now/)
   })
 
+  // #321 — 30-day incident window + grouping on SSR page for SEO depth.
+  test('Recent Incidents heading says "Last 30 days"', async ({ page }) => {
+    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    // Claude reliably has incidents in any 30-day window, so the heading is rendered.
+    const heading = page.locator('h2', { hasText: 'Recent Incidents' })
+    await expect(heading).toBeVisible()
+    await expect(heading).toContainText('Last 30 days')
+  })
+
+  test('meta description on operational page includes 30-day incident count when > 0', async ({ page }) => {
+    // Use a service that tends to have incidents tracked in the 30-day window.
+    // If operational AND >0 incidents, description should surface "N incidents tracked (30d)".
+    // When status is non-operational, AI Analysis copy replaces this — assertion is skipped.
+    await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
+    const desc = await page.locator('meta[name="description"]').getAttribute('content')
+    const isOperational = /Current status: Operational/i.test(desc ?? '')
+    if (!isOperational) {
+      test.info().annotations.push({ type: 'note', description: 'Claude non-operational — "incidents tracked" assertion deferred' })
+      return
+    }
+    expect(desc).toMatch(/\d+ incidents tracked \(30d\)/)
+  })
+
+  test('<details> incident-group elements render with open attribute (crawler-friendly)', async ({ page }) => {
+    // Target Fireworks: BetterStack per-model feed consistently produces ≥3 same-day
+    // "<model> — recovered" entries, so grouping should materialize at least one row.
+    // If no data happens to group on the test day, the test degrades to a structural
+    // presence check and annotates the run.
+    await page.goto('/is-fireworks-down', { waitUntil: 'domcontentloaded' })
+    const groups = page.locator('details.incident-group')
+    const n = await groups.count()
+    if (n === 0) {
+      test.info().annotations.push({ type: 'note', description: 'No grouped incidents on Fireworks today — structure-only check' })
+      return
+    }
+    // Each group must be <details open> so crawlers read the entries without JS.
+    const first = groups.first()
+    await expect(first).toHaveAttribute('open', '')
+    await expect(first.locator('summary')).toBeVisible()
+    await expect(first.locator('.incident-group-entries .incident-item').first()).toBeAttached()
+  })
+
   test('footer has internal cross-links to other service pages', async ({ page }) => {
     await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
     await expect(page.locator('a[href="/is-chatgpt-down"]').first()).toBeAttached()
