@@ -16,7 +16,7 @@ export default defineConfig({
     {
       name: 'desktop',
       use: { ...devices['Desktop Chrome'] },
-      testIgnore: /mobile\.spec|is-down\.spec|intro\.spec/,
+      testIgnore: /mobile\.spec|is-down\.spec|intro\.spec|reports\.spec/,
     },
     {
       name: 'mobile',
@@ -33,6 +33,11 @@ export default defineConfig({
       name: 'intro',
       use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:3333' },
       testMatch: /intro\.spec/,
+    },
+    {
+      name: 'reports',
+      use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:3333' },
+      testMatch: /reports\.spec/,
     },
   ],
   webServer: {

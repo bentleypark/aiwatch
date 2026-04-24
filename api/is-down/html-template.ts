@@ -329,7 +329,7 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
 <p class="meta mono">${metaParts.join(' &middot; ')}</p>
 ${lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}</p>` : '<p class="meta">No recent incidents</p>'}
 ${/* TODO: update report URL monthly (currently hardcoded to latest report) */ ''}
-${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${service.rank}${service.rankTied ? ' (tied)' : ''}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'header'})">AIWatch reliability score</a> &middot; <a href="https://reports.ai-watch.dev/2026-03/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'header'})">March 2026 Report &rarr;</a></p>` : ''}
+${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${service.rank}${service.rankTied ? ' (tied)' : ''}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'header'})">AIWatch reliability score</a> &middot; <a href="/reports/2026-03/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'header'})">March 2026 Report &rarr;</a></p>` : ''}
 </div>`
 }
 
@@ -512,7 +512,7 @@ function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string
 ${items}
 <div class="links" style="margin-top:12px">
 <a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'alternatives'})">Reliability rankings &rarr;</a>
-<a href="https://reports.ai-watch.dev/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'alternatives'})">Monthly reports &rarr;</a>
+<a href="/reports/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'alternatives'})">Monthly reports &rarr;</a>
 </div>
 </div>`
 }
@@ -679,7 +679,7 @@ function renderFooter(slug: string): string {
 
   return `<div class="footer">
 <p style="margin-bottom:12px"><a href="https://ai-watch.dev" class="btn" onclick="typeof gtag==='function'&&gtag('event','click_dashboard',{location:'is_down_page',source:'footer'})">View Full Dashboard</a></p>
-<p><a href="https://ai-watch.dev/#${esc(seoEntry?.id ?? slug)}" onclick="typeof gtag==='function'&&gtag('event','click_service_detail',{location:'is_down_page',service_id:'${esc(seoEntry?.id ?? slug)}'})">Detailed service page</a> &middot; <a href="https://reports.ai-watch.dev/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'footer'})">Monthly reports</a> &middot; <a href="https://ai-watch.dev/#settings" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'footer'})">Set up alerts</a></p>
+<p><a href="https://ai-watch.dev/#${esc(seoEntry?.id ?? slug)}" onclick="typeof gtag==='function'&&gtag('event','click_service_detail',{location:'is_down_page',service_id:'${esc(seoEntry?.id ?? slug)}'})">Detailed service page</a> &middot; <a href="/reports/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'footer'})">Monthly reports</a> &middot; <a href="https://ai-watch.dev/#settings" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'footer'})">Set up alerts</a></p>
 ${relatedLinks ? `<p style="margin-top:12px;font-size:13px">Related: ${relatedLinks}</p>` : ''}
 ${otherLinks ? `<p style="margin-top:8px;font-size:12px">Also check: ${otherLinks}</p>` : ''}
 <p style="margin-top:12px">&copy; 2026 AIWatch. Real-time AI service status monitoring.</p>

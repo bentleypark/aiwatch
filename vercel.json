@@ -32,6 +32,10 @@
     { "source": "/is-character-ai-down", "destination": "/api/is-down?slug=character-ai" },
     { "source": "/is-codex-down", "destination": "/api/is-down?slug=codex" },
     { "source": "/intro", "destination": "/api/intro" },
+    { "source": "/reports", "destination": "/api/reports" },
+    { "source": "/reports/", "destination": "/api/reports" },
+    { "source": "/reports/:rest*", "destination": "/api/reports" },
+    { "source": "/reports/:rest*/", "destination": "/api/reports" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

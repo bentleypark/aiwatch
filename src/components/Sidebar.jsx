@@ -201,18 +201,13 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
           )
         })}
         <a
-          href="https://reports.ai-watch.dev/"
-          target="_blank"
-          rel="noopener noreferrer"
+          href="/reports/"
           onClick={() => { trackEvent('click_reports', {}); onNavigate?.() }}
           className="w-full text-left flex items-center transition-all cursor-pointer text-[var(--text1)] hover:bg-[var(--bg3)] hover:text-[var(--text0)]"
           style={navItemStyle}
         >
           <span className="shrink-0"><IconReport /></span>
           {t('nav.reports')}
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ marginLeft: 'auto', opacity: 0.4 }}>
-            <path d="M3 1h6v6M9 1L4 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
         </a>
         <a
           href="https://github.com/bentleypark/aiwatch/issues/new?template=service_request.md"
