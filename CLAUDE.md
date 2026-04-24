@@ -391,7 +391,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 
 Is X Down pages (Edge SSR) and Landing page use inline `gtag()` calls directly since they don't use React.
 
-**Reports site** (`reports.ai-watch.dev`) uses the same GA4 ID (`G-D4ZWVHQ7JK`) with event delegation in `_includes/footer.html`:
+**Reports site** (served at `ai-watch.dev/reports/` via Vercel rewrite to `reports.ai-watch.dev` — SEO consolidation #264; direct subdomain visits self-redirect via JS in `aiwatch-reports/_includes/head.html`) uses the same GA4 ID (`G-D4ZWVHQ7JK`) with event delegation in `_includes/footer.html`:
 
 | Event | Parameters | Trigger | Purpose |
 |---|---|---|---|

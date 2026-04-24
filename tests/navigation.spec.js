@@ -35,7 +35,7 @@ test.describe('Sidebar navigation', () => {
     const reportsLink = sidebar.getByRole('link', { name: 'Reports' })
 
     await expect(reportsLink).toBeVisible()
-    await expect(reportsLink).toHaveAttribute('href', 'https://reports.ai-watch.dev/')
+    await expect(reportsLink).toHaveAttribute('href', 'https://ai-watch.dev/reports/')
     await expect(reportsLink).toHaveAttribute('target', '_blank')
   })
 })
