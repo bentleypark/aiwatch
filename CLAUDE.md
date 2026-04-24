@@ -264,9 +264,10 @@ When adding a new monitored service, update ALL of the following:
 | `security:seen:osv:{vulnId}` | `SecurityAlertMeta` JSON | 7d | ~0 | OSV.dev vulnerability dedup + dashboard display |
 | `security:monthly:{YYYY-MM}` | `SecurityAlertMeta[]` JSON | 60d | ~1/day | Monthly security alert accumulation for reports |
 | `security:detected:{YYYY-MM-DD}` | integer string | 3d | ~0-3/day | Daily counter of newly-detected security alerts (#288). Incremented by `securityAlerts.length` when HN/OSV detection fires. Daily summary reads this instead of counting `security:seen:*` (which accumulates over 7d and inflates the figure) |
-| `ai:analysis:{svcId}:{incId}` | `AIAnalysisResult` JSON | 1h (active) / 2h (resolved) | ~5 per incident | Hybrid AI analysis result — Gemma 4 primary + Sonnet fallback (TTL refreshed while active; on recovery, `resolvedAt` added instead of deleting — kept 2h for "Recently Resolved" UI). `model` field tracks which model produced the analysis |
+| `ai:analysis:{svcId}:{incId}` | `AIAnalysisResult` JSON | 1h (active) / 2h (resolved) | ~5 per incident | Hybrid AI analysis result — Gemma 4 primary + Sonnet fallback (TTL refreshed while active; on recovery, `resolvedAt` added instead of deleting — kept 2h for "Recently Resolved" UI). `model` field tracks which model produced the analysis. `sticky: true` (#299) marks a manual operator override — cron skips re-analysis and only refreshes TTL; cleared naturally when incident resolves |
 | `ai:reanalysis-skip:{svcId}:{incId}` | `"1"` | 30min | ~2 per incident | Per-incident re-analysis failure cooldown |
-| `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed, gemma?, sonnet? }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis, model breakdown) |
+| `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed, gemma?, sonnet? }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis, model breakdown). Manual `/api/admin/analyze` (#299) calls also increment here so the daily summary attributes them |
+| `admin:ratelimit:{hash}` | `"1"` | 60s | ~0-10/day | Per-incident rate limit for `POST /api/admin/analyze` (#299). `hash` = first 128 bits of SHA-256 of `{svcId}:{incidentId}`. Hashed rather than raw to avoid leaking incident IDs via `kv list` even though the endpoint is secret-gated |
 | `fetch-fail:{svcId}` | counter string | 30min | ~0 (spikes on outage) | RSS fetch consecutive failure counter (3+ → degraded, capped writes) |
 | `component-missing:{svcId}` | counter string | 30min | ~0 (spikes on migration) | Component ID consecutive miss counter (3+ → Discord alert) |
 | `alerted:component-missing:{svcId}` | `"1"` | 24h | ~0 | Component ID mismatch alert dedup |
@@ -482,7 +483,26 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
     npm run deploy:worker
     ```
   - Verify the output says `Uploaded aiwatch-worker` (not `aiwatch`)
-  - Endpoints: `GET /api/status`, `GET /api/status/cached` (KV-only, includes probe24h, for SSR + initial load), `GET /api/uptime?days=30`, `GET /api/probe/history?days=30` (daily probe RTT summaries, 90d max), `GET /api/report?month=YYYY-MM` (monthly archive JSON, permanent), `POST /api/alert`, `GET /badge/:serviceId`, `GET /api/og` (dynamic OG image PNG), `GET /api/v1/status`
+  - Endpoints: `GET /api/status`, `GET /api/status/cached` (KV-only, includes probe24h, for SSR + initial load), `GET /api/uptime?days=30`, `GET /api/probe/history?days=30` (daily probe RTT summaries, 90d max), `GET /api/report?month=YYYY-MM` (monthly archive JSON, permanent), `POST /api/alert`, `POST /api/admin/analyze` (#299 — operator Sonnet override, `X-Admin-Key` required, sets `sticky: true` so cron doesn't auto-replace), `GET /badge/:serviceId`, `GET /api/og` (dynamic OG image PNG), `GET /api/v1/status`
+  - **Operator tools — `POST /api/admin/analyze` (#299)**: Force a Sonnet analysis on a specific active incident when the cron's default (Gemma-first) produced low-signal output. Motivated by the 2026-04-20 ChatGPT outage where Gemma called a systemic infra failure a "service availability issue". Before this endpoint the override required hand-editing a local Node script + `wrangler kv key put --remote`.
+
+    ```bash
+    # One-time secret setup (do NOT commit the value anywhere)
+    npx wrangler secret put ADMIN_API_KEY --config worker/wrangler.toml
+
+    # During an outage — force a Sonnet analysis on the active incident
+    export ADMIN_API_KEY=...  # paste locally from 1Password / keychain
+    curl -X POST https://aiwatch-worker.p2c2kbf.workers.dev/api/admin/analyze \
+      -H "X-Admin-Key: $ADMIN_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{"svcId":"chatgpt","incidentId":"01KPNN2V2SMP3TAN3MCJK87W50"}'
+    ```
+
+    **Request body** (JSON): `svcId` (required), `incidentId` (required, must be an active incident present in `services:latest`), `model` (`'sonnet' | 'gemma'`, default `'sonnet'`), `sticky` (default `true` — cron skips re-analysis until the incident resolves).
+
+    **Response**: `{ ok: true, wrote, ttl, analysis }` on 200. Failure modes: 401 `unauthorized` (missing/wrong `X-Admin-Key` — never leaks whether the secret is even configured), 400 (malformed body), 404 (IDs don't match an active incident — scope guard against arbitrary KV writes), 429 (1-req-per-60s-per-incident rate limit via `admin:ratelimit:{hash}`), 502 (upstream model failure or unparseable response), 503 (`ANTHROPIC_API_KEY` not configured).
+
+    **Security posture**: the endpoint accepts only IDs that match an active incident in `services:latest`, so a leaked secret can't be used to write arbitrary `ai:analysis:*` keys. Per-incident rate limit bounds damage to ~1 Sonnet call per incident per minute ≈ $0.01-level cost. Rotate `ADMIN_API_KEY` independently of `ANTHROPIC_API_KEY` if ever suspected compromised. Never paste the secret value into issues, PR bodies, or commit messages — only the variable name `$ADMIN_API_KEY` should appear in docs.
   - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res:` keys 7d TTL, `alerted:down/degraded/recovered:` keys 2h TTL). Fallback recommendations only included when service status is degraded/down (not operational). AI analysis runs inline with 8s timeout — Gemma 4 26B (Workers AI) primary, Sonnet (AI Gateway) fallback — results stored in `ai:analysis:{svcId}:{incId}` (1h TTL, per-incident). Daily alert counts tracked in `alert:count:{date}` for Daily Summary
 - **Frontend deployment**: Vercel, domain ai-watch.dev — `git push origin main` triggers auto-deploy. `npm run build` is local only; changes are not live until pushed
 - **PWA**: `public/manifest.json` + `public/sw.js` (stale-while-revalidate). CACHE_NAME in `sw.js` must be bumped manually when static assets change. SW excludes `/is-*` (Edge SSR) and `/api/*` (real-time data) from caching

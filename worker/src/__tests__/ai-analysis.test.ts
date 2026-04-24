@@ -1291,3 +1291,102 @@ describe('analyzeIncident — hybrid fallback', () => {
     expect(result).toBeNull()
   })
 })
+
+// #299 — sticky flag: manual operator overrides must survive the cron's
+// Gemma-first re-analysis path. refreshOrReanalyze should only refresh TTL.
+describe('refreshOrReanalyze — sticky analyses (#299)', () => {
+  it('skips re-analysis when existing analysis has sticky=true (only refreshes TTL)', async () => {
+    // 3h-old analysis would normally trigger the 2h age-based re-analysis branch.
+    // sticky=true must short-circuit BEFORE that check.
+    const stickyAnalysis = {
+      ...mockAnalysis,
+      analyzedAt: '2026-03-27T03:00:00Z',  // 3h old
+      sticky: true,
+      model: 'sonnet',
+    }
+    const store: Record<string, string> = {
+      [analysisKey('claude', 'inc-1')]: JSON.stringify(stickyAnalysis),
+    }
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{
+      id: 'inc-1', status: 'investigating',
+      // New timeline entry that would normally trigger re-analysis.
+      timeline: [{ stage: 'identified', text: 'Root cause: pool exhaustion', at: '2026-03-27T05:30:00Z' }],
+    }])
+    const analyzeFn = vi.fn()
+
+    const now = new Date('2026-03-27T06:00:00Z').getTime()
+    const result = await refreshOrReanalyze([svc], kv, 'api-key', analyzeFn, 2, now)
+
+    expect(analyzeFn).not.toHaveBeenCalled()
+    expect(result.refreshed).toEqual(['claude'])
+    expect(result.reanalyzed).toEqual([])
+    // Persisted payload still sticky + no overwrite of summary/model.
+    const persisted = JSON.parse(store[analysisKey('claude', 'inc-1')])
+    expect(persisted.sticky).toBe(true)
+    expect(persisted.model).toBe('sonnet')
+    expect(persisted.summary).toBe('Test analysis')
+  })
+
+  it('still updates _lastRefresh when sticky', async () => {
+    // Even though we skip re-analysis, the 1h TTL needs refreshing so the key
+    // doesn't expire mid-incident.
+    const stickyAnalysis = { ...mockAnalysis, sticky: true }
+    const store: Record<string, string> = {
+      [analysisKey('chatgpt', 'inc-x')]: JSON.stringify(stickyAnalysis),
+    }
+    const kv = mockKV(store)
+    const svc = mockService('chatgpt', [{ id: 'inc-x', status: 'investigating' }])
+
+    await refreshOrReanalyze([svc], kv, 'key', vi.fn(), 2)
+
+    const persisted = JSON.parse(store[analysisKey('chatgpt', 'inc-x')])
+    expect(persisted._lastRefresh).toBeDefined()
+    // Assert the KV.put was called with the 1h TTL so the key can't silently leak past resolution.
+    expect(kv.put).toHaveBeenCalledWith(
+      analysisKey('chatgpt', 'inc-x'),
+      expect.stringContaining('sticky'),
+      { expirationTtl: 3600 },
+    )
+  })
+
+  it('non-sticky analyses follow the existing re-analysis path (regression guard)', async () => {
+    // If someone accidentally inverts the sticky check, non-sticky would be
+    // treated as sticky and never re-analyzed — this test catches that.
+    const oldAnalysis = { ...mockAnalysis, analyzedAt: '2026-03-27T03:00:00Z' } // 3h old, no sticky
+    const store: Record<string, string> = {
+      [analysisKey('claude', 'inc-1')]: JSON.stringify(oldAnalysis),
+    }
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{
+      id: 'inc-1', status: 'investigating',
+      timeline: [{ stage: 'identified', text: 'Root cause identified', at: '2026-03-27T05:30:00Z' }],
+    }])
+    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, model: 'gemma' })
+
+    const now = new Date('2026-03-27T06:00:00Z').getTime()
+    await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
+
+    expect(analyzeFn).toHaveBeenCalledOnce()
+  })
+
+  it('corrupt sticky-analysis JSON falls through to normal re-analysis (does not lock incident)', async () => {
+    // Defensive: if stored JSON is corrupt we already log+fallthrough in the
+    // existing parse catch, but sticky adds a new branch BEFORE that — confirm
+    // corruption still routes through the existing recovery path rather than
+    // hanging on the sticky check.
+    const store: Record<string, string> = {
+      [analysisKey('claude', 'inc-1')]: '{corrupt',
+    }
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, model: 'gemma' })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2)
+
+    // The corrupt JSON should trigger re-analysis (not early-return).
+    expect(analyzeFn).toHaveBeenCalledOnce()
+    warnSpy.mockRestore()
+  })
+})

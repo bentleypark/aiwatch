@@ -5,7 +5,7 @@
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey } from './alerts'
-import { analyzeIncident, refreshOrReanalyze, analysisKey, formatRecoveryDisplay, type AIAnalysisResult } from './ai-analysis'
+import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration } from './utils'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
@@ -14,6 +14,10 @@ interface Env {
   ALLOWED_ORIGIN: string
   DISCORD_WEBHOOK_URL?: string
   ANTHROPIC_API_KEY?: string
+  // #299: operator-only shared secret for POST /api/admin/analyze. Set via
+  // `wrangler secret put ADMIN_API_KEY`. Separate from ANTHROPIC_API_KEY so it
+  // can be rotated independently; absent secret → endpoint always 401.
+  ADMIN_API_KEY?: string
   AI?: Ai
   STATUS_CACHE: KVNamespace
 }
@@ -568,7 +572,15 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
               usage.success++
               if (analysis.model === 'gemma') usage.gemma = (usage.gemma ?? 0) + 1
               else if (analysis.model === 'sonnet') usage.sonnet = (usage.sonnet ?? 0) + 1
-              const kvOk = await kvPut(env.STATUS_CACHE, analysisKey(svc.id, inc.id), JSON.stringify(analysis), { expirationTtl: 3600 })
+              // #299: preserve sticky operator overrides — if an admin already wrote
+              // this key via /api/admin/analyze between two cron cycles, don't
+              // clobber it here. Symmetric with refreshOrReanalyze's guard.
+              const existingRaw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
+              const skipWrite = isStickyExistingAnalysis(existingRaw)
+              if (skipWrite) console.log(`[cron] Preserving sticky analysis for ${svc.id}:${inc.id}; not overwriting`)
+              const kvOk = skipWrite
+                ? true
+                : await kvPut(env.STATUS_CACHE, analysisKey(svc.id, inc.id), JSON.stringify(analysis), { expirationTtl: 3600 })
               if (kvOk) {
                 analysisSection = `\n${DIV}\n🤖 **AI ANALYSIS** [Beta]\n${analysis.summary}\n⏱ Est. recovery: ${formatRecoveryDisplay(analysis.estimatedRecovery)}${analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''}`
               }
@@ -713,9 +725,203 @@ import { collectChangelogs, getStaleSources } from './changelog'
 import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
-import type { ProbeSummary } from './types'
+import type { ProbeSummary, Incident } from './types'
 import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateMonthlyIncidents, type MonthlyIncidents, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
+
+// ── #299: sticky-aware analysis write ─────────────────────────
+
+/**
+ * Inspect an existing raw JSON payload at `ai:analysis:{svcId}:{incId}` and
+ * return true if it's a sticky operator override that must NOT be overwritten.
+ * Corrupt JSON is treated as non-sticky (proceed with overwrite) — that's the
+ * safer default since a stuck-sticky corrupt payload would lock the key for the
+ * full incident lifetime.
+ */
+export function isStickyExistingAnalysis(rawJson: string | null): boolean {
+  if (!rawJson) return false
+  try {
+    const existing = JSON.parse(rawJson) as { sticky?: unknown }
+    return existing.sticky === true
+  } catch {
+    return false
+  }
+}
+
+// ── #299: POST /api/admin/analyze ─────────────────────────────
+
+/**
+ * Constant-time string comparison. Prevents timing-side-channel leaks of the
+ * admin secret. Short-circuits on length mismatch (that's already observable
+ * from the 401 anyway); diverges only on same-length different strings.
+ * Workers runtime doesn't expose `crypto.timingSafeEqual`, so we roll our own.
+ */
+export function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  }
+  return diff === 0
+}
+
+/** SHA-256 hex of svcId:incidentId — used as rate-limit KV key suffix. */
+export async function adminRateLimitKey(svcId: string, incidentId: string): Promise<string> {
+  const data = new TextEncoder().encode(`${svcId}:${incidentId}`)
+  const hash = await crypto.subtle.digest('SHA-256', data)
+  const hex = [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('')
+  return `admin:ratelimit:${hex.slice(0, 32)}` // 128-bit prefix is plenty
+}
+
+interface AdminAnalyzeRequest {
+  svcId?: unknown
+  incidentId?: unknown
+  model?: unknown
+  sticky?: unknown
+}
+
+/**
+ * Look up the active incident matching svcId + incidentId in `services:latest`.
+ * Reading from the cache (5min TTL) avoids a 5-10s live fetch on every admin
+ * request; the operator's "I need this now" is still same-cron-cycle fresh.
+ * Returns null if service or incident not found — caller translates to 404.
+ */
+async function findActiveIncident(kv: KVNamespace, svcId: string, incidentId: string): Promise<{ service: ServiceStatus; incident: Incident } | null> {
+  const raw = await kv.get(CACHE_KEY).catch(err => {
+    console.warn('[admin/analyze] services:latest KV read failed:', err instanceof Error ? err.message : err)
+    return null
+  })
+  if (!raw) return null
+  let payload: { services?: ServiceStatus[] }
+  try {
+    payload = JSON.parse(raw)
+  } catch (err) {
+    // Parity with other JSON.parse sites in this file — corrupt `services:latest`
+    // is never expected and should be visible in logs, not silently collapsed to 404.
+    console.error('[admin/analyze] services:latest corrupt JSON:', err instanceof Error ? err.message : err)
+    return null
+  }
+  const service = payload.services?.find(s => s.id === svcId)
+  if (!service) return null
+  const incident = (service.incidents ?? []).find(i => i.id === incidentId && i.status !== 'resolved')
+  if (!incident) return null
+  return { service, incident }
+}
+
+async function handleAdminAnalyze(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+
+  if (!env.ADMIN_API_KEY) {
+    // Missing secret — same error surface as wrong key (no info leak about config state).
+    return json(401, { ok: false, error: 'unauthorized' })
+  }
+  const provided = request.headers.get('X-Admin-Key') ?? ''
+  if (!constantTimeEqual(provided, env.ADMIN_API_KEY)) {
+    return json(401, { ok: false, error: 'unauthorized' })
+  }
+
+  if (!env.ANTHROPIC_API_KEY) {
+    return json(503, { ok: false, error: 'ANTHROPIC_API_KEY not configured' })
+  }
+
+  let body: AdminAnalyzeRequest
+  try { body = await request.json() } catch { return json(400, { ok: false, error: 'invalid JSON body' }) }
+
+  const svcId = typeof body.svcId === 'string' ? body.svcId : ''
+  const incidentId = typeof body.incidentId === 'string' ? body.incidentId : ''
+  const model = body.model === 'gemma' ? 'gemma' : 'sonnet'  // default sonnet — manual trigger implies escalation
+  const sticky = body.sticky === false ? false : true        // default true — operator override should survive cron updates
+  if (!svcId || !incidentId) {
+    return json(400, { ok: false, error: 'svcId and incidentId are required' })
+  }
+
+  // Rate limit: 1 request per svcId+incidentId per 60s. KV-based so it survives
+  // isolate restarts (in-memory Map would not, which matters for a route an
+  // operator might hammer during an outage from multiple tabs).
+  const rlKey = await adminRateLimitKey(svcId, incidentId)
+  // Fail-open with a log: a silent KV outage here would let an operator bypass
+  // rate limiting entirely (burning Anthropic tokens during a retry storm). We
+  // prefer to know about it rather than silently degrade — but still serve the
+  // request rather than block legitimate operator work on a transient KV blip.
+  const rlHit = await env.STATUS_CACHE.get(rlKey).catch(err => {
+    console.warn('[admin/analyze] rate-limit KV read failed; bypassing:', err instanceof Error ? err.message : err)
+    return null
+  })
+  if (rlHit) return json(429, { ok: false, error: 'rate limited — try again in a moment' })
+
+  // Scope guard: only allow IDs that exist as active incidents. Prevents spraying
+  // arbitrary KV keys via the endpoint if the admin secret ever leaks.
+  const active = await findActiveIncident(env.STATUS_CACHE, svcId, incidentId)
+  if (!active) return json(404, { ok: false, error: `no active incident ${svcId}:${incidentId}` })
+
+  // Write rate-limit marker BEFORE the expensive call so two concurrent requests
+  // don't both get through. TTL is a hard 60s — if the analysis takes longer than
+  // that, a retry is allowed (which is fine — the worst case is a double-write).
+  await env.STATUS_CACHE.put(rlKey, '1', { expirationTtl: 60 }).catch(err =>
+    console.warn('[admin/analyze] rate-limit write failed:', err instanceof Error ? err.message : err),
+  )
+
+  const { service, incident } = active
+  const similar = findSimilarIncidents(incident.title, service.incidents ?? [])
+  const prompt = buildAnalysisPrompt(service.name, {
+    id: incident.id, title: incident.title, status: incident.status,
+    startedAt: incident.startedAt, impact: incident.impact, timeline: incident.timeline,
+  }, similar)
+  const timelineAt = incident.timeline?.at(-1)?.at ?? ''
+
+  let analysis: AIAnalysisResult | null
+  try {
+    if (model === 'sonnet') {
+      analysis = await analyzeWithSonnet(env.ANTHROPIC_API_KEY, prompt, incident.id, timelineAt)
+    } else {
+      // Gemma path: go via analyzeIncident (tries Gemma first, falls back to Sonnet).
+      // The operator picked 'gemma' explicitly, but if Workers AI returns null we'd
+      // rather ship a Sonnet result than error out.
+      analysis = await analyzeIncident(env.ANTHROPIC_API_KEY, service.name, {
+        id: incident.id, title: incident.title, status: incident.status,
+        startedAt: incident.startedAt, impact: incident.impact, timeline: incident.timeline,
+      }, service.incidents ?? [], undefined, env.AI)
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'analysis failed'
+    return json(502, { ok: false, error: 'analysis failed', detail: message })
+  }
+
+  if (!analysis) {
+    return json(502, { ok: false, error: 'analysis returned null — upstream model error or unparseable response' })
+  }
+
+  if (sticky) analysis.sticky = true
+
+  const key = analysisKey(svcId, incidentId)
+  const ttl = 3600
+  try {
+    await env.STATUS_CACHE.put(key, JSON.stringify(analysis), { expirationTtl: ttl })
+  } catch (err) {
+    return json(502, { ok: false, error: 'KV write failed', detail: err instanceof Error ? err.message : String(err) })
+  }
+
+  // Bump ai:usage:{date} counter so the Daily Summary attributes the manual call.
+  // Match the shape used elsewhere: { calls, success, failed, gemma?, sonnet? }.
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    const usageKey = `ai:usage:${today}`
+    const raw = await env.STATUS_CACHE.get(usageKey).catch(() => null)
+    const usage: { calls: number; success: number; failed: number; gemma?: number; sonnet?: number } =
+      raw ? JSON.parse(raw) : { calls: 0, success: 0, failed: 0 }
+    usage.calls++
+    usage.success++
+    if (analysis.model === 'gemma') usage.gemma = (usage.gemma ?? 0) + 1
+    else if (analysis.model === 'sonnet') usage.sonnet = (usage.sonnet ?? 0) + 1
+    await env.STATUS_CACHE.put(usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
+  } catch (err) {
+    // Counter is bookkeeping — don't fail the request over it.
+    console.warn('[admin/analyze] ai:usage counter bump failed:', err instanceof Error ? err.message : err)
+  }
+
+  return json(200, { ok: true, wrote: key, ttl, analysis })
+}
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
@@ -1394,6 +1600,15 @@ export default {
           status: 500, headers: { ...cors, 'Content-Type': 'application/json' },
         })
       }
+    }
+
+    // POST /api/admin/analyze — operator override to run Sonnet analysis on a specific
+    // incident (#299). Motivated by 2026-04-20 ChatGPT outage where Gemma produced a
+    // generic "service availability issue" analysis and Sonnet (same prompt/data) correctly
+    // identified a systemic infra failure. Before this endpoint the override required
+    // hand-editing a Node script + `wrangler kv key put --remote`, racing the cron.
+    if (request.method === 'POST' && url.pathname === '/api/admin/analyze') {
+      return handleAdminAnalyze(request, env, cors)
     }
 
     // POST/DELETE /api/webhook/ping — track active webhook registrations (hashed, no raw URLs stored)

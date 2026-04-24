@@ -6,3 +6,8 @@ DISCORD_WEBHOOK_URL=
 
 # Anthropic API key for AI incident analysis (optional — analysis disabled if empty)
 ANTHROPIC_API_KEY=
+
+# Operator secret for POST /api/admin/analyze (#299). Leave empty to disable the
+# endpoint (requests will 401). Rotate independently of ANTHROPIC_API_KEY.
+# Production: `npx wrangler secret put ADMIN_API_KEY`
+ADMIN_API_KEY=

@@ -68,6 +68,12 @@ export interface AIAnalysisResult {
   model?: 'gemma' | 'sonnet'  // which model produced this analysis
   resolvedAt?: string
   timelineHash?: string  // latest timeline entry timestamp — used to skip re-analysis when unchanged
+  // #299: when true, refreshOrReanalyze skips re-analysis for this incident and only
+  // refreshes the 1h TTL. Set by the /api/admin/analyze endpoint so an operator's
+  // manual Sonnet override doesn't get auto-clobbered by the cron's Gemma-first path
+  // on the next timeline update. Cleared naturally when incident resolves (the
+  // resolution flow overwrites this key with a 2h TTL + resolvedAt marker).
+  sticky?: boolean
 }
 
 /**
@@ -277,7 +283,10 @@ async function analyzeWithGemma(
 /**
  * Analyze incident using Claude Sonnet via AI Gateway (fallback).
  */
-async function analyzeWithSonnet(
+// Exported for the /api/admin/analyze endpoint (#299) so operators can force a
+// Sonnet analysis on an incident where Gemma produced low-signal output. Production
+// cron still reaches it via the analyzeIncident fallback path below.
+export async function analyzeWithSonnet(
   apiKey: string,
   prompt: string,
   incidentId: string,
@@ -392,6 +401,16 @@ export async function refreshOrReanalyze(
       if (raw) {
         try {
           const parsed = JSON.parse(raw)
+          // #299: sticky analyses (manual operator overrides) are never re-analyzed
+          // while the incident is active — only TTL-refreshed. Clears naturally on
+          // incident resolution (resolvedAt write overwrites this key with 2h TTL).
+          if (parsed.sticky === true) {
+            parsed._lastRefresh = new Date(now).toISOString()
+            await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+            analyzedIncidents.set(inc.id, key)
+            result.refreshed.push(svc.id)
+            continue
+          }
           // Time-based re-analysis: if 2h+ old, attempt update without deleting old analysis first
           const analysisAge = now - new Date(parsed.analyzedAt).getTime()
           if (analysisAge >= 7_200_000 && (apiKey || ai) && reAnalysisCount < cap) {
