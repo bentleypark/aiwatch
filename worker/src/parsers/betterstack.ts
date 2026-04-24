@@ -14,7 +14,16 @@ function isValidDate(s: string): boolean {
   return !isNaN(new Date(s).getTime())
 }
 
-export function parseRssIncidents(xml: string): Incident[] {
+// #331: BetterStack RSS occasionally carries planned-maintenance announcements
+// that share the same item shape as real incidents. Detect them via two signals:
+// a "scheduled (network) maintenance" phrase in the title, or a future pubDate
+// (RSS entries describe things that have happened — recovered/went down — so a
+// future timestamp is structurally impossible for a real incident). Skip both
+// rather than rendering a phantom "— down" card.
+const SCHEDULED_MAINTENANCE_TITLE = /scheduled\s+(?:\w+\s+)?maintenance|maintenance[^a-z]{0,20}scheduled/i
+const FUTURE_PUBDATE_BUFFER_MS = 60_000  // clock-skew tolerance
+
+export function parseRssIncidents(xml: string, now = Date.now()): Incident[] {
   const items = xml.match(/<item>([\s\S]*?)<\/item>/g)
   if (!items) return []
 
@@ -49,6 +58,19 @@ export function parseRssIncidents(xml: string): Incident[] {
     const isResolved = /\brecover(?:ed)?\b|\bresolved\b|\bfixed\b|\brestor(?:ed)?\b|\bmitigated\b|\bhealthy again\b|\bis back\b|\bback to normal\b|\bback up\b|\boperational\b/.test(lastText)
     const startMs = new Date(first.date).getTime()
     const endMs = new Date(last.date).getTime()
+
+    // #331: planned-maintenance / future announcements — not real incidents.
+    // Checked here (not at item-level) so a group legitimately named "maintenance"
+    // with a past pubDate and real downtime in its description wouldn't be dropped
+    // — title regex + future-date are AND-independent skip conditions.
+    if (SCHEDULED_MAINTENANCE_TITLE.test(first.title)) {
+      console.debug(`[parseRssIncidents] skipped scheduled maintenance: ${groupKey} ("${first.title}")`)
+      continue
+    }
+    if (startMs > now + FUTURE_PUBDATE_BUFFER_MS) {
+      console.debug(`[parseRssIncidents] skipped future-dated announcement: ${groupKey} ("${first.title}" at ${new Date(startMs).toISOString()})`)
+      continue
+    }
 
     // Filter out micro-incidents (resolved in < 60s) — automated monitoring noise
     if (isResolved && (endMs - startMs) >= 0 && (endMs - startMs) < 60_000) {

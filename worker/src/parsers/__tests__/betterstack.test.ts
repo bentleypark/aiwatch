@@ -354,6 +354,196 @@ describe('parseRssIncidents', () => {
     const result = parseRssIncidents(`<rss>${items}</rss>`)
     expect(result).toHaveLength(20)
   })
+
+  // #331: Together's BetterStack RSS carries planned-maintenance announcements
+  // with a scheduled title + future pubDate. The old parser rendered these as
+  // phantom "Scheduled Network Maintenance — down" incidents. Regression tests:
+  describe('scheduled maintenance / future pubDate filter (#331)', () => {
+    it('skips entries titled "Scheduled Network Maintenance"', () => {
+      const xml = `
+        <item>
+          <guid>https://status.together.ai/incident/876784#hash</guid>
+          <title>Scheduled Network Maintenance</title>
+          <pubDate>Sat, 25 Apr 2026 12:00:01 GMT</pubDate>
+          <description>We will be performing scheduled network maintenance from April 25...</description>
+        </item>
+      `
+      // Use a `now` past the pubDate so the future-date filter can't short-circuit
+      // the test — we want to prove the TITLE filter specifically works.
+      const fixedNow = new Date('2026-04-30T00:00:00Z').getTime()
+      const result = parseRssIncidents(xml, fixedNow)
+      expect(result).toHaveLength(0)
+    })
+
+    it('skips entries titled "Scheduled Maintenance" (no "network")', () => {
+      const xml = `
+        <item>
+          <guid>https://status.example.com/m/1#h</guid>
+          <title>Scheduled maintenance</title>
+          <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+          <description>Routine upgrade</description>
+        </item>
+      `
+      const fixedNow = new Date('2026-03-15T00:00:00Z').getTime()
+      expect(parseRssIncidents(xml, fixedNow)).toHaveLength(0)
+    })
+
+    it('skips entries with pubDate in the future (> 60s past now)', () => {
+      // Future-dated announcement with a NON-matching title (just to prove the
+      // future-date filter works independently of the title regex).
+      const xml = `
+        <item>
+          <guid>https://status.example.com/future#1</guid>
+          <title>Database Upgrade Window</title>
+          <pubDate>Sat, 01 May 2026 10:00:00 GMT</pubDate>
+          <description>We'll be rotating the primary DB cluster next week.</description>
+        </item>
+      `
+      const fixedNow = new Date('2026-04-20T00:00:00Z').getTime()
+      expect(parseRssIncidents(xml, fixedNow)).toHaveLength(0)
+    })
+
+    it('keeps entries with pubDate within the 60s clock-skew buffer', () => {
+      // pubDate is 30s in the future — within the clock-skew tolerance, so it
+      // should still render. Prevents false positives from minor NTP drift.
+      const pubDate = new Date('2026-03-01T10:00:30Z').toUTCString()
+      const xml = `
+        <item>
+          <guid>https://status.example.com/skew#1</guid>
+          <title>Service X went down</title>
+          <pubDate>${pubDate}</pubDate>
+          <description>Errors</description>
+        </item>
+      `
+      const fixedNow = new Date('2026-03-01T10:00:00Z').getTime()
+      expect(parseRssIncidents(xml, fixedNow)).toHaveLength(1)
+    })
+
+    it('still processes a normal incident alongside a filtered maintenance entry', () => {
+      // Regression guard: a real incident in the same feed must not be affected
+      // by a sibling scheduled-maintenance item.
+      const xml = `
+        <item>
+          <guid>https://status.together.ai/incident/876784#hash1</guid>
+          <title>Scheduled Network Maintenance</title>
+          <pubDate>Sat, 25 Apr 2026 12:00:01 GMT</pubDate>
+          <description>We will be performing scheduled network maintenance</description>
+        </item>
+        <item>
+          <guid>https://status.together.ai/incident/999#hash2</guid>
+          <title>GPT OSS 120B went down</title>
+          <pubDate>Sun, 01 Mar 2026 10:00:00 GMT</pubDate>
+          <description>Model unavailable</description>
+        </item>
+      `
+      const fixedNow = new Date('2026-04-30T00:00:00Z').getTime()
+      const result = parseRssIncidents(xml, fixedNow)
+      expect(result).toHaveLength(1)
+      expect(result[0].title).toContain('GPT OSS 120B')
+    })
+
+    it('does not falsely match titles that mention "maintenance" without "scheduled"', () => {
+      // "Maintenance mode" alone is ambiguous — could be an unexpected degraded
+      // state. Only the scheduled+maintenance pair should trigger the skip.
+      const xml = `
+        <item>
+          <guid>https://status.example.com/m2#h</guid>
+          <title>Stuck in maintenance mode</title>
+          <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+          <description>Deploy pipeline hung.</description>
+        </item>
+      `
+      const fixedNow = new Date('2026-03-15T00:00:00Z').getTime()
+      expect(parseRssIncidents(xml, fixedNow)).toHaveLength(1)
+    })
+
+    it('defaults `now` to Date.now() when omitted (backwards-compatible signature)', () => {
+      // Existing callers pass no arg. Verify the default path still works without
+      // regressing to some pathological constant.
+      const recentPast = new Date(Date.now() - 3600_000).toUTCString()  // 1h ago
+      const xml = `
+        <item>
+          <guid>https://status.example.com/now#1</guid>
+          <title>Service went down</title>
+          <pubDate>${recentPast}</pubDate>
+          <description>Errors</description>
+        </item>
+      `
+      expect(parseRssIncidents(xml)).toHaveLength(1)
+    })
+
+    it('matches the second regex alternation: "Maintenance — scheduled for tonight"', () => {
+      // The regex has two alternations; the first matches "scheduled ... maintenance",
+      // the second matches "maintenance ... scheduled". Together's current title
+      // exercises branch 1. A future provider might use branch 2. Without this test
+      // a regex refactor could silently delete that branch.
+      const xml = `
+        <item>
+          <guid>https://status.example.com/m2branch#h</guid>
+          <title>Maintenance — scheduled for tonight</title>
+          <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+          <description>Planned work</description>
+        </item>
+      `
+      const fixedNow = new Date('2026-03-15T00:00:00Z').getTime()
+      expect(parseRssIncidents(xml, fixedNow)).toHaveLength(0)
+    })
+
+    it('does NOT skip "Planned maintenance" or "Scheduled upgrade" variants', () => {
+      // Explicit negative contract: the regex is narrowly scoped to the
+      // scheduled + maintenance pair. Titles like "Planned maintenance window
+      // failed" or "Scheduled upgrade broke DB" describe real incidents where
+      // the planned event went wrong — we must still surface them. Prevents
+      // future over-broadening from swallowing legitimate reports.
+      const xml = `
+        <item>
+          <guid>https://status.example.com/planned#1</guid>
+          <title>Planned maintenance window exceeded</title>
+          <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+          <description>Still ongoing past the planned end</description>
+        </item>
+        <item>
+          <guid>https://status.example.com/upgrade#1</guid>
+          <title>Scheduled upgrade failed to roll forward</title>
+          <pubDate>Sat, 01 Mar 2026 11:00:00 GMT</pubDate>
+          <description>Rollback initiated</description>
+        </item>
+      `
+      const fixedNow = new Date('2026-03-15T00:00:00Z').getTime()
+      const result = parseRssIncidents(xml, fixedNow)
+      expect(result).toHaveLength(2)
+      // Also assert which incidents survived — a future bug that returned 2
+      // different items would slip past the count-only check.
+      const titles = result.map(r => r.title)
+      expect(titles.some(t => t.includes('Planned maintenance window exceeded'))).toBe(true)
+      expect(titles.some(t => t.includes('Scheduled upgrade failed to roll forward'))).toBe(true)
+    })
+
+    it('title filter fires before the future-date filter (order-of-checks guard)', () => {
+      // Real Together case: title matches AND pubDate is in the future. Current
+      // order is title first; if a refactor flipped the order it would still
+      // function (same net result) but logs would mis-categorize. Spy on
+      // console.debug to confirm the specific skip-reason path.
+      // NOTE: test is coupled to the literal log strings "scheduled maintenance"
+      // and "future-dated" in parseRssIncidents. Update both sides together if
+      // the log wording changes.
+      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      const xml = `
+        <item>
+          <guid>https://status.together.ai/incident/876784#hash</guid>
+          <title>Scheduled Network Maintenance</title>
+          <pubDate>Sat, 25 Apr 2026 12:00:01 GMT</pubDate>
+          <description>Planned</description>
+        </item>
+      `
+      const fixedNow = new Date('2026-04-24T00:00:00Z').getTime()  // before pubDate
+      parseRssIncidents(xml, fixedNow)
+      const calls = debugSpy.mock.calls.map(c => String(c[0]))
+      expect(calls.some(m => m.includes('scheduled maintenance'))).toBe(true)
+      expect(calls.some(m => m.includes('future-dated'))).toBe(false)
+      debugSpy.mockRestore()
+    })
+  })
 })
 
 describe('parseXaiRssIncidents', () => {
