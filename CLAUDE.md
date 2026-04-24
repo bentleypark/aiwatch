@@ -202,7 +202,7 @@ When adding a new monitored service, update ALL of the following:
 18. `api/is-down.ts` — add service to `SERVICES` map
 19. `api/is-down/html-template.ts` — if needed
 20. `vercel.json` — add rewrite rule `/is-{service}-down`
-21. `public/sitemap.xml` — add URL entry
+21. `public/sitemap.xml` — add URL entry (`lastmod` is auto-bumped to build date by `scripts/bump-sitemap-lastmod.mjs` via `prebuild` hook — #337 — so any placeholder date works for the initial commit)
 
 #### Reports site (aiwatch-reports) — commit + push to deploy (GitHub Pages auto-build)
 22. `README.md` — service count, category breakdown (e.g., "N LLM APIs, N voice & inference")

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/bump-sitemap-lastmod.mjs",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "npm run build && wrangler dev",
