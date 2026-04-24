@@ -298,6 +298,7 @@ api/
   intro/
     html-template.ts # SSR HTML template (i18n, dashboard mock, GA4)
   is-down.ts        # "Is X Down?" Edge Function (28 services — excludes bedrock/azureopenai per #263)
+  reports.ts        # Monthly Reports proxy (/reports/* → reports.ai-watch.dev) with HTML path rewriting (#264)
 src/
   components/   # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, AnalysisModal
   pages/        # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, AboutScore, Ranking
