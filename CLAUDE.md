@@ -492,12 +492,19 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
     # One-time secret setup (do NOT commit the value anywhere)
     npx wrangler secret put ADMIN_API_KEY --config worker/wrangler.toml
 
-    # During an outage — force a Sonnet analysis on the active incident
+    # During an outage — helper script parses CLI args, handles UA / error hints,
+    # and avoids the shell-quoting pitfalls of raw curl.
     export ADMIN_API_KEY=...  # paste locally from 1Password / keychain
-    curl -X POST https://aiwatch-worker.p2c2kbf.workers.dev/api/admin/analyze \
-      -H "X-Admin-Key: $ADMIN_API_KEY" \
-      -H "Content-Type: application/json" \
-      -d '{"svcId":"chatgpt","incidentId":"01KPNN2V2SMP3TAN3MCJK87W50"}'
+    node scripts/admin-analyze.mjs chatgpt 01KPNN2V2SMP3TAN3MCJK87W50
+    # Optional flags:
+    #   --model gemma         (default: sonnet — manual trigger implies escalation)
+    #   --sticky false        (default: true — prevents cron from re-analyzing with Gemma)
+    # See scripts/admin-analyze.mjs header for full usage + error-code hints.
+
+    # Or raw curl (same endpoint — use --data @file to avoid zsh brace-expansion issues):
+    # curl -X POST https://aiwatch-worker.p2c2kbf.workers.dev/api/admin/analyze \
+    #   -H "X-Admin-Key: $ADMIN_API_KEY" -H "Content-Type: application/json" \
+    #   --data '{"svcId":"chatgpt","incidentId":"01KPNN2V2SMP3TAN3MCJK87W50"}'
     ```
 
     **Request body** (JSON): `svcId` (required), `incidentId` (required, must be an active incident present in `services:latest`), `model` (`'sonnet' | 'gemma'`, default `'sonnet'`), `sticky` (default `true` — cron skips re-analysis until the incident resolves).
