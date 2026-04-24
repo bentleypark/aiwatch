@@ -201,7 +201,7 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
           )
         })}
         <a
-          href="https://reports.ai-watch.dev/"
+          href="https://ai-watch.dev/reports/"
           target="_blank"
           rel="noopener noreferrer"
           onClick={() => { trackEvent('click_reports', {}); onNavigate?.() }}
