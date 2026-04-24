@@ -933,7 +933,10 @@ export default function ServiceDetails({ serviceId }) {
         // Keep in sync with OSV_PACKAGES in worker/src/security-monitor.ts
         const OSV_SERVICE_MAP = {
           'OpenAI': 'openai', 'Anthropic (Claude)': 'claude', 'Google (Gemini)': 'gemini',
-          'Cohere': 'cohere', 'Mistral': 'mistral', 'Hugging Face': 'huggingface', 'LangChain': '',
+          'Cohere': 'cohere', 'Mistral': 'mistral', 'Hugging Face': 'huggingface',
+          'Together': 'together', 'Groq': 'groq', 'Replicate': 'replicate',
+          'AssemblyAI': 'assemblyai', 'Deepgram': 'deepgram',
+          'LangChain': '', // no dedicated service page — subpackage CVEs surface only in the banner
         }
         const filtered = securityAlerts.filter(a => {
           // OSV: match by mapped service ID (e.g., "Anthropic (Claude)" → only "claude", not "claudeai")

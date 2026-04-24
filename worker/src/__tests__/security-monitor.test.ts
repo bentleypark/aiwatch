@@ -1,6 +1,58 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { mapOSVSeverity, detectSecurityAlerts, fetchOSVAlerts, fetchEPSS, enrichAlertsWithEPSS, formatEpssTag, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, EPSS_ACTIVE, EPSS_ELEVATED } from '../security-monitor'
+import { mapOSVSeverity, detectSecurityAlerts, fetchOSVAlerts, fetchEPSS, enrichAlertsWithEPSS, formatEpssTag, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, EPSS_ACTIVE, EPSS_ELEVATED, OSV_PACKAGES } from '../security-monitor'
 import type { SecurityAlert, SecurityAlertMeta } from '../security-monitor'
+
+// #325: OSV_PACKAGES drives both querybatch input and the post-fetch enrichment
+// via OSV_PACKAGES[candidate.packageIndex]. A duplicated (name, ecosystem) would
+// issue redundant queries and inflate querybatch cost; an invalid ecosystem
+// silently yields zero results from OSV. Cheap guard — runs in <1ms.
+describe('OSV_PACKAGES invariants', () => {
+  it('has no duplicate (name, ecosystem) pairs', () => {
+    const keys = OSV_PACKAGES.map(p => `${p.ecosystem}/${p.name}`)
+    const unique = new Set(keys)
+    expect(keys.length).toBe(unique.size)
+  })
+
+  it('uses only OSV-recognized ecosystems (PyPI or npm)', () => {
+    // OSV supports more (Go, Maven, crates.io, etc.), but this project currently
+    // scans Python + JavaScript AI SDKs only. A typo like "pypi" (lowercase) would
+    // silently yield zero vulns across all queries — hence the strict allowlist.
+    const valid = new Set(['PyPI', 'npm'])
+    for (const pkg of OSV_PACKAGES) {
+      expect(valid.has(pkg.ecosystem)).toBe(true)
+    }
+  })
+
+  it('has a non-empty name and service label for every entry', () => {
+    for (const pkg of OSV_PACKAGES) {
+      expect(pkg.name).toBeTruthy()
+      expect(pkg.service).toBeTruthy()
+    }
+  })
+
+  it('every service label is also a key in the frontend OSV_SERVICE_MAP', () => {
+    // Cross-layer invariant: adding a `service` label here without also adding it
+    // to OSV_SERVICE_MAP in src/pages/ServiceDetails.jsx silently drops those
+    // alerts from the Security Alerts card — the filter there evaluates
+    // `OSV_SERVICE_MAP[a.service] === service.id`, which is `undefined === id`
+    // (false) for unmapped labels. This mirror enforces the sync at test time.
+    const KNOWN_SERVICE_LABELS = new Set([
+      'OpenAI', 'Anthropic (Claude)', 'Google (Gemini)', 'Cohere', 'Mistral',
+      'Hugging Face', 'LangChain',
+      'Together', 'Groq', 'Replicate', 'AssemblyAI', 'Deepgram',
+    ])
+    for (const pkg of OSV_PACKAGES) {
+      expect(KNOWN_SERVICE_LABELS.has(pkg.service)).toBe(true)
+    }
+  })
+
+  it('has at least 20 entries (tripwire for accidental mass removal)', () => {
+    // Current count is 24 (2026-04). The lower bound protects against a bad
+    // merge or truncation that would silently shrink OSV coverage — the other
+    // invariants pass for any subset, so a length floor is the only guard.
+    expect(OSV_PACKAGES.length).toBeGreaterThanOrEqual(20)
+  })
+})
 
 describe('mapOSVSeverity', () => {
   it('maps critical (>= 9.0)', () => {
