@@ -952,13 +952,29 @@ export default function ServiceDetails({ serviceId }) {
               </div>
             </div>
             <div style={{ padding: '16px' }} className="flex flex-col gap-2">
+              {/* #326: EPSS-based prefix. Operators triage "🔥 actively exploited"
+                 before anything else; ≥EPSS_ELEVATED is "elevated, prioritize this week".
+                 Below EPSS_ELEVATED we skip the prefix to avoid crowding low-signal advisories.
+                 Thresholds must stay in sync with EPSS_ACTIVE / EPSS_ELEVATED in
+                 worker/src/security-monitor.ts. */}
               {filtered.map((a, i) => {
                 const safeUrl = a.url?.startsWith('https://') ? a.url : '#'
+                const epss = a.epssPercentile
+                let epssPrefix = null
+                if (typeof epss === 'number') {
+                  if (epss >= 0.8) epssPrefix = { tag: '🔥', color: 'var(--red)' }
+                  else if (epss >= 0.5) epssPrefix = { tag: '⚠️', color: 'var(--amber)' }
+                }
                 return (
                   <a key={i} href={safeUrl} target="_blank" rel="noopener noreferrer"
                     className="flex items-start gap-2 text-[12px] text-[var(--text1)] hover:text-[var(--purple)]"
                   >
                     <span className="shrink-0">{a.severity === 'critical' ? '🔴' : a.severity === 'high' ? '🟠' : '🟡'}</span>
+                    {epssPrefix && (
+                      <span className="shrink-0 mono text-[10px]" style={{ color: epssPrefix.color }}
+                        title={`EPSS ${Math.round(epss * 100)}th percentile — ${epss >= 0.8 ? 'actively exploited' : 'elevated exploit risk'}`}
+                      >{epssPrefix.tag}</span>
+                    )}
                     <span className="truncate">{a.title}</span>
                   </a>
                 )
