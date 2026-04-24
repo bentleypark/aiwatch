@@ -486,10 +486,33 @@ describe('buildMonthlyArchive', () => {
     expect(archive.services.claude.grade).toBe('excellent')
     expect(archive.services.claude.incidents).toBe(5) // from accumulated data
     expect(archive.services.claude.avgResolutionMin).toBe(60) // 300/5
+    expect(archive.services.claude.totalDowntimeMin).toBe(300)
+    expect(archive.services.claude.longestIncidentMin).toBe(120)
     expect(archive.services.claude.avgLatencyMs).toBe(210)
     expect(archive.services.openai.incidents).toBe(1)
     expect(archive.services.openai.avgResolutionMin).toBe(45)
+    expect(archive.services.openai.totalDowntimeMin).toBe(45)
+    expect(archive.services.openai.longestIncidentMin).toBe(45)
     expect(archive.services.openai.avgLatencyMs).toBeNull()
+  })
+
+  it('emits null totalDowntimeMin + longestIncidentMin for services with no incidents', async () => {
+    const noIncKV = {
+      get: async (key: string) => {
+        const store: Record<string, string> = {
+          'history:2026-03-01': JSON.stringify({ cohere: { ok: 288, total: 288 } }),
+        }
+        return store[key] ?? null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(noIncKV, 2026, 3)
+    expect(archive.services.cohere.incidents).toBe(0)
+    expect(archive.services.cohere.totalDowntimeMin).toBeNull()
+    expect(archive.services.cohere.longestIncidentMin).toBeNull()
   })
 
   it('handles no score data (uptime + incidents only)', async () => {

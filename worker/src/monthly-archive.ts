@@ -19,6 +19,8 @@ export interface MonthlyServiceData {
   grade: ScoreGrade | null       // Score grade (null if score unavailable)
   incidents: number              // incident count for the month (from accumulated data)
   avgResolutionMin: number | null // average resolution time in minutes (null if no resolved incidents)
+  totalDowntimeMin: number | null // sum of all incident durations for the month (null if no resolved incidents — unresolved durations are tracked as 0 upstream)
+  longestIncidentMin: number | null // max single-incident duration for the month (null if no resolved incidents)
   avgLatencyMs: number | null    // average probe RTT p75 in ms (null if no probe data)
 }
 
@@ -396,6 +398,11 @@ export async function buildMonthlyArchive(
     if (incSvc && incSvc.count > 0 && incSvc.totalMinutes > 0) {
       avgResolutionMin = Math.round(incSvc.totalMinutes / incSvc.count)
     }
+    // totalMinutes / longestMinutes are already tracked per-service by accumulateMonthlyIncidents
+    // — surface them in the permanent archive so monthly reports can render full Incident Summary
+    // columns (Downtime, Longest) without losing data after the 60d incidents:monthly:* TTL lapses.
+    const totalDowntimeMin = incSvc && incSvc.totalMinutes > 0 ? incSvc.totalMinutes : null
+    const longestIncidentMin = incSvc && incSvc.longestMinutes > 0 ? incSvc.longestMinutes : null
 
     services[id] = {
       uptime: uptimeMap[id] ?? null,
@@ -403,6 +410,8 @@ export async function buildMonthlyArchive(
       grade: scoreSvc?.scoreGrade ?? null,
       incidents: incSvc?.count ?? 0,
       avgResolutionMin,
+      totalDowntimeMin,
+      longestIncidentMin,
       avgLatencyMs: latencyMap[id] ?? null,
     }
   }
