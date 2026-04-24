@@ -36,11 +36,11 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   gemini: {
     displayName: 'Gemini',
     description: 'Gemini is Google\'s multimodal AI model API, capable of processing text, images, audio, and video. It powers Google AI Studio and is available through the Vertex AI platform for enterprise applications.',
-    insight: 'Google does not publish official uptime percentages for Gemini on their public status page, making independent monitoring especially valuable. AIWatch tracks Gemini through Google Cloud Status incidents. Gemini outages tend to be infrequent but can be longer in duration compared to other LLM providers.',
+    insight: 'Google does not publish official uptime percentages for Gemini on their public status pages, making independent monitoring especially valuable. AIWatch tracks Gemini through Google AI Studio status (aistudio.google.com/status) and Google Cloud incident feeds in parallel so both the direct API and Vertex surfaces are covered. Gemini outages tend to be infrequent but can be longer in duration compared to other LLM providers.',
     whenDown: 'When Gemini API is down, applications using Google\'s AI models will fail to process requests. This affects both direct API users and services built on Google AI Studio or Vertex AI.',
     faqs: [
-      { q: 'Is Gemini API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Gemini API every 5 minutes using Google Cloud Status data.' },
-      { q: 'How do I check Google Gemini status?', a: 'You can check Gemini status on this page, on Google Cloud Status at status.cloud.google.com, or on the AIWatch dashboard at ai-watch.dev.' },
+      { q: 'Is Gemini API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Gemini API every 5 minutes using Google AI Studio status data and Google Cloud incident feeds.' },
+      { q: 'How do I check Google Gemini status?', a: 'You can check Gemini status on this page, on Google AI Studio status at aistudio.google.com/status, or on the AIWatch dashboard at ai-watch.dev.' },
       { q: 'What alternatives are there to Gemini?', a: 'When Gemini is down, consider Claude API by Anthropic or OpenAI API as alternatives. AIWatch provides real-time fallback recommendations.' },
       { q: 'Does Gemini downtime affect Google AI Studio?', a: 'Yes, Gemini API outages typically affect Google AI Studio and Vertex AI integrations as they rely on the same underlying infrastructure.' },
     ],
