@@ -30,12 +30,11 @@ test.describe('Sidebar navigation', () => {
     await expect(page.locator('main button').filter({ hasText: 'Claude API' })).toBeVisible()
   })
 
-  test('Monthly Reports link opens external page in new tab', async ({ page }) => {
+  test('Monthly Reports link points to consolidated /reports/ path', async ({ page }) => {
     const sidebar = page.locator('aside').first()
     const reportsLink = sidebar.getByRole('link', { name: 'Reports' })
 
     await expect(reportsLink).toBeVisible()
-    await expect(reportsLink).toHaveAttribute('href', 'https://reports.ai-watch.dev/')
-    await expect(reportsLink).toHaveAttribute('target', '_blank')
+    await expect(reportsLink).toHaveAttribute('href', '/reports/')
   })
 })

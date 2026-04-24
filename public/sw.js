@@ -53,7 +53,7 @@ self.addEventListener('fetch', (event) => {
   const url = event.request.url
 
   // Always network — never cache these paths
-  if (url.includes('/is-') || url.includes('/api/')) return
+  if (url.includes('/is-') || url.includes('/api/') || url.includes('/reports')) return
 
   // Only cache same-origin requests
   if (new URL(url).origin !== self.location.origin) return

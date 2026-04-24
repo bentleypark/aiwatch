@@ -6,7 +6,7 @@ interface LandingOptions {
 
 export function renderLandingPage(opts: LandingOptions): string {
   const phDisplay = opts.showPHBanner ? 'block' : 'none'
-  const reportUrl = 'https://reports.ai-watch.dev/'
+  const reportUrl = '/reports/'
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -482,7 +482,7 @@ export function renderLandingPage(opts: LandingOptions): string {
     <div class="nav-links">
       <a href="#how" data-i18n="nav.how">동작 방식</a>
       <a href="#features" data-i18n="nav.features">기능</a>
-      <a href="https://reports.ai-watch.dev" data-i18n="nav.report">월간 리포트</a>
+      <a href="/reports/" data-i18n="nav.report">월간 리포트</a>
       <a href="https://github.com/bentleypark/aiwatch">GitHub</a>
     </div>
     <div class="lang-toggle">
@@ -1079,7 +1079,7 @@ export function renderLandingPage(opts: LandingOptions): string {
   <text x="160" y="350" text-anchor="middle" fill="#484f58" font-size="8" data-i18n="report.chart.note">* Lower scores may reflect reporting granularity, not actual instability</text>
 </svg>
   </div>
-  <a href="${reportUrl}" class="report-link" target="_blank" rel="noopener noreferrer" onclick="gtag('event','click_reports',{location:'landing_report',source:'intro'})">
+  <a href="${reportUrl}" class="report-link" onclick="gtag('event','click_reports',{location:'landing_report',source:'intro'})">
     <span data-i18n="report.link">전체 리포트 보기 →</span>
   </a>
   </div>
@@ -1116,7 +1116,7 @@ export function renderLandingPage(opts: LandingOptions): string {
     <div class="footer-left">© 2026 AIWatch · AGPL-3.0</div>
     <div class="footer-links">
       <a href="https://github.com/bentleypark/aiwatch">GitHub</a>
-      <a href="https://reports.ai-watch.dev" data-i18n="footer.report">월간 리포트</a>
+      <a href="/reports/" data-i18n="footer.report">월간 리포트</a>
       <a href="https://ai-watch.dev/#settings" data-i18n="footer.alert">알림 설정</a>
       <a href="https://ai-watch.dev/is-claude-down">Is Claude Down?</a>
     </div>
