@@ -96,9 +96,9 @@
     <priority>0.8</priority>
   </url>
 
-  <!-- Monthly Reports (Vercel proxy to reports.ai-watch.dev, #264) -->
+  <!-- Monthly Reports (external) -->
   <url>
-    <loc>https://ai-watch.dev/reports/</loc>
+    <loc>https://reports.ai-watch.dev/</loc>
     <lastmod>2026-04-24</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>

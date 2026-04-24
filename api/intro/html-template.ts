@@ -6,7 +6,7 @@ interface LandingOptions {
 
 export function renderLandingPage(opts: LandingOptions): string {
   const phDisplay = opts.showPHBanner ? 'block' : 'none'
-  const reportUrl = 'https://ai-watch.dev/reports/'
+  const reportUrl = 'https://reports.ai-watch.dev/'
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -482,7 +482,7 @@ export function renderLandingPage(opts: LandingOptions): string {
     <div class="nav-links">
       <a href="#how" data-i18n="nav.how">동작 방식</a>
       <a href="#features" data-i18n="nav.features">기능</a>
-      <a href="https://ai-watch.dev/reports" data-i18n="nav.report">월간 리포트</a>
+      <a href="https://reports.ai-watch.dev" data-i18n="nav.report">월간 리포트</a>
       <a href="https://github.com/bentleypark/aiwatch">GitHub</a>
     </div>
     <div class="lang-toggle">
@@ -1116,7 +1116,7 @@ export function renderLandingPage(opts: LandingOptions): string {
     <div class="footer-left">© 2026 AIWatch · AGPL-3.0</div>
     <div class="footer-links">
       <a href="https://github.com/bentleypark/aiwatch">GitHub</a>
-      <a href="https://ai-watch.dev/reports" data-i18n="footer.report">월간 리포트</a>
+      <a href="https://reports.ai-watch.dev" data-i18n="footer.report">월간 리포트</a>
       <a href="https://ai-watch.dev/#settings" data-i18n="footer.alert">알림 설정</a>
       <a href="https://ai-watch.dev/is-claude-down">Is Claude Down?</a>
     </div>
