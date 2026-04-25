@@ -10,6 +10,9 @@ import {
   summarizeSecurityAlerts,
   extractOsvVulnId,
   enrichTopFindingsWithTimelines,
+  buildArchiveReadyEmbed,
+  archiveNotifiedKey,
+  REPORTS_WORKFLOW_URL,
 } from '../monthly-archive'
 import type { ServiceStatus } from '../types'
 import type { MonthlySecurityEntry, MonthlySecuritySummary } from '../monthly-archive'
@@ -705,5 +708,74 @@ describe('buildMonthlyArchive', () => {
     const archive = await buildMonthlyArchive(kvWithUnresolved, 2026, 4)
     expect(archive.services.claude.incidents).toBe(2)
     expect(archive.services.claude.avgResolutionMin).toBeNull()
+  })
+})
+
+// ── Phase 2: Archive-ready notification (aiwatch-reports#4) ──────────
+
+describe('archiveNotifiedKey', () => {
+  it('returns the stable archive:notified:{period} form', () => {
+    expect(archiveNotifiedKey('2026-04')).toBe('archive:notified:2026-04')
+  })
+})
+
+describe('buildArchiveReadyEmbed', () => {
+  it('renders a full English month label for a valid YYYY-MM', () => {
+    const embed = buildArchiveReadyEmbed('2026-04', 31, 30)
+    expect(embed.title).toBe('📦 Monthly Archive Ready — 2026-04')
+    expect(embed.color).toBe(0x9B59B6)
+    expect(embed.description).toContain('**April 2026** archive')
+    expect(embed.description).toContain('Services: 31')
+    expect(embed.description).toContain('Days collected: 30')
+  })
+
+  it('links to the generate-report.yml workflow_dispatch page', () => {
+    const embed = buildArchiveReadyEmbed('2026-04', 31, 30)
+    expect(embed.description).toContain(REPORTS_WORKFLOW_URL)
+    expect(REPORTS_WORKFLOW_URL).toBe(
+      'https://github.com/bentleypark/aiwatch-reports/actions/workflows/generate-report.yml',
+    )
+  })
+
+  it('spells out the month input the operator must enter', () => {
+    const embed = buildArchiveReadyEmbed('2026-04', 31, 30)
+    expect(embed.description).toMatch(/enter month `2026-04`/)
+  })
+
+  it('formats December correctly (month = 12 edge)', () => {
+    const embed = buildArchiveReadyEmbed('2026-12', 31, 31)
+    expect(embed.description).toContain('**December 2026** archive')
+  })
+
+  it('formats January correctly (single-digit month with zero padding)', () => {
+    const embed = buildArchiveReadyEmbed('2027-01', 31, 31)
+    expect(embed.description).toContain('**January 2027** archive')
+  })
+
+  it('renders a usable embed when the archive has zero services or days', () => {
+    const embed = buildArchiveReadyEmbed('2026-04', 0, 0)
+    expect(embed.title).toBe('📦 Monthly Archive Ready — 2026-04')
+    expect(embed.description).toContain('**April 2026** archive')
+    expect(embed.description).toContain('Services: 0')
+    expect(embed.description).toContain('Days collected: 0')
+    expect(embed.description).not.toContain('Invalid Date')
+  })
+
+  it('falls back to the raw period when the format is malformed', () => {
+    const embed = buildArchiveReadyEmbed('not-a-month', 0, 0)
+    expect(embed.title).toBe('📦 Monthly Archive Ready — not-a-month')
+    expect(embed.description).toContain('**not-a-month** archive')
+    expect(embed.description).not.toContain('Invalid Date')
+  })
+
+  it('falls back to the raw period when the month component is out of range', () => {
+    const embed = buildArchiveReadyEmbed('2026-13', 0, 0)
+    expect(embed.description).toContain('**2026-13** archive')
+    expect(embed.description).not.toContain('Invalid Date')
+  })
+
+  it('always embeds the archive KV key path for traceability', () => {
+    const embed = buildArchiveReadyEmbed('2026-04', 31, 30)
+    expect(embed.description).toContain('`archive:monthly:2026-04`')
   })
 })

@@ -265,7 +265,7 @@ import { sanitize } from './utils'
 
 // ── Discord Webhook Alerts (Cron-based, no isolate concurrency) ──
 
-async function sendDiscordAlert(webhookUrl: string, embed: { title: string; description: string; color: number }) {
+async function sendDiscordAlert(webhookUrl: string, embed: { title: string; description: string; color: number }): Promise<boolean> {
   try {
     const resp = await fetch(webhookUrl, {
       method: 'POST',
@@ -280,11 +280,13 @@ async function sendDiscordAlert(webhookUrl: string, embed: { title: string; desc
     })
     if (!resp.ok) {
       console.error(`[discord] webhook returned ${resp.status}: ${await resp.text().catch(() => '')}`)
-    } else {
-      resp.body?.cancel()
+      return false
     }
+    resp.body?.cancel()
+    return true
   } catch (err) {
     console.error('[discord] webhook failed:', err instanceof Error ? err.message : err)
+    return false
   }
 }
 
@@ -299,6 +301,40 @@ async function alertWorkerError(env: Env, error: string) {
     description: `\`fetchAllServices()\` 전체 실패\n\`\`\`${sanitize(error)}\`\`\``,
     color: 0xED4245,
   })
+}
+
+// Dedup marker is written only after the Discord send returns true. A 5xx / network
+// failure on the 00:00 cycle leaves the marker unset so the 01:00 catch-up cycle retries.
+// Corrupt archive JSON bails without sending so operators don't get a misleading
+// "Services: 0" ping that also locks out retries for 60 days.
+async function maybeNotifyArchiveReady(env: Env, archiveKey: string, period: string): Promise<void> {
+  if (!env.DISCORD_WEBHOOK_URL || !env.STATUS_CACHE) return
+  const notifiedKey = archiveNotifiedKey(period)
+  const already = await env.STATUS_CACHE.get(notifiedKey).catch(() => null)
+  if (already) return
+
+  const archiveRaw = await env.STATUS_CACHE.get(archiveKey).catch(() => null)
+  if (!archiveRaw) return // archive not yet written this cycle; catch-up or next month handles it
+
+  let serviceCount: number
+  let daysCollected: number
+  try {
+    const parsed = JSON.parse(archiveRaw)
+    serviceCount = Object.keys(parsed.services ?? {}).length
+    daysCollected = typeof parsed.daysCollected === 'number' ? parsed.daysCollected : 0
+  } catch (err) {
+    console.error(`[monthly-archive] corrupt archive JSON for ${period} — skipping notification:`, err instanceof Error ? err.message : err)
+    return
+  }
+
+  const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, buildArchiveReadyEmbed(period, serviceCount, daysCollected))
+  if (!sent) {
+    console.warn(`[monthly-archive] notification send failed for ${period} — will retry next cron cycle`)
+    return
+  }
+  // 60d TTL — purely for dedup (the archive itself is permanent). Any TTL ≥ 2h would
+  // cover the catch-up window; 60d matches the surrounding monthly-ops retention feel.
+  await kvPut(env.STATUS_CACHE, notifiedKey, '1', { expirationTtl: 60 * 24 * 60 * 60 })
 }
 
 // ── Cron-based Alert Detection ──
@@ -726,7 +762,7 @@ import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyB
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateMonthlyIncidents, type MonthlyIncidents, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
+import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateMonthlyIncidents, buildArchiveReadyEmbed, archiveNotifiedKey, type MonthlyIncidents, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -1334,6 +1370,15 @@ export default {
         } catch (err) {
           console.error('[monthly-archive] Failed:', err)
         }
+      }
+
+      // Sits outside the `if (!existing)` archive-build branch so the 01:00 catch-up
+      // cycle can still ping if the 00:00 cycle built the archive but the Discord send
+      // failed. Dedup via archive:notified:{period}.
+      if (env.DISCORD_WEBHOOK_URL) {
+        await maybeNotifyArchiveReady(env, archiveKey, `${prevYear}-${String(prevMon).padStart(2, '0')}`).catch((err) => {
+          console.error('[monthly-archive] notification failed:', err instanceof Error ? err.message : err)
+        })
       }
     }
 
