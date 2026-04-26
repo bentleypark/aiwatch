@@ -623,9 +623,71 @@ describe('parseBetterStackStatus', () => {
     })).toBe('degraded')
   })
 
-  it('returns degraded for "degraded" and "maintenance" without resource data', () => {
+  it('returns degraded for "degraded" without resource data', () => {
     expect(parseBetterStackStatus({ data: { attributes: { aggregate_state: 'degraded' } } })).toBe('degraded')
-    expect(parseBetterStackStatus({ data: { attributes: { aggregate_state: 'maintenance' } } })).toBe('degraded')
+  })
+
+  it('returns operational for "maintenance" without resource data (planned, no real impact)', () => {
+    // #349 — pure maintenance with no resource breakdown should not surface as degraded.
+    expect(parseBetterStackStatus({ data: { attributes: { aggregate_state: 'maintenance' } } })).toBe('operational')
+  })
+
+  it('returns operational for "maintenance" when all non-op resources are also maintenance (#349)', () => {
+    // Live Together AI scenario on 2026-04-26: 11/31 resources in `maintenance` state,
+    // 0 in `degraded`/`downtime`. Was misclassified as degraded; should be operational.
+    const resources = Array.from({ length: 31 }, () => ({
+      type: 'status_page_resource', attributes: { status: 'operational' },
+    }))
+    for (let i = 0; i < 11; i++) resources[i] = { type: 'status_page_resource', attributes: { status: 'maintenance' } }
+    expect(parseBetterStackStatus({
+      data: { attributes: { aggregate_state: 'maintenance' } },
+      included: resources,
+    })).toBe('operational')
+  })
+
+  it('returns operational for "maintenance" when real issues are below 30% of the non-maintenance fleet', () => {
+    // 8 maintenance + 1 downtime + 11 operational = 20 resources.
+    // Threshold against non-maintenance peers: realIssues / (20 - 8) = 1/12 = 8.3% < 30%
+    // → individual model blip during maintenance, parser stays operational so users don't
+    // see a false-positive amber tile.
+    const resources: Array<{ type: string; attributes: { status: string } }> = []
+    for (let i = 0; i < 8; i++) resources.push({ type: 'status_page_resource', attributes: { status: 'maintenance' } })
+    resources.push({ type: 'status_page_resource', attributes: { status: 'downtime' } })
+    for (let i = 0; i < 11; i++) resources.push({ type: 'status_page_resource', attributes: { status: 'operational' } })
+    expect(parseBetterStackStatus({
+      data: { attributes: { aggregate_state: 'maintenance' } },
+      included: resources,
+    })).toBe('operational')
+  })
+
+  it('returns degraded for "maintenance" when ≥30% of NON-maintenance resources are real issues', () => {
+    // Maintenance announcement coexisting with widespread real outage. The threshold is
+    // applied against non-maintenance peers only — counting against the full fleet would
+    // let widespread maintenance dilute the signal of a coexisting real outage.
+    // 4 downtime / (10 - 0 maintenance) = 40% → escalate.
+    const resources = Array.from({ length: 10 }, () => ({
+      type: 'status_page_resource', attributes: { status: 'maintenance' as string },
+    }))
+    for (let i = 0; i < 4; i++) resources[i] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
+    expect(parseBetterStackStatus({
+      data: { attributes: { aggregate_state: 'maintenance' } },
+      included: resources,
+    })).toBe('degraded')
+  })
+
+  it('returns degraded when real issues are ≥30% of non-maintenance peers despite being a small fraction overall', () => {
+    // Worst-case scenario flagged by review: 25/31 in maintenance, 5/31 in downtime, 1 operational.
+    // Naive ratio 5/31 = 16% would underflag the genuine 5-resource outage. Correct ratio uses
+    // the non-maintenance denominator: 5/(31-25) = 5/6 = 83% → escalate.
+    const resources = Array.from({ length: 31 }, () => ({
+      type: 'status_page_resource', attributes: { status: 'maintenance' as string },
+    }))
+    for (let i = 0; i < 5; i++) resources[i] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
+    resources[5] = { type: 'status_page_resource', attributes: { status: 'operational' } }
+    expect(parseBetterStackStatus({
+      data: { attributes: { aggregate_state: 'maintenance' } },
+      included: resources,
+    })).toBe('degraded')
   })
 
   it('returns operational for "degraded" when <30% of resources are non-operational (#162)', () => {

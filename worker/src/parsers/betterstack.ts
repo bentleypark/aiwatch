@@ -220,7 +220,30 @@ export function parseBetterStackStatus(data: BetterStackIndex): 'operational' | 
   )
   const nonOpCount = resources.filter((r) => r.attributes?.status !== 'operational').length
 
-  if (state === 'degraded' || state === 'maintenance') {
+  if (state === 'maintenance') {
+    // Planned maintenance is not an outage on its own — escalate to `degraded` only when real
+    // unplanned issues (degraded/downtime resources) coexist AND those issues exceed the 30%
+    // threshold against the *non-maintenance* fleet. Counting against `resources.length`
+    // would let widespread maintenance (e.g. 25/31 in maintenance) dilute a coexisting real
+    // outage to a noise-band ratio. The intent — treat planned maintenance as not-an-outage —
+    // matches `parseBetterStackDailyImpact` which separately excludes zero-downtime maintenance
+    // from per-day impact totals (different signal, same product principle).
+    // Closes #349 — Together AI was misclassified as degraded during pure-maintenance windows.
+    const realIssues = resources.filter(
+      (r) => r.attributes?.status === 'degraded' || r.attributes?.status === 'downtime'
+    ).length
+    if (realIssues === 0) return 'operational'
+    const maintenanceCount = resources.filter(
+      (r) => r.attributes?.status === 'maintenance'
+    ).length
+    const nonMaintenanceTotal = resources.length - maintenanceCount
+    // Defensive: realIssues > 0 implies nonMaintenanceTotal > 0 (a resource can't be both
+    // maintenance and downtime simultaneously). Explicit guard makes the safety obvious.
+    if (nonMaintenanceTotal === 0) return 'operational'
+    if (realIssues / nonMaintenanceTotal < 0.3) return 'operational'
+    return 'degraded'
+  }
+  if (state === 'degraded') {
     if (resources.length > 0 && nonOpCount / resources.length < 0.3) return 'operational'
     return 'degraded'
   }
