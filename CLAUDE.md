@@ -132,7 +132,7 @@ gh pr merge --squash --delete-branch
 7. **Docs update** — update documentation affected by the change:
    - `CLAUDE.md`: architecture, service count, directory layout, constraints
    - `README.md` / `README.ko.md`: features, service tables, Project Structure, Available Service IDs
-   - `.github/CONTRIBUTING.md`: Project Structure
+   - `CONTRIBUTING.md`: Project Structure
    - `index.html`: SEO meta tags (service count, description)
    - `aiwatch-reports/`: service count, category breakdown (if applicable)
 8. **Commit + PR** — only after review issues are fixed and tests pass:
@@ -185,7 +185,7 @@ When adding a new monitored service, update ALL of the following:
 11. `CLAUDE.md` — architecture section: service count, service list, category breakdown, KV schema comment, probe count, fallback tier list
 12. `README.md` — service count, service table (add row), API Services header count, feature description, API endpoint comment
 13. `README.ko.md` — same as README.md (Korean)
-14. `.github/CONTRIBUTING.md` — if Project Structure section exists
+14. `CONTRIBUTING.md` — if Project Structure section exists
 
 #### SEO & Meta tags
 15. `index.html` — `<meta name="description">`, `og:title`, `og:description`, `twitter:title`, `twitter:description`, JSON-LD (~6 occurrences)

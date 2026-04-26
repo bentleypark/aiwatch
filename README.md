@@ -21,6 +21,10 @@ Real-time monitoring dashboard for **31 AI services** — track status, latency,
 |---------|--------|
 | ![AIWatch Dashboard](docs/screenshot.png?v=3) | ![AIWatch Mobile](docs/screenshot-mobile.png?v=1) |
 
+## 🛰️ Live Demo
+
+Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated every 5 minutes via Cloudflare Workers.
+
 ## Features
 
 - **Real-time status** — Operational / Degraded / Down for 31 AI services
@@ -345,7 +349,7 @@ worker/
 
 ## Contributing
 
-See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for detailed guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
