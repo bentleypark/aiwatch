@@ -20,6 +20,10 @@
 |---------|--------|
 | ![AIWatch 대시보드](docs/screenshot.png?v=3) | ![AIWatch 모바일](docs/screenshot-mobile.png?v=1) |
 
+## 🛰️ 라이브 데모
+
+**[ai-watch.dev](https://ai-watch.dev)** — 회원가입 불필요. Cloudflare Workers로 5분마다 갱신.
+
 ## 주요 기능
 
 - **실시간 상태 모니터링** — 31개 AI 서비스의 정상 / 성능 저하 / 장애 상태
@@ -344,7 +348,7 @@ worker/
 
 ## 기여하기
 
-자세한 가이드는 [CONTRIBUTING.md](.github/CONTRIBUTING.md)를 참고하세요.
+자세한 가이드는 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고하세요.
 
 1. 레포지토리 포크
 2. 기능 브랜치 생성 (`git checkout -b feature/my-feature`)
