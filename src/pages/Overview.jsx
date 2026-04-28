@@ -10,6 +10,7 @@ import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
 import { SCORE_BG_CLASS, SERVICE_CATEGORIES, EXCLUDE_FALLBACK, API_TIER, getFallbacks } from '../utils/constants'
 import { buildCalendarFromIncidents } from '../utils/calendar'
+import { compareIncidents } from '../utils/incidentSort'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
 import StatusPill from '../components/StatusPill'
@@ -491,12 +492,7 @@ export default function Overview() {
   }
   const recentIncidents = [...incMap.values()]
     .filter((inc) => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= sevenDaysAgo)
-    .sort((a, b) => {
-      const aActive = a.status !== 'resolved' ? 1 : 0
-      const bActive = b.status !== 'resolved' ? 1 : 0
-      if (aActive !== bActive) return bActive - aActive
-      return new Date(b.startedAt) - new Date(a.startedAt)
-    })
+    .sort(compareIncidents)
     .slice(0, 5)
 
   const withLatency = catServices.filter((s) => s.latency != null)

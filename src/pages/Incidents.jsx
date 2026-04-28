@@ -8,6 +8,7 @@ import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { formatDate } from '../utils/time'
 import { groupIncidents } from '../utils/incidentGrouping'
+import { STATUS_PRIORITY, getResolvedTime, compareIncidents } from '../utils/incidentSort'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
 import IncidentTimeline from '../components/IncidentTimeline'
 import EmptyState from '../components/EmptyState'
@@ -36,31 +37,11 @@ const PERIODS = [7, 30, 90]
 const TABLE_COLS = ['col.time', 'col.title', 'col.service', 'col.duration', 'col.status']
 
 // ── Helpers ──────────────────────────────────────────────────
-
-/** Status group priority: investigating/identified → monitoring → resolved */
-const STATUS_PRIORITY = { ongoing: 0, monitoring: 1, resolved: 2 }
-
-/** Get resolved time: resolvedAt field, or last resolved timeline entry, or null */
-function getResolvedTime(inc) {
-  if (inc.resolvedAt) return inc.resolvedAt
-  const tl = inc.timeline ?? []
-  const resolvedEntry = [...tl].reverse().find(t => t.stage === 'resolved')
-  return resolvedEntry?.at ?? null
-}
+// STATUS_PRIORITY / getResolvedTime / getLatestActivity / compareIncidents
+// live in src/utils/incidentSort.js — shared with Overview "Recent Incidents".
 
 /** Last element of array (ES5-safe) */
 function last(arr) { return arr && arr.length > 0 ? arr[arr.length - 1] : undefined }
-
-/** Get the most recent activity time for sorting */
-function getLatestActivity(inc) {
-  if (inc.status === 'resolved') {
-    const resolved = getResolvedTime(inc)
-    if (resolved) return new Date(resolved).getTime()
-  }
-  const lastTimeline = last(inc.timeline)
-  if (lastTimeline?.at) return new Date(lastTimeline.at).getTime()
-  return new Date(inc.startedAt).getTime()
-}
 
 /** Get contextual timestamp label and date based on status */
 function getContextualTime(inc, t) {
@@ -413,14 +394,7 @@ export default function Incidents() {
       .filter((inc) => serviceFilter === 'all' || inc.serviceId === serviceFilter)
       .filter((inc) => statusFilter  === 'all' || inc.status    === statusFilter)
       .filter((inc) => !cutoff || inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= cutoff)
-      .sort((a, b) => {
-        // Priority 1: status group (ongoing → monitoring → resolved)
-        const aPri = STATUS_PRIORITY[a.status] ?? 2
-        const bPri = STATUS_PRIORITY[b.status] ?? 2
-        if (aPri !== bPri) return aPri - bPri
-        // Priority 2: most recent activity (timeline last update, resolvedAt, or startedAt)
-        return getLatestActivity(b) - getLatestActivity(a)
-      })
+      .sort(compareIncidents)
   }, [allIncidents, serviceFilter, statusFilter, period])
 
   // groupIncidents re-sorts purely by date — re-apply STATUS_PRIORITY so ongoing
