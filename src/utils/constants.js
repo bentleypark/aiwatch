@@ -22,7 +22,7 @@ export const API_SERVICE_IDS = [
 export const APP_SERVICE_IDS = ['claudeai', 'chatgpt', 'characterai']
 
 // Coding agents
-export const AGENT_SERVICE_IDS = ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf']
+export const AGENT_SERVICE_IDS = ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie']
 
 // Display order: app → LLM → voice → inference → agent
 export const SERVICE_AND_APP_IDS = [
@@ -46,7 +46,7 @@ export const SERVICE_CATEGORIES = {
   apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai'] },
   llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
   inference: { labelKey: 'filter.inference', ids: ['elevenlabs', 'assemblyai', 'deepgram', 'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal'] },
-  agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf'] },
+  agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'] },
 }
 
 // Services excluded from fallback recommendations (not interchangeable with LLM APIs)

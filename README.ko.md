@@ -12,7 +12,7 @@
 
 [English](README.md) | **한국어**
 
-**31개 AI 서비스**의 상태, 지연시간, 가동률, 인시던트를 실시간으로 모니터링하는 대시보드입니다.
+**32개 AI 서비스**의 상태, 지연시간, 가동률, 인시던트를 실시간으로 모니터링하는 대시보드입니다.
 
 **[대시보드](https://ai-watch.dev)** · **[랜딩 페이지](https://ai-watch.dev/intro)**
 
@@ -26,7 +26,7 @@
 
 ## 주요 기능
 
-- **실시간 상태 모니터링** — 31개 AI 서비스의 정상 / 성능 저하 / 장애 상태
+- **실시간 상태 모니터링** — 32개 AI 서비스의 정상 / 성능 저하 / 장애 상태
 - **PWA 지원** — 홈 화면 추가, Service Worker 오프라인 캐시
 - **지연시간 측정** — 19개 probe 대상 서비스의 API 엔드포인트 직접 RTT 측정, 나머지는 상태 페이지 응답 시간
 - **24시간 지연시간 추세** — Chart.js 라인 차트 (5분 간격 probe 스냅샷)
@@ -273,16 +273,16 @@ README, 문서, 블로그에 실시간 상태 배지를 임베드할 수 있습�
 | `mistral` | Mistral API | `copilot` | GitHub Copilot |
 | `cohere` | Cohere API | `cursor` | Cursor |
 | `groq` | Groq Cloud | `windsurf` | Windsurf |
-| `together` | Together AI | `deepseek` | DeepSeek API |
+| `together` | Together AI | `junie` | Junie |
+| `fireworks` | Fireworks AI | `deepseek` | DeepSeek API |
 | `perplexity` | Perplexity | `xai` | xAI (Grok) |
 | `huggingface` | Hugging Face | `replicate` | Replicate |
 | `elevenlabs` | ElevenLabs | `openrouter` | OpenRouter |
 | `bedrock` | Amazon Bedrock | `pinecone` | Pinecone |
 | `azureopenai` | Azure OpenAI | `stability` | Stability AI |
 | `assemblyai` | AssemblyAI | `deepgram` | Deepgram |
-| `characterai` | Character.AI | `fireworks` | Fireworks AI |
-| `voyageai` | Voyage AI | `modal` | Modal |
-| `codex` | Codex | | |
+| `characterai` | Character.AI | `modal` | Modal |
+| `voyageai` | Voyage AI | `codex` | Codex |
 
 ## 프로젝트 구조
 

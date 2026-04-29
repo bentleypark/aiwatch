@@ -72,6 +72,7 @@ const STATUS_URL = {
   copilot:     'https://githubstatus.com',
   cursor:      'https://status.cursor.com',
   windsurf:    'https://status.windsurf.com',
+  junie:       'https://status.jetbrains.ai',
   codex:       'https://status.openai.com',
 }
 

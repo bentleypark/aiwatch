@@ -13,7 +13,7 @@
 
 **English** | [한국어](README.ko.md)
 
-Real-time monitoring dashboard for **31 AI services** — track status, latency, uptime, and incidents across major AI providers.
+Real-time monitoring dashboard for **32 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[Dashboard](https://ai-watch.dev)** · **[Landing Page](https://ai-watch.dev/intro)**
 
@@ -27,7 +27,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 ## Features
 
-- **Real-time status** — Operational / Degraded / Down for 31 AI services
+- **Real-time status** — Operational / Degraded / Down for 32 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
 - **Latency monitoring** — Direct API endpoint response time (RTT) for 19 probe-capable services, status page timing as fallback
 - **24h latency trend** — Chart.js line chart with 5-min probe snapshots
@@ -274,16 +274,16 @@ Embed real-time status badges in your README, docs, or blog.
 | `mistral` | Mistral API | `copilot` | GitHub Copilot |
 | `cohere` | Cohere API | `cursor` | Cursor |
 | `groq` | Groq Cloud | `windsurf` | Windsurf |
-| `together` | Together AI | `deepseek` | DeepSeek API |
+| `together` | Together AI | `junie` | Junie |
+| `fireworks` | Fireworks AI | `deepseek` | DeepSeek API |
 | `perplexity` | Perplexity | `xai` | xAI (Grok) |
 | `huggingface` | Hugging Face | `replicate` | Replicate |
 | `elevenlabs` | ElevenLabs | `openrouter` | OpenRouter |
 | `bedrock` | Amazon Bedrock | `pinecone` | Pinecone |
 | `azureopenai` | Azure OpenAI | `stability` | Stability AI |
 | `assemblyai` | AssemblyAI | `deepgram` | Deepgram |
-| `characterai` | Character.AI | `fireworks` | Fireworks AI |
-| `voyageai` | Voyage AI | `modal` | Modal |
-| `codex` | Codex | | |
+| `characterai` | Character.AI | `modal` | Modal |
+| `voyageai` | Voyage AI | `codex` | Codex |
 
 ## Project Structure
 
