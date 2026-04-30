@@ -127,7 +127,18 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
   const { incidentKeywords, incidentExclude } = config
   return incidents.filter((inc) => {
     const title = inc.title.toLowerCase()
-    if (incidentExclude?.some((kw) => title.includes(kw.toLowerCase()))) return false
+    if (incidentExclude?.some((kw) => title.includes(kw.toLowerCase()))) {
+      // Bypass exclude when the incident explicitly lists this service's component.
+      // Prevents e.g. "claude.ai and API unavailable" from being dropped from the
+      // Claude API service just because the title matches the 'claude.ai' exclude
+      // pattern (#357).
+      if (config.statusComponent) {
+        const compLower = config.statusComponent.toLowerCase()
+        const incCompNames = (inc.componentNames ?? []).map((n) => n.toLowerCase())
+        if (incCompNames.some((n) => n.startsWith(compLower))) return true
+      }
+      return false
+    }
     // aistudio incidents are component-filtered at the parser (components: [API])
     // so the keyword filter — designed to disambiguate the shared gcloud Vertex
     // feed — doesn't apply and would drop legitimate Gemini events whose titles
