@@ -8,7 +8,7 @@ import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { formatDate } from '../utils/time'
 import { groupIncidents } from '../utils/incidentGrouping'
-import { STATUS_PRIORITY, getResolvedTime, compareIncidents } from '../utils/incidentSort'
+import { STATUS_PRIORITY, getResolvedTime, compareIncidents, dominantGroupStatus, sumGroupDuration, formatDurationMs } from '../utils/incidentSort'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
 import IncidentTimeline from '../components/IncidentTimeline'
 import EmptyState from '../components/EmptyState'
@@ -201,15 +201,19 @@ function IncidentCard({ incident, isSelected, onClick, onClose, t, lang }) {
 // Desktop group row (collapsed): single grid row with [×N flaps] badge; click toggles entries.
 // Entries render as ordinary IncidentRows below in their own rowgroup.
 function IncidentGroupRow({ group, expanded, onToggle, selectedId, onSelect, onClose, t, lang }) {
-  const dominantStatus = group.uniformStatus
-    ? Object.keys(group.statusCounts)[0]
-    : (['ongoing', 'monitoring', 'resolved'].find(s => group.statusCounts[s]) ?? 'resolved')
+  const dominantStatus = dominantGroupStatus(group)
   const statusCls = STATUS_BADGE_CLASS[dominantStatus] ?? STATUS_BADGE_CLASS.resolved
   const statusLabel = group.uniformStatus
     ? t('incidents.group.statusUniform').replace('{status}', t(`incidents.status.${dominantStatus}`).toLowerCase())
     : Object.entries(group.statusCounts).map(([s, n]) => `${n} ${t(`incidents.status.${s}`).toLowerCase()}`).join(' · ')
   const firstEntry = group.entries[0]
   const serviceLabel = firstEntry.affectedNames?.length > 1 ? firstEntry.affectedNames.join(', ') : firstEntry.serviceName
+  const summed = sumGroupDuration(group)
+  const durationLabel = summed.resolvedCount === 0 && summed.hasOngoing
+    ? t('incidents.duration.ongoing')
+    : summed.hasOngoing
+      ? `${formatDurationMs(summed.totalMs)} + ${t('incidents.duration.ongoing')}`
+      : formatDurationMs(summed.totalMs)
   return (
     <>
       <div
@@ -226,7 +230,6 @@ function IncidentGroupRow({ group, expanded, onToggle, selectedId, onSelect, onC
           {formatDate(group.rangeStart, lang)} → {formatDate(group.rangeEnd, lang)}
         </span>
         <div role="cell" className="flex items-center gap-2 min-w-0">
-          <span className="text-[9px] text-[var(--text2)]" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
           <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text0)' }} className="truncate">{group.normalizedTitle}</span>
           <span
             className="shrink-0 mono text-[var(--text2)] bg-[var(--bg2)]"
@@ -234,9 +237,10 @@ function IncidentGroupRow({ group, expanded, onToggle, selectedId, onSelect, onC
           >
             {t('incidents.group.flaps').replace('{n}', String(group.count))}
           </span>
+          <span className="shrink-0 text-[var(--text2)]" style={{ fontSize: '11px' }} aria-hidden="true">{expanded ? '▾' : '▸'}</span>
         </div>
         <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text1)' }}>{serviceLabel}</span>
-        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>—</span>
+        <span role="cell" className="mono" style={{ fontSize: '11px', color: 'var(--text2)' }}>{durationLabel}</span>
         <span role="cell" className={`mono ${statusCls}`} style={{ fontSize: '9px', letterSpacing: '0.04em', padding: '2px 6px', borderRadius: '3px', justifySelf: 'start' }}>
           {statusLabel}
         </span>
@@ -264,14 +268,18 @@ function IncidentGroupRow({ group, expanded, onToggle, selectedId, onSelect, onC
 }
 
 function IncidentGroupCard({ group, expanded, onToggle, selectedId, onSelect, onClose, t, lang }) {
-  const dominantStatus = group.uniformStatus
-    ? Object.keys(group.statusCounts)[0]
-    : (['ongoing', 'monitoring', 'resolved'].find(s => group.statusCounts[s]) ?? 'resolved')
+  const dominantStatus = dominantGroupStatus(group)
   const statusLabel = group.uniformStatus
     ? t('incidents.group.statusUniform').replace('{status}', t(`incidents.status.${dominantStatus}`).toLowerCase())
     : Object.entries(group.statusCounts).map(([s, n]) => `${n} ${t(`incidents.status.${s}`).toLowerCase()}`).join(' · ')
   const firstEntry = group.entries[0]
   const serviceLabel = firstEntry.affectedNames?.length > 1 ? firstEntry.affectedNames.join(', ') : firstEntry.serviceName
+  const summed = sumGroupDuration(group)
+  const durationLabel = summed.resolvedCount === 0 && summed.hasOngoing
+    ? t('incidents.duration.ongoing')
+    : summed.hasOngoing
+      ? `${formatDurationMs(summed.totalMs)} + ${t('incidents.duration.ongoing')}`
+      : formatDurationMs(summed.totalMs)
   return (
     <div>
       <button
@@ -299,8 +307,10 @@ function IncidentGroupCard({ group, expanded, onToggle, selectedId, onSelect, on
           <span>·</span>
           <span>{serviceLabel}</span>
           <span>·</span>
+          <span>{durationLabel}</span>
+          <span>·</span>
           <span>{statusLabel}</span>
-          <span className="ml-auto text-[var(--text2)]" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+          <span className="text-[var(--text2)]" style={{ marginLeft: 'auto' }} aria-hidden="true">{expanded ? '▾' : '▸'}</span>
         </div>
       </button>
       {expanded && (
@@ -402,9 +412,7 @@ export default function Incidents() {
   // newest-first ordering within the same status is preserved.
   const grouped = useMemo(() => {
     const rows = groupIncidents(filtered)
-    const statusOf = (r) => r.kind === 'single'
-      ? r.incident.status
-      : (['ongoing', 'monitoring', 'resolved'].find(s => r.statusCounts[s]) ?? 'resolved')
+    const statusOf = (r) => r.kind === 'single' ? r.incident.status : dominantGroupStatus(r)
     return rows.slice().sort((a, b) => (STATUS_PRIORITY[statusOf(a)] ?? 2) - (STATUS_PRIORITY[statusOf(b)] ?? 2))
   }, [filtered])
 
