@@ -1,9 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
   STATUS_PRIORITY,
+  STATUS_ORDER,
   getResolvedTime,
   getLatestActivity,
   compareIncidents,
+  dominantGroupStatus,
+  formatDurationMs,
+  sumGroupDuration,
 } from '../incidentSort'
 
 function makeIncident({
@@ -194,5 +198,217 @@ describe('compareIncidents', () => {
       '5-resolved-recent',    // resolved tier, latest resolved
       '1-resolved-old',       // resolved tier, older
     ])
+  })
+})
+
+describe('STATUS_ORDER', () => {
+  it('puts ongoing first, then raw worker statuses in priority order', () => {
+    // STATUS_ORDER must include BOTH the normalized 'ongoing' alias used by
+    // Incidents.jsx (which collapses investigating/identified→ongoing before
+    // grouping) AND the raw worker statuses used by ServiceDetails.jsx (which
+    // does not pre-normalize). Putting 'ongoing' first lets the normalized
+    // path resolve correctly, while the raw-status path still falls through
+    // to investigating/identified when 'ongoing' is absent from statusCounts.
+    expect(STATUS_ORDER).toEqual(['ongoing', 'investigating', 'identified', 'monitoring', 'resolved'])
+  })
+})
+
+describe('dominantGroupStatus', () => {
+  it('returns the only key when group is uniform', () => {
+    const group = { uniformStatus: true, statusCounts: { investigating: 4 } }
+    expect(dominantGroupStatus(group)).toBe('investigating')
+  })
+
+  it('picks ongoing for the normalized Incidents.jsx shape (regression for #355)', () => {
+    // Incidents.jsx normalizes inc.status → 'ongoing' | 'monitoring' | 'resolved'
+    // before grouping, so production statusCounts keys for that page are exactly
+    // {ongoing, monitoring, resolved}. Pre-fix: a STATUS_ORDER without 'ongoing'
+    // dropped this case to the resolved tier with a green badge.
+    const group = {
+      uniformStatus: false,
+      statusCounts: { ongoing: 2, resolved: 5 },
+    }
+    expect(dominantGroupStatus(group)).toBe('ongoing')
+  })
+
+  it('picks investigating for the raw-status ServiceDetails.jsx shape', () => {
+    // ServiceDetails.jsx does NOT normalize before grouping, so its statusCounts
+    // keys are raw worker statuses (investigating/identified/monitoring/resolved).
+    // 'ongoing' is absent — find() must fall through to 'investigating'.
+    const group = {
+      uniformStatus: false,
+      statusCounts: { investigating: 2, monitoring: 1, resolved: 5 },
+    }
+    expect(dominantGroupStatus(group)).toBe('investigating')
+  })
+
+  it('picks identified over monitoring + resolved', () => {
+    const group = {
+      uniformStatus: false,
+      statusCounts: { identified: 1, monitoring: 3, resolved: 10 },
+    }
+    expect(dominantGroupStatus(group)).toBe('identified')
+  })
+
+  it('picks investigating over identified (priority order matches STATUS_ORDER)', () => {
+    const group = {
+      uniformStatus: false,
+      statusCounts: { investigating: 1, identified: 1 },
+    }
+    expect(dominantGroupStatus(group)).toBe('investigating')
+  })
+
+  it('falls back to resolved when group has only resolved entries', () => {
+    const group = {
+      uniformStatus: false,
+      statusCounts: { resolved: 5 },
+    }
+    expect(dominantGroupStatus(group)).toBe('resolved')
+  })
+
+  it('falls back to resolved on empty statusCounts (defensive)', () => {
+    const group = { uniformStatus: false, statusCounts: {} }
+    expect(dominantGroupStatus(group)).toBe('resolved')
+  })
+
+  it('integrates with STATUS_PRIORITY so a mostly-investigating group sorts above mostly-resolved', () => {
+    const investigatingGroup = {
+      uniformStatus: false,
+      statusCounts: { investigating: 1, resolved: 8 },
+    }
+    const resolvedGroup = {
+      uniformStatus: false,
+      statusCounts: { monitoring: 1, resolved: 8 },
+    }
+    expect(STATUS_PRIORITY[dominantGroupStatus(investigatingGroup)])
+      .toBeLessThan(STATUS_PRIORITY[dominantGroupStatus(resolvedGroup)])
+  })
+
+  it('integrates with STATUS_PRIORITY for the normalized Incidents.jsx shape (#355 regression)', () => {
+    // The actual production case for Incidents.jsx — a flap group with normalized
+    // 'ongoing' + 'resolved' entries must sort above a resolved-only group.
+    const ongoingGroup = {
+      uniformStatus: false,
+      statusCounts: { ongoing: 2, resolved: 5 },
+    }
+    const resolvedGroup = {
+      uniformStatus: false,
+      statusCounts: { resolved: 8 },
+    }
+    expect(STATUS_PRIORITY[dominantGroupStatus(ongoingGroup)])
+      .toBeLessThan(STATUS_PRIORITY[dominantGroupStatus(resolvedGroup)])
+  })
+})
+
+describe('formatDurationMs', () => {
+  it('renders sub-minute durations as 1m (round up, mirrors worker formatDuration)', () => {
+    expect(formatDurationMs(0)).toBe('1m')
+    expect(formatDurationMs(30_000)).toBe('1m')
+  })
+
+  it('renders minutes-only durations without hour prefix', () => {
+    expect(formatDurationMs(31 * 60_000)).toBe('31m')
+    expect(formatDurationMs(59 * 60_000)).toBe('59m')
+  })
+
+  it('renders hours-and-minutes for durations >= 1h', () => {
+    expect(formatDurationMs(60 * 60_000)).toBe('1h 0m')
+    expect(formatDurationMs(125 * 60_000)).toBe('2h 5m')
+  })
+
+  it('rounds partial minutes up (Math.ceil) to match worker', () => {
+    // 30s30ms → 1m, 60s30ms → 2m, etc. — same rounding as worker formatDuration
+    expect(formatDurationMs(30_500)).toBe('1m')
+    expect(formatDurationMs(60_500)).toBe('2m')
+  })
+
+  it('matches worker formatDuration output bit-for-bit (cross-language parity lock-in)', async () => {
+    // formatDurationMs and worker/src/utils.ts:formatDuration are sibling impls
+    // that MUST produce identical output for the same elapsed ms — group totals
+    // on the dashboard otherwise drift from per-incident `duration` strings the
+    // worker emits. This test imports the worker function and asserts equality
+    // across boundary inputs (sub-minute, minute boundaries, hour rollover,
+    // partial-minute round-up). Catches silent drift if either side migrates
+    // rounding (Math.ceil → Math.round, etc.) without updating the other.
+    const { formatDuration } = await import('../../../worker/src/utils')
+    const fixtures = [0, 1, 30_000, 60_000, 60_001, 60_500, 90_000, 120_000, 30 * 60_000, 59 * 60_000, 60 * 60_000, 125 * 60_000, 180 * 60_000]
+    for (const ms of fixtures) {
+      const epoch0 = new Date(0)
+      const later = new Date(ms)
+      expect(formatDurationMs(ms)).toBe(formatDuration(epoch0, later))
+    }
+  })
+})
+
+describe('sumGroupDuration', () => {
+  const start = (iso) => new Date(iso).toISOString()
+
+  it('sums durations across all resolved entries', () => {
+    const group = {
+      entries: [
+        { startedAt: start('2026-04-30T01:00:00Z'), resolvedAt: start('2026-04-30T01:10:00Z') },
+        { startedAt: start('2026-04-30T02:00:00Z'), resolvedAt: start('2026-04-30T02:30:00Z') },
+        { startedAt: start('2026-04-30T03:00:00Z'), resolvedAt: start('2026-04-30T03:05:00Z') },
+      ],
+    }
+    const result = sumGroupDuration(group)
+    expect(result.totalMs).toBe(45 * 60_000)
+    expect(result.hasOngoing).toBe(false)
+    expect(result.resolvedCount).toBe(3)
+    expect(formatDurationMs(result.totalMs)).toBe('45m')
+  })
+
+  it('flags hasOngoing when an entry is missing resolvedAt', () => {
+    const group = {
+      entries: [
+        { startedAt: start('2026-04-30T01:00:00Z'), resolvedAt: start('2026-04-30T01:10:00Z') },
+        { startedAt: start('2026-04-30T02:00:00Z') }, // ongoing
+      ],
+    }
+    const result = sumGroupDuration(group)
+    expect(result.totalMs).toBe(10 * 60_000)
+    expect(result.hasOngoing).toBe(true)
+    expect(result.resolvedCount).toBe(1)
+  })
+
+  it('returns zero totalMs and hasOngoing=false for empty entries (defensive)', () => {
+    const result = sumGroupDuration({ entries: [] })
+    expect(result.totalMs).toBe(0)
+    expect(result.hasOngoing).toBe(false)
+    expect(result.resolvedCount).toBe(0)
+  })
+
+  it('treats missing entries field as empty (defensive)', () => {
+    const result = sumGroupDuration({})
+    expect(result.totalMs).toBe(0)
+    expect(result.resolvedCount).toBe(0)
+  })
+
+  it('skips entries with end <= start (treats as ongoing)', () => {
+    // Malformed payload: resolvedAt earlier than startedAt — must not produce
+    // negative ms or crash. Treated as ongoing so the sum stays a lower bound.
+    const group = {
+      entries: [
+        { startedAt: start('2026-04-30T01:00:00Z'), resolvedAt: start('2026-04-30T00:50:00Z') },
+        { startedAt: start('2026-04-30T02:00:00Z'), resolvedAt: start('2026-04-30T02:15:00Z') },
+      ],
+    }
+    const result = sumGroupDuration(group)
+    expect(result.totalMs).toBe(15 * 60_000)
+    expect(result.hasOngoing).toBe(true)
+    expect(result.resolvedCount).toBe(1)
+  })
+
+  it('skips entries with invalid timestamps (treats as ongoing)', () => {
+    const group = {
+      entries: [
+        { startedAt: 'not-a-date', resolvedAt: start('2026-04-30T01:10:00Z') },
+        { startedAt: start('2026-04-30T02:00:00Z'), resolvedAt: start('2026-04-30T02:05:00Z') },
+      ],
+    }
+    const result = sumGroupDuration(group)
+    expect(result.totalMs).toBe(5 * 60_000)
+    expect(result.hasOngoing).toBe(true)
+    expect(result.resolvedCount).toBe(1)
   })
 })

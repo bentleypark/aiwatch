@@ -11,6 +11,7 @@ import { trackEvent } from '../utils/analytics'
 import { formatDate } from '../utils/time'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { groupIncidents } from '../utils/incidentGrouping'
+import { dominantGroupStatus } from '../utils/incidentSort'
 import { SCORE_TEXT_CLASS } from '../utils/constants'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
@@ -303,11 +304,7 @@ function IncidentRow({ incident, detectedAt, isRecentlyRecovered, t, lang }) {
 
 function IncidentGroupRow({ group, t, lang }) {
   const [expanded, setExpanded] = useState(false)
-  // BetterStack-flap groups are always null-impact; the visible status is whatever the entries
-  // share. When mixed, render the highest-priority status.
-  const dominantStatus = group.uniformStatus
-    ? Object.keys(group.statusCounts)[0]
-    : (['investigating', 'identified', 'monitoring', 'resolved'].find(s => group.statusCounts[s]))
+  const dominantStatus = dominantGroupStatus(group)
   const STATUS_CLS = {
     investigating: 'text-[var(--red)]',
     identified:    'text-[var(--red)]',
