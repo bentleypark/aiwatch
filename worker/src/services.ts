@@ -308,7 +308,40 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       }
 
       let filtered = filterIncidents(incidents, config)
-      filtered = includeUntaggedIncidents(filtered, incidents, config, summaryData.components ?? [], summaryData.status?.indicator ?? 'none')
+
+      // Compute svcStatus BEFORE includeUntaggedIncidents so the
+      // cross-contamination guard (#361) can suppress untagged-include for
+      // services on shared status pages whose keyword filter found nothing.
+      // Without this ordering, an untagged ChatGPT-only incident on
+      // status.openai.com leaks into Codex's filtered set: filterIncidents
+      // (correctly) drops it, then includeUntaggedIncidents adds it back
+      // because Codex has no statusComponent/Id and the page overall is
+      // non-operational. Computing svcStatus first lets the no-component
+      // branch detect the empty-filtered case and treat the service as
+      // operational, suppressing untagged-include entirely.
+      const svcStatus = (() => {
+        const overall = normalizeStatus(summaryData.status?.indicator ?? 'none')
+        if (!config.statusComponent && !config.statusComponentId) {
+          // No specific component — use overall, but if no relevant unresolved incidents
+          // matched after filtering, treat as operational (avoids cross-contamination
+          // from unrelated incidents, e.g., ChatGPT incident affecting OpenAI API status)
+          if (overall !== 'operational' && filtered.filter((i) => i.status !== 'resolved').length === 0) {
+            return 'operational'
+          }
+          return overall
+        }
+        const comp = config.statusComponent
+          ? summaryData.components?.find((c) => c.name.startsWith(config.statusComponent))
+          : summaryData.components?.find((c) => c.id === config.statusComponentId)
+        return comp ? normalizeStatus(comp.status) : overall
+      })()
+
+      // Only fall back to untagged-include when this service is genuinely
+      // non-operational. Operational services per the cross-contamination
+      // guard above cannot legitimately have untagged incidents to surface.
+      if (svcStatus !== 'operational') {
+        filtered = includeUntaggedIncidents(filtered, incidents, config, summaryData.components ?? [], summaryData.status?.indicator ?? 'none')
+      }
       if (config.incidentIoBaseUrl) {
         filtered = await enrichIncidentIoText(filtered, config.incidentIoBaseUrl, pageUrls, kv)
       }
@@ -345,26 +378,6 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         uptimeSrc = 'estimate'
       }
 
-      // Augment dailyImpact with ongoing incidents (source data only includes resolved)
-      // Only augment when service itself is non-operational (avoid marking calendar for
-      // unrelated incidents that passed through filters but don't affect this component)
-      const svcStatus = (() => {
-        const overall = normalizeStatus(summaryData.status?.indicator ?? 'none')
-        if (!config.statusComponent && !config.statusComponentId) {
-          // No specific component — use overall, but if no relevant unresolved incidents
-          // matched after filtering, treat as operational (avoids cross-contamination
-          // from unrelated incidents, e.g., ChatGPT incident affecting OpenAI API status)
-          if (overall !== 'operational' && filtered.filter((i) => i.status !== 'resolved').length === 0) {
-            return 'operational'
-          }
-          return overall
-        }
-        const comp = config.statusComponent
-          ? summaryData.components?.find((c) => c.name.startsWith(config.statusComponent))
-          : summaryData.components?.find((c) => c.id === config.statusComponentId)
-        return comp ? normalizeStatus(comp.status) : overall
-      })()
-
       // Filter out active incidents when component is operational (#228)
       filtered = filterByComponentStatus(filtered, svcStatus, config)
 
@@ -379,6 +392,9 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           await resetComponentMiss(kv, config.id)
         }
       }
+      // Augment dailyImpact with ongoing incidents (source data only includes resolved).
+      // Only when the service itself is non-operational, to avoid marking the calendar
+      // for unrelated incidents that survived the filters but don't affect this component.
       const augmentedImpact = dailyImpact ? { ...dailyImpact } : {}
       if (svcStatus !== 'operational') {
         for (const inc of filtered) {
