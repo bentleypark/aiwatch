@@ -96,6 +96,39 @@ describe('filterIncidents', () => {
     expect(filterIncidents(incidents, config)).toHaveLength(0)
   })
 
+  it('bypasses incidentExclude when incident explicitly lists this service component (#357)', () => {
+    // "claude.ai and API unavailable" should NOT be excluded from the Claude API service
+    // even though the title contains "claude.ai" (which is in incidentExclude).
+    const incident = mockIncident({
+      id: '2gf1jpyty350',
+      title: 'claude.ai and API unavailable',
+      componentNames: ['claude.ai', 'Claude Console', 'Claude API (api.anthropic.com)', 'Claude Code', 'Claude Cowork'],
+    })
+    const claudeApiConfig = mockConfig({
+      id: 'claude',
+      statusComponent: 'Claude API',
+      statusComponentId: 'k8w3r06qmzrp',
+      incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'],
+    })
+    expect(filterIncidents([incident], claudeApiConfig)).toHaveLength(1)
+  })
+
+  it('still excludes when title matches exclude and component does NOT list this service', () => {
+    // A claude.ai-only incident should still be excluded from the Claude API service.
+    const incident = mockIncident({
+      id: 'abc123',
+      title: 'claude.ai loading issues',
+      componentNames: ['claude.ai'],
+    })
+    const claudeApiConfig = mockConfig({
+      id: 'claude',
+      statusComponent: 'Claude API',
+      statusComponentId: 'k8w3r06qmzrp',
+      incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'],
+    })
+    expect(filterIncidents([incident], claudeApiConfig)).toHaveLength(0)
+  })
+
   it('OpenAI API excludes login incidents', () => {
     const incidents = [mockIncident({ title: 'Elevated Errors with Login' })]
     const config = mockConfig({
