@@ -923,6 +923,92 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
   return json(200, { ok: true, wrote: key, ttl, analysis })
 }
 
+// ── POST /api/admin/rebuild-archive ─────────────────────────────
+// Operator tool to regenerate a specific month's archive:monthly:{YYYY-MM} key.
+// Motivated by the discovery that earlier archive cron runs persisted score: null /
+// grade: null for every service because cacheWrite never stores those fields and
+// the cron read them straight from services:latest. The cron path is now fixed
+// (computes score inline via scoreFor + readProbeSummaries) but already-corrupt
+// archives (e.g. 2026-04) need a one-shot rebuild — the regular cron skips
+// when `existing` and there is no other write path.
+//
+// Score caveat: rebuilding uses the CURRENT live score (today's 7-day rolling
+// window) as a proxy for what should have been captured at archive-cron time.
+// Better than null, not as good as a real-time snapshot. Operator should rebuild
+// soon after detecting the issue, before the rolling window drifts further from
+// the archived month's reality.
+interface AdminRebuildArchiveRequest {
+  month?: unknown
+}
+
+async function handleAdminRebuildArchive(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+
+  if (!env.ADMIN_API_KEY) {
+    return json(401, { ok: false, error: 'unauthorized' })
+  }
+  const provided = request.headers.get('X-Admin-Key') ?? ''
+  if (!constantTimeEqual(provided, env.ADMIN_API_KEY)) {
+    return json(401, { ok: false, error: 'unauthorized' })
+  }
+
+  let body: AdminRebuildArchiveRequest
+  try { body = await request.json() } catch { return json(400, { ok: false, error: 'invalid JSON body' }) }
+
+  const month = typeof body.month === 'string' ? body.month : ''
+  // Strict YYYY-MM. Anything else is operator typo — fail loud rather than build the wrong key.
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    return json(400, { ok: false, error: 'month must be YYYY-MM' })
+  }
+  const [yearStr, monthStr] = month.split('-')
+  const year = Number(yearStr)
+  const monthNum = Number(monthStr)
+
+  // Compute scoreData via the same path the (fixed) cron now uses.
+  let scoreData: ArchiveScoreInput[] = []
+  const cachedRaw = await env.STATUS_CACHE.get(CACHE_KEY).catch(() => null)
+  if (cachedRaw) {
+    try {
+      const p = JSON.parse(cachedRaw)
+      const services: ServiceStatus[] = Array.isArray(p) ? p : (p.services ?? [])
+      const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'admin/rebuild-archive')
+      scoreData = services.map((s) => {
+        const r = scoreFor(s, probeSummaries)
+        return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade }
+      })
+    } catch (parseErr) {
+      console.error('[admin/rebuild-archive] services:latest parse failed:',
+        parseErr instanceof Error ? parseErr.message : parseErr)
+      // Continue with empty scoreData rather than fail — caller may want to rebuild
+      // even when the cache is unreadable, and uptime/incident data is still useful.
+    }
+  }
+
+  let archive
+  try {
+    archive = await buildMonthlyArchive(env.STATUS_CACHE, year, monthNum, scoreData)
+  } catch (err) {
+    return json(502, { ok: false, error: 'archive build failed', detail: err instanceof Error ? err.message : String(err) })
+  }
+
+  const archiveKey = `archive:monthly:${month}`
+  try {
+    await env.STATUS_CACHE.put(archiveKey, JSON.stringify(archive))
+  } catch (err) {
+    return json(502, { ok: false, error: 'KV write failed', detail: err instanceof Error ? err.message : String(err) })
+  }
+
+  return json(200, {
+    ok: true,
+    wrote: archiveKey,
+    period: archive.period,
+    services: Object.keys(archive.services).length,
+    daysCollected: archive.daysCollected,
+    servicesWithScore: scoreData.filter(s => s.aiwatchScore !== null).length,
+  })
+}
+
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     // Health check probing (Phase 2) — runs every cron cycle
@@ -1308,15 +1394,22 @@ export default {
       const existing = await env.STATUS_CACHE.get(archiveKey).catch(() => null)
       if (!existing) {
         try {
-          // Read latest cached services for Score data only (incidents come from accumulated KV data)
+          // Compute Score data inline from services:latest + probe:summaries.
+          // services:latest stores raw ServiceStatus only — aiwatchScore/scoreGrade
+          // are computed on-demand at /api/status response time via scoreFor(),
+          // never persisted to that cache. Reading the cache directly produced
+          // archive entries with score: null for every service — see #monthly-archive-score.
           let scoreData: ArchiveScoreInput[] = []
           const cachedRaw = await env.STATUS_CACHE.get('services:latest').catch(() => null)
           if (cachedRaw) {
             try {
               const p = JSON.parse(cachedRaw)
-              scoreData = (Array.isArray(p) ? p : p.services ?? []).map((s: any) => ({
-                id: s.id, aiwatchScore: s.aiwatchScore ?? null, scoreGrade: s.scoreGrade ?? null,
-              }))
+              const services: ServiceStatus[] = Array.isArray(p) ? p : (p.services ?? [])
+              const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'monthly-archive')
+              scoreData = services.map((s) => {
+                const r = scoreFor(s, probeSummaries)
+                return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade }
+              })
             } catch (parseErr) {
               console.error('[monthly-archive] Failed to parse services:latest — archive will lack Score data:',
                 parseErr instanceof Error ? parseErr.message : parseErr)
@@ -1639,6 +1732,13 @@ export default {
     // hand-editing a Node script + `wrangler kv key put --remote`, racing the cron.
     if (request.method === 'POST' && url.pathname === '/api/admin/analyze') {
       return handleAdminAnalyze(request, env, cors)
+    }
+
+    // POST /api/admin/rebuild-archive — operator tool to regenerate a specific month's
+    // archive:monthly:{YYYY-MM} after a bug-fix deploy. Cron only writes when the key
+    // doesn't exist; this endpoint unconditionally overwrites.
+    if (request.method === 'POST' && url.pathname === '/api/admin/rebuild-archive') {
+      return handleAdminRebuildArchive(request, env, cors)
     }
 
     // POST/DELETE /api/webhook/ping — track active webhook registrations (hashed, no raw URLs stored)

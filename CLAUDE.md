@@ -487,7 +487,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
     npm run deploy:worker
     ```
   - Verify the output says `Uploaded aiwatch-worker` (not `aiwatch`)
-  - Endpoints: `GET /api/status`, `GET /api/status/cached` (KV-only, includes probe24h, for SSR + initial load), `GET /api/uptime?days=30`, `GET /api/probe/history?days=30` (daily probe RTT summaries, 90d max), `GET /api/report?month=YYYY-MM` (monthly archive JSON, permanent), `POST /api/alert`, `POST /api/admin/analyze` (#299 — operator Sonnet override, `X-Admin-Key` required, sets `sticky: true` so cron doesn't auto-replace), `GET /badge/:serviceId`, `GET /api/og` (dynamic OG image PNG), `GET /api/v1/status`
+  - Endpoints: `GET /api/status`, `GET /api/status/cached` (KV-only, includes probe24h, for SSR + initial load), `GET /api/uptime?days=30`, `GET /api/probe/history?days=30` (daily probe RTT summaries, 90d max), `GET /api/report?month=YYYY-MM` (monthly archive JSON, permanent), `POST /api/alert`, `POST /api/admin/analyze` (operator Sonnet override, `X-Admin-Key` required, sets `sticky: true` so cron doesn't auto-replace), `POST /api/admin/rebuild-archive` (operator regenerate of `archive:monthly:{YYYY-MM}` after a bug-fix deploy, `X-Admin-Key` required), `GET /badge/:serviceId`, `GET /api/og` (dynamic OG image PNG), `GET /api/v1/status`
   - **Operator tools — `POST /api/admin/analyze` (#299)**: Force a Sonnet analysis on a specific active incident when the cron's default (Gemma-first) produced low-signal output. Motivated by the 2026-04-20 ChatGPT outage where Gemma called a systemic infra failure a "service availability issue". Before this endpoint the override required hand-editing a local Node script + `wrangler kv key put --remote`.
 
     ```bash
