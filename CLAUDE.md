@@ -285,6 +285,7 @@ When adding a new monitored service, update ALL of the following:
 | `vitals:history:{YYYY-MM-DD}` | `{ count, p75 }` JSON | 90d | 1 | Archived yesterday's vitals p75 summary |
 | `incidents:monthly:{YYYY-MM}` | `MonthlyIncidents` JSON | 60d | 1/day | Monthly incident accumulation (deduped by ID, updated in daily summary cron) |
 | `archive:monthly:{YYYY-MM}` | `MonthlyArchive` JSON | none (permanent) | 1/month | Monthly reliability snapshot (uptime, score, incidents, totalDowntimeMin, longestIncidentMin, avgResolutionMin, avgLatencyMs per service — downtime/longest fields surfaced from `incidents:monthly:*` before its 60d TTL lapses so aiwatch-reports#10 can render full Incident Summary columns; optional `security` summary from `security:monthly:{YYYY-MM}` snapshot — #290; OSV top findings also carry `timeline[]` from `security:timeline:osv:*` when available — #291) |
+| `archive:notified:{YYYY-MM}` | `"1"` | 60d | 1/month | Dedup marker for the "monthly archive ready" Discord ping that links to the `aiwatch-reports/generate-report.yml` workflow_dispatch page (aiwatch-reports#4). Written only after a successful send so a transient webhook failure on the 00:00 archive cycle retries on the 01:00 catch-up cycle. 60d TTL purely for dedup (archive itself is permanent) |
 | `security:timeline:osv:{vulnId}` | `OsvTimeline` JSON | none (permanent) | ~0-3/day | Per-alert OSV lifecycle tracking (#291). Entries: `detected` → `severity_changed` → `fix_released`. Written only on stage transitions by the hourly security cron, so steady-state KV writes are near zero. Archive reader attaches the entries to matching top findings |
 | `platform:status:{platformId}` | `PlatformStatus` JSON | 10min | ~288 | Status page platform health (metastatuspage.com for Atlassian) |
 | `alerted:platform:{platformId}` | `"1"` | 2h | ~1 | Platform outage alert dedup |
@@ -443,6 +444,7 @@ Cron Trigger (*/5 min)
   → daily summary at UTC 09:00 (KST 18:00) with alert count aggregation + Web Vitals p75 + Detection Lead audit log (24h sliding window from today + yesterday keys)
   → daily summary also accumulates incidents:monthly:{YYYY-MM} (dedup by incident ID, 60d TTL)
   → monthly archive on 1st of month (UTC 00:00) → aggregate history:* + probe:daily:* + incidents:monthly:* + security:monthly:* → archive:monthly:{YYYY-MM} (permanent)
+  → archive-ready Discord ping → links to `aiwatch-reports/generate-report.yml` workflow_dispatch so operator clicks "Run workflow" to open draft PR; dedup via archive:notified:{YYYY-MM} (aiwatch-reports#4)
   → changelog RSS/HTML collection (hourly at :00) → KV accumulate new entries from OpenAI/Google/Anthropic
   → security monitoring (hourly at :00) → HN Algolia + OSV.dev SDK vulnerability scan (24 AI SDK packages · two-phase: querybatch → KV dedup → per-vuln GET enrichment; #323/#325) → EPSS enrichment via GitHub Advisories (24h KV cache, #326) → Discord digest on findings
   → weekly briefing on Sunday UTC 00:00 (KST 09:00) → aggregate changelog + incidents + stability → Discord embed

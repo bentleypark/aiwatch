@@ -437,3 +437,57 @@ export function isInMonthlyArchiveWindow(
   if (!isNormal && !isCatchUp) return { inWindow: false, isCatchUp: false }
   return { inWindow: true, isCatchUp: !isNormal }
 }
+
+// ── Archive-ready Discord notification (aiwatch-reports#4) ───────────
+//
+// The aiwatch-reports `generate-report.yml` workflow is `workflow_dispatch`-only,
+// so operators have to remember to click "Run workflow" on the 1st. This hook fires
+// a one-shot Discord ping with the workflow URL the moment the monthly archive lands.
+
+export const REPORTS_WORKFLOW_URL =
+  'https://github.com/bentleypark/aiwatch-reports/actions/workflows/generate-report.yml'
+
+export function archiveNotifiedKey(period: string): string {
+  return `archive:notified:${period}`
+}
+
+/**
+ * Build the Discord embed for "monthly archive ready — go generate the draft" pings.
+ * Pure function for testability; the cron handler owns KV dedup + the send itself.
+ *
+ * `period` is the YYYY-MM covered by the archive (e.g. `"2026-04"` for April).
+ * Invalid periods fall back to the raw string so a malformed call still produces a
+ * readable embed rather than `"Invalid Date"`.
+ */
+export function buildArchiveReadyEmbed(
+  period: string,
+  serviceCount: number,
+  daysCollected: number,
+): { title: string; description: string; color: number } {
+  let monthLabel = period
+  const match = /^(\d{4})-(\d{2})$/.exec(period)
+  if (match) {
+    const y = Number(match[1])
+    const m = Number(match[2])
+    if (m >= 1 && m <= 12) {
+      monthLabel = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', {
+        month: 'long', year: 'numeric', timeZone: 'UTC',
+      })
+    }
+  }
+  const description = [
+    `**${monthLabel}** archive is now available in KV (\`archive:monthly:${period}\`).`,
+    ``,
+    `• Services: ${serviceCount}`,
+    `• Days collected: ${daysCollected}`,
+    ``,
+    `🚀 [**Generate report draft →**](${REPORTS_WORKFLOW_URL})`,
+    ``,
+    `*Click the link, press "Run workflow", enter month \`${period}\`, and a draft PR will open for review.*`,
+  ].join('\n')
+  return {
+    title: `📦 Monthly Archive Ready — ${period}`,
+    description,
+    color: 0x9B59B6, // purple — consistent with daily summary / monthly ops
+  }
+}
