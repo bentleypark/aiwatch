@@ -14,9 +14,11 @@ import {
   archiveNotifiedKey,
   REPORTS_WORKFLOW_URL,
   MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE,
+  summarizeDetectionLead,
 } from '../monthly-archive'
 import type { ServiceStatus } from '../types'
 import type { MonthlySecurityEntry, MonthlySecuritySummary } from '../monthly-archive'
+import type { DetectionLeadEntry } from '../detection-lead-log'
 import type { OsvTimeline } from '../security-monitor'
 
 // ── parseDurationMin ─────────────────────────────────────────────────
@@ -958,5 +960,188 @@ describe('buildArchiveReadyEmbed', () => {
   it('always embeds the archive KV key path for traceability', () => {
     const embed = buildArchiveReadyEmbed('2026-04', 31, 30)
     expect(embed.description).toContain('`archive:monthly:2026-04`')
+  })
+})
+
+// ── Phase 3: Detection-lead monthly summary (#369) ────────────────────
+
+function makeDetEntry(overrides: Partial<DetectionLeadEntry> = {}): DetectionLeadEntry {
+  // Helper that produces leadMs values consistent with detectedAt / officialAt so the
+  // entries pass isValidEntry checks. Default lead is 5 minutes; callers override leadMs
+  // and detectedAt together when they want a specific lead value.
+  const detectedAt = overrides.detectedAt ?? '2026-04-15T10:00:00.000Z'
+  const leadMs = overrides.leadMs ?? 5 * 60_000
+  const officialAt = overrides.officialAt ?? new Date(new Date(detectedAt).getTime() + leadMs).toISOString()
+  return {
+    svcId: 'claude',
+    incId: 'inc-1',
+    leadMs,
+    detectedAt,
+    officialAt,
+    ...overrides,
+  }
+}
+
+describe('summarizeDetectionLead', () => {
+  it('returns null on empty input — caller decides whether to surface field', () => {
+    expect(summarizeDetectionLead([])).toBeNull()
+  })
+
+  it('summarizes a single entry — count 1, all averages equal that entry', () => {
+    const entry = makeDetEntry({ svcId: 'gemini', incId: 'g1', leadMs: 8 * 60_000, detectedAt: '2026-04-10T10:00:00.000Z' })
+    const summary = summarizeDetectionLead([entry])!
+    expect(summary.count).toBe(1)
+    expect(summary.avgLeadMs).toBe(8 * 60_000)
+    expect(summary.medianLeadMs).toBe(8 * 60_000)
+    expect(summary.maxLeadMs).toBe(8 * 60_000)
+    expect(summary.byService).toEqual({ gemini: 1 })
+    expect(summary.topExamples).toHaveLength(1)
+    expect(summary.topExamples[0]).toEqual({ svcId: 'gemini', incId: 'g1', leadMs: 8 * 60_000, detectedAt: '2026-04-10T10:00:00.000Z' })
+  })
+
+  it('computes median for an odd count — middle value', () => {
+    const entries = [3, 5, 7].map((m, i) => makeDetEntry({ incId: `i${i}`, leadMs: m * 60_000 }))
+    expect(summarizeDetectionLead(entries)!.medianLeadMs).toBe(5 * 60_000)
+  })
+
+  it('computes median for an even count — average of two middle values', () => {
+    const entries = [2, 4, 6, 8].map((m, i) => makeDetEntry({ incId: `i${i}`, leadMs: m * 60_000 }))
+    // (4 + 6) / 2 = 5 minutes
+    expect(summarizeDetectionLead(entries)!.medianLeadMs).toBe(5 * 60_000)
+  })
+
+  it('aggregates byService correctly for mixed providers', () => {
+    const entries = [
+      makeDetEntry({ svcId: 'claude',  incId: 'c1', leadMs: 5 * 60_000 }),
+      makeDetEntry({ svcId: 'claude',  incId: 'c2', leadMs: 7 * 60_000 }),
+      makeDetEntry({ svcId: 'openai',  incId: 'o1', leadMs: 3 * 60_000 }),
+      makeDetEntry({ svcId: 'gemini',  incId: 'g1', leadMs: 12 * 60_000 }),
+    ]
+    const summary = summarizeDetectionLead(entries)!
+    expect(summary.byService).toEqual({ claude: 2, openai: 1, gemini: 1 })
+  })
+
+  it('caps topExamples at 5 even when more entries are present', () => {
+    const entries = Array.from({ length: 8 }, (_, i) =>
+      makeDetEntry({ incId: `i${i}`, leadMs: (10 - i) * 60_000 }), // 10m, 9m, 8m, ... 3m
+    )
+    const summary = summarizeDetectionLead(entries)!
+    expect(summary.count).toBe(8)
+    expect(summary.topExamples).toHaveLength(5)
+    // Sorted by leadMs desc — largest first
+    expect(summary.topExamples.map(e => e.leadMs)).toEqual([10, 9, 8, 7, 6].map(m => m * 60_000))
+  })
+
+  it('topExamples ties break on detectedAt desc — most recent wins', () => {
+    // Two entries with identical leadMs but different detectedAt — the recent one should sort first
+    const earlier = makeDetEntry({ incId: 'early', leadMs: 5 * 60_000, detectedAt: '2026-04-05T10:00:00.000Z' })
+    const later   = makeDetEntry({ incId: 'late',  leadMs: 5 * 60_000, detectedAt: '2026-04-25T10:00:00.000Z' })
+    const summary = summarizeDetectionLead([earlier, later])!
+    // First topExample is the later one
+    expect(summary.topExamples[0].incId).toBe('late')
+    expect(summary.topExamples[1].incId).toBe('early')
+  })
+
+  it('does not mutate the input array (defensive)', () => {
+    const entries = [
+      makeDetEntry({ incId: 'a', leadMs: 7 * 60_000 }),
+      makeDetEntry({ incId: 'b', leadMs: 3 * 60_000 }),
+    ]
+    const before = entries.map(e => e.incId)
+    summarizeDetectionLead(entries)
+    expect(entries.map(e => e.incId)).toEqual(before)
+  })
+
+  it('avgLeadMs is rounded to whole milliseconds (no NaN / no Infinity even for odd division)', () => {
+    // Three entries with non-integer-divisible sum: (1m + 2m + 4m) / 3 → not integer ms
+    const entries = [1, 2, 4].map((m, i) => makeDetEntry({ incId: `i${i}`, leadMs: m * 60_000 }))
+    const summary = summarizeDetectionLead(entries)!
+    expect(Number.isFinite(summary.avgLeadMs)).toBe(true)
+    expect(Number.isInteger(summary.avgLeadMs)).toBe(true)
+    // (60_000 + 120_000 + 240_000) / 3 = 140_000 — happens to round cleanly here
+    expect(summary.avgLeadMs).toBe(140_000)
+  })
+})
+
+describe('buildMonthlyArchive — detectionLead integration (#369)', () => {
+  function mkKv(initial: Record<string, string>) {
+    return {
+      get: async (key: string) => initial[key] ?? null,
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+  }
+
+  const baseEntry = (overrides: Partial<DetectionLeadEntry> = {}): DetectionLeadEntry => ({
+    svcId: 'claude', incId: 'c1', leadMs: 5 * 60_000,
+    detectedAt: '2026-04-15T10:00:00.000Z',
+    officialAt: '2026-04-15T10:05:00.000Z',
+    ...overrides,
+  })
+
+  it('attaches detectionLead summary when monthly accumulator has entries', async () => {
+    const period = '2026-04'
+    const kv = mkKv({
+      [`detection:lead:monthly:${period}`]: JSON.stringify([
+        baseEntry({ incId: 'c1', leadMs: 5 * 60_000 }),
+        baseEntry({ incId: 'c2', svcId: 'openai', leadMs: 9 * 60_000, detectedAt: '2026-04-20T10:00:00.000Z', officialAt: '2026-04-20T10:09:00.000Z' }),
+      ]),
+    })
+    const archive = await buildMonthlyArchive(kv, 2026, 4)
+    expect(archive.detectionLead).not.toBeNull()
+    expect(archive.detectionLead!.count).toBe(2)
+    expect(archive.detectionLead!.maxLeadMs).toBe(9 * 60_000)
+    expect(archive.detectionLead!.byService).toEqual({ claude: 1, openai: 1 })
+  })
+
+  it('attaches null when accumulator is missing', async () => {
+    const kv = mkKv({}) // no detection:lead:monthly key
+    const archive = await buildMonthlyArchive(kv, 2026, 4)
+    expect(archive.detectionLead).toBeNull()
+  })
+
+  it('attaches null when accumulator JSON is malformed (no archive crash)', async () => {
+    const kv = mkKv({
+      'detection:lead:monthly:2026-04': '{not valid json',
+    })
+    const archive = await buildMonthlyArchive(kv, 2026, 4)
+    expect(archive.detectionLead).toBeNull()
+  })
+
+  it('attaches null when accumulator is non-array (no archive crash)', async () => {
+    const kv = mkKv({
+      'detection:lead:monthly:2026-04': '{"not": "an array"}',
+    })
+    const archive = await buildMonthlyArchive(kv, 2026, 4)
+    expect(archive.detectionLead).toBeNull()
+  })
+
+  it('filters out malformed entries before summarizing — partial corruption survives', async () => {
+    // Mix: 1 valid, 2 invalid (missing svcId; leadMs negative). Summary should reflect only the valid one.
+    // Note: isValidEntry enforces (officialAt - detectedAt) ≈ leadMs within 1s, so timestamps must
+    // match the lead — "good" uses 6m apart to match leadMs: 6 * 60_000.
+    const kv = mkKv({
+      'detection:lead:monthly:2026-04': JSON.stringify([
+        baseEntry({ incId: 'good', leadMs: 6 * 60_000, officialAt: '2026-04-15T10:06:00.000Z' }),
+        { svcId: '', incId: 'bad-empty-svc', leadMs: 5 * 60_000, detectedAt: '2026-04-15T10:00:00.000Z', officialAt: '2026-04-15T10:05:00.000Z' },
+        { svcId: 'claude', incId: 'bad-neg', leadMs: -100, detectedAt: '2026-04-15T10:00:00.000Z', officialAt: '2026-04-15T10:05:00.000Z' },
+      ]),
+    })
+    const archive = await buildMonthlyArchive(kv, 2026, 4)
+    expect(archive.detectionLead).not.toBeNull()
+    expect(archive.detectionLead!.count).toBe(1)
+    expect(archive.detectionLead!.topExamples[0].incId).toBe('good')
+  })
+
+  it('reads the previous-month accumulator key based on the archive period (not "now")', async () => {
+    // Archive is being built for 2026-04 — must read detection:lead:monthly:2026-04, not :2026-05
+    const kv = mkKv({
+      'detection:lead:monthly:2026-04': JSON.stringify([baseEntry({ incId: 'apr', leadMs: 7 * 60_000, officialAt: '2026-04-15T10:07:00.000Z' })]),
+      'detection:lead:monthly:2026-05': JSON.stringify([baseEntry({ incId: 'may', leadMs: 11 * 60_000, detectedAt: '2026-05-15T10:00:00.000Z', officialAt: '2026-05-15T10:11:00.000Z' })]),
+    })
+    const archive = await buildMonthlyArchive(kv, 2026, 4)
+    expect(archive.detectionLead!.count).toBe(1)
+    expect(archive.detectionLead!.topExamples[0].incId).toBe('apr')
   })
 })

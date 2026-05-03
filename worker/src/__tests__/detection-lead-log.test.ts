@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, detectionLeadKey, computeLeadMs, type DetectionLeadEntry } from '../detection-lead-log'
+import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, detectionLeadKey, detectionLeadMonthlyKey, computeLeadMs, type DetectionLeadEntry } from '../detection-lead-log'
 
 function mockKV(store: Record<string, string> = {}) {
   return {
@@ -20,6 +20,17 @@ const sampleEntry: DetectionLeadEntry = {
 describe('detectionLeadKey', () => {
   it('produces YYYY-MM-DD scoped key', () => {
     expect(detectionLeadKey(fixedDate)).toBe('detection:lead:2026-04-18')
+  })
+})
+
+describe('detectionLeadMonthlyKey (#369)', () => {
+  it('produces YYYY-MM scoped key with zero-padded month', () => {
+    expect(detectionLeadMonthlyKey(fixedDate)).toBe('detection:lead:monthly:2026-04')
+  })
+
+  it('zero-pads single-digit months consistently with daily key', () => {
+    expect(detectionLeadMonthlyKey(new Date('2026-01-05T12:00:00Z'))).toBe('detection:lead:monthly:2026-01')
+    expect(detectionLeadMonthlyKey(new Date('2026-09-30T23:59:00Z'))).toBe('detection:lead:monthly:2026-09')
   })
 })
 
@@ -308,15 +319,21 @@ describe('getWithRetry (transient KV failure handling)', () => {
       }),
       put: vi.fn(),
     } as unknown as KVNamespace
-    // Successful retry → entry already in array → idempotent "duplicate" return (not "failed")
+    // Successful retry → entry already in array → idempotent "duplicate" return (not "failed").
+    // Three kv.get calls expected: 1 daily-throw + 1 daily-retry-success + 1 monthly-accumulator
+    // read (#369 dual-write — even on duplicate-daily we re-attempt monthly in case prior write
+    // dropped). Both daily and monthly accumulators in this fixture already have the entry, so
+    // kv.put is never reached.
     const result = await appendDetectionLead(kv, sampleEntry, fixedDate)
-    expect(calls).toBe(2)
+    expect(calls).toBe(3)
     expect(result).toBe('duplicate')
     expect(kv.put).not.toHaveBeenCalled()
   })
 
   it('isolates retry-success from idempotency: different entry → "persisted" via retry', async () => {
-    // Locks the retry-success behavior independently from the idempotent skip path
+    // Locks the retry-success behavior independently from the idempotent skip path.
+    // Three kv.get calls: 1 daily-throw + 1 daily-retry-success (returns null) + 1 monthly-read
+    // (returns null). Two kv.put: daily key + monthly accumulator (#369 dual-write).
     let calls = 0
     const store: Record<string, string> = {}
     const kv = {
@@ -328,7 +345,7 @@ describe('getWithRetry (transient KV failure handling)', () => {
       put: vi.fn(async (k: string, v: string) => { store[k] = v }),
     } as unknown as KVNamespace
     const result = await appendDetectionLead(kv, sampleEntry, fixedDate)
-    expect(calls).toBe(2)
+    expect(calls).toBe(3)
     expect(result).toBe('persisted')
     expect(kv.put).toHaveBeenCalled()
   })
@@ -342,6 +359,101 @@ describe('getWithRetry (transient KV failure handling)', () => {
     expect(kv.get).toHaveBeenCalledTimes(2)
     expect(result).toBe('failed')
     expect(kv.put).not.toHaveBeenCalled()
+  })
+})
+
+describe('appendDetectionLead — monthly accumulator dual-write (#369)', () => {
+  const dailyKey = `detection:lead:2026-04-18`
+  const monthlyKey = `detection:lead:monthly:2026-04`
+
+  it('dual-writes: persisted to daily AND to monthly accumulator on fresh entry', async () => {
+    const store: Record<string, string> = {}
+    const kv = mockKV(store)
+    const result = await appendDetectionLead(kv, sampleEntry, fixedDate)
+    expect(result).toBe('persisted')
+    expect(store[dailyKey]).toBeTruthy()
+    expect(store[monthlyKey]).toBeTruthy()
+    const monthlyEntries = JSON.parse(store[monthlyKey])
+    expect(monthlyEntries).toHaveLength(1)
+    expect(monthlyEntries[0].incId).toBe(sampleEntry.incId)
+  })
+
+  it('catch-up: duplicate-daily but missing monthly → still writes monthly', async () => {
+    // Simulates a previous run that persisted daily but failed monthly. Re-running with the same
+    // entry must populate the monthly accumulator without changing the daily AppendResult.
+    const store: Record<string, string> = {
+      [dailyKey]: JSON.stringify([sampleEntry]),
+      // monthly key intentionally absent
+    }
+    const kv = mockKV(store)
+    const result = await appendDetectionLead(kv, sampleEntry, fixedDate)
+    expect(result).toBe('duplicate')
+    expect(store[monthlyKey]).toBeTruthy()
+    const monthlyEntries = JSON.parse(store[monthlyKey])
+    expect(monthlyEntries).toHaveLength(1)
+    expect(monthlyEntries[0].incId).toBe(sampleEntry.incId)
+  })
+
+  it('idempotent on monthly: re-run when both daily AND monthly already have entry → no extra puts', async () => {
+    const store: Record<string, string> = {
+      [dailyKey]: JSON.stringify([sampleEntry]),
+      [monthlyKey]: JSON.stringify([sampleEntry]),
+    }
+    const kv = mockKV(store)
+    const result = await appendDetectionLead(kv, sampleEntry, fixedDate)
+    expect(result).toBe('duplicate')
+    // Both keys still hold exactly one entry — no double-counting
+    expect(JSON.parse(store[dailyKey])).toHaveLength(1)
+    expect(JSON.parse(store[monthlyKey])).toHaveLength(1)
+    expect(kv.put).not.toHaveBeenCalled()
+  })
+
+  it('monthly write failure does NOT regress daily AppendResult — stays "persisted"', async () => {
+    // Daily put succeeds; monthly put rejects. The contract is that the daily key (Discord
+    // source-of-truth) is preserved on monthly failure — the caller must see "persisted".
+    const store: Record<string, string> = {}
+    const kv = {
+      get: vi.fn(async (k: string) => store[k] ?? null),
+      put: vi.fn(async (k: string, v: string) => {
+        if (k === monthlyKey) throw new Error('simulated monthly KV write failure')
+        store[k] = v
+      }),
+    } as unknown as KVNamespace
+    const result = await appendDetectionLead(kv, sampleEntry, fixedDate)
+    expect(result).toBe('persisted')
+    expect(store[dailyKey]).toBeTruthy() // daily survived
+    expect(store[monthlyKey]).toBeUndefined() // monthly did not
+  })
+
+  it('monthly read failure on duplicate-daily path does NOT throw out of appendDetectionLead', async () => {
+    // The catch handler in the duplicate-daily path must absorb monthly read errors so the
+    // function still returns 'duplicate' cleanly rather than propagating.
+    const store: Record<string, string> = {
+      [dailyKey]: JSON.stringify([sampleEntry]),
+    }
+    const kv = {
+      get: vi.fn(async (k: string) => {
+        if (k === monthlyKey) throw new Error('persistent monthly read failure')
+        return store[k] ?? null
+      }),
+      put: vi.fn(async (k: string, v: string) => { store[k] = v }),
+    } as unknown as KVNamespace
+    const result = await appendDetectionLead(kv, sampleEntry, fixedDate)
+    expect(result).toBe('duplicate')
+  })
+
+  it('monthly accumulator non-array corruption is isolated — daily AppendResult unaffected', async () => {
+    // If the monthly key gets corrupted (manual edit, partial write), the helper throws and the
+    // caller's .catch absorbs it. Daily must still report the truth.
+    const store: Record<string, string> = {
+      [monthlyKey]: '{"not": "an array"}', // schema corruption
+    }
+    const kv = mockKV(store)
+    const result = await appendDetectionLead(kv, sampleEntry, fixedDate)
+    expect(result).toBe('persisted')
+    expect(store[dailyKey]).toBeTruthy()
+    // Monthly key was not overwritten — corruption isolation, not blind overwrite
+    expect(store[monthlyKey]).toBe('{"not": "an array"}')
   })
 })
 
