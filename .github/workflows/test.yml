@@ -16,6 +16,15 @@ on:
       - 'docs/**'
       - '.github/**/*.md'
 
+# Bound CI quota usage per branch / PR — a new push on the same head_ref
+# cancels the previous run instead of stacking. Mitigates abuse surface
+# after Vercel Git Fork Protection is disabled (#365). For push events,
+# github.head_ref is empty, so the fallback to github.ref keeps each main
+# push in its own group rather than collapsing them all together.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   unit:
     name: Worker Unit Tests
