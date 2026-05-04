@@ -126,10 +126,19 @@ export function computeMedianRtt(snapshots: ProbeSnapshot[], serviceId: string):
  * Check if a micro-incident is corroborated by probe data (RTT spike).
  * Returns true if the incident appears to be a real outage based on probe evidence.
  *
- * Logic: find probe snapshots within ±10 minutes of the incident window.
- * If any probe shows RTT > 3× median or a failed probe (rtt=-1), it's corroborated.
+ * Logic: find probe snapshots within ±20 minutes of the incident window.
+ * If any probe shows RTT > 1.5× median or a failed probe (rtt=-1), it's corroborated.
  * If no probes exist in the window, assume real (conservative — don't filter without evidence).
+ *
+ * Threshold tuning history (#372):
+ *   Original (#91 Phase 2, 2026-04-06): 3× / ±10m. 5/10 incidents corroborated at deploy time.
+ *   Retune (2026-05-04): 1.5× / ±20m. Original threshold dropped to 0/14 by May; data showed
+ *   real Mistral degradations only push RTT to ~2× baseline (not 3×). 1.5× restores ~57% pass rate
+ *   on the same data — a balance between filtering Checkly false-positives and over-filtering
+ *   genuine short outages. Long-term replacement: same-title incident grouping (#373).
  */
+export const PROBE_CORROBORATION_MULTIPLIER = 1.5
+export const PROBE_CORROBORATION_WINDOW_MS = 1_200_000 // ±20 minutes
 export function isCorroboratedByProbe(
   snapshots: ProbeSnapshot[],
   serviceId: string,
@@ -141,8 +150,8 @@ export function isCorroboratedByProbe(
     console.warn(`[isCorroboratedByProbe] no baseline RTT for ${serviceId}, assuming real`)
     return true
   }
-  const WINDOW_MS = 600_000 // ±10 minutes
-  const spikeThreshold = medianRtt * 3
+  const WINDOW_MS = PROBE_CORROBORATION_WINDOW_MS
+  const spikeThreshold = medianRtt * PROBE_CORROBORATION_MULTIPLIER
   const startMs = new Date(incidentStart).getTime()
   if (Number.isNaN(startMs)) {
     console.error(`[isCorroboratedByProbe] invalid incidentStart: "${incidentStart}"`)
