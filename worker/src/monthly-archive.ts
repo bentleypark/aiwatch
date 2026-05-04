@@ -13,6 +13,22 @@ import { osvTimelineKey } from './security-monitor'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
 
+/** Per-incident snapshot kept in the permanent monthly archive (#375).
+ *  Sourced from accumulated incidents:monthly:{period} at archive build time, before its
+ *  60d TTL lapses — so the archive becomes a long-window incident-list source for the
+ *  dashboard's 90-day filter when the upstream status pages only return ~5-30 days. */
+export interface MonthlyIncidentEntry {
+  id: string                     // status-page incident id (deduped during accumulation)
+  title: string
+  startedAt: string              // ISO
+  resolvedAt: string | null      // ISO; null if still open at archive time
+  durationMin: number            // last-known duration in minutes (0 if unresolved)
+  // Last-seen status from the most recent accumulation that touched this entry.
+  // Equals the resolution status once the incident is `resolved`; otherwise the most-recent
+  // in-progress state (`investigating` / `identified` / `monitoring`).
+  finalStatus: 'resolved' | 'monitoring' | 'investigating' | 'identified'
+}
+
 export interface MonthlyServiceData {
   uptime: number | null          // uptime% from daily counters (null if no data)
   score: number | null           // AIWatch Score at archive time (null if unavailable)
@@ -22,6 +38,11 @@ export interface MonthlyServiceData {
   totalDowntimeMin: number | null // sum of all incident durations for the month (null if no resolved incidents — unresolved durations are tracked as 0 upstream)
   longestIncidentMin: number | null // max single-incident duration for the month (null if no resolved incidents)
   avgLatencyMs: number | null    // average probe RTT p75 in ms (null if no probe data)
+  // Per-incident detail (#375). Capped at MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE to bound KV size;
+  // when the cap is hit, oldest entries are truncated (the most-recent-N policy keeps the
+  // dashboard's 30-90d filter useful even on high-frequency services like Together AI).
+  // Optional/null for archives written before this feature shipped — frontend must handle absence.
+  incidentList?: MonthlyIncidentEntry[]
 }
 
 export interface MonthlyArchive {
@@ -81,7 +102,18 @@ export interface MonthlyIncidentServiceData {
   dates: string[]                // unique affected dates (YYYY-MM-DD)
   incidentIds: string[]          // for dedup
   durations: Record<string, number> // incidentId → last known duration in minutes (for delta updates)
+  // Per-incident detail accumulated alongside the aggregates so the permanent archive
+  // can carry full incident lists past the upstream status-page response window (#375).
+  // Optional for backward compat with existing KV entries written before this field shipped.
+  incidents?: MonthlyIncidentEntry[]
 }
+
+/** Cap on incidents kept per service in the monthly accumulator (and thus in the archive).
+ *  Services emit at most ~140 incidents/month in observed data (Together AI 139 in April).
+ *  200 leaves headroom for outliers without inflating KV value size — at ~250B per entry
+ *  it caps each service at ~50KB, and the full archive at ~1.5MB even when every service
+ *  is at the cap. KV value limit is 25MB, so this is comfortable. */
+export const MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE = 200
 
 export interface MonthlyIncidents {
   lastUpdated: string
@@ -105,14 +137,16 @@ export function accumulateMonthlyIncidents(
     if (incidents.length === 0) continue
 
     if (!result.services[svc.id]) {
-      result.services[svc.id] = { count: 0, totalMinutes: 0, longestMinutes: 0, dates: [], incidentIds: [], durations: {} }
+      result.services[svc.id] = { count: 0, totalMinutes: 0, longestMinutes: 0, dates: [], incidentIds: [], durations: {}, incidents: [] }
     }
     const data = result.services[svc.id]
-    // Ensure durations map exists (backward compat with pre-durations data)
+    // Ensure durations + incidents map/array exist (backward compat with pre-feature data)
     if (!data.durations) data.durations = {}
+    if (!data.incidents) data.incidents = []
 
     for (const inc of incidents) {
       const dur = inc.duration ? parseDurationMin(inc.duration) : 0
+      const finalStatus = mapIncidentStatus(inc.status)
 
       if (data.incidentIds.includes(inc.id)) {
         // Update duration delta if incident resolved since last accumulation
@@ -121,6 +155,15 @@ export function accumulateMonthlyIncidents(
           data.totalMinutes += (dur - oldDur)
           data.durations[inc.id] = dur
           if (dur > data.longestMinutes) data.longestMinutes = dur
+        }
+        // Update detail entry (status / resolvedAt / durationMin) when the incident has progressed.
+        // This lets a still-open incident get its resolvedAt + final status snapshotted on a later
+        // accumulator run, without changing dedup behavior.
+        const existingDetail = data.incidents.find(e => e.id === inc.id)
+        if (existingDetail) {
+          existingDetail.durationMin = dur
+          existingDetail.finalStatus = finalStatus
+          existingDetail.resolvedAt = inc.resolvedAt ?? existingDetail.resolvedAt
         }
         continue
       }
@@ -131,13 +174,40 @@ export function accumulateMonthlyIncidents(
       data.count++
       data.totalMinutes += dur
       if (dur > data.longestMinutes) data.longestMinutes = dur
+      data.incidents.push({
+        id: inc.id,
+        title: inc.title,
+        startedAt: inc.startedAt,
+        resolvedAt: inc.resolvedAt ?? null,
+        durationMin: dur,
+        finalStatus,
+      })
 
       const date = inc.startedAt.slice(0, 10)
       if (!data.dates.includes(date)) data.dates.push(date)
     }
+
+    // Cap incident detail to the most-recent N (oldest dropped first). Aggregate fields
+    // (count / totalMinutes / longestMinutes) intentionally keep counting truncated entries
+    // — only the per-incident detail loses tail items when the cap binds. dedup state in
+    // incidentIds / durations is also preserved untruncated so a re-accumulation pass for an
+    // already-counted-but-truncated incident still updates its aggregate, just without
+    // re-adding it to the detail array.
+    if (data.incidents.length > MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE) {
+      data.incidents.sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+      data.incidents.splice(0, data.incidents.length - MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE)
+    }
   }
 
   return result
+}
+
+/** Map a runtime ServiceStatus.incidents[].status to the archive's finalStatus enum.
+ *  Defaults to 'investigating' when the upstream emits a value the archive doesn't
+ *  recognize (defensive against future status-page schema additions). */
+function mapIncidentStatus(s: Incident['status']): MonthlyIncidentEntry['finalStatus'] {
+  if (s === 'resolved' || s === 'monitoring' || s === 'identified' || s === 'investigating') return s
+  return 'investigating'
 }
 
 // ── Duration parsing ──────────────────────────────────────────────────
@@ -404,6 +474,13 @@ export async function buildMonthlyArchive(
     const totalDowntimeMin = incSvc && incSvc.totalMinutes > 0 ? incSvc.totalMinutes : null
     const longestIncidentMin = incSvc && incSvc.longestMinutes > 0 ? incSvc.longestMinutes : null
 
+    // Snapshot per-incident detail (#375) so the dashboard's 90-day filter can read it
+    // post-archive. accumulateMonthlyIncidents already enforces the per-service cap and
+    // dedup, so we just defensively-clone the array (avoids accidental mutation downstream).
+    const incidentList = incSvc?.incidents && incSvc.incidents.length > 0
+      ? incSvc.incidents.map(e => ({ ...e }))
+      : undefined
+
     services[id] = {
       uptime: uptimeMap[id] ?? null,
       score: scoreSvc?.aiwatchScore ?? null,
@@ -413,6 +490,7 @@ export async function buildMonthlyArchive(
       totalDowntimeMin,
       longestIncidentMin,
       avgLatencyMs: latencyMap[id] ?? null,
+      ...(incidentList ? { incidentList } : {}),
     }
   }
 

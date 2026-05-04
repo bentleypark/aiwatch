@@ -13,6 +13,7 @@ import {
   buildArchiveReadyEmbed,
   archiveNotifiedKey,
   REPORTS_WORKFLOW_URL,
+  MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE,
 } from '../monthly-archive'
 import type { ServiceStatus } from '../types'
 import type { MonthlySecurityEntry, MonthlySecuritySummary } from '../monthly-archive'
@@ -281,6 +282,106 @@ describe('accumulateMonthlyIncidents', () => {
     const second = accumulateMonthlyIncidents(first, services, '2026-04')
     expect(second.services.claude.totalMinutes).toBe(120) // unchanged
   })
+
+  // ── incident detail accumulation (#375) ─────────────────────────────
+
+  it('captures per-incident detail (title, timestamps, status) on new entries', () => {
+    const services = [
+      makeService('claude', [
+        { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '2h' },
+        { id: 'inc-2', startedAt: '2026-04-05T14:00:00Z', status: 'investigating', duration: null },
+      ]),
+    ]
+    // Ensure makeService sets resolvedAt on resolved incidents (verify shape).
+    services[0].incidents[0].resolvedAt = '2026-04-01T12:00:00Z'
+
+    const result = accumulateMonthlyIncidents(null, services, '2026-04')
+    const detail = result.services.claude.incidents
+    expect(detail).toBeDefined()
+    expect(detail!.length).toBe(2)
+    expect(detail![0]).toEqual({
+      id: 'inc-1', title: 'Incident inc-1',
+      startedAt: '2026-04-01T10:00:00Z', resolvedAt: '2026-04-01T12:00:00Z',
+      durationMin: 120, finalStatus: 'resolved',
+    })
+    expect(detail![1].finalStatus).toBe('investigating')
+    expect(detail![1].durationMin).toBe(0)
+    expect(detail![1].resolvedAt).toBeNull()
+  })
+
+  it('updates detail entry when incident status progresses on a later run', () => {
+    // First pass: incident is investigating, no duration.
+    const first = accumulateMonthlyIncidents(null, [
+      makeService('claude', [
+        { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'investigating', duration: null },
+      ]),
+    ], '2026-04')
+    expect(first.services.claude.incidents![0].finalStatus).toBe('investigating')
+
+    // Second pass: now resolved with a duration + resolvedAt.
+    const resolvedSvc = makeService('claude', [
+      { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '90m' },
+    ])
+    resolvedSvc.incidents[0].resolvedAt = '2026-04-01T11:30:00Z'
+    const second = accumulateMonthlyIncidents(first, [resolvedSvc], '2026-04')
+    const updated = second.services.claude.incidents![0]
+    expect(updated.finalStatus).toBe('resolved')
+    expect(updated.durationMin).toBe(90)
+    expect(updated.resolvedAt).toBe('2026-04-01T11:30:00Z')
+  })
+
+  it('caps detail at MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE — drops oldest, keeps aggregates', () => {
+    const overflow = MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE + 50
+    const baseMs = Date.parse('2026-04-01T00:00:00Z')
+    const incs = Array.from({ length: overflow }, (_, i) => ({
+      id: `inc-${String(i).padStart(4, '0')}`,
+      // Monotonic +1min per index so "oldest" is unambiguously the lowest index.
+      startedAt: new Date(baseMs + i * 60_000).toISOString(),
+      status: 'resolved',
+      duration: '5m',
+    }))
+    // Shuffle so the cap implementation actually exercises the sort step (otherwise the
+    // input is already chronologically ordered and sort is a no-op for stable algorithms).
+    // Deterministic Fisher-Yates with a fixed seed via simple LCG so the test stays reproducible.
+    let rng = 0x12345
+    const next = () => (rng = (rng * 1664525 + 1013904223) >>> 0)
+    for (let i = incs.length - 1; i > 0; i--) {
+      const j = next() % (i + 1)
+      ;[incs[i], incs[j]] = [incs[j], incs[i]]
+    }
+    const result = accumulateMonthlyIncidents(null, [makeService('mistral', incs)], '2026-04')
+    const data = result.services.mistral
+    // Aggregate counts include every incident (the cap binds detail only).
+    expect(data.count).toBe(overflow)
+    expect(data.totalMinutes).toBe(overflow * 5)
+    expect(data.incidentIds.length).toBe(overflow) // dedup state untruncated
+    // Detail array hits the cap.
+    expect(data.incidents!.length).toBe(MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE)
+    // Oldest 50 dropped — first surviving entry is index 50.
+    expect(data.incidents![0].id).toBe('inc-0050')
+    expect(data.incidents![data.incidents!.length - 1].id).toBe(`inc-${String(overflow - 1).padStart(4, '0')}`)
+  })
+
+  it('backward-compat: existing data without `incidents` field still accumulates correctly', () => {
+    // Simulate an older accumulator value that lacks the new `incidents` field.
+    const legacy = {
+      lastUpdated: '2026-04-01T00:00:00Z',
+      services: {
+        claude: { count: 1, totalMinutes: 60, longestMinutes: 60, dates: ['2026-04-01'], incidentIds: ['old-1'], durations: { 'old-1': 60 } },
+      },
+    }
+    const services = [
+      makeService('claude', [
+        { id: 'new-1', startedAt: '2026-04-02T10:00:00Z', status: 'resolved', duration: '30m' },
+      ]),
+    ]
+    const result = accumulateMonthlyIncidents(legacy, services, '2026-04')
+    expect(result.services.claude.count).toBe(2)
+    expect(result.services.claude.incidents).toBeDefined()
+    // Legacy entry has no detail; only the new incident is in the detail array.
+    expect(result.services.claude.incidents!.length).toBe(1)
+    expect(result.services.claude.incidents![0].id).toBe('new-1')
+  })
 })
 
 // ── summarizeSecurityAlerts (#290) ───────────────────────────────────
@@ -523,6 +624,86 @@ describe('buildMonthlyArchive', () => {
     expect(archive.services.claude.score).toBeNull()
     expect(archive.services.claude.grade).toBeNull()
     expect(archive.services.claude.incidents).toBe(5)
+  })
+
+  // ── #375: snapshot per-incident detail into the permanent archive ──
+  it('snapshots per-service incidentList from accumulated data (#375)', async () => {
+    const detailKV = {
+      get: async (key: string) => {
+        const store: Record<string, string> = {
+          'incidents:monthly:2026-03': JSON.stringify({
+            lastUpdated: '2026-03-31T09:00:00Z',
+            services: {
+              claude: {
+                count: 2, totalMinutes: 90, longestMinutes: 60,
+                dates: ['2026-03-01', '2026-03-15'], incidentIds: ['a', 'b'],
+                durations: { a: 60, b: 30 },
+                incidents: [
+                  { id: 'a', title: 'Claude API down', startedAt: '2026-03-01T10:00:00Z', resolvedAt: '2026-03-01T11:00:00Z', durationMin: 60, finalStatus: 'resolved' },
+                  { id: 'b', title: 'Claude latency spike', startedAt: '2026-03-15T14:00:00Z', resolvedAt: '2026-03-15T14:30:00Z', durationMin: 30, finalStatus: 'resolved' },
+                ],
+              },
+            },
+          }),
+        }
+        return store[key] ?? null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(detailKV, 2026, 3)
+    expect(archive.services.claude.incidentList).toBeDefined()
+    expect(archive.services.claude.incidentList!.length).toBe(2)
+    expect(archive.services.claude.incidentList![0].id).toBe('a')
+    expect(archive.services.claude.incidentList![0].title).toBe('Claude API down')
+    expect(archive.services.claude.incidentList![1].finalStatus).toBe('resolved')
+  })
+
+  it('omits incidentList when accumulated data is from a pre-#375 KV entry (no `incidents` field)', async () => {
+    const legacyKV = {
+      get: async (key: string) => {
+        const store: Record<string, string> = {
+          'incidents:monthly:2026-03': JSON.stringify({
+            lastUpdated: '2026-03-31T09:00:00Z',
+            services: {
+              claude: { count: 1, totalMinutes: 60, longestMinutes: 60, dates: ['2026-03-01'], incidentIds: ['a'], durations: { a: 60 } },
+            },
+          }),
+        }
+        return store[key] ?? null
+      },
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(legacyKV, 2026, 3)
+    expect(archive.services.claude.incidents).toBe(1)
+    expect(archive.services.claude.incidentList).toBeUndefined()
+  })
+
+  it('clones incidentList — archive mutation does not affect accumulator data', async () => {
+    const sharedDetail = [
+      { id: 'a', title: 'incident', startedAt: '2026-03-01T10:00:00Z', resolvedAt: '2026-03-01T11:00:00Z', durationMin: 60, finalStatus: 'resolved' as const },
+    ]
+    const accumKV = {
+      get: async (key: string) => {
+        if (key === 'incidents:monthly:2026-03') {
+          return JSON.stringify({
+            lastUpdated: '2026-03-31T09:00:00Z',
+            services: { claude: { count: 1, totalMinutes: 60, longestMinutes: 60, dates: [], incidentIds: ['a'], durations: { a: 60 }, incidents: sharedDetail } },
+          })
+        }
+        return null
+      },
+      put: async () => {}, delete: async () => {}, list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+    const archive = await buildMonthlyArchive(accumKV, 2026, 3)
+    // Mutate the archive copy and verify the source array is untouched.
+    archive.services.claude.incidentList![0].title = 'mutated'
+    expect(sharedDetail[0].title).toBe('incident')
   })
 
   it('handles empty KV (no data)', async () => {
