@@ -160,6 +160,45 @@ describe('isCorroboratedByProbe', () => {
     )).toBe(true)
   })
 
+  it('corroborates when RTT exceeds 1.5× median (boundary, retuned in #372)', () => {
+    // medianRtt = 185, 1.5× = 277.5 → rtt 280 is just above threshold
+    const snapshots: ProbeSnapshot[] = [
+      ...baseSnapshots,
+      { t: '2026-03-24T01:20:00Z', data: { mistral: { status: 401, rtt: 280 } } },
+    ]
+    expect(isCorroboratedByProbe(
+      snapshots, 'mistral',
+      '2026-03-24T01:18:00Z', '2026-03-24T01:22:00Z',
+      medianRtt,
+    )).toBe(true)
+  })
+
+  it('does NOT corroborate when RTT is just below 1.5× median (locks new threshold)', () => {
+    // 277 = 185 × 1.497 — just under the 1.5× threshold (277.5)
+    const snapshots: ProbeSnapshot[] = [
+      ...baseSnapshots,
+      { t: '2026-03-24T01:20:00Z', data: { mistral: { status: 401, rtt: 277 } } },
+    ]
+    expect(isCorroboratedByProbe(
+      snapshots, 'mistral',
+      '2026-03-24T01:18:00Z', '2026-03-24T01:22:00Z',
+      medianRtt,
+    )).toBe(false)
+  })
+
+  it('uses ±20-minute window — catches probes 15min outside the incident edge (retuned in #372)', () => {
+    // Incident at 01:30; probe with spike at 01:15 (15min before start)
+    // Old window (±10m) would exclude; new window (±20m) includes
+    const snapshots: ProbeSnapshot[] = [
+      { t: '2026-03-24T01:15:00Z', data: { mistral: { status: 401, rtt: 800 } } }, // spike 15min before
+    ]
+    expect(isCorroboratedByProbe(
+      snapshots, 'mistral',
+      '2026-03-24T01:30:00Z', '2026-03-24T01:32:00Z',
+      medianRtt,
+    )).toBe(true)
+  })
+
   it('returns true when probe failed (rtt=-1)', () => {
     const failSnapshots: ProbeSnapshot[] = [
       ...baseSnapshots,
@@ -206,7 +245,7 @@ describe('isCorroboratedByProbe', () => {
   })
 
   it('returns true when incidentEnd is null (ongoing)', () => {
-    // Ongoing incident — window is start ± 10min
+    // Ongoing incident — window is start ± 20min
     const spikeSnapshots: ProbeSnapshot[] = [
       ...baseSnapshots,
       { t: '2026-03-24T01:20:00Z', data: { mistral: { status: 401, rtt: 700 } } },
