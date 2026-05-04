@@ -48,7 +48,7 @@ describe('groupIncidents — empty + below threshold', () => {
   })
 })
 
-describe('groupIncidents — threshold = 3', () => {
+describe('groupIncidents — threshold = 2', () => {
   it('three same-day normalized-title entries collapse to one group row', () => {
     const day = '2026-04-20T'
     const incs = [
@@ -66,15 +66,22 @@ describe('groupIncidents — threshold = 3', () => {
     expect(g.rangeEnd).toBe(day + '12:00:00Z')
   })
 
-  it('exactly 2 dupes stay as singles (strict ≥3 threshold)', () => {
-    expect(GROUP_THRESHOLD).toBe(3)
+  it('exactly 2 dupes group together (≥2 threshold, lowered from ≥3 in #373)', () => {
+    expect(GROUP_THRESHOLD).toBe(2)
     const incs = [
       mkInc({ id: '1', title: 'Alpha', startedAt: '2026-04-20T10:00:00Z' }),
       mkInc({ id: '2', title: 'Alpha', startedAt: '2026-04-20T11:00:00Z' }),
     ]
     const rows = groupIncidents(incs)
-    expect(rows).toHaveLength(2)
-    expect(rows.every((r) => r.kind === 'single')).toBe(true)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].kind).toBe('group')
+    expect((rows[0] as GroupRow).count).toBe(2)
+  })
+
+  it('1 entry stays a single (below ≥2 threshold)', () => {
+    const rows = groupIncidents([mkInc({ id: '1', title: 'Alpha', startedAt: '2026-04-20T10:00:00Z' })])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].kind).toBe('single')
   })
 
   it('entries with impact != null never group (human-tagged real incidents)', () => {
@@ -90,15 +97,19 @@ describe('groupIncidents — threshold = 3', () => {
 })
 
 describe('groupIncidents — day boundary', () => {
-  it('UTC default: 23:00Z and 01:00Z next day are on different days → no grouping', () => {
+  it('UTC default: respects day boundary — 23:30Z and 01:00Z next day land in different buckets', () => {
+    // After #373 (≥2 threshold), the two same-day entries cluster but the next-day entry stays single.
     const incs = [
       mkInc({ id: '1', title: 'X', startedAt: '2026-04-20T23:00:00Z' }),
       mkInc({ id: '2', title: 'X', startedAt: '2026-04-20T23:30:00Z' }),
       mkInc({ id: '3', title: 'X', startedAt: '2026-04-21T01:00:00Z' }),
     ]
     const rows = groupIncidents(incs) // default UTC
-    expect(rows.every((r) => r.kind === 'single')).toBe(true)
-    expect(rows).toHaveLength(3)
+    expect(rows).toHaveLength(2)
+    const group = rows.find((r) => r.kind === 'group') as GroupRow | undefined
+    const single = rows.find((r) => r.kind === 'single') as SingleRow | undefined
+    expect(group?.count).toBe(2)
+    expect(single?.incident.id).toBe('3')
   })
 
   it('SSR determinism: same timezone override produces same groups across calls', () => {
@@ -121,8 +132,11 @@ describe('groupIncidents — day boundary', () => {
       mkInc({ id: '3', title: 'X', startedAt: '2026-04-20T15:30:00Z' }), // 00:30 KST Apr 21
     ]
     const rows = groupIncidents(incs, { timeZone: 'Asia/Seoul' })
-    // First 2 on Apr 20 KST, third on Apr 21 KST → none reaches 3 in one bucket
-    expect(rows.every((r) => r.kind === 'single')).toBe(true)
+    // After #373 (≥2 threshold): first 2 cluster on Apr 20 KST, third stays single on Apr 21 KST.
+    // The point of this test is timezone-correct day-boundary detection — verified by the split.
+    const group = rows.find((r) => r.kind === 'group') as GroupRow | undefined
+    expect(group?.count).toBe(2)
+    expect(rows.find((r) => r.kind === 'single')).toBeDefined()
   })
 })
 

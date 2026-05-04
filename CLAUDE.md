@@ -421,7 +421,7 @@ Browser (React SPA, 60s polling)
     → gemini dual-source (#310): gcloud Vertex feed + aistudio.google.com/status MakerSuite RPC — merged with vertex:/aistudio: ID prefixes
     → normalize to ServiceStatus[]
     → write to KV (cache + daily counters)
-    → probe cross-validation: filter Mistral micro-incident noise (no RTT spike → excluded)
+    → (Mistral-only probe corroboration filter removed in #373 — same-title incident grouping in `src/utils/incidentGrouping.js` now consolidates auto-monitoring noise uniformly across all services)
     → metastatuspage preemptive signal: platform:status:atlassian KV non-operational → hold all Atlassian services operational
     → platform quorum detection: 70%+ same-platform fetch failures → platform outage → hold operational for all affected services
     → probe cross-validation: individual probe RTT normal → hold operational (prevents false positives during status page failures)

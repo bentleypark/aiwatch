@@ -6,12 +6,15 @@
 //
 // Background (same as SPA): BetterStack-backed feeds (Fireworks, Together, HuggingFace,
 // Modal) emit a separate "<model> — recovered" entry per transient blip. Same-day
-// normalized-title clusters of ≥3 collapse into a single group row so the visible list
+// normalized-title clusters of ≥2 collapse into a single group row so the visible list
 // stays readable while the underlying data remains intact for downstream pipelines.
 //
-// See #282 (SPA grouping) and #321 (SSR 30-day window + grouping).
+// Threshold lowered from ≥3 to ≥2 in #373 (in lockstep with SPA) so Mistral's auto-monitoring
+// 2-3-per-day-per-endpoint pattern clusters too — previously they fell just under the old cap.
+//
+// See #282 (SPA grouping), #321 (SSR 30-day window + grouping), #373 (≥3 → ≥2 retune).
 
-export const GROUP_THRESHOLD = 3
+export const GROUP_THRESHOLD = 2
 
 export interface GroupingIncident {
   id: string

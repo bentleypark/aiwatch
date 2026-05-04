@@ -122,74 +122,16 @@ export function computeMedianRtt(snapshots: ProbeSnapshot[], serviceId: string):
   return sorted[Math.floor(sorted.length / 2)]
 }
 
-/**
- * Check if a micro-incident is corroborated by probe data (RTT spike).
- * Returns true if the incident appears to be a real outage based on probe evidence.
- *
- * Logic: find probe snapshots within ±20 minutes of the incident window.
- * If any probe shows RTT > 1.5× median or a failed probe (rtt=-1), it's corroborated.
- * If no probes exist in the window, assume real (conservative — don't filter without evidence).
- *
- * Threshold tuning history (#372):
- *   Original (#91 Phase 2, 2026-04-06): 3× / ±10m. 5/10 incidents corroborated at deploy time.
- *   Retune (2026-05-04): 1.5× / ±20m. Original threshold dropped to 0/14 by May; data showed
- *   real Mistral degradations only push RTT to ~2× baseline (not 3×). 1.5× restores ~57% pass rate
- *   on the same data — a balance between filtering Checkly false-positives and over-filtering
- *   genuine short outages. Long-term replacement: same-title incident grouping (#373).
- */
-export const PROBE_CORROBORATION_MULTIPLIER = 1.5
-export const PROBE_CORROBORATION_WINDOW_MS = 1_200_000 // ±20 minutes
-export function isCorroboratedByProbe(
-  snapshots: ProbeSnapshot[],
-  serviceId: string,
-  incidentStart: string,
-  incidentEnd: string | null,
-  medianRtt: number | null,
-): boolean {
-  if (medianRtt === null || medianRtt <= 0) {
-    console.warn(`[isCorroboratedByProbe] no baseline RTT for ${serviceId}, assuming real`)
-    return true
-  }
-  const WINDOW_MS = PROBE_CORROBORATION_WINDOW_MS
-  const spikeThreshold = medianRtt * PROBE_CORROBORATION_MULTIPLIER
-  const startMs = new Date(incidentStart).getTime()
-  if (Number.isNaN(startMs)) {
-    console.error(`[isCorroboratedByProbe] invalid incidentStart: "${incidentStart}"`)
-    return true
-  }
-  const endMs = incidentEnd ? new Date(incidentEnd).getTime() : NaN
-  if (incidentEnd && Number.isNaN(endMs)) {
-    console.error(`[isCorroboratedByProbe] invalid incidentEnd: "${incidentEnd}"`)
-    return true
-  }
-  const windowStart = startMs - WINDOW_MS
-  const windowEnd = (incidentEnd && !Number.isNaN(endMs) ? endMs : startMs) + WINDOW_MS
-
-  const windowProbes = snapshots.filter((s) => {
-    const t = new Date(s.t).getTime()
-    return !Number.isNaN(t) && t >= windowStart && t <= windowEnd && serviceId in s.data
-  })
-
-  if (windowProbes.length === 0) {
-    console.warn(`[isCorroboratedByProbe] no probes in window for ${serviceId} (${incidentStart}), assuming real`)
-    return true
-  }
-
-  return windowProbes.some((s) => {
-    const probe = s.data[serviceId]
-    return probe.rtt === -1 || probe.rtt > spikeThreshold
-  })
-}
-
-/**
- * Check if a Mistral incident title affects the probed endpoint (/v1/models → Chat Completions).
- * Non-probed sub-services (Batch API, Files API, Audio API, etc.) bypass cross-validation
- * because their outages don't cause RTT spikes on the main models endpoint.
- */
-const MISTRAL_NON_PROBED = /\b(batch|files?|audio|ocr|embedding|fine.?tun)/i
-export function isMistralProbedEndpoint(title: string): boolean {
-  return !MISTRAL_NON_PROBED.test(title)
-}
+// Mistral-only probe corroboration filter (#91 Phase 2 → #372 retune) was removed in #373.
+// The asymmetry it created — Mistral incidents filtered by RTT cross-validation, all other
+// services shown raw — was epistemically weak (probe `/v1/models` couldn't measure the
+// `/v1/chat/completions` endpoint the incidents were actually on) and not generalizable to
+// other auto-monitoring sources (BetterStack/Together AI, Instatus/Perplexity). Replaced by
+// same-title incident grouping in `src/utils/incidentGrouping.js`, which consolidates noise
+// uniformly across all services without overriding what status pages report.
+//
+// `computeMedianRtt` is still exported below — it's used by detection-lead probe-spike-first logic
+// in alerts.ts, independently of the removed corroboration path.
 
 /**
  * Check if a service's recent probe data indicates it is healthy.
