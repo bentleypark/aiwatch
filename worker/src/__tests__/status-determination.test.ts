@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { normalizeStatus } from '../parsers/statuspage'
-import { filterIncidents, SERVICES } from '../services'
+import { filterIncidents, SERVICES, worstStatus, resolveSvcStatus } from '../services'
 import type { Incident, ServiceConfig } from '../types'
 import { type KVLike } from '../utils'
 
@@ -13,6 +13,7 @@ import { type KVLike } from '../utils'
 interface StatusConfig {
   statusComponent?: string
   statusComponentId?: string
+  statusComponentIds?: string[]
 }
 
 interface SummaryData {
@@ -24,26 +25,10 @@ interface FilteredIncident {
   status: string
 }
 
-/**
- * Mirrors the svcStatus determination logic from services.ts lines 219-234
- */
-function determineSvcStatus(
-  config: StatusConfig,
-  summaryData: SummaryData,
-  filtered: FilteredIncident[],
-): string {
-  const overall = normalizeStatus(summaryData.status?.indicator ?? 'none')
-  if (!config.statusComponent && !config.statusComponentId) {
-    if (overall !== 'operational' && filtered.filter((i) => i.status !== 'resolved').length === 0) {
-      return 'operational'
-    }
-    return overall
-  }
-  const comp = config.statusComponent
-    ? summaryData.components?.find((c) => c.name.startsWith(config.statusComponent!))
-    : summaryData.components?.find((c) => c.id === config.statusComponentId!)
-  return comp ? normalizeStatus(comp.status) : overall
-}
+// Tests call the production resolver directly (no test mirror) so a future change
+// to status-resolution logic cannot pass the tests by drifting from runtime.
+const determineSvcStatus = (config: StatusConfig, summary: SummaryData, filtered: FilteredIncident[]): string =>
+  resolveSvcStatus(config, summary, filtered)
 
 describe('svcStatus determination', () => {
   describe('no component configured (e.g., OpenAI API after migration)', () => {
@@ -148,6 +133,164 @@ describe('svcStatus determination', () => {
       }
       expect(determineSvcStatus(config, summary, [])).toBe('degraded')
     })
+  })
+
+  describe('with statusComponentIds (multi-component, worst-of) — #379', () => {
+    // Models the cursor case: IDE primary + Cloud Agents + Automations
+    const config: StatusConfig = {
+      statusComponentId: 'ide',
+      statusComponentIds: ['ide', 'cloud-agents', 'automations'],
+    }
+
+    it('returns operational when all tracked components are operational', () => {
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'ide', name: 'IDE', status: 'operational' },
+          { id: 'cloud-agents', name: 'Cloud Agents', status: 'operational' },
+          { id: 'automations', name: 'Automations', status: 'operational' },
+          { id: 'marketplace', name: 'Marketplace', status: 'operational' },
+        ],
+      }
+      expect(determineSvcStatus(config, summary, [])).toBe('operational')
+    })
+
+    it('flips to degraded when a non-primary component is partial_outage (the bug)', () => {
+      // Live cursor case 2026-05-04 23:32 UTC — IDE OK but Cloud Agents/Automations down.
+      // Pre-#379 single-statusComponentId logic returned operational; now must be degraded.
+      const summary: SummaryData = {
+        status: { indicator: 'minor' },
+        components: [
+          { id: 'ide', name: 'IDE', status: 'operational' },
+          { id: 'cloud-agents', name: 'Cloud Agents', status: 'partial_outage' },
+          { id: 'automations', name: 'Automations', status: 'partial_outage' },
+        ],
+      }
+      expect(determineSvcStatus(config, summary, [])).toBe('degraded')
+    })
+
+    it('returns down when any tracked component is major_outage (worst wins)', () => {
+      const summary: SummaryData = {
+        status: { indicator: 'minor' },
+        components: [
+          { id: 'ide', name: 'IDE', status: 'partial_outage' },
+          { id: 'cloud-agents', name: 'Cloud Agents', status: 'major_outage' },
+          { id: 'automations', name: 'Automations', status: 'operational' },
+        ],
+      }
+      expect(determineSvcStatus(config, summary, [])).toBe('down')
+    })
+
+    it('ignores untracked components (e.g. Marketplace status does not affect badge)', () => {
+      const summary: SummaryData = {
+        status: { indicator: 'minor' },
+        components: [
+          { id: 'ide', name: 'IDE', status: 'operational' },
+          { id: 'cloud-agents', name: 'Cloud Agents', status: 'operational' },
+          { id: 'automations', name: 'Automations', status: 'operational' },
+          { id: 'marketplace', name: 'Marketplace', status: 'major_outage' }, // not tracked
+        ],
+      }
+      expect(determineSvcStatus(config, summary, [])).toBe('operational')
+    })
+
+    it('falls back to overall indicator when none of the tracked ids resolve', () => {
+      // Configured ids drifted (page restructured) — nothing matches; fall back to overall.
+      // Component-miss alert path picks this up separately so operators can reconcile.
+      const summary: SummaryData = {
+        status: { indicator: 'minor' },
+        components: [{ id: 'unknown-1', name: 'Renamed', status: 'operational' }],
+      }
+      expect(determineSvcStatus(config, summary, [])).toBe('degraded')
+    })
+
+    it('partial id resolution still computes worst-of across the resolved subset', () => {
+      // Two of three ids found — worst-of those two is the result.
+      const summary: SummaryData = {
+        status: { indicator: 'minor' },
+        components: [
+          { id: 'ide', name: 'IDE', status: 'operational' },
+          { id: 'cloud-agents', name: 'Cloud Agents', status: 'partial_outage' },
+          // 'automations' missing — drifted away
+        ],
+      }
+      expect(determineSvcStatus(config, summary, [])).toBe('degraded')
+    })
+
+    it('ignores empty statusComponentIds and falls back to single statusComponentId', () => {
+      const cfg: StatusConfig = { statusComponentId: 'ide', statusComponentIds: [] }
+      const summary: SummaryData = {
+        status: { indicator: 'minor' },
+        components: [{ id: 'ide', name: 'IDE', status: 'operational' }],
+      }
+      expect(determineSvcStatus(cfg, summary, [])).toBe('operational')
+    })
+  })
+})
+
+describe('worstStatus helper (#379)', () => {
+  it('returns operational for empty input (no components matched)', () => {
+    expect(worstStatus([])).toBe('operational')
+  })
+  it('returns operational when all are operational', () => {
+    expect(worstStatus(['operational', 'operational'])).toBe('operational')
+  })
+  it('promotes to degraded when any is degraded', () => {
+    expect(worstStatus(['operational', 'degraded', 'operational'])).toBe('degraded')
+  })
+  it('promotes to down when any is down (overrides degraded)', () => {
+    expect(worstStatus(['operational', 'degraded', 'down'])).toBe('down')
+  })
+  it('handles single-element list', () => {
+    expect(worstStatus(['degraded'])).toBe('degraded')
+  })
+})
+
+describe('SERVICES coding-agent multi-component config sanity (#379)', () => {
+  it('cursor tracks IDE primary + Cloud Agents + Automations + CLI', () => {
+    const cursor = SERVICES.find((s) => s.id === 'cursor')!
+    expect(cursor.statusComponentId).toBe('rflc60xp5jp2') // IDE — primary for uptime parsing
+    expect(cursor.statusComponentIds).toEqual([
+      'rflc60xp5jp2', // IDE
+      'mwv1g9sc7kdh', // Cloud Agents
+      'k0trcq273dr6', // Automations
+      'vsny1qv7v86c', // CLI
+    ])
+  })
+
+  it('claudecode intentionally stays single-component (dependency tracking would clash with incidentKeywords filter)', () => {
+    // Pre-merge review caught that adding Claude API as a second tracked component
+    // would flip the badge to degraded for API-only incidents that don't match
+    // claudecode's `incidentKeywords` (['claude code', 'across surfaces']) — leaving
+    // a degraded card with no visible incident. Claude API outages remain visible
+    // on the separate `claude` (Claude API) card. See #379 review.
+    const cc = SERVICES.find((s) => s.id === 'claudecode')!
+    expect(cc.statusComponentId).toBe('yyzkbfz2thpt') // Claude Code (only)
+    expect(cc.statusComponentIds).toBeUndefined()
+  })
+
+  it('copilot tracks Copilot + Copilot AI Model Providers', () => {
+    const cp = SERVICES.find((s) => s.id === 'copilot')!
+    expect(cp.statusComponentId).toBe('pjmpxvq2cmr2')
+    expect(cp.statusComponentIds).toEqual(['pjmpxvq2cmr2', 'cnnb39dkkk82'])
+  })
+
+  it('windsurf tracks Cascade + Windsurf Tab', () => {
+    const ws = SERVICES.find((s) => s.id === 'windsurf')!
+    expect(ws.statusComponentId).toBe('r5wf1ykd7y1m')
+    expect(ws.statusComponentIds).toEqual(['r5wf1ykd7y1m', '8q19cygxvshj'])
+  })
+
+  it('primary statusComponentId always appears as the first entry of statusComponentIds', () => {
+    // Convention: primary first so a reader can scan the array and immediately see
+    // which component drives uptime%/calendar/miss tracking. Enforce in the test
+    // so accidental reordering during config edits is caught.
+    for (const sid of ['cursor', 'copilot', 'windsurf']) {
+      const svc = SERVICES.find((s) => s.id === sid)!
+      if (svc.statusComponentIds && svc.statusComponentId) {
+        expect(svc.statusComponentIds[0]).toBe(svc.statusComponentId)
+      }
+    }
   })
 })
 

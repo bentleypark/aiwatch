@@ -56,6 +56,20 @@ export interface ServiceConfig {
   incidentIoBaseUrl?: string
   statusComponent?: string
   statusComponentId?: string
+  // Optional: multiple components to track for the badge (worst-status wins).
+  // When set, the dashboard status is `down` if any component is `major_outage`,
+  // `degraded` if any is `partial_outage`/`degraded_performance`, else `operational`.
+  // `statusComponentId` remains the *primary* component used for uptime parsing,
+  // calendar days, and component-miss alerting; this list adds extra surfaces
+  // whose health should also flip the badge (e.g. Cursor IDE primary +
+  // Cloud Agents/Automations as user-impacting agentic surfaces).
+  // An empty array `[]` is treated as if the field were absent — the resolver
+  // falls through to the single-`statusComponentId` path. Only use this for
+  // sibling surfaces of the *same* product (cursor IDE + cursor Cloud Agents);
+  // dependency tracking (e.g. Claude Code → Claude API) creates badge/incident
+  // asymmetry when the dependency's incidents don't match the service's
+  // `incidentKeywords` filter. See #379 review for the trade-off.
+  statusComponentIds?: string[]
   incidentIoComponentId?: string
   incidentIoGroupId?: string       // incident.io group uptime (e.g. "APIs" aggregate)
   betterStackUrl?: string
