@@ -56,26 +56,33 @@ export const SERVICES: ServiceConfig[] = [
   // AI Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl' },
-  // ChatGPT has no single umbrella component on status.openai.com; sub-components
-  // (Login/Feed/Video/Atlas) are too granular to represent the service. Status is
-  // resolved from the overall indicator + incidentKeywords filter, with the
-  // "no relevant unresolved incidents → operational" guard in fetchService
-  // preventing cross-contamination from OpenAI API incidents (#292).
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentIoBaseUrl: 'https://status.openai.com/incidents' },
+  // ChatGPT has no single umbrella status-page component, but status.openai.com
+  // does publish a ChatGPT group aggregate over its sub-components — that's the
+  // user-facing uptime number on the page. Status determination still uses the
+  // overall indicator + incidentKeywords filter with the "no relevant unresolved
+  // incidents → operational" cross-contamination guard (#292); the new
+  // incidentIoComponentId / incidentIoGroupId pair only feeds parseIncidentIoUptime
+  // (#367), not the status path. Component fallback is Conversations
+  // (01JMXBNJXGV1T5GT2M9XA83XNG, 99.92% sample) — not perfect coverage but a
+  // reasonable proxy if OpenAI ever restructures the ChatGPT group.
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1' },
   // Coding Agents
   { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'], statusComponent: 'Claude Code', statusComponentId: 'yyzkbfz2thpt' },
   // OpenAI Codex (coding agent): published across 4 distinct surface components on
-  // status.openai.com (Codex Web / Codex API / CLI / VS Code extension) with no
-  // umbrella component. Same #292 pattern as chatgpt — overall indicator +
-  // incidentKeywords filter, cross-contamination guard in fetchService blocks
-  // OpenAI API / ChatGPT incidents from bleeding through.
+  // status.openai.com (Codex Web / Codex API / CLI / VS Code extension) with a
+  // Codex group aggregate over all four. Same #292 pattern as chatgpt — overall
+  // indicator + incidentKeywords filter, cross-contamination guard in fetchService
+  // blocks OpenAI API / ChatGPT incidents from bleeding through.
   //
-  // Uptime source: Codex API component only (#301). Chosen because it backs
-  // the CLI and VS Code extension — API availability is the strongest proxy
-  // for developer-use availability. Surface-specific outages (e.g., Codex Web
-  // frontend only) surface via incidentKeywords in Recent Incidents, not in
-  // the uptime%. Is Codex Down SEO page documents this scoping.
-  { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV' },
+  // Uptime source: Codex group aggregate (#367 — '01KMKF9EBTCD8BN9PG8DJZXRSQ').
+  // Matches what OpenAI publishes on status.openai.com. The original #301 scoping
+  // to the Codex API component alone produced 100% while OpenAI's published Codex
+  // group sat at 99.98%; the dashboard now mirrors what users see upstream.
+  // incidentIoComponentId stays set to Codex API as a fallback — if the group
+  // ID becomes invalid, the parser falls through to the per-component lookup
+  // rather than returning null. Surface-specific outages (e.g., Codex Web only)
+  // still surface via incidentKeywords in Recent Incidents.
+  { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', incidentIoGroupId: '01KMKF9EBTCD8BN9PG8DJZXRSQ' },
   { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2' },
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2' },
   { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m' },

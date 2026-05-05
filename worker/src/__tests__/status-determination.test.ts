@@ -213,17 +213,28 @@ describe('ChatGPT without statusComponentId (#292)', () => {
 
   const chatgptConfig = SERVICES.find((s) => s.id === 'chatgpt') as ServiceConfig
 
-  it('config has no statusComponentId or incidentIoComponentId (post-migration)', () => {
-    // Guard against accidental reintroduction of the stale IDs. incidentExclude
-    // must stay absent too — the cross-contamination guard in fetchService
-    // relies on incidentKeywords being the sole filter.
+  it('config carries no statusComponentId / statusComponent / incidentExclude — cross-contamination guard depends on this (#292)', () => {
+    // The "no relevant unresolved incidents → operational" guard at the !statusComponent &&
+    // !statusComponentId branch in fetchService is what protects chatgpt from inheriting
+    // OpenAI API page-level non-operational states. Re-adding either of those fields would
+    // bypass that guard. incidentKeywords must remain the sole filter for incident
+    // selection, with no overriding incidentExclude list.
     expect(chatgptConfig).toBeDefined()
     expect(chatgptConfig.statusComponentId).toBeUndefined()
     expect(chatgptConfig.statusComponent).toBeUndefined()
-    expect(chatgptConfig.incidentIoComponentId).toBeUndefined()
     expect(chatgptConfig.incidentExclude).toBeUndefined()
     expect(chatgptConfig.incidentKeywords).toContain('chatgpt')
     expect(chatgptConfig.incidentKeywords).toContain('conversation')
+  })
+
+  it('config has incidentIoComponentId + incidentIoGroupId for uptime sourcing (#367)', () => {
+    // Separate code path from the cross-contamination guard above: the dashboard
+    // uptime number comes from parseIncidentIoUptime, which needs an incident.io
+    // group/component to read from. Without these, chatgpt.uptime30d was null.
+    // The guard above checks statusComponent / statusComponentId only, so adding
+    // incidentIoComponentId here does NOT defeat #292.
+    expect(chatgptConfig.incidentIoComponentId).toBe('01JMXBNJXGV1T5GT2M9XA83XNG')  // Conversations
+    expect(chatgptConfig.incidentIoGroupId).toBe('01K5H8S53SY1KMS4GQMNMZXTR1')      // ChatGPT group
   })
 
   it('keyword-matched ChatGPT incident → degraded', () => {
@@ -313,11 +324,13 @@ describe('OpenAI Codex without statusComponentId (#294)', () => {
     expect(codexConfig.statusComponentId).toBeUndefined()
     expect(codexConfig.statusComponent).toBeUndefined()
     expect(codexConfig.incidentExclude).toBeUndefined()
-    // incidentIoComponentId = Codex API (#301) — sourcing official uptime
-    // from the surface that backs CLI + VS Code extension. Guard against
-    // accidental removal; if this assertion ever fails, either the ID was
-    // renamed upstream or someone reverted #301.
+    // incidentIoComponentId = Codex API (#301) — kept as fallback if the group
+    // lookup ever fails. incidentIoGroupId = Codex group (#367) — primary uptime
+    // source, matching what OpenAI publishes on status.openai.com (Codex
+    // group aggregate ≈ 99.98%, vs the single Codex API component which read
+    // 100% and disagreed with the published number).
     expect(codexConfig.incidentIoComponentId).toBe('01KMP3KP5MGE23B80K1EK4S8PV')
+    expect(codexConfig.incidentIoGroupId).toBe('01KMKF9EBTCD8BN9PG8DJZXRSQ')
     expect(codexConfig.incidentKeywords).toContain('codex')
     expect(codexConfig.incidentKeywords).toContain('cli')
     expect(codexConfig.incidentKeywords).toContain('vs code')
