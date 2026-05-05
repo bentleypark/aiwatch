@@ -10,6 +10,8 @@ import type { ProbeDailyData } from './probe-archival'
 import type { ServiceStatus, Incident } from './types'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey } from './security-monitor'
+import type { DetectionLeadEntry } from './detection-lead-log'
+import { detectionLeadMonthlyKey, isValidEntry as isValidDetectionLeadEntry } from './detection-lead-log'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
 
@@ -53,6 +55,10 @@ export interface MonthlyArchive {
   // Optional — null for months before this feature shipped (or no detections).
   // Sourced from security:monthly:{period} at archive build time before its 60d TTL lapses (#290).
   security?: MonthlySecuritySummary | null
+  // Optional — null for months before this feature shipped (or no detections recorded).
+  // Sourced from detection:lead:monthly:{period} (60d TTL accumulator, #369) so the archive
+  // can carry detection-lead figures past the 7d TTL on the per-day audit log keys.
+  detectionLead?: MonthlyDetectionLeadSummary | null
 }
 
 // ── Monthly security summary ─────────────────────────────────────────
@@ -84,6 +90,29 @@ export interface MonthlySecuritySummary {
   bySeverity: Record<SecuritySeverityBucket, number>
   byService: Record<string, number>                // service name → count
   topFindings: MonthlySecurityTopFinding[]         // sorted by severity desc, max 10
+}
+
+// ── Monthly detection lead summary (#369) ───────────────────────────
+//
+// Aggregated from detection:lead:monthly:{YYYY-MM} (60d TTL accumulator) at archive
+// build time. The accumulator is dual-written by appendDetectionLead alongside the
+// per-day audit log so the archive cron on the 1st can still see entries that the
+// 7d-TTL daily keys lost long before. Mirrors the security:monthly:* / archive pattern.
+
+export interface MonthlyDetectionLeadExample {
+  svcId: string
+  incId: string                  // for traceability — matches the original incident
+  leadMs: number
+  detectedAt: string             // ISO 8601 — when AIWatch first noticed
+}
+
+export interface MonthlyDetectionLeadSummary {
+  count: number                                  // total detection lead entries this month
+  avgLeadMs: number                              // mean lead time across all entries
+  medianLeadMs: number                           // median (resilient to outliers)
+  maxLeadMs: number                              // longest single lead — the headline figure
+  byService: Record<string, number>              // svcId → count, for "most-detected services"
+  topExamples: MonthlyDetectionLeadExample[]     // up to 5, sorted by leadMs desc
 }
 
 // ── Incident accumulation (written daily by daily summary cron) ──────
@@ -311,6 +340,47 @@ export function summarizeSecurityAlerts(entries: MonthlySecurityEntry[]): Monthl
 }
 
 /**
+ * Aggregate raw DetectionLeadEntry[] (from the detection:lead:monthly:{period} accumulator)
+ * into a permanent monthly summary (#369). Returns null on empty input — caller decides
+ * whether to attach `detectionLead: null` or omit the field, mirroring how security is
+ * handled. Stats (avg / median / max) computed on entries' leadMs only — every entry is
+ * already validated by isValidDetectionLeadEntry at read time, so leadMs is finite and in
+ * [MIN_LEAD_MS, MAX_LEAD_MS).
+ */
+export function summarizeDetectionLead(entries: DetectionLeadEntry[]): MonthlyDetectionLeadSummary | null {
+  if (entries.length === 0) return null
+
+  const leadValues = entries.map(e => e.leadMs)
+  const sum = leadValues.reduce((a, b) => a + b, 0)
+  const avgLeadMs = Math.round(sum / leadValues.length)
+  const sorted = [...leadValues].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  const medianLeadMs = sorted.length % 2 === 0
+    ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+    : sorted[mid]
+  const maxLeadMs = sorted[sorted.length - 1]
+
+  const byService: Record<string, number> = {}
+  for (const e of entries) byService[e.svcId] = (byService[e.svcId] ?? 0) + 1
+
+  const topExamples = [...entries]
+    .sort((a, b) => {
+      if (b.leadMs !== a.leadMs) return b.leadMs - a.leadMs
+      // Tie-break on detectedAt desc — most recent occurrence wins for equal leads
+      return b.detectedAt.localeCompare(a.detectedAt)
+    })
+    .slice(0, 5)
+    .map((e): MonthlyDetectionLeadExample => ({
+      svcId: e.svcId,
+      incId: e.incId,
+      leadMs: e.leadMs,
+      detectedAt: e.detectedAt,
+    }))
+
+  return { count: entries.length, avgLeadMs, medianLeadMs, maxLeadMs, byService, topExamples }
+}
+
+/**
  * Extract the OSV vuln ID (GHSA-* or CVE-*) from a finding URL.
  * Works for the two shapes our writer currently produces: osv.dev/vulnerability/{id}
  * and github.com/advisories/{id}. Returns null if the URL doesn't carry a recognizable id.
@@ -441,6 +511,34 @@ export async function buildMonthlyArchive(
     }
   }
 
+  // Snapshot detection-lead audit log before the 60d TTL lapses (#369). The daily
+  // keys (detection:lead:{date}) carry only 7d TTL — far too short to read at archive
+  // time — so we read from the dedicated monthly accumulator written by
+  // appendDetectionLead. Missing or malformed data must not fail the archive.
+  // Build the period key from the archive's own period string (not "now") so the cron
+  // archives the *previous* month's accumulator, matching how the rest of this builder
+  // resolves the period.
+  const detKey = `detection:lead:monthly:${period}`
+  const detRaw = await kv.get(detKey).catch(() => null)
+  let detectionLead: MonthlyDetectionLeadSummary | null = null
+  if (detRaw) {
+    try {
+      const parsed = JSON.parse(detRaw)
+      if (Array.isArray(parsed)) {
+        // Filter to validated entries — defensive against malformed values that could
+        // skew avg/median (NaN propagation) or surface as fictitious topExamples.
+        const validEntries = parsed.filter((e): e is DetectionLeadEntry => isValidDetectionLeadEntry(e))
+        detectionLead = summarizeDetectionLead(validEntries)
+      } else {
+        // Non-array means the schema was overwritten unexpectedly — surface so the silent
+        // null in the archive doesn't get mistaken for "no detections this month".
+        console.warn(`[monthly-archive] detection lead accumulator at ${detKey} is not an array (got ${typeof parsed}) — archive will record null`)
+      }
+    } catch (err) {
+      console.warn(`[monthly-archive] corrupt detection lead accumulation for ${period}:`, err instanceof Error ? err.message : err)
+    }
+  }
+
   const uptimeMap = computeMonthlyUptime(dailyData)
   const latencyMap = computeMonthlyLatency(probeData)
 
@@ -500,6 +598,7 @@ export async function buildMonthlyArchive(
     daysCollected,
     services,
     security,
+    detectionLead,
   }
 }
 

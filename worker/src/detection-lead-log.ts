@@ -32,6 +32,17 @@ export function detectionLeadKey(date: Date = new Date()): string {
   return `detection:lead:${date.toISOString().split('T')[0]}`
 }
 
+/** Monthly accumulator key (60d TTL) — written alongside the daily key so the monthly
+ *  archive cron on the 1st can still see entries that the daily 7d-TTL keys lost long
+ *  before. Same shape (DetectionLeadEntry[]) as the daily key, dedup by (svcId, incId).
+ *  Mirrors the incidents:monthly:{period} pattern (#369). */
+export function detectionLeadMonthlyKey(date: Date = new Date()): string {
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0')
+  return `detection:lead:monthly:${date.getUTCFullYear()}-${m}`
+}
+
+export const DETECTION_LEAD_MONTHLY_TTL_SECONDS = 60 * 86400 // 60 days — covers archive cron + late catch-up
+
 const READ_FAILED = Symbol('detection-lead-read-failed')
 
 /** Read KV with one retry (50ms backoff) — converts most transient failures into success
@@ -79,7 +90,7 @@ const LEAD_MS_DRIFT_TOLERANCE_MS = 1000
  *  - leadMs consistent with (officialAt - detectedAt) within 1s tolerance
  *  - officialAt not meaningfully in the future (rejects clock-skew/garbage timestamps that would
  *    otherwise produce fictitious "Detection Lead: 45m" entries from synthesized timestamps) */
-function isValidEntry(e: unknown, now: number = Date.now()): e is DetectionLeadEntry {
+export function isValidEntry(e: unknown, now: number = Date.now()): e is DetectionLeadEntry {
   if (!e || typeof e !== 'object') return false
   const o = e as Record<string, unknown>
   if (typeof o.svcId !== 'string' || o.svcId.length === 0) return false
@@ -141,14 +152,73 @@ export async function appendDetectionLead(
     entries = parsed.filter((e) => isValidEntry(e, now.getTime()))
   }
   // Idempotent: skip if this incident already logged today
-  if (entries.some(e => e.incId === entry.incId && e.svcId === entry.svcId)) return 'duplicate'
+  if (entries.some(e => e.incId === entry.incId && e.svcId === entry.svcId)) {
+    // Daily already has the entry — but the monthly accumulator might still be missing it
+    // (e.g., a previous attempt persisted to daily but failed at monthly). Re-attempt the
+    // monthly side so the dual-write is eventually consistent without re-reporting in Discord.
+    await appendToMonthlyAccumulator(kv, entry, now).catch((err) => {
+      console.warn('[detection-lead] monthly accumulator write failed on duplicate-daily path:', {
+        svcId: entry.svcId,
+        incId: entry.incId,
+        err: err instanceof Error ? err.message : err,
+      })
+    })
+    return 'duplicate'
+  }
   entries.push(entry)
   const ok = await kvPut(kv, key, JSON.stringify(entries), { expirationTtl: 7 * 86400 })
   if (!ok) {
     console.error('[detection-lead] PERSIST FAILED — daily summary will be missing entry:', { svcId: entry.svcId, incId: entry.incId, leadMs: entry.leadMs })
     return 'failed'
   }
+  // After the daily key succeeds, mirror to the 60d monthly accumulator so the monthly
+  // archive cron on the 1st can read entries the 7d daily keys have already lost (#369).
+  // Failure here is non-fatal — the daily key is the source of truth for Discord; monthly
+  // accumulator is best-effort. Log so operators see drift if it happens.
+  await appendToMonthlyAccumulator(kv, entry, now).catch((err) => {
+    console.warn('[detection-lead] monthly accumulator write failed:', {
+      svcId: entry.svcId,
+      incId: entry.incId,
+      err: err instanceof Error ? err.message : err,
+    })
+  })
   return 'persisted'
+}
+
+/** Append `entry` to `detection:lead:monthly:{YYYY-MM}` (60d TTL).
+ *  Idempotent on (svcId, incId) like the daily key. ABORTS on parse / non-array / KV
+ *  read failure rather than overwriting — corruption isolation matches the daily path.
+ *  Throws on unrecoverable corruption so the caller's `.catch` logs it; otherwise resolves. */
+async function appendToMonthlyAccumulator(
+  kv: KVNamespace,
+  entry: DetectionLeadEntry,
+  now: Date,
+): Promise<void> {
+  const monthlyKey = detectionLeadMonthlyKey(now)
+  const raw = await getWithRetry(kv, monthlyKey)
+  if (raw === READ_FAILED) {
+    throw new Error(`monthly read failed: ${monthlyKey}`)
+  }
+  let entries: DetectionLeadEntry[] = []
+  if (raw) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch (err) {
+      throw new Error(`monthly accumulator unparseable at ${monthlyKey}: ${err instanceof Error ? err.message : err}`)
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error(`monthly accumulator not an array at ${monthlyKey}: ${typeof parsed}`)
+    }
+    entries = parsed.filter((e) => isValidEntry(e, now.getTime()))
+  }
+  // Idempotent: same dedup as daily
+  if (entries.some(e => e.incId === entry.incId && e.svcId === entry.svcId)) return
+  entries.push(entry)
+  const ok = await kvPut(kv, monthlyKey, JSON.stringify(entries), { expirationTtl: DETECTION_LEAD_MONTHLY_TTL_SECONDS })
+  if (!ok) {
+    throw new Error(`monthly accumulator persist failed: ${monthlyKey}`)
+  }
 }
 
 /** Read Detection Lead entries from KV, validating per-entry shape and dropping malformed.
