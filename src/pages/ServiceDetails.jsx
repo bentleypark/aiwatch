@@ -11,7 +11,7 @@ import { trackEvent } from '../utils/analytics'
 import { formatDate } from '../utils/time'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { groupIncidents } from '../utils/incidentGrouping'
-import { dominantGroupStatus } from '../utils/incidentSort'
+import { compareGroupedRows, dominantGroupStatus } from '../utils/incidentSort'
 import { SCORE_TEXT_CLASS } from '../utils/constants'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
@@ -691,12 +691,10 @@ export default function ServiceDetails({ serviceId }) {
   const cutoff7d = Date.now() - 7 * 86_400_000
   const recentIncidents = (service.incidents ?? []).filter(
     (inc) => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= cutoff7d
-  ).sort((a, b) => {
-    const aOngoing = a.status !== 'resolved' ? 1 : 0
-    const bOngoing = b.status !== 'resolved' ? 1 : 0
-    if (aOngoing !== bOngoing) return bOngoing - aOngoing
-    return new Date(b.startedAt) - new Date(a.startedAt)
-  })
+  )
+  // groupIncidents re-sorts purely by date; compareGroupedRows lifts ongoing/
+  // monitoring rows back above newer resolved ones. See incidentSort.js.
+  const groupedIncidents = groupIncidents(recentIncidents).slice().sort(compareGroupedRows)
   const incidentCount = recentIncidents.length
   const totalIncidents = (service.incidents ?? []).length
   const isEstimateNoData = service.uptimeSource === 'estimate' && totalIncidents === 0
@@ -883,7 +881,7 @@ export default function ServiceDetails({ serviceId }) {
               </div>
             ) : (
               <div className="flex flex-col" style={{ gap: '8px' }}>
-                {groupIncidents(recentIncidents).map((row) => row.kind === 'group' ? (
+                {groupedIncidents.map((row) => row.kind === 'group' ? (
                   <IncidentGroupRow key={`group:${row.dayKey}:${row.normalizedTitle}`} group={row} t={t} lang={lang} />
                 ) : (
                   <IncidentRow key={row.incident.id} incident={row.incident} detectedAt={service.detectedAt} isRecentlyRecovered={!!(recentlyRecovered[service.id] ?? []).includes(row.incident.id)} t={t} lang={lang} />

@@ -3,6 +3,7 @@
 import type { ServiceSEO } from './seo-content'
 import { SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE, RELATED_SLUGS } from './slug-map'
 import { groupIncidents, type GroupingIncident, type GroupRow, type SingleRow } from './incident-grouping'
+import { compareGroupedRows } from './incident-sort'
 
 /** Format recovery display — shared with worker/src/ai-analysis.ts */
 function formatRecoveryDisplay(recovery: string): string {
@@ -424,7 +425,13 @@ export function renderIncidents(service: ServiceData | null): string {
 <div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">No incidents in the last 30 days</p></div>`
   }
 
-  const rows = groupIncidents(recent, { timeZone: 'UTC' }).slice(0, INCIDENT_ROW_CAP)
+  // Re-sort groupIncidents() output so ongoing/monitoring rows survive the
+  // INCIDENT_ROW_CAP slice — see compareGroupedRows. Sort must run before
+  // .slice() or a resolved-heavy 30-day window can truncate an active row.
+  const rows = groupIncidents(recent, { timeZone: 'UTC' })
+    .slice()
+    .sort(compareGroupedRows)
+    .slice(0, INCIDENT_ROW_CAP)
   const body = rows.map((row) => row.kind === 'group' ? renderIncidentGroup(row) : renderIncidentSingle((row as SingleRow).incident)).join('\n')
   return `${heading}
 <div class="card">${body}</div>`

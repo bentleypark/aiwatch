@@ -5,19 +5,25 @@ import {
   getResolvedTime,
   getLatestActivity,
   compareIncidents,
+  compareGroupedRows,
   dominantGroupStatus,
   formatDurationMs,
   sumGroupDuration,
 } from '../incidentSort'
+import { groupIncidents } from '../incidentGrouping'
 
 function makeIncident({
   id = 'inc',
+  title,
   status = 'ongoing',
   startedAt = '2026-04-28T00:00:00Z',
   resolvedAt,
+  impact = null,
   timeline = [],
 }) {
-  return { id, status, startedAt, resolvedAt, timeline }
+  // title defaults to id so groupIncidents doesn't accidentally merge
+  // distinct fixtures via empty-title same-day collisions.
+  return { id, title: title ?? id, status, startedAt, resolvedAt, impact, timeline }
 }
 
 describe('STATUS_PRIORITY', () => {
@@ -198,6 +204,77 @@ describe('compareIncidents', () => {
       '5-resolved-recent',    // resolved tier, latest resolved
       '1-resolved-old',       // resolved tier, older
     ])
+  })
+})
+
+describe('compareGroupedRows', () => {
+  // Helper: build a real `groupIncidents` output from a list of incidents,
+  // then sort it the way ServiceDetails.jsx / Incidents.jsx do at render time.
+  // Tests the *page-level composition*, not just the comparator in isolation —
+  // a regression like #383 (page calls groupIncidents but forgets the sort)
+  // would still pass an isolated comparator unit test.
+  const UTC = { timeZone: 'UTC' }
+
+  it('puts an investigating incident above newer resolved rows (ServiceDetails.jsx #383 regression)', () => {
+    // Real-world shape: ChatGPT detail page on 2026-05-05 had one investigating
+    // entry from Apr 30 06:59 buried under May 5 / May 1 resolved entries,
+    // because groupIncidents re-sorted purely by date.
+    const incidents = [
+      makeIncident({ id: 'r-may5', status: 'resolved',      startedAt: '2026-05-05T00:29:00Z', resolvedAt: '2026-05-05T02:10:00Z' }),
+      makeIncident({ id: 'r-may1', status: 'resolved',      startedAt: '2026-05-01T12:55:00Z', resolvedAt: '2026-05-01T13:03:00Z' }),
+      makeIncident({ id: 'inv',    status: 'investigating', startedAt: '2026-04-30T06:59:00Z' }),
+      makeIncident({ id: 'r-apr30',status: 'resolved',      startedAt: '2026-04-30T06:01:00Z', resolvedAt: '2026-04-30T07:24:00Z' }),
+    ]
+    const sortedIds = groupIncidents(incidents, UTC)
+      .slice()
+      .sort(compareGroupedRows)
+      .map((row) => row.kind === 'single' ? row.incident.id : `group:${row.normalizedTitle}`)
+    expect(sortedIds[0]).toBe('inv')
+  })
+
+  it('keeps newest-first ordering within the same status tier (stable sort)', () => {
+    const incidents = [
+      makeIncident({ id: 'r-old', status: 'resolved', startedAt: '2026-04-29T10:00:00Z', resolvedAt: '2026-04-29T10:10:00Z' }),
+      makeIncident({ id: 'r-new', status: 'resolved', startedAt: '2026-05-05T10:00:00Z', resolvedAt: '2026-05-05T10:10:00Z' }),
+    ]
+    const sortedIds = groupIncidents(incidents, UTC)
+      .slice()
+      .sort(compareGroupedRows)
+      .map((row) => row.incident.id)
+    expect(sortedIds).toEqual(['r-new', 'r-old'])
+  })
+
+  it('puts a mostly-resolved flap group BELOW a single investigating row (Mistral-flap parity)', () => {
+    // Together/Fireworks/Mistral flap into 2+ same-day same-title resolved rows.
+    // Even when the flap group's rangeEnd is more recent, an unrelated
+    // investigating incident must outrank it.
+    const incidents = [
+      makeIncident({ id: 'flap-1', title: 'Embedding API — recovered', status: 'resolved', startedAt: '2026-05-05T08:00:00Z', resolvedAt: '2026-05-05T08:05:00Z' }),
+      makeIncident({ id: 'flap-2', title: 'Embedding API — recovered', status: 'resolved', startedAt: '2026-05-05T09:00:00Z', resolvedAt: '2026-05-05T09:05:00Z' }),
+      makeIncident({ id: 'flap-3', title: 'Embedding API — recovered', status: 'resolved', startedAt: '2026-05-05T10:00:00Z', resolvedAt: '2026-05-05T10:05:00Z' }),
+      makeIncident({ id: 'inv',    title: 'API outage',                status: 'investigating', startedAt: '2026-05-04T12:00:00Z' }),
+    ]
+    const rows = groupIncidents(incidents, UTC).slice().sort(compareGroupedRows)
+    expect(rows[0].kind).toBe('single')
+    expect(rows[0].incident.id).toBe('inv')
+    expect(rows[1].kind).toBe('group')
+    expect(rows[1].count).toBe(3)
+  })
+
+  it('orders monitoring above resolved across mixed singles and groups', () => {
+    const incidents = [
+      makeIncident({ id: 'r-1', status: 'resolved', startedAt: '2026-05-05T11:00:00Z', resolvedAt: '2026-05-05T11:05:00Z' }),
+      makeIncident({ id: 'mon', status: 'monitoring', startedAt: '2026-05-05T08:00:00Z' }),
+      makeIncident({ id: 'r-2', status: 'resolved', startedAt: '2026-05-05T12:00:00Z', resolvedAt: '2026-05-05T12:05:00Z' }),
+    ]
+    const ids = groupIncidents(incidents, UTC).slice().sort(compareGroupedRows).map((r) => r.incident.id)
+    expect(ids[0]).toBe('mon')
+  })
+
+  it('treats unknown row status as resolved tier (defensive)', () => {
+    const a = { kind: 'single', incident: { id: 'a', status: 'weird', startedAt: '2026-05-05T00:00:00Z' } }
+    const b = { kind: 'single', incident: { id: 'b', status: 'monitoring', startedAt: '2026-05-04T00:00:00Z' } }
+    expect(compareGroupedRows(b, a)).toBeLessThan(0)
   })
 })
 

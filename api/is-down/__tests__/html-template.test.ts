@@ -176,4 +176,66 @@ describe('renderIncidents — 30-day window + grouping', () => {
     expect(rows).toBeLessThanOrEqual(20)
     expect(rows).toBeGreaterThan(15) // sanity: we should fill up near the cap
   })
+
+  it('puts an investigating incident above newer resolved rows (#383 SSR regression)', () => {
+    // Mirrors the ServiceDetails.jsx fix on the SSR side. groupIncidents alone
+    // sorts purely by date — without compareGroupedRows the active incident's
+    // title would render below newer resolved rows in the SERP-visible HTML.
+    const svc = mkService({
+      incidents: [
+        mkInc({ id: 'r1',  title: 'Recent resolved A', status: 'resolved',      startedAt: '2026-05-05T00:29:00Z', duration: '1h 41m' }),
+        mkInc({ id: 'r2',  title: 'Recent resolved B', status: 'resolved',      startedAt: '2026-05-01T12:55:00Z', duration: '8m' }),
+        mkInc({ id: 'inv', title: 'Active partial outage', status: 'investigating', startedAt: '2026-04-30T06:59:00Z' }),
+      ],
+    })
+    const html = renderIncidents(svc)
+    const invIdx = html.indexOf('Active partial outage')
+    const r1Idx = html.indexOf('Recent resolved A')
+    const r2Idx = html.indexOf('Recent resolved B')
+    expect(invIdx).toBeGreaterThan(-1)
+    expect(invIdx).toBeLessThan(r1Idx)
+    expect(invIdx).toBeLessThan(r2Idx)
+  })
+
+  it('puts a monitoring incident above newer resolved rows (#383 SSR regression — monitoring tier)', () => {
+    const svc = mkService({
+      incidents: [
+        mkInc({ id: 'r1',  title: 'Recent resolved A', status: 'resolved',  startedAt: '2026-05-05T11:00:00Z', duration: '5m' }),
+        mkInc({ id: 'mon', title: 'Active fix verifying', status: 'monitoring', startedAt: '2026-05-04T08:00:00Z' }),
+      ],
+    })
+    const html = renderIncidents(svc)
+    const monIdx = html.indexOf('Active fix verifying')
+    const r1Idx = html.indexOf('Recent resolved A')
+    expect(monIdx).toBeGreaterThan(-1)
+    expect(monIdx).toBeLessThan(r1Idx)
+  })
+
+  it('row cap does not truncate an ongoing incident in favor of newer resolved rows (#383 SSR regression)', () => {
+    // 25 newer resolved rows + 1 older investigating row. Without sort-before-cap
+    // the investigating row would be discarded by .slice(0, 20).
+    const now = Date.now()
+    const svc = mkService({
+      incidents: [
+        ...Array.from({ length: 25 }, (_, i) => mkInc({
+          id: `r${i}`,
+          title: `Resolved title ${i}`,
+          status: 'resolved' as const,
+          startedAt: new Date(now - i * 3600_000).toISOString(),
+          duration: '5m',
+        })),
+        mkInc({ id: 'inv', title: 'Active investigation', status: 'investigating', startedAt: new Date(now - 26 * 3600_000).toISOString() }),
+      ],
+    })
+    const html = renderIncidents(svc)
+    expect(html).toContain('Active investigation')
+    // Strong guard: investigating must render BEFORE the newest resolved row,
+    // not just survive the cap. A bug placing investigating at index 19 would
+    // still leave it in the HTML but in the wrong position.
+    const invIdx = html.indexOf('Active investigation')
+    const newestResolvedIdx = html.indexOf('Resolved title 0')
+    expect(invIdx).toBeGreaterThan(-1)
+    expect(newestResolvedIdx).toBeGreaterThan(-1)
+    expect(invIdx).toBeLessThan(newestResolvedIdx)
+  })
 })
