@@ -6,8 +6,14 @@
  * day, swamping the Incident History UI. Grouping pulls these into a single expandable
  * row while leaving raw incident data untouched (Discord pipeline + monthly reports stay raw).
  *
- * Threshold rationale: ≥3 (not ≥2). Two entries don't earn a group row — the UI overhead
- * outweighs the dedup benefit.
+ * Threshold rationale: ≥2 (lowered from ≥3 in #373). Originally ≥3 because BetterStack
+ * RSS-only services (Together AI, Fireworks AI) tended to flap many times per day, and a
+ * threshold of 3 cleanly separated repeat noise from one-off events. After #373 removed the
+ * Mistral-only probe corroboration filter, Mistral's auto-monitoring incidents (typically
+ * 2-3 per day per endpoint) needed clustering too — and they fell *just* below the old
+ * threshold most days. ≥2 captures those without affecting human-classified incidents:
+ * Atlassian/incident.io services almost never emit two identical-title incidents on the
+ * same calendar day in practice.
  *
  * impact != null is never grouped: real human-tagged incidents stay individually visible.
  *
@@ -24,7 +30,7 @@
  * See issue #282.
  */
 
-export const GROUP_THRESHOLD = 3
+export const GROUP_THRESHOLD = 2
 
 /**
  * @param {string} title

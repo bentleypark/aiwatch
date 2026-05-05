@@ -46,19 +46,18 @@ describe('groupIncidents — threshold + impact rules', () => {
     expect(result[0].entries).toHaveLength(14)
   })
 
-  it('does NOT group when count is below threshold (2 entries)', () => {
+  it('does NOT group when count is below threshold (1 entry)', () => {
     const incs = [
       makeIncident({ id: 'a', title: 'X — recovered', startedAt: '2026-04-16T10:00:00Z' }),
-      makeIncident({ id: 'b', title: 'X — recovered', startedAt: '2026-04-16T15:00:00Z' }),
     ]
     const result = groupIncidents(incs, UTC)
-    expect(result).toHaveLength(2)
-    expect(result.every(r => r.kind === 'single')).toBe(true)
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('single')
   })
 
-  it('groups exactly at threshold (3 entries)', () => {
-    expect(GROUP_THRESHOLD).toBe(3)
-    const incs = Array.from({ length: 3 }, (_, i) => makeIncident({
+  it('groups exactly at threshold (2 entries) — lowered from 3 in #373', () => {
+    expect(GROUP_THRESHOLD).toBe(2)
+    const incs = Array.from({ length: 2 }, (_, i) => makeIncident({
       id: `x-${i}`,
       title: 'X — recovered',
       startedAt: `2026-04-16T${10 + i}:00:00Z`,
@@ -66,7 +65,7 @@ describe('groupIncidents — threshold + impact rules', () => {
     const result = groupIncidents(incs, UTC)
     expect(result).toHaveLength(1)
     expect(result[0].kind).toBe('group')
-    expect(result[0].count).toBe(3)
+    expect(result[0].count).toBe(2)
   })
 
   it('never groups entries with non-null impact, even if 3+ match the key', () => {
@@ -121,12 +120,14 @@ describe('groupIncidents — local timezone day boundary (KST = UTC+9)', () => {
       makeIncident({ id: 'e', title: 'X — recovered', startedAt: '2026-04-16T20:00:00Z' }), // KST 04-17 05:00
     ]
     const result = groupIncidents(incs, KST)
-    // Two KST dates: 04-16 (2 entries → below threshold) + 04-17 (3 entries → group)
-    expect(result.filter(r => r.kind === 'group')).toHaveLength(1)
-    const group = result.find(r => r.kind === 'group')
-    expect(group.dayKey).toBe('2026-04-17')
-    expect(group.count).toBe(3)
-    expect(result.filter(r => r.kind === 'single')).toHaveLength(2)
+    // Two KST dates: 04-16 (2 entries → group) + 04-17 (3 entries → group). After #373 the
+    // ≥2 threshold makes both date buckets cluster, so no entries fall through as singles.
+    expect(result.filter(r => r.kind === 'group')).toHaveLength(2)
+    const apr16 = result.find(r => r.kind === 'group' && r.dayKey === '2026-04-16')
+    const apr17 = result.find(r => r.kind === 'group' && r.dayKey === '2026-04-17')
+    expect(apr16?.count).toBe(2)
+    expect(apr17?.count).toBe(3)
+    expect(result.filter(r => r.kind === 'single')).toHaveLength(0)
   })
 
   it('groups entries spanning UTC midnight that share the same KST date', () => {

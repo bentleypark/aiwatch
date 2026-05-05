@@ -134,7 +134,7 @@ async function writeLatencySnapshot(kv: KVNamespace, services: ServiceStatus[]):
 }
 
 // ── Health Check Probing (Phase 2 PoC) ──
-import { type ProbeResult, type ProbeSnapshot, type ProbeSpike, PROBE_TARGETS, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, detectConsecutiveSpikes, computeMedianRtt, isCorroboratedByProbe, isMistralProbedEndpoint } from './probe'
+import { type ProbeResult, type ProbeSnapshot, type ProbeSpike, PROBE_TARGETS, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, detectConsecutiveSpikes } from './probe'
 
 const PROBED_SERVICE_IDS = new Set(PROBE_TARGETS.map((t) => t.id))
 
@@ -414,26 +414,8 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
   })
 
-  // Mistral probe cross-validation — filter micro-incident noise BEFORE alert detection
-  // Ensures Discord alerts and dashboard display are consistent (#209)
-  // Reuse cronProbes if already fetched (stale path), otherwise read from KV
-  if (cronProbes.length === 0) {
-    const probeRaw = await env.STATUS_CACHE.get('probe:24h').catch(() => null)
-    if (probeRaw) {
-      try { cronProbes = JSON.parse(probeRaw).snapshots ?? [] } catch { /* ignore */ }
-    }
-  }
-  if (cronProbes.length > 0) {
-    const mistralMedian = computeMedianRtt(cronProbes, 'mistral')
-    if (mistralMedian !== null) {
-      for (const svc of scored) {
-        if (svc.id !== 'mistral' || !svc.incidents?.length) continue
-        svc.incidents = svc.incidents.filter((inc) =>
-          !isMistralProbedEndpoint(inc.title) || isCorroboratedByProbe(cronProbes, 'mistral', inc.startedAt, inc.resolvedAt ?? null, mistralMedian),
-        )
-      }
-    }
-  }
+  // Mistral-only probe cross-validation removed in #373 — same-title incident grouping
+  // (src/utils/incidentGrouping.js) now handles auto-monitoring noise uniformly across services.
 
   // Collect previously alerted IDs from KV for dedup context
   const alertedNewIds = new Set<string>()
@@ -2030,21 +2012,10 @@ export default {
           try { probe24h = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[kv] cached probe24h parse failed:', err instanceof Error ? err.message : err) }
         }
 
-        // Filter Mistral micro-incident noise via probe cross-validation (#91)
-        // Must run BEFORE AI analysis reads — otherwise filtered incidents still have analysis data
-        if (probe24h.length > 0) {
-          const mistralMedian = computeMedianRtt(probe24h, 'mistral')
-          if (mistralMedian !== null) {
-            for (const svc of cached.services) {
-              if (svc.id !== 'mistral' || !svc.incidents?.length) continue
-              svc.incidents = svc.incidents.filter((inc) =>
-                !isMistralProbedEndpoint(inc.title) || isCorroboratedByProbe(probe24h, 'mistral', inc.startedAt, inc.resolvedAt ?? null, mistralMedian),
-              )
-            }
-          }
-        }
+        // Mistral-only probe cross-validation removed in #373 — same-title incident grouping
+        // (src/utils/incidentGrouping.js) now handles auto-monitoring noise uniformly.
 
-        // Read AI analysis (per-incident keys) — uses filtered incident list
+        // Read AI analysis (per-incident keys) — uses live incident list
         const aiAnalysis: Record<string, AIAnalysisResult[]> = {}
         const recentlyRecovered: Record<string, string[]> = {}
         // Active incidents: read ai:analysis:{svcId}:{incId} for each
@@ -2212,18 +2183,8 @@ export default {
         ctx.waitUntil(writeLatencySnapshot(env.STATUS_CACHE, raw))
       }
 
-      // Filter Mistral micro-incident noise via probe cross-validation (#91)
-      if (probe24h.length > 0) {
-        const mistralMedian = computeMedianRtt(probe24h, 'mistral')
-        if (mistralMedian !== null) {
-          for (const svc of enriched) {
-            if (svc.id !== 'mistral' || !svc.incidents?.length) continue
-            svc.incidents = svc.incidents.filter((inc) =>
-              !isMistralProbedEndpoint(inc.title) || isCorroboratedByProbe(probe24h, 'mistral', inc.startedAt, inc.resolvedAt ?? null, mistralMedian),
-            )
-          }
-        }
-      }
+      // Mistral-only probe cross-validation removed in #373 — same-title incident grouping
+      // (src/utils/incidentGrouping.js) now handles auto-monitoring noise uniformly.
 
       // Add AIWatch Score + Detection Lead timestamps to each service
       const detectionMap = new Map<string, string>()

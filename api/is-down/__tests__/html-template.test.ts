@@ -148,8 +148,7 @@ describe('renderIncidents — 30-day window + grouping', () => {
     expect(html).toMatch(/3×/)
   })
 
-  it('stays single rows (no <details>) when a same-day bucket has exactly 2 entries', () => {
-    // Regression guard: group-to-single downgrade when a BetterStack bucket drops below threshold
+  it('groups when a same-day bucket has exactly 2 entries (≥2 threshold, lowered from ≥3 in #373)', () => {
     const day = '2026-04-20T'
     const svc = mkService({
       incidents: [
@@ -158,8 +157,8 @@ describe('renderIncidents — 30-day window + grouping', () => {
       ],
     })
     const html = renderIncidents(svc)
-    expect(html).not.toContain('incident-group')
-    expect((html.match(/class="incident-item"/g) ?? []).length).toBe(2)
+    expect(html).toContain('incident-group')
+    expect(html).toMatch(/2×/)
   })
 
   it('caps rendered rows at INCIDENT_ROW_CAP = 20', () => {
