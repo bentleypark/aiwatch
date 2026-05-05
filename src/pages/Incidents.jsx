@@ -8,7 +8,7 @@ import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { formatDate } from '../utils/time'
 import { groupIncidents } from '../utils/incidentGrouping'
-import { STATUS_PRIORITY, getResolvedTime, compareIncidents, dominantGroupStatus, sumGroupDuration, formatDurationMs } from '../utils/incidentSort'
+import { getResolvedTime, compareIncidents, compareGroupedRows, dominantGroupStatus, sumGroupDuration, formatDurationMs } from '../utils/incidentSort'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
 import IncidentTimeline from '../components/IncidentTimeline'
 import EmptyState from '../components/EmptyState'
@@ -37,8 +37,8 @@ const PERIODS = [7, 30, 90]
 const TABLE_COLS = ['col.time', 'col.title', 'col.service', 'col.duration', 'col.status']
 
 // ── Helpers ──────────────────────────────────────────────────
-// STATUS_PRIORITY / getResolvedTime / getLatestActivity / compareIncidents
-// live in src/utils/incidentSort.js — shared with Overview "Recent Incidents".
+// Sort/grouping helpers live in src/utils/incidentSort.js — shared with
+// Overview "Recent Incidents" and ServiceDetails.
 
 /** Last element of array (ES5-safe) */
 function last(arr) { return arr && arr.length > 0 ? arr[arr.length - 1] : undefined }
@@ -407,14 +407,12 @@ export default function Incidents() {
       .sort(compareIncidents)
   }, [allIncidents, serviceFilter, statusFilter, period])
 
-  // groupIncidents re-sorts purely by date — re-apply STATUS_PRIORITY so ongoing
-  // incidents stay above resolved flap groups. Sort is stable (ES2019+), so
-  // newest-first ordering within the same status is preserved.
-  const grouped = useMemo(() => {
-    const rows = groupIncidents(filtered)
-    const statusOf = (r) => r.kind === 'single' ? r.incident.status : dominantGroupStatus(r)
-    return rows.slice().sort((a, b) => (STATUS_PRIORITY[statusOf(a)] ?? 2) - (STATUS_PRIORITY[statusOf(b)] ?? 2))
-  }, [filtered])
+  // groupIncidents re-sorts purely by date; compareGroupedRows lifts ongoing
+  // rows back above newer resolved flap groups. See incidentSort.js.
+  const grouped = useMemo(
+    () => groupIncidents(filtered).slice().sort(compareGroupedRows),
+    [filtered]
+  )
 
   if (loading && services.length === 0) return <IncidentsSkeleton />
   if (!loading && services.length === 0 && error) return <EmptyState type="offline" onAction={refresh} />

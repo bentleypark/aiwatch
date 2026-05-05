@@ -170,3 +170,26 @@ export function compareIncidents(a, b) {
   if (aPri !== bPri) return aPri - bPri
   return getLatestActivity(b) - getLatestActivity(a)
 }
+
+/**
+ * Comparator for `groupIncidents()` output rows ({kind:'single'|'group'}).
+ * Sorts by tier (ongoing → monitoring → resolved). Within a tier, the
+ * spec-stable `Array.prototype.sort` (ES2019+) preserves input order — callers
+ * must therefore pass `groupIncidents()` output (already newest-first by
+ * representative date); sorting an unsorted list will not yield newest-first
+ * within tiers.
+ *
+ * Used by `Incidents.jsx` and `ServiceDetails.jsx` (refs #354/#355) and
+ * mirrored on the SSR side at `api/is-down/incident-sort.ts` because
+ * `groupIncidents` re-sorts purely by date and would otherwise bury an active
+ * incident under newer resolved rows.
+ *
+ * @param {{ kind: 'single', incident: { status: string } } | { kind: 'group', uniformStatus?: boolean, statusCounts: Record<string, number> }} a
+ * @param {{ kind: 'single', incident: { status: string } } | { kind: 'group', uniformStatus?: boolean, statusCounts: Record<string, number> }} b
+ * @returns {number}
+ */
+export function compareGroupedRows(a, b) {
+  const aStatus = a.kind === 'single' ? a.incident.status : dominantGroupStatus(a)
+  const bStatus = b.kind === 'single' ? b.incident.status : dominantGroupStatus(b)
+  return (STATUS_PRIORITY[aStatus] ?? 2) - (STATUS_PRIORITY[bStatus] ?? 2)
+}
