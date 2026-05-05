@@ -300,7 +300,7 @@ api/
   intro/
     html-template.ts # SSR HTML template (i18n, dashboard mock, GA4)
   is-down.ts        # "Is X Down?" Edge Function (30 services — excludes bedrock/azureopenai per #263)
-  reports.ts        # Monthly Reports proxy (/reports/* → reports.ai-watch.dev) with HTML path rewriting (#264)
+  reports.ts        # Monthly Reports proxy (/reports/* → bentleypark.github.io/aiwatch-reports/*, fetched directly to bypass the Cloudflare 301 on the public reports.ai-watch.dev hostname) with HTML path rewriting (#264)
 src/
   components/   # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, AnalysisModal
   pages/        # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, AboutScore, Ranking
@@ -394,7 +394,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 
 Is X Down pages (Edge SSR) and Landing page use inline `gtag()` calls directly since they don't use React.
 
-**Reports site** (`reports.ai-watch.dev`) uses the same GA4 ID (`G-D4ZWVHQ7JK`) with event delegation in `_includes/footer.html`:
+**Reports site** (served at `ai-watch.dev/reports/` via the `api/reports.ts` proxy; #264) uses the same GA4 ID (`G-D4ZWVHQ7JK`) with event delegation in `_includes/footer.html`:
 
 | Event | Parameters | Trigger | Purpose |
 |---|---|---|---|
@@ -523,4 +523,4 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
 - **PWA**: `public/manifest.json` + `public/sw.js` (stale-while-revalidate). CACHE_NAME in `sw.js` must be bumped manually when static assets change. SW excludes `/is-*` (Edge SSR) and `/api/*` (real-time data) from caching
 - **Edge SSR**: `api/is-down.ts` serves "Is X Down?" SEO pages (30 services — all monitored except bedrock + azureopenai which are estimate-only with no differentiated data) via Vercel Edge Functions. Uses `/api/status/cached` (KV-only) for fast SSR (~1.2s). Rank uses competition ranking (`Math.round(score)`-based `findIndex`, not id-based) and applies the same `uptimeSource === 'estimate' && incidents.length === 0` filter as the dashboard Ranking page so SEO rank numbers match what users see. Header meta omits the Uptime segment entirely when `uptime30d` is null (no "Uptime: N/A" surface). Dynamic OG image via Worker `/api/og` (PNG, resvg-wasm). Share buttons: X, Threads, KakaoTalk (SDK async), Copy Link. `vercel.json` rewrites route `/is-{service}-down` to the handler
 - **Landing page**: `api/intro.ts` + `api/intro/html-template.ts` — Product Hunt landing page via Vercel Edge Function. `/intro` route (or `?ref=producthunt` for PH banner). Self-contained SSR with inline CSS/JS, KO/EN i18n (client-side toggle), GA4 events, dashboard preview mock. No external data fetch (pure template render)
-- **Monthly Reports proxy**: `api/reports.ts` — Vercel Edge Function that proxies `/reports/*` on `ai-watch.dev` to the aiwatch-reports Jekyll origin at `reports.ai-watch.dev` (#264). Consolidates SEO + GA4 under a single apex domain. `vercel.json` needs four explicit rewrites (`/reports`, `/reports/`, `/reports/:rest*`, `/reports/:rest*/`) because path-to-regexp's `:rest*` does not match trailing-slash paths in Vercel's router. Denylist header filtering (strips `content-encoding`, upstream server IDs, hop-by-hop headers), 10s timeout, `s-maxage=600` edge cache when upstream omits a directive, 502 error page on upstream failure (does not fall back to the SPA so operators can distinguish "report missing" from "proxy broken")
+- **Monthly Reports proxy**: `api/reports.ts` — Vercel Edge Function that proxies `/reports/*` on `ai-watch.dev` to the aiwatch-reports Jekyll site (#264). Fetches directly from `bentleypark.github.io/aiwatch-reports/` rather than the public `reports.ai-watch.dev` subdomain so a Cloudflare Page Rule can 301 the public subdomain to `ai-watch.dev/reports/` without trapping the proxy in a redirect loop (proxy fetch and the 301'd public hostname must not share a hostname). The aiwatch-reports repo therefore must NOT carry a `CNAME` file pointing at `reports.ai-watch.dev`. Consolidates SEO + GA4 under a single apex domain. `vercel.json` needs four explicit rewrites (`/reports`, `/reports/`, `/reports/:rest*`, `/reports/:rest*/`) because path-to-regexp's `:rest*` does not match trailing-slash paths in Vercel's router. Denylist header filtering (strips `content-encoding`, upstream server IDs, hop-by-hop headers), 10s timeout, `s-maxage=600` edge cache when upstream omits a directive, 502 error page on upstream failure (does not fall back to the SPA so operators can distinguish "report missing" from "proxy broken")
