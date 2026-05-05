@@ -67,6 +67,14 @@ export const SERVICES: ServiceConfig[] = [
   // reasonable proxy if OpenAI ever restructures the ChatGPT group.
   { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1' },
   // Coding Agents
+  // claudecode intentionally tracks only the Claude Code component for the badge.
+  // Adding Claude API as a multi-component dependency would conflict with the
+  // existing `incidentKeywords` filter (`['claude code', 'across surfaces']`):
+  // an API-only incident would flip the badge to degraded but be dropped from
+  // the visible incident list, leaving users staring at a degraded card with no
+  // explanation. Track only Claude Code here; users see Claude API outages on
+  // the separate `claude` (Claude API) card. See #379 for the multi-component
+  // pattern and the review trade-off that kept claudecode single-component.
   { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude code', 'across surfaces'], statusComponent: 'Claude Code', statusComponentId: 'yyzkbfz2thpt' },
   // OpenAI Codex (coding agent): published across 4 distinct surface components on
   // status.openai.com (Codex Web / Codex API / CLI / VS Code extension) with a
@@ -83,9 +91,13 @@ export const SERVICES: ServiceConfig[] = [
   // rather than returning null. Surface-specific outages (e.g., Codex Web only)
   // still surface via incidentKeywords in Recent Incidents.
   { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', incidentIoGroupId: '01KMKF9EBTCD8BN9PG8DJZXRSQ' },
-  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2' },
-  { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2' },
-  { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m' },
+  // cursor badge reflects worst-of: IDE primary + Cloud Agents + Automations + CLI (#379).
+  // Bugbot/cursor.com/Marketplace are auxiliary surfaces and intentionally excluded.
+  { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c'] },
+  // copilot badge reflects worst-of: Copilot + Copilot AI Model Providers (direct upstream) (#379).
+  { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2', statusComponentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82'] },
+  // windsurf badge reflects worst-of: Cascade primary + Windsurf Tab (autocomplete agent surface) (#379).
+  { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m', statusComponentIds: ['r5wf1ykd7y1m', '8q19cygxvshj'] },
 ]
 
 /**
@@ -128,6 +140,81 @@ export async function mergeAistudioIncidents(
     cancelBody()
     return { incidents: primary, merged: 0, parseErrors: 1 }
   }
+}
+
+type NormalizedStatus = 'operational' | 'degraded' | 'down'
+const STATUS_RANK: Record<NormalizedStatus, number> = { operational: 0, degraded: 1, down: 2 }
+
+/**
+ * Pick the worst status across multiple components (down > degraded > operational).
+ * Used for `statusComponentIds` multi-component badge resolution: when any tracked
+ * surface is degraded, the service's badge reflects the worst case.
+ */
+export function worstStatus(statuses: NormalizedStatus[]): NormalizedStatus {
+  return statuses.reduce<NormalizedStatus>(
+    (worst, s) => (STATUS_RANK[s] > STATUS_RANK[worst] ? s : worst),
+    'operational',
+  )
+}
+
+// Loose shape used by resolveSvcStatus so the same function can serve both the
+// production fetchService loop (where summaryData is StatuspageResponse) and
+// tests (where it's a hand-rolled fixture). Only the fields actually read are
+// declared — adding StatuspageResponse here would force the test to import
+// types from a parser module unnecessarily.
+type StatusResolverSummary = {
+  status?: { indicator?: string } | null
+  components?: Array<{ id: string; name: string; status: string }>
+}
+type StatusResolverConfig = Pick<ServiceConfig, 'statusComponent' | 'statusComponentId' | 'statusComponentIds'>
+
+/**
+ * Resolve a service's overall badge status from its config + status page summary.
+ *
+ * **Single source of truth** — production (`fetchService` loop) and the
+ * status-determination unit tests both call this directly so the test mirror
+ * cannot drift from the runtime logic.
+ *
+ * Branch order (each step is taken only if the prior didn't return):
+ *   1. **No component configured** — fall back to overall page indicator, but
+ *      if every matching incident is resolved, claim `operational` to suppress
+ *      cross-contamination from sibling services on shared status pages
+ *      (e.g. an OpenAI-API-only incident must not flip ChatGPT to degraded).
+ *   2. **`statusComponentIds` worst-of (#379)** — when configured AND non-empty
+ *      AND `components` is present, pick the worst normalized status across
+ *      the resolved subset (`down > degraded > operational`). If none of the
+ *      configured ids resolve in the page's components (drift), fall back to
+ *      the overall indicator; the separate component-miss alert path picks
+ *      the drift up so operators can reconcile.
+ *   3. **Single-component** (`statusComponent` name-prefix match OR
+ *      `statusComponentId` exact match) — use that component's status; fall
+ *      back to overall if neither matches.
+ */
+export function resolveSvcStatus(
+  config: StatusResolverConfig,
+  summaryData: StatusResolverSummary,
+  filtered: Array<{ status: string }>,
+): NormalizedStatus {
+  const overall = normalizeStatus(summaryData.status?.indicator ?? 'none')
+  if (!config.statusComponent && !config.statusComponentId && !config.statusComponentIds) {
+    if (overall !== 'operational' && filtered.filter((i) => i.status !== 'resolved').length === 0) {
+      return 'operational'
+    }
+    return overall
+  }
+  if (config.statusComponentIds && config.statusComponentIds.length > 0 && summaryData.components) {
+    const matched = config.statusComponentIds
+      .map((id) => summaryData.components!.find((c) => c.id === id))
+      .filter((c): c is NonNullable<typeof c> => c != null)
+    if (matched.length > 0) {
+      return worstStatus(matched.map((c) => normalizeStatus(c.status)))
+    }
+    return overall
+  }
+  const comp = config.statusComponent
+    ? summaryData.components?.find((c) => c.name.startsWith(config.statusComponent!))
+    : summaryData.components?.find((c) => c.id === config.statusComponentId)
+  return comp ? normalizeStatus(comp.status) : overall
 }
 
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
@@ -326,22 +413,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       // non-operational. Computing svcStatus first lets the no-component
       // branch detect the empty-filtered case and treat the service as
       // operational, suppressing untagged-include entirely.
-      const svcStatus = (() => {
-        const overall = normalizeStatus(summaryData.status?.indicator ?? 'none')
-        if (!config.statusComponent && !config.statusComponentId) {
-          // No specific component — use overall, but if no relevant unresolved incidents
-          // matched after filtering, treat as operational (avoids cross-contamination
-          // from unrelated incidents, e.g., ChatGPT incident affecting OpenAI API status)
-          if (overall !== 'operational' && filtered.filter((i) => i.status !== 'resolved').length === 0) {
-            return 'operational'
-          }
-          return overall
-        }
-        const comp = config.statusComponent
-          ? summaryData.components?.find((c) => c.name.startsWith(config.statusComponent))
-          : summaryData.components?.find((c) => c.id === config.statusComponentId)
-        return comp ? normalizeStatus(comp.status) : overall
-      })()
+      const svcStatus = resolveSvcStatus(config, summaryData, filtered)
 
       // Only fall back to untagged-include when this service is genuinely
       // non-operational. Operational services per the cross-contamination
@@ -388,7 +460,10 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       // Filter out active incidents when component is operational (#228)
       filtered = filterByComponentStatus(filtered, svcStatus, config)
 
-      // Track component ID misses for migration detection (#135)
+      // Track component ID misses for migration detection (#135).
+      // Primary statusComponentId drives the alerted-on tracker. Additional ids
+      // from statusComponentIds (#379) are warn-logged so operators can reconcile
+      // without triggering Discord alerts that would fire repeatedly per surface.
       if (config.statusComponentId && summaryData.components) {
         const compFound = summaryData.components.some((c) => c.id === config.statusComponentId)
         if (!compFound) {
@@ -397,6 +472,14 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           await trackComponentMiss(kv, config.id)
         } else {
           await resetComponentMiss(kv, config.id)
+        }
+      }
+      if (config.statusComponentIds && summaryData.components) {
+        const missing = config.statusComponentIds.filter(
+          (id) => id !== config.statusComponentId && !summaryData.components!.some((c) => c.id === id),
+        )
+        if (missing.length > 0) {
+          console.warn(`[fetchService] ${config.id} additional component ids missing: ${missing.join(', ')}`)
         }
       }
       // Augment dailyImpact with ongoing incidents (source data only includes resolved).
