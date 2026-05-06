@@ -5,7 +5,7 @@
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey } from './alerts'
-import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, type AIAnalysisResult } from './ai-analysis'
+import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration } from './utils'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
@@ -574,8 +574,15 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       const svc = scored.find(s => (s.incidents ?? []).some(i => i.id === incId))
       const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : null
       if (svc && inc) {
-        // AI analysis (8s timeout) — Gemma primary + Sonnet fallback
-        if (!alert._mergedKeys && (env.AI || env.ANTHROPIC_API_KEY)) {
+        // AI analysis (8s timeout) — Gemma primary + Sonnet fallback.
+        // shouldSkipInitialAnalysis centralizes the three skip reasons so they
+        // can't drift between this call site and the re-analysis path. Log the
+        // specific reason so empty AI-analysis sections in Discord embeds are
+        // post-hoc explainable (merged / no-model / generic / upstream-fail).
+        const skipReason = shouldSkipInitialAnalysis(alert, inc, !!(env.AI || env.ANTHROPIC_API_KEY))
+        if (skipReason) {
+          console.log(`[cron] skipping initial AI analysis for ${svc.id}:${inc.id}: ${skipReason}`)
+        } else {
           try {
             const today = new Date().toISOString().split('T')[0]
             const usageKey = `ai:usage:${today}`

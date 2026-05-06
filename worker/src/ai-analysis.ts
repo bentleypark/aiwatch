@@ -21,14 +21,37 @@ const BOILERPLATE_PATTERNS = [
   /^(this|the) (incident|issue) is (being )?(monitored|investigated)/i,
 ]
 
-/** Generic incident title patterns — no actionable detail to analyze */
+/**
+ * Generic incident title patterns — no actionable detail to analyze.
+ *
+ * Each pattern is anchored (`^...$`) and requires the title be the bare
+ * placeholder Statuspage / similar status pages auto-emit. Real human-curated
+ * copy ("Outage in us-east-1", "We are aware of an issue with API requests")
+ * MUST NOT match — the cost of a false positive is real: a curated incident
+ * gets clustered into a flap group AND its initial AI analysis is skipped.
+ *
+ * SOURCE OF TRUTH for the worker side. Mirrored verbatim in:
+ *   - src/utils/incidentGrouping.js (SPA grouping override)
+ *   - api/is-down/incident-grouping.ts (SSR grouping override)
+ *
+ * `__assertGenericTitlePatternsAlignment` below + the same assertion in the
+ * other two files lock the parity. Any drift fails the unit test in all three
+ * suites at once.
+ */
 const GENERIC_TITLE_PATTERNS = [
-  /^investigating (an |the |this )?issue$/i,
-  /^(service |system )?(disruption|outage|issue|incident)$/i,
-  /^we are (currently )?(investigating|aware)/i,
-  /^(scheduled |planned )?maintenance$/i,
-  /^(partial |minor |major )?(service )?(degradation|interruption)$/i,
+  /^investigating (an |the |this )?issue\.?$/i,
+  /^(service |system )?(disruption|outage|issue|incident)\.?$/i,
+  /^we are (currently )?(investigating|aware)( (of )?(an?|this|the) (issue|incident|problem))?\.?$/i,
+  /^(scheduled |planned )?maintenance\.?$/i,
+  /^(partial |minor |major )?(service )?(degradation|interruption)\.?$/i,
 ]
+
+/**
+ * Stable serialized form of GENERIC_TITLE_PATTERNS — exported so the SPA and
+ * SSR mirrors can pin against this at test time. Drift surfaces as a unit-test
+ * failure rather than asymmetric production behavior.
+ */
+export const GENERIC_TITLE_PATTERNS_SOURCES: readonly string[] = GENERIC_TITLE_PATTERNS.map((p) => `${p.source}::${p.flags}`)
 
 /**
  * Check if an incident has no actionable detail — generic title + all boilerplate timeline.
@@ -42,6 +65,40 @@ export function isGenericIncident(
   if (!genericTitle) return false
   if (!timeline || timeline.length === 0) return true
   return timeline.every(t => isBoilerplate(t.text))
+}
+
+/**
+ * Reason the cron scheduled handler skipped the initial AI-analysis call —
+ * `null` means proceed.
+ *
+ * Discriminated so the call site can `console.log` the specific reason. An
+ * empty AI-analysis section in a Discord embed otherwise has 4 indistinct
+ * causes (merged group, no model, generic incident, upstream timeout) and
+ * operators have no way to triage post-hoc without this log.
+ */
+export type InitialAnalysisSkipReason = 'merged' | 'no-model' | 'generic'
+
+/**
+ * Predicate for whether the cron scheduled handler should skip the initial
+ * AI-analysis call on a fresh `alerted:new:` event. Centralizes three reasons
+ * to skip so they can't drift between the call site and the re-analysis path:
+ *
+ *   - merged Together-AI model-level alert (deep analysis not useful)
+ *   - no AI model available (neither Workers AI binding nor Sonnet API key)
+ *   - generic-title auto-monitoring noise (#387) — same skip as
+ *     refreshOrReanalyze applies to re-analysis
+ *
+ * Returns the reason string when skipping, `null` when the call should fire.
+ */
+export function shouldSkipInitialAnalysis(
+  alert: { _mergedKeys?: unknown },
+  inc: { title: string; timeline?: Array<{ text: string | null }> },
+  hasModel: boolean,
+): InitialAnalysisSkipReason | null {
+  if (alert._mergedKeys) return 'merged'
+  if (!hasModel) return 'no-model'
+  if (isGenericIncident(inc.title, inc.timeline)) return 'generic'
+  return null
 }
 
 export function isBoilerplate(text: string | null | undefined): boolean {

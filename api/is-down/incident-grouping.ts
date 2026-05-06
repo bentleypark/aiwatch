@@ -16,6 +16,28 @@
 
 export const GROUP_THRESHOLD = 2
 
+// Generic auto-monitoring title patterns — anchored to match only bare
+// Statuspage placeholders. Real human-curated copy must NOT match. See
+// `GENERIC_TITLE_PATTERNS` in `worker/src/ai-analysis.ts` (source of truth)
+// and `src/utils/incidentGrouping.js` (SPA mirror). #387.
+const GENERIC_TITLE_PATTERNS: RegExp[] = [
+  /^investigating (an |the |this )?issue\.?$/i,
+  /^(service |system )?(disruption|outage|issue|incident)\.?$/i,
+  /^we are (currently )?(investigating|aware)( (of )?(an?|this|the) (issue|incident|problem))?\.?$/i,
+  /^(scheduled |planned )?maintenance\.?$/i,
+  /^(partial |minor |major )?(service )?(degradation|interruption)\.?$/i,
+]
+
+/** Stable serialized form for cross-file parity assertions. See worker mirror. */
+export const GENERIC_TITLE_PATTERNS_SOURCES: readonly string[] = GENERIC_TITLE_PATTERNS.map(
+  (p) => `${p.source}::${p.flags}`,
+)
+
+export function isGenericTitle(title: string | null | undefined): boolean {
+  const t = String(title ?? '').trim()
+  return GENERIC_TITLE_PATTERNS.some((p) => p.test(t))
+}
+
 export interface GroupingIncident {
   id: string
   title: string
@@ -68,7 +90,11 @@ export function groupIncidents(
   const ungroupable: Array<{ idx: number; inc: GroupingIncident }> = []
 
   incidents.forEach((inc, idx) => {
-    if (inc.impact != null) {
+    // Real human-curated incidents (impact != null) skip clustering — EXCEPT
+    // when the title is a Statuspage auto-monitoring placeholder (Character.AI
+    // case, #387). Those still get clustered because the impact value is
+    // boilerplate, not a curation signal.
+    if (inc.impact != null && !isGenericTitle(inc.title)) {
       ungroupable.push({ idx, inc })
       return
     }

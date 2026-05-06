@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { groupIncidents, GROUP_THRESHOLD, normalizeTitle } from '../incidentGrouping'
+import { groupIncidents, GROUP_THRESHOLD, normalizeTitle, isGenericTitle, GENERIC_TITLE_PATTERNS_SOURCES } from '../incidentGrouping'
 
 // Minimal Incident factory — fields match worker/src/types.ts shape
 function makeIncident({ id, title, startedAt, status = 'resolved', impact = null, duration = '5m' }) {
@@ -281,5 +281,142 @@ describe('groupIncidents — edge cases', () => {
     const result = groupIncidents(incs, UTC)
     expect(result).toHaveLength(1)
     expect(result[0].kind).toBe('group')
+  })
+})
+
+describe('isGenericTitle', () => {
+  it('matches Statuspage auto-monitoring default', () => {
+    expect(isGenericTitle('Investigating an issue')).toBe(true)
+    expect(isGenericTitle('investigating an issue')).toBe(true)
+    expect(isGenericTitle('Investigating issue')).toBe(true)
+  })
+
+  it('matches the other documented placeholder titles', () => {
+    expect(isGenericTitle('Service disruption')).toBe(true)
+    expect(isGenericTitle('Outage')).toBe(true)
+    expect(isGenericTitle('We are currently investigating')).toBe(true)
+    expect(isGenericTitle('Scheduled maintenance')).toBe(true)
+    expect(isGenericTitle('Partial service degradation')).toBe(true)
+  })
+
+  it('does NOT match real human-curated titles', () => {
+    expect(isGenericTitle('Elevated error rates affecting ChatGPT for some users in Europe')).toBe(false)
+    expect(isGenericTitle('Outage in us-east-1')).toBe(false)
+    expect(isGenericTitle('Issue affecting some pages on the ChatGPT website')).toBe(false)
+    expect(isGenericTitle('Partial Disruption of ChatGPT Workspace Connector Write Actions')).toBe(false)
+  })
+
+  it('does NOT match human-written copy that starts with "We are aware/investigating" (anchor regression)', () => {
+    // Pre-fix the pattern was unanchored at the end, so a real curated title
+    // beginning with this prose got wrongly classified as generic. Lock the
+    // anchored form so a future de-anchor reverts the regex into a foot-gun.
+    expect(isGenericTitle('We are aware of an issue with API requests timing out')).toBe(false)
+    expect(isGenericTitle('We are investigating elevated 5xx on /v1/messages')).toBe(false)
+    expect(isGenericTitle('We are currently investigating reports of degraded inference')).toBe(false)
+  })
+
+  it('still matches the bare placeholder + trailing-period variants', () => {
+    // Statuspage's auto-emitted titles sometimes carry a trailing period.
+    expect(isGenericTitle('Investigating an issue.')).toBe(true)
+    expect(isGenericTitle('We are investigating')).toBe(true)
+    expect(isGenericTitle('We are aware of an issue')).toBe(true)
+    expect(isGenericTitle('We are currently investigating an incident')).toBe(true)
+    expect(isGenericTitle('Service Disruption.')).toBe(true)
+  })
+
+  it('handles null/undefined defensively', () => {
+    expect(isGenericTitle(null)).toBe(false)
+    expect(isGenericTitle(undefined)).toBe(false)
+    expect(isGenericTitle('')).toBe(false)
+  })
+
+  it('trims surrounding whitespace before matching', () => {
+    expect(isGenericTitle('  Investigating an issue  ')).toBe(true)
+  })
+})
+
+describe('GENERIC_TITLE_PATTERNS_SOURCES — cross-file parity (#387)', () => {
+  // Canonical snapshot of the regex source strings (pattern + flags). The
+  // same array MUST appear in `worker/src/ai-analysis.ts` and
+  // `api/is-down/incident-grouping.ts` — each test suite pins this same
+  // constant. Drift between files (a pattern added in one place but not
+  // others) surfaces as a unit-test failure rather than asymmetric
+  // production behavior — e.g. dashboard groups an incident as auto-noise
+  // while the worker still runs AI analysis on it.
+  const EXPECTED_SOURCES = [
+    '^investigating (an |the |this )?issue\\.?$::i',
+    '^(service |system )?(disruption|outage|issue|incident)\\.?$::i',
+    '^we are (currently )?(investigating|aware)( (of )?(an?|this|the) (issue|incident|problem))?\\.?$::i',
+    '^(scheduled |planned )?maintenance\\.?$::i',
+    '^(partial |minor |major )?(service )?(degradation|interruption)\\.?$::i',
+  ]
+
+  it('SPA pattern sources match the canonical snapshot', () => {
+    expect(GENERIC_TITLE_PATTERNS_SOURCES).toEqual(EXPECTED_SOURCES)
+  })
+})
+
+describe('groupIncidents — generic-title flap clustering despite impact != null (#387)', () => {
+  const UTC = { timeZone: 'UTC' }
+
+  it("groups Character.AI's 8 same-day 'Investigating an issue' minor-impact entries", () => {
+    // Real-world snapshot from May 6 Character.AI service detail.
+    const incs = Array.from({ length: 8 }, (_, i) => makeIncident({
+      id: `char-${i}`,
+      title: 'Investigating an issue',
+      // impact: 'minor' is exactly what Atlassian Statuspage assigns by default
+      // for auto-monitoring entries — we still cluster them.
+      impact: 'minor',
+      startedAt: `2026-05-06T0${i % 10}:00:00Z`,
+    }))
+    const result = groupIncidents(incs, UTC)
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('group')
+    expect(result[0].count).toBe(8)
+    expect(result[0].normalizedTitle).toBe('Investigating an issue')
+  })
+
+  it('does NOT group when title is real human copy, even with same minor impact', () => {
+    // Regression guard: human-tagged real incidents must keep individual rows.
+    const incs = [
+      makeIncident({ id: 'r-1', title: 'Outage in us-east-1', impact: 'major', startedAt: '2026-05-06T01:00:00Z' }),
+      makeIncident({ id: 'r-2', title: 'Outage in us-east-1', impact: 'major', startedAt: '2026-05-06T02:00:00Z' }),
+    ]
+    const result = groupIncidents(incs, UTC)
+    expect(result).toHaveLength(2)
+    expect(result.every((r) => r.kind === 'single')).toBe(true)
+  })
+
+  it('mixed input — real incidents stay single, generic-title flaps cluster', () => {
+    const incs = [
+      makeIncident({ id: 'real-1', title: 'Elevated error rates in eu-west', impact: 'major', startedAt: '2026-05-06T08:00:00Z' }),
+      ...Array.from({ length: 3 }, (_, i) => makeIncident({
+        id: `gen-${i}`,
+        title: 'Investigating an issue',
+        impact: 'minor',
+        startedAt: `2026-05-06T${String(9 + i).padStart(2, '0')}:00:00Z`,
+      })),
+      makeIncident({ id: 'real-2', title: 'Latency spike on Asia ingest', impact: 'minor', startedAt: '2026-05-06T13:00:00Z' }),
+    ]
+    const result = groupIncidents(incs, UTC)
+    const groups = result.filter((r) => r.kind === 'group')
+    const singles = result.filter((r) => r.kind === 'single')
+    expect(groups).toHaveLength(1)
+    expect(groups[0].count).toBe(3)
+    expect(singles).toHaveLength(2)
+    expect(new Set(singles.map((r) => r.incident.id))).toEqual(new Set(['real-1', 'real-2']))
+  })
+
+  it('still groups generic-title incidents with impact == null (no regression on the existing path)', () => {
+    const incs = Array.from({ length: 2 }, (_, i) => makeIncident({
+      id: `null-${i}`,
+      title: 'Investigating an issue',
+      // impact omitted → null (default behavior of makeIncident)
+      startedAt: `2026-05-06T1${i}:00:00Z`,
+    }))
+    const result = groupIncidents(incs, UTC)
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('group')
+    expect(result[0].count).toBe(2)
   })
 })
