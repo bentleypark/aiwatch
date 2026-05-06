@@ -180,7 +180,7 @@ describe('buildServiceAlerts', () => {
     expect(alerts).toHaveLength(0)
   })
 
-  it('does not suppress when all incidents are resolved', () => {
+  it('does not suppress when all incidents are resolved without resolvedAt', () => {
     const svc = mockService({
       status: 'degraded',
       incidents: [{ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, duration: '10m', impact: 'minor' }],
@@ -188,6 +188,51 @@ describe('buildServiceAlerts', () => {
     const alerts = buildServiceAlerts([svc], new Map(), new Map())
     expect(alerts).toHaveLength(1)
     expect(alerts[0].key).toBe('alerted:degraded:openai')
+  })
+
+  // #394: Atlassian Statuspage clears incident.status before component status_indicator,
+  // producing a confusing 🟢 Resolved → 🟠 Degraded → 🟢 Recovered tail in the same window.
+  describe('resolved-race-window suppression (#394)', () => {
+    it('suppresses degraded alert when incident resolved within 15min', () => {
+      const resolvedAt = new Date(NOW - 5 * 60_000).toISOString() // 5min ago
+      const svc = mockService({
+        status: 'degraded',
+        incidents: [{ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, resolvedAt, duration: '7m', impact: 'major' }],
+      })
+      expect(buildServiceAlerts([svc], new Map(), new Map(), NOW)).toHaveLength(0)
+    })
+
+    it('fires degraded alert when incident resolved more than 15min ago', () => {
+      const resolvedAt = new Date(NOW - 16 * 60_000).toISOString()
+      const svc = mockService({
+        status: 'degraded',
+        incidents: [{ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, resolvedAt, duration: '7m', impact: 'major' }],
+      })
+      const alerts = buildServiceAlerts([svc], new Map(), new Map(), NOW)
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].key).toBe('alerted:degraded:openai')
+    })
+
+    it('does NOT suppress down alert during race window (high-urgency)', () => {
+      const resolvedAt = new Date(NOW - 5 * 60_000).toISOString()
+      const svc = mockService({
+        status: 'down',
+        incidents: [{ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, resolvedAt, duration: '7m', impact: 'major' }],
+      })
+      const alerts = buildServiceAlerts([svc], new Map(), new Map(), NOW)
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].key).toBe('alerted:down:openai')
+    })
+
+    it('handles invalid resolvedAt without throwing — falls through to degraded fire', () => {
+      const svc = mockService({
+        status: 'degraded',
+        incidents: [{ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, resolvedAt: 'not-a-date', duration: '7m', impact: 'major' }],
+      })
+      const alerts = buildServiceAlerts([svc], new Map(), new Map(), NOW)
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].key).toBe('alerted:degraded:openai')
+    })
   })
 
   it('does not create alert for operational service', () => {

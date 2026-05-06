@@ -203,22 +203,42 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
   return [...rest, ...merged]
 }
 
+// #394: Atlassian Statuspage clears `incident.status` to `resolved` a few minutes before the
+// component-level `status_indicator` clears back to `operational`. Without suppression, a single
+// outage produces 🔴 New → 🟢 Resolved → 🟠 Degraded → 🟢 Recovered. 15min covers up to ~3 cron
+// cycles of component lag — narrower would re-allow the race; much wider would mask a fresh
+// degradation that follows a resolution within the window. Down alerts are not suppressed since
+// they are high-urgency and the lag is rare with major_outage indicators.
+const RESOLVED_RACE_WINDOW_MS = 15 * 60 * 1000
+
 /**
  * Build service status change alerts (degraded/down/recovered).
  * Suppresses status alerts when ongoing incidents already cover the service.
  * @param alertedDownMap Map of service ID → ISO timestamp when alerted as down
  * @param alertedDegradedMap Map of service ID → ISO timestamp when alerted as degraded
+ * @param now Epoch ms used to evaluate the resolved-race-window (#394). Defaults to Date.now().
  */
 export function buildServiceAlerts(
   services: ScoredService[],
   alertedDownMap: Map<string, string>,
   alertedDegradedMap: Map<string, string> = new Map(),
+  now: number = Date.now(),
 ): AlertCandidate[] {
   const alerts: AlertCandidate[] = []
 
   for (const svc of services) {
     // Suppress status alerts if ongoing incidents exist (incident alert already covers it)
     const hasOngoingIncident = (svc.incidents ?? []).some((i) => i.status !== 'resolved')
+
+    // #394: a 🟢 Resolved fired (or about to fire) in the last 15min on this service means
+    // the user already received the canonical "back to normal" signal — silence the
+    // 🟠 degraded that would otherwise fire from the still-stale component indicator.
+    const hasRecentlyResolvedIncident = (svc.incidents ?? []).some((inc) => {
+      if (inc.status !== 'resolved' || !inc.resolvedAt) return false
+      const resolvedMs = new Date(inc.resolvedAt).getTime()
+      if (Number.isNaN(resolvedMs)) return false
+      return now - resolvedMs < RESOLVED_RACE_WINDOW_MS
+    })
 
     if (svc.status === 'down' && !hasOngoingIncident) {
       alerts.push({
@@ -229,7 +249,7 @@ export function buildServiceAlerts(
         url: `https://ai-watch.dev/#${svc.id}`,
       })
     }
-    if (svc.status === 'degraded' && !hasOngoingIncident) {
+    if (svc.status === 'degraded' && !hasOngoingIncident && !hasRecentlyResolvedIncident) {
       alerts.push({
         key: `alerted:degraded:${svc.id}`,
         title: `🟠 ${svc.name} — Partially Degraded`,
