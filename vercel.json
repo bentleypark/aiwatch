@@ -31,6 +31,7 @@
     { "source": "/is-modal-down", "destination": "/api/is-down?slug=modal" },
     { "source": "/is-character-ai-down", "destination": "/api/is-down?slug=character-ai" },
     { "source": "/is-codex-down", "destination": "/api/is-down?slug=codex" },
+    { "source": "/is-junie-down", "destination": "/api/is-down?slug=junie" },
     { "source": "/intro", "destination": "/api/intro" },
     { "source": "/reports", "destination": "/api/reports" },
     { "source": "/reports/", "destination": "/api/reports" },
