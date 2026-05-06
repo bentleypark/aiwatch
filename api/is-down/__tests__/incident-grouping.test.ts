@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   groupIncidents,
   normalizeTitle,
+  isGenericTitle,
+  GENERIC_TITLE_PATTERNS_SOURCES,
   GROUP_THRESHOLD,
   type GroupingIncident,
   type GroupRow,
@@ -180,5 +182,108 @@ describe('groupIncidents — statusCounts + uniformStatus', () => {
     ])
     const g = rows[0] as GroupRow
     expect(g.uniformStatus).toBe(true)
+  })
+})
+
+describe('isGenericTitle (#387)', () => {
+  it('matches Statuspage auto-monitoring placeholder', () => {
+    expect(isGenericTitle('Investigating an issue')).toBe(true)
+    expect(isGenericTitle('Service disruption')).toBe(true)
+    expect(isGenericTitle('Scheduled maintenance')).toBe(true)
+  })
+
+  it('does NOT match real human-curated titles', () => {
+    expect(isGenericTitle('Elevated error rates affecting ChatGPT for some users in Europe')).toBe(false)
+    expect(isGenericTitle('Outage in us-east-1')).toBe(false)
+    expect(isGenericTitle('Issue affecting some pages on the ChatGPT website')).toBe(false)
+  })
+
+  it('does NOT match human-written copy that starts with "We are aware/investigating" (anchor regression)', () => {
+    expect(isGenericTitle('We are aware of an issue with API requests timing out')).toBe(false)
+    expect(isGenericTitle('We are investigating elevated 5xx on /v1/messages')).toBe(false)
+  })
+
+  it('handles null/undefined defensively', () => {
+    expect(isGenericTitle(null)).toBe(false)
+    expect(isGenericTitle(undefined)).toBe(false)
+    expect(isGenericTitle('')).toBe(false)
+  })
+})
+
+describe('GENERIC_TITLE_PATTERNS_SOURCES — cross-file parity (#387)', () => {
+  // Mirror of the SPA test in `src/utils/__tests__/incidentGrouping.test.js`.
+  // Drift between SPA / SSR / worker source-of-truth fails this test.
+  const EXPECTED_SOURCES = [
+    '^investigating (an |the |this )?issue\\.?$::i',
+    '^(service |system )?(disruption|outage|issue|incident)\\.?$::i',
+    '^we are (currently )?(investigating|aware)( (of )?(an?|this|the) (issue|incident|problem))?\\.?$::i',
+    '^(scheduled |planned )?maintenance\\.?$::i',
+    '^(partial |minor |major )?(service )?(degradation|interruption)\\.?$::i',
+  ]
+
+  it('SSR pattern sources match the canonical snapshot', () => {
+    expect(GENERIC_TITLE_PATTERNS_SOURCES).toEqual(EXPECTED_SOURCES)
+  })
+})
+
+describe('groupIncidents — generic-title flap clustering despite impact != null (#387)', () => {
+  it("groups 8 same-day Character.AI 'Investigating an issue' minor-impact entries", () => {
+    const incs: GroupingIncident[] = Array.from({ length: 8 }, (_, i) =>
+      mkInc({
+        id: `char-${i}`,
+        title: 'Investigating an issue',
+        impact: 'minor',
+        startedAt: `2026-05-06T0${i % 10}:00:00Z`,
+      }),
+    )
+    const result = groupIncidents(incs)
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('group')
+    expect((result[0] as GroupRow).count).toBe(8)
+  })
+
+  it('does NOT group when title is real human copy, even at the same impact', () => {
+    const incs: GroupingIncident[] = [
+      mkInc({ id: 'r-1', title: 'Outage in us-east-1', impact: 'major', startedAt: '2026-05-06T01:00:00Z' }),
+      mkInc({ id: 'r-2', title: 'Outage in us-east-1', impact: 'major', startedAt: '2026-05-06T02:00:00Z' }),
+    ]
+    const result = groupIncidents(incs)
+    expect(result).toHaveLength(2)
+    expect(result.every((r) => r.kind === 'single')).toBe(true)
+  })
+
+  it('mixed input — real incidents stay single, generic-title flaps cluster', () => {
+    const incs: GroupingIncident[] = [
+      mkInc({ id: 'real-1', title: 'Elevated error rates in eu-west', impact: 'major', startedAt: '2026-05-06T08:00:00Z' }),
+      ...Array.from({ length: 3 }, (_, i) =>
+        mkInc({
+          id: `gen-${i}`,
+          title: 'Investigating an issue',
+          impact: 'minor',
+          startedAt: `2026-05-06T${String(9 + i).padStart(2, '0')}:00:00Z`,
+        }),
+      ),
+      mkInc({ id: 'real-2', title: 'Latency spike on Asia ingest', impact: 'minor', startedAt: '2026-05-06T13:00:00Z' }),
+    ]
+    const result = groupIncidents(incs)
+    const groups = result.filter((r): r is GroupRow => r.kind === 'group')
+    const singles = result.filter((r): r is SingleRow => r.kind === 'single')
+    expect(groups).toHaveLength(1)
+    expect(groups[0].count).toBe(3)
+    expect(singles).toHaveLength(2)
+  })
+
+  it('still groups generic-title incidents with impact == null (no regression)', () => {
+    const incs: GroupingIncident[] = Array.from({ length: 2 }, (_, i) =>
+      mkInc({
+        id: `null-${i}`,
+        title: 'Investigating an issue',
+        impact: null,
+        startedAt: `2026-05-06T1${i}:00:00Z`,
+      }),
+    )
+    const result = groupIncidents(incs)
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('group')
   })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, isGenericIncident, parseRecoveryHours, formatRecoveryDisplay, parseAnalysisResponse, type KVLike } from '../ai-analysis'
+import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, parseAnalysisResponse, type KVLike } from '../ai-analysis'
 import type { Incident, ServiceStatus } from '../types'
 
 const mockIncident = (overrides: Partial<Incident> = {}): Incident => ({
@@ -90,6 +90,124 @@ describe('isGenericIncident', () => {
       { text: 'We are currently investigating this issue.' },
       { text: 'Error rates spiked to 40% on /v1/messages endpoint.' },
     ])).toBe(false)
+  })
+
+  it('does NOT match human-written copy starting with "We are aware/investigating" (anchor regression #387)', () => {
+    // Pre-fix the pattern was unanchored at the end so a real curated title
+    // starting with this prose got wrongly skipped. Lock the anchored form.
+    expect(isGenericIncident('We are aware of an issue with API requests timing out', [])).toBe(false)
+    expect(isGenericIncident('We are investigating elevated 5xx on /v1/messages', [])).toBe(false)
+  })
+})
+
+describe('GENERIC_TITLE_PATTERNS_SOURCES — cross-file parity (#387)', () => {
+  // Worker is source-of-truth. SPA (`src/utils/__tests__/incidentGrouping.test.js`)
+  // and SSR (`api/is-down/__tests__/incident-grouping.test.ts`) pin this same
+  // snapshot. Any drift fails one test in each suite — no asymmetric prod
+  // behavior survives merge.
+  const EXPECTED_SOURCES = [
+    '^investigating (an |the |this )?issue\\.?$::i',
+    '^(service |system )?(disruption|outage|issue|incident)\\.?$::i',
+    '^we are (currently )?(investigating|aware)( (of )?(an?|this|the) (issue|incident|problem))?\\.?$::i',
+    '^(scheduled |planned )?maintenance\\.?$::i',
+    '^(partial |minor |major )?(service )?(degradation|interruption)\\.?$::i',
+  ]
+
+  it('worker pattern sources match the canonical snapshot', () => {
+    expect(GENERIC_TITLE_PATTERNS_SOURCES).toEqual(EXPECTED_SOURCES)
+  })
+})
+
+describe('shouldSkipInitialAnalysis (#387)', () => {
+  // Three skip reasons must stay in sync with the re-analysis path. These
+  // tests lock the contract AND the discriminated return value so the call
+  // site's observability log carries the right reason.
+
+  it('returns "merged" for Together-AI flap-merged alerts', () => {
+    expect(
+      shouldSkipInitialAnalysis(
+        { _mergedKeys: ['alerted:new:a', 'alerted:new:b'] },
+        { title: 'Real outage', timeline: [{ text: 'Upstream provider returning 500' }] },
+        true,
+      ),
+    ).toBe('merged')
+  })
+
+  it('returns "no-model" when neither AI binding nor Sonnet API key is configured', () => {
+    expect(
+      shouldSkipInitialAnalysis(
+        {},
+        { title: 'Real outage', timeline: [{ text: 'Upstream provider returning 500' }] },
+        false,
+      ),
+    ).toBe('no-model')
+  })
+
+  it('returns "generic" for Statuspage auto-monitoring placeholder titles', () => {
+    // The Character.AI bug (#387) — initial-analysis path was firing on these.
+    expect(
+      shouldSkipInitialAnalysis(
+        {},
+        { title: 'Investigating an issue' },
+        true,
+      ),
+    ).toBe('generic')
+    expect(
+      shouldSkipInitialAnalysis(
+        {},
+        { title: 'Investigating an issue', timeline: [{ text: 'We are investigating' }] },
+        true,
+      ),
+    ).toBe('generic')
+  })
+
+  it('returns null (proceed) for a real human-titled incident with AI available', () => {
+    expect(
+      shouldSkipInitialAnalysis(
+        {},
+        { title: 'Elevated error rates on /v1/messages', timeline: [{ text: 'Spike to 40%' }] },
+        true,
+      ),
+    ).toBeNull()
+  })
+
+  it('returns null when generic-title carries actionable timeline detail', () => {
+    // isGenericIncident is conservative: title alone isn't enough; if the
+    // timeline has technical detail, the analysis can still produce useful
+    // output. Locks that pass-through.
+    expect(
+      shouldSkipInitialAnalysis(
+        {},
+        {
+          title: 'Investigating an issue',
+          timeline: [
+            { text: 'We are investigating' },
+            { text: 'Error rates spiked to 40% on /v1/messages endpoint.' },
+          ],
+        },
+        true,
+      ),
+    ).toBeNull()
+  })
+
+  it('precedence: merged > no-model > generic > null', () => {
+    // When multiple skip conditions apply, the first-listed reason wins.
+    // This locks the order so a future refactor doesn't silently change
+    // which reason gets logged at the call site.
+    expect(
+      shouldSkipInitialAnalysis(
+        { _mergedKeys: ['x'] },
+        { title: 'Investigating an issue' },
+        false,
+      ),
+    ).toBe('merged')
+    expect(
+      shouldSkipInitialAnalysis(
+        {},
+        { title: 'Investigating an issue' },
+        false,
+      ),
+    ).toBe('no-model')
   })
 })
 

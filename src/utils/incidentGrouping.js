@@ -33,6 +33,36 @@
 export const GROUP_THRESHOLD = 2
 
 /**
+ * Generic incident-title patterns indicating Atlassian Statuspage's
+ * auto-monitoring noise (Character.AI is the canonical case — #387).
+ *
+ * Each pattern is anchored (`^...$`) and matches only the bare placeholder
+ * the status page auto-emits. Real human-curated copy must NOT match — the
+ * cost of a false positive is real: the incident gets folded into a flap
+ * group AND its AI analysis is skipped on the worker side.
+ *
+ * MIRROR of `GENERIC_TITLE_PATTERNS` in `worker/src/ai-analysis.ts`. The
+ * `GENERIC_TITLE_PATTERNS_SOURCES` array and a shared parity test (#387)
+ * lock the three copies (SPA / SSR / Worker) against drift.
+ */
+const GENERIC_TITLE_PATTERNS = [
+  /^investigating (an |the |this )?issue\.?$/i,
+  /^(service |system )?(disruption|outage|issue|incident)\.?$/i,
+  /^we are (currently )?(investigating|aware)( (of )?(an?|this|the) (issue|incident|problem))?\.?$/i,
+  /^(scheduled |planned )?maintenance\.?$/i,
+  /^(partial |minor |major )?(service )?(degradation|interruption)\.?$/i,
+]
+
+/** Stable serialized form for cross-file parity assertions. See worker mirror. */
+export const GENERIC_TITLE_PATTERNS_SOURCES = GENERIC_TITLE_PATTERNS.map((p) => `${p.source}::${p.flags}`)
+
+/** @param {string} title */
+export function isGenericTitle(title) {
+  const t = String(title ?? '').trim()
+  return GENERIC_TITLE_PATTERNS.some((p) => p.test(t))
+}
+
+/**
  * @param {string} title
  * @returns {string}
  */
@@ -95,11 +125,14 @@ export function groupIncidents(incidents, options = {}) {
   if (!Array.isArray(incidents) || incidents.length === 0) return []
   const { timeZone } = options
 
-  // Bucket by (dayKey, normalizedTitle). Skip non-null impact — those never group.
+  // Bucket by (dayKey, normalizedTitle). Skip non-null impact — those represent
+  // real human-curated incidents, EXCEPT when the title matches a generic
+  // auto-monitoring pattern (Statuspage assigns default impact even to noise —
+  // #387, Character.AI). Those are still clustered.
   const buckets = new Map()
   const ungroupable = []
   incidents.forEach((inc, idx) => {
-    if (inc.impact != null) {
+    if (inc.impact != null && !isGenericTitle(inc.title)) {
       ungroupable.push({ idx, inc })
       return
     }
