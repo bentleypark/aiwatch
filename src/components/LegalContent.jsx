@@ -13,30 +13,35 @@ export function PrivacyContent() {
   const { lang } = useLang()
   if (lang === 'en') return (
     <div>
-      <p style={dateStyle}>Last updated: March 2026</p>
+      <p style={dateStyle}>Last updated: May 2026</p>
       <h3 style={headingStyle}>1. Information We Collect</h3>
       <p style={paraStyle}>AIWatch uses Google Analytics 4 (GA4) to collect the following information for service improvement.<br /><br />
         · Page visit history and session duration<br />
         · Button click events (Refresh, filter changes, etc.)<br />
         · Device type, browser, and operating system<br />
         · Country/region (with IP anonymization)<br /><br />
-        We do not collect personally identifiable information such as names or email addresses.</p>
+        We do not collect personally identifiable information such as names or email addresses. Without analytics consent, GA4 operates in cookieless mode under Google Consent Mode v2 — only aggregate, anonymized pings flow, with no client identifier stored.</p>
       <h3 style={headingStyle}>2. Cookies and Local Storage</h3>
       <p style={paraStyle}>AIWatch uses the following types of browser storage:<br /><br />
-        <strong>Analytics cookies (optional)</strong> — GA4 uses cookies (_ga, _gid) for usage analytics. You can opt out via the cookie banner or browser settings.<br /><br />
+        <strong>Analytics cookies (optional)</strong> — when you grant consent, GA4 stores _ga, _ga_&lt;measurement_id&gt;, and _gid cookies for usage analytics. _gcl_au may also appear if Google's tag library is loaded; AIWatch does not use it for advertising. You can opt out via the cookie banner or browser settings; on revoke through the banner, AIWatch removes these cookies immediately, and on the next page load when consent has been revoked through other means.<br /><br />
+        <strong>Default-denied behavior</strong> — without explicit consent, no analytics or advertising cookies are set on your device, regardless of which AIWatch surface (dashboard, "Is X down?" pages, monthly reports) you arrive on first. The same consent choice applies across all AIWatch pages because they share the ai-watch.dev origin.<br /><br />
         <strong>Essential local storage (always active)</strong> — AIWatch stores the following preferences in your browser's localStorage. This data never leaves your device:<br />
         · Theme preference (dark/light)<br />
         · Language preference (ko/en)<br />
         · Dashboard settings (monitoring period, SLA target, enabled services)<br />
-        · Cookie consent choice<br />
+        · Cookie consent choice (aiwatch-cookie-consent)<br />
         · PWA install banner dismissal<br />
         · Webhook URLs (Discord/Slack) — entered voluntarily for alert notifications. Stored in your browser's localStorage.<br />
         · Webhook identifier (SHA-256 hash) — a one-way hash of your webhook URL is sent to our server to track active webhook counts. The hash cannot be reversed to recover your original URL.</p>
-      <h3 style={headingStyle}>3. Service Worker (PWA)</h3>
+      <h3 style={headingStyle}>3. Cookie Banner</h3>
+      <p style={paraStyle}>On your first visit to any AIWatch page, a cookie banner appears asking for analytics consent (Accept All / Essential Only). Your choice is stored in <code>localStorage.aiwatch-cookie-consent</code> and reused across all subsequent visits to any AIWatch page. The banner does not appear again unless you clear browser storage. Both choices are honored identically across the dashboard, "Is X down?" SEO pages, and monthly reports.</p>
+      <h3 style={headingStyle}>4. Advertising</h3>
+      <p style={paraStyle}>AIWatch does not display advertisements. The Google Consent Mode v2 signals <code>ad_storage</code>, <code>ad_user_data</code>, and <code>ad_personalization</code> are set to "denied" by default and remain "denied" even after you accept analytics consent — only <code>analytics_storage</code> is upgraded. No advertising profile is built from your visits.</p>
+      <h3 style={headingStyle}>5. Service Worker (PWA)</h3>
       <p style={paraStyle}>AIWatch uses a service worker to cache static assets locally for faster loading and limited offline access. The service worker does not collect or transmit any personal data.</p>
-      <h3 style={headingStyle}>4. Data Retention</h3>
+      <h3 style={headingStyle}>6. Data Retention</h3>
       <p style={paraStyle}>Analytics data collected via GA4 is retained for up to 14 months per GA4 settings. Local storage data is retained in your browser until you clear it manually. Webhook identifier hashes are retained on the server for up to 30 days and are automatically deleted if you do not visit the site during that period.</p>
-      <h3 style={headingStyle}>5. Third-Party Services</h3>
+      <h3 style={headingStyle}>7. Third-Party Services</h3>
       <p style={paraStyle}>AIWatch uses the following third-party services that may process your data:<br /><br />
         · Google Analytics 4 — usage analytics<br />
         · Cloudflare Workers — API proxy and caching<br />
@@ -46,41 +51,48 @@ export function PrivacyContent() {
         · Slack Webhook API — alert delivery proxy (only when configured by user)<br /><br />
         Webhook alert payloads are proxied through our server to your configured webhook URL. The server does not store your webhook URL.<br /><br />
         Collected information is not shared with any other third parties.</p>
-      <h3 style={headingStyle}>6. Your Rights</h3>
-      <p style={paraStyle}>You have the right to request access to, correction of, or deletion of your data. Since AIWatch does not collect personally identifiable information, most data is anonymous and cannot be linked to individuals. You can revoke analytics consent at any time via the cookie banner.</p>
-      <h3 style={headingStyle}>7. Children's Privacy</h3>
+      <h3 style={headingStyle}>8. Your Rights</h3>
+      <p style={paraStyle}>You have the right to request access to, correction of, or deletion of your data. Since AIWatch does not collect personally identifiable information, most data is anonymous and cannot be linked to individuals. You can revoke analytics consent at any time:<br /><br />
+        · <strong>Recommended</strong>: in your browser's DevTools, run <code>localStorage.removeItem('aiwatch-cookie-consent')</code> to make the cookie banner re-appear, then choose Essential Only. This preserves your dashboard preferences (theme, language, enabled services).<br />
+        · <strong>Manual</strong>: run <code>localStorage.setItem('aiwatch-cookie-consent','denied')</code> in your browser's DevTools console. On the next page load, AIWatch reads this value and automatically removes any remaining analytics cookies — the documented manual path produces the same end state as the banner Essential-Only choice.</p>
+      <h3 style={headingStyle}>9. Children's Privacy</h3>
       <p style={paraStyle}>AIWatch does not knowingly collect information from children under the age of 14.</p>
-      <h3 style={headingStyle}>8. Contact</h3>
+      <h3 style={headingStyle}>10. Contact</h3>
       <p>For privacy inquiries, please contact <a href="mailto:contact@ai-watch.dev" style={linkStyle}>contact@ai-watch.dev</a>.</p>
     </div>
   )
 
   return (
     <div>
-      <p style={dateStyle}>최종 수정일: 2026년 3월</p>
+      <p style={dateStyle}>최종 수정일: 2026년 5월</p>
       <h3 style={headingStyle}>1. 수집하는 정보</h3>
       <p style={paraStyle}>AIWatch는 서비스 개선을 위해 Google Analytics 4(GA4)를 통해 다음 정보를 수집합니다.<br /><br />
         · 페이지 방문 기록 및 체류 시간<br />
         · 버튼 클릭 이벤트 (새로고침, 필터 변경 등)<br />
         · 기기 종류, 브라우저, 운영체제<br />
         · 국가/지역 정보 (IP 익명화 적용)<br /><br />
-        개인을 식별할 수 있는 정보(이름, 이메일 등)는 수집하지 않습니다.</p>
+        개인을 식별할 수 있는 정보(이름, 이메일 등)는 수집하지 않습니다. 분석 동의를 하지 않은 상태에서는 GA4가 Google Consent Mode v2의 cookieless 모드로 동작하며, 클라이언트 식별자가 저장되지 않은 익명 집계 ping만 전송됩니다.</p>
       <h3 style={headingStyle}>2. 쿠키 및 로컬 저장소</h3>
       <p style={paraStyle}>AIWatch는 다음 유형의 브라우저 저장소를 사용합니다.<br /><br />
-        <strong>분석 쿠키 (선택)</strong> — GA4가 이용 통계 분석을 위해 쿠키(_ga, _gid)를 사용합니다. 쿠키 배너 또는 브라우저 설정에서 거부할 수 있습니다.<br /><br />
+        <strong>분석 쿠키 (선택)</strong> — 동의 시 GA4가 _ga, _ga_&lt;측정_id&gt;, _gid 쿠키를 이용 통계 분석을 위해 저장합니다. Google 태그 라이브러리 로드 시 _gcl_au가 함께 나타날 수 있으나, AIWatch는 이를 광고 목적으로 사용하지 않습니다. 쿠키 배너 또는 브라우저 설정에서 거부할 수 있으며, 배너에서 거부 시 즉시 삭제되고, 다른 방법으로 동의를 철회한 경우 다음 페이지 로드에서 자동 삭제됩니다.<br /><br />
+        <strong>기본 거부 동작</strong> — 명시적 동의가 없는 상태에서는 어떤 AIWatch 페이지(대시보드, "Is X down?" 페이지, 월간 리포트)에 처음 진입하든 분석/광고 쿠키가 기기에 저장되지 않습니다. 같은 ai-watch.dev origin을 공유하므로 모든 AIWatch 페이지에서 동일한 동의 선택이 적용됩니다.<br /><br />
         <strong>필수 로컬 저장소 (항상 활성)</strong> — 다음 설정이 브라우저의 localStorage에 저장됩니다. 이 데이터는 기기 외부로 전송되지 않습니다:<br />
         · 테마 설정 (다크/라이트)<br />
         · 언어 설정 (한국어/영어)<br />
         · 대시보드 설정 (모니터링 기간, SLA 목표, 활성화된 서비스)<br />
-        · 쿠키 동의 선택<br />
+        · 쿠키 동의 선택 (aiwatch-cookie-consent)<br />
         · PWA 설치 배너 닫기 여부<br />
         · Webhook URL (Discord/Slack) — 알림 수신을 위해 사용자가 직접 입력. 브라우저의 localStorage에 저장됩니다.<br />
         · Webhook 식별자 (SHA-256 해시) — Webhook URL의 단방향 해시값이 활성 Webhook 수 집계를 위해 서버에 전송됩니다. 해시값으로 원본 URL을 복원할 수 없습니다.</p>
-      <h3 style={headingStyle}>3. 서비스 워커 (PWA)</h3>
+      <h3 style={headingStyle}>3. 쿠키 배너</h3>
+      <p style={paraStyle}>AIWatch 페이지를 처음 방문하면 분석 동의를 묻는 쿠키 배너가 표시됩니다(모두 동의 / 필수만 사용). 선택 결과는 <code>localStorage.aiwatch-cookie-consent</code>에 저장되어 이후 모든 AIWatch 페이지 방문에서 재사용됩니다. 브라우저 저장소를 비우기 전까지는 배너가 다시 표시되지 않습니다. 두 선택 모두 대시보드, "Is X down?" SEO 페이지, 월간 리포트에서 동일하게 적용됩니다.</p>
+      <h3 style={headingStyle}>4. 광고</h3>
+      <p style={paraStyle}>AIWatch는 광고를 표시하지 않습니다. Google Consent Mode v2의 <code>ad_storage</code>, <code>ad_user_data</code>, <code>ad_personalization</code> 신호는 기본값이 "denied"이며, 분석 동의를 한 후에도 계속 "denied" 상태로 유지됩니다 — <code>analytics_storage</code>만 동의 시 "granted"로 변경됩니다. 방문 기록을 기반으로 광고 프로필을 생성하지 않습니다.</p>
+      <h3 style={headingStyle}>5. 서비스 워커 (PWA)</h3>
       <p style={paraStyle}>AIWatch는 빠른 로딩과 제한적 오프라인 접근을 위해 서비스 워커를 사용하여 정적 자산을 로컬에 캐싱합니다. 서비스 워커는 개인 정보를 수집하거나 전송하지 않습니다.</p>
-      <h3 style={headingStyle}>4. 정보 보유 기간</h3>
+      <h3 style={headingStyle}>6. 정보 보유 기간</h3>
       <p style={paraStyle}>GA4를 통해 수집된 분석 데이터는 GA4 설정에 따라 최대 14개월간 보관됩니다. 로컬 저장소 데이터는 브라우저에서 직접 삭제할 때까지 유지됩니다. Webhook 식별자 해시값은 서버에 최대 30일간 보관되며, 해당 기간 내 사이트를 방문하지 않으면 자동 삭제됩니다.</p>
-      <h3 style={headingStyle}>5. 개인정보 처리 위탁</h3>
+      <h3 style={headingStyle}>7. 개인정보 처리 위탁</h3>
       <p style={paraStyle}>AIWatch는 다음 제3자 서비스를 통해 데이터를 처리합니다.<br /><br />
         · Google Analytics 4 — 이용 통계 분석<br />
         · Cloudflare Workers — API 프록시 및 캐싱<br />
@@ -90,11 +102,13 @@ export function PrivacyContent() {
         · Slack Webhook API — 알림 전달 프록시 (사용자 설정 시에만)<br /><br />
         Webhook 알림은 서버를 경유하여 사용자가 설정한 Webhook URL로 전달됩니다. 서버는 Webhook URL을 저장하지 않습니다.<br /><br />
         위 서비스 외의 제3자에게 정보를 제공하지 않습니다.</p>
-      <h3 style={headingStyle}>6. 이용자의 권리</h3>
-      <p style={paraStyle}>이용자는 수집된 정보에 대해 열람, 정정, 삭제를 요청할 수 있습니다. AIWatch는 개인 식별 정보를 수집하지 않으므로, 대부분의 데이터는 익명이며 개인과 연결할 수 없습니다. 쿠키 배너를 통해 분석 동의를 언제든 철회할 수 있습니다.</p>
-      <h3 style={headingStyle}>7. 14세 미만 아동</h3>
+      <h3 style={headingStyle}>8. 이용자의 권리</h3>
+      <p style={paraStyle}>이용자는 수집된 정보에 대해 열람, 정정, 삭제를 요청할 수 있습니다. AIWatch는 개인 식별 정보를 수집하지 않으므로, 대부분의 데이터는 익명이며 개인과 연결할 수 없습니다. 분석 동의는 다음 두 가지 방법으로 언제든 철회할 수 있습니다:<br /><br />
+        · <strong>권장</strong>: 브라우저 DevTools 콘솔에서 <code>localStorage.removeItem('aiwatch-cookie-consent')</code>을 실행하면 쿠키 배너가 다시 표시되며, "필수만 사용"을 선택할 수 있습니다. 대시보드 설정(테마, 언어, 활성화된 서비스)은 그대로 유지됩니다.<br />
+        · <strong>수동</strong>: 브라우저 DevTools 콘솔에서 <code>localStorage.setItem('aiwatch-cookie-consent','denied')</code> 실행. 다음 페이지 로드 시 AIWatch가 이 값을 읽고 남아 있는 분석 쿠키를 자동으로 삭제합니다 — 수동 경로는 배너 "필수만 사용"과 동일한 최종 상태를 만듭니다.</p>
+      <h3 style={headingStyle}>9. 14세 미만 아동</h3>
       <p style={paraStyle}>AIWatch는 14세 미만 아동의 정보를 의도적으로 수집하지 않습니다.</p>
-      <h3 style={headingStyle}>8. 문의</h3>
+      <h3 style={headingStyle}>10. 문의</h3>
       <p>개인정보 처리에 관한 문의는 <a href="mailto:contact@ai-watch.dev" style={linkStyle}>contact@ai-watch.dev</a>로 연락해 주세요.</p>
     </div>
   )

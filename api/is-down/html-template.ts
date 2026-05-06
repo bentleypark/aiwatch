@@ -4,6 +4,8 @@ import type { ServiceSEO } from './seo-content'
 import { SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE, RELATED_SLUGS } from './slug-map'
 import { groupIncidents, type GroupingIncident, type GroupRow, type SingleRow } from './incident-grouping'
 import { compareGroupedRows } from './incident-sort'
+import { CONSENT_INIT_COMMENT, CONSENT_INIT_SCRIPT } from '../_shared/consent-init'
+import { COOKIE_BANNER_HTML } from '../_shared/cookie-banner'
 
 /** Format recovery display — shared with worker/src/ai-analysis.ts */
 function formatRecoveryDisplay(recovery: string): string {
@@ -147,9 +149,8 @@ export function renderPage(
 
 <meta name="theme-color" content="#080c10">
 
-<!-- Google Analytics -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-D4ZWVHQ7JK"></script>
-<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-D4ZWVHQ7JK');</script>
+${CONSENT_INIT_COMMENT}
+${CONSENT_INIT_SCRIPT}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -229,6 +230,7 @@ ${renderShareButtons(seo, service, canonical, ogImageUrl, aiInsight)}
 ${renderFooter(slug)}
 
 </div>
+${COOKIE_BANNER_HTML}
 </body>
 </html>`
 }
@@ -548,8 +550,8 @@ function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canoni
   ]
   const operationalTexts = [
     `${n} is running fine for now. All green on AIWatch.`,
-    `All clear — ${n} is fully operational right now.`,
-    `${n} status: operational. No issues detected.`,
+    `All clear — ${n} is fully operational right now via AIWatch.`,
+    `${n} status: operational. No issues detected — tracked on AIWatch.`,
   ]
   const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
   const copyText = rawStatus === 'down'
@@ -575,8 +577,8 @@ function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canoni
   ]
   const xOperationalTexts = [
     `${n} is running fine for now. All green on AIWatch. \u2705`,
-    `All clear — ${n} is fully operational \u2705`,
-    `${n} status: all systems go \u2705`,
+    `All clear — ${n} is fully operational \u2705 via AIWatch`,
+    `${n} status: all systems go \u2705 — tracked on AIWatch`,
   ]
   const xBase = rawStatus === 'down'
     ? pick(xDownTexts)
@@ -666,6 +668,7 @@ function shareKakao(){
 })();
 </script>`
 }
+
 
 function renderFooter(slug: string): string {
   // Related services first (SEO cross-linking), then remaining

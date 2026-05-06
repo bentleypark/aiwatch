@@ -16,7 +16,7 @@ export default defineConfig({
     {
       name: 'desktop',
       use: { ...devices['Desktop Chrome'] },
-      testIgnore: /mobile\.spec|is-down\.spec|intro\.spec|reports\.spec/,
+      testIgnore: /mobile\.spec|is-down\.spec|intro\.spec|reports\.spec|consent\.spec/,
     },
     {
       name: 'mobile',
@@ -38,6 +38,12 @@ export default defineConfig({
       name: 'reports',
       use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:3333' },
       testMatch: /reports\.spec/,
+    },
+    {
+      name: 'consent',
+      // Edge SSR + inline cookie banner gate (#352) — runs against vercel dev :3333.
+      use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:3333' },
+      testMatch: /consent\.spec/,
     },
   ],
   webServer: {
