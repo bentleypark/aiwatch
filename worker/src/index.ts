@@ -9,6 +9,7 @@ import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, bu
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration } from './utils'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
+import { corsHeaders } from './cors'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -710,28 +711,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   }
 }
 
-function corsHeaders(origin: string, allowedOrigin: string | undefined): HeadersInit {
-  let allowOrigin = ''
-  if (!allowedOrigin) {
-    allowOrigin = ''
-  } else if (allowedOrigin === '*') {
-    allowOrigin = '*'
-  } else {
-    const allowed = allowedOrigin.split(',').map((s) => s.trim())
-    if (allowed.includes(origin)) {
-      allowOrigin = origin
-    }
-  }
-  if (!allowOrigin) return {}
-
-  return {
-    'Access-Control-Allow-Origin': allowOrigin,
-    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Max-Age': '86400',
-    'Vary': 'Origin',
-  }
-}
+// corsHeaders moved to ./cors — also handles team-scoped suffix patterns for Vercel preview origins.
 
 import { generateBadgeSvg } from './badge'
 import { generateOgSvg } from './og'

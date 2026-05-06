@@ -4,7 +4,10 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 
 [vars]
-ALLOWED_ORIGIN = "https://ai-watch.dev,https://www.ai-watch.dev,https://aiwatch-dev.vercel.app"
+# Vercel preview deployments rotate per branch+commit, so they're matched via
+# a team-scoped suffix pattern — never use the global `*.vercel.app`, which
+# would let any Vercel tenant call the API.
+ALLOWED_ORIGIN = "https://ai-watch.dev,https://www.ai-watch.dev,https://aiwatch-dev.vercel.app,*-bentleys-projects-5f6a1a8c.vercel.app"
 # Local dev override: create worker/.dev.vars with ALLOWED_ORIGIN=*
 
 [[kv_namespaces]]
