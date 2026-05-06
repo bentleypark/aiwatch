@@ -19,6 +19,12 @@ interface Env {
   // `wrangler secret put ADMIN_API_KEY`. Separate from ANTHROPIC_API_KEY so it
   // can be rotated independently; absent secret → endpoint always 401.
   ADMIN_API_KEY?: string
+  // #378: shared Bearer token between Vercel Edge Functions and the Worker so
+  // POST /api/internal/edge-fallback can be authenticated without exposing the
+  // operator Discord webhook URL on the public Edge surface. Set via
+  // `wrangler secret put EDGE_ALERT_TOKEN` and the same value as a Vercel env
+  // var so both ends agree. Absent secret → endpoint always 401.
+  EDGE_ALERT_TOKEN?: string
   AI?: Ai
   STATUS_CACHE: KVNamespace
 }
@@ -928,6 +934,67 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
   return json(200, { ok: true, wrote: key, ttl, analysis })
 }
 
+// ── POST /api/internal/edge-fallback ───────────────────────────
+// #378: Vercel Edge Functions (api/is-down.ts, api/reports.ts) call this when they
+// fall back to a degraded render because the upstream Worker fetch failed. Worker
+// dedups via KV (5-minute cooldown per surface+slug) and fires a single Discord
+// alert to the operator webhook so silent CDN-cached failures get noticed.
+//
+// Auth: Bearer token in Authorization header, validated against EDGE_ALERT_TOKEN
+// secret. Same token must be set in Vercel env so both ends agree. Missing secret
+// returns 401 (no info leak about config state).
+export const EDGE_FALLBACK_ALERT_TTL_S = 5 * 60 // 5min cooldown matches the worst-case Vercel Edge cache TTL
+export const EDGE_FALLBACK_ALERT_KEY_PREFIX = 'alerted:edge-fallback:'
+
+interface EdgeFallbackRequest {
+  surface?: string  // 'is-down' | 'reports'
+  slug?: string     // service slug for is-down, path for reports (free-form, capped)
+  reason?: string   // short reason string ('worker_unreachable', 'parse_error', etc.)
+}
+
+export async function handleEdgeFallbackAlert(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+
+  if (!env.EDGE_ALERT_TOKEN) return json(401, { ok: false, error: 'unauthorized' })
+  const auth = request.headers.get('Authorization') ?? ''
+  const expected = `Bearer ${env.EDGE_ALERT_TOKEN}`
+  if (!constantTimeEqual(auth, expected)) return json(401, { ok: false, error: 'unauthorized' })
+
+  let body: EdgeFallbackRequest
+  try { body = await request.json() } catch { return json(400, { ok: false, error: 'invalid JSON body' }) }
+
+  // Normalize to lowercase before stripping so casing variants share the dedup
+  // window (e.g. 'Claude' and 'claude' must collapse to the same key).
+  const surface = typeof body.surface === 'string' ? body.surface.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 32) : ''
+  const slug = typeof body.slug === 'string' ? body.slug.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 64) : ''
+  const reason = typeof body.reason === 'string' ? body.reason.toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 64) : 'unknown'
+  if (!surface || !slug) return json(400, { ok: false, error: 'surface and slug required' })
+
+  const dedupKey = `${EDGE_FALLBACK_ALERT_KEY_PREFIX}${surface}:${slug}`
+  const existing = await env.STATUS_CACHE.get(dedupKey).catch(() => null)
+  if (existing) return json(200, { ok: true, deduped: true })
+
+  if (!env.DISCORD_WEBHOOK_URL) {
+    // Skip dispatch but still write the dedup marker so the next call doesn't
+    // recheck immediately — keeps behavior consistent regardless of whether
+    // the operator has configured a webhook URL.
+    await env.STATUS_CACHE.put(dedupKey, '1', { expirationTtl: EDGE_FALLBACK_ALERT_TTL_S }).catch(() => undefined)
+    return json(200, { ok: true, dispatched: false, reason: 'webhook_not_configured' })
+  }
+
+  const dispatched = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+    title: `:warning: Edge SSR fallback: ${surface}/${slug}`,
+    description: `Vercel Edge served the degraded "Status data is temporarily unavailable" render because the upstream Worker fetch failed.\n\n**Reason**: \`${reason}\`\n**Surface**: \`${surface}\`\n**Slug**: \`${slug}\`\n\nThe Edge response is now \`Cache-Control: no-store\` (#378) so subsequent requests retry instead of serving stale failure. If this fires repeatedly, check Worker logs and KV health.`,
+    color: 0xf0883e,
+  })
+  // Write the dedup marker even if Discord delivery failed — otherwise a
+  // misconfigured webhook produces a thundering herd of retry attempts.
+  await env.STATUS_CACHE.put(dedupKey, '1', { expirationTtl: EDGE_FALLBACK_ALERT_TTL_S }).catch(() => undefined)
+
+  return json(200, { ok: true, dispatched })
+}
+
 // ── POST /api/admin/rebuild-archive ─────────────────────────────
 // Operator tool to regenerate a specific month's archive:monthly:{YYYY-MM} key.
 // Motivated by the discovery that earlier archive cron runs persisted score: null /
@@ -1746,6 +1813,13 @@ export default {
     // hand-editing a Node script + `wrangler kv key put --remote`, racing the cron.
     if (request.method === 'POST' && url.pathname === '/api/admin/analyze') {
       return handleAdminAnalyze(request, env, cors)
+    }
+
+    // POST /api/internal/edge-fallback — Vercel Edge Functions notify Worker on
+    // degraded fallback render so the operator gets a Discord alert (#378). KV
+    // dedup ensures one notice per 5min per surface+slug.
+    if (request.method === 'POST' && url.pathname === '/api/internal/edge-fallback') {
+      return handleEdgeFallbackAlert(request, env, cors)
     }
 
     // POST /api/admin/rebuild-archive — operator tool to regenerate a specific month's
