@@ -159,7 +159,7 @@ gh pr merge --squash --delete-branch
 When adding a new monitored service, update ALL of the following:
 
 #### Worker (backend)
-1. `worker/src/services.ts` — add `ServiceConfig` entry at correct position in `SERVICES` array (determines API response order: LLM → voice → infra → apps → agents)
+1. `worker/src/services.ts` — add `ServiceConfig` entry at correct position in `SERVICES` array (determines API response order: LLM → voice → infra → apps → agents). If the status page hosts unrelated components (multi-tenant Atlassian / incident.io / metastatuspage feeds — e.g. `githubstatus.com`, `status.openai.com`, `status.claude.com`), set `incidentKeywords` to scope the visible incident list — otherwise the service card will surface every incident on the page (#397)
 2. `worker/src/probe.ts` — add `ProbeTarget` if API endpoint exists for RTT measurement
 3. `worker/src/fallback.ts` — update ALL of:
    - `EXCLUDE_FALLBACK` — remove if fallback-eligible
