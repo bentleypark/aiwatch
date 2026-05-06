@@ -1,7 +1,10 @@
 // Vercel Edge Function — proxy /reports/* to the aiwatch-reports Jekyll/GH Pages
-// origin at reports.ai-watch.dev (#264). Replaces the prior external-URL rewrite
-// which fell through to the SPA catch-all in production (Vercel rewrites expect
-// internal destinations; external URLs are not reliably proxied).
+// origin (#264). Originally pointed at reports.ai-watch.dev; switched to fetch
+// GH Pages directly via bentleypark.github.io/aiwatch-reports/* so that a
+// Cloudflare Page Rule can 301 the public reports.ai-watch.dev hostname to
+// ai-watch.dev/reports/ without trapping the proxy in a redirect loop. With
+// the prior origin, a Page Rule on the public hostname would 301 the proxy's
+// own fetch back to ai-watch.dev/reports/ (= itself).
 //
 // vercel.json needs four rewrite sources for this to cover every Jekyll URL
 // shape — path-to-regexp's `:rest*` does not match requests with a trailing
@@ -9,17 +12,29 @@
 //   /reports, /reports/, /reports/:rest*, /reports/:rest*/
 //
 // URL mapping:
-//   /reports           → reports.ai-watch.dev/
-//   /reports/          → reports.ai-watch.dev/
-//   /reports/2026-03/  → reports.ai-watch.dev/2026-03/
-//   /reports/assets/x  → reports.ai-watch.dev/assets/x
+//   /reports           → bentleypark.github.io/aiwatch-reports/
+//   /reports/          → bentleypark.github.io/aiwatch-reports/
+//   /reports/2026-03/  → bentleypark.github.io/aiwatch-reports/2026-03/
+//   /reports/assets/x  → bentleypark.github.io/aiwatch-reports/assets/x
 
 export const config = { runtime: 'edge' }
 
-const UPSTREAM_ORIGIN = 'https://reports.ai-watch.dev'
+// Direct GH Pages URL — bypasses the public reports.ai-watch.dev hostname so
+// that Cloudflare's 301 Page Rule on that hostname can't trap the proxy in
+// a redirect loop. Requires the aiwatch-reports repo to NOT have a CNAME
+// file pointing at reports.ai-watch.dev (else GH Pages 301s every request
+// from this URL back to the public hostname, defeating the bypass).
+//
+// During the deploy gap between this proxy change landing and the
+// aiwatch-reports CNAME removal, GH Pages still 301s from this URL back to
+// reports.ai-watch.dev — the fetch's `redirect: 'follow'` (below) is what
+// keeps the proxy working in that interim. Don't change it to 'manual' or
+// 'error' without first verifying the CNAME has been removed.
+const UPSTREAM_ORIGIN = 'https://bentleypark.github.io/aiwatch-reports'
 
 // Strip /reports prefix and normalize: missing trailing slash on home becomes '/'.
-function toUpstreamPath(pathname: string): string {
+// Exported for unit testing; not imported anywhere in production code.
+export function toUpstreamPath(pathname: string): string {
   const stripped = pathname.replace(/^\/reports/, '') || '/'
   return stripped.startsWith('/') ? stripped : `/${stripped}`
 }
@@ -126,7 +141,7 @@ export default async function handler(req: Request): Promise<Response> {
     // so operators can tell the difference between "report not found" and
     // "proxy is broken". Status 502 is semantically correct for upstream fail.
     return new Response(
-      `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Reports unavailable</title></head><body style="background:#080c10;color:#e6edf3;font-family:sans-serif;text-align:center;padding:60px"><h1>Monthly reports temporarily unavailable</h1><p>The aiwatch-reports origin is unreachable. Try <a href="https://reports.ai-watch.dev" style="color:#58a6ff">reports.ai-watch.dev</a> directly, or return to the <a href="https://ai-watch.dev" style="color:#58a6ff">dashboard</a>.</p></body></html>`,
+      `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Reports unavailable</title></head><body style="background:#080c10;color:#e6edf3;font-family:sans-serif;text-align:center;padding:60px"><h1>Monthly reports temporarily unavailable</h1><p>The reports origin is unreachable. Please try again shortly, or return to the <a href="https://ai-watch.dev" style="color:#58a6ff">dashboard</a>.</p></body></html>`,
       { status: 502, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' } },
     )
   }
