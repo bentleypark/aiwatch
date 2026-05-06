@@ -38,6 +38,10 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   // Coding agents (#294) — OpenAI Codex is the current coding-agent product,
   // distinct from the deprecated 2023 Codex code-generation API.
   'codex':           { id: 'codex',       name: 'Codex',           provider: 'OpenAI',      category: 'agent' },
+  // Junie (#336) — JetBrains coding agent. Status page is shared with sibling
+  // JetBrains AI products (Grazie, AI Platform, AI Platform China); the worker
+  // scopes the badge to the Junie component only via statusComponentId.
+  'junie':           { id: 'junie',       name: 'Junie',           provider: 'JetBrains',   category: 'agent' },
 }
 
 // Related services for cross-linking (SEO internal links)
@@ -45,14 +49,15 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   // Phase A
   'claude':         ['claude-ai', 'claude-code', 'openai', 'chatgpt'],
   'claude-ai':      ['claude', 'chatgpt', 'claude-code'],
-  'claude-code':    ['claude', 'cursor', 'github-copilot', 'windsurf', 'codex'],
+  'claude-code':    ['claude', 'cursor', 'github-copilot', 'windsurf', 'codex', 'junie'],
   'chatgpt':        ['claude-ai', 'openai', 'claude', 'gemini'],
   'openai':         ['chatgpt', 'claude', 'gemini', 'mistral', 'cohere'],
   'gemini':         ['openai', 'claude', 'chatgpt'],
-  'github-copilot': ['cursor', 'windsurf', 'claude-code', 'codex'],
-  'cursor':         ['windsurf', 'github-copilot', 'claude-code', 'codex'],
-  'windsurf':       ['cursor', 'github-copilot', 'claude-code', 'codex'],
-  'codex':          ['github-copilot', 'cursor', 'windsurf', 'claude-code'],
+  'github-copilot': ['cursor', 'windsurf', 'claude-code', 'codex', 'junie'],
+  'cursor':         ['windsurf', 'github-copilot', 'claude-code', 'codex', 'junie'],
+  'windsurf':       ['cursor', 'github-copilot', 'claude-code', 'codex', 'junie'],
+  'codex':          ['github-copilot', 'cursor', 'windsurf', 'claude-code', 'junie'],
+  'junie':          ['cursor', 'github-copilot', 'claude-code', 'codex', 'windsurf'],
   // LLM APIs — same-tier alternatives
   'mistral':        ['cohere', 'groq', 'together', 'openai', 'claude'],
   'cohere':         ['mistral', 'groq', 'together', 'openai'],
