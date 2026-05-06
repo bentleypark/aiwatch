@@ -10,8 +10,9 @@ export default function CookieBanner() {
   if (!visible) return null
 
   const handleAccept = () => {
-    setConsent(true)
-    setVisible(false)
+    // setConsent(true) returns false when persistence failed (#352): keep the banner
+    // visible so the user can retry. Mirrors the inline-banner Accept-failure gate.
+    if (setConsent(true)) setVisible(false)
   }
 
   const handleEssentialOnly = () => {

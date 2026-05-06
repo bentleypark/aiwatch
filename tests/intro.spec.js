@@ -36,7 +36,9 @@ test.describe('Landing page (/intro)', () => {
     await expect(banner).not.toHaveCSS('display', 'none')
     await expect(banner).toContainText('Product Hunters')
     const link = banner.locator('a')
-    await expect(link).toHaveAttribute('href', 'https://www.producthunt.com/products/aiwatch-2')
+    // PH "Featured" badge attribution requires UTM params on the upvote URL — these are
+    // baked into the static template (refs PH embed code) and must round-trip in tests.
+    await expect(link).toHaveAttribute('href', /^https:\/\/www\.producthunt\.com\/products\/aiwatch-2(\?|$)/)
     await expect(link).toHaveAttribute('target', '_blank')
   })
 

@@ -11,36 +11,76 @@ export function hasConsent() {
   try { return localStorage.getItem(CONSENT_KEY) } catch { return null }
 }
 
-// Save consent and initialize or disable GA4 accordingly
-export function setConsent(granted) {
-  try { localStorage.setItem(CONSENT_KEY, granted ? 'granted' : 'denied') } catch { /* ignore */ }
-  if (granted) {
-    initGA()
-  } else {
-    // Revoke: disable GA and remove cookies
-    if (window.gtag) {
-      window.gtag('consent', 'update', { analytics_storage: 'denied' })
+// #352: ad_storage / ad_user_data / ad_personalization stay 'denied' even on Accept —
+// AIWatch does not display advertisements and the Privacy Policy commits to this.
+// Only `analytics_storage` flips to 'granted' when the user accepts.
+
+// Remove _ga / _gid / _gcl_au cookies across all common scope variants (host-only,
+// .domain, with/without subdomain). Idempotent — safe to call when no cookies exist.
+function clearAnalyticsCookies() {
+  const hostname = location.hostname
+  const expire = 'expires=Thu, 01 Jan 1970 00:00:00 GMT'
+  document.cookie.split(';').forEach((c) => {
+    const name = c.split('=')[0].trim()
+    if (name.startsWith('_ga') || name.startsWith('_gid') || name.startsWith('_gcl_au')) {
+      document.cookie = `${name}=;${expire};path=/;domain=.${hostname};SameSite=Lax`
+      document.cookie = `${name}=;${expire};path=/;domain=${hostname};SameSite=Lax`
+      document.cookie = `${name}=;${expire};path=/;SameSite=Lax`
     }
-    // Remove GA cookies (_ga, _gid) with multiple domain variants for reliability
-    document.cookie.split(';').forEach((c) => {
-      const name = c.split('=')[0].trim()
-      if (name.startsWith('_ga') || name.startsWith('_gid')) {
-        const hostname = location.hostname
-        const expire = 'expires=Thu, 01 Jan 1970 00:00:00 GMT'
-        document.cookie = `${name}=;${expire};path=/;domain=.${hostname};SameSite=Lax`
-        document.cookie = `${name}=;${expire};path=/;domain=${hostname};SameSite=Lax`
-        document.cookie = `${name}=;${expire};path=/;SameSite=Lax`
-      }
-    })
-  }
+  })
 }
 
-// Set consent default to denied — called at app startup before any GA interaction
+// Save consent and initialize or disable GA4 accordingly.
+// Accept-failure gating mirrors the inline cookie banner (api/_shared/cookie-banner.ts):
+// if persisting `'granted'` to localStorage throws (quota exceeded, disabled storage,
+// sandboxed contexts), do NOT call initGA() AND return false so the caller can keep
+// the banner visible. Otherwise the page-view runs under upgraded consent that was
+// never stored — next page load the banner reappears and the user thinks Accept did
+// nothing, while GA4 already wrote `_ga` cookies for this session. The Essential-Only
+// branch always returns true: the default state is already denied so the banner is
+// safe to dismiss even when persistence failed.
+// Returns true when the user's choice was applied (banner should hide), false when
+// Accept failed to persist (banner should stay visible so the user can retry).
+export function setConsent(granted) {
+  let stored = false
+  try {
+    localStorage.setItem(CONSENT_KEY, granted ? 'granted' : 'denied')
+    stored = true
+  } catch { /* ignore — handled via `stored` flag below */ }
+  if (granted) {
+    if (!stored) return false
+    initGA()
+    return true
+  }
+  // Revoke: disable GA and remove cookies
+  if (window.gtag) {
+    window.gtag('consent', 'update', {
+      analytics_storage: 'denied',
+      ad_storage: 'denied',
+      ad_user_data: 'denied',
+      ad_personalization: 'denied',
+    })
+  }
+  clearAnalyticsCookies()
+  return true
+}
+
+// Set consent default to denied — called at app startup before any GA interaction.
+// Also reconciles state: if a prior session left analytics cookies but consent is now
+// 'denied' (e.g., user manually set localStorage to 'denied' without re-running the
+// banner flow), purge them on this load. Mirrors the Edge SSR / Jekyll inline behavior
+// so the Privacy Policy's documented "manual revoke" path actually works on the SPA.
 export function initConsentDefault() {
   if (!IS_ENABLED) return
   window.dataLayer = window.dataLayer || []
   window.gtag = function () { window.dataLayer.push(arguments) }
-  window.gtag('consent', 'default', { analytics_storage: 'denied' })
+  window.gtag('consent', 'default', {
+    analytics_storage: 'denied',
+    ad_storage: 'denied',
+    ad_user_data: 'denied',
+    ad_personalization: 'denied',
+  })
+  if (hasConsent() === 'denied') clearAnalyticsCookies()
 }
 
 // Dynamically inject gtag.js script and initialize GA4

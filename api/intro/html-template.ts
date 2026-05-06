@@ -1,5 +1,8 @@
 // SSR HTML template for Product Hunt landing page
 
+import { CONSENT_INIT_COMMENT, CONSENT_INIT_SCRIPT } from '../_shared/consent-init'
+import { COOKIE_BANNER_HTML } from '../_shared/cookie-banner'
+
 interface LandingOptions {
   showPHBanner: boolean
 }
@@ -15,8 +18,8 @@ export function renderLandingPage(opts: LandingOptions): string {
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>AIWatch — Real-time AI Service Monitoring</title>
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-D4ZWVHQ7JK"></script>
-<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-D4ZWVHQ7JK');</script>
+${CONSENT_INIT_COMMENT}
+${CONSENT_INIT_SCRIPT}
 <meta name="description" content="Track Claude, OpenAI, Gemini, Cursor and more. AI analyzes incidents and recommends fallback options instantly. Free.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://ai-watch.dev/intro">
@@ -1237,6 +1240,7 @@ try {
 } catch (e) { console.error('[intro] Client init failed:', e); }
 
 </script>
+${COOKIE_BANNER_HTML}
 </body>
 </html>
 `
