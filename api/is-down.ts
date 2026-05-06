@@ -10,6 +10,32 @@ const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 // Keep in sync with worker/src/fallback.ts and src/utils/constants.js
 const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
 
+// #378: notify the Worker when this Edge Function falls back to a degraded
+// render so an operator Discord alert fires. Worker handles 5-min KV dedup, so
+// fan-out across concurrent requests collapses to a single notice per surface
+// per slug per 5min. Awaited with a tight timeout so the user-facing fallback
+// response isn't blocked when the Worker is the very thing that's unhealthy —
+// 500ms is enough for a healthy Worker to respond from the same edge region
+// and short enough that a fully-down Worker doesn't compound the user wait.
+const ALERT_TIMEOUT_MS = 500
+
+async function notifyEdgeFallback(slug: string, reason: string): Promise<void> {
+  const token = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.EDGE_ALERT_TOKEN
+  if (!token) return  // not configured → skip silently in local/preview
+  try {
+    await fetch(`${WORKER_API}/api/internal/edge-fallback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ surface: 'is-down', slug, reason }),
+      signal: AbortSignal.timeout(ALERT_TIMEOUT_MS),
+    })
+  } catch (err) {
+    // Swallow — the alert is best-effort. The user-facing fallback render is
+    // unaffected; if alerting itself is broken, that is a separate signal.
+    console.warn(`[is-down/${slug}] edge-fallback alert dispatch failed:`, err instanceof Error ? err.message : err)
+  }
+}
+
 // Per-isolate dedup for repeated ops signals — re-fires on cold start / per isolate in
 // the fleet, which gives operators enough visibility on deploy without log-volume
 // scaling with request rate.
@@ -36,6 +62,11 @@ export default async function handler(req: Request) {
     let serviceData = null
     let fallbacks: Array<{ id: string; name: string; score: number | null; status: string }> = []
     let aiInsight: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string } | null = null
+    // Track the precise reason for the fallback render so the Discord alert can
+    // distinguish operational classes (timeout vs HTTP failure vs missing service
+    // vs JSON parse error). Defaults to a generic label that should never ship —
+    // overwritten below before use.
+    let fallbackReason: string = 'unknown'
 
     const result = await Promise.allSettled([
       fetch(`${WORKER_API}/api/status/cached`, { signal: AbortSignal.timeout(5000) }),
@@ -58,11 +89,15 @@ export default async function handler(req: Request) {
         const target = allServices.find(s => s.id === entry.id)
         if (target) {
           serviceData = target
-        } else if (!warnedMissingSlugs.has(slug)) {
-          // Hard config drift: slug references an id that doesn't exist in the API response.
-          // Page renders degraded (no status/rank/fallbacks) — log so operators can reconcile.
-          warnedMissingSlugs.add(slug)
-          console.error(`[is-down/${slug}] service id "${entry.id}" not in API response — SLUG_TO_SERVICE is out of sync with worker/src/services.ts`)
+        } else {
+          // Distinct fallback reason — JSON was valid but the slug isn't in the
+          // services array (config drift between SLUG_TO_SERVICE and the Worker's
+          // SERVICES list). Different operational class than a parse failure.
+          fallbackReason = 'service_missing'
+          if (!warnedMissingSlugs.has(slug)) {
+            warnedMissingSlugs.add(slug)
+            console.error(`[is-down/${slug}] service id "${entry.id}" not in API response — SLUG_TO_SERVICE is out of sync with worker/src/services.ts`)
+          }
         }
 
         // Calculate rank by AIWatch Score — match dashboard logic (src/pages/Ranking.jsx):
@@ -146,22 +181,36 @@ export default async function handler(req: Request) {
           aiInsight = analysis
         }
       } catch (parseErr) {
+        fallbackReason = 'parse_error'
         console.error(`[is-down/${slug}] JSON parse failed:`, parseErr instanceof Error ? parseErr.message : parseErr)
       }
     } else if (result[0].status === 'fulfilled' && !result[0].value.ok) {
+      fallbackReason = `worker_http_${result[0].value.status}`
       console.error(`[is-down/${slug}] API returned HTTP ${result[0].value.status}`)
     } else if (result[0].status === 'rejected') {
       const err = result[0].reason
+      fallbackReason = err?.name === 'AbortError' ? 'worker_timeout' : 'worker_unreachable'
       console.error(`[is-down/${slug}] API fetch ${err?.name === 'AbortError' ? 'timeout' : 'failed'}:`, err?.message)
     }
 
     const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight)
 
+    // #378: when the upstream Worker fetch failed and we're rendering the
+    // "Status data is temporarily unavailable" fallback, the response must NOT
+    // be cached the same way as a successful render. Otherwise a sub-minute
+    // Worker blip poisons the Vercel CDN cache for ~6 minutes per region
+    // (s-maxage=60 + stale-while-revalidate=300). Diverge both the status code
+    // and the Cache-Control so a retry gets a fresh fetch, and notify the
+    // Worker so the operator gets a Discord alert.
+    const isFallback = serviceData === null
+    if (isFallback) await notifyEdgeFallback(slug, fallbackReason)
     return new Response(html, {
-      status: 200,
+      status: isFallback ? 503 : 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
+        'Cache-Control': isFallback
+          ? 'no-store, max-age=0, must-revalidate'
+          : 'public, s-maxage=60, stale-while-revalidate=300',
       },
     })
   } catch (err) {

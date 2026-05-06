@@ -32,6 +32,29 @@ export const config = { runtime: 'edge' }
 // 'error' without first verifying the CNAME has been removed.
 const UPSTREAM_ORIGIN = 'https://bentleypark.github.io/aiwatch-reports'
 
+// #378: notify the Worker when the proxy serves the fallback so an operator
+// Discord alert fires. Worker dedups via 5-min KV. See api/is-down.ts for the
+// rationale on the awaited 500ms timeout.
+const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
+const ALERT_TIMEOUT_MS = 500
+async function notifyReportsFallback(path: string, reason: string): Promise<void> {
+  const token = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.EDGE_ALERT_TOKEN
+  if (!token) return
+  // Sanitize path → safe slug. Lowercase + alphanum/hyphen/slash so casing variants
+  // share a dedup window, then collapse slashes to dashes and trim length.
+  const safe = path.toLowerCase().replace(/[^a-z0-9/-]/g, '').replace(/^\/+|\/+$/g, '').replace(/\/+/g, '-').slice(0, 64) || 'index'
+  try {
+    await fetch(`${WORKER_API}/api/internal/edge-fallback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ surface: 'reports', slug: safe, reason }),
+      signal: AbortSignal.timeout(ALERT_TIMEOUT_MS),
+    })
+  } catch (err) {
+    console.warn('[api/reports] edge-fallback alert dispatch failed:', err instanceof Error ? err.message : err)
+  }
+}
+
 // Strip /reports prefix and normalize: missing trailing slash on home becomes '/'.
 // Exported for unit testing; not imported anywhere in production code.
 export function toUpstreamPath(pathname: string): string {
@@ -113,7 +136,12 @@ export default async function handler(req: Request): Promise<Response> {
     // month doesn't linger after Jekyll publishes it. Success responses either keep
     // upstream's cache-control or fall back to 10min + 1h SWR.
     if (upstreamRes.status >= 500) {
-      responseHeaders.set('cache-control', 'no-cache')
+      // #378: bare `no-cache` allows the CDN to keep the response and revalidate;
+      // we want it gone so a transient upstream 5xx doesn't sit in the edge cache.
+      responseHeaders.set('cache-control', 'no-store, max-age=0, must-revalidate')
+      // Surface a sustained GitHub Pages 5xx as a Discord alert too — the catch
+      // path below only covers proxy-unreachable, not upstream-returned-5xx.
+      await notifyReportsFallback(url.pathname, `upstream_${upstreamRes.status}`)
     } else if (upstreamRes.status >= 400) {
       responseHeaders.set('cache-control', 's-maxage=60')
     } else if (!responseHeaders.has('cache-control')) {
@@ -140,9 +168,12 @@ export default async function handler(req: Request): Promise<Response> {
     // Don't mask failure with the dashboard SPA — return an honest error page
     // so operators can tell the difference between "report not found" and
     // "proxy is broken". Status 502 is semantically correct for upstream fail.
+    const reason = err instanceof Error && err.name === 'AbortError' ? 'upstream_timeout' : 'upstream_unreachable'
+    const failedPath = (() => { try { return new URL(req.url).pathname } catch { return '/' } })()
+    await notifyReportsFallback(failedPath, reason)
     return new Response(
       `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Reports unavailable</title></head><body style="background:#080c10;color:#e6edf3;font-family:sans-serif;text-align:center;padding:60px"><h1>Monthly reports temporarily unavailable</h1><p>The reports origin is unreachable. Please try again shortly, or return to the <a href="https://ai-watch.dev" style="color:#58a6ff">dashboard</a>.</p></body></html>`,
-      { status: 502, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' } },
+      { status: 502, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, max-age=0, must-revalidate' } },
     )
   }
 }
