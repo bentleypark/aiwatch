@@ -452,3 +452,90 @@ describe('fetchService cross-contamination guard (#361)', () => {
     expect(filtered.find((i) => i.id === 'db-1')).toBeUndefined()
   })
 })
+
+describe('filterIncidents — GitHub Copilot scoping (#397)', () => {
+  // The GitHub status page mixes incidents across many components (Pull Requests,
+  // Actions, Webhooks, Git Operations, Codespaces, Issues, Packages, Pages, Copilot…).
+  // Without `incidentKeywords: ['copilot']`, the Copilot service card surfaces every
+  // unrelated incident. These tests pin the filter behavior so a future config edit
+  // that removes the keywords list re-introduces the leak loudly.
+  const copilotConfig: ServiceConfig = {
+    id: 'copilot',
+    name: 'GitHub Copilot',
+    provider: 'Microsoft',
+    category: 'agent',
+    statusUrl: 'https://githubstatus.com',
+    apiUrl: 'https://www.githubstatus.com/api/v2/summary.json',
+    statusComponentId: 'pjmpxvq2cmr2',
+    statusComponentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82'],
+    incidentKeywords: ['copilot'],
+  }
+
+  it('keeps incident when "copilot" is in componentNames', () => {
+    const inc = mockIncident({
+      title: 'Incident with multiple GitHub services',
+      componentNames: ['Webhooks', 'Actions', 'Copilot'],
+    })
+    expect(filterIncidents([inc], copilotConfig)).toHaveLength(1)
+  })
+
+  it('keeps incident when "copilot" is in the title even with null componentNames', () => {
+    const inc = mockIncident({
+      title: 'Disruption with Copilot Coding Agent sessions',
+      componentNames: null,
+    })
+    expect(filterIncidents([inc], copilotConfig)).toHaveLength(1)
+  })
+
+  it('drops Pull Requests-only incident', () => {
+    const inc = mockIncident({
+      title: 'Incident with Pull Requests',
+      componentNames: ['Pull Requests'],
+    })
+    expect(filterIncidents([inc], copilotConfig)).toHaveLength(0)
+  })
+
+  it('drops Actions-only incident', () => {
+    const inc = mockIncident({
+      title: 'Incident with Actions, we are investigating reports of degraded availability',
+      componentNames: ['Actions'],
+    })
+    expect(filterIncidents([inc], copilotConfig)).toHaveLength(0)
+  })
+
+  it('drops Git Operations-only incident', () => {
+    const inc = mockIncident({
+      title: 'Increased Latency and Failures for SSH Git Operations',
+      componentNames: ['Git Operations'],
+    })
+    expect(filterIncidents([inc], copilotConfig)).toHaveLength(0)
+  })
+
+  it('drops Codespaces-only incident', () => {
+    const inc = mockIncident({
+      title: 'Errors starting and connecting to Codespaces',
+      componentNames: ['Codespaces'],
+    })
+    expect(filterIncidents([inc], copilotConfig)).toHaveLength(0)
+  })
+
+  it('drops multi-component incident that does NOT include Copilot', () => {
+    const inc = mockIncident({
+      title: 'Incident with Issues and Webhooks',
+      componentNames: ['Git Operations', 'Webhooks', 'Issues', 'Pull Requests', 'Actions', 'Packages', 'Pages', 'Codespaces'],
+    })
+    expect(filterIncidents([inc], copilotConfig)).toHaveLength(0)
+  })
+
+  it('drops generic GitHub incident with null componentNames and no Copilot mention in title', () => {
+    // Defensive default: when GitHub doesn't tag the affected components, we don't
+    // speculate that Copilot is impacted. The status determination still relies on
+    // the component-level operational/degraded signal, so a real Copilot impact would
+    // surface there even if the incident itself stays hidden.
+    const inc = mockIncident({
+      title: 'Disruption with some GitHub services',
+      componentNames: null,
+    })
+    expect(filterIncidents([inc], copilotConfig)).toHaveLength(0)
+  })
+})

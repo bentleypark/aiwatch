@@ -95,7 +95,7 @@ export const SERVICES: ServiceConfig[] = [
   // Bugbot/cursor.com/Marketplace are auxiliary surfaces and intentionally excluded.
   { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c'] },
   // copilot badge reflects worst-of: Copilot + Copilot AI Model Providers (direct upstream) (#379).
-  { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2', statusComponentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82'] },
+  { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2', statusComponentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82'], incidentKeywords: ['copilot'] },
   // windsurf badge reflects worst-of: Cascade primary + Windsurf Tab (autocomplete agent surface) (#379).
   { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m', statusComponentIds: ['r5wf1ykd7y1m', '8q19cygxvshj'] },
   { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.ai', apiUrl: 'https://status.jetbrains.ai/api/v2/summary.json', statusComponentId: '9vbyyqkkjxl4' },
