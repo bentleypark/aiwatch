@@ -28,13 +28,14 @@ test.describe('Statusline guide page (#400 Phase 0)', () => {
     expect(text).toContain('|| true')
   })
 
-  test('renders all four documented presets with copy buttons', async ({ page }) => {
+  test('renders all five documented presets with copy buttons', async ({ page }) => {
     await page.goto('/#statusline')
     await waitForDataLoad(page)
-    // 4 presets = 4 <pre> code blocks + 4 Copy buttons.
-    await expect(page.locator('pre')).toHaveCount(4)
+    // 5 presets = 5 <pre> code blocks + 5 Copy buttons.
+    // (degraded_only, compact_badge, full_list, scoped, clickable)
+    await expect(page.locator('pre')).toHaveCount(5)
     const copyButtons = page.locator('button').filter({ hasText: /^Copy$/ })
-    await expect(copyButtons).toHaveCount(4)
+    await expect(copyButtons).toHaveCount(5)
   })
 
   test('copy button click does not throw and remains a button', async ({ page }) => {
@@ -105,6 +106,45 @@ test.describe('Statusline guide page (#400 Phase 0)', () => {
     await expect(link).toHaveAttribute('href', /github\.com\/bentleypark\/aiwatch.*available-service-ids/)
     await expect(link).toHaveAttribute('target', '_blank')
     await expect(link).toHaveAttribute('rel', /noopener/)
+  })
+
+  test('Clickable preset contains OSC 8 hyperlink escape sequence', async ({ page }) => {
+    // The clickable preset wraps each service name in OSC 8 (ESC]8;;URL ESC\)
+    // so terminal emulators render it as a hyperlink. The literal escape
+    // sequence in the user-visible JSON string must contain `]8;;` and
+    // the `]8;;` closing pair — if a future cleanup "simplifies" by dropping
+    // the OSC 8 wrapper, this preset silently degrades to plain text and the
+    // hyperlink claim in the prose becomes false.
+    await page.goto('/#statusline')
+    await waitForDataLoad(page)
+    const heading = page.locator('h3').filter({ hasText: /Clickable.*OSC 8/i })
+    await expect(heading).toBeVisible()
+    // Scope to the heading's parent subtree instead of nth(4) — survives a
+    // future reorder of preset blocks without spuriously passing on the wrong
+    // snippet.
+    const clickableSnippet = heading.locator('xpath=ancestor::div[1]').locator('pre')
+    const code = (await clickableSnippet.textContent()) || ''
+    // JSON.stringify double-encodes the embedded escape so the on-screen text
+    // is literal `\\u001b` (7 chars: \, \, u, 0, 0, 1, b) — that's what users
+    // copy. Substring checks below are escape-safe (no quoting ambiguity).
+    expect(code).toContain(']8;;')                       // OSC 8 opener
+    expect(code).toContain('https://ai-watch.dev/#')     // hyperlinked URL pointing to dashboard hash route
+    // The OSC 8 closer (ESC]8;;) appears at least twice — once after URL, once at the very end.
+    const matches = code.match(/\]8;;/g) || []
+    expect(matches.length).toBeGreaterThanOrEqual(2)
+  })
+
+  test('Clickable preset documents terminal compatibility caveat', async ({ page }) => {
+    // The OSC 8 escape isn't universal — tmux and some older shells render it
+    // as raw text. Documenting this in the page prose is what keeps users from
+    // copying the snippet into an unsupported terminal and concluding AIWatch
+    // is broken. Pin the caveat presence so a future docs trim doesn't drop it.
+    await page.goto('/#statusline')
+    await waitForDataLoad(page)
+    await expect(page.locator('body')).toContainText(/OSC 8/i)
+    // At least one of the supported terminal names should be mentioned to
+    // give the user a quick "do I have one?" check.
+    await expect(page.locator('body')).toContainText(/iTerm2|Warp|kitty|WezTerm/i)
   })
 
   test('"Compatible with" section lists ccstatusline with a link', async ({ page }) => {

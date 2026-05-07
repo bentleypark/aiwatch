@@ -117,6 +117,20 @@ const PRESET_SCOPED = `{
   }
 }`
 
+// PRESET_CLICKABLE wraps each service name in an OSC 8 hyperlink so cmd+click
+// (macOS) / ctrl+click (Linux) opens the AIWatch service detail page in the
+// browser. The escape sequence is "ESC]8;;URL ESC\ TEXT ESC]8;; ESC\". Manual
+// JS-string-with-backslash escaping for this is a nightmare to read, so we
+// build the object and let JSON.stringify handle the JSON-level encoding for
+// us. The inner template literal still has to escape jq-level backslashes
+// (\\u001b for ESC, \\\\ for a literal "\" that jq's raw-output then emits).
+const PRESET_CLICKABLE = JSON.stringify({
+  statusLine: {
+    type: 'command',
+    command: `( curl -sf --max-time 2 ${API_URL} | jq -r '[.services[] | select(.status != "operational") | "\\u001b]8;;https://ai-watch.dev/#\\(.id)\\u001b\\\\🔴 \\(.name)\\u001b]8;;\\u001b\\\\"] | .[0:3] | join(" ")' ) 2>/dev/null || true`,
+  },
+}, null, 2)
+
 export default function Statusline() {
   const { lang } = useLang()
   return (
@@ -188,6 +202,14 @@ export default function Statusline() {
               </a>{' '}on GitHub.
             </p>
             <Snippet code={PRESET_SCOPED} eventLabel="scoped" />
+          </div>
+
+          <div>
+            <h3 className="text-[var(--text0)] text-[13px] font-medium" style={{ marginBottom: '6px' }}>Clickable (OSC 8 hyperlink)</h3>
+            <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.6', marginBottom: '8px' }}>
+              Each service name becomes a clickable hyperlink that opens the AIWatch service detail page (<code className="mono text-[var(--text0)]">cmd+click</code> on macOS, <code className="mono text-[var(--text0)]">ctrl+click</code> on Linux). Useful for jumping straight to incident details when the statusline shows something is wrong. Requires an OSC 8-compatible terminal — most modern emulators (iTerm2, Warp, kitty, WezTerm, VS Code integrated terminal, Terminal.app on macOS 12+) support it; tmux and some older shells may render the escape sequence as raw text instead.
+            </p>
+            <Snippet code={PRESET_CLICKABLE} eventLabel="clickable" />
           </div>
         </div>
       </Section>
