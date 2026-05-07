@@ -4,7 +4,6 @@
 
 import { useState } from 'react'
 import { useLang } from '../hooks/useLang'
-import { usePage } from '../utils/pageContext'
 import { trackEvent } from '../utils/analytics'
 
 const API_URL = 'https://ai-watch.dev/api/status/cached'
@@ -25,17 +24,32 @@ function CopyButton({ text, eventLabel }) {
   return (
     <button
       onClick={onClick}
-      className="mono text-[10px] cursor-pointer transition-colors"
+      className="mono text-[11px] font-medium cursor-pointer transition-colors flex items-center gap-1.5"
       style={{
-        padding: '4px 10px',
+        padding: '5px 12px',
         borderRadius: '4px',
-        border: '1px solid var(--border)',
-        background: copied ? 'var(--status-bg-green)' : 'var(--bg2)',
-        color: copied ? 'var(--green)' : 'var(--text1)',
+        border: `1px solid ${copied ? 'var(--green)' : 'var(--border-hi)'}`,
+        background: copied ? 'var(--status-bg-green)' : 'var(--bg3)',
+        color: copied ? 'var(--green)' : 'var(--text0)',
       }}
-      aria-label={copied ? 'Copied to clipboard' : 'Copy snippet'}
+      aria-label={copied ? 'Copied to clipboard' : 'Copy snippet to clipboard'}
     >
-      {copied ? 'Copied' : 'Copy'}
+      {copied ? (
+        <>
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
+            <path d="M2 5.5L4.5 8L9.5 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Copied
+        </>
+      ) : (
+        <>
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
+            <rect x="3" y="3" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.2" />
+            <path d="M3 3V2a1 1 0 011-1h5a1 1 0 011 1v5a1 1 0 01-1 1h-1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+          </svg>
+          Copy
+        </>
+      )}
     </button>
   )
 }
@@ -100,7 +114,6 @@ const PRESET_SCOPED = `{
 
 export default function Statusline() {
   const { lang } = useLang()
-  const { setPage } = usePage()
   return (
     <div className="space-y-4">
       {lang === 'ko' && (
@@ -159,14 +172,15 @@ export default function Statusline() {
             <h3 className="text-[var(--text0)] text-[13px] font-medium" style={{ marginBottom: '6px' }}>Scope to specific services</h3>
             <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.6', marginBottom: '8px' }}>
               Filter to the providers you actually use. Edit the <code className="mono text-[var(--text0)]">.id == "claude"</code> list to match the services that matter for your workflow — see the{' '}
-              <button
-                type="button"
-                onClick={() => setPage({ name: 'ranking' })}
-                className="underline cursor-pointer"
-                style={{ color: 'var(--blue)', background: 'none', border: 'none', padding: 0, font: 'inherit' }}
+              <a
+                href="https://github.com/bentleypark/aiwatch#available-service-ids"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+                style={{ color: 'var(--blue)' }}
               >
-                full service list
-              </button>{' '}for valid IDs.
+                full service ID table
+              </a>{' '}on GitHub.
             </p>
             <Snippet code={PRESET_SCOPED} eventLabel="scoped" />
           </div>
@@ -182,6 +196,30 @@ export default function Statusline() {
         </ul>
       </Section>
 
+      <Section title="Compatible with">
+        <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.7', marginBottom: '8px' }}>
+          The snippets above use Claude Code's native <code className="mono text-[var(--text0)]">statusLine</code> setting and run through any tool that supports shell-command output. Drop them into:
+        </p>
+        <ul className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.7', listStyle: 'disc', paddingLeft: '20px' }}>
+          <li><strong className="text-[var(--text0)]">Native Claude Code</strong> — paste directly into <code className="mono text-[var(--text0)]">~/.claude/settings.json</code> as shown.</li>
+          <li>
+            <strong className="text-[var(--text0)]">
+              <a
+                href="https://github.com/sirmalloc/ccstatusline"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+                style={{ color: 'var(--blue)' }}
+              >
+                ccstatusline
+              </a>
+            </strong>
+            {' '}— add as a Custom Command widget in the TUI; the command is the part inside the <code className="mono text-[var(--text0)]">"command":</code> field.
+          </li>
+          <li><strong className="text-[var(--text0)]">Any other statusline tool</strong> that exposes a shell-command output widget (the Custom Command pattern in most popular tools).</li>
+        </ul>
+      </Section>
+
       <Section title="Honest caveats">
         <ul className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.7', listStyle: 'disc', paddingLeft: '20px' }}>
           <li><strong className="text-[var(--text0)]">5-minute cache lag</strong> — incidents can take up to 5 minutes to appear in the statusline after AIWatch detects them.</li>
@@ -193,8 +231,7 @@ export default function Statusline() {
 
       <div className="text-[var(--text2)] text-[11px]" style={{ lineHeight: '1.6' }}>
         AIWatch is open-source under AGPL-3.0. Source on{' '}
-        <a href="https://github.com/bentleypark/aiwatch" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: 'var(--blue)' }}>GitHub</a>
-        . Compatible with any Claude Code statusline tool that supports shell-command output, including <code className="mono text-[var(--text0)]">ccstatusline</code>'s Custom Command widget.
+        <a href="https://github.com/bentleypark/aiwatch" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: 'var(--blue)' }}>GitHub</a>.
       </div>
     </div>
   )
