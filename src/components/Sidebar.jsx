@@ -84,7 +84,7 @@ function IconTerminal() {
   )
 }
 
-const NAV_ICONS = { overview: IconGrid, latency: IconChart, incidents: IconClock, uptime: IconTarget, ranking: IconTrophy, statusline: IconTerminal }
+const NAV_ICONS = { overview: IconGrid, latency: IconChart, incidents: IconClock, uptime: IconTarget, ranking: IconTrophy }
 
 const DASHBOARD_ITEMS = [
   { name: 'overview', labelKey: 'nav.overview' },
@@ -92,7 +92,6 @@ const DASHBOARD_ITEMS = [
   { name: 'incidents', labelKey: 'nav.incidents' },
   { name: 'uptime', labelKey: 'nav.uptime' },
   { name: 'ranking', labelKey: 'nav.ranking' },
-  { name: 'statusline', labelKey: 'nav.statusline' },
 ]
 
 const STATUS_DOT_CLASS = {
@@ -219,6 +218,25 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
           <span className="shrink-0"><IconReport /></span>
           {t('nav.reports')}
         </a>
+        {/* Divider — separates "data viewing" group above from "settings / integrations" group below.
+            aria-hidden because this sits inside the nav landmark and is purely visual. */}
+        <div aria-hidden="true" style={{ height: '1px', background: 'var(--border)', margin: '6px 0' }} />
+        {(() => {
+          const isStatuslineActive = page.name === 'statusline'
+          return (
+            <button
+              onClick={() => { trackEvent('navigate_page', { page: 'statusline' }); setPage({ name: 'statusline' }); onNavigate?.() }}
+              aria-current={isStatuslineActive ? 'page' : undefined}
+              className={`w-full text-left flex items-center transition-all cursor-pointer
+                ${isStatuslineActive ? 'bg-[var(--bg3)] text-[var(--text0)]' : 'text-[var(--text1)] hover:bg-[var(--bg3)] hover:text-[var(--text0)]'}`}
+              style={navItemStyle}
+            >
+              {isStatuslineActive && <span style={activeBarStyle} />}
+              <span className="shrink-0"><IconTerminal /></span>
+              {t('nav.statusline')}
+            </button>
+          )
+        })()}
         <a
           href="https://github.com/bentleypark/aiwatch/issues/new?template=service_request.md"
           target="_blank"
