@@ -55,11 +55,16 @@ function CopyButton({ text, eventLabel }) {
 }
 
 function Snippet({ code, eventLabel }) {
+  // Copy button placed FIRST in the header (left side) so it's the first thing
+  // a user's left-to-right scan hits. Putting it on the right made it easy to
+  // miss when the page chrome shrank the content column or when reviewers
+  // assumed it was tied to the code block's horizontal scroll. The
+  // settings.json label is now secondary metadata on the right.
   return (
     <div className="bg-[var(--bg0)] border border-[var(--border)] rounded-md overflow-hidden">
-      <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '6px 12px' }}>
-        <span className="mono text-[10px] text-[var(--text2)] uppercase tracking-wider">settings.json</span>
+      <div className="flex items-center gap-3 border-b border-[var(--border)]" style={{ padding: '8px 12px' }}>
         <CopyButton text={code} eventLabel={eventLabel} />
+        <span className="mono text-[10px] text-[var(--text2)] uppercase tracking-wider" style={{ marginLeft: 'auto' }}>settings.json</span>
       </div>
       <pre className="mono text-[11px] text-[var(--text0)]" style={{ padding: '12px', margin: 0, overflowX: 'auto', lineHeight: '1.5' }}>
         <code>{code}</code>
