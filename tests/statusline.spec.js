@@ -71,4 +71,55 @@ test.describe('Statusline guide page (#400 Phase 0)', () => {
     await expect(page.locator('body')).toContainText(/5-minute cache lag/i)
     await expect(page.locator('body')).toContainText(/CORS-enabled/i)
   })
+
+  test('Copy button is the first interactive element in the snippet header (left-aligned)', async ({ page }) => {
+    // Reviewer feedback (#400 follow-up 0b78e60): right-aligned Copy was easy to
+    // miss when the content column shrank. Pin the contract that Copy comes
+    // BEFORE the "settings.json" label in DOM order so a future flex/justify
+    // tweak doesn't silently regress.
+    await page.goto('/#statusline')
+    await waitForDataLoad(page)
+    // xpath couples to the Snippet component shape (header div is the immediate
+    // previous sibling of <pre>). If a future refactor wraps <pre> in another
+    // div, update the xpath — see src/pages/Statusline.jsx Snippet().
+    const firstSnippetHeaderText = await page
+      .locator('pre').first().locator('xpath=preceding-sibling::div[1]')
+      .textContent()
+    expect(firstSnippetHeaderText).not.toBeNull()
+    const copyIdx = (firstSnippetHeaderText || '').indexOf('Copy')
+    const labelIdx = (firstSnippetHeaderText || '').indexOf('settings.json')
+    expect(copyIdx).toBeGreaterThanOrEqual(0)
+    expect(labelIdx).toBeGreaterThan(copyIdx)
+  })
+
+  test('"full service list" link points to the GitHub README anchor (not intra-SPA)', async ({ page }) => {
+    // Reviewer feedback (#400 follow-up f426ccd): the link was an intra-SPA
+    // setPage to /#ranking, but the Ranking page renders display names not
+    // service IDs — the snippet's jq filter needs the IDs. Pin the external
+    // GitHub README target so a future "let's keep navigation in-app" refactor
+    // doesn't silently break the documentation contract.
+    await page.goto('/#statusline')
+    await waitForDataLoad(page)
+    const link = page.locator('a').filter({ hasText: /service ID table/i }).first()
+    await expect(link).toBeVisible()
+    await expect(link).toHaveAttribute('href', /github\.com\/bentleypark\/aiwatch.*available-service-ids/)
+    await expect(link).toHaveAttribute('target', '_blank')
+    await expect(link).toHaveAttribute('rel', /noopener/)
+  })
+
+  test('"Compatible with" section lists ccstatusline with a link', async ({ page }) => {
+    // Reviewer feedback (#400 follow-up f426ccd): ccstatusline mention moved
+    // out of the footer and into a dedicated section so users of that tool
+    // can spot integration support quickly. Pin the section + link presence
+    // so a future doc cleanup doesn't bury the cross-promotion that the
+    // Phase 1 distribution PR strategy depends on.
+    await page.goto('/#statusline')
+    await waitForDataLoad(page)
+    await expect(page.locator('body')).toContainText(/Compatible with/i)
+    // `href*=` instead of `href=` so a future UTM/ref query-string addition
+    // doesn't break the test while still catching repo-owner moves.
+    const ccLink = page.locator('a[href*="github.com/sirmalloc/ccstatusline"]').first()
+    await expect(ccLink).toBeVisible()
+    await expect(ccLink).toHaveText(/ccstatusline/)
+  })
 })
