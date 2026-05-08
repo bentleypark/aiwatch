@@ -31,6 +31,7 @@ const ServiceDetails = lazyWithRetry(() => import('./pages/ServiceDetails'))
 const Settings = lazyWithRetry(() => import('./pages/Settings'))
 const AboutScore = lazyWithRetry(() => import('./pages/AboutScore'))
 const Ranking = lazyWithRetry(() => import('./pages/Ranking'))
+const Statusline = lazyWithRetry(() => import('./pages/Statusline'))
 
 class ChunkErrorBoundary extends Component {
   state = { hasError: false }
@@ -59,7 +60,7 @@ class ChunkErrorBoundary extends Component {
 import { ALL_SERVICE_IDS } from './utils/constants'
 import { initVitals } from './utils/vitals'
 
-const PAGE_NAMES = ['overview', 'latency', 'incidents', 'uptime', 'settings', 'about-score', 'ranking']
+const PAGE_NAMES = ['overview', 'latency', 'incidents', 'uptime', 'settings', 'about-score', 'ranking', 'statusline']
 
 function hashToPage(hash) {
   const id = hash.replace(/^#/, '').split(/[?&#]/)[0]
@@ -87,6 +88,7 @@ function resolvePage(page) {
     case 'settings':  return <Suspense fallback={<SkeletonUI />}><Settings /></Suspense>
     case 'about-score': return <Suspense fallback={<SkeletonUI />}><AboutScore /></Suspense>
     case 'ranking':     return <Suspense fallback={<SkeletonUI />}><Ranking /></Suspense>
+    case 'statusline':  return <Suspense fallback={<SkeletonUI />}><Statusline /></Suspense>
     default:          return <Overview />
   }
 }

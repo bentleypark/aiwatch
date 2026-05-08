@@ -8,6 +8,7 @@ const ko = {
   'nav.incidents': '인시던트',
   'nav.uptime': '업타임 현황',
   'nav.ranking': '신뢰도 랭킹',
+  'nav.statusline': '스테이터스라인',
   'nav.settings': '설정',
   'nav.dashboard': '대시보드',
   'nav.reports': '월간 리포트',

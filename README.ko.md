@@ -284,6 +284,25 @@ README, 문서, 블로그에 실시간 상태 배지를 임베드할 수 있습�
 | `characterai` | Character.AI | `modal` | Modal |
 | `voyageai` | Voyage AI | `codex` | Codex |
 
+## Claude Code Statusline 통합
+
+Claude API, OpenAI, Gemini, GitHub Copilot 등 32개 AI 서비스의 장애 여부를 [Claude Code 스테이터스라인](https://docs.claude.com/en/docs/claude-code/statusline)에 직접 표시합니다. 모든 서비스가 정상일 때는 출력이 비어 있어 statusline 공간을 차지하지 않고, 장애가 발생하면 빨간색 표시와 함께 서비스명이 나타나 업스트림 문제와 로컬 문제를 즉시 구분할 수 있습니다.
+
+가장 빠른 설정 — `~/.claude/settings.json`에 추가:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "( curl -sf --max-time 2 https://ai-watch.dev/api/status/cached | jq -r '[.services[] | select(.status != \"operational\") | \"🔴 \" + .name] | .[0:3] | join(\" \")' ) 2>/dev/null || true"
+  }
+}
+```
+
+프리셋 모음 (컴팩트 배지, 전체 목록, 특정 프로바이더만, Powerline 친화 등): **[ai-watch.dev/#statusline](https://ai-watch.dev/#statusline)**
+
+특성: 렌더링당 단일 GET, Cloudflare edge에 5분 KV 캐시, 2초 타임아웃, 네트워크 에러 시 silent fail, Anthropic API 호출 없음, 클라이언트 식별자 미수집. shell 명령 출력을 지원하는 모든 statusline 도구와 호환 (`ccstatusline`의 Custom Command 위젯 포함).
+
 ## 프로젝트 구조
 
 ```

@@ -75,6 +75,15 @@ function IconSend() {
   )
 }
 
+function IconTerminal() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ opacity: 0.6 }}>
+      <rect x="1.5" y="2.5" width="11" height="9" rx="1" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M4 6l2 1.5L4 9M7 9h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 const NAV_ICONS = { overview: IconGrid, latency: IconChart, incidents: IconClock, uptime: IconTarget, ranking: IconTrophy }
 
 const DASHBOARD_ITEMS = [
@@ -209,6 +218,25 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
           <span className="shrink-0"><IconReport /></span>
           {t('nav.reports')}
         </a>
+        {/* Divider — separates "data viewing" group above from "settings / integrations" group below.
+            aria-hidden because this sits inside the nav landmark and is purely visual. */}
+        <div aria-hidden="true" style={{ height: '1px', background: 'var(--border)', margin: '6px 0' }} />
+        {(() => {
+          const isStatuslineActive = page.name === 'statusline'
+          return (
+            <button
+              onClick={() => { trackEvent('navigate_page', { page: 'statusline' }); setPage({ name: 'statusline' }); onNavigate?.() }}
+              aria-current={isStatuslineActive ? 'page' : undefined}
+              className={`w-full text-left flex items-center transition-all cursor-pointer
+                ${isStatuslineActive ? 'bg-[var(--bg3)] text-[var(--text0)]' : 'text-[var(--text1)] hover:bg-[var(--bg3)] hover:text-[var(--text0)]'}`}
+              style={navItemStyle}
+            >
+              {isStatuslineActive && <span style={activeBarStyle} />}
+              <span className="shrink-0"><IconTerminal /></span>
+              {t('nav.statusline')}
+            </button>
+          )
+        })()}
         <a
           href="https://github.com/bentleypark/aiwatch/issues/new?template=service_request.md"
           target="_blank"

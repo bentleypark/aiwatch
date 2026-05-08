@@ -285,6 +285,25 @@ Embed real-time status badges in your README, docs, or blog.
 | `characterai` | Character.AI | `modal` | Modal |
 | `voyageai` | Voyage AI | `codex` | Codex |
 
+## Claude Code Statusline Integration
+
+Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and 28 more — directly in your [Claude Code statusline](https://docs.claude.com/en/docs/claude-code/statusline). Output stays empty while every service is operational; degraded/down services appear with a red indicator so upstream issues are visually distinct from local ones.
+
+Quickest install — add to `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "( curl -sf --max-time 2 https://ai-watch.dev/api/status/cached | jq -r '[.services[] | select(.status != \"operational\") | \"🔴 \" + .name] | .[0:3] | join(\" \")' ) 2>/dev/null || true"
+  }
+}
+```
+
+Full guide with presets (compact badge, full list, scoped to specific providers, Powerline-friendly): **[ai-watch.dev/#statusline](https://ai-watch.dev/#statusline)**
+
+Properties: single GET per render, 5-min KV-cached on Cloudflare's edge, 2-second timeout, fail-silent on network error, no Anthropic API requests, no client identifier. Compatible with any statusline tool that supports shell-command output (including `ccstatusline`'s Custom Command widget).
+
 ## Project Structure
 
 ```

@@ -8,6 +8,7 @@ const en = {
   'nav.incidents': 'Incidents',
   'nav.uptime': 'Uptime Status',
   'nav.ranking': 'Reliability Ranking',
+  'nav.statusline': 'Statusline',
   'nav.settings': 'Settings',
   'nav.dashboard': 'Dashboard',
   'nav.reports': 'Reports',
