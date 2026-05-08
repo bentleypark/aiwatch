@@ -61,9 +61,14 @@ export function buildFallbackText(fallbacks: Array<{ name: string; score: number
 const CATEGORY_LABEL: Record<string, string> = {
   api: 'API', app: 'AI Apps', agent: 'Coding Agent',
 }
+// Agent tier labels carry an "Agent" suffix to keep the noun visible — without it the bare
+// `CLI` / `IDE` / `Plugin` reads as untyped jargon next to category-named peers in the same
+// fallback line ("AI Apps → claude.ai" + "CLI → Claude Code" was the asymmetry that triggered
+// the rename). LLM / Voice / Infra stay bare because those abbreviations are already
+// self-identifying as service categories in the API space.
 const TIER_LABEL: Record<number, string> = {
   1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice',
-  11: 'CLI', 12: 'IDE', 13: 'Plugin',
+  11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
 }
 
 /**

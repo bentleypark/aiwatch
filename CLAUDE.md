@@ -486,9 +486,10 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
     - **Tier 2** (LLM): `mistral`, `cohere`, `groq`, `together`, `fireworks`, `deepseek`, `xai`, `perplexity`
     - **Tier 3** (Infrastructure): `bedrock`, `azureopenai`, `openrouter`
     - **Tier 4** (Voice): `elevenlabs`, `assemblyai`, `deepgram`
-    - **Tier 11** (Coding agent — CLI): `claudecode`, `codex`
-    - **Tier 12** (Coding agent — Standalone IDE): `cursor`, `windsurf`
-    - **Tier 13** (Coding agent — IDE Plugin): `copilot`, `junie`
+    - **Tier 11** (`CLI Agent`): `claudecode`, `codex`
+    - **Tier 12** (`IDE Agent` — standalone): `cursor`, `windsurf`
+    - **Tier 13** (`Plugin Agent` — IDE plugin): `copilot`, `junie`
+    - The `Agent` suffix on each agent-tier label keeps the noun visible in grouped fallback output ("CLI Agent → Claude Code" vs the original ambiguous "CLI → Claude Code") — LLM/Voice/Infra stay bare because those abbreviations already read as service categories.
     - Pre-#402 the agent tiers were unset and every agent fell through to `?? 99`, so the recommendation collapsed to a Score-only sort and Junie (new service, shallow incident history → inflated Score) showed up as #1 for unrelated outages.
   - `EXCLUDE_FALLBACK` services are excluded from both source and candidate lists (keep in sync across `worker/src/fallback.ts`, `src/utils/constants.js`, `api/is-down.ts`): `replicate`, `huggingface`, `pinecone`, `stability`, `voyageai`, `modal`, `characterai`, `bedrock`, `azureopenai`
   - **Estimate-only services** (`uptimeSource === 'estimate'` + 0 incidents): `bedrock`, `azureopenai` — hidden from Ranking, Uptime rankings, fallback recommendations, category averages. Dashboard shows "— Not provided" instead of misleading 100% uptime
