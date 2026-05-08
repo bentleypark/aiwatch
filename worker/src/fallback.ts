@@ -3,13 +3,19 @@
 // Keep in sync with src/utils/constants.js EXCLUDE_FALLBACK
 export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
 
-// Tier-based priority for API services — major LLMs first, then secondary, then infrastructure, then voice
-// Same-tier services are sorted by Score. Higher tier = lower number = higher priority.
+// Tier-based priority — same-tier services sorted by Score, then adjacent tiers by distance.
+// API tiers (1-4) and agent tiers (11-13) use distinct number ranges so TIER_LABEL stays unambiguous
+// and the cross-category category filter in getFallbacks already prevents API ↔ agent leakage.
+// Without agent tiers (#402), all 6 agents fell through to `?? 99` and got Score-only ordering, which
+// pushed Junie (new service, shallow incident history → inflated Score) to #1 for unrelated outages.
 const API_TIER: Record<string, number> = {
   claude: 1, openai: 1, gemini: 1,
   mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, deepseek: 2, xai: 2, perplexity: 2,
   bedrock: 3, azureopenai: 3, openrouter: 3,
   elevenlabs: 4, assemblyai: 4, deepgram: 4,
+  claudecode: 11, codex: 11,
+  cursor: 12, windsurf: 12,
+  copilot: 13, junie: 13,
 }
 
 interface FallbackCandidate {
@@ -55,7 +61,15 @@ export function buildFallbackText(fallbacks: Array<{ name: string; score: number
 const CATEGORY_LABEL: Record<string, string> = {
   api: 'API', app: 'AI Apps', agent: 'Coding Agent',
 }
-const TIER_LABEL: Record<number, string> = { 1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice' }
+// Agent tier labels carry an "Agent" suffix to keep the noun visible — without it the bare
+// `CLI` / `IDE` / `Plugin` reads as untyped jargon next to category-named peers in the same
+// fallback line ("AI Apps → claude.ai" + "CLI → Claude Code" was the asymmetry that triggered
+// the rename). LLM / Voice / Infra stay bare because those abbreviations are already
+// self-identifying as service categories in the API space.
+const TIER_LABEL: Record<number, string> = {
+  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice',
+  11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
+}
 
 /**
  * Build fallback text for a group of affected services (possibly spanning multiple categories).

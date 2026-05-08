@@ -323,7 +323,10 @@ function ActionBanner({ services, setPage, t }) {
   ))
 
   // Collect fallbacks per tier group — exclude non-operational + same provider
-  const TIER_LABEL = { 1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice' }
+  // Keep in sync with worker/src/fallback.ts TIER_LABEL — every tier number used in
+  // src/utils/constants.js API_TIER must have a label here, otherwise grouped fallback display
+  // silently degrades to the bare category label.
+  const TIER_LABEL = { 1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent' }
   const CATEGORY_LABEL = { api: 'API', app: 'AI Apps', agent: 'Coding' }
   const nonOperationalIds = new Set(services.filter(s => s.status !== 'operational').map(s => s.id))
   const affectedProviders = new Set(affected.map(s => s.provider))
