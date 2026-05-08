@@ -120,6 +120,44 @@ export function sumGroupDuration(group) {
   return { totalMs, hasOngoing, resolvedCount }
 }
 
+/** Last element of array (ES5-safe). */
+function last(arr) { return arr && arr.length > 0 ? arr[arr.length - 1] : undefined }
+
+/**
+ * Pick the timestamp + label that matches the incident's current state. The
+ * date this returns is the same axis used by `compareIncidents` for sort
+ * order — keeping list display and sort axis aligned avoids the visible
+ * inversion (#406) where a later-resolved incident outranks an earlier one
+ * but the displayed `startedAt` date suggests the opposite.
+ *
+ * Status order mirrors the worker's 4-state Incident.status plus the
+ * legacy 'ongoing' alias used by Incidents.jsx after pre-normalization.
+ * The 'updated' label fires for ongoing entries only when the timeline
+ * has actually moved past startedAt — otherwise the displayed time would
+ * just repeat startedAt and the label would read as a stale-update lie.
+ *
+ * @param {{ status: string, resolvedAt?: string, startedAt: string, timeline?: { stage: string, at: string }[] }} inc
+ * @param {(key: string) => string} t  i18n function (string-passing kept so this stays framework-agnostic — same convention used elsewhere in this module)
+ * @returns {{ label: string, date: string }}
+ */
+export function getContextualTime(inc, t) {
+  if (inc.status === 'resolved') {
+    const resolved = getResolvedTime(inc)
+    if (resolved) return { label: t('incidents.time.resolved'), date: resolved }
+  }
+  if (inc.status === 'monitoring') {
+    const lt = last(inc.timeline)
+    if (lt?.at) return { label: t('incidents.time.updated'), date: lt.at }
+  }
+  if (inc.status === 'ongoing' || inc.status === 'investigating' || inc.status === 'identified') {
+    const lt = last(inc.timeline)
+    if (lt?.at && lt.at !== inc.startedAt) {
+      return { label: t('incidents.time.updated'), date: lt.at }
+    }
+  }
+  return { label: t('incidents.time.started'), date: inc.startedAt }
+}
+
 /**
  * Resolved timestamp — `resolvedAt` field, or the last `resolved` timeline
  * entry, or null when the incident hasn't resolved yet.

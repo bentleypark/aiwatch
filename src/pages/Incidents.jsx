@@ -8,7 +8,7 @@ import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { formatDate } from '../utils/time'
 import { groupIncidents } from '../utils/incidentGrouping'
-import { getResolvedTime, compareIncidents, compareGroupedRows, dominantGroupStatus, sumGroupDuration, formatDurationMs } from '../utils/incidentSort'
+import { getContextualTime, compareIncidents, compareGroupedRows, dominantGroupStatus, sumGroupDuration, formatDurationMs } from '../utils/incidentSort'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
 import IncidentTimeline from '../components/IncidentTimeline'
 import EmptyState from '../components/EmptyState'
@@ -38,29 +38,8 @@ const TABLE_COLS = ['col.time', 'col.title', 'col.service', 'col.duration', 'col
 
 // ── Helpers ──────────────────────────────────────────────────
 // Sort/grouping helpers live in src/utils/incidentSort.js — shared with
-// Overview "Recent Incidents" and ServiceDetails.
-
-/** Last element of array (ES5-safe) */
-function last(arr) { return arr && arr.length > 0 ? arr[arr.length - 1] : undefined }
-
-/** Get contextual timestamp label and date based on status */
-function getContextualTime(inc, t) {
-  if (inc.status === 'resolved') {
-    const resolved = getResolvedTime(inc)
-    if (resolved) return { label: t('incidents.time.resolved'), date: resolved }
-  }
-  if (inc.status === 'monitoring') {
-    const lt = last(inc.timeline)
-    if (lt?.at) return { label: t('incidents.time.updated'), date: lt.at }
-  }
-  if (inc.status === 'ongoing') {
-    const lt = last(inc.timeline)
-    if (lt?.at && lt.at !== inc.startedAt) {
-      return { label: t('incidents.time.updated'), date: lt.at }
-    }
-  }
-  return { label: t('incidents.time.started'), date: inc.startedAt }
-}
+// Overview "Recent Incidents" and ServiceDetails. getContextualTime moved
+// there in #406 so the Overview list can match its sort axis on display.
 
 // ── Sub-components ───────────────────────────────────────────
 

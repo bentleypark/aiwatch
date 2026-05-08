@@ -10,7 +10,7 @@ import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
 import { SCORE_BG_CLASS, SERVICE_CATEGORIES, EXCLUDE_FALLBACK, API_TIER, getFallbacks } from '../utils/constants'
 import { buildCalendarFromIncidents } from '../utils/calendar'
-import { compareIncidents } from '../utils/incidentSort'
+import { compareIncidents, getContextualTime } from '../utils/incidentSort'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
 import StatusPill from '../components/StatusPill'
@@ -222,6 +222,12 @@ function IncidentItem({ incident, lang, t }) {
   const [expanded, setExpanded] = useState(false)
   const barCls = INC_BAR_CLASS[incident.status] ?? INC_BAR_CLASS.resolved
   const hasTimeline = (incident.timeline ?? []).length > 0
+  // Match the date column to the sort axis (#406): compareIncidents → getLatestActivity
+  // sorts by resolvedAt for resolved incidents, last timeline update for active ones.
+  // Showing startedAt instead produced visible inversions when two incidents straddled
+  // a calendar day boundary. Tooltip exposes the full label so users can tell whether
+  // the date is start / update / resolution without expanding the row.
+  const ctx = getContextualTime(incident, t)
   return (
     <div style={{ marginBottom: '8px' }}>
       <div
@@ -229,8 +235,12 @@ function IncidentItem({ incident, lang, t }) {
         style={{ padding: '2px 4px', margin: '-2px -4px' }}
         onClick={hasTimeline ? () => setExpanded((v) => !v) : undefined}
       >
-        <div className="mono text-[10px] text-[var(--text2)] whitespace-nowrap shrink-0" style={{ width: '52px', paddingTop: '1px' }}>
-          {formatDate(incident.startedAt, lang).split(' ').slice(0, 2).join(' ')}
+        <div
+          className="mono text-[10px] text-[var(--text2)] whitespace-nowrap shrink-0"
+          style={{ width: '52px', paddingTop: '1px' }}
+          title={`${ctx.label} ${formatDate(ctx.date, lang)}`}
+        >
+          {formatDate(ctx.date, lang).split(' ').slice(0, 2).join(' ')}
         </div>
         <div className={`w-[2px] rounded self-stretch ${barCls}`} style={{ minHeight: '32px' }} />
         <div className="flex-1 min-w-0">

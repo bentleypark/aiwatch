@@ -3,6 +3,7 @@ import {
   STATUS_PRIORITY,
   STATUS_ORDER,
   getResolvedTime,
+  getContextualTime,
   getLatestActivity,
   compareIncidents,
   compareGroupedRows,
@@ -487,5 +488,97 @@ describe('sumGroupDuration', () => {
     expect(result.totalMs).toBe(5 * 60_000)
     expect(result.hasOngoing).toBe(true)
     expect(result.resolvedCount).toBe(1)
+  })
+})
+
+// #406 — pin the contract that the timestamp this returns is the same axis
+// compareIncidents sorts by, so Overview's date column visually agrees with
+// list order. Identity-string `t` keeps fixtures terse.
+describe('getContextualTime', () => {
+  const t = (key) => key
+
+  it('resolved → uses resolvedAt with "resolved" label', () => {
+    const inc = { status: 'resolved', startedAt: '2026-04-28T00:00:00Z', resolvedAt: '2026-04-28T03:00:00Z' }
+    expect(getContextualTime(inc, t)).toEqual({ label: 'incidents.time.resolved', date: '2026-04-28T03:00:00Z' })
+  })
+
+  it('resolved without resolvedAt → falls back to last `resolved` timeline entry', () => {
+    const inc = { status: 'resolved', startedAt: '2026-04-28T00:00:00Z', timeline: [
+      { stage: 'investigating', at: '2026-04-28T00:00:00Z' },
+      { stage: 'resolved', at: '2026-04-28T02:30:00Z' },
+    ] }
+    expect(getContextualTime(inc, t)).toEqual({ label: 'incidents.time.resolved', date: '2026-04-28T02:30:00Z' })
+  })
+
+  it('resolved with neither resolvedAt nor a resolved timeline entry → falls through to startedAt', () => {
+    // Defensive — malformed payload. Better to label as start than to crash or
+    // render "Resolved (no time)".
+    const inc = { status: 'resolved', startedAt: '2026-04-28T00:00:00Z' }
+    expect(getContextualTime(inc, t)).toEqual({ label: 'incidents.time.started', date: '2026-04-28T00:00:00Z' })
+  })
+
+  it('monitoring → last timeline update with "updated" label', () => {
+    const inc = { status: 'monitoring', startedAt: '2026-04-28T00:00:00Z', timeline: [
+      { stage: 'investigating', at: '2026-04-28T00:00:00Z' },
+      { stage: 'monitoring',    at: '2026-04-28T01:30:00Z' },
+    ] }
+    expect(getContextualTime(inc, t)).toEqual({ label: 'incidents.time.updated', date: '2026-04-28T01:30:00Z' })
+  })
+
+  it('monitoring without timeline → falls through to startedAt', () => {
+    const inc = { status: 'monitoring', startedAt: '2026-04-28T00:00:00Z' }
+    expect(getContextualTime(inc, t)).toEqual({ label: 'incidents.time.started', date: '2026-04-28T00:00:00Z' })
+  })
+
+  it('ongoing with newer timeline entry → "updated" label', () => {
+    const inc = { status: 'ongoing', startedAt: '2026-04-28T00:00:00Z', timeline: [
+      { stage: 'investigating', at: '2026-04-28T00:00:00Z' },
+      { stage: 'identified',    at: '2026-04-28T00:30:00Z' },
+    ] }
+    expect(getContextualTime(inc, t)).toEqual({ label: 'incidents.time.updated', date: '2026-04-28T00:30:00Z' })
+  })
+
+  it('ongoing whose only timeline entry equals startedAt → uses startedAt with "started" label', () => {
+    // Without this guard the row would say "Updated 14:12" alongside "Started
+    // 14:12", which reads as a stale-ping lie even though nothing has happened.
+    const inc = { status: 'ongoing', startedAt: '2026-04-28T14:12:00Z', timeline: [
+      { stage: 'investigating', at: '2026-04-28T14:12:00Z' },
+    ] }
+    expect(getContextualTime(inc, t)).toEqual({ label: 'incidents.time.started', date: '2026-04-28T14:12:00Z' })
+  })
+
+  it('investigating / identified statuses behave like ongoing (worker-native names)', () => {
+    // Pre-#406 the helper only matched 'ongoing' (post-normalize), missing the
+    // raw worker statuses that ServiceDetails passes through unmodified.
+    const investigating = { status: 'investigating', startedAt: '2026-04-28T00:00:00Z', timeline: [
+      { stage: 'investigating', at: '2026-04-28T00:30:00Z' },
+    ] }
+    expect(getContextualTime(investigating, t).label).toBe('incidents.time.updated')
+
+    const identified = { status: 'identified', startedAt: '2026-04-28T00:00:00Z', timeline: [
+      { stage: 'identified', at: '2026-04-28T00:45:00Z' },
+    ] }
+    expect(getContextualTime(identified, t).label).toBe('incidents.time.updated')
+  })
+
+  it('unknown status → falls through to startedAt with "started" label', () => {
+    // Defensive: a future status enum extension that ships ahead of this helper
+    // shouldn't crash the date column. Falling through to the most-conservative
+    // label lets the row render even if it's slightly less informative.
+    const inc = { status: 'investigating-something-new', startedAt: '2026-04-28T00:00:00Z' }
+    expect(getContextualTime(inc, t)).toEqual({ label: 'incidents.time.started', date: '2026-04-28T00:00:00Z' })
+  })
+
+  it('output date axis matches compareIncidents sort axis (#406 anti-regression)', () => {
+    // The whole point: the date this helper returns is what users see, and
+    // compareIncidents orders by getLatestActivity. Pin that they agree on
+    // resolved entries — if a future refactor diverges them, the Overview
+    // visible-inversion bug returns.
+    const earlier = { status: 'resolved', startedAt: '2026-04-28T14:12:00Z', resolvedAt: '2026-04-28T15:11:00Z' }
+    const later   = { status: 'resolved', startedAt: '2026-04-28T15:03:00Z', resolvedAt: '2026-04-28T15:17:00Z' }
+    expect(getContextualTime(earlier, t).date).toBe(earlier.resolvedAt)
+    expect(getContextualTime(later, t).date).toBe(later.resolvedAt)
+    expect(compareIncidents(earlier, later)).toBeGreaterThan(0)
+    // ↑ later sorts above earlier; later's contextual date is later than earlier's. Aligned.
   })
 })
