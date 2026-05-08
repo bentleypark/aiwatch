@@ -151,13 +151,16 @@ export default async function handler(req: Request) {
           console.error(`[is-down/${slug}] target.aiwatchScore is not finite:`, target.aiwatchScore)
         }
 
-        // Build fallbacks from same data (tier-based priority for API services)
-        // Keep in sync with worker/src/fallback.ts API_TIER
+        // Build fallbacks from same data (tier-based priority for API services + coding agents)
+        // Keep in sync with worker/src/fallback.ts API_TIER and src/utils/constants.js API_TIER.
         const API_TIER: Record<string, number> = {
           claude: 1, openai: 1, gemini: 1,
           mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, deepseek: 2, xai: 2, perplexity: 2,
           bedrock: 3, azureopenai: 3, openrouter: 3,
           elevenlabs: 4, assemblyai: 4, deepgram: 4,
+          claudecode: 11, codex: 11,
+          cursor: 12, windsurf: 12,
+          copilot: 13, junie: 13,
         }
         if (!EXCLUDE_FALLBACK.includes(entry.id)) {
           const sourceTier = API_TIER[entry.id] ?? 99

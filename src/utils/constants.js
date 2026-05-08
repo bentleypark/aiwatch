@@ -53,13 +53,18 @@ export const SERVICE_CATEGORIES = {
 // Keep in sync with worker/src/fallback.ts EXCLUDE_FALLBACK
 export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
 
-// Fallback tier priority for API services
-// Keep in sync with worker/src/fallback.ts API_TIER
+// Fallback tier priority — API services (1-4) and coding agents (11-13) use distinct number ranges
+// so TIER_LABEL (in src/pages/Overview.jsx and worker/src/fallback.ts) maps each tier number to one
+// unambiguous label. Within a category, getFallbacks orders by tier-distance then by Score.
+// Keep in sync with worker/src/fallback.ts API_TIER and api/is-down.ts inline API_TIER.
 export const API_TIER = {
   claude: 1, openai: 1, gemini: 1,
   mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, deepseek: 2, xai: 2, perplexity: 2,
   bedrock: 3, azureopenai: 3, openrouter: 3,
   elevenlabs: 4, assemblyai: 4, deepgram: 4,
+  claudecode: 11, codex: 11,
+  cursor: 12, windsurf: 12,
+  copilot: 13, junie: 13,
 }
 
 /**

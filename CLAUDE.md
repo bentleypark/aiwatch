@@ -163,7 +163,7 @@ When adding a new monitored service, update ALL of the following:
 2. `worker/src/probe.ts` — add `ProbeTarget` if API endpoint exists for RTT measurement
 3. `worker/src/fallback.ts` — update ALL of:
    - `EXCLUDE_FALLBACK` — remove if fallback-eligible
-   - `API_TIER` — add tier number (1=Major LLM, 2=LLM, 3=Infra, 4=Voice)
+   - `API_TIER` — add tier number (API: 1=Major LLM, 2=LLM, 3=Infra, 4=Voice; agents: 11=CLI, 12=IDE, 13=Plugin)
    - `TIER_LABEL` — add label if new tier introduced
    - `buildGroupedFallbackText` uses tier-based grouping — verify Discord alerts show correct labels
 4. `worker/src/__tests__/` — update probe target count test, fallback tests, add service-specific tests
@@ -481,11 +481,15 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
   - **Recently Resolved**: on recovery, cron writes independent `recovered:{svcId}:{incId}` KV (2h TTL) regardless of AI analysis. Also marks per-incident analysis keys with `resolvedAt` field if they exist. `/api/status` returns `recentlyRecovered: Record<svcId, incId[]>` for operational services with recovery markers. Dashboard shows info banner (service names link to detail page) + "Recently Resolved" badge on specific incidents in ServiceDetails + Analyze modal link only when AI analysis exists. "See details in Analyze" hidden when no AI analysis data
   - **Contextual fallback** (`needsFallback`): AI analysis includes boolean flag assessing if incident warrants switching to alternative. When true, AnalysisModal + Is X Down AI Insight card show Score-based fallback list. Shared `getFallbacks()` utility in `src/utils/constants.js` (used by AnalysisModal + Overview)
   - Grouped fallback: when incident affects multiple categories, Discord alerts + dashboard show per-category alternatives via `buildGroupedFallbackText`
-  - **Fallback tier priority** (API services only): same-tier services are recommended first, then adjacent tiers. Within each tier, sorted by AIWatch Score descending. Defined in `worker/src/fallback.ts`, mirrored in `src/utils/constants.js` and `api/is-down.ts`:
+  - **Fallback tier priority**: same-tier services are recommended first, then adjacent tiers by distance. Within each tier, sorted by AIWatch Score descending. Defined in `worker/src/fallback.ts`, mirrored in `src/utils/constants.js`, `api/is-down.ts`, and `TIER_LABEL` in `src/pages/Overview.jsx`. API tiers (1-4) and coding-agent tiers (11-13) use distinct number ranges so a single `TIER_LABEL` map stays unambiguous, and `getFallbacks` already filters by category so the two ranges never compare against each other:
     - **Tier 1** (Major LLM): `claude`, `openai`, `gemini`
     - **Tier 2** (LLM): `mistral`, `cohere`, `groq`, `together`, `fireworks`, `deepseek`, `xai`, `perplexity`
     - **Tier 3** (Infrastructure): `bedrock`, `azureopenai`, `openrouter`
     - **Tier 4** (Voice): `elevenlabs`, `assemblyai`, `deepgram`
+    - **Tier 11** (Coding agent — CLI): `claudecode`, `codex`
+    - **Tier 12** (Coding agent — Standalone IDE): `cursor`, `windsurf`
+    - **Tier 13** (Coding agent — IDE Plugin): `copilot`, `junie`
+    - Pre-#402 the agent tiers were unset and every agent fell through to `?? 99`, so the recommendation collapsed to a Score-only sort and Junie (new service, shallow incident history → inflated Score) showed up as #1 for unrelated outages.
   - `EXCLUDE_FALLBACK` services are excluded from both source and candidate lists (keep in sync across `worker/src/fallback.ts`, `src/utils/constants.js`, `api/is-down.ts`): `replicate`, `huggingface`, `pinecone`, `stability`, `voyageai`, `modal`, `characterai`, `bedrock`, `azureopenai`
   - **Estimate-only services** (`uptimeSource === 'estimate'` + 0 incidents): `bedrock`, `azureopenai` — hidden from Ranking, Uptime rankings, fallback recommendations, category averages. Dashboard shows "— Not provided" instead of misleading 100% uptime
 - Status polling proxy: `worker/` directory (monorepo), Cloudflare Workers

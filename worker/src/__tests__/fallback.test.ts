@@ -190,6 +190,88 @@ describe('buildGroupedFallbackText', () => {
   })
 })
 
+// #402 — coding-agent tier (T11 CLI / T12 IDE / T13 Plugin) regression coverage.
+// Pre-#402 every agent fell through to `?? 99`, so getFallbacks ordered purely by Score, which let
+// Junie (new service, shallow incident history → inflated Score) appear as #1 for unrelated agents.
+// These tests pin the post-fix contract — same-tier peer ranks above cross-tier peers regardless of
+// Score, so the recommendation matches the affected agent's usage pattern (CLI/IDE/Plugin).
+describe('getFallbacks — coding agent tiers (#402)', () => {
+  // Adversarial Score layout: each tier's "wrong" candidates are given Scores that beat the
+  // correct same-tier peer, so a Score-only sort surfaces them first. Tier-distance sort must
+  // override that bias for the assertions below to pass.
+  //
+  // The two highest-Score services (cursor 99 / junie 95) sit in different tiers (T12 / T13)
+  // intentionally. That way, every "affected → expected #1" assertion below names a service that
+  // is NOT the highest Score in the fixture, so a regression that drops the tier-distance term and
+  // collapses to Score-only ordering provably fails — pinned by the simulator at the bottom of
+  // each test comment.
+  const agentServices = [
+    { id: 'claudecode', category: 'agent', name: 'Claude Code', status: 'operational', aiwatchScore: 70 },
+    { id: 'codex',      category: 'agent', name: 'Codex',       status: 'operational', aiwatchScore: 75 },
+    { id: 'cursor',     category: 'agent', name: 'Cursor',      status: 'operational', aiwatchScore: 99 },
+    { id: 'windsurf',   category: 'agent', name: 'Windsurf',    status: 'operational', aiwatchScore: 65 },
+    { id: 'copilot',    category: 'agent', name: 'GitHub Copilot', status: 'operational', aiwatchScore: 78 },
+    { id: 'junie',      category: 'agent', name: 'Junie',       status: 'operational', aiwatchScore: 95 },
+  ]
+
+  it('Claude Code (T11 CLI) → Codex first, despite Cursor + Junie having higher Scores', () => {
+    // Score-only regression would yield [Cursor 99, Junie 95]; tier-distance must produce Codex first.
+    const result = getFallbacks('claudecode', 'agent', agentServices)
+    expect(result[0].name).toBe('Codex')                // T11 same-tier peer (dist 0)
+    expect(result[1].name).toBe('Cursor')               // T12 dist 1, Cursor 99 > Windsurf 65
+  })
+
+  it('Cursor (T12 IDE) → Windsurf first as same-tier peer, despite Junie having a higher Score', () => {
+    // Score-only regression would yield [Junie 95, Copilot 78]; tier-distance must produce Windsurf first.
+    const result = getFallbacks('cursor', 'agent', agentServices)
+    expect(result[0].name).toBe('Windsurf')             // T12 same-tier peer (dist 0)
+    // Second slot: T11 and T13 are equidistant (1) — Score breaks the tie. Junie 95 wins.
+    expect(result[1].name).toBe('Junie')
+  })
+
+  it('GitHub Copilot (T13 Plugin) → Junie first, despite Cursor having a higher Score', () => {
+    // The "Junie #1 is correct" case — but only when Junie is the same-tier peer of the affected
+    // agent. Pre-bump fixture had cursor 80 < junie 95, so Score-only happened to agree with the
+    // tier verdict; the new cursor 99 makes this assertion load-bearing.
+    const result = getFallbacks('copilot', 'agent', agentServices)
+    expect(result[0].name).toBe('Junie')                // T13 same-tier peer (dist 0)
+    expect(result[1].name).toBe('Cursor')               // T12 dist 1 beats CLI dist 2
+  })
+
+  it('Codex (T11 CLI) → Claude Code first, mirroring the claudecode case', () => {
+    // Symmetry pin for the CLI tier — the live #402 trigger was a Codex outage, so this is the
+    // exact scenario users hit. Score-only regression gives [Cursor 99, Junie 95]; tier yields
+    // Claude Code despite its Score 70.
+    const result = getFallbacks('codex', 'agent', agentServices)
+    expect(result[0].name).toBe('Claude Code')
+    expect(result[1].name).toBe('Cursor')               // T12 dist 1, Cursor 99 > Windsurf 65
+  })
+
+  it('Junie (T13 Plugin) → GitHub Copilot first, mirroring the copilot case', () => {
+    // The "new service has its first outage" scenario that motivated #402. With Junie itself
+    // affected, the only same-tier candidate is Copilot — and that must win even though Cursor's
+    // Score (99) is higher.
+    const result = getFallbacks('junie', 'agent', agentServices)
+    expect(result[0].name).toBe('GitHub Copilot')       // T13 same-tier peer
+    expect(result[1].name).toBe('Cursor')               // T12 dist 1 beats CLI dist 2
+  })
+
+  it('Plugin tier wiped out (copilot affected, junie down) → walks to IDE tier (Cursor + Windsurf)', () => {
+    // Sibling-outage realism: when the only same-tier peer is unhealthy, the recommendation must
+    // walk to the nearest healthy tier rather than skip into a far tier just because Score is high.
+    // Score-only regression here produces [Cursor 99, Codex 75]; tier-walk produces [Cursor 99, Windsurf 65]
+    // because both IDE peers are dist 1 vs CLI peers at dist 2 — Windsurf 65 still beats Codex 75
+    // on tier-distance. Second-slot assertion is what makes this load-bearing.
+    const services = agentServices.map(s =>
+      s.id === 'junie' ? { ...s, status: 'down' } : s,
+    )
+    const result = getFallbacks('copilot', 'agent', services)
+    expect(result.find(f => f.name === 'Junie')).toBeUndefined()
+    expect(result[0].name).toBe('Cursor')               // T12 dist 1, Score 99
+    expect(result[1].name).toBe('Windsurf')             // T12 dist 1, Score 65 — still beats Codex 75 (T11 dist 2)
+  })
+})
+
 describe('EXCLUDE_FALLBACK', () => {
   it('contains inference/embedding/infra services but not voice services', () => {
     expect(EXCLUDE_FALLBACK).toContain('replicate')
