@@ -1,0 +1,91 @@
+// #403 — pin the cross-mirror sync of API_TIER and TIER_LABEL.
+//
+// Three independent copies live in this repo:
+//   1. worker/src/fallback.ts     — canonical (Discord alerts, /api/status fallback recommendations)
+//   2. src/utils/constants.js     — frontend (Overview.jsx Action banner, AnalysisModal)
+//   3. api/is-down.ts             — Edge SSR (Is X Down? pages, inline because of the separate
+//                                              compilation surface)
+//
+// Pre-#403 these were synced only by a comment ("Keep in sync with..."). The Junie-as-#1 bug
+// (#402) was the symptom of that drift discipline failing in the *agent* slice; the same failure
+// mode is latent for any future cross-mirror update. This test fails CI when the three diverge.
+//
+// File 3 (api/is-down.ts) can't be imported here — Edge Functions and Workers are different
+// compilation surfaces and api/is-down.ts pulls in @vercel/edge types. Read it via fs and check
+// every canonical key appears as a `<key>: <number>,` line. Catches forgotten additions; doesn't
+// catch a typo in the value (acceptable trade-off — the value is a tier number, an off-by-one
+// would be caught by the human reviewer because the fallback recommendation visibly changes).
+
+import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { API_TIER as workerTier, TIER_LABEL as workerLabel } from '../fallback'
+// Vitest resolves cross-package paths via the repo root; this works because frontend `src/` and
+// worker `src/` share a single repo with one node_modules. The import is data-only (no runtime
+// side effects from constants.js — no environment variables are read at module load).
+import { API_TIER as frontendTier, TIER_LABEL as frontendLabel } from '../../../src/utils/constants'
+
+const REPO_ROOT = join(__dirname, '..', '..', '..')
+
+describe('API_TIER cross-mirror sync (#403)', () => {
+  it('worker/src/fallback.ts ≡ src/utils/constants.js (deep equal)', () => {
+    expect(workerTier).toEqual(frontendTier)
+  })
+
+  it('api/is-down.ts inline copy contains every canonical key', () => {
+    // The inline literal looks like:  claudecode: 11, codex: 11,
+    // We don't reconstruct the full object (would force the file into Vitest's module graph and
+    // bring in the @vercel/edge runtime). String-match is sufficient because the canonical
+    // worker source is the comparison target — if the inline copy adds a stray key the worker
+    // doesn't have, it won't match any worker key here so we'd miss that direction; but the
+    // failure mode #403 actually cares about (forgotten add) is fully covered.
+    const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
+    // Scope to the API_TIER block so we don't accidentally match a key name appearing elsewhere
+    // in the file (e.g., a service id in a regex). The block ends at the `}` that closes the
+    // object literal — there's exactly one such literal in this file, opened on the line that
+    // declares `const API_TIER`.
+    const blockMatch = isDownSource.match(/const API_TIER:\s*Record<[^>]+>\s*=\s*\{([\s\S]*?)\n\s*\}/)
+    expect(blockMatch, 'API_TIER block not found in api/is-down.ts').not.toBeNull()
+    const block = blockMatch![1]
+    for (const id of Object.keys(workerTier)) {
+      // Match `<id>:` exactly so a typo like `claudecodes:` doesn't pass via substring containment.
+      const re = new RegExp(`(^|\\s|,)${id}:\\s*\\d+`)
+      expect(re.test(block), `api/is-down.ts API_TIER missing canonical key "${id}"`).toBe(true)
+    }
+  })
+
+  it('every API_TIER value matches across worker and api/is-down.ts inline', () => {
+    // Stronger than the key-presence check above — if the inline literal carries a different
+    // tier number for a known id, the cross-surface recommendation diverges silently. Worth
+    // catching even though the human reviewer would likely notice the visible change.
+    const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
+    const blockMatch = isDownSource.match(/const API_TIER:\s*Record<[^>]+>\s*=\s*\{([\s\S]*?)\n\s*\}/)
+    const block = blockMatch![1]
+    for (const [id, expectedTier] of Object.entries(workerTier)) {
+      const re = new RegExp(`(^|\\s|,)${id}:\\s*(\\d+)`)
+      const m = block.match(re)
+      expect(m, `key "${id}" not found in api/is-down.ts API_TIER`).not.toBeNull()
+      expect(Number(m![2]), `tier mismatch for "${id}": worker=${expectedTier}, is-down=${m![2]}`).toBe(expectedTier)
+    }
+  })
+})
+
+describe('TIER_LABEL cross-mirror sync (#403)', () => {
+  it('worker/src/fallback.ts ≡ src/utils/constants.js (deep equal)', () => {
+    // Overview.jsx now imports TIER_LABEL from constants.js, so there's no longer a third copy
+    // to compare. If a future contributor reintroduces an inline TIER_LABEL in Overview.jsx,
+    // this test won't catch it directly — but the warn-once `tierLabelFor` helper would fire
+    // on any tier number that the inline copy missed.
+    expect(workerLabel).toEqual(frontendLabel)
+  })
+
+  it('every API_TIER value has a matching TIER_LABEL entry', () => {
+    // Without this guarantee, `tierLabelFor` returns undefined for known tiers and the grouped
+    // fallback display silently degrades to bare category labels — exactly the scenario #403
+    // is meant to surface. Catching the gap at test time avoids relying on runtime warnings.
+    const tierValues = new Set(Object.values(workerTier))
+    for (const tier of tierValues) {
+      expect(workerLabel[tier], `tier ${tier} appears in API_TIER but has no TIER_LABEL entry`).toBeDefined()
+    }
+  })
+})

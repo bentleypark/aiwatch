@@ -152,7 +152,10 @@ export default async function handler(req: Request) {
         }
 
         // Build fallbacks from same data (tier-based priority for API services + coding agents)
-        // Keep in sync with worker/src/fallback.ts API_TIER and src/utils/constants.js API_TIER.
+        // Cross-mirror sync test (worker/src/__tests__/api-tier-sync.test.ts) reads this file via fs
+        // and asserts every key in worker/src/fallback.ts API_TIER appears here, so a partial sync
+        // fails CI. The inline copy is necessary because the Edge Function bundle can't pull from
+        // worker/src/* (separate compilation surface).
         const API_TIER: Record<string, number> = {
           claude: 1, openai: 1, gemini: 1,
           mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, deepseek: 2, xai: 2, perplexity: 2,
@@ -162,13 +165,26 @@ export default async function handler(req: Request) {
           cursor: 12, windsurf: 12,
           copilot: 13, junie: 13,
         }
+        // Inline tierFor — same warn-once shape as worker/src/fallback.ts and src/utils/constants.js.
+        // The Edge Function runs once per request so the warned set is functionally a one-shot per
+        // request, not per session — still useful for surfacing typos in the access log.
+        const warnedTierIds = new Set<string>()
+        const tierFor = (id: string): number => {
+          const t = API_TIER[id]
+          if (t !== undefined) return t
+          if (!warnedTierIds.has(id)) {
+            warnedTierIds.add(id)
+            console.warn(`[is-down/${slug}] no API_TIER for service "${id}" — falling back to 99 (Score-only ordering)`)
+          }
+          return 99
+        }
         if (!EXCLUDE_FALLBACK.includes(entry.id)) {
-          const sourceTier = API_TIER[entry.id] ?? 99
+          const sourceTier = tierFor(entry.id)
           fallbacks = allServices
             .filter(s => s.category === entry.category && s.id !== entry.id && s.status === 'operational' && !EXCLUDE_FALLBACK.includes(s.id))
             .sort((a, b) => {
-              const distA = Math.abs((API_TIER[a.id] ?? 99) - sourceTier)
-              const distB = Math.abs((API_TIER[b.id] ?? 99) - sourceTier)
+              const distA = Math.abs(tierFor(a.id) - sourceTier)
+              const distB = Math.abs(tierFor(b.id) - sourceTier)
               if (distA !== distB) return distA - distB
               return ((b as any).aiwatchScore ?? 0) - ((a as any).aiwatchScore ?? 0)
             })

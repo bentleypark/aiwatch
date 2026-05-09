@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { getFallbacks, buildFallbackText, buildGroupedFallbackText, EXCLUDE_FALLBACK } from '../fallback'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { getFallbacks, buildFallbackText, buildGroupedFallbackText, EXCLUDE_FALLBACK, tierFor, tierLabelFor, API_TIER } from '../fallback'
 
 const mockServices = [
   { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 85 },
@@ -288,5 +288,66 @@ describe('EXCLUDE_FALLBACK', () => {
     expect(EXCLUDE_FALLBACK).not.toContain('cursor')
     expect(EXCLUDE_FALLBACK).not.toContain('claudecode')
     expect(EXCLUDE_FALLBACK).not.toContain('windsurf')
+  })
+})
+
+// #403 — pin the warn-once behavior for the silent-fallback hardening helpers.
+// These tests use unique synthetic ids per test (not real service ids) so the module-scope
+// warned-set never collides between tests, even if vitest runs them in shared module scope.
+describe('tierFor (#403 warn-once helper)', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>
+  beforeEach(() => { warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {}) })
+  afterEach(() => { warnSpy.mockRestore() })
+
+  it('returns the mapped tier for a known service id (no warning)', () => {
+    expect(tierFor('claude')).toBe(API_TIER.claude)
+    expect(warnSpy).not.toHaveBeenCalled()
+  })
+
+  it('returns 99 and warns once for an unknown service id', () => {
+    const fakeId = '__test_warn_once_unknown_a__'
+    expect(tierFor(fakeId)).toBe(99)
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy.mock.calls[0][0]).toContain(fakeId)
+  })
+
+  it('repeated calls for the same unknown id do not re-warn', () => {
+    const fakeId = '__test_warn_once_unknown_b__'
+    tierFor(fakeId)
+    tierFor(fakeId)
+    tierFor(fakeId)
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('warns separately for each distinct unknown id (not silenced globally)', () => {
+    tierFor('__test_warn_once_unknown_c1__')
+    tierFor('__test_warn_once_unknown_c2__')
+    expect(warnSpy).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('tierLabelFor (#403)', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>
+  beforeEach(() => { warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {}) })
+  afterEach(() => { warnSpy.mockRestore() })
+
+  it('returns the mapped label for a known tier (no warning)', () => {
+    expect(tierLabelFor(1)).toBe('LLM')
+    expect(tierLabelFor(11)).toBe('CLI Agent')
+    expect(warnSpy).not.toHaveBeenCalled()
+  })
+
+  it('returns undefined and warns once for an unknown tier', () => {
+    // Using 9999 instead of 99 — 99 is the API_TIER fallback sentinel and a future change might
+    // legitimately add a TIER_LABEL[99] = "Unknown". A clearly-unmapped tier number stays unmapped.
+    expect(tierLabelFor(9999)).toBeUndefined()
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy.mock.calls[0][0]).toContain('9999')
+  })
+
+  it('repeated calls for the same unknown tier do not re-warn', () => {
+    tierLabelFor(8888)
+    tierLabelFor(8888)
+    expect(warnSpy).toHaveBeenCalledTimes(1)
   })
 })

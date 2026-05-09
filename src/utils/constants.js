@@ -54,9 +54,12 @@ export const SERVICE_CATEGORIES = {
 export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
 
 // Fallback tier priority — API services (1-4) and coding agents (11-13) use distinct number ranges
-// so TIER_LABEL (in src/pages/Overview.jsx and worker/src/fallback.ts) maps each tier number to one
-// unambiguous label. Within a category, getFallbacks orders by tier-distance then by Score.
-// Keep in sync with worker/src/fallback.ts API_TIER and api/is-down.ts inline API_TIER.
+// so TIER_LABEL maps each tier number to one unambiguous label. Within a category, getFallbacks
+// orders by tier-distance then by Score.
+//
+// Cross-mirror sync test (worker/src/__tests__/api-tier-sync.test.ts) asserts byte-for-byte equality
+// against worker/src/fallback.ts API_TIER. api/is-down.ts inline copy is checked via string-match.
+// All three must move together.
 export const API_TIER = {
   claude: 1, openai: 1, gemini: 1,
   mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, deepseek: 2, xai: 2, perplexity: 2,
@@ -67,6 +70,38 @@ export const API_TIER = {
   copilot: 13, junie: 13,
 }
 
+// Sync target for worker/src/fallback.ts TIER_LABEL. Pre-#403 this lived inline in Overview.jsx;
+// promoted here so the sync test can compare both copies via a single import without parsing JSX.
+export const TIER_LABEL = {
+  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice',
+  11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
+}
+
+// #403 — warn-once helper that surfaces silent missing-id lookups in the dev console without
+// changing runtime behavior. Mirrors worker/src/fallback.ts tierFor; the parallel implementation
+// is intentional (the worker can't import frontend code at runtime).
+const warnedTierIds = new Set()
+export function tierFor(id) {
+  const t = API_TIER[id]
+  if (t !== undefined) return t
+  if (!warnedTierIds.has(id)) {
+    warnedTierIds.add(id)
+    console.warn(`[fallback] no API_TIER for service "${id}" — falling back to 99 (Score-only ordering)`)
+  }
+  return 99
+}
+
+const warnedLabelTiers = new Set()
+export function tierLabelFor(tier) {
+  const l = TIER_LABEL[tier]
+  if (l !== undefined) return l
+  if (!warnedLabelTiers.has(tier)) {
+    warnedLabelTiers.add(tier)
+    console.warn(`[fallback] no TIER_LABEL for tier ${tier} — grouped fallback display will degrade to bare category label`)
+  }
+  return undefined
+}
+
 /**
  * Get top 2 fallback recommendations for a service, sorted by tier proximity + AIWatch Score.
  * @param {object} service - Source service (needs .id, .category)
@@ -75,12 +110,12 @@ export const API_TIER = {
  */
 export function getFallbacks(service, allServices) {
   if (!service || !Array.isArray(allServices) || EXCLUDE_FALLBACK.includes(service.id)) return []
-  const sourceTier = API_TIER[service.id] ?? 99
+  const sourceTier = tierFor(service.id)
   return allServices
     .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational' && !EXCLUDE_FALLBACK.includes(s.id))
     .sort((a, b) => {
-      const distA = Math.abs((API_TIER[a.id] ?? 99) - sourceTier)
-      const distB = Math.abs((API_TIER[b.id] ?? 99) - sourceTier)
+      const distA = Math.abs(tierFor(a.id) - sourceTier)
+      const distB = Math.abs(tierFor(b.id) - sourceTier)
       if (distA !== distB) return distA - distB
       return (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0)
     })

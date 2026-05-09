@@ -8,7 +8,10 @@ export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stabil
 // and the cross-category category filter in getFallbacks already prevents API ↔ agent leakage.
 // Without agent tiers (#402), all 6 agents fell through to `?? 99` and got Score-only ordering, which
 // pushed Junie (new service, shallow incident history → inflated Score) to #1 for unrelated outages.
-const API_TIER: Record<string, number> = {
+//
+// Exported for the cross-mirror sync test (worker/src/__tests__/api-tier-sync.test.ts) — that test
+// is the only safeguard against drift between the three independent copies of this map (#403).
+export const API_TIER: Record<string, number> = {
   claude: 1, openai: 1, gemini: 1,
   mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, deepseek: 2, xai: 2, perplexity: 2,
   bedrock: 3, azureopenai: 3, openrouter: 3,
@@ -16,6 +19,23 @@ const API_TIER: Record<string, number> = {
   claudecode: 11, codex: 11,
   cursor: 12, windsurf: 12,
   copilot: 13, junie: 13,
+}
+
+// #403 — surfaces the silent-fallback failure mode that produced #402 (Junie-as-#1) without
+// changing the runtime behavior. When a service id isn't in API_TIER (typo, forgotten entry on a
+// new service, partial cross-mirror sync), the lookup still resolves to 99 — but the Cloudflare
+// Worker logs now carry a one-time breadcrumb so the next "why is fallback ordering weird?" debug
+// session has a starting point. Module-scoped Set so the warning is throttled per worker isolate;
+// repeated calls for the same id stay quiet.
+const warnedTierIds = new Set<string>()
+export function tierFor(id: string): number {
+  const t = API_TIER[id]
+  if (t !== undefined) return t
+  if (!warnedTierIds.has(id)) {
+    warnedTierIds.add(id)
+    console.warn(`[fallback] no API_TIER for service "${id}" — falling back to 99 (Score-only ordering)`)
+  }
+  return 99
 }
 
 interface FallbackCandidate {
@@ -32,13 +52,13 @@ export function getFallbacks(
   services: FallbackCandidate[],
 ): Array<{ name: string; score: number | null }> {
   if (EXCLUDE_FALLBACK.includes(serviceId)) return []
-  const sourceTier = API_TIER[serviceId] ?? 99
+  const sourceTier = tierFor(serviceId)
   return services
     .filter(s => s.category === category && s.id !== serviceId && s.status === 'operational' && !EXCLUDE_FALLBACK.includes(s.id))
     .sort((a, b) => {
       // Prefer same or adjacent tier to the affected service
-      const tierA = API_TIER[a.id] ?? 99
-      const tierB = API_TIER[b.id] ?? 99
+      const tierA = tierFor(a.id)
+      const tierB = tierFor(b.id)
       const distA = Math.abs(tierA - sourceTier)
       const distB = Math.abs(tierB - sourceTier)
       if (distA !== distB) return distA - distB
@@ -66,9 +86,26 @@ const CATEGORY_LABEL: Record<string, string> = {
 // fallback line ("AI Apps → claude.ai" + "CLI → Claude Code" was the asymmetry that triggered
 // the rename). LLM / Voice / Infra stay bare because those abbreviations are already
 // self-identifying as service categories in the API space.
-const TIER_LABEL: Record<number, string> = {
+// Exported for the cross-mirror sync test (#403). Mirrored as TIER_LABEL in src/utils/constants.js;
+// Overview.jsx imports from there so there is no third inline copy to drift against.
+export const TIER_LABEL: Record<number, string> = {
   1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice',
   11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
+}
+
+// #403 — same shape as tierFor, for tier numbers that lack a label. Returns undefined (not a
+// sentinel string) because the call sites use `tierLabel ? … : fallback` semantics — a sentinel
+// would break that branch. The warning is the operator-visibility part; the return is identical
+// to the bare lookup it replaces.
+const warnedLabelTiers = new Set<number>()
+export function tierLabelFor(tier: number): string | undefined {
+  const l = TIER_LABEL[tier]
+  if (l !== undefined) return l
+  if (!warnedLabelTiers.has(tier)) {
+    warnedLabelTiers.add(tier)
+    console.warn(`[fallback] no TIER_LABEL for tier ${tier} — grouped fallback display will degrade to bare category label`)
+  }
+  return undefined
 }
 
 /**
@@ -89,8 +126,8 @@ export function buildGroupedFallbackText(
       continue
     }
     if (svc.status === 'operational') continue
-    const tier = API_TIER[svcId] ?? 99
-    const tierLabel = TIER_LABEL[tier]
+    const tier = tierFor(svcId)
+    const tierLabel = tierLabelFor(tier)
     const groupKey = tierLabel ? `${svc.category}:${tierLabel}` : svc.category
     if (seen.has(groupKey)) continue
     seen.add(groupKey)
