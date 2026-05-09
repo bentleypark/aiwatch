@@ -19,6 +19,12 @@ export const API_TIER: Record<string, number> = {
   claudecode: 11, codex: 11,
   cursor: 12, windsurf: 12,
   copilot: 13, junie: 13,
+  // App-category services. All three share tier 21, so same-tier distance collapses to 0
+  // across every pairing and ordering reduces to Score — identical to the pre-#403 `?? 99`
+  // fall-through, just without the warn-once noise. Entries exist only to suppress the
+  // `tierFor` warn-once that would otherwise fire whenever chatgpt/claudeai surface as the
+  // affected service in a fallback flow (Character.AI is in EXCLUDE_FALLBACK so it never does).
+  chatgpt: 21, claudeai: 21, characterai: 21,
 }
 
 // #403 — surfaces the silent-fallback failure mode that produced #402 (Junie-as-#1) without
@@ -91,6 +97,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 export const TIER_LABEL: Record<number, string> = {
   1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice',
   11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
+  21: 'AI Apps', // matches CATEGORY_LABEL[app] so the existing buildGroupedFallbackText copy stays consistent
 }
 
 // #403 — same shape as tierFor, for tier numbers that lack a label. Returns undefined (not a

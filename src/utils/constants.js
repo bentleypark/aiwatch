@@ -68,6 +68,7 @@ export const API_TIER = {
   claudecode: 11, codex: 11,
   cursor: 12, windsurf: 12,
   copilot: 13, junie: 13,
+  chatgpt: 21, claudeai: 21, characterai: 21,
 }
 
 // Sync target for worker/src/fallback.ts TIER_LABEL. Pre-#403 this lived inline in Overview.jsx;
@@ -75,6 +76,7 @@ export const API_TIER = {
 export const TIER_LABEL = {
   1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice',
   11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
+  21: 'AI Apps',
 }
 
 // #403 — warn-once helper that surfaces silent missing-id lookups in the dev console without

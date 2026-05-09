@@ -406,7 +406,7 @@ function ActionBanner({ services, setPage, t }) {
         <div className="mono text-[11px] text-[var(--text2)]" style={{ marginTop: '4px' }}>
           <span>{t('overview.banner.fallback')}</span>
           {categoryGroups.map((grp, gi) => (
-            <span key={grp.category}>
+            <span key={`${grp.category}:${grp.label}`}>
               {gi > 0 && ' · '}
               {' '}<span className="text-[var(--text2)]">{grp.label} → </span>
               {grp.items.map((f, fi) => (
