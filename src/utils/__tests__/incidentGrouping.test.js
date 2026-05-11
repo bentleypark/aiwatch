@@ -247,7 +247,10 @@ describe('groupIncidents — ordering of mixed output', () => {
       makeIncident({ id: 's2', title: 'Real Outage', startedAt: '2026-04-15T08:00:00Z', impact: 'major' }),
     ]
     const result = groupIncidents(incs, UTC)
-    // Newest first by representative time (rangeEnd for groups, startedAt for singles)
+    // Newest first by `getLatestActivity` (#411). For these fixtures resolvedAt is unset, so
+    // getLatestActivity falls through to startedAt for singles and max(startedAt) for groups —
+    // i.e. the comparison happens to match rangeEnd here, but the sort axis is no longer
+    // rangeEnd-specific. See the dedicated #411 describe block below for the discriminating tests.
     const reps = result.map(r => r.kind === 'group' ? r.rangeEnd : r.incident.startedAt)
     const sorted = [...reps].sort().reverse()
     expect(reps).toEqual(sorted)
@@ -418,5 +421,78 @@ describe('groupIncidents — generic-title flap clustering despite impact != nul
     expect(result).toHaveLength(1)
     expect(result[0].kind).toBe('group')
     expect(result[0].count).toBe(2)
+  })
+})
+
+describe('groupIncidents — sort axis alignment with getLatestActivity (#411)', () => {
+  // Regression: pre-#411 `groupIncidents` sorted singles by `inc.startedAt` and
+  // groups by `max(startedAt)` while Overview's `compareIncidents`/`getLatestActivity`
+  // sorted resolved incidents by `resolvedAt`. The Modal/Together pair on
+  // 2026-05-11 was the canary — both pages showed the pair in opposite order.
+  // Post-#411 the axes match: the page that gets `groupIncidents` output sorts
+  // the same way Overview does.
+  const UTC = { timeZone: 'UTC' }
+
+  it('two resolved singles: sorts by resolvedAt desc, not startedAt desc', () => {
+    // Modal:        startedAt 08:59, resolvedAt 09:00 (later startedAt, earlier resolvedAt)
+    // Together AI:  startedAt 08:57, resolvedAt 09:10 (earlier startedAt, later resolvedAt)
+    // Pre-fix: Modal first (startedAt-desc). Post-fix: Together first (resolvedAt-desc).
+    const modal = { id: 'modal-1', title: 'Storage refactor following AWS us-east-1c issues', startedAt: '2026-05-11T08:59:00Z', resolvedAt: '2026-05-11T09:00:00Z', status: 'resolved', impact: 'minor', duration: '1m', timeline: [] }
+    const together = { id: 'together-1', title: 'Kimi K2.6 — recovered', startedAt: '2026-05-11T08:57:00Z', resolvedAt: '2026-05-11T09:10:00Z', status: 'resolved', impact: null, duration: '13m', timeline: [] }
+    const result = groupIncidents([modal, together], UTC)
+    expect(result).toHaveLength(2)
+    expect(result[0].kind).toBe('single')
+    expect(result[1].kind).toBe('single')
+    expect(result[0].incident.id).toBe('together-1') // resolved 09:10 > 09:00
+    expect(result[1].incident.id).toBe('modal-1')
+  })
+
+  it('active incident with later startedAt does not get pushed below a resolved one with earlier startedAt but later resolvedAt', () => {
+    // Active uses startedAt as latest activity (no timeline). Resolved uses resolvedAt.
+    // Active started 09:05 → sortKey 09:05. Resolved 08:57 → 09:10 → sortKey 09:10 → resolved first.
+    // This is correct: resolved's resolution is the more recent activity than the active's start.
+    // Pre-fix would have ranked by startedAt only: active(09:05) > resolved(08:57) → active first.
+    const active = { id: 'active-1', title: 'Service A outage', startedAt: '2026-05-11T09:05:00Z', status: 'investigating', impact: 'major', timeline: [] }
+    const resolved = { id: 'resolved-1', title: 'Service B blip — recovered', startedAt: '2026-05-11T08:57:00Z', resolvedAt: '2026-05-11T09:10:00Z', status: 'resolved', impact: null, duration: '13m', timeline: [] }
+    const result = groupIncidents([active, resolved], UTC)
+    expect(result[0].incident.id).toBe('resolved-1') // 09:10 resolved
+    expect(result[1].incident.id).toBe('active-1')   // 09:05 active
+    // Tier-aware reorder happens *after* groupIncidents via compareGroupedRows
+    // in callers — `groupIncidents` alone now reports newest-activity-first
+    // regardless of status. Callers that need the active-on-top behavior
+    // already pipe through compareGroupedRows (verified at the existing call
+    // sites in Incidents.jsx and ServiceDetails.jsx).
+  })
+
+  it('two groups: ranks by max(getLatestActivity) across entries, not max(startedAt)', () => {
+    // Asymmetric fixture so the test discriminates max-getLatestActivity from max-startedAt
+    // (would-be pre-fix axis) AND from tiebreak ordering. All entries have resolvedAt ≥ startedAt
+    // to stay in the valid-payload space:
+    // - Group A entries: max(startedAt) = 09:00, max(resolvedAt) = 09:30  → latestActivity 09:30
+    // - Group B entries: max(startedAt) = 09:10, max(resolvedAt) = 09:15  → latestActivity 09:15
+    // Pre-fix sort by max(startedAt) would rank B first (09:10 > 09:00). Post-fix sort by
+    // max(getLatestActivity) ranks A first (09:30 > 09:15). Different answers ⇒ the test
+    // actually exercises the new axis instead of passing via tiebreak.
+    const incs = [
+      { id: 'a1', title: 'Model X — recovered', startedAt: '2026-05-11T08:00:00Z', resolvedAt: '2026-05-11T09:30:00Z', status: 'resolved', impact: null, duration: '90m', timeline: [] },
+      { id: 'a2', title: 'Model X — recovered', startedAt: '2026-05-11T09:00:00Z', resolvedAt: '2026-05-11T09:20:00Z', status: 'resolved', impact: null, duration: '20m', timeline: [] },
+      { id: 'b1', title: 'Model Y — recovered', startedAt: '2026-05-11T09:10:00Z', resolvedAt: '2026-05-11T09:15:00Z', status: 'resolved', impact: null, duration: '5m', timeline: [] },
+      { id: 'b2', title: 'Model Y — recovered', startedAt: '2026-05-11T09:08:00Z', resolvedAt: '2026-05-11T09:14:00Z', status: 'resolved', impact: null, duration: '6m', timeline: [] },
+    ]
+    const result = groupIncidents(incs, UTC)
+    expect(result).toHaveLength(2)
+    expect(result[0].kind).toBe('group')
+    expect(result[1].kind).toBe('group')
+    expect(result[0].normalizedTitle).toBe('Model X') // Group A peaks at 09:30 → ranks first
+    expect(result[1].normalizedTitle).toBe('Model Y') // Group B peaks at 09:15
+  })
+
+  it('tiebreak on identical sortKey preserves original input index for determinism', () => {
+    const a = { id: 'a', title: 'Service A — recovered', startedAt: '2026-05-11T08:00:00Z', resolvedAt: '2026-05-11T09:00:00Z', status: 'resolved', impact: null, duration: '60m', timeline: [] }
+    const b = { id: 'b', title: 'Service B — recovered', startedAt: '2026-05-11T08:30:00Z', resolvedAt: '2026-05-11T09:00:00Z', status: 'resolved', impact: null, duration: '30m', timeline: [] }
+    // Both resolved at exactly 09:00. Tiebreak by input index → a first.
+    const result = groupIncidents([a, b], UTC)
+    expect(result[0].incident.id).toBe('a')
+    expect(result[1].incident.id).toBe('b')
   })
 })
