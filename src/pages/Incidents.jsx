@@ -6,9 +6,11 @@
 import { useState, useMemo } from 'react'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
+import { useMonthlyArchives } from '../hooks/useMonthlyArchives'
 import { formatDate } from '../utils/time'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { getResolvedTime, getContextualTime, compareIncidents, compareGroupedRows, dominantGroupStatus, sumGroupDuration, formatDurationMs } from '../utils/incidentSort'
+import { archiveMonthsForPeriod, mergeArchiveIntoMap, archiveSupplementForService } from '../utils/archiveMerge'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
 import IncidentTimeline from '../components/IncidentTimeline'
 import EmptyState from '../components/EmptyState'
@@ -329,16 +331,24 @@ export default function Incidents() {
   const [selectedId,    setSelectedId]    = useState(null)
   const [expandedGroups, setExpandedGroups] = useState(() => new Set())
 
-  // Flatten all incidents from all services (stable ref while services unchanged)
-  // Normalize Worker statuses (investigating/identified) → 'ongoing' for display
+  // Archive merge — see src/utils/archiveMerge.js + src/hooks/useMonthlyArchives.js.
+  // Live /api/status only carries the upstream's last-N incidents (~5d for high-frequency
+  // services like Mistral/Together), so the 90d filter without archive supplement
+  // overpromises by 4-18×. Months: prev 1-3, current month excluded (covered by live).
+  const archiveMonths = useMemo(() => archiveMonthsForPeriod(period), [period])
+  const { archives } = useMonthlyArchives(archiveMonths)
+
+  // Flatten all incidents from all services. Normalize Worker statuses (investigating /
+  // identified) → 'ongoing' for display. Live wins on ID collision with archive — the live
+  // entry has the up-to-date timeline; archive is a frozen snapshot.
   // Deduplicate only when no service filter — services sharing a status page (e.g., Claude API +
   // claude.ai + Claude Code) return same incident IDs. With a service filter active, show all
   // incidents belonging to that service so none get hidden by earlier-processed services.
   const allIncidents = useMemo(
     () => {
       if (serviceFilter !== 'all') {
-        // With service filter: show all incidents for that service
-        return services.flatMap((svc) =>
+        // With service filter: show all incidents for that service.
+        const live = services.flatMap((svc) =>
           (svc.incidents ?? []).flatMap((inc) => [{
             ...inc,
             id: `${svc.id}:${inc.id}`,
@@ -349,9 +359,13 @@ export default function Incidents() {
             serviceId: svc.id,
           }])
         )
+        if (archiveMonths.length === 0) return live
+        const liveCompositeIds = new Set(live.map((i) => i.id))
+        const supplement = archiveSupplementForService(liveCompositeIds, serviceFilter, archives, services)
+        return live.concat(supplement)
       }
-      // Without filter: dedup by incidentId, collect all affected service names
-      const incMap = new Map() // incidentId → merged incident
+      // Without filter: dedup by raw incidentId, collect all affected service names.
+      const incMap = new Map() // raw incidentId → merged incident (composite id assigned at render time below)
       for (const svc of services) {
         for (const inc of svc.incidents ?? []) {
           const existing = incMap.get(inc.id)
@@ -360,6 +374,7 @@ export default function Incidents() {
           } else {
             incMap.set(inc.id, {
               ...inc,
+              // Keep raw id as the map key, but assign the composite id used downstream.
               id: `${svc.id}:${inc.id}`,
               status: inc.status === 'resolved' ? 'resolved'
                 : inc.status === 'monitoring' ? 'monitoring'
@@ -371,9 +386,23 @@ export default function Incidents() {
           }
         }
       }
+      // Archive supplement uses the same raw-id keying so a single incident that touched
+      // multiple services in the archive accumulates into one row, not duplicates.
+      // We rebuild the map keyed by raw id so mergeArchiveIntoMap can find collisions —
+      // the live phase above wrote composite ids into entry.id but kept the raw id as the
+      // Map key. mergeArchiveIntoMap reads/writes via the raw key only.
+      if (archiveMonths.length > 0) {
+        mergeArchiveIntoMap(incMap, archives, services)
+        // Re-assign composite id for archive-only entries — they're added with the raw id
+        // by mergeArchiveIntoMap so the live convention (`${serviceId}:${rawId}`) is the
+        // job of the consumer that mixes raw + composite worlds, i.e. here.
+        for (const [rawId, entry] of incMap) {
+          if (entry.fromArchive) entry.id = `${entry.serviceId}:${rawId}`
+        }
+      }
       return [...incMap.values()]
     },
-    [services, serviceFilter]
+    [services, serviceFilter, archives, archiveMonths]
   )
 
   // Apply service, status, and period filters; sort newest first
