@@ -10,7 +10,7 @@ import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
 import { SCORE_BG_CLASS, SERVICE_CATEGORIES, EXCLUDE_FALLBACK, API_TIER, getFallbacks } from '../utils/constants'
 import { buildCalendarFromIncidents } from '../utils/calendar'
-import { compareIncidents } from '../utils/incidentSort'
+import { compareIncidents, getContextualTime } from '../utils/incidentSort'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
 import StatusPill from '../components/StatusPill'
@@ -229,9 +229,22 @@ function IncidentItem({ incident, lang, t }) {
         style={{ padding: '2px 4px', margin: '-2px -4px' }}
         onClick={hasTimeline ? () => setExpanded((v) => !v) : undefined}
       >
-        <div className="mono text-[10px] text-[var(--text2)] whitespace-nowrap shrink-0" style={{ width: '52px', paddingTop: '1px' }}>
-          {formatDate(incident.startedAt, lang).split(' ').slice(0, 2).join(' ')}
-        </div>
+        {(() => {
+          // #406: align the displayed date with the sort axis (`getLatestActivity`).
+          // Resolved → resolvedAt; monitoring/ongoing with a fresh timeline → last update;
+          // else startedAt. Tooltip exposes the full label so users can still tell whether
+          // the date is the start, an update, or the resolution.
+          const ctx = getContextualTime(incident, t)
+          return (
+            <div
+              className="mono text-[10px] text-[var(--text2)] whitespace-nowrap shrink-0"
+              style={{ width: '52px', paddingTop: '1px' }}
+              title={`${ctx.label} ${formatDate(ctx.date, lang)}`}
+            >
+              {formatDate(ctx.date, lang).split(' ').slice(0, 2).join(' ')}
+            </div>
+          )
+        })()}
         <div className={`w-[2px] rounded self-stretch ${barCls}`} style={{ minHeight: '32px' }} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">

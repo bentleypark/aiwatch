@@ -134,6 +134,47 @@ export function getResolvedTime(inc) {
   return resolvedEntry?.at ?? null
 }
 
+// Active-tier statuses that defer to `lastTimeline.at` only when it post-dates
+// `startedAt` — a single timeline entry equal to `startedAt` is just the initial
+// post and shouldn't read as an "update". Includes the normalized `'ongoing'`
+// alias (Incidents.jsx pre-normalizes) AND the raw worker statuses
+// `'investigating'`/`'identified'` (Overview.jsx consumes raw — without these
+// entries the display axis would silently lag the sort axis whenever an active
+// incident receives a timeline comment from upstream, the same surface bug
+// `#406` set out to fix for resolved incidents).
+const ACTIVE_TIMELINE_GUARDED = new Set(['ongoing', 'investigating', 'identified'])
+
+/**
+ * Contextual timestamp + label for display next to an incident row. Returns
+ * `{ label, date }` where the chosen date matches what `getLatestActivity`
+ * uses for sort ordering, so the displayed date axis aligns with the sort axis
+ * (issue #406). Resolved → `resolvedAt`. Monitoring → last timeline update.
+ * Active (ongoing / investigating / identified) → last timeline update only
+ * when it post-dates `startedAt`. All other cases (unknown status, missing
+ * fields) fall through to `startedAt`.
+ *
+ * Caller passes a translation function so labels stay i18n'd at the call site.
+ *
+ * @param {{ status?: string, startedAt: string, resolvedAt?: string, timeline?: { stage?: string, at?: string }[] }} inc
+ * @param {(key: string) => string} t
+ * @returns {{ label: string, date: string }}
+ */
+export function getContextualTime(inc, t) {
+  const tl = inc.timeline ?? []
+  const lastTimeline = tl.length > 0 ? tl[tl.length - 1] : undefined
+  if (inc.status === 'resolved') {
+    const resolved = getResolvedTime(inc)
+    if (resolved) return { label: t('incidents.time.resolved'), date: resolved }
+  }
+  if (inc.status === 'monitoring' && lastTimeline?.at) {
+    return { label: t('incidents.time.updated'), date: lastTimeline.at }
+  }
+  if (ACTIVE_TIMELINE_GUARDED.has(inc.status) && lastTimeline?.at && lastTimeline.at !== inc.startedAt) {
+    return { label: t('incidents.time.updated'), date: lastTimeline.at }
+  }
+  return { label: t('incidents.time.started'), date: inc.startedAt }
+}
+
 /**
  * Most-recent-activity timestamp (ms epoch) for sort ordering.
  *
