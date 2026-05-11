@@ -8,7 +8,7 @@ import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
-import { SCORE_BG_CLASS, SERVICE_CATEGORIES, EXCLUDE_FALLBACK, API_TIER, getFallbacks } from '../utils/constants'
+import { SCORE_BG_CLASS, SERVICE_CATEGORIES, EXCLUDE_FALLBACK, getFallbacks, tierFor, tierLabelFor } from '../utils/constants'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { compareIncidents, getContextualTime } from '../utils/incidentSort'
 import { formatTime, formatDate } from '../utils/time'
@@ -335,11 +335,10 @@ function ActionBanner({ services, setPage, t }) {
     </span>
   ))
 
-  // Collect fallbacks per tier group — exclude non-operational + same provider
-  // Keep in sync with worker/src/fallback.ts TIER_LABEL — every tier number used in
-  // src/utils/constants.js API_TIER must have a label here, otherwise grouped fallback display
-  // silently degrades to the bare category label.
-  const TIER_LABEL = { 1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent' }
+  // Collect fallbacks per tier group — exclude non-operational + same provider.
+  // TIER_LABEL is now imported from src/utils/constants.js (#403) so a single sync test can compare
+  // it against worker/src/fallback.ts. tierFor / tierLabelFor warn once on missing entries so a
+  // future service add that skips the API_TIER row doesn't silently regress to Score-only ordering.
   const CATEGORY_LABEL = { api: 'API', app: 'AI Apps', agent: 'Coding' }
   const nonOperationalIds = new Set(services.filter(s => s.status !== 'operational').map(s => s.id))
   const affectedProviders = new Set(affected.map(s => s.provider))
@@ -347,15 +346,15 @@ function ActionBanner({ services, setPage, t }) {
   const categoryGroups = [] // [{ category, label, items: [{ id, name, aiwatchScore }] }]
   const eligibleAffected = affected.filter(a => !EXCLUDE_FALLBACK.includes(a.id))
   const numGroups = new Set(eligibleAffected.map(a => {
-    const tier = API_TIER[a.id] ?? 99
-    const tierLabel = TIER_LABEL[tier]
+    const tier = tierFor(a.id)
+    const tierLabel = tierLabelFor(tier)
     return tierLabel ? `${a.category}:${tierLabel}` : a.category
   })).size
   const perGroup = numGroups === 1 ? 2 : 1
   for (const svc of affected) {
     if (EXCLUDE_FALLBACK.includes(svc.id)) continue
-    const tier = API_TIER[svc.id] ?? 99
-    const tierLabel = TIER_LABEL[tier]
+    const tier = tierFor(svc.id)
+    const tierLabel = tierLabelFor(tier)
     const groupKey = tierLabel ? `${svc.category}:${tierLabel}` : svc.category
     if (seenGroups.has(groupKey)) continue
     seenGroups.add(groupKey)
@@ -407,7 +406,7 @@ function ActionBanner({ services, setPage, t }) {
         <div className="mono text-[11px] text-[var(--text2)]" style={{ marginTop: '4px' }}>
           <span>{t('overview.banner.fallback')}</span>
           {categoryGroups.map((grp, gi) => (
-            <span key={grp.category}>
+            <span key={`${grp.category}:${grp.label}`}>
               {gi > 0 && ' · '}
               {' '}<span className="text-[var(--text2)]">{grp.label} → </span>
               {grp.items.map((f, fi) => (

@@ -125,6 +125,35 @@ test.describe('Overview page', () => {
     }
   })
 
+  test('action banner renders multi-tier groups in same category without duplicate React keys', async ({ browser }) => {
+    // Mock data has degraded services across multiple tiers within the api category
+    // (OpenAI Tier 1 LLM, xAI Tier 2 LLM, ElevenLabs Tier 4 Voice). Pre-fix the React key
+    // was `grp.category` which collided when ActionBanner produced multiple groups
+    // under the same category. We capture console errors during a fresh page load and
+    // assert no "same key" warning fires.
+    const ctx = await browser.newContext()
+    const page = await ctx.newPage()
+    const errors = []
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') errors.push(msg.text())
+    })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    // Guard against silent regression if MOCK_SERVICES is changed to no longer trigger the
+    // multi-tier-same-category scenario: require both `LLM →` and `Voice →` groups in the
+    // fallback banner, which both live under category `api` and are precisely what produced
+    // the pre-fix `key='api'` collision. Two groups in *different* categories wouldn't trigger
+    // the bug, so a generic " · " separator count isn't strong enough.
+    const banner = page.locator('main .rounded-lg').filter({ hasText: /Suggested fallback|대체 추천/ }).first()
+    await expect(banner).toBeVisible({ timeout: 5000 })
+    const bannerText = (await banner.textContent()) ?? ''
+    expect(bannerText, 'mock data no longer renders LLM-tier fallback group; bug path not exercised').toMatch(/LLM →/)
+    expect(bannerText, 'mock data no longer renders Voice-tier fallback group; bug path not exercised').toMatch(/Voice →/)
+    const dupKeyError = errors.find((e) => /two children with the same key/i.test(e))
+    expect(dupKeyError, `unexpected duplicate-key console error:\n${dupKeyError ?? ''}`).toBeUndefined()
+    await ctx.close()
+  })
+
   test('action banner shows severity labels and excludes affected from alternatives', async ({ page }) => {
     // Banner only shows when services are degraded/down (requires Worker data or dev mock)
     const banner = page.locator('main').getByText(/Degraded|성능 저하|Down|서비스 중단/)
