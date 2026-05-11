@@ -10,6 +10,7 @@ import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration }
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
 import { corsHeaders } from './cors'
+import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -943,8 +944,8 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
 // Auth: Bearer token in Authorization header, validated against EDGE_ALERT_TOKEN
 // secret. Same token must be set in Vercel env so both ends agree. Missing secret
 // returns 401 (no info leak about config state).
-export const EDGE_FALLBACK_ALERT_TTL_S = 5 * 60 // 5min cooldown matches the worst-case Vercel Edge cache TTL
-export const EDGE_FALLBACK_ALERT_KEY_PREFIX = 'alerted:edge-fallback:'
+// EDGE_FALLBACK_ALERT_TTL_S / _KEY_PREFIX live in ./edge-fallback-alert-keys —
+// `wrangler dev` rejects const exports from the entry module (see that file).
 
 interface EdgeFallbackRequest {
   surface?: string  // 'is-down' | 'reports'
