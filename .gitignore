@@ -49,3 +49,4 @@ blob-report/
 entities.json
 mempalace.yaml
 .claude/mcp.json
+.claude/scheduled_tasks.lock
