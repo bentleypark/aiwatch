@@ -101,6 +101,30 @@ test.describe('Overview page', () => {
     expect(entryText).toContain('Claude Code')
   })
 
+  test('Recent Incidents date label exposes contextual label via tooltip (#406)', async ({ page }) => {
+    // Vitest suite covers `getContextualTime` correctness directly; this test guards the
+    // Overview.jsx call site so reverting `incident.startedAt` or dropping the `title` attribute
+    // is caught at the UI layer. Pre-fix: no incident-row date cell had a `title` attribute.
+    // Post-fix: every cell carries `${ctx.label} ${formatDate(ctx.date)}` where label is one of
+    // Started/Updated/Resolved (or the ko equivalent). MOCK_SERVICES already supplies ≥1 visible
+    // Recent Incidents row across both languages, so no custom route mock is needed.
+    await page.goto('/')
+    await waitForDataLoad(page)
+    const cells = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('main [title]'))
+        .map((el) => ({ title: el.getAttribute('title') ?? '', text: (el.textContent ?? '').trim() }))
+        .filter((c) => /^(Resolved|Updated|Started|해결|업데이트|발생) /.test(c.title))
+    )
+    expect(cells.length, `expected ≥1 incident date cell with contextual [title] like "Resolved May 9, …" or "해결 5월 9일 …"`).toBeGreaterThan(0)
+    // Substring check: pre-fix bug variant would be "title attribute kept but visible date
+    // reverted to incident.startedAt" — title and visible text would no longer share a date.
+    // Contract: visible text is `formatDate(ctx.date).split(' ').slice(0,2).join(' ')`, title
+    // is `${label} ${formatDate(ctx.date)}` — so visible text MUST appear inside title.
+    for (const c of cells) {
+      expect(c.title, `visible date "${c.text}" not found in title "${c.title}" — display axis diverged from tooltip axis`).toContain(c.text)
+    }
+  })
+
   test('action banner shows severity labels and excludes affected from alternatives', async ({ page }) => {
     // Banner only shows when services are degraded/down (requires Worker data or dev mock)
     const banner = page.locator('main').getByText(/Degraded|성능 저하|Down|서비스 중단/)

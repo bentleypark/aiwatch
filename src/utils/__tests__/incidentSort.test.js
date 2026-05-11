@@ -4,6 +4,7 @@ import {
   STATUS_ORDER,
   getResolvedTime,
   getLatestActivity,
+  getContextualTime,
   compareIncidents,
   compareGroupedRows,
   dominantGroupStatus,
@@ -487,5 +488,169 @@ describe('sumGroupDuration', () => {
     expect(result.totalMs).toBe(5 * 60_000)
     expect(result.hasOngoing).toBe(true)
     expect(result.resolvedCount).toBe(1)
+  })
+})
+
+describe('getContextualTime', () => {
+  // Identity translator so assertions can compare against the i18n key.
+  const t = (key) => key
+
+  it('resolved with resolvedAt → resolved label, resolvedAt date', () => {
+    const inc = makeIncident({
+      status: 'resolved',
+      startedAt: '2026-05-08T23:12:00Z',
+      resolvedAt: '2026-05-09T00:17:00Z',
+    })
+    expect(getContextualTime(inc, t)).toEqual({
+      label: 'incidents.time.resolved',
+      date: '2026-05-09T00:17:00Z',
+    })
+  })
+
+  it('resolved without resolvedAt but with resolved timeline entry → that entry', () => {
+    const inc = makeIncident({
+      status: 'resolved',
+      startedAt: '2026-05-08T23:12:00Z',
+      timeline: [
+        { stage: 'investigating', at: '2026-05-08T23:12:00Z' },
+        { stage: 'resolved', at: '2026-05-09T00:17:00Z' },
+      ],
+    })
+    expect(getContextualTime(inc, t)).toEqual({
+      label: 'incidents.time.resolved',
+      date: '2026-05-09T00:17:00Z',
+    })
+  })
+
+  it('monitoring with last timeline entry → updated label, last.at', () => {
+    const inc = makeIncident({
+      status: 'monitoring',
+      startedAt: '2026-05-08T23:12:00Z',
+      timeline: [
+        { stage: 'investigating', at: '2026-05-08T23:12:00Z' },
+        { stage: 'monitoring', at: '2026-05-09T00:05:00Z' },
+      ],
+    })
+    expect(getContextualTime(inc, t)).toEqual({
+      label: 'incidents.time.updated',
+      date: '2026-05-09T00:05:00Z',
+    })
+  })
+
+  it('monitoring without timeline → falls back to started/startedAt', () => {
+    const inc = makeIncident({
+      status: 'monitoring',
+      startedAt: '2026-05-08T23:12:00Z',
+      timeline: [],
+    })
+    expect(getContextualTime(inc, t)).toEqual({
+      label: 'incidents.time.started',
+      date: '2026-05-08T23:12:00Z',
+    })
+  })
+
+  it('ongoing with last timeline post-dating startedAt → updated label, last.at', () => {
+    const inc = makeIncident({
+      status: 'ongoing',
+      startedAt: '2026-05-08T23:12:00Z',
+      timeline: [
+        { stage: 'investigating', at: '2026-05-08T23:12:00Z' },
+        { stage: 'identified', at: '2026-05-08T23:30:00Z' },
+      ],
+    })
+    expect(getContextualTime(inc, t)).toEqual({
+      label: 'incidents.time.updated',
+      date: '2026-05-08T23:30:00Z',
+    })
+  })
+
+  it('ongoing with timeline equal to startedAt → falls back to started (initial post is not an "update")', () => {
+    const inc = makeIncident({
+      status: 'ongoing',
+      startedAt: '2026-05-08T23:12:00Z',
+      timeline: [{ stage: 'investigating', at: '2026-05-08T23:12:00Z' }],
+    })
+    expect(getContextualTime(inc, t)).toEqual({
+      label: 'incidents.time.started',
+      date: '2026-05-08T23:12:00Z',
+    })
+  })
+
+  it('unknown status → started label, startedAt (defensive fallback for malformed payload)', () => {
+    const inc = makeIncident({
+      status: 'mystery_status',
+      startedAt: '2026-05-08T23:12:00Z',
+      timeline: [{ stage: 'whatever', at: '2026-05-08T23:30:00Z' }],
+    })
+    // Status not in the active-status set AND not 'monitoring'/'resolved' → falls through.
+    // Even if a timeline entry post-dates startedAt, an unrecognized status doesn't unlock
+    // the 'updated' branch.
+    expect(getContextualTime(inc, t)).toEqual({
+      label: 'incidents.time.started',
+      date: '2026-05-08T23:12:00Z',
+    })
+  })
+
+  it('matrix: getContextualTime.date equals getLatestActivity timestamp across non-fallback inputs (#406)', () => {
+    // Property-shaped test: for every (status × timeline) combination where the helper
+    // does NOT deliberately fall back to startedAt, the date axis MUST equal the sort axis.
+    // The remaining "deliberate fallback" cases are excluded with a comment so a future
+    // change that narrows the fallback (and starts producing alignment) trips the next
+    // round of test maintenance instead of silently re-aligning.
+    const startedAt = '2026-05-08T12:00:00Z'
+    const lastUpdate = '2026-05-08T13:00:00Z'
+    const resolvedAt = '2026-05-09T18:00:00Z'
+    const cases = [
+      // status, timeline, resolvedAt, note
+      { status: 'resolved', timeline: [], resolvedAt, note: 'resolved + resolvedAt' },
+      { status: 'resolved', timeline: [{ stage: 'investigating', at: startedAt }, { stage: 'resolved', at: resolvedAt }], resolvedAt: undefined, note: 'resolved without resolvedAt, timeline carries resolved entry' },
+      { status: 'monitoring', timeline: [{ stage: 'investigating', at: startedAt }, { stage: 'monitoring', at: lastUpdate }], resolvedAt: undefined, note: 'monitoring + timeline' },
+      { status: 'monitoring', timeline: [], resolvedAt: undefined, note: 'monitoring without timeline (both fall back to startedAt)' },
+      { status: 'ongoing', timeline: [{ stage: 'investigating', at: startedAt }, { stage: 'identified', at: lastUpdate }], resolvedAt: undefined, note: 'ongoing + timeline post-dating startedAt' },
+      { status: 'ongoing', timeline: [{ stage: 'investigating', at: startedAt }], resolvedAt: undefined, note: 'ongoing + timeline === startedAt (both yield startedAt)' },
+      // Raw worker statuses — Overview.jsx consumes these without pre-normalizing, so the
+      // axis-equality contract MUST hold for them too (round 2 review gap, #406).
+      { status: 'investigating', timeline: [{ stage: 'investigating', at: startedAt }, { stage: 'investigating', at: lastUpdate }], resolvedAt: undefined, note: 'investigating + timeline post-dating startedAt' },
+      { status: 'investigating', timeline: [{ stage: 'investigating', at: startedAt }], resolvedAt: undefined, note: 'investigating + timeline === startedAt' },
+      { status: 'identified', timeline: [{ stage: 'investigating', at: startedAt }, { stage: 'identified', at: lastUpdate }], resolvedAt: undefined, note: 'identified + timeline post-dating startedAt' },
+      { status: 'identified', timeline: [], resolvedAt: undefined, note: 'identified without timeline' },
+    ]
+    for (const c of cases) {
+      const inc = makeIncident({ status: c.status, startedAt, resolvedAt: c.resolvedAt, timeline: c.timeline })
+      const ctxMs = new Date(getContextualTime(inc, t).date).getTime()
+      expect(ctxMs, `axis mismatch for case "${c.note}"`).toBe(getLatestActivity(inc))
+    }
+    // Deliberate divergence (NOT asserted, documented for future maintainers):
+    // - resolved without resolvedAt AND no resolved-stage timeline entry: ctx falls back to
+    //   startedAt + 'started' label; getLatestActivity uses the last timeline entry (which
+    //   may be later than startedAt). The malformed-payload posture is conservative.
+  })
+
+  it('aligns with getLatestActivity sort axis — resolved incident sorted by resolvedAt is also displayed by resolvedAt (#406)', () => {
+    // The whole motivation for promoting this helper. Two incidents that cross a
+    // calendar boundary: File Operations resolved later but started earlier.
+    // getLatestActivity ranks by resolvedAt → File Operations newer than Sonnet 4.6;
+    // getContextualTime now reports the same axis so the displayed date label
+    // matches the sort order instead of contradicting it.
+    const fileOps = makeIncident({
+      id: 'file-ops',
+      status: 'resolved',
+      startedAt: '2026-05-08T23:12:00Z',
+      resolvedAt: '2026-05-09T00:17:00Z',
+    })
+    const sonnet46 = makeIncident({
+      id: 'sonnet-4-6',
+      status: 'resolved',
+      startedAt: '2026-05-09T00:03:00Z',
+      resolvedAt: '2026-05-09T00:11:00Z',
+    })
+    expect(getLatestActivity(fileOps)).toBeGreaterThan(getLatestActivity(sonnet46))
+    expect(getContextualTime(fileOps, t).date).toBe(fileOps.resolvedAt)
+    expect(getContextualTime(sonnet46, t).date).toBe(sonnet46.resolvedAt)
+    // Both rendered dates fall on the same calendar day (2026-05-09) — the visible
+    // out-of-order surface from issue #406 disappears once the display follows the
+    // sort axis.
+    expect(getContextualTime(fileOps, t).date.slice(0, 10)).toBe('2026-05-09')
+    expect(getContextualTime(sonnet46, t).date.slice(0, 10)).toBe('2026-05-09')
   })
 })
