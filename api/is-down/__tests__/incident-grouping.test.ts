@@ -143,7 +143,7 @@ describe('groupIncidents — day boundary', () => {
 })
 
 describe('groupIncidents — sort order', () => {
-  it('emits newest-first by representative time (rangeEnd for groups, startedAt for singles)', () => {
+  it('emits newest-first by latest activity (#411 — falls back to startedAt when resolvedAt unset)', () => {
     const rows = groupIncidents([
       mkInc({ id: 'old-single', title: 'Alpha', startedAt: '2026-04-10T10:00:00Z' }),
       mkInc({ id: 'g1', title: 'Group', startedAt: '2026-04-20T10:00:00Z' }),
@@ -285,5 +285,27 @@ describe('groupIncidents — generic-title flap clustering despite impact != nul
     const result = groupIncidents(incs)
     expect(result).toHaveLength(1)
     expect(result[0].kind).toBe('group')
+  })
+})
+
+describe('groupIncidents — sort axis alignment with latest activity (#411)', () => {
+  // SSR mirror of the SPA regression: resolved incidents sort by resolvedAt,
+  // not startedAt, so /is-X-down's grouped list matches Overview's order.
+  it('two resolved singles: sorts by resolvedAt desc, not startedAt desc', () => {
+    const modal = mkInc({ id: 'modal-1', title: 'Storage refactor following AWS us-east-1c issues', startedAt: '2026-05-11T08:59:00Z', resolvedAt: '2026-05-11T09:00:00Z', status: 'resolved', impact: 'minor', duration: '1m' })
+    const together = mkInc({ id: 'together-1', title: 'Kimi K2.6 — recovered', startedAt: '2026-05-11T08:57:00Z', resolvedAt: '2026-05-11T09:10:00Z', status: 'resolved', impact: null, duration: '13m' })
+    const result = groupIncidents([modal, together])
+    expect(result).toHaveLength(2)
+    const ids = result.map((r) => (r.kind === 'single' ? (r as SingleRow).incident.id : null))
+    expect(ids[0]).toBe('together-1') // resolvedAt 09:10
+    expect(ids[1]).toBe('modal-1')    // resolvedAt 09:00
+  })
+
+  it('tiebreak on identical resolvedAt preserves original input index', () => {
+    const a = mkInc({ id: 'a', title: 'Service A — recovered', startedAt: '2026-05-11T08:00:00Z', resolvedAt: '2026-05-11T09:00:00Z', status: 'resolved', impact: null })
+    const b = mkInc({ id: 'b', title: 'Service B — recovered', startedAt: '2026-05-11T08:30:00Z', resolvedAt: '2026-05-11T09:00:00Z', status: 'resolved', impact: null })
+    const result = groupIncidents([a, b])
+    const ids = result.map((r) => (r.kind === 'single' ? (r as SingleRow).incident.id : null))
+    expect(ids).toEqual(['a', 'b'])
   })
 })

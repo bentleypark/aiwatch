@@ -30,6 +30,8 @@
  * See issue #282.
  */
 
+import { getLatestActivity } from './incidentSort.js'
+
 export const GROUP_THRESHOLD = 2
 
 /**
@@ -113,9 +115,15 @@ function localDayKey(iso, timeZone) {
 }
 
 /**
- * Group qualifying incidents; pass others through individually.
- * Output sorted newest-first by representative time
- * (rangeEnd for groups, startedAt for singles).
+ * Group qualifying incidents; pass others through individually. Output is
+ * sorted newest-first by `getLatestActivity` (resolved → resolvedAt, active
+ * → last timeline entry / startedAt) — same axis `compareIncidents` uses on
+ * Overview so the visible order on Incidents / ServiceDetails / Is X Down
+ * matches the order Overview shows (#411 follow-up to #406). For groups, the
+ * representative time is the max `getLatestActivity` across entries (replaces
+ * the prior `rangeEnd = max(startedAt)` which silently diverged from the sort
+ * axis whenever a flap group's most-recently-resolved entry had a different
+ * startedAt-vs-resolvedAt rank).
  *
  * @param {Incident[]} incidents
  * @param {{ timeZone?: string }} [options] - timeZone override (tests). Omit in production.
@@ -146,16 +154,21 @@ export function groupIncidents(incidents, options = {}) {
     bucket.entries.push(inc)
   })
 
-  /** @type {Array<{ row: GroupRow|SingleRow, sortKey: string, idx: number }>} */
+  /** @type {Array<{ row: GroupRow|SingleRow, sortKey: number, idx: number }>} */
   const rows = []
 
   for (const { dayKey, normalizedTitle: nt, entries, firstIdx } of buckets.values()) {
     if (entries.length >= GROUP_THRESHOLD) {
       const startedAtTimes = entries.map(e => e.startedAt)
       const rangeStart = startedAtTimes.reduce((a, b) => a < b ? a : b)
+      // rangeEnd is the bucket's visible time *range*, used for display (#373).
+      // Sorting is by latest activity across entries, computed separately so a
+      // group whose most-recently-resolved entry resolved later than another
+      // group's still ranks newer even if their startedAt ranges coincide.
       const rangeEnd = startedAtTimes.reduce((a, b) => a > b ? a : b)
       const statusCounts = {}
       for (const e of entries) statusCounts[e.status] = (statusCounts[e.status] ?? 0) + 1
+      const latestActivityMs = entries.reduce((m, e) => Math.max(m, getLatestActivity(e)), 0)
       rows.push({
         row: {
           kind: 'group',
@@ -168,25 +181,25 @@ export function groupIncidents(incidents, options = {}) {
           uniformStatus: Object.keys(statusCounts).length === 1,
           entries,
         },
-        sortKey: rangeEnd,
+        sortKey: latestActivityMs,
         idx: firstIdx,
       })
     } else {
       // Below threshold — render each as a single row.
       entries.forEach((inc) => {
         const idx = incidents.indexOf(inc)
-        rows.push({ row: { kind: 'single', incident: inc }, sortKey: inc.startedAt, idx })
+        rows.push({ row: { kind: 'single', incident: inc }, sortKey: getLatestActivity(inc), idx })
       })
     }
   }
 
   for (const { idx, inc } of ungroupable) {
-    rows.push({ row: { kind: 'single', incident: inc }, sortKey: inc.startedAt, idx })
+    rows.push({ row: { kind: 'single', incident: inc }, sortKey: getLatestActivity(inc), idx })
   }
 
-  // Newest first by sortKey; tiebreak by original input index for stable ordering.
+  // Newest first by sortKey (ms epoch); tiebreak by original input index for stable ordering.
   rows.sort((a, b) => {
-    if (a.sortKey !== b.sortKey) return a.sortKey < b.sortKey ? 1 : -1
+    if (a.sortKey !== b.sortKey) return b.sortKey - a.sortKey
     return a.idx - b.idx
   })
 
