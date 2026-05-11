@@ -3,7 +3,8 @@
 // auth, dedup, dispatch toggle on missing webhook, and input sanitization.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { handleEdgeFallbackAlert, EDGE_FALLBACK_ALERT_KEY_PREFIX, EDGE_FALLBACK_ALERT_TTL_S } from '../index'
+import { handleEdgeFallbackAlert } from '../index'
+import { EDGE_FALLBACK_ALERT_KEY_PREFIX, EDGE_FALLBACK_ALERT_TTL_S } from '../edge-fallback-alert-keys'
 
 function makeKV(initial: Record<string, string> = {}) {
   const store = { ...initial }
