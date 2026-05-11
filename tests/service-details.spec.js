@@ -220,6 +220,75 @@ test.describe('xAI Regional Availability', () => {
   })
 })
 
+test.describe('xAI OpenRouter Availability (#371)', () => {
+  const XAI_BASIC = { id: 'xai', category: 'api', name: 'xAI (Grok)', provider: 'xAI', status: 'operational', latency: 200, uptime30d: 99.8, calendarDays: 30, incidents: [] }
+  const baseMock = { json: { services: [
+    { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
+    XAI_BASIC,
+  ], lastUpdated: new Date().toISOString() } }
+
+  async function openXai(page) {
+    await page.route('**/api/status', async (r) => { await r.fulfill(baseMock) })
+    await page.route('**/api/status/cached', async (r) => { await r.fulfill(baseMock) })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    await page.locator('main button').filter({ hasText: 'xAI' }).first().evaluate((el) => el.click())
+    await expect(page.locator('main').getByText('Status Calendar')).toBeVisible({ timeout: 5000 })
+  }
+
+  test('renders the OpenRouter availability section when the endpoint returns data', async ({ page }) => {
+    await page.route('**/api/openrouter-uptime/xai', async (r) => {
+      await r.fulfill({ json: { available: true, uptimePct: 99.93, sampleCount: 3, measuredAt: new Date().toISOString(), gated: false, modelSlugs: ['x-ai/grok-4-fast', 'x-ai/grok-4.3', 'x-ai/grok-4.1-fast'] } })
+    })
+    await openXai(page)
+    await expect(page.locator('main').getByText(/OpenRouter Availability|OpenRouter 가용성/)).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('main').getByText('99.93%')).toBeVisible()
+    // Window/source caveat must be visible (not presented as an official xAI metric)
+    await expect(page.locator('main').getByText(/30-min rolling|30분 롤링/)).toBeVisible()
+    // No "gated" warning when OpenRouter itself is operational
+    await expect(page.locator('main').getByText(/OpenRouter is currently degraded|OpenRouter가 현재 성능 저하/)).not.toBeVisible()
+  })
+
+  test('shows the routing-affected warning when the worker reports gated:true', async ({ page }) => {
+    await page.route('**/api/openrouter-uptime/xai', async (r) => {
+      await r.fulfill({ json: { available: true, uptimePct: 87.5, sampleCount: 2, measuredAt: new Date().toISOString(), gated: true, modelSlugs: ['x-ai/grok-4-fast'] } })
+    })
+    await openXai(page)
+    await expect(page.locator('main').getByText(/OpenRouter Availability|OpenRouter 가용성/)).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('main').getByText(/OpenRouter is currently degraded|OpenRouter가 현재 성능 저하/)).toBeVisible()
+  })
+
+  test('renders nothing when the endpoint reports unavailable (signal absent — graceful)', async ({ page }) => {
+    await page.route('**/api/openrouter-uptime/xai', async (r) => {
+      await r.fulfill({ json: { available: false } })
+    })
+    await openXai(page)
+    // Page still renders fine; the OpenRouter section is simply absent
+    await expect(page.locator('main').getByText(/OpenRouter Availability|OpenRouter 가용성/)).not.toBeVisible()
+  })
+
+  test('renders nothing when available:true but uptimePct is missing/non-numeric (guards the toFixed path)', async ({ page }) => {
+    await page.route('**/api/openrouter-uptime/xai', async (r) => {
+      await r.fulfill({ json: { available: true, sampleCount: 0, measuredAt: new Date().toISOString(), gated: false } })
+    })
+    await openXai(page)
+    await expect(page.locator('main').getByText(/OpenRouter Availability|OpenRouter 가용성/)).not.toBeVisible()
+  })
+
+  test('is xAI-only — the section does not appear on other service detail pages', async ({ page }) => {
+    let called = false
+    await page.route('**/api/openrouter-uptime/xai', async (r) => { called = true; await r.fulfill({ json: { available: true, uptimePct: 99, sampleCount: 1, measuredAt: new Date().toISOString(), gated: false } }) })
+    await page.route('**/api/status', async (r) => { await r.fulfill(baseMock) })
+    await page.route('**/api/status/cached', async (r) => { await r.fulfill(baseMock) })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    await page.locator('main button').filter({ hasText: 'Claude API' }).first().evaluate((el) => el.click())
+    await expect(page.locator('main').getByText('Status Calendar')).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('main').getByText(/OpenRouter Availability|OpenRouter 가용성/)).not.toBeVisible()
+    expect(called, 'Claude detail page must not even call /api/openrouter-uptime/xai').toBe(false)
+  })
+})
+
 test.describe('Gemini Regional Availability', () => {
   test('shows regional status for Gemini with region-specific incident', async ({ page }) => {
     await page.route('**/api/status', async (route) => {

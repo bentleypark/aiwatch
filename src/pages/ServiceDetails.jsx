@@ -564,6 +564,58 @@ function RegionalAvailability({ service, t }) {
   }
 }
 
+// ── OpenRouter-measured availability (xAI only, #371) ──────────
+// status.x.ai's per-endpoint success rates are Cloudflare-blocked to non-browser
+// clients; OpenRouter exposes `uptime_last_30m` per routing endpoint on a plain
+// JSON API. Surface it as an INFORMATIONAL line only — it is NOT fed into the
+// AIWatch Score (which is computed worker-side from uptime/incidents/recovery/
+// probe RTT) and the copy makes the 30-min-rolling, routing-traffic, not-official
+// caveats explicit. When the `openrouter` service itself is non-operational the
+// worker returns `gated: true` and we flag the figure as routing-affected.
+function OpenRouterUptime({ t }) {
+  const [data, setData] = useState(null) // null = loading or unavailable
+  useEffect(() => {
+    let cancelled = false
+    const base = (import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')
+    fetch(`${base}/api/openrouter-uptime/xai`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!cancelled && j?.available) setData(j) })
+      .catch(() => { /* signal unavailable — render nothing */ })
+    return () => { cancelled = true }
+  }, [])
+  if (!data) return null
+  const pct = typeof data.uptimePct === 'number' ? data.uptimePct.toFixed(2) : null
+  if (pct == null) return null
+  const color = data.uptimePct >= 99 ? 'text-[var(--green)]' : data.uptimePct >= 97 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
+  return (
+    <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+      <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+        <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+          <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--blue)' }} />
+          {t('svc.orUptime.title')}
+          <span className="ml-1 cursor-help text-[var(--text2)]" title={t('svc.orUptime.tooltip')}>ⓘ</span>
+        </div>
+      </div>
+      <div style={{ padding: '16px' }}>
+        <div className="flex items-baseline gap-2">
+          <span className={`mono text-[22px] font-semibold leading-none ${color}`}>{pct}%</span>
+          <span className="mono text-[10px] text-[var(--text2)]">
+            {t('svc.orUptime.samples').replace('{n}', String(data.sampleCount ?? 0))}
+          </span>
+        </div>
+        <div className="mono text-[10px] text-[var(--text2)]" style={{ marginTop: '6px' }}>
+          {t('svc.orUptime.window')}
+        </div>
+        {data.gated && (
+          <div className="mono text-[10px] text-[var(--amber)]" style={{ marginTop: '8px', padding: '6px 8px', background: 'var(--bg2)', borderRadius: '4px' }}>
+            {t('svc.orUptime.gated')}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 
 const CALENDAR_OPACITY = { operational: 0.7, degraded: 0.8, down: 0.9 }
 
@@ -856,6 +908,9 @@ export default function ServiceDetails({ serviceId }) {
 
       {/* ── Regional Availability (only for services with defined regions) ── */}
       {SERVICE_REGIONS[service.id] && <RegionalAvailability service={service} t={t} />}
+
+      {/* ── OpenRouter-measured availability (xAI only, #371) — informational, not in Score ── */}
+      {service.id === 'xai' && <OpenRouterUptime t={t} />}
 
       {/* ── Bottom: Incident History + Calendar (2-col on desktop) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>

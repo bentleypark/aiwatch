@@ -10,6 +10,7 @@ import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration }
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
 import { corsHeaders } from './cors'
+import { fetchOpenRouterXaiUptime, isOpenRouterDegraded, XAI_OPENROUTER_MODEL_SLUGS } from './parsers/openrouter-uptime'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -2160,6 +2161,32 @@ export default {
       return new Response(JSON.stringify({ history, days }), {
         status: 200,
         headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300' },
+      })
+    }
+
+    // GET /api/openrouter-uptime/xai — third-party (OpenRouter-measured) availability
+    // for xAI's API, surfaced as an informational line on the xAI service detail page (#371).
+    // status.x.ai's per-endpoint success rates are Cloudflare-blocked to non-browser clients;
+    // OpenRouter exposes `uptime_last_30m` per routing endpoint on a plain JSON API instead.
+    // 5-min edge cache (OpenRouter's window is 30-min rolling, so 5-min lag is immaterial).
+    // `gated: true` means the `openrouter` service is itself non-operational, so the figure
+    // reflects OpenRouter's routing rather than xAI — the frontend flags it accordingly.
+    if (url.pathname === '/api/openrouter-uptime/xai') {
+      const data = await fetchOpenRouterXaiUptime().catch((err) => {
+        console.warn('[api/openrouter-uptime/xai] fetch failed:', err instanceof Error ? err.message : err)
+        return null
+      })
+      let gated = false
+      if (data && env.STATUS_CACHE) {
+        const latestRaw = await env.STATUS_CACHE.get('services:latest').catch(() => null)
+        gated = isOpenRouterDegraded(latestRaw)
+      }
+      const body = data
+        ? { available: true, ...data, gated, modelSlugs: XAI_OPENROUTER_MODEL_SLUGS }
+        : { available: false }
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, s-maxage=300' },
       })
     }
 
