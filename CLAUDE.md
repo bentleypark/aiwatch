@@ -154,6 +154,14 @@ gh pr merge --squash --delete-branch
 - Propose ONE fix approach with reasoning — do not shotgun multiple approaches
 - Wait for user confirmation before implementing the fix
 
+### Workflow-gate hooks (#415)
+
+`.claude/settings.json` wires two enforcement hooks (scripts in `.claude/hooks/`) — because written rules alone (this file + auto-memory) only get probabilistic compliance:
+- **`git-mutation-gate.sh`** (PreToolUse/Bash) — fires before `git commit` / `git push` / `gh pr create` / `gh pr merge`. **Soft** (warns via `systemMessage`, never blocks): if no dev server is listening on a usual port (5173/8788/3333/4000) it flags that step 3.5 (start the right dev server + get the user's in-browser confirmation) was likely skipped; also flags `--no-verify` / `--no-gpg-sign`.
+- **`stop-nag-gate.sh`** (Stop) — reads the just-finished assistant message from the transcript; if its closing line is an auto-proceed nag ("shall I proceed/merge/continue?", "진행할까요?", "다음 작업 진행할까요?", …) it **re-prompts** (`decision: block`) to re-send the closing without the nag. `stop_hook_active` guards the loop.
+
+Every fire is logged to `.claude/hook-audit.jsonl` (gitignored). `npm run hook-audit` (= `node scripts/hook-audit-summary.mjs [--last N] [--days D]`) summarizes (by hook × decision, last-7-days, per-day trend, recent entries) — review periodically; if `warn`/`block` counts don't trend down, escalate the git gate to a hard block (`permissionDecision: "deny"`) or tune the heuristics/regexes. New `.claude/settings.json` only takes effect after `/hooks` is opened once or a restart (the settings watcher only watches dirs that had a settings file at session start).
+
 ### Adding a new service (checklist)
 
 When adding a new monitored service, update ALL of the following:
