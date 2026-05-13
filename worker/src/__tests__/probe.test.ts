@@ -69,12 +69,12 @@ describe('failedProbe', () => {
 describe('PROBE_TARGETS', () => {
   const EXPECTED_IDS = [
     'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq', 'together',
-    'fireworks', 'perplexity', 'huggingface', 'replicate', 'elevenlabs', 'xai', 'deepseek',
+    'fireworks', 'cerebras', 'perplexity', 'huggingface', 'replicate', 'elevenlabs', 'xai', 'deepseek',
     'openrouter', 'stability', 'assemblyai', 'deepgram', 'voyageai',
   ]
 
-  it('has all 19 API service probe targets', () => {
-    expect(PROBE_TARGETS).toHaveLength(19)
+  it('has all 20 API service probe targets', () => {
+    expect(PROBE_TARGETS).toHaveLength(20)
     const ids = PROBE_TARGETS.map((t) => t.id)
     for (const expected of EXPECTED_IDS) {
       expect(ids).toContain(expected)

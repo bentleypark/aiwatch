@@ -13,7 +13,7 @@
 
 **English** | [한국어](README.ko.md)
 
-Real-time monitoring dashboard for **32 AI services** — track status, latency, uptime, and incidents across major AI providers.
+Real-time monitoring dashboard for **33 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[Dashboard](https://ai-watch.dev)** · **[Landing Page](https://ai-watch.dev/intro)**
 
@@ -27,9 +27,9 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 ## Features
 
-- **Real-time status** — Operational / Degraded / Down for 32 AI services
+- **Real-time status** — Operational / Degraded / Down for 33 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
-- **Latency monitoring** — Direct API endpoint response time (RTT) for 19 probe-capable services, status page timing as fallback
+- **Latency monitoring** — Direct API endpoint response time (RTT) for 20 probe-capable services, status page timing as fallback
 - **24h latency trend** — Chart.js line chart with 5-min probe snapshots
 - **Incident history** — Timeline with details from multiple status page formats
 - **Official uptime** — Per-component uptime from Statuspage, incident.io, Better Stack
@@ -45,8 +45,8 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Regional availability** — Per-region incident status for xAI, Gemini, OpenAI with switch recommendation
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
-- **Is X Down SEO pages** — 30 services (all monitored services except Bedrock / Azure OpenAI) with dynamic OG images (PNG), share buttons, AIWatch rank (matches dashboard with tied-rank display), and fallback recommendations
-- **Health check probing** — Direct RTT measurement to API endpoints (19 API services) with early outage detection via consecutive spike alerts and Detection Lead tracking
+- **Is X Down SEO pages** — 31 services (all monitored services except Bedrock / Azure OpenAI) with dynamic OG images (PNG), share buttons, AIWatch rank (matches dashboard with tied-rank display), and fallback recommendations
+- **Health check probing** — Direct RTT measurement to API endpoints (20 API services) with early outage detection via consecutive spike alerts and Detection Lead tracking
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 - **AI Analysis (Beta)** — Hybrid AI auto-analysis on incidents (Gemma 4 primary + Sonnet fallback): cause estimation, recovery time, affected scope, contextual fallback recommendations. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 - **Landing page** — Product Hunt landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, and GA4 tracking
@@ -57,7 +57,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 ## Monitored Services
 
-### AI API Services (23)
+### AI API Services (24)
 
 | Service | Provider | Status Source |
 |---------|----------|---------------|
@@ -69,6 +69,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 | Groq Cloud | Groq | incident.io (Atlassian compat) |
 | Together AI | Together | Better Stack RSS + uptime API |
 | Fireworks AI | Fireworks | Better Stack RSS + uptime API |
+| Cerebras Inference | Cerebras | Atlassian Statuspage (multi-component worst-of) |
 | Perplexity | Perplexity AI | Instatus (Next.js SSR) |
 | Hugging Face | HuggingFace | Better Stack RSS + uptime API |
 | Replicate | Replicate | incident.io (Atlassian compat) |
@@ -121,7 +122,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 Browser (React SPA, 60s polling)
   ↓
 Cloudflare Worker
-  ├── GET /api/status    → parallel fetch (32 services) → normalize
+  ├── GET /api/status    → parallel fetch (33 services) → normalize
   ├── GET /api/uptime    → daily uptime history
   └── POST /api/alert   → webhook proxy (Slack/Discord, SSRF protected)
   ↓
@@ -140,7 +141,7 @@ Cloudflare KV
   ├── daily:YYYY-MM-DD     (uptime counters, TTL 2d)
   ├── history:YYYY-MM-DD   (archived counters, TTL 90d)
   ├── latency:24h          (30-min snapshots, max 48, TTL 25h)
-  ├── probe:24h            (health check probes, max 2016, TTL 7d, 19 API services)
+  ├── probe:24h            (health check probes, max 2016, TTL 7d, 20 API services)
   ├── ai:analysis:{svcId}:{incId}  (AI per-incident analysis, TTL 1h, refreshed while active)
   ├── ai:reanalysis-skip:* (re-analysis failure cooldown, TTL 30min)
   ├── ai:usage:{date}      (daily AI usage counter, TTL 2d)
@@ -284,10 +285,11 @@ Embed real-time status badges in your README, docs, or blog.
 | `assemblyai` | AssemblyAI | `deepgram` | Deepgram |
 | `characterai` | Character.AI | `modal` | Modal |
 | `voyageai` | Voyage AI | `codex` | Codex |
+| `cerebras` | Cerebras Inference | | |
 
 ## Claude Code Statusline Integration
 
-Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and 28 more — directly in your [Claude Code statusline](https://docs.claude.com/en/docs/claude-code/statusline). Output stays empty while every service is operational; degraded/down services appear with a red indicator so upstream issues are visually distinct from local ones.
+Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and 29 more — directly in your [Claude Code statusline](https://docs.claude.com/en/docs/claude-code/statusline). Output stays empty while every service is operational; degraded/down services appear with a red indicator so upstream issues are visually distinct from local ones.
 
 Quickest install — add to `~/.claude/settings.json`:
 
@@ -317,7 +319,7 @@ api/
   intro.ts             # Vercel Edge Function — Product Hunt landing page (/intro)
   intro/
     html-template.ts   # Landing page SSR template (i18n, dashboard mock, GA4)
-  is-down.ts           # Vercel Edge Function — "Is X Down?" SSR pages (30 services)
+  is-down.ts           # Vercel Edge Function — "Is X Down?" SSR pages (31 services)
   is-down/
     slug-map.ts        # URL slug ↔ service ID mapping
     seo-content.ts     # Per-service SEO text + FAQ

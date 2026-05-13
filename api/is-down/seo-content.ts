@@ -190,6 +190,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Is Fireworks faster than Together AI?', a: 'Both target low-latency inference but optimize differently. Check AIWatch ranking at ai-watch.dev/#ranking to compare uptime and probe response times.' },
     ],
   },
+  cerebras: {
+    displayName: 'Cerebras Inference',
+    description: 'Cerebras Inference serves open-source LLMs (Llama 3.1, Qwen 3, GPT-OSS, GLM-4.7) at some of the fastest token throughput available, powered by its wafer-scale CS-3 hardware. It is a direct alternative to Groq, Together AI, and Fireworks AI for latency-sensitive workloads.',
+    insight: 'Cerebras runs its status page on Atlassian Statuspage with one component per served model plus a Developer Console component. AIWatch tracks all of them as a worst-of: any single model degrading marks Cerebras degraded, so model-specific outages are not under-reported. Uptime% is parsed from the Developer Console component.',
+    whenDown: 'When Cerebras Inference is down, apps relying on its high-throughput endpoints lose hosted inference for the affected open-source model. Streaming and high-volume batch workloads see request failures or fall back to slower providers.',
+    faqs: [
+      { q: 'Is Cerebras Inference down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Cerebras every 5 minutes — taking the worst status across all model components and the Developer Console — and shows real-time operational status.' },
+      { q: 'How do I check Cerebras status?', a: 'You can check Cerebras status on this page, on the official status page at status.cerebras.ai, or on the AIWatch dashboard at ai-watch.dev.' },
+      { q: 'What are alternatives to Cerebras Inference?', a: 'Groq Cloud, Together AI, and Fireworks AI offer comparable high-throughput hosted inference for open-source models. AIWatch shows current availability and reliability rankings so you can pick the healthiest option.' },
+      { q: 'Why is one Cerebras model down but not others?', a: 'Cerebras publishes per-model status components, so a rollout or capacity issue can affect just one model (e.g. GPT-OSS-120B) while the rest stay operational. AIWatch surfaces the worst-of, so the service shows degraded even if only one model is affected.' },
+    ],
+  },
   perplexity: {
     displayName: 'Perplexity',
     description: 'Perplexity is an AI-powered answer engine combining LLMs with real-time web search. It offers consumer search at perplexity.ai and an API for developers to access its search-augmented generation capabilities.',
