@@ -296,14 +296,14 @@ Claude API, OpenAI, Gemini, GitHub Copilot 등 33개 AI 서비스의 장애 여�
 {
   "statusLine": {
     "type": "command",
-    "command": "( curl -sf --max-time 2 https://ai-watch.dev/api/status/cached | jq -r '[.services[] | select(.status != \"operational\") | \"🔴 \" + .name] | .[0:3] | join(\" \")' ) 2>/dev/null || true"
+    "command": "( curl -sf --max-time 2 https://ai-watch.dev/api/status/cached?src=statusline-degraded_only | jq -r '[.services[] | select(.status != \"operational\") | \"🔴 \" + .name] | .[0:3] | join(\" \")' ) 2>/dev/null || true"
   }
 }
 ```
 
 프리셋 모음 (컴팩트 배지, 전체 목록, 특정 프로바이더만, Powerline 친화 등): **[ai-watch.dev/#statusline](https://ai-watch.dev/#statusline)**
 
-특성: 렌더링당 단일 GET, Cloudflare edge에 5분 KV 캐시, 2초 타임아웃, 네트워크 에러 시 silent fail, Anthropic API 호출 없음, 클라이언트 식별자 미수집. shell 명령 출력을 지원하는 모든 statusline 도구와 호환 (`ccstatusline`의 Custom Command 위젯 포함).
+특성: 렌더링당 단일 GET, Cloudflare edge에 5분 KV 캐시, 2초 타임아웃, 네트워크 에러 시 silent fail, Anthropic API 호출 없음, 클라이언트 식별자 미수집. `?src=statusline-<preset>` 쿼리 태그는 요청 로그에서 statusline 트래픽을 일반 cached-endpoint 호출과 구분하기 위한 용도일 뿐이며, Worker는 경로만 매칭하므로 캐시/응답 속도에 영향이 없고 사용자 식별자도 포함하지 않습니다. shell 명령 출력을 지원하는 모든 statusline 도구와 호환 (`ccstatusline`의 Custom Command 위젯 포함).
 
 ## 프로젝트 구조
 

@@ -1,7 +1,11 @@
 // #400 Phase 0 — /statusline guide page (Claude Code statusline integration).
-// Pins: hash route works, all 4 presets render with copy buttons, sidebar nav
-// entry exists. A regression in any of these would re-block Phase 1's
-// "snippet documented somewhere reachable from ai-watch.dev" criterion.
+// Pins: hash route works, all 5 presets render with copy buttons, sidebar nav
+// entry exists, and each preset URL carries its own ?src=statusline-<preset>
+// traffic-split tag (so statusline traffic is distinguishable from regular
+// `/api/status/cached` curl hits in Cloudflare request logs — the baseline the
+// issue #400 distribution gates compare against). A regression in any of these
+// would re-block Phase 1's "snippet documented somewhere reachable from
+// ai-watch.dev" criterion or silently invalidate the traction baseline.
 
 import { test, expect } from '@playwright/test'
 import { waitForDataLoad } from './helpers.js'
@@ -145,6 +149,60 @@ test.describe('Statusline guide page (#400 Phase 0)', () => {
     // At least one of the supported terminal names should be mentioned to
     // give the user a quick "do I have one?" check.
     await expect(page.locator('body')).toContainText(/iTerm2|Warp|kitty|WezTerm/i)
+  })
+
+  test('each preset URL is tagged with ?src=statusline-<preset> for traffic split', async ({ page }) => {
+    // The traffic-split tag is what makes the Phase-1 → Reddit/Anthropic gating
+    // measurable (issue #400). Without it, statusline-driven requests are
+    // indistinguishable from regular `/api/status/cached` curl traffic and the
+    // baseline measurement collapses. A future copy-paste refactor that drops
+    // the tag would silently re-block that gate, so pin each preset's slug to
+    // its snippet's <pre> contents. Preset order matches Statusline.jsx render
+    // order: Quick start (degraded_only) then Other presets (compact_badge,
+    // full_list, scoped, clickable).
+    await page.goto('/#statusline')
+    await waitForDataLoad(page)
+    const presetOrder = ['degraded_only', 'compact_badge', 'full_list', 'scoped', 'clickable']
+    const preBlocks = page.locator('pre')
+    await expect(preBlocks).toHaveCount(presetOrder.length)
+    for (let i = 0; i < presetOrder.length; i++) {
+      const text = (await preBlocks.nth(i).textContent()) || ''
+      // `?src=statusline-<preset>` must be present in this preset's snippet AND
+      // must not be replaced by the slug of a different preset (catches "all
+      // snippets share one tag" regressions where the helper was inlined wrong).
+      expect(text, `preset #${i} (${presetOrder[i]}) snippet`).toContain(`?src=statusline-${presetOrder[i]}`)
+      for (const other of presetOrder) {
+        if (other === presetOrder[i]) continue
+        expect(text, `preset #${i} (${presetOrder[i]}) must not carry tag for ${other}`).not.toContain(`?src=statusline-${other}`)
+      }
+    }
+  })
+
+  test('"How it works" section documents the ?src= traffic tag', async ({ page }) => {
+    // User-facing transparency contract: the snippet sends a query parameter,
+    // and the page's "How it works" section explains what it is. The snippet
+    // half is already pinned by 'each preset URL is tagged...' above; this
+    // test pins the prose half. Both assertions are scoped to the "How it
+    // works" <section> subtree so that the literal `?src=statusline-*` inside
+    // the snippet <pre> blocks elsewhere on the page does not satisfy the
+    // first match and silently mask a deleted prose bullet — that drop without
+    // a matching telemetry removal would be the exact "silent telemetry add"
+    // surprise pattern the page's "no client identifier collected" line
+    // promises not to do.
+    await page.goto('/#statusline')
+    await waitForDataLoad(page)
+    // `section` element containing "How it works" — emitted by the Section
+    // helper in src/pages/Statusline.jsx. Two scoped assertions: the tag
+    // pattern is documented AND the no-identifier guarantee is restated.
+    // Either half disappearing should fail this test independently.
+    const howItWorks = page.locator('section').filter({ hasText: /How it works/i })
+    await expect(howItWorks).toHaveCount(1)
+    await expect(howItWorks).toContainText(/\?src=statusline/)
+    // Negation context is what makes this a transparency contract — the bullet
+    // must explicitly state the URL carries no identifier. Anchor the regex on
+    // a negation token (no | never) so "the page accidentally describes the
+    // user identifier we now collect" can't satisfy this assertion.
+    await expect(howItWorks).toContainText(/(?:no|never).{0,40}user identifier/i)
   })
 
   test('"Compatible with" section lists ccstatusline with a link', async ({ page }) => {
