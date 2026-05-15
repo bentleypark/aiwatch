@@ -276,7 +276,6 @@ export default function Statusline() {
           <li><strong className="text-[var(--text0)]">5-minute cache lag</strong> — incidents can take up to 5 minutes to appear in the statusline after AIWatch detects them.</li>
           <li><strong className="text-[var(--text0)]">jq + curl required</strong> — pre-installed on macOS &amp; most Linux distros. Windows users: install via WSL or use <code className="mono text-[var(--text0)]">winget install jqlang.jq</code> with curl from Windows 10+.</li>
           <li><strong className="text-[var(--text0)]">Claude Code is Claude-only</strong> — this surface is informational, not a fallback router. When Claude API is down you'll know immediately, but you can't switch providers mid-session.</li>
-          <li><strong className="text-[var(--text0)]">Self-hosters</strong> — replace <code className="mono text-[var(--text0)]">{API_URL}</code> with your own AIWatch deployment.</li>
         </ul>
       </Section>
 
