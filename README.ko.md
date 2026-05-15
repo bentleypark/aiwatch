@@ -20,6 +20,12 @@
 |---------|--------|
 | ![AIWatch 대시보드](docs/screenshot.png?v=3) | ![AIWatch 모바일](docs/screenshot-mobile.png?v=1) |
 
+**공유**
+[![X에 공유](https://img.shields.io/badge/Share-X-000000?logo=x&logoColor=white)](https://twitter.com/intent/tweet?text=AIWatch%20%E2%80%94%2033%EA%B0%9C%20AI%20%EC%84%9C%EB%B9%84%EC%8A%A4%20%EC%8B%A4%EC%8B%9C%EA%B0%84%20%EC%9E%A5%EC%95%A0%20%EB%AA%A8%EB%8B%88%ED%84%B0%EB%A7%81%20%28Claude%2C%20ChatGPT%2C%20Gemini%20%EC%99%B8%29&url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch)
+[![Reddit에 공유](https://img.shields.io/badge/Share-Reddit-FF4500?logo=reddit&logoColor=white)](https://reddit.com/submit?url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&title=AIWatch%20%E2%80%94%2033%EA%B0%9C%20AI%20%EC%84%9C%EB%B9%84%EC%8A%A4%20%EC%8B%A4%EC%8B%9C%EA%B0%84%20%EC%9E%A5%EC%95%A0%20%EB%AA%A8%EB%8B%88%ED%84%B0%EB%A7%81)
+[![Hacker News에 공유](https://img.shields.io/badge/Share-Hacker%20News-FF6600?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&t=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2033%20AI%20services)
+[![LinkedIn에 공유](https://img.shields.io/badge/Share-LinkedIn-0A66C2?logo=linkedin&logoColor=white)](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch)
+
 ## 🛰️ 라이브 데모
 
 **[ai-watch.dev](https://ai-watch.dev)** — 회원가입 불필요. Cloudflare Workers로 5분마다 갱신.
