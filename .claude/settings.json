@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/git-mutation-gate.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/git-mutation-gate.sh\"",
             "timeout": 10,
             "statusMessage": "Checking git-mutation gate (#415)..."
           }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/stop-nag-gate.sh",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-nag-gate.sh\"",
             "timeout": 10,
             "statusMessage": "Checking for auto-proceed nag (#415)..."
           }
