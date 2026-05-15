@@ -179,3 +179,168 @@ test.describe('Overview page', () => {
   })
 
 })
+
+// ── ActionBanner region recommendation (refs #422 Phase 1) ───────────
+//
+// Surfaces the region-switch hint that today only appears on the per-service
+// detail page. The line renders only when:
+//   - the affected service has a SERVICE_REGIONS entry
+//   - at least one region is OK (not allDown)
+//   - the incident actually matched a region key (hasRegionSpecific) — global
+//     incidents that taint every region must NOT produce a misleading "switch
+//     to region X" suggestion
+// These three gates are tested below via mock API responses.
+
+test.describe('ActionBanner region recommendation', () => {
+  test('partial regional outage surfaces "Switch region: X → Y" above fallback', async ({ page }) => {
+    // Pinecone with AWS us-east-1 hit via componentNames (mirrors the real
+    // Atlassian feed shape — title uses [AWS][us-east-1] bracket form that
+    // substring-match can't parse, but components always carry the structured
+    // `AWS us-east-1` string).
+    const inc = {
+      id: 'pinecone-aws-east-422',
+      title: '[AWS][us-east-1] 5xx errors on read',
+      status: 'investigating',
+      impact: 'major',
+      startedAt: new Date(Date.now() - 120_000).toISOString(),
+      componentNames: ['AWS us-east-1'],
+      timeline: [],
+    }
+    const mockData = { json: {
+      services: [{
+        id: 'pinecone', category: 'api', name: 'Pinecone', provider: 'Pinecone',
+        status: 'degraded', latency: 80, uptime30d: 99.91, calendarDays: 30, incidents: [inc],
+      }],
+      lastUpdated: new Date().toISOString(),
+    } }
+    await page.route('**/api/status', async (route) => { await route.fulfill(mockData) })
+    await page.route('**/api/status/cached', async (route) => { await route.fulfill(mockData) })
+    await page.goto('/')
+    // waitForDataLoad checks for `Claude API` text which is rendered in BOTH
+    // the mobile (hidden) <span> and the desktop <div>. When negative-test
+    // mocks override most services back to operational, the helper's
+    // `.first()` resolution can land on the hidden mobile span. Wait directly
+    // for any service card to render instead — same effect, resilient to the
+    // mocked-service ordering.
+    await page.locator('main button').first().waitFor({ state: 'visible', timeout: 20000 })
+
+    // Region recommendation line surfaces with the i18n label + recommended region.
+    // Label key `overview.banner.regionSwitch` → "Switch region:" (en) / "리전 전환:" (ko).
+    await expect(page.locator('main').getByText(/Switch region|리전 전환/)).toBeVisible({ timeout: 10000 })
+    // Recommended region is the next OK in SERVICE_REGIONS array order — AWS us-west-2.
+    await expect(page.locator('main').getByText(/AWS US West/)).toBeVisible()
+
+    // Security contract — `target="_blank"` external link MUST carry
+    // `rel="noopener noreferrer"` to prevent reverse-tabnabbing into the
+    // provider docs site. A future "clean up the anchor props" refactor that
+    // drops `rel` would be a real (low-impact but real) security regression
+    // with otherwise no test guarding it.
+    const docsLink = page.locator('main a').filter({ hasText: /AWS US West/ }).first()
+    await expect(docsLink).toHaveAttribute('target', '_blank')
+    await expect(docsLink).toHaveAttribute('rel', /noopener/)
+    await expect(docsLink).toHaveAttribute('rel', /noreferrer/)
+
+    // Order: region rec line appears before "Suggested fallback" since cheaper
+    // action (region switch) deserves first-line visibility.
+    const banner = page.locator('main').filter({ hasText: /Switch region|리전 전환/ }).first()
+    const bannerText = (await banner.textContent()) ?? ''
+    const regionIdx = bannerText.search(/Switch region|리전 전환/)
+    const fallbackIdx = bannerText.search(/Suggested fallback|대체 추천/)
+    if (fallbackIdx > -1) {
+      expect(regionIdx, `region line should precede fallback line (regionIdx=${regionIdx}, fallbackIdx=${fallbackIdx})`).toBeLessThan(fallbackIdx)
+    }
+  })
+
+  // MOCK_SERVICES (src/hooks/usePolling.js) ships with several default-degraded
+  // entries to keep the dashboard demo lively, INCLUDING an xAI mock incident
+  // titled `eu-west-1.api.x.ai went down` — that title matches xAI's region key
+  // `eu-west-1`, so a Pinecone-only test mock would still see "Switch region:
+  // xAI → US" surface from the mock fallthrough. Negative tests must explicitly
+  // operational-ize the four default-degraded mock services (openai, xai,
+  // huggingface, elevenlabs) so only the test's intended affected service
+  // contributes to ActionBanner.
+  const operationalize = (id, name) => ({
+    id, category: 'api', name, provider: name, status: 'operational',
+    latency: 100, uptime30d: 99.99, calendarDays: 30, incidents: [],
+  })
+  const MOCK_DEGRADED_OVERRIDE = [
+    operationalize('openai', 'OpenAI API'),
+    operationalize('xai', 'xAI (Grok)'),
+    operationalize('huggingface', 'Hugging Face'),
+    operationalize('elevenlabs', 'ElevenLabs'),
+  ]
+
+  test('global outage (no region keyword) does NOT show region line', async ({ page }) => {
+    // Title and componentNames carry no region substring → regionStatusOf falls
+    // into the "global incident → mark all regions affected" branch, which sets
+    // hasRegionSpecific=false. Recommending any region in this state would be
+    // misleading. Banner must show the cross-service fallback ONLY.
+    const inc = {
+      id: 'pinecone-global-422',
+      title: 'API authentication broken',
+      status: 'investigating',
+      impact: 'major',
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+      componentNames: [],
+      timeline: [],
+    }
+    const mockData = { json: {
+      services: [
+        { id: 'pinecone', category: 'api', name: 'Pinecone', provider: 'Pinecone',
+          status: 'down', latency: 80, uptime30d: 99.91, calendarDays: 30, incidents: [inc] },
+        ...MOCK_DEGRADED_OVERRIDE,
+      ],
+      lastUpdated: new Date().toISOString(),
+    } }
+    await page.route('**/api/status', async (route) => { await route.fulfill(mockData) })
+    await page.route('**/api/status/cached', async (route) => { await route.fulfill(mockData) })
+    await page.goto('/')
+    // waitForDataLoad checks for `Claude API` text which is rendered in BOTH
+    // the mobile (hidden) <span> and the desktop <div>. When negative-test
+    // mocks override most services back to operational, the helper's
+    // `.first()` resolution can land on the hidden mobile span. Wait directly
+    // for any service card to render instead — same effect, resilient to the
+    // mocked-service ordering.
+    await page.locator('main button').first().waitFor({ state: 'visible', timeout: 20000 })
+
+    // Down banner present (sanity)
+    await expect(page.locator('main').getByText(/Down|중단/).first()).toBeVisible({ timeout: 10000 })
+    // Region recommendation line is NOT shown — the algorithm marks every
+    // region affected, so there's no OK region to recommend.
+    await expect(page.locator('main').getByText(/Switch region|리전 전환/)).not.toBeVisible()
+  })
+
+  test('affected service without region data does not show region line', async ({ page }) => {
+    // Mistral has no SERVICE_REGIONS entry → regionStatusOf returns null →
+    // banner skips the region line entirely. The fallback line still renders.
+    const inc = {
+      id: 'mistral-422',
+      title: 'API errors',
+      status: 'investigating',
+      impact: 'major',
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+      timeline: [],
+    }
+    const mockData = { json: {
+      services: [
+        { id: 'mistral', category: 'api', name: 'Mistral API', provider: 'Mistral AI',
+          status: 'degraded', latency: 120, uptime30d: 99.5, calendarDays: 30, incidents: [inc] },
+        ...MOCK_DEGRADED_OVERRIDE,
+      ],
+      lastUpdated: new Date().toISOString(),
+    } }
+    await page.route('**/api/status', async (route) => { await route.fulfill(mockData) })
+    await page.route('**/api/status/cached', async (route) => { await route.fulfill(mockData) })
+    await page.goto('/')
+    // waitForDataLoad checks for `Claude API` text which is rendered in BOTH
+    // the mobile (hidden) <span> and the desktop <div>. When negative-test
+    // mocks override most services back to operational, the helper's
+    // `.first()` resolution can land on the hidden mobile span. Wait directly
+    // for any service card to render instead — same effect, resilient to the
+    // mocked-service ordering.
+    await page.locator('main button').first().waitFor({ state: 'visible', timeout: 20000 })
+
+    await expect(page.locator('main').getByText(/Degraded|성능 저하/).first()).toBeVisible({ timeout: 10000 })
+    await expect(page.locator('main').getByText(/Switch region|리전 전환/)).not.toBeVisible()
+  })
+})

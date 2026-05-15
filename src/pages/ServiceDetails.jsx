@@ -13,6 +13,7 @@ import { buildCalendarFromIncidents } from '../utils/calendar'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { compareGroupedRows, dominantGroupStatus } from '../utils/incidentSort'
 import { SCORE_TEXT_CLASS } from '../utils/constants'
+import { regionStatusOf, SERVICE_REGIONS } from '../utils/regionStatus'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import StatusPill from '../components/StatusPill'
@@ -370,57 +371,10 @@ function IncidentGroupRow({ group, t, lang }) {
 }
 
 // ── Regional Availability ────────────────────────────────
-// Extracts region info from ongoing incident titles
-
-const SERVICE_REGIONS = {
-  xai: [
-    { key: 'us-east-1', label: 'US (us-east-1)' },
-    { key: 'eu-west-1', label: 'EU (eu-west-1)' },
-  ],
-  gemini: [
-    { key: 'us-central1', label: 'US Central (us-central1)' },
-    { key: 'europe-west1', label: 'Europe West (europe-west1)' },
-    { key: 'asia-northeast1', label: 'Asia Northeast (asia-northeast1)' },
-  ],
-  openai: [
-    { key: 'us-east-1', label: 'US East (us-east-1)' },
-    { key: 'us-west-2', label: 'US West (us-west-2)' },
-    { key: 'eu-central-1', label: 'Europe Central (eu-central-1)' },
-  ],
-  azureopenai: [
-    { key: 'East US 2', label: 'East US 2' },
-    { key: 'Central US', label: 'Central US' },
-    { key: 'Sweden Central', label: 'Sweden Central' },
-    { key: 'UK South', label: 'UK South' },
-    { key: 'Australia East', label: 'Australia East' },
-    { key: 'Korea Central', label: 'Korea Central' },
-    { key: 'Norway East', label: 'Norway East' },
-  ],
-  bedrock: [
-    { key: 'us-east-1', label: 'US East (N. Virginia)' },
-    { key: 'us-west-2', label: 'US West (Oregon)' },
-    { key: 'eu-west-1', label: 'Europe (Ireland)' },
-    { key: 'ap-northeast-1', label: 'Asia Pacific (Tokyo)' },
-  ],
-  pinecone: [
-    { key: 'AWS us-east-1', label: 'AWS US East' },
-    { key: 'AWS us-west-2', label: 'AWS US West' },
-    { key: 'AWS eu-west-1', label: 'AWS EU West' },
-    { key: 'Azure eastus2', label: 'Azure East US' },
-    { key: 'GCP us-central1', label: 'GCP US Central' },
-    { key: 'GCP europe-west4', label: 'GCP EU West' },
-  ],
-}
-
-// Classify incident type from title keywords
-function classifyIncident(title) {
-  if (!title || typeof title !== 'string') return 'incident'
-  const lower = title.toLowerCase()
-  if (/\b(down|outage|unavailable)\b/.test(lower)) return 'down'
-  if (/\b(latency|slow|timeout|delay)\b/.test(lower)) return 'degraded_perf'
-  if (/\b(inference|grok|model|gemini|vertex|bedrock)\b/.test(lower)) return 'inference'
-  return 'incident' // generic
-}
+// Renders the per-region status card on service detail pages. Region matching
+// + recommendation logic now lives in src/utils/regionStatus.js so the Overview
+// ActionBanner and future Worker / Edge surfaces share one source of truth
+// (refs #422 Phase 1). This component is presentation-only.
 
 // Label key for each incident type
 const INCIDENT_TYPE_LABEL = {
@@ -444,85 +398,30 @@ const INCIDENT_DOT_COLOR = {
   incident: 'bg-[var(--red)]',
 }
 
-const REGION_DOCS_URL = {
-  xai: 'https://docs.x.ai/docs/regions',
-  gemini: 'https://cloud.google.com/vertex-ai/docs/general/locations',
-  openai: 'https://platform.openai.com/docs/guides/production-best-practices',
-  chatgpt: 'https://status.openai.com',
-  azureopenai: 'https://learn.microsoft.com/azure/ai-services/openai/concepts/models',
-  bedrock: 'https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-regions.html',
-  pinecone: 'https://docs.pinecone.io/troubleshooting/available-cloud-regions',
-}
-
 function RegionalAvailability({ service, t }) {
   try {
-    const regions = SERVICE_REGIONS[service.id]
-    if (!regions) return null
+    const state = regionStatusOf(service)
+    if (!state) return null
 
-    const incidents = Array.isArray(service.incidents) ? service.incidents : []
-    // aistudio:-prefixed incidents come from the global direct Gemini API
-    // surface, which has no per-region breakdown — including them would trigger
-    // the "no region match → mark all regions affected" fallback and overstate
-    // the impact. Region breakdown only makes sense for Vertex (gcloud) feed
-    // entries, whose titles include region keywords. See #310.
-    const ongoing = incidents.filter(
-      (i) =>
-        i &&
-        typeof i.title === 'string' &&
-        i.status !== 'resolved' &&
-        typeof i.id === 'string' &&
-        !i.id.startsWith('aistudio:'),
-    )
-    // Services with componentNames-based region matching (e.g., Bedrock AWS RSS) always show regional status
-    const ALWAYS_SHOW_REGIONS = ['bedrock', 'azureopenai']
-    const alwaysShow = ALWAYS_SHOW_REGIONS.includes(service.id)
-    if (ongoing.length === 0 && !alwaysShow) return null
-
-    const regionStatus = {}
-    let hasRegionSpecific = false
-
-    for (const r of regions) {
-      regionStatus[r.key] = { status: 'ok', type: 'incident' }
-    }
-
-    for (const inc of ongoing) {
-      const titleLower = (inc.title || '').toLowerCase()
-      const compNames = (inc.componentNames ?? []).map(n => n.toLowerCase())
-      for (const r of regions) {
-        const keyLower = r.key.toLowerCase()
-        if (titleLower.includes(keyLower) || compNames.some(n => n.includes(keyLower))) {
-          regionStatus[r.key] = { status: 'incident', type: classifyIncident(inc.title) }
-          hasRegionSpecific = true
-        }
-      }
-    }
-
-    if (!hasRegionSpecific && ongoing.length > 0) {
-      const globalType = classifyIncident(ongoing[0].title)
-      for (const r of regions) {
-        regionStatus[r.key] = { status: 'incident', type: globalType }
-      }
-    }
-
-    const okRegions = regions.filter(r => regionStatus[r.key].status === 'ok')
-    const allDown = regions.length - okRegions.length === regions.length
-    const docsUrl = REGION_DOCS_URL[service.id]
-    const recommendText = (t('svc.region.recommend') || '').replace('{region}', okRegions[0]?.label ?? '')
+    const { regions, okRegions, allDown, recommendedRegion, docsUrl, ongoingCount } = state
+    // recommendText interpolates the FIRST OK region's label — the recommendation
+    // policy itself (array-order, same-cloud-first by SERVICE_REGIONS layout)
+    // lives in regionStatus.js.
+    const recommendText = (t('svc.region.recommend') || '').replace('{region}', recommendedRegion?.label ?? '')
 
     return (
       <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
         <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
           <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
-            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: ongoing.length > 0 ? 'var(--amber)' : 'var(--green)' }} />
+            <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: ongoingCount > 0 ? 'var(--amber)' : 'var(--green)' }} />
             {t('svc.region.title')}
           </div>
         </div>
         <div style={{ padding: '16px' }}>
           <div className="flex flex-col" style={{ gap: '8px' }}>
             {regions.map((region) => {
-              const info = regionStatus[region.key]
-              const isIncident = info.status === 'incident'
-              const type = info.type || 'incident'
+              const isIncident = region.status === 'incident'
+              const type = region.type || 'incident'
               const dotCls = isIncident ? (INCIDENT_DOT_COLOR[type] ?? 'bg-[var(--red)]') : 'bg-[var(--green)]'
               const textCls = isIncident ? (INCIDENT_TYPE_COLOR[type] ?? 'text-[var(--red)]') : 'text-[var(--green)]'
               const labelKey = isIncident ? (INCIDENT_TYPE_LABEL[type] ?? 'svc.region.incident') : 'svc.region.noIncidents'
@@ -535,16 +434,34 @@ function RegionalAvailability({ service, t }) {
               )
             })}
           </div>
-          {!allDown && okRegions.length > 0 && ongoing.length > 0 && (
-            <div className="mono text-[10px] text-[var(--blue)] mt-3 flex items-center justify-between" style={{ padding: '6px 8px', background: 'var(--bg2)', borderRadius: '4px' }}>
+          {/* Recommendation callout — three visual adjustments from the
+              original `mt-3` / `padding: 6px 8px` / `items-center`:
+              1) `marginTop: 20px` (was mt-3=12px): the callout sits on a
+                 different background layer (var(--bg2)) than the region list
+                 above, but only 12px of separation made the layered surfaces
+                 read as a single block — the user perception was the box was
+                 "touching" the last region row. 20px gives the callout its
+                 own visual section.
+              2) `padding: 12px 14px` (was 6px/8px): tighter values cramped
+                 the vertical rhythm when the text wrapped to 3 lines on
+                 narrow viewports, and made the link look hung from the top
+                 edge.
+              3) `items-start` (was items-center): aligns the Check API Guide
+                 link to the first line of the wrapped text rather than its
+                 vertical midpoint — the centered layout placed the link
+                 awkwardly low on mobile.
+              `gap-2` replaces `ml-2` so the gap survives any future wrap /
+              RTL layout change. */}
+          {!allDown && okRegions.length > 0 && ongoingCount > 0 && (
+            <div className="mono text-[10px] text-[var(--blue)] flex items-start justify-between gap-2" style={{ marginTop: '20px', padding: '12px 14px', background: 'var(--bg2)', borderRadius: '4px' }}>
               <span>{recommendText}</span>
               {docsUrl && (
                 <a
                   href={docsUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="ml-2 font-bold underline hover:text-[var(--text1)] shrink-0"
-                  onClick={() => trackEvent('region_switch_intent', { service_id: service.id, recommended_region: okRegions[0].key })}
+                  className="font-bold underline hover:text-[var(--text1)] shrink-0"
+                  onClick={() => trackEvent('region_switch_intent', { service_id: service.id, recommended_region: recommendedRegion.key, location: 'service_details' })}
                 >
                   {t('svc.region.action.guide')} →
                 </a>
@@ -552,7 +469,7 @@ function RegionalAvailability({ service, t }) {
             </div>
           )}
           {allDown && (
-            <div className="mono text-[10px] text-[var(--red)] mt-3" style={{ padding: '6px 8px', background: 'var(--bg2)', borderRadius: '4px' }}>
+            <div className="mono text-[10px] text-[var(--red)]" style={{ marginTop: '20px', padding: '12px 14px', background: 'var(--bg2)', borderRadius: '4px' }}>
               {t('svc.region.allDown')}
             </div>
           )}
