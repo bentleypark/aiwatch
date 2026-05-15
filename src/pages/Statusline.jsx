@@ -8,6 +8,29 @@ import { trackEvent } from '../utils/analytics'
 
 const API_URL = 'https://ai-watch.dev/api/status/cached'
 
+// Tag each preset's URL so Cloudflare request analytics can separate
+// statusline-driven traffic from regular `/api/status/cached` hits and tell us
+// which preset users actually run. The Worker matches only on `url.pathname`
+// and reads from fixed KV keys (`services:latest`, etc.) — see the
+// `url.pathname === '/api/status/cached'` route handler in worker/src/index.ts
+// — so the query string is invisible to cache + KV behavior. It exists purely
+// for the request-log split. Carries no user identifier; the preset slug is
+// the only payload. Measurement framework + baseline-derived distribution
+// gating thresholds (Reddit launch, Anthropic Claude Code docs PR) live on
+// issue #400.
+const taggedUrl = (src) => `${API_URL}?src=statusline-${src}`
+
+// Slug constants are the join key between (a) the URL `?src=statusline-<slug>`
+// query tag in Cloudflare request logs and (b) the GA4 `copy_statusline_snippet`
+// event's `preset` parameter. Extracted to single source so a rename can't
+// silently desynchronize one side from the other — that drift would invalidate
+// the cross-system analytics correlation the gating measurement depends on.
+const SLUG_DEGRADED_ONLY = 'degraded_only'
+const SLUG_COMPACT_BADGE = 'compact_badge'
+const SLUG_FULL_LIST = 'full_list'
+const SLUG_SCOPED = 'scoped'
+const SLUG_CLICKABLE = 'clickable'
+
 function CopyButton({ text, eventLabel }) {
   const [copied, setCopied] = useState(false)
   const onClick = async () => {
@@ -92,28 +115,28 @@ function Section({ title, children }) {
 const PRESET_DEGRADED_ONLY = `{
   "statusLine": {
     "type": "command",
-    "command": "( curl -sf --max-time 2 ${API_URL} | jq -r '[.services[] | select(.status != \\"operational\\") | \\"🔴 \\" + .name] | .[0:3] | join(\\" \\")' ) 2>/dev/null || true"
+    "command": "( curl -sf --max-time 2 ${taggedUrl(SLUG_DEGRADED_ONLY)} | jq -r '[.services[] | select(.status != \\"operational\\") | \\"🔴 \\" + .name] | .[0:3] | join(\\" \\")' ) 2>/dev/null || true"
   }
 }`
 
 const PRESET_COMPACT_BADGE = `{
   "statusLine": {
     "type": "command",
-    "command": "( curl -sf --max-time 2 ${API_URL} | jq -r '([.services[] | select(.status != \\"operational\\")] | length) as $n | if $n == 0 then empty else \\"🔴 \\" + ($n|tostring) + \\" AI services\\" end' ) 2>/dev/null || true"
+    "command": "( curl -sf --max-time 2 ${taggedUrl(SLUG_COMPACT_BADGE)} | jq -r '([.services[] | select(.status != \\"operational\\")] | length) as $n | if $n == 0 then empty else \\"🔴 \\" + ($n|tostring) + \\" AI services\\" end' ) 2>/dev/null || true"
   }
 }`
 
 const PRESET_FULL_LIST = `{
   "statusLine": {
     "type": "command",
-    "command": "( curl -sf --max-time 2 ${API_URL} | jq -r '[.services[] | select(.status != \\"operational\\") | \\"\\(if .status == \\"down\\" then \\"X\\" else \\"!\\" end)\\\\u00b7\\(.name)\\"] | join(\\" | \\")' ) 2>/dev/null || true"
+    "command": "( curl -sf --max-time 2 ${taggedUrl(SLUG_FULL_LIST)} | jq -r '[.services[] | select(.status != \\"operational\\") | \\"\\(if .status == \\"down\\" then \\"X\\" else \\"!\\" end)\\\\u00b7\\(.name)\\"] | join(\\" | \\")' ) 2>/dev/null || true"
   }
 }`
 
 const PRESET_SCOPED = `{
   "statusLine": {
     "type": "command",
-    "command": "( curl -sf --max-time 2 ${API_URL} | jq -r '[.services[] | select(.id == \\"claude\\" or .id == \\"openai\\" or .id == \\"gemini\\") | select(.status != \\"operational\\") | \\"🔴 \\" + .name] | join(\\" \\")' ) 2>/dev/null || true"
+    "command": "( curl -sf --max-time 2 ${taggedUrl(SLUG_SCOPED)} | jq -r '[.services[] | select(.id == \\"claude\\" or .id == \\"openai\\" or .id == \\"gemini\\") | select(.status != \\"operational\\") | \\"🔴 \\" + .name] | join(\\" \\")' ) 2>/dev/null || true"
   }
 }`
 
@@ -127,7 +150,7 @@ const PRESET_SCOPED = `{
 const PRESET_CLICKABLE = JSON.stringify({
   statusLine: {
     type: 'command',
-    command: `( curl -sf --max-time 2 ${API_URL} | jq -r '[.services[] | select(.status != "operational") | "\\u001b]8;;https://ai-watch.dev/#\\(.id)\\u001b\\\\🔴 \\(.name)\\u001b]8;;\\u001b\\\\"] | .[0:3] | join(" ")' ) 2>/dev/null || true`,
+    command: `( curl -sf --max-time 2 ${taggedUrl(SLUG_CLICKABLE)} | jq -r '[.services[] | select(.status != "operational") | "\\u001b]8;;https://ai-watch.dev/#\\(.id)\\u001b\\\\🔴 \\(.name)\\u001b]8;;\\u001b\\\\"] | .[0:3] | join(" ")' ) 2>/dev/null || true`,
   },
 }, null, 2)
 
@@ -166,7 +189,7 @@ export default function Statusline() {
         <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.6', marginBottom: '12px' }}>
           Add to <code className="mono text-[var(--text0)]">~/.claude/settings.json</code>. Output stays empty while every monitored service is operational; up to 3 degraded/down services appear with a red dot when something breaks.
         </p>
-        <Snippet code={PRESET_DEGRADED_ONLY} eventLabel="degraded_only" />
+        <Snippet code={PRESET_DEGRADED_ONLY} eventLabel={SLUG_DEGRADED_ONLY} />
       </Section>
 
       <Section title="Other presets">
@@ -176,7 +199,7 @@ export default function Statusline() {
             <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.6', marginBottom: '8px' }}>
               Shows a single count (e.g. <code className="mono text-[var(--text0)]">🔴 2 AI services</code>) instead of names. Best when statusline space is tight.
             </p>
-            <Snippet code={PRESET_COMPACT_BADGE} eventLabel="compact_badge" />
+            <Snippet code={PRESET_COMPACT_BADGE} eventLabel={SLUG_COMPACT_BADGE} />
           </div>
 
           <div>
@@ -184,7 +207,7 @@ export default function Statusline() {
             <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.6', marginBottom: '8px' }}>
               Shows every degraded/down service with a one-character severity prefix — <code className="mono text-[var(--text0)]">X</code> for down, <code className="mono text-[var(--text0)]">!</code> for degraded. No emoji, plain text — friendly for Powerline themes that already provide their own iconography.
             </p>
-            <Snippet code={PRESET_FULL_LIST} eventLabel="full_list" />
+            <Snippet code={PRESET_FULL_LIST} eventLabel={SLUG_FULL_LIST} />
           </div>
 
           <div>
@@ -201,7 +224,7 @@ export default function Statusline() {
                 full service ID table
               </a>{' '}on GitHub.
             </p>
-            <Snippet code={PRESET_SCOPED} eventLabel="scoped" />
+            <Snippet code={PRESET_SCOPED} eventLabel={SLUG_SCOPED} />
           </div>
 
           <div>
@@ -209,7 +232,7 @@ export default function Statusline() {
             <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.6', marginBottom: '8px' }}>
               Each service name becomes a clickable hyperlink that opens the AIWatch service detail page (<code className="mono text-[var(--text0)]">cmd+click</code> on macOS, <code className="mono text-[var(--text0)]">ctrl+click</code> on Linux). Useful for jumping straight to incident details when the statusline shows something is wrong. Requires an OSC 8-compatible terminal — most modern emulators (iTerm2, Warp, kitty, WezTerm, VS Code integrated terminal, Terminal.app on macOS 12+) support it; tmux and some older shells may render the escape sequence as raw text instead.
             </p>
-            <Snippet code={PRESET_CLICKABLE} eventLabel="clickable" />
+            <Snippet code={PRESET_CLICKABLE} eventLabel={SLUG_CLICKABLE} />
           </div>
         </div>
       </Section>
@@ -219,6 +242,7 @@ export default function Statusline() {
           <li>Single GET to <code className="mono text-[var(--text0)]">{API_URL}</code> per statusline render. CORS-enabled, no authentication, no client identifier collected.</li>
           <li>The endpoint serves a 5-minute KV-cached payload from Cloudflare's edge network — typical response time is under 100 ms from most regions.</li>
           <li>The shell command sets a 2-second timeout (<code className="mono text-[var(--text0)]">--max-time 2</code>) and fails silent (<code className="mono text-[var(--text0)]">2{'>'}/dev/null || true</code>) so a network hiccup never breaks your statusline.</li>
+          <li>Each snippet appends a <code className="mono text-[var(--text0)]">?src=statusline-&lt;preset&gt;</code> query tag so we can split statusline-driven requests from the rest of the cached-endpoint traffic when deciding which presets to keep maintaining. The Worker matches on path only, so the tag has no effect on caching, freshness, or your response — and the only payload is the preset slug, never a user identifier.</li>
           <li>No requests to the Anthropic API. AIWatch operates its own status feed independently.</li>
         </ul>
       </Section>

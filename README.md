@@ -297,14 +297,14 @@ Quickest install — add to `~/.claude/settings.json`:
 {
   "statusLine": {
     "type": "command",
-    "command": "( curl -sf --max-time 2 https://ai-watch.dev/api/status/cached | jq -r '[.services[] | select(.status != \"operational\") | \"🔴 \" + .name] | .[0:3] | join(\" \")' ) 2>/dev/null || true"
+    "command": "( curl -sf --max-time 2 https://ai-watch.dev/api/status/cached?src=statusline-degraded_only | jq -r '[.services[] | select(.status != \"operational\") | \"🔴 \" + .name] | .[0:3] | join(\" \")' ) 2>/dev/null || true"
   }
 }
 ```
 
 Full guide with presets (compact badge, full list, scoped to specific providers, Powerline-friendly): **[ai-watch.dev/#statusline](https://ai-watch.dev/#statusline)**
 
-Properties: single GET per render, 5-min KV-cached on Cloudflare's edge, 2-second timeout, fail-silent on network error, no Anthropic API requests, no client identifier. Compatible with any statusline tool that supports shell-command output (including `ccstatusline`'s Custom Command widget).
+Properties: single GET per render, 5-min KV-cached on Cloudflare's edge, 2-second timeout, fail-silent on network error, no Anthropic API requests, no client identifier. The `?src=statusline-<preset>` query tag just lets us split statusline traffic from regular cached-endpoint hits in request logs — Worker matches on path only, so it doesn't affect caching or freshness, and carries no user identifier. Compatible with any statusline tool that supports shell-command output (including `ccstatusline`'s Custom Command widget).
 
 ## Project Structure
 
