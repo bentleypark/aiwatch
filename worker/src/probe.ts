@@ -15,6 +15,7 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   { id: 'groq', url: 'https://api.groq.com/openai/v1/models' },
   { id: 'together', url: 'https://api.together.xyz/v1/models' },
   { id: 'fireworks', url: 'https://api.fireworks.ai/inference/v1/models' },
+  { id: 'cerebras', url: 'https://api.cerebras.ai/v1/models' }, // #391 — GET returns 403 (auth not required for RTT)
   { id: 'perplexity', url: 'https://api.perplexity.ai/chat/completions' },
   { id: 'huggingface', url: 'https://huggingface.co/api/models?limit=1' },
   { id: 'replicate', url: 'https://api.replicate.com/v1/models' },

@@ -293,7 +293,7 @@ const en = {
   'aboutScore.incidentSection': 'Incident Score (0~25)',
   'aboutScore.recoverySection': 'Recovery Score (0~15)',
   'aboutScore.responsivenessSection': 'Responsiveness Score (0~20)',
-  'aboutScore.responsivenessDesc': 'Measures actual API endpoint speed and stability via 5-minute health-check probes (19 API services). Combines response speed and consistency.',
+  'aboutScore.responsivenessDesc': 'Measures actual API endpoint speed and stability via 5-minute health-check probes (20 API services). Combines response speed and consistency.',
   'aboutScore.responsivenessSpeed': 'Speed (0~10) — exp decay on p50 RTT',
   'aboutScore.responsivenessStability': 'Stability (0~10) — exp decay on combined coefficient of variation',
   'aboutScore.responsivenessNA1': 'Apps, agents, and infrastructure services (Bedrock, Azure OpenAI, Pinecone, Modal) are not probed.',

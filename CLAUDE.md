@@ -233,8 +233,8 @@ When adding a new monitored service, update ALL of the following:
 
 ## Architecture
 
-**AIWatch** is a React SPA that monitors 32 AI services in real time:
-- **23 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Fireworks, Perplexity, HuggingFace, Replicate, ElevenLabs, AssemblyAI, Deepgram, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, Stability AI, Voyage AI, Modal
+**AIWatch** is a React SPA that monitors 33 AI services in real time:
+- **24 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Fireworks, Cerebras, Perplexity, HuggingFace, Replicate, ElevenLabs, AssemblyAI, Deepgram, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, Stability AI, Voyage AI, Modal
 - **3 AI apps**: claude.ai, ChatGPT, Character.AI
 - **6 coding agents**: Claude Code, Codex, Cursor, GitHub Copilot, Windsurf, Junie
 
@@ -249,11 +249,11 @@ When adding a new monitored service, update ALL of the following:
 
 | Key Pattern | Value | TTL | Writes/Day | Purpose |
 |---|---|---|---|---|
-| `services:latest` | `{ services, cachedAt }` JSON | 5min | ~288 | Real-time status cache (all 32 services) |
+| `services:latest` | `{ services, cachedAt }` JSON | 5min | ~288 | Real-time status cache (all 33 services) |
 | `daily:{YYYY-MM-DD}` | `{ [svcId]: { ok, total } }` JSON | 2d | ~288 | Daily uptime counters |
 | `history:{YYYY-MM-DD}` | Same as daily | 90d | 1 | Archived yesterday's counters |
 | `latency:24h` | `{ snapshots: [{ t, data }] }` JSON | 25h | ~48 | 30-min latency snapshots (max 48) |
-| `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 7d | ~288 | 5-min health check probe results (max 2016, 19 API services) |
+| `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 7d | ~288 | 5-min health check probe results (max 2016, 20 API services) |
 | `probe:daily:{YYYY-MM-DD}` | `{ [svcId]: { p50, p75, p95, min, max, count, spikes } }` JSON | 90d | 1 | Daily probe RTT summary for monthly reports |
 | `probe:summaries` | `[svcId, ProbeSummary][]` JSON | 80min | ~48 | Cron-cached 7-day probe summaries (p50, p95, cvCombined, validDays); refreshed every 30min via in-memory slot guard, TTL covers up to 2 missed 30-min refresh cycles |
 | `alerted:new:{incId}` | `"1"` | 7d | ~5 | Incident alert dedup |
@@ -308,7 +308,7 @@ api/
   intro.ts          # Landing page Edge Function (/intro) — Product Hunt landing
   intro/
     html-template.ts # SSR HTML template (i18n, dashboard mock, GA4)
-  is-down.ts        # "Is X Down?" Edge Function (30 services — excludes bedrock/azureopenai per #263)
+  is-down.ts        # "Is X Down?" Edge Function (31 services — excludes bedrock/azureopenai per #263)
   reports.ts        # Monthly Reports proxy (/reports/* → bentleypark.github.io/aiwatch-reports/*, fetched directly to bypass the Cloudflare 301 on the public reports.ai-watch.dev hostname) with HTML path rewriting (#264)
 src/
   components/   # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, AnalysisModal
@@ -338,7 +338,7 @@ worker/
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit, Web Vitals)
     monthly-archive.ts # Monthly reliability archive (uptime, score, incidents, latency per service, permanent KV)
     vitals.ts   # Web Vitals aggregation (ingest, KV flush, p75 computation, Discord formatting)
-    probe.ts    # Health check probing — direct RTT measurement (19 API services)
+    probe.ts    # Health check probing — direct RTT measurement (20 API services)
     probe-archival.ts # Daily probe RTT archival + 7-day summary (p50, p95, cvCombined)
     platform-monitor.ts # Status page platform health monitoring (metastatuspage.com for Atlassian)
     detection.ts # Detection Lead entry parsing + incident-aware reset logic
@@ -437,7 +437,7 @@ Per-service status is resolved in `services.ts` with this priority:
 ```
 Browser (React SPA, 60s polling)
   → Cloudflare Worker (/api/status)
-    → parallel fetch (32 services)
+    → parallel fetch (33 services)
     → gemini dual-source (#310): gcloud Vertex feed + aistudio.google.com/status MakerSuite RPC — merged with vertex:/aistudio: ID prefixes
     → normalize to ServiceStatus[]
     → write to KV (cache + daily counters)
@@ -446,7 +446,7 @@ Browser (React SPA, 60s polling)
     → platform quorum detection: 70%+ same-platform fetch failures → platform outage → hold operational for all affected services
     → probe cross-validation: individual probe RTT normal → hold operational (prevents false positives during status page failures)
   → React state (usePolling hook via PollingContext)
-    → overlay probe RTT onto service.latency (19 probe services)
+    → overlay probe RTT onto service.latency (20 probe services)
     → non-probe services (bedrock, azureopenai, pinecone) keep status page latency
   → all pages read from context
 
@@ -492,7 +492,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
   - Grouped fallback: when incident affects multiple categories, Discord alerts + dashboard show per-category alternatives via `buildGroupedFallbackText`
   - **Fallback tier priority**: same-tier services are recommended first, then adjacent tiers by distance. Within each tier, sorted by AIWatch Score descending. Defined in `worker/src/fallback.ts`, mirrored in `src/utils/constants.js` (frontend) and `api/is-down.ts` (Edge SSR inline). `TIER_LABEL` lives in the same two files; `src/pages/Overview.jsx` imports it (no inline copy). All call sites use `tierFor(id)` / `tierLabelFor(tier)` helpers that warn once per missing entry — the bare `?? 99` lookup pattern was removed in #403 because it silently coalesced typos and forgotten service additions into Score-only ordering (the failure mode that produced the Junie-as-#1 bug, #402). Cross-mirror drift is pinned by `worker/src/__tests__/api-tier-sync.test.ts` — deep-equal assertion across worker ↔ frontend constants plus a string-match check that every canonical key appears in the `api/is-down.ts` inline literal. API tiers (1-4) and coding-agent tiers (11-13) use distinct number ranges so a single `TIER_LABEL` map stays unambiguous, and `getFallbacks` already filters by category so the two ranges never compare against each other:
     - **Tier 1** (Major LLM): `claude`, `openai`, `gemini`
-    - **Tier 2** (LLM): `mistral`, `cohere`, `groq`, `together`, `fireworks`, `deepseek`, `xai`, `perplexity`
+    - **Tier 2** (LLM): `mistral`, `cohere`, `groq`, `together`, `fireworks`, `cerebras`, `deepseek`, `xai`, `perplexity`
     - **Tier 3** (Infrastructure): `bedrock`, `azureopenai`, `openrouter`
     - **Tier 4** (Voice): `elevenlabs`, `assemblyai`, `deepgram`
     - **Tier 11** (`CLI Agent`): `claudecode`, `codex`
@@ -545,6 +545,6 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
   - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res:` keys 7d TTL, `alerted:down/degraded/recovered:` keys 2h TTL). Fallback recommendations only included when service status is degraded/down (not operational). AI analysis runs inline with 8s timeout — Gemma 4 26B (Workers AI) primary, Sonnet (AI Gateway) fallback — results stored in `ai:analysis:{svcId}:{incId}` (1h TTL, per-incident). Daily alert counts tracked in `alert:count:{date}` for Daily Summary
 - **Frontend deployment**: Vercel, domain ai-watch.dev — `git push origin main` triggers auto-deploy. `npm run build` is local only; changes are not live until pushed
 - **PWA**: `public/manifest.json` + `public/sw.js` (stale-while-revalidate). CACHE_NAME in `sw.js` must be bumped manually when static assets change. SW excludes `/is-*` (Edge SSR) and `/api/*` (real-time data) from caching
-- **Edge SSR**: `api/is-down.ts` serves "Is X Down?" SEO pages (30 services — all monitored except bedrock + azureopenai which are estimate-only with no differentiated data) via Vercel Edge Functions. Uses `/api/status/cached` (KV-only) for fast SSR (~1.2s). Rank uses competition ranking (`Math.round(score)`-based `findIndex`, not id-based) and applies the same `uptimeSource === 'estimate' && incidents.length === 0` filter as the dashboard Ranking page so SEO rank numbers match what users see. Header meta omits the Uptime segment entirely when `uptime30d` is null (no "Uptime: N/A" surface). Dynamic OG image via Worker `/api/og` (PNG, resvg-wasm). Share buttons: X, Threads, KakaoTalk (SDK async), Copy Link. `vercel.json` rewrites route `/is-{service}-down` to the handler
+- **Edge SSR**: `api/is-down.ts` serves "Is X Down?" SEO pages (31 services — all monitored except bedrock + azureopenai which are estimate-only with no differentiated data) via Vercel Edge Functions. Uses `/api/status/cached` (KV-only) for fast SSR (~1.2s). Rank uses competition ranking (`Math.round(score)`-based `findIndex`, not id-based) and applies the same `uptimeSource === 'estimate' && incidents.length === 0` filter as the dashboard Ranking page so SEO rank numbers match what users see. Header meta omits the Uptime segment entirely when `uptime30d` is null (no "Uptime: N/A" surface). Dynamic OG image via Worker `/api/og` (PNG, resvg-wasm). Share buttons: X, Threads, KakaoTalk (SDK async), Copy Link. `vercel.json` rewrites route `/is-{service}-down` to the handler
 - **Landing page**: `api/intro.ts` + `api/intro/html-template.ts` — Product Hunt landing page via Vercel Edge Function. `/intro` route (or `?ref=producthunt` for PH banner). Self-contained SSR with inline CSS/JS, KO/EN i18n (client-side toggle), GA4 events, dashboard preview mock. No external data fetch (pure template render)
 - **Monthly Reports proxy**: `api/reports.ts` — Vercel Edge Function that proxies `/reports/*` on `ai-watch.dev` to the aiwatch-reports Jekyll site (#264). Fetches directly from `bentleypark.github.io/aiwatch-reports/` rather than the public `reports.ai-watch.dev` subdomain so a Cloudflare Page Rule can 301 the public subdomain to `ai-watch.dev/reports/` without trapping the proxy in a redirect loop (proxy fetch and the 301'd public hostname must not share a hostname). The aiwatch-reports repo therefore must NOT carry a `CNAME` file pointing at `reports.ai-watch.dev`. Consolidates SEO + GA4 under a single apex domain. `vercel.json` needs four explicit rewrites (`/reports`, `/reports/`, `/reports/:rest*`, `/reports/:rest*/`) because path-to-regexp's `:rest*` does not match trailing-slash paths in Vercel's router. Denylist header filtering (strips `content-encoding`, upstream server IDs, hop-by-hop headers), 10s timeout, `s-maxage=600` edge cache when upstream omits a directive, 502 error page on upstream failure (does not fall back to the SPA so operators can distinguish "report missing" from "proxy broken")

@@ -248,6 +248,19 @@ const MOCK_SERVICES = [
     ],
   },
   {
+    id: 'cerebras', category: 'api', name: 'Cerebras Inference', provider: 'Cerebras', status: 'operational',
+    latency: 118, uptime30d: 99.88,
+    history30d: hist([18]),
+    history3m: [{ month: '2026-01', uptime: 99.92 }, { month: '2026-02', uptime: 99.86 }, { month: '2026-03', uptime: 99.88 }],
+    incidents: [
+      { id: 'cb-1', title: 'Llama3.1-8B degraded throughput', startedAt: ago(12 * D + 2 * H), duration: '40m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: 'Llama3.1-8B 추론 처리량 저하가 관측되고 있습니다.', at: ago(12 * D + 2 * H) },
+          { stage: 'resolved', text: '웨이퍼-스케일 인스턴스 재배치 후 정상화.', at: ago(12 * D + 2 * H - 40 * M) },
+        ] },
+    ],
+  },
+  {
     id: 'perplexity', category: 'api', name: 'Perplexity', provider: 'Perplexity AI', status: 'operational',
     latency: 420, uptime30d: 99.33,
     history30d: hist([5, 6]),

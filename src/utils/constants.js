@@ -13,7 +13,7 @@ export const VALID_PERIODS = ['7d', '30d', '90d']
 // API services (latency tracked)
 export const API_SERVICE_IDS = [
   'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq',
-  'together', 'fireworks', 'perplexity', 'huggingface', 'replicate',
+  'together', 'fireworks', 'cerebras', 'perplexity', 'huggingface', 'replicate',
   'elevenlabs', 'xai', 'deepseek', 'openrouter', 'bedrock', 'azureopenai',
   'pinecone', 'stability', 'voyageai', 'modal', 'assemblyai', 'deepgram',
 ]
@@ -30,7 +30,7 @@ export const SERVICE_AND_APP_IDS = [
   'claudeai', 'chatgpt', 'characterai',
   // LLM API
   'claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq',
-  'together', 'fireworks', 'perplexity', 'xai', 'deepseek', 'openrouter',
+  'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'openrouter',
   // voice & speech AI
   'elevenlabs', 'assemblyai', 'deepgram',
   // inference / infrastructure
@@ -44,7 +44,7 @@ export const ALL_SERVICE_IDS = [...SERVICE_AND_APP_IDS, ...AGENT_SERVICE_IDS]
 export const SERVICE_CATEGORIES = {
   all:       { labelKey: 'filter.all',       ids: null }, // null = show all
   apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai'] },
-  llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
+  llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
   inference: { labelKey: 'filter.inference', ids: ['elevenlabs', 'assemblyai', 'deepgram', 'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal'] },
   agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'] },
 }
@@ -62,7 +62,7 @@ export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stabil
 // All three must move together.
 export const API_TIER = {
   claude: 1, openai: 1, gemini: 1,
-  mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, deepseek: 2, xai: 2, perplexity: 2,
+  mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, xai: 2, perplexity: 2,
   bedrock: 3, azureopenai: 3, openrouter: 3,
   elevenlabs: 4, assemblyai: 4, deepgram: 4,
   claudecode: 11, codex: 11,

@@ -148,7 +148,7 @@ export default function Statusline() {
           AIWatch in your Claude Code statusline
         </h1>
         <p className="text-[var(--text2)] text-[13px]" style={{ lineHeight: '1.6' }}>
-          Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and 28 more — directly in your{' '}
+          Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and 29 more — directly in your{' '}
           <a
             href="https://docs.claude.com/en/docs/claude-code/statusline"
             target="_blank"

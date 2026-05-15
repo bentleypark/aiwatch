@@ -16,6 +16,7 @@
     { "source": "/is-groq-down", "destination": "/api/is-down?slug=groq" },
     { "source": "/is-together-down", "destination": "/api/is-down?slug=together" },
     { "source": "/is-fireworks-down", "destination": "/api/is-down?slug=fireworks" },
+    { "source": "/is-cerebras-down", "destination": "/api/is-down?slug=cerebras" },
     { "source": "/is-perplexity-down", "destination": "/api/is-down?slug=perplexity" },
     { "source": "/is-xai-down", "destination": "/api/is-down?slug=xai" },
     { "source": "/is-deepseek-down", "destination": "/api/is-down?slug=deepseek" },

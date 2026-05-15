@@ -246,7 +246,7 @@ describe('worstStatus helper (#379)', () => {
   })
 })
 
-describe('SERVICES coding-agent multi-component config sanity (#379)', () => {
+describe('SERVICES multi-component config sanity (#379)', () => {
   it('cursor tracks IDE primary + Cloud Agents + Automations + CLI', () => {
     const cursor = SERVICES.find((s) => s.id === 'cursor')!
     expect(cursor.statusComponentId).toBe('rflc60xp5jp2') // IDE — primary for uptime parsing
@@ -281,15 +281,31 @@ describe('SERVICES coding-agent multi-component config sanity (#379)', () => {
     expect(ws.statusComponentIds).toEqual(['r5wf1ykd7y1m', '8q19cygxvshj'])
   })
 
+  it('cerebras tracks all 5 model/console components, Developer Console primary (#391)', () => {
+    // First `category: 'api'` service to use worst-of multi-component (#379). The
+    // per-model components mean a single model degrading marks Cerebras degraded —
+    // "simplifying" this back to single-component would silently re-introduce the
+    // model-specific-outage under-reporting the seo-content insight/FAQ promise users.
+    const cb = SERVICES.find((s) => s.id === 'cerebras')!
+    expect(cb.statusComponentId).toBe('83h1cchw4vs4') // Developer Console — primary for uptime parsing
+    expect(cb.statusComponentIds).toEqual([
+      '83h1cchw4vs4', // Developer Console
+      '7xvps6c9lqwc', // Llama3.1-8B
+      'bhqw2gr7r710', // Qwen-3-235B-Instruct-2507
+      'hgfykfsb36gn', // GPT-OSS-120B
+      '8ygyx5vydlm2', // ZAI-GLM-4.7
+    ])
+  })
+
   it('primary statusComponentId always appears as the first entry of statusComponentIds', () => {
     // Convention: primary first so a reader can scan the array and immediately see
-    // which component drives uptime%/calendar/miss tracking. Enforce in the test
-    // so accidental reordering during config edits is caught.
-    for (const sid of ['cursor', 'copilot', 'windsurf']) {
-      const svc = SERVICES.find((s) => s.id === sid)!
-      if (svc.statusComponentIds && svc.statusComponentId) {
-        expect(svc.statusComponentIds[0]).toBe(svc.statusComponentId)
-      }
+    // which component drives uptime%/calendar/miss tracking. Derive the list from
+    // SERVICES so every present and future multi-component service is covered without
+    // a hand-maintained literal — accidental reordering during config edits is caught.
+    const multiComponent = SERVICES.filter((s) => s.statusComponentIds && s.statusComponentId)
+    expect(multiComponent.length).toBeGreaterThan(0)
+    for (const svc of multiComponent) {
+      expect(svc.statusComponentIds![0]).toBe(svc.statusComponentId)
     }
   })
 })

@@ -50,6 +50,7 @@ const STATUS_URL = {
   groq:        'https://status.groq.com',
   together:    'https://status.together.ai',
   fireworks:   'https://status.fireworks.ai',
+  cerebras:    'https://status.cerebras.ai',
   perplexity:  'https://status.perplexity.ai',
   huggingface: 'https://status.huggingface.co',
   replicate:   'https://www.replicatestatus.com',

@@ -293,7 +293,7 @@ const ko = {
   'aboutScore.incidentSection': 'Incident Score (0~25)',
   'aboutScore.recoverySection': 'Recovery Score (0~15)',
   'aboutScore.responsivenessSection': 'Responsiveness Score (0~20)',
-  'aboutScore.responsivenessDesc': '5분 간격 health-check probe로 측정한 실제 API 엔드포인트의 응답 속도와 안정성을 평가합니다 (19개 API 서비스). 응답 속도와 일관성을 결합합니다.',
+  'aboutScore.responsivenessDesc': '5분 간격 health-check probe로 측정한 실제 API 엔드포인트의 응답 속도와 안정성을 평가합니다 (20개 API 서비스). 응답 속도와 일관성을 결합합니다.',
   'aboutScore.responsivenessSpeed': 'Speed (0~10) — p50 RTT의 지수 감소',
   'aboutScore.responsivenessStability': 'Stability (0~10) — 결합 변동계수의 지수 감소',
   'aboutScore.responsivenessNA1': '앱, 코딩 에이전트, 인프라 서비스(Bedrock, Azure OpenAI, Pinecone, Modal)는 probe 대상이 아닙니다.',

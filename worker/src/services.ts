@@ -38,6 +38,11 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM' },
   { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed', betterStackUrl: 'https://status.together.ai', flapSuppression: true },
   { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: null, rssFeedUrl: 'https://status.fireworks.ai/feed', betterStackUrl: 'https://status.fireworks.ai', flapSuppression: true },
+  // Cerebras Inference (#391) — Atlassian Statuspage, 5 components: 4 model surfaces + Developer Console.
+  // Multi-component worst-of (#379): statusComponentIds lists all 5 so any degraded model degrades the
+  // service; statusComponentId (Developer Console) is the primary for uptime parsing / calendar /
+  // component-miss alerting. Single-tenant page → no incidentKeywords needed.
+  { id: 'cerebras', name: 'Cerebras Inference', provider: 'Cerebras', category: 'api', statusUrl: 'https://status.cerebras.ai', apiUrl: 'https://status.cerebras.ai/api/v2/summary.json', statusComponentId: '83h1cchw4vs4', statusComponentIds: ['83h1cchw4vs4', '7xvps6c9lqwc', 'bhqw2gr7r710', 'hgfykfsb36gn', '8ygyx5vydlm2'] },
   { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com' },
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
   { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://status.deepseek.com/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x', incidentKeywords: ['api'] },
