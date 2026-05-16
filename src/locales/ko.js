@@ -61,6 +61,7 @@ const ko = {
   'overview.banner.down': '서비스 중단',
   'overview.banner.affected': '{n}개 서비스 장애',
   'overview.banner.fallback': '대체 추천:',
+  'overview.banner.regionSwitch': '리전 전환:',
   'overview.banner.noFallback': '대체 서비스 없음 · 재시도 또는 캐싱 권장',
   'overview.banner.viewIssues': 'Issues 탭에서 확인',
   'overview.banner.viewIncidents': '인시던트 상세 확인',

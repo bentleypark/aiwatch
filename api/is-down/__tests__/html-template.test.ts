@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { buildMetaDescription, renderIncidents, renderFooter, type ServiceData } from '../html-template'
+import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderShareButtons, type ServiceData } from '../html-template'
 import type { ServiceSEO } from '../seo-content'
 import { SLUG_TO_SERVICE, RELATED_SLUGS } from '../slug-map'
+import type { RegionStatusResult } from '../region-status'
 
 function mkSeo(overrides: Partial<ServiceSEO> = {}): ServiceSEO {
   return {
@@ -331,5 +332,233 @@ describe('renderFooter — Also check category grouping', () => {
     for (const s of linkSlugs) {
       expect(SLUG_TO_SERVICE[s]?.category, `${s} in API group must be api-category`).toBe('api')
     }
+  })
+})
+
+// ── renderRegionRecommendation (refs #422 Phase 2) ───────────────────
+//
+// Contract: returns '' on all skip conditions; otherwise emits a self-contained
+// callout block matching the AI Insight visual language. The function is the
+// SSR equivalent of the Overview ActionBanner region line + ServiceDetails
+// regional card recommendation — same three skip gates apply.
+
+function mkRegionRec(overrides: Partial<RegionStatusResult> = {}): RegionStatusResult {
+  const usEast = { key: 'AWS us-east-1', label: 'AWS US East', status: 'incident' as const, type: 'incident' as const }
+  const usWest = { key: 'AWS us-west-2', label: 'AWS US West', status: 'ok' as const, type: 'incident' as const }
+  const euWest = { key: 'AWS eu-west-1', label: 'AWS EU West', status: 'ok' as const, type: 'incident' as const }
+  const regions = [usEast, usWest, euWest]
+  return {
+    regions,
+    okRegions: [usWest, euWest],
+    incidentRegions: [usEast],
+    hasRegionSpecific: true,
+    allDown: false,
+    recommendedRegion: usWest,
+    docsUrl: 'https://docs.pinecone.io/troubleshooting/available-cloud-regions',
+    ongoingCount: 1,
+    ...overrides,
+  }
+}
+
+describe('renderRegionRecommendation', () => {
+  it('returns empty string when rec is null (service has no region map)', () => {
+    expect(renderRegionRecommendation(null, 'mistral')).toBe('')
+  })
+
+  it('returns empty string when hasRegionSpecific is false (global incident path)', () => {
+    // Global-incident fallback marks every region as affected but with hasRegionSpecific=false.
+    // Recommending a region in that state would be misleading — the renderer must skip.
+    const rec = mkRegionRec({ hasRegionSpecific: false })
+    expect(renderRegionRecommendation(rec, 'pinecone')).toBe('')
+  })
+
+  it('returns empty string when allDown (no OK region to recommend)', () => {
+    const allDown = mkRegionRec({
+      allDown: true,
+      okRegions: [],
+      recommendedRegion: null,
+    })
+    expect(renderRegionRecommendation(allDown, 'pinecone')).toBe('')
+  })
+
+  it('returns empty string when recommendedRegion is null even if other gates pass', () => {
+    // Defensive: if a future refactor sets allDown=false but recommendedRegion=null
+    // (would indicate a logic bug upstream), the renderer should still bail out.
+    const odd = mkRegionRec({ recommendedRegion: null })
+    expect(renderRegionRecommendation(odd, 'pinecone')).toBe('')
+  })
+
+  it('renders happy-path callout with affected + recommended labels', () => {
+    const html = renderRegionRecommendation(mkRegionRec(), 'pinecone')
+    expect(html).toContain('Try region:')
+    expect(html).toContain('AWS US West')
+    expect(html).toContain('AWS US East')
+    // Single affected region — joined with ", " (only one entry here so we just see the label)
+  })
+
+  it('joins multiple incident regions with ", "', () => {
+    const usEast = { key: 'AWS us-east-1', label: 'AWS US East', status: 'incident' as const, type: 'incident' as const }
+    const usWest = { key: 'AWS us-west-2', label: 'AWS US West', status: 'incident' as const, type: 'incident' as const }
+    const euWest = { key: 'AWS eu-west-1', label: 'AWS EU West', status: 'ok' as const, type: 'incident' as const }
+    const rec = mkRegionRec({
+      regions: [usEast, usWest, euWest],
+      okRegions: [euWest],
+      incidentRegions: [usEast, usWest],
+      recommendedRegion: euWest,
+    })
+    const html = renderRegionRecommendation(rec, 'pinecone')
+    expect(html).toContain('AWS US East, AWS US West')
+    expect(html).toContain('AWS EU West')
+  })
+
+  it('renders docs link with target=_blank rel=noopener noreferrer when docsUrl present', () => {
+    // Security contract — same as the ActionBanner pin (#422 Phase 1).
+    // External link MUST carry rel=noopener noreferrer to prevent reverse-tabnabbing.
+    const html = renderRegionRecommendation(mkRegionRec(), 'pinecone')
+    expect(html).toMatch(/target="_blank"/)
+    expect(html).toMatch(/rel="noopener noreferrer"/)
+    expect(html).toContain('docs.pinecone.io')
+  })
+
+  it('omits docs anchor when docsUrl is undefined', () => {
+    const rec = mkRegionRec({ docsUrl: undefined })
+    const html = renderRegionRecommendation(rec, 'pinecone')
+    expect(html).toContain('Try region:')
+    expect(html).not.toMatch(/<a /)
+  })
+
+  it('fires region_switch_intent GA4 event with location=is_down_page', () => {
+    // Pinned to keep the SSR-driven click attribution distinct from
+    // ServiceDetails (service_details) and ActionBanner (action_banner).
+    // Without this, GA funnel data can't tell which surface drove the click.
+    const html = renderRegionRecommendation(mkRegionRec(), 'pinecone')
+    expect(html).toContain("gtag('event','region_switch_intent'")
+    expect(html).toContain("location:'is_down_page'")
+    expect(html).toContain("service_id:'pinecone'")
+    // The recommended region key is JSON-encoded so a key with spaces (e.g.
+    // "AWS us-west-2") stays valid JS literal — assert that encoding holds.
+    // Quote-escape contract: inner `"` from JSON.stringify must be HTML-encoded
+    // as `&quot;` so the outer `onclick="..."` attribute doesn't truncate.
+    // See the regression test below ("onclick attribute parses as a single
+    // intact JS expression") for the DOM-level integrity check.
+    expect(html).toContain('recommended_region:&quot;AWS us-west-2&quot;')
+  })
+
+  it('onclick attribute parses as a single intact JS expression (regression: quote-escape contract)', () => {
+    // Regression pin for the Phase-2 review-round-3 Critical finding: the GA4
+    // onclick body contains `recommended_region:"AWS us-west-2"` which, if
+    // left as raw `"`, would prematurely close the outer `onclick="..."`
+    // attribute. HTML parser truncates at the first inner `"`, the rest of
+    // the JS body is interpreted as bogus HTML attributes, and the GA4
+    // event silently never fires. We escape inner `"` to `&quot;`.
+    //
+    // Reparse the rendered HTML through the test environment's DOM and pull
+    // the onclick attribute back out to verify it's whole. If a future
+    // contributor swaps the escape strategy (single-quoting, delegated
+    // listeners, etc.) we want this test to catch any regression that
+    // re-breaks the attribute boundary.
+    const html = renderRegionRecommendation(mkRegionRec(), 'pinecone')
+    const container = document.createElement('div')
+    container.innerHTML = html
+    const anchor = container.querySelector('a[onclick]')
+    expect(anchor, 'expected an anchor with onclick to be present').not.toBeNull()
+    const onclick = anchor!.getAttribute('onclick') ?? ''
+    // The full JS body must end with `})` — the closing of gtag(...) call.
+    // If the attribute was truncated, the value would end at `recommended_region:`
+    // and the trailing characters would have become separate attributes.
+    expect(onclick).toMatch(/\}\)$/)
+    // The recommended_region value is present, contains a space (Pinecone-shaped
+    // key), and the JSON.stringify quotes are entity-decoded back to literal `"`
+    // by the HTML parser when we read getAttribute (verified below).
+    expect(onclick).toContain('recommended_region:"AWS us-west-2"')
+    expect(onclick).toContain("location:'is_down_page'")
+    expect(onclick).toContain("service_id:'pinecone'")
+    // No stray HTML attributes leaked from a truncated onclick — the fix
+    // ensures the value is whole, so anchor has exactly the expected attrs.
+    const attrNames = anchor!.getAttributeNames().sort()
+    expect(attrNames).toEqual(['href', 'onclick', 'rel', 'style', 'target'])
+  })
+
+  it('escapes label content (defensive vs upstream-injected labels)', () => {
+    // Note: regression test for the share-button onclick attributes is in the
+    // `renderShareButtons` describe block below, not here — same bug class, same
+    // file, but two separate render call sites worth pinning independently so a
+    // future refactor that splits or merges them doesn't quietly orphan the fix.
+    // SERVICE_REGIONS labels are static + author-controlled today, but the
+    // renderer pipes them through `esc()` anyway as a defense-in-depth
+    // against a future "regions come from an upstream feed" change. Pin by
+    // passing a label with HTML-special chars.
+    const xssLabel = '<img src=x onerror="alert(1)">'
+    const usWest = { key: 'safe', label: xssLabel, status: 'ok' as const, type: 'incident' as const }
+    const usEast = { key: 'aff', label: 'Affected', status: 'incident' as const, type: 'incident' as const }
+    const rec = mkRegionRec({
+      regions: [usEast, usWest],
+      okRegions: [usWest],
+      incidentRegions: [usEast],
+      recommendedRegion: usWest,
+    })
+    const html = renderRegionRecommendation(rec, 'pinecone')
+    expect(html).not.toContain('<img src=x')
+    expect(html).toContain('&lt;img src=x')
+  })
+})
+
+// ── renderShareButtons (quote-escape contract — same class as #422 region rec) ──
+//
+// Phase 2 review round 4 audit caught a pre-existing instance of the same
+// quote-truncation bug in the share buttons: `item_id:${jsDisplayName}` from
+// JSON.stringify embeds a raw `"` into the double-quoted `onclick="..."`
+// attribute. HTML parser truncates → `gtag('event','share',...)` never fires
+// → bogus stray attributes leak. The fix (escJsForAttr helper) applies the same
+// shape across both call sites; this regression test mirrors the region-rec
+// pin so a future split/merge of the helper can't silently revert one side.
+
+describe('renderShareButtons onclick attributes (quote-escape contract)', () => {
+  // Minimal SEO fixture — only the display name + faqs are read by the
+  // share-button code path. The display name carries an embedded space so the
+  // JSON.stringify output has the inner `"` that the bug truncates on.
+  const seo = mkSeo({ displayName: 'Claude API' })
+  const service = mkService({ status: 'down' })
+  const canonical = 'https://ai-watch.dev/is-claude-down'
+  const ogImage = 'https://aiwatch-worker.p2c2kbf.workers.dev/api/og?v=1'
+
+  it('share-x onclick attribute parses as a single intact JS expression', () => {
+    const html = renderShareButtons(seo, service, canonical, ogImage)
+    const container = document.createElement('div')
+    container.innerHTML = html
+    const anchor = container.querySelector('a.share-x')
+    expect(anchor, 'share-x anchor missing').not.toBeNull()
+    const onclick = anchor!.getAttribute('onclick') ?? ''
+    // Whole gtag call survives.
+    expect(onclick).toMatch(/\}\)$/)
+    // Entity-decoded inner double quotes around the displayName.
+    expect(onclick).toContain('item_id:"Claude API"')
+    // No truncation residue — anchor has exactly the documented attrs.
+    expect(anchor!.getAttributeNames().sort()).toEqual(['class', 'href', 'onclick', 'rel', 'target'])
+  })
+
+  it('share-threads onclick attribute parses as a single intact JS expression', () => {
+    const html = renderShareButtons(seo, service, canonical, ogImage)
+    const container = document.createElement('div')
+    container.innerHTML = html
+    const anchor = container.querySelector('a.share-threads')
+    expect(anchor, 'share-threads anchor missing').not.toBeNull()
+    const onclick = anchor!.getAttribute('onclick') ?? ''
+    expect(onclick).toMatch(/\}\)$/)
+    expect(onclick).toContain('item_id:"Claude API"')
+    expect(anchor!.getAttributeNames().sort()).toEqual(['class', 'href', 'onclick', 'rel', 'target'])
+  })
+
+  it('share-x and share-threads onclick wire-format uses the entity-escaped form', () => {
+    // Raw HTML inspection — a future refactor that drops escJsForAttr but uses
+    // a different fix (delegated listeners, single-quoted attrs) must update
+    // this assertion deliberately. Pins the wire format alongside the DOM
+    // parse to give both layers their own regression signal.
+    const html = renderShareButtons(seo, service, canonical, ogImage)
+    // Single quotes inside an HTML attribute value don't need entity-encoding
+    // (the attribute is double-quoted, so `'` is just a literal). Only the
+    // double quotes from JSON.stringify need the `&quot;` treatment.
+    expect(html).toContain(`method:'x',content_type:'is_x_down',item_id:&quot;Claude API&quot;`)
+    expect(html).toContain(`method:'threads',content_type:'is_x_down',item_id:&quot;Claude API&quot;`)
   })
 })

@@ -9,6 +9,7 @@ import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
 import { SCORE_BG_CLASS, SERVICE_CATEGORIES, EXCLUDE_FALLBACK, getFallbacks, tierFor, tierLabelFor } from '../utils/constants'
+import { regionStatusOf } from '../utils/regionStatus'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { compareIncidents, getContextualTime } from '../utils/incidentSort'
 import { formatTime, formatDate } from '../utils/time'
@@ -369,6 +370,29 @@ function ActionBanner({ services, setPage, t }) {
     categoryGroups.push({ category: svc.category, label, items: candidates.slice(0, perGroup) })
   }
 
+  // Region-switch recommendations (refs #422 Phase 1). For each affected service
+  // whose status page reports per-region incidents AND has at least one healthy
+  // region, surface "Pinecone → AWS US West" alongside the cross-service fallback.
+  // Region switch is structurally cheaper than service switch (same SDK / IAM /
+  // billing) so it deserves first-line visibility — today this guidance is
+  // siloed in ServiceDetails and requires a click to discover.
+  //
+  // Skip when:
+  //   • regionStatusOf returns null (no region map / no relevant incidents)
+  //   • hasRegionSpecific === false (global-incident fallback path — every
+  //     region marked affected; suggesting "switch region" would be misleading)
+  //   • allDown — no OK region to recommend
+  const regionRecs = []
+  for (const svc of affected) {
+    const rs = regionStatusOf(svc)
+    if (!rs || !rs.hasRegionSpecific || rs.allDown || !rs.recommendedRegion) continue
+    regionRecs.push({
+      svc,
+      recommendedRegion: rs.recommendedRegion,
+      docsUrl: rs.docsUrl,
+    })
+  }
+
   return (
     <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg" style={{ padding: '10px 14px', lineHeight: 1.5, borderLeft: `3px solid ${borderColor}` }}>
       {downList.length > 0 && (
@@ -400,6 +424,42 @@ function ActionBanner({ services, setPage, t }) {
           >
             👉 {t('overview.banner.viewIncidents')}
           </button>
+        </div>
+      )}
+      {/* Region-switch recommendation line (refs #422 Phase 1). Renders before
+          cross-service fallback so the cheaper-to-execute action lands first.
+          Service name is clickable (drills into ServiceDetails for the full
+          region card); the recommended-region label links out to the provider's
+          region docs and fires region_switch_intent GA4 with location=action_banner. */}
+      {regionRecs.length > 0 && (
+        <div className="mono text-[11px] text-[var(--text2)]" style={{ marginTop: '4px' }}>
+          <span>{t('overview.banner.regionSwitch')}</span>
+          {regionRecs.map((rec, ri) => (
+            <span key={rec.svc.id}>
+              {ri > 0 && ' · '}
+              {' '}
+              <span
+                className="text-[var(--text0)] hover:underline cursor-pointer"
+                onClick={() => setPage({ name: 'service', serviceId: rec.svc.id })}
+              >
+                {rec.svc.name}
+              </span>
+              <span className="text-[var(--text2)]"> → </span>
+              {rec.docsUrl ? (
+                <a
+                  href={rec.docsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--green)] hover:underline"
+                  onClick={() => trackEvent('region_switch_intent', { service_id: rec.svc.id, recommended_region: rec.recommendedRegion.key, location: 'action_banner' })}
+                >
+                  {rec.recommendedRegion.label}
+                </a>
+              ) : (
+                <span className="text-[var(--green)]">{rec.recommendedRegion.label}</span>
+              )}
+            </span>
+          ))}
         </div>
       )}
       {categoryGroups.length > 0 ? (

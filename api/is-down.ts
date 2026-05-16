@@ -3,6 +3,7 @@
 import { SLUG_TO_SERVICE } from './is-down/slug-map'
 import { getSEOContent } from './is-down/seo-content'
 import { renderPage } from './is-down/html-template'
+import { regionStatusOf, type RegionStatusResult } from './is-down/region-status'
 
 export const config = { runtime: 'edge' }
 
@@ -213,7 +214,23 @@ export default async function handler(req: Request) {
       console.error(`[is-down/${slug}] API fetch ${err?.name === 'AbortError' ? 'timeout' : 'failed'}:`, err?.message)
     }
 
-    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight)
+    // Region recommendation (refs #422 Phase 2). regionStatusOf returns null
+    // when the service has no region map, no relevant incident, or every
+    // region is hit — the template's renderRegionRecommendation treats null
+    // as "skip the line entirely" so passing it directly is safe.
+    let regionRec: RegionStatusResult | null = null
+    if (serviceData) {
+      try {
+        regionRec = regionStatusOf(serviceData)
+      } catch (regionErr) {
+        // Region computation is best-effort — never block the page render.
+        // Edge logs the error so a future drift between the Worker's incident
+        // shape and our `IncidentLike` type is visible.
+        console.warn(`[is-down/${slug}] regionStatusOf threw:`, regionErr instanceof Error ? regionErr.message : regionErr)
+      }
+    }
+
+    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec)
 
     // #378: when the upstream Worker fetch failed and we're rendering the
     // "Status data is temporarily unavailable" fallback, the response must NOT

@@ -61,6 +61,7 @@ const en = {
   'overview.banner.down': 'Down',
   'overview.banner.affected': '{n} services affected',
   'overview.banner.fallback': 'Suggested fallback:',
+  'overview.banner.regionSwitch': 'Switch region:',
   'overview.banner.noFallback': 'No direct fallback available · Retry or caching recommended',
   'overview.banner.viewIssues': 'View Issues tab for details',
   'overview.banner.viewIncidents': 'View incident details',

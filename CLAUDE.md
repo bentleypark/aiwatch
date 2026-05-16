@@ -188,6 +188,11 @@ When adding a new monitored service, update ALL of the following:
 8. `src/pages/ServiceDetails.jsx` — add `STATUS_URL` entry for official status page link
 9. `src/pages/Overview.jsx` — verify `TIER_LABEL` (keep in sync with `worker/src/fallback.ts`; `API_TIER` + `getFallbacks` imported from `src/utils/constants.js`)
 10. `api/is-down.ts` — add to `API_TIER` + `EXCLUDE_FALLBACK` (keep in sync with `worker/src/fallback.ts`)
+10b. (region-aware services only) Region data lives in TWO cross-mirrored copies — both must update together. The sync is pinned by `worker/src/__tests__/region-status-sync.test.ts`:
+   - `src/utils/regionStatus.js` — frontend (ServiceDetails RegionalAvailability card, Overview ActionBanner region line). Canonical source for the sync test.
+   - `api/is-down/region-status.ts` — Edge SSR (Is X Down? region recommendation line). Duplicated because Vercel Edge bundling cannot import from `src/`. Same shape, TS port.
+   
+   For both: add `SERVICE_REGIONS` entries (one per region with `key` substring-matched against incident title / componentNames + display `label`) and a `REGION_DOCS_URL` pointer to the provider's region docs. Add `ALWAYS_SHOW_REGIONS` membership only if the service should render the per-region card even with zero ongoing incidents (Bedrock / Azure OpenAI pattern). Surfaces on ServiceDetails + Overview ActionBanner via `regionStatusOf` (#422 Phase 1) + on `/is-*-down` SSR via the Edge mirror (#422 Phase 2).
 
 #### Documentation — service count ("N AI services")
 11. `CLAUDE.md` — architecture section: service count, service list, category breakdown, KV schema comment, probe count, fallback tier list
@@ -397,7 +402,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | `save_settings` | — | Settings | Settings saved |
 | `webhook_register` | `type` (discord/slack) | Settings | Webhook URL added |
 | `webhook_remove` | `type` (discord/slack) | Settings | Webhook URL removed |
-| `region_switch_intent` | `service_id`, `recommended_region` | ServiceDetails (Regional) | Region guide link click |
+| `region_switch_intent` | `service_id`, `recommended_region`, `location` (`service_details` / `action_banner` / `is_down_page`) | ServiceDetails (Regional) · Overview (ActionBanner) · Is X Down SSR | Region guide link click — `location` distinguishes the surface that drove the click (#422 Phase 1 + Phase 2) |
 | `click_reports` | — | Sidebar | Monthly reports link click |
 | `click_request_service` | — | Sidebar (request link) | Service request link click |
 | `copy_statusline_snippet` | `preset` (degraded_only/compact_badge/full_list/scoped/clickable) | Statusline page (Copy buttons) | Statusline integration adoption signal (#400 Phase 0) |

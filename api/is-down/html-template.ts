@@ -6,6 +6,7 @@ import { groupIncidents, type GroupingIncident, type GroupRow, type SingleRow } 
 import { compareGroupedRows } from './incident-sort'
 import { CONSENT_INIT_COMMENT, CONSENT_INIT_SCRIPT } from '../_shared/consent-init'
 import { COOKIE_BANNER_HTML } from '../_shared/cookie-banner'
+import type { RegionStatusResult } from './region-status'
 
 /** Format recovery display — shared with worker/src/ai-analysis.ts */
 function formatRecoveryDisplay(recovery: string): string {
@@ -54,6 +55,22 @@ function esc(s: string | null | undefined): string {
 
 function safeJsonLd(data: unknown): string {
   return JSON.stringify(data).replace(/</g, '\\u003c')
+}
+
+// Encode a JSON.stringify output (or any JS-string-literal-wrapped value) so the
+// inner `"` survives being embedded inside a double-quoted HTML attribute like
+// `onclick="..."`. Without this, the HTML tokenizer treats the first inner `"`
+// as the attribute terminator → truncates the JS body → the rest leaks as
+// stray attributes → the inline handler silently never runs. The browser
+// entity-decodes `&quot;` back to `"` before invoking the JS compiler, so the
+// embedded handler executes as intended.
+//
+// Discovered in #422 Phase 2 review round 3 (region recommendation onclick) and
+// audited across the file in round 4 — also fixes the pre-existing share-button
+// GA4 fire that has been silently dead. Centralized here so future
+// inline-onclick + JSON.stringify combinations don't re-discover the bug.
+function escJsForAttr(jsLiteral: string): string {
+  return jsLiteral.replace(/"/g, '&quot;')
 }
 
 function statusEmoji(status: string): string {
@@ -111,6 +128,12 @@ export function renderPage(
   seo: ServiceSEO,
   fallbacks: Fallback[],
   aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string } | null,
+  // Region recommendation (refs #422 Phase 2). When the affected service has
+  // region-specific incidents AND at least one healthy region, surface an
+  // actionable "Try region: X" line right under the AI Insight block. Null
+  // when the service has no region map, no relevant incident, or every region
+  // is hit (allDown — no useful recommendation).
+  regionRec?: RegionStatusResult | null,
 ): string {
   const title = `Is ${seo.displayName} Down? Live Status | AIWatch`
   const desc = buildMetaDescription(seo, service, aiInsight ?? null)
@@ -222,6 +245,7 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 ${renderStatusHeader(service, seo)}
 ${renderCTA(seo, service?.status ?? 'operational')}
 ${renderAIInsight(aiInsight, service?.status, fallbacks)}
+${renderRegionRecommendation(regionRec ?? null, slug)}
 ${renderIncidents(service)}
 ${renderDescription(seo, service)}
 ${renderFAQ(seo, fallbacks)}
@@ -305,6 +329,57 @@ ${insight.resolvedAt ? `<span>✅ Recovered: ${(() => { const m = Math.floor((Da
 </div>
 ${fallbackHtml}
 <p class="mono" style="font-size:9px;color:#484f58;margin-top:8px;opacity:0.7">⚠️ AI-generated estimation based on historical data. Actual time may vary.</p>
+</div>`
+}
+
+// ── Region recommendation (refs #422 Phase 2) ─────────────────────────
+//
+// When the SSR page is rendered during a partial regional outage (e.g.
+// Pinecone AWS us-east-1 down but other 5 regions healthy), surface a single
+// "Try region: <label>" line BEFORE the cross-service fallback recommendation.
+// Region-switch is structurally cheaper than service-switch (same SDK / IAM /
+// billing — only the endpoint URL changes), so it deserves first-line
+// visibility. Returns '' when there's nothing actionable to show.
+//
+// Exported (alongside other render helpers) so api/is-down/__tests__/html-template.test.ts
+// can pin both the happy-path HTML structure and the three skip conditions.
+export function renderRegionRecommendation(rec: RegionStatusResult | null, slug: string): string {
+  if (!rec) return ''
+  // Three skip conditions, same as ActionBanner (#422 Phase 1):
+  //   - hasRegionSpecific=false → global incident hit every region; recommending
+  //     a region would be misleading
+  //   - allDown → no healthy region to switch to
+  //   - !recommendedRegion → defensive, same as allDown in practice
+  if (!rec.hasRegionSpecific || rec.allDown || !rec.recommendedRegion) return ''
+
+  const affected = rec.incidentRegions.map((r) => esc(r.label)).join(', ')
+  const recLabel = esc(rec.recommendedRegion.label)
+  const docsHref = rec.docsUrl ? esc(rec.docsUrl) : ''
+
+  // Inline styles match the AI Insight callout's visual language: bg #161b22,
+  // 3px left border in the accent color (blue here, matching the region-card
+  // theme on /#service detail pages). The GA4 hook fires `region_switch_intent`
+  // with location=is_down_page so we can tell SSR-driven clicks from
+  // dashboard-driven clicks in the funnel data.
+  //
+  // Region key (e.g. Pinecone's "AWS us-west-2" — has a space) is serialized
+  // via JSON.stringify for a safe JS string literal, then HTML-attribute-
+  // encoded via escJsForAttr() so it survives being interpolated into the
+  // double-quoted `onclick="..."` attribute below. See escJsForAttr's docstring
+  // for the full contract.
+  const recKeyJs = escJsForAttr(JSON.stringify(rec.recommendedRegion.key))
+  const ga4OnClick = `typeof gtag==='function'&&gtag('event','region_switch_intent',{service_id:'${esc(slug)}',recommended_region:${recKeyJs},location:'is_down_page'})`
+
+  return `
+<div style="font-size:14px;margin:16px 0;padding:14px 16px;background:#161b22;border-left:3px solid #58a6ff;border-radius:0 6px 6px 0">
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+<span style="font-size:16px">📍</span>
+<strong style="color:#c9d1d9">Try region: ${recLabel}</strong>
+</div>
+<div style="font-size:12px;color:#8b949e;line-height:1.5">
+<span>Currently affected: ${affected}.</span>
+${docsHref ? `<br><a href="${docsHref}" target="_blank" rel="noopener noreferrer" onclick="${ga4OnClick}" style="color:#58a6ff">Region docs →</a>` : ''}
+</div>
 </div>`
 }
 
@@ -526,7 +601,7 @@ ${items}
 </div>`
 }
 
-function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canonical: string, ogImageUrl: string, aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[] } | null): string {
+export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canonical: string, ogImageUrl: string, aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[] } | null): string {
   const status = service ? statusLabel(service.status) : 'Operational'
   const rawStatus = service?.status ?? 'operational'
 
@@ -596,18 +671,22 @@ function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canoni
   const encodedUrl = rawStatus !== 'operational' ? encodeURIComponent(canonical) : ''
   const xUrlParam = encodedUrl ? `&amp;url=${encodedUrl}` : ''
 
-  // Use JSON.stringify for safe JS string interpolation (prevents XSS via backslash/newline)
+  // Use JSON.stringify for safe JS string interpolation (prevents XSS via backslash/newline).
+  // jsDisplayNameAttr is the attribute-safe form for embedding inside `onclick="..."` —
+  // see escJsForAttr docstring. The raw `jsDisplayName` etc. are kept for `<script>` bodies
+  // where the inner `"` is correct (script content is CDATA-like, not HTML-attribute parsed).
   const jsDisplayName = JSON.stringify(seo.displayName)
+  const jsDisplayNameAttr = escJsForAttr(jsDisplayName)
   const jsCanonical = JSON.stringify(canonical)
   const jsOgImageUrl = JSON.stringify(ogImageUrl)
   const jsStatus = JSON.stringify(status)
 
   return `<div class="share-bar">
-<a href="https://x.com/intent/tweet?text=${encodedText}${xUrlParam}" target="_blank" rel="noopener" class="share-btn share-x" onclick="gtag('event','share',{method:'x',content_type:'is_x_down',item_id:${jsDisplayName}})">
+<a href="https://x.com/intent/tweet?text=${encodedText}${xUrlParam}" target="_blank" rel="noopener" class="share-btn share-x" onclick="gtag('event','share',{method:'x',content_type:'is_x_down',item_id:${jsDisplayNameAttr}})">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
 Post
 </a>
-<a href="https://www.threads.net/intent/post?text=${encodedText}${encodedUrl ? '%20' + encodedUrl : ''}" target="_blank" rel="noopener" class="share-btn share-threads" onclick="gtag('event','share',{method:'threads',content_type:'is_x_down',item_id:${jsDisplayName}})">
+<a href="https://www.threads.net/intent/post?text=${encodedText}${encodedUrl ? '%20' + encodedUrl : ''}" target="_blank" rel="noopener" class="share-btn share-threads" onclick="gtag('event','share',{method:'threads',content_type:'is_x_down',item_id:${jsDisplayNameAttr}})">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12.186 24h-.007c-3.581-.024-6.334-1.205-8.184-3.509C2.35 18.44 1.5 15.586 1.472 12.01v-.017c.03-3.579.879-6.43 2.525-8.482C5.845 1.205 8.6.024 12.18 0h.014c2.746.02 5.043.725 6.826 2.098 1.677 1.29 2.858 3.13 3.509 5.467l-2.04.569c-1.104-3.96-3.898-5.984-8.304-6.015-2.91.022-5.11.936-6.54 2.717C4.307 6.504 3.616 8.914 3.59 12c.025 3.083.718 5.496 2.057 7.164 1.432 1.783 3.631 2.698 6.54 2.717 2.623-.02 4.358-.631 5.8-2.045 1.647-1.613 1.618-3.593 1.09-4.798-.346-.789-.96-1.42-1.757-1.846-.184 2.985-1.086 5.27-2.844 6.39-1.34.853-3.065 1.062-4.62.559-1.72-.557-3.09-1.843-3.37-3.583-.203-1.264.066-2.418.757-3.248.86-1.032 2.278-1.578 3.952-1.578 2.37 0 3.877 1.128 4.453 2.325.153-.915.177-1.937.073-3.065l2.023-.235c.203 2.153.015 4.027-.735 5.483a5.997 5.997 0 0 0 1.013.607c1.27.605 2.567.665 3.557-.12 1.258-1 1.554-2.79 1.168-4.34-.478-1.922-1.806-3.598-3.853-4.85C17.257 5.282 14.907 4.725 12.2 4.708h-.015c-3.34.024-5.886 1.348-7.357 3.832C3.622 10.52 3.088 12.947 3.088 12c0-.96.533-3.504 1.74-5.488 1.41-2.319 3.756-3.568 6.857-3.655h.02c2.467.02 4.57.527 6.25 1.508 1.735 1.012 3.032 2.488 3.558 4.282.65 2.214.23 4.685-1.496 6.055-1.497 1.187-3.366 1.065-4.868.348a7.89 7.89 0 0 1-.778-.42c-.66 1.345-1.68 2.276-3.063 2.788-.986.365-2.103.432-3.243.19-1.882-.401-3.466-1.576-4.156-3.216-.475-1.13-.53-2.394-.155-3.586.468-1.484 1.634-2.632 3.288-3.063 1.918-.5 3.728-.074 5.02 1.182.574.558 1.005 1.26 1.283 2.094.228-.76.382-1.581.455-2.46l-.005-.038z"/></svg>
 Share
 </a>
