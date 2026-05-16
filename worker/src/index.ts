@@ -1040,6 +1040,9 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
 
   // Compute scoreData via the same path the (fixed) cron now uses.
   let scoreData: ArchiveScoreInput[] = []
+  // service id → display name, for the AI narrative prompt (#426). Populated
+  // from the same services:latest read as scoreData.
+  const serviceNames: Record<string, string> = {}
   const cachedRaw = await env.STATUS_CACHE.get(CACHE_KEY).catch(() => null)
   if (cachedRaw) {
     try {
@@ -1050,6 +1053,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
         const r = scoreFor(s, probeSummaries)
         return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade }
       })
+      for (const s of services) serviceNames[s.id] = s.name
     } catch (parseErr) {
       console.error('[admin/rebuild-archive] services:latest parse failed:',
         parseErr instanceof Error ? parseErr.message : parseErr)
@@ -1060,7 +1064,13 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
 
   let archive
   try {
-    archive = await buildMonthlyArchive(env.STATUS_CACHE, year, monthNum, scoreData)
+    // Regenerate the AI narrative on rebuild too — an operator rebuilding after a
+    // bug-fix deploy gets a fresh draft. Best-effort; null on AI failure.
+    archive = await buildMonthlyArchive(env.STATUS_CACHE, year, monthNum, scoreData, {
+      ai: env.AI,
+      apiKey: env.ANTHROPIC_API_KEY,
+      serviceNames,
+    })
   } catch (err) {
     return json(502, { ok: false, error: 'archive build failed', detail: err instanceof Error ? err.message : String(err) })
   }
@@ -1473,6 +1483,8 @@ export default {
           // never persisted to that cache. Reading the cache directly produced
           // archive entries with score: null for every service — see #monthly-archive-score.
           let scoreData: ArchiveScoreInput[] = []
+          // service id → display name, for the AI narrative prompt (#426).
+          const serviceNames: Record<string, string> = {}
           const cachedRaw = await env.STATUS_CACHE.get('services:latest').catch(() => null)
           if (cachedRaw) {
             try {
@@ -1483,13 +1495,21 @@ export default {
                 const r = scoreFor(s, probeSummaries)
                 return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade }
               })
+              for (const s of services) serviceNames[s.id] = s.name
             } catch (parseErr) {
               console.error('[monthly-archive] Failed to parse services:latest — archive will lack Score data:',
                 parseErr instanceof Error ? parseErr.message : parseErr)
             }
           }
 
-          const archive = await buildMonthlyArchive(env.STATUS_CACHE, prevYear, prevMon, scoreData)
+          // Bake the AI retrospective narrative into the archive (#426). Best-effort:
+          // generateMonthlyNarrative degrades to null on any AI failure, the
+          // deterministic archive ships regardless.
+          const archive = await buildMonthlyArchive(env.STATUS_CACHE, prevYear, prevMon, scoreData, {
+            ai: env.AI,
+            apiKey: env.ANTHROPIC_API_KEY,
+            serviceNames,
+          })
           const writeOk = await kvPut(env.STATUS_CACHE, archiveKey, JSON.stringify(archive))
           if (!writeOk) {
             console.error(`[monthly-archive] KV write failed for ${archive.period} — archive NOT persisted`)

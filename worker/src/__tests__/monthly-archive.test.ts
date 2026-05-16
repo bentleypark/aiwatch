@@ -628,6 +628,42 @@ describe('buildMonthlyArchive', () => {
     expect(archive.services.claude.incidents).toBe(5)
   })
 
+  // ── #426: AI retrospective narrative bake-in ──
+  it('omits narrative entirely when no narrativeOpts are passed', async () => {
+    const archive = await buildMonthlyArchive(mockKV, 2026, 3)
+    expect(archive.narrative).toBeUndefined()
+  })
+
+  it('omits narrative when narrativeOpts has neither an AI binding nor an API key', async () => {
+    const archive = await buildMonthlyArchive(mockKV, 2026, 3, undefined, { serviceNames: {} })
+    expect(archive.narrative).toBeUndefined()
+  })
+
+  it('attaches an AI-generated narrative draft when an AI binding produces a usable response', async () => {
+    const draftJson = JSON.stringify({
+      notableIncidents: [{ service: 'Claude API', title: 'Elevated errors', narrative: 'Errors spiked for ~1h.' }],
+      observations: ['Treat Claude as primary; recovery was fast.'],
+    })
+    const ai = { run: async () => ({ response: draftJson }) }
+    const archive = await buildMonthlyArchive(mockKV, 2026, 3, undefined, {
+      ai,
+      serviceNames: { claude: 'Claude API' },
+    })
+    expect(archive.narrative).not.toBeNull()
+    expect(archive.narrative?.model).toBe('gemma')
+    expect(archive.narrative?.notableIncidents).toHaveLength(1)
+    expect(archive.narrative?.observations).toHaveLength(1)
+  })
+
+  it('sets narrative to null (archive still builds) when AI generation fails', async () => {
+    // AI binding throws, no API key → generateMonthlyNarrative returns null.
+    const ai = { run: async () => { throw new Error('Workers AI down') } }
+    const archive = await buildMonthlyArchive(mockKV, 2026, 3, undefined, { ai, serviceNames: {} })
+    // The deterministic archive must be intact regardless of the AI failure.
+    expect(archive.services.claude.incidents).toBe(5)
+    expect(archive.narrative).toBeNull()
+  })
+
   // ── #375: snapshot per-incident detail into the permanent archive ──
   it('snapshots per-service incidentList from accumulated data (#375)', async () => {
     const detailKV = {

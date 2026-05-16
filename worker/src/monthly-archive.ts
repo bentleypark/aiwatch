@@ -12,6 +12,7 @@ import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey } from './security-monitor'
 import type { DetectionLeadEntry } from './detection-lead-log'
 import { detectionLeadMonthlyKey, isValidEntry as isValidDetectionLeadEntry } from './detection-lead-log'
+import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
 
@@ -59,6 +60,12 @@ export interface MonthlyArchive {
   // Sourced from detection:lead:monthly:{period} (60d TTL accumulator, #369) so the archive
   // can carry detection-lead figures past the 7d TTL on the per-day audit log keys.
   detectionLead?: MonthlyDetectionLeadSummary | null
+  // Optional — AI-generated retrospective draft for the report's Notable Incidents
+  // + Observations sections (#426 / aiwatch-reports#4 Phase 3). Generated at archive
+  // build time from the incidentList data. null when AI is unavailable, the call
+  // failed, or the archive predates this feature — aiwatch-reports generate-report.js
+  // must handle absence (falls back to the hand-written placeholder).
+  narrative?: MonthlyNarrativeDraft | null
 }
 
 // ── Monthly security summary ─────────────────────────────────────────
@@ -116,13 +123,16 @@ export interface MonthlyDetectionLeadSummary {
 }
 
 // ── Incident accumulation (written daily by daily summary cron) ──────
-
-export interface MonthlyIncidentEntry {
-  title: string
-  startedAt: string
-  status: string
-  durationMin: number            // 0 if unresolved at accumulation time
-}
+//
+// NOTE: a stale duplicate `MonthlyIncidentEntry` interface used to sit here
+// (shape `{ title, startedAt, status, durationMin }`). It was superseded by the
+// canonical archive-snapshot shape at the top of this file (#375 — adds `id`,
+// `resolvedAt`, `finalStatus`) but never removed. TypeScript declaration-merged
+// the two, and the merge stayed latent only because no cross-module import
+// forced full resolution. #426's `import type { MonthlyIncidentEntry }` in
+// monthly-narrative.ts surfaced it as a TS2345 error. The accumulator pushes the
+// canonical shape (see accumulateMonthlyIncidents) so the duplicate was pure
+// dead code — removed. `incidents` below reuses the single canonical interface.
 
 export interface MonthlyIncidentServiceData {
   count: number
@@ -445,6 +455,10 @@ export async function buildMonthlyArchive(
   year: number,
   month: number,
   scoreData?: ArchiveScoreInput[],
+  // When provided with an AI binding and/or API key, generate the retrospective
+  // narrative draft and bake it into the archive (#426). Omitted/empty → archive
+  // builds with `narrative: null`; the report falls back to its placeholder.
+  narrativeOpts?: NarrativeAiOptions,
 ): Promise<MonthlyArchive> {
   const mm = String(month).padStart(2, '0')
   const period = `${year}-${mm}`
@@ -592,7 +606,7 @@ export async function buildMonthlyArchive(
     }
   }
 
-  return {
+  const archive: MonthlyArchive = {
     period,
     generatedAt: new Date().toISOString(),
     daysCollected,
@@ -600,6 +614,21 @@ export async function buildMonthlyArchive(
     security,
     detectionLead,
   }
+
+  // AI retrospective narrative (#426). Best-effort — generateMonthlyNarrative
+  // never throws (catches internally and returns null), but the extra guard
+  // here is defense-in-depth: a narrative-generation hiccup must never lose the
+  // deterministic archive. Only attempt when an AI binding or API key is given.
+  if (narrativeOpts && (narrativeOpts.ai || narrativeOpts.apiKey)) {
+    try {
+      archive.narrative = await generateMonthlyNarrative(archive, narrativeOpts)
+    } catch (err) {
+      console.error(`[monthly-archive] narrative generation threw for ${period}:`, err instanceof Error ? err.message : err)
+      archive.narrative = null
+    }
+  }
+
+  return archive
 }
 
 /** Check if we should run monthly archive (1st of month, UTC 00:00-00:14 or catch-up 01:00-01:14) */
