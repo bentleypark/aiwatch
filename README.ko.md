@@ -93,7 +93,7 @@
 | ChatGPT | OpenAI |
 | Character.AI | Character AI |
 
-### 코딩 에이전트 (5개)
+### 코딩 에이전트 (6개)
 
 | 서비스 | 제공업체 |
 |--------|----------|
@@ -102,6 +102,7 @@
 | Cursor | Anysphere |
 | GitHub Copilot | Microsoft |
 | Windsurf | Codeium |
+| Junie | JetBrains |
 
 ## 기술 스택
 

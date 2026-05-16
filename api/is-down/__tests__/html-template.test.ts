@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { buildMetaDescription, renderIncidents, type ServiceData } from '../html-template'
+import { buildMetaDescription, renderIncidents, renderFooter, type ServiceData } from '../html-template'
 import type { ServiceSEO } from '../seo-content'
+import { SLUG_TO_SERVICE, RELATED_SLUGS } from '../slug-map'
 
 function mkSeo(overrides: Partial<ServiceSEO> = {}): ServiceSEO {
   return {
@@ -237,5 +238,98 @@ describe('renderIncidents — 30-day window + grouping', () => {
     expect(invIdx).toBeGreaterThan(-1)
     expect(newestResolvedIdx).toBeGreaterThan(-1)
     expect(invIdx).toBeLessThan(newestResolvedIdx)
+  })
+})
+
+// ── renderFooter — "Also check" category grouping (#424) ─────────────
+//
+// The footer cross-links were previously a flat blob in SLUG_TO_SERVICE
+// insertion order (SEO-rollout phase order — API / app / agent interleaved).
+// renderFooter now groups the non-current, non-related links by category
+// with API / AI Apps / Coding Agents sub-labels.
+
+describe('renderFooter — Also check category grouping', () => {
+  it('emits the three category sub-labels in API → AI Apps → Coding Agents order', () => {
+    // Use a slug whose RELATED_SLUGS doesn't drain a whole category, so all
+    // three groups are non-empty. `claude` (api) relates to claude-ai, claude-code,
+    // openai, chatgpt — leaves api/app/agent all populated.
+    const html = renderFooter('claude')
+    const apiIdx = html.indexOf('<strong style="color:#8b949e">API:</strong>')
+    const appIdx = html.indexOf('<strong style="color:#8b949e">AI Apps:</strong>')
+    const agentIdx = html.indexOf('<strong style="color:#8b949e">Coding Agents:</strong>')
+    expect(apiIdx, 'API sub-label present').toBeGreaterThan(-1)
+    expect(appIdx, 'AI Apps sub-label present').toBeGreaterThan(-1)
+    expect(agentIdx, 'Coding Agents sub-label present').toBeGreaterThan(-1)
+    // Order: API before AI Apps before Coding Agents.
+    expect(apiIdx).toBeLessThan(appIdx)
+    expect(appIdx).toBeLessThan(agentIdx)
+  })
+
+  it('every non-current, non-related service appears exactly once under exactly one category', () => {
+    // Completeness contract: the grouping must not drop any service. For a
+    // given page, the footer should account for every SLUG_TO_SERVICE entry =
+    // current + related + (sum of category groups).
+    const slug = 'claude'
+    const html = renderFooter(slug)
+    const related = (RELATED_SLUGS[slug] ?? []).filter(s => SLUG_TO_SERVICE[s])
+    const expectedInFooter = Object.keys(SLUG_TO_SERVICE).filter(
+      s => s !== slug && !related.includes(s),
+    )
+    // Each expected service's is-down link must be present exactly once.
+    for (const s of expectedInFooter) {
+      const href = `/is-${s}-down`
+      const occurrences = html.split(href).length - 1
+      expect(occurrences, `${s} should appear exactly once in the footer "Also check" block`).toBe(1)
+    }
+    // No related service leaks into the "Also check" groups — related links
+    // live on the separate "Related:" line. (They will still match `/is-X-down`
+    // via the Related line, so scope the count to the "Also check:" paragraph.)
+    const alsoCheckStart = html.indexOf('Also check:')
+    const alsoCheckBlock = html.slice(alsoCheckStart)
+    for (const r of related) {
+      expect(alsoCheckBlock.includes(`/is-${r}-down`), `related service ${r} must NOT appear in "Also check"`).toBe(false)
+    }
+  })
+
+  it('omits a category sub-label entirely when that category has no remaining services', () => {
+    // `claude-code` (agent) relates to claude, cursor, github-copilot, windsurf,
+    // codex, junie. Every other agent is either current or related → the
+    // Coding Agents group is empty and must not render a stray "Coding Agents:"
+    // label. API + AI Apps groups remain.
+    const html = renderFooter('claude-code')
+    expect(html).not.toContain('<strong style="color:#8b949e">Coding Agents:</strong>')
+    expect(html).toContain('<strong style="color:#8b949e">API:</strong>')
+    expect(html).toContain('<strong style="color:#8b949e">AI Apps:</strong>')
+  })
+
+  it('FOOTER_CATEGORY_ORDER covers every category present in SLUG_TO_SERVICE', () => {
+    // Completeness guard. renderFooter buckets `remaining` into the three
+    // categories API / AI Apps / Coding Agents. If a future service is added
+    // with a 4th category value (the `category` field is typed `string`, not
+    // a union, so this compiles silently), its is-down link would vanish from
+    // the footer with no other test failure — the exact silent SEO-link-loss
+    // this whole #424 change set out to prevent. Fail loudly here instead.
+    const present = new Set(Object.values(SLUG_TO_SERVICE).map(e => e.category))
+    expect([...present].sort()).toEqual(['agent', 'api', 'app'])
+  })
+
+  it('grouped links are category-pure — no cross-category leakage within a group', () => {
+    // Pull the API group's text span and assert it contains only api-category
+    // service links. A regression that mis-buckets (e.g. category typo) would
+    // surface as an agent/app link inside the API <span>.
+    // NOTE: the slice below assumes the group markup is a FLAT <span> with no
+    // nested <span>. If a future refactor nests spans, update the bounds.
+    const html = renderFooter('claude')
+    // The API group is a <span> ... up to the next <span> or </p>.
+    const apiSpanStart = html.indexOf('<strong style="color:#8b949e">API:</strong>')
+    const afterApi = html.slice(apiSpanStart)
+    const apiSpanEnd = afterApi.indexOf('</span>')
+    const apiSpan = afterApi.slice(0, apiSpanEnd)
+    // Every /is-X-down link inside the API span must map to an api-category slug.
+    const linkSlugs = [...apiSpan.matchAll(/\/is-([a-z-]+)-down/g)].map(m => m[1])
+    expect(linkSlugs.length).toBeGreaterThan(0)
+    for (const s of linkSlugs) {
+      expect(SLUG_TO_SERVICE[s]?.category, `${s} in API group must be api-category`).toBe('api')
+    }
   })
 })

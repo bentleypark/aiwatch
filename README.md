@@ -94,7 +94,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 | ChatGPT | OpenAI |
 | Character.AI | Character AI |
 
-### Coding Agents (5)
+### Coding Agents (6)
 
 | Service | Provider |
 |---------|----------|
@@ -103,6 +103,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 | Cursor | Anysphere |
 | GitHub Copilot | Microsoft |
 | Windsurf | Codeium |
+| Junie | JetBrains |
 
 ## Tech Stack
 

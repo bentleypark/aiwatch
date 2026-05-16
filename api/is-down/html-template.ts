@@ -670,8 +670,22 @@ function shareKakao(){
 }
 
 
-function renderFooter(slug: string): string {
-  // Related services first (SEO cross-linking), then remaining
+// "Also check" footer cross-links are grouped by category (#424). Without
+// grouping, the links render in `SLUG_TO_SERVICE` insertion order — which is
+// the historical SEO-page rollout order, mixing API / app / agent services
+// with no logic. Grouping gives the SEO internal-link block a coherent
+// structure and lets a reader scan to the category they care about.
+const FOOTER_CATEGORY_ORDER: ReadonlyArray<{ key: string; label: string }> = [
+  { key: 'api', label: 'API' },
+  { key: 'app', label: 'AI Apps' },
+  { key: 'agent', label: 'Coding Agents' },
+]
+
+// Exported for api/is-down/__tests__/html-template.test.ts — pins the
+// category-grouped "Also check" structure (#424).
+export function renderFooter(slug: string): string {
+  // Related services first (SEO cross-linking), then everything else grouped
+  // by category.
   const related = (RELATED_SLUGS[slug] ?? []).filter(s => SLUG_TO_SERVICE[s])
   const allSlugs = Object.keys(SLUG_TO_SERVICE).filter(s => s !== slug)
   const remaining = allSlugs.filter(s => !related.includes(s))
@@ -683,15 +697,28 @@ function renderFooter(slug: string): string {
       return `<a href="/is-${esc(s)}-down" style="font-weight:500">Is ${esc(name)} down?</a>`
     })
     .join(' &middot; ')
-  const otherLinks = remaining
-    .map(s => `<a href="/is-${esc(s)}-down">Is ${esc(SLUG_TO_SERVICE[s]?.name ?? s.replace(/-/g, ' '))} down?</a>`)
-    .join(' ')
+
+  // Group `remaining` by category. Within each category the existing
+  // deterministic SLUG_TO_SERVICE order is preserved. Empty categories emit
+  // nothing — no stray sub-label. Every service falls into exactly one of
+  // api / app / agent (all SLUG_TO_SERVICE entries carry one of those three),
+  // so no service is dropped by the grouping.
+  const otherGroups = FOOTER_CATEGORY_ORDER
+    .map(({ key, label }) => {
+      const links = remaining
+        .filter(s => SLUG_TO_SERVICE[s]?.category === key)
+        .map(s => `<a href="/is-${esc(s)}-down">Is ${esc(SLUG_TO_SERVICE[s]?.name ?? s.replace(/-/g, ' '))} down?</a>`)
+      if (links.length === 0) return ''
+      return `<span style="display:block;margin-top:4px"><strong style="color:#8b949e">${label}:</strong> ${links.join(' ')}</span>`
+    })
+    .filter(Boolean)
+    .join('')
 
   return `<div class="footer">
 <p style="margin-bottom:12px"><a href="https://ai-watch.dev" class="btn" onclick="typeof gtag==='function'&&gtag('event','click_dashboard',{location:'is_down_page',source:'footer'})">View Full Dashboard</a></p>
 <p><a href="https://ai-watch.dev/#${esc(seoEntry?.id ?? slug)}" onclick="typeof gtag==='function'&&gtag('event','click_service_detail',{location:'is_down_page',service_id:'${esc(seoEntry?.id ?? slug)}'})">Detailed service page</a> &middot; <a href="/reports/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'footer'})">Monthly reports</a> &middot; <a href="https://ai-watch.dev/#settings" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'footer'})">Set up alerts</a></p>
 ${relatedLinks ? `<p style="margin-top:12px;font-size:13px">Related: ${relatedLinks}</p>` : ''}
-${otherLinks ? `<p style="margin-top:8px;font-size:12px">Also check: ${otherLinks}</p>` : ''}
+${otherGroups ? `<p style="margin-top:8px;font-size:12px">Also check:${otherGroups}</p>` : ''}
 <p style="margin-top:12px">&copy; 2026 AIWatch. Real-time AI service status monitoring.</p>
 </div>`
 }
