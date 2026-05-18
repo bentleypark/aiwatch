@@ -4,7 +4,16 @@
 import type { Incident, ServiceStatus } from './types'
 import { sanitize, kvPut, kvDel, type KVLike } from './utils'
 
-const GEMMA_MODEL = '@cf/google/gemma-4-26b-a4b-it'
+// Workers AI model ID for the Gemma primary path. Exported so monthly-narrative.ts
+// (which runs its own hybrid call with a different prompt + response shape) reuses
+// the same model rather than drifting to a stale ID.
+export const GEMMA_MODEL = '@cf/google/gemma-4-26b-a4b-it'
+
+// Cloudflare AI Gateway endpoint for the Anthropic API. Exported so the
+// monthly-narrative module shares the exact same gateway route — a gateway
+// account / slug change then lives in one place, not two.
+export const AI_GATEWAY_ANTHROPIC_URL =
+  'https://gateway.ai.cloudflare.com/v1/11485987aa7d4639df5ba09d671b5615/aiwatch/anthropic/v1/messages'
 
 /**
  * Detect boilerplate timeline entries that contain no actionable technical detail.
@@ -349,7 +358,7 @@ export async function analyzeWithSonnet(
   incidentId: string,
   timelineAt: string,
 ): Promise<AIAnalysisResult | null> {
-  const res = await fetch('https://gateway.ai.cloudflare.com/v1/11485987aa7d4639df5ba09d671b5615/aiwatch/anthropic/v1/messages', {
+  const res = await fetch(AI_GATEWAY_ANTHROPIC_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
