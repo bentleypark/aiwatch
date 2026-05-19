@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderShareButtons, type ServiceData } from '../html-template'
+import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderShareButtons, renderPage, type ServiceData } from '../html-template'
 import type { ServiceSEO } from '../seo-content'
 import { SLUG_TO_SERVICE, RELATED_SLUGS } from '../slug-map'
 import type { RegionStatusResult } from '../region-status'
@@ -560,5 +560,62 @@ describe('renderShareButtons onclick attributes (quote-escape contract)', () => 
     // double quotes from JSON.stringify need the `&quot;` treatment.
     expect(html).toContain(`method:'x',content_type:'is_x_down',item_id:&quot;Claude API&quot;`)
     expect(html).toContain(`method:'threads',content_type:'is_x_down',item_id:&quot;Claude API&quot;`)
+  })
+})
+
+describe('RSS feed surfacing on /is-*-down (#430)', () => {
+  it('emits a per-service RSS autodiscovery <link> in <head>', () => {
+    const html = renderPage('claude', mkService(), mkSeo({ displayName: 'Claude' }), [])
+    expect(html).toContain(
+      '<link rel="alternate" type="application/rss+xml" title="Claude incidents — AIWatch" href="https://ai-watch.dev/feed/claude">',
+    )
+  })
+
+  it('uses the page slug, not the service ID, for the feed URL', () => {
+    const html = renderPage('claude-code', mkService({ id: 'claudecode' }), mkSeo({ displayName: 'Claude Code' }), [])
+    expect(html).toContain('href="https://ai-watch.dev/feed/claude-code"')
+    expect(html).toContain('data-rss="https://ai-watch.dev/feed/claude-code"')
+    expect(html).not.toContain('feed/claudecode')
+  })
+
+  it('emits /feed/{slug} for every is-down page slug (matches the worker feed-slug map)', () => {
+    // The worker /feed/:slug resolves via feedSlug(id) === slug, pinned by
+    // feed-slug-sync.test.ts. This guards the template's side: every is-down
+    // page must emit /feed/{its own slug} so the autodiscovery link + Copy
+    // button never point at a 404-ing feed.
+    const seo = mkSeo()
+    for (const slug of Object.keys(SLUG_TO_SERVICE)) {
+      const html = renderPage(slug, mkService(), seo, [])
+      expect(html, `autodiscovery <link> for ${slug}`).toContain(
+        `type="application/rss+xml" title="${seo.displayName} incidents — AIWatch" href="https://ai-watch.dev/feed/${slug}">`,
+      )
+      expect(html, `Copy RSS URL button for ${slug}`).toContain(
+        `data-rss="https://ai-watch.dev/feed/${slug}"`,
+      )
+    }
+  })
+
+  it('renders a secondary "Copy RSS URL" button that copies the feed URL to the clipboard', () => {
+    const html = renderPage('claude', mkService(), mkSeo(), [])
+    expect(html).toContain(
+      '<button type="button" class="btn" data-rss="https://ai-watch.dev/feed/claude" data-svc="claude" onclick="copyRss(this)">Copy RSS URL</button>',
+    )
+    expect(html).toContain('function copyRss(b)')
+    expect(html).toContain('navigator.clipboard.writeText(u)')
+    // prompt() fallback for insecure-context / writeText-rejection paths
+    expect(html).toContain("prompt('Copy RSS URL:',u)")
+  })
+
+  it('keys data-svc on the service ID, not the page slug, so copy_rss matches other per-service events', () => {
+    const html = renderPage('claude-code', mkService({ id: 'claudecode' }), mkSeo({ displayName: 'Claude Code' }), [])
+    expect(html).toContain('data-svc="claudecode"')
+    expect(html).not.toContain('data-svc="claude-code"')
+  })
+
+  it('emits the copy_rss gtag call inside the post-copy done() handler', () => {
+    const html = renderPage('claude', mkService(), mkSeo(), [])
+    expect(html).toContain(
+      "gtag('event','copy_rss',{location:'is_down_page',service_id:b.dataset.svc})",
+    )
   })
 })
