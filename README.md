@@ -346,6 +346,7 @@ worker/
     utils.ts     # Shared utilities (formatDuration, fetchWithTimeout)
     score.ts     # AIWatch Score calculation
     badge.ts     # SVG badge generator
+    rss.ts       # Incident RSS 2.0 feed (/feed.xml + /feed/:slug)
     og.ts        # OG image SVG generator (1200×630)
     og-render.ts # SVG → PNG conversion (resvg-wasm)
     alerts.ts    # Alert detection logic (incident + service alerts)
