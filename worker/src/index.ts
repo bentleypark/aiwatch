@@ -728,6 +728,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
 // corsHeaders moved to ./cors — also handles team-scoped suffix patterns for Vercel preview origins.
 
 import { generateBadgeSvg } from './badge'
+import { buildFeedResponse, type FeedRequest } from './rss'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
@@ -1934,6 +1935,48 @@ export default {
           },
         })
       }
+    }
+
+    // GET /feed.xml + /feed/:slug — incident RSS 2.0 feeds (#54).
+    // The 400/404/503/200 decision lives in buildFeedResponse (rss.ts) so it is
+    // unit-tested; this handler only does the KV read + Response wrapping.
+    // A null cache (KV down / missing / corrupt) → 503, distinct from a
+    // present-but-empty cache which is a legitimate 200 empty feed.
+    if (
+      request.method === 'GET' &&
+      (url.pathname === '/feed.xml' || url.pathname.startsWith('/feed/'))
+    ) {
+      const feedReq: FeedRequest =
+        url.pathname === '/feed.xml'
+          ? { scope: 'all' }
+          : { scope: 'service', segment: url.pathname.split('/')[2] ?? '' }
+      const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+      const result = buildFeedResponse(cached, feedReq)
+      if (!result.ok && result.status === 503) {
+        // Same severity as /api/report's KV-read failure — log at error so it
+        // lands in the same operator alerting tier.
+        console.error(`[rss] ${url.pathname} — status cache unavailable, returning 503`)
+      }
+      if (result.ok) {
+        return new Response(result.xml, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/rss+xml; charset=utf-8',
+            'Cache-Control': 'public, max-age=300, s-maxage=300',
+            'Access-Control-Allow-Origin': '*',
+          },
+        })
+      }
+      return new Response(result.message, {
+        status: result.status,
+        headers: {
+          'Content-Type': 'text/plain',
+          // 503 is transient (data layer down) → no-store so readers retry;
+          // 400/404 are stable client errors → briefly cacheable.
+          'Cache-Control': result.status === 503 ? 'no-store' : 'public, max-age=60',
+          'Access-Control-Allow-Origin': '*',
+        },
+      })
     }
 
     // GET /badge/:serviceId — dynamic SVG status badge

@@ -345,6 +345,7 @@ worker/
     utils.ts     # 공유 유틸리티 (formatDuration, fetchWithTimeout)
     score.ts     # AIWatch Score 계산
     badge.ts     # SVG 배지 생성기
+    rss.ts       # 인시던트 RSS 2.0 피드 (/feed.xml + /feed/:slug)
     og.ts        # OG 이미지 SVG 생성기 (1200×630)
     og-render.ts # SVG → PNG 변환 (resvg-wasm)
     alerts.ts    # 알림 감지 로직 (인시던트 + 서비스 알림)
