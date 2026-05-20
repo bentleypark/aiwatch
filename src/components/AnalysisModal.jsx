@@ -1,6 +1,6 @@
 // AI Analysis Modal — shows incident analysis results from Claude
 import { useLang } from '../hooks/useLang'
-import { getFallbacks, EXCLUDE_FALLBACK } from '../utils/constants'
+import { getGroupedFallbacks, EXCLUDE_FALLBACK } from '../utils/constants'
 
 function timeAgo(date, lang) {
   const diff = Date.now() - new Date(date).getTime()
@@ -129,9 +129,10 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
             const showFallback = !allRecovered
               && analyses.some(a => a.needsFallback && !a.resolvedAt)
               && !svcs.every(s => EXCLUDE_FALLBACK.includes(s.id))
-            const fallbacks = showFallback
-              ? getFallbacks(svcs.find(s => !EXCLUDE_FALLBACK.includes(s.id)) ?? svcs[0], services)
-              : []
+            // Per-category alternatives across every affected service in the group
+            // (a multi-service incident spans LLM + agent + app categories), not just
+            // the first service's category (#445).
+            const fallbackGroups = showFallback ? getGroupedFallbacks(svcs, services) : []
 
             return (
               <div key={svcIds.join(',')} className="bg-[var(--bg2)] rounded-lg" style={{ padding: '12px 14px', marginBottom: '10px', opacity: isAllResolved && !hasActiveInc && !allRecovered ? 0.6 : 1 }}>
@@ -192,15 +193,16 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                   )
                 })}
 
-                {/* Contextual fallback recommendation — one per service group */}
+                {/* Contextual fallback recommendation — per category for the service group */}
                 {showFallback && (
                   <div className="mono text-[10px]" style={{ marginTop: '10px', padding: '8px 10px', background: 'var(--bg1)', borderRadius: '6px', borderLeft: '3px solid var(--amber)' }}>
                     <span style={{ color: 'var(--text1)', fontWeight: 600 }}>🔄 {lang === 'ko' ? '대안 서비스' : 'Alternatives'}</span>
-                    {fallbacks.length > 0 ? (
+                    {fallbackGroups.length > 0 ? (
                       <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                        {fallbacks.map(f => (
-                          <span key={f.id} style={{ color: 'var(--text1)' }}>
-                            • {f.name}{f.aiwatchScore != null ? ` (Score: ${f.aiwatchScore})` : ''}
+                        {fallbackGroups.map(grp => (
+                          <span key={`${grp.category}:${grp.label}`} style={{ color: 'var(--text1)' }}>
+                            <span style={{ color: 'var(--text2)' }}>{grp.label} → </span>
+                            {grp.items.map(f => `${f.name}${f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}`).join(', ')}
                           </span>
                         ))}
                       </div>

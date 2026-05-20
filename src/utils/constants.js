@@ -150,6 +150,61 @@ export function getFallbacks(service, allServices) {
     .map(s => ({ id: s.id, name: s.name, aiwatchScore: s.aiwatchScore ?? null }))
 }
 
+const CATEGORY_LABEL = { api: 'API', app: 'AI Apps', agent: 'Coding' }
+
+/**
+ * Group fallback recommendations by category (with API-tier subdivision) for a
+ * multi-service incident, so surfaces that group several affected services into
+ * one card (Overview ActionBanner, AnalysisModal) show per-category alternatives
+ * instead of collapsing to a single affected service's category (#445).
+ *
+ * Shares the per-category "label → list" SHAPE with the Discord
+ * `buildGroupedFallbackText` (worker/src/fallback.ts) but its SELECTION rules
+ * intentionally differ: this helper additionally excludes same-provider
+ * candidates and applies a perGroup cap, neither of which the worker does — so
+ * the two are deliberately not a 1:1 mirror.
+ *
+ * Excludes candidates that share a provider with any affected service. When the
+ * affected services span a single group, each group shows up to 2 alternatives;
+ * with multiple groups, 1 each (to bound banner width).
+ *
+ * @param {object[]} affected - Affected services (need .id, .category, .provider)
+ * @param {object[]} allServices - All services (need .id, .category, .status, .provider, .aiwatchScore)
+ * @returns {{ category: string, label: string, items: { id: string, name: string, aiwatchScore: number | null }[] }[]}
+ */
+export function getGroupedFallbacks(affected, allServices) {
+  if (!Array.isArray(affected) || !Array.isArray(allServices)) return []
+  // Defensive: getFallbacks already filters to operational candidates, so this set
+  // currently never drops anything — kept as a guard in case that contract changes.
+  const nonOperationalIds = new Set(allServices.filter(s => s.status !== 'operational').map(s => s.id))
+  const affectedProviders = new Set(affected.map(s => s.provider).filter(Boolean))
+  const eligibleAffected = affected.filter(a => !EXCLUDE_FALLBACK.includes(a.id))
+  const numGroups = new Set(eligibleAffected.map(a => {
+    const tierLabel = tierLabelFor(tierFor(a.id))
+    return tierLabel ? `${a.category}:${tierLabel}` : a.category
+  })).size
+  const perGroup = numGroups === 1 ? 2 : 1
+  const seenGroups = new Set()
+  const groups = []
+  for (const svc of affected) {
+    if (EXCLUDE_FALLBACK.includes(svc.id)) continue
+    const tierLabel = tierLabelFor(tierFor(svc.id))
+    const groupKey = tierLabel ? `${svc.category}:${tierLabel}` : svc.category
+    if (seenGroups.has(groupKey)) continue
+    seenGroups.add(groupKey)
+    const candidates = getFallbacks(svc, allServices).filter(f => {
+      if (nonOperationalIds.has(f.id)) return false
+      const fSvc = allServices.find(s => s.id === f.id)
+      if (fSvc?.provider && affectedProviders.has(fSvc.provider)) return false
+      return true
+    })
+    if (candidates.length === 0) continue
+    const label = tierLabel || CATEGORY_LABEL[svc.category] || svc.category
+    groups.push({ category: svc.category, label, items: candidates.slice(0, perGroup) })
+  }
+  return groups
+}
+
 export const VALID_ALERT_CONDITIONS = ['down', 'degraded', 'all']
 
 export const DEFAULT_SETTINGS = {

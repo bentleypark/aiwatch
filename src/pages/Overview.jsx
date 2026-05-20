@@ -8,7 +8,7 @@ import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
-import { SCORE_BG_CLASS, SERVICE_CATEGORIES, EXCLUDE_FALLBACK, getFallbacks, tierFor, tierLabelFor, ALL_SERVICES_FEED_URL } from '../utils/constants'
+import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacks, ALL_SERVICES_FEED_URL } from '../utils/constants'
 import RssCopyIcon from '../components/RssCopyIcon'
 import { regionStatusOf } from '../utils/regionStatus'
 import { buildCalendarFromIncidents } from '../utils/calendar'
@@ -337,39 +337,12 @@ function ActionBanner({ services, setPage, t }) {
     </span>
   ))
 
-  // Collect fallbacks per tier group — exclude non-operational + same provider.
-  // TIER_LABEL is now imported from src/utils/constants.js (#403) so a single sync test can compare
-  // it against worker/src/fallback.ts. tierFor / tierLabelFor warn once on missing entries so a
-  // future service add that skips the API_TIER row doesn't silently regress to Score-only ordering.
-  const CATEGORY_LABEL = { api: 'API', app: 'AI Apps', agent: 'Coding' }
-  const nonOperationalIds = new Set(services.filter(s => s.status !== 'operational').map(s => s.id))
-  const affectedProviders = new Set(affected.map(s => s.provider))
-  const seenGroups = new Set() // category or category:tierLabel for api services
-  const categoryGroups = [] // [{ category, label, items: [{ id, name, aiwatchScore }] }]
-  const eligibleAffected = affected.filter(a => !EXCLUDE_FALLBACK.includes(a.id))
-  const numGroups = new Set(eligibleAffected.map(a => {
-    const tier = tierFor(a.id)
-    const tierLabel = tierLabelFor(tier)
-    return tierLabel ? `${a.category}:${tierLabel}` : a.category
-  })).size
-  const perGroup = numGroups === 1 ? 2 : 1
-  for (const svc of affected) {
-    if (EXCLUDE_FALLBACK.includes(svc.id)) continue
-    const tier = tierFor(svc.id)
-    const tierLabel = tierLabelFor(tier)
-    const groupKey = tierLabel ? `${svc.category}:${tierLabel}` : svc.category
-    if (seenGroups.has(groupKey)) continue
-    seenGroups.add(groupKey)
-    const candidates = getFallbacks(svc, services).filter(f => {
-      if (nonOperationalIds.has(f.id)) return false
-      const fSvc = services.find(s => s.id === f.id)
-      if (fSvc?.provider && affectedProviders.has(fSvc.provider)) return false
-      return true
-    })
-    if (candidates.length === 0) continue
-    const label = tierLabel || CATEGORY_LABEL[svc.category] || svc.category
-    categoryGroups.push({ category: svc.category, label, items: candidates.slice(0, perGroup) })
-  }
+  // Per-category fallback groups (with API-tier subdivision), shared with the
+  // AnalysisModal via getGroupedFallbacks so both surfaces show identical
+  // per-category alternatives for a multi-service incident (#445). The helper
+  // excludes non-operational + same-provider candidates and uses tierFor/
+  // tierLabelFor (warn-once on missing API_TIER rows) under the hood.
+  const categoryGroups = getGroupedFallbacks(affected, services)
 
   // Region-switch recommendations (refs #422 Phase 1). For each affected service
   // whose status page reports per-region incidents AND has at least one healthy
