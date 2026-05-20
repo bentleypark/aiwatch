@@ -344,3 +344,34 @@ test.describe('ActionBanner region recommendation', () => {
     await expect(page.locator('main').getByText(/Switch region|리전 전환/)).not.toBeVisible()
   })
 })
+
+test.describe('RSS subscribe affordances (#433)', () => {
+  test('incident banner shows an RSS copy icon that copies the all-services feed', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.route('**/api/status*', (route) => route.fulfill({ json: {
+      services: [
+        { id: 'deepseek', category: 'api', name: 'DeepSeek API', provider: 'DeepSeek', status: 'degraded', latency: 200, uptime30d: 99.5, incidents: [] },
+        { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, incidents: [] },
+      ],
+      lastUpdated: new Date().toISOString(),
+    } }))
+    await page.goto('/')
+    await expect(page.locator('main').getByText(/Degraded|성능 저하/).first()).toBeVisible({ timeout: 15000 })
+    // Labeled CTA (not a bare glyph) so it's noticeable at peak intent
+    const rssBtn = page.locator('main').getByRole('button', { name: /Subscribe via RSS|RSS로 구독/ })
+    await expect(rssBtn).toBeVisible()
+    await rssBtn.click()
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('https://ai-watch.dev/feed.xml')
+  })
+
+  test('sidebar footer shows an always-visible RSS copy icon', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.goto('/')
+    // Sidebar footer is static chrome — renders without waiting on service data.
+    await expect(page.getByRole('link', { name: 'AIWatch' }).first()).toBeVisible({ timeout: 15000 })
+    const rssBtn = page.locator('aside').getByRole('button', { name: /Copy RSS feed URL|RSS 피드 URL 복사/ })
+    await expect(rssBtn).toBeVisible()
+    await rssBtn.click()
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('https://ai-watch.dev/feed.xml')
+  })
+})
