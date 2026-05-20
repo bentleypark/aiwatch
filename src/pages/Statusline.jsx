@@ -6,18 +6,23 @@ import { useState } from 'react'
 import { useLang } from '../hooks/useLang'
 import { trackEvent } from '../utils/analytics'
 
-const API_URL = 'https://ai-watch.dev/api/status/cached'
+// Point snippets at the Worker domain directly, NOT ai-watch.dev (#438): the
+// ai-watch.dev/api/status/cached path is a Vercel rewrite that *proxies* to the
+// Worker, so per-prompt statusline polls counted as Vercel Fast Data Transfer
+// (the #1 bandwidth route, ~17.8 GB/cycle). Hitting the Worker keeps it on
+// Cloudflare. The Worker returns a ~KB id/name/status-only payload for the
+// `?src=statusline-*` tag (buildStatuslinePayload) instead of the ~2 MB full
+// response — see worker/src/statusline.ts.
+const API_URL = 'https://aiwatch-worker.p2c2kbf.workers.dev/api/status/cached'
 
 // Tag each preset's URL so Cloudflare request analytics can separate
-// statusline-driven traffic from regular `/api/status/cached` hits and tell us
-// which preset users actually run. The Worker matches only on `url.pathname`
-// and reads from fixed KV keys (`services:latest`, etc.) — see the
-// `url.pathname === '/api/status/cached'` route handler in worker/src/index.ts
-// — so the query string is invisible to cache + KV behavior. It exists purely
-// for the request-log split. Carries no user identifier; the preset slug is
-// the only payload. Measurement framework + baseline-derived distribution
-// gating thresholds (Reddit launch, Anthropic Claude Code docs PR) live on
-// issue #400.
+// statusline-driven traffic by preset (and trigger the lite payload above).
+// The Worker matches the lite branch on the `?src=statusline-*` tag and the
+// route on `url.pathname` (`/api/status/cached`), reading fixed KV keys
+// (`services:latest`) — so the query string drives the projection but not cache
+// keys. Carries no user identifier; the preset slug is the only payload.
+// Measurement framework + baseline-derived distribution gating thresholds
+// (Reddit launch, Anthropic Claude Code docs PR) live on issue #400.
 const taggedUrl = (src) => `${API_URL}?src=statusline-${src}`
 
 // Slug constants are the join key between (a) the URL `?src=statusline-<slug>`
