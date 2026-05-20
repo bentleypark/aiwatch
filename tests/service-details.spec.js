@@ -489,3 +489,32 @@ test.describe('Estimate-only services (Bedrock, Azure OpenAI)', () => {
     await expect(rankingTable.getByText('Azure OpenAI')).not.toBeVisible()
   })
 })
+
+test.describe('ServiceDetails RSS feed link (#432)', () => {
+  test('Claude shows an RSS link that copies the per-service feed URL', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.goto('/#claude')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+
+    const rssBtn = page.locator('main').getByRole('button', { name: /RSS/ })
+    await expect(rssBtn).toBeVisible()
+    await rssBtn.click()
+    // Success-path feedback proves writeText resolved
+    await expect(page.locator('main').getByText(/Copied ✓|복사됨 ✓/)).toBeVisible()
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('https://ai-watch.dev/feed/claude')
+  })
+
+  test('Claude Code feed URL uses the is-down slug, not the service ID', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.goto('/#claudecode')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+    await page.locator('main').getByRole('button', { name: /RSS/ }).click()
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('https://ai-watch.dev/feed/claude-code')
+  })
+
+  test('estimate-only Bedrock has no RSS link', async ({ page }) => {
+    await page.goto('/#bedrock')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+    await expect(page.locator('main').getByRole('button', { name: /RSS/ })).not.toBeVisible()
+  })
+})

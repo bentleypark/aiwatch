@@ -53,6 +53,27 @@ export const SERVICE_CATEGORIES = {
 // Keep in sync with worker/src/fallback.ts EXCLUDE_FALLBACK
 export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
 
+// Per-service incident RSS feed (#432). The feed URL uses the /is-{slug}-down
+// page slug, which differs from the worker service ID for the few services
+// whose slug carries a dash. Mirror of SERVICE_ID_TO_SLUG in
+// api/is-down/slug-map.ts (overrides only) — pinned by feed-slug.test.js.
+const FEED_SLUG_OVERRIDE = {
+  claudecode:  'claude-code',
+  copilot:     'github-copilot',
+  claudeai:    'claude-ai',
+  characterai: 'character-ai',
+}
+
+// Services with no /is-{slug}-down page and therefore no RSS feed — estimate-only
+// sources excluded per #263. Matches worker/src/rss.ts NO_IS_DOWN_PAGE.
+export const NO_FEED_SERVICES = ['bedrock', 'azureopenai']
+
+// Per-service incident RSS feed URL, or null when the service has no feed.
+export function feedUrlOf(serviceId) {
+  if (!serviceId || NO_FEED_SERVICES.includes(serviceId)) return null
+  return `https://ai-watch.dev/feed/${FEED_SLUG_OVERRIDE[serviceId] ?? serviceId}`
+}
+
 // Fallback tier priority — API services (1-4) and coding agents (11-13) use distinct number ranges
 // so TIER_LABEL maps each tier number to one unambiguous label. Within a category, getFallbacks
 // orders by tier-distance then by Score.

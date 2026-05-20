@@ -12,7 +12,7 @@ import { formatDate } from '../utils/time'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { compareGroupedRows, dominantGroupStatus } from '../utils/incidentSort'
-import { SCORE_TEXT_CLASS } from '../utils/constants'
+import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
 import { regionStatusOf, SERVICE_REGIONS } from '../utils/regionStatus'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
@@ -534,10 +534,17 @@ function BadgeCode({ serviceId, serviceName, t }) {
   const code = `[![${serviceName}](${baseUrl}/badge/${serviceId})](https://ai-watch.dev/#${serviceId})`
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(code).then(() => {
+    const done = () => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    }).catch(() => {})
+    }
+    // Mirror RssLink: surface a prompt() fallback instead of a silent .catch()
+    // when the clipboard write rejects (insecure context) or is unavailable.
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(code).then(done).catch(() => window.prompt(t('svc.badge.prompt'), code))
+    } else {
+      window.prompt(t('svc.badge.prompt'), code)
+    }
   }
 
   return (
@@ -567,6 +574,45 @@ function BadgeCode({ serviceId, serviceName, t }) {
         {copied ? t('svc.badge.copied') : t('svc.badge.copy')}
       </button>
     </div>
+  )
+}
+
+// Header RSS affordance (#432) — copies the per-service incident feed URL to the
+// clipboard. Copy-to-clipboard rather than a plain link: opening a feed URL
+// directly makes the browser download raw XML. prompt() fallback covers insecure
+// contexts. (A matching subscribe affordance for the /is-*-down pages is tracked
+// separately in #430.)
+function RssLink({ feedUrl, serviceId, t }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = () => {
+    const done = () => {
+      setCopied(true)
+      trackEvent('copy_rss', { location: 'service_details', service_id: serviceId })
+      setTimeout(() => setCopied(false), 2000)
+    }
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(feedUrl).then(done).catch(() => window.prompt(t('svc.rss.prompt'), feedUrl))
+    } else {
+      window.prompt(t('svc.rss.prompt'), feedUrl)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      title={t('svc.rss.title')}
+      className={`mono text-[10px] flex items-center gap-1 transition-colors ${copied ? 'text-[var(--green)]' : 'text-[var(--text2)] hover:text-[var(--text0)]'}`}
+      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+    >
+      <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true"
+           style={{ fill: copied ? 'var(--green)' : 'var(--rss)' }}>
+        <circle cx="6.18" cy="17.82" r="2.18" />
+        <path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83C19.56 11.4 12.6 4.44 4 4.44zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z" />
+      </svg>
+      {copied ? t('svc.rss.copied') : t('svc.rss')}
+    </button>
   )
 }
 
@@ -607,6 +653,9 @@ export default function ServiceDetails({ serviceId }) {
   }
 
   const statusUrl = STATUS_URL[service.id]
+  // Per-service incident RSS feed (#432) — null for estimate-only services
+  // (bedrock / azureopenai) that have no /is-*-down page or feed.
+  const feedUrl = feedUrlOf(service.id)
   const cutoff7d = Date.now() - 7 * 86_400_000
   const recentIncidents = (service.incidents ?? []).filter(
     (inc) => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= cutoff7d
@@ -645,16 +694,19 @@ export default function ServiceDetails({ serviceId }) {
         <div>
           <h1 className="text-xl font-medium text-[var(--text0)]" style={{ marginBottom: '3px' }}>{service.name}</h1>
           <div className="mono text-[11px] text-[var(--text2)]" style={{ marginBottom: '10px' }}>{service.provider}</div>
-          {statusUrl && (
-            <a
-              href={statusUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mono text-[10px] text-[var(--blue)] hover:underline flex items-center gap-1"
-            >
-              ↗ {t('svc.status.link')}
-            </a>
-          )}
+          <div className="flex items-center" style={{ gap: '14px' }}>
+            {statusUrl && (
+              <a
+                href={statusUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mono text-[10px] text-[var(--blue)] hover:underline flex items-center gap-1"
+              >
+                ↗ {t('svc.status.link')}
+              </a>
+            )}
+            {feedUrl && <RssLink feedUrl={feedUrl} serviceId={service.id} t={t} />}
+          </div>
         </div>
         <div className="flex items-center gap-1.5">
           {!!recentlyRecovered[service.id] && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
