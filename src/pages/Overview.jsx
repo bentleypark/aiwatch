@@ -8,7 +8,8 @@ import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
-import { SCORE_BG_CLASS, SERVICE_CATEGORIES, EXCLUDE_FALLBACK, getFallbacks, tierFor, tierLabelFor } from '../utils/constants'
+import { SCORE_BG_CLASS, SERVICE_CATEGORIES, EXCLUDE_FALLBACK, getFallbacks, tierFor, tierLabelFor, ALL_SERVICES_FEED_URL } from '../utils/constants'
+import RssCopyIcon from '../components/RssCopyIcon'
 import { regionStatusOf } from '../utils/regionStatus'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { compareIncidents, getContextualTime } from '../utils/incidentSort'
@@ -426,6 +427,12 @@ function ActionBanner({ services, setPage, t }) {
           </button>
         </div>
       )}
+      {/* Subscribe CTA at the visitor's peak-intent moment (#433) — an incident
+          is active, so motivation is highest. A labeled orange link (not a bare
+          corner glyph, which got lost) in the action row; copies /feed.xml. */}
+      <div className="mono text-[11px]" style={{ marginTop: '4px' }}>
+        <RssCopyIcon url={ALL_SERVICES_FEED_URL} location="action_banner" label={t('rss.copy.subscribe')} />
+      </div>
       {/* Region-switch recommendation line (refs #422 Phase 1). Renders before
           cross-service fallback so the cheaper-to-execute action lands first.
           Service name is clickable (drills into ServiceDetails for the full

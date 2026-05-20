@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useLang } from '../hooks/useLang'
 import { useTheme } from '../hooks/useTheme'
 import { useSettings } from '../hooks/useSettings'
-import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, SERVICE_AND_APP_IDS, AGENT_SERVICE_IDS, ALL_SERVICE_IDS, DEFAULT_SETTINGS } from '../utils/constants'
+import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, SERVICE_AND_APP_IDS, AGENT_SERVICE_IDS, ALL_SERVICE_IDS, DEFAULT_SETTINGS, ALL_SERVICES_FEED_URL } from '../utils/constants'
 import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
 
@@ -153,6 +153,7 @@ export default function Settings() {
   const [testResult, setTestResult] = useState(null) // null | 'sending' | 'ok' | 'error'
   const [monitoringOpen, setMonitoringOpen] = useState(false)
   const [agentsOpen, setAgentsOpen] = useState(false)
+  const [rssCopied, setRssCopied] = useState(false)
   const saveTimerRef = useRef(null)
 
   useEffect(() => () => clearTimeout(saveTimerRef.current), [])
@@ -167,6 +168,22 @@ export default function Settings() {
     setAlertServices(settings.alertServices)
     setAlertIncidents(settings.alertIncidents)
   }, [settings])
+
+  // Copy the feed URL rather than linking it: a feed URL opened directly makes
+  // the browser download raw XML. prompt() fallback covers insecure contexts.
+  // copy_rss fires only on a confirmed copy (mirrors RssLink in ServiceDetails).
+  function copyFeed() {
+    const done = () => {
+      setRssCopied(true)
+      trackEvent('copy_rss', { location: 'settings', service_id: 'all' })
+      setTimeout(() => setRssCopied(false), 2000)
+    }
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(ALL_SERVICES_FEED_URL).then(done).catch(() => window.prompt(t('settings.rss.prompt'), ALL_SERVICES_FEED_URL))
+    } else {
+      window.prompt(t('settings.rss.prompt'), ALL_SERVICES_FEED_URL)
+    }
+  }
 
   function handleSave() {
     const slaNum = sla === '' ? DEFAULT_SETTINGS.sla : Number(sla)
@@ -340,6 +357,44 @@ export default function Settings() {
       {/* ── Alerts ── */}
       <section>
         <div style={sectionTitleStyle}>{t('settings.alerts')}</div>
+
+        {/* RSS — lead with the zero-friction channel (#433/#428): no account, no
+            webhook, no PII. Slack/Discord webhooks follow as the power-user path. */}
+        <div style={{ padding: '13px 0', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', marginBottom: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true" style={{ fill: 'var(--rss)' }}>
+              <circle cx="6.18" cy="17.82" r="2.18" />
+              <path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83C19.56 11.4 12.6 4.44 4 4.44zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z" />
+            </svg>
+            {t('settings.rss')}
+          </div>
+          <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', lineHeight: 1.5, marginBottom: '8px' }}>{t('settings.rss.desc')}</div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              readOnly
+              value={ALL_SERVICES_FEED_URL}
+              onClick={(e) => e.target.select()}
+              className="mono"
+              style={{
+                flex: 1, fontSize: '11px', padding: '6px 10px',
+                background: 'var(--bg2)', border: '1px solid var(--border-hi)', borderRadius: '5px',
+                color: 'var(--text0)', outline: 'none', boxSizing: 'border-box',
+              }}
+            />
+            <button
+              onClick={copyFeed}
+              className="mono shrink-0"
+              style={{
+                fontSize: '11px', padding: '6px 12px', borderRadius: '5px', border: 'none',
+                background: rssCopied ? 'var(--green)' : 'var(--bg3)',
+                color: rssCopied ? 'var(--bg0)' : 'var(--text1)', cursor: 'pointer',
+              }}
+            >
+              {rssCopied ? t('settings.rss.copied') : t('settings.rss.copy')}
+            </button>
+          </div>
+        </div>
 
         <div style={{ padding: '13px 0', borderBottom: '1px solid var(--border)' }}>
           <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', marginBottom: '2px' }}>{t('settings.slack')}</div>

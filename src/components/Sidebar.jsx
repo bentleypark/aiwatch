@@ -6,7 +6,8 @@ import { usePage } from '../utils/pageContext'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
-import { SERVICE_CATEGORIES } from '../utils/constants'
+import { SERVICE_CATEGORIES, ALL_SERVICES_FEED_URL } from '../utils/constants'
+import RssCopyIcon from './RssCopyIcon'
 
 const EMPTY = []
 
@@ -296,8 +297,10 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
       <div className="mt-auto">
         <div style={{ height: '1px', background: 'var(--border)', margin: '8px 12px' }} />
         <div style={{ padding: '0 12px' }}>
-          <div className="text-[var(--text2)]" style={{ padding: '6px 8px', letterSpacing: '0.06em', fontSize: '9px' }}>
-            aiwatch.dev · v{__APP_VERSION__}
+          <div className="text-[var(--text2)] flex items-center" style={{ padding: '6px 8px', letterSpacing: '0.06em', fontSize: '9px', gap: '7px' }}>
+            <span>aiwatch.dev · v{__APP_VERSION__}</span>
+            {/* Passive always-visible subscribe affordance (#433) */}
+            <RssCopyIcon url={ALL_SERVICES_FEED_URL} location="sidebar" size={11} />
           </div>
         </div>
       </div>
