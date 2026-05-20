@@ -131,6 +131,7 @@ gh pr merge --squash --delete-branch
    - Only proceed to commit (step 8) after convergence
 7. **Docs update** — update documentation affected by the change:
    - `CLAUDE.md`: architecture, service count, directory layout, constraints
+   - `docs/reference/`: KV keys (`kv-schema.md`), GA4 events (`ga4-events.md`), fallback tiers (`fallback-tiers.md`), add-a-service checklist (`adding-a-service.md`) — the detailed reference moved out of CLAUDE.md, so update the relevant file there if affected
    - `README.md` / `README.ko.md`: features, service tables, Project Structure, Available Service IDs
    - `CONTRIBUTING.md`: Project Structure
    - `index.html`: SEO meta tags (service count, description)
@@ -164,77 +165,7 @@ Every fire is logged to `.claude/hook-audit.jsonl` (gitignored). `npm run hook-a
 
 ### Adding a new service (checklist)
 
-When adding a new monitored service, update ALL of the following:
-
-#### Worker (backend)
-1. `worker/src/services.ts` — add `ServiceConfig` entry at correct position in `SERVICES` array (determines API response order: LLM → voice → infra → apps → agents). If the status page hosts unrelated components (multi-tenant Atlassian / incident.io / metastatuspage feeds — e.g. `githubstatus.com`, `status.openai.com`, `status.claude.com`), set `incidentKeywords` to scope the visible incident list — otherwise the service card will surface every incident on the page (#397)
-2. `worker/src/probe.ts` — add `ProbeTarget` if API endpoint exists for RTT measurement
-3. `worker/src/fallback.ts` — update ALL of:
-   - `EXCLUDE_FALLBACK` — remove if fallback-eligible
-   - `API_TIER` — add tier number (API: 1=Major LLM, 2=LLM, 3=Infra, 4=Voice; agents: 11=CLI, 12=IDE, 13=Plugin)
-   - `TIER_LABEL` — add label if new tier introduced
-   - `buildGroupedFallbackText` uses tier-based grouping — verify Discord alerts show correct labels
-4. `worker/src/__tests__/` — update probe target count test, fallback tests, add service-specific tests
-
-#### Frontend
-5. `src/utils/constants.js` — update ALL of:
-   - `API_SERVICE_IDS` — add new service ID
-   - `SERVICE_AND_APP_IDS` — add at correct display position (app → LLM → voice → inference → agent)
-   - `SERVICE_CATEGORIES` — add to correct category filter (e.g., `llm`, `inference`)
-   - `EXCLUDE_FALLBACK` — keep in sync with `worker/src/fallback.ts`
-   - `API_TIER` — add tier number (keep in sync with `worker/src/fallback.ts`)
-6. `src/hooks/usePolling.js` — add mock entry to `MOCK_SERVICES` at correct position (determines display order via `mergeWithMock`)
-7. `src/hooks/useSettings.js` — new services auto-inserted at canonical position in `enabledServices` (no change needed, but verify logic works)
-8. `src/pages/ServiceDetails.jsx` — add `STATUS_URL` entry for official status page link
-9. `src/pages/Overview.jsx` — verify `TIER_LABEL` (keep in sync with `worker/src/fallback.ts`; `API_TIER` + `getFallbacks` imported from `src/utils/constants.js`)
-10. `api/is-down.ts` — add to `API_TIER` + `EXCLUDE_FALLBACK` (keep in sync with `worker/src/fallback.ts`)
-10b. (region-aware services only) Region data lives in TWO cross-mirrored copies — both must update together. The sync is pinned by `worker/src/__tests__/region-status-sync.test.ts`:
-   - `src/utils/regionStatus.js` — frontend (ServiceDetails RegionalAvailability card, Overview ActionBanner region line). Canonical source for the sync test.
-   - `api/is-down/region-status.ts` — Edge SSR (Is X Down? region recommendation line). Duplicated because Vercel Edge bundling cannot import from `src/`. Same shape, TS port.
-   
-   For both: add `SERVICE_REGIONS` entries (one per region with `key` substring-matched against incident title / componentNames + display `label`) and a `REGION_DOCS_URL` pointer to the provider's region docs. Add `ALWAYS_SHOW_REGIONS` membership only if the service should render the per-region card even with zero ongoing incidents (Bedrock / Azure OpenAI pattern). Surfaces on ServiceDetails + Overview ActionBanner via `regionStatusOf` (#422 Phase 1) + on `/is-*-down` SSR via the Edge mirror (#422 Phase 2).
-
-#### Documentation — service count ("N AI services")
-11. `CLAUDE.md` — architecture section: service count, service list, category breakdown, KV schema comment, probe count, fallback tier list
-12. `README.md` — service count, service table (add row), API Services header count, feature description, API endpoint comment
-13. `README.ko.md` — same as README.md (Korean)
-14. `CONTRIBUTING.md` — if Project Structure section exists
-
-#### SEO & Meta tags
-15. `index.html` — `<meta name="description">`, `og:title`, `og:description`, `twitter:title`, `twitter:description`, JSON-LD (~6 occurrences)
-
-#### Landing page
-16. `api/intro/html-template.ts` — update ALL of:
-    - meta description
-    - hero pill number ("N AI Services")
-    - dashboard preview mock: services running count, "All N", "Operational N", "+ N more" (KO/EN)
-    - i18n strings KO/EN with service count (~12+ occurrences)
-17. `docs/aiwatch-landing.html` — same as intro template (design draft)
-
-#### Is X Down (if adding a dedicated page)
-18. `api/is-down.ts` — add service to `SERVICES` map
-19. `api/is-down/html-template.ts` — if needed
-20. `vercel.json` — add rewrite rule `/is-{service}-down`
-21. `public/sitemap.xml` — add URL entry (`lastmod` is auto-bumped to build date by `scripts/bump-sitemap-lastmod.mjs` via `prebuild` hook — #337 — so any placeholder date works for the initial commit)
-
-#### Reports site (aiwatch-reports) — commit + push to deploy (GitHub Pages auto-build)
-22. `README.md` — service count, category breakdown (e.g., "N LLM APIs, N voice & inference")
-23. `_config.yml` — description
-24. `_templates/monthly-report.md` — service count, category breakdown
-25. Current month report (e.g., `2026-03/index.md`) — service count, category breakdown
-26. `index.md` — top-level index page
-27. `scripts/generate-charts.js` — service count in comments
-
-#### Assets (after deploy)
-28. `scripts/generate-og-intro.mjs` — update `SERVICE_COUNT`, run `node scripts/generate-og-intro.mjs` (generates both `public/og-intro.png` + `docs/social-preview.png`), then commit + push
-29. `docs/screenshot.png` — recapture desktop dashboard
-30. `docs/screenshot-mobile.png` — recapture mobile dashboard
-31. GitHub Settings → Social preview — re-upload
-
-#### Deployment
-32. `npx wrangler deploy --config worker/wrangler.toml --dry-run` — build check
-33. `npm run deploy:worker` — deploy after user approval
-34. `git push origin main` — Vercel auto-deploy for frontend
+When adding a new monitored service, files across worker, frontend, docs, SEO meta, landing page, Is-X-Down, the reports site, and assets must all update together (service count + sync invariants). Follow the full 34-step checklist in **[docs/reference/adding-a-service.md](docs/reference/adding-a-service.md)** — do not skip steps.
 
 ## Architecture
 
@@ -252,60 +183,7 @@ When adding a new monitored service, update ALL of the following:
 
 ### KV Key Schema (STATUS_CACHE namespace)
 
-| Key Pattern | Value | TTL | Writes/Day | Purpose |
-|---|---|---|---|---|
-| `services:latest` | `{ services, cachedAt }` JSON | 5min | ~288 | Real-time status cache (all 33 services) |
-| `daily:{YYYY-MM-DD}` | `{ [svcId]: { ok, total } }` JSON | 2d | ~288 | Daily uptime counters |
-| `history:{YYYY-MM-DD}` | Same as daily | 90d | 1 | Archived yesterday's counters |
-| `latency:24h` | `{ snapshots: [{ t, data }] }` JSON | 25h | ~48 | 30-min latency snapshots (max 48) |
-| `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 7d | ~288 | 5-min health check probe results (max 2016, 20 API services) |
-| `probe:daily:{YYYY-MM-DD}` | `{ [svcId]: { p50, p75, p95, min, max, count, spikes } }` JSON | 90d | 1 | Daily probe RTT summary for monthly reports |
-| `probe:summaries` | `[svcId, ProbeSummary][]` JSON | 80min | ~48 | Cron-cached 7-day probe summaries (p50, p95, cvCombined, validDays); refreshed every 30min via in-memory slot guard, TTL covers up to 2 missed 30-min refresh cycles |
-| `alerted:new:{incId}` | `"1"` | 7d | ~5 | Incident alert dedup |
-| `alerted:res:{incId}` | `"1"` | 7d | ~2 | Resolved incident alert dedup |
-| `alerted:down:{svcId}` | ISO timestamp | 2h | ~2 | Service down alert dedup + recovery duration |
-| `alerted:degraded:{svcId}` | ISO timestamp | 2h | ~2 | Service degraded alert dedup |
-| `alerted:recovered:{svcId}` | `"1"` | 2h | ~2 | Recovery alert dedup |
-| `recovered:{svcId}:{incId}` | `{ resolvedAt, incidentTitle, duration }` JSON | 2h | ~2 | Independent recovery marker (powers Recently Resolved banner without AI analysis) |
-| `alerted:probe-spike:{svcId}` | `"1"` | 1h | ~2 | Probe RTT spike alert dedup (early detection) |
-| `alerted:flap:{svcId}:{normalizedTitle}` | `"1"` | 1h | ~5-20 | BetterStack auto-recovery flap suppression (#283) — 60-min window per service + title. Written on the `alerted:res:` fire of the first flap; checked on next cron cycle to drop both down + resolved halves of subsequent identical flaps. Opt-in via `ServiceConfig.flapSuppression: true`; applies to `together`, `fireworks`, `huggingface`, `modal`. Tier-1 (`claude`/`openai`/`gemini`) never suppressed as defense-in-depth |
-| `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
-| `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time (probe spike or status page, whichever is earlier) |
-| `detection:lead:{YYYY-MM-DD}` | `DetectionLeadEntry[]` JSON | 7d | ~0-5 | Detection Lead audit log — appended on each new incident with positive lead, dedup by incId, surfaced in Daily Summary Discord embed (#256) |
-| `detection:lead:monthly:{YYYY-MM}` | `DetectionLeadEntry[]` JSON | 60d | ~0-5 | Detection Lead monthly accumulator (#369) — dual-written by `appendDetectionLead` alongside the daily key so the monthly archive cron can read full-month entries past the 7d daily TTL. Summarized into `MonthlyArchive.detectionLead` (count / avg / median / max / byService / topExamples). 60d TTL covers archive's 1st-of-next-month read window with margin |
-| `reddit:seen:{postId}` | `"1"` | 24h | ~120 | Reddit post dedup (hourly scan, max 5/hour) |
-| `security:seen:hn:{objectId}` | `SecurityAlertMeta` JSON | 7d | ~0 | HN security post dedup + dashboard display |
-| `security:seen:osv:{vulnId}` | `SecurityAlertMeta` JSON | 7d | ~0 | OSV.dev vulnerability dedup + dashboard display (includes `epssPercentile` / `epssPercentage` from #326 when GitHub Advisories enrichment succeeded) |
-| `security:monthly:{YYYY-MM}` | `SecurityAlertMeta[]` JSON | 60d | ~1/day | Monthly security alert accumulation for reports (entries carry EPSS fields when available, #326) |
-| `enrich:epss:{ghsaId}` | `EpssScore` JSON (`{percentile, percentage}`) | 24h | ~0-15/day | EPSS (Exploit Prediction Scoring System) cache (#326). Hit once per new OSV vuln against GitHub Advisories API, cached 24h (EPSS recomputes daily). Missing = enrichment unavailable → alert still surfaces without the exploit-probability tag. Rate-limited to 60/hr unauth (not a practical concern given 24h cache + #323 15-per-cycle cap) |
-| `security:detected:{YYYY-MM-DD}` | integer string | 3d | ~0-3/day | Daily counter of newly-detected security alerts (#288). Incremented by `securityAlerts.length` when HN/OSV detection fires. Daily summary reads this instead of counting `security:seen:*` (which accumulates over 7d and inflates the figure) |
-| `ai:analysis:{svcId}:{incId}` | `AIAnalysisResult` JSON | 1h (active) / 2h (resolved) | ~5 per incident | Hybrid AI analysis result — Gemma 4 primary + Sonnet fallback (TTL refreshed while active; on recovery, `resolvedAt` added instead of deleting — kept 2h for "Recently Resolved" UI). `model` field tracks which model produced the analysis. `sticky: true` (#299) marks a manual operator override — cron skips re-analysis and only refreshes TTL; cleared naturally when incident resolves |
-| `ai:reanalysis-skip:{svcId}:{incId}` | `"1"` | 30min | ~2 per incident | Per-incident re-analysis failure cooldown |
-| `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed, gemma?, sonnet? }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis, model breakdown). Manual `/api/admin/analyze` (#299) calls also increment here so the daily summary attributes them |
-| `admin:ratelimit:{hash}` | `"1"` | 60s | ~0-10/day | Per-incident rate limit for `POST /api/admin/analyze` (#299). `hash` = first 128 bits of SHA-256 of `{svcId}:{incidentId}`. Hashed rather than raw to avoid leaking incident IDs via `kv list` even though the endpoint is secret-gated |
-| `fetch-fail:{svcId}` | counter string | 30min | ~0 (spikes on outage) | RSS fetch consecutive failure counter (3+ → degraded, capped writes) |
-| `component-missing:{svcId}` | counter string | 30min | ~0 (spikes on migration) | Component ID consecutive miss counter (3+ → Discord alert) |
-| `alerted:component-missing:{svcId}` | `"1"` | 24h | ~0 | Component ID mismatch alert dedup |
-| `alerted:service-drop` | `"1"` | 2h | ~0 | Service count drop alert dedup (< 80% of expected) |
-| `alert:count:{YYYY-MM-DD}` | `{ incidents, resolved, down, degraded, recovered }` JSON | 2d | ~1-5 | Daily alert count aggregated in Daily Summary |
-| `webhook:reg:{sha256hash}` | `{ type, registeredAt }` JSON | 30d | ~1/user/day | Active webhook registration (hashed, refreshed on ping) |
-| `alert:proxy:{YYYY-MM-DD}` | `{ discord, slack, failed }` JSON | 2d | ~1 | User webhook delivery counts (approximate, flushed from in-memory by daily summary cron) |
-| `kv_limit_alert` | `"1"` | 5min | ~1 | KV write limit exceeded cooldown |
-| `daily-summary:{YYYY-MM-DD}` | `"1"` | 7d | 1 | Daily summary execution marker (prevents duplicate send + enables catch-up) |
-| `changelog:entries` | `ChangelogEntry[]` JSON | 14d | ~3 | Accumulated changelog entries from RSS + HTML sources (cleared after weekly briefing) |
-| `changelog:last-fetch:{source}` | ISO timestamp string | 7d | ~96 | Per-source last-successful-fetch marker (#274) — weekly briefing surfaces sources stale >2d so silent collection gaps don't go unnoticed |
-| `weekly-briefing:{YYYY-MM-DD}` | `"1"` | 7d | 1/week | Weekly briefing execution dedup marker |
-| `vitals:{YYYY-MM-DD}` | `{ count, allValues }` JSON | 3d | per visit (100%) | Web Vitals daily aggregation (LCP, FCP, TTFB, CLS, INP) |
-| `vitals:history:{YYYY-MM-DD}` | `{ count, p75 }` JSON | 90d | 1 | Archived yesterday's vitals p75 summary |
-| `incidents:monthly:{YYYY-MM}` | `MonthlyIncidents` JSON | 60d | 1/day | Monthly incident accumulation (deduped by ID, updated in daily summary cron). Per-service entry now also carries an `incidents` array of full incident detail (id, title, startedAt, resolvedAt, durationMin, finalStatus) capped at `MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE = 200`, so the monthly archive can snapshot a real incident list past the upstream status-page response window (#375) |
-| `archive:monthly:{YYYY-MM}` | `MonthlyArchive` JSON | none (permanent) | 1/month | Monthly reliability snapshot (uptime, score, incidents, totalDowntimeMin, longestIncidentMin, avgResolutionMin, avgLatencyMs per service — downtime/longest fields surfaced from `incidents:monthly:*` before its 60d TTL lapses so aiwatch-reports#10 can render full Incident Summary columns; optional `security` summary from `security:monthly:{YYYY-MM}` snapshot — #290; OSV top findings also carry `timeline[]` from `security:timeline:osv:*` when available — #291; per-service `incidentList` array snapshots full incident detail from the accumulator's `incidents` field — #375 — capped at 200 most-recent entries per service for KV size hygiene; absent on archives written before the feature shipped, frontend must handle that null; optional `narrative` field — AI-generated retrospective draft (Notable Incidents + Observations) baked in at archive build via `worker/src/monthly-narrative.ts` hybrid Gemma→Sonnet, #426 — `null` when AI unavailable / failed, consumed by aiwatch-reports `generate-report.js` as an operator-reviewed auto-draft) |
-| `archive:notified:{YYYY-MM}` | `"1"` | 60d | 1/month | Dedup marker for the "monthly archive ready" Discord ping that links to the `aiwatch-reports/generate-report.yml` workflow_dispatch page (aiwatch-reports#4). Written only after a successful send so a transient webhook failure on the 00:00 archive cycle retries on the 01:00 catch-up cycle. 60d TTL purely for dedup (archive itself is permanent) |
-| `security:timeline:osv:{vulnId}` | `OsvTimeline` JSON | none (permanent) | ~0-3/day | Per-alert OSV lifecycle tracking (#291). Entries: `detected` → `severity_changed` → `fix_released`. Written only on stage transitions by the hourly security cron, so steady-state KV writes are near zero. Archive reader attaches the entries to matching top findings |
-| `platform:status:{platformId}` | `PlatformStatus` JSON | 10min | ~288 | Status page platform health (metastatuspage.com for Atlassian) |
-| `alerted:platform:{platformId}` | `"1"` | 2h | ~1 | Platform outage alert dedup |
-| `alerted:edge-fallback:{surface}:{slug}` | `"1"` | 5min | ~0 (spikes on outage) | Edge SSR fallback alert dedup (#378). Vercel Edge Functions (`api/is-down.ts`, `api/reports.ts`) POST to `/api/internal/edge-fallback` when they serve the degraded "Status data is temporarily unavailable" render. Worker validates Bearer token (`EDGE_ALERT_TOKEN` secret), checks dedup key, fires single Discord alert per `surface:slug` per 5-minute window. Surface = `is-down` \| `reports`. Slug is the service slug (is-down) or sanitized URL path (reports). Marker is written even on Discord delivery failure to prevent retry storms |
-
-**KV write budget** (Workers Paid / Standard plan): 1,000,000 writes/month included (~33,333/day); overage billed at $0.50 per additional 1M. Current estimated usage: ~845-958 writes/day + changelog (~3/day) + changelog last-fetch markers (~96/day, 4 sources × 24 hourly cron, #274) + weekly briefing (~1/week) + vitals (1 per visit) + platform status (~1/cycle when changed) + recovery markers (~2-5/day) ≈ **~3% of monthly inclusion**. Existing throttling constants (e.g., `KV_WRITE_INTERVAL_MS = 600_000`) are retained for cost hygiene even though the hard free-tier limit no longer applies.
+The full KV reference (40+ keys: pattern, value, TTL, writes/day, purpose) and the monthly write budget live in **[docs/reference/kv-schema.md](docs/reference/kv-schema.md)**. Read it before adding or changing any KV key.
 
 ### Directory Layout
 ```
@@ -377,56 +255,8 @@ Theme switching: add `data-theme="light"` to `<html>` — CSS variables remap au
 `src/locales/ko.js` and `en.js` export flat `{ 'dot.key': 'string' }` maps (default exports).
 
 ### GA4 Analytics Events
-All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active when user consents via cookie banner.
 
-**Consent flow across surfaces** (#352): three surfaces load GA4 with different mechanisms but share a single source of truth — the `aiwatch-cookie-consent` localStorage key (`'granted'` | `'denied'` | absent).
-- **React SPA (dashboard)** — `src/utils/analytics.js`. Lazy `initGA()` only runs after `setConsent(true)`; gtag.js is not loaded otherwise. Consent Mode v2 defaults set in `initConsentDefault()` before any interaction. `clearAnalyticsCookies()` runs in two paths: (a) `setConsent(false)` — the dominant path, when the user clicks "Essential Only" on the banner — purges immediately; (b) `initConsentDefault()` on boot when `hasConsent() === 'denied'` — handles the manual `localStorage.setItem('aiwatch-cookie-consent','denied')` revoke path documented in the Privacy Policy.
-- **Edge SSR pages** (`/is-*-down`, `/intro` — Vercel Edge Functions in `api/`) — gtag.js loads on every page view (needed for inline `onclick` event tracking), but the inline init script sets Consent Mode v2 default-denied first, then upgrades only `analytics_storage` to `granted` if `localStorage.getItem('aiwatch-cookie-consent') === 'granted'`. When the localStorage value is anything other than `'granted'` (denied, absent, or storage unavailable), the same inline script also clears `_ga`/`_gid`/`_gcl_au` (defense-in-depth for stale cookies from before the gate landed). The init payload + cookie banner are factored into shared modules `api/_shared/consent-init.ts` and `api/_shared/cookie-banner.ts` — both Vercel templates import from there to prevent drift between `/intro` and `/is-*-down`.
-- **Reports site** (Jekyll, `aiwatch-reports/_includes/head.html` + cookie banner in `_includes/footer.html`) — same default-denied + localStorage opt-in + cleanup pattern as Edge SSR. The Jekyll inline payload is hand-synced with `api/_shared/consent-init.ts` + `api/_shared/cookie-banner.ts` because Jekyll cannot import TypeScript — see those module headers for the sync contract. Direct access at `bentleypark.github.io/aiwatch-reports/*` runs on a different origin so SPA-set consent isn't readable there; that path stays cookieless until first consent on the GH Pages origin itself (rare path, most users hit `ai-watch.dev/reports/*`).
-- **Cookie banner on Edge SSR + Jekyll** — inline banner mirrors `src/components/CookieBanner.jsx` UX/copy and writes the same localStorage key. Shown only when localStorage is absent. Same-origin SPA consent is honored without re-prompting on subsequent navigation between surfaces (#352). Accept-click failure handling: if `localStorage.setItem` throws (Safari private mode, quota exhaustion), the Accept branch returns without calling `gtag('consent','update','granted')` and without hiding the banner — prevents a single page-view from running with upgraded consent that was never persisted.
-- **`ad_storage` / `ad_user_data` / `ad_personalization` always denied** — AIWatch does not display advertisements; these Consent Mode v2 signals stay `denied` even on Accept. Only `analytics_storage` is upgraded. The Privacy Policy "Advertising" section commits to this contract — diverging here would break that commitment.
-- **Identical localStorage key across all three surfaces** is required — diverging it would let one surface ignore the user's choice on another. Verified by two complementary suites: `tests/consent.spec.js` exercises the Edge SSR network — asserts no `_ga` cookie is set and that any `g/collect` ping carries the `gcs=G1*` denied marker; `src/utils/__tests__/analytics.test.js` covers the SPA helpers — asserts `setConsent(false)` denies all four Consent Mode v2 signals and removes `_ga`/`_gid`/`_gcl_au`, that `initConsentDefault()` reconciles stale cookies on the manual-revoke path, and that `setConsent(true)` skips `initGA()` when persistence fails.
-
-| Event | Parameters | Location | Purpose |
-|---|---|---|---|
-| `page_view` | `page_title`, `service_id?` | App.jsx | SPA page transition |
-| `select_service` | `service_id` | Overview (card click) | Service card click |
-| `view_service` | `service_id` | Sidebar (service list) | Sidebar service click |
-| `view_incident` | `incident_id` | Incidents page | Incident detail open |
-| `fallback_click` | `from_service`, `to_service`, `location` | ActionBanner, Is X Down | Fallback recommendation click |
-| `change_filter` | `filter` | Overview (filter tabs) | Status filter change |
-| `category_filter` | `category` | Sidebar (category) | Category filter change |
-| `navigate_page` | `page` | Sidebar (nav) | Page navigation |
-| `click_refresh` | — | Topbar | Manual refresh |
-| `click_github_header` | — | Topbar | GitHub link click |
-| `click_analyze` | `has_analysis?`, `count?` | Topbar | Analyze button click (active: has_analysis=true + count, inactive: no params) |
-| `open_legal` | `type` (privacy/terms) | Footer | Legal modal open |
-| `save_settings` | — | Settings | Settings saved |
-| `webhook_register` | `type` (discord/slack) | Settings | Webhook URL added |
-| `webhook_remove` | `type` (discord/slack) | Settings | Webhook URL removed |
-| `region_switch_intent` | `service_id`, `recommended_region`, `location` (`service_details` / `action_banner` / `is_down_page`) | ServiceDetails (Regional) · Overview (ActionBanner) · Is X Down SSR | Region guide link click — `location` distinguishes the surface that drove the click (#422 Phase 1 + Phase 2) |
-| `click_reports` | — | Sidebar | Monthly reports link click |
-| `click_request_service` | — | Sidebar (request link) | Service request link click |
-| `copy_statusline_snippet` | `preset` (degraded_only/compact_badge/full_list/scoped/clickable) | Statusline page (Copy buttons) | Statusline integration adoption signal (#400 Phase 0) |
-| `share` | `method` (x/threads/kakao/copy), `item_id` | Is X Down (share buttons) | Social share button click |
-| `click_dashboard` | `location`, `source` | Is X Down (header/footer) | Dashboard link click |
-| `click_cta_alerts` | `location`, `source?` | Is X Down (CTA/footer) | Set Up Alerts click |
-| `click_ranking` | `location`, `source` | Is X Down (header/alternatives) | Ranking link click |
-| `click_service_detail` | `location`, `service_id` | Is X Down (footer) | Service detail page click |
-| `click_reports` | `location`, `source` | Is X Down (alternatives/footer) | Monthly reports link click (Is X Down) |
-| `copy_rss` | `location`, `service_id` | Is X Down (CTA) · ServiceDetails (header) · Settings (Alerts) · Overview (incident banner) · Sidebar (footer) · Landing (alerts section) | RSS feed URL copied to clipboard. `location` ∈ `is_down_page`/`service_details`/`settings`/`action_banner`/`sidebar`/`landing`; `service_id`=`'all'` for the all-services `/feed.xml`, the page slug for per-service feeds (#430, #432, #433, #434) |
-| `click_ph_upvote` | `location` | Landing page (PH banner) | Product Hunt upvote link click |
-| `font_load_failed` | `transport_type: 'beacon'` | index.html `<link>` onerror | Google Fonts CSS preload failed (CDN outage, ad blocker, network) — surfaces silent fallback to system fonts (refs #191) |
-
-Is X Down pages (Edge SSR) and Landing page use inline `gtag()` calls directly since they don't use React.
-
-**Reports site** (served at `ai-watch.dev/reports/` via the `api/reports.ts` proxy; #264) uses the same GA4 ID (`G-D4ZWVHQ7JK`) with event delegation in `_includes/footer.html`:
-
-| Event | Parameters | Trigger | Purpose |
-|---|---|---|---|
-| `click_dashboard` | `location: reports_site`, `source: footer/body` | ai-watch.dev link click | Dashboard navigation from reports |
-| `click_report` | `location: reports_site`, `report_month: YYYY-MM` | Monthly report link click | Report page view intent |
-| `click_request_service` | `location: reports_site`, `page` | Service request link click | Request a Service link click |
+All events use `trackEvent()` from `src/utils/analytics.js`; GA4 activates only on cookie consent (`aiwatch-cookie-consent` localStorage key, shared across SPA / Edge SSR / Jekyll). The cross-surface consent flow (#352), the full event catalog (parameters · location · purpose), and the reports-site events are in **[docs/reference/ga4-events.md](docs/reference/ga4-events.md)**. Read it before adding/changing analytics events or touching consent logic.
 
 ### Service Status Determination
 Per-service status is resolved in `services.ts` with this priority:
@@ -498,17 +328,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
   - **Recently Resolved**: on recovery, cron writes independent `recovered:{svcId}:{incId}` KV (2h TTL) regardless of AI analysis. Also marks per-incident analysis keys with `resolvedAt` field if they exist. `/api/status` returns `recentlyRecovered: Record<svcId, incId[]>` for operational services with recovery markers. Dashboard shows info banner (service names link to detail page) + "Recently Resolved" badge on specific incidents in ServiceDetails + Analyze modal link only when AI analysis exists. "See details in Analyze" hidden when no AI analysis data
   - **Contextual fallback** (`needsFallback`): AI analysis includes boolean flag assessing if incident warrants switching to alternative. When true, AnalysisModal + Is X Down AI Insight card show Score-based fallback list. Shared `getFallbacks()` utility in `src/utils/constants.js` (used by AnalysisModal + Overview)
   - Grouped fallback: when incident affects multiple categories, Discord alerts + dashboard show per-category alternatives via `buildGroupedFallbackText`
-  - **Fallback tier priority**: same-tier services are recommended first, then adjacent tiers by distance. Within each tier, sorted by AIWatch Score descending. Defined in `worker/src/fallback.ts`, mirrored in `src/utils/constants.js` (frontend) and `api/is-down.ts` (Edge SSR inline). `TIER_LABEL` lives in the same two files; `src/pages/Overview.jsx` imports it (no inline copy). All call sites use `tierFor(id)` / `tierLabelFor(tier)` helpers that warn once per missing entry — the bare `?? 99` lookup pattern was removed in #403 because it silently coalesced typos and forgotten service additions into Score-only ordering (the failure mode that produced the Junie-as-#1 bug, #402). Cross-mirror drift is pinned by `worker/src/__tests__/api-tier-sync.test.ts` — deep-equal assertion across worker ↔ frontend constants plus a string-match check that every canonical key appears in the `api/is-down.ts` inline literal. API tiers (1-4) and coding-agent tiers (11-13) use distinct number ranges so a single `TIER_LABEL` map stays unambiguous, and `getFallbacks` already filters by category so the two ranges never compare against each other:
-    - **Tier 1** (Major LLM): `claude`, `openai`, `gemini`
-    - **Tier 2** (LLM): `mistral`, `cohere`, `groq`, `together`, `fireworks`, `cerebras`, `deepseek`, `xai`, `perplexity`
-    - **Tier 3** (Infrastructure): `bedrock`, `azureopenai`, `openrouter`
-    - **Tier 4** (Voice): `elevenlabs`, `assemblyai`, `deepgram`
-    - **Tier 11** (`CLI Agent`): `claudecode`, `codex`
-    - **Tier 12** (`IDE Agent` — standalone): `cursor`, `windsurf`
-    - **Tier 13** (`Plugin Agent` — IDE plugin): `copilot`, `junie`
-    - **Tier 21** (`AI Apps`): `chatgpt`, `claudeai`, `characterai` — all three share tier 21, so same-tier distance collapses to 0 across every pairing and ordering reduces to Score (identical to the pre-#403 `?? 99` fall-through, just without the warn-once noise). Entries exist only to suppress the `tierFor` warn-once that would otherwise fire when chatgpt/claudeai surface as the affected service in a fallback flow (Character.AI is in `EXCLUDE_FALLBACK` so it never does). Label deliberately matches `CATEGORY_LABEL[app]` so `buildGroupedFallbackText` output reads identically pre/post-#403.
-    - The `Agent` suffix on each agent-tier label keeps the noun visible in grouped fallback output ("CLI Agent → Claude Code" vs the original ambiguous "CLI → Claude Code") — LLM/Voice/Infra stay bare because those abbreviations already read as service categories.
-    - Pre-#402 the agent tiers were unset and every agent fell through to `?? 99`, so the recommendation collapsed to a Score-only sort and Junie (new service, shallow incident history → inflated Score) showed up as #1 for unrelated outages.
+  - **Fallback tier priority**: same-tier first, then adjacent tiers by distance, Score-descending within a tier. Defined in `worker/src/fallback.ts`, mirrored in `src/utils/constants.js` + `api/is-down.ts`; drift pinned by `worker/src/__tests__/api-tier-sync.test.ts`. Tier ranges: API **1** Major LLM / **2** LLM / **3** Infra / **4** Voice; agents **11** CLI / **12** IDE / **13** Plugin; apps **21**. Full tier membership, the `tierFor`/`tierLabelFor` warn-once rationale, and the #402/#403 (Junie-as-#1) history are in **[docs/reference/fallback-tiers.md](docs/reference/fallback-tiers.md)**.
   - `EXCLUDE_FALLBACK` services are excluded from both source and candidate lists (keep in sync across `worker/src/fallback.ts`, `src/utils/constants.js`, `api/is-down.ts`): `replicate`, `huggingface`, `pinecone`, `stability`, `voyageai`, `modal`, `characterai`, `bedrock`, `azureopenai`
   - **Estimate-only services** (`uptimeSource === 'estimate'` + 0 incidents): `bedrock`, `azureopenai` — hidden from Ranking, Uptime rankings, fallback recommendations, category averages. Dashboard shows "— Not provided" instead of misleading 100% uptime
 - Status polling proxy: `worker/` directory (monorepo), Cloudflare Workers

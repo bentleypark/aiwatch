@@ -1,0 +1,58 @@
+# KV Key Schema (STATUS_CACHE namespace)
+
+> Extracted from CLAUDE.md to keep the auto-loaded project file lean. CLAUDE.md links here; this is the canonical reference.
+
+| Key Pattern | Value | TTL | Writes/Day | Purpose |
+|---|---|---|---|---|
+| `services:latest` | `{ services, cachedAt }` JSON | 5min | ~288 | Real-time status cache (all 33 services) |
+| `daily:{YYYY-MM-DD}` | `{ [svcId]: { ok, total } }` JSON | 2d | ~288 | Daily uptime counters |
+| `history:{YYYY-MM-DD}` | Same as daily | 90d | 1 | Archived yesterday's counters |
+| `latency:24h` | `{ snapshots: [{ t, data }] }` JSON | 25h | ~48 | 30-min latency snapshots (max 48) |
+| `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 7d | ~288 | 5-min health check probe results (max 2016, 20 API services) |
+| `probe:daily:{YYYY-MM-DD}` | `{ [svcId]: { p50, p75, p95, min, max, count, spikes } }` JSON | 90d | 1 | Daily probe RTT summary for monthly reports |
+| `probe:summaries` | `[svcId, ProbeSummary][]` JSON | 80min | ~48 | Cron-cached 7-day probe summaries (p50, p95, cvCombined, validDays); refreshed every 30min via in-memory slot guard, TTL covers up to 2 missed 30-min refresh cycles |
+| `alerted:new:{incId}` | `"1"` | 7d | ~5 | Incident alert dedup |
+| `alerted:res:{incId}` | `"1"` | 7d | ~2 | Resolved incident alert dedup |
+| `alerted:down:{svcId}` | ISO timestamp | 2h | ~2 | Service down alert dedup + recovery duration |
+| `alerted:degraded:{svcId}` | ISO timestamp | 2h | ~2 | Service degraded alert dedup |
+| `alerted:recovered:{svcId}` | `"1"` | 2h | ~2 | Recovery alert dedup |
+| `recovered:{svcId}:{incId}` | `{ resolvedAt, incidentTitle, duration }` JSON | 2h | ~2 | Independent recovery marker (powers Recently Resolved banner without AI analysis) |
+| `alerted:probe-spike:{svcId}` | `"1"` | 1h | ~2 | Probe RTT spike alert dedup (early detection) |
+| `alerted:flap:{svcId}:{normalizedTitle}` | `"1"` | 1h | ~5-20 | BetterStack auto-recovery flap suppression (#283) — 60-min window per service + title. Written on the `alerted:res:` fire of the first flap; checked on next cron cycle to drop both down + resolved halves of subsequent identical flaps. Opt-in via `ServiceConfig.flapSuppression: true`; applies to `together`, `fireworks`, `huggingface`, `modal`. Tier-1 (`claude`/`openai`/`gemini`) never suppressed as defense-in-depth |
+| `pending:degraded:{svcId}` | `"1"` | 10min | ~5 | Anti-flapping: 2-cycle consecutive detection |
+| `detected:{svcId}` | ISO timestamp | 7d | ~5 | Detection Lead: earliest detection time (probe spike or status page, whichever is earlier) |
+| `detection:lead:{YYYY-MM-DD}` | `DetectionLeadEntry[]` JSON | 7d | ~0-5 | Detection Lead audit log — appended on each new incident with positive lead, dedup by incId, surfaced in Daily Summary Discord embed (#256) |
+| `detection:lead:monthly:{YYYY-MM}` | `DetectionLeadEntry[]` JSON | 60d | ~0-5 | Detection Lead monthly accumulator (#369) — dual-written by `appendDetectionLead` alongside the daily key so the monthly archive cron can read full-month entries past the 7d daily TTL. Summarized into `MonthlyArchive.detectionLead` (count / avg / median / max / byService / topExamples). 60d TTL covers archive's 1st-of-next-month read window with margin |
+| `reddit:seen:{postId}` | `"1"` | 24h | ~120 | Reddit post dedup (hourly scan, max 5/hour) |
+| `security:seen:hn:{objectId}` | `SecurityAlertMeta` JSON | 7d | ~0 | HN security post dedup + dashboard display |
+| `security:seen:osv:{vulnId}` | `SecurityAlertMeta` JSON | 7d | ~0 | OSV.dev vulnerability dedup + dashboard display (includes `epssPercentile` / `epssPercentage` from #326 when GitHub Advisories enrichment succeeded) |
+| `security:monthly:{YYYY-MM}` | `SecurityAlertMeta[]` JSON | 60d | ~1/day | Monthly security alert accumulation for reports (entries carry EPSS fields when available, #326) |
+| `enrich:epss:{ghsaId}` | `EpssScore` JSON (`{percentile, percentage}`) | 24h | ~0-15/day | EPSS (Exploit Prediction Scoring System) cache (#326). Hit once per new OSV vuln against GitHub Advisories API, cached 24h (EPSS recomputes daily). Missing = enrichment unavailable → alert still surfaces without the exploit-probability tag. Rate-limited to 60/hr unauth (not a practical concern given 24h cache + #323 15-per-cycle cap) |
+| `security:detected:{YYYY-MM-DD}` | integer string | 3d | ~0-3/day | Daily counter of newly-detected security alerts (#288). Incremented by `securityAlerts.length` when HN/OSV detection fires. Daily summary reads this instead of counting `security:seen:*` (which accumulates over 7d and inflates the figure) |
+| `ai:analysis:{svcId}:{incId}` | `AIAnalysisResult` JSON | 1h (active) / 2h (resolved) | ~5 per incident | Hybrid AI analysis result — Gemma 4 primary + Sonnet fallback (TTL refreshed while active; on recovery, `resolvedAt` added instead of deleting — kept 2h for "Recently Resolved" UI). `model` field tracks which model produced the analysis. `sticky: true` (#299) marks a manual operator override — cron skips re-analysis and only refreshes TTL; cleared naturally when incident resolves |
+| `ai:reanalysis-skip:{svcId}:{incId}` | `"1"` | 30min | ~2 per incident | Per-incident re-analysis failure cooldown |
+| `ai:usage:{YYYY-MM-DD}` | `{ calls, success, failed, gemma?, sonnet? }` JSON | 2d | ~5 | Daily AI analysis usage counter (includes re-analysis, model breakdown). Manual `/api/admin/analyze` (#299) calls also increment here so the daily summary attributes them |
+| `admin:ratelimit:{hash}` | `"1"` | 60s | ~0-10/day | Per-incident rate limit for `POST /api/admin/analyze` (#299). `hash` = first 128 bits of SHA-256 of `{svcId}:{incidentId}`. Hashed rather than raw to avoid leaking incident IDs via `kv list` even though the endpoint is secret-gated |
+| `fetch-fail:{svcId}` | counter string | 30min | ~0 (spikes on outage) | RSS fetch consecutive failure counter (3+ → degraded, capped writes) |
+| `component-missing:{svcId}` | counter string | 30min | ~0 (spikes on migration) | Component ID consecutive miss counter (3+ → Discord alert) |
+| `alerted:component-missing:{svcId}` | `"1"` | 24h | ~0 | Component ID mismatch alert dedup |
+| `alerted:service-drop` | `"1"` | 2h | ~0 | Service count drop alert dedup (< 80% of expected) |
+| `alert:count:{YYYY-MM-DD}` | `{ incidents, resolved, down, degraded, recovered }` JSON | 2d | ~1-5 | Daily alert count aggregated in Daily Summary |
+| `webhook:reg:{sha256hash}` | `{ type, registeredAt }` JSON | 30d | ~1/user/day | Active webhook registration (hashed, refreshed on ping) |
+| `alert:proxy:{YYYY-MM-DD}` | `{ discord, slack, failed }` JSON | 2d | ~1 | User webhook delivery counts (approximate, flushed from in-memory by daily summary cron) |
+| `kv_limit_alert` | `"1"` | 5min | ~1 | KV write limit exceeded cooldown |
+| `daily-summary:{YYYY-MM-DD}` | `"1"` | 7d | 1 | Daily summary execution marker (prevents duplicate send + enables catch-up) |
+| `changelog:entries` | `ChangelogEntry[]` JSON | 14d | ~3 | Accumulated changelog entries from RSS + HTML sources (cleared after weekly briefing) |
+| `changelog:last-fetch:{source}` | ISO timestamp string | 7d | ~96 | Per-source last-successful-fetch marker (#274) — weekly briefing surfaces sources stale >2d so silent collection gaps don't go unnoticed |
+| `weekly-briefing:{YYYY-MM-DD}` | `"1"` | 7d | 1/week | Weekly briefing execution dedup marker |
+| `vitals:{YYYY-MM-DD}` | `{ count, allValues }` JSON | 3d | per visit (100%) | Web Vitals daily aggregation (LCP, FCP, TTFB, CLS, INP) |
+| `vitals:history:{YYYY-MM-DD}` | `{ count, p75 }` JSON | 90d | 1 | Archived yesterday's vitals p75 summary |
+| `incidents:monthly:{YYYY-MM}` | `MonthlyIncidents` JSON | 60d | 1/day | Monthly incident accumulation (deduped by ID, updated in daily summary cron). Per-service entry now also carries an `incidents` array of full incident detail (id, title, startedAt, resolvedAt, durationMin, finalStatus) capped at `MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE = 200`, so the monthly archive can snapshot a real incident list past the upstream status-page response window (#375) |
+| `archive:monthly:{YYYY-MM}` | `MonthlyArchive` JSON | none (permanent) | 1/month | Monthly reliability snapshot (uptime, score, incidents, totalDowntimeMin, longestIncidentMin, avgResolutionMin, avgLatencyMs per service — downtime/longest fields surfaced from `incidents:monthly:*` before its 60d TTL lapses so aiwatch-reports#10 can render full Incident Summary columns; optional `security` summary from `security:monthly:{YYYY-MM}` snapshot — #290; OSV top findings also carry `timeline[]` from `security:timeline:osv:*` when available — #291; per-service `incidentList` array snapshots full incident detail from the accumulator's `incidents` field — #375 — capped at 200 most-recent entries per service for KV size hygiene; absent on archives written before the feature shipped, frontend must handle that null; optional `narrative` field — AI-generated retrospective draft (Notable Incidents + Observations) baked in at archive build via `worker/src/monthly-narrative.ts` hybrid Gemma→Sonnet, #426 — `null` when AI unavailable / failed, consumed by aiwatch-reports `generate-report.js` as an operator-reviewed auto-draft) |
+| `archive:notified:{YYYY-MM}` | `"1"` | 60d | 1/month | Dedup marker for the "monthly archive ready" Discord ping that links to the `aiwatch-reports/generate-report.yml` workflow_dispatch page (aiwatch-reports#4). Written only after a successful send so a transient webhook failure on the 00:00 archive cycle retries on the 01:00 catch-up cycle. 60d TTL purely for dedup (archive itself is permanent) |
+| `security:timeline:osv:{vulnId}` | `OsvTimeline` JSON | none (permanent) | ~0-3/day | Per-alert OSV lifecycle tracking (#291). Entries: `detected` → `severity_changed` → `fix_released`. Written only on stage transitions by the hourly security cron, so steady-state KV writes are near zero. Archive reader attaches the entries to matching top findings |
+| `platform:status:{platformId}` | `PlatformStatus` JSON | 10min | ~288 | Status page platform health (metastatuspage.com for Atlassian) |
+| `alerted:platform:{platformId}` | `"1"` | 2h | ~1 | Platform outage alert dedup |
+| `alerted:edge-fallback:{surface}:{slug}` | `"1"` | 5min | ~0 (spikes on outage) | Edge SSR fallback alert dedup (#378). Vercel Edge Functions (`api/is-down.ts`, `api/reports.ts`) POST to `/api/internal/edge-fallback` when they serve the degraded "Status data is temporarily unavailable" render. Worker validates Bearer token (`EDGE_ALERT_TOKEN` secret), checks dedup key, fires single Discord alert per `surface:slug` per 5-minute window. Surface = `is-down` \| `reports`. Slug is the service slug (is-down) or sanitized URL path (reports). Marker is written even on Discord delivery failure to prevent retry storms |
+
+**KV write budget** (Workers Paid / Standard plan): 1,000,000 writes/month included (~33,333/day); overage billed at $0.50 per additional 1M. Current estimated usage: ~845-958 writes/day + changelog (~3/day) + changelog last-fetch markers (~96/day, 4 sources × 24 hourly cron, #274) + weekly briefing (~1/week) + vitals (1 per visit) + platform status (~1/cycle when changed) + recovery markers (~2-5/day) ≈ **~3% of monthly inclusion**. Existing throttling constants (e.g., `KV_WRITE_INTERVAL_MS = 600_000`) are retained for cost hygiene even though the hard free-tier limit no longer applies.

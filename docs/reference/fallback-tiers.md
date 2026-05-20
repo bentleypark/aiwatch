@@ -1,0 +1,15 @@
+# Fallback Tier Priority — Full Reference
+
+> Extracted from CLAUDE.md to keep the auto-loaded project file lean. CLAUDE.md links here; this is the canonical reference.
+
+- **Fallback tier priority**: same-tier services are recommended first, then adjacent tiers by distance. Within each tier, sorted by AIWatch Score descending. Defined in `worker/src/fallback.ts`, mirrored in `src/utils/constants.js` (frontend) and `api/is-down.ts` (Edge SSR inline). `TIER_LABEL` lives in the same two files; `src/pages/Overview.jsx` imports it (no inline copy). All call sites use `tierFor(id)` / `tierLabelFor(tier)` helpers that warn once per missing entry — the bare `?? 99` lookup pattern was removed in #403 because it silently coalesced typos and forgotten service additions into Score-only ordering (the failure mode that produced the Junie-as-#1 bug, #402). Cross-mirror drift is pinned by `worker/src/__tests__/api-tier-sync.test.ts` — deep-equal assertion across worker ↔ frontend constants plus a string-match check that every canonical key appears in the `api/is-down.ts` inline literal. API tiers (1-4) and coding-agent tiers (11-13) use distinct number ranges so a single `TIER_LABEL` map stays unambiguous, and `getFallbacks` already filters by category so the two ranges never compare against each other:
+  - **Tier 1** (Major LLM): `claude`, `openai`, `gemini`
+  - **Tier 2** (LLM): `mistral`, `cohere`, `groq`, `together`, `fireworks`, `cerebras`, `deepseek`, `xai`, `perplexity`
+  - **Tier 3** (Infrastructure): `bedrock`, `azureopenai`, `openrouter`
+  - **Tier 4** (Voice): `elevenlabs`, `assemblyai`, `deepgram`
+  - **Tier 11** (`CLI Agent`): `claudecode`, `codex`
+  - **Tier 12** (`IDE Agent` — standalone): `cursor`, `windsurf`
+  - **Tier 13** (`Plugin Agent` — IDE plugin): `copilot`, `junie`
+  - **Tier 21** (`AI Apps`): `chatgpt`, `claudeai`, `characterai` — all three share tier 21, so same-tier distance collapses to 0 across every pairing and ordering reduces to Score (identical to the pre-#403 `?? 99` fall-through, just without the warn-once noise). Entries exist only to suppress the `tierFor` warn-once that would otherwise fire when chatgpt/claudeai surface as the affected service in a fallback flow (Character.AI is in `EXCLUDE_FALLBACK` so it never does). Label deliberately matches `CATEGORY_LABEL[app]` so `buildGroupedFallbackText` output reads identically pre/post-#403.
+  - The `Agent` suffix on each agent-tier label keeps the noun visible in grouped fallback output ("CLI Agent → Claude Code" vs the original ambiguous "CLI → Claude Code") — LLM/Voice/Infra stay bare because those abbreviations already read as service categories.
+  - Pre-#402 the agent tiers were unset and every agent fell through to `?? 99`, so the recommendation collapsed to a Score-only sort and Junie (new service, shallow incident history → inflated Score) showed up as #1 for unrelated outages.
