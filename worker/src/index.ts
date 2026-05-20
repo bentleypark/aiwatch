@@ -10,6 +10,7 @@ import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration }
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
 import { corsHeaders } from './cors'
+import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 
 interface Env {
@@ -2121,6 +2122,25 @@ export default {
 
     // GET /api/status/cached — KV cache only (no live fetch), for Is X Down SSR pages
     if (request.method === 'GET' && url.pathname === '/api/status/cached') {
+      // Statusline polls (#438, tagged ?src=statusline-*) only need id/name/status.
+      // Return the ~KB lite projection and skip the ~2 MB probe/latency/AI reads —
+      // this path was the single largest Vercel Fast Data Transfer route. Freshly
+      // copied snippets hit the Worker domain directly (off Vercel); legacy installs
+      // still using ai-watch.dev get the small payload here via the rewrite.
+      if (isStatuslineRequest(url.searchParams)) {
+        const liteCache = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+        // Intentional: 200 with empty services when the cache is missing (fail-silent
+        // — the jq over an empty array shows a clean statusline) rather than the
+        // non-lite branch's 503; CORS `*` since this is public, unauthenticated,
+        // GET-only status data hit by curl from any host.
+        return new Response(JSON.stringify(buildStatuslinePayload(liteCache)), {
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'public, max-age=30',
+          },
+        })
+      }
       const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
       if (cached) {
         // Read latency + probe data first (needed for Mistral noise filtering before AI analysis)

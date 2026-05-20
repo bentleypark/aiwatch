@@ -20,13 +20,15 @@ test.describe('Statusline guide page (#400 Phase 0)', () => {
   test('renders the recommended preset snippet', async ({ page }) => {
     await page.goto('/#statusline')
     await waitForDataLoad(page)
-    // Pin the canonical curl + jq one-liner pieces: ai-watch.dev host, jq's
+    // Pin the canonical curl + jq one-liner pieces: the Worker host (#438 — polls
+    // hit the Worker directly, not the Vercel-proxied ai-watch.dev path), jq's
     // status filter, fail-silent fallback, 2s timeout. Substrings chosen to
     // avoid quoting/escaping ambiguity (the JSON-in-JSON produces \" in DOM).
     const code = page.locator('pre').first()
     await expect(code).toBeVisible()
     const text = (await code.textContent()) || ''
-    expect(text).toContain('ai-watch.dev/api/status/cached')
+    expect(text).toContain('aiwatch-worker.p2c2kbf.workers.dev/api/status/cached')
+    expect(text).not.toContain('ai-watch.dev/api/status/cached') // must not poll the Vercel-proxied path
     expect(text).toContain('--max-time 2')
     expect(text).toContain('select(.status')
     expect(text).toContain('|| true')
