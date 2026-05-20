@@ -15,6 +15,21 @@ test.describe('Offline / API failure (dev mode)', () => {
     await expect(page.getByText(/Unable to connect|연결할 수 없습니다/)).not.toBeVisible()
   })
 
+  test('does not register a service worker in dev (no stale source-module cache — #432)', async ({ page }) => {
+    await page.goto('/')
+    // Wait on the header (renders without API data) so this doesn't depend on
+    // the mock-fallback path. Dev build must not register the PWA SW — its
+    // stale-while-revalidate cache would serve previously-cached /src/* modules
+    // and mask source edits (the bug this guards against would register one).
+    await expect(page.getByRole('link', { name: 'AIWatch' }).first()).toBeVisible({ timeout: 15000 })
+    const regCount = await page.evaluate(async () => {
+      if (!('serviceWorker' in navigator)) return 0
+      await new Promise((r) => setTimeout(r, 800)) // let main.jsx's SW path settle
+      return (await navigator.serviceWorker.getRegistrations()).length
+    })
+    expect(regCount).toBe(0)
+  })
+
   test('shows error state when API returns malformed response', async ({ page }) => {
     // Return invalid JSON to simulate a non-network error
     await page.route('**/api/status*', (route) =>
