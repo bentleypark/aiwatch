@@ -414,7 +414,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | `click_ranking` | `location`, `source` | Is X Down (header/alternatives) | Ranking link click |
 | `click_service_detail` | `location`, `service_id` | Is X Down (footer) | Service detail page click |
 | `click_reports` | `location`, `source` | Is X Down (alternatives/footer) | Monthly reports link click (Is X Down) |
-| `copy_rss` | `location`, `service_id` | ServiceDetails (header RSS link) | RSS feed URL copied to clipboard (#432) |
+| `copy_rss` | `location`, `service_id` | ServiceDetails (header) · Settings (Alerts) · Overview (incident banner) · Sidebar (footer) | RSS feed URL copied to clipboard. `location` ∈ `service_details`/`settings`/`action_banner`/`sidebar`; `service_id`=`'all'` for the all-services `/feed.xml`, the page slug for per-service feeds (#432, #433) |
 | `click_ph_upvote` | `location` | Landing page (PH banner) | Product Hunt upvote link click |
 | `font_load_failed` | `transport_type: 'beacon'` | index.html `<link>` onerror | Google Fonts CSS preload failed (CDN outage, ad blocker, network) — surfaces silent fallback to system fonts (refs #191) |
 

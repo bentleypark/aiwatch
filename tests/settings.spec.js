@@ -68,3 +68,28 @@ test.describe('Settings', () => {
     await expect(page.locator('main').getByText(/저장됨|Saved/)).toBeHidden({ timeout: 3000 })
   })
 })
+
+test.describe('Settings — RSS feed (#433)', () => {
+  test('Alerts section offers the all-services feed with copy-to-clipboard', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    // Navigate via the header gear (no API/mock data needed) so this doesn't
+    // depend on the flaky waitForDataLoad path used by the suite's beforeEach.
+    await page.goto('/')
+    await expect(page.getByRole('link', { name: 'AIWatch' }).first()).toBeVisible({ timeout: 15000 })
+    await navigateToSettings(page)
+    await expect(page.locator('main').getByText('General')).toBeVisible({ timeout: 20000 })
+
+    // All-services feed URL surfaced in the Alerts section (the only read-only
+    // input on the page — Slack/Discord inputs are editable)
+    const feedInput = page.locator('main input[readonly]')
+    await expect(feedInput).toHaveValue('https://ai-watch.dev/feed.xml')
+    const shownUrl = await feedInput.inputValue()
+
+    // Copy button → clipboard + "Copied ✓" feedback (success path). Assert the
+    // clipboard equals the *displayed* URL — what you see is what you copy, so a
+    // future divergence between the input value and copyFeed() would fail here.
+    await page.getByRole('button', { name: /^(Copy|복사)$/ }).click()
+    await expect(page.getByRole('button', { name: /Copied ✓|복사됨 ✓/ })).toBeVisible()
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shownUrl)
+  })
+})

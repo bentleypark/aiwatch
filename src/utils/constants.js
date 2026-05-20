@@ -74,6 +74,10 @@ export function feedUrlOf(serviceId) {
   return `https://ai-watch.dev/feed/${FEED_SLUG_OVERRIDE[serviceId] ?? serviceId}`
 }
 
+// All-services incident feed — surfaced wherever a global subscribe affordance
+// makes sense (Settings Alerts, incident banner, sidebar footer — #433).
+export const ALL_SERVICES_FEED_URL = 'https://ai-watch.dev/feed.xml'
+
 // Fallback tier priority — API services (1-4) and coding agents (11-13) use distinct number ranges
 // so TIER_LABEL maps each tier number to one unambiguous label. Within a category, getFallbacks
 // orders by tier-distance then by Score.
