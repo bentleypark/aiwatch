@@ -155,6 +155,7 @@ export function renderPage(
 <meta name="description" content="${esc(desc)}">
 <link rel="canonical" href="${esc(canonical)}">
 <link rel="icon" type="image/png" href="/favicon.png">
+<link rel="alternate" type="application/rss+xml" title="${esc(seo.displayName)} incidents — AIWatch" href="https://ai-watch.dev/feed/${esc(slug)}">
 
 <!-- Open Graph -->
 <meta property="og:type" content="website">
@@ -222,6 +223,7 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 .btn:hover{background:#1c2230;text-decoration:none}
 .btn-primary{background:#1a3d22;border-color:#3fb950;color:#3fb950}
 .btn-primary:hover{background:#224a2a}
+button.btn{cursor:pointer;font-family:inherit;line-height:inherit}
 .cta{background:#0d1117;border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:16px 20px;text-align:center;margin:16px 0}
 .cta-title{font-size:14px;font-weight:600;margin-bottom:10px}
 .cta-buttons{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
@@ -243,7 +245,7 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 <div class="container">
 
 ${renderStatusHeader(service, seo)}
-${renderCTA(seo, service?.status ?? 'operational')}
+${renderCTA(seo, service?.status ?? 'operational', slug, service?.id ?? slug)}
 ${renderAIInsight(aiInsight, service?.status, fallbacks)}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
 ${renderIncidents(service)}
@@ -411,7 +413,7 @@ ${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${s
 </div>`
 }
 
-function renderCTA(seo: ServiceSEO, status: string): string {
+function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string): string {
   const isDown = status === 'down' || status === 'degraded'
   // Positioned directly below the status header (#297) so the alert-subscription
   // prompt catches the visitor at peak intent — before they bounce after reading
@@ -425,8 +427,20 @@ function renderCTA(seo: ServiceSEO, status: string): string {
 <p class="cta-title">${esc(message)}</p>
 <div class="cta-buttons">
 <a href="https://ai-watch.dev/#settings" class="btn btn-primary" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'status_banner'})">${esc(buttonLabel)} &rarr;</a>
+<!-- data-rss uses the page slug (the feed URL is /feed/{slug}); data-svc uses the
+     service ID so the copy_rss GA4 event keys on the same id as fallback_click /
+     click_service_detail (id and slug diverge for claude-code, github-copilot, etc.) -->
+<button type="button" class="btn" data-rss="https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" onclick="copyRss(this)">Copy RSS URL</button>
 </div>
-</div>`
+</div>
+<script>
+function copyRss(b){
+  var u=b.dataset.rss;
+  function done(){b.textContent='Copied!';setTimeout(function(){b.textContent='Copy RSS URL'},2000);typeof gtag==='function'&&gtag('event','copy_rss',{location:'is_down_page',service_id:b.dataset.svc})}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(u).then(done).catch(function(){prompt('Copy RSS URL:',u)})}
+  else{prompt('Copy RSS URL:',u)}
+}
+</script>`
 }
 
 // Upper bound on rendered rows (after grouping) — defense against pathological
