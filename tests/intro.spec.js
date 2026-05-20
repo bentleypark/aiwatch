@@ -117,4 +117,38 @@ test.describe('Landing page (/intro)', () => {
     const featureCard = page.locator('.feature-card.fade-up').first()
     await expect(featureCard).toHaveClass(/visible/, { timeout: 5000 })
   })
+
+  test('alerts section RSS channel badge copies the feed URL + restores its label (#434)', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.goto('/intro', { waitUntil: 'domcontentloaded' })
+    const rssBadge = page.locator('.alert-channels .ch-rss')
+    await rssBadge.scrollIntoViewIfNeeded()
+    await expect(rssBadge).toBeVisible()
+    const label = rssBadge.locator('.rss-label')
+    await rssBadge.click()
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('https://ai-watch.dev/feed.xml')
+    await expect(label).toHaveText(/Copied ✓|복사됨 ✓/)
+    // Restores to "RSS" after the 2s feedback window (guards the data-busy/reset path)
+    await expect(label).toHaveText('RSS', { timeout: 4000 })
+  })
+
+  test('final CTA box offers a localized RSS subscribe link that copies the feed URL (#434)', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.goto('/intro', { waitUntil: 'domcontentloaded' })
+    const ctaRss = page.locator('.cta-rss button')
+    const label = ctaRss.locator('.rss-label')
+    await ctaRss.scrollIntoViewIfNeeded()
+
+    // EN i18n wiring + copy + restore
+    await page.locator('.lang-toggle button').filter({ hasText: 'EN' }).click()
+    await expect(label).toHaveText('Subscribe via RSS')
+    await ctaRss.click()
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('https://ai-watch.dev/feed.xml')
+    await expect(label).toHaveText('Copied ✓')
+    await expect(label).toHaveText('Subscribe via RSS', { timeout: 4000 }) // restores after the timeout
+
+    // KO i18n wiring (pins the cta.rss key in both locales)
+    await page.locator('.lang-toggle button').filter({ hasText: 'KO' }).click()
+    await expect(label).toHaveText('RSS로 구독')
+  })
 })
