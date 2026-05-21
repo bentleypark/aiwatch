@@ -4,6 +4,14 @@ import type { ServiceSEO } from '../seo-content'
 import { SLUG_TO_SERVICE, RELATED_SLUGS } from '../slug-map'
 import type { RegionStatusResult } from '../region-status'
 
+// Incidents are filtered to a rolling 30-day window (the `Date.now() - 30 * 86_400_000`
+// cutoff in buildMetaDescription / renderIncidents), so test fixtures MUST use relative
+// dates — absolute literals silently age out of the window and fail later (#449).
+// `daysAgo(n)` = ISO n days before now; `dayAgo(n)` = the 'YYYY-MM-DDT' date prefix
+// n days ago, for building same-(UTC)-calendar-day groups.
+const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString()
+const dayAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10) + 'T'
+
 function mkSeo(overrides: Partial<ServiceSEO> = {}): ServiceSEO {
   return {
     displayName: 'Claude',
@@ -23,7 +31,7 @@ function mkInc(overrides: Partial<Inc> = {}): Inc {
     title: overrides.title ?? 'Nomic Embed Text v1.5',
     status: overrides.status ?? 'resolved',
     impact: overrides.impact ?? null,
-    startedAt: overrides.startedAt ?? '2026-04-20T10:00:00Z',
+    startedAt: overrides.startedAt ?? daysAgo(5),
     duration: overrides.duration ?? null,
   }
 }
@@ -136,7 +144,7 @@ describe('renderIncidents — 30-day window + grouping', () => {
   })
 
   it('emits <details open class="incident-group"> when 3+ same-day normalized-title entries exist', () => {
-    const day = '2026-04-20T'
+    const day = dayAgo(3)
     const svc = mkService({
       incidents: [
         mkInc({ id: '1', title: 'Nomic Embed Text v1.5', startedAt: day + '10:00:00Z' }),
@@ -151,7 +159,7 @@ describe('renderIncidents — 30-day window + grouping', () => {
   })
 
   it('groups when a same-day bucket has exactly 2 entries (≥2 threshold, lowered from ≥3 in #373)', () => {
-    const day = '2026-04-20T'
+    const day = dayAgo(3)
     const svc = mkService({
       incidents: [
         mkInc({ id: '1', title: 'Nomic Embed', startedAt: day + '10:00:00Z' }),
@@ -185,9 +193,9 @@ describe('renderIncidents — 30-day window + grouping', () => {
     // title would render below newer resolved rows in the SERP-visible HTML.
     const svc = mkService({
       incidents: [
-        mkInc({ id: 'r1',  title: 'Recent resolved A', status: 'resolved',      startedAt: '2026-05-05T00:29:00Z', duration: '1h 41m' }),
-        mkInc({ id: 'r2',  title: 'Recent resolved B', status: 'resolved',      startedAt: '2026-05-01T12:55:00Z', duration: '8m' }),
-        mkInc({ id: 'inv', title: 'Active partial outage', status: 'investigating', startedAt: '2026-04-30T06:59:00Z' }),
+        mkInc({ id: 'r1',  title: 'Recent resolved A', status: 'resolved',      startedAt: daysAgo(2), duration: '1h 41m' }),
+        mkInc({ id: 'r2',  title: 'Recent resolved B', status: 'resolved',      startedAt: daysAgo(3), duration: '8m' }),
+        mkInc({ id: 'inv', title: 'Active partial outage', status: 'investigating', startedAt: daysAgo(4) }),
       ],
     })
     const html = renderIncidents(svc)
@@ -202,8 +210,8 @@ describe('renderIncidents — 30-day window + grouping', () => {
   it('puts a monitoring incident above newer resolved rows (#383 SSR regression — monitoring tier)', () => {
     const svc = mkService({
       incidents: [
-        mkInc({ id: 'r1',  title: 'Recent resolved A', status: 'resolved',  startedAt: '2026-05-05T11:00:00Z', duration: '5m' }),
-        mkInc({ id: 'mon', title: 'Active fix verifying', status: 'monitoring', startedAt: '2026-05-04T08:00:00Z' }),
+        mkInc({ id: 'r1',  title: 'Recent resolved A', status: 'resolved',  startedAt: daysAgo(2), duration: '5m' }),
+        mkInc({ id: 'mon', title: 'Active fix verifying', status: 'monitoring', startedAt: daysAgo(3) }),
       ],
     })
     const html = renderIncidents(svc)
