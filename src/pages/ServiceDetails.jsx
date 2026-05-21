@@ -710,7 +710,7 @@ export default function ServiceDetails({ serviceId }) {
         </div>
         <div className="flex items-center gap-1.5">
           {!!recentlyRecovered[service.id] && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
-          <StatusPill status={service.status} />
+          <StatusPill status={service.status} partialCount={service.partialCount} />
         </div>
       </div>
 
