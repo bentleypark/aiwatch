@@ -17,7 +17,7 @@ import {
   computeDailyImpactFromIncidents,
 } from './parsers/aistudio'
 import { parseInstatusIncidents } from './parsers/instatus'
-import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds } from './parsers/betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackPartialCount } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
 import { parseAwsRssIncidents, deriveAwsStatus } from './parsers/aws'
 
@@ -707,6 +707,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       // Better Stack uptime + status: parse /index.json for aggregate_state and availability
       let betterStackUptime: number | null = null
       let betterStackStat: 'operational' | 'degraded' | 'down' | null = null
+      let betterStackPartial = 0
       let bsDailyImpact: Record<string, DailyImpactLevel> | null = null
       if (betterStackRes && !betterStackRes.ok) {
         console.warn(`[fetchService] ${config.id} BetterStack index.json returned HTTP ${betterStackRes.status}`)
@@ -717,6 +718,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           const bsData: BetterStackIndex = await betterStackRes.json()
           betterStackUptime = parseBetterStackUptime(bsData)
           betterStackStat = parseBetterStackStatus(bsData)
+          betterStackPartial = parseBetterStackPartialCount(bsData)
           bsDailyImpact = parseBetterStackDailyImpact(bsData)
           // Reconcile RSS incidents with index.json resolved status (authoritative)
           const resolvedIds = parseBetterStackResolvedIds(bsData)
@@ -783,6 +785,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         calendarDays: has30dCalendar ? 30 : 14,
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
         ...(betterStackUptime != null ? { uptime30d: betterStackUptime, uptimeSource: 'platform_avg' as const } : {}),
+        ...(betterStackPartial > 0 ? { partialCount: betterStackPartial } : {}),
       }
     }
   } catch (err) {

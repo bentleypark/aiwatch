@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds } from '../betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackPartialCount } from '../betterstack'
 
 describe('parseRssIncidents', () => {
   it('groups RSS items by guid into incidents', () => {
@@ -999,5 +999,54 @@ describe('parseBetterStackResolvedIds', () => {
   it('returns empty set when no status_reports', () => {
     expect(parseBetterStackResolvedIds({})).toEqual(new Set())
     expect(parseBetterStackResolvedIds({ included: [] })).toEqual(new Set())
+  })
+})
+
+describe('parseBetterStackPartialCount (#447)', () => {
+  const resource = (status: string) => ({ type: 'status_page_resource', attributes: { status } })
+
+  it('counts degraded + downtime resources', () => {
+    expect(parseBetterStackPartialCount({
+      included: [resource('downtime'), resource('degraded'), resource('downtime'), resource('operational')],
+    })).toBe(3)
+  })
+
+  it('returns 0 when all resources are operational', () => {
+    expect(parseBetterStackPartialCount({
+      included: [resource('operational'), resource('operational')],
+    })).toBe(0)
+  })
+
+  it('excludes maintenance resources (planned, not an outage)', () => {
+    expect(parseBetterStackPartialCount({
+      included: [resource('maintenance'), resource('maintenance'), resource('downtime')],
+    })).toBe(1)
+  })
+
+  it('ignores non status_page_resource entries', () => {
+    expect(parseBetterStackPartialCount({
+      included: [
+        { type: 'status_report', attributes: { status: 'downtime' } },
+        resource('downtime'),
+      ],
+    })).toBe(1)
+  })
+
+  it('returns 0 for missing / empty included', () => {
+    expect(parseBetterStackPartialCount({})).toBe(0)
+    expect(parseBetterStackPartialCount({ included: [] })).toBe(0)
+  })
+
+  it('reflects the partial-outage gap: status operational (<30%) yet partialCount > 0', () => {
+    // 2 downtime out of 10 → parseBetterStackStatus collapses to operational, but the
+    // 2 affected resources are still surfaced via partialCount (the #447 perception gap).
+    const included = [
+      ...Array.from({ length: 8 }, () => resource('operational')),
+      resource('downtime'),
+      resource('downtime'),
+    ]
+    const data = { data: { attributes: { aggregate_state: 'downtime' } }, included }
+    expect(parseBetterStackStatus(data)).toBe('operational')  // <30% threshold
+    expect(parseBetterStackPartialCount(data)).toBe(2)        // but 2 are affected
   })
 })

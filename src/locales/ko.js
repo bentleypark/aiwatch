@@ -33,6 +33,8 @@ const ko = {
   'status.degraded_perf': '성능 저하',
   'status.degraded': '부분 장애',
   'status.down': '주요 장애',
+  'status.partial.suffix': '개 영향',
+  'status.partial.tooltip': '제공사 상태 페이지에서 일부 구성요소에 이슈가 보고됐습니다. 서비스 전체 가용성은 정상 범위입니다.',
 
   // Overview
   'overview.last.updated': '마지막 업데이트',

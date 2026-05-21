@@ -32,6 +32,10 @@ export interface ServiceStatus {
   calendarDays?: number
   uptimeSource?: 'official' | 'platform_avg' | 'estimate'
   detectedAt?: string
+  /** BetterStack only: count of resources reporting a real issue (degraded/downtime)
+   *  while the service stays operational under the <30% threshold (#447). UI shows a
+   *  "N affected" badge; absent when 0. */
+  partialCount?: number
 }
 
 export type DailyImpactLevel = 'minor' | 'major' | 'critical'
