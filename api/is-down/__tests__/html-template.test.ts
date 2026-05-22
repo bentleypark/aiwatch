@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderShareButtons, renderPage, type ServiceData } from '../html-template'
 import type { ServiceSEO } from '../seo-content'
 import { SLUG_TO_SERVICE, RELATED_SLUGS } from '../slug-map'
@@ -625,5 +627,35 @@ describe('RSS feed surfacing on /is-*-down (#430)', () => {
     expect(html).toContain(
       "gtag('event','copy_rss',{location:'is_down_page',service_id:b.dataset.svc})",
     )
+  })
+})
+
+// ── Recurrence guard (#443 / #449) ───────────────────────────────────
+//
+// buildMetaDescription + renderIncidents filter incidents on a
+// Date.now()-anchored rolling 30-day window. A hard-coded calendar-date
+// literal in any fixture here silently ages out of that window and the
+// test starts failing on a future date with no code change — exactly the
+// #443 breakage. Every fixture MUST derive its dates from daysAgo(n) /
+// dayAgo(n) instead. This meta-test reads its own source and fails if a
+// YYYY-MM-DD literal reappears, so the brittle pattern is caught the
+// moment it's reintroduced rather than weeks later when the calendar
+// happens to roll past the window edge.
+describe('date-literal guard (#443)', () => {
+  it('contains no hard-coded calendar-date literals — fixtures use relative daysAgo()/dayAgo() only', () => {
+    const source = readFileSync(fileURLToPath(import.meta.url), 'utf8')
+    // Matches an ISO-ish YYYY-MM-DD literal (year 19xx/20xx). No trailing
+    // boundary: fixture dates are usually followed by `T` (e.g. ...-20T10:00),
+    // and a `\b` there would never match. The pattern text itself is
+    // digit-class-based, so it never matches its own source line.
+    // Scope: this only catches the ISO-dashed form — the sole literal shape
+    // used by every fixture in this file (and the one #443 actually broke on).
+    // Exotic brittle forms (numeric `new Date(y, m, d)`, epoch-ms literals) are
+    // not detected, but they don't occur here and aren't the realistic regression.
+    const hits = source.match(/\b(?:19|20)\d\d-\d\d-\d\d/g) ?? []
+    expect(
+      hits,
+      'Hard-coded date literal(s) found — replace with daysAgo(n)/dayAgo(n) so fixtures stay inside the rolling 30-day window (see #443).',
+    ).toEqual([])
   })
 })
