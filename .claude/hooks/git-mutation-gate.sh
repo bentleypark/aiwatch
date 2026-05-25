@@ -10,13 +10,16 @@
 #   • `--no-verify` / `--no-gpg-sign` — CLAUDE.md forbids these unless the user
 #     explicitly asked.
 #
-# Heuristic to keep it from nagging on every legit commit: if a dev server is
-# already listening on a usual port (5173 Vite / 8788 wrangler / 3333 vercel /
-# 4000 jekyll) AND the command carries no `--no-verify`, stay silent (a running
-# dev server is weak evidence step 3.5 was at least set up). If no dev server is
-# up, warn — step 3.5 was very likely skipped. It's soft on purpose; if the
-# audit log shows it's being ignored, escalate to a hard block (permissionDecision
-# "deny", exit 0 with that JSON) — see #415.
+# The step-3.5 reminder fires on EVERY matched git mutation — it is NOT silenced
+# by a running dev server. Rationale (#415, 2026-05-19 gap): a port probe cannot
+# distinguish "the assistant started a server and curl-checked it itself" from
+# "the user confirmed in the browser" — and the latter (a user message) is the
+# thing step 3.5 actually requires, which a PreToolUse(Bash) hook cannot observe.
+# Treating an up port as a "pass" produced a false silence in the #430 violation.
+# So the port (5173 Vite / 8788 wrangler / 3333 vercel / 4000 jekyll) is now only
+# an INFORMATIONAL hint inside the reminder, never a silence condition. Still soft
+# on purpose; if the audit log shows it's ignored, escalate to a hard block
+# (permissionDecision "deny", exit 0 with that JSON) — see #415.
 #
 # Every fire is logged via _audit.sh for monitoring. Never blocks on a hook bug:
 # missing jq / parse failure -> exit 0.
@@ -58,18 +61,19 @@ case "$CMD" in
   *"--no-verify"*|*"--no-gpg-sign"*|*"-c commit.gpgsign=false"*) noverify=1 ;;
 esac
 
-warnings=()
-if [ "$dev_running" -eq 0 ]; then
-  warnings+=("🚧 ${op}: no dev server detected on :5173/:8788/:3333/:4000 — CLAUDE.md step 3.5 (start the right dev server + get the user's in-browser confirmation) was very likely skipped. Tests passing ≠ feature verified.")
-fi
-if [ "$noverify" -eq 1 ]; then
-  warnings+=("⛔ ${op}: \`--no-verify\` / \`--no-gpg-sign\` detected — CLAUDE.md forbids these unless the user explicitly asked. If they didn't, drop the flag and let the hook run.")
+# Step 3.5 is ALWAYS surfaced on a matched git mutation — a running dev server is
+# an informational hint, NOT a silence condition (see header). Port status is
+# included so the reminder is honest about what was/wasn't observable.
+if [ "$dev_running" -eq 1 ]; then
+  dev_hint="a dev server IS listening on :5173/:8788/:3333/:4000 — but that is NOT proof the user confirmed (it could be a server you started + curl-checked yourself)"
+else
+  dev_hint="no dev server detected on :5173/:8788/:3333/:4000 — step 3.5 was very likely skipped entirely"
 fi
 
-if [ "${#warnings[@]}" -eq 0 ]; then
-  # Dev server up + no skipped-verification flags: looks fine. Stay silent, just log.
-  audit "pass" "${op}; dev_server=up"
-  exit 0
+warnings=()
+warnings+=("🚦 ${op}: CLAUDE.md step 3.5 — did the USER confirm this change in-browser? Your own curl / Playwright checks do NOT count, and \"tests pass\" ≠ \"feature verified\". (${dev_hint}.)")
+if [ "$noverify" -eq 1 ]; then
+  warnings+=("⛔ ${op}: \`--no-verify\` / \`--no-gpg-sign\` detected — CLAUDE.md forbids these unless the user explicitly asked. If they didn't, drop the flag and let the hook run.")
 fi
 
 # Soft warning: surface a systemMessage, allow the tool to proceed.

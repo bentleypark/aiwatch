@@ -3,8 +3,9 @@
 #
 # Usage:  bash "${HOOK_DIR}/_audit.sh" <hook-name> <decision> <note>
 # Appends one JSON line to .claude/hook-audit.jsonl (gitignored):
-#   {"ts":"<ISO>","hook":"<name>","decision":"<pass|warn|block|skip|clean>","note":"<text>"}
-# Decisions in use: git-mutation-gate → pass | warn; stop-nag-gate → clean | block | skip.
+#   {"ts":"<ISO>","hook":"<name>","decision":"<warn|block|skip|clean|inject|pass>","note":"<text>"}
+# Decisions in use: git-mutation-gate → warn (pass is legacy, pre-#415-gap-fix);
+# stop-nag-gate → clean | block | skip; workflow-gates-reminder → inject.
 #
 # Why a file, not memory: the point of #415 is to *measure* whether the gates
 # change behavior — how often each fires, by which decision, trending over time.

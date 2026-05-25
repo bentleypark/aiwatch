@@ -68,12 +68,14 @@ for (const e of last7) {
 }
 
 // Per-day trend (last DAYS days). Columns track the decisions actually emitted:
-// git-mutation-gate → warn | pass; stop-nag-gate → block | skip | clean.
+// git-mutation-gate → warn (now always on a git mutation; `pass` is legacy, kept
+// for historical rows pre-#415-gap-fix); stop-nag-gate → block | skip | clean;
+// workflow-gates-reminder → inject (UserPromptSubmit, fires every turn).
 const dayCounts = {}
 for (const e of entries) {
   const k = dayKey(e.ts)
   if (k === 'unknown') continue
-  dayCounts[k] = dayCounts[k] ?? { total: 0, warn: 0, block: 0, skip: 0, pass: 0, clean: 0, other: 0 }
+  dayCounts[k] = dayCounts[k] ?? { total: 0, warn: 0, block: 0, skip: 0, pass: 0, clean: 0, inject: 0, other: 0 }
   dayCounts[k].total++
   const d = e.decision
   if (d === 'warn') dayCounts[k].warn++
@@ -81,6 +83,7 @@ for (const e of entries) {
   else if (d === 'skip') dayCounts[k].skip++
   else if (d === 'pass') dayCounts[k].pass++
   else if (d === 'clean') dayCounts[k].clean++
+  else if (d === 'inject') dayCounts[k].inject++
   else dayCounts[k].other++
 }
 const days = []
@@ -102,11 +105,11 @@ out.push('Last 7 days by decision:')
 const dprint = Object.entries(last7ByDecision).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}=${v}`)
 out.push(`  ${dprint.length ? dprint.join('  ') : '(none)'}`)
 out.push('')
-out.push(`Per-day (last ${DAYS} days)  [total | warn | block | skip | pass | clean]:`)
+out.push(`Per-day (last ${DAYS} days)  [total | warn | block | skip | pass | clean | inject]:`)
 for (const d of days) {
   const c = dayCounts[d]
   if (!c) { out.push(`  ${d}   0`); continue }
-  out.push(`  ${d}   ${c.total} | ${c.warn} | ${c.block} | ${c.skip} | ${c.pass} | ${c.clean}`)
+  out.push(`  ${d}   ${c.total} | ${c.warn} | ${c.block} | ${c.skip} | ${c.pass} | ${c.clean} | ${c.inject}`)
 }
 out.push('')
 out.push(`Most recent ${LAST_N}:`)

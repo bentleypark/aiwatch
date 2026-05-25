@@ -1,0 +1,5 @@
+⚙️ AIWatch non-negotiable workflow gates (#415) — re-check at the decision moment, not just at session start:
+1. Local verify (CLAUDE.md step 3.5): before committing, start the right dev server AND get the USER's explicit in-browser confirmation. Your own curl / Playwright checks do NOT satisfy this. "Tests pass" ≠ "feature verified" — STOP and wait for the user after requesting verification.
+2. PR review (/pr-review-toolkit:review-pr) + Build/Test before every commit; auto-loop until a round is 0 Critical/Important.
+3. Commit / push / PR / merge only after the user asks or confirms — a ready/MERGEABLE PR is not a cue to auto-merge.
+4. No nag: never end a turn with "shall I proceed / merge / 진행할까요? / 다음 작업 진행할까요?". Report results and stop.
