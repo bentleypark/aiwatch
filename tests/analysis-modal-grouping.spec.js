@@ -43,9 +43,12 @@ const ANALYSIS_MODEL = {
   analyzedAt: new Date().toISOString(),
 }
 
+// Degraded variant — the modal's fallback gate is status-based (#454), so the
+// Alternatives block only renders when the service is down/degraded. The #315
+// dedup guard ("exactly once per card") needs a card that actually shows it.
 const MOCK = {
   services: [
-    { id: 'together', category: 'api', name: 'Together AI', provider: 'Together', status: 'operational', latency: 150, incidents: [INC_NETWORK, INC_MODEL] },
+    { id: 'together', category: 'api', name: 'Together AI', provider: 'Together', status: 'degraded', latency: 150, incidents: [INC_NETWORK, INC_MODEL] },
     { id: 'groq', category: 'api', name: 'Groq Cloud', provider: 'Groq', status: 'operational', latency: 100, incidents: [], aiwatchScore: 92 },
     { id: 'fireworks', category: 'api', name: 'Fireworks AI', provider: 'Fireworks', status: 'operational', latency: 110, incidents: [], aiwatchScore: 87 },
   ],
@@ -97,6 +100,29 @@ test.describe('AnalysisModal grouping — same service multi-incident', () => {
     const alternatives = modal.getByText(/🔄 (Alternatives|대안 서비스)/)
     await expect(alternatives).toHaveCount(1)
   })
+})
+
+// Operational service with active (unresolved) analyses — the "isolated model
+// issue" case. The status-based gate (#454) hides Alternatives here, matching
+// the Overview ActionBanner which excludes operational services from its
+// affected set, while the isolated-issue badge still surfaces the gap.
+const ISOLATED_MOCK = {
+  services: [
+    { id: 'together', category: 'api', name: 'Together AI', provider: 'Together', status: 'operational', latency: 150, incidents: [INC_NETWORK, INC_MODEL] },
+    { id: 'groq', category: 'api', name: 'Groq Cloud', provider: 'Groq', status: 'operational', latency: 100, incidents: [], aiwatchScore: 92 },
+    { id: 'fireworks', category: 'api', name: 'Fireworks AI', provider: 'Fireworks', status: 'operational', latency: 110, incidents: [], aiwatchScore: 87 },
+  ],
+  aiAnalysis: {
+    together: [ANALYSIS_NETWORK, ANALYSIS_MODEL],
+  },
+  lastUpdated: new Date().toISOString(),
+}
+
+test.describe('AnalysisModal grouping — operational service with active analyses', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/status', (route) => route.fulfill({ json: ISOLATED_MOCK }))
+    await page.route('**/api/status/cached', (route) => route.fulfill({ json: ISOLATED_MOCK }))
+  })
 
   test('shows isolated-issue badge when service is operational with active analyses', async ({ page }) => {
     await page.goto('/')
@@ -107,6 +133,17 @@ test.describe('AnalysisModal grouping — same service multi-incident', () => {
     await expect(modal).toBeVisible()
 
     await expect(modal.getByText(/Isolated issue|부분 이슈/)).toBeVisible()
+  })
+
+  test('hides Alternatives for an operational isolated-issue service (#454 status gate)', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.getByText('Together AI').first()).toBeVisible({ timeout: 20000 })
+
+    await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
+    const modal = page.locator('.fixed.inset-0').last()
+    await expect(modal).toBeVisible()
+
+    await expect(modal.getByText(/🔄 (Alternatives|대안 서비스)/)).toHaveCount(0)
   })
 })
 
@@ -150,9 +187,12 @@ test.describe('AnalysisModal — fully resolved group', () => {
 // EXCLUDE_FALLBACK services (replicate/huggingface/pinecone/modal/etc.) must not render
 // the Alternatives block even when needsFallback=true — keeps suggestion list in sync with
 // constants.js.
+// huggingface is degraded here so the #454 status gate passes — this pins that
+// the EXCLUDE_FALLBACK membership (not the status gate) is what suppresses the
+// Alternatives block.
 const EXCLUDED_SVC_MOCK = {
   services: [
-    { id: 'huggingface', category: 'api', name: 'Hugging Face', provider: 'Hugging Face', status: 'operational', latency: 180, incidents: [INC_MODEL] },
+    { id: 'huggingface', category: 'api', name: 'Hugging Face', provider: 'Hugging Face', status: 'degraded', latency: 180, incidents: [INC_MODEL] },
     { id: 'groq', category: 'api', name: 'Groq Cloud', provider: 'Groq', status: 'operational', latency: 100, incidents: [], aiwatchScore: 92 },
   ],
   aiAnalysis: {
@@ -253,6 +293,11 @@ test.describe('AnalysisModal — mixed sibling-shared + service-private', () => 
     // Shared card must list claude.ai alongside Claude API (sibling grouping preserved)
     const sharedSection = modal.getByText(/Admin API endpoints are degraded/).locator('xpath=ancestor::div[contains(@class, "rounded-lg")][1]')
     await expect(sharedSection.getByText('claude.ai')).toBeVisible()
+
+    // Multi-service degraded group still surfaces Alternatives under the #454
+    // status gate even though SHARED_ANALYSIS is needsFallback:false — pins the
+    // `svcs.some(non-operational)` semantics for a mixed sibling group.
+    await expect(sharedSection.getByText(/🔄 (Alternatives|대안 서비스)/)).toHaveCount(1)
 
     // Private card must be Claude-only — claude.ai must not leak into this card
     const privateSection = modal.getByText(/Opus 4\.6 model error rate elevated/).locator('xpath=ancestor::div[contains(@class, "rounded-lg")][1]')

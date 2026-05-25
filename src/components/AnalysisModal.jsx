@@ -1,6 +1,6 @@
 // AI Analysis Modal — shows incident analysis results from Claude
 import { useLang } from '../hooks/useLang'
-import { getGroupedFallbacks, EXCLUDE_FALLBACK } from '../utils/constants'
+import { getGroupedFallbacks, shouldShowFallback } from '../utils/constants'
 
 function timeAgo(date, lang) {
   const diff = Date.now() - new Date(date).getTime()
@@ -126,9 +126,12 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
               && isAllResolved
               && !allRecovered
               && analyses.some(a => !a.resolvedAt)
-            const showFallback = !allRecovered
-              && analyses.some(a => a.needsFallback && !a.resolvedAt)
-              && !svcs.every(s => EXCLUDE_FALLBACK.includes(s.id))
+            // Gate on service status (not the AI's needsFallback flag) so this
+            // matches the Overview ActionBanner, which shows fallbacks for any
+            // down/degraded service. The AI may mark partial degradation as
+            // needsFallback:false, which previously hid recommendations here
+            // while Overview still showed them (#454).
+            const showFallback = shouldShowFallback(svcs, allRecovered)
             // Per-category alternatives across every affected service in the group
             // (a multi-service incident spans LLM + agent + app categories), not just
             // the first service's category (#445).

@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test'
-import { waitForDataLoad } from './helpers.js'
 
 test.describe('AnalysisModal fallback section', () => {
   const mockServices = [
@@ -15,75 +14,87 @@ test.describe('AnalysisModal fallback section', () => {
     { id: 'mistral', category: 'api', name: 'Mistral API', provider: 'Mistral AI', status: 'operational', latency: 90, uptime30d: 99.90, incidents: [] },
   ]
 
-  test('renders fallback alternatives when needsFallback is true', async ({ page }) => {
-    await page.route('**/api/status*', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          services: mockServices,
-          lastUpdated: new Date().toISOString(),
-          aiAnalysis: {
-            openai: [{
-              summary: 'Chat endpoint latency elevated due to increased traffic.',
-              estimatedRecovery: '~1h',
-              affectedScope: ['Chat API'],
-              needsFallback: true,
-              analyzedAt: new Date().toISOString(),
-              incidentId: 'oi-test',
-            }],
-          },
-        }),
-      })
-    )
+  // Status-based gate (#454): the modal shows alternatives whenever the affected
+  // service is down/degraded, matching the Overview ActionBanner — it no longer
+  // depends on the AI's needsFallback flag.
+  async function loadWithAnalysis(page, aiAnalysis, services = mockServices) {
+    const body = { services, lastUpdated: new Date().toISOString(), aiAnalysis }
+    await page.route('**/api/status', (route) => route.fulfill({ json: body }))
+    await page.route('**/api/status/cached', (route) => route.fulfill({ json: body }))
     await page.goto('/')
-    await waitForDataLoad(page)
+    // Wait for the affected service card to render (proven pattern from
+    // analysis-modal-grouping.spec.js — avoids the main-scoped helper's
+    // hidden-first-match flakiness).
+    await expect(page.getByText('OpenAI API').first()).toBeVisible({ timeout: 20000 })
+    await page.locator('button').filter({ hasText: /Analyze|분석/ }).click()
+    const modal = page.locator('.fixed.inset-0').last()
+    await expect(modal).toBeVisible()
+    return modal
+  }
 
-    // Desktop: click the "Analyze" button (hidden md:block container)
-    const analyzeBtn = page.locator('header .hidden.md\\:block button.btn-topbar').first()
-    await expect(analyzeBtn).toBeVisible({ timeout: 10000 })
-    await analyzeBtn.click()
+  // Match the grouping spec's idiom: scope to the modal and the 🔄-prefixed
+  // heading so the assertion can't match incidental copy and toHaveCount(0)
+  // fails fast on a regression instead of waiting out the visibility timeout.
+  const alternativesIn = (modal) => modal.getByText(/🔄 (Alternatives|대안 서비스)/)
 
-    // Verify modal is open with analysis content
-    await expect(page.getByText('Elevated Latency').first()).toBeVisible({ timeout: 5000 })
+  test('renders fallback alternatives for a degraded service (needsFallback true)', async ({ page }) => {
+    const modal = await loadWithAnalysis(page, {
+      openai: [{
+        summary: 'Chat endpoint latency elevated due to increased traffic.',
+        estimatedRecovery: '~1h',
+        affectedScope: ['Chat API'],
+        needsFallback: true,
+        analyzedAt: new Date().toISOString(),
+        incidentId: 'oi-test',
+      }],
+    })
 
-    // Verify fallback section renders with "Alternatives" heading
-    await expect(page.getByText(/Alternatives|대안 서비스/).first()).toBeVisible()
-
-    // Verify at least one fallback service name appears
-    await expect(page.getByText(/Claude API|Gemini API|Mistral API/).first()).toBeVisible()
+    // Single-incident cards render the AI summary, not the incident title (the
+    // title only shows for multi-incident cards — AnalysisModal.jsx).
+    await expect(modal.getByText('Chat endpoint latency elevated').first()).toBeVisible({ timeout: 5000 })
+    await expect(alternativesIn(modal)).toHaveCount(1)
+    await expect(modal.getByText(/Claude API|Gemini API|Mistral API/).first()).toBeVisible()
   })
 
-  test('does not render fallback section when needsFallback is false', async ({ page }) => {
-    await page.route('**/api/status*', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          services: mockServices,
-          lastUpdated: new Date().toISOString(),
-          aiAnalysis: {
-            openai: [{
-              summary: 'Minor dashboard rendering issue.',
-              estimatedRecovery: '~30m',
-              affectedScope: ['Dashboard'],
-              needsFallback: false,
-              analyzedAt: new Date().toISOString(),
-              incidentId: 'oi-test',
-            }],
-          },
-        }),
-      })
+  test('still renders fallback alternatives for a degraded service when needsFallback is false (#454)', async ({ page }) => {
+    // Regression guard for the #454 gate unification: the AI classifies partial
+    // degradation as needsFallback:false, but a degraded service must still show
+    // alternatives so the modal stays consistent with the Overview ActionBanner.
+    const modal = await loadWithAnalysis(page, {
+      openai: [{
+        summary: 'Partial degradation on a subset of chat models.',
+        estimatedRecovery: '~30m',
+        affectedScope: ['Chat API'],
+        needsFallback: false,
+        analyzedAt: new Date().toISOString(),
+        incidentId: 'oi-test',
+      }],
+    })
+
+    await expect(modal.getByText('Partial degradation').first()).toBeVisible({ timeout: 5000 })
+    await expect(alternativesIn(modal)).toHaveCount(1)
+    await expect(modal.getByText(/Claude API|Gemini API|Mistral API/).first()).toBeVisible()
+  })
+
+  test('hides fallback section for an operational service with an active analysis (isolated model issue)', async ({ page }) => {
+    // When the service dot is operational but a model/component incident is still
+    // being analyzed, the status gate hides alternatives — matching Overview,
+    // which excludes operational services from its affected set.
+    const operationalServices = mockServices.map(s =>
+      s.id === 'openai' ? { ...s, status: 'operational' } : s
     )
-    await page.goto('/')
-    await waitForDataLoad(page)
+    const modal = await loadWithAnalysis(page, {
+      openai: [{
+        summary: 'Isolated model rendering issue under investigation.',
+        estimatedRecovery: '~30m',
+        affectedScope: ['Single model'],
+        needsFallback: true,
+        analyzedAt: new Date().toISOString(),
+        incidentId: 'oi-test',
+      }],
+    }, operationalServices)
 
-    const analyzeBtn = page.locator('header .hidden.md\\:block button.btn-topbar').first()
-    await expect(analyzeBtn).toBeVisible({ timeout: 10000 })
-    await analyzeBtn.click()
-
-    // Modal should show analysis but NOT fallback section
-    await expect(page.getByText('Minor dashboard rendering issue').first()).toBeVisible({ timeout: 5000 })
-    await expect(page.getByText(/Alternatives|대안 서비스/).first()).not.toBeVisible()
+    await expect(modal.getByText('Isolated model rendering issue').first()).toBeVisible({ timeout: 5000 })
+    await expect(alternativesIn(modal)).toHaveCount(0)
   })
 })
