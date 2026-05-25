@@ -215,7 +215,7 @@ worker/
     rss.ts      # Incident RSS 2.0 feed generation (#54) — buildFeedResponse (400/404/503/200 decision), buildRssFeed, feedSlug↔is-down-slug map (pinned by feed-slug-sync.test.ts)
     og.ts       # OG image SVG generator (1200×630 for social share)
     og-render.ts # SVG → PNG conversion (resvg-wasm, Inter font from CDN)
-    alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts, formatDetectionLead)
+    alerts.ts   # Alert detection logic (buildIncidentAlerts, buildServiceAlerts, formatDetectionLead, buildRegionHint). buildRegionHint (#422 Phase 2) reuses the Edge region-status port (api/is-down/region-status.ts) — imported, not re-copied — to append a "📍 Try region: <label>" line to new-incident Discord embeds for region-aware services with a region-specific partial outage
     fallback.ts # Fallback recommendation (getFallbacks, buildFallbackText, buildGroupedFallbackText for multi-category incidents)
     ai-analysis.ts # Hybrid AI incident analysis — Gemma 4 26B (Workers AI) primary + Claude Sonnet (AI Gateway) fallback (system/user prompt, needsFallback assessment, TTL refresh, re-analysis, incidentId dedup, timeline context, boilerplate filtering, formatRecoveryDisplay)
     changelog.ts # Changelog/news collection (OpenAI blog RSS, Google AI blog RSS, Anthropic /news HTML parsing) — 15s timeout + 1 retry on transient errors, per-source last-fetch KV markers for stale-source detection (#274)

@@ -4,6 +4,22 @@
 import { getFallbacks, buildFallbackText } from './fallback'
 import { sanitize, formatDuration } from './utils'
 import { computeLeadMs } from './detection-lead-log'
+// #422 Phase 2 — region-switch hint in Discord alerts. We reuse the existing
+// Edge TS port rather than adding a third copy of SERVICE_REGIONS: the Worker
+// bundler (esbuild via wrangler) can import across dirs (unlike Vercel Edge,
+// which is why that port exists), and the file is pure data + functions with no
+// runtime deps. This keeps the region map at two text-sync-pinned copies (SPA +
+// this shared Edge/Worker port) instead of three. The SPA↔Edge parity is pinned
+// by worker/src/__tests__/region-status-sync.test.ts.
+//
+// Trade-off (accepted, #422): this import reaches outside worker/tsconfig.json's
+// rootDir ("src"), so a standalone `tsc -p worker/tsconfig.json` would emit
+// TS6059. The worker is never built with tsc — wrangler/esbuild bundles it and CI
+// runs vitest + `wrangler deploy --dry-run`, none of which trip on rootDir — so
+// this is latent only. Preferred over a third SERVICE_REGIONS copy (drift > tsc
+// purity here). If a tsc typecheck is ever added for the worker, add this path to
+// the tsconfig `include` or relocate the shared port.
+import { regionStatusOf } from '../../api/is-down/region-status'
 import type { ServiceStatus } from './services'
 import type { Incident } from './types'
 
@@ -59,10 +75,35 @@ export interface AlertCandidate {
   title: string
   description: string
   fallbackText?: string
+  /** #422 — region-switch hint (e.g. "📍 Try region: AWS US West") for new incidents
+   *  on region-aware services with a region-specific partial outage. Rendered below the
+   *  cross-service fallback. Absent on resolved alerts and non-region-aware services. */
+  regionText?: string
   color: number
   url: string
   /** When alerts are merged (e.g., Together AI), contains all original dedup keys */
   _mergedKeys?: string[]
+}
+
+/**
+ * Build the Discord region-switch hint for a new incident, or undefined when no
+ * region recommendation applies. A region line is only useful when the outage is
+ * region-specific AND at least one region is still healthy:
+ *  - non-region-aware service (no SERVICE_REGIONS entry) → regionStatusOf returns null
+ *  - global (non-region-specific) incident → hasRegionSpecific=false: cross-service
+ *    fallback is the right guidance, not a region switch
+ *  - every region hit (allDown) → no healthy region to recommend
+ *  - a global incident coexisting with a region-specific one (hasGlobalIncident) →
+ *    the whole service is affected, so a "healthy" region is not actually safe to
+ *    recommend even though some regions look ok (#422 — would otherwise point
+ *    operators at a region the global outage is also taking down)
+ */
+export function buildRegionHint(svc: ScoredService): string | undefined {
+  const state = regionStatusOf(svc)
+  if (!state || !state.hasRegionSpecific || state.allDown || state.hasGlobalIncident || !state.recommendedRegion) {
+    return undefined
+  }
+  return `📍 Try region: ${state.recommendedRegion.label}`
 }
 
 export interface ScoredService extends ServiceStatus {
@@ -125,6 +166,7 @@ export function buildIncidentAlerts(
       title: `🔴 ${displayName} — New Incident`,
       description: sanitize(inc.title),
       fallbackText,
+      regionText: buildRegionHint(firstSvc),
       color: 0xED4245,
       url: `https://ai-watch.dev/#${ids[0]}`,
     })
@@ -178,6 +220,7 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
       title: `🔴 Together AI — ${newAlerts.length} New Incidents`,
       description: descriptions.join('\n'),
       fallbackText: newAlerts[0].fallbackText,
+      regionText: newAlerts[0].regionText, // Together has no region map → undefined; preserved for parity
       color: 0xED4245,
       url: 'https://ai-watch.dev/#together',
       _mergedKeys: newAlerts.map(a => a.key),
