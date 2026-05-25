@@ -34,6 +34,45 @@ Each drawer save specifies **wing + room + hall**. Hall is the memory type (fixe
 - **Rooms** (topics): `architecture`, `debugging`, `feedback`, `decisions`, `deployments`
 - **Halls** (memory types, fixed): `facts`, `events`, `discoveries`, `preferences`, `advice`
 
+## API Docs via Context Hub (chub)
+
+This project uses [Context Hub](https://github.com/andrewyng/context-hub) (`chub` CLI) to fetch
+current, version-accurate API docs **before writing code against an external API/SDK/library** —
+instead of relying on training-cutoff knowledge (anti-hallucination). The global `get-api-docs`
+skill auto-triggers this flow.
+
+### Flow
+```bash
+chub update                          # refresh registry (occasionally)
+chub search "<keywords>" --json      # find the right doc id
+chub get <id> --lang js              # fetch (always pass --lang)
+chub annotate <id> "<gotcha>"        # save discovered gaps — persists across sessions
+```
+
+### AIWatch stack coverage (verified present, mostly maintainer-curated)
+`react/react` (React 19) · `vite/vite` · `tailwindcss/tailwindcss` (**v4**, CSS-first) ·
+`vitest/vitest` · `playwright/playwright` · `typescript/typescript` · `vercel/*` (Edge Functions) ·
+`esbuild/esbuild` (transitive via Vite — no direct config to tune)
+
+**Anthropic** is a special case: AIWatch calls the **Messages REST API via the Cloudflare AI Gateway
+with raw `fetch()`** (no `@anthropic-ai/sdk` dependency — see `worker/src/ai-analysis.ts`), so reach
+for the Anthropic Messages **REST API** doc shape, not an SDK-client doc.
+
+### Cloudflare doc selection (footgun)
+For `worker/src/*` runtime code (`env.AI` Gemma binding, KV `STATUS_CACHE` binding, `scheduled`
+cron handler, `wrangler.toml`) use **`cloudflare/workers-runtime`** (community). Do **NOT** use
+`cloudflare/workers` — that's the REST *management* API (Zones/DNS/script upload), the wrong layer.
+(An annotation already flags this on `cloudflare/workers`.)
+
+### Treat docs as orientation, not ground truth for our edge cases
+chub gives correct API *shape* but not project-specific battle scars. Example verified in the trial:
+the Workers AI doc shows only `res.response`, but `ai-analysis.ts` must also handle the
+OpenAI-compatible `res.choices[0].message.content` / `.reasoning` shape (model-dependent) plus
+`chat_template_kwargs:{enable_thinking:false}` for Gemma. Save such findings with `chub annotate`.
+
+**chub vs MemPalace**: chub = external API ground-truth (public, shared); MemPalace = this project's
+decisions/debugging/feedback (private, project-scoped). Complementary, different layers.
+
 ## Commands
 
 ```bash
