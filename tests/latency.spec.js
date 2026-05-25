@@ -19,8 +19,10 @@ test.describe('Latency page', () => {
   test('renders latency rankings with service names', async ({ page }) => {
     // Rankings section should show numbered services with latency bars
     const main = page.locator('main')
-    await expect(main.getByText('Claude API').first()).toBeVisible()
-    await expect(main.getByText('OpenAI API').first()).toBeVisible()
+    // visible-filtered: a 0×0 'Claude API' node can sort first in <main> under
+    // some layouts (#455).
+    await expect(main.getByText('Claude API').filter({ visible: true }).first()).toBeVisible()
+    await expect(main.getByText('OpenAI API').filter({ visible: true }).first()).toBeVisible()
   })
 
   test('renders 24h trend section', async ({ page }) => {

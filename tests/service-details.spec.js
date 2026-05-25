@@ -14,7 +14,10 @@ test.describe('ServiceDetails page', () => {
   test('renders service header with name and provider', async ({ page }) => {
     const main = page.locator('main')
     await expect(main.getByRole('heading', { name: 'Claude API', exact: true })).toBeVisible()
-    await expect(main.getByText('Anthropic')).toBeVisible()
+    // .first() — 'Anthropic' (the provider) appears in several places on the
+    // detail page (header + sibling/fallback service rows); we only assert the
+    // provider is shown.
+    await expect(main.getByText('Anthropic').first()).toBeVisible()
   })
 
   test('renders metric cards with uptime', async ({ page }) => {
@@ -67,7 +70,7 @@ test.describe('AIWatch Score Breakdown denominators (#132)', () => {
       ],
       lastUpdated: new Date().toISOString(),
     } }
-    await page.route('**/api/status', async (route) => { await route.fulfill(probedMock) })
+    await page.route('**/api/status**', async (route) => { await route.fulfill(probedMock) })
     await page.route('**/api/status/cached', async (route) => { await route.fulfill(probedMock) })
     await page.goto('/#claude')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
@@ -96,7 +99,7 @@ test.describe('AIWatch Score Breakdown denominators (#132)', () => {
       ],
       lastUpdated: new Date().toISOString(),
     } }
-    await page.route('**/api/status', async (route) => { await route.fulfill(unsupportedMock) })
+    await page.route('**/api/status**', async (route) => { await route.fulfill(unsupportedMock) })
     await page.route('**/api/status/cached', async (route) => { await route.fulfill(unsupportedMock) })
     await page.goto('/#chatgpt')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
@@ -120,7 +123,7 @@ test.describe('AIWatch Score Breakdown denominators (#132)', () => {
       ],
       lastUpdated: new Date().toISOString(),
     } }
-    await page.route('**/api/status', async (route) => { await route.fulfill(unavailableMock) })
+    await page.route('**/api/status**', async (route) => { await route.fulfill(unavailableMock) })
     await page.route('**/api/status/cached', async (route) => { await route.fulfill(unavailableMock) })
     await page.goto('/#claude')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
@@ -143,7 +146,7 @@ test.describe('AIWatch Score Breakdown denominators (#132)', () => {
       ],
       lastUpdated: new Date().toISOString(),
     } }
-    await page.route('**/api/status', async (route) => { await route.fulfill(insufficientMock) })
+    await page.route('**/api/status**', async (route) => { await route.fulfill(insufficientMock) })
     await page.route('**/api/status/cached', async (route) => { await route.fulfill(insufficientMock) })
     await page.goto('/#claude')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
@@ -165,7 +168,7 @@ test.describe('xAI Regional Availability', () => {
 
   test('shows regional status with incident type for xAI', async ({ page }) => {
     // Intercept API: serve mock response with xAI EU incident
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       const mockResponse = {
         services: [
           { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
@@ -191,7 +194,7 @@ test.describe('xAI Regional Availability', () => {
     const globalMock = { ...XAI_MOCK, incidents: [
       { id: 'xa-g', title: 'Elevated API Error Rates', startedAt: new Date(Date.now() - 3600000).toISOString(), duration: null, status: 'investigating', impact: null, timeline: [] },
     ] }
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: {
         services: [
           { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
@@ -222,7 +225,7 @@ test.describe('xAI Regional Availability', () => {
 
 test.describe('Gemini Regional Availability', () => {
   test('shows regional status for Gemini with region-specific incident', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: {
         services: [
           { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
@@ -249,7 +252,7 @@ test.describe('Gemini Regional Availability', () => {
 
 test.describe('OpenAI Regional Availability', () => {
   test('shows regional status for OpenAI with global incident', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: {
         services: [
           { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
@@ -276,7 +279,7 @@ test.describe('OpenAI Regional Availability', () => {
 
 test.describe('Bedrock Regional Availability (always visible)', () => {
   test('shows all regions operational when no incidents', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: {
         services: [
           { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
@@ -294,7 +297,7 @@ test.describe('Bedrock Regional Availability (always visible)', () => {
   })
 
   test('shows region-specific incident via componentNames', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: {
         services: [
           { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
@@ -321,7 +324,7 @@ test.describe('Bedrock Regional Availability (always visible)', () => {
 
 test.describe('Azure OpenAI Regional Availability (always visible)', () => {
   test('shows all 7 regions operational when no incidents', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: {
         services: [
           { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
@@ -339,7 +342,7 @@ test.describe('Azure OpenAI Regional Availability (always visible)', () => {
   })
 
   test('shows region-specific incident for Azure OpenAI', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: {
         services: [
           { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
@@ -365,12 +368,26 @@ test.describe('Azure OpenAI Regional Availability (always visible)', () => {
 
 test.describe('Detection Lead badge', () => {
   test('shows lead badge for OpenAI ongoing incident', async ({ page }) => {
+    // Deterministic mock: OpenAI with an ongoing incident whose detectedAt is
+    // 7min before startedAt (1–60m window → Detection Lead badge). Relying on
+    // the DEV mock fallback breaks against a running local worker (#455).
+    const startedAt = new Date(Date.now() - 2 * 3600_000).toISOString()
+    const detectedAt = new Date(Date.now() - 2 * 3600_000 - 7 * 60_000).toISOString()
+    await page.route('**/api/status**', (route) => route.fulfill({ json: {
+      services: [
+        { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'degraded', latency: 200, uptime30d: 99.21, detectedAt, incidents: [
+          { id: 'oi-ongoing', title: 'Elevated error rates', status: 'investigating', impact: 'major', startedAt, duration: null, timeline: [] },
+        ] },
+      ],
+      lastUpdated: new Date().toISOString(),
+    } }))
     await page.goto('/')
-    await waitForDataLoad(page)
-    // Navigate to OpenAI (mock: detectedAt 7min before ongoing incident)
+    // Wait for the card to render before clicking (deterministic load signal —
+    // the mock settles after usePolling's ~800ms simulated delay).
+    await expect(page.locator('main button').filter({ hasText: 'OpenAI API' }).first()).toBeVisible({ timeout: 20000 })
     await page.locator('main button').filter({ hasText: 'OpenAI API' }).first().click()
     await expect(page.locator('main').getByText('Incident History')).toBeVisible({ timeout: 5000 })
-    // Lead badge should be visible for ongoing incident
+    // Lead badge should be visible for the ongoing incident (Detection Lead)
     await expect(page.locator('main').getByText('lead').first()).toBeVisible()
   })
 })
@@ -396,7 +413,7 @@ test.describe('Incident accordion in ServiceDetails', () => {
 
 test.describe('Non-probe service latency card', () => {
   test('shows "Not provided" latency for non-probe API service', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: {
         services: [
           { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, uptimeSource: 'official', calendarDays: 30, incidents: [], aiwatchScore: 92 },
@@ -417,7 +434,7 @@ test.describe('Non-probe service latency card', () => {
   })
 
   test('shows RTT latency for probe API service', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: {
         services: [
           { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 142, uptime30d: 99.95, uptimeSource: 'official', calendarDays: 30, incidents: [] },
@@ -448,7 +465,7 @@ test.describe('Estimate-only services (Bedrock, Azure OpenAI)', () => {
   }
 
   test('shows "Not provided" for estimate service with no incidents', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: ESTIMATE_MOCK })
     })
     await page.goto('/#bedrock')
@@ -464,7 +481,7 @@ test.describe('Estimate-only services (Bedrock, Azure OpenAI)', () => {
   })
 
   test('hides 24h Trend chart for non-probe services', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: ESTIMATE_MOCK })
     })
     await page.goto('/#bedrock')
@@ -474,7 +491,7 @@ test.describe('Estimate-only services (Bedrock, Azure OpenAI)', () => {
   })
 
   test('excludes estimate services from Ranking scored list', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: ESTIMATE_MOCK })
     })
     await page.goto('/#ranking')
