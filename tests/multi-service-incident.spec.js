@@ -37,7 +37,7 @@ const MOCK = {
 
 test.describe('Multi-service incident display', () => {
   test.beforeEach(async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: MOCK })
     })
     await page.route('**/api/status/cached', async (route) => {

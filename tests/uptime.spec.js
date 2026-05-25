@@ -16,8 +16,9 @@ test.describe('Uptime page', () => {
 
   test('renders uptime rankings with service names', async ({ page }) => {
     const main = page.locator('main')
-    // Rankings section should show services with uptime bars
-    await expect(main.getByText('Claude API').first()).toBeVisible()
+    // Rankings section should show services with uptime bars (visible-filtered —
+    // a 0×0 'Claude API' node can sort first in <main>, #455)
+    await expect(main.getByText('Claude API').filter({ visible: true }).first()).toBeVisible()
   })
 
   test('renders uptime matrix', async ({ page }) => {
@@ -40,9 +41,11 @@ test.describe('Uptime Rankings — estimate-only services', () => {
   }
 
   test('shows estimate-only services as "—" instead of percentage', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
-      await route.fulfill({ json: MOCK })
-    })
+    // Mock BOTH endpoints — the initial load hits /api/status/cached first, so
+    // routing only /api/status leaks real worker data (e.g. live 100% services)
+    // when a local worker is running and makes this assertion flaky (#455).
+    await page.route('**/api/status', (route) => route.fulfill({ json: MOCK }))
+    await page.route('**/api/status/cached', (route) => route.fulfill({ json: MOCK }))
     await page.goto('/#uptime')
     const rankings = page.locator('section').filter({ hasText: /Uptime Rankings/ })
     await expect(rankings).toBeVisible({ timeout: 20000 })
@@ -61,9 +64,8 @@ test.describe('Uptime Rankings — estimate-only services', () => {
   })
 
   test('excludes estimate-only services from summary cards', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
-      await route.fulfill({ json: MOCK })
-    })
+    await page.route('**/api/status', (route) => route.fulfill({ json: MOCK }))
+    await page.route('**/api/status/cached', (route) => route.fulfill({ json: MOCK }))
     await page.goto('/#uptime')
     const main = page.locator('main')
     await expect(main.getByText(/Uptime Rankings/).first()).toBeVisible({ timeout: 20000 })

@@ -1,9 +1,12 @@
 import { test, expect } from '@playwright/test'
+import { waitForDataLoad } from './helpers.js'
 
 test.describe('Mobile viewport', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.locator('main').getByText('Claude API').first().waitFor({ state: 'visible', timeout: 20000 })
+    // Use the shared helper (visible-filtered) instead of an inline copy so the
+    // 0×0 'Claude API' fix lives in one place (#455).
+    await waitForDataLoad(page)
   })
 
   test('sidebar hidden by default, hamburger opens overlay', async ({ page }) => {
@@ -34,7 +37,21 @@ test.describe('Mobile viewport', () => {
   })
 
   test('topbar icons stay within viewport when analyze button is visible', async ({ page }) => {
-    // Wait for analyze button (🤖) — mock data includes aiAnalysis for openai
+    // Provide deterministic analysis data so the 🤖 button is present — the DEV
+    // mock fallback's analysis only appears when no worker is reachable, so a
+    // running local worker would otherwise leave the button disabled (#455).
+    await page.route('**/api/status**', (route) => route.fulfill({ json: {
+      services: [
+        { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'degraded', latency: 200, uptime30d: 99.9, incidents: [
+          { id: 'oi-m', title: 'Elevated errors', status: 'investigating', impact: 'major', startedAt: new Date().toISOString(), duration: null, timeline: [] },
+        ] },
+      ],
+      aiAnalysis: { openai: [{ summary: 'Elevated error rate under investigation.', estimatedRecovery: '~1h', affectedScope: ['API'], needsFallback: true, analyzedAt: new Date().toISOString(), incidentId: 'oi-m' }] },
+      lastUpdated: new Date().toISOString(),
+    } }))
+    await page.reload()
+
+    // Wait for analyze button (🤖) — enabled because the mock has an active analysis
     const analyzeBtn = page.locator('header button[aria-label]').filter({ hasText: '🤖' })
     await expect(analyzeBtn).toBeVisible({ timeout: 10000 })
 

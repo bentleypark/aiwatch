@@ -37,7 +37,7 @@ const MOCK = {
 
 test.describe('Security Alerts Banner', () => {
   test('shows banner for recent security alerts (< 24h)', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: { ...MOCK, securityAlerts: [RECENT_ALERT] } })
     })
     await page.route('**/api/status/cached', async (route) => {
@@ -53,7 +53,7 @@ test.describe('Security Alerts Banner', () => {
   })
 
   test('hides banner for old alerts (> 24h)', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: { ...MOCK, securityAlerts: [OLD_ALERT] } })
     })
     await page.route('**/api/status/cached', async (route) => {
@@ -69,7 +69,7 @@ test.describe('Security Alerts Banner', () => {
   })
 
   test('hides banner when no security alerts', async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: MOCK })
     })
     await page.route('**/api/status/cached', async (route) => {
@@ -85,7 +85,7 @@ test.describe('Security Alerts Banner', () => {
 
   test('overview banner shows service tag for all alerts', async ({ page }) => {
     const alerts = [RECENT_ALERT, OSV_ALERT]
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: { ...MOCK, securityAlerts: alerts } })
     })
     await page.route('**/api/status/cached', async (route) => {
@@ -106,7 +106,7 @@ test.describe('Security Alerts in ServiceDetails', () => {
   const ALERTS = [OSV_ALERT, RECENT_ALERT]
 
   test.beforeEach(async ({ page }) => {
-    await page.route('**/api/status', async (route) => {
+    await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: { ...MOCK, securityAlerts: ALERTS } })
     })
     await page.route('**/api/status/cached', async (route) => {
