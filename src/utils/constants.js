@@ -205,6 +205,26 @@ export function getGroupedFallbacks(affected, allServices) {
   return groups
 }
 
+/**
+ * Whether to surface fallback recommendations for a group of affected services.
+ *
+ * Gated on service STATUS (not the AI's `needsFallback` flag) so the Analyze
+ * modal stays consistent with the Overview ActionBanner, which shows fallbacks
+ * for any `down`/`degraded` service (#454). The AI may classify partial
+ * degradation as `needsFallback: false`, which previously hid the modal's
+ * recommendations for degraded incidents while Overview still showed them.
+ *
+ * @param {object[]} svcs - Services in the group (need .id, .status)
+ * @param {boolean} allRecovered - True if every analysis in the group is resolved
+ * @returns {boolean}
+ */
+export function shouldShowFallback(svcs, allRecovered) {
+  if (allRecovered || !Array.isArray(svcs) || svcs.length === 0) return false
+  if (!svcs.some(s => s.status !== 'operational')) return false
+  if (svcs.every(s => EXCLUDE_FALLBACK.includes(s.id))) return false
+  return true
+}
+
 export const VALID_ALERT_CONDITIONS = ['down', 'degraded', 'all']
 
 export const DEFAULT_SETTINGS = {

@@ -3,7 +3,7 @@
 // because the worker can't import frontend code at runtime.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getGroupedFallbacks } from '../constants'
+import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getGroupedFallbacks, shouldShowFallback } from '../constants'
 
 describe('tierFor (#403 frontend warn-once helper)', () => {
   let warnSpy
@@ -154,5 +154,49 @@ describe('getGroupedFallbacks (#445 multi-category incident alternatives)', () =
   it('returns [] for invalid inputs', () => {
     expect(getGroupedFallbacks(null, all)).toEqual([])
     expect(getGroupedFallbacks(affected, null)).toEqual([])
+  })
+})
+
+describe('shouldShowFallback (#454 status-based modal gate)', () => {
+  it('shows for a degraded service (the needsFallback:false bug case)', () => {
+    // Overview shows fallbacks for degraded; the modal must too, regardless of
+    // how the AI classified needsFallback.
+    expect(shouldShowFallback([{ id: 'cursor', status: 'degraded' }], false)).toBe(true)
+  })
+
+  it('shows for a down service', () => {
+    expect(shouldShowFallback([{ id: 'chatgpt', status: 'down' }], false)).toBe(true)
+  })
+
+  it('shows when at least one service in the group is non-operational', () => {
+    expect(shouldShowFallback([
+      { id: 'claudeai', status: 'operational' },
+      { id: 'chatgpt', status: 'degraded' },
+    ], false)).toBe(true)
+  })
+
+  it('hides when every service is operational (isolated model issue)', () => {
+    expect(shouldShowFallback([{ id: 'elevenlabs', status: 'operational' }], false)).toBe(false)
+  })
+
+  it('hides when all analyses are recovered', () => {
+    expect(shouldShowFallback([{ id: 'chatgpt', status: 'down' }], true)).toBe(false)
+  })
+
+  it('hides when every affected service is excluded from fallback', () => {
+    // characterai is in EXCLUDE_FALLBACK — no meaningful alternative to recommend.
+    expect(shouldShowFallback([{ id: 'characterai', status: 'down' }], false)).toBe(false)
+  })
+
+  it('shows when a non-excluded service is affected alongside an excluded one', () => {
+    expect(shouldShowFallback([
+      { id: 'characterai', status: 'down' },
+      { id: 'chatgpt', status: 'down' },
+    ], false)).toBe(true)
+  })
+
+  it('returns false for empty or invalid input', () => {
+    expect(shouldShowFallback([], false)).toBe(false)
+    expect(shouldShowFallback(null, false)).toBe(false)
   })
 })
