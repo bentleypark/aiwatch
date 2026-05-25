@@ -191,6 +191,7 @@ describe('regionStatusOf — global-incident fallback', () => {
       incidents: [{ id: 'p1', status: 'investigating', title: 'API authentication broken' }],
     })
     expect(result.hasRegionSpecific).toBe(false)
+    expect(result.hasGlobalIncident).toBe(true)
     expect(result.allDown).toBe(true)
     expect(result.recommendedRegion).toBeNull()
     expect(result.regions.every((r) => r.status === 'incident')).toBe(true)
@@ -205,6 +206,34 @@ describe('regionStatusOf — global-incident fallback', () => {
       ],
     })
     expect(result.regions.every((r) => r.type === 'down')).toBe(true)
+  })
+})
+
+describe('regionStatusOf — hasGlobalIncident flag (#422)', () => {
+  test('false when every ongoing incident matches a region', () => {
+    const result = regionStatusOf({
+      id: 'pinecone',
+      incidents: [{ id: 'p1', status: 'investigating', title: 'AWS us-east-1 degraded' }],
+    })
+    expect(result.hasRegionSpecific).toBe(true)
+    expect(result.hasGlobalIncident).toBe(false)
+  })
+
+  test('true when a global incident coexists with a region-specific one (region marking unchanged)', () => {
+    const result = regionStatusOf({
+      id: 'pinecone',
+      incidents: [
+        { id: 'p1', status: 'investigating', title: 'AWS us-east-1 degraded' },
+        { id: 'p2', status: 'investigating', title: 'API authentication broken' }, // matches no region
+      ],
+    })
+    // Both flags true; region marking is intentionally unchanged — only us-east-1 down,
+    // so the SPA/Edge render exactly as before (allDown stays false). The flag is what
+    // lets the Worker hint suppress in this mixed case.
+    expect(result.hasRegionSpecific).toBe(true)
+    expect(result.hasGlobalIncident).toBe(true)
+    expect(result.allDown).toBe(false)
+    expect(result.okRegions.length).toBeGreaterThan(0)
   })
 })
 

@@ -100,6 +100,10 @@ export function classifyIncident(title) {
 //   hasRegionSpecific    — true if any region matched an incident title /
 //                          componentNames substring; false when we fell back
 //                          to the "global incident → mark all regions" path
+//   hasGlobalIncident    — true if at least one ongoing incident matched NO
+//                          region (a whole-service outage). Distinct from
+//                          !hasRegionSpecific: both a region-specific AND a
+//                          global incident can be ongoing at once (#422)
 //   allDown              — every defined region is in incident state
 //   recommendedRegion    — first OK region by SERVICE_REGIONS array order,
 //                          or null when allDown
@@ -136,9 +140,18 @@ export function regionStatusOf(service, opts = {}) {
   }
 
   let hasRegionSpecific = false
+  // True when at least one ongoing incident matched NO region key — i.e. a
+  // "global" incident affecting the whole service, not a single region. Tracked
+  // per-incident (not just the aggregate `!hasRegionSpecific`) so the mixed case
+  // — one region-specific incident PLUS one global incident — is detectable.
+  // Region marking is intentionally left unchanged (SPA/Edge render identically);
+  // only consumers that must NOT recommend a region during a global outage
+  // (Worker Discord hint, #422 Phase 2) read this flag. See buildRegionHint.
+  let hasGlobalIncident = false
   for (const inc of ongoing) {
     const titleLower = (inc.title || '').toLowerCase()
     const compNames = (inc.componentNames ?? []).map((n) => String(n).toLowerCase())
+    let incMatched = false
     for (const r of regionDefs) {
       const keyLower = r.key.toLowerCase()
       if (titleLower.includes(keyLower) || compNames.some((n) => n.includes(keyLower))) {
@@ -156,8 +169,10 @@ export function regionStatusOf(service, opts = {}) {
           status[r.key] = { status: 'incident', type: classifyIncident(inc.title) }
         }
         hasRegionSpecific = true
+        incMatched = true
       }
     }
+    if (!incMatched) hasGlobalIncident = true
   }
 
   // Global-incident fallback — no region substring matched but we know
@@ -181,6 +196,7 @@ export function regionStatusOf(service, opts = {}) {
     okRegions,
     incidentRegions,
     hasRegionSpecific,
+    hasGlobalIncident,
     allDown,
     recommendedRegion: okRegions[0] ?? null,
     docsUrl: REGION_DOCS_URL[service.id],

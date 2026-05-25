@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, buildRegionHint } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
 
@@ -140,6 +140,91 @@ describe('buildIncidentAlerts', () => {
     expect(alerts).toHaveLength(2)
     expect(alerts[0].key).toBe('alerted:new:inc1')
     expect(alerts[1].key).toBe('alerted:res:inc2')
+  })
+})
+
+describe('region-switch hint (#422)', () => {
+  // Pinecone is region-aware (SERVICE_REGIONS) with AWS us-east-1 listed first and
+  // AWS us-west-2 second — so a us-east-1-only outage recommends "AWS US West".
+  const regionSpecific: Incident = {
+    id: 'pc1', title: 'Index unavailable', status: 'investigating',
+    startedAt: recentDate, impact: 'major', componentNames: ['AWS us-east-1'],
+  }
+
+  it('buildRegionHint recommends the first healthy region for a region-specific outage', () => {
+    const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', status: 'degraded', incidents: [regionSpecific] })
+    expect(buildRegionHint(pinecone)).toBe('📍 Try region: AWS US West')
+  })
+
+  it('buildRegionHint returns undefined for a non-region-aware service', () => {
+    // mistral has no SERVICE_REGIONS entry → regionStatusOf returns null
+    const mistral = mockService({ id: 'mistral', name: 'Mistral API', status: 'degraded',
+      incidents: [{ id: 'm1', title: 'Errors', status: 'investigating', startedAt: recentDate, impact: 'major' }] })
+    expect(buildRegionHint(mistral)).toBeUndefined()
+  })
+
+  it('buildRegionHint returns undefined for a global (non-region-specific) incident', () => {
+    // No region in title/components → every region marked down via fallback → allDown → no recommendation
+    const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', status: 'down',
+      incidents: [{ id: 'pc-global', title: 'Major outage', status: 'investigating', startedAt: recentDate, impact: 'critical' }] })
+    expect(buildRegionHint(pinecone)).toBeUndefined()
+  })
+
+  it('attaches regionText to the new-incident alert for region-specific outages', () => {
+    const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', status: 'degraded', incidents: [regionSpecific] })
+    const alerts = buildIncidentAlerts([pinecone], new Set(), NOW)
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0].regionText).toBe('📍 Try region: AWS US West')
+  })
+
+  it('does not attach regionText to resolved alerts', () => {
+    const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', status: 'operational',
+      incidents: [{ ...regionSpecific, id: 'pc-res', status: 'resolved', duration: '20m' }] })
+    const alerts = buildIncidentAlerts([pinecone], new Set(['pc-res']), NOW)
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0].key).toBe('alerted:res:pc-res')
+    expect(alerts[0].regionText).toBeUndefined()
+  })
+
+  it('suppresses the hint when a global incident coexists with a region-specific one', () => {
+    // A region-tagged outage flips hasRegionSpecific=true, but a coexisting global
+    // incident (matches no region) means the whole service is affected — recommending
+    // a "healthy" region would point operators at a region the global outage also
+    // takes down. Must suppress. (#422 — pr-test-analyzer Severity-9 finding)
+    const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', status: 'down', incidents: [
+      regionSpecific,
+      { id: 'pc-global', title: 'Major outage', status: 'investigating', startedAt: recentDate, impact: 'critical' },
+    ] })
+    expect(buildRegionHint(pinecone)).toBeUndefined()
+    const alerts = buildIncidentAlerts([pinecone], new Set(), NOW)
+    // Both incidents alert; neither carries a region hint while the global outage is open.
+    expect(alerts.every(a => a.regionText === undefined)).toBe(true)
+  })
+
+  it('recommends the first healthy region when several regions are hit (partial multi-region)', () => {
+    // Two region-specific incidents knock out AWS us-east-1 + us-west-2 → first
+    // remaining healthy region in SERVICE_REGIONS order is AWS eu-west-1 ("AWS EU West").
+    const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', status: 'degraded', incidents: [
+      { id: 'pc-e', title: 'Outage', status: 'investigating', startedAt: recentDate, impact: 'major', componentNames: ['AWS us-east-1'] },
+      { id: 'pc-w', title: 'Outage', status: 'investigating', startedAt: recentDate, impact: 'major', componentNames: ['AWS us-west-2'] },
+    ] })
+    expect(buildRegionHint(pinecone)).toBe('📍 Try region: AWS EU West')
+  })
+
+  it('mergeTogetherAlerts preserves regionText from the first merged alert', () => {
+    // Together has no region map so this is undefined in practice, but the merge path
+    // is generic — pin that a set regionText survives the merge. (#422 Severity-6)
+    const withRegion: AlertCandidate = {
+      key: 'alerted:new:t1', title: '🔴 Together AI — New Incident', description: 'A — down',
+      color: 0xED4245, url: 'https://ai-watch.dev/#together', regionText: '📍 Try region: AWS US West',
+    }
+    const second: AlertCandidate = {
+      key: 'alerted:new:t2', title: '🔴 Together AI — New Incident', description: 'B — down',
+      color: 0xED4245, url: 'https://ai-watch.dev/#together',
+    }
+    const merged = mergeTogetherAlerts([withRegion, second])
+    expect(merged).toHaveLength(1)
+    expect(merged[0].regionText).toBe('📍 Try region: AWS US West')
   })
 })
 

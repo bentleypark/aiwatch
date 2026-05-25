@@ -662,6 +662,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     } else if (alert.fallbackText) {
       parts.push(`${DIV}\n${alert.fallbackText}`)
     }
+    // #422 — region-switch hint below the cross-service fallback. Cheaper first-line
+    // action (same SDK/IAM) when the outage is region-specific with healthy regions left.
+    if (alert.regionText) parts.push(`${DIV}\n${alert.regionText}`)
     parts.push(`${DIV}\n[View on AIWatch](${alert.url})`)
     await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
       title: alert.title,

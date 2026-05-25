@@ -36,6 +36,11 @@ export type RegionStatusResult = {
   okRegions: RegionRow[]
   incidentRegions: RegionRow[]
   hasRegionSpecific: boolean
+  // True when at least one ongoing incident matched NO region — a whole-service
+  // outage. Distinct from !hasRegionSpecific: a region-specific AND a global
+  // incident can be ongoing simultaneously. Consumers that must not recommend a
+  // region during a global outage (Worker Discord hint, #422) gate on this.
+  hasGlobalIncident: boolean
   allDown: boolean
   recommendedRegion: RegionRow | null
   docsUrl: string | undefined
@@ -137,11 +142,14 @@ export function regionStatusOf(service: ServiceLike | null | undefined): RegionS
   }
 
   let hasRegionSpecific = false
+  // Per-incident global detection — see SPA copy src/utils/regionStatus.js (#422).
+  let hasGlobalIncident = false
   for (const inc of ongoing) {
     const titleLower = (inc.title as string).toLowerCase()
     const compNames = Array.isArray(inc.componentNames)
       ? (inc.componentNames as unknown[]).map((n) => String(n).toLowerCase())
       : []
+    let incMatched = false
     for (const r of regionDefs) {
       const keyLower = r.key.toLowerCase()
       if (titleLower.includes(keyLower) || compNames.some((n) => n.includes(keyLower))) {
@@ -152,8 +160,10 @@ export function regionStatusOf(service: ServiceLike | null | undefined): RegionS
           status[r.key] = { status: 'incident', type: classifyIncident(inc.title) }
         }
         hasRegionSpecific = true
+        incMatched = true
       }
     }
+    if (!incMatched) hasGlobalIncident = true
   }
 
   if (!hasRegionSpecific && ongoing.length > 0) {
@@ -173,6 +183,7 @@ export function regionStatusOf(service: ServiceLike | null | undefined): RegionS
     okRegions,
     incidentRegions,
     hasRegionSpecific,
+    hasGlobalIncident,
     allDown,
     recommendedRegion: okRegions[0] ?? null,
     docsUrl: service.id ? REGION_DOCS_URL[service.id] : undefined,
