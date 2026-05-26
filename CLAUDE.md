@@ -299,58 +299,10 @@ Theme switching: add `data-theme="light"` to `<html>` — CSS variables remap au
 All events use `trackEvent()` from `src/utils/analytics.js`; GA4 activates only on cookie consent (`aiwatch-cookie-consent` localStorage key, shared across SPA / Edge SSR / Jekyll). The cross-surface consent flow (#352), the full event catalog (parameters · location · purpose), and the reports-site events are in **[docs/reference/ga4-events.md](docs/reference/ga4-events.md)**. Read it before adding/changing analytics events or touching consent logic.
 
 ### Service Status Determination
-Per-service status is resolved in `services.ts` with this priority:
-1. **Multi-component worst-of** (`statusComponentIds`, #379): when configured, look up each id in the page's `components`, normalize each, and pick the worst (`down` > `degraded` > `operational`). Used for coding agents whose user-facing surface spans multiple components — e.g. Cursor IDE primary + Cloud Agents + Automations + CLI; Claude Code component + Claude API dependency. `statusComponentId` (singular) remains the *primary* component for uptime parsing, calendar days, and component-miss alerting; `statusComponentIds` is purely for badge resolution. Convention: list the primary as the first entry of `statusComponentIds`. If none of the ids resolve in the components list, falls through to step 2.
-2. **Component match** (`statusComponentId` or `statusComponent`): use that component's status
-3. **Component not found**: fall back to overall page indicator
-4. **No component configured**: use overall indicator, BUT if no relevant unresolved incidents matched after `incidentExclude`/`incidentKeywords` filtering, treat as `operational` (prevents cross-contamination from unrelated incidents on shared status pages, e.g., ChatGPT incident should not affect OpenAI API status)
-5. **`incidentExclude` component bypass** (#359): when an `incidentExclude` pattern matches the incident title, check if the incident's `componentNames` starts with `config.statusComponent` — if it does, include the incident anyway. Prevents "claude.ai and API unavailable" from being dropped from Claude API just because the title contains "claude.ai". Component tagging is more authoritative than title substring matching.
-6. **Component-status incident filter** (`filterByComponentStatus`): if component is `operational` but provider bulk-linked incidents to all components, remove unresolved incidents (keep resolved + monitoring). Prevents e.g., Anthropic admin API incident from showing on claude.ai/Claude Code when their components are healthy
-7. **Status page fetch failure cross-validation** (post-processing in `fetchAllServices`):
-   - If service is `degraded` from fetch failure (no incidents) AND probe RTT is normal → override to `operational`
-   - If 70%+ of services on the same platform (Atlassian/incident.io/etc.) fail simultaneously → platform outage → override all to `operational`
-   - Conservative: only overrides when evidence is strong (≥2 recent probes healthy, or quorum failure detected)
+Per-service status is resolved in `worker/src/services.ts` with a layered priority chain (multi-component worst-of → component match → overall-indicator fallback → `incidentExclude` bypass → component-status filter → fetch-failure cross-validation). The full ordered rules and their #-issue rationale are in **[docs/reference/status-determination.md](docs/reference/status-determination.md)** — read it before changing status resolution.
 
 ### Status Data Flow
-```
-Browser (React SPA, 60s polling)
-  → Cloudflare Worker (/api/status)
-    → parallel fetch (33 services)
-    → gemini dual-source (#310): gcloud Vertex feed + aistudio.google.com/status MakerSuite RPC — merged with vertex:/aistudio: ID prefixes
-    → normalize to ServiceStatus[]
-    → write to KV (cache + daily counters)
-    → (Mistral-only probe corroboration filter removed in #373 — same-title incident grouping in `src/utils/incidentGrouping.js` now consolidates auto-monitoring noise uniformly across all services)
-    → metastatuspage preemptive signal: platform:status:atlassian KV non-operational → hold all Atlassian services operational
-    → platform quorum detection: 70%+ same-platform fetch failures → platform outage → hold operational for all affected services
-    → probe cross-validation: individual probe RTT normal → hold operational (prevents false positives during status page failures)
-  → React state (usePolling hook via PollingContext)
-    → overlay probe RTT onto service.latency (20 probe services)
-    → non-probe services (bedrock, azureopenai, pinecone) keep status page latency
-  → all pages read from context
-
-Cron Trigger (*/5 min)
-  → health check probing (direct RTT to API endpoints, stored in probe:24h)
-  → probe spike detection (3+ consecutive RTT spikes) → record to detected:{svcId} as earliest detection
-  → platform monitor: check metastatuspage.com → store platform:status:atlassian → Discord alert on outage/recovery
-  → read KV cache → detect incidents/status changes
-  → record detection timestamps (detected:{serviceId}) for Detection Lead (probe spike time preferred if earlier)
-  → KV ID-based dedup → Discord alerts (single embed per incident, with Detection Lead if probe detected first)
-  → incident detected → AI analysis via Gemma 4 (Workers AI, primary) or Sonnet (AI Gateway, fallback) (8s timeout) + Detection Lead (1-60min advance detection → "⚡ Detection Lead: Xm") → merged into incident embed + persisted to detection:lead:{date} audit log (#256, dedup by incId, surfaced in daily summary)
-  → recovery detected → mark ai:analysis:{svcId}:{incId} with resolvedAt (2h TTL, powers "Recently Resolved" UI)
-  → active incidents: refresh analysis TTL / re-analyze if expired / dedup sibling services
-  → alert count tracked in KV (alert:count:{date}) for Daily Summary
-  → daily summary at UTC 09:00 (KST 18:00) with alert count aggregation + Web Vitals p75 + Detection Lead audit log (24h sliding window from today + yesterday keys)
-  → daily summary also accumulates incidents:monthly:{YYYY-MM} (dedup by incident ID, 60d TTL)
-  → monthly archive on 1st of month (UTC 00:00) → aggregate history:* + probe:daily:* + incidents:monthly:* + security:monthly:* + detection:lead:monthly:* (#369) → archive:monthly:{YYYY-MM} (permanent)
-  → archive-ready Discord ping → links to `aiwatch-reports/generate-report.yml` workflow_dispatch so operator clicks "Run workflow" to open draft PR; dedup via archive:notified:{YYYY-MM} (aiwatch-reports#4)
-  → changelog RSS/HTML collection (hourly at :00) → KV accumulate new entries from OpenAI/Google/Anthropic
-  → security monitoring (hourly at :00) → HN Algolia + OSV.dev SDK vulnerability scan (24 AI SDK packages · two-phase: querybatch → KV dedup → per-vuln GET enrichment; #323/#325) → EPSS enrichment via GitHub Advisories (24h KV cache, #326) → Discord digest on findings
-  → weekly briefing on Sunday UTC 00:00 (KST 09:00) → aggregate changelog + incidents + stability → Discord embed
-
-Web Vitals Pipeline (per-request, 100% collection):
-  Browser (web-vitals) → POST /api/vitals → Worker → KV merge (vitals:{date})
-  Daily Summary cron reads vitals KV → Discord embed (p75 + grade)
-```
+Browser (60s polling) → Worker `/api/status` (parallel 33-service fetch, normalize, KV write, platform/probe cross-validation) → React state → pages. Cron (`*/5`) handles probing, incident detection + Discord alerts, AI analysis, daily/monthly aggregation, changelog/security/weekly briefing. The full annotated request + cron + Web Vitals flow diagram is in **[docs/reference/data-flow.md](docs/reference/data-flow.md)**.
 
 ### SPA Navigation
 No React Router. Hash-based routing in `App.jsx` — `#claude` for service details, `#latency` for pages. `PageContext` shares current page state. Browser back/forward supported via `popstate` listener.
@@ -384,32 +336,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
     ```
   - Verify the output says `Uploaded aiwatch-worker` (not `aiwatch`)
   - Endpoints: `GET /api/status`, `GET /api/status/cached` (KV-only, includes probe24h, for SSR + initial load; **`?src=statusline-*` returns a ~KB id/name/status-only projection** via `buildStatuslinePayload` in `worker/src/statusline.ts` — skips the ~2 MB probe/latency/AI reads. Statusline snippets (#400) poll this with the tag and target the Worker domain directly, not the Vercel-proxied `ai-watch.dev` path, so per-prompt polls don't burn Vercel Fast Data Transfer — #438), `GET /api/uptime?days=30`, `GET /api/probe/history?days=30` (daily probe RTT summaries, 90d max), `GET /api/report?month=YYYY-MM` (monthly archive JSON, permanent), `POST /api/alert`, `POST /api/admin/analyze` (operator Sonnet override, `X-Admin-Key` required, sets `sticky: true` so cron doesn't auto-replace), `POST /api/admin/rebuild-archive` (operator regenerate of `archive:monthly:{YYYY-MM}` after a bug-fix deploy, `X-Admin-Key` required), `POST /api/internal/edge-fallback` (Bearer-authenticated `EDGE_ALERT_TOKEN`; called by Vercel Edge Functions on degraded fallback render, dedups via `alerted:edge-fallback:*` and fires Discord — #378), `GET /badge/:serviceId`, `GET /api/og` (dynamic OG image PNG), `GET /api/v1/status`, `GET /feed.xml` (all-services incident RSS 2.0), `GET /feed/:slug` (per-service incident RSS — slug matches `/is-{slug}-down`; KV-unavailable → 503, unknown slug → 404 — #54)
-  - **Operator tools — `POST /api/admin/analyze` (#299)**: Force a Sonnet analysis on a specific active incident when the cron's default (Gemma-first) produced low-signal output. Motivated by the 2026-04-20 ChatGPT outage where Gemma called a systemic infra failure a "service availability issue". Before this endpoint the override required hand-editing a local Node script + `wrangler kv key put --remote`.
-
-    ```bash
-    # One-time secret setup (do NOT commit the value anywhere)
-    npx wrangler secret put ADMIN_API_KEY --config worker/wrangler.toml
-
-    # During an outage — helper script parses CLI args, handles UA / error hints,
-    # and avoids the shell-quoting pitfalls of raw curl.
-    export ADMIN_API_KEY=...  # paste locally from 1Password / keychain
-    node scripts/admin-analyze.mjs chatgpt 01KPNN2V2SMP3TAN3MCJK87W50
-    # Optional flags:
-    #   --model gemma         (default: sonnet — manual trigger implies escalation)
-    #   --sticky false        (default: true — prevents cron from re-analyzing with Gemma)
-    # See scripts/admin-analyze.mjs header for full usage + error-code hints.
-
-    # Or raw curl (same endpoint — use --data @file to avoid zsh brace-expansion issues):
-    # curl -X POST https://aiwatch-worker.p2c2kbf.workers.dev/api/admin/analyze \
-    #   -H "X-Admin-Key: $ADMIN_API_KEY" -H "Content-Type: application/json" \
-    #   --data '{"svcId":"chatgpt","incidentId":"01KPNN2V2SMP3TAN3MCJK87W50"}'
-    ```
-
-    **Request body** (JSON): `svcId` (required), `incidentId` (required, must be an active incident present in `services:latest`), `model` (`'sonnet' | 'gemma'`, default `'sonnet'`), `sticky` (default `true` — cron skips re-analysis until the incident resolves).
-
-    **Response**: `{ ok: true, wrote, ttl, analysis }` on 200. Failure modes: 401 `unauthorized` (missing/wrong `X-Admin-Key` — never leaks whether the secret is even configured), 400 (malformed body), 404 (IDs don't match an active incident — scope guard against arbitrary KV writes), 429 (1-req-per-60s-per-incident rate limit via `admin:ratelimit:{hash}`), 502 (upstream model failure or unparseable response), 503 (`ANTHROPIC_API_KEY` not configured).
-
-    **Security posture**: the endpoint accepts only IDs that match an active incident in `services:latest`, so a leaked secret can't be used to write arbitrary `ai:analysis:*` keys. Per-incident rate limit bounds damage to ~1 Sonnet call per incident per minute ≈ $0.01-level cost. Rotate `ADMIN_API_KEY` independently of `ANTHROPIC_API_KEY` if ever suspected compromised. Never paste the secret value into issues, PR bodies, or commit messages — only the variable name `$ADMIN_API_KEY` should appear in docs.
+  - **Operator tools — `POST /api/admin/analyze` (#299)**: Force a Sonnet analysis on a specific active incident when the cron's default (Gemma-first) produced low-signal output. Auth via `X-Admin-Key` (`ADMIN_API_KEY` secret); accepts only IDs matching an active incident in `services:latest` (scope guard), per-incident rate-limited, `sticky:true` by default so cron won't auto-replace. Use the `scripts/admin-analyze.mjs` helper, not raw curl. Full runbook (secret setup, flags, request/response, failure codes, security posture) in **[docs/reference/operator-tools.md](docs/reference/operator-tools.md)**.
   - **Cron Trigger**: `*/5 * * * *` — alert detection runs every 5 minutes via scheduled handler (not per-request). Uses KV ID-based dedup (`alerted:new/res:` keys 7d TTL, `alerted:down/degraded/recovered:` keys 2h TTL). Fallback recommendations only included when service status is degraded/down (not operational). AI analysis runs inline with 8s timeout — Gemma 4 26B (Workers AI) primary, Sonnet (AI Gateway) fallback — results stored in `ai:analysis:{svcId}:{incId}` (1h TTL, per-incident). Daily alert counts tracked in `alert:count:{date}` for Daily Summary
 - **Frontend deployment**: Vercel, domain ai-watch.dev — `git push origin main` triggers auto-deploy. `npm run build` is local only; changes are not live until pushed
 - **PWA**: `public/manifest.json` + `public/sw.js` (stale-while-revalidate). CACHE_NAME in `sw.js` must be bumped manually when static assets change. SW excludes `/is-*` (Edge SSR) and `/api/*` (real-time data) from caching. **Registered in production only** (`src/main.jsx` gates on `import.meta.env.PROD`); in dev the SW is proactively unregistered because its stale-while-revalidate cache serves previously-cached `/src/*` modules and masks source edits (#432). Verify SW behavior via `npm run build && npm run preview`, not `npm run dev`
