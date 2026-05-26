@@ -1,0 +1,28 @@
+# Operator Tools — `POST /api/admin/analyze` (#299)
+
+Force a Sonnet analysis on a specific active incident when the cron's default (Gemma-first) produced low-signal output. Motivated by the 2026-04-20 ChatGPT outage where Gemma called a systemic infra failure a "service availability issue". Before this endpoint the override required hand-editing a local Node script + `wrangler kv key put --remote`.
+
+```bash
+# One-time secret setup (do NOT commit the value anywhere)
+npx wrangler secret put ADMIN_API_KEY --config worker/wrangler.toml
+
+# During an outage — helper script parses CLI args, handles UA / error hints,
+# and avoids the shell-quoting pitfalls of raw curl.
+export ADMIN_API_KEY=...  # paste locally from 1Password / keychain
+node scripts/admin-analyze.mjs chatgpt 01KPNN2V2SMP3TAN3MCJK87W50
+# Optional flags:
+#   --model gemma         (default: sonnet — manual trigger implies escalation)
+#   --sticky false        (default: true — prevents cron from re-analyzing with Gemma)
+# See scripts/admin-analyze.mjs header for full usage + error-code hints.
+
+# Or raw curl (same endpoint — use --data @file to avoid zsh brace-expansion issues):
+# curl -X POST https://aiwatch-worker.p2c2kbf.workers.dev/api/admin/analyze \
+#   -H "X-Admin-Key: $ADMIN_API_KEY" -H "Content-Type: application/json" \
+#   --data '{"svcId":"chatgpt","incidentId":"01KPNN2V2SMP3TAN3MCJK87W50"}'
+```
+
+**Request body** (JSON): `svcId` (required), `incidentId` (required, must be an active incident present in `services:latest`), `model` (`'sonnet' | 'gemma'`, default `'sonnet'`), `sticky` (default `true` — cron skips re-analysis until the incident resolves).
+
+**Response**: `{ ok: true, wrote, ttl, analysis }` on 200. Failure modes: 401 `unauthorized` (missing/wrong `X-Admin-Key` — never leaks whether the secret is even configured), 400 (malformed body), 404 (IDs don't match an active incident — scope guard against arbitrary KV writes), 429 (1-req-per-60s-per-incident rate limit via `admin:ratelimit:{hash}`), 502 (upstream model failure or unparseable response), 503 (`ANTHROPIC_API_KEY` not configured).
+
+**Security posture**: the endpoint accepts only IDs that match an active incident in `services:latest`, so a leaked secret can't be used to write arbitrary `ai:analysis:*` keys. Per-incident rate limit bounds damage to ~1 Sonnet call per incident per minute ≈ $0.01-level cost. Rotate `ADMIN_API_KEY` independently of `ANTHROPIC_API_KEY` if ever suspected compromised. Never paste the secret value into issues, PR bodies, or commit messages — only the variable name `$ADMIN_API_KEY` should appear in docs.
