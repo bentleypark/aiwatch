@@ -1,25 +1,22 @@
-// Vercel Edge Function — Product Hunt landing page
+// Vercel Edge Function — /intro landing page
 
 import { renderLandingPage } from './intro/html-template'
+import { resolveAnnouncement } from './intro/announcements'
 
 export const config = { runtime: 'edge' }
 
 export default async function handler(req: Request) {
   try {
     const url = new URL(req.url)
-    const ref = url.searchParams.get('ref') ?? ''
-    const referer = req.headers.get('referer') ?? ''
-    const fromPH = ref === 'producthunt' || referer.includes('producthunt.com')
-    const html = renderLandingPage({ showPHBanner: fromPH })
+    // Optional campaign banner via ?banner=<key> (#265). Defaults to none.
+    const announcement = resolveAnnouncement(url.searchParams.get('banner'))
+    const html = renderLandingPage({ announcement })
 
     return new Response(html, {
       status: 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': fromPH
-          ? 'public, s-maxage=600, stale-while-revalidate=3600'
-          : 'public, s-maxage=3600, stale-while-revalidate=86400',
-        'Vary': 'Referer',
+        'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
       },
     })
   } catch (err) {

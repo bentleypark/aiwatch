@@ -1,14 +1,30 @@
-// SSR HTML template for Product Hunt landing page
+// SSR HTML template for the /intro landing page
 
 import { CONSENT_INIT_COMMENT, CONSENT_INIT_SCRIPT } from '../_shared/consent-init'
 import { COOKIE_BANNER_HTML } from '../_shared/cookie-banner'
+import type { Announcement } from './announcements'
 
 interface LandingOptions {
-  showPHBanner: boolean
+  /** Optional campaign banner to surface at the top of the page (#265). */
+  announcement?: Announcement | null
 }
 
-export function renderLandingPage(opts: LandingOptions): string {
-  const phDisplay = opts.showPHBanner ? 'block' : 'none'
+function renderAnnouncementBanner(a: Announcement): string {
+  // a.html / a.href / a.id are author-controlled trusted config (never user input) —
+  // interpolated raw on purpose. a.id is the map key (see announcements.ts), so it is
+  // also safe inside the single-quoted onclick JS string below.
+  const onclick = `onclick="typeof gtag==='function'&&gtag('event','click_announcement',{id:'${a.id}',location:'landing_banner'})"`
+  const inner = a.href
+    ? `<a href="${a.href}" target="_blank" rel="noopener" ${onclick} style="display:inline-flex;align-items:center;gap:12px;font-size:13px;color:var(--blue);font-family:var(--font-mono);text-decoration:none;">${a.html}</a>`
+    : `<span style="font-size:13px;color:var(--text1);font-family:var(--font-mono);">${a.html}</span>`
+  return `<!-- ANNOUNCEMENT BANNER -->
+<div id="announcement-banner" style="background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 24px;text-align:center;">
+  ${inner}
+</div>`
+}
+
+export function renderLandingPage(opts: LandingOptions = {}): string {
+  const announcementHtml = opts.announcement ? renderAnnouncementBanner(opts.announcement) : ''
   const reportUrl = '/reports/'
   return `<!DOCTYPE html>
 <html lang="en">
@@ -475,15 +491,7 @@ ${CONSENT_INIT_SCRIPT}
 </head>
 <body>
 <div class="page-wrap">
-
-<!-- PH BANNER -->
-<div id="ph-banner" style="display:${phDisplay};background:var(--green-dim);border-bottom:1px solid rgba(63,185,80,0.3);padding:10px 24px;text-align:center;">
-  <a href="https://www.producthunt.com/products/aiwatch-2?utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-aiwatch-2" target="_blank" rel="noopener" onclick="typeof gtag==='function'&&gtag('event','click_ph_upvote',{location:'landing_banner'})" style="display:inline-flex;align-items:center;gap:12px;font-size:13px;color:var(--green);font-family:var(--font-mono);text-decoration:none;">
-    <img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1124212&theme=dark" alt="AIWatch on Product Hunt" width="250" height="54" style="vertical-align:middle;" />
-    <span>👋 Welcome, Product Hunters! If AIWatch is useful, <strong style="text-decoration:underline;text-underline-offset:3px;">an upvote means the world to us</strong> 🙏</span>
-  </a>
-</div>
-
+${announcementHtml}
 <nav>
   <div class="nav-logo">
     <div class="logo-icon">

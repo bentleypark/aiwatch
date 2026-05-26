@@ -55,7 +55,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Health check probing** — Direct RTT measurement to API endpoints (20 API services) with early outage detection via consecutive spike alerts and Detection Lead tracking
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 - **AI Analysis (Beta)** — Hybrid AI auto-analysis on incidents (Gemma 4 primary + Sonnet fallback): cause estimation, recovery time, affected scope, contextual fallback recommendations. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
-- **Landing page** — Product Hunt landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, and GA4 tracking
+- **Landing page** — Landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, optional `?banner=` campaign slot, and GA4 tracking
 - **Web Vitals monitoring** — Real user LCP, FCP, TTFB, CLS, INP collection with p75 aggregation and threshold-based alerts in Discord Daily Report
 - **Weekly briefing** — Sunday Discord digest with AI service changelog detection (OpenAI, Google, Anthropic), incident summary, and stability trends
 - **Security monitoring** — AI service security incident detection via Hacker News, Reddit (r/netsec, r/cybersecurity), and OSV.dev SDK vulnerability scanning across 24 AI SDK packages (PyPI + npm, including Langchain ecosystem adapters) with dashboard alerts + Discord digest
@@ -323,7 +323,7 @@ src/
   utils/         # analytics, calendar, time, pageContext, constants
   locales/       # ko.js, en.js (flat key→string maps)
 api/
-  intro.ts             # Vercel Edge Function — Product Hunt landing page (/intro)
+  intro.ts             # Vercel Edge Function — landing page (/intro)
   intro/
     html-template.ts   # Landing page SSR template (i18n, dashboard mock, GA4)
   is-down.ts           # Vercel Edge Function — "Is X Down?" SSR pages (31 services)
