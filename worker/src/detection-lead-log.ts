@@ -76,6 +76,28 @@ export function computeLeadMs(detectedAt: string, officialAt: string): number | 
   return diff
 }
 
+/** Why a (detectedAt, officialAt) pair did or didn't produce a recordable lead — the diagnostic
+ *  buckets behind the empty audit log (#464). Boundaries mirror computeLeadMs so the diagnostic can
+ *  never disagree with what actually gets recorded:
+ *  - no_detected: missing/invalid detection timestamp
+ *  - negative:    detected at/after the official start (diff <= 0) — AIWatch was not earlier
+ *  - below_min:   0 < diff < MIN_LEAD_MS (sub-minute — not displayed/audited)
+ *  - in_window:   MIN_LEAD_MS <= diff < MAX_LEAD_MS (a real, recorded lead)
+ *  - above_max:   diff >= MAX_LEAD_MS (stale `detected:` marker, filtered out) */
+export type LeadOutcome = 'no_detected' | 'negative' | 'below_min' | 'in_window' | 'above_max'
+
+export function classifyLead(detectedAt: string | null | undefined, officialAt: string): LeadOutcome {
+  if (!detectedAt) return 'no_detected'
+  const detected = new Date(detectedAt).getTime()
+  const official = new Date(officialAt).getTime()
+  if (isNaN(detected) || isNaN(official)) return 'no_detected'
+  const diff = official - detected
+  if (diff <= 0) return 'negative'
+  if (diff < MIN_LEAD_MS) return 'below_min'
+  if (diff >= MAX_LEAD_MS) return 'above_max'
+  return 'in_window'
+}
+
 // Tolerance for clock skew between AIWatch (Cloudflare PoP NTP) and upstream status pages.
 // 5min is conservative: rejects obvious garbage (status page "future" timestamps, manual backdates)
 // while not rejecting legitimate near-real-time incidents. Sub-second NTP drift fits comfortably.
@@ -272,6 +294,122 @@ export async function readDetectionLeadEntries(
     if (dropped > 0) console.warn(`[detection-lead] dropped ${dropped} malformed entr${dropped === 1 ? 'y' : 'ies'} from ${targetKey}`)
   }
   return out
+}
+
+// ── Detection Lead diagnostics (#464) ───────────────────────────────
+// Lossy daily counter (NOT source-of-truth like the audit log) measuring WHY leads are/aren't
+// recorded, split by whether the service is a probe target. Answers: is the empty audit log a
+// coverage problem (non-probe / no_detected) or a timing problem (negative / below_min)?
+// Key: `detection:lead:diag:{YYYY-MM-DD}` (30d TTL). Best-effort: increment failures never block alerts.
+
+export interface LeadDiagBuckets {
+  no_detected: number
+  negative: number
+  below_min: number
+  in_window: number
+  above_max: number
+}
+export interface LeadDiag {
+  probe: LeadDiagBuckets     // services in PROBE_TARGETS (direct RTT — can structurally lead)
+  nonProbe: LeadDiagBuckets  // status-page-only services (detection can't precede the official post)
+}
+
+export const DETECTION_LEAD_DIAG_TTL_SECONDS = 30 * 86400
+
+export function detectionLeadDiagKey(date: Date = new Date()): string {
+  return `detection:lead:diag:${date.toISOString().split('T')[0]}`
+}
+
+function emptyBuckets(): LeadDiagBuckets {
+  return { no_detected: 0, negative: 0, below_min: 0, in_window: 0, above_max: 0 }
+}
+function emptyDiag(): LeadDiag {
+  return { probe: emptyBuckets(), nonProbe: emptyBuckets() }
+}
+
+/** Coerce an unknown parsed value into a well-formed LeadDiag, keeping only finite non-negative
+ *  integer counts. Unlike the audit log (which aborts on corruption to avoid data loss), the diag
+ *  counter is a disposable measurement — a corrupt/foreign value normalizes to zeros for that field. */
+export function normalizeDiag(parsed: unknown): LeadDiag {
+  const out = emptyDiag()
+  if (!parsed || typeof parsed !== 'object') return out
+  for (const group of ['probe', 'nonProbe'] as const) {
+    const g = (parsed as Record<string, unknown>)[group]
+    if (!g || typeof g !== 'object') continue
+    for (const k of Object.keys(out[group]) as (keyof LeadDiagBuckets)[]) {
+      const v = (g as Record<string, unknown>)[k]
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[group][k] = Math.floor(v)
+    }
+  }
+  return out
+}
+
+/** Increment today's diagnostic counter for one classified outcome. Best-effort:
+ *  - read failure → skip (return false) rather than overwrite the day's counts
+ *  - unparseable existing value → reset that day (lossy counter, not audit data) and warn
+ *  Returns whether the KV write succeeded. */
+export async function appendLeadDiag(
+  kv: KVNamespace,
+  outcome: LeadOutcome,
+  isProbeTarget: boolean,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const key = detectionLeadDiagKey(now)
+  const raw = await getWithRetry(kv, key)
+  if (raw === READ_FAILED) return false
+  let diag = emptyDiag()
+  if (raw) {
+    try {
+      diag = normalizeDiag(JSON.parse(raw))
+    } catch (err) {
+      console.warn('[detection-lead] diag counter unparseable, resetting day:', key, '-', err instanceof Error ? err.message : err)
+      diag = emptyDiag()
+    }
+  }
+  const group = isProbeTarget ? diag.probe : diag.nonProbe
+  group[outcome]++
+  return kvPut(kv, key, JSON.stringify(diag), { expirationTtl: DETECTION_LEAD_DIAG_TTL_SECONDS })
+}
+
+/** Sum the diagnostic counters across the most recent `days` (clamped [1,7]). */
+export async function readLeadDiag(
+  kv: KVNamespace,
+  date: Date = new Date(),
+  days: number = DAYS_FOR_DAILY_SUMMARY,
+): Promise<LeadDiag> {
+  const total = emptyDiag()
+  const n = Math.max(1, Math.min(7, Math.floor(Number.isFinite(days) ? days : 1)))
+  for (let offset = 0; offset < n; offset++) {
+    const target = new Date(date.getTime() - offset * 86_400_000)
+    const raw = await getWithRetry(kv, detectionLeadDiagKey(target))
+    if (raw === READ_FAILED || !raw) continue
+    let diag: LeadDiag
+    try {
+      diag = normalizeDiag(JSON.parse(raw))
+    } catch {
+      continue
+    }
+    for (const grp of ['probe', 'nonProbe'] as const) {
+      for (const k of Object.keys(total[grp]) as (keyof LeadDiagBuckets)[]) {
+        total[grp][k] += diag[grp][k]
+      }
+    }
+  }
+  return total
+}
+
+function bucketsTotal(b: LeadDiagBuckets): number {
+  return b.no_detected + b.negative + b.below_min + b.in_window + b.above_max
+}
+
+/** Format the diagnostic counter as a Discord daily-summary line.
+ *  Returns empty string when no incidents were classified (caller skips the section). */
+export function formatLeadDiagSection(diag: LeadDiag): string {
+  const p = diag.probe
+  const probeTotal = bucketsTotal(p)
+  const nonProbeTotal = bucketsTotal(diag.nonProbe)
+  if (probeTotal + nonProbeTotal === 0) return ''
+  return `\n🔍 **Detection diag** (~48h) — probe svcs: in-window ${p.in_window} · negative ${p.negative} · sub-min ${p.below_min} · >60m ${p.above_max} · no-detect ${p.no_detected}  |  non-probe incidents: ${nonProbeTotal}`
 }
 
 /** Format Detection Lead entries as a Discord embed section.

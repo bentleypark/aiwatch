@@ -8,7 +8,7 @@ import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDet
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration } from './utils'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
-import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
+import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, classifyLead, appendLeadDiag, readLeadDiag, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
 import { corsHeaders } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
@@ -631,6 +631,10 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
           const detectRaw = await env.STATUS_CACHE.get(`detected:${svc.id}`).catch(() => null)
           const detectedAt = getDetectionTimestamp(detectRaw)
           detectionLeadSection = formatDetectionLead(detectedAt, inc.startedAt)
+          // #464 diagnostics: record WHY this new incident did/didn't produce a lead, split by probe
+          // coverage. Best-effort, never blocks the alert. No change to the audit-log behavior below.
+          await appendLeadDiag(env.STATUS_CACHE, classifyLead(detectedAt, inc.startedAt), PROBED_SERVICE_IDS.has(svc.id))
+            .catch((err) => console.warn('[cron] detection lead diag failed:', err instanceof Error ? err.message : err))
           // Persist to audit log: computeLeadMs returns null outside [1m, 60m) — single source of truth
           // shared with formatDetectionLead, so audit log can never drift from Discord display rules.
           if (detectedAt) {
@@ -1670,6 +1674,12 @@ export default {
               console.error('[daily-summary] detection lead read failed:', err instanceof Error ? err.message : err)
               return []
             })
+          // #464 — diagnostic counter breakdown (why leads are/aren't landing). Best-effort.
+          const leadDiag = await readLeadDiag(env.STATUS_CACHE, new Date(), DAYS_FOR_DAILY_SUMMARY)
+            .catch((err) => {
+              console.error('[daily-summary] detection lead diag read failed:', err instanceof Error ? err.message : err)
+              return null
+            })
 
           const description = buildDailySummary({
             services: dailyServices,
@@ -1684,6 +1694,7 @@ export default {
             vitals: vitalsSummary,
             probeSnapshots,
             detectionLeadEntries,
+            leadDiag,
           })
 
           if (isCatchUp) console.log(`[daily-summary] catch-up run for ${today}`)

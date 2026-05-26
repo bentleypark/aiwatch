@@ -270,7 +270,7 @@ worker/
     probe-archival.ts # Daily probe RTT archival + 7-day summary (p50, p95, cvCombined)
     platform-monitor.ts # Status page platform health monitoring (metastatuspage.com for Atlassian)
     detection.ts # Detection Lead entry parsing + incident-aware reset logic
-    detection-lead-log.ts # Detection Lead audit log — per-day KV array (#256), tagged AppendResult, 24h sliding window for daily summary
+    detection-lead-log.ts # Detection Lead audit log — per-day KV array (#256), tagged AppendResult, 24h sliding window for daily summary. Also `classifyLead` + `detection:lead:diag:{date}` counter (#464): measures why leads are/aren't recorded (no_detected/negative/below_min/in_window/above_max × probe/non-probe), surfaced in daily summary
     reddit.ts   # Reddit r/ChatGPT + r/netsec + r/cybersecurity monitoring
     security-monitor.ts # AI service security monitoring (HN Algolia, OSV.dev SDK vulnerabilities — 24 tracked packages across PyPI + npm including Langchain ecosystem adapters, see OSV_PACKAGES; two-phase flow: querybatch bulk scan + per-vuln GET enrichment, capped at OSV_MAX_DETAIL_FETCH=15/cycle to protect the Workers subrequest budget; overflow re-offered next cron since seen-markers are only written for surfaced alerts)
     parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, aistudio, instatus, betterstack, aws)
