@@ -45,10 +45,10 @@ test.describe('Landing page (/intro)', () => {
     // Playwright Chrome defaults to en-US, so page starts in EN
     // Switch to KO
     await toggle.filter({ hasText: 'KO' }).click()
-    await expect(page.locator('.hero-left h1')).toContainText('나만 안 되는 건가요')
+    await expect(page.locator('.hero-left h1')).toContainText('갈아탈 대안까지')
     // Switch back to EN
     await toggle.filter({ hasText: 'EN' }).click()
-    await expect(page.locator('.hero-left h1')).toContainText('is it just you')
+    await expect(page.locator('.hero-left h1')).toContainText('what to switch to')
   })
 
   test('flow animation elements exist', async ({ page }) => {
