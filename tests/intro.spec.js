@@ -24,38 +24,19 @@ test.describe('Landing page (/intro)', () => {
     await expect(page.locator('.mock-cards > .mock-card')).toHaveCount(4) // 3 services + 1 "more"
   })
 
-  test('PH banner hidden by default', async ({ page }) => {
+  test('no announcement banner by default (stale PH banner removed, #265)', async ({ page }) => {
     await page.goto('/intro', { waitUntil: 'domcontentloaded' })
-    const banner = page.locator('#ph-banner')
-    await expect(banner).toHaveCSS('display', 'none')
+    await expect(page.locator('#announcement-banner')).toHaveCount(0)
+    // the time-bound Product Hunt banner must be fully gone
+    await expect(page.locator('body')).not.toContainText('Product Hunters')
   })
 
-  test('PH banner visible with ?ref=producthunt and upvote link', async ({ page }) => {
-    await page.goto('/intro?ref=producthunt', { waitUntil: 'domcontentloaded' })
-    const banner = page.locator('#ph-banner')
-    await expect(banner).not.toHaveCSS('display', 'none')
-    await expect(banner).toContainText('Product Hunters')
-    const link = banner.locator('a')
-    // PH "Featured" badge attribution requires UTM params on the upvote URL — these are
-    // baked into the static template (refs PH embed code) and must round-trip in tests.
-    await expect(link).toHaveAttribute('href', /^https:\/\/www\.producthunt\.com\/products\/aiwatch-2(\?|$)/)
-    await expect(link).toHaveAttribute('target', '_blank')
-  })
-
-  test('PH banner visible with Referer header', async ({ request }) => {
-    const res = await request.get('/intro', {
-      headers: { 'Referer': 'https://www.producthunt.com/products/aiwatch-2' },
-    })
+  test('unknown ?banner key renders no banner and no PH remnants', async ({ request }) => {
+    const res = await request.get('/intro?banner=does-not-exist')
     expect(res.status()).toBe(200)
     const html = await res.text()
-    expect(html).toContain('id="ph-banner" style="display:block')
-  })
-
-  test('PH banner hidden without Referer', async ({ request }) => {
-    const res = await request.get('/intro')
-    expect(res.status()).toBe(200)
-    const html = await res.text()
-    expect(html).toContain('id="ph-banner" style="display:none')
+    expect(html).not.toContain('id="announcement-banner"')
+    expect(html).not.toContain('producthunt.com')
   })
 
   test('i18n toggle switches language', async ({ page }) => {
