@@ -358,23 +358,13 @@ ${CONSENT_INIT_SCRIPT}
   /* REPORT + AI ANALYSIS SECTIONS */
   .report-section { padding: 64px 24px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
   .report-inner { max-width: 900px; margin: 0 auto; }
-  .ai-section { border-top: 1px solid var(--border); padding: 64px 24px; }
-  .ai-inner { max-width: 900px; margin: 0 auto; }
   .report-chart { background: var(--bg1); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin: 28px auto 0; overflow-x: auto; max-width: 560px; }
   .report-chart svg { display: block; width: 100%; height: auto; }
   .report-link { display: inline-flex; align-items: center; gap: 6px; color: var(--green); font-size: 14px; font-weight: 500; border-bottom: 1px solid rgba(63,185,80,0.3); padding-bottom: 2px; transition: border-color 0.2s; }
   .report-link:hover { border-color: var(--green); }
-  .ai-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
-  .ai-analysis-mock { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin-top: 20px; border-left: 3px solid #7c3aed; }
-  .ai-mock-title { font-size: 13px; font-weight: 500; color: #e6edf3; margin-bottom: 10px; }
-  .ai-mock-body { font-size: 12px; color: #adbac7; line-height: 1.7; margin-bottom: 10px; }
-  .ai-mock-meta { display: flex; gap: 16px; flex-wrap: wrap; }
-  .ai-mock-chip { background: #1a1d21; border: 1px solid #30363d; border-radius: 4px; padding: 4px 10px; font-size: 11px; font-family: var(--font-mono); color: #adbac7; }
-  .ai-mock-chip span { color: #3fb950; }
   @media (max-width: 768px) {
     .report-section { padding: 40px 20px; }
     .report-chart { padding: 12px 8px; border-radius: 8px; margin: 20px -8px; }
-    .ai-section { padding: 40px 20px; }
   }
 
 
@@ -469,7 +459,10 @@ ${CONSENT_INIT_SCRIPT}
     .feature-grid { grid-template-columns: 1fr; }
 
     /* How */
-    .how-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    /* grid-auto-rows:1fr makes both row tracks equal height; align-items:stretch (overriding the
+       desktop flex-start) makes each card fill its track — so all 4 step cards share one height
+       regardless of description length (e.g. the longer "Analyze" / "Alert" text) */
+    .how-grid { display: grid; grid-template-columns: repeat(2, 1fr); grid-auto-rows: 1fr; align-items: stretch; gap: 16px; }
     .how-arrow { display: none; }
     .how-item { padding: 16px; background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; }
     .how-icon-wrap { width: 48px; height: 48px; margin-bottom: 10px; }
@@ -518,13 +511,13 @@ ${announcementHtml}
 <div class="hero-2col">
   <div class="hero-left">
     <div class="hero-badge"><span class="hero-badge-dot"></span><span data-i18n="hero.badge">LIVE MONITORING</span></div>
-    <h1 data-i18n="hero.title">지금 <em>Claude</em>가<br>나만 안 되는 건가요?</h1>
-    <p data-i18n="hero.sub">Claude, OpenAI, Gemini, Cursor 등 주요 AI 서비스<span class="hero-sub-line"> 상태를 한눈에 확인하세요.</span> 장애 발생 시 AI가 원인을 분석하고 대안을 즉시 추천합니다.</p>
+    <h1 data-i18n="hero.title"><em>AI 서비스</em> 장애를 즉시 파악하고,<br>갈아탈 대안까지 한 번에.</h1>
+    <p data-i18n="hero.sub">33개 AI 서비스 상태를 한 화면에서.<span class="hero-sub-line"> AIWatch가 신뢰도를 랭킹하고 장애를 분석해,</span> 멈추는 순간 대안을 즉시 추천합니다. 무료 · 오픈소스 · 무가입.</p>
     <div class="hero-ctas">
-      <a href="https://ai-watch.dev" class="btn-primary" data-i18n="hero.cta1" onclick="gtag('event','click_dashboard',{location:'landing_hero',source:'intro'})">지금 장애 확인하기 →</a>
+      <a href="https://ai-watch.dev" class="btn-primary" data-i18n="hero.cta1" onclick="gtag('event','click_dashboard',{location:'landing_hero',source:'intro'})">대시보드 열기 →</a>
       <a href="https://github.com/bentleypark/aiwatch" target="_blank" rel="noopener noreferrer" class="btn-secondary" data-i18n="hero.cta2" onclick="gtag('event','click_github_header',{location:'landing_hero',source:'intro'})">GitHub에서 보기</a>
     </div>
-    <p class="hero-trust" data-i18n="hero.trust">로그인 없음 · 10초 만에 확인 · 완전 무료 오픈소스</p>
+    <p class="hero-trust" data-i18n="hero.trust">로그인 없음 · 실시간 상태 · 완전 무료 오픈소스 (AGPL)</p>
     <div class="hero-pills">
       <div class="stat-pill"><span class="stat-pill-num">33</span> <span data-i18n="hero.pill1">AI 서비스</span></div>
       <div class="stat-pill"><span class="stat-pill-num" data-i18n="hero.pill2v">실시간</span> <span data-i18n="hero.pill2">알림</span></div>
@@ -809,7 +802,7 @@ ${announcementHtml}
   <div class="how-grid">
 
     <div class="how-item fade-up">
-      <div class="how-badge">자동</div>
+      <div class="how-badge" data-i18n="how.1.badge">자동</div>
       <div class="how-icon-wrap">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"/>
@@ -823,7 +816,7 @@ ${announcementHtml}
     <div class="how-arrow fade-up delay-1">→</div>
 
     <div class="how-item fade-up delay-1">
-      <div class="how-badge">장애 감지 시</div>
+      <div class="how-badge" data-i18n="how.2.badge">장애 감지 시</div>
       <div class="how-icon-wrap">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"/>
@@ -831,13 +824,13 @@ ${announcementHtml}
         </svg>
       </div>
       <div class="how-title" data-i18n="how.2.title">분석</div>
-      <div class="how-desc" data-i18n="how.2.desc">Claude Sonnet이 패턴 · 복구 시간 · 영향 범위 분석</div>
+      <div class="how-desc" data-i18n="how.2.desc">하이브리드 AI(Gemma 4 + Claude Sonnet fallback)가 패턴 · 복구 시간 · 영향 범위 분석</div>
     </div>
 
     <div class="how-arrow fade-up delay-2">→</div>
 
     <div class="how-item fade-up delay-2">
-      <div class="how-badge">즉시</div>
+      <div class="how-badge" data-i18n="how.3.badge">즉시</div>
       <div class="how-icon-wrap">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -851,7 +844,7 @@ ${announcementHtml}
     <div class="how-arrow fade-up delay-3">→</div>
 
     <div class="how-item fade-up delay-3">
-      <div class="how-badge">매월</div>
+      <div class="how-badge" data-i18n="how.4.badge">매월</div>
       <div class="how-icon-wrap">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="20" x2="18" y2="10"/>
@@ -876,13 +869,13 @@ ${announcementHtml}
         <div class="feature-tag">SCORE</div>
         <div class="feature-icon">📊</div>
         <div class="feature-title" data-i18n="feat.1.title">AIWatch Score</div>
-        <div class="feature-desc" data-i18n="feat.1.desc">Uptime(50) + 인시던트 영향 일수(30) + 복구 시간(20)을 종합한 0~100점 신뢰도 지표입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다. 데이터 미제공 서비스는 업계 평균 + 10% 패널티가 적용됩니다.</div>
+        <div class="feature-desc" data-i18n="feat.1.desc">Uptime(40) + 인시던트 영향 일수(25) + 복구 시간(15) + 응답성(20)을 종합한 0~100점 신뢰도 지표입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다. 데이터 미제공 서비스는 업계 평균 + 패널티가 적용됩니다.</div>
       </div>
       <div class="feature-card fade-up delay-1">
         <div class="feature-tag">AI ANALYSIS BETA</div>
         <div class="feature-icon">🤖</div>
         <div class="feature-title" data-i18n="feat.2.title">AI 장애 분석</div>
-        <div class="feature-desc" data-i18n="feat.2.desc">장애 발생 시 Claude Sonnet이 패턴을 분석해 예상 복구 시간과 영향 범위를 알려줍니다. "언제쯤 복구될까?"에 빠르게 답합니다.</div>
+        <div class="feature-desc" data-i18n="feat.2.desc">장애 발생 시 AIWatch가 패턴을 분석해 예상 복구 시간과 영향 범위를 알려줍니다. "언제쯤 복구될까?"에 빠르게 답합니다.</div>
       </div>
       <div class="feature-card fade-up delay-2">
         <div class="feature-tag">FALLBACK</div>
@@ -895,105 +888,6 @@ ${announcementHtml}
         <div class="feature-icon">🔍</div>
         <div class="feature-title" data-i18n="feat.4.title">"Is X Down?" 전용 페이지</div>
         <div class="feature-desc" data-i18n="feat.4.desc">ai-watch.dev/is-claude-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다.</div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="alert-section">
-  <div class="alert-inner">
-    <p class="section-label">// real-time alerts</p>
-    <h2 class="section-title" data-i18n="alert.title">장애 알림, 원하는 방식으로</h2>
-    <p class="section-sub" data-i18n="alert.sub">장애 발생 즉시 알림 + AI 분석 + Fallback 추천까지 한 번에. 무료입니다.</p>
-    <div class="alert-channels">
-      <span class="ch-badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="#5865F2" aria-hidden="true"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028 14.09 14.09 0 001.226-1.994.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03z"/></svg>Discord</span>
-      <span class="ch-badge"><svg width="13" height="13" viewBox="0 0 24 24" fill="#E01E5A" aria-hidden="true"><path d="M5.042 15.165a2.528 2.528 0 01-2.52 2.523A2.528 2.528 0 010 15.165a2.527 2.527 0 012.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 012.521-2.52 2.527 2.527 0 012.521 2.52v6.313A2.528 2.528 0 018.834 24a2.528 2.528 0 01-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 01-2.521-2.52A2.528 2.528 0 018.834 0a2.528 2.528 0 012.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 012.521 2.521 2.528 2.528 0 01-2.521 2.521H2.522A2.528 2.528 0 010 8.834a2.528 2.528 0 012.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 012.522-2.521A2.528 2.528 0 0124 8.834a2.528 2.528 0 01-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 01-2.523 2.521 2.527 2.527 0 01-2.52-2.521V2.522A2.527 2.527 0 0115.165 0a2.528 2.528 0 012.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 012.523 2.522A2.528 2.528 0 0115.165 24a2.527 2.527 0 01-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 01-2.52-2.523 2.526 2.526 0 012.52-2.52h6.313A2.527 2.527 0 0124 15.165a2.528 2.528 0 01-2.522 2.523h-6.313z"/></svg>Slack</span>
-      <button type="button" class="ch-badge ch-rss" onclick="copyRss(this)" title="Copy RSS feed URL" aria-label="Copy RSS feed URL"><svg width="13" height="13" viewBox="0 0 24 24" fill="#f26522" aria-hidden="true"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83C19.56 11.4 12.6 4.44 4 4.44zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z"/></svg><span class="rss-label">RSS</span></button>
-    </div>
-    <div class="alert-grid">
-      <div>
-        <div class="discord-wrap">
-          <!-- incident + AI Analysis 통합 -->
-          <div class="bot-msg">
-            <div class="bot-avatar" style="background:#1a3d25;">
-              <img src="/favicon.png" alt="" width="22" height="22" style="border-radius:4px;">
-            </div>
-            <div class="bot-body">
-              <div class="bot-name" style="color:#dbdee1;">AIWatch Worker <span class="bot-time" style="color:#949ba4;">오후 2:48</span></div>
-              <div class="d-embed" style="border-left:4px solid #f85149;background:#2b2d31;">
-                <div class="d-embed-title" style="color:#dbdee1;">🔴 Together AI — New Incident</div>
-                <div class="d-embed-text" style="color:#b5bac1;margin-bottom:6px;">Qwen3 Coder 480B A35B Instruct FP8 — down</div>
-                <div class="d-embed-text" style="color:#949ba4;font-family:var(--font-mono);font-size:11px;margin-bottom:6px;">┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈</div>
-                <div class="d-embed-text" style="color:#dbdee1;font-weight:500;margin-bottom:4px;">🤖 AI ANALYSIS [Beta]</div>
-                <div class="d-embed-text" style="color:#b5bac1;margin-bottom:4px;">Qwen model-specific outage affecting the 480B variant. 4 similar incidents detected in the past 30 days.</div>
-                <div class="d-embed-text" style="color:#b5bac1;margin-bottom:2px;">⏱ Est. recovery: 13–54 min</div>
-                <div class="d-embed-text" style="color:#b5bac1;margin-bottom:6px;">📡 Scope: Qwen3 Coder 480B, Code generation</div>
-                <div class="d-embed-text" style="color:#949ba4;font-family:var(--font-mono);font-size:11px;margin-bottom:6px;">┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈</div>
-                <div class="d-embed-text" style="color:#dbdee1;font-weight:500;margin-bottom:4px;">👉 SUGGESTED FALLBACK</div>
-                <div class="d-embed-text" style="color:#3fb950;margin-bottom:6px;">• Cohere API (Score 100) · DeepSeek API (Score 100)</div>
-                <div class="d-embed-text" style="color:#949ba4;font-family:var(--font-mono);font-size:11px;margin-bottom:6px;">┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈</div>
-                <a href="https://ai-watch.dev" class="d-embed-link" style="color:#00a8fc;">View on AIWatch</a>
-                <div class="d-embed-footer" style="color:#949ba4;margin-top:4px;">AIWatch Worker · 오늘 오후 2:48</div>
-              </div>
-            </div>
-          </div>
-          <!-- resolved -->
-          <div class="bot-msg">
-            <div class="bot-avatar" style="background:#0d2818;">
-              <img src="/favicon.png" alt="" width="22" height="22" style="border-radius:4px;">
-            </div>
-            <div class="bot-body">
-              <div class="bot-name" style="color:#dbdee1;">AIWatch Worker <span class="bot-time" style="color:#949ba4;">오후 3:35</span></div>
-              <div class="d-embed" style="border-left:4px solid #3fb950;background:#2b2d31;">
-                <div class="d-embed-title" style="color:#dbdee1;">🟢 Together AI — Service Recovered (47m)</div>
-                <div class="d-embed-text" style="color:#b5bac1;"><strong style="color:#dbdee1;">Together AI</strong> is back to operational</div>
-                <div class="d-embed-divider" style="background:#3d3f45;"></div>
-                <a href="https://ai-watch.dev" class="d-embed-link" style="color:#00a8fc;">View on AIWatch</a>
-                <div class="d-embed-footer" style="color:#949ba4;margin-top:4px;">AIWatch Worker · 오늘 오후 3:35</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="ai-section" id="ai-analysis">
-  <div class="ai-inner">
-    <p class="section-label">// ai analysis beta</p>
-    <h2 class="section-title" data-i18n="ai.title">장애가 나면 AI가 분석합니다</h2>
-    <p class="section-sub" data-i18n="ai.sub">단순 상태 표시에서 한 발 더 — 장애 패턴, 예상 복구 시간, 영향 범위를 Claude Sonnet이 즉시 분석합니다.</p>
-    <!-- AI Analysis 모달 목업 — 실제 UI 기반 -->
-    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-top:20px;">
-      <!-- 모달 헤더 -->
-      <div style="background:var(--bg1);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span style="font-size:16px;">🤖</span>
-          <span style="font-family:var(--font-mono);font-size:14px;font-weight:500;color:var(--text0);">AI Analysis</span>
-          <span style="background:#4c1d95;color:#c4b5fd;font-size:10px;font-family:var(--font-mono);padding:2px 8px;border-radius:4px;">Beta</span>
-          <span style="color:var(--text2);font-size:12px;font-family:var(--font-mono);">(1)</span>
-        </div>
-      </div>
-      <!-- 분석 카드 -->
-      <div style="padding:16px;">
-        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:20px;">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
-            <span style="width:8px;height:8px;background:var(--green);border-radius:50%;display:inline-block;flex-shrink:0;"></span>
-            <span style="font-size:15px;font-weight:600;color:var(--text0);">Claude API</span>
-          </div>
-          <p style="font-size:13px;color:var(--text1);line-height:1.7;margin-bottom:14px;">Connection reset errors specific to Cowork environment, indicating a network/infrastructure issue rather than the model-level errors seen in recent incidents. This represents a new failure pattern compared to the recent Opus 4.6 model errors.</p>
-          <div style="font-family:var(--font-mono);font-size:12px;color:var(--text1);margin-bottom:10px;">⏱ 15 minutes - 3 hours</div>
-          <div style="font-family:var(--font-mono);font-size:12px;color:var(--text1);margin-bottom:14px;">📡 Cowork integration, Claude API connectivity, Real-time collaboration features</div>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <span style="width:8px;height:8px;background:var(--text2);border-radius:50%;display:inline-block;"></span>
-            <span style="font-size:12px;color:var(--text2);font-family:var(--font-mono);">5시간 전</span>
-          </div>
-        </div>
-      </div>
-      <!-- 푸터 경고 -->
-      <div style="background:var(--bg1);border-top:1px solid var(--border);padding:10px 20px;">
-        <p style="font-size:11px;color:var(--text2);font-family:var(--font-mono);line-height:1.6;">⚠ AI-generated estimation based on historical data. Actual recovery time may vary. This analysis is provided for informational purposes only.</p>
       </div>
     </div>
   </div>
@@ -1013,16 +907,16 @@ ${announcementHtml}
         </tr>
       </thead>
       <tbody>
-        
+
         <tr>
           <td data-i18n="compare.r2">장애 알림</td>
-          <td class="no" data-i18n="compare.r2a">직접 확인 필요</td>
-          <td class="yes" data-i18n="compare.r2b">Discord · Slack 즉시 발송</td>
+          <td class="no" data-i18n="compare.r2a">제공사마다 개별 구독</td>
+          <td class="yes" data-i18n="compare.r2b">33개를 한 곳에서 — Discord · Slack · RSS</td>
         </tr>
         <tr>
           <td data-i18n="compare.r3">AIWatch Score</td>
           <td class="no" data-i18n="compare.r3a">업타임 % 뿐</td>
-          <td class="yes" data-i18n="compare.r3b">AIWatch Score — Uptime + 영향 일수 + 복구 시간</td>
+          <td class="yes" data-i18n="compare.r3b">AIWatch Score — Uptime + 영향 일수 + 복구 + 응답성</td>
         </tr>
         <tr>
           <td data-i18n="compare.r4">장애 분석</td>
@@ -1046,6 +940,65 @@ ${announcementHtml}
         </tr>
       </tbody>
     </table>
+  </div>
+</section>
+
+<section class="alert-section">
+  <div class="alert-inner">
+    <p class="section-label">// real-time alerts</p>
+    <h2 class="section-title" data-i18n="alert.title">장애 알림, 원하는 방식으로</h2>
+    <p class="section-sub" data-i18n="alert.sub">장애 발생 즉시 알림 + AI 분석 + Fallback 추천까지 한 번에. 무료입니다.</p>
+    <div class="alert-channels">
+      <span class="ch-badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="#5865F2" aria-hidden="true"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028 14.09 14.09 0 001.226-1.994.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03z"/></svg>Discord</span>
+      <span class="ch-badge"><svg width="13" height="13" viewBox="0 0 24 24" fill="#E01E5A" aria-hidden="true"><path d="M5.042 15.165a2.528 2.528 0 01-2.52 2.523A2.528 2.528 0 010 15.165a2.527 2.527 0 012.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 012.521-2.52 2.527 2.527 0 012.521 2.52v6.313A2.528 2.528 0 018.834 24a2.528 2.528 0 01-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 01-2.521-2.52A2.528 2.528 0 018.834 0a2.528 2.528 0 012.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 012.521 2.521 2.528 2.528 0 01-2.521 2.521H2.522A2.528 2.528 0 010 8.834a2.528 2.528 0 012.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 012.522-2.521A2.528 2.528 0 0124 8.834a2.528 2.528 0 01-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 01-2.523 2.521 2.527 2.527 0 01-2.52-2.521V2.522A2.527 2.527 0 0115.165 0a2.528 2.528 0 012.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 012.523 2.522A2.528 2.528 0 0115.165 24a2.527 2.527 0 01-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 01-2.52-2.523 2.526 2.526 0 012.52-2.52h6.313A2.527 2.527 0 0124 15.165a2.528 2.528 0 01-2.522 2.523h-6.313z"/></svg>Slack</span>
+      <button type="button" class="ch-badge ch-rss" onclick="copyRss(this)" title="Copy RSS feed URL" aria-label="Copy RSS feed URL"><svg width="13" height="13" viewBox="0 0 24 24" fill="#f26522" aria-hidden="true"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83C19.56 11.4 12.6 4.44 4 4.44zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z"/></svg><span class="rss-label">RSS</span></button>
+    </div>
+    <div class="alert-grid">
+      <div>
+        <div class="discord-wrap">
+          <!-- incident + AI Analysis 통합 -->
+          <div class="bot-msg">
+            <div class="bot-avatar" style="background:#1a3d25;">
+              <img src="/favicon.png" alt="" width="22" height="22" style="border-radius:4px;">
+            </div>
+            <div class="bot-body">
+              <div class="bot-name" style="color:#dbdee1;">AIWatch Worker <span class="bot-time" style="color:#949ba4;">2:48 PM</span></div>
+              <div class="d-embed" style="border-left:4px solid #f85149;background:#2b2d31;">
+                <div class="d-embed-title" style="color:#dbdee1;">🔴 Together AI — New Incident</div>
+                <div class="d-embed-text" style="color:#b5bac1;margin-bottom:6px;">Qwen3 Coder 480B A35B Instruct FP8 — down</div>
+                <div class="d-embed-text" style="color:#949ba4;font-family:var(--font-mono);font-size:11px;margin-bottom:6px;">┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈</div>
+                <div class="d-embed-text" style="color:#dbdee1;font-weight:500;margin-bottom:4px;">🤖 AI ANALYSIS [Beta]</div>
+                <div class="d-embed-text" style="color:#b5bac1;margin-bottom:4px;">Qwen model-specific outage affecting the 480B variant. 4 similar incidents detected in the past 30 days.</div>
+                <div class="d-embed-text" style="color:#b5bac1;margin-bottom:2px;">⏱ Est. recovery: 13–54 min</div>
+                <div class="d-embed-text" style="color:#b5bac1;margin-bottom:6px;">📡 Scope: Qwen3 Coder 480B, Code generation</div>
+                <div class="d-embed-text" style="color:#949ba4;font-family:var(--font-mono);font-size:11px;margin-bottom:6px;">┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈</div>
+                <div class="d-embed-text" style="color:#dbdee1;font-weight:500;margin-bottom:4px;">👉 SUGGESTED FALLBACK</div>
+                <div class="d-embed-text" style="color:#3fb950;margin-bottom:6px;">• Cohere API (Score 100) · DeepSeek API (Score 100)</div>
+                <div class="d-embed-text" style="color:#949ba4;font-family:var(--font-mono);font-size:11px;margin-bottom:6px;">┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈</div>
+                <a href="https://ai-watch.dev" class="d-embed-link" style="color:#00a8fc;">View on AIWatch</a>
+                <div class="d-embed-footer" style="color:#949ba4;margin-top:4px;">AIWatch Worker · Today 2:48 PM</div>
+              </div>
+            </div>
+          </div>
+          <!-- resolved -->
+          <div class="bot-msg">
+            <div class="bot-avatar" style="background:#0d2818;">
+              <img src="/favicon.png" alt="" width="22" height="22" style="border-radius:4px;">
+            </div>
+            <div class="bot-body">
+              <div class="bot-name" style="color:#dbdee1;">AIWatch Worker <span class="bot-time" style="color:#949ba4;">3:35 PM</span></div>
+              <div class="d-embed" style="border-left:4px solid #3fb950;background:#2b2d31;">
+                <div class="d-embed-title" style="color:#dbdee1;">🟢 Together AI — Service Recovered (47m)</div>
+                <div class="d-embed-text" style="color:#b5bac1;"><strong style="color:#dbdee1;">Together AI</strong> is back to operational</div>
+                <div class="d-embed-divider" style="background:#3d3f45;"></div>
+                <a href="https://ai-watch.dev" class="d-embed-link" style="color:#00a8fc;">View on AIWatch</a>
+                <div class="d-embed-footer" style="color:#949ba4;margin-top:4px;">AIWatch Worker · Today 3:35 PM</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -1150,55 +1103,57 @@ const i18n = {
   ko: {
     'nav.features': '기능', 'nav.how': '동작 방식', 'nav.report': '월간 리포트', 'nav.cta': '장애 확인하기 →',
     'hero.badge': 'LIVE MONITORING',
-    'hero.title': '지금 <em>Claude</em>가<br>나만 안 되는 건가요?',
-    'hero.sub': 'Claude, OpenAI, Gemini, Cursor 등 주요 AI 서비스<span class="hero-sub-line"> 상태를 한눈에 확인하세요.</span> 장애 발생 시 AI가 원인을 분석하고 대안을 즉시 추천합니다.',
-    'hero.cta1': '지금 장애 확인하기 →', 'hero.trust': '로그인 없음 · 10초 만에 확인 · 완전 무료 오픈소스', 'hero.cta2': 'GitHub에서 보기',
+    'hero.title': '<em>AI 서비스</em> 장애를 즉시 파악하고,<br>갈아탈 대안까지 한 번에.',
+    'hero.sub': '33개 AI 서비스 상태를 한 화면에서.<span class="hero-sub-line"> AIWatch가 신뢰도를 랭킹하고 장애를 분석해,</span> 멈추는 순간 대안을 즉시 추천합니다. 무료 · 오픈소스 · 무가입.',
+    'hero.cta1': '대시보드 열기 →', 'hero.trust': '로그인 없음 · 실시간 상태 · 완전 무료 오픈소스 (AGPL)', 'hero.cta2': 'GitHub에서 보기',
     'hero.pill1': 'AI 서비스', 'hero.pill2v': '실시간', 'hero.pill2': '알림', 'hero.pill3': '오픈소스',
     'flow.1.title': '장애 감지', 'flow.2.conn': 'AI 분석 시작', 'flow.2.bar': '패턴 분석 중', 'flow.3.conn': 'Discord · Slack 발송', 'flow.3.title': '알림 발송', 'flow.3.body': 'Discord · Slack 알림 전송 완료', 'flow.4.conn': '대안 추천', 'flow.4.title': 'Fallback 추천',
     'stats.services': '모니터링 서비스', 'stats.interval': '자동 수집', 'stats.free': 'Discord/Slack 알림 포함', 'stats.oss': '오픈소스',
     'demo.title': '장애 파악부터 대안 선택까지', 'demo.sub': '지금 어떤 서비스가 안정적인지, 장애 중이라면 대안은 무엇인지 한 화면에서 파악합니다', 'demo.more': '+ 30개 서비스 더 보기...',
     'feat.title': '단순 상태 표시를 넘어', 'feat.sub': '의사결정까지 도와주는 AI 모니터링 대시보드',
-    'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'Uptime(50) + 인시던트 영향 일수(30) + 복구 시간(20)을 종합한 0~100점 신뢰도 지표입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다. 데이터 미제공 서비스는 업계 평균 + 10% 패널티가 적용됩니다.',
-    'feat.2.title': 'AI 장애 분석', 'feat.2.desc': '장애 발생 시 Claude Sonnet이 패턴을 분석해 예상 복구 시간과 영향 범위를 알려줍니다. "언제쯤 복구될까?"에 빠르게 답합니다.',
+    'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'Uptime(40) + 인시던트 영향 일수(25) + 복구 시간(15) + 응답성(20)을 종합한 0~100점 신뢰도 지표입니다. 서비스마다 흩어진 공식 데이터를 통합해 한눈에 비교할 수 있게 합니다. 데이터 미제공 서비스는 업계 평균 + 패널티가 적용됩니다.',
+    'feat.2.title': 'AI 장애 분석', 'feat.2.desc': '장애 발생 시 AIWatch가 패턴을 분석해 예상 복구 시간과 영향 범위를 알려줍니다. "언제쯤 복구될까?"에 빠르게 답합니다.',
     'feat.3.title': 'Fallback 추천', 'feat.3.desc': '장애 중인 서비스의 대안을 같은 카테고리 Score 상위 순으로 즉시 제안합니다. 같은 제공사 서비스는 자동 제외됩니다.',
     'feat.4.title': '"Is X Down?" 전용 페이지', 'feat.4.desc': 'ai-watch.dev/is-claude-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다.',
     'how.title': '이렇게 동작합니다', 'how.sub': '각 서비스의 공식 상태 페이지 데이터를 기반으로 동작합니다',
-    'compare.title': '공식 상태 페이지와 무엇이 다른가요?', 'compare.sub': '공식 페이지 데이터를 기반으로, 33개를 한 화면에서 통합합니다', 'compare.col1': '공식 상태 페이지', 'compare.r2': '장애 알림', 'compare.r2a': '직접 확인 필요', 'compare.r2b': 'Discord · Slack 즉시 발송', 'compare.r3': 'AIWatch Score', 'compare.r3a': '서비스별 개별 확인', 'compare.r3b': 'AIWatch Score — Uptime + 영향 일수 + 복구 시간', 'compare.r4': '장애 분석', 'compare.r4b': 'AI가 원인 · 복구 시간 분석', 'compare.r5': '대안 추천', 'compare.r5b': 'Fallback 서비스 즉시 제안', 'compare.r6': '월간 리포트', 'compare.r6b': '매월 리포트 공개', 'compare.r7': '비용', 'compare.r7a': '무료', 'compare.r7b': '완전 무료 · 오픈소스',
+    'compare.title': '공식 상태 페이지와 무엇이 다른가요?', 'compare.sub': '공식 페이지 데이터를 기반으로, 33개를 한 화면에서 통합합니다', 'compare.col1': '공식 상태 페이지', 'compare.r2': '장애 알림', 'compare.r2a': '제공사마다 개별 구독', 'compare.r2b': '33개를 한 곳에서 — Discord · Slack · RSS', 'compare.r3': 'AIWatch Score', 'compare.r3a': '서비스별 개별 확인', 'compare.r3b': 'AIWatch Score — Uptime + 영향 일수 + 복구 + 응답성', 'compare.r4': '장애 분석', 'compare.r4b': 'AI가 원인 · 복구 시간 분석', 'compare.r5': '대안 추천', 'compare.r5b': 'Fallback 서비스 즉시 제안', 'compare.r6': '월간 리포트', 'compare.r6b': '매월 리포트 공개', 'compare.r7': '비용', 'compare.r7a': '무료', 'compare.r7b': '완전 무료 · 오픈소스',
+    'how.1.badge': '자동', 'how.2.badge': '장애 감지 시', 'how.3.badge': '즉시', 'how.4.badge': '매월',
     'how.1.title': '수집', 'how.1.desc': '공식 상태 페이지를 최대 5분 간격으로 자동 갱신',
-    'how.2.title': '분석', 'how.2.desc': 'Claude Sonnet이 패턴 · 복구 시간 · 영향 범위 분석',
+    'how.2.title': '분석', 'how.2.desc': '하이브리드 AI(Gemma 4 + Claude Sonnet fallback)가 패턴 · 복구 시간 · 영향 범위 분석',
     'how.3.title': '알림', 'how.3.desc': 'Discord · Slack 즉시 발송 + Fallback 추천 포함',
     'how.4.title': '리포트', 'how.4.desc': '월간 업타임 추이 · 인시던트 통계 리포트 공개',
     'cta.title': '지금 바로 확인하세요', 'cta.sub': '완전 무료 · 설치 불필요 · Discord · Slack · RSS 알림', 'cta.btn1': '지금 장애 확인하기 →', 'cta.btn2': '알림 설정하기', 'cta.rss': 'RSS로 구독',
     'alert.title': '장애 알림, 원하는 방식으로', 'alert.sub': '장애 발생 즉시 알림 + AI 분석 + Fallback 추천까지 한 번에. 무료입니다.',
     'alert.rss.copied': '복사됨 ✓', 'alert.rss.prompt': 'RSS 피드 URL 복사:',
-    'report.title': '월간 AI 서비스 신뢰도 리포트', 'report.hook': '가장 안정적인 AI 서비스는? 답은 의외일 수 있습니다.', 'report.link': '전체 리포트 보기 →', 'report.sub': '매월 33개 서비스의 AIWatch Score 순위, 인시던트 요약, 공식 업타임, 주요 장애 분석, 프로바이더 추천까지 한 리포트로 공개합니다.', 'report.chart.note': '* 하위 점수는 리포팅 방식 차이일 수 있으며, 실제 불안정성을 의미하지 않습니다', 'ai.title': '장애가 나면 AI가 분석합니다', 'ai.sub': '단순 상태 표시에서 한 발 더 — 장애 패턴, 예상 복구 시간, 영향 범위를 Claude Sonnet이 즉시 분석합니다.',
+    'report.title': '월간 AI 서비스 신뢰도 리포트', 'report.hook': '가장 안정적인 AI 서비스는? 답은 의외일 수 있습니다.', 'report.link': '전체 리포트 보기 →', 'report.sub': '매월 33개 서비스의 AIWatch Score 순위, 인시던트 요약, 공식 업타임, 주요 장애 분석, 프로바이더 추천까지 한 리포트로 공개합니다.', 'report.chart.note': '* 하위 점수는 리포팅 방식 차이일 수 있으며, 실제 불안정성을 의미하지 않습니다',
     'footer.report': '월간 리포트', 'footer.alert': '알림 설정'
   },
   en: {
     'nav.features': 'Features', 'nav.how': 'How it works', 'nav.report': 'Monthly Report', 'nav.cta': 'Check for Outages →',
     'hero.badge': 'LIVE MONITORING',
-    'hero.title': 'Is <em>Claude</em> down —<br>or is it just you?',
-    'hero.sub': 'Track Claude, OpenAI, Gemini, Cursor and more —<span class="hero-sub-line"> all in one dashboard.</span> AI analyzes incidents and recommends fallback options instantly.',
-    'hero.cta1': 'Check for Outages Now →', 'hero.trust': 'No signup · See results in 10 seconds · Free & open source', 'hero.cta2': 'View on GitHub',
+    'hero.title': 'Know when any <em>AI service</em> is down —<br>and what to switch to.',
+    'hero.sub': 'Real-time status for 33 AI services in one view.<span class="hero-sub-line"> AIWatch ranks reliability, analyzes incidents,</span> and recommends an instant fallback the moment something breaks. Free & open source — no signup.',
+    'hero.cta1': 'Open the dashboard →', 'hero.trust': 'No signup · Live status · Free & open source (AGPL)', 'hero.cta2': 'View on GitHub',
     'hero.pill1': 'AI Services', 'hero.pill2v': 'Real-time', 'hero.pill2': 'Alerts', 'hero.pill3': 'Open Source',
     'flow.1.title': 'Outage Detected', 'flow.2.conn': 'AI analysis started', 'flow.2.bar': 'Analyzing patterns', 'flow.3.conn': 'Discord · Slack sent', 'flow.3.title': 'Alert Sent', 'flow.3.body': 'Discord · Slack alert delivered', 'flow.4.conn': 'Alternatives suggested', 'flow.4.title': 'Fallback Suggested',
     'stats.services': 'Services monitored', 'stats.interval': 'Auto-collected', 'stats.free': 'Discord/Slack alerts included', 'stats.oss': 'Open source',
     'demo.title': 'From outage detection to fallback — in one view', 'demo.sub': 'See which services are stable right now — and what to use instead when they\\\'re not', 'demo.more': '+ 30 more services...',
     'feat.title': 'Beyond status monitoring', 'feat.sub': 'An AI monitoring dashboard that helps you make decisions',
-    'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'A 0–100 reliability score combining Uptime (50) + Impact days (30) + Recovery time (20). Services without official data use industry averages with a 10% penalty.',
-    'feat.2.title': 'AI Incident Analysis', 'feat.2.desc': 'When an outage hits, Claude Sonnet analyzes the pattern and tells you the estimated recovery time and impact scope. No more guessing.',
+    'feat.1.title': 'AIWatch Score', 'feat.1.desc': 'A 0–100 reliability score combining Uptime (40) + Incident impact days (25) + Recovery time (15) + Responsiveness (20). Services without official data use industry averages with a penalty.',
+    'feat.2.title': 'AI Incident Analysis', 'feat.2.desc': 'When an outage hits, AIWatch analyzes the pattern and tells you the estimated recovery time and impact scope. No more guessing.',
     'feat.3.title': 'Fallback Recommendations', 'feat.3.desc': 'Get instant alternative suggestions ranked by Score within the same category. Same-provider services are automatically excluded.',
     'feat.4.title': '"Is X Down?" Dedicated Pages', 'feat.4.desc': 'Pages like ai-watch.dev/is-claude-down show real-time status, AI analysis, and fallback recommendations — all in one place.',
     'how.title': 'How it works', 'how.sub': 'Powered by official status page data from each provider',
-    'compare.title': 'How is AIWatch different?', 'compare.sub': 'Built on official status data — aggregated across 33 services in one place', 'compare.col1': 'Official Status Page', 'compare.r2': 'Alerts', 'compare.r2a': 'Manual check required', 'compare.r2b': 'Instant Discord · Slack', 'compare.r3': 'AIWatch Score', 'compare.r3a': 'Per-service, separate pages', 'compare.r3b': 'AIWatch Score — Uptime + Impact days + Recovery', 'compare.r4': 'Incident analysis', 'compare.r4b': 'AI analyzes cause & recovery', 'compare.r5': 'Fallback', 'compare.r5b': 'Alternative services suggested', 'compare.r6': 'Monthly report', 'compare.r6b': 'Monthly report published', 'compare.r7': 'Cost', 'compare.r7a': 'Free', 'compare.r7b': 'Free & open source',
+    'compare.title': 'How is AIWatch different?', 'compare.sub': 'Built on official status data — aggregated across 33 services in one place', 'compare.col1': 'Official Status Page', 'compare.r2': 'Alerts', 'compare.r2a': 'Subscribe per provider, separately', 'compare.r2b': 'All 33 in one — Discord · Slack · RSS', 'compare.r3': 'AIWatch Score', 'compare.r3a': 'Per-service, separate pages', 'compare.r3b': 'AIWatch Score — Uptime + Impact days + Recovery + Responsiveness', 'compare.r4': 'Incident analysis', 'compare.r4b': 'AI analyzes cause & recovery', 'compare.r5': 'Fallback', 'compare.r5b': 'Alternative services suggested', 'compare.r6': 'Monthly report', 'compare.r6b': 'Monthly report published', 'compare.r7': 'Cost', 'compare.r7a': 'Free', 'compare.r7b': 'Free & open source',
+    'how.1.badge': 'Auto', 'how.2.badge': 'On detection', 'how.3.badge': 'Instant', 'how.4.badge': 'Monthly',
     'how.1.title': 'Collect', 'how.1.desc': 'Official status pages auto-refreshed up to every 5 min',
-    'how.2.title': 'Analyze', 'how.2.desc': 'Claude Sonnet analyzes pattern, recovery time & scope',
+    'how.2.title': 'Analyze', 'how.2.desc': 'Hybrid AI (Gemma 4 + Claude Sonnet fallback) analyzes pattern, recovery time & scope',
     'how.3.title': 'Alert', 'how.3.desc': 'Discord · Slack instant alert + fallback recommendations',
     'how.4.title': 'Report', 'how.4.desc': 'Monthly uptime trends · incident statistics report',
     'cta.title': 'Check it out now', 'cta.sub': 'Completely free · No installation · Discord · Slack · RSS alerts', 'cta.btn1': 'Check for Outages Now →', 'cta.btn2': 'Set Up Alerts', 'cta.rss': 'Subscribe via RSS',
     'alert.title': 'Get notified, your way', 'alert.sub': 'Instant incident alerts with AI analysis and fallback recommendations. Free.',
     'alert.rss.copied': 'Copied ✓', 'alert.rss.prompt': 'Copy this RSS feed URL:',
-    'report.title': 'Monthly AI Reliability Report', 'report.hook': 'Which AI service is most reliable? The answer may surprise you.', 'report.link': 'View All Reports →', 'report.sub': 'AIWatch Score rankings, incident summaries, official uptime, notable outage analysis, and provider recommendations — all in one monthly report for 33 services.', 'report.chart.note': '* Lower scores may reflect reporting granularity, not actual instability', 'ai.title': 'AI analyzes every incident', 'ai.sub': 'One step beyond status monitoring — Claude Sonnet instantly analyzes incident patterns, estimated recovery time, and impact scope.',
+    'report.title': 'Monthly AI Reliability Report', 'report.hook': 'Which AI service is most reliable? The answer may surprise you.', 'report.link': 'View All Reports →', 'report.sub': 'AIWatch Score rankings, incident summaries, official uptime, notable outage analysis, and provider recommendations — all in one monthly report for 33 services.', 'report.chart.note': '* Lower scores may reflect reporting granularity, not actual instability',
     'footer.report': 'Monthly Report', 'footer.alert': 'Alert Settings'
   }
 };
