@@ -9,6 +9,7 @@ import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, bu
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, classifyLead, appendLeadDiag, readLeadDiag, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
+import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
 import { corsHeaders } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
@@ -519,6 +520,10 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // For new incidents, run AI analysis with timeout so it can be merged into the embed
   const sent = mergedToSend.slice(0, 5)
   const DIV = '┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈'
+  // #475 — capture every embed we send to the operator into the canonical alert feed, so the
+  // dashboard can relay byte-identical alerts to a visitor's own Discord webhook (single source of
+  // truth; kills the browser/operator divergence that #473/#474 chased).
+  const feedEntries: AlertFeedEntry[] = []
   for (const alert of sent) {
     const isStatusAlert = alert.key.startsWith('alerted:down:') || alert.key.startsWith('alerted:degraded:')
     const isRecoveryAlert = alert.key.startsWith('alerted:recovered:')
@@ -670,11 +675,21 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     // action (same SDK/IAM) when the outage is region-specific with healthy regions left.
     if (alert.regionText) parts.push(`${DIV}\n${alert.regionText}`)
     parts.push(`${DIV}\n[View on AIWatch](${alert.url})`)
+    const description = parts.join('\n')
     await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
       title: alert.title,
-      description: parts.join('\n'),
+      description,
       color: alert.color,
     })
+    const feedEntry = buildFeedEntry(alert, description, scored)
+    if (feedEntry) feedEntries.push(feedEntry)
+  }
+  // #475 — single read-modify-write after the send loop (alerts are infrequent; negligible KV budget).
+  // Best-effort (must not affect the operator sends above), but a failure means EVERY per-user webhook
+  // misses this cycle's alerts — log loudly so a whole-cohort relay miss is diagnosable, not buried.
+  if (env.STATUS_CACHE && feedEntries.length > 0) {
+    const feedOk = await appendAlertFeed(env.STATUS_CACHE, feedEntries)
+    if (!feedOk) console.error('[cron] alert feed append failed — per-user webhook relays skipped this cycle:', feedEntries.map(e => e.key))
   }
 
   // Track daily alert count in KV for Daily Summary
@@ -2238,6 +2253,9 @@ export default {
         // See readRecentSecurityAlerts — both endpoints must emit this field.
         const securityAlerts = await readRecentSecurityAlerts(env.STATUS_CACHE!)
 
+        // #475 — canonical per-user alert feed (see /api/status). Both endpoints emit it.
+        const alertFeed = await readAlertFeed(env.STATUS_CACHE!)
+
         // Calculate scores for cached services (same as /api/status)
         const cachedProbeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'status-cached')
         const scoredCached = cached.services.map((svc) => {
@@ -2254,6 +2272,7 @@ export default {
           ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
           ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),
           ...(securityAlerts.length > 0 ? { securityAlerts } : {}),
+          ...(alertFeed.length > 0 ? { alertFeed } : {}),
         }), {
           status: 200,
           headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
@@ -2429,6 +2448,10 @@ export default {
       // See readRecentSecurityAlerts — both endpoints must emit this field.
       const securityAlerts = env.STATUS_CACHE ? await readRecentSecurityAlerts(env.STATUS_CACHE) : []
 
+      // #475 — canonical per-user alert feed (cron-produced embeds the dashboard relays). Both
+      // /api/status and /api/status/cached must emit it so a browser on either path can relay.
+      const alertFeed = env.STATUS_CACHE ? await readAlertFeed(env.STATUS_CACHE) : []
+
       return new Response(JSON.stringify({
         services: servicesWithScore,
         lastUpdated: new Date().toISOString(),
@@ -2437,6 +2460,7 @@ export default {
         ...(Object.keys(aiAnalysis).length > 0 ? { aiAnalysis } : {}),
         ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),
         ...(securityAlerts.length > 0 ? { securityAlerts } : {}),
+        ...(alertFeed.length > 0 ? { alertFeed } : {}),
       }), {
         status: 200,
         headers: {
