@@ -18,11 +18,22 @@ export function sanitize(s: string, maxLen = 1000): string {
 }
 
 // SSRF allow-list for the /api/alert webhook proxy: HTTPS Discord webhook URLs only (#467 \u2014
-// Slack moved to native /feed RSS, so the proxy no longer forwards to hooks.slack.com). The
-// hostname must equal `discord.com` exactly (no subdomain/suffix matching, which would let
-// `evildiscord.com` or `discord.com.evil.tld` through) and the path must be a real webhook path.
-// Broadening to discordapp.com / canary.discord.com is tracked in #468. Extracted as a pure
-// predicate so the boundary is unit-testable (the rest of the proxy is inline in the fetch handler).
+// Slack moved to native /feed RSS, so the proxy no longer forwards to hooks.slack.com).
+//
+// Host (#468): `discordapp.com` (legacy host, still issued/saved) exact-match, plus `discord.com`
+// and any real `*.discord.com` subdomain (`canary.`/`ptb.` beta clients hand these out), matched by
+// DISCORD_HOST. Every name in Discord's zone is controlled by Discord's DNS, so the wildcard is
+// safe; the regex requires non-empty labels + an exact `discord.com` suffix, so look-alikes
+// (`evildiscord.com`, `discord.com.evil.tld`), the label-less `.discord.com`, and trailing-dot
+// FQDNs (`discord.com.`) are all rejected. `URL.hostname` is already lowercased and strips any
+// userinfo (`discord.com@evil.tld` \u2192 host `evil.tld`), so authority-confusion bypasses fail here.
+//
+// Path (#468): a webhook path, optionally version-prefixed \u2014 `/api/webhooks/...` or
+// `/api/v{N}/webhooks/...` (some SDKs/tools emit the versioned form).
+//
+// Extracted as a pure predicate so the boundary is unit-testable (the rest of the proxy is inline
+// in the fetch handler). HTTPS-only + the proxy's rate limit are unchanged.
+const DISCORD_HOST = /^([a-z0-9-]+\.)*discord\.com$/
 export function isAllowedAlertWebhook(webhookUrl: string): boolean {
   let parsed: URL
   try {
@@ -30,10 +41,12 @@ export function isAllowedAlertWebhook(webhookUrl: string): boolean {
   } catch {
     return false
   }
+  const host = parsed.hostname
+  const hostAllowed = host === 'discordapp.com' || DISCORD_HOST.test(host)
   return (
     parsed.protocol === 'https:' &&
-    parsed.hostname === 'discord.com' &&
-    parsed.pathname.startsWith('/api/webhooks/')
+    hostAllowed &&
+    /^\/api\/(v\d+\/)?webhooks\//.test(parsed.pathname)
   )
 }
 

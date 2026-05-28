@@ -9,9 +9,36 @@ function mockKV(store: Record<string, string> = {}): KVLike {
   }
 }
 
-describe('isAllowedAlertWebhook (SSRF allow-list, #467)', () => {
+describe('isAllowedAlertWebhook (SSRF allow-list, #467 + #468)', () => {
   it('accepts an HTTPS discord.com webhook URL', () => {
     expect(isAllowedAlertWebhook('https://discord.com/api/webhooks/123456789/abcDEF-token')).toBe(true)
+  })
+
+  it('accepts the legacy + beta Discord hosts (#468)', () => {
+    expect(isAllowedAlertWebhook('https://discordapp.com/api/webhooks/123/abc')).toBe(true)
+    expect(isAllowedAlertWebhook('https://canary.discord.com/api/webhooks/123/abc')).toBe(true)
+    expect(isAllowedAlertWebhook('https://ptb.discord.com/api/webhooks/123/abc')).toBe(true)
+  })
+
+  it('accepts any real *.discord.com subdomain (the wildcard is intentional — Discord owns the zone)', () => {
+    expect(isAllowedAlertWebhook('https://foo.discord.com/api/webhooks/123/abc')).toBe(true)
+    expect(isAllowedAlertWebhook('https://a.b.discord.com/api/webhooks/123/abc')).toBe(true)
+  })
+
+  it('normalizes host via the URL parser (uppercase host still matches)', () => {
+    // URL.hostname lowercases — guards against a future hand-rolled case-sensitive host check.
+    expect(isAllowedAlertWebhook('https://DISCORD.COM/api/webhooks/123/abc')).toBe(true)
+  })
+
+  it('rejects authority-confusion / userinfo bypass (the canonical SSRF allow-list trick)', () => {
+    // URL.hostname resolves to evil.tld here; a string-match on the raw URL would wrongly allow it.
+    expect(isAllowedAlertWebhook('https://discord.com@evil.tld/api/webhooks/123/abc')).toBe(false)
+    expect(isAllowedAlertWebhook('https://evil.tld/#@discord.com/api/webhooks/123/abc')).toBe(false)
+  })
+
+  it('accepts version-prefixed webhook paths (#468)', () => {
+    expect(isAllowedAlertWebhook('https://discord.com/api/v10/webhooks/123/abc')).toBe(true)
+    expect(isAllowedAlertWebhook('https://discord.com/api/v9/webhooks/123/abc')).toBe(true)
   })
 
   it('rejects non-HTTPS schemes', () => {
@@ -19,18 +46,21 @@ describe('isAllowedAlertWebhook (SSRF allow-list, #467)', () => {
     expect(isAllowedAlertWebhook('ftp://discord.com/api/webhooks/123/abc')).toBe(false)
   })
 
-  it('rejects non-discord.com hosts (no suffix/subdomain bypass)', () => {
-    // Guards against a future endsWith('discord.com') regression letting these through.
-    expect(isAllowedAlertWebhook('https://evildiscord.com/api/webhooks/123/abc')).toBe(false)
-    expect(isAllowedAlertWebhook('https://discord.com.evil.tld/api/webhooks/123/abc')).toBe(false)
+  it('rejects look-alike hosts (the leading-dot guard blocks suffix/substring bypass)', () => {
+    expect(isAllowedAlertWebhook('https://evildiscord.com/api/webhooks/123/abc')).toBe(false)       // no leading dot
+    expect(isAllowedAlertWebhook('https://discord.com.evil.tld/api/webhooks/123/abc')).toBe(false)  // ends in .evil.tld
+    expect(isAllowedAlertWebhook('https://notdiscord.com/api/webhooks/123/abc')).toBe(false)
+    expect(isAllowedAlertWebhook('https://discordapp.com.evil.tld/api/webhooks/123/abc')).toBe(false)
     expect(isAllowedAlertWebhook('https://hooks.slack.com/services/T/B/x')).toBe(false)
-    // Legacy/beta Discord hosts are intentionally NOT accepted yet (broadening tracked in #468).
-    expect(isAllowedAlertWebhook('https://discordapp.com/api/webhooks/123/abc')).toBe(false)
-    expect(isAllowedAlertWebhook('https://canary.discord.com/api/webhooks/123/abc')).toBe(false)
+    // Label-less / trailing-dot host edges — the regex requires real labels + exact suffix.
+    expect(isAllowedAlertWebhook('https://.discord.com/api/webhooks/123/abc')).toBe(false)
+    expect(isAllowedAlertWebhook('https://discord.com./api/webhooks/123/abc')).toBe(false)
   })
 
-  it('rejects discord.com URLs that are not a webhook path', () => {
+  it('rejects Discord hosts whose path is not a webhook path', () => {
     expect(isAllowedAlertWebhook('https://discord.com/api/users/@me')).toBe(false)
+    expect(isAllowedAlertWebhook('https://discord.com/api/v10/users/@me')).toBe(false)
+    expect(isAllowedAlertWebhook('https://discord.com/webhooks/123/abc')).toBe(false) // missing /api/ prefix
     expect(isAllowedAlertWebhook('https://discord.com/')).toBe(false)
   })
 
