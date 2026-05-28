@@ -119,6 +119,7 @@ export default function Settings() {
   const [testResult, setTestResult] = useState(null) // null | 'sending' | 'ok' | 'error'
   const [monitoringOpen, setMonitoringOpen] = useState(false)
   const [agentsOpen, setAgentsOpen] = useState(false)
+  const [alertServicesOpen, setAlertServicesOpen] = useState(true)
   const [rssCopied, setRssCopied] = useState(false)
   const [slackFeedCopied, setSlackFeedCopied] = useState(false)
   const saveTimerRef = useRef(null)
@@ -183,6 +184,13 @@ export default function Settings() {
 
   function toggleService(id) {
     setEnabledServices((prev) =>
+      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]
+    )
+  }
+
+  // Per-service alert subscription, shown only when Alert Targets = Custom (#470).
+  function toggleAlertService(id) {
+    setAlertServices((prev) =>
       prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]
     )
   }
@@ -425,7 +433,7 @@ export default function Settings() {
           <SegmentControl
             value={alertCondition}
             onChange={setAlertCondition}
-            options={[{ value: 'down', label: t('status.down') }, { value: 'degraded', label: t('status.degraded') }, { value: 'all', label: t('overview.filter.all') }]}
+            options={[{ value: 'down', label: t('status.down') }, { value: 'all', label: t('overview.filter.all') }]}
           />
         </FieldRow>
 
@@ -436,6 +444,49 @@ export default function Settings() {
             options={[{ value: 'all', label: t('overview.filter.all') }, { value: 'custom', label: t('settings.alert.custom') }]}
           />
         </FieldRow>
+
+        {/* Per-service picker — only meaningful when Alert Targets = Custom (#470) */}
+        {alertTarget === 'custom' && (
+          <div style={{ padding: '0 0 13px', borderBottom: '1px solid var(--border)' }}>
+            <div className="flex items-center justify-between" style={{ padding: '4px 0 8px' }}>
+              <button
+                type="button"
+                aria-expanded={alertServicesOpen}
+                onClick={() => setAlertServicesOpen((v) => !v)}
+                className="flex items-center cursor-pointer"
+                style={{ gap: '6px', background: 'none', border: 'none', padding: 0, color: 'var(--text1)', fontSize: '11px' }}
+              >
+                <span>{t('settings.alert.services')} ({alertServices.length}/{ALL_SERVICE_IDS.length})</span>
+                <svg width="12" height="12" viewBox="0 0 12 12" style={{ color: 'var(--text2)', transition: 'transform 0.2s', transform: alertServicesOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}><path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+              <div className="flex items-center" style={{ gap: '8px' }}>
+                <button type="button" onClick={() => setAlertServices([...ALL_SERVICE_IDS])} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--blue)', fontSize: '10px' }}>{t('settings.alert.services.all')}</button>
+                <span style={{ color: 'var(--text2)', fontSize: '10px' }}>·</span>
+                <button type="button" onClick={() => setAlertServices([])} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--blue)', fontSize: '10px' }}>{t('settings.alert.services.none')}</button>
+              </div>
+            </div>
+            {alertServicesOpen && (
+              <div>
+                {alertServices.length === 0 && (
+                  <div className="mono" style={{ fontSize: '10px', color: 'var(--amber)', padding: '0 0 8px' }}>{t('settings.alert.services.empty')}</div>
+                )}
+                {ALL_SERVICE_IDS.map((id) => {
+                  const svc = svcMap[id]
+                  const dotCls = STATUS_DOT_CLASS[svc?.status] ?? STATUS_DOT_CLASS.unknown
+                  return (
+                    <div key={id} className="flex items-center justify-between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                      <div className="flex items-center" style={{ gap: '8px' }}>
+                        <span className={`rounded-full shrink-0 ${dotCls}`} style={{ width: '6px', height: '6px' }} />
+                        <span style={{ fontSize: '12px', color: 'var(--text0)' }}>{svc?.name ?? id}</span>
+                      </div>
+                      <Toggle checked={alertServices.includes(id)} onChange={() => toggleAlertService(id)} />
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         <FieldRow label={t('settings.alert.incidents')} desc={t('settings.alert.incidents.desc')} last>
           <Toggle checked={alertIncidents} onChange={() => setAlertIncidents((v) => !v)} />

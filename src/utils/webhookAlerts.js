@@ -64,9 +64,10 @@ export function computeStatusAlerts(prev, current, settings) {
   for (const svc of current) {
     const prevStatus = prevMap.get(svc.id)
     if (!prevStatus || prevStatus === svc.status) continue
-    // 'down'     → only down entry/recovery; 'degraded' → any non-operational entry/recovery; 'all' → every change
+    // 'down' → only transitions involving a Major Outage, which still covers recovery FROM down
+    // (prevStatus==='down'); 'all' → every status change. ('degraded' was removed in #470 — it was
+    // identical to 'all' and is migrated to it in useSettings.)
     if (alertCondition === 'down' && svc.status !== 'down' && prevStatus !== 'down') continue
-    if (alertCondition === 'degraded' && svc.status === 'operational' && prevStatus === 'operational') continue
     if (alertTarget === 'custom' && !alertServices?.includes(svc.id)) continue
     out.push({ svcId: svc.id, name: svc.name, prevStatus, status: svc.status })
   }
