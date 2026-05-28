@@ -578,9 +578,10 @@ export function usePolling() {
 }
 
 
-// Two alert paths: the Worker posts to the operator webhook server-side; usePolling posts to the
-// user's OWN Discord webhook browser-side (#467, via runWebhookAlerts). Different destinations, so
-// no cross-source duplicates (the #60 dedup concern). Slack uses native `/feed subscribe` instead.
+// Two alert paths: the Worker posts to the operator webhook server-side; usePolling relays the
+// worker's canonical embeds (the /api/status `alertFeed`) to the user's OWN Discord webhook browser-
+// side (#467, #475, via runWebhookAlerts). Different destinations, so no cross-source duplicates (the
+// #60 dedup concern). Slack uses native `/feed subscribe` instead.
 
 // mode: 'initial' = first load (skeleton), 'refresh' = manual (keep data, show refreshing), 'silent' = auto-poll (invisible)
 function usePollingInternal() {
@@ -602,7 +603,6 @@ function usePollingInternal() {
   const hasDataRef = useRef(false)
   const refreshingRef = useRef(false) // prevent silent polls from aborting refresh
   const prevServicesRef = useRef([])  // backup for recovery on refresh failure
-  const alertPrevRef = useRef([])     // previous services snapshot for browser-side webhook diff (#467)
 
   const poll = useCallback(async (mode = 'silent') => {
     // Skip silent polls while refresh is in progress
@@ -657,12 +657,11 @@ function usePollingInternal() {
       const elapsed = Date.now() - loadStart
       if ((isInitial || isRefresh) && elapsed < 500) await new Promise((r) => setTimeout(r, 500 - elapsed))
 
-      // Browser-side webhook alerts for the user's OWN Discord webhook (#467). The Worker's
-      // server-side path only posts to the operator webhook, never to a visitor's configured one,
-      // so this restores per-user delivery. No-op unless a Discord webhook is set. Best-effort;
-      // fires only while a tab is open. Diff against the previous poll's snapshot.
-      runWebhookAlerts(alertPrevRef.current, merged, data.aiAnalysis ?? {})
-      alertPrevRef.current = merged
+      // Relay the worker's canonical alert embeds (data.alertFeed) to the user's OWN Discord webhook
+      // (#467, #475). The worker is the single source of truth — this just filters by the user's
+      // settings and POSTs verbatim, so operator/user alerts are identical. No-op unless a Discord
+      // webhook is set. Best-effort; fires only while a tab is open.
+      runWebhookAlerts(data.alertFeed ?? [])
 
       // Overlay probe RTT onto service.latency (replaces status page timing with real API RTT)
       // Non-probe API services keep status page latency with different label in UI

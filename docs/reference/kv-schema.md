@@ -41,6 +41,7 @@
 | `alert:count:{YYYY-MM-DD}` | `{ incidents, resolved, down, degraded, recovered }` JSON | 2d | ~1-5 | Daily alert count aggregated in Daily Summary |
 | `webhook:reg:{sha256hash}` | `{ type, registeredAt }` JSON (`type` always `discord` since #467) | 30d | ~1/user/day | Active Discord webhook registration (hashed; TTL refreshed ≤1×/day per webhook on app load — Slack uses native /feed, no reg) |
 | `alert:proxy:{YYYY-MM-DD}` | `{ discord, failed }` JSON | 2d | ~1 | User Discord webhook delivery counts (approximate, flushed from in-memory by daily summary cron; Slack moved to /feed, #467) |
+| `alert:feed:recent` | `[{ key, kind, svcIds, embed, ts }]` JSON (rolling, pruned >2h, max 50) | 2h | ~1/alert-cycle | Canonical per-user alert feed (#475) — cron appends each operator embed it sends; `/api/status` (+`/cached`) surfaces the last 30min as `alertFeed` so the dashboard relays byte-identical alerts to a visitor's own Discord (single source of truth; browser is a dumb relay) |
 | `kv_limit_alert` | `"1"` | 5min | ~1 | KV write limit exceeded cooldown |
 | `daily-summary:{YYYY-MM-DD}` | `"1"` | 7d | 1 | Daily summary execution marker (prevents duplicate send + enables catch-up) |
 | `changelog:entries` | `ChangelogEntry[]` JSON | 14d | ~3 | Accumulated changelog entries from RSS + HTML sources (cleared after weekly briefing) |
