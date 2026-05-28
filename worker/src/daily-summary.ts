@@ -3,10 +3,10 @@
 import type { ServiceStatus } from './types'
 import type { ProbeSnapshot } from './probe'
 import type { VitalsDaily } from './vitals'
-import type { DetectionLeadEntry } from './detection-lead-log'
+import type { DetectionLeadEntry, LeadDiag } from './detection-lead-log'
 import { formatVitalsSection } from './vitals'
 import { aggregateProbeDaily } from './probe-archival'
-import { formatDetectionLeadSection } from './detection-lead-log'
+import { formatDetectionLeadSection, formatLeadDiagSection } from './detection-lead-log'
 
 export interface DailySummaryData {
   services: ServiceStatus[]
@@ -22,10 +22,11 @@ export interface DailySummaryData {
   vitals?: VitalsDaily | null
   probeSnapshots?: ProbeSnapshot[]
   detectionLeadEntries?: DetectionLeadEntry[]
+  leadDiag?: LeadDiag | null
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
-  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, deliveryCounts, redditCount, vitals, detectionLeadEntries } = data
+  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, deliveryCounts, redditCount, vitals, detectionLeadEntries, leadDiag } = data
   const total = services.length
   const operational = services.filter(s => s.status === 'operational').length
   const degraded = services.filter(s => s.status === 'degraded').length
@@ -138,6 +139,13 @@ export function buildDailySummary(data: DailySummaryData): string {
     const nameMap = new Map(services.map(s => [s.id, s.name]))
     const section = formatDetectionLeadSection(detectionLeadEntries, nameMap)
     if (section) lines.push(section)
+  }
+
+  // Section: Detection Lead diagnostics (#464) — measures WHY leads are/aren't recorded while the
+  // audit log stays empty. Shown even when there were zero leads, as long as incidents were classified.
+  if (leadDiag) {
+    const diagSection = formatLeadDiagSection(leadDiag)
+    if (diagSection) lines.push(diagSection)
   }
 
   return lines.join('\n')
