@@ -31,8 +31,8 @@ export function PrivacyContent() {
         · Dashboard settings (monitoring period, SLA target, enabled services)<br />
         · Cookie consent choice (aiwatch-cookie-consent)<br />
         · PWA install banner dismissal<br />
-        · Webhook URLs (Discord/Slack) — entered voluntarily for alert notifications. Stored in your browser's localStorage.<br />
-        · Webhook identifier (SHA-256 hash) — a one-way hash of your webhook URL is sent to our server to track active webhook counts. The hash cannot be reversed to recover your original URL.</p>
+        · Discord webhook URL — entered voluntarily for alert notifications. Stored in your browser's localStorage (Slack subscriptions use Slack's native /feed RSS app and store no URL).<br />
+        · Webhook identifier (SHA-256 hash) — a one-way hash of your Discord webhook URL is sent to our server to track active webhook counts. The hash cannot be reversed to recover your original URL.</p>
       <h3 style={headingStyle}>3. Cookie Banner</h3>
       <p style={paraStyle}>On your first visit to any AIWatch page, a cookie banner appears asking for analytics consent (Accept All / Essential Only). Your choice is stored in <code>localStorage.aiwatch-cookie-consent</code> and reused across all subsequent visits to any AIWatch page. The banner does not appear again unless you clear browser storage. Both choices are honored identically across the dashboard, "Is X down?" SEO pages, and monthly reports.</p>
       <h3 style={headingStyle}>4. Advertising</h3>
@@ -47,9 +47,8 @@ export function PrivacyContent() {
         · Cloudflare Workers — API proxy and caching<br />
         · Vercel — web hosting<br />
         · GitHub API — repository star count display<br />
-        · Discord Webhook API — alert delivery proxy (only when configured by user)<br />
-        · Slack Webhook API — alert delivery proxy (only when configured by user)<br /><br />
-        Webhook alert payloads are proxied through our server to your configured webhook URL. The server does not store your webhook URL.<br /><br />
+        · Discord Webhook API — alert delivery proxy (only when configured by user)<br /><br />
+        Discord alert payloads are proxied through our server to your configured webhook URL. The server does not store your webhook URL. Slack subscriptions go through Slack's native /feed app reading our public RSS feed — no payload is proxied and no URL is stored.<br /><br />
         Collected information is not shared with any other third parties.</p>
       <h3 style={headingStyle}>8. Your Rights</h3>
       <p style={paraStyle}>You have the right to request access to, correction of, or deletion of your data. Since AIWatch does not collect personally identifiable information, most data is anonymous and cannot be linked to individuals. You can revoke analytics consent at any time:<br /><br />
@@ -82,8 +81,8 @@ export function PrivacyContent() {
         · 대시보드 설정 (모니터링 기간, SLA 목표, 활성화된 서비스)<br />
         · 쿠키 동의 선택 (aiwatch-cookie-consent)<br />
         · PWA 설치 배너 닫기 여부<br />
-        · Webhook URL (Discord/Slack) — 알림 수신을 위해 사용자가 직접 입력. 브라우저의 localStorage에 저장됩니다.<br />
-        · Webhook 식별자 (SHA-256 해시) — Webhook URL의 단방향 해시값이 활성 Webhook 수 집계를 위해 서버에 전송됩니다. 해시값으로 원본 URL을 복원할 수 없습니다.</p>
+        · Discord Webhook URL — 알림 수신을 위해 사용자가 직접 입력. 브라우저의 localStorage에 저장됩니다 (Slack 구독은 Slack 내장 /feed RSS 앱을 사용하며 URL을 저장하지 않습니다).<br />
+        · Webhook 식별자 (SHA-256 해시) — Discord Webhook URL의 단방향 해시값이 활성 Webhook 수 집계를 위해 서버에 전송됩니다. 해시값으로 원본 URL을 복원할 수 없습니다.</p>
       <h3 style={headingStyle}>3. 쿠키 배너</h3>
       <p style={paraStyle}>AIWatch 페이지를 처음 방문하면 분석 동의를 묻는 쿠키 배너가 표시됩니다(모두 동의 / 필수만 사용). 선택 결과는 <code>localStorage.aiwatch-cookie-consent</code>에 저장되어 이후 모든 AIWatch 페이지 방문에서 재사용됩니다. 브라우저 저장소를 비우기 전까지는 배너가 다시 표시되지 않습니다. 두 선택 모두 대시보드, "Is X down?" SEO 페이지, 월간 리포트에서 동일하게 적용됩니다.</p>
       <h3 style={headingStyle}>4. 광고</h3>
@@ -98,9 +97,8 @@ export function PrivacyContent() {
         · Cloudflare Workers — API 프록시 및 캐싱<br />
         · Vercel — 웹 호스팅<br />
         · GitHub API — 저장소 별 수 표시<br />
-        · Discord Webhook API — 알림 전달 프록시 (사용자 설정 시에만)<br />
-        · Slack Webhook API — 알림 전달 프록시 (사용자 설정 시에만)<br /><br />
-        Webhook 알림은 서버를 경유하여 사용자가 설정한 Webhook URL로 전달됩니다. 서버는 Webhook URL을 저장하지 않습니다.<br /><br />
+        · Discord Webhook API — 알림 전달 프록시 (사용자 설정 시에만)<br /><br />
+        Discord 알림은 서버를 경유하여 사용자가 설정한 Webhook URL로 전달됩니다. 서버는 Webhook URL을 저장하지 않습니다. Slack 구독은 Slack 내장 /feed 앱이 공개 RSS 피드를 읽는 방식이라 알림이 프록시되지 않고 URL도 저장되지 않습니다.<br /><br />
         위 서비스 외의 제3자에게 정보를 제공하지 않습니다.</p>
       <h3 style={headingStyle}>8. 이용자의 권리</h3>
       <p style={paraStyle}>이용자는 수집된 정보에 대해 열람, 정정, 삭제를 요청할 수 있습니다. AIWatch는 개인 식별 정보를 수집하지 않으므로, 대부분의 데이터는 익명이며 개인과 연결할 수 없습니다. 분석 동의는 다음 두 가지 방법으로 언제든 철회할 수 있습니다:<br /><br />

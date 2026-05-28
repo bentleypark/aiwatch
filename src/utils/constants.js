@@ -231,7 +231,6 @@ export const DEFAULT_SETTINGS = {
   period: '7d',
   sla: 99.9,
   enabledServices: ALL_SERVICE_IDS,
-  slackUrl: '',
   discordUrl: '',
   alertCondition: 'down',  // 'down' | 'degraded' | 'all'
   alertTarget: 'all',      // 'all' | 'custom'

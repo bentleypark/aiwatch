@@ -40,7 +40,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Incident history** — Timeline with details from multiple status page formats
 - **Official uptime** — Per-component uptime from Statuspage, incident.io, Better Stack
 - **Status calendar** — 30-day (Statuspage) or 14-day (incident.io) daily status visualization
-- **Slack/Discord alerts** — Webhook notifications on status changes and incidents
+- **Discord & Slack alerts** — Discord webhook on status changes/incidents + Slack via its native `/feed` RSS app (zero-config) + RSS feeds
 - **Cookie consent** — GA4 Consent Mode v2 with accept/essential-only
 - **Deep links** — Hash-based routing (`#claude`, `#latency`) for direct page access
 - **Dark/Light theme** — System-aware with manual toggle
@@ -119,7 +119,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 | Backend | Cloudflare Workers (TypeScript) |
 | Cache | Cloudflare KV (status cache, latency snapshots) |
 | Hosting | Vercel |
-| Alerts | Discord/Slack Webhook (Worker proxy) |
+| Alerts | Discord Webhook (Worker proxy) · Slack via native `/feed` RSS · RSS feeds |
 | Analytics | Google Analytics 4 (Consent Mode v2) |
 | Tests | Playwright (E2E), Vitest (unit) |
 
@@ -131,7 +131,7 @@ Browser (React SPA, 60s polling)
 Cloudflare Worker
   ├── GET /api/status    → parallel fetch (33 services) → normalize
   ├── GET /api/uptime    → daily uptime history
-  └── POST /api/alert   → webhook proxy (Slack/Discord, SSRF protected)
+  └── POST /api/alert   → Discord webhook proxy (SSRF protected)
   ↓
 Parsers (worker/src/parsers/)
   ├── impact-weights.ts  → shared MAJOR_WEIGHT/MINOR_WEIGHT (Atlassian formula, used by both)
@@ -225,7 +225,7 @@ npm run deploy:worker  # Deploy to Cloudflare (use npm script only)
 | `/api/status/cached` | GET | KV-only cached status (for Edge SSR, fast ~1.2s) |
 | `/api/uptime?days=30` | GET | Daily uptime history (1-90 days) |
 | `/api/report?month=YYYY-MM` | GET | Monthly reliability archive (uptime, score, incidents, latency) |
-| `/api/alert` | POST | Webhook proxy (Slack/Discord only, SSRF protected) |
+| `/api/alert` | POST | Discord webhook proxy (SSRF protected) |
 | `/badge/:serviceId` | GET | SVG status badge (shields.io style) |
 | `/api/og` | GET | Dynamic OG image PNG (1200×630, resvg-wasm) |
 | `/api/v1/status` | GET | Public API — all services (lightweight, CORS `*`) |

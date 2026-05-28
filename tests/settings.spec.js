@@ -79,17 +79,38 @@ test.describe('Settings — RSS feed (#433)', () => {
     await navigateToSettings(page)
     await expect(page.locator('main').getByText('General')).toBeVisible({ timeout: 20000 })
 
-    // All-services feed URL surfaced in the Alerts section (the only read-only
-    // input on the page — Slack/Discord inputs are editable)
-    const feedInput = page.locator('main input[readonly]')
+    // All-services feed URL surfaced in the Alerts section. There are now two read-only
+    // inputs (RSS feed + Slack /feed command, #467) — the RSS feed is first in DOM order.
+    const feedInput = page.locator('main input[readonly]').first()
     await expect(feedInput).toHaveValue('https://ai-watch.dev/feed.xml')
     const shownUrl = await feedInput.inputValue()
 
     // Copy button → clipboard + "Copied ✓" feedback (success path). Assert the
     // clipboard equals the *displayed* URL — what you see is what you copy, so a
     // future divergence between the input value and copyFeed() would fail here.
-    await page.getByRole('button', { name: /^(Copy|복사)$/ }).click()
-    await expect(page.getByRole('button', { name: /Copied ✓|복사됨 ✓/ })).toBeVisible()
+    // Scope to this row's button so the Slack /feed Copy button doesn't collide.
+    const copyBtn = feedInput.locator('xpath=following-sibling::button')
+    await copyBtn.click()
+    await expect(copyBtn).toHaveText(/Copied ✓|복사됨 ✓/)
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shownUrl)
+  })
+
+  test('Alerts section offers the Slack /feed subscribe command with copy-to-clipboard (#467)', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.goto('/')
+    await expect(page.getByRole('link', { name: 'AIWatch' }).first()).toBeVisible({ timeout: 15000 })
+    await navigateToSettings(page)
+    await expect(page.locator('main').getByText('General')).toBeVisible({ timeout: 20000 })
+
+    // Slack subscribes via its native /feed RSS app — no webhook. The command embeds the feed URL.
+    // Second read-only input in DOM order (after the RSS feed URL).
+    const slackInput = page.locator('main input[readonly]').nth(1)
+    await expect(slackInput).toHaveValue('/feed subscribe https://ai-watch.dev/feed.xml')
+    const shownCmd = await slackInput.inputValue()
+
+    const copyBtn = slackInput.locator('xpath=following-sibling::button')
+    await copyBtn.click()
+    await expect(copyBtn).toHaveText(/Copied ✓|복사됨 ✓/)
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shownCmd)
   })
 })

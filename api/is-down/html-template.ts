@@ -431,6 +431,9 @@ function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string)
      service ID so the copy_rss GA4 event keys on the same id as fallback_click /
      click_service_detail (id and slug diverge for claude-code, github-copilot, etc.) -->
 <button type="button" class="btn" data-rss="https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" onclick="copyRss(this)">Copy RSS URL</button>
+<!-- Slack subscribes via its native /feed RSS app (#467) — paste this command into any
+     channel, zero webhook setup. Uses the same per-service feed URL. -->
+<button type="button" class="btn" data-slack="/feed subscribe https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" onclick="copySlackFeed(this)">Copy Slack command</button>
 </div>
 </div>
 <script>
@@ -439,6 +442,12 @@ function copyRss(b){
   function done(){b.textContent='Copied!';setTimeout(function(){b.textContent='Copy RSS URL'},2000);typeof gtag==='function'&&gtag('event','copy_rss',{location:'is_down_page',service_id:b.dataset.svc})}
   if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(u).then(done).catch(function(){prompt('Copy RSS URL:',u)})}
   else{prompt('Copy RSS URL:',u)}
+}
+function copySlackFeed(b){
+  var c=b.dataset.slack;
+  function done(){b.textContent='Copied!';setTimeout(function(){b.textContent='Copy Slack command'},2000);typeof gtag==='function'&&gtag('event','copy_slack_feed',{location:'is_down_page',service_id:b.dataset.svc})}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(c).then(done).catch(function(){prompt('Copy Slack command:',c)})}
+  else{prompt('Copy Slack command:',c)}
 }
 </script>`
 }

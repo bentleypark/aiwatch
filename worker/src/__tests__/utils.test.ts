@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, type KVLike } from '../utils'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, isAllowedAlertWebhook, type KVLike } from '../utils'
 
 function mockKV(store: Record<string, string> = {}): KVLike {
   return {
@@ -8,6 +8,37 @@ function mockKV(store: Record<string, string> = {}): KVLike {
     delete: vi.fn(async (key: string) => { delete store[key] }),
   }
 }
+
+describe('isAllowedAlertWebhook (SSRF allow-list, #467)', () => {
+  it('accepts an HTTPS discord.com webhook URL', () => {
+    expect(isAllowedAlertWebhook('https://discord.com/api/webhooks/123456789/abcDEF-token')).toBe(true)
+  })
+
+  it('rejects non-HTTPS schemes', () => {
+    expect(isAllowedAlertWebhook('http://discord.com/api/webhooks/123/abc')).toBe(false)
+    expect(isAllowedAlertWebhook('ftp://discord.com/api/webhooks/123/abc')).toBe(false)
+  })
+
+  it('rejects non-discord.com hosts (no suffix/subdomain bypass)', () => {
+    // Guards against a future endsWith('discord.com') regression letting these through.
+    expect(isAllowedAlertWebhook('https://evildiscord.com/api/webhooks/123/abc')).toBe(false)
+    expect(isAllowedAlertWebhook('https://discord.com.evil.tld/api/webhooks/123/abc')).toBe(false)
+    expect(isAllowedAlertWebhook('https://hooks.slack.com/services/T/B/x')).toBe(false)
+    // Legacy/beta Discord hosts are intentionally NOT accepted yet (broadening tracked in #468).
+    expect(isAllowedAlertWebhook('https://discordapp.com/api/webhooks/123/abc')).toBe(false)
+    expect(isAllowedAlertWebhook('https://canary.discord.com/api/webhooks/123/abc')).toBe(false)
+  })
+
+  it('rejects discord.com URLs that are not a webhook path', () => {
+    expect(isAllowedAlertWebhook('https://discord.com/api/users/@me')).toBe(false)
+    expect(isAllowedAlertWebhook('https://discord.com/')).toBe(false)
+  })
+
+  it('rejects unparseable input instead of throwing', () => {
+    expect(isAllowedAlertWebhook('not a url')).toBe(false)
+    expect(isAllowedAlertWebhook('')).toBe(false)
+  })
+})
 
 describe('formatDuration', () => {
   it('returns 1m for durations under 60 seconds (ceil to 1m)', () => {

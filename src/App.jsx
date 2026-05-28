@@ -5,6 +5,7 @@ import { initConsentDefault, initGA, trackPageView, trackEvent } from './utils/a
 import { PageContext } from './utils/pageContext'
 import { PollingProvider } from './hooks/usePolling'
 import { useSettings } from './hooks/useSettings'
+import { refreshWebhookRegistration } from './utils/webhookRegistration'
 import Layout from './components/Layout'
 import Topbar from './components/Topbar'
 import TickerBar from './components/TickerBar'
@@ -129,6 +130,12 @@ function AppInner() {
 
   // Initialize GA4 once on mount
   useEffect(() => { initConsentDefault(); initGA(); initVitals() }, [])
+
+  // Refresh the Discord webhook registration's 30d TTL on each visit so the daily-summary
+  // "active webhooks" count reflects set-and-forget users instead of decaying (#467).
+  useEffect(() => {
+    if (settings.discordUrl) refreshWebhookRegistration(settings.discordUrl, 'discord')
+  }, [settings.discordUrl])
 
   // Track page views + scroll to top on SPA navigation
   useEffect(() => {

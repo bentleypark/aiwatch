@@ -3,6 +3,7 @@
 // Return shape: { services, loading, error, lastUpdated, refresh }
 
 import { useState, useEffect, useCallback, useRef, createContext, useContext, createElement } from 'react'
+import { runWebhookAlerts } from '../utils/webhookAlerts'
 const POLL_INTERVAL = 60_000 // 60s
 
 // Worker API URL — defaults to local dev, override via env
@@ -577,8 +578,9 @@ export function usePolling() {
 }
 
 
-// Status/incident alerts handled server-side (Worker detectAndAlertIncidents).
-// Browser-side detection removed to prevent duplicate alerts.
+// Two alert paths: the Worker posts to the operator webhook server-side; usePolling posts to the
+// user's OWN Discord webhook browser-side (#467, via runWebhookAlerts). Different destinations, so
+// no cross-source duplicates (the #60 dedup concern). Slack uses native `/feed subscribe` instead.
 
 // mode: 'initial' = first load (skeleton), 'refresh' = manual (keep data, show refreshing), 'silent' = auto-poll (invisible)
 function usePollingInternal() {
@@ -600,6 +602,7 @@ function usePollingInternal() {
   const hasDataRef = useRef(false)
   const refreshingRef = useRef(false) // prevent silent polls from aborting refresh
   const prevServicesRef = useRef([])  // backup for recovery on refresh failure
+  const alertPrevRef = useRef([])     // previous services snapshot for browser-side webhook diff (#467)
 
   const poll = useCallback(async (mode = 'silent') => {
     // Skip silent polls while refresh is in progress
@@ -654,8 +657,12 @@ function usePollingInternal() {
       const elapsed = Date.now() - loadStart
       if ((isInitial || isRefresh) && elapsed < 500) await new Promise((r) => setTimeout(r, 500 - elapsed))
 
-      // Status/incident alerts handled server-side (Worker detectAndAlertIncidents)
-      // to avoid duplicate alerts when both browser and Worker are running
+      // Browser-side webhook alerts for the user's OWN Discord webhook (#467). The Worker's
+      // server-side path only posts to the operator webhook, never to a visitor's configured one,
+      // so this restores per-user delivery. No-op unless a Discord webhook is set. Best-effort;
+      // fires only while a tab is open. Diff against the previous poll's snapshot.
+      runWebhookAlerts(alertPrevRef.current, merged)
+      alertPrevRef.current = merged
 
       // Overlay probe RTT onto service.latency (replaces status page timing with real API RTT)
       // Non-probe API services keep status page latency with different label in UI

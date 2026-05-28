@@ -6,7 +6,7 @@ import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type Serv
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
-import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration } from './utils'
+import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
 import { corsHeaders } from './cors'
@@ -40,7 +40,7 @@ let lastArchivedDate = '' // prevent duplicate archival writes within same isola
 let lastKvLimitAlert = 0 // in-memory throttle for KV limit alerts (can't use KV when KV is full)
 let lastLatencySlot = '' // prevent duplicate 30-min latency writes within same isolate
 const alertProxyRate = new Map<string, { start: number; count: number }>() // rate limit for /api/alert
-const deliveryCounter = { discord: 0, slack: 0, failed: 0 } // in-memory counter, flushed to KV by daily summary cron
+const deliveryCounter = { discord: 0, failed: 0 } // in-memory counter, flushed to KV by daily summary cron (Discord-only since #467)
 const webhookPingRate = new Map<string, { start: number; count: number }>() // rate limit for /api/webhook/ping
 const publicApiRate = new Map<string, { start: number; count: number }>() // rate limit for /api/v1/*
 
@@ -732,7 +732,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
 // corsHeaders moved to ./cors — also handles team-scoped suffix patterns for Vercel preview origins.
 
 import { generateBadgeSvg } from './badge'
-import { buildFeedResponse, type FeedRequest } from './rss'
+import { buildFeedResponse, FEED_XSL, type FeedRequest } from './rss'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
@@ -1616,37 +1616,36 @@ export default {
             console.error('[daily-summary] Failed to parse alert counts:', err instanceof Error ? err.message : err)
           }
 
-          // Count active webhook registrations (uses KV metadata — no individual gets needed)
-          let webhookCounts = { discord: 0, slack: 0 }
+          // Count active webhook registrations (uses KV metadata — no individual gets needed).
+          // Discord-only since #467 — Slack moved to native /feed RSS; any legacy webhook:reg:*
+          // entries with `type: 'slack'` metadata decay out within their 30d TTL and are skipped here.
+          let webhookCounts = { discord: 0 }
           try {
             const listed = await env.STATUS_CACHE.list({ prefix: 'webhook:reg:' })
             for (const key of listed.keys) {
               const meta = key.metadata as { type?: string } | null
               if (meta?.type === 'discord') webhookCounts.discord++
-              else if (meta?.type === 'slack') webhookCounts.slack++
             }
           } catch (err) {
             console.warn('[daily-summary] Failed to count webhooks:', err instanceof Error ? err.message : err)
           }
 
           // Flush in-memory delivery counter to KV (merge with any existing counts from prior isolates)
-          let deliveryCounts: { discord: number; slack: number; failed: number } | null = null
+          let deliveryCounts: { discord: number; failed: number } | null = null
           try {
             const proxyDateKey = `alert:proxy:${today}`
             const proxyRaw = await env.STATUS_CACHE.get(proxyDateKey)
             const prior = proxyRaw ? JSON.parse(proxyRaw) : {}
             const merged = {
               discord: (typeof prior.discord === 'number' ? prior.discord : 0) + deliveryCounter.discord,
-              slack: (typeof prior.slack === 'number' ? prior.slack : 0) + deliveryCounter.slack,
               failed: (typeof prior.failed === 'number' ? prior.failed : 0) + deliveryCounter.failed,
             }
-            if (merged.discord > 0 || merged.slack > 0 || merged.failed > 0) {
+            if (merged.discord > 0 || merged.failed > 0) {
               await env.STATUS_CACHE.put(proxyDateKey, JSON.stringify(merged), { expirationTtl: 172800 })
             }
             deliveryCounts = merged
             // Reset in-memory counter after flush
             deliveryCounter.discord = 0
-            deliveryCounter.slack = 0
             deliveryCounter.failed = 0
           } catch (err) {
             console.warn('[daily-summary] Failed to flush delivery counts:', err instanceof Error ? err.message : err)
@@ -1773,7 +1772,9 @@ export default {
       return new Response(null, { status: 204, headers: cors })
     }
 
-    // POST /api/alert — webhook proxy (CORS workaround for Slack/Discord)
+    // POST /api/alert — Discord webhook proxy (CORS workaround). Discord-only since #467:
+    // browser-side per-user alerts (webhookAlerts.js) + Settings "Send test" both target Discord;
+    // Slack moved to the native /feed RSS subscription, which never hits this proxy.
     if (request.method === 'POST' && url.pathname === '/api/alert') {
       try {
         const body = await request.json() as { webhookUrl?: string; channel?: string; payload?: unknown }
@@ -1783,20 +1784,13 @@ export default {
             status: 400, headers: { ...cors, 'Content-Type': 'application/json' },
           })
         }
-        // Strict validation — protocol, domain, and path prefix
-        const parsed = new URL(webhookUrl)
-        if (parsed.protocol !== 'https:') {
-          return new Response(JSON.stringify({ error: 'Only HTTPS webhook URLs allowed' }), {
-            status: 403, headers: { ...cors, 'Content-Type': 'application/json' },
-          })
-        }
-        const isSlack = parsed.hostname === 'hooks.slack.com' && parsed.pathname.startsWith('/services/')
-        const isDiscord = parsed.hostname === 'discord.com' && parsed.pathname.startsWith('/api/webhooks/')
-        if (!isSlack && !isDiscord) {
+        // Strict SSRF validation — HTTPS Discord webhook URLs only (pure, unit-tested predicate).
+        if (!isAllowedAlertWebhook(webhookUrl)) {
           return new Response(JSON.stringify({ error: 'Webhook URL not allowed' }), {
             status: 403, headers: { ...cors, 'Content-Type': 'application/json' },
           })
         }
+        const parsed = new URL(webhookUrl) // safe — isAllowedAlertWebhook confirmed it parses
         // Rate limit: max 10 per minute per webhook URL
         const now = Date.now()
         const rateKey = parsed.pathname
@@ -1817,7 +1811,7 @@ export default {
           body: JSON.stringify(payload),
         })
         // Track delivery count in-memory (flushed to KV by daily summary cron)
-        if (resp.ok) deliveryCounter[isDiscord ? 'discord' : 'slack']++
+        if (resp.ok) deliveryCounter.discord++
         else deliveryCounter.failed++
         resp.body?.cancel()
         return new Response(JSON.stringify({ ok: resp.ok, status: resp.status }), {
@@ -1882,7 +1876,8 @@ export default {
         }
 
         if (request.method === 'POST') {
-          if (!type || (type !== 'discord' && type !== 'slack')) {
+          // Discord-only since #467 — Slack subscribes via native /feed RSS, no webhook registered.
+          if (type !== 'discord') {
             return new Response(JSON.stringify({ error: 'Invalid type' }), {
               status: 400, headers: { ...cors, 'Content-Type': 'application/json' },
             })
@@ -1941,6 +1936,23 @@ export default {
       }
     }
 
+    // GET /feed.xsl — client-side XSLT so browsers render the feed as a page instead of
+    // downloading raw XML (#467). Static, no KV read. Same-origin requirement met via the
+    // /feed.xsl Vercel rewrite (mirrors /feed.xml).
+    if (request.method === 'GET' && url.pathname === '/feed.xsl') {
+      return new Response(FEED_XSL, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/xsl; charset=utf-8',
+          // 1h, not a day: the stylesheet evolves with the feed item shape, and a long TTL
+          // strands returning visitors on a stale XSL (e.g. showing literal <p> tags) after a
+          // format change. Short enough to propagate, long enough to stay cheap (#467).
+          'Cache-Control': 'public, max-age=3600, s-maxage=3600',
+          'Access-Control-Allow-Origin': '*',
+        },
+      })
+    }
+
     // GET /feed.xml + /feed/:slug — incident RSS 2.0 feeds (#54).
     // The 400/404/503/200 decision lives in buildFeedResponse (rss.ts) so it is
     // unit-tested; this handler only does the KV read + Response wrapping.
@@ -1965,7 +1977,10 @@ export default {
         return new Response(result.xml, {
           status: 200,
           headers: {
-            'Content-Type': 'application/rss+xml; charset=utf-8',
+            // text/xml (not application/rss+xml) so browsers apply the /feed.xsl client-side XSLT
+            // and render a page instead of downloading raw XML (#467). RSS readers + Slack /feed
+            // accept text/xml; the <atom:link> self type stays application/rss+xml for discovery.
+            'Content-Type': 'text/xml; charset=utf-8',
             'Cache-Control': 'public, max-age=300, s-maxage=300',
             'Access-Control-Allow-Origin': '*',
           },

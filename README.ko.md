@@ -39,7 +39,7 @@
 - **인시던트 이력** — 다양한 상태 페이지 형식의 타임라인 상세 정보
 - **공식 가동률** — Statuspage, incident.io, Better Stack에서 컴포넌트별 가동률
 - **상태 캘린더** — 30일(Statuspage) 또는 14일(incident.io) 일별 상태 시각화
-- **Slack/Discord 알림** — 상태 변경 및 인시던트 Webhook 알림
+- **Discord & Slack 알림** — 상태 변경/인시던트 Discord Webhook + Slack 내장 `/feed` RSS 앱(설정 0) + RSS 피드
 - **쿠키 동의** — GA4 Consent Mode v2 (동의/필수만)
 - **딥링크** — hash 기반 라우팅 (`#claude`, `#latency`)
 - **다크/라이트 테마** — 시스템 설정 감지 + 수동 전환
@@ -118,7 +118,7 @@
 | 백엔드 | Cloudflare Workers (TypeScript) |
 | 캐시 | Cloudflare KV (상태 캐시, 지연시간 스냅샷) |
 | 호스팅 | Vercel |
-| 알림 | Discord/Slack Webhook (Worker 프록시) |
+| 알림 | Discord Webhook (Worker 프록시) · Slack 내장 `/feed` RSS · RSS 피드 |
 | 분석 | Google Analytics 4 (Consent Mode v2) |
 | 테스트 | Playwright (E2E), Vitest (단위) |
 
@@ -130,7 +130,7 @@
 Cloudflare Worker
   ├── GET /api/status    → 병렬 fetch (33개 서비스) → 정규화
   ├── GET /api/uptime    → 일별 가동률 이력
-  └── POST /api/alert   → Webhook 프록시 (Slack/Discord, SSRF 보호)
+  └── POST /api/alert   → Discord Webhook 프록시 (SSRF 보호)
   ↓
 파서 (worker/src/parsers/)
   ├── impact-weights.ts  → 공유 MAJOR_WEIGHT/MINOR_WEIGHT (Atlassian 공식, 두 파서 공통)
@@ -224,7 +224,7 @@ npm run deploy:worker  # Cloudflare 배포 (npm 스크립트만 사용)
 | `/api/status/cached` | GET | KV 캐시 전용 (Edge SSR용, ~1.2초) |
 | `/api/uptime?days=30` | GET | 일별 가동률 이력 (1-90일) |
 | `/api/report?month=YYYY-MM` | GET | 월간 안정성 아카이브 (가동률, 점수, 인시던트, 레이턴시) |
-| `/api/alert` | POST | Webhook 프록시 (Slack/Discord만, SSRF 보호) |
+| `/api/alert` | POST | Discord Webhook 프록시 (SSRF 보호) |
 | `/badge/:serviceId` | GET | SVG 상태 배지 (shields.io 스타일) |
 | `/api/og` | GET | 동적 OG 이미지 PNG (1200×630, resvg-wasm) |
 | `/api/v1/status` | GET | 공개 API — 전체 서비스 (경량, CORS `*`) |

@@ -27,8 +27,8 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | `click_analyze` | `has_analysis?`, `count?` | Topbar | Analyze button click (active: has_analysis=true + count, inactive: no params) |
 | `open_legal` | `type` (privacy/terms) | Footer | Legal modal open |
 | `save_settings` | — | Settings | Settings saved |
-| `webhook_register` | `type` (discord/slack) | Settings | Webhook URL added |
-| `webhook_remove` | `type` (discord/slack) | Settings | Webhook URL removed |
+| `webhook_register` | `type` (discord) | Settings | Discord webhook URL added (Slack moved to native /feed, #467) |
+| `webhook_remove` | `type` (discord) | Settings | Discord webhook URL removed (Slack moved to native /feed, #467) |
 | `region_switch_intent` | `service_id`, `recommended_region`, `location` (`service_details` / `action_banner` / `is_down_page`) | ServiceDetails (Regional) · Overview (ActionBanner) · Is X Down SSR | Region guide link click — `location` distinguishes the surface that drove the click (#422 Phase 1 + Phase 2) |
 | `click_reports` | — | Sidebar | Monthly reports link click |
 | `click_request_service` | — | Sidebar (request link) | Service request link click |
@@ -41,6 +41,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | `click_reports` | `location`, `source` | Is X Down (alternatives/footer) | Monthly reports link click (Is X Down) |
 | `copy_rss` | `location`, `service_id` | Is X Down (CTA) · ServiceDetails (header) · Settings (Alerts) · Overview (incident banner) · Sidebar (footer) · Landing (alerts section) | RSS feed URL copied to clipboard. `location` ∈ `is_down_page`/`service_details`/`settings`/`action_banner`/`sidebar`/`landing`; `service_id`=`'all'` for the all-services `/feed.xml`, the page slug for per-service feeds (#430, #432, #433, #434) |
 | `click_announcement` | `id`, `location` | Landing page (announcement banner) | Campaign announcement banner click-through (`?banner=<key>`, #265). `id`=announcement key |
+| `copy_slack_feed` | `location`, `service_id?` | Settings (Alerts) · Is X Down (CTA) | Slack `/feed subscribe <feed-url>` command copied (#467) — zero-config Slack subscription via Slack's native /feed RSS app. `location` ∈ `settings`/`is_down_page`; `service_id` set on the Is X Down per-service command (service ID — equals the slug except for `claude-code`/`github-copilot` etc., matching `copy_rss`) |
 | `font_load_failed` | `transport_type: 'beacon'` | index.html `<link>` onerror | Google Fonts CSS preload failed (CDN outage, ad blocker, network) — surfaces silent fallback to system fonts (refs #191) |
 
 Is X Down pages (Edge SSR) and Landing page use inline `gtag()` calls directly since they don't use React.

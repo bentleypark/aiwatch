@@ -40,6 +40,7 @@
     { "source": "/reports/:rest*/", "destination": "/api/reports" },
     { "source": "/api/status/cached", "destination": "https://aiwatch-worker.p2c2kbf.workers.dev/api/status/cached?src=statusline-proxy" },
     { "source": "/feed.xml", "destination": "https://aiwatch-worker.p2c2kbf.workers.dev/feed.xml" },
+    { "source": "/feed.xsl", "destination": "https://aiwatch-worker.p2c2kbf.workers.dev/feed.xsl" },
     { "source": "/feed/:slug", "destination": "https://aiwatch-worker.p2c2kbf.workers.dev/feed/:slug" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
