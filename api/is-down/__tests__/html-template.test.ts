@@ -616,6 +616,17 @@ describe('RSS feed surfacing on /is-*-down (#430)', () => {
     expect(html).toContain("prompt('Copy RSS URL:',u)")
   })
 
+  it('renders a "Copy Slack command" button with the per-service /feed subscribe command (#467)', () => {
+    const html = renderPage('claude', mkService(), mkSeo(), [])
+    expect(html).toContain(
+      '<button type="button" class="btn" data-slack="/feed subscribe https://ai-watch.dev/feed/claude" data-svc="claude" onclick="copySlackFeed(this)">Copy Slack command</button>',
+    )
+    expect(html).toContain('function copySlackFeed(b)')
+    expect(html).toContain("gtag('event','copy_slack_feed',{location:'is_down_page',service_id:b.dataset.svc})")
+    // prompt() fallback for insecure-context / writeText-rejection paths
+    expect(html).toContain("prompt('Copy Slack command:',c)")
+  })
+
   it('keys data-svc on the service ID, not the page slug, so copy_rss matches other per-service events', () => {
     const html = renderPage('claude-code', mkService({ id: 'claudecode' }), mkSeo({ displayName: 'Claude Code' }), [])
     expect(html).toContain('data-svc="claudecode"')

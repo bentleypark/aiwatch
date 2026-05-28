@@ -8,40 +8,7 @@ import { useSettings } from '../hooks/useSettings'
 import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, SERVICE_AND_APP_IDS, AGENT_SERVICE_IDS, ALL_SERVICE_IDS, DEFAULT_SETTINGS, ALL_SERVICES_FEED_URL } from '../utils/constants'
 import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
-
-const WORKER_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')
-
-async function hashWebhookUrl(url) {
-  const data = new TextEncoder().encode(url)
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('')
-}
-
-function pingWebhookRegistration(currentUrl, type, previousUrl) {
-  if (currentUrl === previousUrl) return // no change — skip
-  // Unregister old webhook if URL changed or removed
-  if (previousUrl) {
-    hashWebhookUrl(previousUrl).then(hash => {
-      fetch(`${WORKER_BASE}/api/webhook/ping`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hash }),
-      }).then(r => { if (!r.ok) console.warn(`[webhook-ping] DELETE failed: ${r.status}`) })
-        .catch(err => console.warn('[webhook-ping] DELETE error:', err.message))
-    }).catch(err => console.warn('[webhook-ping] Hash error:', err.message))
-  }
-  // Register new webhook
-  if (currentUrl) {
-    hashWebhookUrl(currentUrl).then(hash => {
-      fetch(`${WORKER_BASE}/api/webhook/ping`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hash, type }),
-      }).then(r => { if (!r.ok) console.warn(`[webhook-ping] POST failed: ${r.status}`) })
-        .catch(err => console.warn('[webhook-ping] POST error:', err.message))
-    }).catch(err => console.warn('[webhook-ping] Hash error:', err.message))
-  }
-}
+import { pingWebhookRegistration } from '../utils/webhookRegistration'
 
 // ── Styles matching design mockup ────────────────────────
 
@@ -143,7 +110,6 @@ export default function Settings() {
   const [period, setPeriod] = useState(settings.period)
   const [sla, setSla] = useState(settings.sla)
   const [enabledServices, setEnabledServices] = useState(settings.enabledServices)
-  const [slackUrl, setSlackUrl] = useState(settings.slackUrl)
   const [discordUrl, setDiscordUrl] = useState(settings.discordUrl)
   const [alertCondition, setAlertCondition] = useState(settings.alertCondition)
   const [alertTarget, setAlertTarget] = useState(settings.alertTarget)
@@ -154,6 +120,7 @@ export default function Settings() {
   const [monitoringOpen, setMonitoringOpen] = useState(false)
   const [agentsOpen, setAgentsOpen] = useState(false)
   const [rssCopied, setRssCopied] = useState(false)
+  const [slackFeedCopied, setSlackFeedCopied] = useState(false)
   const saveTimerRef = useRef(null)
 
   useEffect(() => () => clearTimeout(saveTimerRef.current), [])
@@ -161,7 +128,6 @@ export default function Settings() {
     setPeriod(settings.period)
     setSla(settings.sla)
     setEnabledServices(settings.enabledServices)
-    setSlackUrl(settings.slackUrl)
     setDiscordUrl(settings.discordUrl)
     setAlertCondition(settings.alertCondition)
     setAlertTarget(settings.alertTarget)
@@ -185,18 +151,31 @@ export default function Settings() {
     }
   }
 
+  // Slack uses its built-in /feed RSS app (#467) — paste this into any channel. We don't store a
+  // Slack webhook; the native slash command + our RSS does the subscription, zero-config.
+  const SLACK_FEED_CMD = `/feed subscribe ${ALL_SERVICES_FEED_URL}`
+  function copySlackFeed() {
+    const done = () => {
+      setSlackFeedCopied(true)
+      trackEvent('copy_slack_feed', { location: 'settings' })
+      setTimeout(() => setSlackFeedCopied(false), 2000)
+    }
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(SLACK_FEED_CMD).then(done).catch(() => window.prompt(t('settings.slack.prompt'), SLACK_FEED_CMD))
+    } else {
+      window.prompt(t('settings.slack.prompt'), SLACK_FEED_CMD)
+    }
+  }
+
   function handleSave() {
     const slaNum = sla === '' ? DEFAULT_SETTINGS.sla : Number(sla)
-    save({ period, sla: slaNum, enabledServices, slackUrl, discordUrl, alertCondition, alertTarget, alertServices, alertIncidents })
+    save({ period, sla: slaNum, enabledServices, discordUrl, alertCondition, alertTarget, alertServices, alertIncidents })
     trackEvent('save_settings')
-    // Track webhook registration/removal for operational metrics
+    // Track webhook registration/removal for operational metrics (Discord only — Slack moved to /feed, #467)
     if (discordUrl && !settings.discordUrl) trackEvent('webhook_register', { type: 'discord' })
     if (!discordUrl && settings.discordUrl) trackEvent('webhook_remove', { type: 'discord' })
-    if (slackUrl && !settings.slackUrl) trackEvent('webhook_register', { type: 'slack' })
-    if (!slackUrl && settings.slackUrl) trackEvent('webhook_remove', { type: 'slack' })
     // Ping server with hashed webhook URL for active webhook tracking
     pingWebhookRegistration(discordUrl, 'discord', settings.discordUrl)
-    pingWebhookRegistration(slackUrl, 'slack', settings.slackUrl)
     setSaved(true)
     clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => setSaved(false), 1800)
@@ -212,7 +191,6 @@ export default function Settings() {
   const hasNoChanges = period === settings.period
     && sla === settings.sla
     && JSON.stringify([...enabledServices].sort()) === JSON.stringify([...settings.enabledServices].sort())
-    && slackUrl === settings.slackUrl
     && discordUrl === settings.discordUrl
     && alertCondition === settings.alertCondition
     && alertTarget === settings.alertTarget
@@ -399,18 +377,31 @@ export default function Settings() {
         <div style={{ padding: '13px 0', borderBottom: '1px solid var(--border)' }}>
           <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text0)', marginBottom: '2px' }}>{t('settings.slack')}</div>
           <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', lineHeight: 1.5, marginBottom: '8px' }}>{t('settings.slack.desc')}</div>
-          <input
-            type="text"
-            value={slackUrl}
-            onChange={(e) => setSlackUrl(e.target.value)}
-            placeholder="https://hooks.slack.com/services/..."
-            className="mono"
-            style={{
-              width: '100%', fontSize: '11px', padding: '6px 10px',
-              background: 'var(--bg2)', border: '1px solid var(--border-hi)', borderRadius: '5px',
-              color: 'var(--text0)', outline: 'none', boxSizing: 'border-box',
-            }}
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              readOnly
+              value={SLACK_FEED_CMD}
+              onClick={(e) => e.target.select()}
+              className="mono"
+              style={{
+                flex: 1, fontSize: '11px', padding: '6px 10px',
+                background: 'var(--bg2)', border: '1px solid var(--border-hi)', borderRadius: '5px',
+                color: 'var(--text0)', outline: 'none', boxSizing: 'border-box',
+              }}
+            />
+            <button
+              onClick={copySlackFeed}
+              className="mono shrink-0"
+              style={{
+                fontSize: '11px', padding: '6px 12px', borderRadius: '5px', border: 'none',
+                background: slackFeedCopied ? 'var(--green)' : 'var(--bg3)',
+                color: slackFeedCopied ? 'var(--bg0)' : 'var(--text1)', cursor: 'pointer',
+              }}
+            >
+              {slackFeedCopied ? t('settings.rss.copied') : t('settings.rss.copy')}
+            </button>
+          </div>
         </div>
 
         <div style={{ padding: '13px 0', borderBottom: '1px solid var(--border)' }}>
@@ -450,21 +441,17 @@ export default function Settings() {
           <Toggle checked={alertIncidents} onChange={() => setAlertIncidents((v) => !v)} />
         </FieldRow>
 
-        {(slackUrl || discordUrl) && (
+        {discordUrl && (
           <div style={{ marginTop: '12px' }}>
             <button
               onClick={async () => {
                 setTestResult('sending')
                 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8788'
                 const apiBase = API_URL.replace('/api/status', '')
-                const targets = []
-                if (slackUrl) targets.push({ url: slackUrl, channel: 'slack', payload: { text: `${t('settings.alert.test.title')} — ${t('settings.alert.test.desc')}` } })
-                if (discordUrl) targets.push({ url: discordUrl, channel: 'discord', payload: { embeds: [{ title: t('settings.alert.test.title'), description: t('settings.alert.test.desc'), color: 5814783, footer: { text: 'AIWatch Alert — Test' } }] } })
+                const payload = { embeds: [{ title: t('settings.alert.test.title'), description: t('settings.alert.test.desc'), color: 5814783, footer: { text: 'AIWatch Alert — Test' } }] }
                 try {
-                  const results = await Promise.all(targets.map((t) =>
-                    fetch(`${apiBase}/api/alert`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ webhookUrl: t.url, channel: t.channel, payload: t.payload }) }).then((r) => r.ok)
-                  ))
-                  setTestResult(results.every(Boolean) ? 'ok' : 'error')
+                  const r = await fetch(`${apiBase}/api/alert`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ webhookUrl: discordUrl, channel: 'discord', payload }) })
+                  setTestResult(r.ok ? 'ok' : 'error')
                 } catch { setTestResult('error') }
                 setTimeout(() => setTestResult(null), 3000)
               }}

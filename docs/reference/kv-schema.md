@@ -38,8 +38,8 @@
 | `alerted:component-missing:{svcId}` | `"1"` | 24h | ~0 | Component ID mismatch alert dedup |
 | `alerted:service-drop` | `"1"` | 2h | ~0 | Service count drop alert dedup (< 80% of expected) |
 | `alert:count:{YYYY-MM-DD}` | `{ incidents, resolved, down, degraded, recovered }` JSON | 2d | ~1-5 | Daily alert count aggregated in Daily Summary |
-| `webhook:reg:{sha256hash}` | `{ type, registeredAt }` JSON | 30d | ~1/user/day | Active webhook registration (hashed, refreshed on ping) |
-| `alert:proxy:{YYYY-MM-DD}` | `{ discord, slack, failed }` JSON | 2d | ~1 | User webhook delivery counts (approximate, flushed from in-memory by daily summary cron) |
+| `webhook:reg:{sha256hash}` | `{ type, registeredAt }` JSON (`type` always `discord` since #467) | 30d | ~1/user/day | Active Discord webhook registration (hashed; TTL refreshed ≤1×/day per webhook on app load — Slack uses native /feed, no reg) |
+| `alert:proxy:{YYYY-MM-DD}` | `{ discord, failed }` JSON | 2d | ~1 | User Discord webhook delivery counts (approximate, flushed from in-memory by daily summary cron; Slack moved to /feed, #467) |
 | `kv_limit_alert` | `"1"` | 5min | ~1 | KV write limit exceeded cooldown |
 | `daily-summary:{YYYY-MM-DD}` | `"1"` | 7d | 1 | Daily summary execution marker (prevents duplicate send + enables catch-up) |
 | `changelog:entries` | `ChangelogEntry[]` JSON | 14d | ~3 | Accumulated changelog entries from RSS + HTML sources (cleared after weekly briefing) |

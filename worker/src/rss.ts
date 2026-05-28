@@ -4,8 +4,66 @@
 
 import type { ServiceStatus, Incident } from './types'
 import { escapeXml } from './badge'
+import { getFallbacks } from './fallback'
 
 const SITE = 'https://ai-watch.dev'
+
+// Cache-bust token for the stylesheet URL. The <?xml-stylesheet?> PI points at
+// /feed.xsl?v=${FEED_XSL_VERSION}; /feed.xsl is cacheable, so without a version a returning
+// visitor keeps a stale XSL after a format change (#467 — e.g. an old XSL rendering literal
+// <p> tags). BUMP THIS whenever FEED_XSL changes so the URL changes and the cache misses.
+export const FEED_XSL_VERSION = '2'
+
+// Client-side XSLT so a browser opening the feed URL directly renders a friendly page
+// instead of downloading raw XML (#467 — surfaced when Slack `/feed` links the feed title to
+// the .xml). Feed readers + Slack ignore the stylesheet PI. Served at /feed.xsl (same origin,
+// required for the browser to apply it). Self-contained: no external CSS/JS.
+export const FEED_XSL = `<?xml version="1.0" encoding="UTF-8"?>
+<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <xsl:output method="html" encoding="UTF-8" indent="yes"/>
+  <xsl:template match="/rss/channel">
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title><xsl:value-of select="title"/></title>
+        <style>
+          :root { color-scheme: dark; }
+          body { margin:0; background:#0d1117; color:#e6edf3; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; line-height:1.6; }
+          .wrap { max-width:760px; margin:0 auto; padding:40px 20px 80px; }
+          .rss-tag { display:inline-block; font-size:11px; font-family:ui-monospace,monospace; color:#f26522; border:1px solid rgba(242,101,34,.4); border-radius:4px; padding:2px 8px; margin-bottom:14px; }
+          h1 { font-size:24px; margin:0 0 6px; }
+          .desc { color:#9aa4b2; margin:0 0 10px; }
+          .hint { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:12px 14px; font-size:13px; color:#9aa4b2; margin:18px 0 28px; }
+          .hint code { color:#e6edf3; background:#0d1117; padding:1px 6px; border-radius:4px; font-size:12px; }
+          .hint a { color:#58a6ff; }
+          article { border-top:1px solid #21262d; padding:18px 0; }
+          article a.t { color:#e6edf3; font-weight:600; font-size:16px; text-decoration:none; }
+          article a.t:hover { color:#58a6ff; }
+          time { display:block; color:#6e7681; font-size:12px; font-family:ui-monospace,monospace; margin:4px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <span class="rss-tag">RSS FEED</span>
+          <h1><xsl:value-of select="title"/></h1>
+          <p class="desc"><xsl:value-of select="description"/></p>
+          <div class="hint">
+            This is a machine-readable RSS feed. Subscribe in any feed reader, or in Slack paste
+            <code>/feed subscribe <xsl:value-of select="atom:link/@href" xmlns:atom="http://www.w3.org/2005/Atom"/></code>.
+            See the <a href="{link}">AIWatch dashboard</a> for live status.
+          </div>
+          <xsl:for-each select="item">
+            <article>
+              <a class="t" href="{link}"><xsl:value-of select="title"/></a>
+              <time><xsl:value-of select="pubDate"/></time>
+            </article>
+          </xsl:for-each>
+        </div>
+      </body>
+    </html>
+  </xsl:template>
+</xsl:stylesheet>`
 
 // Cap the feed (both scopes) so a burst of incidents can't bloat the response.
 // The cached incident list is already small (recent + unresolved only).
@@ -100,25 +158,100 @@ function buildIncidentServiceMap(services: ServiceStatus[]): Map<string, string[
   return map
 }
 
-function itemXml(service: ServiceStatus, inc: Incident, incidentServices: Map<string, string[]>): string {
+// A feed item is either the incident's own entry ('active' — fires the new-incident
+// notification) or a separate resolution entry ('resolved'). A resolved incident keeps
+// its 'active' item (description shows Status: resolved) AND gets a 'resolved' item with a
+// DISTINCT guid + later pubDate (#467). RSS readers / Slack /feed dedup by guid, so without
+// the distinct guid a status flip to resolved never re-notifies a subscriber.
+type ItemKind = 'active' | 'resolved'
+
+// Resolution timestamp: explicit resolvedAt, else the last 'resolved' timeline entry, else the
+// last timeline entry, else the start (so the resolved item never sorts before its own start).
+function resolvedAtOf(inc: Incident): string {
+  if (inc.resolvedAt) return inc.resolvedAt
+  for (let i = inc.timeline.length - 1; i >= 0; i--) {
+    if (inc.timeline[i].stage === 'resolved') return inc.timeline[i].at
+  }
+  return inc.timeline.length > 0 ? inc.timeline[inc.timeline.length - 1].at : inc.startedAt
+}
+
+// "Try instead" line for an active item when the service is impaired (#467). Reuses the same
+// tier-aware ranking as Discord/dashboard fallbacks. services:latest carries no aiwatchScore,
+// so the ordering is tier-distance-first (intra-tier order arbitrary) and names are shown
+// without scores — enough to point a subscriber somewhere useful.
+function fallbackLine(svc: ServiceStatus, services: ServiceStatus[]): string | undefined {
+  if (svc.status === 'operational') return undefined
+  const fbs = getFallbacks(svc.id, svc.category, services)
+  if (fbs.length === 0) return undefined
+  return `Try instead: ${fbs.map((f) => f.name).join(' · ')}`
+}
+
+// Severity dot for the title + meta line (#467). Resolved → green; critical/major impact or a
+// down service → red; everything else (minor / degraded) → amber. Roughly mirrors the dashboard
+// status colors — note the feed additionally treats `major` impact as red even when the service
+// is only `degraded` (the dashboard pill stays amber there), favoring alert legibility.
+function severityEmoji(svc: ServiceStatus, inc: Incident, isResolved: boolean): string {
+  if (isResolved) return '🟢'
+  if (inc.impact === 'critical' || inc.impact === 'major' || svc.status === 'down') return '🔴'
+  return '🟡'
+}
+
+// HTML-escape for text embedded inside the CDATA description. escapeXml turns `>` into `&gt;`,
+// which also neutralizes any `]]>` sequence so user-sourced text can't terminate the CDATA early.
+function escHtml(s: string): string {
+  return escapeXml(stripControlChars(s))
+}
+
+function cap(s: string): string {
+  return s.length > 0 ? s.charAt(0).toUpperCase() + s.slice(1) : s
+}
+
+// Render the description as small HTML paragraphs instead of one `·`-joined line (#467). Slack
+// /feed, RSS readers, and the /feed.xsl browser page all render the HTML, so each fact lands on
+// its own line — far more scannable than the old single run-on string. Structural tags are raw;
+// every dynamic value is escHtml-escaped so nothing injects markup.
+function descHtml(
+  service: ServiceStatus,
+  inc: Incident,
+  coAffected: string[],
+  opts: { kind: ItemKind; fallbackText?: string },
+): string {
+  const isResolved = opts.kind === 'resolved'
   const latest = inc.timeline.length > 0 ? inc.timeline[inc.timeline.length - 1] : null
+  const lines: string[] = []
+
+  if (isResolved) {
+    lines.push(`<p>🟢 <strong>Resolved</strong>${inc.duration ? ` · lasted ${escHtml(inc.duration)}` : ''}</p>`)
+  } else {
+    const label = inc.impact ? cap(inc.impact) : service.status === 'down' ? 'Down' : 'Degraded'
+    const meta = [`${severityEmoji(service, inc, false)} <strong>${escHtml(label)}</strong>`, escHtml(inc.status)]
+    if (inc.duration) meta.push(escHtml(inc.duration))
+    lines.push(`<p>${meta.join(' · ')}</p>`)
+  }
+  if (coAffected.length > 0) lines.push(`<p>Also affecting: ${escHtml(coAffected.join(', '))}</p>`)
+  if (latest?.text) lines.push(`<p>${escHtml(latest.text)}</p>`)
+  if (opts.fallbackText) lines.push(`<p>↪ ${escHtml(opts.fallbackText)}</p>`)
+  return lines.join('')
+}
+
+function itemXml(
+  service: ServiceStatus,
+  inc: Incident,
+  incidentServices: Map<string, string[]>,
+  opts: { kind: ItemKind; pubDate: string; fallbackText?: string },
+): string {
+  const isResolved = opts.kind === 'resolved'
   const coAffected = (incidentServices.get(inc.id) ?? []).filter((n) => n !== service.name)
-  const desc = [
-    `Status: ${inc.status}`,
-    inc.impact ? `Impact: ${inc.impact}` : null,
-    inc.duration ? `Duration: ${inc.duration}` : null,
-    coAffected.length > 0 ? `Also affecting: ${coAffected.join(', ')}` : null,
-    latest?.text ? `Latest update: ${latest.text}` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ')
+  const emoji = severityEmoji(service, inc, isResolved)
+  const title = `${emoji} ${service.name}: ${isResolved ? 'Resolved — ' : ''}${inc.title}`
+  const guid = isResolved ? `aiwatch:${service.id}:${inc.id}:resolved` : `aiwatch:${service.id}:${inc.id}`
 
   return `    <item>
-      <title>${xml(service.name)}: ${xml(inc.title)}</title>
+      <title>${xml(title)}</title>
       <link>${xml(serviceLink(service.id))}</link>
-      <guid isPermaLink="false">aiwatch:${xml(service.id)}:${xml(inc.id)}</guid>
-      <pubDate>${rfc822(inc.startedAt)}</pubDate>${inc.impact ? `\n      <category>${xml(inc.impact)}</category>` : ''}
-      <description>${xml(desc)}</description>
+      <guid isPermaLink="false">${xml(guid)}</guid>
+      <pubDate>${rfc822(opts.pubDate)}</pubDate>${inc.impact ? `\n      <category>${xml(inc.impact)}</category>` : ''}
+      <description><![CDATA[${descHtml(service, inc, coAffected, opts)}]]></description>
     </item>`
 }
 
@@ -140,13 +273,24 @@ export function buildRssFeed(
 ): string {
   const incidentServices = buildIncidentServiceMap(services)
   const sources = opts.scope === 'service' ? [opts.service] : services
-  const items = sources
-    .flatMap((svc) => (svc.incidents ?? []).map((incident) => ({ svc, incident })))
-    .sort(
-      (a, b) =>
-        new Date(b.incident.startedAt).getTime() - new Date(a.incident.startedAt).getTime(),
-    )
-    .slice(0, MAX_ITEMS)
+  // One item per incident, keyed by its current state (#467): an active incident emits its
+  // 'active' item (guid `aiwatch:svc:inc`, red/amber); once resolved it emits ONLY the 'resolved'
+  // item (guid `aiwatch:svc:inc:resolved`, green). The guid flips on resolution, so RSS readers /
+  // Slack /feed re-notify the recovery — without ever showing a contradictory "🔴 … resolved"
+  // base row. Sort by each item's own pubDate (resolution time for resolved items).
+  type Entry = { svc: ServiceStatus; incident: Incident; kind: ItemKind; pubDate: string; fallbackText?: string }
+  const items: Entry[] = []
+  for (const svc of sources) {
+    for (const incident of svc.incidents ?? []) {
+      if (incident.status === 'resolved') {
+        items.push({ svc, incident, kind: 'resolved', pubDate: resolvedAtOf(incident) })
+      } else {
+        items.push({ svc, incident, kind: 'active', pubDate: incident.startedAt, fallbackText: fallbackLine(svc, services) })
+      }
+    }
+  }
+  items.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime())
+  const capped = items.slice(0, MAX_ITEMS)
 
   const title =
     opts.scope === 'service'
@@ -159,9 +303,12 @@ export function buildRssFeed(
   const feedPath =
     opts.scope === 'service' ? `/feed/${feedSlug(opts.service.id)}` : '/feed.xml'
 
-  const itemsXml = items.map(({ svc, incident }) => itemXml(svc, incident, incidentServices)).join('\n')
+  const itemsXml = capped
+    .map((e) => itemXml(e.svc, e.incident, incidentServices, { kind: e.kind, pubDate: e.pubDate, fallbackText: e.fallbackText }))
+    .join('\n')
 
   return `<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="/feed.xsl?v=${FEED_XSL_VERSION}"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
     <title>${xml(title)}</title>

@@ -17,6 +17,26 @@ export function sanitize(s: string, maxLen = 1000): string {
     .slice(0, maxLen)
 }
 
+// SSRF allow-list for the /api/alert webhook proxy: HTTPS Discord webhook URLs only (#467 \u2014
+// Slack moved to native /feed RSS, so the proxy no longer forwards to hooks.slack.com). The
+// hostname must equal `discord.com` exactly (no subdomain/suffix matching, which would let
+// `evildiscord.com` or `discord.com.evil.tld` through) and the path must be a real webhook path.
+// Broadening to discordapp.com / canary.discord.com is tracked in #468. Extracted as a pure
+// predicate so the boundary is unit-testable (the rest of the proxy is inline in the fetch handler).
+export function isAllowedAlertWebhook(webhookUrl: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(webhookUrl)
+  } catch {
+    return false
+  }
+  return (
+    parsed.protocol === 'https:' &&
+    parsed.hostname === 'discord.com' &&
+    parsed.pathname.startsWith('/api/webhooks/')
+  )
+}
+
 export interface KVLike {
   get(key: string): Promise<string | null>
   put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>

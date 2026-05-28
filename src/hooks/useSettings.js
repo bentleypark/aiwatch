@@ -50,7 +50,6 @@ function readStored() {
             return result
           })()
         : DEFAULT_SETTINGS.enabledServices,
-      slackUrl: typeof parsed.slackUrl === 'string' ? parsed.slackUrl : DEFAULT_SETTINGS.slackUrl,
       discordUrl: typeof parsed.discordUrl === 'string' ? parsed.discordUrl : DEFAULT_SETTINGS.discordUrl,
       alertCondition: VALID_ALERT_CONDITIONS.includes(parsed.alertCondition) ? parsed.alertCondition : DEFAULT_SETTINGS.alertCondition,
       alertTarget: ['all', 'custom'].includes(parsed.alertTarget) ? parsed.alertTarget : DEFAULT_SETTINGS.alertTarget,
@@ -87,7 +86,6 @@ export function useSettings() {
       enabledServices: Array.isArray(next.enabledServices)
         ? next.enabledServices.filter((id) => ALL_SERVICE_IDS.includes(id))
         : settings.enabledServices,
-      slackUrl: typeof next.slackUrl === 'string' ? next.slackUrl : settings.slackUrl,
       discordUrl: typeof next.discordUrl === 'string' ? next.discordUrl : settings.discordUrl,
       alertCondition: VALID_ALERT_CONDITIONS.includes(next.alertCondition) ? next.alertCondition : settings.alertCondition,
       alertTarget: ['all', 'custom'].includes(next.alertTarget) ? next.alertTarget : settings.alertTarget,

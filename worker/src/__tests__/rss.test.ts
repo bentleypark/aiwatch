@@ -37,6 +37,9 @@ describe('buildRssFeed — all scope', () => {
   it('emits a well-formed RSS 2.0 envelope', () => {
     const xml = buildRssFeed([], { scope: 'all' }, NOW)
     expect(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true)
+    // XSL stylesheet PI so browsers render the feed instead of downloading it (#467).
+    // Versioned (?v=) so a changed stylesheet busts the browser cache instead of going stale.
+    expect(xml).toContain('<?xml-stylesheet type="text/xsl" href="/feed.xsl?v=')
     expect(xml).toContain('<rss version="2.0"')
     expect(xml).toContain('<channel>')
     expect(xml).toContain('<title>AIWatch — AI Service Incidents</title>')
@@ -117,6 +120,144 @@ describe('buildRssFeed — service scope', () => {
     expect(xml).toContain('<title>AIWatch — OpenAI Incidents</title>')
     expect(xml).not.toContain('<item>')
     expect(xml.trimEnd().endsWith('</rss>')).toBe(true)
+  })
+})
+
+describe('buildRssFeed — resolution notifications (#467)', () => {
+  it('emits ONLY the resolved item (distinct guid, no contradictory active row) for a resolved incident', () => {
+    const inc = incident({
+      id: 'r1',
+      title: 'Elevated errors',
+      status: 'resolved',
+      startedAt: '2026-05-10T12:00:00.000Z',
+      resolvedAt: '2026-05-10T14:30:00.000Z',
+      duration: '2h 30m',
+    })
+    const xml = buildRssFeed([service({ incidents: [inc] })], { scope: 'all' }, NOW)
+    // One item: the resolution event only. The plain `:r1` base row is dropped so the feed never
+    // shows a "🔴 … resolved" contradiction; the `:resolved` guid still re-notifies subscribers.
+    expect((xml.match(/<item>/g) ?? []).length).toBe(1)
+    expect(xml).toContain('aiwatch:claude:r1:resolved</guid>')
+    expect(xml).not.toContain('aiwatch:claude:r1</guid>')
+    expect(xml).toContain('🟢 Claude: Resolved — Elevated errors')
+    // The resolved item uses resolvedAt as its pubDate so it re-notifies as a fresh item.
+    expect(xml).toContain(`<pubDate>${new Date('2026-05-10T14:30:00.000Z').toUTCString()}</pubDate>`)
+  })
+
+  it('does not emit a resolved item for an active incident', () => {
+    const xml = buildRssFeed([service({ incidents: [incident({ id: 'a1', status: 'investigating' })] })], { scope: 'all' }, NOW)
+    expect((xml.match(/<item>/g) ?? []).length).toBe(1)
+    expect(xml).not.toContain(':resolved</guid>')
+  })
+
+  it('falls back to the resolved timeline entry timestamp when resolvedAt is null', () => {
+    const inc = incident({
+      id: 'r2',
+      status: 'resolved',
+      resolvedAt: null,
+      timeline: [
+        { stage: 'investigating', text: 'Looking into it', at: '2026-05-10T12:10:00.000Z' },
+        { stage: 'resolved', text: 'Fixed', at: '2026-05-10T13:00:00.000Z' },
+      ],
+    })
+    const xml = buildRssFeed([service({ incidents: [inc] })], { scope: 'all' }, NOW)
+    expect(xml).toContain('aiwatch:claude:r2:resolved</guid>')
+    expect(xml).toContain(`<pubDate>${new Date('2026-05-10T13:00:00.000Z').toUTCString()}</pubDate>`)
+  })
+
+  it('prefers the resolved-stage entry over a later non-resolved entry when resolvedAt is null', () => {
+    // A post-recovery update (e.g. monitoring/post-mortem) can be appended AFTER the resolved
+    // entry. resolvedAtOf must pick the resolved stage (12:30), not the chronologically-last entry.
+    const inc = incident({
+      id: 'r5',
+      status: 'resolved',
+      resolvedAt: null,
+      startedAt: '2026-05-10T12:00:00.000Z',
+      timeline: [
+        { stage: 'investigating', text: 'Looking into it', at: '2026-05-10T12:10:00.000Z' },
+        { stage: 'resolved', text: 'Fixed', at: '2026-05-10T12:30:00.000Z' },
+        { stage: 'monitoring', text: 'Post-incident monitoring', at: '2026-05-10T13:00:00.000Z' },
+      ],
+    })
+    const xml = buildRssFeed([service({ incidents: [inc] })], { scope: 'all' }, NOW)
+    expect(xml).toContain(`<pubDate>${new Date('2026-05-10T12:30:00.000Z').toUTCString()}</pubDate>`)
+    expect(xml).not.toContain(`<pubDate>${new Date('2026-05-10T13:00:00.000Z').toUTCString()}</pubDate>`)
+  })
+
+  it('uses the last timeline entry when resolvedAt is null and no entry is stage=resolved', () => {
+    const inc = incident({
+      id: 'r3',
+      status: 'resolved',
+      resolvedAt: null,
+      startedAt: '2026-05-10T12:00:00.000Z',
+      timeline: [
+        { stage: 'investigating', text: 'Looking into it', at: '2026-05-10T12:10:00.000Z' },
+        { stage: 'monitoring', text: 'Monitoring', at: '2026-05-10T12:45:00.000Z' },
+      ],
+    })
+    const xml = buildRssFeed([service({ incidents: [inc] })], { scope: 'all' }, NOW)
+    expect(xml).toContain(`<pubDate>${new Date('2026-05-10T12:45:00.000Z').toUTCString()}</pubDate>`)
+  })
+
+  it('falls back to startedAt when resolvedAt is null and the timeline is empty', () => {
+    const inc = incident({ id: 'r4', status: 'resolved', resolvedAt: null, startedAt: '2026-05-10T12:00:00.000Z', timeline: [] })
+    const xml = buildRssFeed([service({ incidents: [inc] })], { scope: 'all' }, NOW)
+    expect(xml).toContain(`<pubDate>${new Date('2026-05-10T12:00:00.000Z').toUTCString()}</pubDate>`)
+  })
+})
+
+describe('buildRssFeed — fallback suggestions (#467)', () => {
+  const candidates = [
+    service({ id: 'openai', name: 'OpenAI', category: 'api', status: 'operational' }),
+    service({ id: 'gemini', name: 'Gemini', category: 'api', status: 'operational' }),
+  ]
+
+  it('adds a "Try instead" line to an active item when the service is impaired', () => {
+    const down = service({ id: 'claude', name: 'Claude', category: 'api', status: 'down', incidents: [incident({ id: 'd1' })] })
+    const xml = buildRssFeed([down, ...candidates], { scope: 'all' }, NOW)
+    expect(xml).toContain('Try instead:')
+    expect(xml).toMatch(/Try instead: (OpenAI|Gemini)/)
+  })
+
+  it('omits the fallback line for an operational service', () => {
+    const ok = service({ id: 'claude', name: 'Claude', category: 'api', status: 'operational', incidents: [incident({ id: 'o1' })] })
+    const xml = buildRssFeed([ok, ...candidates], { scope: 'all' }, NOW)
+    expect(xml).not.toContain('Try instead:')
+  })
+
+  it('omits the fallback line on the resolved item', () => {
+    const resolved = service({ id: 'claude', name: 'Claude', category: 'api', status: 'down', incidents: [incident({ id: 'rr', status: 'resolved', resolvedAt: '2026-05-10T14:00:00.000Z' })] })
+    const xml = buildRssFeed([resolved, ...candidates], { scope: 'all' }, NOW)
+    // The resolved item (distinct guid) must not carry a stale "Try instead" line.
+    const resolvedItem = xml.slice(xml.indexOf('aiwatch:claude:rr:resolved'))
+    expect(resolvedItem.split('</item>')[0]).not.toContain('Try instead:')
+  })
+})
+
+describe('buildRssFeed — item formatting (#467)', () => {
+  it('prefixes the title with a severity emoji (red for down/major, amber for minor)', () => {
+    const down = buildRssFeed([service({ name: 'OpenAI', status: 'down', incidents: [incident({ id: 'd', title: 'API errors', impact: 'major' })] })], { scope: 'all' }, NOW)
+    expect(down).toContain('<title>🔴 OpenAI: API errors</title>')
+    const minor = buildRssFeed([service({ name: 'ElevenLabs', status: 'degraded', incidents: [incident({ id: 'm', title: 'Export failures', impact: 'minor', status: 'identified' })] })], { scope: 'all' }, NOW)
+    expect(minor).toContain('<title>🟡 ElevenLabs: Export failures</title>')
+  })
+
+  it('marks a resolved item title with the green emoji + "Resolved"', () => {
+    const xml = buildRssFeed([service({ incidents: [incident({ id: 'r', title: 'Outage', status: 'resolved', resolvedAt: '2026-05-10T14:00:00.000Z', duration: '2h' })] })], { scope: 'all' }, NOW)
+    expect(xml).toContain('<title>🟢 Claude: Resolved — Outage</title>')
+  })
+
+  it('renders the description as CDATA HTML paragraphs with a bold impact label', () => {
+    const xml = buildRssFeed([service({ name: 'ElevenLabs', status: 'degraded', incidents: [incident({ id: 'm', impact: 'minor', status: 'identified', timeline: [{ stage: 'identified', text: 'Scaling resources', at: '2026-05-10T12:30:00.000Z' }] })] })], { scope: 'all' }, NOW)
+    expect(xml).toContain('<description><![CDATA[<p>🟡 <strong>Minor</strong> · identified</p>')
+    expect(xml).toContain('<p>Scaling resources</p>')
+    expect(xml).toContain(']]></description>')
+  })
+
+  it('escapes HTML-significant characters inside the CDATA description (no injection)', () => {
+    const xml = buildRssFeed([service({ status: 'down', incidents: [incident({ id: 'x', impact: 'major', timeline: [{ stage: 'investigating', text: '<img src=x onerror=alert(1)>', at: '2026-05-10T12:00:00.000Z' }] })] })], { scope: 'all' }, NOW)
+    expect(xml).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    expect(xml).not.toContain('<img src=x')
   })
 })
 
@@ -229,8 +370,10 @@ describe('buildRssFeed — item fields', () => {
       { scope: 'all' },
       NOW,
     )
-    expect(xml).toContain('Latest update: root cause found')
-    expect(xml).toContain('Duration: 1h 20m')
+    // Description is now structured HTML (#467): the latest timeline text is its own <p>,
+    // duration folds into the meta line. Only the latest entry is shown, never earlier ones.
+    expect(xml).toContain('<p>root cause found</p>')
+    expect(xml).toContain('1h 20m')
     expect(xml).not.toContain('looking into it')
   })
 

@@ -14,8 +14,9 @@ export interface DailySummaryData {
   latencySnapshots: Array<{ t: string; data: Record<string, number> }>
   incidentCountToday: { newCount: number; resolvedCount: number }
   alertCounts?: { incidents: number; resolved: number; down: number; degraded: number; recovered: number } | null
-  webhookCounts?: { discord: number; slack: number }
-  deliveryCounts?: { discord: number; slack: number; failed: number } | null
+  // Discord-only since #467 — Slack moved to native /feed RSS (no per-user webhook registered or proxied).
+  webhookCounts?: { discord: number }
+  deliveryCounts?: { discord: number; failed: number } | null
   redditCount: number
   securityCount?: number
   vitals?: VitalsDaily | null
@@ -117,23 +118,12 @@ export function buildDailySummary(data: DailySummaryData): string {
     if (incidentCountToday.resolvedCount > 0) incParts.push(`${incidentCountToday.resolvedCount} resolved`)
     if (incParts.length > 0) lines.push(`\n📬 **Alerts Sent Today**: ${incParts.join(' · ')}`)
   }
-  if (deliveryCounts && (deliveryCounts.discord > 0 || deliveryCounts.slack > 0 || deliveryCounts.failed > 0)) {
-    const parts: string[] = []
-    if (deliveryCounts.discord > 0) parts.push(`${deliveryCounts.discord} Discord`)
-    if (deliveryCounts.slack > 0) parts.push(`${deliveryCounts.slack} Slack`)
+  if (deliveryCounts && (deliveryCounts.discord > 0 || deliveryCounts.failed > 0)) {
     const failText = deliveryCounts.failed > 0 ? ` (${deliveryCounts.failed} failed)` : ''
-    lines.push(`📨 **User Webhook Delivery**: ${parts.join(', ')}${failText}`)
+    lines.push(`📨 **User Webhook Delivery**: ${deliveryCounts.discord} Discord${failText}`)
   }
   if (webhookCounts) {
-    const total = webhookCounts.discord + webhookCounts.slack
-    if (total > 0) {
-      const parts: string[] = []
-      if (webhookCounts.discord > 0) parts.push(`${webhookCounts.discord} Discord`)
-      if (webhookCounts.slack > 0) parts.push(`${webhookCounts.slack} Slack`)
-      lines.push(`🔗 **Active Webhooks**: ${parts.join(', ')}`)
-    } else {
-      lines.push(`🔗 **Active Webhooks**: 0`)
-    }
+    lines.push(`🔗 **Active Discord Webhooks**: ${webhookCounts.discord}`)
   }
   if (redditCount > 0) lines.push(`📢 **Reddit**: ${redditCount} posts detected`)
   if (data.securityCount && data.securityCount > 0) lines.push(`🔒 **Security**: ${data.securityCount} alerts detected`)
