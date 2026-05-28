@@ -254,6 +254,13 @@ describe('buildRssFeed — item formatting (#467)', () => {
     expect(xml).toContain(']]></description>')
   })
 
+  it('separates description paragraphs with a newline so flatteners (Slack /feed) don\'t glue them (#479)', () => {
+    const inc = incident({ id: 'sep', title: 'Outage', status: 'resolved', resolvedAt: '2026-05-10T14:00:00.000Z', duration: '14m', timeline: [{ stage: 'resolved', text: 'Qwen3 recovered', at: '2026-05-10T14:00:00.000Z' }] })
+    const xml = buildRssFeed([service({ incidents: [inc] })], { scope: 'all' }, NOW)
+    expect(xml).toContain('lasted 14m</p>\n<p>Qwen3 recovered</p>')
+    expect(xml).not.toContain('14m</p><p>') // not glued
+  })
+
   it('escapes HTML-significant characters inside the CDATA description (no injection)', () => {
     const xml = buildRssFeed([service({ status: 'down', incidents: [incident({ id: 'x', impact: 'major', timeline: [{ stage: 'investigating', text: '<img src=x onerror=alert(1)>', at: '2026-05-10T12:00:00.000Z' }] })] })], { scope: 'all' }, NOW)
     expect(xml).toContain('&lt;img src=x onerror=alert(1)&gt;')

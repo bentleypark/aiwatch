@@ -231,7 +231,11 @@ function descHtml(
   if (coAffected.length > 0) lines.push(`<p>Also affecting: ${escHtml(coAffected.join(', '))}</p>`)
   if (latest?.text) lines.push(`<p>${escHtml(latest.text)}</p>`)
   if (opts.fallbackText) lines.push(`<p>↪ ${escHtml(opts.fallbackText)}</p>`)
-  return lines.join('')
+  // Join with a newline, not '' (#479): block-level <p> render with a break in real RSS readers,
+  // but Slack's /feed app FLATTENS the tags and would otherwise concatenate adjacent paragraphs
+  // ("lasted 14m" + "Qwen3…" → "14mQwen3…"). The newline is insignificant whitespace between block
+  // elements for HTML readers, and a line break for flatteners.
+  return lines.join('\n')
 }
 
 function itemXml(
