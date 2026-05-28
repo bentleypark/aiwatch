@@ -73,6 +73,14 @@ OpenAI-compatible `res.choices[0].message.content` / `.reasoning` shape (model-d
 **chub vs MemPalace**: chub = external API ground-truth (public, shared); MemPalace = this project's
 decisions/debugging/feedback (private, project-scoped). Complementary, different layers.
 
+### modern-web-guidance + when-to-use-which
+The **`modern-web-guidance`** Claude Code plugin (Google Chrome marketplace) adds Baseline-current
+web-platform skills (a11y / Core Web Vitals / modern HTML/CSS/JS); run its skill **first** on any
+HTML/CSS/client-JS work. Install: `/plugin marketplace add GoogleChrome/modern-web-guidance` +
+`/plugin install modern-web-guidance@googlechrome`. The full trigger map (which of chub vs
+modern-web-guidance to run by file path) and the `tooling-trigger.sh` PreToolUse backstop are in
+**[docs/reference/reference-tooling.md](docs/reference/reference-tooling.md)**.
+
 ## Commands
 
 ```bash
@@ -197,10 +205,11 @@ gh pr merge --squash --delete-branch
 
 ### Workflow-gate hooks (#415)
 
-`.claude/settings.json` wires three enforcement hooks (scripts in `.claude/hooks/`) — because written rules alone (this file + auto-memory) only get probabilistic compliance:
+`.claude/settings.json` wires four enforcement hooks (scripts in `.claude/hooks/`) — because written rules alone (this file + auto-memory) only get probabilistic compliance:
 - **`workflow-gates-reminder.sh`** (UserPromptSubmit) — re-injects the 4 non-negotiable gates (text in `.claude/hooks/workflow-gates.txt`) as `additionalContext` on **every turn**. Targets the root cause (rules are passive context loaded once at session start; compaction drops methodology), and is the only hook surface that fires each turn + survives compaction. Soft (cannot block); logged as `inject`. Mirrors memory note `feedback_workflow_gates`.
 - **`git-mutation-gate.sh`** (PreToolUse/Bash) — fires before `git commit` / `git push` / `gh pr create` / `gh pr merge`. **Soft** (warns via `systemMessage`, never blocks). The step-3.5 reminder fires on **every** matched mutation (always `warn`) — a running dev server is now only an *informational hint*, **not** a silence condition, because a port probe can't distinguish "the assistant started + curl-checked a server itself" from "the user confirmed in-browser" (the #430 false-pass; #415 2026-05-19 gap). Also flags `--no-verify` / `--no-gpg-sign`.
 - **`stop-nag-gate.sh`** (Stop) — reads the just-finished assistant message from the transcript; if its closing line is an auto-proceed nag ("shall I proceed/merge/continue?", "진행할까요?", "다음 작업 진행할까요?", …) it **re-prompts** (`decision: block`) to re-send the closing without the nag. `stop_hook_active` guards the loop.
+- **`tooling-trigger.sh`** (PreToolUse/Edit|Write|MultiEdit) — soft path-based reminder (`systemMessage`, never blocks) to run **chub** first on external-integration files or **modern-web-guidance** first on frontend HTML/CSS/JS; the #415 backstop for those skills' probabilistic triggers. Logged as `inject`. Trigger map: **[docs/reference/reference-tooling.md](docs/reference/reference-tooling.md)**.
 
 > **Coverage limit (#415 2026-05-19)**: no `PreToolUse(Bash)` hook can *enforce* step 3.5 — the user's in-browser confirmation is a user message the hook never sees, and the violating action (launching PR review via the `Agent` tool) isn't even a Bash command. The reminder + always-on git-gate raise salience; the actual step-3.5 wait remains **behavioral** (STOP after requesting verification until the user answers).
 

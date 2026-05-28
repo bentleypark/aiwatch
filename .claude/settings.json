@@ -24,6 +24,17 @@
             "statusMessage": "Checking git-mutation gate (#415)..."
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/tooling-trigger.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking reference-tooling triggers..."
+          }
+        ]
       }
     ],
     "Stop": [
