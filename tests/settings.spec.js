@@ -36,6 +36,28 @@ test.describe('Settings', () => {
     await expect(html).not.toHaveAttribute('data-theme', 'light')
   })
 
+  test('Alert Targets "Custom" reveals a per-service picker that persists (#470)', async ({ page }) => {
+    const main = page.locator('main')
+    // Default target is "All" — no picker rendered.
+    await expect(main.getByText(/Alert services \(/)).toHaveCount(0)
+
+    // Switch the Alert Targets segment to Custom → picker appears, all selected by default.
+    await main.locator('button').filter({ hasText: /^Custom$/ }).evaluate((el) => el.click())
+    await expect(main.getByText(/Alert services \(\d+\/\d+\)/)).toBeVisible()
+
+    // "None" empties the selection → count 0 + an explicit "no alerts" warning.
+    await main.locator('button').filter({ hasText: /^None$/ }).evaluate((el) => el.click())
+    await expect(main.getByText(/Alert services \(0\//)).toBeVisible()
+    await expect(main.getByText(/won't receive any alerts/)).toBeVisible()
+
+    // Persist + reload: Custom (and the empty selection) survive.
+    await main.locator('button').filter({ hasText: /Save settings/ }).evaluate((el) => el.click())
+    await page.reload()
+    await waitForDataLoad(page)
+    await navigateToSettings(page)
+    await expect(page.locator('main').getByText(/Alert services \(0\//)).toBeVisible()
+  })
+
   test('language toggle switches UI text', async ({ page }) => {
     await expect(page.locator('main').getByText('General')).toBeVisible()
 

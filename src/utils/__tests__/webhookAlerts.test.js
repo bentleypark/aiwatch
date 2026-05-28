@@ -32,14 +32,18 @@ describe('computeStatusAlerts', () => {
     expect(degradedOnly).toEqual([])
     const downEntry = computeStatusAlerts([svc('a', 'operational')], [svc('a', 'down')], cond)
     expect(downEntry).toHaveLength(1)
+    const degradedToDown = computeStatusAlerts([svc('a', 'degraded')], [svc('a', 'down')], cond)
+    expect(degradedToDown).toHaveLength(1)
+    // Recovery FROM a Major Outage is still alerted (prevStatus === 'down'), so a down→operational
+    // "all clear" reaches the user even in down-only mode (#470).
     const downRecovery = computeStatusAlerts([svc('a', 'down')], [svc('a', 'operational')], cond)
     expect(downRecovery).toHaveLength(1)
+    expect(downRecovery[0]).toMatchObject({ prevStatus: 'down', status: 'operational' })
   })
 
-  it("alertCondition 'degraded' ignores nothing-to-operational noise but keeps any non-operational change", () => {
-    const cond = { ...base, alertCondition: 'degraded' }
-    // operational stays operational is already filtered by "no change"; this guards the explicit rule
-    expect(computeStatusAlerts([svc('a', 'degraded')], [svc('a', 'down')], cond)).toHaveLength(1)
+  it("alertCondition 'all' fires on every status change incl. degraded-only", () => {
+    const cond = { ...base, alertCondition: 'all' }
+    expect(computeStatusAlerts([svc('a', 'operational')], [svc('a', 'degraded')], cond)).toHaveLength(1)
     expect(computeStatusAlerts([svc('a', 'degraded')], [svc('a', 'operational')], cond)).toHaveLength(1)
   })
 
@@ -159,6 +163,18 @@ describe('runWebhookAlerts (dispatch — Discord only)', () => {
     runWebhookAlerts([svc('claude', 'operational')], [svc('claude', 'down')])
     runWebhookAlerts([svc('claude', 'operational')], [svc('claude', 'down')])
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('alertTarget custom dispatches only for selected services (#470 picker payoff)', () => {
+    withSettings({ alertTarget: 'custom', alertServices: ['openai'] })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true })
+    // Both go down, but only openai is in alertServices → exactly one alert, for openai.
+    runWebhookAlerts(
+      [svc('claude', 'operational'), svc('openai', 'operational')],
+      [svc('claude', 'down'), svc('openai', 'down')],
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).payload.embeds[0].title).toContain('OPENAI — Down')
   })
 
   // ── incident path + first-run guard ──────────────────────────────────

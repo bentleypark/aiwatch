@@ -19,6 +19,14 @@ const canUseStorage = (() => {
 
 const SETTINGS_EVENT = 'aiwatch-settings-change'
 
+// Normalize a stored/incoming alertCondition. #470 removed 'degraded' (it behaved identically to
+// 'all'); migrate it so a user who picked it keeps the same "alert on every change" behavior
+// instead of silently snapping to the default. Unknown values fall back to `fallback`.
+export function normalizeAlertCondition(v, fallback) {
+  if (v === 'degraded') return 'all'
+  return VALID_ALERT_CONDITIONS.includes(v) ? v : fallback
+}
+
 function readStored() {
   if (!canUseStorage) return DEFAULT_SETTINGS
   try {
@@ -51,7 +59,7 @@ function readStored() {
           })()
         : DEFAULT_SETTINGS.enabledServices,
       discordUrl: typeof parsed.discordUrl === 'string' ? parsed.discordUrl : DEFAULT_SETTINGS.discordUrl,
-      alertCondition: VALID_ALERT_CONDITIONS.includes(parsed.alertCondition) ? parsed.alertCondition : DEFAULT_SETTINGS.alertCondition,
+      alertCondition: normalizeAlertCondition(parsed.alertCondition, DEFAULT_SETTINGS.alertCondition),
       alertTarget: ['all', 'custom'].includes(parsed.alertTarget) ? parsed.alertTarget : DEFAULT_SETTINGS.alertTarget,
       alertServices: Array.isArray(parsed.alertServices)
         ? parsed.alertServices.filter((id) => ALL_SERVICE_IDS.includes(id))
@@ -87,7 +95,7 @@ export function useSettings() {
         ? next.enabledServices.filter((id) => ALL_SERVICE_IDS.includes(id))
         : settings.enabledServices,
       discordUrl: typeof next.discordUrl === 'string' ? next.discordUrl : settings.discordUrl,
-      alertCondition: VALID_ALERT_CONDITIONS.includes(next.alertCondition) ? next.alertCondition : settings.alertCondition,
+      alertCondition: normalizeAlertCondition(next.alertCondition, settings.alertCondition),
       alertTarget: ['all', 'custom'].includes(next.alertTarget) ? next.alertTarget : settings.alertTarget,
       alertServices: Array.isArray(next.alertServices)
         ? next.alertServices.filter((id) => ALL_SERVICE_IDS.includes(id))

@@ -225,17 +225,20 @@ export function shouldShowFallback(svcs, allRecovered) {
   return true
 }
 
-export const VALID_ALERT_CONDITIONS = ['down', 'degraded', 'all']
+// 'degraded' was removed (#470): with 3 statuses it behaved identically to 'all' (every change
+// involves a non-operational state), so it was a redundant, mislabeled option. useSettings
+// migrates any stored 'degraded' → 'all'.
+export const VALID_ALERT_CONDITIONS = ['down', 'all']
 
 export const DEFAULT_SETTINGS = {
   period: '7d',
   sla: 99.9,
   enabledServices: ALL_SERVICE_IDS,
   discordUrl: '',
-  alertCondition: 'down',  // 'down' | 'degraded' | 'all'
+  alertCondition: 'down',  // 'down' | 'all'  (#470 removed 'degraded')
   alertTarget: 'all',      // 'all' | 'custom'
   alertServices: ALL_SERVICE_IDS,
-  alertIncidents: false,
+  alertIncidents: true,    // on by default — a configured Discord webhook gets incident alerts without a second opt-in (no-op until discordUrl is set)
 }
 
 export const SCORE_BG_CLASS = {
