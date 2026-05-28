@@ -11,7 +11,7 @@
 // open (no raw URL is stored server-side — privacy by design). Cross-tab/poll dedup via a localStorage
 // cooldown; the operator (Worker) posts to a *different* webhook, so there is no cross-source dupe.
 
-import { SETTINGS_STORAGE_KEY } from './constants'
+import { SETTINGS_STORAGE_KEY, getGroupedFallbacks } from './constants'
 
 const ALERT_COOLDOWN_MS = 5 * 60_000
 const COOLDOWN_STORAGE_KEY = 'aiwatch-alert-cooldowns'
@@ -129,13 +129,72 @@ function statusEmbed({ svcId, name, prevStatus, status }) {
   }
 }
 
-function incidentEmbed({ kind, svcId, name, title, duration }) {
+// Neutralize @everyone/@here pings, user/role mentions, and code fences in provider-sourced text
+// before POSTing to the user's Discord channel (#474). Mirrors the operator's worker sanitize()
+// (worker/src/utils.ts) — the operator applies it to incident titles, so the per-user path must too.
+function sanitizeForDiscord(s, maxLen = 1000) {
+  return String(s ?? '')
+    .replace(/@(everyone|here)/g, '@​$1')
+    .replace(/<@[!&]?\d+>/g, '[mention]')
+    .replace(/```/g, '\\`\\`\\`')
+    .slice(0, maxLen)
+}
+
+/** Find the AI analysis entry for a grouped incident across its affected services (#474). */
+function findAiAnalysis(aiAnalysis, svcIds, incId) {
+  for (const svcId of svcIds) {
+    const arr = aiAnalysis?.[svcId]
+    if (!Array.isArray(arr)) continue
+    const match = arr.find((a) => a && a.incidentId === incId)
+    if (match) return match
+  }
+  return null
+}
+
+/** Build a rich, grouped incident embed (#474) matching the operator alert: provider-grouped
+ *  display name for multi-service incidents, a Suggested fallback line for impaired services, and
+ *  an AI-analysis section when available. `group` = { kind, incId, title, duration, svcIds[], names[] }. */
+function incidentEmbed(group, services, aiAnalysis, byId) {
+  const { kind, incId, title, duration, svcIds, names } = group
   const resolved = kind === 'resolved'
+  const first = byId.get(svcIds[0])
+  // Operator parity: "Anthropic (Claude API, claude.ai, Claude Code)" when >1 service shares the incident.
+  const displayName = names.length > 1 && first?.provider ? `${first.provider} (${names.join(', ')})` : names[0]
   const durationText = duration ? ` (${duration})` : ''
+
+  const sections = [sanitizeForDiscord(title)]
+  if (!resolved) {
+    const ai = findAiAnalysis(aiAnalysis, svcIds, incId)
+    if (ai?.summary) {
+      const aiLines = [`🤖 ${sanitizeForDiscord(ai.summary)}`]
+      // Mirror formatRecoveryDisplay / AnalysisModal: 'N/A' means no estimate → show the friendly
+      // phrasing rather than a bare "N/A"; skip the line for the other non-estimate sentinel.
+      const recovery = ai.estimatedRecovery === 'N/A' ? 'Exceeded typical pattern' : ai.estimatedRecovery
+      if (recovery && recovery !== 'No historical data for estimation') aiLines.push(`⏱ Est. recovery: ${recovery}`)
+      if (ai.affectedScope?.length) aiLines.push(`📡 Scope: ${sanitizeForDiscord(ai.affectedScope.join(', '), 200)}`)
+      sections.push(aiLines.join('\n'))
+    }
+    // Per-category fallback for ALL impaired services in this (possibly multi-category) incident,
+    // mirroring the dashboard/operator grouped fallback (#474). A multi-surface Anthropic incident
+    // (Claude API = LLM, claude.ai = app, Claude Code = agent) shows one alternative line per
+    // category — not just the first service's. getGroupedFallbacks handles tier subdivision,
+    // EXCLUDE_FALLBACK, operational filtering, and same-provider exclusion.
+    const affected = svcIds.map((id) => byId.get(id)).filter((s) => s && s.status !== 'operational')
+    const fbGroups = getGroupedFallbacks(affected, services)
+    if (fbGroups.length > 0) {
+      const fmt = (items) => items.map((i) => (i.aiwatchScore != null ? `${i.name} (Score ${i.aiwatchScore})` : i.name)).join(' · ')
+      if (fbGroups.length === 1) {
+        sections.push(`👉 Suggested fallback: ${fmt(fbGroups[0].items)}`)
+      } else {
+        sections.push(`👉 Suggested fallback\n${fbGroups.map((g) => `• ${g.label}: ${fmt(g.items)}`).join('\n')}`)
+      }
+    }
+  }
+
   return {
-    title: resolved ? `🟢 ${name} — Incident resolved${durationText}` : `🔴 ${name} — New incident`,
-    url: `https://ai-watch.dev/#${svcId}`,
-    description: title,
+    title: resolved ? `🟢 ${displayName} — Incident resolved${durationText}` : `🔴 ${displayName} — New incident`,
+    url: `https://ai-watch.dev/#${svcIds[0]}`,
+    description: sections.join('\n\n'),
     color: resolved ? 0x57F287 : 0xED4245,
     timestamp: new Date().toISOString(),
     footer: { text: 'AIWatch Alert' },
@@ -160,35 +219,67 @@ function sendDiscord(discordUrl, embed) {
 // every already-open incident on page load). Module-scoped, reset on full reload.
 let incidentFirstRun = true
 
+/** Group per-(service, incident) alerts from computeIncidentAlerts into one entry per incident
+ *  (kind + incId), collecting all affected service ids/names — so a multi-service incident becomes
+ *  a single grouped embed (#474). svcIds[0] (the first service seen in currentServices order)
+ *  anchors the embed's provider, url, and fallback source; currentServices order is stable. */
+function groupIncidentAlerts(incidentAlerts) {
+  const groups = new Map()
+  for (const a of incidentAlerts) {
+    const k = `${a.kind}:${a.incId}`
+    const g = groups.get(k)
+    if (g) {
+      if (!g.svcIds.includes(a.svcId)) { g.svcIds.push(a.svcId); g.names.push(a.name) }
+    } else {
+      groups.set(k, { kind: a.kind, incId: a.incId, title: a.title, duration: a.duration, svcIds: [a.svcId], names: [a.name] })
+    }
+  }
+  return [...groups.values()]
+}
+
 /** Run browser-side Discord alerting for one poll. No-op unless a Discord webhook is configured. */
-export function runWebhookAlerts(prevServices, currentServices) {
+export function runWebhookAlerts(prevServices, currentServices, aiAnalysis = {}) {
   const settings = readAlertSettings()
   const discordUrl = settings?.discordUrl
   if (!discordUrl) return
 
+  const currSnap = buildIncidentSnapshot(currentServices)
+
+  // Incident alerts are computed first so status alerts can dedup against them (#473). On the first
+  // poll we only baseline the incident snapshot (never alert on already-open incidents), so
+  // incidentGroups stays empty — but status alerts still process (production's first poll has an
+  // empty prevServices ⇒ computeStatusAlerts returns [] anyway; a later poll is the real first diff).
+  let incidentGroups = []
+  if (incidentFirstRun) {
+    incidentFirstRun = false
+  } else {
+    let prevSnap = {}
+    try {
+      const raw = localStorage.getItem(PREV_INCIDENTS_KEY)
+      if (raw) { const parsed = JSON.parse(raw); prevSnap = parsed.data ?? parsed }
+    } catch { /* ignore */ }
+    incidentGroups = groupIncidentAlerts(computeIncidentAlerts(prevSnap, currSnap, currentServices, settings))
+  }
+  const incidentSvcIds = new Set(incidentGroups.flatMap((g) => g.svcIds))
+  const byId = new Map(currentServices.map((s) => [s.id, s]))
+
   for (const a of computeStatusAlerts(prevServices, currentServices, settings)) {
+    // Suppress the status embed when an incident embed covers the same service: a new/resolved
+    // incident alert this cycle (incidentSvcIds), or an ongoing incident from a prior cycle still
+    // covering a down/degraded (operator-parity hasOngoingIncident). Status changes with NO incident
+    // (e.g. down before the status page posts one) still fire — that signal isn't duplicated.
+    if (incidentSvcIds.has(a.svcId)) continue
+    if (a.status !== 'operational' && (byId.get(a.svcId)?.incidents ?? []).some((i) => i.status !== 'resolved')) continue
     const key = `${a.svcId}:${a.status}`
     if (isInCooldown(key)) continue
     setCooldown(key)
     sendDiscord(discordUrl, statusEmbed(a))
   }
-
-  const currSnap = buildIncidentSnapshot(currentServices)
-  if (incidentFirstRun) {
-    incidentFirstRun = false
-    try { localStorage.setItem(PREV_INCIDENTS_KEY, JSON.stringify(currSnap)) } catch { /* ignore */ }
-    return
-  }
-  let prevSnap = {}
-  try {
-    const raw = localStorage.getItem(PREV_INCIDENTS_KEY)
-    if (raw) { const parsed = JSON.parse(raw); prevSnap = parsed.data ?? parsed }
-  } catch { /* ignore */ }
-  for (const a of computeIncidentAlerts(prevSnap, currSnap, currentServices, settings)) {
-    const key = a.kind === 'new' ? `inc:${a.incId}` : `inc-resolve:${a.incId}`
+  for (const g of incidentGroups) {
+    const key = g.kind === 'new' ? `inc:${g.incId}` : `inc-resolve:${g.incId}`
     if (isInCooldown(key)) continue
     setCooldown(key)
-    sendDiscord(discordUrl, incidentEmbed(a))
+    sendDiscord(discordUrl, incidentEmbed(g, currentServices, aiAnalysis, byId))
   }
   try { localStorage.setItem(PREV_INCIDENTS_KEY, JSON.stringify(currSnap)) } catch { /* ignore */ }
 }

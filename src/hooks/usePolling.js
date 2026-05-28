@@ -661,7 +661,7 @@ function usePollingInternal() {
       // server-side path only posts to the operator webhook, never to a visitor's configured one,
       // so this restores per-user delivery. No-op unless a Discord webhook is set. Best-effort;
       // fires only while a tab is open. Diff against the previous poll's snapshot.
-      runWebhookAlerts(alertPrevRef.current, merged)
+      runWebhookAlerts(alertPrevRef.current, merged, data.aiAnalysis ?? {})
       alertPrevRef.current = merged
 
       // Overlay probe RTT onto service.latency (replaces status page timing with real API RTT)
