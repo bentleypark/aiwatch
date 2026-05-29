@@ -4,6 +4,7 @@
 import { getFallbacks, buildFallbackText } from './fallback'
 import { sanitize, formatDuration } from './utils'
 import { computeLeadMs } from './detection-lead-log'
+import { kindFromKey, svcIdsForAlert } from './alert-feed'
 // #422 Phase 2 — region-switch hint in Discord alerts. We reuse the existing
 // Edge TS port rather than adding a third copy of SERVICE_REGIONS: the Worker
 // bundler (esbuild via wrangler) can import across dirs (unlike Vercel Edge,
@@ -340,6 +341,109 @@ export function formatDetectionLead(detectedAt: string | null, incidentStartedAt
   if (leadMs === null) return ''
   const mins = Math.floor(leadMs / 60_000)
   return `⚡ **Detection Lead: ${mins}m** — AIWatch detected this before the official report`
+}
+
+// #348 — outage-tweet draft (Phase 1.5: manual-assist, no X API). For Claude/OpenAI-family
+// incidents the operator Discord alert carries a ready-to-post tweet + a one-click X compose
+// (Web Intent) link, so the operator turns the #348 manual playbook into a single click at the
+// detection moment. This is OPERATOR-ONLY: the caller appends it after the per-user feed entry is
+// built, so it never reaches a visitor's relayed webhook (#475).
+//
+// id → is-down slug. Slugs MUST match api/is-down/slug-map.ts — pinned by tweet-draft-slug-sync.test.ts.
+export const TWEET_DRAFT_SERVICES: Record<string, string> = {
+  claude: 'claude',
+  openai: 'openai',
+  claudeai: 'claude-ai',
+  chatgpt: 'chatgpt',
+  claudecode: 'claude-code',
+  codex: 'codex',
+}
+
+// Headroom under X's 280-char limit. Literal .length is conservative: X counts any URL as 23 chars
+// (t.co) regardless of its literal length, so a cap on the literal string can never under-count.
+const TWEET_MAX = 270
+const X_INTENT_BASE = 'https://twitter.com/intent/tweet?text='
+
+/** Single-line, tweet-safe text: drop backticks (would break the Discord blockquote preview AND
+ *  read oddly on X) and collapse all whitespace/newlines to single spaces. */
+function cleanForTweet(s: string): string {
+  return s.replace(/[`\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function impactPhrase(impact: Incident['impact']): string {
+  switch (impact) {
+    case 'critical':
+    case 'major':
+      return 'a major outage'
+    case 'minor':
+      return 'degraded performance'
+    default:
+      return ''
+  }
+}
+
+/** Pull the duration out of a recovery embed title's trailing parens, e.g.
+ *  "🟢 Claude API — Incident Resolved (1h 20m)" → "1h 20m". Null when absent. */
+function durationFromTitle(title: string): string | null {
+  const m = title.match(/\(([^)]+)\)\s*$/)
+  return m ? m[1].trim() : null
+}
+
+function findIncident(services: ServiceStatus[], incId: string): Incident | null {
+  for (const s of services) {
+    const inc = (s.incidents ?? []).find((i) => i.id === incId)
+    if (inc) return inc
+  }
+  return null
+}
+
+/**
+ * Build the outage/recovery tweet draft for an alert, or null when the alert doesn't cover any
+ * Claude/OpenAI-family service (the only services in scope for #348). Returns the canonical tweet
+ * `text` (≤ TWEET_MAX, single line) plus the `intentUrl` that opens X's compose window prefilled.
+ *
+ * - outage (new / down / degraded): 🔴 {name} is reporting {impact}[: {title}]. Live status → …
+ * - recovery (resolved / recovered): 🟢 {name} recovered after {duration}. / 🟢 {name} has recovered. …
+ */
+export function buildTweetDraft(
+  alert: AlertCandidate,
+  services: ScoredService[],
+): { text: string; intentUrl: string } | null {
+  const kind = kindFromKey(alert.key)
+  if (!kind) return null
+  const keys = alert._mergedKeys ?? [alert.key]
+  const svcIds = svcIdsForAlert(keys, kind, services)
+  // Pick the first covered service that's in scope (a grouped incident may list a non-target sibling first).
+  const targetId = svcIds.find((id) => Boolean(TWEET_DRAFT_SERVICES[id]))
+  if (!targetId) return null
+  const svc = services.find((s) => s.id === targetId)
+  if (!svc) return null
+  const url = `https://ai-watch.dev/is-${TWEET_DRAFT_SERVICES[targetId]}-down`
+
+  let text: string
+  if (kind === 'resolved' || kind === 'recovered') {
+    const duration = durationFromTitle(alert.title)
+    text = duration
+      ? `🟢 ${svc.name} recovered after ${duration}. Live status → ${url}`
+      : `🟢 ${svc.name} has recovered. Live status → ${url}`
+  } else {
+    // down/degraded alerts carry no incId tail (svcId only), so incident-title enrichment applies
+    // to `new` incidents only; status alerts fall back to status-based phrasing below.
+    const incId = kind === 'new' ? alert.key.slice('alerted:new:'.length) : null
+    const inc = incId ? findIncident(services, incId) : null
+    const phrase = (inc && impactPhrase(inc.impact)) || (svc.status === 'degraded' ? 'degraded performance' : 'an outage')
+    const head = `🔴 ${svc.name} is reporting ${phrase}`
+    const tail = `. Live status → ${url}`
+    if (inc) {
+      const cleaned = cleanForTweet(inc.title)
+      const room = TWEET_MAX - head.length - 2 /* ": " */ - tail.length
+      const title = cleaned.length > room ? `${cleaned.slice(0, Math.max(0, room - 1)).trimEnd()}…` : cleaned
+      text = title ? `${head}: ${title}${tail}` : `${head}${tail}`
+    } else {
+      text = `${head}${tail}`
+    }
+  }
+  return { text, intentUrl: X_INTENT_BASE + encodeURIComponent(text) }
 }
 
 /** Detect service count drop — returns missing service IDs if below threshold */
