@@ -10,6 +10,7 @@ import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, 
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, classifyLead, appendLeadDiag, readLeadDiag, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
+import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex } from './webhook-subscriptions'
 import { corsHeaders } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
@@ -18,6 +19,10 @@ interface Env {
   ALLOWED_ORIGIN: string
   DISCORD_WEBHOOK_URL?: string
   ANTHROPIC_API_KEY?: string
+  // #486: AES-256 key (64 hex chars) encrypting stored per-user webhook URLs. Set via
+  // `wrangler secret put WEBHOOK_ENC_KEY`. Absent/invalid → /api/webhook/subscribe fails closed
+  // (503), so server-side per-user delivery is simply disabled rather than storing plaintext URLs.
+  WEBHOOK_ENC_KEY?: string
   // #299: operator-only shared secret for POST /api/admin/analyze. Set via
   // `wrangler secret put ADMIN_API_KEY`. Separate from ANTHROPIC_API_KEY so it
   // can be rotated independently; absent secret → endpoint always 401.
@@ -44,6 +49,23 @@ const alertProxyRate = new Map<string, { start: number; count: number }>() // ra
 const deliveryCounter = { discord: 0, failed: 0 } // in-memory counter, flushed to KV by daily summary cron (Discord-only since #467)
 const webhookPingRate = new Map<string, { start: number; count: number }>() // rate limit for /api/webhook/ping
 const publicApiRate = new Map<string, { start: number; count: number }>() // rate limit for /api/v1/*
+// #486: per-IP rate limits for the server-side subscription endpoints. subscribe/update trigger an
+// outbound message to (or mutate) an arbitrary channel → 10/hour/IP; confirm is a code check →
+// 20/hour/IP (brute-force hardening atop the 10^6 code space + the KV-side global confirm budget).
+const webhookSubRate = new Map<string, { start: number; count: number }>()   // /subscribe + /update: 10/hour/IP
+const webhookConfirmRate = new Map<string, { start: number; count: number }>() // /confirm: 20/hour/IP
+const HOUR_MS = 3_600_000
+/** Fixed-window per-IP limiter (in-memory, per-isolate — same mechanism as the existing
+ *  alertProxyRate/webhookPingRate counters, just an hour window). Returns true if over the limit.
+ *  Fixed-window means up to 2× the limit can pass across a window boundary; acceptable for these
+ *  low-frequency endpoints where the KV global confirm budget is the real abuse ceiling. */
+function overRateLimit(map: Map<string, { start: number; count: number }>, ip: string, max: number, now: number): boolean {
+  const entry = map.get(ip)
+  if (entry && entry.count >= max && now - entry.start < HOUR_MS) return true
+  if (!entry || now - entry.start >= HOUR_MS) map.set(ip, { start: now, count: 1 })
+  else entry.count++
+  return false
+}
 
 interface DailyCounters {
   [serviceId: string]: { ok: number; total: number }
@@ -1873,6 +1895,118 @@ export default {
     // doesn't exist; this endpoint unconditionally overwrites.
     if (request.method === 'POST' && url.pathname === '/api/admin/rebuild-archive') {
       return handleAdminRebuildArchive(request, env, cors)
+    }
+
+    // #486 — server-side per-user Discord subscription endpoints. The browser POSTs the raw URL +
+    // filters here; the worker stores the AES-GCM-encrypted URL and (PR3) the cron fan-out delivers
+    // directly, so alerts fire tab-independently. Ownership is proven by a confirm code sent THROUGH
+    // the webhook channel (double opt-in / challenge-response) — channel control = identity, no
+    // account/PII. CORS-guarded like /api/alert; per-IP rate limited via overRateLimit.
+    if (request.method === 'POST' && url.pathname === '/api/webhook/subscribe') {
+      const origin = request.headers.get('Origin')
+      const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown'
+      const now = Date.now()
+      if (overRateLimit(webhookSubRate, ip, 10, now)) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429, headers: { ...cors, 'Content-Type': 'application/json' } })
+      }
+      try {
+        const body = await request.json() as { url?: string; filters?: unknown }
+        const hourBucket = new Date(now).toISOString().slice(0, 13) // YYYY-MM-DDTHH — hourly budget bucket
+        const result = await subscribeWebhook(
+          env.STATUS_CACHE, env.WEBHOOK_ENC_KEY, body.url ?? '', body.filters, hourBucket,
+          new Date(now).toISOString(),
+          // The confirm message is the channel-control challenge: posted to the webhook itself. The
+          // link is crawler-safe — /confirm GET only renders a page; activation is the button POST.
+          async (target, code) => {
+            try {
+              const h = await webhookSha256Hex(target)
+              const r = await fetch(target, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: `🔔 **AIWatch** — confirm alerts for this channel:\nhttps://ai-watch.dev/confirm?h=${h}&c=${code}\n\n*(Ignore this message if you didn't request AIWatch alerts.)*` }),
+              })
+              r.body?.cancel()
+              if (!r.ok) console.warn(`[webhook/subscribe] confirm post rejected by Discord (${r.status})`)
+              return r.ok
+            } catch (err) {
+              console.warn('[webhook/subscribe] confirm post network error:', err instanceof Error ? err.message : err)
+              return false
+            }
+          },
+        )
+        if (!result.ok) {
+          return new Response(JSON.stringify({ error: result.error }), { status: result.status, headers: { ...cors, 'Content-Type': 'application/json' } })
+        }
+        // status: 'sent' (code dispatched) | 'pending' (code already in-flight) | 'confirmed'
+        // (already subscribed) — lets the SPA (PR2) show the right message without re-charging budget.
+        return new Response(JSON.stringify({ ok: true, hash: result.hash, status: result.status }), { headers: { ...cors, 'Content-Type': 'application/json' } })
+      } catch (err) {
+        console.error('[webhook/subscribe] error:', err instanceof Error ? err.message : err)
+        return new Response(JSON.stringify({ error: 'Internal error' }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } })
+      }
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/webhook/confirm') {
+      const origin = request.headers.get('Origin')
+      const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown'
+      const now = Date.now()
+      if (overRateLimit(webhookConfirmRate, ip, 20, now)) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429, headers: { ...cors, 'Content-Type': 'application/json' } })
+      }
+      try {
+        const body = await request.json() as { hash?: string; code?: string }
+        const result = await confirmWebhook(env.STATUS_CACHE, body.hash ?? '', body.code ?? '', new Date(now).toISOString())
+        if (!result.ok) {
+          return new Response(JSON.stringify({ error: result.error }), { status: result.status, headers: { ...cors, 'Content-Type': 'application/json' } })
+        }
+        return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } })
+      } catch (err) {
+        console.error('[webhook/confirm] error:', err instanceof Error ? err.message : err)
+        return new Response(JSON.stringify({ error: 'Internal error' }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } })
+      }
+    }
+
+    // Filters-only update on a confirmed sub — no new OTP (channel control already proven). A URL
+    // change is a new channel ⇒ the client must re-subscribe instead.
+    if (request.method === 'POST' && url.pathname === '/api/webhook/update') {
+      const origin = request.headers.get('Origin')
+      const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown'
+      const now = Date.now()
+      if (overRateLimit(webhookSubRate, ip, 10, now)) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429, headers: { ...cors, 'Content-Type': 'application/json' } })
+      }
+      try {
+        const body = await request.json() as { hash?: string; filters?: unknown }
+        const result = await updateWebhookFilters(env.STATUS_CACHE, body.hash ?? '', body.filters)
+        if (!result.ok) {
+          return new Response(JSON.stringify({ error: result.error }), { status: result.status, headers: { ...cors, 'Content-Type': 'application/json' } })
+        }
+        return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } })
+      } catch (err) {
+        console.error('[webhook/update] error:', err instanceof Error ? err.message : err)
+        return new Response(JSON.stringify({ error: 'Internal error' }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } })
+      }
+    }
+
+    // Unsubscribe = immediate complete deletion (privacy deletion path). hash-only, idempotent KV
+    // deletes; no rate limit (deleting a sub requires knowing the SHA-256 of the exact webhook URL,
+    // infeasible without the URL itself, so there's no useful abuse surface to throttle).
+    if (request.method === 'POST' && url.pathname === '/api/webhook/unsubscribe') {
+      const origin = request.headers.get('Origin')
+      const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)
+      try {
+        const body = await request.json() as { hash?: string }
+        const result = await unsubscribeWebhook(env.STATUS_CACHE, body.hash ?? '')
+        if (!result.ok) {
+          return new Response(JSON.stringify({ error: result.error }), { status: result.status, headers: { ...cors, 'Content-Type': 'application/json' } })
+        }
+        return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } })
+      } catch (err) {
+        console.error('[webhook/unsubscribe] error:', err instanceof Error ? err.message : err)
+        return new Response(JSON.stringify({ error: 'Internal error' }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } })
+      }
     }
 
     // POST/DELETE /api/webhook/ping — track active webhook registrations (hashed, no raw URLs stored)
