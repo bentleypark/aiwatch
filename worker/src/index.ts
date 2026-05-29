@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, buildTweetDraft } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
@@ -676,13 +676,28 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     if (alert.regionText) parts.push(`${DIV}\n${alert.regionText}`)
     parts.push(`${DIV}\n[View on AIWatch](${alert.url})`)
     const description = parts.join('\n')
-    await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-      title: alert.title,
-      description,
-      color: alert.color,
-    })
+    // #475 invariant: the per-user relay feed must use the CLEAN description — build it before the
+    // operator-only tweet draft is appended, so the draft (an operator action) never reaches a
+    // visitor's webhook.
     const feedEntry = buildFeedEntry(alert, description, scored)
     if (feedEntry) feedEntries.push(feedEntry)
+    // #348 — operator-only tweet draft + X compose link for Claude/OpenAI-family alerts.
+    // Guarded: the draft is an optional nicety, so a bug here must never abort the send loop or
+    // the post-loop feed append (the operator alert is the critical path). Log so it's diagnosable.
+    let draft: { text: string; intentUrl: string } | null = null
+    try {
+      draft = buildTweetDraft(alert, scored)
+    } catch (err) {
+      console.error('[cron] tweet draft build failed (alert still sent):', alert.key, err instanceof Error ? err.message : err)
+    }
+    const operatorDescription = draft
+      ? `${description}\n${DIV}\n🐦 **TWEET DRAFT** — [✍️ Post on X](${draft.intentUrl})\n> ${draft.text}`
+      : description
+    await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+      title: alert.title,
+      description: operatorDescription,
+      color: alert.color,
+    })
   }
   // #475 — single read-modify-write after the send loop (alerts are infrequent; negligible KV budget).
   // Best-effort (must not affect the operator sends above), but a failure means EVERY per-user webhook
