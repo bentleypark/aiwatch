@@ -59,7 +59,9 @@ export default async function handler(req: Request) {
       return new Response('Not Found', { status: 404 })
     }
 
-    // Single API call — /api/status always returns real-time data (no KV dependency)
+    // Single API call to the KV-backed /api/status/cached (fast SSR). The cron refreshes that cache
+    // on every status-change edge (#488), so an incident is visible here within one cron cycle —
+    // without paying the ~33-service live fan-out of /api/status on this high-traffic SEO surface.
     let serviceData = null
     let fallbacks: Array<{ id: string; name: string; score: number | null; status: string }> = []
     let aiInsight: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string } | null = null

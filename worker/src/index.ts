@@ -10,6 +10,7 @@ import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, 
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, classifyLead, appendLeadDiag, readLeadDiag, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
+import { refreshStatusCacheOnChange } from './cache-refresh'
 import { corsHeaders } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
@@ -727,6 +728,27 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       console.error('[cron] alert count update failed:', err instanceof Error ? err.message : err)
     }
   }
+
+  // #488 — refresh the status cache on a status-change edge so OG/SEO surfaces (which read CACHE_KEY
+  // via /api/status/cached) reflect an incident within one cron cycle, instead of lagging up to the
+  // 10-min cacheWrite throttle. Reuses the live `services` the cron already alerted on (RAW
+  // ServiceStatus[], matching cacheWrite's contract — NOT `scored`; /api/status/cached recomputes
+  // scores on read). Writes only when an alert fired (sent.length > 0). Bypasses the throttle
+  // (event-driven, rare) — see cache-refresh.ts. Align lastKvWrite so a same-isolate /api/status
+  // doesn't immediately double-write.
+  //
+  // Known limitation (#488): this refreshes on status *edges* (alert fired), so the OG card's status
+  // is correct from the down-edge onward, but the AIWatch Score keeps drifting through a long incident
+  // and is only re-snapshotted at the next edge (recovery) or by the throttled /api/status path. The
+  // headline (status flip) is fixed; continuous score freshness during an active incident is a
+  // deliberate non-goal here (it would mean a KV write every cron while any incident is active).
+  const refreshed = await refreshStatusCacheOnChange(env.STATUS_CACHE, services, sent.length, CACHE_KEY, CACHE_TTL_SECONDS)
+  // Escalated to error (not warn): a failed refresh silently reintroduces the exact staleness bug
+  // #488 fixes, and it's most likely to fail precisely during an incident (KV under write pressure).
+  // kvPut already logs the underlying cause; this records the user-facing impact at the same severity
+  // the sibling cacheWrite uses for KV failures.
+  if (refreshed) lastKvWrite = Date.now()
+  else if (sent.length > 0) console.error('[cron] status-change cache refresh failed — OG/SEO previews may show pre-incident state until the next /api/status write')
 
   // Refresh TTL on existing AI analyses / re-analyze missing ones (max 2 per cron)
   // monitoring = "recovery confirmed, verifying" — treat as inactive (no TTL refresh)
