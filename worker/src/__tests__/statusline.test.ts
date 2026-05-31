@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { buildStatuslinePayload, isStatuslineRequest } from '../statusline'
 import type { ServiceStatus } from '../types'
 
@@ -71,6 +71,60 @@ describe('/api/status/cached statusline routing contract (#438)', () => {
   it('routes untagged + non-statusline requests to the full path', () => {
     expect(dispatch('', { services: [] }).path).toBe('full')
     expect(dispatch('src=dashboard', { services: [] }).path).toBe('full')
+  })
+})
+
+describe('WAE writeDataPoint contract (#494)', () => {
+  // Mirrors the WAE branch in the index.ts statusline handler.
+  // Pins: blob1/double1/index shape, 32-byte safeSrc cap, optional-binding guard.
+  function dispatchWithWae(
+    search: string,
+    analytics: { writeDataPoint: ReturnType<typeof vi.fn> } | undefined,
+  ) {
+    const sp = new URLSearchParams(search)
+    if (!isStatuslineRequest(sp)) return
+    const src = sp.get('src')
+    if (src && analytics) {
+      try {
+        const safeSrc = src.slice(0, 32)
+        analytics.writeDataPoint({ blobs: [safeSrc], doubles: [1], indexes: [safeSrc] })
+      } catch { /* best-effort */ }
+    }
+  }
+
+  it('writes one data point with correct blob/double/index for a statusline request', () => {
+    const wae = { writeDataPoint: vi.fn() }
+    dispatchWithWae('src=statusline-compact_badge', wae)
+    expect(wae.writeDataPoint).toHaveBeenCalledOnce()
+    expect(wae.writeDataPoint).toHaveBeenCalledWith({
+      blobs: ['statusline-compact_badge'],
+      doubles: [1],
+      indexes: ['statusline-compact_badge'],
+    })
+  })
+
+  it('does not write when env.ANALYTICS is absent (local dev / tests)', () => {
+    const wae = { writeDataPoint: vi.fn() }
+    dispatchWithWae('src=statusline-compact_badge', undefined)
+    expect(wae.writeDataPoint).not.toHaveBeenCalled()
+  })
+
+  it('does not write for non-statusline requests', () => {
+    const wae = { writeDataPoint: vi.fn() }
+    dispatchWithWae('', wae)
+    dispatchWithWae('src=dashboard', wae)
+    expect(wae.writeDataPoint).not.toHaveBeenCalled()
+  })
+
+  it('caps src to 32 bytes to stay within WAE index limit', () => {
+    const wae = { writeDataPoint: vi.fn() }
+    const longSrc = 'statusline-' + 'x'.repeat(60) // 71 chars total
+    dispatchWithWae(`src=${longSrc}`, wae)
+    expect(wae.writeDataPoint).toHaveBeenCalledOnce()
+    const call = wae.writeDataPoint.mock.calls[0][0]
+    expect(call.blobs[0]).toHaveLength(32)
+    expect(call.indexes[0]).toHaveLength(32)
+    expect(call.blobs[0]).toBe(call.indexes[0]) // same safeSrc used for both
   })
 })
 

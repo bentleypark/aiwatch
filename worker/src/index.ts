@@ -40,6 +40,10 @@ interface Env {
   EDGE_ALERT_TOKEN?: string
   AI?: Ai
   STATUS_CACHE: KVNamespace
+  // #494: Workers Analytics Engine dataset for statusline traffic measurement.
+  // Optional so local dev (wrangler dev --local) and test environments without the
+  // binding continue to work — writeDataPoint is skipped when absent.
+  ANALYTICS?: AnalyticsEngineDataset
 }
 
 // ── KV Cache + Daily Counters ──
@@ -2341,6 +2345,25 @@ export default {
       // still using ai-watch.dev get the small payload here via the rewrite.
       if (isStatuslineRequest(url.searchParams)) {
         const liteCache = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+        // Record per-preset statusline request count in WAE (#494) so we can
+        // isolate ?src=statusline-* traffic from regular cached-endpoint traffic
+        // when evaluating #400 Phase 1 distribution gates. writeDataPoint is
+        // synchronous (void return) but can throw on payload validation errors
+        // or binding misconfiguration — wrap in try/catch so a WAE failure never
+        // aborts the statusline response. WAE index entries are capped at 32 bytes.
+        const src = url.searchParams.get('src') // e.g. "statusline-compact_badge"
+        if (src && env.ANALYTICS) {
+          try {
+            const safeSrc = src.slice(0, 32)
+            env.ANALYTICS.writeDataPoint({
+              blobs: [safeSrc],   // blob1: full src tag (preset slug)
+              doubles: [1],       // double1: request counter (sum in GraphQL queries)
+              indexes: [safeSrc], // fast dimension filter (max 32 bytes)
+            })
+          } catch (err) {
+            console.warn('[wae] writeDataPoint failed:', err instanceof Error ? err.message : err)
+          }
+        }
         // Intentional: 200 with empty services when the cache is missing (fail-silent
         // — the jq over an empty array shows a clean statusline) rather than the
         // non-lite branch's 503; CORS `*` since this is public, unauthenticated,
