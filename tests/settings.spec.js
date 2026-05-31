@@ -36,7 +36,7 @@ test.describe('Settings', () => {
     await expect(html).not.toHaveAttribute('data-theme', 'light')
   })
 
-  test('Alert Targets "Custom" reveals a per-service picker that persists (#470)', async ({ page }) => {
+  test('Alert Targets "Custom" reveals a per-service picker (#470)', async ({ page }) => {
     const main = page.locator('main')
     // Default target is "All" — no picker rendered.
     await expect(main.getByText(/Alert services \(/)).toHaveCount(0)
@@ -50,12 +50,10 @@ test.describe('Settings', () => {
     await expect(main.getByText(/Alert services \(0\//)).toBeVisible()
     await expect(main.getByText(/won't receive any alerts/)).toBeVisible()
 
-    // Persist + reload: Custom (and the empty selection) survive.
-    await main.locator('button').filter({ hasText: /Save settings/ }).evaluate((el) => el.click())
-    await page.reload()
-    await waitForDataLoad(page)
-    await navigateToSettings(page)
-    await expect(page.locator('main').getByText(/Alert services \(0\//)).toBeVisible()
+    // Note: alertTarget/alertServices are only persisted through the Discord webhook
+    // subscription flow (persistWebhookSettings), not via the general "Save settings"
+    // button (#486 PR2). Persistence across reload is therefore not testable here without
+    // a webhook URL.
   })
 
   test('language toggle switches UI text', async ({ page }) => {
