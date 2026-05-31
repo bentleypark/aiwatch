@@ -3,6 +3,7 @@
 
 import type { ChangelogEntry, StaleSourceInfo } from './changelog'
 import { formatChangelogSection, formatStaleSourcesWarning } from './changelog'
+import type { MonthlyIncidentEntry } from './monthly-archive'
 
 export interface WeeklyIncidentSummary {
   serviceId: string
@@ -33,6 +34,55 @@ export interface WeeklyBriefingData {
   security?: WeeklySecuritySummary
   /** Per-source last-fetch staleness — surfaces silent collection gaps (#274) */
   staleSources?: StaleSourceInfo[]
+}
+
+/**
+ * Filter accumulated changelog entries to the given week window (Mon 00:00Z – Sun 23:59:59Z).
+ * changelog:entries KV keeps the last 50 entries over 14 days; without this filter
+ * the briefing would include entries from before the current week.
+ */
+export function filterChangelogToWeek(entries: ChangelogEntry[], weekStart: string, weekEnd: string): ChangelogEntry[] {
+  const startMs = new Date(weekStart).getTime()
+  const endMs = new Date(weekEnd + 'T23:59:59Z').getTime()
+  return entries.filter((e) => {
+    if (!e.date) return false
+    const ts = new Date(e.date).getTime()
+    return !isNaN(ts) && ts >= startMs && ts <= endMs
+  })
+}
+
+/**
+ * Flatten incidents:monthly:YYYY-MM KV value into the flat array expected by
+ * buildIncidentSummary. The KV format is { services: { [svcId]: { incidents: [] } } }
+ * — incidents are nested per service, not at the root level.
+ */
+export function parseMonthlyIncidents(
+  raw: unknown,
+  serviceNames: Record<string, string>,
+): Parameters<typeof buildIncidentSummary>[0] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    console.warn('[weekly-briefing] parseMonthlyIncidents: unexpected root type', typeof raw)
+    return []
+  }
+  const services = (raw as Record<string, unknown>).services
+  if (services !== undefined && (typeof services !== 'object' || Array.isArray(services) || services === null)) {
+    console.warn('[weekly-briefing] parseMonthlyIncidents: services is not an object', typeof services)
+    return []
+  }
+  const out: Parameters<typeof buildIncidentSummary>[0] = []
+  for (const [svcId, svcData] of Object.entries((services ?? {}) as Record<string, { incidents?: MonthlyIncidentEntry[] }>)) {
+    for (const inc of (svcData.incidents ?? [])) {
+      if (!inc.id || !inc.startedAt || !inc.title) {
+        console.warn(`[weekly-briefing] parseMonthlyIncidents: skipping ${svcId} incident with missing required fields`, { id: inc.id, startedAt: inc.startedAt })
+        continue
+      }
+      const dm = inc.durationMin ?? 0
+      const h = Math.floor(dm / 60), m = dm % 60
+      const duration = dm > 0 ? (h > 0 && m > 0 ? `${h}h ${m}m` : h > 0 ? `${h}h` : `${m}m`) : null
+      out.push({ id: inc.id, serviceId: svcId, serviceName: serviceNames[svcId] ?? svcId, title: inc.title, startedAt: inc.startedAt, duration })
+    }
+  }
+  return out
 }
 
 /**
