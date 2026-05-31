@@ -11,6 +11,7 @@ import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, g
 import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, classifyLead, appendLeadDiag, readLeadDiag, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
 import { refreshStatusCacheOnChange } from './cache-refresh'
+import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey } from './webhook-subscriptions'
 import { corsHeaders } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
@@ -19,6 +20,14 @@ interface Env {
   ALLOWED_ORIGIN: string
   DISCORD_WEBHOOK_URL?: string
   ANTHROPIC_API_KEY?: string
+  // #486: AES-256 key (64 hex chars) encrypting stored per-user webhook URLs. Set via
+  // `wrangler secret put WEBHOOK_ENC_KEY`. Absent/invalid → /api/webhook/subscribe fails closed
+  // (503), so server-side per-user delivery is simply disabled rather than storing plaintext URLs.
+  WEBHOOK_ENC_KEY?: string
+  // #486: base origin for the channel-control confirm link (`{base}/confirm?h=…&c=…`). Defaults to
+  // the production site when unset; override in worker/.dev.vars (e.g. http://localhost:3333) to run
+  // the subscribe→confirm click-through end-to-end against `wrangler dev` + `vercel dev`.
+  CONFIRM_BASE_URL?: string
   // #299: operator-only shared secret for POST /api/admin/analyze. Set via
   // `wrangler secret put ADMIN_API_KEY`. Separate from ANTHROPIC_API_KEY so it
   // can be rotated independently; absent secret → endpoint always 401.
@@ -43,8 +52,24 @@ let lastKvLimitAlert = 0 // in-memory throttle for KV limit alerts (can't use KV
 let lastLatencySlot = '' // prevent duplicate 30-min latency writes within same isolate
 const alertProxyRate = new Map<string, { start: number; count: number }>() // rate limit for /api/alert
 const deliveryCounter = { discord: 0, failed: 0 } // in-memory counter, flushed to KV by daily summary cron (Discord-only since #467)
-const webhookPingRate = new Map<string, { start: number; count: number }>() // rate limit for /api/webhook/ping
 const publicApiRate = new Map<string, { start: number; count: number }>() // rate limit for /api/v1/*
+// #486: per-IP rate limits for the server-side subscription endpoints. subscribe/update trigger an
+// outbound message to (or mutate) an arbitrary channel → 10/hour/IP; confirm is a code check →
+// 20/hour/IP (brute-force hardening atop the 10^6 code space + the KV-side global confirm budget).
+const webhookSubRate = new Map<string, { start: number; count: number }>()   // /subscribe + /update: 10/hour/IP
+const webhookConfirmRate = new Map<string, { start: number; count: number }>() // /confirm: 20/hour/IP
+const HOUR_MS = 3_600_000
+/** Fixed-window per-IP limiter (in-memory, per-isolate — same mechanism as the existing
+ *  alertProxyRate/webhookPingRate counters, just an hour window). Returns true if over the limit.
+ *  Fixed-window means up to 2× the limit can pass across a window boundary; acceptable for these
+ *  low-frequency endpoints where the KV global confirm budget is the real abuse ceiling. */
+function overRateLimit(map: Map<string, { start: number; count: number }>, ip: string, max: number, now: number): boolean {
+  const entry = map.get(ip)
+  if (entry && entry.count >= max && now - entry.start < HOUR_MS) return true
+  if (!entry || now - entry.start >= HOUR_MS) map.set(ip, { start: now, count: 1 })
+  else entry.count++
+  return false
+}
 
 interface DailyCounters {
   [serviceId: string]: { ok: number; total: number }
@@ -705,7 +730,57 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // misses this cycle's alerts — log loudly so a whole-cohort relay miss is diagnosable, not buried.
   if (env.STATUS_CACHE && feedEntries.length > 0) {
     const feedOk = await appendAlertFeed(env.STATUS_CACHE, feedEntries)
-    if (!feedOk) console.error('[cron] alert feed append failed — per-user webhook relays skipped this cycle:', feedEntries.map(e => e.key))
+    if (!feedOk) console.error('[cron] alert feed append failed:', feedEntries.map(e => e.key))
+
+    // #486 PR3 — server-side per-user delivery. Fan the just-built entries out to every confirmed
+    // subscriber (this replaced the old browser relay). Reuses the in-memory feedEntries (already
+    // appended above — no KV re-read). Fully isolated from the operator path: deliverToSubscribers
+    // catches per-sub errors via allSettled + prunes dead webhooks, and the whole call is wrapped so
+    // a fan-out failure can never affect the operator sends above or the rest of the cron. postEmbed
+    // re-validates the decrypted URL (defense in depth) and mirrors sendDiscordAlert's embed shape so
+    // user alerts are byte-identical to the operator's.
+    // Observability: deliverToSubscribers is a silent no-op when the enc key is missing/invalid (it
+    // can't decrypt any stored URL). Surface that explicitly so a key removed/rotated AFTER subs exist
+    // doesn't kill per-user delivery invisibly (subscribe-time already fails closed with 503).
+    if (!isValidEncKey(env.WEBHOOK_ENC_KEY)) {
+      console.warn(`[cron] WEBHOOK_ENC_KEY missing/invalid — per-user fan-out skipped for ${feedEntries.length} entr${feedEntries.length === 1 ? 'y' : 'ies'}`)
+    }
+    try {
+      const stats = await deliverToSubscribers(
+        env.STATUS_CACHE,
+        env.WEBHOOK_ENC_KEY,
+        feedEntries,
+        async (webhookUrl, entry) => {
+          if (!isAllowedAlertWebhook(webhookUrl)) {
+            // A stored URL that no longer passes the SSRF allowlist (e.g. allowlist tightened, or a
+            // pre-validation sub). classifyDelivery(403) → retry → prune after MAX_FAIL_COUNT; log the
+            // reason so that prune is attributable, not indistinguishable from a transient failure.
+            console.warn('[cron] subscriber webhook rejected by allowlist re-validation — will prune after repeated cycles')
+            return 403
+          }
+          try {
+            const resp = await fetch(webhookUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                embeds: [{ ...entry.embed, timestamp: new Date().toISOString(), footer: { text: 'AIWatch Worker' } }],
+              }),
+            })
+            resp.body?.cancel()
+            return resp.status
+          } catch (err) {
+            console.warn('[cron] subscriber webhook POST failed:', err instanceof Error ? err.message : err)
+            return null
+          }
+        },
+        Date.now(),
+      )
+      if (stats.attempted > 0 || stats.pruned > 0) {
+        console.log(`[cron] webhook fan-out: ${stats.delivered}/${stats.attempted} delivered, ${stats.pruned} pruned, ${stats.failed} failed, ${stats.rejected} rejected`)
+      }
+    } catch (err) {
+      console.error('[cron] webhook fan-out failed:', err instanceof Error ? err.message : err)
+    }
   }
 
   // Track daily alert count in KV for Daily Summary
@@ -1672,16 +1747,13 @@ export default {
             console.error('[daily-summary] Failed to parse alert counts:', err instanceof Error ? err.message : err)
           }
 
-          // Count active webhook registrations (uses KV metadata — no individual gets needed).
-          // Discord-only since #467 — Slack moved to native /feed RSS; any legacy webhook:reg:*
-          // entries with `type: 'slack'` metadata decay out within their 30d TTL and are skipped here.
+          // Count active webhook subscriptions. Since #486 PR3 this is the number of confirmed
+          // server-side subscriptions (webhook:sub:*) — the source of truth now that delivery is
+          // server-side (replaced the legacy webhook:reg:* count removed with the browser relay).
           let webhookCounts = { discord: 0 }
           try {
-            const listed = await env.STATUS_CACHE.list({ prefix: 'webhook:reg:' })
-            for (const key of listed.keys) {
-              const meta = key.metadata as { type?: string } | null
-              if (meta?.type === 'discord') webhookCounts.discord++
-            }
+            const hashes = await listConfirmedHashes(env.STATUS_CACHE)
+            webhookCounts.discord = hashes.length
           } catch (err) {
             console.warn('[daily-summary] Failed to count webhooks:', err instanceof Error ? err.message : err)
           }
@@ -1912,63 +1984,122 @@ export default {
       return handleAdminRebuildArchive(request, env, cors)
     }
 
-    // POST/DELETE /api/webhook/ping — track active webhook registrations (hashed, no raw URLs stored)
-    if ((request.method === 'POST' || request.method === 'DELETE') && url.pathname === '/api/webhook/ping') {
-      // Rate limit: 5 per minute per IP
-      const clientIp = request.headers.get('CF-Connecting-IP') || 'unknown'
+    // #486 — server-side per-user Discord subscription endpoints. The browser POSTs the raw URL +
+    // filters here; the worker stores the AES-GCM-encrypted URL and (PR3) the cron fan-out delivers
+    // directly, so alerts fire tab-independently. Ownership is proven by a confirm code sent THROUGH
+    // the webhook channel (double opt-in / challenge-response) — channel control = identity, no
+    // account/PII. CORS-guarded like /api/alert; per-IP rate limited via overRateLimit.
+    if (request.method === 'POST' && url.pathname === '/api/webhook/subscribe') {
+      const origin = request.headers.get('Origin')
+      const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown'
       const now = Date.now()
-      const pingEntry = webhookPingRate.get(clientIp)
-      if (pingEntry && pingEntry.count >= 5 && now - pingEntry.start < 60_000) {
-        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
-          status: 429, headers: { ...cors, 'Content-Type': 'application/json' },
-        })
+      if (overRateLimit(webhookSubRate, ip, 10, now)) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429, headers: { ...cors, 'Content-Type': 'application/json' } })
       }
-      if (!pingEntry || now - pingEntry.start >= 60_000) {
-        webhookPingRate.set(clientIp, { start: now, count: 1 })
-      } else {
-        pingEntry.count++
-      }
-
       try {
-        const body = await request.json() as { hash?: string; type?: string }
-        const { hash, type } = body
-        if (!hash || !/^[a-f0-9]{64}$/.test(hash)) {
-          return new Response(JSON.stringify({ error: 'Invalid hash format' }), {
-            status: 400, headers: { ...cors, 'Content-Type': 'application/json' },
-          })
+        const body = await request.json() as { url?: string; filters?: unknown }
+        const hourBucket = new Date(now).toISOString().slice(0, 13) // YYYY-MM-DDTHH — hourly budget bucket
+        const result = await subscribeWebhook(
+          env.STATUS_CACHE, env.WEBHOOK_ENC_KEY, body.url ?? '', body.filters, hourBucket,
+          new Date(now).toISOString(),
+          // The confirm message is the channel-control challenge: posted to the webhook itself. The
+          // link is crawler-safe — /confirm GET only renders a page; activation is the button POST.
+          async (target, code) => {
+            try {
+              const h = await webhookSha256Hex(target)
+              const confirmBase = (env.CONFIRM_BASE_URL || 'https://ai-watch.dev').replace(/\/$/, '')
+              const r = await fetch(target, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: `🔔 **AIWatch** — confirm alerts for this channel:\n${confirmBase}/confirm?h=${h}&c=${code}\n\n*(Ignore this message if you didn't request AIWatch alerts.)*` }),
+              })
+              r.body?.cancel()
+              if (!r.ok) console.warn(`[webhook/subscribe] confirm post rejected by Discord (${r.status})`)
+              return r.ok
+            } catch (err) {
+              console.warn('[webhook/subscribe] confirm post network error:', err instanceof Error ? err.message : err)
+              return false
+            }
+          },
+        )
+        if (!result.ok) {
+          return new Response(JSON.stringify({ error: result.error }), { status: result.status, headers: { ...cors, 'Content-Type': 'application/json' } })
         }
-
-        if (request.method === 'POST') {
-          // Discord-only since #467 — Slack subscribes via native /feed RSS, no webhook registered.
-          if (type !== 'discord') {
-            return new Response(JSON.stringify({ error: 'Invalid type' }), {
-              status: 400, headers: { ...cors, 'Content-Type': 'application/json' },
-            })
-          }
-          if (env.STATUS_CACHE) {
-            // Raw kv.put — kvPut opts don't support metadata, needed for fast list reads
-            await env.STATUS_CACHE.put(
-              `webhook:reg:${hash}`,
-              JSON.stringify({ type, registeredAt: new Date().toISOString() }),
-              { expirationTtl: 2592000, metadata: { type } },
-            )
-          }
-        } else {
-          // DELETE
-          if (env.STATUS_CACHE) {
-            await kvDel(env.STATUS_CACHE, `webhook:reg:${hash}`)
-          }
-        }
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: { ...cors, 'Content-Type': 'application/json' },
-        })
+        // status: 'sent' (code dispatched) | 'pending' (code already in-flight) | 'confirmed'
+        // (already subscribed) — lets the SPA (PR2) show the right message without re-charging budget.
+        return new Response(JSON.stringify({ ok: true, hash: result.hash, status: result.status }), { headers: { ...cors, 'Content-Type': 'application/json' } })
       } catch (err) {
-        console.error('[webhook/ping] Error:', err instanceof Error ? err.message : err)
-        return new Response(JSON.stringify({ error: 'Internal error' }), {
-          status: 500, headers: { ...cors, 'Content-Type': 'application/json' },
-        })
+        console.error('[webhook/subscribe] error:', err instanceof Error ? err.message : err)
+        return new Response(JSON.stringify({ error: 'Internal error' }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } })
       }
     }
+
+    if (request.method === 'POST' && url.pathname === '/api/webhook/confirm') {
+      const origin = request.headers.get('Origin')
+      const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown'
+      const now = Date.now()
+      if (overRateLimit(webhookConfirmRate, ip, 20, now)) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429, headers: { ...cors, 'Content-Type': 'application/json' } })
+      }
+      try {
+        const body = await request.json() as { hash?: string; code?: string }
+        const result = await confirmWebhook(env.STATUS_CACHE, body.hash ?? '', body.code ?? '', new Date(now).toISOString())
+        if (!result.ok) {
+          return new Response(JSON.stringify({ error: result.error }), { status: result.status, headers: { ...cors, 'Content-Type': 'application/json' } })
+        }
+        return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } })
+      } catch (err) {
+        console.error('[webhook/confirm] error:', err instanceof Error ? err.message : err)
+        return new Response(JSON.stringify({ error: 'Internal error' }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } })
+      }
+    }
+
+    // Filters-only update on a confirmed sub — no new OTP (channel control already proven). A URL
+    // change is a new channel ⇒ the client must re-subscribe instead.
+    if (request.method === 'POST' && url.pathname === '/api/webhook/update') {
+      const origin = request.headers.get('Origin')
+      const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown'
+      const now = Date.now()
+      if (overRateLimit(webhookSubRate, ip, 10, now)) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429, headers: { ...cors, 'Content-Type': 'application/json' } })
+      }
+      try {
+        const body = await request.json() as { hash?: string; filters?: unknown }
+        const result = await updateWebhookFilters(env.STATUS_CACHE, body.hash ?? '', body.filters)
+        if (!result.ok) {
+          return new Response(JSON.stringify({ error: result.error }), { status: result.status, headers: { ...cors, 'Content-Type': 'application/json' } })
+        }
+        return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } })
+      } catch (err) {
+        console.error('[webhook/update] error:', err instanceof Error ? err.message : err)
+        return new Response(JSON.stringify({ error: 'Internal error' }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } })
+      }
+    }
+
+    // Unsubscribe = immediate complete deletion (privacy deletion path). hash-only, idempotent KV
+    // deletes; no rate limit (deleting a sub requires knowing the SHA-256 of the exact webhook URL,
+    // infeasible without the URL itself, so there's no useful abuse surface to throttle).
+    if (request.method === 'POST' && url.pathname === '/api/webhook/unsubscribe') {
+      const origin = request.headers.get('Origin')
+      const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)
+      try {
+        const body = await request.json() as { hash?: string }
+        const result = await unsubscribeWebhook(env.STATUS_CACHE, body.hash ?? '')
+        if (!result.ok) {
+          return new Response(JSON.stringify({ error: result.error }), { status: result.status, headers: { ...cors, 'Content-Type': 'application/json' } })
+        }
+        return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } })
+      } catch (err) {
+        console.error('[webhook/unsubscribe] error:', err instanceof Error ? err.message : err)
+        return new Response(JSON.stringify({ error: 'Internal error' }), { status: 500, headers: { ...cors, 'Content-Type': 'application/json' } })
+      }
+    }
+
+    // (#486 PR3) The legacy POST/DELETE /api/webhook/ping endpoint (browser-side webhook:reg: count)
+    // was removed with the browser relay — active-webhook counts now come from confirmed
+    // subscriptions (webhook:sub:*, counted via listConfirmedHashes in the daily summary).
 
     // GET /api/og — dynamic OG image (PNG) for social share previews
     if (request.method === 'GET' && url.pathname === '/api/og') {

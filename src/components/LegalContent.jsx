@@ -25,14 +25,13 @@ export function PrivacyContent() {
       <p style={paraStyle}>AIWatch uses the following types of browser storage:<br /><br />
         <strong>Analytics cookies (optional)</strong> — when you grant consent, GA4 stores _ga, _ga_&lt;measurement_id&gt;, and _gid cookies for usage analytics. _gcl_au may also appear if Google's tag library is loaded; AIWatch does not use it for advertising. You can opt out via the cookie banner or browser settings; on revoke through the banner, AIWatch removes these cookies immediately, and on the next page load when consent has been revoked through other means.<br /><br />
         <strong>Default-denied behavior</strong> — without explicit consent, no analytics or advertising cookies are set on your device, regardless of which AIWatch surface (dashboard, "Is X down?" pages, monthly reports) you arrive on first. The same consent choice applies across all AIWatch pages because they share the ai-watch.dev origin.<br /><br />
-        <strong>Essential local storage (always active)</strong> — AIWatch stores the following preferences in your browser's localStorage. This data never leaves your device:<br />
+        <strong>Essential local storage (always active)</strong> — AIWatch stores the following preferences in your browser's localStorage. This data stays on your device, except the Discord webhook URL, which is also stored encrypted on our server for alert delivery (see below):<br />
         · Theme preference (dark/light)<br />
         · Language preference (ko/en)<br />
         · Dashboard settings (monitoring period, SLA target, enabled services)<br />
         · Cookie consent choice (aiwatch-cookie-consent)<br />
         · PWA install banner dismissal<br />
-        · Discord webhook URL — entered voluntarily for alert notifications. Stored in your browser's localStorage (Slack subscriptions use Slack's native /feed RSS app and store no URL).<br />
-        · Webhook identifier (SHA-256 hash) — a one-way hash of your Discord webhook URL is sent to our server to track active webhook counts. The hash cannot be reversed to recover your original URL.</p>
+        · Discord webhook URL — entered voluntarily for alert notifications. Your alert filter preferences are kept in localStorage; the webhook URL itself, after you confirm control of the channel, is stored on our server <strong>encrypted (AES-GCM)</strong> so we can deliver alerts to it (Slack subscriptions use Slack's native /feed RSS app and store no URL). See "Third-Party Services" below for how it is used and deleted.</p>
       <h3 style={headingStyle}>3. Cookie Banner</h3>
       <p style={paraStyle}>On your first visit to any AIWatch page, a cookie banner appears asking for analytics consent (Accept All / Essential Only). Your choice is stored in <code>localStorage.aiwatch-cookie-consent</code> and reused across all subsequent visits to any AIWatch page. The banner does not appear again unless you clear browser storage. Both choices are honored identically across the dashboard, "Is X down?" SEO pages, and monthly reports.</p>
       <h3 style={headingStyle}>4. Advertising</h3>
@@ -40,7 +39,7 @@ export function PrivacyContent() {
       <h3 style={headingStyle}>5. Service Worker (PWA)</h3>
       <p style={paraStyle}>AIWatch uses a service worker to cache static assets locally for faster loading and limited offline access. The service worker does not collect or transmit any personal data.</p>
       <h3 style={headingStyle}>6. Data Retention</h3>
-      <p style={paraStyle}>Analytics data collected via GA4 is retained for up to 14 months per GA4 settings. Local storage data is retained in your browser until you clear it manually. Webhook identifier hashes are retained on the server for up to 30 days and are automatically deleted if you do not visit the site during that period.</p>
+      <p style={paraStyle}>Analytics data collected via GA4 is retained for up to 14 months per GA4 settings. Local storage data is retained in your browser until you clear it manually. Your encrypted Discord webhook URL is retained on the server until you unsubscribe — unsubscribing deletes it immediately and permanently; subscriptions whose webhook stops accepting deliveries are also pruned automatically.</p>
       <h3 style={headingStyle}>7. Third-Party Services</h3>
       <p style={paraStyle}>AIWatch uses the following third-party services that may process your data:<br /><br />
         · Google Analytics 4 — usage analytics<br />
@@ -48,7 +47,7 @@ export function PrivacyContent() {
         · Vercel — web hosting<br />
         · GitHub API — repository star count display<br />
         · Discord Webhook API — alert delivery proxy (only when configured by user)<br /><br />
-        Discord alert payloads are proxied through our server to your configured webhook URL. The server does not store your webhook URL. Slack subscriptions go through Slack's native /feed app reading our public RSS feed — no payload is proxied and no URL is stored.<br /><br />
+        When you subscribe a Discord webhook for alerts, we store its URL <strong>encrypted (AES-GCM) on our server</strong> and our scheduled worker delivers incident/status alerts to it directly. The URL is used only for that delivery and your chosen alert filters; you can remove it anytime via Settings → Alerts (Unsubscribe), which deletes it immediately and permanently. Slack subscriptions go through Slack's native /feed app reading our public RSS feed — no payload is proxied and no URL is stored.<br /><br />
         Collected information is not shared with any other third parties.</p>
       <h3 style={headingStyle}>8. Your Rights</h3>
       <p style={paraStyle}>You have the right to request access to, correction of, or deletion of your data. Since AIWatch does not collect personally identifiable information, most data is anonymous and cannot be linked to individuals. You can revoke analytics consent at any time:<br /><br />
@@ -75,14 +74,13 @@ export function PrivacyContent() {
       <p style={paraStyle}>AIWatch는 다음 유형의 브라우저 저장소를 사용합니다.<br /><br />
         <strong>분석 쿠키 (선택)</strong> — 동의 시 GA4가 _ga, _ga_&lt;측정_id&gt;, _gid 쿠키를 이용 통계 분석을 위해 저장합니다. Google 태그 라이브러리 로드 시 _gcl_au가 함께 나타날 수 있으나, AIWatch는 이를 광고 목적으로 사용하지 않습니다. 쿠키 배너 또는 브라우저 설정에서 거부할 수 있으며, 배너에서 거부 시 즉시 삭제되고, 다른 방법으로 동의를 철회한 경우 다음 페이지 로드에서 자동 삭제됩니다.<br /><br />
         <strong>기본 거부 동작</strong> — 명시적 동의가 없는 상태에서는 어떤 AIWatch 페이지(대시보드, "Is X down?" 페이지, 월간 리포트)에 처음 진입하든 분석/광고 쿠키가 기기에 저장되지 않습니다. 같은 ai-watch.dev origin을 공유하므로 모든 AIWatch 페이지에서 동일한 동의 선택이 적용됩니다.<br /><br />
-        <strong>필수 로컬 저장소 (항상 활성)</strong> — 다음 설정이 브라우저의 localStorage에 저장됩니다. 이 데이터는 기기 외부로 전송되지 않습니다:<br />
+        <strong>필수 로컬 저장소 (항상 활성)</strong> — 다음 설정이 브라우저의 localStorage에 저장됩니다. 이 데이터는 기기에 보관되며, 다만 Discord webhook URL은 알림 전송을 위해 서버에도 암호화되어 저장됩니다(아래 참고):<br />
         · 테마 설정 (다크/라이트)<br />
         · 언어 설정 (한국어/영어)<br />
         · 대시보드 설정 (모니터링 기간, SLA 목표, 활성화된 서비스)<br />
         · 쿠키 동의 선택 (aiwatch-cookie-consent)<br />
         · PWA 설치 배너 닫기 여부<br />
-        · Discord Webhook URL — 알림 수신을 위해 사용자가 직접 입력. 브라우저의 localStorage에 저장됩니다 (Slack 구독은 Slack 내장 /feed RSS 앱을 사용하며 URL을 저장하지 않습니다).<br />
-        · Webhook 식별자 (SHA-256 해시) — Discord Webhook URL의 단방향 해시값이 활성 Webhook 수 집계를 위해 서버에 전송됩니다. 해시값으로 원본 URL을 복원할 수 없습니다.</p>
+        · Discord Webhook URL — 알림 수신을 위해 사용자가 직접 입력. 알림 필터 설정은 localStorage에 보관되며, Webhook URL 자체는 채널 소유 확인 후 알림 전송을 위해 서버에 <strong>암호화(AES-GCM)되어</strong> 저장됩니다 (Slack 구독은 Slack 내장 /feed RSS 앱을 사용하며 URL을 저장하지 않습니다). 사용 목적·삭제 방법은 아래 "개인정보 처리 위탁" 참고.</p>
       <h3 style={headingStyle}>3. 쿠키 배너</h3>
       <p style={paraStyle}>AIWatch 페이지를 처음 방문하면 분석 동의를 묻는 쿠키 배너가 표시됩니다(모두 동의 / 필수만 사용). 선택 결과는 <code>localStorage.aiwatch-cookie-consent</code>에 저장되어 이후 모든 AIWatch 페이지 방문에서 재사용됩니다. 브라우저 저장소를 비우기 전까지는 배너가 다시 표시되지 않습니다. 두 선택 모두 대시보드, "Is X down?" SEO 페이지, 월간 리포트에서 동일하게 적용됩니다.</p>
       <h3 style={headingStyle}>4. 광고</h3>
@@ -90,7 +88,7 @@ export function PrivacyContent() {
       <h3 style={headingStyle}>5. 서비스 워커 (PWA)</h3>
       <p style={paraStyle}>AIWatch는 빠른 로딩과 제한적 오프라인 접근을 위해 서비스 워커를 사용하여 정적 자산을 로컬에 캐싱합니다. 서비스 워커는 개인 정보를 수집하거나 전송하지 않습니다.</p>
       <h3 style={headingStyle}>6. 정보 보유 기간</h3>
-      <p style={paraStyle}>GA4를 통해 수집된 분석 데이터는 GA4 설정에 따라 최대 14개월간 보관됩니다. 로컬 저장소 데이터는 브라우저에서 직접 삭제할 때까지 유지됩니다. Webhook 식별자 해시값은 서버에 최대 30일간 보관되며, 해당 기간 내 사이트를 방문하지 않으면 자동 삭제됩니다.</p>
+      <p style={paraStyle}>GA4를 통해 수집된 분석 데이터는 GA4 설정에 따라 최대 14개월간 보관됩니다. 로컬 저장소 데이터는 브라우저에서 직접 삭제할 때까지 유지됩니다. 암호화된 Discord Webhook URL은 구독을 해제할 때까지 서버에 보관되며, 구독 해제 시 즉시 영구 삭제됩니다. Webhook이 더 이상 전송을 받지 못하는 구독은 자동으로 정리됩니다.</p>
       <h3 style={headingStyle}>7. 개인정보 처리 위탁</h3>
       <p style={paraStyle}>AIWatch는 다음 제3자 서비스를 통해 데이터를 처리합니다.<br /><br />
         · Google Analytics 4 — 이용 통계 분석<br />
@@ -98,7 +96,7 @@ export function PrivacyContent() {
         · Vercel — 웹 호스팅<br />
         · GitHub API — 저장소 별 수 표시<br />
         · Discord Webhook API — 알림 전달 프록시 (사용자 설정 시에만)<br /><br />
-        Discord 알림은 서버를 경유하여 사용자가 설정한 Webhook URL로 전달됩니다. 서버는 Webhook URL을 저장하지 않습니다. Slack 구독은 Slack 내장 /feed 앱이 공개 RSS 피드를 읽는 방식이라 알림이 프록시되지 않고 URL도 저장되지 않습니다.<br /><br />
+        알림용 Discord webhook을 구독하면 해당 URL을 서버에 <strong>암호화(AES-GCM)하여</strong> 저장하고, 예약된 worker가 인시던트·상태 알림을 해당 webhook으로 직접 전송합니다. URL은 이 알림 전송과 사용자가 선택한 알림 필터에만 사용되며, 설정 → 알림(구독 해제)에서 언제든 삭제할 수 있고 삭제 시 즉시 영구 제거됩니다. Slack 구독은 Slack 내장 /feed 앱이 공개 RSS 피드를 읽는 방식이라 알림이 프록시되지 않고 URL도 저장되지 않습니다.<br /><br />
         위 서비스 외의 제3자에게 정보를 제공하지 않습니다.</p>
       <h3 style={headingStyle}>8. 이용자의 권리</h3>
       <p style={paraStyle}>이용자는 수집된 정보에 대해 열람, 정정, 삭제를 요청할 수 있습니다. AIWatch는 개인 식별 정보를 수집하지 않으므로, 대부분의 데이터는 익명이며 개인과 연결할 수 없습니다. 분석 동의는 다음 두 가지 방법으로 언제든 철회할 수 있습니다:<br /><br />
