@@ -17,5 +17,9 @@ id = "e49508d80bb144e9a7ff872f2be771a4" # Not a secret — KV namespace IDs are 
 [ai]
 binding = "AI"
 
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "aiwatch_statusline" # #494: statusline per-preset traffic counts (queried via CF GraphQL)
+
 [triggers]
 crons = ["*/5 * * * *"]
