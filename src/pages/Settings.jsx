@@ -8,7 +8,7 @@ import { useSettings } from '../hooks/useSettings'
 import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, SERVICE_AND_APP_IDS, AGENT_SERVICE_IDS, ALL_SERVICE_IDS, DEFAULT_SETTINGS, ALL_SERVICES_FEED_URL } from '../utils/constants'
 import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
-import { pingWebhookRegistration } from '../utils/webhookRegistration'
+import { subscribeWebhook, updateWebhookFilters, unsubscribeWebhook, getLocalSubStatus, reconcileSubscription } from '../utils/webhookSubscription'
 
 // ── Styles matching design mockup ────────────────────────
 
@@ -117,14 +117,21 @@ export default function Settings() {
   const [alertIncidents, setAlertIncidents] = useState(settings.alertIncidents)
   const [saved, setSaved] = useState(false)
   const [testResult, setTestResult] = useState(null) // null | 'sending' | 'ok' | 'error'
+  // #486 PR2 — server-side subscription flow state.
+  //  subStatus: 'none' | 'pending' | 'confirmed' — UX state for the saved discordUrl (server is
+  //  authoritative; this drives which step to show). subAction: transient feedback for the in-flight
+  //  subscribe/unsubscribe call.
+  const [subStatus, setSubStatus] = useState('none')
+  const [subAction, setSubAction] = useState(null) // null | 'subscribing' | 'unsubscribing' | 'error'
   const [monitoringOpen, setMonitoringOpen] = useState(false)
   const [agentsOpen, setAgentsOpen] = useState(false)
   const [alertServicesOpen, setAlertServicesOpen] = useState(true)
   const [rssCopied, setRssCopied] = useState(false)
   const [slackFeedCopied, setSlackFeedCopied] = useState(false)
   const saveTimerRef = useRef(null)
+  const errorTimerRef = useRef(null)
 
-  useEffect(() => () => clearTimeout(saveTimerRef.current), [])
+  useEffect(() => () => { clearTimeout(saveTimerRef.current); clearTimeout(errorTimerRef.current) }, [])
   useEffect(() => {
     setPeriod(settings.period)
     setSla(settings.sla)
@@ -135,6 +142,24 @@ export default function Settings() {
     setAlertServices(settings.alertServices)
     setAlertIncidents(settings.alertIncidents)
   }, [settings])
+
+  // Auto-dismiss the subscription error so a stale failure message doesn't linger forever (the user
+  // reported it staying on screen). Editing the URL clears it immediately too (input onChange below);
+  // this timer covers errors where the URL doesn't change (unsubscribe/reconcile). Re-armed on each
+  // new error; cleared on unmount.
+  useEffect(() => {
+    if (subAction !== 'error') return undefined
+    errorTimerRef.current = setTimeout(() => setSubAction(null), 5000)
+    return () => clearTimeout(errorTimerRef.current)
+  }, [subAction])
+
+  // Reconcile the local subscription status whenever the SAVED discordUrl changes (load + after save).
+  // Reads localStorage UX state for that URL's hash; server is the real source of truth.
+  useEffect(() => {
+    let cancelled = false
+    getLocalSubStatus(settings.discordUrl).then((s) => { if (!cancelled) setSubStatus(s) })
+    return () => { cancelled = true }
+  }, [settings.discordUrl])
 
   // Copy the feed URL rather than linking it: a feed URL opened directly makes
   // the browser download raw XML. prompt() fallback covers insecure contexts.
@@ -168,18 +193,92 @@ export default function Settings() {
     }
   }
 
+  // #486 PR2 — "Save settings" now persists ONLY general settings (theme/lang/period/SLA + monitored
+  // services). It omits discordUrl + alert filters: useSettings.save() merges, so omitted fields are
+  // preserved from existing settings, and the Discord webhook is managed entirely by its own
+  // Subscribe / Update / Unsubscribe buttons in the Alerts section.
   function handleSave() {
     const slaNum = sla === '' ? DEFAULT_SETTINGS.sla : Number(sla)
-    save({ period, sla: slaNum, enabledServices, discordUrl, alertCondition, alertTarget, alertServices, alertIncidents })
+    save({ period, sla: slaNum, enabledServices })
     trackEvent('save_settings')
-    // Track webhook registration/removal for operational metrics (Discord only — Slack moved to /feed, #467)
-    if (discordUrl && !settings.discordUrl) trackEvent('webhook_register', { type: 'discord' })
-    if (!discordUrl && settings.discordUrl) trackEvent('webhook_remove', { type: 'discord' })
-    // Ping server with hashed webhook URL for active webhook tracking
-    pingWebhookRegistration(discordUrl, 'discord', settings.discordUrl)
     setSaved(true)
     clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => setSaved(false), 1800)
+  }
+
+  const currentFilters = () => ({ alertCondition, alertTarget, alertServices, alertIncidents })
+
+  // Persist the Discord URL + filters to localStorage (the subscription's own save path, separate from
+  // the general "Save settings" button). Keeps localStorage in sync with what the server subscription
+  // holds, so the UI survives reload and the reconcile effect (keyed on settings.discordUrl) works.
+  function persistWebhookSettings(url) {
+    save({ period, sla: sla === '' ? DEFAULT_SETTINGS.sla : Number(sla), enabledServices, discordUrl: url, ...currentFilters() })
+  }
+
+  // Subscribe the current webhook URL: persist URL+filters locally, then send the channel confirm
+  // link. Driven by the dedicated Subscribe button — NOT by general Save.
+  function handleSubscribe() {
+    const url = discordUrl.trim()
+    if (!url) return
+    const isNewUrl = !settings.discordUrl
+    persistWebhookSettings(url)
+    setSubAction('subscribing')
+    subscribeWebhook(url, currentFilters()).then((res) => {
+      if (res.ok) {
+        setSubStatus(res.status === 'confirmed' ? 'confirmed' : 'pending')
+        setSubAction(null)
+        // Track only on a successful subscribe — a 403/502 must not count as a registration. The
+        // active-webhook count is now derived server-side from confirmed subscriptions (#486 PR3),
+        // so the legacy webhook:reg: ping was removed.
+        if (isNewUrl) trackEvent('webhook_register', { type: 'discord' })
+      } else setSubAction('error')
+    }).catch(() => setSubAction('error'))
+  }
+
+  // Push the current alert filters to an already-confirmed subscription (no new confirm code) AND
+  // persist them locally so the change sticks across reloads.
+  function handleUpdateFilters() {
+    if (!settings.discordUrl) return
+    persistWebhookSettings(settings.discordUrl)
+    setSubAction('subscribing')
+    updateWebhookFilters(settings.discordUrl, currentFilters()).then((res) => {
+      setSubAction(res.ok ? 'updated' : 'error')
+      if (res.ok) { clearTimeout(saveTimerRef.current); saveTimerRef.current = setTimeout(() => setSubAction(null), 1800) }
+    }).catch(() => setSubAction('error'))
+  }
+
+  // Remove the server-side subscription for the saved URL. Only clears local state on a confirmed
+  // server delete (privacy: no false "removed"); on failure keeps 'confirmed' + shows an error.
+  function handleUnsubscribe() {
+    if (!settings.discordUrl) return
+    setSubAction('unsubscribing')
+    unsubscribeWebhook(settings.discordUrl).then((res) => {
+      if (res.ok) { setSubStatus('none'); setSubAction(null); trackEvent('webhook_remove', { type: 'discord' }) }
+      else setSubAction('error')
+    }).catch(() => setSubAction('error'))
+  }
+
+  // Reconcile after the user clicks the confirm link in their channel (the /confirm page is a
+  // separate document and can't signal this SPA). Re-checks server status (side-effect-free) and, if
+  // now confirmed, pushes any filters edited during the pending window.
+  function handleReconcile() {
+    if (!settings.discordUrl) return
+    const filters = { alertCondition, alertTarget, alertServices, alertIncidents }
+    setSubAction('subscribing')
+    reconcileSubscription(settings.discordUrl, filters).then((res) => {
+      if (res.ok) {
+        // Authoritative server status — confirmed or still pending.
+        setSubStatus(res.status)
+        // If confirmed but the deferred filter push failed, the sub is live with the OLD filters.
+        // Show an error (not a silent success) — filtersDirty is false now (settings.* already
+        // persisted), so the [Update alert filters] button wouldn't otherwise prompt a retry.
+        setSubAction(res.status === 'confirmed' && res.filtersSynced === false ? 'error' : null)
+      } else {
+        // Probe failed (transient 502/network). Do NOT touch subStatus — a healthy pending sub must
+        // survive a blip. Just surface the error briefly; the pending UI + button stay so they retry.
+        setSubAction('error')
+      }
+    }).catch(() => setSubAction('error'))
   }
 
   function toggleService(id) {
@@ -195,15 +294,12 @@ export default function Settings() {
     )
   }
 
-  // Check if draft differs from saved settings
+  // #486 PR2 — the "Save settings" button now covers ONLY general settings (theme/lang/period/SLA +
+  // monitored-service toggles). The Discord webhook URL + its alert filters live in the Alerts section
+  // and are persisted by the subscription buttons (Subscribe / Update), so they're excluded here.
   const hasNoChanges = period === settings.period
     && sla === settings.sla
     && JSON.stringify([...enabledServices].sort()) === JSON.stringify([...settings.enabledServices].sort())
-    && discordUrl === settings.discordUrl
-    && alertCondition === settings.alertCondition
-    && alertTarget === settings.alertTarget
-    && JSON.stringify([...alertServices].sort()) === JSON.stringify([...settings.alertServices].sort())
-    && alertIncidents === settings.alertIncidents
 
   // Service data map
   const svcMap = {}
@@ -340,6 +436,34 @@ export default function Settings() {
         )}
       </section>
 
+      {/* ── Save (general settings only — theme/lang/period/SLA + monitored services). The Discord
+          webhook + its alert filters are saved separately by the Subscribe/Update buttons in Alerts. */}
+      <div className="flex items-center justify-end" style={{ gap: '12px' }}>
+        <button
+          onClick={handleSave}
+          disabled={hasNoChanges}
+          className="mono"
+          style={{
+            fontSize: '11px', padding: '5px 14px', borderRadius: '5px', border: 'none',
+            background: hasNoChanges ? 'var(--bg3)' : 'var(--green)',
+            color: hasNoChanges ? 'var(--text2)' : 'var(--bg0)',
+            fontWeight: 500,
+            cursor: hasNoChanges ? 'not-allowed' : 'pointer',
+            opacity: hasNoChanges ? 0.5 : 1,
+            transition: 'background 0.12s',
+          }}
+          onMouseEnter={(e) => { if (!hasNoChanges) e.target.style.filter = 'brightness(1.1)' }}
+          onMouseLeave={(e) => { if (!hasNoChanges) e.target.style.filter = '' }}
+        >
+          {t('settings.save')}
+        </button>
+        {saved && (
+          <span className="mono text-[var(--green)] animate-[fade-in_0.2s_ease-out]" style={{ fontSize: '11px' }}>
+            {t('settings.saved')}
+          </span>
+        )}
+      </div>
+
       {/* ── Alerts ── */}
       <section>
         <div style={sectionTitleStyle}>{t('settings.alerts')}</div>
@@ -418,7 +542,7 @@ export default function Settings() {
           <input
             type="text"
             value={discordUrl}
-            onChange={(e) => setDiscordUrl(e.target.value)}
+            onChange={(e) => { setDiscordUrl(e.target.value); if (subAction === 'error') setSubAction(null) }}
             placeholder="https://discord.com/api/webhooks/..."
             className="mono"
             style={{
@@ -427,8 +551,105 @@ export default function Settings() {
               color: 'var(--text0)', outline: 'none', boxSizing: 'border-box',
             }}
           />
-        </div>
+          {/* #486 PR2 — the Discord subscription is managed HERE by its own buttons, fully decoupled
+              from the general "Save settings" button. State machine:
+                • subscribing/unsubscribing → in-flight text
+                • error → error text (retry via Subscribe)
+                • updated → transient "filters updated" confirmation
+                • url empty or changed-since-subscribe, or status 'none' → [Subscribe]
+                • pending (saved url) → "check your channel" + [I've confirmed → reconcile]
+                • confirmed (saved url) → "✓ Subscribed" + [Update alert filters] + [Unsubscribe] */}
+          {(() => {
+            const url = discordUrl.trim()
+            const savedMatchesInput = url && url === settings.discordUrl
+            const inFlight = subAction === 'subscribing' || subAction === 'unsubscribing'
+            // Subscribe shows when there's a URL that isn't an active (pending/confirmed) sub for the
+            // SAVED url — i.e. a brand-new URL, a changed URL, or a 'none' status.
+            const showSubscribe = url && !inFlight && (!savedMatchesInput || subStatus === 'none')
+            // Are the on-screen filters out of sync with what the server subscription holds? settings.*
+            // mirrors the last value pushed to the server (persisted by Subscribe/Update), so any diff
+            // means there are unsaved filter changes the user must apply via [Update alert filters].
+            const filtersDirty = alertCondition !== settings.alertCondition
+              || alertTarget !== settings.alertTarget
+              || alertIncidents !== settings.alertIncidents
+              || JSON.stringify([...alertServices].sort()) !== JSON.stringify([...settings.alertServices].sort())
+            return (
+              <div style={{ marginTop: '8px' }}>
+                {subAction === 'subscribing' && (
+                  <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)' }}>{t('settings.discord.subscribing')}</div>
+                )}
+                {subAction === 'unsubscribing' && (
+                  <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)' }}>{t('settings.discord.unsubscribing')}</div>
+                )}
+                {subAction === 'error' && (
+                  <div className="mono" style={{ fontSize: '10px', color: 'var(--red)', marginBottom: '6px' }}>{t('settings.discord.sub.error')}</div>
+                )}
+                {subAction === 'updated' && (
+                  <div className="mono" style={{ fontSize: '10px', color: 'var(--green)' }}>{t('settings.discord.filtersUpdated')}</div>
+                )}
 
+                {showSubscribe && (
+                  <button
+                    type="button"
+                    onClick={handleSubscribe}
+                    className="mono"
+                    style={{ fontSize: '11px', padding: '5px 14px', borderRadius: '5px', border: 'none', background: 'var(--green)', color: 'var(--bg0)', cursor: 'pointer' }}
+                  >
+                    {t('settings.discord.subscribe')}
+                  </button>
+                )}
+
+                {!inFlight && savedMatchesInput && subStatus === 'pending' && (
+                  <div>
+                    <div className="mono" style={{ fontSize: '10px', color: 'var(--amber)', lineHeight: 1.5, marginBottom: '6px' }}>{t('settings.discord.pending')}</div>
+                    {filtersDirty && (
+                      <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', lineHeight: 1.5, marginBottom: '6px' }}>{t('settings.discord.pendingDirty')}</div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleReconcile}
+                      className="mono"
+                      style={{ fontSize: '10px', padding: 0, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--blue)', textDecoration: 'underline' }}
+                    >
+                      {t('settings.discord.reconcile')}
+                    </button>
+                  </div>
+                )}
+
+                {!inFlight && savedMatchesInput && subStatus === 'confirmed' && (
+                  <div className="flex items-center" style={{ gap: '12px' }}>
+                    <span className="mono" style={{ fontSize: '10px', color: 'var(--green)' }}>{t('settings.discord.confirmed')}</span>
+                    {filtersDirty ? (
+                      // Unsaved filter changes — offer to push them to the server subscription.
+                      <button
+                        type="button"
+                        onClick={handleUpdateFilters}
+                        className="mono"
+                        style={{ fontSize: '10px', padding: 0, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--blue)', textDecoration: 'underline' }}
+                      >
+                        {t('settings.discord.updateFilters')}
+                      </button>
+                    ) : (
+                      // In sync with the server — nothing to apply.
+                      <span className="mono" style={{ fontSize: '10px', color: 'var(--text2)' }}>{t('settings.discord.filtersSynced')}</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleUnsubscribe}
+                      className="mono"
+                      style={{ fontSize: '10px', padding: 0, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', textDecoration: 'underline' }}
+                    >
+                      {t('settings.discord.unsubscribe')}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* #486 PR2 — alert filters live INSIDE the Discord block (they only shape Discord webhook
+              delivery). Persisted by Subscribe / Update, never by the general Save button. */}
+          <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid var(--border)' }}>
         <FieldRow label={t('settings.alert.condition')} desc={t('settings.alert.condition.desc')}>
           <SegmentControl
             value={alertCondition}
@@ -491,8 +712,9 @@ export default function Settings() {
         <FieldRow label={t('settings.alert.incidents')} desc={t('settings.alert.incidents.desc')} last>
           <Toggle checked={alertIncidents} onChange={() => setAlertIncidents((v) => !v)} />
         </FieldRow>
+          </div>
 
-        {discordUrl && (
+          {discordUrl && (
           <div style={{ marginTop: '12px' }}>
             <button
               onClick={async () => {
@@ -516,35 +738,9 @@ export default function Settings() {
               {testResult === 'sending' ? t('settings.alert.testing') : testResult === 'ok' ? t('settings.alert.test.ok') : testResult === 'error' ? t('settings.alert.test.error') : t('settings.alert.test')}
             </button>
           </div>
-        )}
+          )}
+        </div>
       </section>
-
-      {/* ── Save ── */}
-      <div className="flex items-center justify-end" style={{ gap: '12px' }}>
-        <button
-          onClick={handleSave}
-          disabled={hasNoChanges}
-          className="mono"
-          style={{
-            fontSize: '11px', padding: '5px 14px', borderRadius: '5px', border: 'none',
-            background: hasNoChanges ? 'var(--bg3)' : 'var(--green)',
-            color: hasNoChanges ? 'var(--text2)' : 'var(--bg0)',
-            fontWeight: 500,
-            cursor: hasNoChanges ? 'not-allowed' : 'pointer',
-            opacity: hasNoChanges ? 0.5 : 1,
-            transition: 'background 0.12s',
-          }}
-          onMouseEnter={(e) => { if (!hasNoChanges) e.target.style.filter = 'brightness(1.1)' }}
-          onMouseLeave={(e) => { if (!hasNoChanges) e.target.style.filter = '' }}
-        >
-          {t('settings.save')}
-        </button>
-        {saved && (
-          <span className="mono text-[var(--green)] animate-[fade-in_0.2s_ease-out]" style={{ fontSize: '11px' }}>
-            {t('settings.saved')}
-          </span>
-        )}
-      </div>
 
     </div>
   )

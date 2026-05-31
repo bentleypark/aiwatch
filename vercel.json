@@ -34,6 +34,7 @@
     { "source": "/is-codex-down", "destination": "/api/is-down?slug=codex" },
     { "source": "/is-junie-down", "destination": "/api/is-down?slug=junie" },
     { "source": "/intro", "destination": "/api/intro" },
+    { "source": "/confirm", "destination": "/api/confirm" },
     { "source": "/reports", "destination": "/api/reports" },
     { "source": "/reports/", "destination": "/api/reports" },
     { "source": "/reports/:rest*", "destination": "/api/reports" },

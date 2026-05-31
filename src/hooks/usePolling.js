@@ -3,7 +3,6 @@
 // Return shape: { services, loading, error, lastUpdated, refresh }
 
 import { useState, useEffect, useCallback, useRef, createContext, useContext, createElement } from 'react'
-import { runWebhookAlerts } from '../utils/webhookAlerts'
 const POLL_INTERVAL = 60_000 // 60s
 
 // Worker API URL — defaults to local dev, override via env
@@ -578,10 +577,8 @@ export function usePolling() {
 }
 
 
-// Two alert paths: the Worker posts to the operator webhook server-side; usePolling relays the
-// worker's canonical embeds (the /api/status `alertFeed`) to the user's OWN Discord webhook browser-
-// side (#467, #475, via runWebhookAlerts). Different destinations, so no cross-source duplicates (the
-// #60 dedup concern). Slack uses native `/feed subscribe` instead.
+// Discord alerts (operator + per-user) are delivered server-side by the worker cron (#486 PR3); the
+// dashboard no longer relays them. `alertFeed` is still surfaced on /api/status for external readers.
 
 // mode: 'initial' = first load (skeleton), 'refresh' = manual (keep data, show refreshing), 'silent' = auto-poll (invisible)
 function usePollingInternal() {
@@ -656,12 +653,6 @@ function usePollingInternal() {
       // Minimum skeleton display time: 500ms to prevent flash
       const elapsed = Date.now() - loadStart
       if ((isInitial || isRefresh) && elapsed < 500) await new Promise((r) => setTimeout(r, 500 - elapsed))
-
-      // Relay the worker's canonical alert embeds (data.alertFeed) to the user's OWN Discord webhook
-      // (#467, #475). The worker is the single source of truth — this just filters by the user's
-      // settings and POSTs verbatim, so operator/user alerts are identical. No-op unless a Discord
-      // webhook is set. Best-effort; fires only while a tab is open.
-      runWebhookAlerts(data.alertFeed ?? [])
 
       // Overlay probe RTT onto service.latency (replaces status page timing with real API RTT)
       // Non-probe API services keep status page latency with different label in UI
