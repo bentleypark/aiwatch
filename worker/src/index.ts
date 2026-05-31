@@ -870,7 +870,7 @@ import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDet
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow } from './daily-summary'
 import { collectChangelogs, getStaleSources } from './changelog'
-import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek } from './weekly-briefing'
+import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
@@ -1229,10 +1229,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
 }
 
 export default {
-  async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
-    // Use the scheduled trigger time (not wall-clock) so time-of-day checks like
-    // `minutes === 0` remain accurate even when cronAlertCheck takes 60+ seconds.
-    const scheduledNow = new Date(event.scheduledTime)
+  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     // Health check probing (Phase 2) — runs every cron cycle
     if (env.STATUS_CACHE) {
       await writeProbeSnapshot(env.STATUS_CACHE).catch((err) =>
@@ -1319,7 +1316,7 @@ export default {
 
     // Reddit community monitoring — runs once per hour (minute 0-4) to respect rate limits
     // KV budget: max 5 writes/hour = 120/day (trivial against the Workers Paid 1M/month inclusion)
-    const now = scheduledNow
+    const now = new Date()
     if (env.STATUS_CACHE && env.DISCORD_WEBHOOK_URL && now.getUTCMinutes() < 5) {
       try {
         const redditAlerts = await detectRedditPosts(env.STATUS_CACHE)
@@ -1495,35 +1492,21 @@ export default {
         if (!alreadySent) {
           const { start: weekStart, end: weekEnd } = getWeekRange(now)
 
-          // Read changelog entries accumulated this week, filtered to the briefing window
+          // Read changelog entries accumulated this week
           const changelogRaw = await env.STATUS_CACHE.get('changelog:entries').catch(() => null)
-          let changelog: import('./changelog').ChangelogEntry[] = []
-          if (changelogRaw) {
-            try {
-              const all = JSON.parse(changelogRaw)
-              if (!Array.isArray(all)) {
-                console.warn('[cron] changelog entries: expected array, got', typeof all)
-              } else {
-                changelog = filterChangelogToWeek(all, weekStart, weekEnd)
-              }
-            } catch (err) { console.warn('[cron] changelog entries parse failed:', err instanceof Error ? err.message : String(err)) }
-          }
+          let changelog: unknown[] = []
+          if (changelogRaw) { try { changelog = JSON.parse(changelogRaw) } catch { console.warn('[cron] changelog entries parse failed') } }
 
-          // Read monthly incidents for incident summary (current + previous month for week spanning boundary).
-          const allMonthlyIncidents: Parameters<typeof buildIncidentSummary>[0] = []
-          const serviceNameMap: Record<string, string> = {}
-          for (const svc of SERVICES) serviceNameMap[svc.id] = svc.name
-          const currMonthKey = `incidents:monthly:${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+          // Read monthly incidents for incident summary (check both current and previous month for week spanning month boundary)
+          const allMonthlyIncidents: unknown[] = []
+          const currMonthKey = `incidents:monthly:${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
           const prevMonth = new Date(now); prevMonth.setUTCMonth(prevMonth.getUTCMonth() - 1)
-          const prevMonthKey = `incidents:monthly:${prevMonth.getUTCFullYear()}-${String(prevMonth.getUTCMonth() + 1).padStart(2, '0')}`
+          const prevMonthKey = `incidents:monthly:${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`
           for (const mk of [currMonthKey, prevMonthKey]) {
             const mRaw = await env.STATUS_CACHE.get(mk).catch(() => null)
-            if (!mRaw) continue
-            try {
-              allMonthlyIncidents.push(...parseMonthlyIncidents(JSON.parse(mRaw), serviceNameMap))
-            } catch (err) { console.warn(`[cron] ${mk} parse failed:`, err instanceof Error ? err.message : String(err)) }
+            if (mRaw) { try { allMonthlyIncidents.push(...(JSON.parse(mRaw).incidents ?? [])) } catch { console.warn(`[cron] ${mk} parse failed`) } }
           }
-          const incidents = buildIncidentSummary(allMonthlyIncidents, weekStart, weekEnd)
+          const incidents = buildIncidentSummary(allMonthlyIncidents as Parameters<typeof buildIncidentSummary>[0], weekStart, weekEnd)
 
           // Read daily uptime counters for stability comparison
           const thisWeekCounters: Record<string, { ok: number; total: number }> = {}
