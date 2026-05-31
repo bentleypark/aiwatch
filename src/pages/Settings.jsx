@@ -8,7 +8,6 @@ import { useSettings } from '../hooks/useSettings'
 import { VALID_THEMES, VALID_LANGS, VALID_PERIODS, SERVICE_AND_APP_IDS, AGENT_SERVICE_IDS, ALL_SERVICE_IDS, DEFAULT_SETTINGS, ALL_SERVICES_FEED_URL } from '../utils/constants'
 import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
-import { pingWebhookRegistration } from '../utils/webhookRegistration'
 import { subscribeWebhook, updateWebhookFilters, unsubscribeWebhook, getLocalSubStatus, reconcileSubscription } from '../utils/webhookSubscription'
 
 // ── Styles matching design mockup ────────────────────────
@@ -228,10 +227,10 @@ export default function Settings() {
       if (res.ok) {
         setSubStatus(res.status === 'confirmed' ? 'confirmed' : 'pending')
         setSubAction(null)
-        // Track + ping only on a successful subscribe — a 403/502 must not count as a registration.
+        // Track only on a successful subscribe — a 403/502 must not count as a registration. The
+        // active-webhook count is now derived server-side from confirmed subscriptions (#486 PR3),
+        // so the legacy webhook:reg: ping was removed.
         if (isNewUrl) trackEvent('webhook_register', { type: 'discord' })
-        // Legacy active-webhook-count ping (#467) — kept until the PR3 cutover; different KV key, harmless.
-        pingWebhookRegistration(url, 'discord', isNewUrl ? '' : settings.discordUrl)
       } else setSubAction('error')
     }).catch(() => setSubAction('error'))
   }

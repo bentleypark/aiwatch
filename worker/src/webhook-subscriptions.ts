@@ -13,8 +13,8 @@
 // the identity — no account, email, or PII.
 //
 // This module is pure logic + Web Crypto + KV-key helpers; HTTP wiring lives in index.ts. The cron
-// fan-out (deliverToSubscribers) is defined here but NOT called yet — PR3 wires it after the browser
-// relay is removed in the same release, so the two paths never double-send (#486 cutover).
+// fan-out (deliverToSubscribers) is wired into the scheduled handler as of #486 PR3, which also
+// removed the old browser relay in the same release so the two paths never double-send.
 
 import { kvPut, kvDel, isAllowedAlertWebhook } from './utils'
 import type { AlertFeedEntry, AlertKind } from './alert-feed'
@@ -379,7 +379,7 @@ export async function unsubscribe(kv: KVNamespace, hash: string): Promise<Update
   return { ok: true }
 }
 
-// ── Cron fan-out (defined here, wired in PR3) ────────────────────────────────
+// ── Cron fan-out (wired into the scheduled handler, #486 PR3) ────────────────
 
 export interface DeliveryStats {
   attempted: number
@@ -405,8 +405,8 @@ export function classifyDelivery(status: number | null): DeliveryOutcome {
 
 /** Fan-out the recent alert feed to all confirmed subscribers. Each sub: decrypt URL → filter →
  *  dedup (webhook:sent:) → POST. Isolated per sub (one dead webhook never blocks the rest). Dead
- *  webhooks (410/404, or MAX_FAIL_COUNT consecutive retries) are pruned. NOT called yet — PR3 wires
- *  this into the cron AFTER the browser relay is removed, so the two paths never double-send.
+ *  webhooks (410/404, or MAX_FAIL_COUNT consecutive retries) are pruned. Wired into the cron in #486
+ *  PR3, which removed the browser relay in the same release so the two paths never double-send.
  *
  *  `postEmbed` returns the HTTP status (or null on network error) so classifyDelivery can decide. */
 export async function deliverToSubscribers(

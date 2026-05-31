@@ -23,10 +23,6 @@ import {
   type SubscriptionFilters,
 } from '../webhook-subscriptions'
 import type { AlertFeedEntry } from '../alert-feed'
-// Parity guard: the former client-side relay decision (#475) the worker must stay byte-identical to.
-// Namespace import (not named) — the SPA module lives outside the worker vitest root and a named
-// import trips a vitest module-resolution quirk; the namespace form resolves cleanly.
-import * as clientRelay from '../../../src/utils/webhookAlerts'
 
 // In-memory KV mock supporting get/put(+metadata)/delete/list(prefix,cursor). TTL ignored (tests
 // don't advance wall-clock across TTLs).
@@ -114,42 +110,28 @@ describe('normalizeFilters', () => {
   })
 })
 
-describe('shouldDeliver (parity with client shouldRelay)', () => {
+describe('shouldDeliver — per-user delivery filter (ported from the former client shouldRelay, #475)', () => {
   it('custom target requires a matching service', () => {
     const f: SubscriptionFilters = { ...FILTERS_ALL, alertTarget: 'custom', alertServices: ['openai'] }
     expect(shouldDeliver(feedEntry({ svcIds: ['claude'] }), f)).toBe(false)
     expect(shouldDeliver(feedEntry({ svcIds: ['openai'] }), f)).toBe(true)
+    expect(shouldDeliver(feedEntry({ svcIds: ['claude', 'openai'] }), f)).toBe(true) // any match passes
   })
   it('incident kinds gated by alertIncidents', () => {
     expect(shouldDeliver(feedEntry({ kind: 'new' }), { ...FILTERS_ALL, alertIncidents: false })).toBe(false)
+    expect(shouldDeliver(feedEntry({ kind: 'resolved' }), { ...FILTERS_ALL, alertIncidents: false })).toBe(false)
+    expect(shouldDeliver(feedEntry({ kind: 'new' }), FILTERS_ALL)).toBe(true)
     expect(shouldDeliver(feedEntry({ kind: 'resolved' }), FILTERS_ALL)).toBe(true)
   })
-  it("condition 'down' drops degraded but keeps down/recovered", () => {
-    const f: SubscriptionFilters = { ...FILTERS_ALL, alertCondition: 'down' }
-    expect(shouldDeliver(feedEntry({ kind: 'degraded' }), f)).toBe(false)
-    expect(shouldDeliver(feedEntry({ kind: 'down' }), f)).toBe(true)
-    expect(shouldDeliver(feedEntry({ kind: 'recovered' }), f)).toBe(true)
+  it("condition 'down' drops degraded but keeps down/recovered; 'all' keeps everything", () => {
+    const down: SubscriptionFilters = { ...FILTERS_ALL, alertCondition: 'down' }
+    expect(shouldDeliver(feedEntry({ kind: 'degraded' }), down)).toBe(false)
+    expect(shouldDeliver(feedEntry({ kind: 'down' }), down)).toBe(true)
+    expect(shouldDeliver(feedEntry({ kind: 'recovered' }), down)).toBe(true)
+    expect(shouldDeliver(feedEntry({ kind: 'degraded' }), FILTERS_ALL)).toBe(true)
   })
-  // Pins the #475 "byte-identical" contract: the worker's shouldDeliver must agree with the former
-  // client shouldRelay (src/utils/webhookAlerts.js) for every (kind × filter) combination, so server
-  // delivery (PR3) matches what the browser relay did. If either drifts, this fails.
-  it('agrees with the client shouldRelay over the full kind × filter matrix', () => {
-    const kinds: AlertFeedEntry['kind'][] = ['new', 'resolved', 'down', 'degraded', 'recovered']
-    const conditions: Array<'down' | 'all'> = ['down', 'all']
-    const targets: Array<'all' | 'custom'> = ['all', 'custom']
-    const serviceSets = [[], ['claude'], ['openai']]
-    const incidentsFlags = [true, false]
-    const svcIdSets = [['claude'], ['openai'], ['claude', 'openai'], []]
-    for (const kind of kinds)
-      for (const alertCondition of conditions)
-        for (const alertTarget of targets)
-          for (const alertServices of serviceSets)
-            for (const alertIncidents of incidentsFlags)
-              for (const svcIds of svcIdSets) {
-                const entry = feedEntry({ kind, svcIds })
-                const filters = { alertCondition, alertTarget, alertServices, alertIncidents }
-                expect(shouldDeliver(entry, filters)).toBe(clientRelay.shouldRelay(entry, filters))
-              }
+  it('never delivers an unknown kind', () => {
+    expect(shouldDeliver(feedEntry({ kind: 'bogus' as AlertFeedEntry['kind'] }), FILTERS_ALL)).toBe(false)
   })
 })
 

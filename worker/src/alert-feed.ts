@@ -2,16 +2,16 @@
 //
 // The cron (cronAlertCheck) builds one rich Discord embed per operator alert (incident / status /
 // recovery), assembling AI analysis, Detection Lead, fallback, region hint, and multi-service
-// grouping server-side. Re-implementing that in the browser (webhookAlerts.js, #467) inevitably
-// drifted (#473 dedup, #474 grouping/fallback/AI). Instead, the cron appends every embed it sends to
-// a short rolling KV feed; the dashboard relays the matching entries to a visitor's OWN Discord
-// webhook, so operator and user alerts are byte-identical and future format changes propagate for
-// free. The browser's only job is the per-user filter (alertTarget/alertCondition/alertIncidents) +
-// delivery — duplicate suppression (incl. the #473 cross-poll status/incident race) is already
-// resolved server-side, so it can't reappear here.
+// grouping server-side. The cron appends every embed it sends to a short rolling KV feed, then (since
+// #486 PR3) fans those same entries out to confirmed per-user subscriptions server-side
+// (deliverToSubscribers in webhook-subscriptions.ts), applying the per-user filter (alertTarget/
+// alertCondition/alertIncidents) there. So operator and user alerts are byte-identical, future format
+// changes propagate for free, and duplicate suppression (incl. the #473 cross-poll status/incident
+// race) is resolved once, server-side. (#467/#475 originally relayed this from the browser; PR3
+// retired that relay.) `alertFeed` is still surfaced on /api/status for external readers.
 //
-// Privacy unchanged (#467): the worker only stores a HASH of the user URL — it provides payloads,
-// the browser still does the POST.
+// Privacy: this feed stores no webhook URL — only the subscription store (webhook:sub:*) holds the
+// user URL, AES-GCM-encrypted (#486 reversed #467's hash-only posture).
 
 import { kvPut } from './utils'
 import type { ServiceStatus } from './services'

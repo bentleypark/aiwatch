@@ -9,9 +9,9 @@
 // AIWatch posts into it. We keep the confirmation status keyed by the URL's sha256 hash in
 // localStorage so the UI survives reloads — the server is the source of truth, this is just UX state.
 //
-// NOTE (cutover): the legacy browser relay (webhookAlerts.js) + its registration ping
-// (webhookRegistration.js) are NOT removed here — that happens in PR3 together with wiring the cron
-// fan-out, so the two delivery paths never overlap. PR2 only adds the subscription flow + UI.
+// As of #486 PR3 this is the ONLY per-user delivery path: the legacy browser relay (webhookAlerts.js)
+// + its registration ping (webhookRegistration.js) were removed and the worker cron now fans out
+// alerts server-side, so delivery no longer depends on a tab being open.
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8788'
 const API_BASE = API_URL.replace('/api/status', '')
