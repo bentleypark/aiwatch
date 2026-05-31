@@ -1,9 +1,16 @@
-// Webhook registration ping (#467). The Worker stores only a SHA-256 hash of the webhook URL
-// (webhook:reg:{hash}, 30d TTL) purely to COUNT active webhooks in the daily summary — it never
-// stores the raw URL. `pingWebhookRegistration` runs on Settings save (register/unregister on
-// change). `refreshWebhookRegistration` runs on app load so a set-and-forget user's registration
-// keeps refreshing its 30d TTL each visit — otherwise the "active webhooks" count decays and
-// under-reports (#467). "Active" therefore means: configured + opened AIWatch within 30 days.
+// Webhook registration ping (#467) — LEGACY, removed in the #486 PR3 cutover. The Worker stores only
+// a SHA-256 hash of the webhook URL (webhook:reg:{hash}, 30d TTL) purely to COUNT active webhooks in
+// the daily summary — this `reg` path never stores the raw URL. `pingWebhookRegistration` runs on a
+// successful Subscribe (register/unregister on change). `refreshWebhookRegistration` runs on app load
+// so a set-and-forget user's registration keeps refreshing its 30d TTL each visit — otherwise the
+// "active webhooks" count decays and under-reports (#467). "Active" therefore means: configured +
+// opened AIWatch within 30 days.
+//
+// NOTE (#486): the new server-side subscription path (worker/src/webhook-subscriptions.ts,
+// webhook:sub:{hash}) DOES persist an AES-GCM-*encrypted* URL — a different KV key + a deliberate
+// reversal of #467's hash-only posture, gated by channel-control confirmation. The two coexist only
+// until #486 PR3 removes this legacy ping + the browser relay (webhookAlerts.js). The "count-only, no
+// URL" statement above is scoped to webhook:reg: and stays accurate for it.
 
 const WORKER_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')
 
