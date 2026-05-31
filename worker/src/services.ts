@@ -995,10 +995,19 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
 
     // Phase 1: Probe-based cross-validation (requires probe data)
     if (probeSnapshots && probeSnapshots.length > 0) {
+      const date = new Date().toISOString().split('T')[0]
       for (const svc of degradedFromFetch) {
         if (svc.status === 'degraded' && isProbeHealthy(probeSnapshots, svc.id)) {
           console.log(`[cross-validation] ${svc.id}: status page down but probe RTT normal — holding operational`)
           svc.status = 'operational'
+          // Daily suppression counter: how many times was this service's degraded status
+          // overridden by probe health? Surfaced in daily summary alongside fetch-fail:daily
+          // to distinguish "probe healthy → false positive" from "probe also spiking → real outage".
+          if (kv) {
+            const supKey = `cross-valid:suppressed:${svc.id}:${date}`
+            const prev = parseInt(await kv.get(supKey).catch(() => null) ?? '0', 10) || 0
+            await kvPut(kv, supKey, String(prev + 1), { expirationTtl: 172800 })
+          }
         }
       }
     }

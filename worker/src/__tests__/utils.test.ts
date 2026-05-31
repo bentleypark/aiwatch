@@ -124,10 +124,39 @@ describe('trackFetchFailure', () => {
     expect(await trackFetchFailure(kv, 'azure')).toBe(true)
   })
 
-  it('returns true when already above threshold and skips write', async () => {
+  it('increments daily accumulator when threshold is reached', async () => {
+    const store: Record<string, string> = { 'fetch-fail:azure': '2' }
+    const kv = mockKV(store)
+    expect(await trackFetchFailure(kv, 'azure')).toBe(true)
+    const today = new Date().toISOString().split('T')[0]
+    expect(store[`fetch-fail:daily:azure:${today}`]).toBe('1')
+  })
+
+  it('accumulates daily counter across multiple threshold hits', async () => {
+    const today = new Date().toISOString().split('T')[0]
+    const store: Record<string, string> = {
+      'fetch-fail:azure': '2',
+      [`fetch-fail:daily:azure:${today}`]: '3',
+    }
+    const kv = mockKV(store)
+    await trackFetchFailure(kv, 'azure')
+    expect(store[`fetch-fail:daily:azure:${today}`]).toBe('4')
+  })
+
+  it('does not increment daily accumulator when threshold is not yet reached', async () => {
+    const store: Record<string, string> = { 'fetch-fail:azure': '1' }
+    const kv = mockKV(store)
+    expect(await trackFetchFailure(kv, 'azure')).toBe(false) // count=2, below threshold
+    const today = new Date().toISOString().split('T')[0]
+    expect(store[`fetch-fail:daily:azure:${today}`]).toBeUndefined()
+  })
+
+  it('returns true when already above threshold, but does NOT write daily key (not a rising edge)', async () => {
+    // count=5 → next=6 ≥ threshold, so shouldDegrade=true, but 6 ≠ threshold(3) → no daily write.
+    // This prevents double-counting cycles where the failure is sustained above threshold.
     const kv = mockKV({ 'fetch-fail:azure': '5' })
     expect(await trackFetchFailure(kv, 'azure')).toBe(true)
-    expect(kv.put).not.toHaveBeenCalled() // already above, skip write
+    expect(kv.put).not.toHaveBeenCalled()
   })
 
   it('handles corrupted (non-numeric) KV value gracefully', async () => {

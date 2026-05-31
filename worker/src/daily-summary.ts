@@ -23,10 +23,12 @@ export interface DailySummaryData {
   probeSnapshots?: ProbeSnapshot[]
   detectionLeadEntries?: DetectionLeadEntry[]
   leadDiag?: LeadDiag | null
+  fetchFailureCounts?: Record<string, number>   // svcId → times degraded threshold hit today
+  crossValidSuppressed?: Record<string, number> // svcId → times probe overrode to operational
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
-  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, deliveryCounts, redditCount, vitals, detectionLeadEntries, leadDiag } = data
+  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, deliveryCounts, redditCount, vitals, detectionLeadEntries, leadDiag, fetchFailureCounts, crossValidSuppressed } = data
   const total = services.length
   const operational = services.filter(s => s.status === 'operational').length
   const degraded = services.filter(s => s.status === 'degraded').length
@@ -146,6 +148,27 @@ export function buildDailySummary(data: DailySummaryData): string {
   if (leadDiag) {
     const diagSection = formatLeadDiagSection(leadDiag)
     if (diagSection) lines.push(diagSection)
+  }
+
+  // Section: Status page fetch failures (#500) — surfaces structural URL blocks early.
+  // fetch-fail:daily = times the degraded threshold was hit today (transient: 1-2, structural: 5+).
+  // cross-valid:suppressed = subset where probe confirmed the API was healthy (false positives caught).
+  if (fetchFailureCounts && Object.keys(fetchFailureCounts).length > 0) {
+    const nameMap = new Map(services.map(s => [s.id, s.name]))
+    const items = Object.entries(fetchFailureCounts)
+      .sort(([, a], [, b]) => b - a)
+      .map(([id, total]) => {
+        const suppressed = crossValidSuppressed?.[id] ?? 0
+        const real = Math.max(0, total - suppressed)
+        const detail = suppressed === total
+          ? `all false positives — probe healthy`
+          : suppressed > 0
+            ? `${real} real, ${suppressed} probe-suppressed`
+            : `${real} real`
+        return `   ${nameMap.get(id) ?? id}: ${total}× threshold hit (${detail})`
+      })
+      .join('\n')
+    lines.push(`\n⚠️ **Status Page Fetch Failures Today** (#500)\n${items}`)
   }
 
   return lines.join('\n')
