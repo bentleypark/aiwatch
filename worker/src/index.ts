@@ -23,6 +23,10 @@ interface Env {
   // `wrangler secret put WEBHOOK_ENC_KEY`. Absent/invalid → /api/webhook/subscribe fails closed
   // (503), so server-side per-user delivery is simply disabled rather than storing plaintext URLs.
   WEBHOOK_ENC_KEY?: string
+  // #486: base origin for the channel-control confirm link (`{base}/confirm?h=…&c=…`). Defaults to
+  // the production site when unset; override in worker/.dev.vars (e.g. http://localhost:3333) to run
+  // the subscribe→confirm click-through end-to-end against `wrangler dev` + `vercel dev`.
+  CONFIRM_BASE_URL?: string
   // #299: operator-only shared secret for POST /api/admin/analyze. Set via
   // `wrangler secret put ADMIN_API_KEY`. Separate from ANTHROPIC_API_KEY so it
   // can be rotated independently; absent secret → endpoint always 401.
@@ -1921,9 +1925,10 @@ export default {
           async (target, code) => {
             try {
               const h = await webhookSha256Hex(target)
+              const confirmBase = (env.CONFIRM_BASE_URL || 'https://ai-watch.dev').replace(/\/$/, '')
               const r = await fetch(target, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: `🔔 **AIWatch** — confirm alerts for this channel:\nhttps://ai-watch.dev/confirm?h=${h}&c=${code}\n\n*(Ignore this message if you didn't request AIWatch alerts.)*` }),
+                body: JSON.stringify({ content: `🔔 **AIWatch** — confirm alerts for this channel:\n${confirmBase}/confirm?h=${h}&c=${code}\n\n*(Ignore this message if you didn't request AIWatch alerts.)*` }),
               })
               r.body?.cancel()
               if (!r.ok) console.warn(`[webhook/subscribe] confirm post rejected by Discord (${r.status})`)
