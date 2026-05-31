@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, type WeeklyBriefingData } from '../weekly-briefing'
+import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, type WeeklyBriefingData } from '../weekly-briefing'
 
 describe('getWeekRange', () => {
   it('returns Mon–Sun for a Wednesday', () => {
@@ -144,6 +144,100 @@ describe('buildWeeklyBriefing', () => {
     }
     const result = buildWeeklyBriefing(data)
     expect(result).not.toContain('Security')
+  })
+})
+
+describe('filterChangelogToWeek', () => {
+  it('excludes entries before weekStart and includes entries within the window', () => {
+    // Regression: changelog:entries KV accumulates 14 days; without this filter
+    // the weekly briefing showed entries from before the current week (e.g. 5/22 in 5/25-5/31).
+    const entries = [
+      { source: 'anthropic', title: 'Project Glasswing', url: 'https://anthropic.com/glasswing', date: '2026-05-22T00:00:00Z' }, // outside week
+      { source: 'openai', title: 'Codex Enterprise', url: 'https://openai.com/blog/codex', date: '2026-05-27T00:00:00Z' },       // inside week
+      { source: 'anthropic', title: 'Claude Opus 4.8', url: 'https://anthropic.com/news/opus', date: '2026-05-29T00:00:00Z' },    // inside week
+    ]
+    const result = filterChangelogToWeek(entries, '2026-05-25', '2026-05-31')
+    expect(result).toHaveLength(2)
+    expect(result.every((e) => e.title !== 'Project Glasswing')).toBe(true)
+  })
+
+  it('includes entries on weekEnd day up to 23:59:59Z', () => {
+    const entries = [
+      { source: 'openai', title: 'Last day entry', url: 'https://openai.com', date: '2026-05-31T23:59:00Z' },
+      { source: 'openai', title: 'Next day entry', url: 'https://openai.com', date: '2026-06-01T00:00:00Z' },
+    ]
+    const result = filterChangelogToWeek(entries, '2026-05-25', '2026-05-31')
+    expect(result).toHaveLength(1)
+    expect(result[0].title).toBe('Last day entry')
+  })
+
+  it('returns empty array when no entries fall in the window', () => {
+    const entries = [
+      { source: 'anthropic', title: 'Old news', url: 'https://anthropic.com', date: '2026-05-10T00:00:00Z' },
+    ]
+    expect(filterChangelogToWeek(entries, '2026-05-25', '2026-05-31')).toEqual([])
+  })
+})
+
+describe('parseMonthlyIncidents', () => {
+  const svcNames = { claude: 'Claude API', openai: 'OpenAI API' }
+
+  it('flattens nested services.incidents into a flat list with serviceId/serviceName', () => {
+    const raw = {
+      services: {
+        claude: {
+          incidents: [
+            { id: 'inc-1', title: 'Outage', startedAt: '2026-05-28T10:00:00Z', durationMin: 90 },
+          ],
+        },
+        openai: {
+          incidents: [
+            { id: 'inc-2', title: 'Degraded', startedAt: '2026-05-29T08:00:00Z', durationMin: 30 },
+          ],
+        },
+      },
+    }
+    const result = parseMonthlyIncidents(raw, svcNames)
+    expect(result).toHaveLength(2)
+    expect(result[0]).toMatchObject({ id: 'inc-1', serviceId: 'claude', serviceName: 'Claude API', duration: '1h 30m' })
+    expect(result[1]).toMatchObject({ id: 'inc-2', serviceId: 'openai', serviceName: 'OpenAI API', duration: '30m' })
+  })
+
+  it('returns empty array for a root-level incidents key (old bug: was reading .incidents at root)', () => {
+    // This validates that the old pattern JSON.parse(mRaw).incidents would have returned undefined
+    const raw = { incidents: [{ id: 'inc-1' }] } as unknown as Parameters<typeof parseMonthlyIncidents>[0]
+    const result = parseMonthlyIncidents(raw, svcNames)
+    expect(result).toHaveLength(0) // no .services → empty, not the stale root .incidents
+  })
+
+  it('handles services with no incidents array (backward compat)', () => {
+    const raw = { services: { claude: { count: 2, totalMinutes: 60 } } } as unknown as Parameters<typeof parseMonthlyIncidents>[0]
+    const result = parseMonthlyIncidents(raw, svcNames)
+    expect(result).toHaveLength(0)
+  })
+
+  it('converts durationMin to duration string correctly', () => {
+    const raw = {
+      services: {
+        claude: {
+          incidents: [
+            { id: 'a', title: 'T', startedAt: '2026-05-01T00:00:00Z', durationMin: 120 },
+            { id: 'b', title: 'T', startedAt: '2026-05-01T00:00:00Z', durationMin: 45 },
+            { id: 'c', title: 'T', startedAt: '2026-05-01T00:00:00Z', durationMin: 0 },
+          ],
+        },
+      },
+    }
+    const result = parseMonthlyIncidents(raw, svcNames)
+    expect(result[0].duration).toBe('2h')
+    expect(result[1].duration).toBe('45m')
+    expect(result[2].duration).toBeNull()
+  })
+
+  it('uses svcId as fallback serviceName when not in map', () => {
+    const raw = { services: { unknown_svc: { incidents: [{ id: 'x', title: 'T', startedAt: '2026-05-01T00:00:00Z' }] } } }
+    const result = parseMonthlyIncidents(raw, {})
+    expect(result[0].serviceName).toBe('unknown_svc')
   })
 })
 
