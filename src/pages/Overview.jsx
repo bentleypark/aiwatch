@@ -12,7 +12,8 @@ import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacks, ALL_SERVICES_F
 import RssCopyIcon from '../components/RssCopyIcon'
 import { regionStatusOf } from '../utils/regionStatus'
 import { buildCalendarFromIncidents } from '../utils/calendar'
-import { compareIncidents, getContextualTime } from '../utils/incidentSort'
+import { compareIncidents, compareGroupedRows, getContextualTime, dominantGroupStatus } from '../utils/incidentSort'
+import { groupIncidents } from '../utils/incidentGrouping'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
 import StatusPill from '../components/StatusPill'
@@ -215,6 +216,69 @@ function FilterTabs({ filter, setFilter, total, issueCount, downCount, t }) {
           )}
         </button>
       ))}
+    </div>
+  )
+}
+
+// Grouped flap incidents (same title, same day) — compact expandable row (#496)
+function GroupIncidentItem({ group, lang, t }) {
+  const [expanded, setExpanded] = useState(false)
+  // Use canonical dominantGroupStatus (handles 'ongoing' alias + uniformStatus fast-path)
+  const dominantStatus = dominantGroupStatus(group)
+  const barCls = INC_BAR_CLASS[dominantStatus] ?? INC_BAR_CLASS.resolved
+  // entries[0] is newest because Overview pre-sorts input by compareIncidents before groupIncidents()
+  const representative = group.entries[0]
+  const serviceName = representative.serviceName ?? representative.affectedNames?.[0] ?? ''
+  const dateStr = formatDate(group.rangeEnd, lang).split(' ').slice(0, 2).join(' ')
+  return (
+    <div style={{ marginBottom: '8px' }}>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        className="flex gap-2.5 items-start cursor-pointer hover:bg-[var(--bg2)] rounded transition-colors focus:outline-none focus:ring-1 focus:ring-[var(--border-hi)]"
+        style={{ padding: '2px 4px', margin: '-2px -4px' }}
+        onClick={() => setExpanded(v => !v)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(v => !v) } }}
+      >
+        <div
+          className="mono text-[10px] text-[var(--text2)] whitespace-nowrap shrink-0"
+          style={{ width: '52px', paddingTop: '1px' }}
+          title={`${dateStr} · ${group.count} occurrences`}
+        >
+          {dateStr}
+        </div>
+        <div className={`w-[2px] rounded self-stretch ${barCls}`} style={{ minHeight: '32px' }} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap" style={{ marginBottom: '2px' }}>
+            <div className="text-[12px] font-medium text-[var(--text0)] truncate">
+              {serviceName} — {group.normalizedTitle}
+            </div>
+            <span
+              className="shrink-0 mono bg-[var(--bg3)] text-[var(--text2)]"
+              style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', letterSpacing: '0.04em' }}
+            >
+              ×{group.count}
+            </span>
+            <span className="shrink-0 text-[9px] text-[var(--text2)]" aria-hidden="true">
+              {expanded ? '▾' : '▸'}
+            </span>
+          </div>
+          <div className="mono text-[10px] text-[var(--text2)]">
+            {representative.duration ?? (dominantStatus === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}
+          </div>
+        </div>
+      </div>
+      {expanded && (
+        <div
+          className="border-l-2 border-[var(--border)]"
+          style={{ marginLeft: '6px', paddingLeft: '8px', paddingTop: '4px', background: 'var(--bg0)', borderRadius: '0 4px 4px 0' }}
+        >
+          {group.entries.map(inc => (
+            <IncidentItem key={inc.id} incident={{ ...inc, serviceName: inc.serviceName ?? serviceName, affectedNames: inc.affectedNames ?? [serviceName] }} lang={lang} t={t} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -545,10 +609,14 @@ export default function Overview() {
       }
     }
   }
-  const recentIncidents = [...incMap.values()]
-    .filter((inc) => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= sevenDaysAgo)
-    .sort(compareIncidents)
-    .slice(0, 5)
+  // Apply flap grouping (#496): BetterStack services emit many same-title incidents per day
+  // with unique IDs (Fireworks, Together, Mistral). groupIncidents() collapses ≥2 same-title
+  // incidents on the same local day into one group row, preventing them from filling the panel.
+  const recentIncidents = groupIncidents(
+    [...incMap.values()]
+      .filter((inc) => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= sevenDaysAgo)
+      .sort(compareIncidents)
+  ).sort(compareGroupedRows).slice(0, 5)
 
   const withLatency = catServices.filter((s) => s.latency != null)
   const sortedByLatency = [...withLatency].sort((a, b) => a.latency - b.latency)
@@ -710,9 +778,11 @@ export default function Overview() {
             <EmptyState type="good" />
           ) : (
             <div>
-              {recentIncidents.map((inc) => (
-                <IncidentItem key={inc.id} incident={inc} lang={lang} t={t} />
-              ))}
+              {recentIncidents.map((row) =>
+                row.kind === 'single'
+                  ? <IncidentItem key={row.incident.id} incident={row.incident} lang={lang} t={t} />
+                  : <GroupIncidentItem key={`group:${row.dayKey}:${row.normalizedTitle}`} group={row} lang={lang} t={t} />
+              )}
             </div>
           )}
         </Panel>
