@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { groupIncidents, GROUP_THRESHOLD, normalizeTitle, isGenericTitle, GENERIC_TITLE_PATTERNS_SOURCES } from '../incidentGrouping'
+import { compareIncidents, compareGroupedRows } from '../incidentSort'
 
 // Minimal Incident factory — fields match worker/src/types.ts shape
 function makeIncident({ id, title, startedAt, status = 'resolved', impact = null, duration = '5m' }) {
@@ -494,5 +495,111 @@ describe('groupIncidents — sort axis alignment with getLatestActivity (#411)',
     const result = groupIncidents([a, b], UTC)
     expect(result[0].incident.id).toBe('a')
     expect(result[1].incident.id).toBe('b')
+  })
+})
+
+describe('Overview recentIncidents grouping regression (#496)', () => {
+  // Simulates the exact incMap + groupIncidents pipeline used in Overview.jsx.
+  // Bug: Overview was calling groupIncidents() nowhere — flap incidents with unique
+  // IDs (BetterStack: Together AI, Fireworks AI, Mistral) appeared as separate rows,
+  // filling the panel's 5-item limit with duplicates and hiding real incidents.
+  const UTC = { timeZone: 'UTC' }
+
+  function buildRecentIncidents(services, { sevenDaysAgo = 0, limit = 5 } = {}) {
+    // mirrors Overview.jsx incMap dedup + filter + compareIncidents + groupIncidents + compareGroupedRows
+    const incMap = new Map()
+    for (const s of services) {
+      for (const inc of s.incidents ?? []) {
+        const existing = incMap.get(inc.id)
+        if (existing) {
+          if (!existing.affectedNames.includes(s.name)) existing.affectedNames.push(s.name)
+        } else {
+          incMap.set(inc.id, { ...inc, serviceName: s.name, affectedNames: [s.name] })
+        }
+      }
+    }
+    const flat = [...incMap.values()]
+      .filter(inc => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= sevenDaysAgo)
+      .sort(compareIncidents)
+    return groupIncidents(flat, UTC).sort(compareGroupedRows).slice(0, limit)
+  }
+
+  it('WITHOUT groupIncidents: 3 flap incidents from Together AI fill 3 of 5 slots', () => {
+    // This is the BUG: same title, same day, different IDs appear as separate rows.
+    // Simulate the pre-fix behavior (no groupIncidents call).
+    const services = [
+      { name: 'Together AI', incidents: [
+        { id: 'flap-1', title: 'DeepSeek V4 Pro — recovered', status: 'resolved', startedAt: '2026-05-31T02:00:00Z', impact: null, duration: '2m', timeline: [] },
+        { id: 'flap-2', title: 'DeepSeek V4 Pro — recovered', status: 'resolved', startedAt: '2026-05-31T04:00:00Z', impact: null, duration: '2m', timeline: [] },
+        { id: 'flap-3', title: 'DeepSeek V4 Pro — recovered', status: 'resolved', startedAt: '2026-05-31T06:00:00Z', impact: null, duration: '2m', timeline: [] },
+      ]},
+      { name: 'Claude API', incidents: [
+        { id: 'real-1', title: 'Elevated errors on Claude Opus 4.8', status: 'resolved', startedAt: '2026-05-29T10:00:00Z', impact: 'minor', duration: '45m', timeline: [] },
+        { id: 'real-2', title: 'Elevated errors on Claude Opus 4.7', status: 'resolved', startedAt: '2026-05-28T08:00:00Z', impact: 'minor', duration: '30m', timeline: [] },
+        { id: 'real-3', title: 'Billing issues', status: 'resolved', startedAt: '2026-05-27T12:00:00Z', impact: 'minor', duration: '60m', timeline: [] },
+      ]},
+    ]
+    const incMap = new Map()
+    for (const s of services) {
+      for (const inc of s.incidents) {
+        if (!incMap.has(inc.id)) incMap.set(inc.id, { ...inc, serviceName: s.name, affectedNames: [s.name] })
+      }
+    }
+    // Pre-fix: no groupIncidents, just sort + slice
+    const bugged = [...incMap.values()]
+      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+      .slice(0, 5)
+    // 3 flap + 2 real: "real-3" (oldest real) is pushed out of the top 5
+    expect(bugged.map(i => i.id)).toEqual(['flap-3', 'flap-2', 'flap-1', 'real-1', 'real-2'])
+    expect(bugged.filter(i => i.title === 'DeepSeek V4 Pro — recovered')).toHaveLength(3)
+  })
+
+  it('WITH groupIncidents: 3 flap incidents collapse to 1 group, all 3 real incidents visible', () => {
+    const sevenDaysAgo = new Date('2026-05-24T00:00:00Z').getTime()
+    const services = [
+      { name: 'Together AI', incidents: [
+        { id: 'flap-1', title: 'DeepSeek V4 Pro — recovered', status: 'resolved', startedAt: '2026-05-31T02:00:00Z', impact: null, duration: '2m', timeline: [] },
+        { id: 'flap-2', title: 'DeepSeek V4 Pro — recovered', status: 'resolved', startedAt: '2026-05-31T04:00:00Z', impact: null, duration: '2m', timeline: [] },
+        { id: 'flap-3', title: 'DeepSeek V4 Pro — recovered', status: 'resolved', startedAt: '2026-05-31T06:00:00Z', impact: null, duration: '3m', timeline: [] },
+      ]},
+      { name: 'Claude API', incidents: [
+        { id: 'real-1', title: 'Elevated errors on Claude Opus 4.8', status: 'resolved', startedAt: '2026-05-29T10:00:00Z', impact: 'minor', duration: '45m', timeline: [] },
+        { id: 'real-2', title: 'Elevated errors on Claude Opus 4.7', status: 'resolved', startedAt: '2026-05-28T08:00:00Z', impact: 'minor', duration: '30m', timeline: [] },
+        { id: 'real-3', title: 'Billing issues', status: 'resolved', startedAt: '2026-05-27T12:00:00Z', impact: 'minor', duration: '60m', timeline: [] },
+      ]},
+    ]
+    const rows = buildRecentIncidents(services, { sevenDaysAgo, limit: 5 })
+    // 3 flap → 1 group + 3 real = 4 rows (all fit in 5-item limit)
+    expect(rows).toHaveLength(4)
+    expect(rows[0].kind).toBe('group')
+    expect(rows[0].normalizedTitle).toBe('DeepSeek V4 Pro')
+    expect(rows[0].count).toBe(3)
+    // All 3 real incidents are now visible
+    const realIds = rows.filter(r => r.kind === 'single').map(r => r.incident.id)
+    expect(realIds).toContain('real-1')
+    expect(realIds).toContain('real-2')
+    expect(realIds).toContain('real-3')
+    // Group entries retain their duration (most-recent entry = 'flap-3' with '3m')
+    // Critical: duration must NOT be null — null causes IncidentItem to show "In Progress"
+    // instead of the resolved state indicator (#496 follow-up fix)
+    expect(rows[0].entries[0].duration).toBe('3m')
+  })
+
+  it('cross-service same-id dedup still works alongside flap grouping', () => {
+    // Anthropic shares the same incident ID across Claude API + Claude Code + claude.ai
+    const sevenDaysAgo = new Date('2026-05-24T00:00:00Z').getTime()
+    const sharedInc = { id: 'shared-1', title: 'Opus 4.8 elevated errors', status: 'resolved', startedAt: '2026-05-29T10:00:00Z', impact: 'minor', duration: '45m', timeline: [] }
+    const services = [
+      { name: 'Claude API', incidents: [sharedInc] },
+      { name: 'claude.ai', incidents: [sharedInc] },
+      { name: 'Claude Code', incidents: [sharedInc] },
+    ]
+    const rows = buildRecentIncidents(services, { sevenDaysAgo })
+    // Should be 1 row (deduped by id), with affectedNames from all 3 services
+    expect(rows).toHaveLength(1)
+    expect(rows[0].kind).toBe('single')
+    expect(rows[0].incident.affectedNames).toContain('Claude API')
+    expect(rows[0].incident.affectedNames).toContain('claude.ai')
+    expect(rows[0].incident.affectedNames).toContain('Claude Code')
   })
 })
