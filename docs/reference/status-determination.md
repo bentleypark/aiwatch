@@ -12,3 +12,19 @@ Per-service status is resolved in `worker/src/services.ts` with this priority:
    - If service is `degraded` from fetch failure (no incidents) AND probe RTT is normal → override to `operational`
    - If 70%+ of services on the same platform (Atlassian/incident.io/etc.) fail simultaneously → platform outage → override all to `operational`
    - Conservative: only overrides when evidence is strong (≥2 recent probes healthy, or quorum failure detected)
+
+## Status page URL selection
+
+`apiUrl` (the machine-readable fetch endpoint) and `statusUrl` (the human-facing link) can differ. When selecting `apiUrl`, **verify it is reachable from Cloudflare Workers** — some providers host their status page on a custom domain that blocks Workers IPs while the canonical Atlassian/incident.io host remains accessible.
+
+**Verification method**: `curl -sv "<url>" 2>&1 | head -20` — look for SSL connection reset or HTTP 000 (curl's notation for a connection-level failure — no HTTP response received at all), which indicate Workers-IP blocking even when a browser can reach the page.
+
+### Known case: DeepSeek (2026-05, #498)
+
+`status.deepseek.com/api/v2/summary.json` resets the connection from Workers IPs (Alibaba Cloud CDN with geo/bot filtering). `deepseek.statuspage.io/api/v2/summary.json` is the Atlassian-hosted mirror — identical component IDs and data, always accessible.
+
+**Fix**: set `apiUrl` to the `.statuspage.io` URL; keep `statusUrl` as the branded domain for the dashboard link.
+
+**Symptom pattern**: `fetch-fail:{svcId}` KV key reaches `3` (threshold) and stops refreshing — the write-back guard (`next <= threshold`) skips writes once the counter would exceed 3, so the TTL is last refreshed on the 3rd failure (writes on failures 1, 2, and 3 each extend it; no writes occur after that) and expires 1800s (~30 min) later. After expiry the counter resets; the threshold is crossed again after 3 more cron cycles (~15 min), so the re-alert fires roughly 45 min after the original alert rather than exactly 30 min. Probe cross-validation (Phase 1) may not fully suppress these if the API probe has a concurrent RTT blip, or if fewer than 2 recent probe snapshots are available (e.g., after a probe disruption).
+
+**General rule**: when adding or updating a service with an Atlassian Statuspage, check both `{custom-domain}/api/v2/summary.json` and `{slug}.statuspage.io/api/v2/summary.json`. Use whichever responds with HTTP 200 from a non-browser client. Also confirm that the `statusComponentId` value in the service config resolves correctly against the chosen endpoint's component list — component IDs are not always identical between a custom domain and its `.statuspage.io` mirror.
