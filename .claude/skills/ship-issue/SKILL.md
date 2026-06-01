@@ -56,10 +56,11 @@ is the *procedure* — follow it top to bottom.
 5. **PR review** — gate #2: `/pr-review-toolkit:review-pr`.
 6. **Fix review findings — auto-loop** to 0 Critical/Important (Suggestions-only = converged).
 7. **Docs update** — update whatever the change affects: CLAUDE.md (architecture/service count/layout —
-   keep it **lean, ~40k-char guideline**; move detail to `docs/reference/`), the relevant
-   **`docs/reference/`** file (see the directory — kv-schema, ga4-events, fallback-tiers,
-   status-determination, discord-alert-paths, etc.), README(.ko), `index.html` SEO meta,
-   `aiwatch-reports/`. Adding a service → the full `adding-a-service.md` checklist.
+   keep it **lean, ~40k-char guideline** — check `python3 -c "print(len(open('CLAUDE.md').read()))"`,
+   move detail to `docs/reference/` if near), the relevant **`docs/reference/`** file (see the
+   directory — kv-schema, ga4-events, fallback-tiers, status-determination, discord-alert-paths, etc.),
+   README(.ko), `CONTRIBUTING.md`, `index.html` SEO meta, `aiwatch-reports/`. Adding a service → the
+   full `adding-a-service.md` checklist.
 8. **Commit + PR** (gate #3 — only after the user confirms):
    - Commit message + PR body end with the required Co-Authored-By / 🤖 footer.
    - `closes #N` **only when ALL checklist items are done AND verified** — this includes
