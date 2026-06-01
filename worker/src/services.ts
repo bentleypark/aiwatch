@@ -17,7 +17,7 @@ import {
   computeDailyImpactFromIncidents,
 } from './parsers/aistudio'
 import { parseInstatusIncidents } from './parsers/instatus'
-import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackPartialCount } from './parsers/betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
 import { parseAwsRssIncidents, deriveAwsStatus } from './parsers/aws'
 
@@ -722,6 +722,17 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           betterStackStat = parseBetterStackStatus(bsData)
           betterStackPartial = parseBetterStackPartialCount(bsData)
           bsDailyImpact = parseBetterStackDailyImpact(bsData)
+          // Filter out planned-maintenance events (report_type='maintenance') — signal 3 of 3.
+          // Catches custom-titled maintenance events like "Authorization System Restart" (#503)
+          // where the title contains no maintenance keyword (signal 1) and pubDate is not future (signal 2).
+          const maintenanceIds = parseBetterStackMaintenanceIds(bsData)
+          if (maintenanceIds.size > 0) {
+            const before = incidents.length
+            incidents = incidents.filter(inc => !maintenanceIds.has(inc.id))
+            if (incidents.length < before) {
+              console.debug(`[fetchService] ${config.id} filtered ${before - incidents.length} maintenance incident(s) via index.json report_type`)
+            }
+          }
           // Reconcile RSS incidents with index.json resolved status (authoritative)
           const resolvedIds = parseBetterStackResolvedIds(bsData)
           if (resolvedIds.size > 0) {
