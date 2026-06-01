@@ -707,6 +707,11 @@ export default function ServiceDetails({ serviceId }) {
             )}
             {feedUrl && <RssLink feedUrl={feedUrl} serviceId={service.id} t={t} />}
           </div>
+          {service.id === 'deepseek' && (
+            <div className="mono text-[10px] text-[var(--text2)]" style={{ marginTop: '6px' }}>
+              ⚠ {t('svc.deepseek.probeNote')}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-1.5">
           {!!recentlyRecovered[service.id] && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}

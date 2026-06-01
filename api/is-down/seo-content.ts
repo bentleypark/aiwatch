@@ -229,7 +229,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   deepseek: {
     displayName: 'DeepSeek',
     description: 'DeepSeek API provides access to DeepSeek\'s frontier reasoning models (V3, R1) at significantly lower price points than Western providers. It is a Chinese AI lab whose models have gained rapid adoption since early 2026.',
-    insight: 'DeepSeek API can experience capacity-driven outages during demand spikes (model release events, viral moments). Geographic latency varies more than US-based providers given DeepSeek\'s primarily Asian infrastructure. Check AIWatch probe data for response time trends.',
+    insight: 'DeepSeek API can experience capacity-driven outages during demand spikes (model release events, viral moments). Geographic latency varies more than US-based providers given DeepSeek\'s primarily Asian infrastructure. Note: DeepSeek migrated their status page to Flashduty (a Chinese-hosted platform) in May 2026. That platform blocks non-Chinese IPs, so AIWatch monitors DeepSeek via direct API probe only — incident history may be incomplete after May 2026.',
     whenDown: 'When DeepSeek API is down, applications relying on its low-cost reasoning models will fail. Cost-sensitive deployments that switched from OpenAI/Claude to DeepSeek for affordability lose their primary backend.',
     faqs: [
       { q: 'Is DeepSeek API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors DeepSeek every 5 minutes and shows real-time operational status.' },
