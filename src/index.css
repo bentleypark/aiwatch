@@ -181,6 +181,14 @@ pre,
 ::-webkit-scrollbar-track { background: var(--bg1); }
 ::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
 
+/* ─── Modal backdrop (native <dialog>::backdrop, #481) ───── */
+/* Theme-adaptive scrim: ::backdrop inherits custom properties from its originating
+   element (the <dialog>, which inherits --bg0 from :root), so it tracks the
+   [data-theme="light"] remap — verified in-browser in both themes. color-mix is Baseline 2023. */
+dialog::backdrop {
+  background: color-mix(in srgb, var(--bg0) 60%, transparent);
+}
+
 /* ─── Ticker Bar Animation ───────────────────────────────── */
 @keyframes ticker-scroll {
   from { transform: translateX(0); }

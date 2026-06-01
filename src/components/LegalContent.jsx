@@ -131,7 +131,7 @@ export function TermsContent() {
       <h3 style={headingStyle}>6. Disclaimer</h3>
       <p style={paraStyle}>AIWatch is provided "as is" without warranties of any kind. We are not responsible for decisions made based on the information displayed, including but not limited to business, operational, or financial decisions.</p>
       <h3 style={headingStyle}>7. Open Source and Licensing</h3>
-      <p style={paraStyle}>AIWatch is open-source software licensed under the <a href="https://github.com/bentleypark/aiwatch/blob/main/LICENSE" style={linkStyle}>GNU Affero General Public License v3.0 (AGPL-3.0)</a>. The source code is available on GitHub. Contributions and usage are subject to the terms of this license.</p>
+      <p style={paraStyle}>AIWatch is open-source software licensed under the <a href="https://github.com/bentleypark/aiwatch/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" style={linkStyle}>GNU Affero General Public License v3.0 (AGPL-3.0)</a>. The source code is available on GitHub. Contributions and usage are subject to the terms of this license.</p>
       <h3 style={headingStyle}>8. Governing Law</h3>
       <p style={paraStyle}>These terms are governed by and construed in accordance with the laws of the Republic of Korea.</p>
       <h3 style={headingStyle}>9. Changes to Terms</h3>
@@ -160,7 +160,7 @@ export function TermsContent() {
       <h3 style={headingStyle}>6. 면책 조항</h3>
       <p style={paraStyle}>AIWatch는 어떠한 종류의 보증 없이 "있는 그대로" 제공됩니다. 표시된 정보를 기반으로 내린 비즈니스, 운영, 재무 등 모든 결정에 대해 AIWatch는 책임을 지지 않습니다.</p>
       <h3 style={headingStyle}>7. 오픈소스 및 라이선스</h3>
-      <p style={paraStyle}>AIWatch는 <a href="https://github.com/bentleypark/aiwatch/blob/main/LICENSE" style={linkStyle}>GNU Affero General Public License v3.0 (AGPL-3.0)</a> 라이선스에 따라 배포되는 오픈소스 소프트웨어입니다. 소스 코드는 GitHub에서 확인할 수 있으며, 기여 및 이용은 해당 라이선스 조건을 따릅니다.</p>
+      <p style={paraStyle}>AIWatch는 <a href="https://github.com/bentleypark/aiwatch/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" style={linkStyle}>GNU Affero General Public License v3.0 (AGPL-3.0)</a> 라이선스에 따라 배포되는 오픈소스 소프트웨어입니다. 소스 코드는 GitHub에서 확인할 수 있으며, 기여 및 이용은 해당 라이선스 조건을 따릅니다.</p>
       <h3 style={headingStyle}>8. 준거법</h3>
       <p style={paraStyle}>본 약관은 대한민국 법률에 따라 해석됩니다.</p>
       <h3 style={headingStyle}>9. 약관 변경</h3>
