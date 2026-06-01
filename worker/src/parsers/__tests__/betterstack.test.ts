@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackPartialCount } from '../betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount } from '../betterstack'
 
 describe('parseRssIncidents', () => {
   it('groups RSS items by guid into incidents', () => {
@@ -472,11 +472,52 @@ describe('parseRssIncidents', () => {
       expect(parseRssIncidents(xml)).toHaveLength(1)
     })
 
+    it('skips titles ending with "maintenance" standalone — "Network maintenance", "Volume v2 maintenance" (#503)', () => {
+      // The third alternation `\bmaintenance\s*$` catches Modal-style planned maintenance titles
+      // that end with the word "maintenance" but lack a "scheduled/planned" qualifier.
+      const xml = `
+        <item>
+          <guid>https://status.modal.com/incident/764951#hash</guid>
+          <title>Volume version 2 maintenance</title>
+          <pubDate>Wed, 19 Nov 2025 09:00:00 GMT</pubDate>
+          <description>We are upgrading core systems.</description>
+        </item>
+        <item>
+          <guid>https://status.modal.com/incident/265716#hash</guid>
+          <title>Network maintenance</title>
+          <pubDate>Fri, 29 Sep 2023 18:00:00 GMT</pubDate>
+          <description>Scheduled network maintenance.</description>
+        </item>
+      `
+      const fixedNow = new Date('2026-01-01T00:00:00Z').getTime()
+      expect(parseRssIncidents(xml, fixedNow)).toHaveLength(0)
+    })
+
+    it('still passes "Stuck in maintenance mode" and "Planned maintenance window exceeded" (#503 negative contract)', () => {
+      // These are real incidents — a service got stuck in maintenance mode unexpectedly,
+      // or a planned maintenance window ran over. The third alternation `\bmaintenance\s*$`
+      // must NOT match when "maintenance" is not the final word of the title.
+      const xml = `
+        <item>
+          <guid>https://status.example.com/stuck#1</guid>
+          <title>Stuck in maintenance mode</title>
+          <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+          <description>Deploy pipeline hung.</description>
+        </item>
+        <item>
+          <guid>https://status.example.com/exceed#1</guid>
+          <title>Planned maintenance window exceeded</title>
+          <pubDate>Sat, 01 Mar 2026 11:00:00 GMT</pubDate>
+          <description>Still ongoing past scheduled end.</description>
+        </item>
+      `
+      const fixedNow = new Date('2026-03-15T00:00:00Z').getTime()
+      expect(parseRssIncidents(xml, fixedNow)).toHaveLength(2)
+    })
+
     it('matches the second regex alternation: "Maintenance — scheduled for tonight"', () => {
-      // The regex has two alternations; the first matches "scheduled ... maintenance",
-      // the second matches "maintenance ... scheduled". Together's current title
-      // exercises branch 1. A future provider might use branch 2. Without this test
-      // a regex refactor could silently delete that branch.
+      // Three alternations in the regex; this exercises alternation 2.
+      // Alternation 1: "scheduled ... maintenance"; alternation 3: title ends with "maintenance".
       const xml = `
         <item>
           <guid>https://status.example.com/m2branch#h</guid>
@@ -524,7 +565,7 @@ describe('parseRssIncidents', () => {
       // order is title first; if a refactor flipped the order it would still
       // function (same net result) but logs would mis-categorize. Spy on
       // console.debug to confirm the specific skip-reason path.
-      // NOTE: test is coupled to the literal log strings "scheduled maintenance"
+      // NOTE: test is coupled to the literal log strings "maintenance title" (#331/#503)
       // and "future-dated" in parseRssIncidents. Update both sides together if
       // the log wording changes.
       const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
@@ -539,7 +580,7 @@ describe('parseRssIncidents', () => {
       const fixedNow = new Date('2026-04-24T00:00:00Z').getTime()  // before pubDate
       parseRssIncidents(xml, fixedNow)
       const calls = debugSpy.mock.calls.map(c => String(c[0]))
-      expect(calls.some(m => m.includes('scheduled maintenance'))).toBe(true)
+      expect(calls.some(m => m.includes('maintenance title'))).toBe(true)
       expect(calls.some(m => m.includes('future-dated'))).toBe(false)
       debugSpy.mockRestore()
     })
@@ -979,6 +1020,26 @@ describe('parseBetterStackDailyImpact', () => {
       '2026-03-21': 'critical',  // 5h duration
       '2026-03-22': 'minor',     // 30min, 3% ratio
     })
+  })
+})
+
+describe('parseBetterStackMaintenanceIds (#503)', () => {
+  it('extracts report_type=maintenance IDs from index.json status_reports', () => {
+    const data = {
+      included: [
+        { type: 'status_report', id: '908255', attributes: { report_type: 'maintenance', aggregate_state: 'investigating' } },
+        { type: 'status_report', id: '111', attributes: { report_type: 'manual', aggregate_state: 'investigating' } },
+        { type: 'status_report', id: '222', attributes: { report_type: 'maintenance', aggregate_state: 'resolved' } },
+        { type: 'status_page_resource', id: '999', attributes: { status: 'operational' } },
+      ],
+    }
+    expect(parseBetterStackMaintenanceIds(data)).toEqual(new Set(['908255', '222']))
+  })
+
+  it('returns empty set when no maintenance reports', () => {
+    expect(parseBetterStackMaintenanceIds({})).toEqual(new Set())
+    const data = { included: [{ type: 'status_report', id: '1', attributes: { report_type: 'manual' } }] }
+    expect(parseBetterStackMaintenanceIds(data)).toEqual(new Set())
   })
 })
 

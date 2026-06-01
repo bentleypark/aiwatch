@@ -14,13 +14,19 @@ function isValidDate(s: string): boolean {
   return !isNaN(new Date(s).getTime())
 }
 
-// #331: BetterStack RSS occasionally carries planned-maintenance announcements
-// that share the same item shape as real incidents. Detect them via two signals:
-// a "scheduled (network) maintenance" phrase in the title, or a future pubDate
-// (RSS entries describe things that have happened — recovered/went down — so a
-// future timestamp is structurally impossible for a real incident). Skip both
-// rather than rendering a phantom "— down" card.
-const SCHEDULED_MAINTENANCE_TITLE = /scheduled\s+(?:\w+\s+)?maintenance|maintenance[^a-z]{0,20}scheduled/i
+// #331 / #503: BetterStack RSS carries planned-maintenance announcements alongside real incidents.
+// Detect and skip them via three signals (any one is sufficient):
+//   1. Title pattern — three alternations:
+//      a) "scheduled ... maintenance" (e.g., "Scheduled Network Maintenance")
+//      b) "maintenance ... scheduled" (e.g., "Maintenance — scheduled for tonight")
+//      c) title ENDS with "maintenance" (e.g., "Network maintenance", "Volume version 2 maintenance")
+//      Deliberately does NOT match "Stuck in maintenance mode" or "Planned maintenance window exceeded"
+//      — those describe real incidents where a maintenance-labeled state caused unexpected degradation.
+//   2. Future pubDate — structurally impossible for a real incident (recovered/went down).
+//   3. index.json report_type === 'maintenance' — used in services.ts after index.json parse.
+//      Handles custom-titled events like "Authorization System Restart" (#503) where no title
+//      keyword is present.
+const MAINTENANCE_TITLE = /scheduled\s+(?:\w+\s+)?maintenance|maintenance[^a-z]{0,20}scheduled|\bmaintenance\s*$/i
 const FUTURE_PUBDATE_BUFFER_MS = 60_000  // clock-skew tolerance
 
 export function parseRssIncidents(xml: string, now = Date.now()): Incident[] {
@@ -59,12 +65,10 @@ export function parseRssIncidents(xml: string, now = Date.now()): Incident[] {
     const startMs = new Date(first.date).getTime()
     const endMs = new Date(last.date).getTime()
 
-    // #331: planned-maintenance / future announcements — not real incidents.
-    // Checked here (not at item-level) so a group legitimately named "maintenance"
-    // with a past pubDate and real downtime in its description wouldn't be dropped
-    // — title regex + future-date are AND-independent skip conditions.
-    if (SCHEDULED_MAINTENANCE_TITLE.test(first.title)) {
-      console.debug(`[parseRssIncidents] skipped scheduled maintenance: ${groupKey} ("${first.title}")`)
+    // #331 / #503: planned-maintenance title filter (signal 1 of 3).
+    // Signal 2 (future pubDate) and signal 3 (index.json report_type) are below.
+    if (MAINTENANCE_TITLE.test(first.title)) {
+      console.debug(`[parseRssIncidents] skipped maintenance title (#331/#503): ${groupKey} ("${first.title}")`)
       continue
     }
     if (startMs > now + FUTURE_PUBDATE_BUFFER_MS) {
@@ -189,10 +193,27 @@ export interface BetterStackIndex {
       status?: string
       status_history?: BetterStackStatusHistory[]
       aggregate_state?: string
+      report_type?: string  // 'manual' | 'maintenance' | 'calculated' (#503)
       title?: string
       starts_at?: string
     }
   }>
+}
+
+/**
+ * Extract IDs of planned-maintenance reports from index.json status_reports.
+ * BetterStack sets report_type='maintenance' for maintenance windows. These are
+ * passed to parseRssIncidents so custom-titled maintenance events (e.g. "Authorization
+ * System Restart") are filtered out even when their title contains no maintenance keyword.
+ */
+export function parseBetterStackMaintenanceIds(data: BetterStackIndex): Set<string> {
+  const ids = new Set<string>()
+  for (const r of data.included ?? []) {
+    if (r.type === 'status_report' && r.attributes?.report_type === 'maintenance' && r.id) {
+      ids.add(r.id)
+    }
+  }
+  return ids
 }
 
 /** Extract resolved incident IDs from index.json status_reports */
