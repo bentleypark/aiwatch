@@ -15,12 +15,16 @@ import InstallBanner from './components/InstallBanner'
 import { PrivacyContent, TermsContent } from './components/LegalContent'
 import Overview from './pages/Overview'
 import SkeletonUI, { LatencySkeleton, IncidentsSkeleton, UptimeSkeleton, ServiceDetailsSkeleton } from './components/SkeletonUI'
+import { isChunkLoadError } from './utils/chunkError'
 
 function lazyWithRetry(importFn) {
   return lazy(() =>
-    importFn().catch(() =>
-      new Promise((resolve) => setTimeout(resolve, 1500)).then(importFn)
-    )
+    importFn().catch((err) => {
+      // Chunk hash mismatch (new deployment) → never resolves on retry; skip the delay
+      // and let ChunkErrorBoundary's componentDidCatch trigger the auto-reload immediately.
+      if (isChunkLoadError(err)) throw err
+      return new Promise((resolve) => setTimeout(resolve, 1500)).then(importFn)
+    })
   )
 }
 
@@ -36,6 +40,24 @@ const Statusline = lazyWithRetry(() => import('./pages/Statusline'))
 class ChunkErrorBoundary extends Component {
   state = { hasError: false }
   static getDerivedStateFromError() { return { hasError: true } }
+
+  componentDidCatch(error) {
+    // Chunk load failures almost always mean the deployed chunk hash changed while
+    // the user had the old page open. Auto-reload fetches fresh HTML + chunks.
+    // sessionStorage guard prevents an infinite reload loop if the new bundle is broken.
+    if (isChunkLoadError(error)) {
+      try {
+        const reloadedAt = sessionStorage.getItem('chunk-error-reload')
+        if (!reloadedAt || Date.now() - Number(reloadedAt) > 60_000) {
+          sessionStorage.setItem('chunk-error-reload', String(Date.now()))
+          window.location.reload()
+        }
+      } catch {
+        // sessionStorage unavailable (sandboxed iframe, storage full) — skip auto-reload
+      }
+    }
+  }
+
   render() {
     if (this.state.hasError) {
       return (
@@ -190,7 +212,7 @@ function AppInner() {
         sidebarOpen={sidebarOpen}
         onSidebarClose={() => setSidebarOpen(false)}
       >
-        <ChunkErrorBoundary>
+        <ChunkErrorBoundary key={page.name + (page.serviceId ?? '')}>
           {resolvePage(page)}
         </ChunkErrorBoundary>
       </Layout>
