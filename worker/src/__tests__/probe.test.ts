@@ -275,23 +275,48 @@ describe('isProbeHealthy', () => {
     expect(isProbeHealthy(snapshots, 'claude')).toBe(true)
   })
 
-  it('returns false when recent probes show RTT spike', () => {
+  it('returns true when only 1 of 3 recent probes has an RTT spike (majority healthy)', () => {
+    // Majority rule: 2/3 healthy → healthy. A single transient spike is noise, not evidence
+    // of genuine degradation. Previously "every" required all probes healthy, which caused
+    // false-positive degraded alerts for services with structural status page failures (#507).
     const snapshots: ProbeSnapshot[] = [
-      { t: recentTime(0), data: { claude: { status: 200, rtt: 2000 } } }, // spike
+      { t: recentTime(0), data: { claude: { status: 200, rtt: 2000 } } }, // spike (1 of 3 recent)
       { t: recentTime(5), data: { claude: { status: 200, rtt: 200 } } },
       { t: recentTime(10), data: { claude: { status: 200, rtt: 210 } } },
-      { t: recentTime(15), data: { claude: { status: 200, rtt: 190 } } },
-      { t: recentTime(20), data: { claude: { status: 200, rtt: 205 } } },
+      { t: recentTime(20), data: { claude: { status: 200, rtt: 205 } } }, // outside 15-min window
     ]
-    expect(isProbeHealthy(snapshots, 'claude')).toBe(false)
+    expect(isProbeHealthy(snapshots, 'claude')).toBe(true)
   })
 
-  it('returns false when probe has failures (rtt=-1)', () => {
+  it('returns false when 2 of 3 recent probes have RTT spikes (majority unhealthy)', () => {
+    // Establish a healthy median baseline via historical probes (outside the 15-min window),
+    // then have 2 of 3 recent probes spike above 3× that median.
+    const historical = Array.from({ length: 6 }, (_, i) => ({
+      t: recentTime(20 + i * 5), // 20–45 min ago — outside 15-min recent window
+      data: { claude: { status: 200, rtt: 200 } },
+    }))
+    const recent: ProbeSnapshot[] = [
+      { t: recentTime(0), data: { claude: { status: 200, rtt: 800 } } }, // >3×200 → spike
+      { t: recentTime(5), data: { claude: { status: 200, rtt: 750 } } }, // >3×200 → spike
+      { t: recentTime(10), data: { claude: { status: 200, rtt: 210 } } },
+    ]
+    expect(isProbeHealthy([...recent, ...historical], 'claude')).toBe(false)
+  })
+
+  it('returns true when only 1 of 3 recent probes has a failure rtt=-1 (majority healthy)', () => {
     const snapshots: ProbeSnapshot[] = [
-      { t: recentTime(0), data: { claude: { status: 0, rtt: -1 } } },
+      { t: recentTime(0), data: { claude: { status: 0, rtt: -1 } } },  // 1 failure
       { t: recentTime(5), data: { claude: { status: 200, rtt: 200 } } },
       { t: recentTime(10), data: { claude: { status: 200, rtt: 210 } } },
-      { t: recentTime(15), data: { claude: { status: 200, rtt: 190 } } },
+    ]
+    expect(isProbeHealthy(snapshots, 'claude')).toBe(true)
+  })
+
+  it('returns false when 2 of 3 recent probes have failures rtt=-1 (majority unhealthy)', () => {
+    const snapshots: ProbeSnapshot[] = [
+      { t: recentTime(0), data: { claude: { status: 0, rtt: -1 } } },
+      { t: recentTime(5), data: { claude: { status: 0, rtt: -1 } } },
+      { t: recentTime(10), data: { claude: { status: 200, rtt: 200 } } },
     ]
     expect(isProbeHealthy(snapshots, 'claude')).toBe(false)
   })

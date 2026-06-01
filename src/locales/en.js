@@ -196,6 +196,7 @@ const en = {
   'svc.cal.ago.suffix': 'ago',
   'svc.cal.today': 'Today',
   'svc.status.link': 'Official Status',
+  'svc.deepseek.probeNote': 'Status page (Flashduty) not accessible outside China — monitoring via API probe only since May 2026',
   'svc.rss': 'RSS',
   'svc.rss.copied': 'Copied ✓',
   'svc.rss.title': 'Copy this service\'s incident RSS feed URL',

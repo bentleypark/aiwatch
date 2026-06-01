@@ -164,9 +164,16 @@ export function isProbeHealthy(
   if (median === null || median <= 0) return false
 
   const threshold = median * 3
-  // All recent probes must be healthy (no failures, no spikes)
-  return recent.every(s => {
+  // Majority rule: ≥ ⌈2/3⌉ of recent probes must be healthy.
+  // Previously required ALL probes healthy, which caused false-positive degraded alerts
+  // when a single transient RTT blip coincided with a structural status-page fetch failure
+  // (e.g. DeepSeek — status.deepseek.com blocks Workers IPs, so degradedFromFetch fires
+  // every cron cycle; one probe blip prevented cross-validation from overriding to operational).
+  // A single outlier probe in 3 cycles is network noise; a genuine degradation spikes
+  // multiple consecutive probes, which majority correctly identifies as unhealthy.
+  const healthyCount = recent.filter(s => {
     const probe = s.data[serviceId]
     return probe.rtt > 0 && probe.rtt <= threshold
-  })
+  }).length
+  return healthyCount >= Math.ceil(recent.length * 2 / 3)
 }
