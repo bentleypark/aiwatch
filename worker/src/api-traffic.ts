@@ -49,3 +49,71 @@ export function recordV1Traffic(
     console.warn('[wae] v1 writeDataPoint failed:', err instanceof Error ? err.message : err)
   }
 }
+
+export interface V1TrafficCounts {
+  all: number      // /api/v1/status (all-services) requests
+  service: number  // /api/v1/status/:id requests (incl. malformed/404 per-service paths)
+  total: number    // all + service
+}
+
+/** The WAE dataset name (matches wrangler.toml [[analytics_engine_datasets]].dataset). */
+export const V1_DATASET = 'aiwatch_statusline'
+
+/** Build the AE SQL that sums the last-24h v1 request count per variant.
+ *  WAE samples at high volume, so SUM(_sample_interval) is the unbiased event-count estimate
+ *  (exact when _sample_interval=1 at low volume) — NOT COUNT(*), which would undercount. */
+export function buildV1TrafficSql(dataset = V1_DATASET): string {
+  return (
+    `SELECT blob1 AS variant, SUM(_sample_interval) AS requests ` +
+    `FROM ${dataset} ` +
+    `WHERE index1 = '${V1_INDEX}' AND timestamp > NOW() - INTERVAL '1' DAY ` +
+    `GROUP BY blob1 ` +
+    `FORMAT JSON`
+  )
+}
+
+/** Parse the AE SQL API JSON response into per-variant counts. Tolerant of string/number
+ *  `requests` and unknown variants. Returns null when the payload has no usable data array. */
+export function parseV1TrafficResponse(json: unknown): V1TrafficCounts | null {
+  const data = (json as { data?: unknown })?.data
+  if (!Array.isArray(data)) return null
+  let all = 0
+  let service = 0
+  for (const row of data) {
+    const r = row as { variant?: unknown; requests?: unknown }
+    // Number() (not parseInt) so sampling-corrected SUM(_sample_interval) fractional totals on the
+    // string-typed path aren't floored; NaN → 0.
+    const parsed = Number(r.requests)
+    const n = Number.isFinite(parsed) ? parsed : 0
+    if (r.variant === 'v1-status-all') all += n
+    else if (r.variant === 'v1-status-service') service += n
+  }
+  return { all, service, total: all + service }
+}
+
+/**
+ * Query the last-24h /api/v1 request count via the Analytics Engine SQL API.
+ * Best-effort: returns null (caller skips the daily section) when the account id / token is
+ * absent, the HTTP call fails, or the response can't be parsed. Never throws.
+ */
+export async function queryV1Traffic(
+  accountId: string | undefined,
+  token: string | undefined,
+  fetchImpl: typeof fetch = fetch,
+): Promise<V1TrafficCounts | null> {
+  if (!accountId || !token) return null
+  try {
+    const res = await fetchImpl(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: buildV1TrafficSql() },
+    )
+    if (!res.ok) {
+      console.warn(`[wae] v1 SQL query failed: HTTP ${res.status}`)
+      return null
+    }
+    return parseV1TrafficResponse(await res.json())
+  } catch (err) {
+    console.warn('[wae] v1 SQL query error:', err instanceof Error ? err.message : err)
+    return null
+  }
+}

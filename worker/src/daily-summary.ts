@@ -27,6 +27,13 @@ export interface DailySummaryData {
   crossValidSuppressed?: Record<string, number> // svcId → times probe overrode to operational
   degradationCounts?: Record<string, number>          // svcId → RTT degradation spikes today (#464)
   degradationNoStatusCounts?: Record<string, number>  // svcId → degradations NOT on official status page
+  // #518 — public API (/api/v1) traffic: last-24h counts (from WAE) + the running cumulative total
+  // (folded into a permanent KV counter once/day). Absent (null) when the SQL API isn't configured.
+  v1Traffic?: {
+    today: { all: number; service: number; total: number }
+    cumulative: number
+    since: string
+  } | null
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
@@ -179,7 +186,32 @@ export function buildDailySummary(data: DailySummaryData): string {
   const degSection = formatDegradationSection(degradationCounts, degradationNoStatusCounts, services)
   if (degSection) lines.push(degSection)
 
+  // Section: public API (/api/v1) traffic (#518) — usage leading indicator for product decisions.
+  const v1Section = formatV1TrafficSection(data.v1Traffic)
+  if (v1Section) lines.push(v1Section)
+
   return lines.join('\n')
+}
+
+/**
+ * Format the /api/v1 traffic counters as a Discord section (#518).
+ * Returns empty string when traffic data is unavailable (SQL API not configured) so the caller
+ * skips the section. Shows the last-24h total (with the all-vs-per-service split) and the running
+ * cumulative since first measurement. Two approximations are surfaced honestly with `~`:
+ *  - per-service counts include malformed/404 per-service paths (recorded before handler validation),
+ *  - the cumulative is a once/day snapshot of a 24h rolling window, so it can drift or miss a skipped day.
+ * The 24h total (the clean signal) is shown without `~`.
+ */
+export function formatV1TrafficSection(
+  v1: DailySummaryData['v1Traffic'],
+): string {
+  if (!v1) return ''
+  const { today, cumulative, since } = v1
+  return (
+    `\n🔌 **Public API (/api/v1)**\n` +
+    `   Last 24h: ${today.total} (all-services ${today.all} · per-service ~${today.service})\n` +
+    `   Cumulative: ~${cumulative} (since ${since})`
+  )
 }
 
 /**
