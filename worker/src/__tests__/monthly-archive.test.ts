@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   computeMonthlyUptime,
   computeMonthlyLatency,
+  computeMonthlyLatencyStats,
   getMonthDates,
   isInMonthlyArchiveWindow,
   buildMonthlyArchive,
@@ -140,6 +141,44 @@ describe('computeMonthlyLatency', () => {
 
   it('handles empty data', () => {
     expect(Object.keys(computeMonthlyLatency({}))).toHaveLength(0)
+  })
+})
+
+describe('computeMonthlyLatencyStats (#17 — p95 + spikes)', () => {
+  it('averages valid daily p95 and sums spikes', () => {
+    const probeData = {
+      '2026-03-01': { claude: { p50: 100, p75: 200, p95: 300, min: 50, max: 400, count: 100, spikes: 2 } },
+      '2026-03-02': { claude: { p50: 110, p75: 220, p95: 320, min: 55, max: 410, count: 100, spikes: 3 } },
+    }
+    expect(computeMonthlyLatencyStats(probeData).claude).toEqual({ p95: 310, spikes: 5 })
+  })
+
+  it('p95 is null when no day has a valid (>0) p95, but spikes still accumulate', () => {
+    // A probe-failure-only day stores p95=0 — must not render a misleading "0 ms".
+    const probeData = {
+      '2026-03-01': { openai: { p50: 0, p75: 0, p95: 0, min: 0, max: 0, count: 5, spikes: 5 } },
+      '2026-03-02': { openai: { p50: 0, p75: 0, p95: 0, min: 0, max: 0, count: 3, spikes: 3 } },
+    }
+    expect(computeMonthlyLatencyStats(probeData).openai).toEqual({ p95: null, spikes: 8 })
+  })
+
+  it('excludes p95=0 days from the average but keeps valid ones', () => {
+    const probeData = {
+      '2026-03-01': { groq: { p50: 0, p75: 0, p95: 0, min: 0, max: 0, count: 5, spikes: 1 } },
+      '2026-03-02': { groq: { p50: 50, p75: 100, p95: 150, min: 30, max: 200, count: 50, spikes: 0 } },
+    }
+    expect(computeMonthlyLatencyStats(probeData).groq).toEqual({ p95: 150, spikes: 1 })
+  })
+
+  it('spikes total is 0 (not null) when service has valid p95 but no spikes', () => {
+    const probeData = {
+      '2026-03-01': { cohere: { p50: 80, p75: 160, p95: 240, min: 40, max: 300, count: 100, spikes: 0 } },
+    }
+    expect(computeMonthlyLatencyStats(probeData).cohere).toEqual({ p95: 240, spikes: 0 })
+  })
+
+  it('handles empty data', () => {
+    expect(Object.keys(computeMonthlyLatencyStats({}))).toHaveLength(0)
   })
 })
 

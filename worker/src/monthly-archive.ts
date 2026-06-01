@@ -41,6 +41,8 @@ export interface MonthlyServiceData {
   totalDowntimeMin: number | null // sum of all incident durations for the month (null if no resolved incidents — unresolved durations are tracked as 0 upstream)
   longestIncidentMin: number | null // max single-incident duration for the month (null if no resolved incidents)
   avgLatencyMs: number | null    // average probe RTT p75 in ms (null if no probe data)
+  p95LatencyMs: number | null    // mean of daily probe RTT p95 in ms (#17 — null if no valid p95 data)
+  latencySpikes: number | null   // total RTT spikes this month (rtt>3×median or failed probe; #17 — null if no probe data)
   // Per-incident detail (#375). Capped at MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE to bound KV size;
   // when the cap is hit, oldest entries are truncated (the most-recent-N policy keeps the
   // dashboard's 30-90d filter useful even on high-frequency services like Together AI).
@@ -393,6 +395,41 @@ export function computeMonthlyLatency(
   return result
 }
 
+/**
+ * Monthly p95 (mean of valid daily p95) + total spike count per service (#17 follow-up).
+ * Same daily probe source as computeMonthlyLatency; kept separate so the existing p75 callers
+ * and tests are unaffected. p95 is null when no day had a valid (>0) p95 — a probe-failure-only
+ * day stores p95=0, which would otherwise render a misleading "0 ms" in the report. Spikes
+ * accumulate across all days (a failed-probe day contributes spikes even with p95=0).
+ */
+export function computeMonthlyLatencyStats(
+  probeData: Record<string, ProbeDailyData>,
+): Record<string, { p95: number | null; spikes: number }> {
+  const p95Sums: Record<string, number> = {}
+  const p95Counts: Record<string, number> = {}
+  const spikeTotals: Record<string, number> = {}
+  for (const daily of Object.values(probeData)) {
+    for (const [id, stat] of Object.entries(daily)) {
+      if (stat.p95 > 0) {
+        p95Sums[id] = (p95Sums[id] ?? 0) + stat.p95
+        p95Counts[id] = (p95Counts[id] ?? 0) + 1
+      }
+      if (typeof stat.spikes === 'number' && stat.spikes > 0) {
+        spikeTotals[id] = (spikeTotals[id] ?? 0) + stat.spikes
+      }
+    }
+  }
+  const result: Record<string, { p95: number | null; spikes: number }> = {}
+  const ids = new Set([...Object.keys(p95Sums), ...Object.keys(spikeTotals)])
+  for (const id of ids) {
+    result[id] = {
+      p95: p95Counts[id] ? Math.round(p95Sums[id] / p95Counts[id]) : null,
+      spikes: spikeTotals[id] ?? 0,
+    }
+  }
+  return result
+}
+
 // ── Security summary builder ─────────────────────────────────────────
 
 const SEVERITY_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 }
@@ -658,6 +695,7 @@ export async function buildMonthlyArchive(
 
   const uptimeMap = computeMonthlyUptime(dailyData)
   const latencyMap = computeMonthlyLatency(probeData)
+  const latencyStats = computeMonthlyLatencyStats(probeData) // p95 + spikes (#17)
 
   // Guard: 0 days with data is almost certainly a KV failure
   if (daysCollected === 0) {
@@ -666,7 +704,7 @@ export async function buildMonthlyArchive(
 
   // Build per-service archive
   const services: Record<string, MonthlyServiceData> = {}
-  const allIds = new Set([...Object.keys(uptimeMap), ...Object.keys(latencyMap)])
+  const allIds = new Set([...Object.keys(uptimeMap), ...Object.keys(latencyMap), ...Object.keys(latencyStats)])
 
   if (scoreData) {
     for (const svc of scoreData) allIds.add(svc.id)
@@ -705,6 +743,8 @@ export async function buildMonthlyArchive(
       totalDowntimeMin,
       longestIncidentMin,
       avgLatencyMs: latencyMap[id] ?? null,
+      p95LatencyMs: latencyStats[id]?.p95 ?? null,
+      latencySpikes: latencyStats[id]?.spikes ?? null,
       ...(incidentList ? { incidentList } : {}),
     }
   }
