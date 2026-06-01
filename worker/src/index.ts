@@ -1825,6 +1825,25 @@ export default {
               return null
             })
 
+          // #500 — status page fetch failure observability: read per-service daily counters.
+          // fetch-fail:daily:{svcId}:{date}: threshold crossings today (rising-edge incremented).
+          // cross-valid:suppressed:{svcId}:{date}: times probe overrode degraded → operational.
+          // Individual .catch(() => null) absorb KV I/O errors; missing keys are treated as 0.
+          const fetchFailureCounts: Record<string, number> = {}
+          const crossValidSuppressed: Record<string, number> = {}
+          await Promise.all(SERVICES.filter(s => s.apiUrl).map(async (svc) => {
+            const [failRaw, supRaw] = await Promise.all([
+              env.STATUS_CACHE.get(`fetch-fail:daily:${svc.id}:${today}`).catch(() => null),
+              env.STATUS_CACHE.get(`cross-valid:suppressed:${svc.id}:${today}`).catch(() => null),
+            ])
+            const failCount = parseInt(failRaw ?? '0', 10) || 0
+            const supCount = parseInt(supRaw ?? '0', 10) || 0
+            if (failCount > 0) fetchFailureCounts[svc.id] = failCount
+            if (supCount > 0) crossValidSuppressed[svc.id] = supCount
+          })).catch((err) => {
+            console.warn('[daily-summary] fetch failure counts read failed:', err instanceof Error ? err.message : err)
+          })
+
           const description = buildDailySummary({
             services: dailyServices,
             aiUsage,
@@ -1839,6 +1858,8 @@ export default {
             probeSnapshots,
             detectionLeadEntries,
             leadDiag,
+            fetchFailureCounts,
+            crossValidSuppressed,
           })
 
           if (isCatchUp) console.log(`[daily-summary] catch-up run for ${today}`)

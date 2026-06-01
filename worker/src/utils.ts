@@ -89,7 +89,19 @@ export async function trackFetchFailure(kv: KVLike | undefined, svcId: string, t
   if (next <= threshold) {
     await kvPut(kv, failKey, String(next), { expirationTtl: 1800 })
   }
-  return next >= threshold
+  const shouldDegrade = next >= threshold
+  if (next === threshold) {
+    // Daily accumulator: counts threshold *crossings* (distinct failure episodes), not polling cycles.
+    // Fires only on the rising edge (count going from threshold-1 → threshold) so each 30-min
+    // fetch-fail TTL cycle contributes exactly one crossing. Expected scale:
+    //   transient: 1–3 crossings/day  (occasional blips that recover quickly)
+    //   structural: 10+ crossings/day (URL blocked — one crossing per ~45-min cycle all day)
+    const date = new Date().toISOString().split('T')[0]
+    const dailyKey = `fetch-fail:daily:${svcId}:${date}`
+    const dailyCount = parseInt(await kv.get(dailyKey).catch(() => null) ?? '0', 10) || 0
+    await kvPut(kv, dailyKey, String(dailyCount + 1), { expirationTtl: 172800 }) // 48h
+  }
+  return shouldDegrade
 }
 
 /**
