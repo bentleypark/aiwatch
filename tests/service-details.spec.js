@@ -366,11 +366,12 @@ test.describe('Azure OpenAI Regional Availability (always visible)', () => {
   })
 })
 
-test.describe('Detection Lead badge', () => {
-  test('shows lead badge for OpenAI ongoing incident', async ({ page }) => {
-    // Deterministic mock: OpenAI with an ongoing incident whose detectedAt is
-    // 7min before startedAt (1–60m window → Detection Lead badge). Relying on
-    // the DEV mock fallback breaks against a running local worker (#455).
+test.describe('Detection Lead badge removed (#464)', () => {
+  test('does NOT render a per-incident lead/early badge even with detectedAt before startedAt', async ({ page }) => {
+    // #464: the per-incident "Xm lead/early" badge was removed. It only ever rendered for the
+    // in_window case (probe detected before the official publish), which production data showed
+    // is ~0 — status-page polling is structurally later than the official publish. Even with a
+    // detectedAt 7min before startedAt (the old trigger), no lead/early badge must appear now.
     const startedAt = new Date(Date.now() - 2 * 3600_000).toISOString()
     const detectedAt = new Date(Date.now() - 2 * 3600_000 - 7 * 60_000).toISOString()
     await page.route('**/api/status**', (route) => route.fulfill({ json: {
@@ -382,13 +383,12 @@ test.describe('Detection Lead badge', () => {
       lastUpdated: new Date().toISOString(),
     } }))
     await page.goto('/')
-    // Wait for the card to render before clicking (deterministic load signal —
-    // the mock settles after usePolling's ~800ms simulated delay).
     await expect(page.locator('main button').filter({ hasText: 'OpenAI API' }).first()).toBeVisible({ timeout: 20000 })
     await page.locator('main button').filter({ hasText: 'OpenAI API' }).first().click()
     await expect(page.locator('main').getByText('Incident History')).toBeVisible({ timeout: 5000 })
-    // Lead badge should be visible for the ongoing incident (Detection Lead)
-    await expect(page.locator('main').getByText('lead').first()).toBeVisible()
+    // The incident renders, but no lead/early badge alongside its title.
+    await expect(page.locator('main').getByText('Elevated error rates')).toBeVisible()
+    await expect(page.locator('main').getByText(/\d+m (lead|early|먼저)/)).toHaveCount(0)
   })
 })
 

@@ -46,12 +46,12 @@
 - **한국어/영어** — 이중 언어 지원
 - **모바일 반응형** — 사이드바 오버레이, 모바일 액션 바
 - **AIWatch Score** — uptime, 인시던트, 복구 시간, probe 기반 응답성을 결합한 종합 신뢰도 점수 ([계산 방식](https://ai-watch.dev/#about-score))
-- **Detection Lead** — 공식 발표 대비 AIWatch의 조기 감지 시간 표시 (대시보드 배지 + Discord 알림 임베드 + 일일 요약에 최근 24시간 감지 audit 표시)
+- **RTT 저하 감지** — AIWatch의 직접 API probe가 공식 상태 페이지에 보고되지 않는 지연(latency) 저하를 포착 (대시보드 배지 + Discord 일일 요약). 공식 발표 대비 ~5분 폴링 주기 내 독립 감지(MTTD); 드물게 발생하는 진짜 조기 RTT 신호는 이벤트별로 표시
 - **리전별 가용성** — xAI, Gemini, OpenAI의 리전별 인시던트 상태 및 전환 추천
 - **스마트 알림** — degraded/down 상태 Discord 알림 (anti-flapping + 인시던트 억제 + 복구 지속 시간)
 - **오프라인 UI** — API 연결 불가 시 안내 화면 (프로덕션 전용)
 - **Is X Down SEO 페이지** — 31개 서비스 (Bedrock/Azure OpenAI 제외한 모든 모니터링 대상), 동적 OG 이미지(PNG), 공유 버튼, AIWatch 순위 (대시보드와 동일한 동률 표기), 대체 서비스 추천
-- **헬스체크 프로빙** — API 엔드포인트 직접 RTT 측정 (20개 API 서비스) + 연속 스파이크 조기 장애 감지 및 Detection Lead 추적
+- **헬스체크 프로빙** — API 엔드포인트 직접 RTT 측정 (20개 API 서비스) + 연속 스파이크 조기 장애 감지 및 RTT 저하 추적
 - **페이지별 스켈레톤** — 각 페이지 레이아웃에 맞는 로딩 placeholder
 - **AI 분석 (Beta)** — 장애 발생 시 하이브리드 AI 자동 분석 (Gemma 4 primary + Sonnet fallback): 원인 추정, 예상 복구 시간, 영향 범위, 대체 서비스 추천. 인시던트 Discord 알림에 통합(단일 embed), Topbar Analyze 모달, Is X Down AI Insight 카드
 - **랜딩 페이지** — 랜딩 페이지(`/intro`), 대시보드 프리뷰 mock, KO/EN 이중 언어, Flow 애니메이션, `?banner=` 캠페인 슬롯(선택), GA4 트래킹
@@ -152,8 +152,9 @@ Cloudflare KV
   ├── ai:reanalysis-skip:* (재분석 실패 쿨다운, TTL 30분)
   ├── ai:usage:{date}      (일별 AI 사용량 카운터, TTL 2일)
   ├── alerted:*            (알림 중복 방지 키, TTL 2시간-7일)
-  ├── detected:{svcId}     (Detection Lead 타임스탬프, TTL 7일)
-  ├── detection:lead:{date} (Detection Lead audit 로그, UTC 일별, TTL 7일, 일일 요약에 24h 슬라이딩 윈도우)
+  ├── detected:{svcId}     (최초 감지 타임스탬프, TTL 7일)
+  ├── detection:lead:{date} (조기 RTT audit 로그, UTC 일별, TTL 7일, 일일 요약에 24h 슬라이딩 윈도우)
+  ├── probe-degradation:daily:{svcId}:{date} (RTT 저하 카운터, TTL 48시간, #464)
   ├── reddit:seen:{postId} (Reddit 게시글 중복 방지, TTL 24시간)
   └── vitals:{YYYY-MM-DD}  (Web Vitals 일별 집계, TTL 2일)
 ```

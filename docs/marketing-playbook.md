@@ -6,7 +6,7 @@ Operational reference for opportunistic, organic distribution of AIWatch during 
 - [Reddit](#reddit)
 - [Shared rules](#shared-rules)
 
-**Not covered here:** journalist outreach (Casey Newton, Hard Fork, AI beat reporters). That channel requires verified statistics (90-day Detection Lead average, per-service audit) and a permanent embeddable URL — tracked separately in issue #266 (`/press` page). Once `/press` ships, a third section will be added here for journalist DM/email flow.
+**Not covered here:** journalist outreach (Casey Newton, Hard Fork, AI beat reporters). That channel requires verified statistics (MTTD + RTT-degradation counts the official status pages don't report — the honest pillars after the #464 redefinition, not a "faster than official" average) and a permanent embeddable URL — tracked separately in issue #266 (`/press` page). Once `/press` ships, a third section will be added here for journalist DM/email flow.
 
 ---
 
@@ -52,12 +52,16 @@ AIWatch is an open-source status dashboard for 33 AI services (24 APIs + 3 apps
   binding) as primary, Claude Sonnet (via AI Gateway) as fallback. Per-incident
   KV caching keeps costs near zero. Analyses update as the incident timeline
   evolves.
-- Detection Lead — direct API probes run every 5 minutes; when probe RTT
-  anomalies precede the provider's status page acknowledgment, we record the
-  gap. The 5-minute cadence bounds observation resolution, not the lead itself
-  — status pages routinely lag the actual outage by 15-45 minutes, so measured
-  leads typically land in the minute range (capped at 60 min in UI). Surfaced
-  in the dashboard and in Discord alerts.
+- RTT degradation detection — direct API probes run every 5 minutes and flag
+  latency degradation that provider status pages often never report (status
+  pages report hard-down, not slowness). This is the honest differentiator for a
+  synthetic-probe architecture (#464). Independent detection lands within the
+  ~5-min polling cycle of the official report (MTTD); we do NOT claim "faster
+  than the official status page" as a headline — diagnostic data showed status-
+  page-based detection is structurally bounded by polling lag. Occasional genuine
+  early-RTT signals (probe flagged degradation before the official update) are
+  shown per-event; the averaged figure is gated behind a minimum sample size so a
+  marketing claim never rests on thin data. Surfaced in the dashboard + Discord.
 - Score — single 0-100 reliability metric combining uptime, incident impact
   days (Atlassian-weighted), recovery time, and response consistency for probed
   services.
@@ -104,7 +108,7 @@ Lower expectations. Lead with the technical angle, not the outage angle:
 Show HN: Monitoring 30 AI services on Cloudflare Workers
 ```
 
-First comment opens with the stack and cost profile, not the outage framing. Detection Lead becomes a secondary bullet, not the headline.
+First comment opens with the stack and cost profile, not the outage framing. RTT degradation detection becomes a secondary bullet, not the headline.
 
 ### Do not
 
@@ -158,8 +162,8 @@ It's down for everyone — just pulled this from AIWatch
 (ai-watch.dev/is-claude-down):
 
 - Status: Major Outage (confirmed [HH:MM UTC — pull from dashboard])
-- Detection Lead: [X minutes — pull from dashboard] ahead of the official
-  status page
+- Early RTT signal: [X minutes — ONLY if the dashboard shows one] — our probe
+  flagged latency degradation before the official status update
 - AI analysis: [paste the current AIWatch AI analysis summary, 1-2 sentences]
 
 Fallback recommendation from the dashboard: [top 1-2 fallbacks by Score].
@@ -169,7 +173,7 @@ Source is open — happy to explain how the detection works if anyone's curious.
 
 Link to the **specific service page** (`/is-claude-down`, `/is-openai-down`, etc.), **never** the homepage. The homepage link looks like spam; the service page is the contextually useful answer.
 
-If the dashboard has not yet computed a Detection Lead (typical within the first 5-10 minutes of an outage, before our probe cycles confirm a sustained spike), **drop the Detection Lead line entirely** rather than leave a `[X minutes]` placeholder or guess. The rest of the template still stands — confirmed outage + AI analysis + fallback recs are useful on their own.
+A genuine early-RTT signal is **rare** (most incidents are component/connector degradations that don't spike the probed endpoint's RTT, and status-page detection is structurally bounded by polling lag — #464). If the dashboard does not show one, **drop the line entirely** rather than guess or claim "ahead of official." The rest of the template still stands — confirmed outage + AI analysis + fallback recs are useful on their own. Never frame AIWatch as "faster than the official status page" as a blanket claim; the verifiable pillars are independent detection (MTTD) + RTT degradation that status pages don't report.
 
 ### Frequency limit
 
@@ -218,7 +222,7 @@ To catch outage windows in time:
 Every post, every channel, no exceptions. Run through this in order before hitting submit:
 
 - [ ] All `[bracket placeholders]` in the template replaced with live values pulled from the dashboard at posting time
-- [ ] Numbers (timestamps, Detection Lead minutes, uptime %) match what ai-watch.dev shows right now — not a cached tab from 30 minutes ago
+- [ ] Numbers (timestamps, early-RTT signal minutes if shown, uptime %) match what ai-watch.dev shows right now — not a cached tab from 30 minutes ago
 - [ ] Link points to the specific service page (`/is-<service>-down`), not the homepage
 - [ ] Authorship disclosed in the first line ("Author here" / "I built this")
 - [ ] Only one AIWatch URL in the body

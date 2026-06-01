@@ -187,7 +187,6 @@ const ko = {
   'svc.mttr.sub': '데이터 수집 중',
   'svc.cal.legend': '상태 캘린더',
   'svc.incidents.history': '인시던트 히스토리',
-  'svc.detectionLead': '공식 발표보다 {n} 빠르게 감지',
   'svc.no.incidents': '인시던트 없음',
   'svc.no.incidents.limited': '보고된 인시던트 없음 — 이 서비스의 상태 페이지는 제한된 데이터를 제공합니다.',
   'svc.no.incidents.realtime': '활성 인시던트 없음. 실시간 모니터링 전용 — 장애 발생 시에만 이력이 표시됩니다.',

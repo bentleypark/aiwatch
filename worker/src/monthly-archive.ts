@@ -11,7 +11,7 @@ import type { ServiceStatus, Incident } from './types'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey } from './security-monitor'
 import type { DetectionLeadEntry } from './detection-lead-log'
-import { detectionLeadMonthlyKey, isValidEntry as isValidDetectionLeadEntry } from './detection-lead-log'
+import { detectionLeadMonthlyKey, isValidEntry as isValidDetectionLeadEntry, MIN_LEAD_SAMPLE_SIZE } from './detection-lead-log'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
@@ -120,6 +120,17 @@ export interface MonthlyDetectionLeadSummary {
   maxLeadMs: number                              // longest single lead — the headline figure
   byService: Record<string, number>              // svcId → count, for "most-detected services"
   topExamples: MonthlyDetectionLeadExample[]     // up to 5, sorted by leadMs desc
+}
+
+/** #464 — whether the monthly detection-lead AVERAGE may be presented as a headline/marketing
+ *  figure. Returns false below MIN_LEAD_SAMPLE_SIZE entries (`summary.count`) so a public claim
+ *  never rests on thin/zero samples. The raw summary is still stored in the archive for inspection —
+ *  only the averaged claim is gated. INTENDED CONSUMERS are the report-rendering surfaces that live
+ *  OUTSIDE this repo (the aiwatch-reports monthly template, and the future /press page #266) — this
+ *  worker stores the raw `avgLeadMs` and exposes this guard for them; nothing in this repo renders
+ *  the average yet. Per-event `topExamples` remain honest to show regardless of the gate. */
+export function canPresentLeadAverage(summary: MonthlyDetectionLeadSummary | null | undefined): boolean {
+  return !!summary && summary.count >= MIN_LEAD_SAMPLE_SIZE
 }
 
 // ── Incident accumulation (written daily by daily summary cron) ──────

@@ -21,13 +21,13 @@ Cron Trigger (*/5 min)
   → probe spike detection (3+ consecutive RTT spikes) → record to detected:{svcId} as earliest detection
   → platform monitor: check metastatuspage.com → store platform:status:atlassian → Discord alert on outage/recovery
   → read KV cache → detect incidents/status changes
-  → record detection timestamps (detected:{serviceId}) for Detection Lead (probe spike time preferred if earlier)
-  → KV ID-based dedup → Discord alerts (single embed per incident, with Detection Lead if probe detected first)
-  → incident detected → AI analysis via Gemma 4 (Workers AI, primary) or Sonnet (AI Gateway, fallback) (8s timeout) + Detection Lead (1-60min advance detection → "⚡ Detection Lead: Xm") → merged into incident embed + persisted to detection:lead:{date} audit log (#256, dedup by incId, surfaced in daily summary)
+  → record detection timestamps (detected:{serviceId}); probe-spike rising edge also increments probe-degradation:daily(+:nostatus) RTT-degradation counters (#464)
+  → KV ID-based dedup → Discord alerts (single embed per incident; rare genuine early-RTT signal appended when probe flagged degradation before the official update)
+  → incident detected → AI analysis via Gemma 4 (Workers AI, primary) or Sonnet (AI Gateway, fallback) (8s timeout) + early-RTT signal (1-60min, rare → "⚡ Early signal: Xm") → merged into incident embed + persisted to detection:lead:{date} audit log (#256, dedup by incId). NOTE (#464): status-page polling is structurally later than the official publish, so the "faster than official" headline is retired — honest framing is MTTD (alerted within ~5-min polling cycle) + RTT degradation detection (degradations status pages don't report); aggregate average gated by MIN_LEAD_SAMPLE_SIZE
   → recovery detected → mark ai:analysis:{svcId}:{incId} with resolvedAt (2h TTL, powers "Recently Resolved" UI)
   → active incidents: refresh analysis TTL / re-analyze if expired / dedup sibling services
   → alert count tracked in KV (alert:count:{date}) for Daily Summary
-  → daily summary at UTC 09:00 (KST 18:00) with alert count aggregation + Web Vitals p75 + Detection Lead audit log (24h sliding window from today + yesterday keys)
+  → daily summary at UTC 09:00 (KST 18:00) with alert count aggregation + Web Vitals p75 + early-RTT detections (24h sliding window) + RTT degradation counts (probe-degradation:daily, #464) + fetch-failure observability (#500/#501)
   → daily summary also accumulates incidents:monthly:{YYYY-MM} (dedup by incident ID, 60d TTL)
   → monthly archive on 1st of month (UTC 00:00) → aggregate history:* + probe:daily:* + incidents:monthly:* + security:monthly:* + detection:lead:monthly:* (#369) → archive:monthly:{YYYY-MM} (permanent)
   → archive-ready Discord ping → links to `aiwatch-reports/generate-report.yml` workflow_dispatch so operator clicks "Run workflow" to open draft PR; dedup via archive:notified:{YYYY-MM} (aiwatch-reports#4)

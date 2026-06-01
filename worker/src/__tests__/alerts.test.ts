@@ -518,8 +518,8 @@ describe('formatDetectionLead', () => {
     const detected = new Date(NOW - 10 * 60_000).toISOString() // 10min before startedAt
     const started = new Date(NOW).toISOString()
     const result = formatDetectionLead(detected, started)
-    expect(result).toContain('Detection Lead: 10m')
-    expect(result).toContain('AIWatch detected')
+    expect(result).toContain('Early signal: 10m')
+    expect(result).toContain('AIWatch flagged RTT degradation')
   })
 
   it('returns empty when detectedAt is null', () => {

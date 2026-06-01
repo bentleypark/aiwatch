@@ -28,6 +28,14 @@ export const MIN_LEAD_MS = 60_000          // 1m — sub-minute leads aren't dis
 export const MAX_LEAD_MS = 60 * 60_000     // 60m — formatDetectionLead caps at <60min to filter stale `detected:` entries
 export const DAYS_FOR_DAILY_SUMMARY = 2    // today + yesterday — covers the 24h window ending at UTC 09:00 cron run
 
+// #464 — minimum genuine `in_window` lead events before any AGGREGATE "average detection lead"
+// figure may be presented as a headline/marketing claim. Diagnostic data showed in_window=0 over the
+// measurement window (status-page polling is structurally later than the official publish; probe-first
+// rarely fires because most incidents are component degradations that don't spike the probed endpoint).
+// Per-event leads remain honest and are still shown individually; only the averaged claim is gated, so
+// a marketing number never rests on ~0 samples. Single source of truth — imported by every consumer.
+export const MIN_LEAD_SAMPLE_SIZE = 5
+
 export function detectionLeadKey(date: Date = new Date()): string {
   return `detection:lead:${date.toISOString().split('T')[0]}`
 }
@@ -296,6 +304,24 @@ export async function readDetectionLeadEntries(
   return out
 }
 
+// ── RTT degradation detection (#464) ────────────────────────────────
+// The honest differentiator that replaced the unverifiable "faster than official" claim: AIWatch's
+// direct RTT probe (detectConsecutiveSpikes) catches latency degradation that status pages often
+// never report. We count two daily figures per service (KV keys live in index.ts, mirroring the
+// fetch-fail:daily pattern):
+//   - probe-degradation:daily:{svcId}:{date}          — every probe-spike rising edge
+//   - probe-degradation:nostatus:daily:{svcId}:{date} — subset where the service's official status
+//                                                        was still operational (degradation NOT on
+//                                                        the status page — the headline figure)
+export type DegradationOutcome = 'degradation' | 'degradation_nostatus'
+
+/** Classify a probe-spike degradation by whether the service's official status already reflects it.
+ *  svcStatusOperational === true → the status page shows nothing → 'degradation_nostatus' (our edge).
+ *  Pure + side-effect-free so the rising-edge decision is unit-testable; KV I/O stays in index.ts. */
+export function classifyDegradation(svcStatusOperational: boolean): DegradationOutcome {
+  return svcStatusOperational ? 'degradation_nostatus' : 'degradation'
+}
+
 // ── Detection Lead diagnostics (#464) ───────────────────────────────
 // Lossy daily counter (NOT source-of-truth like the audit log) measuring WHY leads are/aren't
 // recorded, split by whether the service is a probe target. Answers: is the empty audit log a
@@ -408,8 +434,18 @@ export function formatLeadDiagSection(diag: LeadDiag): string {
   const p = diag.probe
   const probeTotal = bucketsTotal(p)
   const nonProbeTotal = bucketsTotal(diag.nonProbe)
-  if (probeTotal + nonProbeTotal === 0) return ''
-  return `\n🔍 **Detection diag** (~48h) — probe svcs: in-window ${p.in_window} · negative ${p.negative} · sub-min ${p.below_min} · >60m ${p.above_max} · no-detect ${p.no_detected}  |  non-probe incidents: ${nonProbeTotal}`
+  const total = probeTotal + nonProbeTotal
+  if (total === 0) return ''
+  // MTTD framing (#464): in_window = genuinely earlier than official (rare); the negative/below_min
+  // buckets are NOT failures — they mean AIWatch alerted within the */5 polling cycle of the official
+  // publish (status-page detection is structurally bounded by polling lag, never "before").
+  // no-detect spans BOTH groups: a non-probe incident the status-page poll missed entirely is an
+  // honest "not detected", not a within-cycle alert — so subtract the combined total (Math.max guards
+  // against any future bucket-routing change producing a negative count).
+  const earlyViaRtt = p.in_window
+  const noDetect = p.no_detected + diag.nonProbe.no_detected
+  const withinCycle = Math.max(0, total - earlyViaRtt - noDetect)
+  return `\n🔍 **Detection (~48h)** — ${total} incidents · ${earlyViaRtt} early via RTT probe · ${withinCycle} alerted within ~5-min polling cycle of official · ${noDetect} no-detect`
 }
 
 /** Format Detection Lead entries as a Discord embed section.
@@ -425,7 +461,9 @@ export function formatDetectionLeadSection(
     const name = serviceNames.get(e.svcId) ?? e.svcId
     // Math.floor matches formatDetectionLead — never displays 60m for leads in [59m30s, 60m)
     const mins = Math.floor(e.leadMs / 60_000)
-    return `   ${name}: ${mins}m lead`
+    return `   ${name}: ${mins}m before official update`
   })
-  return `\n⚡ **Detection Lead (last 24h)** (${entries.length} ${entries.length === 1 ? 'event' : 'events'})\n${lines.join('\n')}`
+  // Per-event, genuinely earlier-than-official RTT detections (rare). Aggregate "average lead" is
+  // gated by MIN_LEAD_SAMPLE_SIZE elsewhere; these individual events are always honest when shown.
+  return `\n⚡ **Early RTT detections (last 24h)** (${entries.length} ${entries.length === 1 ? 'event' : 'events'})\n${lines.join('\n')}`
 }

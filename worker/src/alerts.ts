@@ -329,9 +329,11 @@ export function buildServiceAlerts(
 }
 
 /**
- * Compute Detection Lead text for Discord alerts.
- * Returns formatted string if AIWatch detected the issue before the official report (1-59 min lead).
- * Capped at 59 minutes — longer leads likely indicate stale detection data (#189).
+ * Compute early-RTT-detection text for Discord alerts (#464 reframe).
+ * Only renders for genuine cases where AIWatch's RTT probe flagged degradation BEFORE the official
+ * status update (computeLeadMs returns null outside [1m, 60m), so negative/stale leads emit nothing).
+ * This is an honest per-event signal — the aggregate "average lead" claim is gated separately by
+ * MIN_LEAD_SAMPLE_SIZE since diagnostic data showed such genuine leads are rare.
  */
 export function formatDetectionLead(detectedAt: string | null, incidentStartedAt: string): string {
   if (!detectedAt) return ''
@@ -340,7 +342,7 @@ export function formatDetectionLead(detectedAt: string | null, incidentStartedAt
   const leadMs = computeLeadMs(detectedAt, incidentStartedAt)
   if (leadMs === null) return ''
   const mins = Math.floor(leadMs / 60_000)
-  return `⚡ **Detection Lead: ${mins}m** — AIWatch detected this before the official report`
+  return `⚡ **Early signal: ${mins}m** — AIWatch flagged RTT degradation before the official status update`
 }
 
 // #348 — outage-tweet draft (Phase 1.5: manual-assist, no X API). For Claude/OpenAI-family

@@ -47,12 +47,12 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Bilingual** — Korean / English
 - **Mobile responsive** — Sidebar overlay, mobile action bar
 - **AIWatch Score** — Composite reliability score combining uptime, incidents, recovery time, and probe-based responsiveness ([how it works](https://ai-watch.dev/#about-score))
-- **Detection Lead** — Shows how much earlier AIWatch detected an incident vs official report (dashboard badge + Discord alert embed + daily summary audit log surfacing 24h of events)
+- **RTT degradation detection** — AIWatch's direct API probes flag latency degradation that official status pages often never report (dashboard badge + Discord daily summary). Independent detection within the ~5-min polling cycle of the official report (MTTD); occasional genuine early-RTT signals are shown per-event
 - **Regional availability** — Per-region incident status for xAI, Gemini, OpenAI with switch recommendation
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
 - **Is X Down SEO pages** — 31 services (all monitored services except Bedrock / Azure OpenAI) with dynamic OG images (PNG), share buttons, AIWatch rank (matches dashboard with tied-rank display), and fallback recommendations
-- **Health check probing** — Direct RTT measurement to API endpoints (20 API services) with early outage detection via consecutive spike alerts and Detection Lead tracking
+- **Health check probing** — Direct RTT measurement to API endpoints (20 API services) with early outage detection via consecutive spike alerts and RTT degradation tracking
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 - **AI Analysis (Beta)** — Hybrid AI auto-analysis on incidents (Gemma 4 primary + Sonnet fallback): cause estimation, recovery time, affected scope, contextual fallback recommendations. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 - **Landing page** — Landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, optional `?banner=` campaign slot, and GA4 tracking
@@ -153,8 +153,9 @@ Cloudflare KV
   ├── ai:reanalysis-skip:* (re-analysis failure cooldown, TTL 30min)
   ├── ai:usage:{date}      (daily AI usage counter, TTL 2d)
   ├── alerted:*            (alert dedup keys, TTL 2h-7d)
-  ├── detected:{svcId}     (Detection Lead timestamp, TTL 7d)
-  ├── detection:lead:{date} (Detection Lead audit log per UTC day, TTL 7d, 24h sliding window in daily summary)
+  ├── detected:{svcId}     (earliest detection timestamp, TTL 7d)
+  ├── detection:lead:{date} (early-RTT audit log per UTC day, TTL 7d, 24h sliding window in daily summary)
+  ├── probe-degradation:daily:{svcId}:{date} (RTT degradation counter, TTL 48h, #464)
   ├── reddit:seen:{postId} (Reddit post dedup, TTL 24h)
   └── vitals:{YYYY-MM-DD}  (Web Vitals daily aggregation, TTL 2d)
 ```

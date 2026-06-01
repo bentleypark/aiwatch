@@ -25,10 +25,12 @@ export interface DailySummaryData {
   leadDiag?: LeadDiag | null
   fetchFailureCounts?: Record<string, number>   // svcId → times degraded threshold hit today
   crossValidSuppressed?: Record<string, number> // svcId → times probe overrode to operational
+  degradationCounts?: Record<string, number>          // svcId → RTT degradation spikes today (#464)
+  degradationNoStatusCounts?: Record<string, number>  // svcId → degradations NOT on official status page
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
-  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, deliveryCounts, redditCount, vitals, detectionLeadEntries, leadDiag, fetchFailureCounts, crossValidSuppressed } = data
+  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, deliveryCounts, redditCount, vitals, detectionLeadEntries, leadDiag, fetchFailureCounts, crossValidSuppressed, degradationCounts, degradationNoStatusCounts } = data
   const total = services.length
   const operational = services.filter(s => s.status === 'operational').length
   const degraded = services.filter(s => s.status === 'degraded').length
@@ -171,7 +173,39 @@ export function buildDailySummary(data: DailySummaryData): string {
     lines.push(`\n⚠️ **Status Page Fetch Failures Today** (#500)\n${items}`)
   }
 
+  // Section: RTT degradation detection (#464) — the honest differentiator that replaced the
+  // unverifiable "faster than official" claim. probe-degradation:daily = every probe RTT spike;
+  // :nostatus = the subset where the official status page showed nothing (our edge).
+  const degSection = formatDegradationSection(degradationCounts, degradationNoStatusCounts, services)
+  if (degSection) lines.push(degSection)
+
   return lines.join('\n')
+}
+
+/**
+ * Format the RTT-degradation daily counters as a Discord section (#464).
+ * Returns empty string when no degradations were recorded (caller skips the section).
+ * The `not on official status page` total is the headline differentiator — degradations status
+ * pages never report. Per-service breakdown sorted by total spikes descending.
+ */
+export function formatDegradationSection(
+  degradationCounts: Record<string, number> | undefined,
+  degradationNoStatusCounts: Record<string, number> | undefined,
+  services: ServiceStatus[],
+): string {
+  if (!degradationCounts || Object.keys(degradationCounts).length === 0) return ''
+  const nameMap = new Map(services.map(s => [s.id, s.name]))
+  const totalSpikes = Object.values(degradationCounts).reduce((a, b) => a + b, 0)
+  const totalNoStatus = Object.values(degradationNoStatusCounts ?? {}).reduce((a, b) => a + b, 0)
+  const items = Object.entries(degradationCounts)
+    .sort(([, a], [, b]) => b - a)
+    .map(([id, total]) => {
+      const ns = degradationNoStatusCounts?.[id] ?? 0
+      const detail = ns > 0 ? `${ns} not on official status page` : 'all reflected on status page'
+      return `   ${nameMap.get(id) ?? id}: ${total} RTT spike${total === 1 ? '' : 's'} (${detail})`
+    })
+    .join('\n')
+  return `\n📈 **RTT Degradations (~48h)** — ${totalSpikes} total · ${totalNoStatus} not on official status pages\n${items}`
 }
 
 /**
