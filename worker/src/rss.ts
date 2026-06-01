@@ -259,6 +259,32 @@ function itemXml(
     </item>`
 }
 
+/**
+ * Collapse feed entries sharing an incidentId+kind into a single entry (#520), keeping the FIRST
+ * occurrence. A per-surface provider (Anthropic: Claude API / claude.ai / Claude Code) links one
+ * root incident to several services, which would otherwise emit N near-identical items in the
+ * all-services feed — and N Slack /feed messages. Callers pass entries in SERVICES order, so the
+ * survivor is the deterministic "primary" surface (e.g. Claude API ahead of claude.ai / Claude Code);
+ * itemXml's "Also affecting" line still names the rest. Exported for unit testing.
+ *
+ * Accepted edge: the survivor's guid is the primary's (`aiwatch:{primaryId}:{incId}`). If the primary
+ * surface recovers BEFORE its siblings (partial recovery), the still-active item's primary shifts to the
+ * next SERVICES-order surface, so its guid changes and Slack/RSS re-notifies the ongoing incident once.
+ * Rare and arguably informative ("still active on claude.ai"); the alternative — an incident-scoped guid
+ * — would re-post the entire feed on deploy (every guid changes), which is worse churn. Left as-is.
+ */
+export function dedupeSharedIncidents<T extends { incident: { id: string }; kind: ItemKind }>(entries: T[]): T[] {
+  const seen = new Set<string>()
+  const out: T[] = []
+  for (const e of entries) {
+    const key = `${e.incident.id}:${e.kind}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(e)
+  }
+  return out
+}
+
 export type FeedScope =
   | { scope: 'all' }
   | { scope: 'service'; service: ServiceStatus }
@@ -293,8 +319,14 @@ export function buildRssFeed(
       }
     }
   }
-  items.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime())
-  const capped = items.slice(0, MAX_ITEMS)
+  // All-services feed (#520): collapse a multi-surface incident (one incidentId across Claude API /
+  // claude.ai / Claude Code) into ONE item per (incidentId, kind) so a Slack /feed subscriber to
+  // /feed.xml gets a single consolidated message instead of N near-identical ones. `sources` iterates
+  // in SERVICES order so the surviving "primary" is deterministic; itemXml's "Also affecting" lists
+  // the rest. Per-service feeds (scope:'service') have a single source, so this is a no-op there.
+  const deduped = opts.scope === 'all' ? dedupeSharedIncidents(items) : items
+  deduped.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime())
+  const capped = deduped.slice(0, MAX_ITEMS)
 
   const title =
     opts.scope === 'service'
