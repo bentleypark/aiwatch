@@ -46,6 +46,24 @@ if (entries.length === 0) {
   process.exit(0)
 }
 
+// #415 effectiveness: distinguish actual VIOLATIONS from preventive telemetry.
+// Most decisions are telemetry, not evidence the gate caught a violation:
+//   - warn (git-mutation): a step-3.5 REMINDER fires on every git mutation — not a violation,
+//     count scales with workload, so its trend is meaningless as an effectiveness signal.
+//   - inject/clean/pass/skip: pure telemetry (gate is on / turn ended cleanly).
+// Only two signals mean a real workflow violation was intercepted:
+//   - block (stop-nag): the assistant tried to end on an auto-proceed nag → blocked.
+//   - any entry whose note carries `no_verify=1` (git-mutation): --no-verify/--no-gpg-sign
+//     was on a commit/push, which CLAUDE.md forbids unless the user asked.
+// NOTE the structural blind spot (#415's own 2026-05-19 comment): step-3.5 violations (advancing
+// without the user's in-browser confirmation) are invisible to hooks — the confirmation is a user
+// message the hook never sees. So even this violation count UNDERCOUNTS; it is a floor, not a total.
+const isViolation = (e) => {
+  if (e.decision === 'block') return true
+  if (typeof e.note === 'string' && /\bno_verify=1\b/.test(e.note)) return true
+  return false
+}
+
 const dayKey = (ts) => (typeof ts === 'string' && ts.length >= 10 ? ts.slice(0, 10) : 'unknown')
 const todayUTC = new Date().toISOString().slice(0, 10)
 const cutoff7 = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10)
@@ -75,7 +93,7 @@ const dayCounts = {}
 for (const e of entries) {
   const k = dayKey(e.ts)
   if (k === 'unknown') continue
-  dayCounts[k] = dayCounts[k] ?? { total: 0, warn: 0, block: 0, skip: 0, pass: 0, clean: 0, inject: 0, other: 0 }
+  dayCounts[k] = dayCounts[k] ?? { total: 0, warn: 0, block: 0, skip: 0, pass: 0, clean: 0, inject: 0, other: 0, violations: 0 }
   dayCounts[k].total++
   const d = e.decision
   if (d === 'warn') dayCounts[k].warn++
@@ -85,6 +103,16 @@ for (const e of entries) {
   else if (d === 'clean') dayCounts[k].clean++
   else if (d === 'inject') dayCounts[k].inject++
   else dayCounts[k].other++
+  if (isViolation(e)) dayCounts[k].violations++
+}
+
+// Violation tally (the real effectiveness signal — see isViolation).
+const violations = entries.filter(isViolation)
+const violationsLast7 = violations.filter((e) => dayKey(e.ts) >= cutoff7)
+const violByKind = {}
+for (const e of violations) {
+  const kind = e.decision === 'block' ? 'nag-blocked' : 'no-verify-attempt'
+  violByKind[kind] = (violByKind[kind] ?? 0) + 1
 }
 const days = []
 for (let i = DAYS - 1; i >= 0; i--) {
@@ -105,11 +133,17 @@ out.push('Last 7 days by decision:')
 const dprint = Object.entries(last7ByDecision).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}=${v}`)
 out.push(`  ${dprint.length ? dprint.join('  ') : '(none)'}`)
 out.push('')
-out.push(`Per-day (last ${DAYS} days)  [total | warn | block | skip | pass | clean | inject]:`)
+// The effectiveness signal (#415): real violations intercepted, separated from preventive
+// telemetry. A LOW/declining violation count is the goal — telemetry (warn/inject) is not.
+out.push('⚖️  Violations intercepted (real signal — block + --no-verify; UNDERCOUNTS, step-3.5 invisible):')
+const vkind = Object.entries(violByKind).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}=${v}`)
+out.push(`  ${violations.length} total · ${violationsLast7.length} in last 7d${vkind.length ? '  (' + vkind.join(', ') + ')' : ''}`)
+out.push('')
+out.push(`Per-day (last ${DAYS} days)  [total | violations | warn | block | skip | pass | clean | inject]:`)
 for (const d of days) {
   const c = dayCounts[d]
   if (!c) { out.push(`  ${d}   0`); continue }
-  out.push(`  ${d}   ${c.total} | ${c.warn} | ${c.block} | ${c.skip} | ${c.pass} | ${c.clean} | ${c.inject}`)
+  out.push(`  ${d}   ${c.total} | ${c.violations} | ${c.warn} | ${c.block} | ${c.skip} | ${c.pass} | ${c.clean} | ${c.inject}`)
 }
 out.push('')
 out.push(`Most recent ${LAST_N}:`)
