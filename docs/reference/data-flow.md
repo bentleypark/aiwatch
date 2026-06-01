@@ -29,7 +29,7 @@ Cron Trigger (*/5 min)
   → alert count tracked in KV (alert:count:{date}) for Daily Summary
   → daily summary at UTC 09:00 (KST 18:00) with alert count aggregation + Web Vitals p75 + early-RTT detections (24h sliding window) + RTT degradation counts (probe-degradation:daily, #464) + fetch-failure observability (#500/#501)
   → daily summary also accumulates incidents:monthly:{YYYY-MM} (dedup by incident ID, 60d TTL)
-  → monthly archive on 1st of month (UTC 00:00) → aggregate history:* + probe:daily:* + incidents:monthly:* + security:monthly:* + detection:lead:monthly:* (#369) → archive:monthly:{YYYY-MM} (permanent)
+  → monthly archive on 1st of month (UTC 00:00) → aggregate history:* + probe:daily:* + incidents:monthly:* + security:monthly:* + detection:lead:monthly:* (#369) + probe-degradation:monthly:* (#511) → archive:monthly:{YYYY-MM} (permanent)
   → archive-ready Discord ping → links to `aiwatch-reports/generate-report.yml` workflow_dispatch so operator clicks "Run workflow" to open draft PR; dedup via archive:notified:{YYYY-MM} (aiwatch-reports#4)
   → changelog RSS/HTML collection (hourly at :00) → KV accumulate new entries from OpenAI/Google/Anthropic
   → security monitoring (hourly at :00) → HN Algolia + OSV.dev SDK vulnerability scan (24 AI SDK packages · two-phase: querybatch → KV dedup → per-vuln GET enrichment; #323/#325) → EPSS enrichment via GitHub Advisories (24h KV cache, #326) → Discord digest on findings

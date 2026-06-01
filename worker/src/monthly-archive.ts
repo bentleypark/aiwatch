@@ -60,6 +60,11 @@ export interface MonthlyArchive {
   // Sourced from detection:lead:monthly:{period} (60d TTL accumulator, #369) so the archive
   // can carry detection-lead figures past the 7d TTL on the per-day audit log keys.
   detectionLead?: MonthlyDetectionLeadSummary | null
+  // Optional — null for months before this feature shipped (or no degradations recorded).
+  // Sourced from probe-degradation:monthly:{period} (60d TTL accumulator, #511) — RTT latency
+  // degradations the official status pages often don't report. The `noStatus*` figures are the
+  // headline differentiator: degradations flagged while the service's official status was still ok.
+  degradation?: MonthlyDegradationSummary | null
   // Optional — AI-generated retrospective draft for the report's Notable Incidents
   // + Observations sections (#426 / aiwatch-reports#4 Phase 3). Generated at archive
   // build time from the incidentList data. null when AI is unavailable, the call
@@ -131,6 +136,79 @@ export interface MonthlyDetectionLeadSummary {
  *  the average yet. Per-event `topExamples` remain honest to show regardless of the gate. */
 export function canPresentLeadAverage(summary: MonthlyDetectionLeadSummary | null | undefined): boolean {
   return !!summary && summary.count >= MIN_LEAD_SAMPLE_SIZE
+}
+
+// ── Monthly RTT degradation summary (#511, follow-up to #464) ───────
+//
+// Accumulated from probe-degradation:monthly:{YYYY-MM} (60d TTL) — incremented on each
+// probe-spike rising edge alongside the daily counter so the archive cron on the 1st can carry
+// month-complete figures past the 48h TTL on the per-day keys. Mirrors the detection:lead:monthly
+// pattern. `noStatus*` = degradations flagged while the service's official status was still
+// operational (NOT on the status page) — the headline differentiator from #464.
+
+/** Raw monthly accumulator shape stored at probe-degradation:monthly:{period}. */
+export interface DegradationMonthly {
+  byService: Record<string, number>          // svcId → total RTT-degradation rising edges this month
+  noStatusByService: Record<string, number>  // svcId → subset not reflected on the official status page
+}
+
+export interface MonthlyDegradationSummary {
+  total: number                              // all RTT degradations this month
+  noStatusTotal: number                      // subset not on the official status page (headline)
+  byService: Record<string, number>          // svcId → total
+  noStatusByService: Record<string, number>  // svcId → not-on-status count
+}
+
+/** Monthly degradation accumulator key (60d TTL) — written alongside the daily counter so the
+ *  archive cron can read month-complete figures past the daily 48h TTL. Mirrors detectionLeadMonthlyKey. */
+export function degradationMonthlyKey(date: Date = new Date()): string {
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0')
+  return `probe-degradation:monthly:${date.getUTCFullYear()}-${m}`
+}
+
+export const DEGRADATION_MONTHLY_TTL_SECONDS = 60 * 86400 // 60 days — covers archive cron + late catch-up
+
+/** Pure: fold one rising-edge degradation into the monthly accumulator. Returns a NEW object
+ *  (input not mutated). `existing` null/garbage → start fresh. Increments byService always; also
+ *  noStatusByService when the degradation wasn't on the official status page. Unit-testable so the
+ *  index.ts read-modify-write stays a thin I/O wrapper. */
+export function addDegradationToMonthly(
+  existing: DegradationMonthly | null | undefined,
+  svcId: string,
+  isNoStatus: boolean,
+): DegradationMonthly {
+  const byService = { ...(existing?.byService ?? {}) }
+  const noStatusByService = { ...(existing?.noStatusByService ?? {}) }
+  byService[svcId] = (byService[svcId] ?? 0) + 1
+  if (isNoStatus) noStatusByService[svcId] = (noStatusByService[svcId] ?? 0) + 1
+  return { byService, noStatusByService }
+}
+
+/** Coerce an unknown parsed value into a well-formed DegradationMonthly, keeping only finite
+ *  non-negative integer counts (disposable accumulator — corrupt/foreign value → empty, never throws). */
+export function normalizeDegradationMonthly(parsed: unknown): DegradationMonthly {
+  const out: DegradationMonthly = { byService: {}, noStatusByService: {} }
+  if (!parsed || typeof parsed !== 'object') return out
+  for (const field of ['byService', 'noStatusByService'] as const) {
+    const m = (parsed as Record<string, unknown>)[field]
+    if (!m || typeof m !== 'object') continue
+    for (const [k, v] of Object.entries(m as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[field][k] = Math.floor(v)
+    }
+  }
+  return out
+}
+
+/** Aggregate the raw monthly accumulator into a permanent archive summary. Returns null on empty
+ *  input — caller decides whether to attach `degradation: null`, mirroring detectionLead/security. */
+export function summarizeDegradation(raw: DegradationMonthly | null | undefined): MonthlyDegradationSummary | null {
+  if (!raw) return null
+  const byService = raw.byService ?? {}
+  const noStatusByService = raw.noStatusByService ?? {}
+  const total = Object.values(byService).reduce((a, b) => a + b, 0)
+  if (total === 0) return null
+  const noStatusTotal = Object.values(noStatusByService).reduce((a, b) => a + b, 0)
+  return { total, noStatusTotal, byService, noStatusByService }
 }
 
 // ── Incident accumulation (written daily by daily summary cron) ──────
@@ -564,6 +642,20 @@ export async function buildMonthlyArchive(
     }
   }
 
+  // Snapshot RTT-degradation monthly accumulator before its 60d TTL lapses (#511). Same pattern
+  // as detection lead: the per-day probe-degradation:* keys carry only 48h TTL, so the archive
+  // reads the dedicated monthly accumulator. Missing/malformed must not fail the archive.
+  const degKey = `probe-degradation:monthly:${period}`
+  const degRaw = await kv.get(degKey).catch(() => null)
+  let degradation: MonthlyDegradationSummary | null = null
+  if (degRaw) {
+    try {
+      degradation = summarizeDegradation(normalizeDegradationMonthly(JSON.parse(degRaw)))
+    } catch (err) {
+      console.warn(`[monthly-archive] corrupt degradation accumulation for ${period}:`, err instanceof Error ? err.message : err)
+    }
+  }
+
   const uptimeMap = computeMonthlyUptime(dailyData)
   const latencyMap = computeMonthlyLatency(probeData)
 
@@ -624,6 +716,7 @@ export async function buildMonthlyArchive(
     services,
     security,
     detectionLead,
+    degradation,
   }
 
   // AI retrospective narrative (#426). Best-effort — generateMonthlyNarrative

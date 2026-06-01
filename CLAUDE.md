@@ -273,7 +273,7 @@ worker/
     changelog.ts # Changelog/news collection (OpenAI blog RSS, Google AI blog RSS, Anthropic /news HTML parsing) — 15s timeout + 1 retry on transient errors, per-source last-fetch KV markers for stale-source detection (#274)
     weekly-briefing.ts # Weekly Discord briefing (changelog + incidents + stability trends)
     daily-summary.ts # Expanded daily Discord report (uptime, latency, AI usage, Reddit, Web Vitals)
-    monthly-archive.ts # Monthly reliability archive (uptime, score, incidents, latency per service, permanent KV)
+    monthly-archive.ts # Monthly reliability archive (uptime, score, incidents, latency per service, permanent KV). Also aggregates detection:lead:monthly (#369) + probe-degradation:monthly (#511, RTT degradation total/noStatus via summarizeDegradation) into MonthlyArchive, exposed by /api/report
     monthly-narrative.ts # AI retrospective narrative (Notable Incidents + Observations draft) baked into the archive — hybrid Gemma→Sonnet, #426
     vitals.ts   # Web Vitals aggregation (ingest, KV flush, p75 computation, Discord formatting)
     probe.ts    # Health check probing — direct RTT measurement (20 API services)

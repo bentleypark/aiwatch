@@ -509,6 +509,16 @@ describe('classifyDegradation (#464)', () => {
   it('non-operational service → degradation (already reflected on the status page)', () => {
     expect(classifyDegradation(false)).toBe('degradation')
   })
+
+  it('pins the exact outcome literals — index.ts derives isNoStatus via `=== "degradation_nostatus"`', () => {
+    // Guard (#511 review): the monthly/daily nostatus counters depend on the literal string
+    // 'degradation_nostatus'. If a refactor renames the union, this test fails loudly rather than
+    // letting the headline differentiator silently under-count (isNoStatus would go always-false).
+    expect(classifyDegradation(true)).toBe('degradation_nostatus')
+    expect(classifyDegradation(false)).toBe('degradation')
+    expect(new Set([classifyDegradation(true), classifyDegradation(false)]))
+      .toEqual(new Set(['degradation_nostatus', 'degradation']))
+  })
 })
 
 describe('MIN_LEAD_SAMPLE_SIZE (#464)', () => {

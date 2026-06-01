@@ -878,7 +878,7 @@ import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyB
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateMonthlyIncidents, buildArchiveReadyEmbed, archiveNotifiedKey, type MonthlyIncidents, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
+import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateMonthlyIncidents, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, type MonthlyIncidents, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -1278,14 +1278,23 @@ export default {
             // `nostatus` figure. Best-effort, mirrors the fetch-fail:daily counter (48h TTL).
             const svcOperational = statusByService.get(spike.serviceId) === 'operational'
             const outcome = classifyDegradation(svcOperational)
+            const isNoStatus = outcome === 'degradation_nostatus'
             const degBase = `probe-degradation:daily:${spike.serviceId}:${degradationDate}`
             const prevDeg = parseInt(await env.STATUS_CACHE.get(degBase).catch(() => null) ?? '0', 10) || 0
             await kvPut(env.STATUS_CACHE, degBase, String(prevDeg + 1), { expirationTtl: 172800 })
-            if (outcome === 'degradation_nostatus') {
+            if (isNoStatus) {
               const nsKey = `probe-degradation:nostatus:daily:${spike.serviceId}:${degradationDate}`
               const prevNs = parseInt(await env.STATUS_CACHE.get(nsKey).catch(() => null) ?? '0', 10) || 0
               await kvPut(env.STATUS_CACHE, nsKey, String(prevNs + 1), { expirationTtl: 172800 })
             }
+            // #511 — dual-write the monthly accumulator (60d TTL) so the archive cron can read
+            // month-complete figures past the daily 48h TTL. Mirrors detection lead's monthly write.
+            const degMonthKey = degradationMonthlyKey()
+            const degMonthRaw = await env.STATUS_CACHE.get(degMonthKey).catch(() => null)
+            let degMonth = null
+            try { degMonth = degMonthRaw ? normalizeDegradationMonthly(JSON.parse(degMonthRaw)) : null } catch { degMonth = null }
+            const nextDegMonth = addDegradationToMonthly(degMonth, spike.serviceId, isNoStatus)
+            await kvPut(env.STATUS_CACHE, degMonthKey, JSON.stringify(nextDegMonth), { expirationTtl: DEGRADATION_MONTHLY_TTL_SECONDS })
             // Record probe spike as earliest detection (Detection Lead feature)
             const detectKey = `detected:${spike.serviceId}`
             const existingDetect = await env.STATUS_CACHE.get(detectKey).catch(() => null)
