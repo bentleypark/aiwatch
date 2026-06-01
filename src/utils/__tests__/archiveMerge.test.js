@@ -240,6 +240,19 @@ describe('archiveSupplementForService (service filter mode)', () => {
     expect(archiveSupplementForService(liveCompositeIds, 'mistral', archives, services)).toEqual([])
   })
 
+  it('skips an estimate-only filtered service (#375 — Bedrock/Azure: archive entry has no incidentList)', () => {
+    // Symmetric to the no-filter mode's estimate-only test: a user selecting an estimate-only service
+    // in the 90d Incidents view must get nothing from the archive. These services carry no incidents,
+    // so their archive entry omits incidentList — current (live-only) behavior stays unchanged.
+    const svcs = [...services, { id: 'bedrock', name: 'Amazon Bedrock' }]
+    const liveCompositeIds = new Set()
+    const archives = {
+      '2026-04': { services: { bedrock: { uptime: null, score: 92 /* estimate-only — no incidentList */ } } },
+    }
+    expect(archiveSupplementForService(liveCompositeIds, 'bedrock', archives, svcs)).toEqual([])
+    expect(liveCompositeIds.size).toBe(0) // nothing added to the dedup set either
+  })
+
   it('does not throw when an archive month is null (404 path)', () => {
     const liveCompositeIds = new Set()
     const archives = { '2026-04': null }
