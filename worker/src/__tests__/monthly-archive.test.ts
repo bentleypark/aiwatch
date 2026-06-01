@@ -16,6 +16,10 @@ import {
   MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE,
   summarizeDetectionLead,
   canPresentLeadAverage,
+  degradationMonthlyKey,
+  addDegradationToMonthly,
+  normalizeDegradationMonthly,
+  summarizeDegradation,
 } from '../monthly-archive'
 import { MIN_LEAD_SAMPLE_SIZE } from '../detection-lead-log'
 import type { ServiceStatus } from '../types'
@@ -1120,6 +1124,90 @@ describe('canPresentLeadAverage (#464)', () => {
   })
 })
 
+describe('degradation monthly accumulator (#511)', () => {
+  it('degradationMonthlyKey is YYYY-MM in UTC', () => {
+    expect(degradationMonthlyKey(new Date('2026-06-01T12:00:00Z'))).toBe('probe-degradation:monthly:2026-06')
+    expect(degradationMonthlyKey(new Date('2026-01-31T23:59:00Z'))).toBe('probe-degradation:monthly:2026-01')
+  })
+
+  describe('addDegradationToMonthly (pure fold)', () => {
+    it('starts fresh from null and increments byService only when on-status', () => {
+      const out = addDegradationToMonthly(null, 'deepseek', false)
+      expect(out).toEqual({ byService: { deepseek: 1 }, noStatusByService: {} })
+    })
+
+    it('increments both byService and noStatusByService when not on status page', () => {
+      const out = addDegradationToMonthly(null, 'deepseek', true)
+      expect(out).toEqual({ byService: { deepseek: 1 }, noStatusByService: { deepseek: 1 } })
+    })
+
+    it('accumulates across calls without mutating the input', () => {
+      const prev = { byService: { deepseek: 2 }, noStatusByService: { deepseek: 1 } }
+      const out = addDegradationToMonthly(prev, 'deepseek', true)
+      expect(out).toEqual({ byService: { deepseek: 3 }, noStatusByService: { deepseek: 2 } })
+      expect(prev).toEqual({ byService: { deepseek: 2 }, noStatusByService: { deepseek: 1 } }) // unmutated
+    })
+
+    it('tracks multiple services independently', () => {
+      let acc = addDegradationToMonthly(null, 'deepseek', true)
+      acc = addDegradationToMonthly(acc, 'mistral', false)
+      expect(acc).toEqual({ byService: { deepseek: 1, mistral: 1 }, noStatusByService: { deepseek: 1 } })
+    })
+  })
+
+  describe('normalizeDegradationMonthly', () => {
+    it('returns empty shape for null/garbage', () => {
+      expect(normalizeDegradationMonthly(null)).toEqual({ byService: {}, noStatusByService: {} })
+      expect(normalizeDegradationMonthly('nope')).toEqual({ byService: {}, noStatusByService: {} })
+    })
+
+    it('keeps only finite non-negative integer counts', () => {
+      const out = normalizeDegradationMonthly({
+        byService: { deepseek: 3, bad: -1, nan: NaN, frac: 2.7 },
+        noStatusByService: { deepseek: 2 },
+      })
+      expect(out).toEqual({ byService: { deepseek: 3, frac: 2 }, noStatusByService: { deepseek: 2 } })
+    })
+
+    it('drops Infinity, negative fractions, and non-number values (Number.isFinite + v>=0 guard, pre-floor)', () => {
+      const out = normalizeDegradationMonthly({
+        byService: { inf: Infinity, negfrac: -2.7, str: '3', nul: null, obj: {}, ok: 4 },
+        noStatusByService: {},
+      })
+      // Infinity dropped (Number.isFinite), -2.7 dropped (v>=0 runs before Math.floor),
+      // '3'/null/{} dropped (typeof !== number); only ok:4 survives.
+      expect(out).toEqual({ byService: { ok: 4 }, noStatusByService: {} })
+    })
+  })
+
+  describe('summarizeDegradation', () => {
+    it('returns null for null input or all-zero totals', () => {
+      expect(summarizeDegradation(null)).toBeNull()
+      expect(summarizeDegradation({ byService: {}, noStatusByService: {} })).toBeNull()
+    })
+
+    it('computes total + noStatusTotal across services', () => {
+      const out = summarizeDegradation({
+        byService: { deepseek: 4, mistral: 1 },
+        noStatusByService: { deepseek: 3 },
+      })
+      expect(out).toEqual({
+        total: 5,
+        noStatusTotal: 3,
+        byService: { deepseek: 4, mistral: 1 },
+        noStatusByService: { deepseek: 3 },
+      })
+    })
+
+    it('returns null when byService is empty even if noStatusByService has counts (corrupt-KV invariant)', () => {
+      // total is driven by byService (every nostatus increment also bumps byService in normal flow).
+      // A hand-edited/corrupt accumulator with byService empty but noStatus populated → null (garbage
+      // in → null out). Pins the byService-drives-total invariant.
+      expect(summarizeDegradation({ byService: {}, noStatusByService: { deepseek: 3 } })).toBeNull()
+    })
+  })
+})
+
 describe('buildMonthlyArchive — detectionLead integration (#369)', () => {
   function mkKv(initial: Record<string, string>) {
     return {
@@ -1200,5 +1288,46 @@ describe('buildMonthlyArchive — detectionLead integration (#369)', () => {
     const archive = await buildMonthlyArchive(kv, 2026, 4)
     expect(archive.detectionLead!.count).toBe(1)
     expect(archive.detectionLead!.topExamples[0].incId).toBe('apr')
+  })
+})
+
+describe('buildMonthlyArchive — degradation integration (#511)', () => {
+  function mkKv(initial: Record<string, string>) {
+    return {
+      get: async (key: string) => initial[key] ?? null,
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+  }
+
+  it('attaches degradation summary when monthly accumulator has counts', async () => {
+    const kv = mkKv({
+      'probe-degradation:monthly:2026-04': JSON.stringify({
+        byService: { deepseek: 4, mistral: 1 },
+        noStatusByService: { deepseek: 3 },
+      }),
+    })
+    const archive = await buildMonthlyArchive(kv, 2026, 4)
+    expect(archive.degradation).not.toBeNull()
+    expect(archive.degradation!.total).toBe(5)
+    expect(archive.degradation!.noStatusTotal).toBe(3)
+    expect(archive.degradation!.byService).toEqual({ deepseek: 4, mistral: 1 })
+  })
+
+  it('attaches null when accumulator is missing', async () => {
+    const archive = await buildMonthlyArchive(mkKv({}), 2026, 4)
+    expect(archive.degradation).toBeNull()
+  })
+
+  it('attaches null when accumulator JSON is malformed (no archive crash)', async () => {
+    const archive = await buildMonthlyArchive(mkKv({ 'probe-degradation:monthly:2026-04': '{bad json' }), 2026, 4)
+    expect(archive.degradation).toBeNull()
+  })
+
+  it('attaches null when accumulator has all-zero totals', async () => {
+    const kv = mkKv({ 'probe-degradation:monthly:2026-04': JSON.stringify({ byService: {}, noStatusByService: {} }) })
+    const archive = await buildMonthlyArchive(kv, 2026, 4)
+    expect(archive.degradation).toBeNull()
   })
 })
