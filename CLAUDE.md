@@ -146,57 +146,30 @@ gh pr merge --squash --delete-branch
 
 ## Development Workflow
 
-> **IMPORTANT**: Always re-read this section before starting any task. Never skip code review (step 4) or tests (step 3).
+> **IMPORTANT**: The full step-by-step runbook (each step's detail, the 4 non-negotiable gates, and
+> the cross-issue / refs-not-closes / deferred-reverify / label-exit hygiene) lives in the
+> **`ship-issue` skill** (`.claude/skills/ship-issue/`) — **invoke it at the START of issue work and
+> BEFORE closing**. This outline is the map; the skill is the runbook. The #415 hooks re-inject the
+> gates every turn regardless. Never skip review or tests.
 
-### Per-issue process (follow this order every time)
+### Per-issue process — outline (full runbook: invoke the `ship-issue` skill)
 
-0. **Review rules** — Re-read this Development Workflow section and follow each step in order
-1. **Branch** — create a feature branch from main: `git checkout -b {type}/{issue#}-{description}`
-2. **Design check** (UI issues only) — before coding, compare `docs/AIWatch_화면디자인_초안.html` with the current implementation:
-   - Open design mockup in browser and take screenshots of the relevant area
-   - Identify **every** difference (spacing, colors, fonts, layout, icons, text)
-   - List differences explicitly before writing any code
-3. **Code** — implement the feature or fix
-3.5. **Local verify** — start the appropriate dev server and let the user confirm in browser before proceeding. See "Local verification by page type" table above for which command to use. Never skip this step.
-   - **Reachability gate (do this BEFORE handing off to the user)**: confirm the changed surface is actually *exercisable* in the running dev environment. If the change only manifests under a specific data condition — an active/multi-service incident, AI-analysis present, a `down`/`degraded` status, an error/empty state, a feature flag — that condition is usually **absent in live data**, so the user would click and see nothing. In that case, set up the trigger FIRST (force `usePolling` mock data, seed local Worker KV, or craft a fixture), verify *yourself* (Playwright DOM/text extraction is sufficient when screenshots time out) that the change renders, and only then hand off — telling the user exactly which state to look at and how it was triggered. Revert any temporary mock/fixture before commit (`git checkout` the file) and confirm `git status` shows only the intended files. Never tell the user "verify in the browser" for a path you have not confirmed can be reached.
-4. **Build + Test** — based on change scope:
-   - **Frontend changes** (`src/`): `npm run build` + `npm run test:src` (Vitest, if utility/logic tests exist) + `npm test` (Playwright E2E)
-   - **Backend changes** (`worker/`): `npx wrangler deploy --config worker/wrangler.toml --dry-run` + `npm run test:worker` (Vitest)
-   - **Both**: run all of the above
-   - **Worker logic additions**: new functions must have unit tests — extract to separate files with exports, test in `worker/src/__tests__/` or `worker/src/parsers/__tests__/`
-   - **Frontend utility additions** (`src/utils/`): pure-function utilities should have unit tests in `src/utils/__tests__/*.test.js` (Vitest)
-   - **Bug fixes**: every bug fix must include a test that would have caught the bug — E2E (Playwright) or Vitest for frontend, Vitest for worker
-5. **Review** — run PR review **before** creating PR:
-   ```
-   /pr-review-toolkit:review-pr
-   ```
-6. **Fix review issues — auto-loop until convergence**:
-   - Address all **Critical** and **Important** findings
-   - Re-run Build + Test after fixes
-   - **Auto-run another review round** without waiting for user prompt
-   - Repeat (fix → test → re-review) until a round produces zero new Critical/Important findings (Suggestions only = converged)
-   - Each round must focus on issues *introduced by the previous round's fixes* — agents should not repeat already-resolved items
-   - Only proceed to commit (step 8) after convergence
-7. **Docs update** — update documentation affected by the change:
-   - `CLAUDE.md`: architecture, service count, directory layout, constraints. **Size budget: keep under 40,000 chars** (Claude Code warns "Large CLAUDE.md will impact performance" past 40k). Check after editing: `python3 -c "print(len(open('CLAUDE.md').read()))"`. If near/over, move detail to `docs/reference/` and link — never inline long prose here.
-   - `docs/reference/`: KV keys (`kv-schema.md`), GA4 events (`ga4-events.md`), fallback tiers (`fallback-tiers.md`), add-a-service checklist (`adding-a-service.md`) — the detailed reference moved out of CLAUDE.md, so update the relevant file there if affected
-   - `README.md` / `README.ko.md`: features, service tables, Project Structure, Available Service IDs
-   - `CONTRIBUTING.md`: Project Structure
-   - `index.html`: SEO meta tags (service count, description)
-   - `aiwatch-reports/`: service count, category breakdown (if applicable)
-8. **Commit + PR** — only after review issues are fixed and tests pass:
-   - Commit on feature branch (multiple commits OK — will be squash merged)
-   - Push branch: `git push -u origin {branch}`
-   - Create PR: `gh pr create --title "{type}: description (#N)" --body "closes #N"`
-   - Body: `closes #N` — **only** when ALL checklist items in the issue are complete
-   - Body: `refs #N` — when some items remain (e.g., future phases, deferred work)
-9. **Verify Vercel Preview** — check the Vercel preview deployment URL from the PR
-10. **Merge** — squash merge: `gh pr merge --squash --delete-branch`
-11. **Verify checklist** — read the issue (`gh issue view N`) and confirm every checklist item (`- [ ]`) is actually implemented in code before closing
-12. **Close** — only close the issue after checklist verification: `gh issue close N`
-    - If unchecked items remain for future work, **do not close** — add a label (e.g., `deferred`, `phase-N`) to track instead
+0. **Review** — invoke `ship-issue`; re-read the issue checklist (`gh issue view N`)
+1. **Branch** from main: `git checkout -b {type}/{issue#}-{desc}` — never commit to main; `git status` must show only intended files
+2. **Design check** (UI only) — diff against `docs/AIWatch_화면디자인_초안_v2.html`; list every difference first
+3. **Code**
+3.5. **Local verify** — start the right dev server (see "Local verification by page type"); get the USER's **in-browser confirmation** (curl/Playwright/tests do NOT count). Reachability gate: if the change needs a specific state (incident / `down` / error / flag), set up the trigger + verify yourself first, revert it before commit. **STOP and wait.**
+4. **Build + test** by scope — frontend: `npm run build` + `npm run test:src` + `npm test`; worker: `npx wrangler deploy --config worker/wrangler.toml --dry-run` + `npm run test:worker`. New worker/util logic → exported fn + unit test; **every bug fix → a test that catches it**
+5. **PR review** before commit — `/pr-review-toolkit:review-pr`
+6. **Fix → re-test → re-review, auto-loop** until 0 Critical/Important (Suggestions-only = converged)
+7. **Docs update** — CLAUDE.md (lean, **~40k-char guideline**; detail → `docs/reference/`), the relevant `docs/reference/*`, README(.ko), `CONTRIBUTING.md`, `index.html` SEO, `aiwatch-reports/`
+8. **Commit + PR** (only after the user confirms) — footer required; `closes #N` only when every item is done **and verified** (time/prod-gated verification = remaining → `refs`); also reconcile OTHER open issues this change closes / supersedes / invalidates
+9. **Verify Vercel Preview** (frontend)
+10. **Merge** `gh pr merge --squash --delete-branch` — worker deploy is manual (`npm run deploy:worker`, once, after approval; batch multi-PR deploys)
+11. **Verify checklist** against code before closing; periodically re-verify `deferred`/`tracking` issues (later work may have completed one)
+12. **Close** only after verification; deferred items → keep open with a label carrying a **written exit condition**
 
-> Never close an issue immediately after merging. Always re-read the issue checklist and verify each item against the code first. If any phase or checklist item is deferred, keep the issue open and manage with labels.
+> Never close an issue immediately after merging. Verify each checklist item against the code first; deferred → keep open with a labeled exit condition.
 
 ### Debugging rules
 - Before writing any fix, read all relevant code and identify the root cause
