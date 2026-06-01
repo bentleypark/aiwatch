@@ -12,8 +12,9 @@ description: >-
 # Ship an issue — per-issue workflow
 
 This is the canonical procedure. CLAUDE.md holds the *architecture/reference* (what the code is);
-the #415 hooks are the *mechanical backstop* (they nag at the tool-call moment but can't run a
-multi-step procedure or see issue state). This skill is the *procedure* — follow it top to bottom.
+the #415 hooks are the *mechanical backstop* (mostly soft reminders at the tool-call moment — the
+stop-nag gate can block — but they can't run a multi-step procedure or see issue state). This skill
+is the *procedure* — follow it top to bottom.
 
 ## ⚙️ Non-negotiable gates (the most-missed — re-check at the decision moment, not just here)
 
@@ -43,7 +44,7 @@ multi-step procedure or see issue state). This skill is the *procedure* — foll
    never commit to main. Before committing, `git status` must show **only** the intended files
    (branch switches can drag a prior PR's staged/untracked files along).
    - First check `gh pr list` for an existing open PR on the same issue (avoid dupes).
-2. **Design check** (UI only) — compare against `docs/AIWatch_화면디자인_초안.html`; list every
+2. **Design check** (UI only) — compare against `docs/AIWatch_화면디자인_초안_v2.html`; list every
    spacing/color/font/layout/text difference before coding.
 3. **Code** the change.
 3.5. **Local verify** — gate #1 above. Hand off and **wait** for the user's in-browser confirmation.
@@ -55,9 +56,10 @@ multi-step procedure or see issue state). This skill is the *procedure* — foll
 5. **PR review** — gate #2: `/pr-review-toolkit:review-pr`.
 6. **Fix review findings — auto-loop** to 0 Critical/Important (Suggestions-only = converged).
 7. **Docs update** — update whatever the change affects: CLAUDE.md (architecture/service count/layout —
-   keep it **under 40k chars**; move detail to `docs/reference/`), `docs/reference/*` (kv-schema,
-   ga4-events, fallback-tiers, status-determination, api-endpoints, discord-alert-paths, …), README(.ko),
-   `index.html` SEO meta, `aiwatch-reports/`. Adding a service → the 34-step `adding-a-service.md` checklist.
+   keep it **lean, ~40k-char guideline**; move detail to `docs/reference/`), the relevant
+   **`docs/reference/`** file (see the directory — kv-schema, ga4-events, fallback-tiers,
+   status-determination, discord-alert-paths, etc.), README(.ko), `index.html` SEO meta,
+   `aiwatch-reports/`. Adding a service → the full `adding-a-service.md` checklist.
 8. **Commit + PR** (gate #3 — only after the user confirms):
    - Commit message + PR body end with the required Co-Authored-By / 🤖 footer.
    - `closes #N` **only when ALL checklist items are done AND verified** — this includes
