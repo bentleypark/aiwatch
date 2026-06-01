@@ -14,6 +14,7 @@ import { refreshStatusCacheOnChange } from './cache-refresh'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey } from './webhook-subscriptions'
 import { corsHeaders } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
+import { recordV1Traffic } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 
 interface Env {
@@ -2363,6 +2364,11 @@ export default {
           if (now - entry.start >= 60_000) publicApiRate.delete(ip)
         }
       }
+
+      // Record this served (non-429) v1 request in WAE so call volume is queryable (#518).
+      // Placed after the rate-limit gate so 429s are excluded; before the cache read so a
+      // 503 (cache miss) still counts as received traffic. Best-effort — never blocks the response.
+      recordV1Traffic(env.ANALYTICS, url.pathname)
 
       // Read cached services
       const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
