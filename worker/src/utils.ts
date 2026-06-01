@@ -100,18 +100,56 @@ export async function trackFetchFailure(kv: KVLike | undefined, svcId: string, t
     const dailyKey = `fetch-fail:daily:${svcId}:${date}`
     const dailyCount = parseInt(await kv.get(dailyKey).catch(() => null) ?? '0', 10) || 0
     await kvPut(kv, dailyKey, String(dailyCount + 1), { expirationTtl: 172800 }) // 48h
+
+    // #500: record the FIRST-failure timestamp for the persistent (1h+) structural-block alert.
+    // Set only if absent so it survives the short fetch-fail key's 30-min expiry + re-climb cycles
+    // (and is immune to call frequency — trackFetchFailure also runs on every /api/status request,
+    // not just the 5-min cron, so a count-of-cycles would alert well under an hour). resetFetchFailure
+    // clears it on recovery. 25h TTL > the alert's 24h dedup window so it can't lapse mid-incident.
+    const sinceKey = `fetch-fail:since:${svcId}`
+    const existingSince = await kv.get(sinceKey).catch(() => null)
+    if (existingSince === null) {
+      await kvPut(kv, sinceKey, new Date().toISOString(), { expirationTtl: 90_000 }) // 25h
+    }
   }
   return shouldDegrade
 }
 
 /**
- * Reset fetch failure counter on successful fetch.
+ * Reset fetch failure counter on successful fetch. Also clears the #500 persistent
+ * first-failure timestamp so a later failure episode times its own fresh hour.
  */
 export async function resetFetchFailure(kv: KVLike | undefined, svcId: string): Promise<void> {
   if (!kv) return
   const key = `fetch-fail:${svcId}`
   const existing = await kv.get(key).catch(() => null)
   if (existing !== null) await kvDel(kv, key)
+  const sinceKey = `fetch-fail:since:${svcId}`
+  const sinceExisting = await kv.get(sinceKey).catch(() => null)
+  if (sinceExisting !== null) await kvDel(kv, sinceKey)
+}
+
+/** Threshold for the #500 persistent structural-block alert: a status page unreachable this long
+ *  is a structural block (URL/IP), not a transient blip. */
+export const PERSISTENT_FAILURE_THRESHOLD_MS = 3_600_000 // 1h
+
+/** Pure decision: has the status page been continuously unreachable for >= threshold? Frequency-
+ *  independent — keys off the first-failure wall-clock timestamp, not a count of polling cycles. */
+export function shouldAlertPersistentFailure(
+  sinceIso: string | null | undefined,
+  nowMs: number,
+  thresholdMs: number = PERSISTENT_FAILURE_THRESHOLD_MS,
+): boolean {
+  if (!sinceIso) return false
+  const sinceMs = new Date(sinceIso).getTime()
+  if (isNaN(sinceMs)) return false
+  return nowMs - sinceMs >= thresholdMs
+}
+
+/** Operator Discord alert body for a persistent (structural) status-page block (#500). */
+export function formatPersistentFailureAlert(serviceName: string, sinceIso: string, nowMs: number): string {
+  const elapsedH = Math.floor((nowMs - new Date(sinceIso).getTime()) / 3_600_000)
+  return `⚠️ **${serviceName}** status page has been unreachable for **${elapsedH}h+** — likely a structural block (URL moved / IP blocked), not a transient blip. Probe-based status may still be accurate; verify the configured status-page URL.`
 }
 
 /**
