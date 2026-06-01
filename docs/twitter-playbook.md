@@ -42,9 +42,10 @@ https://ai-watch.dev/is-${slug}-down?utm_source=twitter&utm_medium=manual&utm_ca
 ```
 - `${duration}` = e.g., `1h 12m` (round to nearest minute)
 
-### 3. Detection Lead — only when lead ≥ 10 min
+### 3. Early RTT signal — only when a genuine lead ≥ 10 min is shown
+Rare by design (#464) — only when the dashboard surfaces an early-RTT signal; never a blanket "faster than official" claim.
 ```
-⚡ ${SERVICE_NAME} issue first detected by AIWatch at ${HH:MM} UTC, ${N} min ahead of the upstream status page.
+⚡ RTT degradation on ${SERVICE_NAME} flagged by AIWatch at ${HH:MM} UTC, ${N} min before the upstream status page update.
 https://ai-watch.dev/is-${slug}-down?utm_source=twitter&utm_medium=manual&utm_campaign=phase1&utm_content=${incidentId}
 ```
 - Soft phrasing — no "we beat them" tone

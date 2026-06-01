@@ -194,15 +194,54 @@ describe('formatLeadDiagSection', () => {
     expect(formatLeadDiagSection(empty)).toBe('')
   })
 
-  it('renders probe buckets + non-probe total when there is activity', () => {
+  it('renders MTTD framing (#464): total, early-via-RTT, within-cycle, no-detect', () => {
     const diag: LeadDiag = {
       probe: { no_detected: 1, negative: 2, below_min: 0, in_window: 0, above_max: 0 },
       nonProbe: { no_detected: 0, negative: 5, below_min: 0, in_window: 0, above_max: 0 },
     }
+    // total = 8, early via RTT (in_window) = 0, no-detect (probe) = 1, within-cycle = 8-0-1 = 7
     const out = formatLeadDiagSection(diag)
-    expect(out).toContain('in-window 0')
-    expect(out).toContain('negative 2')
-    expect(out).toContain('no-detect 1')
-    expect(out).toContain('non-probe incidents: 5')
+    expect(out).toContain('8 incidents')
+    expect(out).toContain('0 early via RTT probe')
+    expect(out).toContain('7 alerted within ~5-min polling cycle of official')
+    expect(out).toContain('1 no-detect')
+  })
+
+  it('counts a genuine in_window event as early-via-RTT', () => {
+    const diag: LeadDiag = {
+      probe: { no_detected: 0, negative: 1, below_min: 0, in_window: 2, above_max: 0 },
+      nonProbe: { no_detected: 0, negative: 0, below_min: 0, in_window: 0, above_max: 0 },
+    }
+    // total = 3, early = 2, no-detect = 0, within-cycle = 3-2-0 = 1
+    const out = formatLeadDiagSection(diag)
+    expect(out).toContain('3 incidents')
+    expect(out).toContain('2 early via RTT probe')
+    expect(out).toContain('1 alerted within ~5-min polling cycle of official')
+  })
+
+  it('includes non-probe no_detected in the combined no-detect figure (not within-cycle)', () => {
+    // A non-probe incident the status-page poll missed is an honest "not detected", NOT a
+    // within-cycle alert. no-detect must span both groups (#464 review fix).
+    const diag: LeadDiag = {
+      probe: { no_detected: 1, negative: 0, below_min: 0, in_window: 0, above_max: 0 },
+      nonProbe: { no_detected: 2, negative: 3, below_min: 0, in_window: 0, above_max: 0 },
+    }
+    // total = 6, early = 0, no-detect = 1+2 = 3, within-cycle = 6-0-3 = 3
+    const out = formatLeadDiagSection(diag)
+    expect(out).toContain('6 incidents')
+    expect(out).toContain('3 alerted within ~5-min polling cycle of official')
+    expect(out).toContain('3 no-detect')
+  })
+
+  it('never renders a negative within-cycle count (Math.max floor)', () => {
+    // All probe no_detected, nothing else — within-cycle must floor at 0, not go negative.
+    const diag: LeadDiag = {
+      probe: { no_detected: 3, negative: 0, below_min: 0, in_window: 0, above_max: 0 },
+      nonProbe: { no_detected: 0, negative: 0, below_min: 0, in_window: 0, above_max: 0 },
+    }
+    // total = 3, early = 0, no-detect = 3, within-cycle = max(0, 3-0-3) = 0
+    const out = formatLeadDiagSection(diag)
+    expect(out).toContain('0 alerted within ~5-min polling cycle of official')
+    expect(out).not.toMatch(/-\d+ alerted/)
   })
 })

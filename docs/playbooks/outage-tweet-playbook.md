@@ -46,10 +46,13 @@ Live status → https://ai-watch.dev/is-{slug}-down?utm_source=twitter
 https://ai-watch.dev/is-{slug}-down?utm_source=twitter
 ```
 
-**Detection Lead** (only when lead ≥ 10 min — soft phrasing):
+**Early RTT signal** (only when a genuine lead ≥ 10 min is shown — soft phrasing).
+Rare by design (#464): most incidents don't spike the probed endpoint's RTT, and
+status-page detection is bounded by polling lag — so only use this when the
+dashboard actually surfaces an early-RTT signal, never as a blanket "faster" claim:
 ```
-⚡ Issue affecting {Service} — first detected by AIWatch at {HH:MM} UTC,
-~{X} min ahead of the upstream status page.
+⚡ RTT degradation on {Service} flagged by AIWatch at {HH:MM} UTC,
+~{X} min before the upstream status page update.
 → https://ai-watch.dev/is-{slug}-down?utm_source=twitter
 ```
 

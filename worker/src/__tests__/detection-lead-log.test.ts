@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, detectionLeadKey, detectionLeadMonthlyKey, computeLeadMs, type DetectionLeadEntry } from '../detection-lead-log'
+import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, detectionLeadKey, detectionLeadMonthlyKey, computeLeadMs, classifyDegradation, MIN_LEAD_SAMPLE_SIZE, type DetectionLeadEntry } from '../detection-lead-log'
 
 function mockKV(store: Record<string, string> = {}) {
   return {
@@ -465,9 +465,9 @@ describe('formatDetectionLeadSection', () => {
   it('renders single event with service name + lead in minutes', () => {
     const nameMap = new Map([['together', 'Together AI']])
     const out = formatDetectionLeadSection([sampleEntry], nameMap)
-    expect(out).toContain('Detection Lead (last 24h)')
+    expect(out).toContain('Early RTT detections (last 24h)')
     expect(out).toContain('1 event')
-    expect(out).toContain('Together AI: 7m lead')
+    expect(out).toContain('Together AI: 7m before official update')
   })
 
   it('renders multiple events sorted by lead descending (biggest first)', () => {
@@ -486,17 +486,34 @@ describe('formatDetectionLeadSection', () => {
 
   it('falls back to svcId when service name missing from map', () => {
     const out = formatDetectionLeadSection([sampleEntry], new Map())
-    expect(out).toContain('together: 7m lead')
+    expect(out).toContain('together: 7m before official update')
   })
 
   it('floors lead milliseconds (never displays 60m for [59m30s, 60m) inputs)', () => {
     // Math.floor — 7m 31s → 7m (not 8m); 59m 59s → 59m (not 60m which would violate the cap)
     const entry7m31s = { ...sampleEntry, leadMs: 7 * 60_000 + 31_000 }
-    expect(formatDetectionLeadSection([entry7m31s], new Map([['together', 'Together AI']]))).toContain('Together AI: 7m lead')
+    expect(formatDetectionLeadSection([entry7m31s], new Map([['together', 'Together AI']]))).toContain('Together AI: 7m before official update')
 
     const entry59m59s = { ...sampleEntry, leadMs: 59 * 60_000 + 59_000 }
     const out = formatDetectionLeadSection([entry59m59s], new Map([['together', 'Together AI']]))
-    expect(out).toContain('Together AI: 59m lead')
+    expect(out).toContain('Together AI: 59m before official update')
     expect(out).not.toContain('60m')
+  })
+})
+
+describe('classifyDegradation (#464)', () => {
+  it('operational service → degradation_nostatus (not on the status page — the differentiator)', () => {
+    expect(classifyDegradation(true)).toBe('degradation_nostatus')
+  })
+
+  it('non-operational service → degradation (already reflected on the status page)', () => {
+    expect(classifyDegradation(false)).toBe('degradation')
+  })
+})
+
+describe('MIN_LEAD_SAMPLE_SIZE (#464)', () => {
+  it('is a positive integer threshold', () => {
+    expect(Number.isInteger(MIN_LEAD_SAMPLE_SIZE)).toBe(true)
+    expect(MIN_LEAD_SAMPLE_SIZE).toBeGreaterThan(0)
   })
 })

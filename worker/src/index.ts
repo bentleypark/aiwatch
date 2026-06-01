@@ -8,7 +8,7 @@ import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDet
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
-import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, classifyLead, appendLeadDiag, readLeadDiag, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
+import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, classifyLead, appendLeadDiag, readLeadDiag, classifyDegradation, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
 import { refreshStatusCacheOnChange } from './cache-refresh'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey } from './webhook-subscriptions'
@@ -1252,11 +1252,40 @@ export default {
           const snapshots: ProbeSnapshot[] = JSON.parse(probeRaw).snapshots ?? []
           const serviceIds = PROBE_TARGETS.map((t) => t.id)
           const spikes = detectConsecutiveSpikes(snapshots, serviceIds, 3)
+          // #464 — read cached service status once so we can tag each RTT degradation as
+          // "on the official status page" vs "not reported there" (the headline differentiator).
+          // `scored` isn't in scope in scheduled(); the services:latest cache is the same snapshot
+          // /api/status/cached serves. Best-effort: a miss → treat status unknown (operational=false).
+          const statusByService = new Map<string, string>()
+          try {
+            const cachedRaw = await env.STATUS_CACHE.get(CACHE_KEY).catch(() => null)
+            if (cachedRaw) {
+              const parsed = JSON.parse(cachedRaw)
+              const svcs: ServiceStatus[] = Array.isArray(parsed) ? parsed : parsed.services ?? []
+              for (const s of svcs) statusByService.set(s.id, s.status)
+            }
+          } catch (err) {
+            console.warn('[cron] degradation status read failed:', err instanceof Error ? err.message : err)
+          }
+          const degradationDate = new Date().toISOString().split('T')[0]
           for (const spike of spikes) {
             const alertKey = `alerted:probe-spike:${spike.serviceId}`
             const existing = await env.STATUS_CACHE.get(alertKey).catch(() => null)
             if (existing) continue
             await kvPut(env.STATUS_CACHE, alertKey, '1', { expirationTtl: 3600 })
+            // #464 — rising edge of a spike streak: count this RTT degradation. If the service's
+            // official status is still operational, the degradation isn't on the status page → the
+            // `nostatus` figure. Best-effort, mirrors the fetch-fail:daily counter (48h TTL).
+            const svcOperational = statusByService.get(spike.serviceId) === 'operational'
+            const outcome = classifyDegradation(svcOperational)
+            const degBase = `probe-degradation:daily:${spike.serviceId}:${degradationDate}`
+            const prevDeg = parseInt(await env.STATUS_CACHE.get(degBase).catch(() => null) ?? '0', 10) || 0
+            await kvPut(env.STATUS_CACHE, degBase, String(prevDeg + 1), { expirationTtl: 172800 })
+            if (outcome === 'degradation_nostatus') {
+              const nsKey = `probe-degradation:nostatus:daily:${spike.serviceId}:${degradationDate}`
+              const prevNs = parseInt(await env.STATUS_CACHE.get(nsKey).catch(() => null) ?? '0', 10) || 0
+              await kvPut(env.STATUS_CACHE, nsKey, String(prevNs + 1), { expirationTtl: 172800 })
+            }
             // Record probe spike as earliest detection (Detection Lead feature)
             const detectKey = `detected:${spike.serviceId}`
             const existingDetect = await env.STATUS_CACHE.get(detectKey).catch(() => null)
@@ -1844,6 +1873,24 @@ export default {
             console.warn('[daily-summary] fetch failure counts read failed:', err instanceof Error ? err.message : err)
           })
 
+          // #464 — RTT degradation observability: read per-service daily counters.
+          // probe-degradation:daily — every probe-spike rising edge; :nostatus — subset not on the
+          // official status page (the differentiator). Probe targets only; best-effort.
+          const degradationCounts: Record<string, number> = {}
+          const degradationNoStatusCounts: Record<string, number> = {}
+          await Promise.all(PROBE_TARGETS.map(async (t) => {
+            const [degRaw, nsRaw] = await Promise.all([
+              env.STATUS_CACHE.get(`probe-degradation:daily:${t.id}:${today}`).catch(() => null),
+              env.STATUS_CACHE.get(`probe-degradation:nostatus:daily:${t.id}:${today}`).catch(() => null),
+            ])
+            const degCount = parseInt(degRaw ?? '0', 10) || 0
+            const nsCount = parseInt(nsRaw ?? '0', 10) || 0
+            if (degCount > 0) degradationCounts[t.id] = degCount
+            if (nsCount > 0) degradationNoStatusCounts[t.id] = nsCount
+          })).catch((err) => {
+            console.warn('[daily-summary] degradation counts read failed:', err instanceof Error ? err.message : err)
+          })
+
           const description = buildDailySummary({
             services: dailyServices,
             aiUsage,
@@ -1860,6 +1907,8 @@ export default {
             leadDiag,
             fetchFailureCounts,
             crossValidSuppressed,
+            degradationCounts,
+            degradationNoStatusCounts,
           })
 
           if (isCatchUp) console.log(`[daily-summary] catch-up run for ${today}`)

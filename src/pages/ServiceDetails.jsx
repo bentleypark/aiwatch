@@ -216,7 +216,7 @@ function ServiceLatencyTrend({ service, t, hourlyData }) {
   )
 }
 
-function IncidentRow({ incident, detectedAt, isRecentlyRecovered, t, lang }) {
+function IncidentRow({ incident, isRecentlyRecovered, t, lang }) {
   const [expanded, setExpanded] = useState(false)
   const STATUS_CLS = {
     investigating: 'text-[var(--red)]',
@@ -231,22 +231,6 @@ function IncidentRow({ incident, detectedAt, isRecentlyRecovered, t, lang }) {
     : 'ongoing'
   const hasTimeline = (incident.timeline ?? []).length > 0
 
-  // Detection Lead: per-incident calculation
-  const lead = (() => {
-    if (!detectedAt || incident.status === 'resolved') return null
-    const detected = new Date(detectedAt).getTime()
-    const started = new Date(incident.startedAt).getTime()
-    const diffMs = started - detected
-    if (diffMs <= 0) return null
-    const mins = Math.round(diffMs / 60_000)
-    if (mins < 1 || mins > 60) return null // >60m means detectedAt is stale, not related to this incident
-    const label = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`
-    const timeOpts = { hour: '2-digit', minute: '2-digit', hour12: false }
-    const detectedTime = new Date(detectedAt).toLocaleTimeString(lang === 'ko' ? 'ko-KR' : 'en-US', timeOpts)
-    const officialTime = new Date(incident.startedAt).toLocaleTimeString(lang === 'ko' ? 'ko-KR' : 'en-US', timeOpts)
-    return { label, detectedTime, officialTime }
-  })()
-
   return (
     <div>
       <div
@@ -258,17 +242,6 @@ function IncidentRow({ incident, detectedAt, isRecentlyRecovered, t, lang }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <p className="text-xs text-[var(--text1)] truncate">{incident.title}</p>
-            {lead && (
-              <span
-                className="shrink-0 mono text-[9px] text-[var(--green)] bg-[var(--status-bg-green)] rounded cursor-default"
-                style={{ padding: '1px 5px' }}
-                title={lang === 'ko'
-                  ? `AIWatch 감지: ${lead.detectedTime} / 공식 발표: ${lead.officialTime}`
-                  : `AIWatch detected: ${lead.detectedTime} / Official report: ${lead.officialTime}`}
-              >
-                <span style={{ fontWeight: 600 }}>{lead.label}</span> lead
-              </span>
-            )}
             {hasTimeline && expanded && (
               <span className="shrink-0 text-[9px] text-[var(--text2)]">▾</span>
             )}
@@ -362,7 +335,7 @@ function IncidentGroupRow({ group, t, lang }) {
           }}
         >
           {group.entries.map((inc) => (
-            <IncidentRow key={inc.id} incident={inc} detectedAt={null} isRecentlyRecovered={false} t={t} lang={lang} />
+            <IncidentRow key={inc.id} incident={inc} isRecentlyRecovered={false} t={t} lang={lang} />
           ))}
         </div>
       )}
@@ -860,7 +833,7 @@ export default function ServiceDetails({ serviceId }) {
                 {groupedIncidents.map((row) => row.kind === 'group' ? (
                   <IncidentGroupRow key={`group:${row.dayKey}:${row.normalizedTitle}`} group={row} t={t} lang={lang} />
                 ) : (
-                  <IncidentRow key={row.incident.id} incident={row.incident} detectedAt={service.detectedAt} isRecentlyRecovered={!!(recentlyRecovered[service.id] ?? []).includes(row.incident.id)} t={t} lang={lang} />
+                  <IncidentRow key={row.incident.id} incident={row.incident} isRecentlyRecovered={!!(recentlyRecovered[service.id] ?? []).includes(row.incident.id)} t={t} lang={lang} />
                 ))}
               </div>
             )}

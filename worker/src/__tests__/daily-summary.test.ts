@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection } from '../daily-summary'
 import type { ServiceStatus } from '../types'
 
 function makeSvc(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
@@ -301,8 +301,8 @@ describe('buildDailySummary', () => {
         { svcId: 'together', incId: 'i1', leadMs: 7 * 60_000, detectedAt: '2026-04-18T11:53:00Z', officialAt: '2026-04-18T12:00:00Z' },
       ],
     })
-    expect(result).toContain('Detection Lead (last 24h)')
-    expect(result).toContain('Together AI: 7m lead')
+    expect(result).toContain('Early RTT detections (last 24h)')
+    expect(result).toContain('Together AI: 7m before official update')
   })
 
   it('omits Detection Lead section when entries empty', () => {
@@ -437,5 +437,51 @@ describe('computeLatencyAvg', () => {
     ])
     expect(avg.a).toBe(150)
     expect(avg.b).toBe(400)
+  })
+})
+
+describe('formatDegradationSection (#464)', () => {
+  const svcs = [
+    makeSvc({ id: 'deepseek', name: 'DeepSeek API' }),
+    makeSvc({ id: 'mistral', name: 'Mistral API' }),
+  ]
+
+  it('returns empty string when no degradations recorded', () => {
+    expect(formatDegradationSection(undefined, undefined, svcs)).toBe('')
+    expect(formatDegradationSection({}, {}, svcs)).toBe('')
+  })
+
+  it('renders total + not-on-status-page headline and per-service breakdown', () => {
+    const out = formatDegradationSection({ deepseek: 4, mistral: 1 }, { deepseek: 3 }, svcs)
+    expect(out).toContain('RTT Degradations (~48h)')
+    expect(out).toContain('5 total')                      // 4 + 1
+    expect(out).toContain('3 not on official status pages') // deepseek nostatus only
+    expect(out).toContain('DeepSeek API: 4 RTT spikes (3 not on official status page)')
+    expect(out).toContain('Mistral API: 1 RTT spike (all reflected on status page)')
+  })
+
+  it('sorts services by spike count descending', () => {
+    const out = formatDegradationSection({ mistral: 2, deepseek: 9 }, {}, svcs)
+    expect(out.indexOf('DeepSeek API')).toBeLessThan(out.indexOf('Mistral API'))
+  })
+
+  it('falls back to svcId when name missing', () => {
+    const out = formatDegradationSection({ unknownsvc: 2 }, {}, svcs)
+    expect(out).toContain('unknownsvc: 2 RTT spikes')
+  })
+
+  it('headline shows 0 not-on-status when all degradations are reflected on status pages', () => {
+    const out = formatDegradationSection({ deepseek: 3 }, {}, svcs)
+    expect(out).toContain('3 total · 0 not on official status pages')
+    expect(out).toContain('DeepSeek API: 3 RTT spikes (all reflected on status page)')
+  })
+
+  it('per-service loop iterates degradationCounts only — a nostatus-only entry is not attributed per-service', () => {
+    // Production always writes degBase before the nostatus key, so this mismatch shouldn't occur;
+    // this pins the formatter's behavior if it ever does (headline counts it, no orphan per-service line).
+    const out = formatDegradationSection({ deepseek: 2 }, { mistral: 1 }, svcs)
+    expect(out).toContain('2 total · 1 not on official status pages')
+    expect(out).toContain('DeepSeek API: 2 RTT spikes')
+    expect(out).not.toContain('Mistral API:')  // mistral only in nostatus → no per-service line
   })
 })

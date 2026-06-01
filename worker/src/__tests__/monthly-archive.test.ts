@@ -15,7 +15,9 @@ import {
   REPORTS_WORKFLOW_URL,
   MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE,
   summarizeDetectionLead,
+  canPresentLeadAverage,
 } from '../monthly-archive'
+import { MIN_LEAD_SAMPLE_SIZE } from '../detection-lead-log'
 import type { ServiceStatus } from '../types'
 import type { MonthlySecurityEntry, MonthlySecuritySummary } from '../monthly-archive'
 import type { DetectionLeadEntry } from '../detection-lead-log'
@@ -1096,6 +1098,25 @@ describe('summarizeDetectionLead', () => {
     expect(Number.isInteger(summary.avgLeadMs)).toBe(true)
     // (60_000 + 120_000 + 240_000) / 3 = 140_000 — happens to round cleanly here
     expect(summary.avgLeadMs).toBe(140_000)
+  })
+})
+
+describe('canPresentLeadAverage (#464)', () => {
+  it('returns false for null/undefined summary', () => {
+    expect(canPresentLeadAverage(null)).toBe(false)
+    expect(canPresentLeadAverage(undefined)).toBe(false)
+  })
+
+  it('returns false below MIN_LEAD_SAMPLE_SIZE (thin sample — no marketing claim)', () => {
+    const entries = Array.from({ length: MIN_LEAD_SAMPLE_SIZE - 1 }, (_, i) =>
+      makeDetEntry({ incId: `i${i}`, leadMs: 5 * 60_000 }))
+    expect(canPresentLeadAverage(summarizeDetectionLead(entries))).toBe(false)
+  })
+
+  it('returns true at MIN_LEAD_SAMPLE_SIZE (enough genuine events to present)', () => {
+    const entries = Array.from({ length: MIN_LEAD_SAMPLE_SIZE }, (_, i) =>
+      makeDetEntry({ incId: `i${i}`, leadMs: 5 * 60_000 }))
+    expect(canPresentLeadAverage(summarizeDetectionLead(entries))).toBe(true)
   })
 })
 
