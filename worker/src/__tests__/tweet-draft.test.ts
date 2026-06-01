@@ -1,7 +1,7 @@
 // #348 — outage-tweet draft attached to operator Discord alerts for the Claude/OpenAI family.
 import { describe, it, expect } from 'vitest'
-import { buildTweetDraft } from '../alerts'
-import type { AlertCandidate, ScoredService } from '../alerts'
+import { buildTweetDraft, buildTweetDrafts, appendTweetDraftSection, DISCORD_EMBED_DESC_MAX } from '../alerts'
+import type { AlertCandidate, ScoredService, TweetDraft } from '../alerts'
 
 const X_INTENT = 'https://twitter.com/intent/tweet?text='
 
@@ -147,5 +147,116 @@ describe('buildTweetDraft', () => {
     expect(draft!.text).not.toContain('\n')
     expect(draft!.text).not.toContain('`')
     expect(draft!.text).toContain('line1 line2 code')
+  })
+})
+
+describe('buildTweetDrafts (#521 — operator picks the surface)', () => {
+  // A multi-surface Anthropic incident: one incidentId carried by all three surfaces.
+  const sharedInc = (id: string) => ({ id, title: 'Opus 4.7 elevated errors', status: 'investigating', startedAt: new Date().toISOString(), impact: 'minor' } as any)
+  const anthropic = [
+    mockService({ id: 'claude', name: 'Claude API', status: 'degraded', incidents: [sharedInc('opus47')] }),
+    mockService({ id: 'claudeai', name: 'claude.ai', status: 'degraded', incidents: [sharedInc('opus47')] }),
+    mockService({ id: 'claudecode', name: 'Claude Code', status: 'degraded', incidents: [sharedInc('opus47')] }),
+  ]
+
+  it('returns one draft per affected in-scope surface, each with its OWN name + is-down url', () => {
+    const drafts = buildTweetDrafts(alert({ key: 'alerted:new:opus47' }), anthropic)
+    expect(drafts.map((d) => d.serviceId)).toEqual(['claude', 'claudeai', 'claudecode'])
+    expect(drafts[0].text).toContain('Claude API')
+    expect(drafts[0].intentUrl).toContain(encodeURIComponent('https://ai-watch.dev/is-claude-down'))
+    expect(drafts[1].text).toContain('claude.ai')
+    expect(drafts[1].intentUrl).toContain(encodeURIComponent('https://ai-watch.dev/is-claude-ai-down'))
+    expect(drafts[2].text).toContain('Claude Code')
+    expect(drafts[2].intentUrl).toContain(encodeURIComponent('https://ai-watch.dev/is-claude-code-down'))
+  })
+
+  it('filters out non-in-scope services in the group (e.g. Gemini)', () => {
+    const withGemini = [
+      mockService({ id: 'gemini', name: 'Gemini API', provider: 'Google', incidents: [sharedInc('opus47')] }),
+      ...anthropic,
+    ]
+    const drafts = buildTweetDrafts(alert({ key: 'alerted:new:opus47' }), withGemini)
+    expect(drafts.map((d) => d.serviceId)).toEqual(['claude', 'claudeai', 'claudecode']) // gemini excluded
+  })
+
+  it('single-surface incident yields exactly one draft (matches buildTweetDraft)', () => {
+    const svc = mockService({ id: 'openai', name: 'OpenAI API', provider: 'OpenAI', status: 'down', incidents: [sharedInc('solo')] })
+    const drafts = buildTweetDrafts(alert({ key: 'alerted:new:solo' }), [svc])
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0].text).toBe(buildTweetDraft(alert({ key: 'alerted:new:solo' }), [svc])!.text)
+  })
+
+  it('returns [] when no in-scope service is covered', () => {
+    const svc = mockService({ id: 'gemini', name: 'Gemini API', provider: 'Google', incidents: [sharedInc('g1')] })
+    expect(buildTweetDrafts(alert({ key: 'alerted:new:g1' }), [svc])).toEqual([])
+  })
+
+  it('builds recovery drafts per surface for a resolved multi-surface incident', () => {
+    const drafts = buildTweetDrafts(alert({ key: 'alerted:res:opus47', title: '🟢 Claude API — Incident Resolved (34m)' }), anthropic)
+    expect(drafts).toHaveLength(3)
+    expect(drafts[0].text).toBe('🟢 Claude API recovered after 34m. Live status → https://ai-watch.dev/is-claude-down')
+    expect(drafts[1].text).toContain('🟢 claude.ai recovered after 34m')
+  })
+})
+
+describe('appendTweetDraftSection (#521 — Discord 4096 length guard)', () => {
+  const DIV = '┈┈┈┈┈┈'
+  const draft = (serviceId: string, serviceName: string, text: string): TweetDraft =>
+    ({ serviceId, serviceName, text, intentUrl: 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(text) })
+  const three = [
+    draft('claude', 'Claude API', '🔴 Claude API is reporting degraded performance: Opus 4.7 elevated errors. Live status → https://ai-watch.dev/is-claude-down'),
+    draft('claudeai', 'claude.ai', '🔴 claude.ai is reporting degraded performance: Opus 4.7 elevated errors. Live status → https://ai-watch.dev/is-claude-ai-down'),
+    draft('claudecode', 'Claude Code', '🔴 Claude Code is reporting degraded performance: Opus 4.7 elevated errors. Live status → https://ai-watch.dev/is-claude-code-down'),
+  ]
+
+  it('returns the description unchanged when there are no drafts', () => {
+    expect(appendTweetDraftSection('desc', [], DIV)).toBe('desc')
+  })
+
+  it('single draft → original preview+link shape', () => {
+    const out = appendTweetDraftSection('desc', [three[0]], DIV)
+    expect(out).toContain('🐦 **TWEET DRAFT** — [✍️ Post on X](')
+    expect(out).toContain('> 🔴 Claude API is reporting')
+  })
+
+  it('multiple drafts → one labeled compose link per service, no single preview', () => {
+    const out = appendTweetDraftSection('desc', three, DIV)
+    expect(out).toContain('pick a service to post:')
+    expect(out).toContain('[✍️ Claude API](')
+    expect(out).toContain('[✍️ claude.ai](')
+    expect(out).toContain('[✍️ Claude Code](')
+    expect(out).not.toContain('> 🔴') // no blockquote preview in the multi case
+  })
+
+  it('never exceeds the Discord 4096-char limit, truncating links with "+N more"', () => {
+    const longDesc = 'x'.repeat(3900) // already near the cap
+    const out = appendTweetDraftSection(longDesc, three, DIV)
+    expect(out.length).toBeLessThanOrEqual(DISCORD_EMBED_DESC_MAX)
+    // not all three links fit → either truncated to fewer (+N more) or section skipped entirely
+    expect(out.startsWith(longDesc)).toBe(true)
+  })
+
+  it('partially fits links and appends a "+N more" suffix, still under the limit', () => {
+    // Pick a description length that leaves room for some but not all 3 links → exercises the
+    // truncation branch (the prior test lands on "none fit"). Each link is ~235 chars.
+    const linkLen = `[✍️ Claude API](${three[0].intentUrl})`.length
+    const intro = '\n' + DIV + '\n🐦 **TWEET DRAFT** — pick a service to post:\n'
+    // Budget that fits exactly 2 links (2*linkLen + 3) but not 3: target budget ≈ 2*linkLen + 10
+    const targetBudget = 2 * linkLen + 10
+    const descLen = DISCORD_EMBED_DESC_MAX - 16 - intro.length - targetBudget
+    const out = appendTweetDraftSection('x'.repeat(descLen), three, DIV)
+    expect(out.length).toBeLessThanOrEqual(DISCORD_EMBED_DESC_MAX)
+    expect(out).toContain(' more') // some links dropped → "+N more"
+    expect(out).toContain('[✍️ Claude API](') // at least one link kept
+  })
+
+  it('skips the whole section (description unchanged) when not even one link fits', () => {
+    const longDesc = 'x'.repeat(4090)
+    expect(appendTweetDraftSection(longDesc, three, DIV)).toBe(longDesc)
+  })
+
+  it('skips a single draft that would overflow rather than dropping the alert', () => {
+    const longDesc = 'x'.repeat(4090)
+    expect(appendTweetDraftSection(longDesc, [three[0]], DIV)).toBe(longDesc)
   })
 })
