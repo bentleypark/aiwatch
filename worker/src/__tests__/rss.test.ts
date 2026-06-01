@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildRssFeed, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse } from '../rss'
+import { buildRssFeed, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse, dedupeSharedIncidents } from '../rss'
 import type { ServiceStatus, Incident } from '../types'
 
 function incident(over: Partial<Incident> = {}): Incident {
@@ -408,11 +408,24 @@ describe('buildRssFeed — shared incident (per-surface providers)', () => {
     service({ id: 'claudecode', name: 'Claude Code', incidents: [incident({ id: 'shared', title: 'Elevated errors' })] }),
   ]
 
-  it('annotates each item with the other services sharing the incident ID', () => {
+  it('collapses a multi-surface incident into ONE all-feed item, keeping the SERVICES-order primary (#520)', () => {
     const xml = buildRssFeed(anthropic, { scope: 'all' }, NOW)
+    // One item, not three — the Slack /feed subscriber gets a single consolidated message
+    expect((xml.match(/<item>/g) ?? []).length).toBe(1)
+    // Primary = first in SERVICES order (Claude API); its "Also affecting" names the rest
+    expect(xml).toContain('🔴 Claude API: Elevated errors') // default incident impact 'major' → 🔴
     expect(xml).toContain('Also affecting: claude.ai, Claude Code')
-    expect(xml).toContain('Also affecting: Claude API, Claude Code')
-    expect(xml).toContain('Also affecting: Claude API, claude.ai')
+    // The other surfaces' items (and their inverse "Also affecting" lines) are gone
+    expect(xml).not.toContain('Also affecting: Claude API, Claude Code')
+    expect(xml).not.toContain('Also affecting: Claude API, claude.ai')
+  })
+
+  it('uses a per-incident guid for the collapsed item (no Slack re-post churn)', () => {
+    const xml = buildRssFeed(anthropic, { scope: 'all' }, NOW)
+    expect((xml.match(/aiwatch:claude:shared/g) ?? []).length).toBe(1)
+    // no per-surface guids leak through for the deduped incident
+    expect(xml).not.toContain('aiwatch:claudeai:shared')
+    expect(xml).not.toContain('aiwatch:claudecode:shared')
   })
 
   it('omits the note for an incident unique to one service', () => {
@@ -420,10 +433,53 @@ describe('buildRssFeed — shared incident (per-surface providers)', () => {
     expect(xml).not.toContain('Also affecting:')
   })
 
-  it('keeps the note in a service-scoped feed using the full service list', () => {
+  it('keeps the note + single item in a service-scoped feed using the full service list', () => {
     const xml = buildRssFeed(anthropic, { scope: 'service', service: anthropic[0] }, NOW)
     expect(xml).toContain('Also affecting: claude.ai, Claude Code')
     expect((xml.match(/<item>/g) ?? []).length).toBe(1)
+  })
+
+  it('keeps an active and a resolved item separate (dedup is per incidentId+kind)', () => {
+    // If one surface is resolved while another is still active under the same incidentId, both kinds survive.
+    const mixed = [
+      service({ id: 'claude', name: 'Claude API', status: 'operational', incidents: [incident({ id: 'shared', title: 'Elevated errors', status: 'resolved', resolvedAt: '2026-05-10T14:00:00.000Z', duration: '34m' })] }),
+      service({ id: 'claudeai', name: 'claude.ai', status: 'degraded', incidents: [incident({ id: 'shared', title: 'Elevated errors', status: 'investigating' })] }),
+    ]
+    const xml = buildRssFeed(mixed, { scope: 'all' }, NOW)
+    expect((xml.match(/<item>/g) ?? []).length).toBe(2)
+  })
+})
+
+describe('dedupeSharedIncidents (#520)', () => {
+  const e = (id: string, kind: 'active' | 'resolved', tag: string) => ({ incident: { id }, kind, tag })
+
+  it('keeps the first occurrence per incidentId+kind', () => {
+    const out = dedupeSharedIncidents([
+      e('shared', 'active', 'claude'),
+      e('shared', 'active', 'claudeai'),
+      e('shared', 'active', 'claudecode'),
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0].tag).toBe('claude') // first = primary
+  })
+
+  it('treats active and resolved of the same incident as distinct entries', () => {
+    const out = dedupeSharedIncidents([
+      e('shared', 'resolved', 'claude'),
+      e('shared', 'active', 'claudeai'),
+      e('shared', 'resolved', 'claudecode'),
+    ])
+    expect(out).toHaveLength(2)
+    expect(out.map(o => o.tag)).toEqual(['claude', 'claudeai'])
+  })
+
+  it('leaves distinct incidents untouched and preserves order', () => {
+    const out = dedupeSharedIncidents([
+      e('a', 'active', 'x'),
+      e('b', 'active', 'y'),
+      e('a', 'active', 'dup'),
+    ])
+    expect(out.map(o => o.tag)).toEqual(['x', 'y'])
   })
 })
 
