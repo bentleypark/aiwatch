@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, buildTweetDraft } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, buildTweetDrafts, appendTweetDraftSection } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
@@ -720,18 +720,20 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     // visitor's webhook.
     const feedEntry = buildFeedEntry(alert, description, scored)
     if (feedEntry) feedEntries.push(feedEntry)
-    // #348 — operator-only tweet draft + X compose link for Claude/OpenAI-family alerts.
-    // Guarded: the draft is an optional nicety, so a bug here must never abort the send loop or
-    // the post-loop feed append (the operator alert is the critical path). Log so it's diagnosable.
-    let draft: { text: string; intentUrl: string } | null = null
+    // #348/#521 — operator-only tweet draft(s) + X compose link(s) for Claude/OpenAI-family alerts.
+    // A grouped multi-surface incident yields one draft per affected surface so the operator PICKS
+    // which to post (instead of a single auto-chosen primary). Guarded: the draft is an optional
+    // nicety, so a bug here must never abort the send loop or the post-loop feed append (the operator
+    // alert is the critical path). Log so it's diagnosable.
+    let drafts: ReturnType<typeof buildTweetDrafts> = []
     try {
-      draft = buildTweetDraft(alert, scored)
+      drafts = buildTweetDrafts(alert, scored)
     } catch (err) {
       console.error('[cron] tweet draft build failed (alert still sent):', alert.key, err instanceof Error ? err.message : err)
     }
-    const operatorDescription = draft
-      ? `${description}\n${DIV}\n🐦 **TWEET DRAFT** — [✍️ Post on X](${draft.intentUrl})\n> ${draft.text}`
-      : description
+    // appendTweetDraftSection is length-guarded (Discord 4096 cap) so a multi-link draft can never
+    // push the description over the limit and drop the whole operator alert.
+    const operatorDescription = appendTweetDraftSection(description, drafts, DIV)
     await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
       title: alert.title,
       description: operatorDescription,

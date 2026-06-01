@@ -4,7 +4,7 @@
 import { getFallbacks, buildFallbackText } from './fallback'
 import { sanitize, formatDuration } from './utils'
 import { computeLeadMs } from './detection-lead-log'
-import { kindFromKey, svcIdsForAlert } from './alert-feed'
+import { kindFromKey, svcIdsForAlert, type AlertKind } from './alert-feed'
 // #422 Phase 2 — region-switch hint in Discord alerts. We reuse the existing
 // Edge TS port rather than adding a third copy of SERVICE_REGIONS: the Worker
 // bundler (esbuild via wrangler) can import across dirs (unlike Vercel Edge,
@@ -399,28 +399,16 @@ function findIncident(services: ServiceStatus[], incId: string): Incident | null
   return null
 }
 
-/**
- * Build the outage/recovery tweet draft for an alert, or null when the alert doesn't cover any
- * Claude/OpenAI-family service (the only services in scope for #348). Returns the canonical tweet
- * `text` (≤ TWEET_MAX, single line) plus the `intentUrl` that opens X's compose window prefilled.
- *
- * - outage (new / down / degraded): 🔴 {name} is reporting {impact}[: {title}]. Live status → …
- * - recovery (resolved / recovered): 🟢 {name} recovered after {duration}. / 🟢 {name} has recovered. …
- */
-export function buildTweetDraft(
+/** Build the tweet text + X compose link for ONE specific in-scope service. The caller has already
+ *  confirmed `svc.id` is in TWEET_DRAFT_SERVICES. The incident title/impact (for `new` alerts) comes
+ *  from the shared incident, but the phrasing/status/url are the service's own. */
+function buildTweetForService(
+  svc: ScoredService,
+  kind: AlertKind,
   alert: AlertCandidate,
   services: ScoredService[],
-): { text: string; intentUrl: string } | null {
-  const kind = kindFromKey(alert.key)
-  if (!kind) return null
-  const keys = alert._mergedKeys ?? [alert.key]
-  const svcIds = svcIdsForAlert(keys, kind, services)
-  // Pick the first covered service that's in scope (a grouped incident may list a non-target sibling first).
-  const targetId = svcIds.find((id) => Boolean(TWEET_DRAFT_SERVICES[id]))
-  if (!targetId) return null
-  const svc = services.find((s) => s.id === targetId)
-  if (!svc) return null
-  const url = `https://ai-watch.dev/is-${TWEET_DRAFT_SERVICES[targetId]}-down`
+): { text: string; intentUrl: string } {
+  const url = `https://ai-watch.dev/is-${TWEET_DRAFT_SERVICES[svc.id]}-down`
 
   let text: string
   if (kind === 'resolved' || kind === 'recovered') {
@@ -446,6 +434,91 @@ export function buildTweetDraft(
     }
   }
   return { text, intentUrl: X_INTENT_BASE + encodeURIComponent(text) }
+}
+
+export interface TweetDraft {
+  serviceId: string
+  serviceName: string
+  text: string
+  intentUrl: string
+}
+
+/**
+ * Build a tweet draft per in-scope (Claude/OpenAI-family) service the alert covers (#521). A grouped
+ * multi-surface incident (one incidentId across Claude API / claude.ai / Claude Code) yields one draft
+ * per affected surface, in svcIds order, so the operator PICKS which surface to tweet about instead of
+ * being locked to a single auto-chosen "primary". Empty when the alert covers no in-scope service.
+ * Operator-only (the caller appends these after the per-user feed entry — never relayed, #475).
+ */
+export function buildTweetDrafts(
+  alert: AlertCandidate,
+  services: ScoredService[],
+): TweetDraft[] {
+  const kind = kindFromKey(alert.key)
+  if (!kind) return []
+  const keys = alert._mergedKeys ?? [alert.key]
+  const svcIds = svcIdsForAlert(keys, kind, services)
+  const drafts: TweetDraft[] = []
+  for (const id of svcIds) {
+    if (!TWEET_DRAFT_SERVICES[id]) continue // not a Claude/OpenAI-family service in scope
+    const svc = services.find((s) => s.id === id)
+    if (!svc) continue
+    const { text, intentUrl } = buildTweetForService(svc, kind, alert, services)
+    drafts.push({ serviceId: id, serviceName: svc.name, text, intentUrl })
+  }
+  return drafts
+}
+
+/**
+ * Single-draft convenience: the first in-scope service's draft (legacy shape). Retained for the
+ * existing contract/tests; new callers should prefer buildTweetDrafts for the operator's pick-a-service UX.
+ */
+export function buildTweetDraft(
+  alert: AlertCandidate,
+  services: ScoredService[],
+): { text: string; intentUrl: string } | null {
+  const [first] = buildTweetDrafts(alert, services)
+  return first ? { text: first.text, intentUrl: first.intentUrl } : null
+}
+
+// Discord rejects an embed description over this with HTTP 400 — which would drop the WHOLE operator
+// alert, not just the draft section (sendDiscordAlert does no truncation). The tweet draft is an
+// optional nicety, so it must never push the description over the limit.
+export const DISCORD_EMBED_DESC_MAX = 4096
+
+/**
+ * Append the operator-only tweet-draft section to a Discord embed description, guaranteeing the result
+ * stays within Discord's 4096-char limit (#521). One draft → the original preview+link shape; many →
+ * labeled per-service compose links the operator picks from. Links that wouldn't fit are dropped with a
+ * "+N more" suffix; if not even one fits (or there are no drafts), the description is returned unchanged
+ * so the critical operator alert always sends.
+ */
+export function appendTweetDraftSection(description: string, drafts: TweetDraft[], div: string): string {
+  if (drafts.length === 0) return description
+  const SAFETY = 16 // headroom for the "+N more" suffix / multibyte rounding
+
+  if (drafts.length === 1) {
+    const d = drafts[0]
+    const section = `\n${div}\n🐦 **TWEET DRAFT** — [✍️ Post on X](${d.intentUrl})\n> ${d.text}`
+    return description.length + section.length <= DISCORD_EMBED_DESC_MAX - SAFETY
+      ? description + section
+      : description
+  }
+
+  const intro = `\n${div}\n🐦 **TWEET DRAFT** — pick a service to post:\n`
+  const budget = DISCORD_EMBED_DESC_MAX - SAFETY - description.length - intro.length
+  const links = drafts.map((d) => `[✍️ ${d.serviceName}](${d.intentUrl})`)
+  const fit: string[] = []
+  let used = 0
+  for (const link of links) {
+    const add = (fit.length ? 3 : 0) /* " · " */ + link.length
+    if (used + add > budget) break
+    fit.push(link)
+    used += add
+  }
+  if (fit.length === 0) return description
+  const more = drafts.length - fit.length
+  return `${description}${intro}${fit.join(' · ')}${more > 0 ? ` · +${more} more` : ''}`
 }
 
 /** Detect service count drop — returns missing service IDs if below threshold */
