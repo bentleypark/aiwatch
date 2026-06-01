@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection } from '../daily-summary'
 import type { ServiceStatus } from '../types'
 
 function makeSvc(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
@@ -483,5 +483,46 @@ describe('formatDegradationSection (#464)', () => {
     expect(out).toContain('2 total · 1 not on official status pages')
     expect(out).toContain('DeepSeek API: 2 RTT spikes')
     expect(out).not.toContain('Mistral API:')  // mistral only in nostatus → no per-service line
+  })
+})
+
+describe('formatV1TrafficSection (#518)', () => {
+  it('returns empty string when traffic data is unavailable (SQL API not configured)', () => {
+    expect(formatV1TrafficSection(null)).toBe('')
+    expect(formatV1TrafficSection(undefined)).toBe('')
+  })
+
+  it('renders last-24h total with the all-vs-per-service split and cumulative since-date', () => {
+    const out = formatV1TrafficSection({
+      today: { all: 120, service: 30, total: 150 },
+      cumulative: 4200,
+      since: '2026-06-01',
+    })
+    expect(out).toContain('Public API (/api/v1)')
+    expect(out).toContain('Last 24h: 150 (all-services 120 · per-service ~30)')
+    expect(out).toContain('Cumulative: ~4200 (since 2026-06-01)')
+  })
+
+  it('renders a zero-traffic day without breaking (0 total)', () => {
+    const out = formatV1TrafficSection({
+      today: { all: 0, service: 0, total: 0 },
+      cumulative: 4200,
+      since: '2026-06-01',
+    })
+    expect(out).toContain('Last 24h: 0 (all-services 0 · per-service ~0)')
+    expect(out).toContain('Cumulative: ~4200')
+  })
+
+  it('is included by buildDailySummary when v1Traffic is present', () => {
+    const out = buildDailySummary({
+      services: [makeSvc({ id: 'claude', name: 'Claude' })],
+      aiUsage: null,
+      latencySnapshots: [],
+      incidentCountToday: { newCount: 0, resolvedCount: 0 },
+      redditCount: 0,
+      v1Traffic: { today: { all: 5, service: 2, total: 7 }, cumulative: 7, since: '2026-06-01' },
+    })
+    expect(out).toContain('Public API (/api/v1)')
+    expect(out).toContain('Last 24h: 7')
   })
 })

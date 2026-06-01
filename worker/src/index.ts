@@ -14,6 +14,7 @@ import { refreshStatusCacheOnChange } from './cache-refresh'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey } from './webhook-subscriptions'
 import { corsHeaders } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
+import { recordV1Traffic, queryV1Traffic } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 
 interface Env {
@@ -44,6 +45,14 @@ interface Env {
   // Optional so local dev (wrangler dev --local) and test environments without the
   // binding continue to work — writeDataPoint is skipped when absent.
   ANALYTICS?: AnalyticsEngineDataset
+  // #518: read-back of WAE /api/v1 traffic for the daily report. The Worker can WRITE to WAE
+  // but cannot read it from the runtime — the daily cron queries the Analytics Engine SQL API
+  // (POST /accounts/{id}/analytics_engine/sql) with these. Both are set as secrets so the
+  // account id isn't committed to this public repo: `wrangler secret put CF_ACCOUNT_ID` and
+  // `wrangler secret put CF_ANALYTICS_TOKEN` (token scope: Account Analytics Read). Both optional
+  // → absent → the daily v1-traffic section is skipped gracefully (queryV1Traffic returns null).
+  CF_ACCOUNT_ID?: string
+  CF_ANALYTICS_TOKEN?: string
 }
 
 // ── KV Cache + Daily Counters ──
@@ -1900,6 +1909,41 @@ export default {
             console.warn('[daily-summary] degradation counts read failed:', err instanceof Error ? err.message : err)
           })
 
+          // #518 — public API (/api/v1) traffic for the daily report. Query the last-24h count from
+          // WAE via the AE SQL API (sampling-corrected), then fold it into a permanent cumulative KV
+          // counter. The increment is made idempotent by storing `lastDate` IN the counter value: it
+          // only folds in once per UTC day, regardless of marker-write ordering or a retried cron
+          // cycle (the daily-summary marker is written later and kvPut swallows failures, so it can't
+          // be relied on to gate a permanent monotonic total). The cumulative is still an APPROXIMATE
+          // lifetime estimate — a 24h rolling window snapshotted once/day can drift slightly or miss a
+          // fully-skipped day. Absent token/account → queryV1Traffic returns null → section skipped.
+          let v1Traffic = null
+          try {
+            const today24h = await queryV1Traffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+            if (today24h) {
+              const cumKey = 'apiv1:cumulative'
+              const cumRaw = await env.STATUS_CACHE.get(cumKey).catch(() => null)
+              // Self-heal a corrupt value (restart the counter) rather than throwing → being swallowed
+              // by the outer catch → silently suppressing the section forever on every future run.
+              let cum: { total: number; since: string; lastDate: string }
+              try {
+                cum = cumRaw ? JSON.parse(cumRaw) : { total: 0, since: today, lastDate: '' }
+              } catch {
+                cum = { total: 0, since: today, lastDate: '' }
+              }
+              if (typeof cum.total !== 'number') cum.total = 0
+              if (typeof cum.since !== 'string') cum.since = today
+              if (cum.lastDate !== today) { // fold in once per day — idempotent on retry
+                cum.total += today24h.total
+                cum.lastDate = today
+                await env.STATUS_CACHE.put(cumKey, JSON.stringify(cum))
+              }
+              v1Traffic = { today: today24h, cumulative: cum.total, since: cum.since }
+            }
+          } catch (err) {
+            console.warn('[daily-summary] v1 traffic read failed:', err instanceof Error ? err.message : err)
+          }
+
           const description = buildDailySummary({
             services: dailyServices,
             aiUsage,
@@ -1918,6 +1962,7 @@ export default {
             crossValidSuppressed,
             degradationCounts,
             degradationNoStatusCounts,
+            v1Traffic,
           })
 
           if (isCatchUp) console.log(`[daily-summary] catch-up run for ${today}`)
@@ -2363,6 +2408,11 @@ export default {
           if (now - entry.start >= 60_000) publicApiRate.delete(ip)
         }
       }
+
+      // Record this served (non-429) v1 request in WAE so call volume is queryable (#518).
+      // Placed after the rate-limit gate so 429s are excluded; before the cache read so a
+      // 503 (cache miss) still counts as received traffic. Best-effort — never blocks the response.
+      recordV1Traffic(env.ANALYTICS, url.pathname)
 
       // Read cached services
       const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
