@@ -41,6 +41,9 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm run test:worker
+      # #533 Phase 1: fail on undefined-name / missing-import (TS2304) in worker
+      # source — the #532 bug class that esbuild / `wrangler --dry-run` can't catch.
+      - run: npm run typecheck:worker
 
   e2e:
     name: E2E Tests

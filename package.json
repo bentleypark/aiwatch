@@ -12,6 +12,7 @@
     "test": "npx playwright test --project=desktop --project=mobile",
     "test:is-down": "npx playwright test --project=is-down",
     "test:worker": "npx vitest run --config worker/vitest.config.ts",
+    "typecheck:worker": "node scripts/typecheck-worker.mjs",
     "test:ui": "npx playwright test --ui",
     "deploy": "npm run build && wrangler deploy",
     "deploy:worker": "npx wrangler deploy --config worker/wrangler.toml",
@@ -43,6 +44,7 @@
     "happy-dom": "^15.11.7",
     "prettier": "^3.4.2",
     "tailwindcss": "^4.0.0",
+    "typescript": "^5.0.0",
     "vite": "^6.0.5",
     "vitest": "^4.1.0",
     "wrangler": "^4.76.0"
