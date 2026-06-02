@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, buildTweetDrafts, appendTweetDraftSection, defuseDiscordAutolink } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
 import { checkPersistentFetchFailures } from './persistent-failure'
@@ -739,9 +739,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     // the draft's X intent URL keeps the real branded "claude.ai" tweet text (the blockquote/label
     // inside appendTweetDraftSection are defused there). The per-user feed (built above from the
     // clean `description`) is intentionally untouched — this is the operator surface only.
-    const operatorDescription = appendTweetDraftSection(defuseDiscordAutolink(description), drafts, DIV)
+    const operatorDescription = appendTweetDraftSection(defuseAutolinkDomain(description), drafts, DIV)
     await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-      title: defuseDiscordAutolink(alert.title),
+      title: defuseAutolinkDomain(alert.title),
       description: operatorDescription,
       color: alert.color,
     })

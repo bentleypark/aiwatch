@@ -294,6 +294,17 @@ describe('formatRedditAlert', () => {
     expect(promotable[1].post.id).toBe('3')
   })
 
+  it('#539: defuses bare claude.ai in the post title + tags the share link ?e=reddit', () => {
+    const alert: RedditAlert = {
+      key: 'reddit:seen:c1', subreddit: 'ClaudeAI', type: 'outage',
+      post: { id: 'c1', title: 'claude.ai is down again', author: 'u', subreddit: 'ClaudeAI', score: 9, url: 'https://reddit.com/x', createdUtc: Math.floor(Date.now() / 1000) - 60 },
+    }
+    const formatted = formatRedditAlert(alert)
+    expect(formatted.description).toContain('claude ai is down again') // brand defused
+    expect(formatted.description).not.toContain('claude.ai')
+    expect(formatted.description).toContain('ai-watch.dev/is-claude-down?e=reddit') // source-namespaced share link
+  })
+
   it('omits Is X Down link for unknown subreddit', () => {
     const alert: RedditAlert = {
       key: 'reddit:seen:xyz',

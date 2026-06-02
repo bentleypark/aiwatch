@@ -1,5 +1,16 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike } from '../utils'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike } from '../utils'
+
+describe('appendStatusHint (#539)', () => {
+  it('uses ? when the URL has no query, & when it already has one', () => {
+    expect(appendStatusHint('https://ai-watch.dev/is-claude-down', 'resolved')).toBe('https://ai-watch.dev/is-claude-down?e=resolved')
+    expect(appendStatusHint('https://ai-watch.dev/is-claude-down?ref=x', 'down')).toBe('https://ai-watch.dev/is-claude-down?ref=x&e=down')
+  })
+
+  it('url-encodes the hint value', () => {
+    expect(appendStatusHint('https://x.dev/p', 'a b')).toBe('https://x.dev/p?e=a%20b')
+  })
+})
 
 function mockKV(store: Record<string, string> = {}): KVLike {
   return {

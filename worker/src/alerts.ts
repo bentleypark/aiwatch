@@ -2,7 +2,7 @@
 // Used by cronAlertCheck in index.ts
 
 import { getFallbacks, buildFallbackText } from './fallback'
-import { sanitize, formatDuration } from './utils'
+import { sanitize, formatDuration, appendStatusHint } from './utils'
 import { computeLeadMs } from './detection-lead-log'
 import { kindFromKey, svcIdsForAlert, type AlertKind } from './alert-feed'
 // #422 Phase 2 — region-switch hint in Discord alerts. We reuse the existing
@@ -408,24 +408,33 @@ function buildTweetForService(
   alert: AlertCandidate,
   services: ScoredService[],
 ): { text: string; intentUrl: string } {
-  const url = `https://ai-watch.dev/is-${TWEET_DRAFT_SERVICES[svc.id]}-down`
+  // #539: defuse the bare "claude.ai" brand in the tweet text (the operator pastes this into
+  // Slack/Reddit/X where a bare domain auto-links) + give the is-X-down link a status hint so a
+  // recovery share is a DISTINCT URL from the outage share → platforms re-unfurl a fresh OG card.
+  const isRecovery = kind === 'resolved' || kind === 'recovered'
+  const name = defuseAutolinkDomain(svc.name)
+  // Hint vocab mirrors the RSS feed (active/resolved): a 'new' incident alert can fire before the
+  // service status has flipped off 'operational', so clamp that edge to 'active' (never emit
+  // ?e=operational on an outage share). The only requirement is outage URL ≠ recovery URL.
+  const hint = isRecovery ? 'resolved' : svc.status === 'operational' ? 'active' : svc.status
+  const url = appendStatusHint(`https://ai-watch.dev/is-${TWEET_DRAFT_SERVICES[svc.id]}-down`, hint)
 
   let text: string
-  if (kind === 'resolved' || kind === 'recovered') {
+  if (isRecovery) {
     const duration = durationFromTitle(alert.title)
     text = duration
-      ? `🟢 ${svc.name} recovered after ${duration}. Live status → ${url}`
-      : `🟢 ${svc.name} has recovered. Live status → ${url}`
+      ? `🟢 ${name} recovered after ${duration}. Live status → ${url}`
+      : `🟢 ${name} has recovered. Live status → ${url}`
   } else {
     // down/degraded alerts carry no incId tail (svcId only), so incident-title enrichment applies
     // to `new` incidents only; status alerts fall back to status-based phrasing below.
     const incId = kind === 'new' ? alert.key.slice('alerted:new:'.length) : null
     const inc = incId ? findIncident(services, incId) : null
     const phrase = (inc && impactPhrase(inc.impact)) || (svc.status === 'degraded' ? 'degraded performance' : 'an outage')
-    const head = `🔴 ${svc.name} is reporting ${phrase}`
+    const head = `🔴 ${name} is reporting ${phrase}`
     const tail = `. Live status → ${url}`
     if (inc) {
-      const cleaned = cleanForTweet(inc.title)
+      const cleaned = defuseAutolinkDomain(cleanForTweet(inc.title))
       const room = TWEET_MAX - head.length - 2 /* ": " */ - tail.length
       const title = cleaned.length > room ? `${cleaned.slice(0, Math.max(0, room - 1)).trimEnd()}…` : cleaned
       text = title ? `${head}: ${title}${tail}` : `${head}${tail}`
@@ -481,17 +490,15 @@ export function buildTweetDraft(
   return first ? { text: first.text, intentUrl: first.intentUrl } : null
 }
 
-// Discord auto-links a bare brand domain that appears as plain text in an embed title/description
-// (e.g. "claude.ai", the claudeai service's display name) and unfurls a preview thumbnail into the
-// operator alert — visual noise (#535). Render it as "claude ai" wherever it appears as Discord
-// plain text so no domain is detected. Applied at the operator send (#535: embed title + the main
-// description) AND here to the tweet-draft blockquote/label. The X intent-URL tweet text is left
-// untouched on purpose — it keeps the real "claude.ai" brand (a useful link on X) and lives in a URL
-// query param Discord never linkifies; that's why the caller defuses the description BEFORE the draft
-// (with its intent URL) is appended. The is-down URL is unaffected — its slug is `is-claude-ai-down`
-// (hyphen, no dot). Only `claudeai`'s display name is a dotted domain among TWEET_DRAFT_SERVICES
+// Social platforms (Discord, Slack, Reddit, X) auto-link a bare brand domain that appears as plain
+// text (e.g. "claude.ai", the claudeai service's display name) and unfurl a preview/thumbnail —
+// visual noise. Render it as "claude ai" wherever it appears as plain text so no domain is detected.
+// Used across the operator Discord embed (#535: title + description + tweet blockquote/label) AND the
+// tweet/RSS/Reddit message text (#539 — the operator pastes the tweet draft into Slack, where the
+// bare domain auto-links). The is-down URL is unaffected — its slug is `is-claude-ai-down` (hyphen,
+// no dot). Only `claudeai`'s display name is a dotted domain among the monitored services
 // (Character.AI is not in scope), so the literal regex is sufficient.
-export function defuseDiscordAutolink(s: string): string {
+export function defuseAutolinkDomain(s: string): string {
   return s.replace(/claude\.ai/gi, 'claude ai')
 }
 
@@ -513,7 +520,7 @@ export function appendTweetDraftSection(description: string, drafts: TweetDraft[
 
   if (drafts.length === 1) {
     const d = drafts[0]
-    const section = `\n${div}\n🐦 **TWEET DRAFT** — [✍️ Post on X](${d.intentUrl})\n> ${defuseDiscordAutolink(d.text)}`
+    const section = `\n${div}\n🐦 **TWEET DRAFT** — [✍️ Post on X](${d.intentUrl})\n> ${defuseAutolinkDomain(d.text)}`
     return description.length + section.length <= DISCORD_EMBED_DESC_MAX - SAFETY
       ? description + section
       : description
@@ -521,7 +528,7 @@ export function appendTweetDraftSection(description: string, drafts: TweetDraft[
 
   const intro = `\n${div}\n🐦 **TWEET DRAFT** — pick a service to post:\n`
   const budget = DISCORD_EMBED_DESC_MAX - SAFETY - description.length - intro.length
-  const links = drafts.map((d) => `[✍️ ${defuseDiscordAutolink(d.serviceName)}](${d.intentUrl})`)
+  const links = drafts.map((d) => `[✍️ ${defuseAutolinkDomain(d.serviceName)}](${d.intentUrl})`)
   const fit: string[] = []
   let used = 0
   for (const link of links) {

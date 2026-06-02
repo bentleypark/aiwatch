@@ -1,6 +1,9 @@
 // Reddit community monitoring — detect "is X down?" posts in target subreddits
 // Uses Reddit's public JSON search endpoint (no OAuth required)
 
+import { defuseAutolinkDomain } from './alerts'
+import { appendStatusHint } from './utils'
+
 export interface RedditPost {
   id: string
   title: string
@@ -258,12 +261,15 @@ export function formatRedditAlert(alert: RedditAlert): { title: string; descript
     : ago < 3600 ? `${Math.floor(ago / 60)}m ago`
     : `${Math.floor(ago / 3600)}h ago`
 
+  // #539: `?e=reddit` namespaces the promote share so it doesn't collide with status-alert unfurls
+  // (this is a community-mention alert, not a status event). Post title is defused so a bare
+  // "claude.ai" in it doesn't auto-link in the operator channel.
   const slug = SUBREDDIT_SLUG[alert.subreddit]
-  const shareLink = slug ? `\n🔗 https://ai-watch.dev/is-${slug}-down` : ''
+  const shareLink = slug ? `\n🔗 ${appendStatusHint(`https://ai-watch.dev/is-${slug}-down`, 'reddit')}` : ''
 
   return {
     title: `📢 Reddit: r/${alert.subreddit} [🎯 PROMOTE]`,
-    description: `"${alert.post.title}"\nby u/${alert.post.author} · ${alert.post.score} upvotes · ${agoText}${shareLink}`,
+    description: `"${defuseAutolinkDomain(alert.post.title)}"\nby u/${alert.post.author} · ${alert.post.score} upvotes · ${agoText}${shareLink}`,
     color: 0x3fb950, // green
     url: alert.post.url,
   }

@@ -212,6 +212,20 @@ export function isCacheStale(raw: string | null, thresholdMs: number, now = Date
   }
 }
 
+/**
+ * Append a status/event hint to a public is-X-down share URL (#539). Social platforms
+ * (Slack/Discord/KakaoTalk) cache the OG unfurl by PAGE URL, so a static `is-X-down` link shows a
+ * stale card after a status flip (e.g. recovery still shows the cached outage card). Giving the
+ * outage vs recovery share links DISTINCT URLs (`?e=degraded` vs `?e=resolved`) makes each a fresh
+ * URL → fresh unfurl. The canonical page URL stays clean (this is only on shared message links);
+ * the is-down Edge ignores unknown query params. Already-posted messages can't be fixed (external
+ * cache) — this only affects future messages.
+ */
+export function appendStatusHint(url: string, hint: string): string {
+  const sep = url.includes('?') ? '&' : '?'
+  return `${url}${sep}e=${encodeURIComponent(hint)}`
+}
+
 export async function fetchWithTimeout(
   url: string,
   timeoutMs = 8000,

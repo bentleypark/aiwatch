@@ -5,6 +5,8 @@
 import type { ServiceStatus, Incident } from './types'
 import { escapeXml } from './badge'
 import { getFallbacks } from './fallback'
+import { defuseAutolinkDomain } from './alerts'
+import { appendStatusHint } from './utils'
 
 const SITE = 'https://ai-watch.dev'
 
@@ -118,9 +120,13 @@ export function resolveFeedService(
 // Item <link> target. /is-{slug}-down is a real crawlable URL (feed readers and
 // Googlebot ignore the dashboard's `#hash` route); estimate-only services with
 // no SEO page fall back to the hash route.
-function serviceLink(serviceId: string): string {
+// #539: the status hint (`?e=resolved|active`) gives a resolved item a DISTINCT link from its
+// active item, so Slack /feed and other unfurlers fetch a fresh OG card on recovery instead of
+// reusing the cached outage card. The hash fallback (estimate-only services) gets no hint — it has
+// no is-down OG page to unfurl.
+function serviceLink(serviceId: string, kind: ItemKind): string {
   if (NO_IS_DOWN_PAGE.has(serviceId)) return `${SITE}/#${serviceId}`
-  return `${SITE}/is-${feedSlug(serviceId)}-down`
+  return appendStatusHint(`${SITE}/is-${feedSlug(serviceId)}-down`, kind)
 }
 
 // XML 1.0 forbids most C0 control characters. escapeXml handles & < > " but
@@ -228,8 +234,9 @@ function descHtml(
     if (inc.duration) meta.push(escHtml(inc.duration))
     lines.push(`<p>${meta.join(' · ')}</p>`)
   }
-  if (coAffected.length > 0) lines.push(`<p>Also affecting: ${escHtml(coAffected.join(', '))}</p>`)
-  if (latest?.text) lines.push(`<p>${escHtml(latest.text)}</p>`)
+  // #539: defuse bare "claude.ai" in co-affected service names + timeline text (Slack /feed unfurl).
+  if (coAffected.length > 0) lines.push(`<p>Also affecting: ${escHtml(defuseAutolinkDomain(coAffected.join(', ')))}</p>`)
+  if (latest?.text) lines.push(`<p>${escHtml(defuseAutolinkDomain(latest.text))}</p>`)
   if (opts.fallbackText) lines.push(`<p>↪ ${escHtml(opts.fallbackText)}</p>`)
   // Join with a newline, not '' (#479): block-level <p> render with a break in real RSS readers,
   // but Slack's /feed app FLATTENS the tags and would otherwise concatenate adjacent paragraphs
@@ -247,12 +254,13 @@ function itemXml(
   const isResolved = opts.kind === 'resolved'
   const coAffected = (incidentServices.get(inc.id) ?? []).filter((n) => n !== service.name)
   const emoji = severityEmoji(service, inc, isResolved)
-  const title = `${emoji} ${service.name}: ${isResolved ? 'Resolved — ' : ''}${inc.title}`
+  // #539: defuse the bare "claude.ai" brand so Slack /feed doesn't auto-link/unfurl it.
+  const title = defuseAutolinkDomain(`${emoji} ${service.name}: ${isResolved ? 'Resolved — ' : ''}${inc.title}`)
   const guid = isResolved ? `aiwatch:${service.id}:${inc.id}:resolved` : `aiwatch:${service.id}:${inc.id}`
 
   return `    <item>
       <title>${xml(title)}</title>
-      <link>${xml(serviceLink(service.id))}</link>
+      <link>${xml(serviceLink(service.id, opts.kind))}</link>
       <guid isPermaLink="false">${xml(guid)}</guid>
       <pubDate>${rfc822(opts.pubDate)}</pubDate>${inc.impact ? `\n      <category>${xml(inc.impact)}</category>` : ''}
       <description><![CDATA[${descHtml(service, inc, coAffected, opts)}]]></description>
