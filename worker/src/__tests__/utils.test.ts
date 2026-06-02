@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, isAllowedAlertWebhook, type KVLike } from '../utils'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike } from '../utils'
 
 function mockKV(store: Record<string, string> = {}): KVLike {
   return {
@@ -174,6 +174,29 @@ describe('trackFetchFailure', () => {
     const kv2 = mockKV({ 'fetch-fail:azure': '4' })
     expect(await trackFetchFailure(kv2, 'azure', 5)).toBe(true) // 4+1=5 >= 5
   })
+
+  it('sets fetch-fail:since on the rising edge when absent (#500)', async () => {
+    const store: Record<string, string> = { 'fetch-fail:azure': '2' }
+    const kv = mockKV(store)
+    await trackFetchFailure(kv, 'azure') // next=3 = threshold → rising edge
+    expect(store['fetch-fail:since:azure']).toBeDefined()
+    expect(Number.isNaN(Date.parse(store['fetch-fail:since:azure']))).toBe(false) // valid ISO
+  })
+
+  it('does NOT overwrite an existing fetch-fail:since (preserves first-failure time across re-climbs)', async () => {
+    const original = '2026-06-01T00:00:00.000Z'
+    const store: Record<string, string> = { 'fetch-fail:azure': '2', 'fetch-fail:since:azure': original }
+    const kv = mockKV(store)
+    await trackFetchFailure(kv, 'azure') // rising edge again, but since already set
+    expect(store['fetch-fail:since:azure']).toBe(original)
+  })
+
+  it('does not set fetch-fail:since below the rising edge', async () => {
+    const store: Record<string, string> = { 'fetch-fail:azure': '0' }
+    const kv = mockKV(store)
+    await trackFetchFailure(kv, 'azure') // next=1, below threshold
+    expect(store['fetch-fail:since:azure']).toBeUndefined()
+  })
 })
 
 describe('resetFetchFailure', () => {
@@ -193,6 +216,58 @@ describe('resetFetchFailure', () => {
 
   it('does nothing when kv is undefined', async () => {
     await resetFetchFailure(undefined, 'azure') // no throw
+  })
+
+  it('also clears fetch-fail:since on recovery (#500)', async () => {
+    const store: Record<string, string> = { 'fetch-fail:azure': '3', 'fetch-fail:since:azure': '2026-06-01T00:00:00.000Z' }
+    const kv = mockKV(store)
+    await resetFetchFailure(kv, 'azure')
+    expect(store['fetch-fail:azure']).toBeUndefined()
+    expect(store['fetch-fail:since:azure']).toBeUndefined()
+  })
+})
+
+describe('shouldAlertPersistentFailure (#500)', () => {
+  const now = Date.parse('2026-06-02T12:00:00.000Z')
+
+  it('false when no since timestamp', () => {
+    expect(shouldAlertPersistentFailure(null, now)).toBe(false)
+    expect(shouldAlertPersistentFailure(undefined, now)).toBe(false)
+  })
+
+  it('false when unreachable < 1h', () => {
+    const since = new Date(now - 59 * 60_000).toISOString() // 59 min ago
+    expect(shouldAlertPersistentFailure(since, now)).toBe(false)
+  })
+
+  it('true at exactly the 1h threshold', () => {
+    const since = new Date(now - PERSISTENT_FAILURE_THRESHOLD_MS).toISOString()
+    expect(shouldAlertPersistentFailure(since, now)).toBe(true)
+  })
+
+  it('true when unreachable well over 1h', () => {
+    const since = new Date(now - 5 * 3_600_000).toISOString()
+    expect(shouldAlertPersistentFailure(since, now)).toBe(true)
+  })
+
+  it('false on an unparseable timestamp (no false alert)', () => {
+    expect(shouldAlertPersistentFailure('not-a-date', now)).toBe(false)
+  })
+
+  it('respects a custom threshold', () => {
+    const since = new Date(now - 90 * 60_000).toISOString() // 90 min ago
+    expect(shouldAlertPersistentFailure(since, now, 2 * 3_600_000)).toBe(false) // < 2h
+  })
+})
+
+describe('formatPersistentFailureAlert (#500)', () => {
+  it('reports the elapsed whole hours and names the service', () => {
+    const now = Date.parse('2026-06-02T12:00:00.000Z')
+    const since = new Date(now - 3 * 3_600_000 - 20 * 60_000).toISOString() // 3h 20m ago
+    const out = formatPersistentFailureAlert('DeepSeek API', since, now)
+    expect(out).toContain('DeepSeek API')
+    expect(out).toContain('3h+') // floor of 3h20m
+    expect(out).toContain('structural block')
   })
 })
 

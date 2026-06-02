@@ -7,6 +7,7 @@ import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, buildTweetDrafts, appendTweetDraftSection } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
+import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, classifyLead, appendLeadDiag, readLeadDiag, classifyDegradation, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
@@ -839,6 +840,10 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // the sibling cacheWrite uses for KV failures.
   if (refreshed) lastKvWrite = Date.now()
   else if (sent.length > 0) console.error('[cron] status-change cache refresh failed — OG/SEO previews may show pre-incident state until the next /api/status write')
+
+  // #500 — persistent (1h+) status-page block alert. Independent of the status-alert path above:
+  // sweeps the fetch-fail:since markers and warns the operator once per blocked service per 24h.
+  await checkPersistentFetchFailures(env.STATUS_CACHE, env.DISCORD_WEBHOOK_URL, services, Date.now(), sendDiscordAlert)
 
   // Refresh TTL on existing AI analyses / re-analyze missing ones (max 2 per cron)
   // monitoring = "recovery confirmed, verifying" — treat as inactive (no TTL refresh)
