@@ -2,7 +2,7 @@
 
 import type { Incident, ServiceStatus, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
-import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss } from './utils'
+import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, kvPut } from './utils'
 import { isProbeHealthy, type ProbeSnapshot } from './probe'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
@@ -869,6 +869,20 @@ export function detectPlatformOutage(
   return affected
 }
 
+/**
+ * Increment the daily "probe overrode a status-page degraded status" suppression counter.
+ * Surfaced in the daily summary alongside fetch-fail:daily to distinguish a probe-healthy
+ * false positive from a real outage where the probe also spiked. Never throws — kvPut
+ * swallows + logs its own KV failures (returns false). Extracted + unit-tested because the
+ * inline call previously shipped with `kvPut` un-imported, throwing a ReferenceError that
+ * crashed all of fetchAllServices() (#501).
+ */
+export async function recordProbeSuppression(kv: KVNamespace, svcId: string, date: string): Promise<void> {
+  const supKey = `cross-valid:suppressed:${svcId}:${date}`
+  const prev = parseInt(await kv.get(supKey).catch(() => null) ?? '0', 10) || 0
+  await kvPut(kv, supKey, String(prev + 1), { expirationTtl: 172800 })
+}
+
 export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeSnapshot[]): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[] }> {
   // Pre-fetch unique Atlassian status API endpoints once.
   // Services sharing a status page (claude+claudeai+claudecode, openai+chatgpt) would each fetch
@@ -1011,14 +1025,8 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
         if (svc.status === 'degraded' && isProbeHealthy(probeSnapshots, svc.id)) {
           console.log(`[cross-validation] ${svc.id}: status page down but probe RTT normal — holding operational`)
           svc.status = 'operational'
-          // Daily suppression counter: how many times was this service's degraded status
-          // overridden by probe health? Surfaced in daily summary alongside fetch-fail:daily
-          // to distinguish "probe healthy → false positive" from "probe also spiking → real outage".
-          if (kv) {
-            const supKey = `cross-valid:suppressed:${svc.id}:${date}`
-            const prev = parseInt(await kv.get(supKey).catch(() => null) ?? '0', 10) || 0
-            await kvPut(kv, supKey, String(prev + 1), { expirationTtl: 172800 })
-          }
+          // Daily suppression counter — see recordProbeSuppression() docstring.
+          if (kv) await recordProbeSuppression(kv, svc.id, date)
         }
       }
     }
