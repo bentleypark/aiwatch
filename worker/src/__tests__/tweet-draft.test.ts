@@ -1,6 +1,6 @@
 // #348 — outage-tweet draft attached to operator Discord alerts for the Claude/OpenAI family.
 import { describe, it, expect } from 'vitest'
-import { buildTweetDraft, buildTweetDrafts, appendTweetDraftSection, DISCORD_EMBED_DESC_MAX } from '../alerts'
+import { buildTweetDraft, buildTweetDrafts, appendTweetDraftSection, defuseDiscordAutolink, DISCORD_EMBED_DESC_MAX } from '../alerts'
 import type { AlertCandidate, ScoredService, TweetDraft } from '../alerts'
 
 const X_INTENT = 'https://twitter.com/intent/tweet?text='
@@ -223,9 +223,52 @@ describe('appendTweetDraftSection (#521 — Discord 4096 length guard)', () => {
     const out = appendTweetDraftSection('desc', three, DIV)
     expect(out).toContain('pick a service to post:')
     expect(out).toContain('[✍️ Claude API](')
-    expect(out).toContain('[✍️ claude.ai](')
+    expect(out).toContain('[✍️ claude ai](') // #535: defused so Discord doesn't unfurl a thumbnail
     expect(out).toContain('[✍️ Claude Code](')
     expect(out).not.toContain('> 🔴') // no blockquote preview in the multi case
+  })
+
+  // #535 — Discord auto-unfurls a thumbnail for the bare "claude.ai" domain in the embed
+  // description. The visible tweet-draft text must render it as "claude ai", while the X intent
+  // URL keeps the real branded "claude.ai" tweet text.
+  describe('claude.ai thumbnail defuse (#535)', () => {
+    const claudeaiText =
+      '🔴 claude.ai is reporting a major outage: Opus 4.7 elevated errors. Live status → https://ai-watch.dev/is-claude-ai-down'
+    const claudeaiDraft: TweetDraft = {
+      serviceId: 'claudeai',
+      serviceName: 'claude.ai',
+      text: claudeaiText,
+      intentUrl: 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(claudeaiText),
+    }
+
+    it('single draft: blockquote preview shows "claude ai", no bare "claude.ai" domain', () => {
+      const out = appendTweetDraftSection('desc', [claudeaiDraft], DIV)
+      expect(out).toContain('> 🔴 claude ai is reporting')
+      // the only "claude.ai" left is inside the X intent URL (a query param Discord never linkifies)
+      const blockquote = out.split('\n').find((l) => l.startsWith('> '))!
+      expect(blockquote).not.toContain('claude.ai')
+    })
+
+    it('keeps the real "claude.ai" brand in the X intent URL (tweet stays branded)', () => {
+      const out = appendTweetDraftSection('desc', [claudeaiDraft], DIV)
+      expect(out).toContain(claudeaiDraft.intentUrl) // intent URL embedded verbatim
+      expect(claudeaiDraft.intentUrl).toContain('claude.ai') // encodeURIComponent leaves the dot → still branded
+    })
+
+    it('multi draft: per-service label is defused to "claude ai"', () => {
+      const others: TweetDraft[] = [
+        { serviceId: 'claude', serviceName: 'Claude API', text: 'x', intentUrl: 'https://twitter.com/intent/tweet?text=x' },
+        claudeaiDraft,
+      ]
+      const out = appendTweetDraftSection('desc', others, DIV)
+      expect(out).toContain('[✍️ claude ai](')
+      expect(out).not.toContain('[✍️ claude.ai](')
+    })
+
+    it('does not touch the is-claude-ai-down slug (hyphen, not a dot)', () => {
+      const out = appendTweetDraftSection('desc', [claudeaiDraft], DIV)
+      expect(out).toContain('is-claude-ai-down')
+    })
   })
 
   it('never exceeds the Discord 4096-char limit, truncating links with "+N more"', () => {
@@ -258,5 +301,34 @@ describe('appendTweetDraftSection (#521 — Discord 4096 length guard)', () => {
   it('skips a single draft that would overflow rather than dropping the alert', () => {
     const longDesc = 'x'.repeat(4090)
     expect(appendTweetDraftSection(longDesc, [three[0]], DIV)).toBe(longDesc)
+  })
+})
+
+// #535 — the operator send (index.ts) applies this to the embed title + the main description
+// (before the tweet draft is appended) so Discord doesn't unfurl a "claude.ai" thumbnail anywhere
+// in the operator embed, while the X intent-URL tweet text stays branded.
+describe('defuseDiscordAutolink (#535)', () => {
+  it('replaces the bare "claude.ai" domain with "claude ai"', () => {
+    expect(defuseDiscordAutolink('🔴 claude.ai — Service Down')).toBe('🔴 claude ai — Service Down')
+    expect(defuseDiscordAutolink('**claude.ai** (Anthropic)')).toBe('**claude ai** (Anthropic)')
+  })
+
+  it('is case-insensitive and global (incident titles may carry mixed case / repeats)', () => {
+    expect(defuseDiscordAutolink('Claude.AI and claude.ai degraded')).toBe('claude ai and claude ai degraded')
+  })
+
+  it('does NOT touch the is-claude-ai-down slug (hyphen, not a dot)', () => {
+    const s = 'Live status → https://ai-watch.dev/is-claude-ai-down'
+    expect(defuseDiscordAutolink(s)).toBe(s)
+  })
+
+  it('leaves other dotted brands alone (only claude.ai is in scope)', () => {
+    expect(defuseDiscordAutolink('Character.AI is fine')).toBe('Character.AI is fine')
+    expect(defuseDiscordAutolink('ai-watch.dev unaffected')).toBe('ai-watch.dev unaffected')
+  })
+
+  it('is idempotent (re-applying does nothing)', () => {
+    const once = defuseDiscordAutolink('claude.ai down')
+    expect(defuseDiscordAutolink(once)).toBe(once)
   })
 })

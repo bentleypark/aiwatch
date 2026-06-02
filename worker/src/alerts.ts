@@ -481,6 +481,20 @@ export function buildTweetDraft(
   return first ? { text: first.text, intentUrl: first.intentUrl } : null
 }
 
+// Discord auto-links a bare brand domain that appears as plain text in an embed title/description
+// (e.g. "claude.ai", the claudeai service's display name) and unfurls a preview thumbnail into the
+// operator alert — visual noise (#535). Render it as "claude ai" wherever it appears as Discord
+// plain text so no domain is detected. Applied at the operator send (#535: embed title + the main
+// description) AND here to the tweet-draft blockquote/label. The X intent-URL tweet text is left
+// untouched on purpose — it keeps the real "claude.ai" brand (a useful link on X) and lives in a URL
+// query param Discord never linkifies; that's why the caller defuses the description BEFORE the draft
+// (with its intent URL) is appended. The is-down URL is unaffected — its slug is `is-claude-ai-down`
+// (hyphen, no dot). Only `claudeai`'s display name is a dotted domain among TWEET_DRAFT_SERVICES
+// (Character.AI is not in scope), so the literal regex is sufficient.
+export function defuseDiscordAutolink(s: string): string {
+  return s.replace(/claude\.ai/gi, 'claude ai')
+}
+
 // Discord rejects an embed description over this with HTTP 400 — which would drop the WHOLE operator
 // alert, not just the draft section (sendDiscordAlert does no truncation). The tweet draft is an
 // optional nicety, so it must never push the description over the limit.
@@ -499,7 +513,7 @@ export function appendTweetDraftSection(description: string, drafts: TweetDraft[
 
   if (drafts.length === 1) {
     const d = drafts[0]
-    const section = `\n${div}\n🐦 **TWEET DRAFT** — [✍️ Post on X](${d.intentUrl})\n> ${d.text}`
+    const section = `\n${div}\n🐦 **TWEET DRAFT** — [✍️ Post on X](${d.intentUrl})\n> ${defuseDiscordAutolink(d.text)}`
     return description.length + section.length <= DISCORD_EMBED_DESC_MAX - SAFETY
       ? description + section
       : description
@@ -507,7 +521,7 @@ export function appendTweetDraftSection(description: string, drafts: TweetDraft[
 
   const intro = `\n${div}\n🐦 **TWEET DRAFT** — pick a service to post:\n`
   const budget = DISCORD_EMBED_DESC_MAX - SAFETY - description.length - intro.length
-  const links = drafts.map((d) => `[✍️ ${d.serviceName}](${d.intentUrl})`)
+  const links = drafts.map((d) => `[✍️ ${defuseDiscordAutolink(d.serviceName)}](${d.intentUrl})`)
   const fit: string[] = []
   let used = 0
   for (const link of links) {

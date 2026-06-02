@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, buildTweetDrafts, appendTweetDraftSection } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, buildTweetDrafts, appendTweetDraftSection, defuseDiscordAutolink } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
 import { checkPersistentFetchFailures } from './persistent-failure'
@@ -734,9 +734,14 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     }
     // appendTweetDraftSection is length-guarded (Discord 4096 cap) so a multi-link draft can never
     // push the description over the limit and drop the whole operator alert.
-    const operatorDescription = appendTweetDraftSection(description, drafts, DIV)
+    // #535 — defuse the bare "claude.ai" domain so Discord doesn't unfurl a thumbnail into the
+    // operator embed. Defuse the title + the main description BEFORE appending the tweet draft, so
+    // the draft's X intent URL keeps the real branded "claude.ai" tweet text (the blockquote/label
+    // inside appendTweetDraftSection are defused there). The per-user feed (built above from the
+    // clean `description`) is intentionally untouched — this is the operator surface only.
+    const operatorDescription = appendTweetDraftSection(defuseDiscordAutolink(description), drafts, DIV)
     await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
-      title: alert.title,
+      title: defuseDiscordAutolink(alert.title),
       description: operatorDescription,
       color: alert.color,
     })
