@@ -1,0 +1,10 @@
+{
+  "//": "Type-check-only config for the worker (#533). Extends the build tsconfig but scopes to production source (src, excluding __tests__) and never emits. rootDir is widened to the repo root so the legitimate cross-boundary import in alerts.ts (api/is-down/region-status.ts) resolves without TS6059. Consumed by scripts/typecheck-worker.mjs. Phase 1 of #533 only gates on TS2304 (undefined name / missing import); promoting this to a full zero-error gate is tracked in #533 Phases 2-4.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".."
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/__tests__/**", "src/**/*.test.ts"]
+}
