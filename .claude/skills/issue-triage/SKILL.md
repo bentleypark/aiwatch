@@ -29,7 +29,7 @@ skill is the periodic backstop — run it over the whole open board.
      → comment *why* + name the superseding issue/PR, then close.
    - **③ Premise invalidated?** Did a later finding retire the assumption it rests on?
      → re-scope (new issue with the corrected hook) or close.
-   - Pay special attention to `deferred` / `tracking` / `phase-N` labels — their blocker may have
+   - Pay special attention to `U3-someday` / `tracking` / `phase-N` labels — their blocker may have
      cleared, or incremental work may have quietly completed them.
 
 3. **Verify before closing** (parity with ship-issue step 11): `gh issue view N`, read every
@@ -40,27 +40,44 @@ skill is the periodic backstop — run it over the whole open board.
      that can't be checked yet is a **remaining** item → keep the issue open with a labeled exit
      condition; do NOT close on the strength of code alone.
 
-4. **Label hygiene**: every `deferred`/`tracking` issue must carry a **written exit condition** in its
+4. **Label hygiene**: every `U3-someday`/`tracking` issue must carry a **written exit condition** in its
    body ("close when X"). If the condition has cleared → close or drop the label. If a label has no
-   exit condition, add one.
+   exit condition, add one. (The legacy `deferred` label is retired — relabel any survivor to `U3-someday`.)
 
 5. **Cross-issue reconciliation backstop**: for each recently-merged PR this sweep surfaces, check
    whether it *also* closes/supersedes OTHER open issues that weren't reconciled at PR time.
 
-## Prioritize what's left
+## Classify + prioritize (two persistent axes → derived priority)
 
-Tier the genuinely-live issues (don't just list — recommend the next pick):
-- **P1 — high value, scoped**: clear acceptance, reasonable effort, ties to a current pain point or
-  the stated strategy (e.g. the monthly service-expansion cadence). Security/observability fixes.
-- **P2 — strategic, needs scoping**: larger features / infra / monetization-adjacent — flag that they
-  need a design pass first.
-- **P3 — docs / community / marketing**: low effort, low urgency.
-- **Tracking / deferred**: leave as-is *if* the exit condition still holds; otherwise step 2 applies.
+Label every live issue on TWO axes (persistent labels), then DERIVE priority each sweep.
+
+**Axis 1 — area (domain / which hat):**
+`area:dev` (features/bugs/tests) · `area:design` (UX/UI) · `area:ops` (infra/deploy/self-reliability/
+internal tooling) · `area:biz` (monetization/pricing/partnerships/licensing) · `area:marketing`
+(SEO/social/community/outreach/press). Pick ONE primary; add a second only when genuinely split
+(e.g. self-host template = biz+ops). `ui`→area:design; `backend` is a sub-tag of dev/ops.
+
+**Axis 2 — urgency:**
+`U0-now` (prod break / security / data loss) · `U1-soon` (high value, this cycle) · `U2-later`
+(valuable, no time pressure) · `U3-someday` (nice-to-have / signal-gated — the urgency-axis successor
+to the now-retired `deferred` label); `tracking` stays for meta umbrellas.
+
+**Derived priority** = Impact × Urgency × (1 / Effort) — Impact and Effort are per-sweep judgments
+(NOT labels); only `area`/`urgency` persist. Do NOT store priority as a label; recompute each sweep:
+- **P0** — any `U0-now`. Drop everything.
+- **P1** — high impact + `U1-soon` + small/medium effort. The "do next" set.
+- **P2** — high impact + large effort (needs a scoping/design pass first), OR medium impact + `U2-later`.
+- **P3** — low impact / `U3-someday`.
+
+Recommend the next pick **balanced across areas** — don't starve biz/marketing/design by always
+picking dev. Surface the per-area counts (count a dual-area issue under its primary) so a lopsided
+board is visible.
 
 ## Output + norms
 
-- Produce a **triage table**: per issue → `close` / `re-scope` / `keep + label` / `priority tier`,
-  with the one-line reason. Then state the **recommended next action**.
+- Produce a **triage table**: per issue → action (`close` / `re-scope` / `keep + label`) and, for the
+  live ones, `area` · `urgency` · effort → derived `P`, with a one-line reason. End with per-area
+  counts + the **recommended next pick** (balanced across areas).
 - **Act on confirmation**: closing/commenting/relabeling issues follows the same norm as the rest of
   the workflow — propose the triage, then apply the closes/labels the user confirms (issue ops are
   reversible, but the project norm is to confirm closes; see the gates in `ship-issue`).
