@@ -77,10 +77,10 @@ is the *procedure* — follow it top to bottom.
       output says `Uploaded aiwatch-worker`), once, after user approval. If several worker PRs are open,
       merge + resolve all THEN deploy once (no half-deploys).
 11. **Verify checklist** — `gh issue view N`; confirm **every** `- [ ]` item is actually implemented in
-    code before closing. Re-run step-11-style verification on `deferred`/`tracking` issues periodically —
+    code before closing. Re-run step-11-style verification on `U3-someday`/`tracking` issues periodically —
     later/incremental work may have completed one without any PR claiming `closes`.
-12. **Close** — only after verification: `gh issue close N`. Unverified/deferred items remain → keep the
-    issue open with a label whose **exit condition is written in the body** (e.g. "close when secrets set
+12. **Close** — only after verification: `gh issue close N`. Unverified/not-yet-done items remain → keep the
+    issue open with a label (`U3-someday`) whose **exit condition is written in the body** (e.g. "close when secrets set
     & data confirmed"). Never close immediately after merge.
 
 ## Why this is a skill, not just CLAUDE.md
