@@ -38,10 +38,13 @@ const ko = {
 
   // Overview
   'overview.last.updated': '마지막 업데이트',
-  'overview.stats.operational': '서비스 운영 중',
-  'overview.stats.degraded': '부분 영향',
-  'overview.stats.down': '서비스 중단',
+  'overview.stats.operational': '정상',
+  'overview.stats.degraded': '저하',
+  'overview.stats.down': '중단',
   'overview.stats.uptime': '평균 업타임',
+  'overview.stats.operational.sub': '서비스 운영 중',
+  'overview.stats.degraded.sub': '부분 영향',
+  'overview.stats.down.sub': '서비스 중단',
   'overview.filter.all': '전체',
   'overview.filter.operational': '정상',
   'overview.filter.issues': '이슈',
