@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, parseAlertedRoster } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
 import { checkPersistentFetchFailures } from './persistent-failure'
@@ -467,8 +467,14 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // Mistral-only probe cross-validation removed in #373 — same-title incident grouping
   // (src/utils/incidentGrouping.js) now handles auto-monitoring noise uniformly across services.
 
-  // Collect previously alerted IDs from KV for dedup context
-  const alertedNewIds = new Set<string>()
+  // Collect previously alerted IDs from KV for dedup context.
+  // #545: `alerted:new:{incId}` now stores the JSON array of service ids already alerted for that
+  // incident (was the boolean '1'). Read it into incId → Set<svcId> so buildIncidentAlerts can
+  // alert a service that JOINS an already-alerted incident later (e.g. ChatGPT joining a Codex
+  // incident after OpenAI renamed the title). Legacy '1' values auto-migrate: seed the set with
+  // whatever services currently carry the incident (the read loop visits each), which reproduces
+  // the old "whole incident already alerted" behavior → no re-alert storm on deploy.
+  const alertedNewMap = new Map<string, Set<string>>()
   const alertedDownMap = new Map<string, string>()
   const alertedDegradedMap = new Map<string, string>()
   // #283: flap suppression state.
@@ -482,7 +488,13 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     const config = SERVICES.find(c => c.id === svc.id)
     for (const inc of svc.incidents ?? []) {
       const wasAlerted = await env.STATUS_CACHE.get(`alerted:new:${inc.id}`).catch(() => null)
-      if (wasAlerted) alertedNewIds.add(inc.id)
+      if (wasAlerted) {
+        let set = alertedNewMap.get(inc.id)
+        if (!set) { set = new Set<string>(); alertedNewMap.set(inc.id, set) }
+        const { ids, corrupt } = parseAlertedRoster(wasAlerted, svc.id)
+        if (corrupt) console.warn('[cron] #545 corrupt alerted:new roster, treating as legacy:', inc.id, wasAlerted.slice(0, 80))
+        for (const id of ids) set.add(id)
+      }
       if (config && isFlapSuppressible(svc.id, config, inc)) {
         const flapKey = flapSuppressionKey(svc.id, inc)
         const flapActive = await env.STATUS_CACHE.get(flapKey).catch(() => null)
@@ -508,7 +520,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   }
 
   // Build alerts using pure functions
-  const incidentAlerts = buildIncidentAlerts(scored, alertedNewIds, Date.now(), suppressedIncIds)
+  const incidentAlerts = buildIncidentAlerts(scored, alertedNewMap, Date.now(), suppressedIncIds)
   const serviceAlerts = buildServiceAlerts(scored, alertedDownMap, alertedDegradedMap)
   const allAlerts = [...incidentAlerts, ...serviceAlerts]
 
@@ -518,7 +530,12 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   for (const alert of allAlerts) {
     if (seenKeys.has(alert.key)) continue // same incident across shared-status-page services
     const existing = await env.STATUS_CACHE.get(alert.key).catch(() => null)
-    if (existing) continue
+    // #545: for new-incident alerts the per-service dedup already happened in buildIncidentAlerts
+    // (against alertedNewMap, read from this same key) — so if it produced one, there's a genuine
+    // not-yet-alerted joiner. Skipping on key existence here would silently drop that joiner, which
+    // is the exact bug. The roster write below merges the joiner into the stored set. Other alert
+    // kinds keep the simple "key exists → already sent → skip" dedup.
+    if (existing && !alert.key.startsWith('alerted:new:')) continue
     // Anti-flapping: degraded alerts need pending from PREVIOUS cron cycle
     if (alert.key.startsWith('alerted:degraded:')) {
       const svcId = alert.key.replace('alerted:degraded:', '')
@@ -571,7 +588,26 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     const kvValue = isStatusAlert ? new Date().toISOString() : '1'
     // Write dedup keys for all merged alerts (Together AI grouping)
     const keysToWrite = alert._mergedKeys ?? [alert.key]
-    await Promise.all(keysToWrite.map(k => kvPut(env.STATUS_CACHE, k, kvValue, { expirationTtl: ttl })))
+    if (alert.key.startsWith('alerted:new:')) {
+      // #545: store the per-incident roster (svcIds), merging this alert's services into whatever
+      // was already alerted for the incident (in-memory alertedNewMap, read this cycle — no re-read).
+      // So a later joiner is recorded and the NEXT cycle's buildIncidentAlerts skips it. 7d TTL.
+      const newSvcIds = alert.svcIds ?? []
+      // #545: surface a failed roster write. The dedup-bypass below relies on this write to persist
+      // the joiner — if it silently fails, buildIncidentAlerts re-emits the SAME new-incident alert
+      // every cron cycle (operator + all subscribers) until a write lands. (Pre-#545 the `if (existing)
+      // continue` key check was the backstop; the bypass removed it for alerted:new, so this is now
+      // the only thing preventing a 5-min duplicate-alert loop — log loudly so it's diagnosable.)
+      await Promise.all(keysToWrite.map(async k => {
+        const incId = k.slice('alerted:new:'.length)
+        const roster = alertedNewMap.get(incId) ?? new Set<string>()
+        for (const id of newSvcIds) roster.add(id)
+        const ok = await kvPut(env.STATUS_CACHE, k, JSON.stringify([...roster]), { expirationTtl: 604800 })
+        if (!ok) console.error('[cron] #545 alerted:new roster write FAILED — incident will re-alert next cycle:', k)
+      }))
+    } else {
+      await Promise.all(keysToWrite.map(k => kvPut(env.STATUS_CACHE, k, kvValue, { expirationTtl: ttl })))
+    }
     // #283: write flap-suppression key when a flap-candidate *resolved* alert fires
     // (BetterStack emits "— recovered" only on resolved). This marks the end of the
     // first flap cycle and starts a 60-min window that silently drops subsequent
@@ -624,7 +660,12 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     let detectionLeadSection = ''
     if (alert.key.startsWith('alerted:new:')) {
       const incId = alert.key.replace('alerted:new:', '')
-      const svc = scored.find(s => (s.incidents ?? []).some(i => i.id === incId))
+      // #545: scope AI analysis + Detection Lead to the service this alert actually represents
+      // (alert.svcIds[0]) — for a late joiner that's the newly-affected service (e.g. ChatGPT), not
+      // the incident's first service (Codex). Falls back to first-incident-match for older shapes.
+      const primaryId = alert.svcIds?.[0]
+      const svc = (primaryId && scored.find(s => s.id === primaryId))
+        || scored.find(s => (s.incidents ?? []).some(i => i.id === incId))
       const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : null
       if (svc && inc) {
         // AI analysis (8s timeout) — Gemma primary + Sonnet fallback.

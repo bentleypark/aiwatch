@@ -82,7 +82,7 @@ export function svcIdsForAlert(keys: string[], kind: AlertKind, services: Servic
 /** Build a feed entry from a sent operator alert + its final rendered description. Returns null for
  *  alert keys that aren't per-user-relevant (unknown prefix — e.g. operator-only digests). */
 export function buildFeedEntry(
-  alert: { key: string; title: string; color: number; _mergedKeys?: string[] },
+  alert: { key: string; title: string; color: number; _mergedKeys?: string[]; svcIds?: string[] },
   description: string,
   services: ServiceStatus[],
   ts: number = Date.now(),
@@ -92,7 +92,12 @@ export function buildFeedEntry(
   return {
     key: alert.key,
     kind,
-    svcIds: svcIdsForAlert(alert._mergedKeys ?? [alert.key], kind, services),
+    // #545: incident alerts carry `svcIds` — the exact services this alert represents (new-incident:
+    // the not-yet-alerted joiners; resolved: the full affected set) — so the per-user relay targets
+    // only those services, not every service sharing the incidentId. A late joiner thus relays to the
+    // newly-affected service alone, not the ones that already fired. Status alerts have no svcIds →
+    // resolve the key tail the legacy way.
+    svcIds: alert.svcIds ?? svcIdsForAlert(alert._mergedKeys ?? [alert.key], kind, services),
     embed: { title: alert.title, description, color: alert.color },
     ts,
   }

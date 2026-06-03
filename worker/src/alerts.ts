@@ -84,6 +84,12 @@ export interface AlertCandidate {
   url: string
   /** When alerts are merged (e.g., Together AI), contains all original dedup keys */
   _mergedKeys?: string[]
+  /** #545 — the service ids this alert actually represents (the not-yet-alerted joiners for a
+   *  new-incident alert; the affected set for resolved). Lets the dispatcher (a) merge only these
+   *  ids into the per-incident `alerted:new:` roster and (b) scope tweet drafts + the per-user feed
+   *  to them — so a service joining an already-alerted incident doesn't re-draft/re-notify the
+   *  services that already fired. Absent on status alerts (down/degraded/recovered). */
+  svcIds?: string[]
 }
 
 /**
@@ -113,15 +119,40 @@ export interface ScoredService extends ServiceStatus {
 }
 
 /**
+ * #545 — parse a stored `alerted:new:{incId}` KV value into the set of service ids already alerted
+ * for that incident. The value is `JSON.stringify(svcIds)`; the legacy pre-#545 value was the boolean
+ * `'1'`. Both `'1'` and any corrupt / non-array value fall back to `[currentSvcId]` — reproducing the
+ * old "this incident is already alerted" suppression for the service currently visiting the key, so a
+ * malformed value can never cause a re-alert storm (it errs toward suppression, self-heals on the next
+ * clean write). `corrupt` is true only for unparseable / non-array values (NOT for the legacy `'1'`),
+ * so the caller can log a breadcrumb without spamming on every legacy key during migration.
+ */
+export function parseAlertedRoster(raw: string, currentSvcId: string): { ids: string[]; corrupt: boolean } {
+  if (raw === '1') return { ids: [currentSvcId], corrupt: false } // legacy boolean → seed current svc
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return { ids: parsed.map(String), corrupt: false }
+  } catch {
+    // fall through to the corrupt fallback below
+  }
+  return { ids: [currentSvcId], corrupt: true }
+}
+
+/**
  * Build incident alerts (new + resolved) from service data.
  * Does NOT check KV dedup — caller is responsible for filtering already-sent alerts.
- * @param alertedNewIds Set of incident IDs that were previously alerted as new
+ * @param alertedNewMap incidentId → set of service ids already alerted for that incident (#545).
+ *                      A service is included in a new-incident alert only if it is NOT already in
+ *                      its incident's set — so a service joining an already-alerted incident later
+ *                      (e.g. ChatGPT joining a Codex incident after the title was renamed) still
+ *                      gets its own alert. The resolved path fires once per incident that had ANY
+ *                      service alerted (incidentId-level), as before.
  * @param suppressedIncIds Set of incident IDs to silently drop (both new and resolved paths).
  *                        Used by #283 flap suppression to skip a repeat flap within the window.
  */
 export function buildIncidentAlerts(
   services: ScoredService[],
-  alertedNewIds: Set<string>,
+  alertedNewMap: Map<string, Set<string>>,
   now: number = Date.now(),
   suppressedIncIds: Set<string> = new Set(),
 ): AlertCandidate[] {
@@ -135,7 +166,9 @@ export function buildIncidentAlerts(
       const incAge = now - new Date(inc.startedAt).getTime()
       if (incAge > 86_400_000) continue
 
-      if (inc.status !== 'resolved' && !alertedNewIds.has(inc.id)) {
+      // #545: per-service (not per-incident) — only services NOT yet alerted for this incident.
+      // A service joining an already-alerted incident later still produces its own alert.
+      if (inc.status !== 'resolved' && !alertedNewMap.get(inc.id)?.has(svc.id)) {
         const existing = newIncidents.get(inc.id)
         if (existing) {
           if (!existing.names.includes(svc.name)) existing.names.push(svc.name)
@@ -143,7 +176,7 @@ export function buildIncidentAlerts(
         } else {
           newIncidents.set(inc.id, { names: [svc.name], ids: [svc.id], inc, category: svc.category, firstSvc: svc })
         }
-      } else if (inc.status === 'resolved' && alertedNewIds.has(inc.id)) {
+      } else if (inc.status === 'resolved' && alertedNewMap.has(inc.id)) {
         const existing = resolvedIncidents.get(inc.id)
         if (existing) {
           if (!existing.names.includes(svc.name)) existing.names.push(svc.name)
@@ -170,6 +203,7 @@ export function buildIncidentAlerts(
       regionText: buildRegionHint(firstSvc),
       color: 0xED4245,
       url: `https://ai-watch.dev/#${ids[0]}`,
+      svcIds: ids, // #545 — the not-yet-alerted subset (all affected on first fire, only the joiner after)
     })
   }
 
@@ -182,6 +216,7 @@ export function buildIncidentAlerts(
       description: sanitize(inc.title),
       color: 0x57F287,
       url: `https://ai-watch.dev/#${ids[0]}`,
+      svcIds: ids, // #545 — the affected set, so the tweet/relay scope matches this alert
     })
   }
 
@@ -225,6 +260,7 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
       color: 0xED4245,
       url: 'https://ai-watch.dev/#together',
       _mergedKeys: newAlerts.map(a => a.key),
+      svcIds: [...new Set(newAlerts.flatMap(a => a.svcIds ?? []))], // #545 — preserve roster (all 'together')
     })
   } else {
     merged.push(...newAlerts)
@@ -239,6 +275,7 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
       color: 0x57F287,
       url: 'https://ai-watch.dev/#together',
       _mergedKeys: resAlerts.map(a => a.key),
+      svcIds: [...new Set(resAlerts.flatMap(a => a.svcIds ?? []))], // #545 — preserve roster (all 'together')
     })
   } else {
     merged.push(...resAlerts)
@@ -465,8 +502,12 @@ export function buildTweetDrafts(
 ): TweetDraft[] {
   const kind = kindFromKey(alert.key)
   if (!kind) return []
+  // #545: incident alerts carry `svcIds` — the exact services this alert represents (new-incident: the
+  // not-yet-alerted joiners; resolved: the full affected set) — so a service joining an already-alerted
+  // incident later doesn't re-draft the services that already fired. Status alerts have no svcIds →
+  // resolve the key tail (svcId/incId) the legacy way.
   const keys = alert._mergedKeys ?? [alert.key]
-  const svcIds = svcIdsForAlert(keys, kind, services)
+  const svcIds = alert.svcIds ?? svcIdsForAlert(keys, kind, services)
   const drafts: TweetDraft[] = []
   for (const id of svcIds) {
     if (!TWEET_DRAFT_SERVICES[id]) continue // not a Claude/OpenAI-family service in scope

@@ -11,7 +11,7 @@
 | `probe:24h` | `{ snapshots: [{ t, data }] }` JSON | 7d | ~288 | 5-min health check probe results (max 2016, 20 API services) |
 | `probe:daily:{YYYY-MM-DD}` | `{ [svcId]: { p50, p75, p95, min, max, count, spikes } }` JSON | 90d | 1 | Daily probe RTT summary for monthly reports |
 | `probe:summaries` | `[svcId, ProbeSummary][]` JSON | 80min | ~48 | Cron-cached 7-day probe summaries (p50, p95, cvCombined, validDays); refreshed every 30min via in-memory slot guard, TTL covers up to 2 missed 30-min refresh cycles |
-| `alerted:new:{incId}` | `"1"` | 7d | ~5 | Incident alert dedup |
+| `alerted:new:{incId}` | `JSON.stringify(svcIds)` (e.g. `["codex","chatgpt"]`); legacy `"1"` auto-migrated | 7d | ~5 | Incident alert dedup — now the **per-service roster** already alerted for the incident (#545). A service that JOINS a multi-service incident after the first alert fired (e.g. ChatGPT joining a Codex incident after OpenAI renamed the title) is alerted only if NOT in this set, then merged in. Read via `parseAlertedRoster` (legacy `"1"` → seed with the currently-matching service, no re-alert storm on deploy). The cron's dedup loop bypasses the key-exists skip for `alerted:new:` (per-service dedup already happened in `buildIncidentAlerts`); a failed roster write is logged loudly since it would re-fire the alert next cycle |
 | `alerted:res:{incId}` | `"1"` | 7d | ~2 | Resolved incident alert dedup |
 | `alerted:down:{svcId}` | ISO timestamp | 2h | ~2 | Service down alert dedup + recovery duration |
 | `alerted:degraded:{svcId}` | ISO timestamp | 2h | ~2 | Service degraded alert dedup |
