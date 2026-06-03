@@ -1,6 +1,6 @@
 // #348 — outage-tweet draft attached to operator Discord alerts for the Claude/OpenAI family.
 import { describe, it, expect } from 'vitest'
-import { buildTweetDraft, buildTweetDrafts, appendTweetDraftSection, defuseDiscordAutolink, DISCORD_EMBED_DESC_MAX } from '../alerts'
+import { buildTweetDraft, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, DISCORD_EMBED_DESC_MAX } from '../alerts'
 import type { AlertCandidate, ScoredService, TweetDraft } from '../alerts'
 
 const X_INTENT = 'https://twitter.com/intent/tweet?text='
@@ -41,20 +41,20 @@ describe('buildTweetDraft', () => {
     })
     const draft = buildTweetDraft(alert(), [svc])
     expect(draft).not.toBeNull()
-    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: API returning 500s. Live status → https://ai-watch.dev/is-claude-down')
+    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: API returning 500s. Live status → https://ai-watch.dev/is-claude-down?e=down')
     expect(draft!.intentUrl).toBe(X_INTENT + encodeURIComponent(draft!.text))
   })
 
   it('falls back to status phrasing for a status-only down alert (no incident)', () => {
     const svc = mockService({ id: 'openai', name: 'OpenAI API', provider: 'OpenAI', status: 'down' })
     const draft = buildTweetDraft(alert({ key: 'alerted:down:openai', title: '🔴 OpenAI API — Service Down' }), [svc])
-    expect(draft!.text).toBe('🔴 OpenAI API is reporting an outage. Live status → https://ai-watch.dev/is-openai-down')
+    expect(draft!.text).toBe('🔴 OpenAI API is reporting an outage. Live status → https://ai-watch.dev/is-openai-down?e=down')
   })
 
   it('uses "degraded performance" for a degraded status alert', () => {
     const svc = mockService({ id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', status: 'degraded' })
     const draft = buildTweetDraft(alert({ key: 'alerted:degraded:chatgpt', title: '🟠 ChatGPT — Partially Degraded' }), [svc])
-    expect(draft!.text).toBe('🔴 ChatGPT is reporting degraded performance. Live status → https://ai-watch.dev/is-chatgpt-down')
+    expect(draft!.text).toBe('🔴 ChatGPT is reporting degraded performance. Live status → https://ai-watch.dev/is-chatgpt-down?e=degraded')
   })
 
   it('maps minor incident impact to "degraded performance"', () => {
@@ -63,7 +63,7 @@ describe('buildTweetDraft', () => {
       incidents: [{ id: 'inc1', title: 'Slow responses', status: 'investigating', startedAt: new Date().toISOString(), impact: 'minor' } as any],
     })
     const draft = buildTweetDraft(alert(), [svc])
-    expect(draft!.text).toBe('🔴 Claude API is reporting degraded performance: Slow responses. Live status → https://ai-watch.dev/is-claude-down')
+    expect(draft!.text).toBe('🔴 Claude API is reporting degraded performance: Slow responses. Live status → https://ai-watch.dev/is-claude-down?e=degraded')
   })
 
   it('builds a recovery draft with duration parsed from the resolved title (claude.ai slug)', () => {
@@ -72,19 +72,19 @@ describe('buildTweetDraft', () => {
       incidents: [{ id: 'incX', title: 'Resolved', status: 'resolved', startedAt: new Date().toISOString(), duration: '1h 20m', impact: 'major' } as any],
     })
     const draft = buildTweetDraft(alert({ key: 'alerted:res:incX', title: '🟢 claude.ai — Incident Resolved (1h 20m)' }), [svc])
-    expect(draft!.text).toBe('🟢 claude.ai recovered after 1h 20m. Live status → https://ai-watch.dev/is-claude-ai-down')
+    expect(draft!.text).toBe('🟢 claude ai recovered after 1h 20m. Live status → https://ai-watch.dev/is-claude-ai-down?e=resolved')
   })
 
   it('builds a recovery draft from a service-recovered status alert', () => {
     const svc = mockService({ status: 'operational' })
     const draft = buildTweetDraft(alert({ key: 'alerted:recovered:claude', title: '🟢 Claude API — Service Recovered (45m)' }), [svc])
-    expect(draft!.text).toBe('🟢 Claude API recovered after 45m. Live status → https://ai-watch.dev/is-claude-down')
+    expect(draft!.text).toBe('🟢 Claude API recovered after 45m. Live status → https://ai-watch.dev/is-claude-down?e=resolved')
   })
 
   it('omits duration when the recovery title has none', () => {
     const svc = mockService({ status: 'operational' })
     const draft = buildTweetDraft(alert({ key: 'alerted:recovered:claude', title: '🟢 Claude API — Service Recovered' }), [svc])
-    expect(draft!.text).toBe('🟢 Claude API has recovered. Live status → https://ai-watch.dev/is-claude-down')
+    expect(draft!.text).toBe('🟢 Claude API has recovered. Live status → https://ai-watch.dev/is-claude-down?e=resolved')
   })
 
   it('resolves the claudecode → claude-code slug and maps critical impact to "a major outage"', () => {
@@ -93,7 +93,7 @@ describe('buildTweetDraft', () => {
       incidents: [{ id: 'inc1', title: 'CLI down', status: 'investigating', startedAt: new Date().toISOString(), impact: 'critical' } as any],
     })
     const draft = buildTweetDraft(alert(), [svc])
-    expect(draft!.text).toBe('🔴 Claude Code is reporting a major outage: CLI down. Live status → https://ai-watch.dev/is-claude-code-down')
+    expect(draft!.text).toBe('🔴 Claude Code is reporting a major outage: CLI down. Live status → https://ai-watch.dev/is-claude-code-down?e=down')
   })
 
   it('skips a non-target sibling and resolves the in-scope service in a shared-incident group', () => {
@@ -103,7 +103,7 @@ describe('buildTweetDraft', () => {
     const gemini = mockService({ id: 'gemini', name: 'Gemini API', provider: 'Google', status: 'down', incidents: [inc] })
     const claude = mockService({ status: 'down', incidents: [inc] })
     const draft = buildTweetDraft(alert(), [gemini, claude])
-    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: Shared multi-provider outage. Live status → https://ai-watch.dev/is-claude-down')
+    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: Shared multi-provider outage. Live status → https://ai-watch.dev/is-claude-down?e=down')
   })
 
   it('consults _mergedKeys when resolving the covered service', () => {
@@ -113,7 +113,7 @@ describe('buildTweetDraft', () => {
       incidents: [{ id: 'incA', title: 'Merged incident', status: 'investigating', startedAt: new Date().toISOString(), impact: 'major' } as any],
     })
     const draft = buildTweetDraft(alert({ key: 'alerted:new:incA', _mergedKeys: ['alerted:new:incA', 'alerted:new:incB'] }), [svc])
-    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: Merged incident. Live status → https://ai-watch.dev/is-claude-down')
+    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: Merged incident. Live status → https://ai-watch.dev/is-claude-down?e=down')
   })
 
   it('returns null for a non-target service', () => {
@@ -164,7 +164,7 @@ describe('buildTweetDrafts (#521 — operator picks the surface)', () => {
     expect(drafts.map((d) => d.serviceId)).toEqual(['claude', 'claudeai', 'claudecode'])
     expect(drafts[0].text).toContain('Claude API')
     expect(drafts[0].intentUrl).toContain(encodeURIComponent('https://ai-watch.dev/is-claude-down'))
-    expect(drafts[1].text).toContain('claude.ai')
+    expect(drafts[1].text).toContain('claude ai') // #539: brand defused in tweet text
     expect(drafts[1].intentUrl).toContain(encodeURIComponent('https://ai-watch.dev/is-claude-ai-down'))
     expect(drafts[2].text).toContain('Claude Code')
     expect(drafts[2].intentUrl).toContain(encodeURIComponent('https://ai-watch.dev/is-claude-code-down'))
@@ -194,8 +194,8 @@ describe('buildTweetDrafts (#521 — operator picks the surface)', () => {
   it('builds recovery drafts per surface for a resolved multi-surface incident', () => {
     const drafts = buildTweetDrafts(alert({ key: 'alerted:res:opus47', title: '🟢 Claude API — Incident Resolved (34m)' }), anthropic)
     expect(drafts).toHaveLength(3)
-    expect(drafts[0].text).toBe('🟢 Claude API recovered after 34m. Live status → https://ai-watch.dev/is-claude-down')
-    expect(drafts[1].text).toContain('🟢 claude.ai recovered after 34m')
+    expect(drafts[0].text).toBe('🟢 Claude API recovered after 34m. Live status → https://ai-watch.dev/is-claude-down?e=resolved')
+    expect(drafts[1].text).toContain('🟢 claude ai recovered after 34m') // #539: brand defused
   })
 })
 
@@ -228,9 +228,10 @@ describe('appendTweetDraftSection (#521 — Discord 4096 length guard)', () => {
     expect(out).not.toContain('> 🔴') // no blockquote preview in the multi case
   })
 
-  // #535 — Discord auto-unfurls a thumbnail for the bare "claude.ai" domain in the embed
-  // description. The visible tweet-draft text must render it as "claude ai", while the X intent
-  // URL keeps the real branded "claude.ai" tweet text.
+  // #535 — appendTweetDraftSection defuses the bare "claude.ai" in the VISIBLE blockquote/label so
+  // Discord doesn't unfurl a thumbnail; it passes the intentUrl through verbatim (does not rewrite
+  // it). These use SYNTHETIC drafts to test that isolation. (Real drafts from buildTweetForService
+  // now also defuse the tweet text + intentUrl upstream — see the #539 block below.)
   describe('claude.ai thumbnail defuse (#535)', () => {
     const claudeaiText =
       '🔴 claude.ai is reporting a major outage: Opus 4.7 elevated errors. Live status → https://ai-watch.dev/is-claude-ai-down'
@@ -249,10 +250,9 @@ describe('appendTweetDraftSection (#521 — Discord 4096 length guard)', () => {
       expect(blockquote).not.toContain('claude.ai')
     })
 
-    it('keeps the real "claude.ai" brand in the X intent URL (tweet stays branded)', () => {
+    it('passes the intentUrl through verbatim (does not rewrite the link target)', () => {
       const out = appendTweetDraftSection('desc', [claudeaiDraft], DIV)
-      expect(out).toContain(claudeaiDraft.intentUrl) // intent URL embedded verbatim
-      expect(claudeaiDraft.intentUrl).toContain('claude.ai') // encodeURIComponent leaves the dot → still branded
+      expect(out).toContain(claudeaiDraft.intentUrl) // intent URL embedded verbatim, untouched
     })
 
     it('multi draft: per-service label is defused to "claude ai"', () => {
@@ -307,28 +307,56 @@ describe('appendTweetDraftSection (#521 — Discord 4096 length guard)', () => {
 // #535 — the operator send (index.ts) applies this to the embed title + the main description
 // (before the tweet draft is appended) so Discord doesn't unfurl a "claude.ai" thumbnail anywhere
 // in the operator embed, while the X intent-URL tweet text stays branded.
-describe('defuseDiscordAutolink (#535)', () => {
+describe('defuseAutolinkDomain (#535)', () => {
   it('replaces the bare "claude.ai" domain with "claude ai"', () => {
-    expect(defuseDiscordAutolink('🔴 claude.ai — Service Down')).toBe('🔴 claude ai — Service Down')
-    expect(defuseDiscordAutolink('**claude.ai** (Anthropic)')).toBe('**claude ai** (Anthropic)')
+    expect(defuseAutolinkDomain('🔴 claude.ai — Service Down')).toBe('🔴 claude ai — Service Down')
+    expect(defuseAutolinkDomain('**claude.ai** (Anthropic)')).toBe('**claude ai** (Anthropic)')
   })
 
   it('is case-insensitive and global (incident titles may carry mixed case / repeats)', () => {
-    expect(defuseDiscordAutolink('Claude.AI and claude.ai degraded')).toBe('claude ai and claude ai degraded')
+    expect(defuseAutolinkDomain('Claude.AI and claude.ai degraded')).toBe('claude ai and claude ai degraded')
   })
 
   it('does NOT touch the is-claude-ai-down slug (hyphen, not a dot)', () => {
     const s = 'Live status → https://ai-watch.dev/is-claude-ai-down'
-    expect(defuseDiscordAutolink(s)).toBe(s)
+    expect(defuseAutolinkDomain(s)).toBe(s)
   })
 
   it('leaves other dotted brands alone (only claude.ai is in scope)', () => {
-    expect(defuseDiscordAutolink('Character.AI is fine')).toBe('Character.AI is fine')
-    expect(defuseDiscordAutolink('ai-watch.dev unaffected')).toBe('ai-watch.dev unaffected')
+    expect(defuseAutolinkDomain('Character.AI is fine')).toBe('Character.AI is fine')
+    expect(defuseAutolinkDomain('ai-watch.dev unaffected')).toBe('ai-watch.dev unaffected')
   })
 
   it('is idempotent (re-applying does nothing)', () => {
-    const once = defuseDiscordAutolink('claude.ai down')
-    expect(defuseDiscordAutolink(once)).toBe(once)
+    const once = defuseAutolinkDomain('claude.ai down')
+    expect(defuseAutolinkDomain(once)).toBe(once)
+  })
+})
+
+// #539 — the tweet draft is pasted into Slack/Reddit/X, so (1) the brand is defused in the tweet
+// TEXT + intentUrl (not just the Discord preview), and (2) the is-X-down link carries a status hint
+// so a recovery share is a DISTINCT URL from the outage share → platforms re-unfurl a fresh OG card.
+describe('buildTweetForService brand defuse + status hint (#539)', () => {
+  it('defuses claude.ai in the recovery tweet text AND the intent URL', () => {
+    const svc = mockService({
+      id: 'claudeai', name: 'claude.ai', category: 'app',
+      incidents: [{ id: 'incX', title: 'Resolved', status: 'resolved', startedAt: new Date().toISOString(), duration: '1h 20m', impact: 'major' } as any],
+    })
+    const draft = buildTweetDraft(alert({ key: 'alerted:res:incX', title: '🟢 claude.ai — Incident Resolved (1h 20m)' }), [svc])!
+    expect(draft.text).not.toContain('claude.ai')      // brand defused everywhere in the text
+    expect(draft.text).toContain('claude ai')
+    expect(decodeURIComponent(draft.intentUrl)).not.toContain('claude.ai') // intent URL no longer branded
+  })
+
+  it('appends ?e=resolved on recovery and ?e=<status> on outage (distinct URLs)', () => {
+    const recSvc = mockService({ status: 'operational' })
+    const rec = buildTweetDraft(alert({ key: 'alerted:recovered:claude', title: '🟢 Claude API — Service Recovered (45m)' }), [recSvc])!
+    expect(rec.text).toContain('is-claude-down?e=resolved')
+
+    const downSvc = mockService({ status: 'down', incidents: [{ id: 'inc1', title: 'down', status: 'investigating', startedAt: new Date().toISOString(), impact: 'major' } as any] })
+    const down = buildTweetDraft(alert(), [downSvc])!
+    expect(down.text).toContain('is-claude-down?e=down')
+    // the two transitions yield different URLs → fresh unfurl
+    expect(rec.text).not.toBe(down.text)
   })
 })

@@ -318,12 +318,12 @@ describe('isValidFeedSegment', () => {
 describe('buildRssFeed — item link', () => {
   it('links to the /is-{id}-down SEO page for identity-slug services', () => {
     const xml = buildRssFeed([service({ id: 'openai', incidents: [incident()] })], { scope: 'all' }, NOW)
-    expect(xml).toContain('<link>https://ai-watch.dev/is-openai-down</link>')
+    expect(xml).toContain('<link>https://ai-watch.dev/is-openai-down?e=active</link>') // #539 status hint
   })
 
   it('applies the slug override for dash-dropped service IDs', () => {
     const xml = buildRssFeed([service({ id: 'claudecode', name: 'Claude Code', incidents: [incident()] })], { scope: 'all' }, NOW)
-    expect(xml).toContain('<link>https://ai-watch.dev/is-claude-code-down</link>')
+    expect(xml).toContain('<link>https://ai-watch.dev/is-claude-code-down?e=active</link>') // #539 status hint
   })
 
   it('falls back to the dashboard hash route for services with no is-down page', () => {
@@ -414,7 +414,7 @@ describe('buildRssFeed — shared incident (per-surface providers)', () => {
     expect((xml.match(/<item>/g) ?? []).length).toBe(1)
     // Primary = first in SERVICES order (Claude API); its "Also affecting" names the rest
     expect(xml).toContain('🔴 Claude API: Elevated errors') // default incident impact 'major' → 🔴
-    expect(xml).toContain('Also affecting: claude.ai, Claude Code')
+    expect(xml).toContain('Also affecting: claude ai, Claude Code') // #539 brand defused
     // The other surfaces' items (and their inverse "Also affecting" lines) are gone
     expect(xml).not.toContain('Also affecting: Claude API, Claude Code')
     expect(xml).not.toContain('Also affecting: Claude API, claude.ai')
@@ -435,7 +435,7 @@ describe('buildRssFeed — shared incident (per-surface providers)', () => {
 
   it('keeps the note + single item in a service-scoped feed using the full service list', () => {
     const xml = buildRssFeed(anthropic, { scope: 'service', service: anthropic[0] }, NOW)
-    expect(xml).toContain('Also affecting: claude.ai, Claude Code')
+    expect(xml).toContain('Also affecting: claude ai, Claude Code') // #539 brand defused
     expect((xml.match(/<item>/g) ?? []).length).toBe(1)
   })
 
