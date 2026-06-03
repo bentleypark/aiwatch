@@ -130,16 +130,29 @@ export function tierLabelFor(tier) {
 }
 
 /**
+ * Whether a service has an unresolved incident (investigating/identified/monitoring — anything not
+ * 'resolved'). A service can be `status: 'operational'` while carrying such an incident (the phase
+ * hasn't flipped its status, or the impact is minor), and recommending it as a healthy fallback is
+ * misleading — the Overview banner shows it as an active incident on the same screen (#550).
+ * @param {object} s - Service (needs .incidents)
+ * @returns {boolean}
+ */
+export function hasActiveIncident(s) {
+  return (s?.incidents ?? []).some(i => i.status !== 'resolved')
+}
+
+/**
  * Get top 2 fallback recommendations for a service, sorted by tier proximity + AIWatch Score.
+ * A candidate must be genuinely clean: operational AND no unresolved incident (#550).
  * @param {object} service - Source service (needs .id, .category)
- * @param {object[]} allServices - All services (needs .id, .category, .status, .aiwatchScore)
+ * @param {object[]} allServices - All services (needs .id, .category, .status, .incidents, .aiwatchScore)
  * @returns {{ id: string, name: string, aiwatchScore: number | null }[]}
  */
 export function getFallbacks(service, allServices) {
   if (!service || !Array.isArray(allServices) || EXCLUDE_FALLBACK.includes(service.id)) return []
   const sourceTier = tierFor(service.id)
   return allServices
-    .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational' && !EXCLUDE_FALLBACK.includes(s.id))
+    .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational' && !hasActiveIncident(s) && !EXCLUDE_FALLBACK.includes(s.id))
     .sort((a, b) => {
       const distA = Math.abs(tierFor(a.id) - sourceTier)
       const distB = Math.abs(tierFor(b.id) - sourceTier)
@@ -174,9 +187,9 @@ const CATEGORY_LABEL = { api: 'API', app: 'AI Apps', agent: 'Coding' }
  */
 export function getGroupedFallbacks(affected, allServices) {
   if (!Array.isArray(affected) || !Array.isArray(allServices)) return []
-  // Defensive: getFallbacks already filters to operational candidates, so this set
-  // currently never drops anything — kept as a guard in case that contract changes.
-  const nonOperationalIds = new Set(allServices.filter(s => s.status !== 'operational').map(s => s.id))
+  // Defensive: getFallbacks already excludes non-operational AND active-incident candidates (#550),
+  // so this set currently never drops anything — kept as a guard in case that contract changes.
+  const nonOperationalIds = new Set(allServices.filter(s => s.status !== 'operational' || hasActiveIncident(s)).map(s => s.id))
   const affectedProviders = new Set(affected.map(s => s.provider).filter(Boolean))
   const eligibleAffected = affected.filter(a => !EXCLUDE_FALLBACK.includes(a.id))
   const numGroups = new Set(eligibleAffected.map(a => {

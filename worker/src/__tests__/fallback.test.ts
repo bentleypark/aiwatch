@@ -35,6 +35,24 @@ describe('getFallbacks', () => {
     expect(result.find(f => f.name === 'OpenAI API')).toBeUndefined()
   })
 
+  it('#550 — excludes an operational candidate with ANY unresolved incident phase', () => {
+    // Each top-score T2 peer is operational but carries an active incident in a different phase
+    // (investigating/identified/monitoring) — all three phases must disqualify (the rule is "any
+    // status !== 'resolved'"). together's only incident is resolved, so it stays eligible.
+    const services = [
+      { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 76 },
+      { id: 'groq', category: 'api', name: 'Groq Cloud', status: 'operational', aiwatchScore: 93, incidents: [{ status: 'investigating' }] },
+      { id: 'cohere', category: 'api', name: 'Cohere API', status: 'operational', aiwatchScore: 92, incidents: [{ status: 'identified' }] },
+      { id: 'fireworks', category: 'api', name: 'Fireworks AI', status: 'operational', aiwatchScore: 91, incidents: [{ status: 'monitoring' }] },
+      { id: 'together', category: 'api', name: 'Together AI', status: 'operational', aiwatchScore: 89, incidents: [{ status: 'resolved' }] },
+    ]
+    const result = getFallbacks('mistral', 'api', services)
+    expect(result.find(f => f.name === 'Groq Cloud')).toBeUndefined()    // investigating → dropped
+    expect(result.find(f => f.name === 'Cohere API')).toBeUndefined()    // identified → dropped
+    expect(result.find(f => f.name === 'Fireworks AI')).toBeUndefined()  // monitoring → dropped
+    expect(result.find(f => f.name === 'Together AI')).toBeDefined()     // only a resolved incident → eligible
+  })
+
   it('returns empty for EXCLUDE_FALLBACK services', () => {
     expect(getFallbacks('replicate', 'api', mockServices)).toEqual([])
     expect(getFallbacks('huggingface', 'api', mockServices)).toEqual([])
