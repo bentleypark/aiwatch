@@ -19,7 +19,7 @@
     "dev:worker": "npx wrangler dev --config worker/wrangler.toml --port 8788",
     "dev:all": "npx wrangler dev --config worker/wrangler.toml --port 8788 & vite",
     "test:src": "npx vitest run --config vitest.config.js",
-    "test:scripts": "node --test \"scripts/*.test.mjs\"",
+    "test:scripts": "node --test scripts/*.test.mjs",
     "hook-audit": "node scripts/hook-audit-summary.mjs"
   },
   "dependencies": {
