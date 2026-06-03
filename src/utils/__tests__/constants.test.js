@@ -3,7 +3,7 @@
 // because the worker can't import frontend code at runtime.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getGroupedFallbacks, shouldShowFallback } from '../constants'
+import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFallbacks, shouldShowFallback, hasActiveIncident } from '../constants'
 
 describe('tierFor (#403 frontend warn-once helper)', () => {
   let warnSpy
@@ -154,6 +154,50 @@ describe('getGroupedFallbacks (#445 multi-category incident alternatives)', () =
   it('returns [] for invalid inputs', () => {
     expect(getGroupedFallbacks(null, all)).toEqual([])
     expect(getGroupedFallbacks(affected, null)).toEqual([])
+  })
+})
+
+describe('hasActiveIncident / getFallbacks active-incident exclusion (#550)', () => {
+  const op = (id, category, aiwatchScore, extra = {}) => ({ id, category, aiwatchScore, status: 'operational', incidents: [], ...extra })
+  const inc = (status) => ({ id: `${status}-inc`, status })
+
+  it('hasActiveIncident is true for any unresolved incident, false otherwise', () => {
+    expect(hasActiveIncident({ incidents: [inc('investigating')] })).toBe(true)
+    expect(hasActiveIncident({ incidents: [inc('identified')] })).toBe(true)
+    expect(hasActiveIncident({ incidents: [inc('monitoring')] })).toBe(true)
+    expect(hasActiveIncident({ incidents: [inc('resolved')] })).toBe(false)
+    expect(hasActiveIncident({ incidents: [] })).toBe(false)
+    expect(hasActiveIncident({})).toBe(false)
+  })
+
+  it('excludes an operational candidate that has an unresolved incident', () => {
+    // The screenshot case: Claude Code degraded; Codex is operational but "investigating" an incident.
+    const source = { id: 'claudecode', category: 'agent', status: 'degraded', incidents: [inc('investigating')] }
+    const codexInvestigating = op('codex', 'agent', 89, { incidents: [inc('investigating')] })
+    const windsurf = op('windsurf', 'agent', 92)
+    const ids = getFallbacks(source, [source, codexInvestigating, windsurf]).map(f => f.id)
+    expect(ids).not.toContain('codex')   // active incident → not a healthy fallback
+    expect(ids).toContain('windsurf')
+  })
+
+  it('still recommends a candidate whose only incident is resolved', () => {
+    const source = { id: 'claudecode', category: 'agent', status: 'degraded', incidents: [inc('investigating')] }
+    const codexResolved = op('codex', 'agent', 89, { incidents: [inc('resolved')] })
+    const ids = getFallbacks(source, [source, codexResolved]).map(f => f.id)
+    expect(ids).toContain('codex')
+  })
+
+  it('getGroupedFallbacks drops an operational-but-active-incident candidate', () => {
+    const affected = [{ id: 'claudecode', category: 'agent', provider: 'Anthropic', status: 'degraded', incidents: [inc('investigating')] }]
+    const pool = [
+      ...affected,
+      op('codex', 'agent', 89, { provider: 'OpenAI', incidents: [inc('investigating')] }),
+      op('windsurf', 'agent', 92, { provider: 'Windsurf' }),
+    ]
+    const groups = getGroupedFallbacks(affected, pool)
+    const agentItems = (groups.find(g => g.category === 'agent')?.items ?? []).map(i => i.id)
+    expect(agentItems).not.toContain('codex')
+    expect(agentItems).toContain('windsurf')
   })
 })
 

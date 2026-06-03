@@ -185,7 +185,10 @@ export default async function handler(req: Request) {
         if (!EXCLUDE_FALLBACK.includes(entry.id)) {
           const sourceTier = tierFor(entry.id)
           fallbacks = allServices
-            .filter(s => s.category === entry.category && s.id !== entry.id && s.status === 'operational' && !EXCLUDE_FALLBACK.includes(s.id))
+            // #550 — exclude candidates with an unresolved incident even if status is still 'operational'.
+            .filter(s => s.category === entry.category && s.id !== entry.id && s.status === 'operational'
+              && !(s.incidents ?? []).some(i => (i as { status?: string }).status !== 'resolved')
+              && !EXCLUDE_FALLBACK.includes(s.id))
             .sort((a, b) => {
               const distA = Math.abs(tierFor(a.id) - sourceTier)
               const distB = Math.abs(tierFor(b.id) - sourceTier)
