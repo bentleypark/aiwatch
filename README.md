@@ -297,7 +297,7 @@ Embed real-time status badges in your README, docs, or blog.
 
 ## Claude Code Statusline Integration
 
-Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and 29 more — directly in your [Claude Code statusline](https://docs.claude.com/en/docs/claude-code/statusline). Output stays empty while every service is operational; degraded/down services appear with a red indicator so upstream issues are visually distinct from local ones.
+Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and 29 more — directly in your [Claude Code statusline](https://docs.claude.com/en/docs/claude-code/statusline). The recommended preset keeps an always-on, clickable **AIWatch** label (`AIWatch 🟢` while all healthy, `AIWatch 🔴 Claude API` when something breaks — cmd/ctrl+click opens the dashboard). Prefer zero footprint when healthy? A minimalist preset that stays empty until something degrades is on the [presets page](https://ai-watch.dev/#statusline).
 
 Quickest install — add to `~/.claude/settings.json`:
 
@@ -305,12 +305,14 @@ Quickest install — add to `~/.claude/settings.json`:
 {
   "statusLine": {
     "type": "command",
-    "command": "( curl -sf --max-time 2 https://ai-watch.dev/api/status/cached?src=statusline-degraded_only | jq -r '[.services[] | select(.status != \"operational\") | \"🔴 \" + .name] | .[0:3] | join(\" \")' ) 2>/dev/null || true"
+    "command": "( curl -sf --max-time 2 https://aiwatch-worker.p2c2kbf.workers.dev/api/status/cached?src=statusline-branded | jq -r '([.services[] | select(.status != \"operational\")]) as $d | \"\\u001b]8;;https://ai-watch.dev\\u001b\\\\AIWatch\\u001b]8;;\\u001b\\\\ \" + (if ($d | length) == 0 then \"🟢\" else ([$d[] | \"🔴 \" + .name] | .[0:3] | join(\" \")) end)' ) 2>/dev/null || true"
   }
 }
 ```
 
-Full guide with presets (compact badge, full list, scoped to specific providers, Powerline-friendly): **[ai-watch.dev/#statusline](https://ai-watch.dev/#statusline)**
+> Requires an OSC 8-compatible terminal (iTerm2, Warp, kitty, WezTerm, VS Code terminal, Terminal.app on macOS 12+) for the clickable label; others show it as plain text. Targets the Worker domain directly so per-prompt polls don't count as Vercel bandwidth.
+
+Other presets — **minimalist** (empty when healthy), compact badge, full list, scoped to specific providers, and clickable per-service links: **[ai-watch.dev/#statusline](https://ai-watch.dev/#statusline)**
 
 Properties: single GET per render, 5-min KV-cached on Cloudflare's edge, 2-second timeout, fail-silent on network error, no Anthropic API requests, no client identifier. The `?src=statusline-<preset>` query tag just lets us split statusline traffic from regular cached-endpoint hits in request logs — Worker matches on path only, so it doesn't affect caching or freshness, and carries no user identifier. Compatible with any statusline tool that supports shell-command output (including `ccstatusline`'s Custom Command widget).
 
