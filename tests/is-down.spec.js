@@ -68,7 +68,7 @@ test.describe('Is X Down? SSR pages', () => {
       test(`has CTA alert banner`, async ({ page: p }) => {
         await p.goto(`/is-${page.slug}-down`, { waitUntil: 'domcontentloaded' })
         await expect(p.locator('.cta')).toBeVisible()
-        await expect(p.locator('.cta a.btn-primary')).toHaveAttribute('href', 'https://ai-watch.dev/#settings')
+        await expect(p.locator('.cta a.btn-primary')).toHaveAttribute('href', 'https://ai-watch.dev/#settings?focus=alerts')
       })
 
       test(`has GA4 tag`, async ({ page: p }) => {
@@ -329,16 +329,16 @@ test.describe('Is X Down? SSR pages', () => {
       // fall back to any is-down page — we check the copy's shape, not the status.
       await page.goto('/is-chatgpt-down', { waitUntil: 'domcontentloaded' })
       const ctaText = await page.locator('.cta').textContent()
-      // Accept either down-state copy (benefit-framed, 1-min framing) or
-      // operational copy ("Get notified when X goes down") — both are acceptable.
-      const isDownCopy = /Get notified when it recovers.*takes 1 minute/i.test(ctaText || '')
+      // Accept either down-state copy (#546: "<svc> is down/having issues right now.
+      // Get notified when it recovers.") or operational copy ("Get notified when X
+      // goes down") — both are acceptable; we check shape, not the live status.
+      const isDownCopy = /is (down|having issues) right now\.\s*Get notified when it recovers/i.test(ctaText || '')
       const isOperationalCopy = /Get notified when .* goes down/i.test(ctaText || '')
       expect(isDownCopy || isOperationalCopy).toBe(true)
 
-      // Button label must never regress to the old generic "Set Up Alerts"
-      // when the service is in a down/degraded state.
+      // Button label: outage state → "Notify Me When Fixed" (#546); operational → "Set Up Alerts".
       const btnText = (await page.locator('.cta a.btn-primary').textContent()) || ''
-      expect(btnText.trim()).toMatch(/^(Get Alerts When Fixed|Set Up Alerts)/)
+      expect(btnText.trim()).toMatch(/^(Notify Me When Fixed|Set Up Alerts)/)
     })
   })
 })
