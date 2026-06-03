@@ -95,6 +95,22 @@ describe('buildFeedEntry', () => {
   it('returns null for an unknown (operator-only) alert key', () => {
     expect(buildFeedEntry({ key: 'alert:count:x', title: 't', color: 1 }, 'd', [])).toBeNull()
   })
+
+  it('#545 — prefers alert.svcIds over re-deriving the full incident roster', () => {
+    // Late joiner: codex + chatgpt share inc 'oai-multi', but this alert represents only the joiner
+    // (chatgpt). Without the alert.svcIds preference, svcIdsForAlert would return BOTH → the per-user
+    // relay would re-notify codex, which already fired (the #545 bug).
+    const services = [svc('codex', ['oai-multi']), svc('chatgpt', ['oai-multi'])]
+    const entry = buildFeedEntry(
+      { key: 'alerted:new:oai-multi', title: '🔴 ChatGPT — New Incident', color: 0xED4245, svcIds: ['chatgpt'] },
+      'errors',
+      services,
+      2000,
+    )
+    expect(entry?.svcIds).toEqual(['chatgpt'])
+    // Sanity: the legacy derivation WOULD have returned both — proving the preference matters here.
+    expect(svcIdsForAlert(['alerted:new:oai-multi'], 'new', services).sort()).toEqual(['chatgpt', 'codex'])
+  })
 })
 
 describe('appendAlertFeed + readAlertFeed', () => {

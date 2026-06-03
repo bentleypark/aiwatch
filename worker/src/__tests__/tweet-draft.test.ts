@@ -197,6 +197,15 @@ describe('buildTweetDrafts (#521 — operator picks the surface)', () => {
     expect(drafts[0].text).toBe('🟢 Claude API recovered after 34m. Live status → https://ai-watch.dev/is-claude-down?e=resolved')
     expect(drafts[1].text).toContain('🟢 claude ai recovered after 34m') // #539: brand defused
   })
+
+  it('#545 — scopes drafts to alert.svcIds (the joiner), not every service sharing the incidentId', () => {
+    // The alert represents only the late joiner (claudecode); the other two surfaces already fired.
+    // Without the alert.svcIds preference, all three would be re-drafted (the #545 bug).
+    const drafts = buildTweetDrafts(alert({ key: 'alerted:new:opus47', svcIds: ['claudecode'] }), anthropic)
+    expect(drafts.map((d) => d.serviceId)).toEqual(['claudecode'])
+    // Sanity: without svcIds the same alert+services would draft all three.
+    expect(buildTweetDrafts(alert({ key: 'alerted:new:opus47' }), anthropic)).toHaveLength(3)
+  })
 })
 
 describe('appendTweetDraftSection (#521 — Discord 4096 length guard)', () => {

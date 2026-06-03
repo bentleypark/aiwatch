@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, buildRegionHint } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, buildRegionHint, parseAlertedRoster } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
 
@@ -24,12 +24,18 @@ function mockService(overrides: Partial<ScoredService> = {}): ScoredService {
   } as ScoredService
 }
 
+// #545: buildIncidentAlerts now takes incidentId → Set<already-alerted svcId> (was Set<incId>).
+// This helper builds that map from { incId: [svcIds] } pairs; alertedMap() is the empty case.
+function alertedMap(entries: Record<string, string[]> = {}): Map<string, Set<string>> {
+  return new Map(Object.entries(entries).map(([incId, ids]) => [incId, new Set(ids)]))
+}
+
 describe('buildIncidentAlerts', () => {
   it('creates new incident alert for recent non-resolved incident', () => {
     const svc = mockService({
       incidents: [{ id: 'inc1', title: 'API Error', status: 'investigating', startedAt: recentDate, impact: 'major' }],
     })
-    const alerts = buildIncidentAlerts([svc], new Set(), NOW)
+    const alerts = buildIncidentAlerts([svc], alertedMap(), NOW)
     expect(alerts).toHaveLength(1)
     expect(alerts[0].key).toBe('alerted:new:inc1')
     expect(alerts[0].title).toContain('New Incident')
@@ -39,7 +45,7 @@ describe('buildIncidentAlerts', () => {
     const svc = mockService({
       incidents: [{ id: 'inc1', title: 'API Error', status: 'investigating', startedAt: recentDate, impact: 'major' }],
     })
-    const alerts = buildIncidentAlerts([svc], new Set(['inc1']), NOW)
+    const alerts = buildIncidentAlerts([svc], alertedMap({ inc1: ['openai'] }), NOW)
     expect(alerts).toHaveLength(0)
   })
 
@@ -47,7 +53,7 @@ describe('buildIncidentAlerts', () => {
     const svc = mockService({
       incidents: [{ id: 'inc1', title: 'Old Error', status: 'investigating', startedAt: oldDate, impact: 'major' }],
     })
-    const alerts = buildIncidentAlerts([svc], new Set(), NOW)
+    const alerts = buildIncidentAlerts([svc], alertedMap(), NOW)
     expect(alerts).toHaveLength(0)
   })
 
@@ -57,10 +63,10 @@ describe('buildIncidentAlerts', () => {
     })
 
     // Not previously alerted → no resolved alert
-    expect(buildIncidentAlerts([svc], new Set(), NOW)).toHaveLength(0)
+    expect(buildIncidentAlerts([svc], alertedMap(), NOW)).toHaveLength(0)
 
     // Previously alerted → resolved alert
-    const alerts = buildIncidentAlerts([svc], new Set(['inc1']), NOW)
+    const alerts = buildIncidentAlerts([svc], alertedMap({ inc1: ['openai'] }), NOW)
     expect(alerts).toHaveLength(1)
     expect(alerts[0].key).toBe('alerted:res:inc1')
     expect(alerts[0].title).toContain('Resolved (30m)')
@@ -72,7 +78,7 @@ describe('buildIncidentAlerts', () => {
       incidents: [{ id: 'inc1', title: 'Slow', status: 'investigating', startedAt: recentDate, impact: 'minor' }],
     })
     const claude = mockService({ id: 'claude', name: 'Claude API', aiwatchScore: 90 })
-    const alerts = buildIncidentAlerts([openai, claude], new Set(), NOW)
+    const alerts = buildIncidentAlerts([openai, claude], alertedMap(), NOW)
     expect(alerts[0].description).toBe('Slow')
     expect(alerts[0].fallbackText).toContain('Suggested fallback')
   })
@@ -83,7 +89,7 @@ describe('buildIncidentAlerts', () => {
       incidents: [{ id: 'inc1', title: 'Minor issue', status: 'investigating', startedAt: recentDate, impact: 'minor' }],
     })
     const claude = mockService({ id: 'claude', name: 'Claude API', aiwatchScore: 90 })
-    const alerts = buildIncidentAlerts([openai, claude], new Set(), NOW)
+    const alerts = buildIncidentAlerts([openai, claude], alertedMap(), NOW)
     expect(alerts).toHaveLength(1)
     expect(alerts[0].fallbackText).toBe('')
     expect(alerts[0].description).toBe('Minor issue')
@@ -91,7 +97,7 @@ describe('buildIncidentAlerts', () => {
 
   it('handles service with no incidents', () => {
     const svc = mockService({ incidents: [] })
-    expect(buildIncidentAlerts([svc], new Set(), NOW)).toHaveLength(0)
+    expect(buildIncidentAlerts([svc], alertedMap(), NOW)).toHaveLength(0)
   })
 
   it('groups shared-incidentId services into single alert with all service names', () => {
@@ -101,7 +107,7 @@ describe('buildIncidentAlerts', () => {
     const claudeai = mockService({ id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', incidents: [sharedIncident] })
     const claudecode = mockService({ id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', incidents: [sharedIncident] })
 
-    const alerts = buildIncidentAlerts([claude, claudeai, claudecode], new Set(), NOW)
+    const alerts = buildIncidentAlerts([claude, claudeai, claudecode], alertedMap(), NOW)
 
     // buildIncidentAlerts groups same incidentId into one alert
     expect(alerts).toHaveLength(1)
@@ -120,7 +126,7 @@ describe('buildIncidentAlerts', () => {
     const openai = mockService({ id: 'openai', name: 'OpenAI API', category: 'api', status: 'operational', aiwatchScore: 90 })
     const cursor = mockService({ id: 'cursor', name: 'Cursor', category: 'agent', status: 'operational', aiwatchScore: 75 })
 
-    const alerts = buildIncidentAlerts([claude, claudecode, openai, cursor], new Set(), NOW)
+    const alerts = buildIncidentAlerts([claude, claudecode, openai, cursor], alertedMap(), NOW)
     // Dedup: only first alert for shared2 is sent
     const first = alerts.find(a => a.key === 'alerted:new:shared2')!
     // Claude API alert should only have API fallbacks, not Coding Agent
@@ -136,10 +142,75 @@ describe('buildIncidentAlerts', () => {
         { id: 'inc2', title: 'Error 2', status: 'resolved', startedAt: recentDate, duration: '10m', impact: 'minor' },
       ],
     })
-    const alerts = buildIncidentAlerts([svc], new Set(['inc2']), NOW)
+    const alerts = buildIncidentAlerts([svc], alertedMap({ inc2: ['openai'] }), NOW)
     expect(alerts).toHaveLength(2)
     expect(alerts[0].key).toBe('alerted:new:inc1')
     expect(alerts[1].key).toBe('alerted:res:inc2')
+  })
+
+  // #545: a service that JOINS a multi-service incident AFTER the first New Incident alert fired
+  // (e.g. OpenAI renames "Issue with Codex" → "…Codex and ChatGPT", so chatgpt's keyword now matches
+  // the same incidentId) must still get its own alert — scoped to only the joiner.
+  describe('#545 late-joining service', () => {
+    const shared = { id: 'oai-multi', title: 'Elevated errors on Codex and ChatGPT', status: 'investigating' as const, startedAt: recentDate, impact: 'major' as const }
+    const codex = mockService({ id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', status: 'down', incidents: [shared] })
+    const chatgpt = mockService({ id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', status: 'down', incidents: [shared] })
+
+    it('alerts the joiner when only the first service was already alerted', () => {
+      // codex already fired (roster = {codex}); chatgpt joined the same incidentId later.
+      const alerts = buildIncidentAlerts([codex, chatgpt], alertedMap({ 'oai-multi': ['codex'] }), NOW)
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].key).toBe('alerted:new:oai-multi')
+      // The alert represents ONLY the joiner — not the already-alerted codex.
+      expect(alerts[0].svcIds).toEqual(['chatgpt'])
+      expect(alerts[0].title).toContain('ChatGPT')
+      expect(alerts[0].title).not.toContain('Codex')
+    })
+
+    it('does not re-alert once every affected service is in the roster', () => {
+      const alerts = buildIncidentAlerts([codex, chatgpt], alertedMap({ 'oai-multi': ['codex', 'chatgpt'] }), NOW)
+      expect(alerts).toHaveLength(0)
+    })
+
+    it('alerts both (grouped) when neither was alerted yet — first-fire path unchanged', () => {
+      const alerts = buildIncidentAlerts([codex, chatgpt], alertedMap(), NOW)
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].svcIds).toEqual(['codex', 'chatgpt'])
+    })
+
+    it('fires ONE grouped resolved alert (incidentId-level) for a multi-service roster', () => {
+      const resolved = { ...shared, status: 'resolved' as const, duration: '42m' }
+      const codexR = mockService({ ...codex, status: 'operational', incidents: [resolved] })
+      const chatgptR = mockService({ ...chatgpt, status: 'operational', incidents: [resolved] })
+      const alerts = buildIncidentAlerts([codexR, chatgptR], alertedMap({ 'oai-multi': ['codex', 'chatgpt'] }), NOW)
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].key).toBe('alerted:res:oai-multi')
+      expect(alerts[0].svcIds).toEqual(['codex', 'chatgpt']) // full affected set on resolve
+      expect(alerts[0].title).toContain('Codex')
+      expect(alerts[0].title).toContain('ChatGPT')
+    })
+  })
+})
+
+// #545: the cron read-site (index.ts) auto-migrates legacy '1' and parses the JSON roster through
+// this helper. Pinning it here is the unit test for the migration logic, which is otherwise only
+// reachable via the (unexported) cron handler.
+describe('parseAlertedRoster (#545)', () => {
+  it('migrates the legacy boolean "1" by seeding the current service', () => {
+    expect(parseAlertedRoster('1', 'codex')).toEqual({ ids: ['codex'], corrupt: false })
+  })
+
+  it('round-trips a JSON svcId array', () => {
+    expect(parseAlertedRoster('["codex","chatgpt"]', 'chatgpt')).toEqual({ ids: ['codex', 'chatgpt'], corrupt: false })
+  })
+
+  it('treats non-array JSON as corrupt and falls back to the current service', () => {
+    expect(parseAlertedRoster('{}', 'codex')).toEqual({ ids: ['codex'], corrupt: true })
+    expect(parseAlertedRoster('true', 'codex')).toEqual({ ids: ['codex'], corrupt: true })
+  })
+
+  it('treats unparseable JSON as corrupt and falls back to the current service', () => {
+    expect(parseAlertedRoster('not json', 'gpt')).toEqual({ ids: ['gpt'], corrupt: true })
   })
 })
 
@@ -172,7 +243,7 @@ describe('region-switch hint (#422)', () => {
 
   it('attaches regionText to the new-incident alert for region-specific outages', () => {
     const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', status: 'degraded', incidents: [regionSpecific] })
-    const alerts = buildIncidentAlerts([pinecone], new Set(), NOW)
+    const alerts = buildIncidentAlerts([pinecone], alertedMap(), NOW)
     expect(alerts).toHaveLength(1)
     expect(alerts[0].regionText).toBe('📍 Try region: AWS US West')
   })
@@ -180,7 +251,7 @@ describe('region-switch hint (#422)', () => {
   it('does not attach regionText to resolved alerts', () => {
     const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', status: 'operational',
       incidents: [{ ...regionSpecific, id: 'pc-res', status: 'resolved', duration: '20m' }] })
-    const alerts = buildIncidentAlerts([pinecone], new Set(['pc-res']), NOW)
+    const alerts = buildIncidentAlerts([pinecone], alertedMap({ 'pc-res': ['pinecone'] }), NOW)
     expect(alerts).toHaveLength(1)
     expect(alerts[0].key).toBe('alerted:res:pc-res')
     expect(alerts[0].regionText).toBeUndefined()
@@ -196,7 +267,7 @@ describe('region-switch hint (#422)', () => {
       { id: 'pc-global', title: 'Major outage', status: 'investigating', startedAt: recentDate, impact: 'critical' },
     ] })
     expect(buildRegionHint(pinecone)).toBeUndefined()
-    const alerts = buildIncidentAlerts([pinecone], new Set(), NOW)
+    const alerts = buildIncidentAlerts([pinecone], alertedMap(), NOW)
     // Both incidents alert; neither carries a region hint while the global outage is open.
     expect(alerts.every(a => a.regionText === undefined)).toBe(true)
   })
@@ -488,12 +559,13 @@ describe('mergeTogetherAlerts', () => {
         { id: 'inc3', title: 'Kokoro-82M — down', status: 'investigating', startedAt: recentDate, impact: 'major' },
       ],
     })
-    const alerts = buildIncidentAlerts([together], new Set(), NOW)
+    const alerts = buildIncidentAlerts([together], alertedMap(), NOW)
     expect(alerts).toHaveLength(3)
     const merged = mergeTogetherAlerts(alerts)
     expect(merged).toHaveLength(1)
     expect(merged[0].title).toContain('3 New Incidents')
     expect(merged[0]._mergedKeys).toHaveLength(3)
+    expect(merged[0].svcIds).toEqual(['together']) // #545 — deduped union of the merged rosters
   })
 
   it('correctly merges resolved alerts generated by buildIncidentAlerts (integration)', () => {
@@ -504,12 +576,13 @@ describe('mergeTogetherAlerts', () => {
         { id: 'inc2', title: 'ZAI GLM 5 FP4', status: 'resolved', startedAt: recentDate, duration: '15m', impact: 'major' },
       ],
     })
-    const alerts = buildIncidentAlerts([together], new Set(['inc1', 'inc2']), NOW)
+    const alerts = buildIncidentAlerts([together], alertedMap({ inc1: ['together'], inc2: ['together'] }), NOW)
     expect(alerts).toHaveLength(2)
     const merged = mergeTogetherAlerts(alerts)
     expect(merged).toHaveLength(1)
     expect(merged[0].title).toContain('2 Incidents Resolved')
     expect(merged[0]._mergedKeys).toHaveLength(2)
+    expect(merged[0].svcIds).toEqual(['together']) // #545 — deduped union of the merged rosters
   })
 })
 
@@ -672,7 +745,7 @@ describe('flap suppression (#283)', () => {
         ],
       })
       const suppressed = new Set(['flap2-down', 'flap2-res'])
-      const alerts = buildIncidentAlerts([svc], new Set(['flap2-res']), NOW, suppressed)
+      const alerts = buildIncidentAlerts([svc], alertedMap({ 'flap2-res': ['fireworks'] }), NOW, suppressed)
       expect(alerts).toHaveLength(0)
     })
 
@@ -683,7 +756,7 @@ describe('flap suppression (#283)', () => {
           { id: 'real', title: 'Actual Outage', status: 'investigating', impact: 'major', startedAt: recentDate },
         ],
       })
-      const alerts = buildIncidentAlerts([svc], new Set(), NOW, new Set(['suppressed']))
+      const alerts = buildIncidentAlerts([svc], alertedMap(), NOW, new Set(['suppressed']))
       expect(alerts).toHaveLength(1)
       expect(alerts[0].key).toBe('alerted:new:real')
     })
