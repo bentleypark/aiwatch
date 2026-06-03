@@ -92,7 +92,9 @@ export const SERVICE_REGIONS: Record<string, RegionDef[]> = {
 }
 
 export const REGION_DOCS_URL: Record<string, string> = {
-  xai: 'https://docs.x.ai/docs/regions',
+  // xai intentionally has NO entry (#560): xAI removed its regional-endpoints doc page
+  // (docs.x.ai/docs/regions → 404, no live replacement). Mirrors src/utils/regionStatus.js —
+  // the Edge omits the docs anchor when docsUrl is undefined. Do NOT re-add a guessed URL.
   gemini: 'https://cloud.google.com/vertex-ai/docs/general/locations',
   openai: 'https://platform.openai.com/docs/guides/production-best-practices',
   chatgpt: 'https://status.openai.com',

@@ -321,6 +321,19 @@ describe('regionStatusOf — docsUrl pass-through', () => {
     )
     expect(result.docsUrl).toBeUndefined()
   })
+
+  test('xai has NO docsUrl — xAI removed its regions doc page (#560)', () => {
+    // xai IS region-aware (SERVICE_REGIONS.xai us-east-1/eu-west-1), so a region incident
+    // yields a result — but its docs page (docs.x.ai/docs/regions) 404s and was removed with
+    // no live replacement, so the "learn more" link must be absent. Pre-fix this returned the
+    // dead URL; this test fails if anyone re-adds a (likely still-dead) REGION_DOCS_URL.xai.
+    const result = regionStatusOf({
+      id: 'xai',
+      incidents: [{ id: 'x1', status: 'investigating', title: 'Elevated errors in eu-west-1' }],
+    })
+    expect(result).not.toBeNull()
+    expect(result.docsUrl).toBeUndefined()
+  })
 })
 
 describe('SERVICE_REGIONS — invariants', () => {
