@@ -163,13 +163,14 @@ const PRESET_CLICKABLE = JSON.stringify({
 // PRESET_BRANDED keeps an always-on, clickable "AIWatch" label (OSC 8 → dashboard
 // home) so the brand is present even when every service is healthy — unlike the
 // other presets, which are empty when healthy. Healthy → `AIWatch 🟢`; degraded →
-// `AIWatch 🔴 <name>` (≤3). Same OSC 8 escaping as PRESET_CLICKABLE (\\u001b = ESC,
-// \\\\ = a literal "\" that jq emits, forming the ESC]8;;URL ESC\ … ESC]8;; ESC\
-// hyperlink). Terminals without OSC 8 support show the text as plain (no harm).
+// `AIWatch 🔴 <name>` (≤3) where EACH red service name is itself an OSC 8 link to
+// its detail page (https://ai-watch.dev/#<id>), like PRESET_CLICKABLE. Same OSC 8
+// escaping (\\u001b = ESC, \\\\ = a literal "\" that jq emits, forming the
+// ESC]8;;URL ESC\ … ESC]8;; ESC\ hyperlink). Terminals without OSC 8 → plain text.
 export const PRESET_BRANDED = JSON.stringify({
   statusLine: {
     type: 'command',
-    command: `( curl -sf --max-time 2 ${taggedUrl(SLUG_BRANDED)} | jq -r '([.services[] | select(.status != "operational")]) as $d | "\\u001b]8;;https://ai-watch.dev\\u001b\\\\AIWatch\\u001b]8;;\\u001b\\\\ " + (if ($d | length) == 0 then "🟢" else ([$d[] | "🔴 " + .name] | .[0:3] | join(" ")) end)' ) 2>/dev/null || true`,
+    command: `( curl -sf --max-time 2 ${taggedUrl(SLUG_BRANDED)} | jq -r '([.services[] | select(.status != "operational")]) as $d | "\\u001b]8;;https://ai-watch.dev\\u001b\\\\AIWatch\\u001b]8;;\\u001b\\\\ " + (if ($d | length) == 0 then "🟢" else ([$d[] | "\\u001b]8;;https://ai-watch.dev/#\\(.id)\\u001b\\\\🔴 \\(.name)\\u001b]8;;\\u001b\\\\"] | .[0:3] | join(" ")) end)' ) 2>/dev/null || true`,
   },
 }, null, 2)
 
@@ -206,7 +207,7 @@ export default function Statusline() {
 
       <Section title="Quick start (recommended preset)">
         <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.6', marginBottom: '12px' }}>
-          Add to <code className="mono text-[var(--text0)]">~/.claude/settings.json</code>. Always-on, clickable <code className="mono text-[var(--text0)]">AIWatch</code> label: <code className="mono text-[var(--text0)]">AIWatch 🟢</code> when all healthy, <code className="mono text-[var(--text0)]">AIWatch 🔴 Claude API</code> (up to 3) when something breaks — <code className="mono text-[var(--text0)]">cmd+click</code> (macOS) / <code className="mono text-[var(--text0)]">ctrl+click</code> (Linux) the label to open the dashboard. Needs an OSC 8-compatible terminal (iTerm2, Warp, kitty, WezTerm, VS Code integrated terminal, Terminal.app on macOS 12+); others show it as plain text — no harm.
+          Add to <code className="mono text-[var(--text0)]">~/.claude/settings.json</code>. Always-on, clickable <code className="mono text-[var(--text0)]">AIWatch</code> label: <code className="mono text-[var(--text0)]">AIWatch 🟢</code> when all healthy, <code className="mono text-[var(--text0)]">AIWatch 🔴 Claude API</code> (up to 3) when something breaks — <code className="mono text-[var(--text0)]">cmd+click</code> (macOS) / <code className="mono text-[var(--text0)]">ctrl+click</code> (Linux) the <code className="mono text-[var(--text0)]">AIWatch</code> label to open the dashboard, or a red service name to jump to its detail page. Needs an OSC 8-compatible terminal (iTerm2, Warp, kitty, WezTerm, VS Code integrated terminal, Terminal.app on macOS 12+); others show it as plain text — no harm.
         </p>
         <Snippet code={PRESET_BRANDED} eventLabel={SLUG_BRANDED} />
       </Section>

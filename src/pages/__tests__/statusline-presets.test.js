@@ -26,10 +26,14 @@ describe('PRESET_BRANDED statusline snippet (#543)', () => {
     expect(cmd).toContain('\\u001b]8;;https://ai-watch.dev\\u001b\\\\AIWatch\\u001b]8;;\\u001b\\\\')
   })
 
+  it('also links each degraded service name to its detail page (ai-watch.dev/#<id>)', () => {
+    expect(cmd).toContain('\\u001b]8;;https://ai-watch.dev/#\\(.id)\\u001b\\\\🔴 \\(.name)\\u001b]8;;\\u001b\\\\')
+  })
+
   it('shows 🟢 when all healthy and 🔴 <name> (≤3) when degraded', () => {
     expect(cmd).toContain('select(.status != "operational")')
     expect(cmd).toContain('"🟢"')
-    expect(cmd).toContain('"🔴 " + .name')
+    expect(cmd).toContain('🔴 \\(.name)') // red name inside the per-service OSC 8 link
     expect(cmd).toContain('.[0:3]')
   })
 
