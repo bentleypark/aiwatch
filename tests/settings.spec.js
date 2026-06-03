@@ -13,6 +13,21 @@ test.describe('Settings', () => {
     await expect(page.locator('main').getByText('General')).toBeVisible()
   })
 
+  test('#546: deep-link #settings?focus=alerts routes to Settings and scrolls to the Alerts section', async ({ page }) => {
+    // The Is-X-Down "Notify Me When Fixed" CTA links here; the outage visitor must land AT the
+    // Alerts section, not the page top (the 3-clicks→0-registers friction).
+    await page.goto('/#settings?focus=alerts')
+    await page.reload({ waitUntil: 'domcontentloaded' }) // unambiguous fresh mount (beforeEach already sits on #settings; a fragment-only goto may not remount)
+    await expect(page.locator('main').getByText('General')).toBeVisible() // routing unaffected by ?focus
+    // Strict: the window must actually scroll so the Alerts section sits at/near the viewport top —
+    // NOT merely intersect it (a long page can intersect #alerts at scrollY=0, which toBeInViewport
+    // would false-pass). Poll the section's top until the scroll settles.
+    await expect.poll(
+      async () => page.locator('#alerts').evaluate((el) => Math.round(el.getBoundingClientRect().top)),
+      { timeout: 15000 },
+    ).toBeLessThan(120)
+  })
+
   test('theme toggle persists to localStorage', async ({ page }) => {
     const html = page.locator('html')
 

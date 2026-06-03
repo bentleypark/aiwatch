@@ -419,14 +419,20 @@ function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string)
   // prompt catches the visitor at peak intent — before they bounce after reading
   // the status. GA4 source='status_banner' distinguishes this placement from the
   // footer CTA for the 2-week conversion comparison.
+  // #546: during an outage the visitor is here at peak intent for one reason \u2014
+  // confirm it's down + be told when it's back. Lead with that exact need (status-
+  // accurate: "down" vs "having issues" for degraded), label the button to match.
+  const stateLead = status === 'down'
+    ? `${seo.displayName} is down right now.`
+    : `${seo.displayName} is having issues right now.`
   const message = isDown
-    ? 'Get notified when it recovers \u2014 takes 1 minute'
+    ? `${stateLead} Get notified when it recovers.`
     : `Get notified when ${seo.displayName} goes down`
-  const buttonLabel = isDown ? 'Get Alerts When Fixed' : 'Set Up Alerts'
+  const buttonLabel = isDown ? 'Notify Me When Fixed' : 'Set Up Alerts'
   return `<div class="cta">
 <p class="cta-title">${esc(message)}</p>
 <div class="cta-buttons">
-<a href="https://ai-watch.dev/#settings" class="btn btn-primary" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'status_banner'})">${esc(buttonLabel)} &rarr;</a>
+<a href="https://ai-watch.dev/#settings?focus=alerts" class="btn btn-primary" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'status_banner'})">${esc(buttonLabel)} &rarr;</a>
 <!-- data-rss uses the page slug (the feed URL is /feed/{slug}); data-svc uses the
      service ID so the copy_rss GA4 event keys on the same id as fallback_click /
      click_service_detail (id and slug diverge for claude-code, github-copilot, etc.) -->

@@ -1,7 +1,7 @@
 // Settings page — redesigned to match design mockup.
 // Segment controls, green toggles, description text, service dots+uptime.
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useLang } from '../hooks/useLang'
 import { useTheme } from '../hooks/useTheme'
 import { useSettings } from '../hooks/useSettings'
@@ -100,7 +100,7 @@ function ComingSoonBadge({ t }) {
 
 // ── Main Component ───────────────────────────────────────
 
-export default function Settings() {
+export default function Settings({ focus } = {}) {
   const { t, lang, setLang } = useLang()
   const { theme, setTheme } = useTheme()
   const { settings, save } = useSettings()
@@ -130,8 +130,33 @@ export default function Settings() {
   const [slackFeedCopied, setSlackFeedCopied] = useState(false)
   const saveTimerRef = useRef(null)
   const errorTimerRef = useRef(null)
+  const alertsRef = useRef(null)
+  const didFocusScrollRef = useRef(false)
 
   useEffect(() => () => { clearTimeout(saveTimerRef.current); clearTimeout(errorTimerRef.current) }, [])
+
+  // #546: deep-link from the Is-X-Down "Notify Me When Fixed" CTA (#settings?focus=alerts) lands the
+  // outage visitor straight at the Alerts section instead of the page top — the friction behind the
+  // 3-clicks→0-registers leak. Two scrolls: (1) on mount regardless of data (so it works even when
+  // /api/status is slow/unavailable), and (2) once more after services data first loads, since the
+  // monitored-services list above Alerts reflows the page and shifts the target. rAF lets App's
+  // post-nav scrollTo(0,0) + that frame's layout settle first, so the scroll isn't overridden.
+  const scrollToAlerts = useCallback(() => {
+    requestAnimationFrame(() => {
+      alertsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      // a11y: move keyboard/SR focus to the section so it isn't left at the page top, out of sync
+      // with the visual scroll. preventScroll so it doesn't fight the smooth scroll above.
+      alertsRef.current?.focus?.({ preventScroll: true })
+    })
+  }, [])
+  useEffect(() => {
+    if (focus === 'alerts') scrollToAlerts()
+  }, [focus, scrollToAlerts])
+  useEffect(() => {
+    if (focus !== 'alerts' || rawServices == null || didFocusScrollRef.current) return
+    didFocusScrollRef.current = true
+    scrollToAlerts()
+  }, [focus, rawServices, scrollToAlerts])
   useEffect(() => {
     setPeriod(settings.period)
     setSla(settings.sla)
@@ -465,7 +490,7 @@ export default function Settings() {
       </div>
 
       {/* ── Alerts ── */}
-      <section>
+      <section ref={alertsRef} id="alerts" tabIndex={-1} style={{ scrollMarginTop: '12px', outline: 'none' }}>
         <div style={sectionTitleStyle}>{t('settings.alerts')}</div>
 
         {/* RSS — lead with the zero-friction channel (#433/#428): no account, no
