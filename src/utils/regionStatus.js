@@ -57,7 +57,10 @@ export const SERVICE_REGIONS = {
 }
 
 export const REGION_DOCS_URL = {
-  xai: 'https://docs.x.ai/docs/regions',
+  // xai intentionally has NO entry (#560): xAI removed its regional-endpoints doc page
+  // (docs.x.ai/docs/regions → 404, no live replacement in the current docs nav). The region
+  // card omits the "learn more" link when a service has no docsUrl — do NOT re-add a guessed
+  // URL here without verifying it resolves in a real browser. (region-status.ts mirrors this.)
   gemini: 'https://cloud.google.com/vertex-ai/docs/general/locations',
   openai: 'https://platform.openai.com/docs/guides/production-best-practices',
   chatgpt: 'https://status.openai.com',
