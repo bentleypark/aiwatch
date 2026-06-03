@@ -13,6 +13,7 @@ import { buildCalendarFromIncidents } from '../utils/calendar'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { compareGroupedRows, dominantGroupStatus } from '../utils/incidentSort'
 import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
+import { computeRecoveryStats, formatRecoveryMin } from '../utils/recovery'
 import { regionStatusOf, SERVICE_REGIONS } from '../utils/regionStatus'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
@@ -598,18 +599,11 @@ export default function ServiceDetails({ serviceId }) {
   const services = rawServices ?? []
 
   // useMemo must be called before any early returns (Rules of Hooks)
-  const mttr = useMemo(() => {
+  // #557 — median (typical recovery, robust to many short component blips) + worst, replacing the
+  // old plain mean that let one long outage be diluted away by micro-incidents (computeRecoveryStats).
+  const recovery = useMemo(() => {
     const svc = services.find((s) => s.id === serviceId)
-    const cutoff = Date.now() - 7 * 86_400_000
-    const resolved = (svc?.incidents ?? []).filter((i) => i.status === 'resolved' && i.duration && i.duration !== '0m' && new Date(i.startedAt).getTime() >= cutoff)
-    if (resolved.length === 0) return null
-    const totalMinutes = resolved.reduce((sum, i) => {
-      const m = i.duration.match(/(?:(\d+)h\s*)?(\d+)m/)
-      return sum + (m ? (parseInt(m[1] || '0') * 60 + parseInt(m[2])) : 0)
-    }, 0)
-    if (totalMinutes === 0) return null
-    const avg = Math.round(totalMinutes / resolved.length)
-    return avg >= 60 ? `${Math.floor(avg / 60)}h ${avg % 60}m` : `${avg}m`
+    return computeRecoveryStats(svc?.incidents, Date.now(), 7)
   }, [services, serviceId])
 
   if (loading && services.length === 0) return <ServiceDetailsSkeleton />
@@ -724,9 +718,14 @@ export default function ServiceDetails({ serviceId }) {
         />
         <MetricCard
           label={t('svc.mttr')}
-          value={isEstimateNoData ? '—' : (mttr ?? '—')}
-          sub={isEstimateNoData ? t('uptime.unavailable') : mttr ? t('svc.incidents.sub') : t('svc.mttr.none')}
-          colorClass={isEstimateNoData ? 'text-[var(--text2)]' : mttr ? 'text-[var(--amber)]' : 'text-[var(--text2)]'}
+          value={isEstimateNoData ? '—' : (recovery ? formatRecoveryMin(recovery.medianMin) : '—')}
+          // #557 — headline is the median (typical) recovery; when a longer outage exists in the
+          // window, surface it as "worst Xh Ym" so a 29h outage is never hidden by short blips.
+          sub={isEstimateNoData ? t('uptime.unavailable')
+            : !recovery ? t('svc.mttr.none')
+            : recovery.maxMin > recovery.medianMin ? t('svc.recovery.worst').replace('{d}', formatRecoveryMin(recovery.maxMin))
+            : t('svc.incidents.sub')}
+          colorClass={isEstimateNoData ? 'text-[var(--text2)]' : recovery ? 'text-[var(--amber)]' : 'text-[var(--text2)]'}
         />
       </div>
 
