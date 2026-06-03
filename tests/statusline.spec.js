@@ -34,14 +34,14 @@ test.describe('Statusline guide page (#400 Phase 0)', () => {
     expect(text).toContain('|| true')
   })
 
-  test('renders all five documented presets with copy buttons', async ({ page }) => {
+  test('renders all six documented presets with copy buttons', async ({ page }) => {
     await page.goto('/#statusline')
     await waitForDataLoad(page)
-    // 5 presets = 5 <pre> code blocks + 5 Copy buttons.
-    // (degraded_only, compact_badge, full_list, scoped, clickable)
-    await expect(page.locator('pre')).toHaveCount(5)
+    // 6 presets = 6 <pre> code blocks + 6 Copy buttons.
+    // (branded [quick start], compact_badge, full_list, scoped, clickable, degraded_only [minimalist])
+    await expect(page.locator('pre')).toHaveCount(6)
     const copyButtons = page.locator('button').filter({ hasText: /^Copy$/ })
-    await expect(copyButtons).toHaveCount(5)
+    await expect(copyButtons).toHaveCount(6)
   })
 
   test('copy button click does not throw and remains a button', async ({ page }) => {
@@ -160,11 +160,11 @@ test.describe('Statusline guide page (#400 Phase 0)', () => {
     // baseline measurement collapses. A future copy-paste refactor that drops
     // the tag would silently re-block that gate, so pin each preset's slug to
     // its snippet's <pre> contents. Preset order matches Statusline.jsx render
-    // order: Quick start (degraded_only) then Other presets (compact_badge,
-    // full_list, scoped, clickable).
+    // order: Quick start (branded) then Other presets (compact_badge,
+    // full_list, scoped, clickable, degraded_only [minimalist]).
     await page.goto('/#statusline')
     await waitForDataLoad(page)
-    const presetOrder = ['degraded_only', 'compact_badge', 'full_list', 'scoped', 'clickable']
+    const presetOrder = ['branded', 'compact_badge', 'full_list', 'scoped', 'clickable', 'degraded_only']
     const preBlocks = page.locator('pre')
     await expect(preBlocks).toHaveCount(presetOrder.length)
     for (let i = 0; i < presetOrder.length; i++) {

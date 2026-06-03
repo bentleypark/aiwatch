@@ -296,7 +296,7 @@ README, 문서, 블로그에 실시간 상태 배지를 임베드할 수 있습�
 
 ## Claude Code Statusline 통합
 
-Claude API, OpenAI, Gemini, GitHub Copilot 등 33개 AI 서비스의 장애 여부를 [Claude Code 스테이터스라인](https://docs.claude.com/en/docs/claude-code/statusline)에 직접 표시합니다. 모든 서비스가 정상일 때는 출력이 비어 있어 statusline 공간을 차지하지 않고, 장애가 발생하면 빨간색 표시와 함께 서비스명이 나타나 업스트림 문제와 로컬 문제를 즉시 구분할 수 있습니다.
+Claude API, OpenAI, Gemini, GitHub Copilot 등 33개 AI 서비스의 장애 여부를 [Claude Code 스테이터스라인](https://docs.claude.com/en/docs/claude-code/statusline)에 직접 표시합니다. 추천 프리셋은 항상 표시되는 클릭 가능한 **AIWatch** 라벨을 유지합니다 — 모두 정상이면 `AIWatch 🟢`, 장애 시 `AIWatch 🔴 Claude API`, 라벨 cmd/ctrl+클릭 시 대시보드 열림. 정상일 때 공간을 비우고 싶으면 [프리셋 페이지](https://ai-watch.dev/#statusline)의 minimalist 프리셋을 쓰면 됩니다.
 
 가장 빠른 설정 — `~/.claude/settings.json`에 추가:
 
@@ -304,12 +304,14 @@ Claude API, OpenAI, Gemini, GitHub Copilot 등 33개 AI 서비스의 장애 여�
 {
   "statusLine": {
     "type": "command",
-    "command": "( curl -sf --max-time 2 https://ai-watch.dev/api/status/cached?src=statusline-degraded_only | jq -r '[.services[] | select(.status != \"operational\") | \"🔴 \" + .name] | .[0:3] | join(\" \")' ) 2>/dev/null || true"
+    "command": "( curl -sf --max-time 2 https://aiwatch-worker.p2c2kbf.workers.dev/api/status/cached?src=statusline-branded | jq -r '([.services[] | select(.status != \"operational\")]) as $d | \"\\u001b]8;;https://ai-watch.dev\\u001b\\\\AIWatch\\u001b]8;;\\u001b\\\\ \" + (if ($d | length) == 0 then \"🟢\" else ([$d[] | \"\\u001b]8;;https://ai-watch.dev/#\\(.id)\\u001b\\\\🔴 \\(.name)\\u001b]8;;\\u001b\\\\\"] | .[0:3] | join(\" \")) end)' ) 2>/dev/null || true"
   }
 }
 ```
 
-프리셋 모음 (컴팩트 배지, 전체 목록, 특정 프로바이더만, Powerline 친화 등): **[ai-watch.dev/#statusline](https://ai-watch.dev/#statusline)**
+> 클릭 가능한 라벨은 OSC 8 지원 터미널(iTerm2, Warp, kitty, WezTerm, VS Code 터미널, macOS 12+ Terminal.app)에서 동작하고, 미지원은 plain text로 표시됩니다. Worker 도메인을 직접 호출해 렌더링당 폴링이 Vercel 대역폭으로 잡히지 않습니다.
+
+프리셋 모음 — **minimalist**(정상 시 빈 출력), 컴팩트 배지, 전체 목록, 특정 프로바이더만, 서비스별 clickable 링크: **[ai-watch.dev/#statusline](https://ai-watch.dev/#statusline)**
 
 특성: 렌더링당 단일 GET, Cloudflare edge에 5분 KV 캐시, 2초 타임아웃, 네트워크 에러 시 silent fail, Anthropic API 호출 없음, 클라이언트 식별자 미수집. `?src=statusline-<preset>` 쿼리 태그는 요청 로그에서 statusline 트래픽을 일반 cached-endpoint 호출과 구분하기 위한 용도일 뿐이며, Worker는 경로만 매칭하므로 캐시/응답 속도에 영향이 없고 사용자 식별자도 포함하지 않습니다. shell 명령 출력을 지원하는 모든 statusline 도구와 호환 (`ccstatusline`의 Custom Command 위젯 포함).
 

@@ -35,6 +35,7 @@ const SLUG_COMPACT_BADGE = 'compact_badge'
 const SLUG_FULL_LIST = 'full_list'
 const SLUG_SCOPED = 'scoped'
 const SLUG_CLICKABLE = 'clickable'
+export const SLUG_BRANDED = 'branded'
 
 function CopyButton({ text, eventLabel }) {
   const [copied, setCopied] = useState(false)
@@ -159,6 +160,20 @@ const PRESET_CLICKABLE = JSON.stringify({
   },
 }, null, 2)
 
+// PRESET_BRANDED keeps an always-on, clickable "AIWatch" label (OSC 8 → dashboard
+// home) so the brand is present even when every service is healthy — unlike the
+// other presets, which are empty when healthy. Healthy → `AIWatch 🟢`; degraded →
+// `AIWatch 🔴 <name>` (≤3) where EACH red service name is itself an OSC 8 link to
+// its detail page (https://ai-watch.dev/#<id>), like PRESET_CLICKABLE. Same OSC 8
+// escaping (\\u001b = ESC, \\\\ = a literal "\" that jq emits, forming the
+// ESC]8;;URL ESC\ … ESC]8;; ESC\ hyperlink). Terminals without OSC 8 → plain text.
+export const PRESET_BRANDED = JSON.stringify({
+  statusLine: {
+    type: 'command',
+    command: `( curl -sf --max-time 2 ${taggedUrl(SLUG_BRANDED)} | jq -r '([.services[] | select(.status != "operational")]) as $d | "\\u001b]8;;https://ai-watch.dev\\u001b\\\\AIWatch\\u001b]8;;\\u001b\\\\ " + (if ($d | length) == 0 then "🟢" else ([$d[] | "\\u001b]8;;https://ai-watch.dev/#\\(.id)\\u001b\\\\🔴 \\(.name)\\u001b]8;;\\u001b\\\\"] | .[0:3] | join(" ")) end)' ) 2>/dev/null || true`,
+  },
+}, null, 2)
+
 export default function Statusline() {
   const { lang } = useLang()
   return (
@@ -186,15 +201,15 @@ export default function Statusline() {
           >
             Claude Code statusline
           </a>
-          . When everything is healthy nothing is shown — your statusline real estate is preserved. When a service degrades or goes down, it appears with a red indicator so you can tell upstream issues from local ones at a glance.
+          . The recommended preset keeps an always-on, clickable <code className="mono text-[var(--text0)]">AIWatch</code> label — <code className="mono text-[var(--text0)]">AIWatch 🟢</code> while all healthy, <code className="mono text-[var(--text0)]">AIWatch 🔴 Claude API</code> (up to 3) when something breaks — so a click opens the dashboard at any time. Prefer zero footprint when healthy? The minimalist preset under <em>Other presets</em> stays empty until a service degrades.
         </p>
       </div>
 
       <Section title="Quick start (recommended preset)">
         <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.6', marginBottom: '12px' }}>
-          Add to <code className="mono text-[var(--text0)]">~/.claude/settings.json</code>. Output stays empty while every monitored service is operational; up to 3 degraded/down services appear with a red dot when something breaks.
+          Add to <code className="mono text-[var(--text0)]">~/.claude/settings.json</code>. Always-on, clickable <code className="mono text-[var(--text0)]">AIWatch</code> label: <code className="mono text-[var(--text0)]">AIWatch 🟢</code> when all healthy, <code className="mono text-[var(--text0)]">AIWatch 🔴 Claude API</code> (up to 3) when something breaks — <code className="mono text-[var(--text0)]">cmd+click</code> (macOS) / <code className="mono text-[var(--text0)]">ctrl+click</code> (Linux) the <code className="mono text-[var(--text0)]">AIWatch</code> label to open the dashboard, or a red service name to jump to its detail page. Needs an OSC 8-compatible terminal (iTerm2, Warp, kitty, WezTerm, VS Code integrated terminal, Terminal.app on macOS 12+); others show it as plain text — no harm.
         </p>
-        <Snippet code={PRESET_DEGRADED_ONLY} eventLabel={SLUG_DEGRADED_ONLY} />
+        <Snippet code={PRESET_BRANDED} eventLabel={SLUG_BRANDED} />
       </Section>
 
       <Section title="Other presets">
@@ -238,6 +253,14 @@ export default function Statusline() {
               Each service name becomes a clickable hyperlink that opens the AIWatch service detail page (<code className="mono text-[var(--text0)]">cmd+click</code> on macOS, <code className="mono text-[var(--text0)]">ctrl+click</code> on Linux). Useful for jumping straight to incident details when the statusline shows something is wrong. Requires an OSC 8-compatible terminal — most modern emulators (iTerm2, Warp, kitty, WezTerm, VS Code integrated terminal, Terminal.app on macOS 12+) support it; tmux and some older shells may render the escape sequence as raw text instead.
             </p>
             <Snippet code={PRESET_CLICKABLE} eventLabel={SLUG_CLICKABLE} />
+          </div>
+
+          <div>
+            <h3 className="text-[var(--text0)] text-[13px] font-medium" style={{ marginBottom: '6px' }}>Minimalist (empty when healthy)</h3>
+            <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.6', marginBottom: '8px' }}>
+              No brand label — output stays completely empty while every service is operational, preserving statusline space; up to 3 degraded/down service names appear with a red dot only when something breaks. Choose this if you want zero footprint when all is well.
+            </p>
+            <Snippet code={PRESET_DEGRADED_ONLY} eventLabel={SLUG_DEGRADED_ONLY} />
           </div>
         </div>
       </Section>
