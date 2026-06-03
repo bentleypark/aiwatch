@@ -97,6 +97,7 @@ npm test           # Run Playwright E2E tests
 npm run test:src   # Run frontend unit tests (vitest, src/**/*.test.js)
 npm run test:worker # Run Worker unit tests (vitest)
 npm run typecheck:worker # tsc gate — fails on undefined-name/missing-import (TS2304) in worker source (#533)
+npm run test:scripts # node:test unit tests for scripts/*.mjs (e.g. verify-reminders, #541)
 ```
 
 ### Local verification by page type
@@ -168,7 +169,7 @@ gh pr merge --squash --delete-branch
 9. **Verify Vercel Preview** (frontend)
 10. **Merge** `gh pr merge --squash --delete-branch` — worker deploy is manual (`npm run deploy:worker`, once, after approval; batch multi-PR deploys)
 11. **Verify checklist** against code before closing; periodically re-verify `deferred`/`tracking` issues (later work may have completed one)
-12. **Close** only after verification; deferred items → keep open with a label carrying a **written exit condition**
+12. **Close** only after verification; deferred items → keep open with a label carrying a **written exit condition**. Production-data check needed after a delay → add a `- [ ] **verify-after YYYY-MM-DD** — …` line; the daily `verify-reminders` Action (`.github/workflows/verify-reminders.yml` + `scripts/verify-reminders.mjs`, #541) pings the operator Discord when due so the check isn't missed
 
 > Never close an issue immediately after merging. Verify each checklist item against the code first; deferred → keep open with a labeled exit condition.
 
