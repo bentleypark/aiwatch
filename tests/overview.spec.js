@@ -375,3 +375,43 @@ test.describe('RSS subscribe affordances (#433)', () => {
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('https://ai-watch.dev/feed.xml')
   })
 })
+
+test.describe('#553 Issues filter — agent-only issue', () => {
+  test('does NOT show "No Issues" when only a coding agent is degraded', async ({ page }) => {
+    // usePolling MERGES the API response with MOCK_SERVICES, keeping the mock status for any service
+    // the response omits. MOCK_SERVICES defaults openai/xai/huggingface/elevenlabs to 'degraded', so
+    // the fixture must override ALL of them to operational — otherwise a non-agent issue keeps the
+    // grid non-empty and the empty state never fires (the bug would be masked → false pass).
+    const op = (id, name, category = 'api') => ({ id, category, name, provider: 'x', status: 'operational', latency: 200, uptime30d: 99.9, calendarDays: 30, incidents: [] })
+    const mockData = { json: {
+      services: [
+        op('openai', 'OpenAI API'), op('xai', 'xAI (Grok)'), op('huggingface', 'Hugging Face'), op('elevenlabs', 'ElevenLabs'),
+        { id: 'claudecode', category: 'agent', name: 'Claude Code', provider: 'Anthropic', status: 'degraded', latency: null, uptime30d: 99.05, calendarDays: 30,
+          incidents: [{ id: 'cc1', title: 'Partial outage', status: 'investigating', impact: 'minor', startedAt: new Date(Date.now() - 120_000).toISOString(), timeline: [] }] },
+      ],
+      lastUpdated: new Date().toISOString(),
+    } }
+    await page.route('**/api/status**', (route) => route.fulfill(mockData))
+    await page.route('**/api/status/cached', (route) => route.fulfill(mockData))
+    await page.goto('/')
+    await page.locator('main button').first().waitFor({ state: 'visible', timeout: 20000 })
+
+    // Precondition guard: exactly ONE issue and it is the agent (else the fixture didn't neutralize a
+    // non-agent issue and the test isn't exercising the agent-only path). The Issues tab shows "1".
+    await expect(page.locator('main').getByRole('button', { name: /Issues\s*1\b/ })).toBeVisible()
+
+    // Select Issues → the agent section must render and the "No Issues" empty state must NOT appear.
+    await page.locator('main').getByRole('button', { name: /Issues/ }).click()
+
+    // Positive: assert the *Coding Agents section heading* (renders only when filteredAgents.length > 0),
+    // NOT bare getByText('Claude Code') — the agent name also appears in the Recent Incidents panel below,
+    // which renders regardless of the filter or the fix, so a name-only check would pass even when buggy.
+    await expect(page.locator('main').getByText(/Coding Agents|코딩 에이전트/)).toBeVisible()
+
+    // Negative (load-bearing — this is what fails when the fix is reverted): no "No Issues" empty state.
+    // EmptyState type="good" is shared by the issues-grid AND the Recent Incidents panel, but the fixture's
+    // incident is left UNRESOLVED so the incidents panel is non-empty → the only "No Issues" that can appear
+    // is the issues-grid bug. (If a future edit resolves/removes the incident, also scope this to the grid.)
+    await expect(page.locator('main').getByText(/No Issues|이슈 없음/)).toHaveCount(0)
+  })
+})

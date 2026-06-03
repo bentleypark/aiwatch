@@ -730,7 +730,10 @@ export default function Overview() {
       </div>
 
       {/* ── Service Grid ── */}
-      {filter === 'issues' && filteredServices.length === 0 ? (
+      {/* #553: the empty state must consider agents too — issueCount counts all categories, but
+          filteredServices excludes agents, so an agent-only issue otherwise shows "No Issues"
+          here while the Coding Agents section below renders the degraded agent. */}
+      {filter === 'issues' && filteredServices.length === 0 && filteredAgents.length === 0 ? (
         <EmptyState type="good" />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3" style={{ gap: '8px' }}>
