@@ -67,6 +67,11 @@ is the *procedure* — follow it top to bottom.
      time/production-gated verification (e.g. "queryable after deploy", "shows after next cron"):
      if such an item can't be verified yet, it's a **remaining** item → use **`refs #N`** and close
      manually after verifying (do NOT let `closes` auto-close it prematurely).
+   - **Production-gated → add a `verify-after` line (#541)** so the check isn't forgotten: when an
+     item needs a production-data check after a delay, add a line to the issue body
+     `- [ ] **verify-after YYYY-MM-DD** — what to check + where` (pick a realistic date). The daily
+     `verify-reminders` GitHub Action pings the operator Discord when due (and weekly while open);
+     closing the issue / removing the line cancels it. This replaces "remember to check the board".
    - **Cross-issue reconciliation** — also scan OTHER open issues this change touches:
      fully implements another → add `closes #M`; partially advances → `refs #M` + comment;
      **supersedes/invalidates** another (a newer finding/feature makes it moot) → comment the why + close it.
