@@ -3,6 +3,33 @@
 import type { TimelineEntry, Incident } from '../types'
 import { formatDuration } from '../utils'
 
+// #556 — map an Instatus severity/impact string to AIWatch's impact scale. Instatus exposes it
+// differently per SSR format, so this helper handles BOTH vocabularies:
+//   • Next.js: component-status impact — OPERATIONAL / UNDERMAINTENANCE / DEGRADEDPERFORMANCE /
+//     PARTIALOUTAGE / MAJOROUTAGE  (observed live on Perplexity: DEGRADEDPERFORMANCE)
+//   • Nuxt: incident severity — MINOR / MEDIUM / MAJOR / CRITICAL (observed live on Mistral: MEDIUM)
+// Both previously fell through to `null` (Next.js handled only MAJOR/PARTIAL; Nuxt hardcoded null),
+// which made every Mistral/Perplexity incident invisible to the AIWatch Score's incident penalty and
+// to "Affected Days" (score.ts excludes null-impact per #261). OPERATIONAL/maintenance → null, which
+// excludes them from the incident SCORE (affected-days + weighted days) — note this is a scoring
+// exclusion, not a display one (a null-impact entry still counts in the raw incident list/count); the
+// `/incidents` feed these parsers read carries real incidents, not scheduled maintenance, so the
+// maintenance entries here are a defensive belt. Unknown values default to 'minor' (an /incidents-feed
+// entry is real) and warn-once so a new Instatus value is diagnosable, not silently dropped.
+const warnedInstatusImpacts = new Set<string>()
+export function mapInstatusImpact(raw: string | null | undefined): Incident['impact'] {
+  const s = (raw ?? '').toUpperCase()
+  if (!s || s === 'OPERATIONAL' || s === 'UNDERMAINTENANCE' || s === 'MAINTENANCE' || s === 'NONE') return null
+  if (s === 'CRITICAL') return 'critical'
+  if (s === 'MAJOROUTAGE' || s === 'MAJOR' || s === 'HIGH') return 'major'
+  if (s === 'PARTIALOUTAGE' || s === 'DEGRADEDPERFORMANCE' || s === 'MINOR' || s === 'MEDIUM' || s === 'LOW') return 'minor'
+  if (!warnedInstatusImpacts.has(s)) {
+    warnedInstatusImpacts.add(s)
+    console.warn(`[instatus] unknown severity/impact "${raw}" — defaulting to 'minor'; extend mapInstatusImpact`)
+  }
+  return 'minor'
+}
+
 function parseInstatusNextIncidents(html: string): Incident[] {
   try {
     // Next.js SSR payload has escaped quotes: notices\":{\"id\":{...}}
@@ -42,7 +69,7 @@ function parseInstatusNextIncidents(html: string): Incident[] {
         id: notice.id,
         title: notice.name.default,
         status: isResolved ? 'resolved' : 'investigating',
-        impact: notice.impact === 'MAJOROUTAGE' ? 'major' : notice.impact === 'PARTIALOUTAGE' ? 'minor' : null,
+        impact: mapInstatusImpact(notice.impact), // #556 — was MAJOR/PARTIAL-only; DEGRADEDPERFORMANCE fell to null
         startedAt: startDate.toISOString(),
         resolvedAt: (resolvedDate && !isNaN(resolvedDate.getTime())) ? resolvedDate.toISOString() : null,
         duration: (isResolved && resolvedDate && !isNaN(resolvedDate.getTime()))
@@ -91,6 +118,7 @@ export function parseInstatusIncidents(html: string): Incident[] {
         const status = (arr[inc.lastUpdateStatus] as string) ?? ''
         const createdAt = arr[inc.created_at] as string
         const durationSec = arr[inc.duration] as number | null
+        const severity = arr[inc.severity] as string | undefined // #556 — Nuxt incident severity (e.g. 'MEDIUM')
 
         // Extract affected service name from services array (e.g. "Chat Completions API")
         const servicesArr = arr[inc.services] as number[] | undefined
@@ -136,7 +164,7 @@ export function parseInstatusIncidents(html: string): Incident[] {
             : status === 'MONITORING' ? 'monitoring' as const
             : status === 'IDENTIFIED' ? 'identified' as const
             : 'investigating' as const,
-          impact: null,
+          impact: mapInstatusImpact(severity), // #556 — was hardcoded null; now maps the Nuxt `severity` field
           startedAt: createdAt,
           resolvedAt: (status === 'RESOLVED' && durationSec != null) ? new Date(new Date(createdAt).getTime() + durationSec * 1000).toISOString() : null,
           duration: durationSec ? formatDuration(new Date(createdAt), new Date(new Date(createdAt).getTime() + durationSec * 1000)) : null,
