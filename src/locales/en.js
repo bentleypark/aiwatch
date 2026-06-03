@@ -38,10 +38,13 @@ const en = {
 
   // Overview
   'overview.last.updated': 'Last updated',
-  'overview.stats.operational': 'services running',
-  'overview.stats.degraded': 'partially affected',
-  'overview.stats.down': 'service down',
+  'overview.stats.operational': 'Operational',
+  'overview.stats.degraded': 'Degraded',
+  'overview.stats.down': 'Down',
   'overview.stats.uptime': 'avg uptime',
+  'overview.stats.operational.sub': 'services running',
+  'overview.stats.degraded.sub': 'partially affected',
+  'overview.stats.down.sub': 'service down',
   'overview.filter.all': 'All',
   'overview.filter.operational': 'Operational',
   'overview.filter.issues': 'Issues',

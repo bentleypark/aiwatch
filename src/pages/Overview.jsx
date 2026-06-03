@@ -714,9 +714,9 @@ export default function Overview() {
 
       {/* ── Summary Stats ── */}
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>
-        <StatCard index={0} value={operationalCount} sub={t('overview.stats.operational')} labelKey="overview.stats.operational" colorClass="text-[var(--green)]" t={t} />
-        <StatCard index={1} value={degradedCount}    sub={t('overview.stats.degraded')}    labelKey="overview.stats.degraded"    colorClass="text-[var(--amber)]" t={t} />
-        <StatCard index={2} value={downCount}         sub="—"                                labelKey="overview.stats.down"         colorClass="text-[var(--red)]"   t={t} />
+        <StatCard index={0} value={operationalCount} sub={t('overview.stats.operational.sub')} labelKey="overview.stats.operational" colorClass="text-[var(--green)]" t={t} />
+        <StatCard index={1} value={degradedCount}    sub={t('overview.stats.degraded.sub')}    labelKey="overview.stats.degraded"    colorClass="text-[var(--amber)]" t={t} />
+        <StatCard index={2} value={downCount}         sub={t('overview.stats.down.sub')}        labelKey="overview.stats.down"         colorClass="text-[var(--red)]"   t={t} />
         <StatCard index={3} value={avgUptime === '—' ? '—' : `${avgUptime}%`}  sub={t('overview.stats.uptime.sub')}  labelKey="overview.stats.uptime"       colorClass="text-[var(--blue)]"  t={t} />
       </div>
 
