@@ -11,6 +11,7 @@
     "preview": "npm run build && wrangler dev",
     "test": "npx playwright test --project=desktop --project=mobile",
     "test:is-down": "npx playwright test --project=is-down",
+    "test:edge": "npx playwright test --project=is-down --project=intro --project=reports --project=consent",
     "test:worker": "npx vitest run --config worker/vitest.config.ts",
     "typecheck:worker": "node scripts/typecheck-worker.mjs",
     "test:ui": "npx playwright test --ui",
