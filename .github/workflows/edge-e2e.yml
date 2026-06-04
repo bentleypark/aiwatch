@@ -1,0 +1,65 @@
+# #570 — run the Edge-SSR e2e (is-down / intro / reports / consent) against the
+# Vercel Preview deployment for each PR/push, since the normal `npm test` CI job
+# only covers the Vite desktop/mobile projects (the Edge projects need a deployed
+# Edge runtime). Triggered by Vercel's deployment_status, so it runs the moment the
+# preview is ready and points Playwright at the real preview URL (no vercel dev in CI).
+name: Edge E2E
+
+on:
+  deployment_status: {}
+
+# Least privilege: this only checks out + runs tests against a remote URL.
+permissions:
+  contents: read
+
+# One run per deployment URL; cancel a superseded preview's run.
+concurrency:
+  group: edge-e2e-${{ github.event.deployment_status.environment_url }}
+  cancel-in-progress: true
+
+jobs:
+  edge-e2e:
+    name: Edge E2E (Vercel Preview)
+    # Only successful deployments that actually expose a URL (Vercel fires several
+    # statuses per deploy — building/error/ready; the ready one carries the URL).
+    # NOTE: this guard does NOT distinguish preview vs production, so a `main` merge's
+    # production deploy ALSO triggers a run against https://ai-watch.dev — intentional
+    # as a post-deploy prod smoke. (Vercel's `environment` string naming is unverified;
+    # filtering on it risks the workflow never firing. The verify-after on #570 inspects
+    # the first real events and tightens to `environment == 'Preview'` if prod runs are noisy.)
+    if: github.event.deployment_status.state == 'success' && github.event.deployment_status.environment_url != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Test the same commit that was deployed, so the spec files match the preview.
+          ref: ${{ github.event.deployment.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Wait for the deployment to be reachable (cold-start guard)
+        env:
+          EDGE_BASE_URL: ${{ github.event.deployment_status.environment_url }}
+        run: |
+          for i in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$EDGE_BASE_URL/intro" || echo 000)
+            echo "attempt $i: GET /intro -> HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 6
+          done
+          echo "::error::preview not reachable after retries"; exit 1
+      - name: Run Edge E2E against the Vercel preview
+        env:
+          # Drives the Edge projects' baseURL in playwright.config.js (#570) and skips
+          # the local Vite webServer.
+          EDGE_BASE_URL: ${{ github.event.deployment_status.environment_url }}
+        run: npm run test:edge
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-e2e-report
+          path: playwright-report/
+          retention-days: 7
