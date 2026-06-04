@@ -1,4 +1,13 @@
 import { test, expect } from '@playwright/test'
+// #568: derive the max ranked-services count from the canonical service lists so this
+// assertion never goes stale when a service is added. constants.js is a pure data module
+// (no browser deps) → importable in node/Playwright. NO_FEED_SERVICES (bedrock, azureopenai)
+// is used here as the static proxy for the set api/is-down.ts drops from ranking
+// (`uptimeSource === 'estimate' && incidents.length === 0`); the two are synonymous by
+// convention today. It's an UPPER bound — the real count can be lower when a service lacks a
+// finite score — so a future divergence only weakens the bound, never breaks the test.
+import { ALL_SERVICE_IDS, NO_FEED_SERVICES } from '../src/utils/constants.js'
+const MAX_RANKED = ALL_SERVICE_IDS.length - NO_FEED_SERVICES.length
 
 const PAGES = [
   // Phase A — original 6 services
@@ -231,7 +240,7 @@ test.describe('Is X Down? SSR pages', () => {
     const m = text.match(/is ranked #(\d+)(\s*\(tied\))? of (\d+) AI services/)
     expect(m).not.toBeNull()
     expect(Number(m[1])).toBeGreaterThanOrEqual(1)
-    expect(Number(m[3])).toBeLessThanOrEqual(30) // 32 total − bedrock − azureopenai (estimate-only, no SEO page)
+    expect(Number(m[3])).toBeLessThanOrEqual(MAX_RANKED) // ALL_SERVICE_IDS − estimate-only (bedrock, azureopenai); auto-tracks service additions (#568)
   })
 
   test('tied rank shows "(tied)" marker for services in a stable tie cluster', async ({ page }) => {
@@ -261,7 +270,9 @@ test.describe('Is X Down? SSR pages', () => {
     const text = (await rankLine.textContent()) || ''
     const m = text.match(/of (\d+) AI services/)
     expect(m).not.toBeNull()
-    expect(Number(m && m[1])).toBeLessThanOrEqual(30)
+    // ≤ MAX_RANKED proves the estimate-only services (bedrock, azureopenai) are excluded,
+    // since MAX_RANKED = total − 2 < total. Auto-tracks service additions (#568).
+    expect(Number(m && m[1])).toBeLessThanOrEqual(MAX_RANKED)
   })
 
   test('hides "Uptime (30d): N/A" when no uptime data is available', async ({ page }) => {
