@@ -132,7 +132,8 @@ test.describe('Is X Down? SSR pages', () => {
   test('meta description contains dynamic status', async ({ page }) => {
     await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
     const desc = page.locator('meta[name="description"]')
-    await expect(desc).toHaveAttribute('content', /Check if Claude is down right now/)
+    // #566: answer-first — leads with No/Yes/Issues + the plain-language status phrase.
+    await expect(desc).toHaveAttribute('content', /(No|Yes|Issues) — Claude (is operational|is down right now|is having problems right now)/)
   })
 
   // #321 — 30-day incident window + grouping on SSR page for SEO depth.
@@ -150,7 +151,7 @@ test.describe('Is X Down? SSR pages', () => {
     // When status is non-operational, AI Analysis copy replaces this — assertion is skipped.
     await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
     const desc = await page.locator('meta[name="description"]').getAttribute('content')
-    const isOperational = /Current status: Operational/i.test(desc ?? '')
+    const isOperational = /No — Claude is operational/i.test(desc ?? '')
     if (!isOperational) {
       test.info().annotations.push({ type: 'note', description: 'Claude non-operational — "incidents tracked" assertion deferred' })
       return

@@ -85,6 +85,37 @@ function statusLabel(status: string): string {
   return 'Down'
 }
 
+// #566 — SERP CTR. Answer the "Is X Down?" query directly in the <title>, <meta
+// description>, and the on-page status line so Google's snippet (the meta OR an
+// auto-generated one from page content) leads with the answer, like SaaSHub's "NO".
+// Plain language only — "degraded" is dev jargon a panic visitor won't parse.
+// Caveat: a SERP snippet reflects Google's last crawl, so during a fresh outage a
+// stale "Operational" can show; accepted because services are operational ~99% of the
+// time and the "updated every 5 minutes" freshness hint frames it as a live tracker.
+function statusTitleLabel(status: string): string {
+  if (status === 'operational') return 'Operational'
+  if (status === 'degraded') return 'Having Issues'
+  return 'Down Right Now'
+}
+
+// Direct answer word + sentence fragment. yesno answers "Is it down?"; phrase completes
+// "${displayName} ${phrase}".
+function statusAnswer(status: string): { yesno: string; phrase: string } {
+  if (status === 'operational') return { yesno: 'No', phrase: 'is operational' }
+  if (status === 'degraded') return { yesno: 'Issues', phrase: 'is having problems right now' }
+  return { yesno: 'Yes', phrase: 'is down right now' }
+}
+
+// #572: the is-down header links the monthly reports. Was hardcoded to /reports/2026-03/
+// "March 2026 Report" (stale). Reports publish on a LAGGING, variable cadence — as of
+// 2026-06-04 the latest live report is April (May not generated yet) — so a date-derived
+// "previous month" link 404s. Determining the latest *existing* report reliably would need a
+// per-render network probe of the reports site (bad for fast SSR) or a worker-cached
+// latest-month, both overkill for a header link. Instead link the /reports/ index, which is
+// always live and lists reports newest-first → the reader lands on the latest published one.
+const REPORTS_INDEX_HREF = '/reports/'
+const REPORTS_INDEX_LABEL = 'Monthly Reports'
+
 function statusColor(status: string): string {
   if (status === 'operational') return '#3fb950'
   if (status === 'degraded') return '#e86235'
@@ -135,7 +166,11 @@ export function renderPage(
   // is hit (allDown — no useful recommendation).
   regionRec?: RegionStatusResult | null,
 ): string {
-  const title = `Is ${seo.displayName} Down? Live Status | AIWatch`
+  // #566: lead the SERP title with the live status answer (falls back to "Live Status"
+  // when status data is unavailable) so the result answers the query before the click.
+  const title = service
+    ? `Is ${seo.displayName} Down? ${statusTitleLabel(service.status)} | AIWatch`
+    : `Is ${seo.displayName} Down? Live Status | AIWatch`
   const desc = buildMetaDescription(seo, service, aiInsight ?? null)
   const canonical = `https://ai-watch.dev/is-${slug}-down`
 
@@ -398,6 +433,7 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
   }
 
   const color = statusColor(service.status)
+  const answer = statusAnswer(service.status) // #566 — on-page direct answer (feeds Google's auto-snippet)
   const hasUptime = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d)
   const gradeStr = service.scoreGrade ? ` (${service.scoreGrade.charAt(0).toUpperCase() + service.scoreGrade.slice(1)})` : ''
   const metaParts = [`Last checked: ${esc(timeAgo(service.lastChecked))}`]
@@ -408,11 +444,10 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
 
   return `<div class="header">
 <h1>${statusEmoji(service.status)} Is ${esc(seo.displayName)} Down?</h1>
-<p style="font-size:20px;font-weight:600;color:${color};margin:12px 0">${statusLabel(service.status)}</p>
+<p style="font-size:20px;font-weight:600;color:${color};margin:12px 0">${answer.yesno} &mdash; ${esc(seo.displayName)} ${answer.phrase}</p>
 <p class="meta mono">${metaParts.join(' &middot; ')}</p>
 ${lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}</p>` : '<p class="meta">No recent incidents</p>'}
-${/* TODO: update report URL monthly (currently hardcoded to latest report) */ ''}
-${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${service.rank}${service.rankTied ? ' (tied)' : ''}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'header'})">AIWatch reliability score</a> &middot; <a href="/reports/2026-03/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'header'})">March 2026 Report &rarr;</a></p>` : ''}
+${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${service.rank}${service.rankTied ? ' (tied)' : ''}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'header'})">AIWatch reliability score</a> &middot; <a href="${REPORTS_INDEX_HREF}" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'header'})">${REPORTS_INDEX_LABEL} &rarr;</a></p>` : ''}
 </div>`
 }
 
@@ -509,7 +544,8 @@ export function buildMetaDescription(
   aiInsight: { summary: string; estimatedRecovery: string } | null,
 ): string {
   if (aiInsight && service && service.status !== 'operational') {
-    return `${seo.displayName} is currently ${statusLabel(service.status).toLowerCase()}. AI Analysis: ${aiInsight.summary.slice(0, 120)} Est. recovery: ${formatRecoveryDisplay(aiInsight.estimatedRecovery)}.`
+    const a = statusAnswer(service.status)
+    return `${a.yesno} — ${seo.displayName} ${a.phrase}. AI Analysis: ${aiInsight.summary.slice(0, 120)} Est. recovery: ${formatRecoveryDisplay(aiInsight.estimatedRecovery)}.`
   }
   if (!service) {
     return `Check if ${seo.displayName} is down right now. Real-time status monitoring by AIWatch.`
@@ -522,7 +558,10 @@ export function buildMetaDescription(
     : null
   const uptimeClause = uptimeStr ? ` 30-day uptime: ${uptimeStr}.` : ''
   const incidentClause = thirtyDayIncidentCount > 0 ? ` ${thirtyDayIncidentCount} incidents tracked (30d).` : ''
-  return `Check if ${seo.displayName} is down right now. Current status: ${statusLabel(service.status)}.${uptimeClause}${incidentClause} Updated every 5 minutes.`
+  // #566: answer-first ("No — X is operational" / "Yes — X is down right now") so the
+  // SERP snippet leads with the answer; freshness hint stays to frame it as a live tracker.
+  const a = statusAnswer(service.status)
+  return `${a.yesno} — ${seo.displayName} ${a.phrase}.${uptimeClause}${incidentClause} Live status, updated every 5 minutes.`
 }
 
 export function renderIncidents(service: ServiceData | null): string {
@@ -831,7 +870,7 @@ export function renderFooter(slug: string): string {
 
   return `<div class="footer">
 <p style="margin-bottom:12px"><a href="https://ai-watch.dev" class="btn" onclick="typeof gtag==='function'&&gtag('event','click_dashboard',{location:'is_down_page',source:'footer'})">View Full Dashboard</a></p>
-<p><a href="https://ai-watch.dev/#${esc(seoEntry?.id ?? slug)}" onclick="typeof gtag==='function'&&gtag('event','click_service_detail',{location:'is_down_page',service_id:'${esc(seoEntry?.id ?? slug)}'})">Detailed service page</a> &middot; <a href="/reports/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'footer'})">Monthly reports</a> &middot; <a href="https://ai-watch.dev/#settings" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'footer'})">Set up alerts</a></p>
+<p><a href="https://ai-watch.dev/#${esc(seoEntry?.id ?? slug)}" onclick="typeof gtag==='function'&&gtag('event','click_service_detail',{location:'is_down_page',service_id:'${esc(seoEntry?.id ?? slug)}'})">Detailed service page</a> &middot; <a href="/reports/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'footer'})">Monthly reports</a> &middot; <a href="https://ai-watch.dev/#settings?focus=alerts" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'footer'})">Set up alerts</a></p>
 ${relatedLinks ? `<p style="margin-top:12px;font-size:13px">Related: ${relatedLinks}</p>` : ''}
 ${otherGroups ? `<p style="margin-top:8px;font-size:12px">Also check:${otherGroups}</p>` : ''}
 <p style="margin-top:12px">&copy; 2026 AIWatch. Real-time AI service status monitoring.</p>
