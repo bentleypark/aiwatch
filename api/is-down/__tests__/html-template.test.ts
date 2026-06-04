@@ -599,21 +599,37 @@ describe('RSS feed surfacing on /is-*-down (#430)', () => {
       expect(html, `autodiscovery <link> for ${slug}`).toContain(
         `type="application/rss+xml" title="${seo.displayName} incidents — AIWatch" href="https://ai-watch.dev/feed/${slug}">`,
       )
-      expect(html, `Copy RSS URL button for ${slug}`).toContain(
+      expect(html, `RSS copy button for ${slug}`).toContain(
         `data-rss="https://ai-watch.dev/feed/${slug}"`,
       )
     }
   })
 
-  it('renders a secondary "Copy RSS URL" button that copies the feed URL to the clipboard', () => {
+  it('renders the PRIMARY "Notify me via RSS" button that copies the feed URL (#547)', () => {
     const html = renderPage('claude', mkService(), mkSeo(), [])
+    // #547: RSS is the primary (btn-primary) CTA — the only channel that converted on the
+    // outage day. Lock the exact primary markup + label.
     expect(html).toContain(
-      '<button type="button" class="btn" data-rss="https://ai-watch.dev/feed/claude" data-svc="claude" onclick="copyRss(this)">Copy RSS URL</button>',
+      '<button type="button" class="btn btn-primary" data-rss="https://ai-watch.dev/feed/claude" data-svc="claude" onclick="copyRss(this)">🔔 Notify me via RSS</button>',
     )
     expect(html).toContain('function copyRss(b)')
     expect(html).toContain('navigator.clipboard.writeText(u)')
-    // prompt() fallback for insecure-context / writeText-rejection paths
+    // prompt() fallback for insecure-context / writeText-rejection paths (label text unchanged)
     expect(html).toContain("prompt('Copy RSS URL:',u)")
+  })
+
+  it('demotes the Discord double-opt-in to a de-emphasized secondary text link (#547)', () => {
+    const html = renderPage('claude', mkService(), mkSeo(), [])
+    // The heavy Discord per-user push keeps the #546 deep-link (scrolls to the Alerts section)
+    // but is no longer a btn-primary; it is a .cta-alt text link tagged status_banner_secondary
+    // so the funnel comparison can tell post-reorder clicks from the old primary placement.
+    expect(html).toContain('<p class="cta-alt"><a href="https://ai-watch.dev/#settings?focus=alerts"')
+    expect(html).toContain("gtag('event','click_cta_alerts',{location:'is_down_page',source:'status_banner_secondary'})")
+    // No "email" channel exists yet — the link must not advertise one.
+    expect(html).toContain('Prefer Discord push alerts?')
+    expect(html).not.toContain('email push')
+    // The Discord path must NOT be a btn-primary anchor anymore (RSS owns btn-primary).
+    expect(html).not.toMatch(/<a[^>]*class="btn btn-primary"/)
   })
 
   it('renders a "Copy Slack command" button with the per-service /feed subscribe command (#467)', () => {
