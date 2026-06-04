@@ -68,7 +68,12 @@ test.describe('Is X Down? SSR pages', () => {
       test(`has CTA alert banner`, async ({ page: p }) => {
         await p.goto(`/is-${page.slug}-down`, { waitUntil: 'domcontentloaded' })
         await expect(p.locator('.cta')).toBeVisible()
-        await expect(p.locator('.cta a.btn-primary')).toHaveAttribute('href', 'https://ai-watch.dev/#settings?focus=alerts')
+        // #547: the PRIMARY CTA is now the zero-friction RSS copy button (the only channel that
+        // converted on the outage day); the Discord double-opt-in is demoted to a
+        // de-emphasized secondary text link (.cta-alt) that still carries the focus=alerts href.
+        await expect(p.locator('.cta button.btn-primary[data-rss]')).toBeVisible()
+        await expect(p.locator('.cta a.btn-primary')).toHaveCount(0)
+        await expect(p.locator('.cta .cta-alt a')).toHaveAttribute('href', 'https://ai-watch.dev/#settings?focus=alerts')
       })
 
       test(`has GA4 tag`, async ({ page: p }) => {
@@ -316,11 +321,17 @@ test.describe('Is X Down? SSR pages', () => {
       if (aiIdx >= 0) expect(aiIdx).toBeGreaterThan(ctaIdx)
     })
 
-    test('button onclick fires GA4 event with source=status_banner', async ({ page }) => {
+    test('primary CTA is the RSS copy button; Discord demoted to secondary link (#547)', async ({ page }) => {
       await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
-      const onclick = await page.locator('.cta a.btn-primary').getAttribute('onclick')
+      // Primary = zero-friction RSS button → fires copy_rss (success proxy) via copyRss().
+      const primary = page.locator('.cta button.btn-primary[data-rss]')
+      await expect(primary).toBeVisible()
+      expect(await primary.getAttribute('onclick')).toContain('copyRss(this)')
+      // Heavy Discord path is now a de-emphasized text link, tagged source=status_banner_secondary
+      // so the funnel comparison can tell post-reorder clicks apart from the old primary placement.
+      const onclick = await page.locator('.cta .cta-alt a').getAttribute('onclick')
       expect(onclick).toContain("'click_cta_alerts'")
-      expect(onclick).toContain("source:'status_banner'")
+      expect(onclick).toContain("source:'status_banner_secondary'")
       expect(onclick).toContain("location:'is_down_page'")
     })
 
@@ -336,9 +347,10 @@ test.describe('Is X Down? SSR pages', () => {
       const isOperationalCopy = /Get notified when .* goes down/i.test(ctaText || '')
       expect(isDownCopy || isOperationalCopy).toBe(true)
 
-      // Button label: outage state → "Notify Me When Fixed" (#546); operational → "Set Up Alerts".
-      const btnText = (await page.locator('.cta a.btn-primary').textContent()) || ''
-      expect(btnText.trim()).toMatch(/^(Notify Me When Fixed|Set Up Alerts)/)
+      // #547: the primary button is now the zero-friction RSS notify button (both states);
+      // the title copy (#546 benefit framing) is unchanged above.
+      const btnText = (await page.locator('.cta button.btn-primary').textContent()) || ''
+      expect(btnText).toMatch(/Notify me via RSS/i)
     })
   })
 })

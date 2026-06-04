@@ -227,6 +227,9 @@ button.btn{cursor:pointer;font-family:inherit;line-height:inherit}
 .cta{background:#0d1117;border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:16px 20px;text-align:center;margin:16px 0}
 .cta-title{font-size:14px;font-weight:600;margin-bottom:10px}
 .cta-buttons{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.cta-alt{font-size:12px;margin-top:10px;color:#8b949e}
+.cta-alt a{color:#8b949e;text-decoration:underline}
+.cta-alt a:hover{color:#c9d1d9}
 .links{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .links a{font-size:13px;padding:6px 12px;background:#161b22;border:1px solid rgba(255,255,255,0.07);border-radius:4px;color:#8b949e}
 .links a:hover{color:#e6edf3;text-decoration:none}
@@ -428,24 +431,28 @@ function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string)
   const message = isDown
     ? `${stateLead} Get notified when it recovers.`
     : `Get notified when ${seo.displayName} goes down`
-  const buttonLabel = isDown ? 'Notify Me When Fixed' : 'Set Up Alerts'
+  // #547: the outage-day funnel leaked — 3 clicks on the Discord double-opt-in CTA,
+  // 0 webhook_register; the only channel that converted was the zero-config RSS copy
+  // (copy_rss 3×). So lead with the lowest-friction channel: RSS is the PRIMARY button,
+  // Slack /feed the secondary, and the heavy Discord per-user push (double opt-in) is demoted
+  // to a de-emphasized text link so it no longer out-competes the converting channel for the
+  // click. (copy_rss remains the success proxy; we compare its rate vs the 3→0 baseline.)
+  // data-rss uses the page slug (feed URL is /feed/{slug}); data-svc uses the service ID
+  // so copy_rss keys on the same id as fallback_click / click_service_detail (id and slug
+  // diverge for claude-code, github-copilot, etc.).
   return `<div class="cta">
 <p class="cta-title">${esc(message)}</p>
 <div class="cta-buttons">
-<a href="https://ai-watch.dev/#settings?focus=alerts" class="btn btn-primary" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'status_banner'})">${esc(buttonLabel)} &rarr;</a>
-<!-- data-rss uses the page slug (the feed URL is /feed/{slug}); data-svc uses the
-     service ID so the copy_rss GA4 event keys on the same id as fallback_click /
-     click_service_detail (id and slug diverge for claude-code, github-copilot, etc.) -->
-<button type="button" class="btn" data-rss="https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" onclick="copyRss(this)">Copy RSS URL</button>
-<!-- Slack subscribes via its native /feed RSS app (#467) — paste this command into any
-     channel, zero webhook setup. Uses the same per-service feed URL. -->
+<button type="button" class="btn btn-primary" data-rss="https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" onclick="copyRss(this)">🔔 Notify me via RSS</button>
+<!-- Slack subscribes via its native /feed RSS app (#467) — paste into any channel, zero webhook setup. -->
 <button type="button" class="btn" data-slack="/feed subscribe https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" onclick="copySlackFeed(this)">Copy Slack command</button>
 </div>
+<p class="cta-alt"><a href="https://ai-watch.dev/#settings?focus=alerts" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'status_banner_secondary'})">Prefer Discord push alerts? Set up here &rarr;</a></p>
 </div>
 <script>
 function copyRss(b){
-  var u=b.dataset.rss;
-  function done(){b.textContent='Copied!';setTimeout(function(){b.textContent='Copy RSS URL'},2000);typeof gtag==='function'&&gtag('event','copy_rss',{location:'is_down_page',service_id:b.dataset.svc})}
+  var u=b.dataset.rss, orig=b.textContent;
+  function done(){b.textContent='Copied! Paste into your RSS reader';setTimeout(function(){b.textContent=orig},2200);typeof gtag==='function'&&gtag('event','copy_rss',{location:'is_down_page',service_id:b.dataset.svc})}
   if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(u).then(done).catch(function(){prompt('Copy RSS URL:',u)})}
   else{prompt('Copy RSS URL:',u)}
 }
