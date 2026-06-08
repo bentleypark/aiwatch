@@ -64,8 +64,9 @@ describe('buildMetaDescription', () => {
       ),
     })
     const desc = buildMetaDescription(mkSeo(), svc, null)
-    // Regression guard on the clause ordering surfaced in SERP snippet
-    expect(desc).toMatch(/Check if Claude is down right now\. Current status: Operational\. 30-day uptime: 99\.09%\. 27 incidents tracked \(30d\)\. Updated every 5 minutes\./)
+    // #566: answer-first ("No — X is operational") so the SERP snippet leads with the answer;
+    // clause ordering + the "Live status, updated every 5 minutes" freshness hint preserved.
+    expect(desc).toMatch(/No — Claude is operational\. 30-day uptime: 99\.09%\. 27 incidents tracked \(30d\)\. Live status, updated every 5 minutes\./)
   })
 
   it('operational with zero 30-day incidents omits the incident clause', () => {
@@ -98,13 +99,14 @@ describe('buildMetaDescription', () => {
     expect(desc).toContain('1 incidents tracked (30d)')
   })
 
-  it('non-operational + aiInsight replaces the clause template with AI analysis copy', () => {
+  it('non-operational + aiInsight leads with the answer, then AI analysis copy', () => {
     const svc = mkService({ status: 'degraded' })
     const desc = buildMetaDescription(mkSeo(), svc, {
       summary: 'Elevated error rates on model inference',
       estimatedRecovery: '30m',
     })
-    expect(desc).toContain('Claude is currently degraded')
+    // #566: answer-first, plain language ("Issues — …", not the dev-jargon "degraded").
+    expect(desc).toContain('Issues — Claude is having problems right now')
     expect(desc).toContain('AI Analysis: Elevated error rates')
     expect(desc).not.toContain('incidents tracked')
   })
@@ -112,6 +114,52 @@ describe('buildMetaDescription', () => {
   it('no service (cache miss) falls through to the static fallback copy', () => {
     const desc = buildMetaDescription(mkSeo(), null, null)
     expect(desc).toBe('Check if Claude is down right now. Real-time status monitoring by AIWatch.')
+  })
+
+  // #566 — answer-first lead per status (the SERP-CTR change).
+  it('leads with the direct answer per status (No / Yes / Issues)', () => {
+    const op = buildMetaDescription(mkSeo(), mkService({ status: 'operational', uptime30d: 99.9 }), null)
+    expect(op.startsWith('No — Claude is operational.')).toBe(true)
+
+    const down = buildMetaDescription(mkSeo(), mkService({ status: 'down', uptime30d: 99.9 }), null)
+    expect(down.startsWith('Yes — Claude is down right now.')).toBe(true)
+
+    const degraded = buildMetaDescription(mkSeo(), mkService({ status: 'degraded', uptime30d: 99.9 }), null)
+    expect(degraded.startsWith('Issues — Claude is having problems right now.')).toBe(true)
+    // No dev jargon in the user-facing snippet.
+    expect(degraded).not.toContain('degraded')
+  })
+})
+
+describe('renderPage <title> — live status (#566)', () => {
+  it('leads the title with the status label, before the brand', () => {
+    const opTitle = renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [])
+    expect(opTitle).toContain('<title>Is Claude Down? Operational | AIWatch</title>')
+
+    const downTitle = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [])
+    expect(downTitle).toContain('<title>Is Claude Down? Down Right Now | AIWatch</title>')
+
+    const degTitle = renderPage('claude', mkService({ status: 'degraded' }), mkSeo(), [])
+    expect(degTitle).toContain('<title>Is Claude Down? Having Issues | AIWatch</title>')
+  })
+
+  it('falls back to "Live Status" when status data is unavailable', () => {
+    const html = renderPage('claude', null, mkSeo(), [])
+    expect(html).toContain('<title>Is Claude Down? Live Status | AIWatch</title>')
+  })
+
+  it('renders the on-page direct answer (feeds Google auto-snippet)', () => {
+    const html = renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [])
+    expect(html).toContain('No &mdash; Claude is operational')
+  })
+
+  // #572: the header report link is the always-live /reports/ index (reports publish on a
+  // lagging, variable cadence, so a date-derived per-month link 404s — see the issue).
+  it('links the /reports/ index, not a hardcoded/derived month', () => {
+    const html = renderPage('claude', mkService({ status: 'operational', rank: 5, totalRanked: 31 }), mkSeo(), [])
+    expect(html).toContain('href="/reports/"')
+    expect(html).toContain('Monthly Reports &rarr;')
+    expect(html).not.toContain('/reports/2026-03/') // the old hardcoded link is gone
   })
 })
 
@@ -260,6 +308,16 @@ describe('renderIncidents — 30-day window + grouping', () => {
 // with API / AI Apps / Coding Agents sub-labels.
 
 describe('renderFooter — Also check category grouping', () => {
+  it('footer "Set up alerts" link deep-links with ?focus=alerts so it scrolls to the Alerts section (#566)', () => {
+    // Regression: the footer link pointed at bare #settings (no scroll), diverging from the
+    // CTA's #settings?focus=alerts (#546/#547). Both must carry focus=alerts.
+    const html = renderFooter('claude')
+    expect(html).toContain('href="https://ai-watch.dev/#settings?focus=alerts"')
+    expect(html).toContain('>Set up alerts</a>')
+    // No bare #settings link (without the focus param) may remain in the footer.
+    expect(html).not.toMatch(/href="https:\/\/ai-watch\.dev\/#settings"/)
+  })
+
   it('emits the three category sub-labels in API → AI Apps → Coding Agents order', () => {
     // Use a slug whose RELATED_SLUGS doesn't drain a whole category, so all
     // three groups are non-empty. `claude` (api) relates to claude-ai, claude-code,
