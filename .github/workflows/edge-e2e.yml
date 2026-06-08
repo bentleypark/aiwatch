@@ -22,12 +22,17 @@ jobs:
     name: Edge E2E (Vercel Preview)
     # Only successful deployments that actually expose a URL (Vercel fires several
     # statuses per deploy — building/error/ready; the ready one carries the URL).
-    # NOTE: this guard does NOT distinguish preview vs production, so a `main` merge's
-    # production deploy ALSO triggers a run against https://ai-watch.dev — intentional
-    # as a post-deploy prod smoke. (Vercel's `environment` string naming is unverified;
-    # filtering on it risks the workflow never firing. The verify-after on #570 inspects
-    # the first real events and tightens to `environment == 'Preview'` if prod runs are noisy.)
-    if: github.event.deployment_status.state == 'success' && github.event.deployment_status.environment_url != ''
+    # Preview-only: Edge E2E is a pre-merge PR gate. The #570 verify-after confirmed
+    # Vercel sends environment == 'Preview' for PR deploys and 'Production' for main
+    # deploys (capitalized), so we filter to 'Preview'. This drops the redundant
+    # post-merge run against the production deployment — its only effect was a second
+    # green run per merge, and a transient prod blip there would have shown as a
+    # confusing main-branch red that isn't a code regression. Prod health is covered
+    # by the app's own monitoring, not this gate.
+    if: >-
+      github.event.deployment_status.state == 'success'
+      && github.event.deployment_status.environment_url != ''
+      && github.event.deployment_status.environment == 'Preview'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
