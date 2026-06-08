@@ -42,9 +42,15 @@ jobs:
       - name: Wait for the deployment to be reachable (cold-start guard)
         env:
           EDGE_BASE_URL: ${{ github.event.deployment_status.environment_url }}
+          # #570: Vercel Preview Deployment Protection returns 401 to anonymous requests.
+          # This single-origin curl can safely carry the bypass as a header (it never
+          # fans out cross-origin); Playwright uses a cookie instead (edge-bypass-setup.js).
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
           for i in $(seq 1 10); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "$EDGE_BASE_URL/intro" || echo 000)
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
+              "$EDGE_BASE_URL/intro" || echo 000)
             echo "attempt $i: GET /intro -> HTTP $code"
             [ "$code" = "200" ] && exit 0
             sleep 6
@@ -55,6 +61,8 @@ jobs:
           # Drives the Edge projects' baseURL in playwright.config.js (#570) and skips
           # the local Vite webServer.
           EDGE_BASE_URL: ${{ github.event.deployment_status.environment_url }}
+          # Consumed by globalSetup to mint a preview-scoped bypass cookie (#570).
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: npm run test:edge
       - name: Upload Playwright report on failure
         if: failure()
