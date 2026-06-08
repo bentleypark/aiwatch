@@ -1,5 +1,4 @@
 // Vercel Edge Function — "Is X Down?" SSR pages
-// (no-op touch to force a Vercel preview build so Edge E2E runs with the #570 bypass; squashed on merge)
 
 import { SLUG_TO_SERVICE } from './is-down/slug-map'
 import { getSEOContent } from './is-down/seo-content'
