@@ -33,6 +33,7 @@ test-results/
 playwright-report/
 blob-report/
 .playwright-mcp/
+playwright/.edge-bypass-state.json
 
 # Env
 .env
