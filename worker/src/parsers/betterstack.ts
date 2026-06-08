@@ -14,6 +14,23 @@ function isValidDate(s: string): boolean {
   return !isNaN(new Date(s).getTime())
 }
 
+// #564 — derive incident impact from BetterStack title/update text. BetterStack exposes no structured
+// per-incident severity (the RSS <item> carries only title/description; index.json affected_resources
+// read 'resolved' at rest, losing the historical severity), so the wording is the only signal — and it
+// is NOT reliable for severity: BetterStack's automated monitors emit a generic "<X> went down" for
+// ANY failed check (a single model/endpoint flap), so "down" does NOT mean a declared major outage.
+// Treating "down" as major over-penalizes monitor-flap services (Together/Fireworks are 20/20 "went
+// down") vs services with human-written titles (Modal). So we map MAJOR only on explicit broad-outage
+// wording ("outage"/"unavailable"/"offline") and everything else (down/went down/degraded/...) → MINOR.
+// This is the conservative default and is SYMMETRIC with the Instatus fix (#556, which resolved to all
+// minor on uniform severity). The key bug fix is non-null impact: any value lets score.ts count the
+// incident in affected-days (the old hardcoded `null` dropped it via the #261 filter). Planned
+// maintenance is filtered UPSTREAM (MAINTENANCE_TITLE + index.json report_type), so it never reaches here.
+const BS_MAJOR = /\b(?:outage|unavailable|offline)\b/i
+export function mapBetterStackImpact(text: string): Incident['impact'] {
+  return BS_MAJOR.test(text || '') ? 'major' : 'minor'
+}
+
 // #331 / #503: BetterStack RSS carries planned-maintenance announcements alongside real incidents.
 // Detect and skip them via three signals (any one is sufficient):
 //   1. Title pattern — three alternations:
@@ -87,12 +104,15 @@ export function parseRssIncidents(xml: string, now = Date.now()): Incident[] {
       ? formatDuration(new Date(first.date), new Date(last.date))
       : null
     const component = first.title.replace(/ went down$/i, '').replace(/ recovered$/i, '')
+    // #564 — map impact from the RAW event text (titles + descriptions), NOT the reconstructed
+    // display title below (which normalizes every incident to "— down/recovered", erasing severity).
+    const severityText = events.map((e) => `${e.title} ${e.desc}`).join(' ')
 
     incidents.push({
       id: groupKey.split('/').pop() ?? groupKey,
       title: `${component} — ${isResolved ? 'recovered' : 'down'}`,
       status: isResolved ? 'resolved' : 'investigating',
-      impact: null,
+      impact: mapBetterStackImpact(severityText),
       startedAt,
       resolvedAt: isResolved ? new Date(last.date).toISOString() : null,
       duration,
@@ -119,6 +139,15 @@ export function parseXaiRssIncidents(xml: string): Incident[] {
     const title = item.match(/<title>(.*?)<\/title>/)?.[1] ?? ''
     const guid = item.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1] ?? ''
     if (!guid) continue
+
+    // #564 — the RSS path filters planned maintenance (MAINTENANCE_TITLE) before assigning impact;
+    // the xAI path has no betterStackUrl, so the index.json `report_type === 'maintenance'` filter in
+    // services.ts is skipped for it. Apply the same title filter here so a maintenance entry isn't
+    // mapped to a non-null impact and counted toward the score (it was score-neutral as `null` before).
+    if (MAINTENANCE_TITLE.test(title)) {
+      console.debug(`[parseXaiRssIncidents] skipped maintenance title (#564): "${title}"`)
+      continue
+    }
 
     // Extract status and resolved date from description
     const desc = item.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/)?.[1] ?? ''
@@ -164,7 +193,11 @@ export function parseXaiRssIncidents(xml: string): Incident[] {
       id: guid,
       title,
       status: isResolved ? 'resolved' : 'investigating',
-      impact: null,
+      // #564 — map impact from the title + the tag-STRIPPED description (not the raw CDATA `desc`,
+      // whose markup like class="offline-banner" would false-match the regex). Stripping the desc
+      // directly (rather than reading `timeline`) keeps the severity signal even when an update's
+      // date fails to parse and the timeline ends up empty.
+      impact: mapBetterStackImpact(`${title} ${desc.replace(/<[^>]*>/g, ' ')}`),
       startedAt,
       resolvedAt: resolvedAt ? resolvedAt.toISOString() : null,
       duration,
