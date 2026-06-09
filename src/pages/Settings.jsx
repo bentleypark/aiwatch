@@ -218,10 +218,11 @@ export default function Settings({ focus } = {}) {
     }
   }
 
-  // #486 PR2 — "Save settings" now persists ONLY general settings (theme/lang/period/SLA + monitored
-  // services). It omits discordUrl + alert filters: useSettings.save() merges, so omitted fields are
-  // preserved from existing settings, and the Discord webhook is managed entirely by its own
-  // Subscribe / Update / Unsubscribe buttons in the Alerts section.
+  // #486 PR2 — "Save settings" persists period/SLA + monitored services. theme/lang are NOT here:
+  // they apply + persist instantly via useTheme/useLang on toggle (live switching, no save needed),
+  // and are visually separated into the "Display" section (#582). It omits discordUrl + alert filters:
+  // useSettings.save() merges, so omitted fields are preserved, and the Discord webhook is managed
+  // entirely by its own Subscribe / Update / Unsubscribe buttons in the Alerts section.
   function handleSave() {
     const slaNum = sla === '' ? DEFAULT_SETTINGS.sla : Number(sla)
     save({ period, sla: slaNum, enabledServices })
@@ -319,9 +320,11 @@ export default function Settings({ focus } = {}) {
     )
   }
 
-  // #486 PR2 — the "Save settings" button now covers ONLY general settings (theme/lang/period/SLA +
-  // monitored-service toggles). The Discord webhook URL + its alert filters live in the Alerts section
-  // and are persisted by the subscription buttons (Subscribe / Update), so they're excluded here.
+  // #486 PR2 / #582 — the "Save settings" button covers ONLY save-required settings (period/SLA +
+  // monitored-service toggles). theme/lang are instant-apply (their own hooks persist on toggle) and
+  // live in the separate "Display" section, so they intentionally do NOT dirty this button. The
+  // Discord webhook URL + its alert filters live in the Alerts section and are persisted by the
+  // subscription buttons (Subscribe / Update), so they're excluded here too.
   const hasNoChanges = period === settings.period
     && sla === settings.sla
     && JSON.stringify([...enabledServices].sort()) === JSON.stringify([...settings.enabledServices].sort())
@@ -333,9 +336,10 @@ export default function Settings({ focus } = {}) {
   return (
     <div className="flex flex-col" style={{ maxWidth: '640px', gap: '28px' }}>
 
-      {/* ── General ── */}
+      {/* ── Display (theme + language — applied instantly, NOT governed by Save) #582 ── */}
       <section>
-        <div style={sectionTitleStyle}>{t('settings.general')}</div>
+        <div style={sectionTitleStyle}>{t('settings.display')}</div>
+        <div className="mono" style={{ fontSize: '10px', color: 'var(--text2)', marginTop: '10px', marginBottom: '2px' }}>{t('settings.applied.instant')}</div>
 
         <FieldRow label={t('settings.theme')} desc={t('settings.theme.desc')}>
           <SegmentControl
@@ -345,13 +349,18 @@ export default function Settings({ focus } = {}) {
           />
         </FieldRow>
 
-        <FieldRow label={t('settings.language')} desc={t('settings.lang.desc')}>
+        <FieldRow label={t('settings.language')} desc={t('settings.lang.desc')} last>
           <SegmentControl
             value={lang}
             onChange={setLang}
             options={VALID_LANGS.map((v) => ({ value: v, label: v === 'ko' ? '한국어' : 'English' }))}
           />
         </FieldRow>
+      </section>
+
+      {/* ── General (period/SLA — saved with the "Save settings" button below) ── */}
+      <section>
+        <div style={sectionTitleStyle}>{t('settings.general')}</div>
 
         <FieldRow label={t('settings.period')} desc={t('settings.period.desc')}>
           <SegmentControl
@@ -461,8 +470,9 @@ export default function Settings({ focus } = {}) {
         )}
       </section>
 
-      {/* ── Save (general settings only — theme/lang/period/SLA + monitored services). The Discord
-          webhook + its alert filters are saved separately by the Subscribe/Update buttons in Alerts. */}
+      {/* ── Save (save-required settings only — period/SLA + monitored services; theme/lang are
+          instant-apply, see the Display section, #582). The Discord webhook + its alert filters are
+          saved separately by the Subscribe/Update buttons in Alerts. */}
       <div className="flex items-center justify-end" style={{ gap: '12px' }}>
         <button
           onClick={handleSave}

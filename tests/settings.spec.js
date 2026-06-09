@@ -102,6 +102,30 @@ test.describe('Settings', () => {
     await expect(page.locator('main').getByText(/저장됨|Saved/)).toBeVisible()
     await expect(page.locator('main').getByText(/저장됨|Saved/)).toBeHidden({ timeout: 3000 })
   })
+
+  test('theme & language live in the "Display" section, applied instantly — Save stays disabled (#582)', async ({ page }) => {
+    // #582 — theme/lang are instant-apply (live switching + persisted on toggle), so they are NOT
+    // governed by the Save button. They're separated into a "Display · applied instantly" section so
+    // the user can tell save-required settings apart from instant ones.
+    const main = page.locator('main')
+    await expect(main.getByText(/Display|화면/).first()).toBeVisible()
+    await expect(main.getByText(/Applied instantly|즉시 적용/)).toBeVisible()
+
+    const saveBtn = main.locator('button').filter({ hasText: /저장|Save/ }).first()
+    await expect(saveBtn).toBeDisabled() // fresh Settings, no save-required change
+
+    // Changing language applies instantly (UI switches to Korean) but does NOT enable Save.
+    await main.locator('button').filter({ hasText: '한국어' }).first().evaluate((el) => el.click())
+    await expect(main.getByText('일반')).toBeVisible() // instant-apply confirmed
+    await expect(saveBtn).toBeDisabled()              // language is not save-governed
+  })
+
+  test('a save-required setting (period) DOES enable the Save button — contrast with Display (#582)', async ({ page }) => {
+    const saveBtn = page.locator('main button').filter({ hasText: /저장|Save/ }).first()
+    await expect(saveBtn).toBeDisabled()
+    await page.locator('main button').filter({ hasText: '30' }).first().evaluate((el) => el.click())
+    await expect(saveBtn).toBeEnabled()
+  })
 })
 
 test.describe('Settings — RSS feed (#433)', () => {
