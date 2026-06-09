@@ -52,6 +52,44 @@ test.describe('ServiceDetails page', () => {
   })
 })
 
+test.describe('#581 Recovery card — ongoing (unresolved) incident', () => {
+  const baseSvc = (incidents) => ({
+    id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic',
+    status: incidents.some(i => i.status !== 'resolved') ? 'degraded' : 'operational',
+    latency: 120, uptime30d: 99.5, uptimeSource: 'official', calendarDays: 30, incidents,
+    aiwatchScore: 80, scoreGrade: 'good', scoreConfidence: 'high',
+    scoreBreakdown: { uptime: 39, incidents: 22, recovery: 15, responsiveness: 12, responsivenessStatus: 'available' },
+    scoreMetrics: { uptimePct: 99.5, incidents30d: incidents.length, affectedDays30d: 1, mttrHours: null, probe: { p50: 178, p95: 311, cvCombined: 0.5, validDays: 7 } },
+  })
+  const mount = async (page, incidents) => {
+    const mock = { json: { services: [baseSvc(incidents)], lastUpdated: new Date().toISOString() } }
+    await page.route('**/api/status**', (route) => route.fulfill(mock))
+    await page.route('**/api/status/cached', (route) => route.fulfill(mock))
+    await page.goto('/#claude')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+  }
+
+  test('shows "Incident ongoing" (not "No incidents in 7 days") when an incident is unresolved', async ({ page }) => {
+    // An unresolved (monitoring) incident has no recovery time yet → computeRecoveryStats returns
+    // null → the Recovery card value is "—". Pre-#581 the sub falsely read "No incidents in 7 days",
+    // contradicting the Incident History showing the active incident.
+    await mount(page, [
+      { id: 'on1', status: 'monitoring', title: 'Auth & licensing service issues',
+        startedAt: new Date(Date.now() - 3 * 3600_000).toISOString(), impact: 'minor', duration: null },
+    ])
+    const main = page.locator('main')
+    await expect(main.getByText(/Incident ongoing|인시던트 진행 중/)).toBeVisible()
+    await expect(main.getByText(/No incidents in 7 days|최근 7일 인시던트 없음/)).toHaveCount(0)
+  })
+
+  test('still shows "No incidents in 7 days" when there is genuinely no incident', async ({ page }) => {
+    await mount(page, [])
+    const main = page.locator('main')
+    await expect(main.getByText(/No incidents in 7 days|최근 7일 인시던트 없음/)).toBeVisible()
+    await expect(main.getByText(/Incident ongoing|인시던트 진행 중/)).toHaveCount(0)
+  })
+})
+
 test.describe('AIWatch Score Breakdown denominators (#132)', () => {
   // Regression guards for the weight redistribution: 40/25/15 + 20 (Responsiveness).
   // Routes are set up before navigation — no beforeEach interference.

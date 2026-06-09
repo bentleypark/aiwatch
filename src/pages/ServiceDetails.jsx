@@ -627,6 +627,11 @@ export default function ServiceDetails({ serviceId }) {
   const recentIncidents = (service.incidents ?? []).filter(
     (inc) => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= cutoff7d
   )
+  // #581 — an unresolved incident has no recovery time yet (computeRecoveryStats counts only
+  // resolved ones), so the Recovery card's value is '—'. Distinguish that from "no incidents":
+  // when an incident is ongoing, the sub must say so, not falsely claim "No incidents in 7 days"
+  // (which contradicts the Incident History showing the active incident right below).
+  const hasOngoingIncident = (service.incidents ?? []).some((inc) => inc.status !== 'resolved')
   // groupIncidents re-sorts purely by date; compareGroupedRows lifts ongoing/
   // monitoring rows back above newer resolved ones. See incidentSort.js.
   const groupedIncidents = groupIncidents(recentIncidents).slice().sort(compareGroupedRows)
@@ -722,7 +727,7 @@ export default function ServiceDetails({ serviceId }) {
           // #557 — headline is the median (typical) recovery; when a longer outage exists in the
           // window, surface it as "worst Xh Ym" so a 29h outage is never hidden by short blips.
           sub={isEstimateNoData ? t('uptime.unavailable')
-            : !recovery ? t('svc.mttr.none')
+            : !recovery ? (hasOngoingIncident ? t('svc.mttr.ongoing') : t('svc.mttr.none'))
             : recovery.maxMin > recovery.medianMin ? t('svc.recovery.worst').replace('{d}', formatRecoveryMin(recovery.maxMin))
             : t('svc.incidents.sub')}
           colorClass={isEstimateNoData ? 'text-[var(--text2)]' : recovery ? 'text-[var(--amber)]' : 'text-[var(--text2)]'}
