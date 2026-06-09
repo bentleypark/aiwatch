@@ -220,6 +220,8 @@ const en = {
 
   // Settings
   'settings.general': 'General',
+  'settings.display': 'Display',
+  'settings.applied.instant': 'Applied instantly — no save needed',
   'settings.theme': 'Theme',
   'settings.theme.desc': 'Select dashboard color mode',
   'settings.lang.desc': 'Select UI language',

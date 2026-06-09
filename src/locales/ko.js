@@ -220,6 +220,8 @@ const ko = {
 
   // Settings
   'settings.general': '일반',
+  'settings.display': '화면',
+  'settings.applied.instant': '변경 즉시 적용 · 저장 불필요',
   'settings.theme': '테마',
   'settings.theme.desc': '대시보드 색상 모드를 선택합니다',
   'settings.lang.desc': 'UI 언어를 선택합니다',
