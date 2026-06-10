@@ -86,7 +86,7 @@ function overRateLimit(map: Map<string, { start: number; count: number }>, ip: s
 }
 
 interface DailyCounters {
-  [serviceId: string]: { ok: number; total: number }
+  [serviceId: string]: { ok: number; total: number; officialUptime?: number | null }
 }
 
 function todayUTC(): string {
@@ -114,6 +114,11 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl
     if (!counters[s.id]) counters[s.id] = { ok: 0, total: 0 }
     counters[s.id].total++
     if (s.status === 'operational') counters[s.id].ok++
+    // #586 — snapshot the live status-page rolling-30d uptime each cycle (last-write-wins = the
+    // day's most-recent value). The monthly archive reads the month-end day's value as the
+    // "Official Uptime" display number, so it stays month-accurate and survives a later rebuild
+    // (unlike a one-shot snapshot taken only at build time).
+    counters[s.id].officialUptime = s.uptime30d ?? null
   })
 
   // Write cache + daily counters (2 writes per interval)
@@ -1253,7 +1258,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
       const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'admin/rebuild-archive')
       scoreData = services.map((s) => {
         const r = scoreFor(s, probeSummaries)
-        return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade }
+        return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade, officialUptime: s.uptime30d ?? null }
       })
       for (const s of services) serviceNames[s.id] = s.name
     } catch (parseErr) {
@@ -1750,7 +1755,7 @@ export default {
               const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'monthly-archive')
               scoreData = services.map((s) => {
                 const r = scoreFor(s, probeSummaries)
-                return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade }
+                return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade, officialUptime: s.uptime30d ?? null }
               })
               for (const s of services) serviceNames[s.id] = s.name
             } catch (parseErr) {

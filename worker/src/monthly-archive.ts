@@ -33,7 +33,8 @@ export interface MonthlyIncidentEntry {
 }
 
 export interface MonthlyServiceData {
-  uptime: number | null          // uptime% from daily counters (null if no data)
+  uptime: number | null          // AIWatch-measured uptime% from daily ok/total counters — feeds the Score (null if no data)
+  officialUptime: number | null  // #586 — status-page rolling-30d uptime (month-end daily snapshot, build-time fallback) for the "Official Uptime" DISPLAY table; separate from the daily-counter `uptime` that feeds the Score. null if the service publishes no metric
   score: number | null           // AIWatch Score at archive time (null if unavailable)
   grade: ScoreGrade | null       // Score grade (null if score unavailable)
   incidents: number              // incident count for the month (from accumulated data)
@@ -354,7 +355,24 @@ export function parseDurationMin(d: string): number {
 
 // ── Uptime / Latency computation ─────────────────────────────────────
 
-type DailyCounters = Record<string, { ok: number; total: number }>
+type DailyCounters = Record<string, { ok: number; total: number; officialUptime?: number | null }>
+
+/** #586 — per-service "Official Uptime" for the month: the status-page rolling-30d value as of the
+ *  LATEST day in the window (≈ the month, since uptime30d trails 30 days). Reads the per-cycle daily
+ *  snapshots (DailyCounters.officialUptime) rather than a one-shot build-time snapshot, so it stays
+ *  month-accurate and survives a later rebuild. Omits a service when no day carried a value (months
+ *  before this shipped, or a service that publishes no metric) → the caller falls back to null. */
+export function computeMonthlyOfficialUptime(
+  dailyData: Record<string, DailyCounters>,
+): Record<string, number> {
+  const result: Record<string, number> = {}
+  for (const date of Object.keys(dailyData).sort()) { // ascending → later dates overwrite (most-recent wins)
+    for (const [id, c] of Object.entries(dailyData[date])) {
+      if (c.officialUptime !== null && c.officialUptime !== undefined) result[id] = c.officialUptime
+    }
+  }
+  return result
+}
 
 /** Compute per-service uptime% from daily counters */
 export function computeMonthlyUptime(
@@ -573,6 +591,11 @@ export interface ArchiveScoreInput {
   id: string
   aiwatchScore?: number | null
   scoreGrade?: ScoreGrade | null
+  // #586 hybrid — FALLBACK source for officialUptime: the live status-page rolling-30d uptime
+  // (ServiceStatus.uptime30d) snapshotted from services:latest at archive-build time. The PRIMARY
+  // source is computeMonthlyOfficialUptime (the month-end daily snapshot), which is month-accurate
+  // and rebuild-safe; this build-time value only applies to months with no daily snapshots.
+  officialUptime?: number | null
 }
 
 /** Build monthly archive from daily KV data + accumulated incident data */
@@ -694,6 +717,7 @@ export async function buildMonthlyArchive(
   }
 
   const uptimeMap = computeMonthlyUptime(dailyData)
+  const officialUptimeMap = computeMonthlyOfficialUptime(dailyData) // #586 — month-end status-page value per service
   const latencyMap = computeMonthlyLatency(probeData)
   const latencyStats = computeMonthlyLatencyStats(probeData) // p95 + spikes (#17)
 
@@ -736,6 +760,9 @@ export async function buildMonthlyArchive(
 
     services[id] = {
       uptime: uptimeMap[id] ?? null,
+      // #586 — prefer the daily-snapshot month-end value (month-accurate, rebuild-safe); fall back
+      // to the build-time services:latest snapshot (scoreData) for months with no daily snapshots.
+      officialUptime: officialUptimeMap[id] ?? scoreSvc?.officialUptime ?? null,
       score: scoreSvc?.aiwatchScore ?? null,
       grade: scoreSvc?.scoreGrade ?? null,
       incidents: incSvc?.count ?? 0,
