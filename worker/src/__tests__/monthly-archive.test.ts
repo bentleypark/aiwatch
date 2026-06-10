@@ -7,6 +7,7 @@ import {
   isInMonthlyArchiveWindow,
   buildMonthlyArchive,
   accumulateMonthlyIncidents,
+  accumulateIncidentsOnlyIfChanged,
   parseDurationMin,
   summarizeSecurityAlerts,
   extractOsvVulnId,
@@ -23,7 +24,7 @@ import {
   summarizeDegradation,
 } from '../monthly-archive'
 import { MIN_LEAD_SAMPLE_SIZE } from '../detection-lead-log'
-import type { ServiceStatus } from '../types'
+import type { ServiceStatus, Incident } from '../types'
 import type { MonthlySecurityEntry, MonthlySecuritySummary } from '../monthly-archive'
 import type { DetectionLeadEntry } from '../detection-lead-log'
 import type { OsvTimeline } from '../security-monitor'
@@ -595,6 +596,68 @@ describe('enrichTopFindingsWithTimelines', () => {
     const enriched = await enrichTopFindingsWithTimelines(kv, baseSummary)
     expect(enriched.topFindings[0].timeline).toBeUndefined()
     expect(enriched.topFindings[1].timeline).toHaveLength(3)
+  })
+})
+
+// ── accumulateIncidentsOnlyIfChanged (#587) ──────────────────────────
+describe('accumulateIncidentsOnlyIfChanged (#587)', () => {
+  const svc = (id: string, incidents: Array<{ id: string; startedAt: string; status: string; duration: string | null }>): ServiceStatus => ({
+    id, name: id, status: 'down', category: 'api', uptime30d: null, latency: null,
+    incidents: incidents.map(i => ({
+      id: i.id, title: `inc ${i.id}`, status: i.status as Incident['status'],
+      startedAt: i.startedAt, duration: i.duration, timeline: [],
+    })),
+  } as unknown as ServiceStatus)
+
+  // In-memory KV with get/put + a write counter so we can assert the budget guard.
+  const makeKV = (seed: Record<string, string> = {}) => {
+    const store: Record<string, string> = { ...seed }
+    let writes = 0
+    return {
+      kv: {
+        get: async (k: string) => store[k] ?? null,
+        put: async (k: string, v: string) => { store[k] = v; writes++ },
+      } as unknown as KVNamespace,
+      store,
+      writes: () => writes,
+    }
+  }
+
+  it('writes a freshly-seen incident into incidents:monthly (captures short-lived/RSS incidents)', async () => {
+    const { kv, store, writes } = makeKV()
+    const services = [svc('azureopenai', [{ id: 'az-1', startedAt: '2026-06-03T10:00:00Z', status: 'investigating', duration: null }])]
+    const res = await accumulateIncidentsOnlyIfChanged(kv, services, '2026-06')
+    expect(res).toBe('written')
+    expect(writes()).toBe(1)
+    const stored = JSON.parse(store['incidents:monthly:2026-06'])
+    expect(stored.services.azureopenai.count).toBe(1)
+    expect(stored.services.azureopenai.incidentIds).toContain('az-1')
+  })
+
+  it('skips the write when no incident data changed (budget guard — bumped lastUpdated alone)', async () => {
+    const services = [svc('azureopenai', [{ id: 'az-1', startedAt: '2026-06-03T10:00:00Z', status: 'resolved', duration: '20m' }])]
+    const { kv, writes } = makeKV()
+    expect(await accumulateIncidentsOnlyIfChanged(kv, services, '2026-06')).toBe('written') // first write
+    expect(await accumulateIncidentsOnlyIfChanged(kv, services, '2026-06')).toBe('unchanged') // no change → no write
+    expect(await accumulateIncidentsOnlyIfChanged(kv, services, '2026-06')).toBe('unchanged')
+    expect(writes()).toBe(1) // only the first run wrote, despite three calls
+  })
+
+  it('dedups by id — re-accumulating the same incident never double-counts', async () => {
+    const services = [svc('bedrock', [{ id: 'bd-1', startedAt: '2026-06-04T08:00:00Z', status: 'resolved', duration: '1h' }])]
+    const { kv, store } = makeKV()
+    await accumulateIncidentsOnlyIfChanged(kv, services, '2026-06')
+    await accumulateIncidentsOnlyIfChanged(kv, services, '2026-06')
+    expect(JSON.parse(store['incidents:monthly:2026-06']).services.bedrock.count).toBe(1)
+  })
+
+  it('writes again when an active incident progresses (duration grows)', async () => {
+    const { kv, store, writes } = makeKV()
+    await accumulateIncidentsOnlyIfChanged(kv, [svc('chatgpt', [{ id: 'cg-1', startedAt: '2026-06-05T01:00:00Z', status: 'investigating', duration: '30m' }])], '2026-06')
+    const r2 = await accumulateIncidentsOnlyIfChanged(kv, [svc('chatgpt', [{ id: 'cg-1', startedAt: '2026-06-05T01:00:00Z', status: 'resolved', duration: '1h 15m' }])], '2026-06')
+    expect(r2).toBe('written') // progressed → persisted
+    expect(writes()).toBe(2)
+    expect(JSON.parse(store['incidents:monthly:2026-06']).services.chatgpt.count).toBe(1) // still one incident
   })
 })
 
