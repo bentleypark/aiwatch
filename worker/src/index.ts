@@ -469,6 +469,17 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
   })
 
+  // #587 — accumulate this cycle's incidents into incidents:monthly every */5 (not just the daily
+  // summary), so a short-lived / RSS-sourced incident (Azure/Bedrock) that fires an alert is
+  // captured before it ages out of the upstream feed — previously the once-a-day pass missed those,
+  // leaving the dashboard 90-day filter + monthly archive blind to an incident AIWatch alerted on.
+  // Writes only when the incident data changed (idempotent dedup-by-id), so it's budget-safe.
+  try {
+    await accumulateIncidentsOnlyIfChanged(env.STATUS_CACHE, services, todayUTC().slice(0, 7))
+  } catch (err) {
+    console.error('[cron] incident accumulation failed:', err instanceof Error ? err.message : err)
+  }
+
   // Mistral-only probe cross-validation removed in #373 — same-title incident grouping
   // (src/utils/incidentGrouping.js) now handles auto-monitoring noise uniformly across services.
 
@@ -945,7 +956,7 @@ import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyB
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateMonthlyIncidents, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, type MonthlyIncidents, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
+import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -2032,24 +2043,15 @@ export default {
           // Mark today's summary as done (prevents re-send on subsequent cron cycles)
           await kvPut(env.STATUS_CACHE, `daily-summary:${today}`, '1', { expirationTtl: 604800 })
 
-          // Accumulate monthly incident data (runs daily alongside summary)
+          // Accumulate monthly incident data. As of #587 this also runs on the */5 alert cron
+          // (so short-lived / RSS incidents are captured before they age out of the feed); this
+          // daily pass stays as a backstop. accumulateIncidentsOnlyIfChanged writes only when the
+          // incident data changed, so the two cadences don't double-write or double-count.
           if (dailyServices.length > 0) {
             try {
               const currentMonth = today.slice(0, 7) // YYYY-MM
-              const incKey = `incidents:monthly:${currentMonth}`
-              const existingRaw = await env.STATUS_CACHE.get(incKey).catch(() => null)
-              let existingInc: MonthlyIncidents | null = null
-              if (existingRaw) {
-                try { existingInc = JSON.parse(existingRaw) } catch (parseErr) {
-                  console.warn('[daily-summary] corrupt incident accumulation data, resetting:',
-                    parseErr instanceof Error ? parseErr.message : parseErr)
-                }
-              }
-              const updated = accumulateMonthlyIncidents(existingInc, dailyServices, currentMonth)
-              const incWriteOk = await kvPut(env.STATUS_CACHE, incKey, JSON.stringify(updated), { expirationTtl: 60 * 86400 })
-              if (!incWriteOk) {
-                console.error(`[daily-summary] incident accumulation KV write failed for ${currentMonth}`)
-              }
+              const res = await accumulateIncidentsOnlyIfChanged(env.STATUS_CACHE, dailyServices, currentMonth)
+              if (res === 'failed') console.error(`[daily-summary] incident accumulation KV write failed for ${currentMonth}`)
             } catch (err) {
               console.error('[daily-summary] incident accumulation failed:', err instanceof Error ? err.message : err)
             }

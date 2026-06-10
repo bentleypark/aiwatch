@@ -13,6 +13,7 @@ import { osvTimelineKey } from './security-monitor'
 import type { DetectionLeadEntry } from './detection-lead-log'
 import { detectionLeadMonthlyKey, isValidEntry as isValidDetectionLeadEntry, MIN_LEAD_SAMPLE_SIZE } from './detection-lead-log'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
+import { kvPut } from './utils'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
 
@@ -331,6 +332,38 @@ export function accumulateMonthlyIncidents(
   }
 
   return result
+}
+
+/** #587 — read `incidents:monthly:{month}`, accumulate the current services onto it, and write
+ *  back ONLY when the incident data actually changed.
+ *
+ *  Designed to run on the every-5-minute alert cron (not just the daily summary), so a short-lived
+ *  or RSS-sourced incident (Azure/Bedrock) that fires an alert is captured before it ages out of
+ *  the upstream feed — the daily-only cadence missed those, leaving the dashboard 90-day filter +
+ *  monthly archive blind to an incident that AIWatch alerted on.
+ *
+ *  Write-budget guard: `accumulateMonthlyIncidents` always stamps a fresh `lastUpdated`, so a full
+ *  JSON compare would never match. We compare the `services` payload only — when no incident data
+ *  changed (the overwhelmingly common 5-min case) we skip the write entirely. dedup-by-id inside
+ *  `accumulateMonthlyIncidents` keeps it idempotent, so repeated 5-min runs never double-count. */
+export async function accumulateIncidentsOnlyIfChanged(
+  kv: KVNamespace,
+  services: ServiceStatus[],
+  month: string, // YYYY-MM
+): Promise<'unchanged' | 'written' | 'failed'> {
+  const incKey = `incidents:monthly:${month}`
+  const existingRaw = await kv.get(incKey).catch(() => null)
+  let existing: MonthlyIncidents | null = null
+  if (existingRaw) {
+    try { existing = JSON.parse(existingRaw) } catch { existing = null /* corrupt → rebuild from current */ }
+  }
+  const updated = accumulateMonthlyIncidents(existing, services, month)
+  // Compare incident payload only — `lastUpdated` is bumped every call, so a whole-object compare
+  // would always differ. No service-payload change → nothing to persist → skip the write.
+  const existingServices = existing ? JSON.stringify(existing.services) : null
+  if (existingServices === JSON.stringify(updated.services)) return 'unchanged'
+  const ok = await kvPut(kv, incKey, JSON.stringify(updated), { expirationTtl: 60 * 86400 })
+  return ok ? 'written' : 'failed'
 }
 
 /** Map a runtime ServiceStatus.incidents[].status to the archive's finalStatus enum.
