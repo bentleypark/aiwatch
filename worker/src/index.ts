@@ -86,7 +86,7 @@ function overRateLimit(map: Map<string, { start: number; count: number }>, ip: s
 }
 
 interface DailyCounters {
-  [serviceId: string]: { ok: number; total: number }
+  [serviceId: string]: { ok: number; total: number; officialUptime?: number | null }
 }
 
 function todayUTC(): string {
@@ -114,6 +114,11 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl
     if (!counters[s.id]) counters[s.id] = { ok: 0, total: 0 }
     counters[s.id].total++
     if (s.status === 'operational') counters[s.id].ok++
+    // #586 — snapshot the live status-page rolling-30d uptime each cycle (last-write-wins = the
+    // day's most-recent value). The monthly archive reads the month-end day's value as the
+    // "Official Uptime" display number, so it stays month-accurate and survives a later rebuild
+    // (unlike a one-shot snapshot taken only at build time).
+    counters[s.id].officialUptime = s.uptime30d ?? null
   })
 
   // Write cache + daily counters (2 writes per interval)

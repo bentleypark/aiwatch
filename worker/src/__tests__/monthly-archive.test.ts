@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   computeMonthlyUptime,
+  computeMonthlyOfficialUptime,
   computeMonthlyLatency,
   computeMonthlyLatencyStats,
   getMonthDates,
@@ -108,6 +109,30 @@ describe('computeMonthlyUptime', () => {
   it('returns 0 for total=0', () => {
     const dailyData = { '2026-03-01': { claude: { ok: 0, total: 0 } } }
     expect(computeMonthlyUptime(dailyData).claude).toBe(0)
+  })
+})
+
+// ── computeMonthlyOfficialUptime (#586 daily snapshot) ───────────────
+describe('computeMonthlyOfficialUptime (#586)', () => {
+  it('returns the most-recent day\'s officialUptime per service', () => {
+    const daily = {
+      '2026-06-01': { chatgpt: { ok: 200, total: 288, officialUptime: 98.5 }, openai: { ok: 288, total: 288, officialUptime: 99.9 } },
+      '2026-06-30': { chatgpt: { ok: 210, total: 288, officialUptime: 99.83 } }, // later day wins for chatgpt
+    }
+    const r = computeMonthlyOfficialUptime(daily)
+    expect(r.chatgpt).toBe(99.83)  // month-end value, not the earlier 98.5
+    expect(r.openai).toBe(99.9)    // only present on the 1st → carried
+  })
+  it('omits services with no officialUptime on any day (→ caller falls back to null)', () => {
+    const daily = { '2026-06-01': { cohere: { ok: 288, total: 288 } } } // no officialUptime field
+    expect(computeMonthlyOfficialUptime(daily).cohere).toBeUndefined()
+  })
+  it('skips null/undefined daily values, keeping the last real one', () => {
+    const daily = {
+      '2026-06-01': { gemini: { ok: 280, total: 288, officialUptime: 97.0 } },
+      '2026-06-15': { gemini: { ok: 288, total: 288, officialUptime: null } }, // null does not clobber
+    }
+    expect(computeMonthlyOfficialUptime(daily).gemini).toBe(97.0)
   })
 })
 
@@ -667,6 +692,22 @@ describe('buildMonthlyArchive', () => {
       { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const },
     ])
     expect(archive.services.claude.officialUptime).toBeNull()
+  })
+
+  it('#586 daily snapshot WINS over the build-time scoreData fallback', async () => {
+    // History days carry officialUptime; the month-end (2026-03-02) value must be used over the
+    // scoreData snapshot (which is the build-time fallback for months that lack daily snapshots).
+    const dailyKV = {
+      get: async (key: string) => ({
+        'history:2026-03-01': JSON.stringify({ claude: { ok: 280, total: 288, officialUptime: 98.0 } }),
+        'history:2026-03-02': JSON.stringify({ claude: { ok: 288, total: 288, officialUptime: 99.83 } }),
+      } as Record<string, string>)[key] ?? null,
+    } as unknown as KVNamespace
+    const archive = await buildMonthlyArchive(dailyKV, 2026, 3, [
+      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const, officialUptime: 50 }, // stale fallback — must be ignored
+    ])
+    expect(archive.services.claude.officialUptime).toBe(99.83) // month-end daily value, not 50
+    expect(archive.services.claude.uptime).toBeCloseTo(98.61, 0) // daily-counter uptime unchanged
   })
 
   it('emits null totalDowntimeMin + longestIncidentMin for services with no incidents', async () => {
