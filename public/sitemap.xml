@@ -101,9 +101,15 @@
   <!-- Monthly Reports (proxied via Edge Function to reports.ai-watch.dev, #264) -->
   <url>
     <loc>https://ai-watch.dev/reports/</loc>
-    <lastmod>2026-05-16</lastmod>
+    <lastmod>2026-06-09</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://ai-watch.dev/reports/2026-05/</loc>
+    <lastmod>2026-06-09</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
   </url>
   <url>
     <loc>https://ai-watch.dev/reports/2026-04/</loc>
