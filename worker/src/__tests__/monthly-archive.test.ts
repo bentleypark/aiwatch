@@ -647,6 +647,28 @@ describe('buildMonthlyArchive', () => {
     expect(archive.services.openai.avgLatencyMs).toBeNull()
   })
 
+  it('#586 hybrid: threads officialUptime (status-page) separately from the daily-counter uptime', async () => {
+    // claude's daily counters give ~98.61% (AIWatch-measured) — see test above. The status-page
+    // officialUptime (from services:latest's uptime30d) is passed through scoreData and must NOT
+    // overwrite or equal the daily-counter uptime; estimate services (null uptime30d) → null.
+    const scoreData = [
+      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const, officialUptime: 99.83 },
+      { id: 'openai', aiwatchScore: 92, scoreGrade: 'excellent' as const, officialUptime: null },
+    ]
+    const archive = await buildMonthlyArchive(mockKV, 2026, 3, scoreData)
+    expect(archive.services.claude.officialUptime).toBe(99.83)        // status-page value, for display
+    expect(archive.services.claude.uptime).toBeCloseTo(98.61, 0)      // daily-counter value, for the Score — unchanged
+    expect(archive.services.claude.officialUptime).not.toBe(archive.services.claude.uptime)
+    expect(archive.services.openai.officialUptime).toBeNull()         // no published metric → null
+  })
+
+  it('officialUptime defaults to null when scoreData omits it (forward/back compat)', async () => {
+    const archive = await buildMonthlyArchive(mockKV, 2026, 3, [
+      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const },
+    ])
+    expect(archive.services.claude.officialUptime).toBeNull()
+  })
+
   it('emits null totalDowntimeMin + longestIncidentMin for services with no incidents', async () => {
     const noIncKV = {
       get: async (key: string) => {

@@ -33,7 +33,8 @@ export interface MonthlyIncidentEntry {
 }
 
 export interface MonthlyServiceData {
-  uptime: number | null          // uptime% from daily counters (null if no data)
+  uptime: number | null          // AIWatch-measured uptime% from daily ok/total counters — feeds the Score (null if no data)
+  officialUptime: number | null  // #586 — status-page rolling-30d uptime snapshotted at build time, for the "Official Uptime" DISPLAY table (null if the service publishes no metric)
   score: number | null           // AIWatch Score at archive time (null if unavailable)
   grade: ScoreGrade | null       // Score grade (null if score unavailable)
   incidents: number              // incident count for the month (from accumulated data)
@@ -573,6 +574,13 @@ export interface ArchiveScoreInput {
   id: string
   aiwatchScore?: number | null
   scoreGrade?: ScoreGrade | null
+  // #586 hybrid — the live status-page rolling-30d uptime (ServiceStatus.uptime30d), snapshotted
+  // from services:latest at archive-build time. Stored as `officialUptime` for DISPLAY (the
+  // "Official Uptime" table), separate from the daily-counter `uptime` that feeds the Score.
+  // NOTE: it's a rolling-30d window captured on the 1st of the next month, so it ≈ the reported
+  // calendar month but its edges don't align to month boundaries — an acceptable display proxy,
+  // not an exact month-scoped figure.
+  officialUptime?: number | null
 }
 
 /** Build monthly archive from daily KV data + accumulated incident data */
@@ -736,6 +744,7 @@ export async function buildMonthlyArchive(
 
     services[id] = {
       uptime: uptimeMap[id] ?? null,
+      officialUptime: scoreSvc?.officialUptime ?? null,
       score: scoreSvc?.aiwatchScore ?? null,
       grade: scoreSvc?.scoreGrade ?? null,
       incidents: incSvc?.count ?? 0,
