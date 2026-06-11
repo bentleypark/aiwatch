@@ -154,6 +154,7 @@ const en = {
   // Service Details
   'svc.latency': 'API Response Time',
   'svc.latency.statusPage': 'Status Page Latency',
+  'svc.latency.statusPage.sub': 'Status page response time',
   'svc.uptime30d': '30-Day Uptime',
   'uptime.label.official': 'Official Uptime',
   'uptime.sub.official': 'Official status page',

@@ -34,6 +34,10 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'stability':       { id: 'stability',  name: 'Stability AI',     provider: 'Stability AI', category: 'api' },
   'voyageai':        { id: 'voyageai',   name: 'Voyage AI',        provider: 'Voyage AI',   category: 'api' },
   'modal':           { id: 'modal',      name: 'Modal',            provider: 'Modal',       category: 'api' },
+  // LangChain (LangSmith) (#561) — slug is 'langchain' (search volume) while the worker id is
+  // 'langsmith'; the id≠slug mapping is mirrored in worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE and
+  // src/utils/constants.js FEED_SLUG_OVERRIDE, pinned by feed-slug-sync.test.ts / feed-slug.test.js.
+  'langchain':       { id: 'langsmith',  name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api' },
   // AI apps (#263)
   'character-ai':    { id: 'characterai', name: 'Character.AI',    provider: 'Character.AI', category: 'app' },
   // Coding agents (#294) — OpenAI Codex is the current coding-agent product,
@@ -81,6 +85,7 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'stability':      ['replicate', 'huggingface'],
   'voyageai':       ['pinecone', 'cohere'],
   'modal':          ['replicate', 'huggingface'],
+  'langchain':      ['pinecone', 'openai', 'claude'],
   // Apps
   'character-ai':   ['chatgpt', 'claude-ai', 'gemini'],
 }

@@ -250,10 +250,13 @@ test.describe('Is X Down? SSR pages', () => {
   })
 
   test('tied rank shows "(tied)" marker for services in a stable tie cluster', async ({ page }) => {
-    // Cohere/Fireworks/DeepSeek have tied at score 83 for weeks. Guards the rankTied
-    // render path — deleting ${service.rankTied ? ' (tied)' : ''} would fail this.
-    // If the cluster ever un-ties, move to another known-tied service.
-    const tiedCandidates = ['fireworks', 'cohere', 'deepseek']
+    // Guards the rankTied render path — deleting ${service.rankTied ? ' (tied)' : ''} would fail this.
+    // AIWatch Scores drift with live data, so pinning a single tie pair is fragile: the old
+    // Cohere/Fireworks/DeepSeek "tied at 83" cluster un-tied. Instead scan a broad set spanning
+    // multiple clusters — the lower-60s band (claude/elevenlabs/deepgram) is a large, drift-stable
+    // multi-way tie, with deepseek/fireworks/cohere as secondary fallbacks. Passes if ANY candidate's
+    // SSR page renders "(tied)"; only if every cluster un-ties at once, refresh against /api/status.
+    const tiedCandidates = ['claude', 'elevenlabs', 'deepgram', 'deepseek', 'fireworks', 'cohere']
     let foundTied = false
     for (const slug of tiedCandidates) {
       await page.goto(`/is-${slug}-down`, { waitUntil: 'domcontentloaded' })
@@ -263,7 +266,7 @@ test.describe('Is X Down? SSR pages', () => {
         if (text.includes('(tied)')) { foundTied = true; break }
       }
     }
-    expect(foundTied, 'at least one of fireworks/cohere/deepseek must show "(tied)"').toBe(true)
+    expect(foundTied, `none of ${tiedCandidates.join('/')} rendered "(tied)" — score clusters may have drifted; refresh against /api/status`).toBe(true)
   })
 
   test('rank excludes estimate-only services with zero incidents', async ({ page }) => {

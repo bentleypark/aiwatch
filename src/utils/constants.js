@@ -15,7 +15,7 @@ export const API_SERVICE_IDS = [
   'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq',
   'together', 'fireworks', 'cerebras', 'perplexity', 'huggingface', 'replicate',
   'elevenlabs', 'xai', 'deepseek', 'openrouter', 'bedrock', 'azureopenai',
-  'pinecone', 'stability', 'voyageai', 'modal', 'assemblyai', 'deepgram',
+  'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'assemblyai', 'deepgram',
 ]
 
 // AI web apps (no latency — web services, ordered before related API)
@@ -34,7 +34,7 @@ export const SERVICE_AND_APP_IDS = [
   // voice & speech AI
   'elevenlabs', 'assemblyai', 'deepgram',
   // inference / infrastructure
-  'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal',
+  'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal', 'langsmith',
 ]
 
 // All service IDs
@@ -45,13 +45,13 @@ export const SERVICE_CATEGORIES = {
   all:       { labelKey: 'filter.all',       ids: null }, // null = show all
   apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai'] },
   llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
-  inference: { labelKey: 'filter.inference', ids: ['elevenlabs', 'assemblyai', 'deepgram', 'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal'] },
+  inference: { labelKey: 'filter.inference', ids: ['elevenlabs', 'assemblyai', 'deepgram', 'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal', 'langsmith'] },
   agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'] },
 }
 
 // Services excluded from fallback recommendations (not interchangeable with LLM APIs)
 // Keep in sync with worker/src/fallback.ts EXCLUDE_FALLBACK
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'characterai', 'bedrock', 'azureopenai']
 
 // Per-service incident RSS feed (#432). The feed URL uses the /is-{slug}-down
 // page slug, which differs from the worker service ID for the few services
@@ -62,6 +62,7 @@ const FEED_SLUG_OVERRIDE = {
   copilot:     'github-copilot',
   claudeai:    'claude-ai',
   characterai: 'character-ai',
+  langsmith:   'langchain',
 }
 
 // Services with no /is-{slug}-down page and therefore no RSS feed — estimate-only
@@ -88,7 +89,7 @@ export const ALL_SERVICES_FEED_URL = 'https://ai-watch.dev/feed.xml'
 export const API_TIER = {
   claude: 1, openai: 1, gemini: 1,
   mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, xai: 2, perplexity: 2,
-  bedrock: 3, azureopenai: 3, openrouter: 3,
+  bedrock: 3, azureopenai: 3, openrouter: 3, langsmith: 3,
   elevenlabs: 4, assemblyai: 4, deepgram: 4,
   claudecode: 11, codex: 11,
   cursor: 12, windsurf: 12,

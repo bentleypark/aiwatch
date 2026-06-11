@@ -66,6 +66,7 @@ const STATUS_URL = {
   stability:   'https://status.stability.ai',
   voyageai:    'https://voyageai-status.statuspage.io',
   modal:       'https://status.modal.com',
+  langsmith:   'https://status.smith.langchain.com',
   assemblyai:  'https://status.assemblyai.com',
   deepgram:    'https://status.deepgram.com',
   azureopenai: 'https://azure.status.microsoft/en-us/status',
@@ -698,12 +699,10 @@ export default function ServiceDetails({ serviceId }) {
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>
         <MetricCard
           label={probeServiceIds.includes(service.id) ? t('svc.latency') : t('svc.latency.statusPage')}
-          value={probeServiceIds.includes(service.id)
-            ? (service.latency != null ? `${service.latency} ms` : '—')
-            : '—'}
+          value={service.latency != null ? `${service.latency} ms` : '—'}
           sub={probeServiceIds.includes(service.id)
             ? (service.latency != null ? t('svc.latency.sub') : t('uptime.collecting'))
-            : t('uptime.unavailable')}
+            : (service.latency != null ? t('svc.latency.statusPage.sub') : t('uptime.unavailable'))}
           colorClass={probeServiceIds.includes(service.id) ? 'text-[var(--blue)]' : 'text-[var(--text2)]'}
         />
         <MetricCard
@@ -890,7 +889,7 @@ export default function ServiceDetails({ serviceId }) {
           'Cohere': 'cohere', 'Mistral': 'mistral', 'Hugging Face': 'huggingface',
           'Together': 'together', 'Groq': 'groq', 'Replicate': 'replicate',
           'AssemblyAI': 'assemblyai', 'Deepgram': 'deepgram',
-          'LangChain': '', // no dedicated service page — subpackage CVEs surface only in the banner
+          'LangChain': 'langsmith', // #561 — langchain ecosystem CVEs now have a detail-page home
         }
         const filtered = securityAlerts.filter(a => {
           // OSV: match by mapped service ID (e.g., "Anthropic (Claude)" → only "claude", not "claudeai")

@@ -3,7 +3,7 @@
 ```
 Browser (React SPA, 60s polling)
   → Cloudflare Worker (/api/status)
-    → parallel fetch (33 services)
+    → parallel fetch (34 services)
     → gemini dual-source (#310): gcloud Vertex feed + aistudio.google.com/status MakerSuite RPC — merged with vertex:/aistudio: ID prefixes
     → normalize to ServiceStatus[]
     → write to KV (cache + daily counters)

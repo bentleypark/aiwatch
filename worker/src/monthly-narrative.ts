@@ -43,7 +43,7 @@ export interface NarrativeAiOptions {
 }
 
 // Cap on incident candidates sent to the model. Archives can carry thousands of
-// incidents (200/service × 33); the prompt only needs the most significant ones.
+// incidents (200/service × 34); the prompt only needs the most significant ones.
 // 14 leaves the model room to pick the report's 5-6 notable entries with margin.
 const MAX_INCIDENT_CANDIDATES = 14
 // Cap on per-service summary rows in the Observations input — every service with

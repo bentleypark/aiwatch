@@ -154,6 +154,7 @@ const ko = {
   // Service Details
   'svc.latency': 'API 응답 시간',
   'svc.latency.statusPage': '상태 페이지 레이턴시',
+  'svc.latency.statusPage.sub': '상태 페이지 응답 시간',
   'svc.uptime30d': '30일 업타임',
   'uptime.label.official': '공식 Uptime',
   'uptime.sub.official': '공식 status page 기준',

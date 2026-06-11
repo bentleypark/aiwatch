@@ -1,7 +1,7 @@
 // Fallback recommendation logic for incident alerts
 
 // Keep in sync with src/utils/constants.js EXCLUDE_FALLBACK
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'characterai', 'bedrock', 'azureopenai']
 
 // Tier-based priority — same-tier services sorted by Score, then adjacent tiers by distance.
 // API tiers (1-4) and agent tiers (11-13) use distinct number ranges so TIER_LABEL stays unambiguous
@@ -14,7 +14,7 @@ export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stabil
 export const API_TIER: Record<string, number> = {
   claude: 1, openai: 1, gemini: 1,
   mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, xai: 2, perplexity: 2,
-  bedrock: 3, azureopenai: 3, openrouter: 3,
+  bedrock: 3, azureopenai: 3, openrouter: 3, langsmith: 3,
   elevenlabs: 4, assemblyai: 4, deepgram: 4,
   claudecode: 11, codex: 11,
   cursor: 12, windsurf: 12,

@@ -439,6 +439,20 @@ const MOCK_SERVICES = [
         ] },
     ],
   },
+  {
+    id: 'langsmith', category: 'api', name: 'LangChain (LangSmith)', provider: 'LangChain', status: 'operational',
+    latency: null, uptime30d: 98.48,
+    history30d: hist([9, 18]),
+    history3m: [{ month: '2026-01', uptime: 99.55 }, { month: '2026-02', uptime: 99.30 }, { month: '2026-03', uptime: 99.40 }],
+    incidents: [
+      { id: 'ls-1', title: 'Elevated LangSmith API error rate', startedAt: ago(3 * D + 2 * H), duration: '50m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: 'LangSmith API 오류율이 상승하고 있습니다.', at: ago(3 * D + 2 * H) },
+          { stage: 'identified', text: 'Run ingestion 백엔드 부하로 확인.', at: ago(3 * D + 2 * H - 20 * M) },
+          { stage: 'resolved', text: '용량 확장 후 정상화.', at: ago(3 * D + 2 * H - 50 * M) },
+        ] },
+    ],
+  },
   // ── Coding Agents ──
   {
     id: 'claudecode', category: 'agent', name: 'Claude Code', provider: 'Anthropic', status: 'operational',
