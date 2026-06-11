@@ -35,7 +35,7 @@ describe('parseRssIncidents', () => {
         <description>Down</description>
       </item>
     `
-    const result = parseRssIncidents(xml)
+    const result = parseRssIncidents(xml, Date.parse('2026-03-01T11:00:00Z')) // #602 — recent `now` so the unresolved incident isn't stale-resolved
     expect(result).toHaveLength(1)
     expect(result[0].status).toBe('investigating')
     expect(result[0].duration).toBeNull()
@@ -89,7 +89,7 @@ describe('parseRssIncidents', () => {
         <description>Down</description>
       </item>
     `
-    const result = parseRssIncidents(xml)
+    const result = parseRssIncidents(xml, Date.parse('2026-03-01T11:00:00Z')) // #602 — recent `now` so the unresolved incident isn't stale-resolved
     expect(result).toHaveLength(1)
     expect(result[0].status).toBe('investigating')
   })
@@ -235,7 +235,7 @@ describe('parseRssIncidents', () => {
         <description>Spike detected</description>
       </item>
     `
-    const result = parseRssIncidents(xml)
+    const result = parseRssIncidents(xml, Date.parse('2026-03-01T15:00:00Z')) // #602 — recent `now` so the unresolved incident isn't stale-resolved
     expect(result).toHaveLength(2)
     expect(result[0].title).toContain('Web endpoint')
     expect(result[0].status).toBe('resolved')
@@ -309,7 +309,7 @@ describe('parseRssIncidents', () => {
         <description>Down</description>
       </item>
     `
-    const result = parseRssIncidents(xml)
+    const result = parseRssIncidents(xml, Date.parse('2026-04-06T13:00:00Z')) // #602 — recent `now` so the unresolved incident isn't stale-resolved
     expect(result).toHaveLength(2)
     expect(result[0].status).toBe('resolved')
     expect(result[1].status).toBe('investigating')

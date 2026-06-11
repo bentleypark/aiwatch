@@ -466,6 +466,19 @@ const MOCK_SERVICES = [
         ] },
     ],
   },
+  {
+    id: 'luma', category: 'api', name: 'Luma (Dream Machine)', provider: 'Luma', status: 'operational',
+    latency: null, uptime30d: 99.40,
+    history30d: hist([12, 23]),
+    history3m: [{ month: '2026-01', uptime: 99.50 }, { month: '2026-02', uptime: 99.20 }, { month: '2026-03', uptime: 99.40 }],
+    incidents: [
+      { id: 'lm-1', title: 'Dream Machine is degraded', startedAt: ago(2 * D), duration: '1h 4m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: 'Dream Machine 비디오 생성 지연이 확인됩니다.', at: ago(2 * D) },
+          { stage: 'resolved', text: 'Ray/UNI-1 추론 용량 복구 후 정상화.', at: ago(2 * D - 64 * M) },
+        ] },
+    ],
+  },
   // ── Coding Agents ──
   {
     id: 'claudecode', category: 'agent', name: 'Claude Code', provider: 'Anthropic', status: 'operational',

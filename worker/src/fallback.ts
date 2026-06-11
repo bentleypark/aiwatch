@@ -14,8 +14,11 @@ export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stabil
 export const API_TIER: Record<string, number> = {
   claude: 1, openai: 1, gemini: 1,
   mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, xai: 2, perplexity: 2,
-  bedrock: 3, azureopenai: 3, openrouter: 3, langsmith: 3, runway: 3,
+  bedrock: 3, azureopenai: 3, openrouter: 3, langsmith: 3,
   elevenlabs: 4, assemblyai: 4, deepgram: 4,
+  // Tier 5 = generative Video (#602 / #601 step B). A distinct tier so a degraded video service
+  // recommends its video sibling (distance 0) over a tier-3 LLM router / infra service.
+  runway: 5, luma: 5,
   claudecode: 11, codex: 11,
   cursor: 12, windsurf: 12,
   copilot: 13, junie: 13,
@@ -103,7 +106,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 // Exported for the cross-mirror sync test (#403). Mirrored as TIER_LABEL in src/utils/constants.js;
 // Overview.jsx imports from there so there is no third inline copy to drift against.
 export const TIER_LABEL: Record<number, string> = {
-  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice',
+  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video',
   11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
   21: 'AI Apps', // matches CATEGORY_LABEL[app] so the existing buildGroupedFallbackText copy stays consistent
 }
