@@ -21,6 +21,12 @@ skill is the periodic backstop — run it over the whole open board.
 1. **List the board**: `gh issue list --state open --limit 100 --json number,title,labels,createdAt`,
    `gh pr list --state open`, AND `gh pr list --state merged --limit 30` — question ① (shipped-not-closed)
    is about work in **merged** PRs, so the merged list is the one that catches it.
+   - **Also sweep the `aiwatch-reports` repo** (the monthly-report site + generator — a sibling repo
+     at `~/Desktop/bentely/aiwatch/aiwatch-reports`, with its own issues like the #27–#29 generator
+     work). Run the same three lists there: `gh issue list --state open --repo bentleypark/aiwatch-reports`
+     (+ open/merged PRs). The two repos cross-reference (e.g. `aiwatch#586`/`#591` → reports-generator
+     PRs), so reconcile across **both** boards: a worker/dashboard fix can leave a reports-generator
+     follow-up open, and vice-versa.
 
 2. **Per issue, ask the 3 staleness questions** — any "yes" means it's likely not a live work item:
    - **① Already shipped?** Did the work land (this/other/incremental PRs) with no PR claiming `closes`?
