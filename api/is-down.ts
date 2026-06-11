@@ -9,7 +9,7 @@ export const config = { runtime: 'edge' }
 
 const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 // Keep in sync with worker/src/fallback.ts and src/utils/constants.js
-const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
+const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'characterai', 'bedrock', 'azureopenai']
 
 // #378: notify the Worker when this Edge Function falls back to a degraded
 // render so an operator Discord alert fires. Worker handles 5-min KV dedup, so
@@ -61,7 +61,7 @@ export default async function handler(req: Request) {
 
     // Single API call to the KV-backed /api/status/cached (fast SSR). The cron refreshes that cache
     // on every status-change edge (#488), so an incident is visible here within one cron cycle —
-    // without paying the ~33-service live fan-out of /api/status on this high-traffic SEO surface.
+    // without paying the ~34-service live fan-out of /api/status on this high-traffic SEO surface.
     let serviceData = null
     let fallbacks: Array<{ id: string; name: string; score: number | null; status: string }> = []
     let aiInsight: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string } | null = null
@@ -162,7 +162,7 @@ export default async function handler(req: Request) {
         const API_TIER: Record<string, number> = {
           claude: 1, openai: 1, gemini: 1,
           mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, xai: 2, perplexity: 2,
-          bedrock: 3, azureopenai: 3, openrouter: 3,
+          bedrock: 3, azureopenai: 3, openrouter: 3, langsmith: 3,
           elevenlabs: 4, assemblyai: 4, deepgram: 4,
           claudecode: 11, codex: 11,
           cursor: 12, windsurf: 12,

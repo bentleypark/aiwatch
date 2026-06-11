@@ -360,6 +360,19 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How do I check Modal status?', a: 'You can check Modal status on this page, on the official Modal status page at status.modal.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
+  langchain: {
+    displayName: 'LangChain (LangSmith)',
+    description: 'LangSmith is LangChain\'s hosted observability, evaluation, and prompt-management platform for LLM applications and agents. Developers use it to trace runs, debug chains, evaluate prompts, and monitor agents in production.',
+    insight: 'AIWatch tracks LangSmith\'s load-bearing surfaces — run ingestion, API, and the web application — using a worst-of badge, so a tracing-ingestion outage is reflected even when the marketing site is fine. Billing, sandboxes, and PromptHub are excluded from the status signal to avoid non-availability noise.',
+    whenDown: 'When LangSmith is down, trace ingestion stalls so production runs stop appearing in dashboards, evaluations and prompt experiments fail to record, and teams lose live observability into their agents — though the underlying LLM calls themselves usually keep working.',
+    faqs: [
+      { q: 'Is LangChain down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors LangSmith every 5 minutes and shows real-time operational status.' },
+      { q: 'Is LangChain the same as LangSmith?', a: 'LangChain is the open-source framework; LangSmith is LangChain\'s hosted observability and evaluation platform with its own status page. This page tracks the LangSmith platform.' },
+      { q: 'Why are my LangSmith traces not showing up?', a: 'Missing traces often indicate a run-ingestion incident even when the app loads. Check this page for active ingestion incidents, then verify your API key and project configuration.' },
+      { q: 'What are alternatives to LangSmith?', a: 'For LLM observability, Langfuse, Helicone, and Phoenix (Arize) are alternatives. AIWatch shows current availability across the AI stack.' },
+      { q: 'How do I check LangSmith status?', a: 'You can check status on this page, on the official LangSmith status page at status.smith.langchain.com, or on the AIWatch dashboard at ai-watch.dev.' },
+    ],
+  },
   // AI apps (#263)
   'character-ai': {
     displayName: 'Character.AI',

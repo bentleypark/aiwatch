@@ -80,6 +80,7 @@ export const IS_DOWN_SLUG_OVERRIDE: Record<string, string> = {
   claudecode: 'claude-code',
   characterai: 'character-ai',
   copilot: 'github-copilot',
+  langsmith: 'langchain',
 }
 
 // Services with no /is-{slug}-down page — estimate-only, excluded per #263.

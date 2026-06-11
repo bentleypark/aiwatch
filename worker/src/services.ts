@@ -63,6 +63,20 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'stability', name: 'Stability AI', provider: 'Stability AI', category: 'api', statusUrl: 'https://status.stability.ai', apiUrl: 'https://status.stability.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.stability.ai/incidents', incidentIoComponentId: '01JW9J39X55NDFZTZT3K5NYR48' },
   { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr' },
   { id: 'modal', name: 'Modal', provider: 'Modal', category: 'api', statusUrl: 'https://status.modal.com', apiUrl: null, rssFeedUrl: 'https://status.modal.com/feed', betterStackUrl: 'https://status.modal.com', flapSuppression: true },
+  // LangSmith (#561) — LangChain's hosted observability/eval platform. incident.io page exposes a
+  // statuspage v2-compatible API so statuspage.ts covers it. Multi-component worst-of (#379): badge
+  // tracks the three load-bearing surfaces (Run Ingestion + API + Application); the other components
+  // (Billing, Sandboxes, Bulk Exports, PromptHub, Fleet, Deployments Data/Control Plane) are excluded
+  // so non-availability blips don't flip the badge. Single-tenant (dedicated) page → no
+  // incidentKeywords needed. is-down slug is 'langchain' (see slug-map.ts / rss.ts).
+  // Official 30-day uptime comes from the incident.io `component_uptimes` of the API component
+  // (incidentIoComponentId, 98.48%-class) — NOT the statuspage uptime-showcase (incident.io pages
+  // don't emit it) — so without this the resolver would fall through to null ("Not provided"). The
+  // API surface is the developer-facing one and tracks the real incident activity; Run Ingestion
+  // reads ~100% despite the incidents, so it would understate. That API component is also
+  // statusComponentIds[1], so it doubles as one of the three worst-of badge inputs AND (via
+  // incidentIoComponentId) the source of official uptime + calendar impact + text enrichment.
+  { id: 'langsmith', name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', statusUrl: 'https://status.smith.langchain.com', apiUrl: 'https://status.smith.langchain.com/api/v2/summary.json', statusComponentId: '01JT46QKH7HC0HA6RHD82GQYME', statusComponentIds: ['01JT46QKH7HC0HA6RHD82GQYME', '01JT46QKH7CWH1K3K3CAVMSQ7E', '01JT46QKH7PSQYR4CKSVXJ7PHS'], incidentIoBaseUrl: 'https://status.smith.langchain.com/incidents', incidentIoComponentId: '01JT46QKH7CWH1K3K3CAVMSQ7E' },
   // AI Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl' },
