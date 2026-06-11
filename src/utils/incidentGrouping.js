@@ -91,6 +91,25 @@ export function isFlapTitle(title) {
 }
 
 /**
+ * Instatus auto-monitor noise marker — "<Component> Degraded" / "<Component> Degraded
+ * Performance", optionally trailed by a "- <model>" or "· <service>" tail
+ * ("Completion API Degraded - mistral-tiny-2407 · Chat Completions API"). Instatus maps
+ * DEGRADEDPERFORMANCE → `minor` (not null) by design (#564 / status-determination.md), so
+ * these auto-monitor blips escape the `impact != null` guard and swamp the history the
+ * same way BetterStack flaps do (#599, Mistral). The status word must sit at the end (or
+ * before the "-"/"·" tail) so prose like "API degraded due to upstream" does NOT match;
+ * combined with the minor gate + the ≥2 same-(day, normalized-title) GROUP_THRESHOLD this
+ * stays tight. "Down" is deliberately excluded (broader false-positive surface; the
+ * observed Instatus auto-monitor noise is all "Degraded"). Lockstep with the SSR port.
+ * @param {string} title
+ * @returns {boolean}
+ */
+const AUTOMONITOR_TITLE_RE = /\bdegraded(\s+performance)?\b\s*(?:[·\-]\s.*)?$/i
+export function isAutoMonitorTitle(title) {
+  return AUTOMONITOR_TITLE_RE.test(String(title ?? ''))
+}
+
+/**
  * @typedef {Object} Incident
  * @property {string} id
  * @property {string} title
@@ -154,12 +173,14 @@ export function groupIncidents(incidents, options = {}) {
   // Bucket by (dayKey, normalizedTitle). Skip non-null impact — those represent
   // real human-curated incidents — EXCEPT (a) generic auto-monitoring titles
   // (Statuspage assigns a default impact even to noise — #387, Character.AI) and
-  // (b) BetterStack flap markers "<model> — recovered/down" (tagged `minor` but
-  // machine-emitted transient blips — #597, Together/Fireworks). Both still cluster.
+  // (b) machine-emitted `minor` auto-monitor noise: BetterStack flap markers
+  // "<model> — recovered/down" (#597, Together/Fireworks) + Instatus "<X> Degraded"
+  // blips (#599, Mistral). All still cluster.
   const buckets = new Map()
   const ungroupable = []
   incidents.forEach((inc, idx) => {
-    if (inc.impact != null && !isGenericTitle(inc.title) && !(isFlapTitle(inc.title) && inc.impact === 'minor')) {
+    const isMinorAutoNoise = inc.impact === 'minor' && (isFlapTitle(inc.title) || isAutoMonitorTitle(inc.title))
+    if (inc.impact != null && !isGenericTitle(inc.title) && !isMinorAutoNoise) {
       ungroupable.push({ idx, inc })
       return
     }

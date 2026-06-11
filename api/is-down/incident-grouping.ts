@@ -106,6 +106,19 @@ export function isFlapTitle(title: string | null | undefined): boolean {
   return FLAP_TITLE_RE.test(String(title ?? ''))
 }
 
+// Instatus auto-monitor noise marker — "<Component> Degraded" / "<Component> Degraded
+// Performance", optionally trailed by a "- <model>" or "· <service>" tail. Instatus maps
+// DEGRADEDPERFORMANCE → `minor` (not null) by design (#564), so these auto-monitor blips
+// escape the `impact != null` guard and swamp the history the same way BetterStack flaps do
+// (#599, Mistral). The status word must sit at the end (or before the "-"/"·" tail) so prose
+// like "API degraded due to upstream" does NOT match; with the minor gate + ≥2 same-(day,
+// normalized-title) GROUP_THRESHOLD this stays tight. "Down" is deliberately excluded
+// (broader false-positive surface; the observed noise is all "Degraded"). Lockstep with SPA.
+const AUTOMONITOR_TITLE_RE = /\bdegraded(\s+performance)?\b\s*(?:[·\-]\s.*)?$/i
+export function isAutoMonitorTitle(title: string | null | undefined): boolean {
+  return AUTOMONITOR_TITLE_RE.test(String(title ?? ''))
+}
+
 function localDayKey(iso: string, timeZone: string): string {
   return new Date(iso).toLocaleDateString('en-CA', { timeZone })
 }
@@ -123,10 +136,11 @@ export function groupIncidents(
   incidents.forEach((inc, idx) => {
     // Real human-curated incidents (impact != null) skip clustering — EXCEPT
     // (a) Statuspage auto-monitoring placeholders (Character.AI, #387) and
-    // (b) BetterStack flap markers "<model> — recovered/down" (tagged `minor`
-    // but machine-emitted transient blips — #597, Together/Fireworks). Both
-    // still cluster because the impact value is boilerplate, not curation.
-    if (inc.impact != null && !isGenericTitle(inc.title) && !(isFlapTitle(inc.title) && inc.impact === 'minor')) {
+    // (b) machine-emitted `minor` auto-monitor noise: BetterStack flap markers
+    // "<model> — recovered/down" (#597, Together/Fireworks) + Instatus "<X> Degraded"
+    // blips (#599, Mistral). All cluster because the impact is boilerplate, not curation.
+    const isMinorAutoNoise = inc.impact === 'minor' && (isFlapTitle(inc.title) || isAutoMonitorTitle(inc.title))
+    if (inc.impact != null && !isGenericTitle(inc.title) && !isMinorAutoNoise) {
       ungroupable.push({ idx, inc })
       return
     }

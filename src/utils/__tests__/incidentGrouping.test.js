@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { groupIncidents, GROUP_THRESHOLD, normalizeTitle, isGenericTitle, isFlapTitle, GENERIC_TITLE_PATTERNS_SOURCES } from '../incidentGrouping'
+import { groupIncidents, GROUP_THRESHOLD, normalizeTitle, isGenericTitle, isFlapTitle, isAutoMonitorTitle, GENERIC_TITLE_PATTERNS_SOURCES } from '../incidentGrouping'
 import { compareIncidents, compareGroupedRows } from '../incidentSort'
 
 // Minimal Incident factory — fields match worker/src/types.ts shape
@@ -176,6 +176,71 @@ describe('isFlapTitle (#597)', () => {
 describe('normalizeTitle — "— down" suffix (#597)', () => {
   it('strips trailing " — down"', () => {
     expect(normalizeTitle('Google Gemma 4 31B IT — down')).toBe('Google Gemma 4 31B IT')
+  })
+})
+
+describe('groupIncidents — Instatus "<Component> Degraded" auto-monitor noise (#599)', () => {
+  const UTC = { timeZone: 'UTC' }
+
+  it('groups same-day minor "Conversations API Degraded" series (Mistral case)', () => {
+    // Instatus maps DEGRADEDPERFORMANCE → minor (not null), so before #599 these
+    // auto-monitor blips escaped the impact != null guard and listed individually.
+    const incs = Array.from({ length: 4 }, (_, i) => makeIncident({
+      id: `conv-${i}`,
+      title: 'Conversations API Degraded',
+      startedAt: `2026-06-10T${String(2 + i * 3).padStart(2, '0')}:00:00Z`,
+      impact: 'minor',
+    }))
+    const result = groupIncidents(incs, UTC)
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('group')
+    expect(result[0].count).toBe(4)
+  })
+
+  it('keeps per-model "Completion API Degraded - <model>" variants in separate groups', () => {
+    const incs = [
+      ...Array.from({ length: 2 }, (_, i) => makeIncident({ id: `a-${i}`, title: 'Completion API Degraded - mistral-tiny-2407', startedAt: `2026-06-10T0${i}:00:00Z`, impact: 'minor' })),
+      ...Array.from({ length: 2 }, (_, i) => makeIncident({ id: `b-${i}`, title: 'Completion API Degraded - mistral-tiny-latest', startedAt: `2026-06-10T1${i}:00:00Z`, impact: 'minor' })),
+    ]
+    const result = groupIncidents(incs, UTC)
+    const groups = result.filter(r => r.kind === 'group')
+    expect(groups).toHaveLength(2)
+    expect(groups.every(g => g.count === 2)).toBe(true)
+  })
+
+  it('does NOT group major "X Degraded" — only minor auto-monitor noise clusters', () => {
+    const incs = Array.from({ length: 3 }, (_, i) => makeIncident({
+      id: `maj-${i}`, title: 'Conversations API Degraded', startedAt: `2026-06-10T0${i}:00:00Z`, impact: 'major',
+    }))
+    const result = groupIncidents(incs, UTC)
+    expect(result.every(r => r.kind === 'single')).toBe(true)
+    expect(result).toHaveLength(3)
+  })
+
+  it('a lone minor "X Degraded" stays a single row (below threshold)', () => {
+    const result = groupIncidents([
+      makeIncident({ id: 'solo', title: 'OCR API Degraded', startedAt: '2026-06-10T05:00:00Z', impact: 'minor' }),
+    ], UTC)
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('single')
+  })
+})
+
+describe('isAutoMonitorTitle (#599)', () => {
+  it('matches Instatus "<X> Degraded" / "Degraded Performance" + tails', () => {
+    expect(isAutoMonitorTitle('Conversations API Degraded')).toBe(true)
+    expect(isAutoMonitorTitle('OCR API Degraded Performance')).toBe(true)
+    expect(isAutoMonitorTitle('Completion API Degraded - mistral-tiny-2407')).toBe(true)
+    expect(isAutoMonitorTitle('Conversations API Degraded · Chat Completions API')).toBe(true)
+  })
+  it('does not match prose, "Down", or plain titles (false-positive guard)', () => {
+    expect(isAutoMonitorTitle('API degraded due to an upstream provider')).toBe(false)
+    expect(isAutoMonitorTitle('Conversations API Down')).toBe(false) // "Down" deliberately excluded
+    expect(isAutoMonitorTitle('Elevated error rates')).toBe(false)
+    expect(isAutoMonitorTitle('')).toBe(false)
+    // The "- <model>" tail requires a space after the separator; a no-space tail is fail-safe
+    // (left un-grouped rather than risk a false group). Pinned so a future regex tweak is deliberate.
+    expect(isAutoMonitorTitle('Completion API Degraded -mistral')).toBe(false)
   })
 })
 
