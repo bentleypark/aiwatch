@@ -77,6 +77,13 @@ export const SERVICES: ServiceConfig[] = [
   // statusComponentIds[1], so it doubles as one of the three worst-of badge inputs AND (via
   // incidentIoComponentId) the source of official uptime + calendar impact + text enrichment.
   { id: 'langsmith', name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', statusUrl: 'https://status.smith.langchain.com', apiUrl: 'https://status.smith.langchain.com/api/v2/summary.json', statusComponentId: '01JT46QKH7HC0HA6RHD82GQYME', statusComponentIds: ['01JT46QKH7HC0HA6RHD82GQYME', '01JT46QKH7CWH1K3K3CAVMSQ7E', '01JT46QKH7PSQYR4CKSVXJ7PHS'], incidentIoBaseUrl: 'https://status.smith.langchain.com/incidents', incidentIoComponentId: '01JT46QKH7CWH1K3K3CAVMSQ7E' },
+  // Runway (#393) — hosted generative-video AI (Gen-4 / Act-Two), AIWatch's first video provider. Native
+  // Atlassian Statuspage (page s9lfdrzmhryw) → statuspage.ts covers it, no new parser. Multi-component
+  // worst-of (#379): badge tracks the three availability surfaces (Public API + App + Backend); Billing +
+  // Support are excluded so non-availability blips don't flip the badge. Single-tenant page → no
+  // incidentKeywords. Probe-less (API requires auth). is-down slug == id ('runway'), so no slug override.
+  // Lumped under `inference` for now (avoid a single-member video category until Luma/Pika are added).
+  { id: 'runway', name: 'Runway', provider: 'Runway', category: 'api', statusUrl: 'https://status.runwayml.com', apiUrl: 'https://status.runwayml.com/api/v2/summary.json', statusComponentId: 'w3jcq3dwljp4', statusComponentIds: ['w3jcq3dwljp4', '2fr8tksxj5ns', 'hl94rh0mg6xt'] },
   // AI Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl' },

@@ -45,7 +45,7 @@ Show HN: Open-source AI status dashboard with AI-powered incident analysis
 ```
 Author here. Quick context since this went up during the Claude outage:
 
-AIWatch is an open-source status dashboard for 34 AI services (25 APIs + 3 apps
+AIWatch is an open-source status dashboard for 35 AI services (26 APIs + 3 apps
 + 6 coding agents). What makes it different from Downdetector / StatusGator:
 
 - AI-powered incident analysis — hybrid Gemma 4 26B (Cloudflare Workers AI

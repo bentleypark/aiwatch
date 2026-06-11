@@ -67,6 +67,7 @@ const STATUS_URL = {
   voyageai:    'https://voyageai-status.statuspage.io',
   modal:       'https://status.modal.com',
   langsmith:   'https://status.smith.langchain.com',
+  runway:      'https://status.runwayml.com',
   assemblyai:  'https://status.assemblyai.com',
   deepgram:    'https://status.deepgram.com',
   azureopenai: 'https://azure.status.microsoft/en-us/status',

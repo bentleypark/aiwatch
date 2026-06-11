@@ -373,6 +373,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How do I check LangSmith status?', a: 'You can check status on this page, on the official LangSmith status page at status.smith.langchain.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
+  runway: {
+    displayName: 'Runway',
+    description: 'Runway is a hosted generative-video AI platform (Gen-4 video, Act-Two character animation) used to generate and edit video from text and image prompts. Developers reach it through the web app and the Public API.',
+    insight: 'AIWatch tracks Runway\'s availability surfaces — Public API, App, and Backend — using a worst-of badge, so an API or backend outage is reflected even when the marketing site loads. Billing and Support are excluded from the status signal to avoid non-availability noise.',
+    whenDown: 'When Runway is down, video-generation jobs (Gen-4, Act-Two) queue or fail, the editor stops rendering, and API requests return errors — so production pipelines that depend on generated video stall until it recovers.',
+    faqs: [
+      { q: 'Is Runway down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Runway every 5 minutes and shows real-time operational status.' },
+      { q: 'Why are my Runway video generations failing?', a: 'Failed or stuck generations often indicate a Public API or Backend incident even when the app loads. Check this page for active incidents, then verify your API key and credit balance.' },
+      { q: 'What are alternatives to Runway?', a: 'For generative video, Luma Dream Machine, Pika, and Kling are alternatives; for image generation, Stability AI and Replicate. AIWatch shows current availability across the AI stack.' },
+      { q: 'How do I check Runway status?', a: 'You can check status on this page, on the official Runway status page at status.runwayml.com, or on the AIWatch dashboard at ai-watch.dev.' },
+    ],
+  },
   // AI apps (#263)
   'character-ai': {
     displayName: 'Character.AI',

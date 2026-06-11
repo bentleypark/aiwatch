@@ -38,6 +38,8 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   // 'langsmith'; the id≠slug mapping is mirrored in worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE and
   // src/utils/constants.js FEED_SLUG_OVERRIDE, pinned by feed-slug-sync.test.ts / feed-slug.test.js.
   'langchain':       { id: 'langsmith',  name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api' },
+  // Runway (#393) — generative-video AI; slug == worker id ('runway'), no override needed.
+  'runway':          { id: 'runway',     name: 'Runway',           provider: 'Runway',      category: 'api' },
   // AI apps (#263)
   'character-ai':    { id: 'characterai', name: 'Character.AI',    provider: 'Character.AI', category: 'app' },
   // Coding agents (#294) — OpenAI Codex is the current coding-agent product,
@@ -86,6 +88,7 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'voyageai':       ['pinecone', 'cohere'],
   'modal':          ['replicate', 'huggingface'],
   'langchain':      ['pinecone', 'openai', 'claude'],
+  'runway':         ['replicate', 'stability', 'huggingface'],
   // Apps
   'character-ai':   ['chatgpt', 'claude-ai', 'gemini'],
 }

@@ -8,7 +8,7 @@ All served by the Cloudflare Worker (`aiwatch-worker`, domain `aiwatch-worker.p2
 
 | Endpoint | Notes |
 |---|---|
-| `GET /api/status` | Live parallel fetch of all 34 services, normalize, KV write, platform/probe cross-validation |
+| `GET /api/status` | Live parallel fetch of all 35 services, normalize, KV write, platform/probe cross-validation |
 | `GET /api/status/cached` | KV-only (no live fetch), includes `probe24h` — for "Is X Down" SSR + initial load. **`?src=statusline-*`** returns a ~KB id/name/status-only projection via `buildStatuslinePayload` (`worker/src/statusline.ts`) — skips the ~2 MB probe/latency/AI reads. Statusline snippets (#400) poll this with the tag and target the Worker domain directly, **not** the Vercel-proxied `ai-watch.dev` path, so per-prompt polls don't burn Vercel Fast Data Transfer (#438) |
 | `GET /api/uptime?days=30` | Daily uptime counters |
 | `GET /api/probe/history?days=30` | Daily probe RTT summaries (90d max) |

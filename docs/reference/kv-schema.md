@@ -4,7 +4,7 @@
 
 | Key Pattern | Value | TTL | Writes/Day | Purpose |
 |---|---|---|---|---|
-| `services:latest` | `{ services, cachedAt }` JSON | 5min | ~288 + a few | Real-time status cache (all 34 services). Written by the throttled `/api/status` `cacheWrite` (10-min) **and** by the cron on each status-change edge (#488, `cache-refresh.ts`) so OG/SEO previews (`/api/status/cached` readers) reflect an incident within one cron cycle — the edge writes are rare (incident start/recovery), negligible vs. the budget |
+| `services:latest` | `{ services, cachedAt }` JSON | 5min | ~288 + a few | Real-time status cache (all 35 services). Written by the throttled `/api/status` `cacheWrite` (10-min) **and** by the cron on each status-change edge (#488, `cache-refresh.ts`) so OG/SEO previews (`/api/status/cached` readers) reflect an incident within one cron cycle — the edge writes are rare (incident start/recovery), negligible vs. the budget |
 | `daily:{YYYY-MM-DD}` | `{ [svcId]: { ok, total } }` JSON | 2d | ~288 | Daily uptime counters |
 | `history:{YYYY-MM-DD}` | Same as daily | 90d | 1 | Archived yesterday's counters |
 | `latency:24h` | `{ snapshots: [{ t, data }] }` JSON | 25h | ~48 | 30-min latency snapshots (max 48) |

@@ -453,6 +453,19 @@ const MOCK_SERVICES = [
         ] },
     ],
   },
+  {
+    id: 'runway', category: 'api', name: 'Runway', provider: 'Runway', status: 'operational',
+    latency: 412, uptime30d: 99.82,
+    history30d: hist([21]),
+    history3m: [{ month: '2026-01', uptime: 99.90 }, { month: '2026-02', uptime: 99.75 }, { month: '2026-03', uptime: 99.82 }],
+    incidents: [
+      { id: 'rw-1', title: 'Elevated errors on Gen-4 video generation', startedAt: ago(4 * D), duration: '38m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: 'Gen-4 비디오 생성 요청 오류율이 상승하고 있습니다.', at: ago(4 * D) },
+          { stage: 'resolved', text: '백엔드 용량 확장 후 정상화.', at: ago(4 * D - 38 * M) },
+        ] },
+    ],
+  },
   // ── Coding Agents ──
   {
     id: 'claudecode', category: 'agent', name: 'Claude Code', provider: 'Anthropic', status: 'operational',
