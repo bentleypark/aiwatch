@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { groupIncidents, GROUP_THRESHOLD, normalizeTitle, isGenericTitle, GENERIC_TITLE_PATTERNS_SOURCES } from '../incidentGrouping'
+import { groupIncidents, GROUP_THRESHOLD, normalizeTitle, isGenericTitle, isFlapTitle, GENERIC_TITLE_PATTERNS_SOURCES } from '../incidentGrouping'
 import { compareIncidents, compareGroupedRows } from '../incidentSort'
 
 // Minimal Incident factory — fields match worker/src/types.ts shape
@@ -101,6 +101,81 @@ describe('groupIncidents — threshold + impact rules', () => {
     const single = result.find(r => r.kind === 'single')
     expect(group.count).toBe(5)
     expect(single.incident.id).toBe('real-1')
+  })
+})
+
+describe('groupIncidents — BetterStack minor flap markers (#597)', () => {
+  const UTC = { timeZone: 'UTC' }
+
+  it('groups same-day minor "<model> — recovered" flap series (Together/Gemma case)', () => {
+    // BetterStack tags auto-recovery model blips impact:'minor' (not null), so before
+    // #597 they escaped the impact != null guard and swamped the history individually.
+    const incs = Array.from({ length: 7 }, (_, i) => makeIncident({
+      id: `gemma-${i}`,
+      title: 'Google Gemma 4 31B IT — recovered',
+      startedAt: `2026-06-08T${String(5 + i * 2).padStart(2, '0')}:00:00Z`,
+      impact: 'minor',
+    }))
+    const result = groupIncidents(incs, UTC)
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('group')
+    expect(result[0].count).toBe(7)
+    expect(result[0].normalizedTitle).toBe('Google Gemma 4 31B IT')
+  })
+
+  it('does NOT group major/critical "— recovered" — only minor flaps cluster', () => {
+    // A severity-tagged incident that happens to carry the suffix is a real event,
+    // not BetterStack flap noise. Stays individually visible even at 3+ same-day.
+    const incs = Array.from({ length: 3 }, (_, i) => makeIncident({
+      id: `maj-${i}`,
+      title: 'Model serving — recovered',
+      startedAt: `2026-06-08T1${i}:00:00Z`,
+      impact: 'major',
+    }))
+    const result = groupIncidents(incs, UTC)
+    expect(result.every(r => r.kind === 'single')).toBe(true)
+    expect(result).toHaveLength(3)
+  })
+
+  it('buckets a "— down" + "— recovered" minor flap cycle into one group', () => {
+    // normalizeTitle strips both halves, so a down/recovered pair for the same model
+    // on the same day collapses to a single grouped event.
+    const incs = [
+      makeIncident({ id: 'd1', title: 'Pearl-ai Gemma 4 31B IT — down', startedAt: '2026-06-08T05:00:00Z', impact: 'minor' }),
+      makeIncident({ id: 'r1', title: 'Pearl-ai Gemma 4 31B IT — recovered', startedAt: '2026-06-08T05:25:00Z', impact: 'minor' }),
+    ]
+    const result = groupIncidents(incs, UTC)
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('group')
+    expect(result[0].count).toBe(2)
+    expect(result[0].normalizedTitle).toBe('Pearl-ai Gemma 4 31B IT')
+  })
+
+  it('a lone minor flap stays a single row (below threshold — no false-positive)', () => {
+    const result = groupIncidents([
+      makeIncident({ id: 'solo', title: 'Some Model — recovered', startedAt: '2026-06-08T05:00:00Z', impact: 'minor' }),
+    ], UTC)
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('single')
+  })
+})
+
+describe('isFlapTitle (#597)', () => {
+  it('matches BetterStack "— recovered" / "— down" suffixes (case-insensitive)', () => {
+    expect(isFlapTitle('Google Gemma 4 31B IT — recovered')).toBe(true)
+    expect(isFlapTitle('Foo — down')).toBe(true)
+    expect(isFlapTitle('Bar — RECOVERED')).toBe(true)
+  })
+  it('does not match plain or mid-string occurrences', () => {
+    expect(isFlapTitle('Elevated API errors')).toBe(false)
+    expect(isFlapTitle('Service recovered after a brief outage')).toBe(false)
+    expect(isFlapTitle('')).toBe(false)
+  })
+})
+
+describe('normalizeTitle — "— down" suffix (#597)', () => {
+  it('strips trailing " — down"', () => {
+    expect(normalizeTitle('Google Gemma 4 31B IT — down')).toBe('Google Gemma 4 31B IT')
   })
 })
 
