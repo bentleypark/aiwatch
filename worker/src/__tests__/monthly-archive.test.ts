@@ -757,6 +757,16 @@ describe('buildMonthlyArchive', () => {
     expect(archive.services.claude.officialUptime).toBeNull()
   })
 
+  it('#591 threads incidentSourceStale into the archive (only when set)', async () => {
+    const archive = await buildMonthlyArchive(mockKV, 2026, 3, [
+      { id: 'deepseek', aiwatchScore: 88, scoreGrade: 'good' as const, incidentSourceStale: true },
+      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const },
+    ])
+    expect(archive.services.deepseek.incidentSourceStale).toBe(true)
+    // absent (not false) for non-stale services — the report generator treats absence as not-stale
+    expect(archive.services.claude.incidentSourceStale).toBeUndefined()
+  })
+
   it('#586 daily snapshot WINS over the build-time scoreData fallback', async () => {
     // History days carry officialUptime; the month-end (2026-03-02) value must be used over the
     // scoreData snapshot (which is the build-time fallback for months that lack daily snapshots).

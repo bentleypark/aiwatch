@@ -8,11 +8,11 @@ import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { UptimeSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
+import { isUnreliableUptime } from '../utils/serviceReliability'
 
 // ── Constants ────────────────────────────────────────────────
 
 const WARN_THRESHOLD = 95.0 // < 95% → red
-const isEstimateNoData = (s) => s.uptimeSource === 'estimate' && (s.incidents ?? []).length === 0
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -56,7 +56,7 @@ function UptimeBar({ service, sla, t }) {
   const MIN_DISPLAY = 95
   const range = 100 - MIN_DISPLAY
   const uptime = service.uptime30d ?? 0
-  const hasUptime = service.uptime30d != null && !isEstimateNoData(service)
+  const hasUptime = service.uptime30d != null && !isUnreliableUptime(service)
   const clampedPct = Math.max(MIN_DISPLAY, uptime)
   const widthPct = hasUptime ? Math.round(((clampedPct - MIN_DISPLAY) / range) * 100) : 0
   const slaPos = Math.round(((sla - MIN_DISPLAY) / range) * 100)
@@ -97,12 +97,12 @@ export default function Uptime() {
   const sla = settings.sla
   const services = (rawServices ?? []).filter((s) => settings.enabledServices.includes(s.id))
 
-  const hasReliableUptime = (s) => s.uptime30d != null && !isEstimateNoData(s)
+  const hasReliableUptime = (s) => s.uptime30d != null && !isUnreliableUptime(s)
   const sortedByUptime = useMemo(
     () => [...services]
       .sort((a, b) => {
-        const aUp = isEstimateNoData(a) ? null : a.uptime30d
-        const bUp = isEstimateNoData(b) ? null : b.uptime30d
+        const aUp = isUnreliableUptime(a) ? null : a.uptime30d
+        const bUp = isUnreliableUptime(b) ? null : b.uptime30d
         if (aUp == null && bUp == null) return 0
         if (aUp == null) return 1
         if (bUp == null) return -1

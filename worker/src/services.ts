@@ -47,7 +47,10 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
   // status.deepseek.com blocks Cloudflare Workers IPs (SSL reset); deepseek.statuspage.io is the
   // Atlassian-hosted mirror that's accessible from Workers — same component IDs, same data (#498).
-  { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://deepseek.statuspage.io/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x', incidentKeywords: ['api'] },
+  // #591/#507 — that mirror FROZE at 2026-05-08 (DeepSeek migrated to Flashduty, unreachable
+  // server-side); it still returns 200 with stale data, so the feed reads as current but isn't.
+  // `incidentSourceStale` excludes it from all Score rankings until the feed is reachable again.
+  { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://deepseek.statuspage.io/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x', incidentKeywords: ['api'], incidentSourceStale: true },
   { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, onlineOrNotUrl: 'https://status.openrouter.ai', onlineOrNotComponent: 'Chat (/api/v1/chat/completions)' },
   // Voice & Speech AI
   { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['webpage'] },
@@ -355,6 +358,9 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
     uptime30d: null,
     lastChecked: now,
     incidents: [],
+    // #591 — propagated from config to every return path (all spread `...base`), so a stale-source
+    // service is flagged regardless of which fetch branch produces its status.
+    ...(config.incidentSourceStale ? { incidentSourceStale: true } : {}),
   }
 
   try {
@@ -968,6 +974,9 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       uptime30d: null,
       lastChecked: new Date().toISOString(),
       incidents: [],
+      // #591 — carry the stale flag even on a total fetch reject (fetchService's success paths set it
+      // via `base`; this fresh-object fallback must too, so a stale service stays ranking-excluded).
+      ...(SERVICES[i].incidentSourceStale ? { incidentSourceStale: true } : {}),
     }
   })
 

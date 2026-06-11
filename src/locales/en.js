@@ -304,7 +304,7 @@ const en = {
   'ranking.service': 'Service',
   'ranking.affectedDays': 'Affected Days',
   'ranking.na': 'Insufficient Data',
-  'ranking.naReason': 'Status page does not publish enough data for scoring',
+  'ranking.naReason': 'Not enough comparable data to score fairly — no published uptime metric, or the status source is currently unavailable.',
   'ranking.score': 'Score',
   'ranking.grade': 'Grade',
   'ranking.uptime': 'Uptime',

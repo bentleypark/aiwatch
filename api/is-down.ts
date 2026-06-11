@@ -82,7 +82,7 @@ export default async function handler(req: Request) {
             id: string; name: string; category: string; status: string
             latency: number | null; uptime30d: number | null; uptimeSource?: string
             lastChecked: string; incidents: unknown[]; aiwatchScore?: number | null
-            scoreGrade?: string | null; scoreConfidence?: string
+            scoreGrade?: string | null; scoreConfidence?: string; incidentSourceStale?: boolean
           }>
           aiAnalysis?: Record<string, { summary: string; estimatedRecovery: string; affectedScope: string[]; needsFallback?: boolean; analyzedAt: string; incidentId: string; resolvedAt?: string }>
         }
@@ -108,14 +108,14 @@ export default async function handler(req: Request) {
         // 2. Use competition ranking (1, 2, 4=, 4=, 4=, 7=, ...) based on rounded score,
         //    not array index — otherwise tied services display different ranks per service
         if (Number.isFinite(target?.aiwatchScore)) {
-          const hasReliableData = (s: { uptimeSource?: string; incidents?: unknown[] }) =>
-            !(s.uptimeSource === 'estimate' && (s.incidents ?? []).length === 0)
+          const hasReliableData = (s: { uptimeSource?: string; incidents?: unknown[]; incidentSourceStale?: boolean }) =>
+            !(s.uptimeSource === 'estimate' && (s.incidents ?? []).length === 0) && !s.incidentSourceStale
           const targetScore = Math.round(target!.aiwatchScore as number)
           if (!hasReliableData(target!)) {
             // Target itself fails the reliability filter — dedup'd to avoid log spam
             if (!warnedExcludedSlugs.has(slug)) {
               warnedExcludedSlugs.add(slug)
-              console.warn(`[is-down/${slug}] target excluded from ranked set (estimate source with 0 incidents) — check SLUG_TO_SERVICE vs uptimeSource`)
+              console.warn(`[is-down/${slug}] target excluded from ranked set (estimate source with 0 incidents, or stale incident source #591) — check SLUG_TO_SERVICE vs uptimeSource/incidentSourceStale`)
             }
           } else {
             // Use Number.isFinite instead of != null so NaN scores (from a corrupt pipeline)

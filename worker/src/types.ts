@@ -36,6 +36,13 @@ export interface ServiceStatus {
    *  while the service stays operational under the <30% threshold (#447). UI shows a
    *  "N affected" badge; absent when 0. */
   partialCount?: number
+  /** #591 — the service's incident source is known-stale (its status page migrated to a
+   *  platform AIWatch can't reach server-side, so the feed AIWatch reads is frozen — e.g.
+   *  DeepSeek → Flashduty, #507). The incident list/uptime read as current but aren't, which
+   *  inflates the Score (an empty 30-day incident window scores full incidents+recovery). All
+   *  ranking surfaces exclude these (like estimate-only services) so a frozen feed can't rank.
+   *  Declared per-service via ServiceConfig.incidentSourceStale; absent when false. */
+  incidentSourceStale?: boolean
 }
 
 export type DailyImpactLevel = 'minor' | 'major' | 'critical'
@@ -85,6 +92,11 @@ export interface ServiceConfig {
   // produce 10-20 alerts per affected model. Opt-in suppression dedups by normalized title
   // in a 60-minute window. See #283 and isFlapSuppressible() in alerts.ts.
   flapSuppression?: boolean
+  // #591 — mark a service whose status page migrated to a server-side-unreachable platform, so
+  // the feed AIWatch reads is FROZEN (e.g. DeepSeek → Flashduty, #507). Propagated to
+  // ServiceStatus.incidentSourceStale → all ranking surfaces exclude it (a frozen empty 30-day
+  // incident window would otherwise inflate the Score). REMOVE once the feed is reachable again.
+  incidentSourceStale?: boolean
 }
 
 export interface ProbeSummary {
