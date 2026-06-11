@@ -131,3 +131,29 @@ describe('parseXaiRssIncidents impact mapping (#564)', () => {
     expect(parseXaiRssIncidents(xml)).toHaveLength(0)
   })
 })
+
+describe('parseRssIncidents — stale-ongoing guard (#602)', () => {
+  const NOW = Date.parse('2026-06-02T00:00:00Z')
+  // Single unresolved item (no "recovered/resolved" wording), human-titled like Luma's feed.
+  const lone = (title, date, incId) =>
+    `<item><title>${title}</title><link>https://status.lumalabs.ai/incident/${incId}</link>` +
+    `<pubDate>${date}</pubDate><guid>https://status.lumalabs.ai/incident/${incId}#a</guid>` +
+    `<description>${title}</description></item>`
+
+  it('marks a months-old unresolved incident as resolved (Luma ray3 Jan-21 case)', () => {
+    // No paired "recovered" + last activity ~4.5 months before NOW → stale → resolved.
+    const xml = `<rss><channel>${lone('ray3 service degraded', 'Wed, 21 Jan 2026 14:55:00 -0000', 'r1')}</channel></rss>`
+    const incidents = parseRssIncidents(xml, NOW)
+    expect(incidents).toHaveLength(1)
+    expect(incidents[0].status).toBe('resolved')
+    expect(incidents[0].resolvedAt).not.toBeNull()
+  })
+
+  it('keeps a recent (<7d) unresolved incident as investigating — a real ongoing outage', () => {
+    const xml = `<rss><channel>${lone('Dream Machine is degraded', 'Mon, 01 Jun 2026 10:00:00 -0000', 'r2')}</channel></rss>`
+    const incidents = parseRssIncidents(xml, NOW)
+    expect(incidents).toHaveLength(1)
+    expect(incidents[0].status).toBe('investigating')
+    expect(incidents[0].resolvedAt).toBeNull()
+  })
+})

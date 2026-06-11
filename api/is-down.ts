@@ -162,8 +162,9 @@ export default async function handler(req: Request) {
         const API_TIER: Record<string, number> = {
           claude: 1, openai: 1, gemini: 1,
           mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, xai: 2, perplexity: 2,
-          bedrock: 3, azureopenai: 3, openrouter: 3, langsmith: 3, runway: 3,
+          bedrock: 3, azureopenai: 3, openrouter: 3, langsmith: 3,
           elevenlabs: 4, assemblyai: 4, deepgram: 4,
+          runway: 5, luma: 5, // Video (#602 / #601 step B) — keep in sync with worker/src/fallback.ts
           claudecode: 11, codex: 11,
           cursor: 12, windsurf: 12,
           copilot: 13, junie: 13,

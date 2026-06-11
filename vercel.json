@@ -32,6 +32,7 @@
     { "source": "/is-modal-down", "destination": "/api/is-down?slug=modal" },
     { "source": "/is-langchain-down", "destination": "/api/is-down?slug=langchain" },
     { "source": "/is-runway-down", "destination": "/api/is-down?slug=runway" },
+    { "source": "/is-luma-down", "destination": "/api/is-down?slug=luma" },
     { "source": "/is-character-ai-down", "destination": "/api/is-down?slug=character-ai" },
     { "source": "/is-codex-down", "destination": "/api/is-down?slug=codex" },
     { "source": "/is-junie-down", "destination": "/api/is-down?slug=junie" },

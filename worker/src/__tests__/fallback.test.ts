@@ -53,6 +53,28 @@ describe('getFallbacks', () => {
     expect(result.find(f => f.name === 'Together AI')).toBeDefined()     // only a resolved incident → eligible
   })
 
+  it('#602/#601 step B — degraded Runway recommends its video sibling Luma OVER a higher-scored tier-3 infra service', () => {
+    // openrouter (tier 3 Infra) has a higher Score than luma, so pre-step-B it won the Infra-tier slot
+    // and Runway got recommended an LLM router. With the Video tier (5), luma (distance 0) outranks it.
+    const services = [
+      { id: 'runway', category: 'api', name: 'Runway', status: 'degraded', aiwatchScore: 70 },
+      { id: 'luma', category: 'api', name: 'Luma (Dream Machine)', status: 'operational', aiwatchScore: 75 },
+      { id: 'openrouter', category: 'api', name: 'OpenRouter', status: 'operational', aiwatchScore: 95 },
+    ]
+    const result = getFallbacks('runway', 'api', services)
+    expect(result[0]?.name).toBe('Luma (Dream Machine)')
+  })
+
+  it('#602 — degraded Luma recommends Runway first (reverse video pairing) over higher-scored infra', () => {
+    const services = [
+      { id: 'luma', category: 'api', name: 'Luma (Dream Machine)', status: 'degraded', aiwatchScore: 70 },
+      { id: 'runway', category: 'api', name: 'Runway', status: 'operational', aiwatchScore: 75 },
+      { id: 'openrouter', category: 'api', name: 'OpenRouter', status: 'operational', aiwatchScore: 95 },
+    ]
+    const result = getFallbacks('luma', 'api', services)
+    expect(result[0]?.name).toBe('Runway')
+  })
+
   it('returns empty for EXCLUDE_FALLBACK services', () => {
     expect(getFallbacks('replicate', 'api', mockServices)).toEqual([])
     expect(getFallbacks('huggingface', 'api', mockServices)).toEqual([])

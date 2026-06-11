@@ -385,6 +385,19 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How do I check Runway status?', a: 'You can check status on this page, on the official Runway status page at status.runwayml.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
+  luma: {
+    displayName: 'Luma (Dream Machine)',
+    description: 'Luma AI\'s Dream Machine is a generative-video AI (models Ray and UNI-1) that creates and extends video from text and image prompts, via the web app and the Dream Machine API.',
+    insight: 'AIWatch tracks Luma\'s status page (Better Stack) — the Dream Machine API, Ray, and UNI-1 surfaces — so an API or model outage is reflected in real time. AIWatch also groups Luma\'s frequent auto-monitor blips into single rows so the incident history stays readable.',
+    whenDown: 'When Luma is down, Dream Machine generations queue or fail and the editor stops rendering, so production pipelines that depend on Luma-generated video stall until it recovers.',
+    faqs: [
+      { q: 'Is Luma down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Luma (Dream Machine) every 5 minutes and shows real-time operational status.' },
+      { q: 'Is Luma the same as Dream Machine?', a: 'Dream Machine is Luma AI\'s video-generation product (powered by the Ray and UNI-1 models). This page tracks the Luma / Dream Machine status.' },
+      { q: 'Why are my Dream Machine video generations failing?', a: 'Failed or stuck generations often indicate an API or model incident even when the app loads. Check this page for active incidents, then verify your API key and credit balance.' },
+      { q: 'What are alternatives to Luma?', a: 'For generative video, Runway is an alternative AIWatch also tracks; Kling and Pika are others. AIWatch shows current availability across the AI stack.' },
+      { q: 'How do I check Luma / Dream Machine status?', a: 'You can check status on this page, on the official Luma status page at status.lumalabs.ai, or on the AIWatch dashboard at ai-watch.dev.' },
+    ],
+  },
   // AI apps (#263)
   'character-ai': {
     displayName: 'Character.AI',

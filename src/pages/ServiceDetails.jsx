@@ -68,6 +68,7 @@ const STATUS_URL = {
   modal:       'https://status.modal.com',
   langsmith:   'https://status.smith.langchain.com',
   runway:      'https://status.runwayml.com',
+  luma:        'https://status.lumalabs.ai',
   assemblyai:  'https://status.assemblyai.com',
   deepgram:    'https://status.deepgram.com',
   azureopenai: 'https://azure.status.microsoft/en-us/status',

@@ -58,7 +58,7 @@ ${CONSENT_INIT_SCRIPT}
   "@type": "WebApplication",
   "name": "AIWatch",
   "url": "https://ai-watch.dev",
-  "description": "Real-time status monitoring for 35 AI services including Claude, ChatGPT, Gemini, Cursor, and Codex. AI-powered incident analysis with fallback recommendations.",
+  "description": "Real-time status monitoring for 36 AI services including Claude, ChatGPT, Gemini, Cursor, and Codex. AI-powered incident analysis with fallback recommendations.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Web",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
@@ -512,14 +512,14 @@ ${announcementHtml}
   <div class="hero-left">
     <div class="hero-badge"><span class="hero-badge-dot"></span><span data-i18n="hero.badge">LIVE MONITORING</span></div>
     <h1 data-i18n="hero.title"><em>AI 서비스</em> 장애를 즉시 파악하고,<br>갈아탈 대안까지 한 번에.</h1>
-    <p data-i18n="hero.sub">35개 AI 서비스 상태를 한 화면에서.<span class="hero-sub-line"> AIWatch가 신뢰도를 랭킹하고 장애를 분석해,</span> 멈추는 순간 대안을 즉시 추천합니다. 무료 · 오픈소스 · 무가입.</p>
+    <p data-i18n="hero.sub">36개 AI 서비스 상태를 한 화면에서.<span class="hero-sub-line"> AIWatch가 신뢰도를 랭킹하고 장애를 분석해,</span> 멈추는 순간 대안을 즉시 추천합니다. 무료 · 오픈소스 · 무가입.</p>
     <div class="hero-ctas">
       <a href="https://ai-watch.dev" class="btn-primary" data-i18n="hero.cta1" onclick="gtag('event','click_dashboard',{location:'landing_hero',source:'intro'})">대시보드 열기 →</a>
       <a href="https://github.com/bentleypark/aiwatch" target="_blank" rel="noopener noreferrer" class="btn-secondary" data-i18n="hero.cta2" onclick="gtag('event','click_github_header',{location:'landing_hero',source:'intro'})">GitHub에서 보기</a>
     </div>
     <p class="hero-trust" data-i18n="hero.trust">로그인 없음 · 실시간 상태 · 완전 무료 오픈소스 (AGPL)</p>
     <div class="hero-pills">
-      <div class="stat-pill"><span class="stat-pill-num">35</span> <span data-i18n="hero.pill1">AI 서비스</span></div>
+      <div class="stat-pill"><span class="stat-pill-num">36</span> <span data-i18n="hero.pill1">AI 서비스</span></div>
       <div class="stat-pill"><span class="stat-pill-num" data-i18n="hero.pill2v">실시간</span> <span data-i18n="hero.pill2">알림</span></div>
       <div class="stat-pill"><span class="stat-pill-num">AGPL</span> <span data-i18n="hero.pill3">오픈소스</span></div>
     </div>
@@ -651,7 +651,7 @@ ${announcementHtml}
       <div class="mock-section-header">
         <div class="mock-section-title"><span class="green-slash">//</span> Services</div>
         <div class="mock-filter-tabs">
-          <span class="mock-filter-tab active">All 35</span>
+          <span class="mock-filter-tab active">All 36</span>
           <span class="mock-filter-tab">Operational 33</span>
           <span class="mock-filter-tab">Issues 1<span class="mock-filter-dot"></span></span>
         </div>
@@ -911,7 +911,7 @@ ${announcementHtml}
         <tr>
           <td data-i18n="compare.r2">장애 알림</td>
           <td class="no" data-i18n="compare.r2a">제공사마다 개별 구독</td>
-          <td class="yes" data-i18n="compare.r2b">35개를 한 곳에서 — Discord · Slack · RSS</td>
+          <td class="yes" data-i18n="compare.r2b">36개를 한 곳에서 — Discord · Slack · RSS</td>
         </tr>
         <tr>
           <td data-i18n="compare.r3">AIWatch Score</td>
@@ -1007,7 +1007,7 @@ ${announcementHtml}
   <p class="section-label">// monthly report</p>
   <h2 class="section-title" data-i18n="report.title">월간 AI 서비스 신뢰도 리포트</h2>
   <p class="section-sub" data-i18n="report.hook" style="color:var(--amber);font-size:15px;font-weight:500;margin-bottom:8px;">가장 안정적인 AI 서비스는? 답은 의외일 수 있습니다.</p>
-  <p class="section-sub" data-i18n="report.sub">매월 35개 서비스의 AIWatch Score 순위, 인시던트 요약, 공식 업타임, 주요 장애 분석, 프로바이더 추천까지 한 리포트로 공개합니다.</p>
+  <p class="section-sub" data-i18n="report.sub">매월 36개 서비스의 AIWatch Score 순위, 인시던트 요약, 공식 업타임, 주요 장애 분석, 프로바이더 추천까지 한 리포트로 공개합니다.</p>
   <div class="report-chart">
     <svg viewBox="0 0 320 356" xmlns="http://www.w3.org/2000/svg" style="width:100%;font-family:'JetBrains Mono',monospace;">
   <rect width="320" height="356" fill="#0d1117" rx="8"/>
@@ -1104,7 +1104,7 @@ const i18n = {
     'nav.features': '기능', 'nav.how': '동작 방식', 'nav.report': '월간 리포트', 'nav.cta': '장애 확인하기 →',
     'hero.badge': 'LIVE MONITORING',
     'hero.title': '<em>AI 서비스</em> 장애를 즉시 파악하고,<br>갈아탈 대안까지 한 번에.',
-    'hero.sub': '35개 AI 서비스 상태를 한 화면에서.<span class="hero-sub-line"> AIWatch가 신뢰도를 랭킹하고 장애를 분석해,</span> 멈추는 순간 대안을 즉시 추천합니다. 무료 · 오픈소스 · 무가입.',
+    'hero.sub': '36개 AI 서비스 상태를 한 화면에서.<span class="hero-sub-line"> AIWatch가 신뢰도를 랭킹하고 장애를 분석해,</span> 멈추는 순간 대안을 즉시 추천합니다. 무료 · 오픈소스 · 무가입.',
     'hero.cta1': '대시보드 열기 →', 'hero.trust': '로그인 없음 · 실시간 상태 · 완전 무료 오픈소스 (AGPL)', 'hero.cta2': 'GitHub에서 보기',
     'hero.pill1': 'AI 서비스', 'hero.pill2v': '실시간', 'hero.pill2': '알림', 'hero.pill3': '오픈소스',
     'flow.1.title': '장애 감지', 'flow.2.conn': 'AI 분석 시작', 'flow.2.bar': '패턴 분석 중', 'flow.3.conn': 'Discord · Slack · RSS 알림', 'flow.3.title': '알림 발송', 'flow.3.body': 'Discord · Slack · RSS 알림 발송', 'flow.4.conn': '대안 추천', 'flow.4.title': 'Fallback 추천',
@@ -1116,7 +1116,7 @@ const i18n = {
     'feat.3.title': 'Fallback 추천', 'feat.3.desc': '장애 중인 서비스의 대안을 같은 카테고리 Score 상위 순으로 즉시 제안합니다. 같은 제공사 서비스는 자동 제외됩니다.',
     'feat.4.title': '"Is X Down?" 전용 페이지', 'feat.4.desc': 'ai-watch.dev/is-claude-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다.',
     'how.title': '이렇게 동작합니다', 'how.sub': '각 서비스의 공식 상태 페이지 데이터를 기반으로 동작합니다',
-    'compare.title': '공식 상태 페이지와 무엇이 다른가요?', 'compare.sub': '공식 페이지 데이터를 기반으로, 35개를 한 화면에서 통합합니다', 'compare.col1': '공식 상태 페이지', 'compare.r2': '장애 알림', 'compare.r2a': '제공사마다 개별 구독', 'compare.r2b': '35개를 한 곳에서 — Discord · Slack · RSS', 'compare.r3': 'AIWatch Score', 'compare.r3a': '서비스별 개별 확인', 'compare.r3b': 'AIWatch Score — Uptime + 영향 일수 + 복구 + 응답성', 'compare.r4': '장애 분석', 'compare.r4b': 'AI가 원인 · 복구 시간 분석', 'compare.r5': '대안 추천', 'compare.r5b': 'Fallback 서비스 즉시 제안', 'compare.r6': '월간 리포트', 'compare.r6b': '매월 리포트 공개', 'compare.r7': '비용', 'compare.r7a': '무료', 'compare.r7b': '완전 무료 · 오픈소스',
+    'compare.title': '공식 상태 페이지와 무엇이 다른가요?', 'compare.sub': '공식 페이지 데이터를 기반으로, 36개를 한 화면에서 통합합니다', 'compare.col1': '공식 상태 페이지', 'compare.r2': '장애 알림', 'compare.r2a': '제공사마다 개별 구독', 'compare.r2b': '36개를 한 곳에서 — Discord · Slack · RSS', 'compare.r3': 'AIWatch Score', 'compare.r3a': '서비스별 개별 확인', 'compare.r3b': 'AIWatch Score — Uptime + 영향 일수 + 복구 + 응답성', 'compare.r4': '장애 분석', 'compare.r4b': 'AI가 원인 · 복구 시간 분석', 'compare.r5': '대안 추천', 'compare.r5b': 'Fallback 서비스 즉시 제안', 'compare.r6': '월간 리포트', 'compare.r6b': '매월 리포트 공개', 'compare.r7': '비용', 'compare.r7a': '무료', 'compare.r7b': '완전 무료 · 오픈소스',
     'how.1.badge': '자동', 'how.2.badge': '장애 감지 시', 'how.3.badge': '실시간', 'how.4.badge': '매월',
     'how.1.title': '수집', 'how.1.desc': '공식 상태 페이지를 최대 5분 간격으로 자동 갱신',
     'how.2.title': '분석', 'how.2.desc': '하이브리드 AI(Gemma 4 + Claude Sonnet fallback)가 패턴 · 복구 시간 · 영향 범위 분석',
@@ -1125,14 +1125,14 @@ const i18n = {
     'cta.title': '지금 바로 확인하세요', 'cta.sub': '완전 무료 · 설치 불필요 · Discord · Slack · RSS 알림', 'cta.btn1': '지금 장애 확인하기 →', 'cta.btn2': '알림 설정하기', 'cta.rss': 'RSS로 구독',
     'alert.title': '장애 알림, 원하는 방식으로', 'alert.sub': '장애 발생 시 실시간 알림 + AI 분석 + Fallback 추천까지 한 번에. 무료입니다.',
     'alert.rss.copied': '복사됨 ✓', 'alert.rss.prompt': 'RSS 피드 URL 복사:',
-    'report.title': '월간 AI 서비스 신뢰도 리포트', 'report.hook': '가장 안정적인 AI 서비스는? 답은 의외일 수 있습니다.', 'report.link': '전체 리포트 보기 →', 'report.sub': '매월 35개 서비스의 AIWatch Score 순위, 인시던트 요약, 공식 업타임, 주요 장애 분석, 프로바이더 추천까지 한 리포트로 공개합니다.', 'report.chart.note': '* 하위 점수는 리포팅 방식 차이일 수 있으며, 실제 불안정성을 의미하지 않습니다',
+    'report.title': '월간 AI 서비스 신뢰도 리포트', 'report.hook': '가장 안정적인 AI 서비스는? 답은 의외일 수 있습니다.', 'report.link': '전체 리포트 보기 →', 'report.sub': '매월 36개 서비스의 AIWatch Score 순위, 인시던트 요약, 공식 업타임, 주요 장애 분석, 프로바이더 추천까지 한 리포트로 공개합니다.', 'report.chart.note': '* 하위 점수는 리포팅 방식 차이일 수 있으며, 실제 불안정성을 의미하지 않습니다',
     'footer.report': '월간 리포트', 'footer.alert': '알림 설정'
   },
   en: {
     'nav.features': 'Features', 'nav.how': 'How it works', 'nav.report': 'Monthly Report', 'nav.cta': 'Check for Outages →',
     'hero.badge': 'LIVE MONITORING',
     'hero.title': 'Know when any <em>AI service</em> is down —<br>and what to switch to.',
-    'hero.sub': 'Real-time status for 35 AI services in one view.<span class="hero-sub-line"> AIWatch ranks reliability, analyzes incidents,</span> and recommends an instant fallback the moment something breaks. Free & open source — no signup.',
+    'hero.sub': 'Real-time status for 36 AI services in one view.<span class="hero-sub-line"> AIWatch ranks reliability, analyzes incidents,</span> and recommends an instant fallback the moment something breaks. Free & open source — no signup.',
     'hero.cta1': 'Open the dashboard →', 'hero.trust': 'No signup · Live status · Free & open source (AGPL)', 'hero.cta2': 'View on GitHub',
     'hero.pill1': 'AI Services', 'hero.pill2v': 'Real-time', 'hero.pill2': 'Alerts', 'hero.pill3': 'Open Source',
     'flow.1.title': 'Outage Detected', 'flow.2.conn': 'AI analysis started', 'flow.2.bar': 'Analyzing patterns', 'flow.3.conn': 'Discord · Slack · RSS alerts', 'flow.3.title': 'Alert Sent', 'flow.3.body': 'Discord · Slack · RSS alert sent', 'flow.4.conn': 'Alternatives suggested', 'flow.4.title': 'Fallback Suggested',
@@ -1144,7 +1144,7 @@ const i18n = {
     'feat.3.title': 'Fallback Recommendations', 'feat.3.desc': 'Get instant alternative suggestions ranked by Score within the same category. Same-provider services are automatically excluded.',
     'feat.4.title': '"Is X Down?" Dedicated Pages', 'feat.4.desc': 'Pages like ai-watch.dev/is-claude-down show real-time status, AI analysis, and fallback recommendations — all in one place.',
     'how.title': 'How it works', 'how.sub': 'Powered by official status page data from each provider',
-    'compare.title': 'How is AIWatch different?', 'compare.sub': 'Built on official status data — aggregated across 35 services in one place', 'compare.col1': 'Official Status Page', 'compare.r2': 'Alerts', 'compare.r2a': 'Subscribe per provider, separately', 'compare.r2b': 'All 35 in one — Discord · Slack · RSS', 'compare.r3': 'AIWatch Score', 'compare.r3a': 'Per-service, separate pages', 'compare.r3b': 'AIWatch Score — Uptime + Impact days + Recovery + Responsiveness', 'compare.r4': 'Incident analysis', 'compare.r4b': 'AI analyzes cause & recovery', 'compare.r5': 'Fallback', 'compare.r5b': 'Alternative services suggested', 'compare.r6': 'Monthly report', 'compare.r6b': 'Monthly report published', 'compare.r7': 'Cost', 'compare.r7a': 'Free', 'compare.r7b': 'Free & open source',
+    'compare.title': 'How is AIWatch different?', 'compare.sub': 'Built on official status data — aggregated across 36 services in one place', 'compare.col1': 'Official Status Page', 'compare.r2': 'Alerts', 'compare.r2a': 'Subscribe per provider, separately', 'compare.r2b': 'All 36 in one — Discord · Slack · RSS', 'compare.r3': 'AIWatch Score', 'compare.r3a': 'Per-service, separate pages', 'compare.r3b': 'AIWatch Score — Uptime + Impact days + Recovery + Responsiveness', 'compare.r4': 'Incident analysis', 'compare.r4b': 'AI analyzes cause & recovery', 'compare.r5': 'Fallback', 'compare.r5b': 'Alternative services suggested', 'compare.r6': 'Monthly report', 'compare.r6b': 'Monthly report published', 'compare.r7': 'Cost', 'compare.r7a': 'Free', 'compare.r7b': 'Free & open source',
     'how.1.badge': 'Auto', 'how.2.badge': 'On detection', 'how.3.badge': 'Real-time', 'how.4.badge': 'Monthly',
     'how.1.title': 'Collect', 'how.1.desc': 'Official status pages auto-refreshed up to every 5 min',
     'how.2.title': 'Analyze', 'how.2.desc': 'Hybrid AI (Gemma 4 + Claude Sonnet fallback) analyzes pattern, recovery time & scope',
@@ -1153,7 +1153,7 @@ const i18n = {
     'cta.title': 'Check it out now', 'cta.sub': 'Completely free · No installation · Discord · Slack · RSS alerts', 'cta.btn1': 'Check for Outages Now →', 'cta.btn2': 'Set Up Alerts', 'cta.rss': 'Subscribe via RSS',
     'alert.title': 'Get notified, your way', 'alert.sub': 'Real-time incident alerts with AI analysis and fallback recommendations. Free.',
     'alert.rss.copied': 'Copied ✓', 'alert.rss.prompt': 'Copy this RSS feed URL:',
-    'report.title': 'Monthly AI Reliability Report', 'report.hook': 'Which AI service is most reliable? The answer may surprise you.', 'report.link': 'View All Reports →', 'report.sub': 'AIWatch Score rankings, incident summaries, official uptime, notable outage analysis, and provider recommendations — all in one monthly report for 35 services.', 'report.chart.note': '* Lower scores may reflect reporting granularity, not actual instability',
+    'report.title': 'Monthly AI Reliability Report', 'report.hook': 'Which AI service is most reliable? The answer may surprise you.', 'report.link': 'View All Reports →', 'report.sub': 'AIWatch Score rankings, incident summaries, official uptime, notable outage analysis, and provider recommendations — all in one monthly report for 36 services.', 'report.chart.note': '* Lower scores may reflect reporting granularity, not actual instability',
     'footer.report': 'Monthly Report', 'footer.alert': 'Alert Settings'
   }
 };

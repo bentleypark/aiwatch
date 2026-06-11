@@ -40,6 +40,8 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'langchain':       { id: 'langsmith',  name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api' },
   // Runway (#393) — generative-video AI; slug == worker id ('runway'), no override needed.
   'runway':          { id: 'runway',     name: 'Runway',           provider: 'Runway',      category: 'api' },
+  // Luma / Dream Machine (#602) — generative-video AI; slug == worker id ('luma'), no override needed.
+  'luma':            { id: 'luma',       name: 'Luma (Dream Machine)', provider: 'Luma',     category: 'api' },
   // AI apps (#263)
   'character-ai':    { id: 'characterai', name: 'Character.AI',    provider: 'Character.AI', category: 'app' },
   // Coding agents (#294) — OpenAI Codex is the current coding-agent product,
@@ -89,6 +91,7 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'modal':          ['replicate', 'huggingface'],
   'langchain':      ['pinecone', 'openai', 'claude'],
   'runway':         ['replicate', 'stability', 'huggingface'],
+  'luma':           ['runway', 'replicate', 'stability'],
   // Apps
   'character-ai':   ['chatgpt', 'claude-ai', 'gemini'],
 }

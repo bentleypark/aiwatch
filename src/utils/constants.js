@@ -15,7 +15,7 @@ export const API_SERVICE_IDS = [
   'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq',
   'together', 'fireworks', 'cerebras', 'perplexity', 'huggingface', 'replicate',
   'elevenlabs', 'xai', 'deepseek', 'openrouter', 'bedrock', 'azureopenai',
-  'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'runway', 'assemblyai', 'deepgram',
+  'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'runway', 'luma', 'assemblyai', 'deepgram',
 ]
 
 // AI web apps (no latency — web services, ordered before related API)
@@ -34,7 +34,7 @@ export const SERVICE_AND_APP_IDS = [
   // voice & speech AI
   'elevenlabs', 'assemblyai', 'deepgram',
   // inference / infrastructure
-  'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'runway',
+  'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'runway', 'luma',
 ]
 
 // All service IDs
@@ -45,7 +45,7 @@ export const SERVICE_CATEGORIES = {
   all:       { labelKey: 'filter.all',       ids: null }, // null = show all
   apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai'] },
   llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
-  inference: { labelKey: 'filter.inference', ids: ['elevenlabs', 'assemblyai', 'deepgram', 'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'runway'] },
+  inference: { labelKey: 'filter.inference', ids: ['elevenlabs', 'assemblyai', 'deepgram', 'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'runway', 'luma'] },
   agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'] },
 }
 
@@ -89,8 +89,10 @@ export const ALL_SERVICES_FEED_URL = 'https://ai-watch.dev/feed.xml'
 export const API_TIER = {
   claude: 1, openai: 1, gemini: 1,
   mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, xai: 2, perplexity: 2,
-  bedrock: 3, azureopenai: 3, openrouter: 3, langsmith: 3, runway: 3,
+  bedrock: 3, azureopenai: 3, openrouter: 3, langsmith: 3,
   elevenlabs: 4, assemblyai: 4, deepgram: 4,
+  // Tier 5 = generative Video (#602 / #601 step B) — keep in sync with worker/src/fallback.ts.
+  runway: 5, luma: 5,
   claudecode: 11, codex: 11,
   cursor: 12, windsurf: 12,
   copilot: 13, junie: 13,
@@ -100,7 +102,7 @@ export const API_TIER = {
 // Sync target for worker/src/fallback.ts TIER_LABEL. Pre-#403 this lived inline in Overview.jsx;
 // promoted here so the sync test can compare both copies via a single import without parsing JSX.
 export const TIER_LABEL = {
-  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice',
+  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video',
   11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
   21: 'AI Apps',
 }

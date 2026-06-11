@@ -45,6 +45,12 @@ export function mapBetterStackImpact(text: string): Incident['impact'] {
 //      keyword is present.
 const MAINTENANCE_TITLE = /scheduled\s+(?:\w+\s+)?maintenance|maintenance[^a-z]{0,20}scheduled|\bmaintenance\s*$/i
 const FUTURE_PUBDATE_BUFFER_MS = 60_000  // clock-skew tolerance
+// #602 — an unresolved Better Stack incident with no RSS activity for this long is treated as a
+// stale monitor post. Better Stack feeds with human-written titles (Luma's "Ray3 service degraded")
+// don't pair a "down"/"recovered" cycle, so an old incident never flips to resolved and lingers as a
+// perpetual `investigating` even while the page is operational. 7 days: real ongoing incidents emit
+// updates far sooner; the rare genuine multi-day outage gets an explicit resolution post anyway.
+const STALE_ONGOING_MS = 7 * 86_400_000
 
 export function parseRssIncidents(xml: string, now = Date.now()): Incident[] {
   const items = xml.match(/<item>([\s\S]*?)<\/item>/g)
@@ -81,6 +87,9 @@ export function parseRssIncidents(xml: string, now = Date.now()): Incident[] {
     const isResolved = /\brecover(?:ed)?\b|\bresolved\b|\bfixed\b|\brestor(?:ed)?\b|\bmitigated\b|\bhealthy again\b|\bis back\b|\bback to normal\b|\bback up\b|\boperational\b/.test(lastText)
     const startMs = new Date(first.date).getTime()
     const endMs = new Date(last.date).getTime()
+    // Stale-ongoing guard (#602): an unresolved incident untouched for STALE_ONGOING_MS is treated as
+    // resolved (resolvedAt = last-seen), so a months-old monitor post doesn't show as a live incident.
+    const resolved = isResolved || (now - endMs) > STALE_ONGOING_MS
 
     // #331 / #503: planned-maintenance title filter (signal 1 of 3).
     // Signal 2 (future pubDate) and signal 3 (index.json report_type) are below.
@@ -100,7 +109,7 @@ export function parseRssIncidents(xml: string, now = Date.now()): Incident[] {
     }
 
     const startedAt = new Date(first.date).toISOString()
-    const duration = isResolved
+    const duration = resolved
       ? formatDuration(new Date(first.date), new Date(last.date))
       : null
     const component = first.title.replace(/ went down$/i, '').replace(/ recovered$/i, '')
@@ -110,14 +119,14 @@ export function parseRssIncidents(xml: string, now = Date.now()): Incident[] {
 
     incidents.push({
       id: groupKey.split('/').pop() ?? groupKey,
-      title: `${component} — ${isResolved ? 'recovered' : 'down'}`,
-      status: isResolved ? 'resolved' : 'investigating',
+      title: `${component} — ${resolved ? 'recovered' : 'down'}`,
+      status: resolved ? 'resolved' : 'investigating',
       impact: mapBetterStackImpact(severityText),
       startedAt,
-      resolvedAt: isResolved ? new Date(last.date).toISOString() : null,
+      resolvedAt: resolved ? new Date(last.date).toISOString() : null,
       duration,
       timeline: events.map((e, idx) => ({
-        stage: (isResolved && idx === events.length - 1) ? 'resolved' as const : 'investigating' as const,
+        stage: (resolved && idx === events.length - 1) ? 'resolved' as const : 'investigating' as const,
         text: e.desc || e.title,
         at: new Date(e.date).toISOString(),
       })),
