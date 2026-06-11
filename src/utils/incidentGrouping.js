@@ -69,7 +69,25 @@ export function isGenericTitle(title) {
  * @returns {string}
  */
 export function normalizeTitle(title) {
-  return String(title ?? '').replace(/\s*—\s*recovered\s*$/, '').trim()
+  return String(title ?? '').replace(/\s*—\s*(recovered|down)\s*$/i, '').trim()
+}
+
+/**
+ * BetterStack auto-recovery flap marker — "<model> — recovered" / "<model> — down".
+ * BetterStack tags these transient model blips with a `minor` impact (not null), so
+ * the `impact != null` guard alone leaves them ungrouped and they swamp the history
+ * (#597, Together/Fireworks). The suffix is machine-emitted — human-curated incidents
+ * don't title themselves "X — recovered" — and the ≥2 same-(day, normalized-title)
+ * GROUP_THRESHOLD guards against folding a genuine one-off. Kept in lockstep with the
+ * SSR port (`api/is-down/incident-grouping.ts`); the alert-side `FLAP_TITLE_RE` in
+ * `worker/src/alerts.ts` matches the same suffix but is case-sensitive — this display
+ * copy adds the `/i` flag as a deliberate (BetterStack emits lowercase) widening.
+ * @param {string} title
+ * @returns {boolean}
+ */
+const FLAP_TITLE_RE = /\s*—\s*(recovered|down)\s*$/i
+export function isFlapTitle(title) {
+  return FLAP_TITLE_RE.test(String(title ?? ''))
 }
 
 /**
@@ -134,13 +152,14 @@ export function groupIncidents(incidents, options = {}) {
   const { timeZone } = options
 
   // Bucket by (dayKey, normalizedTitle). Skip non-null impact — those represent
-  // real human-curated incidents, EXCEPT when the title matches a generic
-  // auto-monitoring pattern (Statuspage assigns default impact even to noise —
-  // #387, Character.AI). Those are still clustered.
+  // real human-curated incidents — EXCEPT (a) generic auto-monitoring titles
+  // (Statuspage assigns a default impact even to noise — #387, Character.AI) and
+  // (b) BetterStack flap markers "<model> — recovered/down" (tagged `minor` but
+  // machine-emitted transient blips — #597, Together/Fireworks). Both still cluster.
   const buckets = new Map()
   const ungroupable = []
   incidents.forEach((inc, idx) => {
-    if (inc.impact != null && !isGenericTitle(inc.title)) {
+    if (inc.impact != null && !isGenericTitle(inc.title) && !(isFlapTitle(inc.title) && inc.impact === 'minor')) {
       ungroupable.push({ idx, inc })
       return
     }

@@ -3,6 +3,7 @@ import {
   groupIncidents,
   normalizeTitle,
   isGenericTitle,
+  isFlapTitle,
   GENERIC_TITLE_PATTERNS_SOURCES,
   GROUP_THRESHOLD,
   type GroupingIncident,
@@ -307,5 +308,65 @@ describe('groupIncidents — sort axis alignment with latest activity (#411)', (
     const result = groupIncidents([a, b])
     const ids = result.map((r) => (r.kind === 'single' ? (r as SingleRow).incident.id : null))
     expect(ids).toEqual(['a', 'b'])
+  })
+})
+
+describe('groupIncidents — BetterStack minor flap markers (#597)', () => {
+  it('groups same-day minor "<model> — recovered" flap series (Together/Gemma case)', () => {
+    // BetterStack tags auto-recovery model blips impact:'minor' (not null), so before
+    // #597 they escaped the impact != null guard and swamped the SSR history list.
+    const incs: GroupingIncident[] = Array.from({ length: 7 }, (_, i) =>
+      mkInc({ id: `gemma-${i}`, title: 'Google Gemma 4 31B IT — recovered', impact: 'minor', startedAt: `2026-06-08T${String(5 + i * 2).padStart(2, '0')}:00:00Z` }),
+    )
+    const result = groupIncidents(incs)
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('group')
+    expect((result[0] as GroupRow).count).toBe(7)
+    expect((result[0] as GroupRow).normalizedTitle).toBe('Google Gemma 4 31B IT')
+  })
+
+  it('does NOT group major "— recovered" — only minor flaps cluster', () => {
+    const incs: GroupingIncident[] = Array.from({ length: 3 }, (_, i) =>
+      mkInc({ id: `maj-${i}`, title: 'Model serving — recovered', impact: 'major', startedAt: `2026-06-08T1${i}:00:00Z` }),
+    )
+    const result = groupIncidents(incs)
+    expect(result).toHaveLength(3)
+    expect(result.every((r) => r.kind === 'single')).toBe(true)
+  })
+
+  it('buckets a "— down" + "— recovered" minor flap cycle into one group', () => {
+    const incs: GroupingIncident[] = [
+      mkInc({ id: 'd1', title: 'Pearl-ai Gemma 4 31B IT — down', impact: 'minor', startedAt: '2026-06-08T05:00:00Z' }),
+      mkInc({ id: 'r1', title: 'Pearl-ai Gemma 4 31B IT — recovered', impact: 'minor', startedAt: '2026-06-08T05:25:00Z' }),
+    ]
+    const result = groupIncidents(incs)
+    expect(result).toHaveLength(1)
+    expect((result[0] as GroupRow).count).toBe(2)
+    expect((result[0] as GroupRow).normalizedTitle).toBe('Pearl-ai Gemma 4 31B IT')
+  })
+
+  it('a lone minor flap stays a single row (below threshold — no false-positive)', () => {
+    const result = groupIncidents([
+      mkInc({ id: 'solo', title: 'Some Model — recovered', impact: 'minor', startedAt: '2026-06-08T05:00:00Z' }),
+    ])
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('single')
+  })
+})
+
+describe('isFlapTitle (#597)', () => {
+  it('matches "— recovered" / "— down" suffixes; not plain or mid-string', () => {
+    expect(isFlapTitle('Google Gemma 4 31B IT — recovered')).toBe(true)
+    expect(isFlapTitle('Foo — down')).toBe(true)
+    expect(isFlapTitle('Elevated API errors')).toBe(false)
+    expect(isFlapTitle('Service recovered after a brief outage')).toBe(false)
+    expect(isFlapTitle(null)).toBe(false)
+    expect(isFlapTitle('')).toBe(false)
+  })
+})
+
+describe('normalizeTitle — "— down" suffix (#597)', () => {
+  it('strips trailing " — down"', () => {
+    expect(normalizeTitle('Google Gemma 4 31B IT — down')).toBe('Google Gemma 4 31B IT')
   })
 })

@@ -89,7 +89,21 @@ export interface SingleRow {
 export type GroupedRow = GroupRow | SingleRow
 
 export function normalizeTitle(title: string | null | undefined): string {
-  return String(title ?? '').replace(/\s*—\s*recovered\s*$/, '').trim()
+  return String(title ?? '').replace(/\s*—\s*(recovered|down)\s*$/i, '').trim()
+}
+
+// BetterStack auto-recovery flap marker — "<model> — recovered" / "<model> — down".
+// BetterStack tags these transient model blips with a `minor` impact (not null), so the
+// `impact != null` guard alone leaves them ungrouped and they swamp the history (#597,
+// Together/Fireworks). The suffix is machine-emitted (human-curated incidents don't title
+// themselves "X — recovered"), and the ≥2 same-(day, normalized-title) GROUP_THRESHOLD
+// guards against folding a genuine one-off. Kept in lockstep with the SPA copy
+// (`src/utils/incidentGrouping.js`); the alert-side `FLAP_TITLE_RE` in
+// `worker/src/alerts.ts` matches the same suffix but is case-sensitive — this display
+// copy adds the `/i` flag as a deliberate (BetterStack emits lowercase) widening.
+const FLAP_TITLE_RE = /\s*—\s*(recovered|down)\s*$/i
+export function isFlapTitle(title: string | null | undefined): boolean {
+  return FLAP_TITLE_RE.test(String(title ?? ''))
 }
 
 function localDayKey(iso: string, timeZone: string): string {
@@ -108,10 +122,11 @@ export function groupIncidents(
 
   incidents.forEach((inc, idx) => {
     // Real human-curated incidents (impact != null) skip clustering — EXCEPT
-    // when the title is a Statuspage auto-monitoring placeholder (Character.AI
-    // case, #387). Those still get clustered because the impact value is
-    // boilerplate, not a curation signal.
-    if (inc.impact != null && !isGenericTitle(inc.title)) {
+    // (a) Statuspage auto-monitoring placeholders (Character.AI, #387) and
+    // (b) BetterStack flap markers "<model> — recovered/down" (tagged `minor`
+    // but machine-emitted transient blips — #597, Together/Fireworks). Both
+    // still cluster because the impact value is boilerplate, not curation.
+    if (inc.impact != null && !isGenericTitle(inc.title) && !(isFlapTitle(inc.title) && inc.impact === 'minor')) {
       ungroupable.push({ idx, inc })
       return
     }
