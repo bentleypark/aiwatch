@@ -7,6 +7,7 @@ import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
 import { SERVICE_CATEGORIES, ALL_SERVICES_FEED_URL } from '../utils/constants'
+import { isUnreliableUptime } from '../utils/serviceReliability'
 import RssCopyIcon from './RssCopyIcon'
 
 const EMPTY = []
@@ -117,8 +118,7 @@ const uptimeBadgeStyle = { ...badgeStyle, whiteSpace: 'nowrap', minWidth: '46px'
 function ServiceNavItem({ svc, page, setPage, onNavigate }) {
   const active = page.name === 'service' && page.serviceId === svc.id
   const dotClass = STATUS_DOT_CLASS[svc.status] ?? STATUS_DOT_CLASS.operational
-  const isEstimateOnly = svc.uptimeSource === 'estimate' && (svc.incidents ?? []).length === 0
-  const hasUptime = svc.uptime30d != null && !isEstimateOnly
+  const hasUptime = svc.uptime30d != null && !isUnreliableUptime(svc) // #591 — hide frozen stale uptime too
   const badgeCls = hasUptime ? uptimeBadgeCls(svc.uptime30d) : 'bg-[var(--bg3)] text-[var(--text2)]'
   const statusTextCls = svc.status === 'degraded' ? 'text-[var(--amber)]'
     : svc.status === 'down' ? 'text-[var(--red)]' : null

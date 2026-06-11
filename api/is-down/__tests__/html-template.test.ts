@@ -163,6 +163,42 @@ describe('renderPage <title> — live status (#566)', () => {
   })
 })
 
+// #591 — a stale-source service (frozen feed; is-down.ts never sets a rank for it) must not surface
+// its frozen uptime/score, and must show the honest "source moved/can't reach" note instead.
+describe('renderPage — stale incident source (#591)', () => {
+  const stale = () => mkService({
+    status: 'operational',
+    uptime30d: 99.92,            // frozen mirror value — must NOT appear
+    aiwatchScore: 88,            // inflated by the empty window — must NOT appear
+    scoreGrade: 'good',
+    incidentSourceStale: true,
+    // rank intentionally unset: is-down.ts excludes stale services from the ranked set
+  })
+
+  it('omits the frozen uptime and inflated score from the header meta', () => {
+    const html = renderPage('deepseek', stale(), mkSeo(), [])
+    expect(html).not.toContain('Uptime (30d): 99.92%')
+    expect(html).not.toContain('AIWatch Score: 88')
+  })
+
+  it('renders the honest stale-source note', () => {
+    const html = renderPage('deepseek', stale(), mkSeo(), [])
+    expect(html).toMatch(/status page moved to a source AIWatch can't reach/i)
+  })
+
+  it('omits the frozen uptime from the SERP meta description', () => {
+    const desc = buildMetaDescription(mkSeo(), stale(), null)
+    expect(desc).not.toContain('30-day uptime: 99.92%')
+  })
+
+  it('a NON-stale service still shows uptime + score (no over-suppression)', () => {
+    const html = renderPage('deepseek', mkService({ status: 'operational', uptime30d: 99.92, aiwatchScore: 88, scoreGrade: 'good' }), mkSeo(), [])
+    expect(html).toContain('Uptime (30d): 99.92%')
+    expect(html).toContain('AIWatch Score: 88')
+    expect(html).not.toMatch(/can't reach/i)
+  })
+})
+
 describe('renderIncidents — 30-day window + grouping', () => {
   it('returns empty string when service is null or incidents array is empty', () => {
     expect(renderIncidents(null)).toBe('')
@@ -178,6 +214,22 @@ describe('renderIncidents — 30-day window + grouping', () => {
     const html = renderIncidents(svc)
     expect(html).toContain('Last 30 days')
     expect(html).toContain('No incidents in the last 30 days')
+  })
+
+  it('#591 stale source: shows "history unavailable", NOT a false "No incidents" all-clear', () => {
+    // frozen feed — incidents exist but are all old (can\'t fetch recent), so the 30-day window is empty
+    const svc = mkService({
+      incidentSourceStale: true,
+      incidents: [mkInc({ startedAt: new Date(Date.now() - 40 * 86_400_000).toISOString() })],
+    })
+    const html = renderIncidents(svc)
+    expect(html).toContain('Incident history unavailable')
+    expect(html).not.toContain('No incidents in the last 30 days')
+  })
+
+  it('#591 stale source with an EMPTY incident array still renders the unavailable message', () => {
+    const html = renderIncidents(mkService({ incidentSourceStale: true, incidents: [] }))
+    expect(html).toContain('Incident history unavailable')
   })
 
   it('30-day boundary: 29d included, 31d excluded', () => {

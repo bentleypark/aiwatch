@@ -304,7 +304,7 @@ const ko = {
   'ranking.service': '서비스',
   'ranking.affectedDays': '영향 일수',
   'ranking.na': '데이터 불충분 서비스',
-  'ranking.naReason': '상태 페이지에서 점수 산정에 필요한 데이터 미제공',
+  'ranking.naReason': '공정하게 점수를 매길 만큼 비교 가능한 데이터가 부족합니다 — 공식 가동률 지표가 없거나, 상태 페이지를 현재 가져올 수 없습니다.',
   'ranking.score': '점수',
   'ranking.grade': '등급',
   'ranking.uptime': 'Uptime',

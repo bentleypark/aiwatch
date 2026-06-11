@@ -7,6 +7,7 @@ import { usePage } from '../utils/pageContext'
 import { useSettings } from '../hooks/useSettings'
 import { SCORE_BG_CLASS, SCORE_TEXT_CLASS } from '../utils/constants'
 import { formatTime } from '../utils/time'
+import { hasReliableScoreData } from '../utils/serviceReliability'
 import SkeletonUI from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 
@@ -20,9 +21,7 @@ export default function Ranking() {
   const services = (rawServices ?? []).filter((s) => settings.enabledServices.includes(s.id))
 
   const ranked = useMemo(() => {
-    // Exclude services with insufficient data (estimate uptime + no incidents = unreliable score)
-    const hasReliableData = (s) => !(s.uptimeSource === 'estimate' && (s.incidents ?? []).length === 0)
-    const scored = services.filter((s) => s.aiwatchScore != null && hasReliableData(s))
+    const scored = services.filter((s) => s.aiwatchScore != null && hasReliableScoreData(s))
       .sort((a, b) => b.aiwatchScore - a.aiwatchScore)
       .map((svc, i, arr) => {
         const score = Math.round(svc.aiwatchScore)
@@ -30,7 +29,7 @@ export default function Ranking() {
         const isTied = arr.filter((s) => Math.round(s.aiwatchScore) === score).length > 1
         return { ...svc, rank, isTied }
       })
-    const na = services.filter((s) => s.aiwatchScore == null || !hasReliableData(s))
+    const na = services.filter((s) => s.aiwatchScore == null || !hasReliableScoreData(s))
     return { scored, na }
   }, [services])
 
@@ -201,12 +200,14 @@ export default function Ranking() {
             </div>
           </div>
           <div style={{ padding: '16px' }}>
+            {/* #591 — the exclusion reason is shared by the whole bucket, so show it once here
+                instead of repeating it on every row. */}
+            <p className="text-[11px] text-[var(--text2)]" style={{ marginBottom: '10px' }}>{t('ranking.naReason')}</p>
             <div className="flex flex-col gap-2">
               {ranked.na.map((svc) => (
                 <div key={svc.id} className="flex items-center gap-2 text-[11px] text-[var(--text2)]">
                   <span>•</span>
                   <span className="text-[var(--text1)]">{svc.name}</span>
-                  <span>— {t('ranking.naReason')}</span>
                 </div>
               ))}
             </div>

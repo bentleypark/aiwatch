@@ -1269,7 +1269,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
       const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'admin/rebuild-archive')
       scoreData = services.map((s) => {
         const r = scoreFor(s, probeSummaries)
-        return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade, officialUptime: s.uptime30d ?? null }
+        return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade, officialUptime: s.uptime30d ?? null, ...(s.incidentSourceStale ? { incidentSourceStale: true } : {}) }
       })
       for (const s of services) serviceNames[s.id] = s.name
     } catch (parseErr) {
@@ -1766,7 +1766,7 @@ export default {
               const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'monthly-archive')
               scoreData = services.map((s) => {
                 const r = scoreFor(s, probeSummaries)
-                return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade, officialUptime: s.uptime30d ?? null }
+                return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade, officialUptime: s.uptime30d ?? null, ...(s.incidentSourceStale ? { incidentSourceStale: true } : {}) }
               })
               for (const s of services) serviceNames[s.id] = s.name
             } catch (parseErr) {

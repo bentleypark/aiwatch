@@ -39,6 +39,7 @@ export interface ServiceData {
   rank?: number
   rankTied?: boolean
   totalRanked?: number
+  incidentSourceStale?: boolean
 }
 
 interface Fallback {
@@ -436,9 +437,12 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
   const answer = statusAnswer(service.status) // #566 — on-page direct answer (feeds Google's auto-snippet)
   const hasUptime = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d)
   const gradeStr = service.scoreGrade ? ` (${service.scoreGrade.charAt(0).toUpperCase() + service.scoreGrade.slice(1)})` : ''
+  // #591 — a stale-source service carries a frozen uptime30d + an inflated score; omit both here
+  // (the ⚠️ note below explains why). Status/last-checked stay — they're probe-measured + current.
+  const stale = !!service.incidentSourceStale
   const metaParts = [`Last checked: ${esc(timeAgo(service.lastChecked))}`]
-  if (hasUptime) metaParts.push(`Uptime (30d): ${service.uptime30d!.toFixed(2)}%`)
-  if (service.aiwatchScore != null) metaParts.push(`AIWatch Score: ${service.aiwatchScore}${esc(gradeStr)}`)
+  if (hasUptime && !stale) metaParts.push(`Uptime (30d): ${service.uptime30d!.toFixed(2)}%`)
+  if (service.aiwatchScore != null && !stale) metaParts.push(`AIWatch Score: ${service.aiwatchScore}${esc(gradeStr)}`)
   const incidents = Array.isArray(service.incidents) ? service.incidents : []
   const lastIncident = incidents.length > 0 ? incidents[0] : null
 
@@ -448,6 +452,7 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
 <p class="meta mono">${metaParts.join(' &middot; ')}</p>
 ${lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}</p>` : '<p class="meta">No recent incidents</p>'}
 ${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${service.rank}${service.rankTied ? ' (tied)' : ''}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'header'})">AIWatch reliability score</a> &middot; <a href="${REPORTS_INDEX_HREF}" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'header'})">${REPORTS_INDEX_LABEL} &rarr;</a></p>` : ''}
+${service.incidentSourceStale ? `<p class="meta" style="color:var(--amber)">⚠️ ${esc(seo.displayName)}'s status page moved to a source AIWatch can't reach, so its incident feed is frozen — uptime, score, and ranking are omitted until the source is reachable again. Live status above is still measured directly.</p>` : ''}
 </div>`
 }
 
@@ -553,7 +558,8 @@ export function buildMetaDescription(
   const thirtyDayIncidentCount = Array.isArray(service.incidents)
     ? service.incidents.filter((i) => new Date(i.startedAt).getTime() >= Date.now() - 30 * 86_400_000).length
     : 0
-  const uptimeStr = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d)
+  // #591 — don't surface a stale-source service's frozen uptime in the SERP snippet.
+  const uptimeStr = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d) && !service.incidentSourceStale
     ? `${service.uptime30d.toFixed(2)}%`
     : null
   const uptimeClause = uptimeStr ? ` 30-day uptime: ${uptimeStr}.` : ''
@@ -566,11 +572,20 @@ export function buildMetaDescription(
 
 export function renderIncidents(service: ServiceData | null): string {
   const incidents = Array.isArray(service?.incidents) ? service.incidents : []
-  if (!service || incidents.length === 0) return ''
+  // #591 — a stale-source service must still render the section (to say "unavailable"), even if its
+  // frozen incident array is empty; only a non-stale service with no incidents renders nothing.
+  if (!service || (incidents.length === 0 && !service.incidentSourceStale)) return ''
 
   const cutoff = Date.now() - 30 * 86_400_000
   const recent = incidents.filter((inc) => new Date(inc.startedAt).getTime() >= cutoff) as GroupingIncident[]
   const heading = `<h2>Recent Incidents <span class="mono" style="font-size:12px;color:#8b949e;font-weight:400;margin-left:8px">&middot; Last 30 days</span></h2>`
+
+  // #591 — the incident feed is frozen, so we can't fetch recent incidents. A "No incidents" message
+  // here would be a false all-clear; say the history is unavailable instead.
+  if (service.incidentSourceStale) {
+    return `${heading}
+<div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">Incident history unavailable &mdash; ${esc(service.name)}'s status source moved to a platform AIWatch can't currently reach, so recent incidents can't be retrieved.</p></div>`
+  }
 
   if (recent.length === 0) {
     return `${heading}

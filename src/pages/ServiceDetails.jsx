@@ -14,6 +14,7 @@ import { groupIncidents } from '../utils/incidentGrouping'
 import { compareGroupedRows, dominantGroupStatus } from '../utils/incidentSort'
 import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
 import { computeRecoveryStats, formatRecoveryMin } from '../utils/recovery'
+import { isUnreliableUptime } from '../utils/serviceReliability'
 import { regionStatusOf, SERVICE_REGIONS } from '../utils/regionStatus'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
@@ -636,8 +637,10 @@ export default function ServiceDetails({ serviceId }) {
   // monitoring rows back above newer resolved ones. See incidentSort.js.
   const groupedIncidents = groupIncidents(recentIncidents).slice().sort(compareGroupedRows)
   const incidentCount = recentIncidents.length
-  const totalIncidents = (service.incidents ?? []).length
-  const isEstimateNoData = service.uptimeSource === 'estimate' && totalIncidents === 0
+  // #591 — estimate-no-data OR stale-source (frozen feed, e.g. DeepSeek → Flashduty): blank the
+  // uptime / incidents / MTTR / score cards + the status calendar (showing a frozen 30-day window as
+  // current would mislead). Latency stays — it's probe-measured + current.
+  const isUnreliableData = isUnreliableUptime(service)
   const calendarDays = service.calendarDays ?? 14
 
   const calendarData = buildCalendarFromIncidents(service.incidents, service.dailyImpact, calendarDays)
@@ -704,38 +707,38 @@ export default function ServiceDetails({ serviceId }) {
           colorClass={probeServiceIds.includes(service.id) ? 'text-[var(--blue)]' : 'text-[var(--text2)]'}
         />
         <MetricCard
-          label={isEstimateNoData
+          label={isUnreliableData
             ? t('svc.uptime30d')
             : t({ official: 'uptime.label.official', platform_avg: 'uptime.label.platform_avg', estimate: 'uptime.label.estimate' }[service.uptimeSource] ?? 'svc.uptime30d')}
-          value={isEstimateNoData
+          value={isUnreliableData
             ? '—'
             : service.uptime30d != null ? `${service.uptime30d.toFixed(2)}%` : '—'}
-          sub={isEstimateNoData
+          sub={isUnreliableData
             ? t('uptime.unavailable')
             : t({ official: 'uptime.sub.official', platform_avg: 'uptime.sub.platform_avg', estimate: 'uptime.sub.estimate' }[service.uptimeSource] ?? 'uptime.unavailable')}
           colorClass="text-[var(--green)]"
         />
         <MetricCard
           label={t('svc.incidents')}
-          value={isEstimateNoData ? '—' : incidentCount}
-          sub={isEstimateNoData ? t('uptime.unavailable') : t('svc.incidents.sub')}
-          colorClass={isEstimateNoData ? 'text-[var(--text2)]' : incidentCount > 0 ? 'text-[var(--amber)]' : 'text-[var(--text1)]'}
+          value={isUnreliableData ? '—' : incidentCount}
+          sub={isUnreliableData ? t('uptime.unavailable') : t('svc.incidents.sub')}
+          colorClass={isUnreliableData ? 'text-[var(--text2)]' : incidentCount > 0 ? 'text-[var(--amber)]' : 'text-[var(--text1)]'}
         />
         <MetricCard
           label={t('svc.mttr')}
-          value={isEstimateNoData ? '—' : (recovery ? formatRecoveryMin(recovery.medianMin) : '—')}
+          value={isUnreliableData ? '—' : (recovery ? formatRecoveryMin(recovery.medianMin) : '—')}
           // #557 — headline is the median (typical) recovery; when a longer outage exists in the
           // window, surface it as "worst Xh Ym" so a 29h outage is never hidden by short blips.
-          sub={isEstimateNoData ? t('uptime.unavailable')
+          sub={isUnreliableData ? t('uptime.unavailable')
             : !recovery ? (hasOngoingIncident ? t('svc.mttr.ongoing') : t('svc.mttr.none'))
             : recovery.maxMin > recovery.medianMin ? t('svc.recovery.worst').replace('{d}', formatRecoveryMin(recovery.maxMin))
             : t('svc.incidents.sub')}
-          colorClass={isEstimateNoData ? 'text-[var(--text2)]' : recovery ? 'text-[var(--amber)]' : 'text-[var(--text2)]'}
+          colorClass={isUnreliableData ? 'text-[var(--text2)]' : recovery ? 'text-[var(--amber)]' : 'text-[var(--text2)]'}
         />
       </div>
 
       {/* ── AIWatch Score Breakdown ── */}
-      {service.aiwatchScore != null && !isEstimateNoData && (
+      {service.aiwatchScore != null && !isUnreliableData && (
         <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
             <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
@@ -822,7 +825,7 @@ export default function ServiceDetails({ serviceId }) {
             <span className="mono text-[10px] text-[var(--text2)]">{t('incidents.period.7d')}</span>
           </div>
           <div style={{ padding: '16px' }}>
-            {isEstimateNoData || NO_INCIDENT_SUPPORT.has(service.id) ? (
+            {isUnreliableData || NO_INCIDENT_SUPPORT.has(service.id) ? (
               <div className="flex items-center gap-2 py-4">
                 <span className="text-[var(--text2)] text-sm" aria-hidden="true">—</span>
                 <span className="text-xs text-[var(--text2)]">{t('uptime.unavailable')}</span>
@@ -844,8 +847,11 @@ export default function ServiceDetails({ serviceId }) {
           </div>
         </section>
 
-        {/* Status Calendar — hidden when calendarDays is 0 (no reliable data) */}
-        {calendarDays > 0 && <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+        {/* Status Calendar — hidden when calendarDays is 0 (no reliable data) or the source is STALE
+            (#591 — a frozen incident feed paints a 30-day all-green calendar, contradicting the
+            blanked cards above). Estimate-only services keep the calendar (existing behaviour — their
+            window isn't frozen, just lacks a published uptime %). */}
+        {calendarDays > 0 && !service.incidentSourceStale && <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
             <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
               <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--green)' }} />
@@ -946,7 +952,7 @@ export default function ServiceDetails({ serviceId }) {
         <div style={{ padding: '16px' }}>
           <div className="flex items-center gap-3" style={{ marginBottom: '12px' }}>
             <img src={`${(import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')}/badge/${service.id}`} alt={`${service.name} status`} height="20" />
-            {service.uptime30d != null && !isEstimateNoData && <img src={`${(import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')}/badge/${service.id}?uptime=true`} alt={`${service.name} uptime`} height="20" />}
+            {service.uptime30d != null && !isUnreliableData && <img src={`${(import.meta.env.VITE_API_URL || 'http://localhost:8788').replace('/api/status', '')}/badge/${service.id}?uptime=true`} alt={`${service.name} uptime`} height="20" />}
           </div>
           <BadgeCode serviceId={service.id} serviceName={service.name} t={t} />
         </div>

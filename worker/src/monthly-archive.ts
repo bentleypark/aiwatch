@@ -50,6 +50,10 @@ export interface MonthlyServiceData {
   // dashboard's 30-90d filter useful even on high-frequency services like Together AI).
   // Optional/null for archives written before this feature shipped — frontend must handle absence.
   incidentList?: MonthlyIncidentEntry[]
+  // #591 — the service's incident source was known-stale (frozen feed, e.g. DeepSeek → Flashduty)
+  // when this archive was built. The report generator excludes such services from the Score ranking
+  // (their empty incident window would inflate the Score). Absent when false / pre-#591 archives.
+  incidentSourceStale?: boolean
 }
 
 export interface MonthlyArchive {
@@ -629,6 +633,9 @@ export interface ArchiveScoreInput {
   // source is computeMonthlyOfficialUptime (the month-end daily snapshot), which is month-accurate
   // and rebuild-safe; this build-time value only applies to months with no daily snapshots.
   officialUptime?: number | null
+  // #591 — the service's incident source is known-stale (frozen feed). Threaded into the archive so
+  // the report generator can exclude it from the Score ranking, parity with the live dashboard.
+  incidentSourceStale?: boolean
 }
 
 /** Build monthly archive from daily KV data + accumulated incident data */
@@ -806,6 +813,7 @@ export async function buildMonthlyArchive(
       p95LatencyMs: latencyStats[id]?.p95 ?? null,
       latencySpikes: latencyStats[id]?.spikes ?? null,
       ...(incidentList ? { incidentList } : {}),
+      ...(scoreSvc?.incidentSourceStale ? { incidentSourceStale: true } : {}),
     }
   }
 
