@@ -4,6 +4,7 @@ import {
   normalizeTitle,
   isGenericTitle,
   isFlapTitle,
+  isAutoMonitorTitle,
   GENERIC_TITLE_PATTERNS_SOURCES,
   GROUP_THRESHOLD,
   type GroupingIncident,
@@ -368,5 +369,50 @@ describe('isFlapTitle (#597)', () => {
 describe('normalizeTitle — "— down" suffix (#597)', () => {
   it('strips trailing " — down"', () => {
     expect(normalizeTitle('Google Gemma 4 31B IT — down')).toBe('Google Gemma 4 31B IT')
+  })
+})
+
+describe('groupIncidents — Instatus "<Component> Degraded" auto-monitor noise (#599)', () => {
+  it('groups same-day minor "Conversations API Degraded" series (Mistral case)', () => {
+    const incs: GroupingIncident[] = Array.from({ length: 4 }, (_, i) =>
+      mkInc({ id: `conv-${i}`, title: 'Conversations API Degraded', impact: 'minor', startedAt: `2026-06-10T${String(2 + i * 3).padStart(2, '0')}:00:00Z` }),
+    )
+    const result = groupIncidents(incs)
+    expect(result).toHaveLength(1)
+    expect((result[0] as GroupRow).count).toBe(4)
+  })
+
+  it('keeps per-model "Completion API Degraded - <model>" variants in separate groups', () => {
+    const incs: GroupingIncident[] = [
+      ...Array.from({ length: 2 }, (_, i) => mkInc({ id: `a-${i}`, title: 'Completion API Degraded - mistral-tiny-2407', impact: 'minor', startedAt: `2026-06-10T0${i}:00:00Z` })),
+      ...Array.from({ length: 2 }, (_, i) => mkInc({ id: `b-${i}`, title: 'Completion API Degraded - mistral-tiny-latest', impact: 'minor', startedAt: `2026-06-10T1${i}:00:00Z` })),
+    ]
+    const groups = groupIncidents(incs).filter((r): r is GroupRow => r.kind === 'group')
+    expect(groups).toHaveLength(2)
+    expect(groups.every((g) => g.count === 2)).toBe(true)
+  })
+
+  it('does NOT group major "X Degraded" — only minor auto-monitor noise clusters', () => {
+    const incs: GroupingIncident[] = Array.from({ length: 3 }, (_, i) =>
+      mkInc({ id: `maj-${i}`, title: 'Conversations API Degraded', impact: 'major', startedAt: `2026-06-10T0${i}:00:00Z` }),
+    )
+    const result = groupIncidents(incs)
+    expect(result).toHaveLength(3)
+    expect(result.every((r) => r.kind === 'single')).toBe(true)
+  })
+})
+
+describe('isAutoMonitorTitle (#599)', () => {
+  it('matches "<X> Degraded[ Performance]" + tails; not prose / Down / plain', () => {
+    expect(isAutoMonitorTitle('Conversations API Degraded')).toBe(true)
+    expect(isAutoMonitorTitle('OCR API Degraded Performance')).toBe(true)
+    expect(isAutoMonitorTitle('Completion API Degraded - mistral-tiny-2407')).toBe(true)
+    expect(isAutoMonitorTitle('Conversations API Degraded · Chat Completions API')).toBe(true)
+    expect(isAutoMonitorTitle('API degraded due to an upstream provider')).toBe(false)
+    expect(isAutoMonitorTitle('Conversations API Down')).toBe(false)
+    expect(isAutoMonitorTitle('Elevated error rates')).toBe(false)
+    expect(isAutoMonitorTitle(null)).toBe(false)
+    // No-space tail ("- <model>" requires a space) is fail-safe — left un-grouped, not false-grouped.
+    expect(isAutoMonitorTitle('Completion API Degraded -mistral')).toBe(false)
   })
 })

@@ -51,10 +51,14 @@ test.describe('Incidents filtering', () => {
 
   test('clicking incident row expands accordion with header and close button', async ({ page }) => {
     const main = page.locator('main')
-    const rows = main.locator('[role="rowgroup"] [role="row"]')
+    // Target a SINGLE incident row. Group rows carry [aria-expanded] and toggle their member
+    // entries (▸/▾) instead of opening the single-incident timeline accordion; flap/auto-monitor
+    // grouping (#597/#599) grew, so the first row may now be a group. :not([aria-expanded])
+    // selects the single rows this assertion is about.
+    const rows = main.locator('[role="rowgroup"] [role="row"]:not([aria-expanded])')
     const count = await rows.count()
-    if (count === 0) return // no incidents to test
-    // Click first incident row
+    if (count === 0) return // only grouped rows present — nothing single to expand here
+    // Click first single incident row
     await rows.first().click()
     // Accordion detail should appear with header (desktop does not use hideHeader)
     const timeline = main.locator('.rounded-lg.overflow-hidden.mt-2').first()

@@ -277,7 +277,7 @@ button.btn{cursor:pointer;font-family:inherit;line-height:inherit}
 .share-kakao{background:#FEE500;color:#191919;border-color:#FEE500}
 .share-copy{background:#161b22;color:#e6edf3;border-color:rgba(255,255,255,0.14)}
 .share-copy.copied{background:#1a3d22;border-color:#3fb950;color:#3fb950}
-@media(max-width:600px){h1{font-size:22px}.container{padding:16px 12px}}
+@media(max-width:600px){h1{font-size:22px}.container{padding:16px 12px}.incident-group>summary{flex-direction:column;align-items:flex-start;gap:2px}.incident-group-title{flex:none}.incident-group-meta{white-space:normal}}
 </style>
 </head>
 <body>
