@@ -2,15 +2,20 @@ name: DeepSeek status feed
 
 # #618 — DeepSeek's status page (status.deepseek.com, Flashduty) blocks non-browser TLS
 # fingerprints, so the Cloudflare Worker can't read it directly. This Action browser-renders the
-# page every 10 min, fetches the clean Flashduty JSON API from the browser context, and POSTs it to
-# the Worker (/api/internal/deepseek-feed → KV). fetchService('deepseek') then serves live incidents
-# and the Score re-includes DeepSeek (incidentSourceStale lifts while the feed is fresh; a 3h KV TTL
-# falls back to the frozen Atlassian mirror if this Action stops).
+# page, fetches the clean Flashduty JSON API from the browser context, and POSTs it to the Worker
+# (/api/internal/deepseek-feed → KV). fetchService('deepseek') then serves live incidents and the
+# Score re-includes DeepSeek (incidentSourceStale lifts while the feed is fresh; 3h KV TTL else falls
+# back to the frozen Atlassian mirror).
+#
+# #629 — the PRIMARY trigger is now the Worker's reliable */5 cron, which workflow_dispatches this
+# (GitHub's own `schedule` is throttled to ~2h, which let the feed expire / go soft-stale). The
+# schedule below is just a low-frequency BACKUP for when the Worker is unavailable.
 
 on:
   schedule:
-    - cron: '*/10 * * * *'   # every 10 min (GH cron is best-effort + often delayed; the 3h KV TTL tolerates misses)
-  workflow_dispatch: {}       # manual trigger for first-run verification
+    - cron: '17 * * * *'      # hourly backup only (#629 — the Worker */5 cron is the primary trigger;
+                              # off-the-hour minute to dodge GitHub's top-of-hour scheduling congestion)
+  workflow_dispatch: {}       # primary path (dispatched by the Worker cron) + manual runs
 
 # A scheduled run + a manual dispatch (or an overlapping slow run) must not double-push.
 concurrency:

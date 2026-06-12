@@ -18,6 +18,7 @@ import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
 import { recordV1Traffic, queryV1Traffic } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
+import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -46,6 +47,10 @@ interface Env {
   // this. Set via `wrangler secret put DEEPSEEK_FEED_TOKEN` and the same value as a GH Action
   // secret. Absent secret → endpoint always 401.
   DEEPSEEK_FEED_TOKEN?: string
+  // #629: fine-grained GitHub PAT (actions: write on this repo) so the */5 cron can reliably
+  // workflow_dispatch the deepseek-feed Action (GitHub's own schedule is throttled to ~2h). Set via
+  // `wrangler secret put GH_DISPATCH_TOKEN`. Absent → the worker skips dispatch (GH schedule backup only).
+  GH_DISPATCH_TOKEN?: string
   AI?: Ai
   STATUS_CACHE: KVNamespace
   // #494: Workers Analytics Engine dataset for statusline traffic measurement.
@@ -1390,10 +1395,20 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
 }
 
 export default {
-  async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     // Use the scheduled trigger time (not wall-clock) so time-of-day checks like
     // `minutes === 0` remain accurate even when cronAlertCheck takes 60+ seconds.
     const scheduledNow = new Date(event.scheduledTime)
+
+    // #629 — reliably trigger the deepseek-feed Action each */5 cycle (GitHub's own schedule is
+    // throttled to ~2h, expiring the Flashduty feed). waitUntil so the GitHub POST runs concurrently
+    // with the rest of the cron instead of serially delaying it; .catch so it can never break the cron.
+    ctx.waitUntil(
+      maybeDispatchDeepseekFeed(env).catch((err) =>
+        console.warn('[cron] deepseek dispatch failed:', err instanceof Error ? err.message : err)
+      )
+    )
+
     // Health check probing (Phase 2) — runs every cron cycle
     if (env.STATUS_CACHE) {
       await writeProbeSnapshot(env.STATUS_CACHE).catch((err) =>
