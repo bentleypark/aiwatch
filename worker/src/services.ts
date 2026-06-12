@@ -53,12 +53,17 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://deepseek.statuspage.io/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x', incidentKeywords: ['api'], incidentSourceStale: true },
   { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, onlineOrNotUrl: 'https://status.openrouter.ai', onlineOrNotComponent: 'Chat (/api/v1/chat/completions)' },
   // Voice & Speech AI
-  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['webpage'] },
+  // displayComponentIds (#606): curated availability surfaces for the breakdown card —
+  // TTS, STT, Conversations, RAG, Telephony, Other API endpoints (excludes UI/Quality/ElevenCreative/Other).
+  // Display-only: badge stays on the overall page indicator (no statusComponentIds).
+  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['webpage'], displayComponentIds: ['01JP2RQVGDHPEEDAFM5KV2MH9P', '01JYDTNNSJBT4X90MAC47YPM9S', '01JY3H5SJJZNC33AYMAE4SK4TH', '01JY3H5SJJD2BMSGSW5FZE08ST', '01JY3H5SJJJG47J60JPKX882H8', '01JY3H5SJJFKTXYQHG5A8Z1KYH'] },
   { id: 'assemblyai', name: 'AssemblyAI', provider: 'AssemblyAI', category: 'api', statusUrl: 'https://status.assemblyai.com', apiUrl: 'https://status.assemblyai.com/api/v2/summary.json', statusComponentId: '50txf4qfk2kv' },
   { id: 'deepgram', name: 'Deepgram', provider: 'Deepgram', category: 'api', statusUrl: 'https://status.deepgram.com', apiUrl: 'https://status.deepgram.com/api/v2/summary.json', statusComponentId: 'cv8l6gg3cb9d' },
   // Inference / Infrastructure
   { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed', betterStackUrl: 'https://status.huggingface.co', flapSuppression: true },
-  { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: '01JRJYHBWCXHFZ0NHMP1N7T2G3' },
+  // displayComponentIds (#606): curated API/product surfaces — HTTP API, Streaming API, Registry,
+  // Official Models, Playground (excludes Billing/Support/Home Page/Hardware×5). Display-only.
+  { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: '01JRJYHBWCXHFZ0NHMP1N7T2G3', displayComponentIds: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01J5NNACBNTG5GR693P6RH5Q6J'] },
   { id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', statusUrl: 'https://status.pinecone.io', apiUrl: 'https://status.pinecone.io/api/v2/summary.json', statusComponentId: 'r7tngp2p3sjd' },
   { id: 'stability', name: 'Stability AI', provider: 'Stability AI', category: 'api', statusUrl: 'https://status.stability.ai', apiUrl: 'https://status.stability.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.stability.ai/incidents', incidentIoComponentId: '01JW9J39X55NDFZTZT3K5NYR48' },
   { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr' },
@@ -204,7 +209,7 @@ type StatusResolverSummary = {
   status?: { indicator?: string } | null
   components?: Array<{ id: string; name: string; status: string }>
 }
-type StatusResolverConfig = Pick<ServiceConfig, 'statusComponent' | 'statusComponentId' | 'statusComponentIds'>
+type StatusResolverConfig = Pick<ServiceConfig, 'statusComponent' | 'statusComponentId' | 'statusComponentIds' | 'displayComponentIds'>
 
 /**
  * Resolve a service's overall badge status from its config + status page summary.
@@ -261,12 +266,16 @@ export function resolveSvcStatus(
  * subset into one badge; this preserves each matched component (same availability-relevant
  * set) with its own normalized status, in the configured order.
  *
+ * Component source is `displayComponentIds ?? statusComponentIds` (#606): a service can
+ * supply a display-only list (decoupled from the worst-of badge) for a curated breakdown
+ * without changing its status determination; multi-component services reuse their badge ids.
+ *
  * Self-gates to the display rule: returns the matched subset ONLY when **≥2** components
  * resolve, else `[]`. A single row is redundant with the badge, so the ≥2 gate lives
  * here (not at the caller) — there is exactly one consumer (the `components` field), so
  * folding the rule in keeps it a single pure, fully-testable unit.
  *
- * Returns `[]` when: no `statusComponentIds` multi-component config, no page `components`,
+ * Returns `[]` when: no component list configured (neither field), no page `components`,
  * fewer than 2 of the configured ids resolve (incl. status-page drift that leaves 1), or
  * none resolve. Single-`statusComponentId` services are never expanded.
  */
@@ -274,10 +283,11 @@ export function resolveSvcComponents(
   config: StatusResolverConfig,
   summaryData: StatusResolverSummary,
 ): ServiceComponent[] {
-  if (!config.statusComponentIds || config.statusComponentIds.length === 0 || !summaryData.components) {
+  const ids = config.displayComponentIds ?? config.statusComponentIds
+  if (!ids || ids.length === 0 || !summaryData.components) {
     return []
   }
-  const matched = config.statusComponentIds
+  const matched = ids
     .map((id) => summaryData.components!.find((c) => c.id === id))
     .filter((c): c is NonNullable<typeof c> => c != null)
     .map((c) => ({ id: c.id, name: c.name, status: normalizeStatus(c.status) }))
@@ -551,6 +561,17 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         )
         if (missing.length > 0) {
           console.warn(`[fetchService] ${config.id} additional component ids missing: ${missing.join(', ')}`)
+        }
+      }
+      // #606 — same drift signal for the display-only breakdown list. These services have
+      // no statusComponentId/Ids, so without this a renamed/removed curated component would
+      // silently shrink the breakdown card (or drop it under the ≥2 gate) with no operator signal.
+      if (config.displayComponentIds && summaryData.components) {
+        const missing = config.displayComponentIds.filter(
+          (id) => !summaryData.components!.some((c) => c.id === id),
+        )
+        if (missing.length > 0) {
+          console.warn(`[fetchService] ${config.id} displayComponentIds missing (breakdown drift): ${missing.join(', ')}`)
         }
       }
       // Augment dailyImpact with ongoing incidents (source data only includes resolved).
