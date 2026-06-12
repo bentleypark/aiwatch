@@ -41,6 +41,27 @@ describe('filterIncidents', () => {
     expect(filterIncidents(incidents, config)).toHaveLength(0)
   })
 
+  it('#623 — Mistral: scopes to API, excludes Le Chat / non-API surfaces (Nuxt title carries the component)', () => {
+    // status.mistral.ai is Instatus/Nuxt — the parser appends the affected component to the title
+    // ("name · Component"). The mistral denylist drops the consumer/non-API surfaces while keeping
+    // every API component (denylist, so a real API incident is never dropped).
+    const mistral = mockConfig({ id: 'mistral', incidentExclude: ['le chat', 'le console', 'documentation', 'website'] })
+    const incidents = [
+      mockIncident({ id: 'a', title: 'Requests are experiencing degraded service · Chat Completions API' }),
+      mockIncident({ id: 'b', title: 'Requests are experiencing degraded service · AI Registry Prompts API' }),
+      mockIncident({ id: 'g', title: 'Elevated errors · Files API' }),   // broadens the no-collision net
+      mockIncident({ id: 'c', title: 'Slow responses · Le Chat' }),
+      mockIncident({ id: 'd', title: 'Login broken · Le Console' }),
+      mockIncident({ id: 'e', title: 'Docs outage · Documentation' }),
+      mockIncident({ id: 'f', title: 'Marketing page down · Mistral.ai Website' }),
+    ]
+    const kept = filterIncidents(incidents, mistral).map((i) => i.id)
+    expect(kept).toEqual(['a', 'b', 'g']) // only the API-component incidents survive
+    // a real API incident is never accidentally dropped (no API component name contains a denylist term)
+    expect(kept).not.toContain('c')
+    expect(kept).not.toContain('f')
+  })
+
   it('includes only matching incidentKeywords', () => {
     const incidents = [
       mockIncident({ id: '1', title: 'API latency spike' }),
