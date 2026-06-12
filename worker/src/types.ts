@@ -25,6 +25,11 @@ export interface ServiceComponent {
   id: string
   name: string
   status: 'operational' | 'degraded' | 'down'
+  // #606 — optional group label for the collapsible breakdown. Components sharing a
+  // group (e.g. 'Models') collapse under one header row; ungrouped components ("surfaces"
+  // like API/Console) render individually. Set by the worker in displayAllComponents mode
+  // (everything not in componentSurfaces → the Models group); absent for curated services.
+  group?: string
 }
 
 export interface ServiceStatus {
@@ -104,6 +109,22 @@ export interface ServiceConfig {
   // worst-of'ing every component into the badge would be too noisy (e.g. a Billing blip).
   // When both are set, the breakdown prefers displayComponentIds.
   displayComponentIds?: string[]
+  // #606 Category A (cohere/groq) — DYNAMIC breakdown for per-model statuspages with
+  // many, frequently-changing components. Instead of a hardcoded id list (which goes
+  // stale as models ship/retire), surface EVERY page component except `componentDenylist`
+  // names. Zero model-churn maintenance. The UI collapses the (long) list to a
+  // "N of M operational" summary + non-operational rows when it exceeds a threshold.
+  // Display-only (never feeds resolveSvcStatus), like displayComponentIds; takes
+  // precedence over both id lists when set. Pair with componentDenylist.
+  displayAllComponents?: boolean
+  // Names (case-insensitive exact match) excluded from the displayAllComponents set —
+  // non-availability surfaces like Docs/Website. Kept small + stable (unlike the model list).
+  componentDenylist?: string[]
+  // Names (case-insensitive) treated as individual "surface" rows in the breakdown; every
+  // OTHER displayAllComponents component is folded into a collapsible "Models" group (#606,
+  // matching the official status page's Endpoints/Models split). e.g. groq: ['API'];
+  // cohere: ['Coral','Infrastructure','Playground','embeddings']. Empty/absent → all grouped.
+  componentSurfaces?: string[]
   incidentIoComponentId?: string
   incidentIoGroupId?: string       // incident.io group uptime (e.g. "APIs" aggregate)
   betterStackUrl?: string

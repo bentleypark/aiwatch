@@ -388,12 +388,73 @@ const COMPONENT_TEXT_COLOR = {
   down: 'text-[var(--red)]',
 }
 
-// #604 — per-component breakdown for multi-component services (cerebras / cursor /
-// copilot / windsurf / langsmith / runway). Reads service.components, the curated
-// statusComponentIds subset preserved by the worker (worst-of'd into the badge).
+// #606 — worst-of a component set, for a group's header dot.
+function worstComponentStatus(members) {
+  if (members.some((c) => c.status === 'down')) return 'down'
+  if (members.some((c) => c.status === 'degraded')) return 'degraded'
+  return 'operational'
+}
+
+function ComponentRow({ c, t }) {
+  const label = t(`status.${c.status}`)
+  // #606 — operational is conveyed by the green dot alone; a visible "Operational" label on
+  // every row (18+ for per-model services) is noise. Show the text only for degraded/down,
+  // where it should stand out; keep the status on `title` for hover + a11y.
+  return (
+    <div className="flex items-center gap-2" title={`${c.name} — ${label}`}>
+      <span className={`rounded-full shrink-0 ${COMPONENT_DOT_COLOR[c.status] ?? COMPONENT_DOT_COLOR.operational}`} style={{ width: '6px', height: '6px' }} />
+      <span className="mono text-xs text-[var(--text1)]">{c.name}</span>
+      {c.status !== 'operational'
+        ? <span className={`mono text-[10px] ml-auto ${COMPONENT_TEXT_COLOR[c.status]}`}>{label}</span>
+        : <span className="sr-only">{label}</span>}
+    </div>
+  )
+}
+
+// #606 — collapsible group (e.g. "Models · 18 components ▸"). The header row IS the toggle
+// (chevron in-header, mirroring IncidentGroupRow), so there is no separate bottom button.
+// Expanded members render in the same 4-col grid as the surface rows.
+function ComponentGroup({ name, members, t }) {
+  const [open, setOpen] = useState(false)
+  const worst = worstComponentStatus(members)
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="w-full flex items-center gap-2 hover:bg-[var(--bg2)] rounded transition-colors"
+        style={{ padding: '6px 8px', margin: '0 -8px', minHeight: '32px' }}
+      >
+        <span className={`rounded-full shrink-0 ${COMPONENT_DOT_COLOR[worst]}`} style={{ width: '6px', height: '6px' }} />
+        <span className="mono text-xs text-[var(--text1)]">{name}</span>
+        <span className="mono text-[10px] text-[var(--text2)]">{t('svc.components.groupCount').replace('{n}', String(members.length))}</span>
+        {worst !== 'operational' && (
+          <span className={`mono text-[10px] ${COMPONENT_TEXT_COLOR[worst]}`}>{t(`status.${worst}`)}</span>
+        )}
+        <span aria-hidden="true" className="text-[9px] text-[var(--text2)] ml-auto">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div
+          className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4"
+          style={{ columnGap: '20px', rowGap: '8px', marginTop: '8px', marginLeft: '12px', paddingLeft: '12px', borderLeft: '2px solid var(--border-hi)' }}
+        >
+          {members.map((c) => <ComponentRow key={c.id} c={c} t={t} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// #604/#606 — per-component breakdown. Reads service.components (curated subset or the
+// dynamic displayAllComponents set). Ungrouped "surface" components render as individual
+// rows in a 4-col grid; grouped components (group:'Models') collapse under a group header
+// (matching the official status page's Endpoints/Models split).
 function ComponentBreakdown({ service, t }) {
   const components = service.components ?? []
   if (components.length === 0) return null
+  const surfaces = components.filter((c) => !c.group)
+  const groupNames = [...new Set(components.filter((c) => c.group).map((c) => c.group))]
   const anyIssue = components.some((c) => c.status !== 'operational')
   return (
     <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
@@ -404,16 +465,17 @@ function ComponentBreakdown({ service, t }) {
           <span className="text-[var(--text2)] font-normal normal-case tracking-normal">— {t('svc.components.sub')}</span>
         </div>
       </div>
-      <div style={{ padding: '16px' }}>
-        <div className="flex flex-col" style={{ gap: '8px' }}>
-          {components.map((c) => (
-            <div key={c.id} className="flex items-center gap-2">
-              <span className={`rounded-full shrink-0 ${COMPONENT_DOT_COLOR[c.status] ?? COMPONENT_DOT_COLOR.operational}`} style={{ width: '6px', height: '6px' }} />
-              <span className="mono text-xs text-[var(--text1)]">{c.name}</span>
-              <span className={`mono text-[10px] ml-auto ${COMPONENT_TEXT_COLOR[c.status] ?? COMPONENT_TEXT_COLOR.operational}`}>{t(`status.${c.status}`)}</span>
-            </div>
-          ))}
-        </div>
+      <div className="flex flex-col" style={{ padding: '16px', gap: '10px' }}>
+        {/* surfaces: individual rows in a 4-col grid (fills the wide card) */}
+        {surfaces.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4" style={{ columnGap: '20px', rowGap: '8px' }}>
+            {surfaces.map((c) => <ComponentRow key={c.id} c={c} t={t} />)}
+          </div>
+        )}
+        {/* grouped: one collapsible header per group (Models …) */}
+        {groupNames.map((g) => (
+          <ComponentGroup key={g} name={g} members={components.filter((c) => c.group === g)} t={t} />
+        ))}
       </div>
     </section>
   )

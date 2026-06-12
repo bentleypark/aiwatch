@@ -203,6 +203,7 @@ const ko = {
   'svc.status.link': '공식 Status',
   'svc.components.title': '구성요소 상태',
   'svc.components.sub': '공식 상태 페이지의 구성요소별 상태',
+  'svc.components.groupCount': '구성요소 {n}개',
   'svc.deepseek.probeNote': '상태 페이지(Flashduty)가 중국 외 IP에서 접근 불가 — 2026년 5월부터 API probe만으로 모니터링',
   'svc.rss': 'RSS',
   'svc.rss.copied': '복사됨 ✓',
