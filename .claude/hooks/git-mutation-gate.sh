@@ -9,6 +9,11 @@
 #     in-browser confirmation before code lands. "tests pass" ≠ "feature verified".
 #   • `--no-verify` / `--no-gpg-sign` — CLAUDE.md forbids these unless the user
 #     explicitly asked.
+#   • Docs drift (git commit only) — when the staged diff changes doc-load-bearing
+#     code (services.ts / index.ts / parsers / wrangler.toml / vercel.json /
+#     constants.js, or adds a new worker module) but touches no docs/reference/* or
+#     CLAUDE.md, surface the change→doc map. Docs is the recurring miss because it's
+#     the late, no-feedback, no-gate step (memory: feedback_docs_update_not_skipped).
 #
 # The step-3.5 reminder fires on EVERY matched git mutation — it is NOT silenced
 # by a running dev server. Rationale (#415, 2026-05-19 gap): a port probe cannot
@@ -61,6 +66,30 @@ case "$CMD" in
   *"--no-verify"*|*"--no-gpg-sign"*|*"-c commit.gpgsign=false"*) noverify=1 ;;
 esac
 
+# Docs-drift reminder (git commit only). Inspect the STAGED diff: doc-load-bearing code changed
+# (or a new worker module added) but no docs/reference/* / CLAUDE.md edit in the same commit.
+# Soft nudge with the change→doc map. Robust: any git/parse failure leaves docs_reminder=0 (no fire).
+docs_reminder=0
+if [ "$op" = "git-commit" ]; then
+  HCWD="$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)"
+  [ -n "$HCWD" ] && cd "$HCWD" 2>/dev/null || true
+  if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    staged="$(git diff --cached --name-status 2>/dev/null)"
+    names="$(printf '%s\n' "$staged" | awk '{print $NF}')"
+    code_changed=0
+    printf '%s\n' "$names" | grep -vE '(__tests__|\.test\.)' | grep -qE \
+      '^worker/src/(services|index)\.ts$|^worker/src/parsers/.*\.ts$|^worker/wrangler\.toml$|^vercel\.json$|^src/utils/constants\.js$' \
+      && code_changed=1
+    new_module=0
+    printf '%s\n' "$staged" | grep -E '^A' | grep -vE '(__tests__|\.test\.)' | grep -qE 'worker/src/.*\.ts$' && new_module=1
+    docs_changed=0
+    printf '%s\n' "$names" | grep -qE '^docs/|^CLAUDE\.md$|README' && docs_changed=1
+    if { [ "$code_changed" = 1 ] || [ "$new_module" = 1 ]; } && [ "$docs_changed" = 0 ]; then
+      docs_reminder=1
+    fi
+  fi
+fi
+
 # Step 3.5 is ALWAYS surfaced on a matched git mutation — a running dev server is
 # an informational hint, NOT a silence condition (see header). Port status is
 # included so the reminder is honest about what was/wasn't observable.
@@ -75,10 +104,13 @@ warnings+=("🚦 ${op}: CLAUDE.md step 3.5 — did the USER confirm this change 
 if [ "$noverify" -eq 1 ]; then
   warnings+=("⛔ ${op}: \`--no-verify\` / \`--no-gpg-sign\` detected — CLAUDE.md forbids these unless the user explicitly asked. If they didn't, drop the flag and let the hook run.")
 fi
+if [ "$docs_reminder" -eq 1 ]; then
+  warnings+=("📝 ${op}: doc-load-bearing code changed but no docs/reference/* or CLAUDE.md in this commit. Change→doc map: KV key → kv-schema.md · feed/cron/data-flow → data-flow.md · new endpoint → api-endpoints.md · new file/service-count/architecture → CLAUDE.md · fallback/tier → fallback-tiers.md · status determination → status-determination.md. Update docs in THIS commit, not \"later\".")
+fi
 
 # Soft warning: surface a systemMessage, allow the tool to proceed.
 msg="$(printf '%s\n' "${warnings[@]}")"
-note="${op}; dev_server=$([ "$dev_running" -eq 1 ] && echo up || echo down); no_verify=${noverify}"
+note="${op}; dev_server=$([ "$dev_running" -eq 1 ] && echo up || echo down); no_verify=${noverify}; docs_reminder=${docs_reminder}"
 audit "warn" "$note"
 # jq -Rs . turns raw stdin into a properly-escaped JSON string literal.
 esc="$(printf '%s' "$msg" | jq -Rs . 2>/dev/null)"
