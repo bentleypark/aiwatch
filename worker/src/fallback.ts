@@ -27,7 +27,7 @@ export const API_TIER: Record<string, number> = {
   // fall-through, just without the warn-once noise. Entries exist only to suppress the
   // `tierFor` warn-once that would otherwise fire whenever chatgpt/claudeai surface as the
   // affected service in a fallback flow (Character.AI is in EXCLUDE_FALLBACK so it never does).
-  chatgpt: 21, claudeai: 21, characterai: 21,
+  chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21,
 }
 
 // #403 — surfaces the silent-fallback failure mode that produced #402 (Junie-as-#1) without

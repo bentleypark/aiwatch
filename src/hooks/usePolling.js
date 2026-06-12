@@ -64,6 +64,13 @@ const MOCK_SERVICES = [
     history3m: null,
     incidents: [],
   },
+  {
+    id: 'deepseekapp', category: 'app', name: 'DeepSeek App', provider: 'DeepSeek', status: 'operational',
+    latency: null, uptime30d: 99.48,
+    history30d: hist([13, 18, 22]),
+    history3m: null,
+    incidents: [],
+  },
   // ── LLM API ──
   {
     id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational',

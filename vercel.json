@@ -20,6 +20,7 @@
     { "source": "/is-perplexity-down", "destination": "/api/is-down?slug=perplexity" },
     { "source": "/is-xai-down", "destination": "/api/is-down?slug=xai" },
     { "source": "/is-deepseek-down", "destination": "/api/is-down?slug=deepseek" },
+    { "source": "/is-deepseek-app-down", "destination": "/api/is-down?slug=deepseek-app" },
     { "source": "/is-openrouter-down", "destination": "/api/is-down?slug=openrouter" },
     { "source": "/is-elevenlabs-down", "destination": "/api/is-down?slug=elevenlabs" },
     { "source": "/is-assemblyai-down", "destination": "/api/is-down?slug=assemblyai" },

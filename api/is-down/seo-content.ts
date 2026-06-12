@@ -411,6 +411,20 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How long do Character.AI outages usually last?', a: 'Character.AI outage durations vary by cause. Check the recent incidents section on this page for typical resolution times.' },
     ],
   },
+  // DeepSeek App (#619) — the consumer chat app (chat.deepseek.com + the "DeepSeek - AI Assistant"
+  // mobile app), distinct from the 'deepseek' (DeepSeek API) page for developers.
+  'deepseek-app': {
+    displayName: 'DeepSeek App',
+    description: 'DeepSeek App is DeepSeek\'s consumer AI assistant — the chat experience at chat.deepseek.com and the "DeepSeek - AI Assistant" mobile apps on iOS and Android. It is distinct from the DeepSeek API used by developers; AIWatch tracks the consumer Web Chat surface here and the API separately.',
+    insight: 'DeepSeek\'s consumer chat saw rapid, viral growth and experiences capacity-driven slowdowns more often than its developer API. AIWatch reads DeepSeek\'s official Flashduty status feed (via a browser-rendered fetch, since the page blocks plain server requests) and scopes this page to the Web Chat component — so a chat outage shows here even when the API stays healthy, and vice versa.',
+    whenDown: 'When the DeepSeek App is down, users cannot start or continue conversations on the web chat or mobile apps. The web and mobile clients share the same backend, so an outage typically affects all consumer access at once; the DeepSeek API may still be operational for developers.',
+    faqs: [
+      { q: 'Is the DeepSeek App down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors DeepSeek\'s Web Chat service and shows real-time operational status from DeepSeek\'s official status feed.' },
+      { q: 'Is this the same as the DeepSeek API?', a: 'No. This page tracks the consumer chat app (chat.deepseek.com and the mobile apps). The developer API has its own page — AIWatch monitors the two surfaces separately because they can fail independently.' },
+      { q: 'Why is the DeepSeek App not loading?', a: 'The DeepSeek App may be experiencing high traffic, a backend incident, or maintenance. Check this page for current status and recent incident history.' },
+      { q: 'What are alternatives to the DeepSeek App?', a: 'When the DeepSeek App is down, ChatGPT, claude.ai, or Gemini are alternative AI chat apps. AIWatch shows which AI chat services are currently operational.' },
+    ],
+  },
   // Coding agents (#294) — "OpenAI Codex" on this page means the current coding
   // agent product (CLI, Codex Web, VS Code extension), not the deprecated 2023
   // Codex code-generation API.

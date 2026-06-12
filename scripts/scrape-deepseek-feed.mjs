@@ -25,7 +25,12 @@ if (!WORKER_URL || !TOKEN) {
 }
 
 const HISTORY_DAYS = 90 // change/list window — wide enough for the Score's 30d incident history + margin
-const UPTIME_DAYS = 30 // summary/structure window — matches the 30-day uptime/impact the Score uses
+// summary/structure window — 90 days to MATCH what the official DeepSeek status page displays (it
+// shows a 90-day uptime, e.g. Web Chat 99.48% / API 99.88%) and AIWatch's own convention: the
+// Atlassian parseUptimeData path iterates the full ~90-day uptimeData window, so "Official Uptime"
+// is effectively 90-day for every official-source service. A 30-day window here produced a higher,
+// inconsistent number (99.92%) that didn't match the source page (#619).
+const UPTIME_DAYS = 90
 
 async function main() {
   const browser = await chromium.launch()

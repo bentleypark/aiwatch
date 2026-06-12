@@ -132,6 +132,12 @@ export const SERVICES: ServiceConfig[] = [
   // official grouping (not the API group, despite the names). Login here is the ChatGPT Login
   // (the APIs group has a separate API-Login id absent from summary.json).
   { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', displayComponentIds: ['01JNKS9D9S72PMP1938PVFFQN4', '01K8C008QVXHA6JX98PAS42VPD', '01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ'] },
+  // #619 — DeepSeek's consumer app (chat.deepseek.com, "DeepSeek App"). Same Flashduty feed as
+  // DeepSeek API (#618), scoped to the Web Chat component — the api-vs-app split mirror of
+  // OpenAI API↔ChatGPT. Feed-only (no apiUrl): when the scraper feed is fresh it supersedes +
+  // clears incidentSourceStale; when absent, fetchService returns an empty stale base (it does NOT
+  // fetch the bot-walled status.deepseek.com directly). incidentSourceStale is the feed-absent flag.
+  { id: 'deepseekapp', name: 'DeepSeek App', provider: 'DeepSeek', category: 'app', statusUrl: 'https://status.deepseek.com', apiUrl: null, incidentSourceStale: true, flashdutyFeed: true, flashdutyPrimaryComponentId: '01KR3NC9ETESRRQ4GABE0TGW53' },
   // Coding Agents
   // claudecode intentionally tracks only the Claude Code component for the badge.
   // Adding Claude API as a multi-component dependency would conflict with the
@@ -549,6 +555,10 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
     if (config.flashdutyFeed && kv) {
       const fed = await readFlashdutyStatus(kv, config, base, now)
       if (fed) return fed
+      // Feed-only service (no apiUrl fallback, e.g. DeepSeek App) and the feed is absent/expired:
+      // return an empty stale base rather than fetching the bot-walled statusUrl below (which would
+      // reset and falsely mark degraded). base carries incidentSourceStale from config.
+      if (!config.apiUrl) return base
     }
 
     if (config.apiUrl) {

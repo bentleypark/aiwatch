@@ -196,9 +196,9 @@ When adding a new monitored service, files across worker, frontend, docs, SEO me
 
 ## Architecture
 
-**AIWatch** is a React SPA that monitors 36 AI services in real time:
+**AIWatch** is a React SPA that monitors 37 AI services in real time:
 - **27 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Fireworks, Cerebras, Perplexity, HuggingFace, Replicate, ElevenLabs, AssemblyAI, Deepgram, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, Stability AI, Voyage AI, Modal, LangChain (LangSmith), Runway, Luma (Dream Machine)
-- **3 AI apps**: claude.ai, ChatGPT, Character.AI
+- **4 AI apps**: claude.ai, ChatGPT, Character.AI, DeepSeek App
 - **6 coding agents**: Claude Code, Codex, Cursor, GitHub Copilot, Windsurf, Junie
 
 ### Tech Stack
@@ -292,7 +292,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`; GA4 activates only 
 Per-service status is resolved in `worker/src/services.ts` with a layered priority chain (multi-component worst-of → component match → overall-indicator fallback → `incidentExclude` bypass → component-status filter → fetch-failure cross-validation). The full ordered rules and their #-issue rationale are in **[docs/reference/status-determination.md](docs/reference/status-determination.md)** — read it before changing status resolution.
 
 ### Status Data Flow
-Browser (60s polling) → Worker `/api/status` (parallel 36-service fetch, normalize, KV write, platform/probe cross-validation) → React state → pages. Cron (`*/5`) handles probing, incident detection + Discord alerts, AI analysis, daily/monthly aggregation, changelog/security/weekly briefing. The full annotated request + cron + Web Vitals flow diagram is in **[docs/reference/data-flow.md](docs/reference/data-flow.md)**.
+Browser (60s polling) → Worker `/api/status` (parallel 37-service fetch, normalize, KV write, platform/probe cross-validation) → React state → pages. Cron (`*/5`) handles probing, incident detection + Discord alerts, AI analysis, daily/monthly aggregation, changelog/security/weekly briefing. The full annotated request + cron + Web Vitals flow diagram is in **[docs/reference/data-flow.md](docs/reference/data-flow.md)**.
 
 ### SPA Navigation
 No React Router. Hash-based routing in `App.jsx` — `#claude` for service details, `#latency` for pages. `PageContext` shares current page state. Browser back/forward supported via `popstate` listener.

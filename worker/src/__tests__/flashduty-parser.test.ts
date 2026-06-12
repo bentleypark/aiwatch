@@ -2,9 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { parseFlashdutyFeed, type FlashdutyFeed } from '../parsers/flashduty'
 import fixture from './fixtures/deepseek-flashduty.json'
 
-// #618 — Flashduty parser, exercised against a REAL captured DeepSeek payload (2026-06-12):
-// 2 components (API Service / Web Chat Service), 15 history incidents, 0 active, 13 impact windows,
-// per-component uptime 99.89 / 99.92.
+// #618 — Flashduty parser, exercised against a REAL captured DeepSeek payload (2026-06-12, 90-day
+// window to match the official status page's displayed uptime, #619): 2 components (API Service /
+// Web Chat Service), 15 history incidents, 0 active, 38 impact windows, per-component uptime
+// 99.88 (API) / 99.48 (Web Chat).
 const feed = fixture as FlashdutyFeed
 
 describe('parseFlashdutyFeed (#618)', () => {
@@ -53,7 +54,8 @@ describe('parseFlashdutyFeed (#618)', () => {
   })
 
   it('uptime30d = worst (min) component uptime from structure', () => {
-    expect(parsed.uptime30d).toBeCloseTo(99.89, 2)
+    // min(API 99.88, Web Chat 99.48) — the 90-day values shown on the official page (#619)
+    expect(parsed.uptime30d).toBeCloseTo(99.48, 2)
   })
 
   it('builds a dailyImpact map keyed by YYYY-MM-DD with valid levels', () => {
@@ -118,8 +120,8 @@ describe('parseFlashdutyFeed (#618)', () => {
       expect(scoped.components.map((c) => c.id)).toEqual([API_ID])
     })
 
-    it('uptime = the API component uptime (99.89), not the min-with-Web-Chat', () => {
-      expect(scoped.uptime30d).toBeCloseTo(99.89, 2)
+    it('uptime = the API component uptime (99.88), not the min-with-Web-Chat (99.48)', () => {
+      expect(scoped.uptime30d).toBeCloseTo(99.88, 2)
     })
 
     it('a Web-Chat-only active incident does NOT flip the API badge', () => {
