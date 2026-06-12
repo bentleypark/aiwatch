@@ -233,7 +233,8 @@ scripts/
   generate-og-intro.mjs # OG intro image generator (uses icon-192.png + sharp)
 worker/
   src/
-    index.ts    # Worker entry: CORS, KV, routing, /api/alert, /badge, /api/v1, Cron scheduled handler
+    index.ts    # Worker entry: CORS, KV, routing, /api/alert, /badge, /api/v1, /api/internal/deepseek-feed (#618), Cron scheduled handler
+    deepseek-dispatch.ts # #629 — Worker */5 cron workflow_dispatches the deepseek-feed Action (GitHub's own schedule is throttled to ~2h). See parsers/flashduty.ts + docs/reference/data-flow.md
     services.ts # Service configs + fetch orchestrator + status determination (resolveSvcStatus worst-of badge; resolveSvcComponents = #604 per-component snapshot → ServiceStatus.components, source = displayAllComponents → displayComponentIds → statusComponentIds, ≥2-gated, badge-decoupled. #606: displayComponentIds = curated list (elevenlabs/replicate/assemblyai/deepgram/characterai/junie/voyageai/pinecone); displayAllComponents = dynamic all-minus-componentDenylist with componentSurfaces individual + rest group:'Models' collapsed (cohere/groq); Cat B splits shared status.openai.com across openai/chatgpt/codex by official group, disjoint/leak-guarded, componentsUrl sourcing from components.json via pickBreakdownComponents)
     types.ts    # Shared types (ServiceStatus, Incident, etc.)
     utils.ts    # Shared utilities (formatDuration, fetchWithTimeout, sanitize)
@@ -260,7 +261,8 @@ worker/
     alert-feed.ts # Canonical per-user alert feed (#475) — cron appends each operator embed it sends to `alert:feed:recent` KV; `/api/status` surfaces it as `alertFeed` so the dashboard relays byte-identical alerts to a visitor's own Discord webhook (kindFromKey, svcIdsForAlert, buildFeedEntry, appendAlertFeed, readAlertFeed)
     reddit.ts   # Reddit r/ChatGPT + r/netsec + r/cybersecurity monitoring
     security-monitor.ts # AI service security monitoring (HN Algolia, OSV.dev SDK vulnerabilities — 24 tracked packages across PyPI + npm including Langchain ecosystem adapters, see OSV_PACKAGES; two-phase flow: querybatch bulk scan + per-vuln GET enrichment, capped at OSV_MAX_DETAIL_FETCH=15/cycle to protect the Workers subrequest budget; overflow re-offered next cron since seen-markers are only written for surfaced alerts)
-    parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, aistudio, instatus, betterstack, aws)
+    parsers/    # Platform-specific parsers (statuspage, incident-io, gcloud, aistudio, instatus, betterstack, aws, flashduty)
+                # flashduty.ts (#618/#619): normalizes the browser-rendered DeepSeek Flashduty feed (status.deepseek.com is bot-walled to a plain fetch) → ServiceStatus; parseFlashdutyFeed({primaryComponentId}) scopes deepseek (API) vs deepseekapp (Web Chat). KV deepseek:feed, 3h TTL. Full pipeline: docs/reference/data-flow.md
                 # dailyImpact support: statuspage (uptimeData), incident-io (component impacts), betterstack (status_history from index.json)
                 # impact-weights.ts: shared MAJOR_WEIGHT=1.0, MINOR_WEIGHT=0.3 — used by both statuspage.ts (official) and incident-io.ts (estimate from durations) for Atlassian-aligned uptime%
                 # aistudio.ts (#310): parses aistudio.google.com/status MakerSuite gRPC-web JSON. API key + Referer gated; component filter at source (API=1). Merged via mergeAistudioIncidents() in services.ts with vertex:/aistudio: ID prefixes; filterIncidents() bypasses incidentKeywords for aistudio: IDs since they're already component-scoped. Fetch/parse failures silently fall back to vertex-only output.

@@ -40,16 +40,23 @@ Web Vitals Pipeline (per-request, 100% collection):
   Daily Summary cron reads vitals KV → Discord embed (p75 + grade)
 ```
 
-## DeepSeek Flashduty Feed Pipeline (#618 / #619)
+## DeepSeek Flashduty Feed Pipeline (#618 / #619 / #629)
 
 DeepSeek's status page migrated to Flashduty (`status.deepseek.com`, #507), which blocks
 **non-browser TLS fingerprints** — a Worker `fetch()` is reset at the TLS layer regardless of egress
 IP (a real Chromium from the same IP succeeds → JA3/bot wall, not an IP block). The Worker therefore
-cannot read it directly. A scheduled GitHub Action acts as a **browser-fingerprint proxy**:
+cannot read it directly. A GitHub Action acts as a **browser-fingerprint proxy**, and the Worker's
+reliable `*/5` cron is what TRIGGERS it (#629 — GitHub's own `schedule` is throttled to ~2h, so it's
+demoted to an hourly backup):
 
 ```
-[GitHub Action]  cron */10 min  (.github/workflows/deepseek-feed.yml — GH cron is best-effort + often delayed)
-  Playwright headless Chromium (official mcr.microsoft.com/playwright container, pinned)
+[Worker cron */5]  maybeDispatchDeepseekFeed (deepseek-dispatch.ts, #629)
+  → ~240s KV cooldown (deepseek:dispatch:cooldown) spaces it to one dispatch/cycle; the workflow's
+    `concurrency` group is the real pile-up guard (KV is eventually consistent). 15-min back-off on failure.
+  → POST api.github.com /actions/workflows/deepseek-feed.yml/dispatches  (Bearer GH_DISPATCH_TOKEN)
+                                  │  (GitHub `schedule: 17 * * * *` is a hourly BACKUP only)
+                                  ▼
+[GitHub Action]  Playwright headless Chromium (official mcr.microsoft.com/playwright container, pinned)
   → goto status.deepseek.com         ← real browser TLS/HTTP fingerprint clears the bot wall
   → in-page fetch() of the clean Flashduty JSON API (scripts/scrape-deepseek-feed.mjs):
        /api/status-page/{pageId}/summary/active            (active incidents + components)
@@ -58,7 +65,7 @@ cannot read it directly. A scheduled GitHub Action acts as a **browser-fingerpri
   → POST /api/internal/deepseek-feed  (Authorization: Bearer DEEPSEEK_FEED_TOKEN)
                                   │
                                   ▼
-[Worker]  handleDeepseekFeed → validate token + shape (reject empty) → KV `deepseek:feed` (3h TTL, ~18 missed-run tolerance)
+[Worker]  handleDeepseekFeed → validate token + shape (reject empty) → KV `deepseek:feed` (3h TTL)
                                   ▲
                                   │  read each */5 cron + each /api/status fan-out
 [Worker]  fetchService('deepseek' | 'deepseekapp')  (services.ts readFlashdutyStatus)
@@ -72,11 +79,14 @@ cannot read it directly. A scheduled GitHub Action acts as a **browser-fingerpri
        deepseekapp → empty stale base (feed-only, no apiUrl) — never fetches the bot-walled URL
 ```
 
-Two timers interlock: the **Action (*/10)** refreshes the KV data source; the **Worker cron (*/5)**
-reads it + recomputes `services:latest`. So DeepSeek **status-page** incident detection lags ~10 min
-behind the 5-min-polled services — but DeepSeek **API RTT degradation** is still caught at */5 by the
-direct probe (`api.deepseek.com`, which bypasses the bot-walled status host). Shared incidents (a
-"Web/API" outage) carry the same `flashduty:{change_id}` id across both services, so the existing
-cross-surface grouping (Incidents page dedup→affectedNames, Analyze modal, RSS `dedupeSharedIncidents`)
-collapses them to one. Go-live ops: `DEEPSEEK_FEED_TOKEN` Worker secret + GH Action secrets
-(`DEEPSEEK_FEED_TOKEN`, `DEEPSEEK_FEED_WORKER_URL`).
+The Worker cron `*/5` both **dispatches** the Action (refreshing the `deepseek:feed` source) and
+**reads** it (recomputing `services:latest`), so DeepSeek is a first-class `*/5` service — the feed is
+always <~5min old (fresh → ranked), no longer soft-stale most of the time as it was under the throttled
+GitHub schedule (#629). DeepSeek **API RTT degradation** is also caught at `*/5` by the direct probe
+(`api.deepseek.com`, which bypasses the bot-walled status host). Shared incidents (a "Web/API" outage)
+carry the same `flashduty:{change_id}` id across both services, so the existing cross-surface grouping
+(Incidents page dedup→affectedNames, Analyze modal, RSS `dedupeSharedIncidents`) collapses them to one.
+
+Go-live ops (secrets): `DEEPSEEK_FEED_TOKEN` (Worker + GH Action, the feed-ingest auth),
+`DEEPSEEK_FEED_WORKER_URL` (GH Action), and `GH_DISPATCH_TOKEN` (Worker — a fine-grained PAT with
+`actions: write` so the cron can dispatch the workflow, #629).
