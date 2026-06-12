@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   computeMonthlyUptime,
+  computeMonthlyComponentUptime,
   computeMonthlyOfficialUptime,
   computeMonthlyLatency,
   computeMonthlyLatencyStats,
@@ -110,6 +111,59 @@ describe('computeMonthlyUptime', () => {
   it('returns 0 for total=0', () => {
     const dailyData = { '2026-03-01': { claude: { ok: 0, total: 0 } } }
     expect(computeMonthlyUptime(dailyData).claude).toBe(0)
+  })
+})
+
+// ── computeMonthlyComponentUptime (#605 Phase 2) ─────────────────────
+describe('computeMonthlyComponentUptime (#605)', () => {
+  it('aggregates per-component uptime across days, sorted least-reliable first', () => {
+    const daily = {
+      '2026-06-01': { openai: { ok: 288, total: 288, components: {
+        api: { ok: 288, total: 288, name: 'API' },
+        batch: { ok: 280, total: 288, name: 'Batch' },
+      } } },
+      '2026-06-02': { openai: { ok: 288, total: 288, components: {
+        api: { ok: 288, total: 288, name: 'API' },
+        batch: { ok: 288, total: 288, name: 'Batch' }, // batch recovered
+      } } },
+    }
+    const r = computeMonthlyComponentUptime(daily)
+    expect(r.openai).toEqual([
+      { id: 'batch', name: 'Batch', uptime: 98.61 }, // (280+288)/(288+288) → least reliable first
+      { id: 'api', name: 'API', uptime: 100 },
+    ])
+  })
+
+  it('omits services with no per-component data, and keeps the latest component name', () => {
+    const daily = {
+      '2026-06-01': {
+        claude: { ok: 288, total: 288 }, // no components → omitted
+        cohere: { ok: 288, total: 288, components: { m1: { ok: 288, total: 288, name: 'old-model' }, m2: { ok: 288, total: 288, name: 'Coral' } } },
+      },
+      '2026-06-02': { cohere: { ok: 288, total: 288, components: { m1: { ok: 288, total: 288, name: 'new-model' }, m2: { ok: 288, total: 288, name: 'Coral' } } } },
+    }
+    const r = computeMonthlyComponentUptime(daily)
+    expect(r.claude).toBeUndefined()
+    expect(r.cohere.find(c => c.id === 'm1')!.name).toBe('new-model') // latest name
+    expect(r.cohere).toHaveLength(2)
+  })
+
+  it('breaks equal-uptime ties by name (ascending), and drops zero-sample components', () => {
+    const daily = {
+      '2026-06-01': { svc: { ok: 288, total: 288, components: {
+        z: { ok: 288, total: 288, name: 'Zebra' },   // 100%
+        a: { ok: 288, total: 288, name: 'Apple' },    // 100% — ties with Zebra → name asc
+        n: { ok: 0, total: 0, name: 'NoSamples' },    // zero-sample → dropped
+      } } },
+    }
+    expect(computeMonthlyComponentUptime(daily).svc).toEqual([
+      { id: 'a', name: 'Apple', uptime: 100 },
+      { id: 'z', name: 'Zebra', uptime: 100 },
+    ])
+  })
+
+  it('returns {} for empty data', () => {
+    expect(computeMonthlyComponentUptime({})).toEqual({})
   })
 })
 

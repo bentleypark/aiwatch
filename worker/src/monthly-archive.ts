@@ -54,6 +54,11 @@ export interface MonthlyServiceData {
   // when this archive was built. The report generator excludes such services from the Score ranking
   // (their empty incident window would inflate the Score). Absent when false / pre-#591 archives.
   incidentSourceStale?: boolean
+  // #605 Phase 2 — per-component monthly uptime% (from the accumulated daily component counters),
+  // sorted least-reliable first. Present only for multi-component services with accumulated data;
+  // absent for single-component services and pre-#605 archives. Feeds the report's per-component
+  // reliability table / "weakest component this month" ranking (Phase 3).
+  components?: Array<{ id: string; name: string; uptime: number }>
 }
 
 export interface MonthlyArchive {
@@ -392,11 +397,14 @@ export function parseDurationMin(d: string): number {
 
 // ── Uptime / Latency computation ─────────────────────────────────────
 
-// #605 — the live daily:{date} value now also carries `components?: Record<compId,{ok,total,name}>`
-// (index.ts accumulateComponentCounters). This narrower local type is a compile-time view only —
-// JSON.parse preserves the field at runtime, so the #605 Phase 2 per-component monthly aggregator
-// can widen this type and read `components` without a data migration.
-type DailyCounters = Record<string, { ok: number; total: number; officialUptime?: number | null }>
+// #605 — the live daily:{date} value also carries per-component daily counters (index.ts
+// accumulateComponentCounters); Phase 2 reads them into per-component monthly uptime.
+type DailyCounters = Record<string, {
+  ok: number
+  total: number
+  officialUptime?: number | null
+  components?: Record<string, { ok: number; total: number; name: string }>
+}>
 
 /** #586 — per-service "Official Uptime" for the month: the status-page rolling-30d value as of the
  *  LATEST day in the window (≈ the month, since uptime30d trails 30 days). Reads the per-cycle daily
@@ -430,6 +438,39 @@ export function computeMonthlyUptime(
   const result: Record<string, number> = {}
   for (const [id, { ok, total }] of Object.entries(totals)) {
     result[id] = total > 0 ? Math.round((ok / total) * 10000) / 100 : 0
+  }
+  return result
+}
+
+/** #605 Phase 2 — per-component monthly uptime%, per service, from the accumulated daily
+ *  component counters. Sorted **least-reliable first** (the report's "which component was the
+ *  weakest link this month" angle). Services with no per-component data are omitted. */
+export function computeMonthlyComponentUptime(
+  dailyData: Record<string, DailyCounters>,
+): Record<string, Array<{ id: string; name: string; uptime: number }>> {
+  // svcId → compId → accumulated {ok,total,name}
+  const totals: Record<string, Record<string, { ok: number; total: number; name: string }>> = {}
+  for (const counters of Object.values(dailyData)) {
+    for (const [svcId, entry] of Object.entries(counters)) {
+      if (!entry.components) continue
+      const svc = (totals[svcId] ??= {})
+      for (const [compId, c] of Object.entries(entry.components)) {
+        const cc = (svc[compId] ??= { ok: 0, total: 0, name: c.name })
+        cc.ok += c.ok
+        cc.total += c.total
+        cc.name = c.name // latest display name
+      }
+    }
+  }
+  const result: Record<string, Array<{ id: string; name: string; uptime: number }>> = {}
+  for (const [svcId, comps] of Object.entries(totals)) {
+    const arr = Object.entries(comps)
+      // Drop zero-sample components (unlike computeMonthlyUptime's `total===0 → 0`): a component with
+      // no samples shouldn't appear as a misleading 0% in the "weakest component" table.
+      .filter(([, c]) => c.total > 0)
+      .map(([id, c]) => ({ id, name: c.name, uptime: Math.round((c.ok / c.total) * 10000) / 100 }))
+      .sort((a, b) => a.uptime - b.uptime || a.name.localeCompare(b.name)) // ties → name asc (stable)
+    if (arr.length > 0) result[svcId] = arr
   }
   return result
 }
@@ -761,6 +802,7 @@ export async function buildMonthlyArchive(
   }
 
   const uptimeMap = computeMonthlyUptime(dailyData)
+  const componentUptimeMap = computeMonthlyComponentUptime(dailyData) // #605 Phase 2 — per-component monthly uptime
   const officialUptimeMap = computeMonthlyOfficialUptime(dailyData) // #586 — month-end status-page value per service
   const latencyMap = computeMonthlyLatency(probeData)
   const latencyStats = computeMonthlyLatencyStats(probeData) // p95 + spikes (#17)
@@ -818,6 +860,7 @@ export async function buildMonthlyArchive(
       latencySpikes: latencyStats[id]?.spikes ?? null,
       ...(incidentList ? { incidentList } : {}),
       ...(scoreSvc?.incidentSourceStale ? { incidentSourceStale: true } : {}),
+      ...(componentUptimeMap[id] ? { components: componentUptimeMap[id] } : {}), // #605 Phase 2
     }
   }
 
