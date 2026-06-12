@@ -39,6 +39,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **24h latency trend** — Chart.js line chart with 5-min probe snapshots
 - **Incident history** — Timeline with details from multiple status page formats
 - **Official uptime** — Per-component uptime from Statuspage, incident.io, Better Stack
+- **Component status breakdown** — Real-time per-component status (models, API surfaces, …) on ServiceDetails + Is X Down for 24 multi-component services, with collapsible section/model groups for long lists
 - **Status calendar** — 30-day (Statuspage) or 14-day (incident.io) daily status visualization
 - **Discord & Slack alerts** — Discord webhook on status changes/incidents + Slack via its native `/feed` RSS app (zero-config) + RSS feeds
 - **Cookie consent** — GA4 Consent Mode v2 with accept/essential-only
