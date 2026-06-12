@@ -392,6 +392,10 @@ export function parseDurationMin(d: string): number {
 
 // ── Uptime / Latency computation ─────────────────────────────────────
 
+// #605 — the live daily:{date} value now also carries `components?: Record<compId,{ok,total,name}>`
+// (index.ts accumulateComponentCounters). This narrower local type is a compile-time view only —
+// JSON.parse preserves the field at runtime, so the #605 Phase 2 per-component monthly aggregator
+// can widen this type and read `components` without a data migration.
 type DailyCounters = Record<string, { ok: number; total: number; officialUptime?: number | null }>
 
 /** #586 — per-service "Official Uptime" for the month: the status-page rolling-30d value as of the

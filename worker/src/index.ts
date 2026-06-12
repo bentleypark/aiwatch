@@ -86,7 +86,33 @@ function overRateLimit(map: Map<string, { start: number; count: number }>, ip: s
 }
 
 interface DailyCounters {
-  [serviceId: string]: { ok: number; total: number; officialUptime?: number | null }
+  [serviceId: string]: {
+    ok: number
+    total: number
+    officialUptime?: number | null
+    // #605 — per-component daily uptime accumulation. Same {ok,total} cadence as the service,
+    // keyed by component id (+ name for display). Populated from ServiceStatus.components (#604/#606).
+    // Rides the existing `daily:{date}` value (+0 KV writes); the monthly archive aggregates it.
+    components?: Record<string, { ok: number; total: number; name: string }>
+  }
+}
+
+/** #605 — accumulate per-component daily uptime into a service's counter entry (mutates `entry`).
+ *  Mirrors the per-service ok/total cadence; keyed by component id, with the latest display name.
+ *  No-op when the service has no breakdown. The monthly archive aggregates these into per-component
+ *  uptime% for the report (component-level reliability rankings). */
+export function accumulateComponentCounters(
+  entry: DailyCounters[string],
+  components: ReadonlyArray<{ id: string; name: string; status: string }> | undefined,
+): void {
+  if (!components || components.length === 0) return
+  const comps = (entry.components ??= {})
+  for (const c of components) {
+    const cc = (comps[c.id] ??= { ok: 0, total: 0, name: c.name })
+    cc.total++
+    if (c.status === 'operational') cc.ok++
+    cc.name = c.name // keep the latest display name (status pages rename components)
+  }
 }
 
 function todayUTC(): string {
@@ -119,6 +145,8 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl
     // "Official Uptime" display number, so it stays month-accurate and survives a later rebuild
     // (unlike a one-shot snapshot taken only at build time).
     counters[s.id].officialUptime = s.uptime30d ?? null
+    // #605 — accumulate per-component uptime (same cadence) for services with a breakdown.
+    accumulateComponentCounters(counters[s.id], s.components)
   })
 
   // Write cache + daily counters (2 writes per interval)

@@ -12,6 +12,13 @@ When adding a new monitored service, update ALL of the following:
    curl -sf --max-time 5 "{apiUrl}" -o /dev/null && echo "OK" || echo "BLOCKED — check .statuspage.io mirror"
    ```
    For Atlassian Statuspage services, if the custom domain is blocked, use `https://{slug}.statuspage.io/api/v2/summary.json` instead. Confirm `statusComponentId` resolves on the chosen endpoint. See `docs/reference/status-determination.md` § "Status page URL selection".
+
+   **Per-component breakdown (#606, optional but check it)** — if the status page exposes **≥2 availability-relevant components**, configure a display-only breakdown (the badge is unaffected; `resolveSvcStatus` never reads these). Pick the right mechanism — full rules in `docs/reference/status-determination.md` § "Per-component snapshot":
+   - **Curated allowlist** → `displayComponentIds: [ids]` (a few stable surfaces; e.g. elevenlabs, replicate, assemblyai).
+   - **Per-model / many churny components** → `displayAllComponents: true` + `componentDenylist: ['Docs','Website',…]` + `componentSurfaces: [names]` (surfaces stay individual; the rest fold into a collapsible "Models" group; e.g. cohere, groq).
+   - **Shared status page** (multiple AIWatch services on one page, e.g. status.openai.com) → per-service `displayComponentIds` matching the official groups, **disjoint across the sibling services** (add a LEAK-GUARD test); set `componentsUrl` (components.json) if summary.json omits some.
+   - **BetterStack page** → no config beyond `componentDenylist: ['Website']`; `parseBetterStackComponents` extracts the breakdown from `index.json` (grouped by section).
+   - Skip when the service maps to a single component (≥2 gate suppresses it) or its components are regions already on the Region card (configure `SERVICE_REGIONS` instead). Add a config-sanity test (count + badge-unchanged + disjointness) like the existing `#606` ones in `status-determination.test.ts`.
 2. `worker/src/probe.ts` — add `ProbeTarget` if API endpoint exists for RTT measurement
 3. `worker/src/fallback.ts` — update ALL of:
    - `EXCLUDE_FALLBACK` — remove if fallback-eligible
