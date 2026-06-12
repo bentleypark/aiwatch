@@ -2,14 +2,14 @@ name: DeepSeek status feed
 
 # #618 — DeepSeek's status page (status.deepseek.com, Flashduty) blocks non-browser TLS
 # fingerprints, so the Cloudflare Worker can't read it directly. This Action browser-renders the
-# page every 15 min, fetches the clean Flashduty JSON API from the browser context, and POSTs it to
+# page every 10 min, fetches the clean Flashduty JSON API from the browser context, and POSTs it to
 # the Worker (/api/internal/deepseek-feed → KV). fetchService('deepseek') then serves live incidents
 # and the Score re-includes DeepSeek (incidentSourceStale lifts while the feed is fresh; a 3h KV TTL
 # falls back to the frozen Atlassian mirror if this Action stops).
 
 on:
   schedule:
-    - cron: '*/15 * * * *'   # every 15 min (GH cron is best-effort; the 3h KV TTL tolerates misses)
+    - cron: '*/10 * * * *'   # every 10 min (GH cron is best-effort + often delayed; the 3h KV TTL tolerates misses)
   workflow_dispatch: {}       # manual trigger for first-run verification
 
 # A scheduled run + a manual dispatch (or an overlapping slow run) must not double-push.
