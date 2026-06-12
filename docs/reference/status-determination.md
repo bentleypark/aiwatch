@@ -13,6 +13,14 @@ Per-service status is resolved in `worker/src/services.ts` with this priority:
    - If 70%+ of services on the same platform (Atlassian/incident.io/etc.) fail simultaneously → platform outage → override all to `operational`
    - Conservative: only overrides when evidence is strong (≥2 recent probes healthy, or quorum failure detected)
 
+## Per-component snapshot — `resolveSvcComponents` (#604)
+
+`resolveSvcStatus` collapses the `statusComponentIds` subset into one worst-of badge and **discards** the per-component statuses. `resolveSvcComponents(config, summaryData)` is the **display counterpart**: it preserves the same matched subset as `ServiceComponent[]` (`{ id, name, status }`, normalized, in configured order) on `ServiceStatus.components`, so the ServiceDetails + "Is X Down" surfaces can render a per-component breakdown card (parity with StatusGator / IsDown).
+
+- **Self-gates to ≥2 matched** — returns `[]` (caller omits the field) for single-`statusComponentId` services, no `components` array, or when status-page drift leaves <2 of the configured ids resolving. A one-row breakdown is redundant with the badge, so the rule lives in the resolver (one consumer = the `components` field).
+- **Curated, not all** — only the configured `statusComponentIds` are surfaced (Billing/Support excluded, same scope as the badge). Currently 6 services qualify: cerebras, cursor, runway, langsmith, copilot, windsurf. Shared status pages (status.openai.com = API+ChatGPT+Codex; status.claude.com = API+claude.ai+Code) are intentionally **not** expanded via "all page components" — that would leak sibling-service components; a per-service curated allowlist is tracked in **#606**.
+- **Plumbing**: the field rides on the raw `ServiceStatus` → `cacheWrite` (`services:latest`) → `/api/status` (`...svc`) and `/api/status/cached` (`...svc`). No projection strips it; the `?src=statusline-*` lite path omits it (statusline only needs id/name/status). The Edge is-down SSR reads it from `/api/status/cached`.
+
 ## Status page URL selection
 
 `apiUrl` (the machine-readable fetch endpoint) and `statusUrl` (the human-facing link) can differ. When selecting `apiUrl`, **verify it is reachable from Cloudflare Workers** — some providers host their status page on a custom domain that blocks Workers IPs while the canonical Atlassian/incident.io host remains accessible.

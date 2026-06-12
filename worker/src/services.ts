@@ -1,6 +1,6 @@
 // Service status fetching and parsing for all monitored AI services.
 
-import type { Incident, ServiceStatus, ServiceConfig, DailyImpactLevel } from './types'
+import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, kvPut } from './utils'
 import { isProbeHealthy, type ProbeSnapshot } from './probe'
@@ -253,6 +253,36 @@ export function resolveSvcStatus(
     ? summaryData.components?.find((c) => c.name.startsWith(config.statusComponent!))
     : summaryData.components?.find((c) => c.id === config.statusComponentId)
   return comp ? normalizeStatus(comp.status) : overall
+}
+
+/**
+ * Resolve the curated per-component snapshot for the #604 breakdown — the *display*
+ * counterpart to the worst-of: `resolveSvcStatus` collapses the `statusComponentIds`
+ * subset into one badge; this preserves each matched component (same availability-relevant
+ * set) with its own normalized status, in the configured order.
+ *
+ * Self-gates to the display rule: returns the matched subset ONLY when **≥2** components
+ * resolve, else `[]`. A single row is redundant with the badge, so the ≥2 gate lives
+ * here (not at the caller) — there is exactly one consumer (the `components` field), so
+ * folding the rule in keeps it a single pure, fully-testable unit.
+ *
+ * Returns `[]` when: no `statusComponentIds` multi-component config, no page `components`,
+ * fewer than 2 of the configured ids resolve (incl. status-page drift that leaves 1), or
+ * none resolve. Single-`statusComponentId` services are never expanded.
+ */
+export function resolveSvcComponents(
+  config: StatusResolverConfig,
+  summaryData: StatusResolverSummary,
+): ServiceComponent[] {
+  if (!config.statusComponentIds || config.statusComponentIds.length === 0 || !summaryData.components) {
+    return []
+  }
+  const matched = config.statusComponentIds
+    .map((id) => summaryData.components!.find((c) => c.id === id))
+    .filter((c): c is NonNullable<typeof c> => c != null)
+    .map((c) => ({ id: c.id, name: c.name, status: normalizeStatus(c.status) }))
+  // ≥2 only — a one-row breakdown adds nothing the badge doesn't already say.
+  return matched.length >= 2 ? matched : []
 }
 
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
@@ -547,11 +577,16 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         await resetFetchFailure(kv, config.id)
       }
 
+      // #604 — preserve the curated per-component snapshot for the breakdown UI.
+      // resolveSvcComponents self-gates to ≥2 matched (a single component is redundant with the badge).
+      const components = resolveSvcComponents(config, summaryData)
+
       return {
         ...base,
         status: svcStatus,
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
+        ...(components.length > 0 ? { components } : {}),
         ...(Object.keys(augmentedImpact).length > 0 ? { dailyImpact: augmentedImpact } : {}),
         calendarDays: config.statusComponentId ? 30 : 14,
         ...(uptimeValue != null ? { uptime30d: uptimeValue, uptimeSource: uptimeSrc } : {}),

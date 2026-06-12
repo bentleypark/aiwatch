@@ -18,6 +18,15 @@ export interface Incident {
   timeline: TimelineEntry[]
 }
 
+/** A single status-page component preserved for the per-component breakdown (#604).
+ *  Only the availability-relevant subset configured via `statusComponentIds` is kept —
+ *  Billing/Support etc. are intentionally excluded to match the badge's curated scope. */
+export interface ServiceComponent {
+  id: string
+  name: string
+  status: 'operational' | 'degraded' | 'down'
+}
+
 export interface ServiceStatus {
   id: string
   name: string
@@ -28,6 +37,11 @@ export interface ServiceStatus {
   uptime30d: number | null
   lastChecked: string
   incidents: Incident[]
+  /** #604 — per-component snapshot for multi-component services (cerebras / cursor /
+   *  copilot / windsurf / langsmith / runway). The curated `statusComponentIds` subset,
+   *  worst-of'd into `status` above but retained here for the ServiceDetails / is-down
+   *  breakdown. Present only when ≥2 components matched; absent otherwise. */
+  components?: ServiceComponent[]
   dailyImpact?: Record<string, DailyImpactLevel>
   calendarDays?: number
   uptimeSource?: 'official' | 'platform_avg' | 'estimate'

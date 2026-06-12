@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { normalizeStatus } from '../parsers/statuspage'
-import { filterIncidents, SERVICES, worstStatus, resolveSvcStatus } from '../services'
+import { filterIncidents, SERVICES, worstStatus, resolveSvcStatus, resolveSvcComponents } from '../services'
 import type { Incident, ServiceConfig } from '../types'
 import { type KVLike } from '../utils'
 
@@ -243,6 +243,83 @@ describe('worstStatus helper (#379)', () => {
   })
   it('handles single-element list', () => {
     expect(worstStatus(['degraded'])).toBe('degraded')
+  })
+})
+
+describe('resolveSvcComponents — per-component snapshot (#604)', () => {
+  const config: StatusConfig = {
+    statusComponentId: 'ide',
+    statusComponentIds: ['ide', 'cloud-agents', 'automations'],
+  }
+
+  it('returns the matched subset in configured order, normalized', () => {
+    const summary: SummaryData = {
+      status: { indicator: 'minor' },
+      components: [
+        { id: 'cloud-agents', name: 'Cloud Agents', status: 'partial_outage' }, // page order differs
+        { id: 'ide', name: 'IDE', status: 'operational' },
+        { id: 'automations', name: 'Automations', status: 'major_outage' },
+        { id: 'marketplace', name: 'Marketplace', status: 'operational' }, // untracked — excluded
+      ],
+    }
+    expect(resolveSvcComponents(config, summary)).toEqual([
+      { id: 'ide', name: 'IDE', status: 'operational' },
+      { id: 'cloud-agents', name: 'Cloud Agents', status: 'degraded' },
+      { id: 'automations', name: 'Automations', status: 'down' },
+    ])
+  })
+
+  it('omits ids that drifted out of the page but keeps the rest (still ≥2)', () => {
+    const summary: SummaryData = {
+      status: { indicator: 'minor' },
+      components: [
+        { id: 'ide', name: 'IDE', status: 'operational' },
+        { id: 'cloud-agents', name: 'Cloud Agents', status: 'partial_outage' },
+        // 'automations' missing
+      ],
+    }
+    expect(resolveSvcComponents(config, summary)).toEqual([
+      { id: 'ide', name: 'IDE', status: 'operational' },
+      { id: 'cloud-agents', name: 'Cloud Agents', status: 'degraded' },
+    ])
+  })
+
+  it('self-gates to [] when drift leaves only ONE matched id (a 1-row breakdown is redundant with the badge)', () => {
+    // 3 ids configured, but only 'ide' survives on the page → the ≥2 display gate suppresses the field.
+    const summary: SummaryData = {
+      status: { indicator: 'minor' },
+      components: [{ id: 'ide', name: 'IDE', status: 'operational' }],
+    }
+    expect(resolveSvcComponents(config, summary)).toEqual([])
+  })
+
+  it('returns [] for single-component services (no statusComponentIds) — redundant with the badge', () => {
+    const single: StatusConfig = { statusComponentId: 'api' }
+    const summary: SummaryData = {
+      status: { indicator: 'none' },
+      components: [{ id: 'api', name: 'API', status: 'operational' }],
+    }
+    expect(resolveSvcComponents(single, summary)).toEqual([])
+  })
+
+  it('returns [] when statusComponentIds is empty', () => {
+    const summary: SummaryData = {
+      status: { indicator: 'none' },
+      components: [{ id: 'ide', name: 'IDE', status: 'operational' }],
+    }
+    expect(resolveSvcComponents({ statusComponentIds: [] }, summary)).toEqual([])
+  })
+
+  it('returns [] when the page exposes no components array', () => {
+    expect(resolveSvcComponents(config, { status: { indicator: 'none' } })).toEqual([])
+  })
+
+  it('returns [] when none of the configured ids resolve (full drift)', () => {
+    const summary: SummaryData = {
+      status: { indicator: 'minor' },
+      components: [{ id: 'renamed-1', name: 'Renamed', status: 'operational' }],
+    }
+    expect(resolveSvcComponents(config, summary)).toEqual([])
   })
 })
 

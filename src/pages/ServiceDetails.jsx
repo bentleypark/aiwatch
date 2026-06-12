@@ -376,6 +376,49 @@ const INCIDENT_DOT_COLOR = {
   incident: 'bg-[var(--red)]',
 }
 
+// #604 — per-component snapshot status colors (operational/degraded/down)
+const COMPONENT_DOT_COLOR = {
+  operational: 'bg-[var(--green)]',
+  degraded: 'bg-[var(--amber)]',
+  down: 'bg-[var(--red)]',
+}
+const COMPONENT_TEXT_COLOR = {
+  operational: 'text-[var(--green)]',
+  degraded: 'text-[var(--amber)]',
+  down: 'text-[var(--red)]',
+}
+
+// #604 — per-component breakdown for multi-component services (cerebras / cursor /
+// copilot / windsurf / langsmith / runway). Reads service.components, the curated
+// statusComponentIds subset preserved by the worker (worst-of'd into the badge).
+function ComponentBreakdown({ service, t }) {
+  const components = service.components ?? []
+  if (components.length === 0) return null
+  const anyIssue = components.some((c) => c.status !== 'operational')
+  return (
+    <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+      <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+        <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+          <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: anyIssue ? 'var(--amber)' : 'var(--green)' }} />
+          {t('svc.components.title')}
+          <span className="text-[var(--text2)] font-normal normal-case tracking-normal">— {t('svc.components.sub')}</span>
+        </div>
+      </div>
+      <div style={{ padding: '16px' }}>
+        <div className="flex flex-col" style={{ gap: '8px' }}>
+          {components.map((c) => (
+            <div key={c.id} className="flex items-center gap-2">
+              <span className={`rounded-full shrink-0 ${COMPONENT_DOT_COLOR[c.status] ?? COMPONENT_DOT_COLOR.operational}`} style={{ width: '6px', height: '6px' }} />
+              <span className="mono text-xs text-[var(--text1)]">{c.name}</span>
+              <span className={`mono text-[10px] ml-auto ${COMPONENT_TEXT_COLOR[c.status] ?? COMPONENT_TEXT_COLOR.operational}`}>{t(`status.${c.status}`)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function RegionalAvailability({ service, t }) {
   try {
     const state = regionStatusOf(service)
@@ -812,6 +855,11 @@ export default function ServiceDetails({ serviceId }) {
 
       {/* ── Regional Availability (only for services with defined regions) ── */}
       {SERVICE_REGIONS[service.id] && <RegionalAvailability service={service} t={t} />}
+
+      {/* ── Per-component breakdown (#604) — grouped with the Region card (same
+          per-dimension status pattern) in the drill-down zone, right before the
+          incident history block ── */}
+      <ComponentBreakdown service={service} t={t} />
 
       {/* ── Bottom: Incident History + Calendar (2-col on desktop) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>

@@ -6,7 +6,10 @@ import { MAJOR_WEIGHT, MINOR_WEIGHT } from './impact-weights'
 
 export interface StatuspageResponse {
   status: { indicator: string; description: string }
-  components?: Array<{ name: string; status: string }>
+  // `id` is the Atlassian component UUID — read by resolveSvcStatus / resolveSvcComponents
+  // (#379, #604) for statusComponentIds matching. Present in every real summary.json
+  // component; declared here so those id-based lookups are type-sound.
+  components?: Array<{ id: string; name: string; status: string }>
   incidents?: Array<{
     id: string
     name: string
