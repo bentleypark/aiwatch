@@ -75,7 +75,10 @@ export const SERVICES: ServiceConfig[] = [
   // displayComponentIds (#606): curated API/product surfaces — HTTP API, Streaming API, Registry,
   // Official Models, Playground (excludes Billing/Support/Home Page/Hardware×5). Display-only.
   { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: '01JRJYHBWCXHFZ0NHMP1N7T2G3', displayComponentIds: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01J5NNACBNTG5GR693P6RH5Q6J'] },
-  { id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', statusUrl: 'https://status.pinecone.io', apiUrl: 'https://status.pinecone.io/api/v2/summary.json', statusComponentId: 'r7tngp2p3sjd' },
+  // displayComponentIds (#606): pinecone's FUNCTIONAL surfaces (Console, Pod/Serverless Indexes
+  // group headers, Index Management, Inference, Assistant). The 22 region components are excluded
+  // — the Region card already covers per-region status. Display-only — badge stays on statusComponentId.
+  { id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', statusUrl: 'https://status.pinecone.io', apiUrl: 'https://status.pinecone.io/api/v2/summary.json', statusComponentId: 'r7tngp2p3sjd', displayComponentIds: ['jhky1rj0ps27', 'g7400gqyfhh9', 'r7tngp2p3sjd', 'hrgtfbcqygpc', '34h37xk5ltv1', 'pxr1b208pdh1'] },
   { id: 'stability', name: 'Stability AI', provider: 'Stability AI', category: 'api', statusUrl: 'https://status.stability.ai', apiUrl: 'https://status.stability.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.stability.ai/incidents', incidentIoComponentId: '01JW9J39X55NDFZTZT3K5NYR48' },
   // displayComponentIds (#606): API + User Dashboard. Display-only.
   { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr', displayComponentIds: ['g74wmxgm0zxr', 'p4zzcfjd8p5q'] },
