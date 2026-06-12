@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { normalizeStatus } from '../parsers/statuspage'
-import { filterIncidents, SERVICES, worstStatus, resolveSvcStatus, resolveSvcComponents } from '../services'
+import { filterIncidents, SERVICES, worstStatus, resolveSvcStatus, resolveSvcComponents, pickBreakdownComponents } from '../services'
 import type { Incident, ServiceConfig } from '../types'
 import { type KVLike } from '../utils'
 
@@ -455,6 +455,86 @@ describe('displayComponentIds config sanity (#606)', () => {
       expect(svc.displayComponentIds, id).toBeUndefined()
       expect(svc.statusComponentIds, id).toBeUndefined()
     }
+  })
+
+  // #606 Category B — shared status.openai.com page split across 3 services by the official groups.
+  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 14, chatgpt: 12, codex: 5 }
+
+  it('openai/chatgpt/codex carry their official-group displayComponentIds count and NO statusComponentIds', () => {
+    for (const [id, count] of Object.entries(SHARED_PAGE_COUNT)) {
+      const svc = SERVICES.find((s) => s.id === id)!
+      expect(svc.displayComponentIds, id).toBeDefined()
+      expect(svc.displayComponentIds!.length, id).toBe(count)
+      expect(new Set(svc.displayComponentIds).size, id).toBe(count)
+      expect(svc.statusComponentIds, id).toBeUndefined()
+    }
+  })
+
+  it('openai sources the breakdown from components.json (summary.json omits 6 of its 14 ids)', () => {
+    // The APIs Login / Chat Completions / Embeddings / Moderations + Platform FedRAMP / Ads Manager
+    // are components.json-only, so openai must set componentsUrl; chatgpt/codex are summary.json-complete.
+    expect(SERVICES.find((s) => s.id === 'openai')!.componentsUrl).toBe('https://status.openai.com/api/v2/components.json')
+    expect(SERVICES.find((s) => s.id === 'chatgpt')!.componentsUrl).toBeUndefined()
+    expect(SERVICES.find((s) => s.id === 'codex')!.componentsUrl).toBeUndefined()
+  })
+
+  it('LEAK GUARD: the 3 shared-page services have DISJOINT component ids (no sibling-service leak)', () => {
+    const lists = ['openai', 'chatgpt', 'codex'].map((id) => SERVICES.find((s) => s.id === id)!.displayComponentIds!)
+    const all = lists.flat()
+    // Every id assigned to exactly one service → flat length === unique count.
+    expect(new Set(all).size).toBe(all.length)
+    expect(all.length).toBe(14 + 12 + 5)
+  })
+
+  // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing
+  // single statusComponentId badge (so the badge is unchanged; statusComponentIds plural absent).
+  const SINGLE_OWNER_COUNT: Record<string, number> = { assemblyai: 6, deepgram: 8, characterai: 5, junie: 2, voyageai: 2 }
+
+  it('single-owner services carry the curated displayComponentIds count, keep their badge statusComponentId, and have no worst-of statusComponentIds', () => {
+    for (const [id, count] of Object.entries(SINGLE_OWNER_COUNT)) {
+      const svc = SERVICES.find((s) => s.id === id)!
+      expect(svc.displayComponentIds, id).toBeDefined()
+      expect(svc.displayComponentIds!.length, id).toBe(count)
+      expect(new Set(svc.displayComponentIds).size, id).toBe(count)
+      // Badge unchanged: still a single statusComponentId, never the worst-of statusComponentIds.
+      expect(svc.statusComponentId, id).toBeDefined()
+      expect(svc.statusComponentIds, id).toBeUndefined()
+    }
+  })
+
+  it('pins the non-obvious official-group assignments (the ones the comments justify)', () => {
+    const has = (id: string, compId: string) => SERVICES.find((s) => s.id === id)!.displayComponentIds!.includes(compId)
+    // Compliance API + Agent are ChatGPT (not API) per the official grouping.
+    expect(has('chatgpt', '01JNKS9D9S72PMP1938PVFFQN4'), 'Compliance API → chatgpt').toBe(true)
+    expect(has('chatgpt', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ'), 'Agent → chatgpt').toBe(true)
+    // Sora + the API Login + the Platform FedRAMP/Ads Manager are OpenAI API.
+    expect(has('openai', '01K9G527YRPY1EFRMHTKB5BKT5'), 'Sora → openai').toBe(true)
+    expect(has('openai', '01JSM5RTJWHRWDTS6Q604VEW3B'), 'API Login → openai').toBe(true)
+    expect(has('openai', '01KKAD7C71MCCH3FTREMJH4AAS'), 'FedRAMP → openai').toBe(true)
+    expect(has('openai', '01KTQBYVARFJ5KMCSECM06VKCF'), 'Ads Manager → openai').toBe(true)
+    // App is Codex.
+    expect(has('codex', '01KMKFAMWKQ81YWSE1Z18R6VHR'), 'App → codex').toBe(true)
+    // The two Logins are distinct ids (ChatGPT login vs API login) — both present, no collision.
+    expect(has('chatgpt', '01JMXBNJXG1S2D9V65P1ZZTD94'), 'ChatGPT Login → chatgpt').toBe(true)
+  })
+})
+
+describe('pickBreakdownComponents (#606 Cat B)', () => {
+  const summary = [{ id: 'a', name: 'A', status: 'operational' }]
+  const fetched = [{ id: 'a', name: 'A', status: 'operational' }, { id: 'b', name: 'B', status: 'operational' }]
+
+  it('uses the fetched components.json list when it is a non-empty array (superset wins)', () => {
+    expect(pickBreakdownComponents(summary, fetched)).toBe(fetched)
+  })
+
+  it('falls back to summary.json components when the fetch yields no array', () => {
+    expect(pickBreakdownComponents(summary, undefined)).toBe(summary)
+    expect(pickBreakdownComponents(summary, null)).toBe(summary)
+    expect(pickBreakdownComponents(summary, { components: 'oops' })).toBe(summary)
+  })
+
+  it('falls back to summary.json when the fetched array is empty (avoids blanking the breakdown)', () => {
+    expect(pickBreakdownComponents(summary, [])).toBe(summary)
   })
 })
 

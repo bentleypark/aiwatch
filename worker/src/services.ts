@@ -24,7 +24,12 @@ import { parseAwsRssIncidents, deriveAwsStatus } from './parsers/aws'
 export const SERVICES: ServiceConfig[] = [
   // AI API Services
   { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp' },
-  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'login', 'conversation', 'workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMQM1K5', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'] },
+  // displayComponentIds (#606 Cat B): the official "APIs" group (12) + "Platform" group (FedRAMP,
+  // Ads Manager) on the shared status.openai.com page (incident.io). Display-only allowlist (badge
+  // unchanged — no statusComponentId); disjoint from chatgpt/codex (pinned by the shared-page no-leak
+  // test). componentsUrl sources the list from components.json (31) since summary.json (25) omits
+  // Chat Completions / Embeddings / Moderations / the API Login / FedRAMP / Ads Manager.
+  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'login', 'conversation', 'workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMQM1K5', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'], displayComponentIds: ['01JP8CD9JR3HR6Y7G4Q75N4DVW', '01JMXBRMFEMZK0HPK19RYET250', '01JMXBRMFE4MAP2BHSJNZ787WX', '01JMXBRMFE5ESNNV8JDHVCGSRD', '01JMXBRMFEKVBWKK82B44QFMCE', '01JMXBRMFEQW613TFE89F45035', '01JMXBRMFESJCBGJR10PDD3WCQ', '01K9G527YRPY1EFRMHTKB5BKT5', '01JMXBRMFE6N2NNT7DG6XZQ6PW', '01JMXBRMFEV0AJ0VVS68N9CD6R', '01JMXBRMFEVZ7E0X9GD9FWR9WX', '01JSM5RTJWHRWDTS6Q604VEW3B', '01KKAD7C71MCCH3FTREMJH4AAS', '01KTQBYVARFJ5KMCSECM06VKCF'] },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://aistudio.google.com/status', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B', aistudioStatus: true, incidentKeywords: ['vertex', 'gemini', 'us-central1', 'europe-west1', 'asia-northeast1'] },
   { id: 'bedrock', name: 'Amazon Bedrock', provider: 'AWS', category: 'api', statusUrl: 'https://health.aws.amazon.com/health/status', apiUrl: null, awsRssUrls: [
     'https://status.aws.amazon.com/rss/bedrock-us-east-1.rss',
@@ -60,8 +65,11 @@ export const SERVICES: ServiceConfig[] = [
   // TTS, STT, Conversations, RAG, Telephony, Other API endpoints (excludes UI/Quality/ElevenCreative/Other).
   // Display-only: badge stays on the overall page indicator (no statusComponentIds).
   { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['webpage'], displayComponentIds: ['01JP2RQVGDHPEEDAFM5KV2MH9P', '01JYDTNNSJBT4X90MAC47YPM9S', '01JY3H5SJJZNC33AYMAE4SK4TH', '01JY3H5SJJD2BMSGSW5FZE08ST', '01JY3H5SJJJG47J60JPKX882H8', '01JY3H5SJJFKTXYQHG5A8Z1KYH'] },
-  { id: 'assemblyai', name: 'AssemblyAI', provider: 'AssemblyAI', category: 'api', statusUrl: 'https://status.assemblyai.com', apiUrl: 'https://status.assemblyai.com/api/v2/summary.json', statusComponentId: '50txf4qfk2kv' },
-  { id: 'deepgram', name: 'Deepgram', provider: 'Deepgram', category: 'api', statusUrl: 'https://status.deepgram.com', apiUrl: 'https://status.deepgram.com/api/v2/summary.json', statusComponentId: 'cv8l6gg3cb9d' },
+  // displayComponentIds (#606): curated user-facing API surfaces for assemblyai + deepgram
+  // (excludes internal infra / Website / Billing / Docs, and the badge's umbrella statusComponentId
+  // — the card shows the per-surface children). Display-only — badge stays on statusComponentId.
+  { id: 'assemblyai', name: 'AssemblyAI', provider: 'AssemblyAI', category: 'api', statusUrl: 'https://status.assemblyai.com', apiUrl: 'https://status.assemblyai.com/api/v2/summary.json', statusComponentId: '50txf4qfk2kv', displayComponentIds: ['kygwc83t1rfg', '20vm7q71wjcn', 'trxjzz9bwdmc', 'psxcg5mfhznq', 'rfh9swc12f9h', '12wrfd55ml3r'] },
+  { id: 'deepgram', name: 'Deepgram', provider: 'Deepgram', category: 'api', statusUrl: 'https://status.deepgram.com', apiUrl: 'https://status.deepgram.com/api/v2/summary.json', statusComponentId: 'cv8l6gg3cb9d', displayComponentIds: ['m49xkwqkc4kh', 's6v5z4lsl658', '6854s60zwxgw', 'r2z04fcdhhzb', 'jgfq9ffjsfqk', 'vm1x1v101qtn', 'cvbdk3fslx9v', 't80v4qz2jdsf'] },
   // Inference / Infrastructure
   { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed', betterStackUrl: 'https://status.huggingface.co', flapSuppression: true },
   // displayComponentIds (#606): curated API/product surfaces — HTTP API, Streaming API, Registry,
@@ -69,7 +77,8 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: '01JRJYHBWCXHFZ0NHMP1N7T2G3', displayComponentIds: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01J5NNACBNTG5GR693P6RH5Q6J'] },
   { id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', statusUrl: 'https://status.pinecone.io', apiUrl: 'https://status.pinecone.io/api/v2/summary.json', statusComponentId: 'r7tngp2p3sjd' },
   { id: 'stability', name: 'Stability AI', provider: 'Stability AI', category: 'api', statusUrl: 'https://status.stability.ai', apiUrl: 'https://status.stability.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.stability.ai/incidents', incidentIoComponentId: '01JW9J39X55NDFZTZT3K5NYR48' },
-  { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr' },
+  // displayComponentIds (#606): API + User Dashboard. Display-only.
+  { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr', displayComponentIds: ['g74wmxgm0zxr', 'p4zzcfjd8p5q'] },
   { id: 'modal', name: 'Modal', provider: 'Modal', category: 'api', statusUrl: 'https://status.modal.com', apiUrl: null, rssFeedUrl: 'https://status.modal.com/feed', betterStackUrl: 'https://status.modal.com', flapSuppression: true },
   // LangSmith (#561) — LangChain's hosted observability/eval platform. incident.io page exposes a
   // statuspage v2-compatible API so statuspage.ts covers it. Multi-component worst-of (#379): badge
@@ -100,7 +109,8 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'luma', name: 'Luma (Dream Machine)', provider: 'Luma', category: 'api', statusUrl: 'https://status.lumalabs.ai', apiUrl: null, rssFeedUrl: 'https://status.lumalabs.ai/feed', betterStackUrl: 'https://status.lumalabs.ai', flapSuppression: true },
   // AI Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
-  { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl' },
+  // displayComponentIds (#606): all Character.AI surfaces (single-owner page). Display-only.
+  { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl', displayComponentIds: ['fw8g76r7dqcl', 'ngscynkb3c53', 'v58xb4x4tg0l', '8b8kpp2h7w82', 'dtcqb0ffqv21'] },
   // ChatGPT has no single umbrella status-page component, but status.openai.com
   // does publish a ChatGPT group aggregate over its sub-components — that's the
   // user-facing uptime number on the page. Status determination still uses the
@@ -110,7 +120,11 @@ export const SERVICES: ServiceConfig[] = [
   // (#367), not the status path. Component fallback is Conversations
   // (01JMXBNJXGV1T5GT2M9XA83XNG, 99.92% sample) — not perfect coverage but a
   // reasonable proxy if OpenAI ever restructures the ChatGPT group.
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1' },
+  // displayComponentIds (#606 Cat B): the official "ChatGPT" group (12) on status.openai.com.
+  // Display-only; disjoint from openai/codex. Compliance API + Agent belong to ChatGPT per the
+  // official grouping (not the API group, despite the names). Login here is the ChatGPT Login
+  // (the APIs group has a separate API-Login id absent from summary.json).
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', displayComponentIds: ['01JNKS9D9S72PMP1938PVFFQN4', '01K8C008QVXHA6JX98PAS42VPD', '01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ'] },
   // Coding Agents
   // claudecode intentionally tracks only the Claude Code component for the badge.
   // Adding Claude API as a multi-component dependency would conflict with the
@@ -135,7 +149,10 @@ export const SERVICES: ServiceConfig[] = [
   // ID becomes invalid, the parser falls through to the per-component lookup
   // rather than returning null. Surface-specific outages (e.g., Codex Web only)
   // still surface via incidentKeywords in Recent Incidents.
-  { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', incidentIoGroupId: '01KMKF9EBTCD8BN9PG8DJZXRSQ' },
+  // displayComponentIds (#606 Cat B): the official "Codex" group (5) on status.openai.com.
+  // Display-only; disjoint from openai/chatgpt. App shares Codex's id prefix (01KMKFAMWK) and
+  // is in neither the ChatGPT(12) nor APIs(12) official group → Codex.
+  { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', incidentIoGroupId: '01KMKF9EBTCD8BN9PG8DJZXRSQ', displayComponentIds: ['01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK', '01KMP3KP5MGE23B80K1EK4S8PV', '01KMKFAMWKQ81YWSE1Z18R6VHR'] },
   // cursor badge reflects worst-of: IDE primary + Cloud Agents + Automations + CLI (#379).
   // Bugbot/cursor.com/Marketplace are auxiliary surfaces and intentionally excluded.
   { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c'] },
@@ -143,7 +160,10 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2', statusComponentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82'], incidentKeywords: ['copilot'] },
   // windsurf badge reflects worst-of: Cascade primary + Windsurf Tab (autocomplete agent surface) (#379).
   { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m', statusComponentIds: ['r5wf1ykd7y1m', '8q19cygxvshj'] },
-  { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.ai', apiUrl: 'https://status.jetbrains.ai/api/v2/summary.json', statusComponentId: '9vbyyqkkjxl4' },
+  // displayComponentIds (#606): Junie + its AI Platform dependency only. status.jetbrains.ai is a
+  // shared JetBrains page, but junie is the only AIWatch service on it, so excluding the sibling
+  // products (AI Assistant, Grazie, AI Platform China) keeps the breakdown Junie-relevant. Display-only.
+  { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.ai', apiUrl: 'https://status.jetbrains.ai/api/v2/summary.json', statusComponentId: '9vbyyqkkjxl4', displayComponentIds: ['9vbyyqkkjxl4', 'x4pcb5vz7jj2'] },
 ]
 
 /**
@@ -320,6 +340,22 @@ export function resolveSvcComponents(
     .map((c) => ({ id: c.id, name: c.name, status: normalizeStatus(c.status) }))
   // ≥2 only — a one-row breakdown adds nothing the badge doesn't already say.
   return matched.length >= 2 ? matched : []
+}
+
+/**
+ * #606 Cat B — pick the component list the breakdown resolves from. When a `componentsUrl`
+ * (components.json) fetch yields a non-empty array, use it (a superset of summary.json's
+ * components on shared pages, e.g. status.openai.com); otherwise fall back to summary.json's.
+ * Pure so the merge decision is unit-testable; the fetch itself stays in fetchService.
+ */
+export function pickBreakdownComponents(
+  summaryComponents: Array<{ id: string; name: string; status: string }> | undefined,
+  fetchedComponents: unknown,
+): Array<{ id: string; name: string; status: string }> | undefined {
+  if (Array.isArray(fetchedComponents) && fetchedComponents.length > 0) {
+    return fetchedComponents as Array<{ id: string; name: string; status: string }>
+  }
+  return summaryComponents
 }
 
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
@@ -590,12 +626,30 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           console.warn(`[fetchService] ${config.id} additional component ids missing: ${missing.join(', ')}`)
         }
       }
-      // #606 — same drift signal for the display-only breakdown list. These services have
-      // no statusComponentId/Ids, so without this a renamed/removed curated component would
-      // silently shrink the breakdown card (or drop it under the ≥2 gate) with no operator signal.
-      if (config.displayComponentIds && summaryData.components) {
+      // #606 Cat B — source the breakdown component list from componentsUrl (components.json, a
+      // superset on shared pages like status.openai.com) when set, else summary.json. Computed here
+      // (before the drift check) so the drift signal checks the SAME source the breakdown resolves
+      // from — otherwise openai's components.json-only ids would false-flag every cycle. Status,
+      // incidents, and uptime still come from summaryData; only the component list changes.
+      let breakdownComponents = summaryData.components
+      if (config.componentsUrl) {
+        const cRes = await fetchWithTimeout(config.componentsUrl, 8000).catch(() => null)
+        if (cRes?.ok) {
+          try {
+            const cJson = await cRes.json() as { components?: unknown }
+            breakdownComponents = pickBreakdownComponents(summaryData.components, cJson.components)
+          } catch (err) {
+            console.warn(`[fetchService] ${config.id} components.json parse failed — using summary.json:`, err instanceof Error ? err.message : err)
+          }
+        } else cRes?.body?.cancel()
+      }
+      // #606 — drift signal for the display-only breakdown list. These services have no
+      // statusComponentId/Ids, so without this a renamed/removed curated component would silently
+      // shrink the breakdown (or drop it under the ≥2 gate) with no operator signal. Checks
+      // breakdownComponents (the resolved source), so componentsUrl-backed ids aren't false-flagged.
+      if (config.displayComponentIds && breakdownComponents) {
         const missing = config.displayComponentIds.filter(
-          (id) => !summaryData.components!.some((c) => c.id === id),
+          (id) => !breakdownComponents!.some((c) => c.id === id),
         )
         if (missing.length > 0) {
           console.warn(`[fetchService] ${config.id} displayComponentIds missing (breakdown drift): ${missing.join(', ')}`)
@@ -625,9 +679,9 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         await resetFetchFailure(kv, config.id)
       }
 
-      // #604 — preserve the curated per-component snapshot for the breakdown UI.
+      // #604 — preserve the curated per-component snapshot for the breakdown UI (source picked above).
       // resolveSvcComponents self-gates to ≥2 matched (a single component is redundant with the badge).
-      const components = resolveSvcComponents(config, summaryData)
+      const components = resolveSvcComponents(config, { ...summaryData, components: breakdownComponents })
 
       return {
         ...base,

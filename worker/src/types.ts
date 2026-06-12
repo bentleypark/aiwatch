@@ -125,6 +125,12 @@ export interface ServiceConfig {
   // matching the official status page's Endpoints/Models split). e.g. groq: ['API'];
   // cohere: ['Coral','Infrastructure','Playground','embeddings']. Empty/absent → all grouped.
   componentSurfaces?: string[]
+  // #606 Cat B — source the breakdown's component LIST from this URL (an Atlassian/incident.io
+  // `components.json`) instead of the `apiUrl` summary.json. Needed when a shared status page
+  // exposes more components in components.json than summary.json (e.g. status.openai.com:
+  // FedRAMP, Chat Completions, the separate API Login). Status/incidents/uptime still come from
+  // summary.json; only resolveSvcComponents reads this. Falls back to summary.json on fetch error.
+  componentsUrl?: string
   incidentIoComponentId?: string
   incidentIoGroupId?: string       // incident.io group uptime (e.g. "APIs" aggregate)
   betterStackUrl?: string
