@@ -70,7 +70,7 @@ export interface StoredFlashdutyFeed {
 
 // KV key the scraper (via /api/internal/deepseek-feed) writes and fetchService('deepseek') reads.
 export const DEEPSEEK_FEED_KV_KEY = 'deepseek:feed'
-// KV TTL. The scraper runs ~every 15 min; a 3h TTL tolerates ~12 consecutive missed runs before the
+// KV TTL. The scraper runs ~every 10 min; a 3h TTL tolerates ~18 consecutive missed runs before the
 // key expires and fetchService falls back to the frozen Atlassian mirror (with incidentSourceStale).
 export const DEEPSEEK_FEED_TTL_S = 3 * 60 * 60
 // Soft-staleness gate: a feed older than this still SERVES (badge/incidents stay live) but re-asserts
