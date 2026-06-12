@@ -116,6 +116,35 @@ function parseInstatusNextIncidents(html: string): Incident[] {
   }
 }
 
+// #627 — 30-day uptime % for a named component from an Instatus page. Instatus exposes uptime per
+// component (no Atlassian summary.json), so AIWatch otherwise shows "Not provided". Nuxt encodes it
+// as a flat-array index ref to a direct float (e.g. the "API" group component on status.mistral.ai →
+// 99.599). The Next.js format (Perplexity) does NOT carry an inline per-component uptime % (only
+// daily metrics) → returns null for now (a daily-aggregation follow-up). Returns null when the
+// component isn't found or the value is out of range, so the caller falls back to estimate/null.
+export function parseInstatusUptime(html: string, componentName: string | undefined): number | null {
+  if (!componentName) return null
+  if (!html.includes('__NUXT_DATA__')) return null // Next.js: no inline component uptime (#627 follow-up)
+  const match = html.match(/__NUXT_DATA__[^>]*>([\s\S]*?)<\/script/)
+  if (!match) return null
+  try {
+    const arr: unknown[] = JSON.parse(match[1])
+    const deref = (v: unknown) => (typeof v === 'number' ? arr[v] : v) // Nuxt scalars are index refs
+    for (const item of arr) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+      const o = item as Record<string, unknown>
+      if (!('uptime' in o) || !('name' in o)) continue
+      if (deref(o.name) !== componentName) continue
+      const up = deref(o.uptime)
+      if (typeof up === 'number' && up >= 0 && up <= 100) return up
+    }
+    return null
+  } catch (err) {
+    console.warn('[parseInstatusUptime] failed:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
 export function parseInstatusIncidents(html: string): Incident[] {
   // Instatus has two SSR formats: Nuxt (__NUXT_DATA__) and Next.js (__next_f)
   if (!html.includes('__NUXT_DATA__') && html.includes('__next_f')) {
@@ -186,7 +215,32 @@ export function parseInstatusIncidents(html: string): Incident[] {
               at: arr[u.created_at] as string,
             }]
           } catch { return [] }
-        }).reverse()
+        }).reverse() // chronological: oldest → newest
+
+        // #626 — Instatus's `duration` field is authoritative on the active-impact WINDOW: the
+        // incident ran [createdAt, createdAt+duration]. The RESOLVED update's created_at is only when
+        // the "resolved" MESSAGE was posted, which can be much later (a delayed status-page close —
+        // e.g. a 2h40m Mistral incident whose resolved note was posted ~2 days later). Mistral's OWN UI
+        // displays the resolution at createdAt+duration ("Jun 10 10:48", not the post time), so:
+        //   • resolvedAt = createdAt + durationSec (the real resolution), and
+        //   • the resolved TIMELINE entry is pinned to that time too (else it shows the late post time,
+        //     a "resolved days later" entry that doesn't exist on the source page).
+        // Fall back to the last resolved update's created_at only when Instatus omits durationSec.
+        const resolvedIso = status === 'RESOLVED'
+          ? (durationSec != null
+              ? new Date(new Date(createdAt).getTime() + durationSec * 1000).toISOString()
+              : ([...timeline].reverse().find((t) => t.stage === 'resolved')?.at ?? null))
+          : null
+        if (resolvedIso) {
+          for (let i = timeline.length - 1; i >= 0; i--) {
+            if (timeline[i].stage === 'resolved') { timeline[i] = { ...timeline[i], at: resolvedIso }; break }
+          }
+        }
+        // duration = the `duration` field (active impact, what Mistral's badge shows + what the Score
+        // MTTR / Recovery card read), NOT resolvedAt−startedAt. Fall back to the span only without it.
+        const durationStr = durationSec != null
+          ? formatDuration(new Date(createdAt), new Date(new Date(createdAt).getTime() + durationSec * 1000))
+          : (resolvedIso ? formatDuration(new Date(createdAt), new Date(resolvedIso)) : null)
 
         return [{
           id: arr[inc.id] as string,
@@ -197,8 +251,8 @@ export function parseInstatusIncidents(html: string): Incident[] {
             : 'investigating' as const,
           impact: mapInstatusImpact(severity), // #556 — was hardcoded null; now maps the Nuxt `severity` field
           startedAt: createdAt,
-          resolvedAt: (status === 'RESOLVED' && durationSec != null) ? new Date(new Date(createdAt).getTime() + durationSec * 1000).toISOString() : null,
-          duration: durationSec ? formatDuration(new Date(createdAt), new Date(new Date(createdAt).getTime() + durationSec * 1000)) : null,
+          resolvedAt: resolvedIso,
+          duration: durationStr,
           timeline,
         }]
       } catch { return [] }
