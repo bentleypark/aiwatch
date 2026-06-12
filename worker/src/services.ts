@@ -39,9 +39,17 @@ export const SERVICES: ServiceConfig[] = [
     'https://status.aws.amazon.com/rss/bedrock-ap-northeast-1.rss',
   ] },
   { id: 'azureopenai', name: 'Azure OpenAI', provider: 'Microsoft', category: 'api', statusUrl: 'https://azure.status.microsoft/en-us/status', apiUrl: null, azureRssUrl: 'https://rssfeed.azure.status.microsoft/en-us/status/feed/', incidentKeywords: ['Azure OpenAI'] },
+  // #623 — status.mistral.ai (Instatus, Nuxt) lists API components ("Chat Completions API", …)
+  // alongside non-API surfaces (Le Chat consumer app, Le Console, Documentation, Website). The Nuxt
+  // parser appends the affected component to the incident title ("… · Le Chat"), so a denylist scopes
+  // the "Mistral API" badge/incidents/Score to the API only — the api-vs-app split (cf. OpenAI API
+  // excludes ChatGPT). Denylist (not an `['api']` allowlist) so a real API incident is never dropped.
+  // Known limitation: the Nuxt parser tags the title with only servicesArr[0] (first affected
+  // component) and doesn't populate componentNames, so a *combined* Le-Chat+API incident that lists
+  // Le Chat first would be dropped despite affecting the API. Low-probability; revisit if observed.
   // #627 — statusComponent 'API' selects the Instatus "API" group component for the 30-day uptime%
   // (status.mistral.ai groups all API endpoints under it; → ~99.6% instead of "Not provided").
-  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1', statusComponent: 'API' },
+  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1', incidentExclude: ['le chat', 'le console', 'documentation', 'website'], statusComponent: 'API' },
   // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
   // (dynamic, so new/retired models need no config edit). componentSurfaces stay as individual rows;
   // the rest fold into a collapsible "Models" group (matches the official Endpoints/Models split).
@@ -54,7 +62,13 @@ export const SERVICES: ServiceConfig[] = [
   // service; statusComponentId (Developer Console) is the primary for uptime parsing / calendar /
   // component-miss alerting. Single-tenant page → no incidentKeywords needed.
   { id: 'cerebras', name: 'Cerebras Inference', provider: 'Cerebras', category: 'api', statusUrl: 'https://status.cerebras.ai', apiUrl: 'https://status.cerebras.ai/api/v2/summary.json', statusComponentId: '83h1cchw4vs4', statusComponentIds: ['83h1cchw4vs4', '7xvps6c9lqwc', 'bhqw2gr7r710', 'hgfykfsb36gn', '8ygyx5vydlm2'] },
-  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com' },
+  // #623 — status.perplexity.com (Instatus, Next.js) has 2 components: "API" (Sonar) + "Website"
+  // (the consumer perplexity.ai). The Next.js parser now resolves each incident's affected components
+  // → componentNames (#623), so `incidentKeywords: ['api']` (matched against componentNames) scopes
+  // the badge/Score to the API: a Website-only incident is dropped, a Website+API incident kept (it
+  // affects the API). Allowlist is correct here — the API component is literally named "API", and
+  // unlike a title-denylist it keeps a multi-component "Website and API" incident.
+  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com', incidentKeywords: ['api'] },
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
   // status.deepseek.com (Flashduty, #507) blocks NON-BROWSER TLS fingerprints — a Worker fetch()
   // is reset at the TLS layer regardless of egress IP (verified 2026-06-12: a real Chromium from

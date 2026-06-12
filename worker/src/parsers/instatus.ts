@@ -30,6 +30,21 @@ export function mapInstatusImpact(raw: string | null | undefined): Incident['imp
   return 'minor'
 }
 
+// #623 — extract Instatus component definitions (id → display name) from the Next.js SSR payload so
+// each notice's `components: [{id}]` can be resolved to names (set on Incident.componentNames). That
+// lets a service like Perplexity scope its API badge with `incidentKeywords: ['api']` (matched
+// against componentNames): a Website-only incident is dropped, a Website+API incident kept.
+// Component entries serialize as `"id":"…","name":{"default":"Website"}` (name has ONLY a `default`
+// key); incident notices use `"name":{"en":…,"default":…}` (an `en` key first), so the
+// `"name":{"default":` anchor matches component definitions but not notice names.
+function buildInstatusComponentMap(html: string): Map<string, string> {
+  const map = new Map<string, string>()
+  const re = /\\"id\\":\\"([a-z0-9]+)\\",\\"name\\":\{\\"default\\":\\"([^\\"]+)\\"\}/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(html)) !== null) map.set(m[1], m[2])
+  return map
+}
+
 function parseInstatusNextIncidents(html: string): Incident[] {
   try {
     // Next.js SSR payload has escaped quotes: notices\":{\"id\":{...}}
@@ -41,7 +56,9 @@ function parseInstatusNextIncidents(html: string): Incident[] {
     const notices = JSON.parse(raw) as Record<string, {
       id: string; name: { default: string }; impact: string
       started: string; resolved: string | null; status: string
+      components?: Array<{ id: string }> // #623 — affected component ids (resolved → componentNames)
     }>
+    const componentNameById = buildInstatusComponentMap(html)
 
     const incidents: Incident[] = []
     for (const notice of Object.values(notices)) {
@@ -65,11 +82,25 @@ function parseInstatusNextIncidents(html: string): Incident[] {
         timeline.push({ stage: 'resolved' as const, text: 'Resolved', at: resolvedDate.toISOString() })
       }
 
+      // #623 — resolve affected component ids → names for component-aware filtering (e.g. Perplexity
+      // incidentKeywords:['api'] keeps a Website+API incident but drops a Website-only one).
+      const componentRefs = notice.components ?? []
+      const componentNames = componentRefs
+        .map((c) => componentNameById.get(c.id))
+        .filter((n): n is string => !!n)
+      // Resolution depends on the Instatus `"id":"…","name":{"default":…}` serialization (key order):
+      // if a notice references components but NONE resolve, the component map likely changed shape —
+      // log it so a future Instatus format change is diagnosable instead of silently scoping wrong.
+      if (componentRefs.length > 0 && componentNames.length === 0) {
+        console.debug(`[parseInstatusNext] notice ${notice.id} references ${componentRefs.length} component id(s) but none resolved — Instatus component serialization may have changed`)
+      }
+
       incidents.push({
         id: notice.id,
         title: notice.name.default,
         status: isResolved ? 'resolved' : 'investigating',
         impact: mapInstatusImpact(notice.impact), // #556 — was MAJOR/PARTIAL-only; DEGRADEDPERFORMANCE fell to null
+        componentNames: componentNames.length > 0 ? componentNames : undefined,
         startedAt: startDate.toISOString(),
         resolvedAt: (resolvedDate && !isNaN(resolvedDate.getTime())) ? resolvedDate.toISOString() : null,
         duration: (isResolved && resolvedDate && !isNaN(resolvedDate.getTime()))
