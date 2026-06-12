@@ -603,6 +603,34 @@ describe('refreshOrReanalyze', () => {
     )
   })
 
+  it('#633 — skips a held incident (no analysis on a sub-10min flap blip)', async () => {
+    // A flap-shaped incident held by the first-seen confirmation gate has no analysis key yet
+    // and must NOT be analyzed this cycle — it would burn a Gemma/Sonnet call on a phantom.
+    const kv = mockKV()
+    const svc = mockService('modal', [{ id: 'flap-held', status: 'investigating' }])
+    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'flap-held' })
+
+    const result = await refreshOrReanalyze([svc], kv, 'api-key', analyzeFn, 2, Date.now(), undefined, new Set(['flap-held']))
+
+    expect(analyzeFn).not.toHaveBeenCalled()
+    expect(result.reanalyzed).toEqual([])
+    expect(kv.put).not.toHaveBeenCalled()
+  })
+
+  it('#633 — still analyzes a non-held active incident on the same cron cycle', async () => {
+    const kv = mockKV()
+    const svc = mockService('modal', [
+      { id: 'flap-held', status: 'investigating' },
+      { id: 'real-inc', status: 'investigating' },
+    ])
+    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'real-inc' })
+
+    const result = await refreshOrReanalyze([svc], kv, 'api-key', analyzeFn, 2, Date.now(), undefined, new Set(['flap-held']))
+
+    expect(analyzeFn).toHaveBeenCalledOnce()
+    expect(result.reanalyzed).toEqual(['modal'])
+  })
+
   it('respects cap — only re-analyzes up to cap services', async () => {
     const kv = mockKV()
     const services = [

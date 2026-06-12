@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, parseAlertedRoster } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, parseAlertedRoster } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
 import { checkPersistentFetchFailures } from './persistent-failure'
@@ -539,6 +539,13 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   //   post-send writes the flap key on the res alert to start the window for the NEXT flap.
   const suppressedIncIds = new Set<string>()
   const flapKeysToWrite = new Map<string, string>()
+  // #633 — first-seen confirmation gate. A flap-shaped NEW incident on a monitor-flap service is
+  // HELD for one cron cycle so a single-cycle BetterStack blip can't fire a phantom alert + AI
+  // analysis. heldNewIncIds is added to suppressedIncIds (buildIncidentAlerts skips both new + res)
+  // AND passed to refreshOrReanalyze (so the analysis is deferred too). pendingNewToWrite seeds the
+  // pending:new marker so the NEXT cycle confirms + fires.
+  const heldNewIncIds = new Set<string>()
+  const pendingNewToWrite = new Set<string>()
   for (const svc of scored) {
     const config = SERVICES.find(c => c.id === svc.id)
     for (const inc of svc.incidents ?? []) {
@@ -555,6 +562,28 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
         const flapActive = await env.STATUS_CACHE.get(flapKey).catch(() => null)
         if (flapActive) suppressedIncIds.add(inc.id)
         else flapKeysToWrite.set(inc.id, flapKey)
+      }
+      // #633 — hold a flap-shaped new incident on its first sight (no pending marker from a prior
+      // cycle); confirm + fire once it survives a cycle. alreadyAlerted is read from alertedNewMap
+      // above, so a re-fire of an already-sent incident is never held.
+      if (config) {
+        const alreadyAlerted = alertedNewMap.get(inc.id)?.has(svc.id) ?? false
+        // FAIL OPEN on a KV read error (return '1' → pendingExists=true → NOT held → the alert fires).
+        // Unlike the sibling pending:degraded debounce (which fails open — a missing marker means
+        // "alert now"), this gate's marker RELEASES the alert, so a missing-or-errored read fails
+        // CLOSED. Dropping a real alert is worse than letting one phantom through on a transient KV
+        // blip, so on a read *error* we deliberately do not hold. Only a legit absent marker (null) holds.
+        const pendingRaw = await env.STATUS_CACHE.get(pendingNewKey(inc.id)).catch((err) => {
+          console.warn('[cron] #633 pending:new read failed — failing open (will not hold):', inc.id, err instanceof Error ? err.message : err)
+          return '1'
+        })
+        const pendingExists = pendingRaw !== null
+        if (shouldHoldNewIncident(svc.id, config, inc, { alreadyAlerted, pendingExists })) {
+          console.log('[cron] #633 holding flap-shaped new incident one cycle (phantom-alert gate):', svc.id, inc.id)
+          suppressedIncIds.add(inc.id)
+          heldNewIncIds.add(inc.id)
+          pendingNewToWrite.add(inc.id)
+        }
       }
     }
     const wasDown = await env.STATUS_CACHE.get(`alerted:down:${svc.id}`).catch(() => null)
@@ -605,6 +634,15 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     if (svc.status === 'degraded') {
       await kvPut(env.STATUS_CACHE, `pending:degraded:${svc.id}`, '1', { expirationTtl: 600 })
     }
+  }
+  // #633 — seed the first-seen markers for held new incidents so the NEXT cron cycle confirms +
+  // fires (or the marker expires if the blip recovered inside the window → no phantom alert).
+  // Log on failure (mirrors the alerted:new roster write below): a dropped marker means the incident
+  // is re-held next cycle and retried — self-heals on a transient blip, but a sustained KV-write
+  // outage (which also breaks the roster writes) would delay the alert, so make it observable.
+  for (const incId of pendingNewToWrite) {
+    const ok = await kvPut(env.STATUS_CACHE, pendingNewKey(incId), '1', { expirationTtl: PENDING_NEW_TTL_S })
+    if (!ok) console.error('[cron] #633 pending:new write FAILED — held incident may stay held an extra cycle:', incId)
   }
 
   // Record detection timestamps for non-operational services (Detection Lead feature)
@@ -951,7 +989,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   const activeServices = scored.filter(s =>
     (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring')
   )
-  await refreshOrReanalyze(activeServices, env.STATUS_CACHE, env.ANTHROPIC_API_KEY, analyzeIncident, 2, Date.now(), env.AI)
+  await refreshOrReanalyze(activeServices, env.STATUS_CACHE, env.ANTHROPIC_API_KEY, analyzeIncident, 2, Date.now(), env.AI, heldNewIncIds)
 
   // Component ID mismatch detection (#135) — alert when statusComponentId is not found
   const mismatches = await detectComponentMismatches(COMPONENT_ID_SERVICES, env.STATUS_CACHE)
