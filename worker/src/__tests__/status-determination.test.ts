@@ -14,6 +14,7 @@ interface StatusConfig {
   statusComponent?: string
   statusComponentId?: string
   statusComponentIds?: string[]
+  displayComponentIds?: string[]
 }
 
 interface SummaryData {
@@ -320,6 +321,64 @@ describe('resolveSvcComponents — per-component snapshot (#604)', () => {
       components: [{ id: 'renamed-1', name: 'Renamed', status: 'operational' }],
     }
     expect(resolveSvcComponents(config, summary)).toEqual([])
+  })
+
+  // #606 — display-only list, decoupled from the badge (no statusComponentIds)
+  it('drives the breakdown from displayComponentIds when statusComponentIds is absent', () => {
+    const displayOnly: StatusConfig = { displayComponentIds: ['tts', 'stt'] }
+    const summary: SummaryData = {
+      status: { indicator: 'none' },
+      components: [
+        { id: 'tts', name: 'Text to Speech', status: 'operational' },
+        { id: 'stt', name: 'Speech to Text', status: 'partial_outage' },
+        { id: 'ui', name: 'UI', status: 'major_outage' }, // not in the curated list — excluded
+      ],
+    }
+    expect(resolveSvcComponents(displayOnly, summary)).toEqual([
+      { id: 'tts', name: 'Text to Speech', status: 'operational' },
+      { id: 'stt', name: 'Speech to Text', status: 'degraded' },
+    ])
+  })
+
+  it('self-gates the displayComponentIds path to [] when only ONE resolves (≥2 gate is source-agnostic)', () => {
+    const displayOnly: StatusConfig = { displayComponentIds: ['tts', 'stt'] }
+    const summary: SummaryData = {
+      status: { indicator: 'none' },
+      components: [{ id: 'tts', name: 'Text to Speech', status: 'operational' }], // 'stt' drifted out
+    }
+    expect(resolveSvcComponents(displayOnly, summary)).toEqual([])
+  })
+
+  it('prefers displayComponentIds over statusComponentIds when both are set', () => {
+    const both: StatusConfig = { statusComponentIds: ['a', 'b'], displayComponentIds: ['c', 'd'] }
+    const summary: SummaryData = {
+      status: { indicator: 'none' },
+      components: [
+        { id: 'a', name: 'A', status: 'operational' },
+        { id: 'b', name: 'B', status: 'operational' },
+        { id: 'c', name: 'C', status: 'operational' },
+        { id: 'd', name: 'D', status: 'operational' },
+      ],
+    }
+    expect(resolveSvcComponents(both, summary).map((c) => c.id)).toEqual(['c', 'd'])
+  })
+})
+
+describe('displayComponentIds config sanity (#606)', () => {
+  // Exact curated counts — guards against a careless edit truncating the list
+  // (the doc comments enumerate the excluded components, so the count is intentional).
+  const EXPECTED_COUNT: Record<string, number> = { elevenlabs: 6, replicate: 5 }
+
+  it('elevenlabs + replicate carry the exact curated displayComponentIds count and NO statusComponentIds (badge unchanged)', () => {
+    for (const [id, count] of Object.entries(EXPECTED_COUNT)) {
+      const svc = SERVICES.find((s) => s.id === id)!
+      expect(svc.displayComponentIds, id).toBeDefined()
+      expect(svc.displayComponentIds!.length, id).toBe(count)
+      // No duplicate ids in the curated list.
+      expect(new Set(svc.displayComponentIds).size, id).toBe(count)
+      // Display-only: must not feed the worst-of badge (#606 decoupling), so no statusComponentIds.
+      expect(svc.statusComponentIds, id).toBeUndefined()
+    }
   })
 })
 

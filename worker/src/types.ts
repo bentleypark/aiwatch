@@ -95,6 +95,15 @@ export interface ServiceConfig {
   // asymmetry when the dependency's incidents don't match the service's
   // `incidentKeywords` filter. See #379 review for the trade-off.
   statusComponentIds?: string[]
+  // #606 — display-only per-component breakdown list, DECOUPLED from the badge.
+  // `statusComponentIds` drives both the worst-of badge AND the #604 breakdown; this
+  // field drives ONLY the breakdown (read by resolveSvcComponents, never resolveSvcStatus),
+  // so a service whose badge stays on the overall page indicator (no statusComponentIds)
+  // can still surface a curated component card without changing its status determination.
+  // Use for single-owner statuspages with rich components (elevenlabs, replicate) where
+  // worst-of'ing every component into the badge would be too noisy (e.g. a Billing blip).
+  // When both are set, the breakdown prefers displayComponentIds.
+  displayComponentIds?: string[]
   incidentIoComponentId?: string
   incidentIoGroupId?: string       // incident.io group uptime (e.g. "APIs" aggregate)
   betterStackUrl?: string
