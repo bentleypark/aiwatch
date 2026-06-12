@@ -156,7 +156,8 @@ export function getFallbacks(service, allServices) {
   if (!service || !Array.isArray(allServices) || EXCLUDE_FALLBACK.includes(service.id)) return []
   const sourceTier = tierFor(service.id)
   return allServices
-    .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational' && !hasActiveIncident(s) && !EXCLUDE_FALLBACK.includes(s.id))
+    // #616 — exclude stale-source services (#591): ranking-excluded → not a trusted fallback either
+    .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale && !EXCLUDE_FALLBACK.includes(s.id))
     .sort((a, b) => {
       const distA = Math.abs(tierFor(a.id) - sourceTier)
       const distB = Math.abs(tierFor(b.id) - sourceTier)
