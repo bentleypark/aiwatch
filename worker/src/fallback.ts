@@ -54,6 +54,10 @@ interface FallbackCandidate {
   status: string
   /** #550 — used to exclude candidates with an unresolved incident (operational-but-incident). */
   incidents?: Array<{ status: string }>
+  /** #616 — stale incident source (#591). Excluded from Score ranking, so it must also be excluded
+   *  as a fallback candidate: recommending a service we don't trust enough to rank contradicts the
+   *  same product surface. */
+  incidentSourceStale?: boolean
   aiwatchScore?: number | null
 }
 
@@ -71,7 +75,7 @@ export function getFallbacks(
   if (EXCLUDE_FALLBACK.includes(serviceId)) return []
   const sourceTier = tierFor(serviceId)
   return services
-    .filter(s => s.category === category && s.id !== serviceId && s.status === 'operational' && !hasActiveIncident(s) && !EXCLUDE_FALLBACK.includes(s.id))
+    .filter(s => s.category === category && s.id !== serviceId && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale && !EXCLUDE_FALLBACK.includes(s.id))
     .sort((a, b) => {
       // Prefer same or adjacent tier to the affected service
       const tierA = tierFor(a.id)

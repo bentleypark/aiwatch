@@ -53,6 +53,20 @@ describe('getFallbacks', () => {
     expect(result.find(f => f.name === 'Together AI')).toBeDefined()     // only a resolved incident → eligible
   })
 
+  it('#616 — excludes a stale-source candidate (incidentSourceStale, #591) even when operational with a high Score', () => {
+    // deepseek is excluded from Score ranking because its incident feed is stale (#591). It is
+    // operational with an inflated Score and not in EXCLUDE_FALLBACK, so without the guard it would
+    // win the tier-2 slot. Ranking-excluded → must not be recommended as a trusted fallback either.
+    const services = [
+      { id: 'mistral', category: 'api', name: 'Mistral API', status: 'degraded', aiwatchScore: 76 },
+      { id: 'deepseek', category: 'api', name: 'DeepSeek API', status: 'operational', aiwatchScore: 95, incidentSourceStale: true },
+      { id: 'together', category: 'api', name: 'Together AI', status: 'operational', aiwatchScore: 89 },
+    ]
+    const result = getFallbacks('mistral', 'api', services)
+    expect(result.find(f => f.name === 'DeepSeek API')).toBeUndefined() // stale source → dropped
+    expect(result.find(f => f.name === 'Together AI')).toBeDefined()    // healthy → eligible
+  })
+
   it('#602/#601 step B — degraded Runway recommends its video sibling Luma OVER a higher-scored tier-3 infra service', () => {
     // openrouter (tier 3 Infra) has a higher Score than luma, so pre-step-B it won the Infra-tier slot
     // and Runway got recommended an LLM router. With the Video tier (5), luma (distance 0) outranks it.

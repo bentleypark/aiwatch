@@ -187,6 +187,17 @@ describe('hasActiveIncident / getFallbacks active-incident exclusion (#550)', ()
     expect(ids).toContain('codex')
   })
 
+  it('#616 — excludes a stale-source candidate (incidentSourceStale, #591) even when operational with a high Score', () => {
+    // deepseek is excluded from Score ranking because its incident feed is stale (#591). Operational
+    // with an inflated Score and not in EXCLUDE_FALLBACK, so without the guard it would win the slot.
+    const source = { id: 'mistral', category: 'api', status: 'degraded', incidents: [] }
+    const deepseekStale = op('deepseek', 'api', 95, { incidentSourceStale: true })
+    const together = op('together', 'api', 89)
+    const ids = getFallbacks(source, [source, deepseekStale, together]).map(f => f.id)
+    expect(ids).not.toContain('deepseek') // stale source → not a trusted fallback
+    expect(ids).toContain('together')
+  })
+
   it('getGroupedFallbacks drops an operational-but-active-incident candidate', () => {
     const affected = [{ id: 'claudecode', category: 'agent', provider: 'Anthropic', status: 'degraded', incidents: [inc('investigating')] }]
     const pool = [
