@@ -1,0 +1,1234 @@
+{
+ "active": {
+  "page": {
+   "page_id": 6410630422455,
+   "name": "DeepSeek",
+   "url_name": "deepseek",
+   "type": "public",
+   "custom_domain": "status.deepseek.com",
+   "logo": "https://static.flashcat.cloud/statuspage/long-term/statuspage/image/5758820581287/6410630422455/logo_01KRD68AFGR1B4MXN1C7KMFDBM.png",
+   "dark_logo": "https://static.flashcat.cloud/statuspage/long-term/statuspage/image/5758820581287/6410630422455/logo_01KRD68K0AD6FZBCGZMPY0XK96.png",
+   "logo_url": "https://www.deepseek.com/",
+   "favicon": "https://static.flashcat.cloud/statuspage/long-term/statuspage/image/5758820581287/6410630422455/favicon_01KRD6DQEG6PHXDSA3J66PFMWV.png",
+   "date_view": "calendar",
+   "display_uptime_mode": "chart_and_percentage",
+   "components": [
+    {
+     "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+     "name": "API 服务 (API Service)",
+     "description": "https://api.deepseek.com 的状态 (The status of https://api.deepseek.com)",
+     "available_since_seconds": 1706745600,
+     "order_id": 1
+    },
+    {
+     "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+     "name": "网页对话服务 (Web Chat Service)",
+     "description": "https://chat.deepseek.com 的状态 (The status of https://chat.deepseek.com)",
+     "available_since_seconds": 1706745600,
+     "order_id": 2
+    }
+   ],
+   "sections": [],
+   "subscription": {
+    "email": true,
+    "im": false
+   },
+   "template_preference": "message"
+  },
+  "active_changes": []
+ },
+ "changeList": {
+  "items": [
+   {
+    "change_id": 6551550194287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "DeepSeek 网页 性能下降（DeepSeek Web Degraded Performance）",
+    "description": "本次问题已解决，服务已恢复。\n\nThe incident has been resolved and service has been restored.",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+      "name": "网页对话服务 (Web Chat Service)",
+      "description": "https://chat.deepseek.com 的状态 (The status of https://chat.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 2,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1780991884,
+    "close_at_seconds": 1780994827,
+    "updates": [
+     {
+      "update_id": "01KTNP6ZE299P31AT21YR31YHV",
+      "at_seconds": 1780991884,
+      "status": "identified",
+      "description": "已定位原因，正在实施修复。\n\nThe cause has been identified and a fix is being implemented.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "01KTNS0SC01G5FF20FT5A2JS3H",
+      "at_seconds": 1780994827,
+      "status": "resolved",
+      "description": "本次问题已解决，服务已恢复。\n\nThe incident has been resolved and service has been restored.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ],
+    "notify_subscribers": true
+   },
+   {
+    "change_id": 6499101276287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "API 性能下降（API Degraded Performance）",
+    "description": "本次问题已解决，服务已恢复。\n\nThe incident has been resolved and service has been restored.",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+      "name": "API 服务 (API Service)",
+      "description": "https://api.deepseek.com 的状态 (The status of https://api.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 1,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1779967491,
+    "close_at_seconds": 1779968182,
+    "updates": [
+     {
+      "update_id": "01KSQ58ZQAH3ECX1CKZ1RZJN7X",
+      "at_seconds": 1779967491,
+      "status": "investigating",
+      "description": "正在排查问题，以定位原因。\n\nThe issue is being investigated to identify the cause.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "partial_outage"
+       }
+      ]
+     },
+     {
+      "update_id": "01KSQ5Y2MJX8QGF97RSAKBGZHP",
+      "at_seconds": 1779968182,
+      "status": "resolved",
+      "description": "本次问题已解决，服务已恢复。\n\nThe incident has been resolved and service has been restored.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ],
+    "notify_subscribers": true
+   },
+   {
+    "change_id": 6497432543287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "DeepSeek 网页/API 性能下降（DeepSeek Web/API Degraded Performance）",
+    "description": "本次问题已解决，服务已恢复。\n\nThe incident has been resolved and service has been restored.",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+      "name": "API 服务 (API Service)",
+      "description": "https://api.deepseek.com 的状态 (The status of https://api.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 1,
+      "status": "operational"
+     },
+     {
+      "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+      "name": "网页对话服务 (Web Chat Service)",
+      "description": "https://chat.deepseek.com 的状态 (The status of https://chat.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 2,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1779934899,
+    "close_at_seconds": 1779936653,
+    "updates": [
+     {
+      "update_id": "01KSP66B5CN5PRMT7MPR7H2VG9",
+      "at_seconds": 1779934899,
+      "status": "identified",
+      "description": "已定位原因，正在实施修复。\n\nThe cause has been identified and a fix is being implemented.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "degraded"
+       },
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "01KSP6G7K0ED5A6D1ZW0N345Q1",
+      "at_seconds": 1779935223,
+      "status": "identified",
+      "description": "已定位原因，正在实施修复。\n\nThe cause has been identified and a fix is being implemented.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "partial_outage"
+       },
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "partial_outage"
+       }
+      ]
+     },
+     {
+      "update_id": "01KSP7BBJFF6GX7JNJW5GF6WTC",
+      "at_seconds": 1779936112,
+      "status": "monitoring",
+      "description": "已实施修复，正在监控结果。\n\nA fix has been implemented and the results are being monitored.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "operational"
+       },
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "01KSP7VWN6SNZS5D23ZPG8M92Z",
+      "at_seconds": 1779936653,
+      "status": "resolved",
+      "description": "本次问题已解决，服务已恢复。\n\nThe incident has been resolved and service has been restored.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ],
+    "notify_subscribers": true
+   },
+   {
+    "change_id": 6480608319287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "DeepSeek 网页端/API 不可用（DeepSeek WEB/API Unavailable）",
+    "description": "本次问题已解决，服务已恢复。\n\nThe incident has been resolved and service has been restored.",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+      "name": "API 服务 (API Service)",
+      "description": "https://api.deepseek.com 的状态 (The status of https://api.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 1,
+      "status": "operational"
+     },
+     {
+      "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+      "name": "网页对话服务 (Web Chat Service)",
+      "description": "https://chat.deepseek.com 的状态 (The status of https://chat.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 2,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1779606301,
+    "close_at_seconds": 1779607386,
+    "updates": [
+     {
+      "update_id": "01KSCCTAHZ4TSDK5RCWCWQ40ZT",
+      "at_seconds": 1779606301,
+      "status": "investigating",
+      "description": "正在排查问题，以定位原因。\n\nThe issue is being investigated to identify the cause.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "full_outage"
+       },
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "full_outage"
+       }
+      ]
+     },
+     {
+      "update_id": "01KSCDC2C9CJ9BA3XP0YYXF819",
+      "at_seconds": 1779606882,
+      "status": "identified",
+      "description": "已定位原因，正在实施修复。\n\nThe cause has been identified and a fix is being implemented.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "partial_outage"
+       },
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "partial_outage"
+       }
+      ]
+     },
+     {
+      "update_id": "01KSCDM1H26DW7FNQSAERHM8BP",
+      "at_seconds": 1779607143,
+      "status": "monitoring",
+      "description": "已实施修复，正在监控结果。\n\nA fix has been implemented and the results are being monitored."
+     },
+     {
+      "update_id": "01KSCDVEK15MVYF8RMVN349YYJ",
+      "at_seconds": 1779607386,
+      "status": "resolved",
+      "description": "本次问题已解决，服务已恢复。\n\nThe incident has been resolved and service has been restored.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "operational"
+       },
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ],
+    "notify_subscribers": true
+   },
+   {
+    "change_id": 6467187538287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "DeepSeek 网页/API 性能下降（DeepSeek Web/API Degraded Performance）",
+    "description": "本次问题已解决，服务已恢复。\n\nThe incident has been resolved and service has been restored.",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+      "name": "API 服务 (API Service)",
+      "description": "https://api.deepseek.com 的状态 (The status of https://api.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 1,
+      "status": "operational"
+     },
+     {
+      "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+      "name": "网页对话服务 (Web Chat Service)",
+      "description": "https://chat.deepseek.com 的状态 (The status of https://chat.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 2,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1779344176,
+    "close_at_seconds": 1779345434,
+    "updates": [
+     {
+      "update_id": "01KS4JTXF1Z4D3KQ9WEPMAQ2AM",
+      "at_seconds": 1779344176,
+      "status": "identified",
+      "description": "已定位原因，正在实施修复。\n\nThe cause has been identified and a fix is being implemented.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "degraded"
+       },
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "01KS4M1A544D2Z3CCGNQ6CJQMG",
+      "at_seconds": 1779345434,
+      "status": "resolved",
+      "description": "本次问题已解决，服务已恢复。\n\nThe incident has been resolved and service has been restored.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "operational"
+       },
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ],
+    "notify_subscribers": true
+   },
+   {
+    "change_id": 6410630567287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "【已恢复】DeepSeek 网页/API不可用（[Resolved]DeepSeek Web/API Service Not Available）",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+      "name": "API 服务 (API Service)",
+      "description": "https://api.deepseek.com 的状态 (The status of https://api.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 1,
+      "status": "operational"
+     },
+     {
+      "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+      "name": "网页对话服务 (Web Chat Service)",
+      "description": "https://chat.deepseek.com 的状态 (The status of https://chat.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 2,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1778232728,
+    "close_at_seconds": 1778234748,
+    "updates": [
+     {
+      "update_id": "",
+      "at_seconds": 1778232728,
+      "status": "identified",
+      "description": "The issue has been identified and a fix is being implemented.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "full_outage"
+       },
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "full_outage"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1778234508,
+      "status": "monitoring",
+      "description": "A fix has been implemented and we are monitoring the results.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       },
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1778234748,
+      "status": "resolved",
+      "description": "This incident has been resolved.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "operational"
+       },
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "change_id": 76779374745287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "【已恢复】DeepSeek 网页/API 性能异常（[Resolved]DeepSeek Web/API Service Degraded Performance）",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+      "name": "API 服务 (API Service)",
+      "description": "https://api.deepseek.com 的状态 (The status of https://api.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 1,
+      "status": "operational"
+     },
+     {
+      "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+      "name": "网页对话服务 (Web Chat Service)",
+      "description": "https://chat.deepseek.com 的状态 (The status of https://chat.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 2,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1778051625,
+    "close_at_seconds": 1778052020,
+    "updates": [
+     {
+      "update_id": "",
+      "at_seconds": 1778051625,
+      "status": "identified",
+      "description": "The issue has been identified and a fix is being implemented.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       },
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1778052020,
+      "status": "resolved",
+      "description": "This incident has been resolved.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "operational"
+       },
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "change_id": 147148118922287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "【已恢复】DeepSeek 网页/API 性能异常（[Resolved]DeepSeek Web/API Service Degraded Performance）",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+      "name": "API 服务 (API Service)",
+      "description": "https://api.deepseek.com 的状态 (The status of https://api.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 1,
+      "status": "operational"
+     },
+     {
+      "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+      "name": "网页对话服务 (Web Chat Service)",
+      "description": "https://chat.deepseek.com 的状态 (The status of https://chat.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 2,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1778039584,
+    "close_at_seconds": 1778040256,
+    "updates": [
+     {
+      "update_id": "",
+      "at_seconds": 1778039584,
+      "status": "identified",
+      "description": "The issue has been identified and a fix is being implemented.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "partial_outage"
+       },
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "partial_outage"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1778040256,
+      "status": "resolved",
+      "description": "This incident has been resolved.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "operational"
+       },
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "change_id": 217516863100287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "【已恢复】DeepSeek API 异常（[Resolved]DeepSeek API Abnormal）",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+      "name": "API 服务 (API Service)",
+      "description": "https://api.deepseek.com 的状态 (The status of https://api.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 1,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1776853398,
+    "close_at_seconds": 1776857192,
+    "updates": [
+     {
+      "update_id": "",
+      "at_seconds": 1776853398,
+      "status": "investigating",
+      "description": "We are currently investigating this issue.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "full_outage"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1776857192,
+      "status": "resolved",
+      "description": "This incident has been resolved.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+        "component_name": "API 服务 (API Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "change_id": 287885607278287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "【已解决】DeepSeek Web/APP 快速模式性能异常（[Resolved]DeepSeek Web/APP Instant Mode Performance Abnormal）",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+      "name": "网页对话服务 (Web Chat Service)",
+      "description": "https://chat.deepseek.com 的状态 (The status of https://chat.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 2,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1776688800,
+    "close_at_seconds": 1776701307,
+    "updates": [
+     {
+      "update_id": "",
+      "at_seconds": 1776688800,
+      "status": "investigating",
+      "description": "We are currently investigating this issue.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1776701307,
+      "status": "resolved",
+      "description": "This incident has been resolved.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "change_id": 358254351455287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "【已恢复】DeepSeek 网页/APP 服务异常（[Resolved]DeepSeek Web/APP Service Abnormal）",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+      "name": "网页对话服务 (Web Chat Service)",
+      "description": "https://chat.deepseek.com 的状态 (The status of https://chat.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 2,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1775205401,
+    "close_at_seconds": 1775206218,
+    "updates": [
+     {
+      "update_id": "",
+      "at_seconds": 1775205401,
+      "status": "investigating",
+      "description": "We are currently investigating this issue.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1775205495,
+      "status": "investigating",
+      "description": "We are continuing to investigate this issue.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "full_outage"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1775205598,
+      "status": "monitoring",
+      "description": "A fix has been implemented and we are monitoring the results.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1775206218,
+      "status": "resolved",
+      "description": "This incident has been resolved.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "change_id": 428623095633287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "【已解决】DeepSeek 网页/API 性能异常（[Resolved]DeepSeek Web/API Service Degraded Performance）",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+      "name": "网页对话服务 (Web Chat Service)",
+      "description": "https://chat.deepseek.com 的状态 (The status of https://chat.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 2,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1774947759,
+    "close_at_seconds": 1774951554,
+    "updates": [
+     {
+      "update_id": "",
+      "at_seconds": 1774947760,
+      "status": "investigating",
+      "description": "We are currently investigating this issue.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "partial_outage"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1774949734,
+      "status": "investigating",
+      "description": "We are continuing to investigate this issue.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "full_outage"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1774951554,
+      "status": "resolved",
+      "description": "This incident has been resolved.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "change_id": 498991839811287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "【已解决】DeepSeek 网页/APP 性能异常（[Resolved]DeepSeek Web/APP Service Performance Agnormal）",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+      "name": "网页对话服务 (Web Chat Service)",
+      "description": "https://chat.deepseek.com 的状态 (The status of https://chat.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 2,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1774801214,
+    "close_at_seconds": 1774838022,
+    "updates": [
+     {
+      "update_id": "",
+      "at_seconds": 1774801214,
+      "status": "investigating",
+      "description": "We are currently investigating this issue.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "full_outage"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1774802189,
+      "status": "investigating",
+      "description": "We are continuing to investigate this issue.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1774805059,
+      "status": "monitoring",
+      "description": "A fix has been implemented and we are monitoring the results.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1774808176,
+      "status": "investigating",
+      "description": "We are currently investigating this issue.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "full_outage"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1774833225,
+      "status": "monitoring",
+      "description": "A fix has been implemented and we are monitoring the results.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1774838008,
+      "status": "monitoring",
+      "description": "We are continuing to monitor for any further issues.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "operational"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1774838022,
+      "status": "resolved",
+      "description": "This incident has been resolved.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "change_id": 569360583988287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "【已恢复】DeepSeek 网页/APP 服务异常（[Resolved]DeepSeek Web/APP Service Abnormal）",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+      "name": "网页对话服务 (Web Chat Service)",
+      "description": "https://chat.deepseek.com 的状态 (The status of https://chat.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 2,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1774791352,
+    "close_at_seconds": 1774797797,
+    "updates": [
+     {
+      "update_id": "",
+      "at_seconds": 1774791352,
+      "status": "investigating",
+      "description": "We are currently investigating this issue.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "full_outage"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1774794507,
+      "status": "identified",
+      "description": "The issue has been identified and a fix is being implemented.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "full_outage"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1774796932,
+      "status": "monitoring",
+      "description": "A fix has been implemented and we are monitoring the results.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1774797797,
+      "status": "resolved",
+      "description": "This incident has been resolved.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "change_id": 639729328166287,
+    "page_id": 6410630422455,
+    "type": "incident",
+    "title": "【已解决】DeepSeek 网页/APP 性能异常（[Resolved]DeepSeek Web/APP Service Degraded Performance）",
+    "status": "resolved",
+    "affected_components": [
+     {
+      "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+      "name": "网页对话服务 (Web Chat Service)",
+      "description": "https://chat.deepseek.com 的状态 (The status of https://chat.deepseek.com)",
+      "available_since_seconds": 1706745600,
+      "order_id": 2,
+      "status": "operational"
+     }
+    ],
+    "start_at_seconds": 1773836812,
+    "close_at_seconds": 1773837427,
+    "updates": [
+     {
+      "update_id": "",
+      "at_seconds": 1773836812,
+      "status": "investigating",
+      "description": "We are currently investigating this issue.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1773836959,
+      "status": "identified",
+      "description": "The issue has been identified and a fix is being implemented.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "degraded"
+       }
+      ]
+     },
+     {
+      "update_id": "",
+      "at_seconds": 1773837427,
+      "status": "resolved",
+      "description": "This incident has been resolved.",
+      "component_changes": [
+       {
+        "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+        "component_name": "网页对话服务 (Web Chat Service)",
+        "status": "operational"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "structure": {
+  "section_impacts": [],
+  "section_uptimes": [],
+  "component_impacts": [
+   {
+    "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+    "section_id": "",
+    "change_id": 6467187538287,
+    "start_at_seconds": 1779344176,
+    "end_at_seconds": 1779345434,
+    "status": "degraded"
+   },
+   {
+    "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+    "section_id": "",
+    "change_id": 6467187538287,
+    "start_at_seconds": 1779344176,
+    "end_at_seconds": 1779345434,
+    "status": "degraded"
+   },
+   {
+    "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+    "section_id": "",
+    "change_id": 6480608319287,
+    "start_at_seconds": 1779606301,
+    "end_at_seconds": 1779606882,
+    "status": "full_outage"
+   },
+   {
+    "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+    "section_id": "",
+    "change_id": 6480608319287,
+    "start_at_seconds": 1779606301,
+    "end_at_seconds": 1779606882,
+    "status": "full_outage"
+   },
+   {
+    "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+    "section_id": "",
+    "change_id": 6480608319287,
+    "start_at_seconds": 1779606882,
+    "end_at_seconds": 1779607386,
+    "status": "partial_outage"
+   },
+   {
+    "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+    "section_id": "",
+    "change_id": 6480608319287,
+    "start_at_seconds": 1779606882,
+    "end_at_seconds": 1779607386,
+    "status": "partial_outage"
+   },
+   {
+    "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+    "section_id": "",
+    "change_id": 6497432543287,
+    "start_at_seconds": 1779934899,
+    "end_at_seconds": 1779935223,
+    "status": "degraded"
+   },
+   {
+    "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+    "section_id": "",
+    "change_id": 6497432543287,
+    "start_at_seconds": 1779934899,
+    "end_at_seconds": 1779935223,
+    "status": "degraded"
+   },
+   {
+    "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+    "section_id": "",
+    "change_id": 6497432543287,
+    "start_at_seconds": 1779935223,
+    "end_at_seconds": 1779936112,
+    "status": "partial_outage"
+   },
+   {
+    "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+    "section_id": "",
+    "change_id": 6497432543287,
+    "start_at_seconds": 1779935223,
+    "end_at_seconds": 1779936112,
+    "status": "partial_outage"
+   },
+   {
+    "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+    "section_id": "",
+    "change_id": 6497432543287,
+    "start_at_seconds": 1779936112,
+    "end_at_seconds": 1779936653,
+    "status": "degraded"
+   },
+   {
+    "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+    "section_id": "",
+    "change_id": 6499101276287,
+    "start_at_seconds": 1779967491,
+    "end_at_seconds": 1779968182,
+    "status": "partial_outage"
+   },
+   {
+    "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+    "section_id": "",
+    "change_id": 6551550194287,
+    "start_at_seconds": 1780991884,
+    "end_at_seconds": 1780994827,
+    "status": "degraded"
+   }
+  ],
+  "component_uptimes": [
+   {
+    "component_id": "01KR3NC9ETZYF436Z8YT1HM047",
+    "section_id": "",
+    "uptime": 99.89,
+    "available_since_seconds": 1706745600
+   },
+   {
+    "component_id": "01KR3NC9ETESRRQ4GABE0TGW53",
+    "section_id": "",
+    "uptime": 99.92,
+    "available_since_seconds": 1706745600
+   }
+  ],
+  "linked_changes": [
+   {
+    "id": 6467187538287,
+    "type": "incident",
+    "title": "DeepSeek 网页/API 性能下降（DeepSeek Web/API Degraded Performance）"
+   },
+   {
+    "id": 6480608319287,
+    "type": "incident",
+    "title": "DeepSeek 网页端/API 不可用（DeepSeek WEB/API Unavailable）"
+   },
+   {
+    "id": 6497432543287,
+    "type": "incident",
+    "title": "DeepSeek 网页/API 性能下降（DeepSeek Web/API Degraded Performance）"
+   },
+   {
+    "id": 6499101276287,
+    "type": "incident",
+    "title": "API 性能下降（API Degraded Performance）"
+   },
+   {
+    "id": 6551550194287,
+    "type": "incident",
+    "title": "DeepSeek 网页 性能下降（DeepSeek Web Degraded Performance）"
+   }
+  ]
+ }
+}

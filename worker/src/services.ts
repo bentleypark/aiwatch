@@ -6,6 +6,7 @@ import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure,
 import { isProbeHealthy, type ProbeSnapshot } from './probe'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
+import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, computeUptimeFromIncidents, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
@@ -53,12 +54,15 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'cerebras', name: 'Cerebras Inference', provider: 'Cerebras', category: 'api', statusUrl: 'https://status.cerebras.ai', apiUrl: 'https://status.cerebras.ai/api/v2/summary.json', statusComponentId: '83h1cchw4vs4', statusComponentIds: ['83h1cchw4vs4', '7xvps6c9lqwc', 'bhqw2gr7r710', 'hgfykfsb36gn', '8ygyx5vydlm2'] },
   { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com' },
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
-  // status.deepseek.com blocks Cloudflare Workers IPs (SSL reset); deepseek.statuspage.io is the
-  // Atlassian-hosted mirror that's accessible from Workers — same component IDs, same data (#498).
-  // #591/#507 — that mirror FROZE at 2026-05-08 (DeepSeek migrated to Flashduty, unreachable
-  // server-side); it still returns 200 with stale data, so the feed reads as current but isn't.
-  // `incidentSourceStale` excludes it from all Score rankings until the feed is reachable again.
-  { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://deepseek.statuspage.io/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x', incidentKeywords: ['api'], incidentSourceStale: true },
+  // status.deepseek.com (Flashduty, #507) blocks NON-BROWSER TLS fingerprints — a Worker fetch()
+  // is reset at the TLS layer regardless of egress IP (verified 2026-06-12: a real Chromium from
+  // the SAME IP succeeds where curl/fetch are reset, so it's a JA3/bot wall, NOT an IP block).
+  // #618 — a scheduled GitHub Action browser-renders the page and POSTs the Flashduty feed to
+  // /api/internal/deepseek-feed → KV. `flashdutyFeed` makes fetchService prefer that KV feed (fresh
+  // → supersedes the mirror, clears the stale flag). The deepseek.statuspage.io Atlassian mirror
+  // (#498) is the FALLBACK when the feed is missing/expired — it FROZE at 2026-05-08 (#591/#507),
+  // returning 200 with stale data, so `incidentSourceStale` keeps it out of Score rankings then.
+  { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://deepseek.statuspage.io/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x', incidentKeywords: ['api'], incidentSourceStale: true, flashdutyFeed: true, flashdutyPrimaryComponentId: '01KR3NC9ETZYF436Z8YT1HM047' },
   { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, onlineOrNotUrl: 'https://status.openrouter.ai', onlineOrNotComponent: 'Chat (/api/v1/chat/completions)' },
   // Voice & Speech AI
   // displayComponentIds (#606): curated availability surfaces for the breakdown card —
@@ -478,6 +482,48 @@ interface PrefetchedData {
 // For services without `apiUrl`, status is based on HTTP reachability of the status page (200 = operational).
 // This may not reflect actual service outages if the status page itself remains up.
 
+// #618 — read the browser-rendered Flashduty feed (pushed to KV by the deepseek-feed Action) and
+// normalize it into a ServiceStatus. Returns null when the KV key is absent/expired/corrupt so the
+// caller falls through to the frozen-mirror apiUrl path (which keeps incidentSourceStale). On a
+// fresh feed the result intentionally DROPS the stale flag — the data is now live, not frozen.
+async function readFlashdutyStatus(kv: KVNamespace, config: ServiceConfig, base: ServiceStatus, now: string): Promise<ServiceStatus | null> {
+  let raw: string | null
+  try {
+    raw = await kv.get(DEEPSEEK_FEED_KV_KEY)
+  } catch (err) {
+    console.warn(`[fetchService] ${base.id} flashduty KV read failed:`, err instanceof Error ? err.message : err)
+    return null
+  }
+  if (!raw) return null
+  let parsed
+  let fetchedAt: string | undefined
+  try {
+    const stored = JSON.parse(raw) as StoredFlashdutyFeed
+    fetchedAt = stored.fetchedAt
+    parsed = parseFlashdutyFeed(stored.feed, { primaryComponentId: config.flashdutyPrimaryComponentId })
+  } catch (err) {
+    console.warn(`[fetchService] ${base.id} flashduty parse failed:`, err instanceof Error ? err.message : err)
+    return null
+  }
+  const result: ServiceStatus = {
+    ...base,
+    status: parsed.status,
+    lastChecked: now,
+    incidents: parsed.incidents,
+    ...(parsed.uptime30d != null ? { uptime30d: parsed.uptime30d, uptimeSource: 'official' as const } : {}),
+    ...(Object.keys(parsed.dailyImpact).length > 0 ? { dailyImpact: parsed.dailyImpact } : {}),
+    ...(parsed.components.length >= 2 ? { components: parsed.components } : {}),
+  }
+  // A FRESH feed (≤ soft-stale window) → no longer stale: strip the config's incidentSourceStale so
+  // ranking/fallback re-include DeepSeek with trustworthy data. An AGING feed (older than the soft
+  // window but not yet KV-expired) still serves its live badge/incidents but KEEPS incidentSourceStale
+  // so the stale snapshot can't inflate the Score ranking until a fresh scraper push lands.
+  const ageS = (Date.parse(now) - Date.parse(fetchedAt ?? '')) / 1000
+  const fresh = Number.isFinite(ageS) && ageS <= DEEPSEEK_FEED_SOFT_STALE_S
+  if (fresh) delete (result as { incidentSourceStale?: boolean }).incidentSourceStale
+  return result
+}
+
 async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
   const now = new Date().toISOString()
   let parseErrors = 0 // Track internal parse/fetch failures — prevents resetFetchFailure from masking repeated errors
@@ -497,6 +543,14 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
   }
 
   try {
+    // #618 — DeepSeek: prefer the browser-rendered Flashduty feed cached in KV by the scraper Action.
+    // Fresh feed supersedes the frozen Atlassian mirror and clears incidentSourceStale; missing/
+    // expired feed falls through to the apiUrl path below (which keeps the stale flag from base).
+    if (config.flashdutyFeed && kv) {
+      const fed = await readFlashdutyStatus(kv, config, base, now)
+      if (fed) return fed
+    }
+
     if (config.apiUrl) {
       // Atlassian Statuspage API — use pre-fetched data when available, else fetch directly
       let summaryData: StatuspageResponse

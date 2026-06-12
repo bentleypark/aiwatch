@@ -147,6 +147,16 @@ export interface ServiceConfig {
   // ServiceStatus.incidentSourceStale → all ranking surfaces exclude it (a frozen empty 30-day
   // incident window would otherwise inflate the Score). REMOVE once the feed is reachable again.
   incidentSourceStale?: boolean
+  // #618 — the service's live status comes from a browser-rendered Flashduty feed pushed to KV by
+  // the deepseek-feed GitHub Action (status.deepseek.com is bot-walled to a plain Worker fetch).
+  // When set, fetchService reads DEEPSEEK_FEED_KV_KEY first; a FRESH feed supersedes apiUrl and
+  // clears incidentSourceStale, while a missing/expired feed falls through to apiUrl (the frozen
+  // Atlassian mirror) keeping incidentSourceStale. Pairs with incidentSourceStale (the fallback).
+  flashdutyFeed?: boolean
+  // #618 option A — scope the Flashduty feed to a single component id (the API surface), excluding
+  // sibling consumer-app components (e.g. DeepSeek's Web Chat) from the badge/incidents/uptime/score
+  // — the same api-vs-app split as OpenAI API (incidentExclude:['chatgpt']). Absent → whole feed.
+  flashdutyPrimaryComponentId?: string
 }
 
 export interface ProbeSummary {

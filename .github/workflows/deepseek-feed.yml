@@ -1,0 +1,43 @@
+name: DeepSeek status feed
+
+# #618 — DeepSeek's status page (status.deepseek.com, Flashduty) blocks non-browser TLS
+# fingerprints, so the Cloudflare Worker can't read it directly. This Action browser-renders the
+# page every 15 min, fetches the clean Flashduty JSON API from the browser context, and POSTs it to
+# the Worker (/api/internal/deepseek-feed → KV). fetchService('deepseek') then serves live incidents
+# and the Score re-includes DeepSeek (incidentSourceStale lifts while the feed is fresh; a 3h KV TTL
+# falls back to the frozen Atlassian mirror if this Action stops).
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # every 15 min (GH cron is best-effort; the 3h KV TTL tolerates misses)
+  workflow_dispatch: {}       # manual trigger for first-run verification
+
+# A scheduled run + a manual dispatch (or an overlapping slow run) must not double-push.
+concurrency:
+  group: deepseek-feed
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scrape:
+    name: Scrape + push Flashduty feed
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    # Official Playwright image ships Chromium + system deps preinstalled — no per-run browser
+    # download. Pin the tag to the @playwright/test version in package.json (^1.58.2).
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-jammy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Playwright (npm pkg only — browsers are in the image)
+        run: npm install --no-save playwright@1.58.2
+      - name: Scrape DeepSeek feed + push to Worker
+        run: node scripts/scrape-deepseek-feed.mjs
+        env:
+          WORKER_URL: ${{ secrets.DEEPSEEK_FEED_WORKER_URL }}     # e.g. https://aiwatch-worker.p2c2kbf.workers.dev
+          DEEPSEEK_FEED_TOKEN: ${{ secrets.DEEPSEEK_FEED_TOKEN }} # must equal the Worker secret of the same name

@@ -17,6 +17,7 @@ import { corsHeaders } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
 import { recordV1Traffic, queryV1Traffic } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
+import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -40,6 +41,11 @@ interface Env {
   // `wrangler secret put EDGE_ALERT_TOKEN` and the same value as a Vercel env
   // var so both ends agree. Absent secret → endpoint always 401.
   EDGE_ALERT_TOKEN?: string
+  // #618: Bearer token for POST /api/internal/deepseek-feed — the GitHub Action scraper that
+  // browser-renders status.deepseek.com (bot-walled to a plain Worker fetch) authenticates with
+  // this. Set via `wrangler secret put DEEPSEEK_FEED_TOKEN` and the same value as a GH Action
+  // secret. Absent secret → endpoint always 401.
+  DEEPSEEK_FEED_TOKEN?: string
   AI?: Ai
   STATUS_CACHE: KVNamespace
   // #494: Workers Analytics Engine dataset for statusline traffic measurement.
@@ -1242,6 +1248,51 @@ export async function handleEdgeFallbackAlert(request: Request, env: Env, cors: 
   return json(200, { ok: true, dispatched })
 }
 
+// ── POST /api/internal/deepseek-feed ───────────────────────────
+// #618: status.deepseek.com (Flashduty) blocks non-browser TLS fingerprints, so a Worker fetch()
+// can't read DeepSeek's live incidents. A scheduled GitHub Action browser-renders the page, fetches
+// the Flashduty JSON API, and POSTs the raw { active, changeList, structure } payload here. We cache
+// it in KV (DEEPSEEK_FEED_KV_KEY, 3h TTL); fetchService('deepseek') reads + normalizes it (via
+// parseFlashdutyFeed) instead of the frozen Atlassian mirror, lifting incidentSourceStale while the
+// feed is fresh. Auth: Bearer DEEPSEEK_FEED_TOKEN. Body shape validated minimally; parsing happens
+// at read time so a malformed push can't corrupt the served status mid-write.
+interface DeepseekFeedRequest {
+  active?: unknown
+  changeList?: unknown
+  structure?: unknown
+}
+
+export async function handleDeepseekFeed(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+
+  if (!env.DEEPSEEK_FEED_TOKEN) return json(401, { ok: false, error: 'unauthorized' })
+  const auth = request.headers.get('Authorization') ?? ''
+  if (!constantTimeEqual(auth, `Bearer ${env.DEEPSEEK_FEED_TOKEN}`)) return json(401, { ok: false, error: 'unauthorized' })
+
+  let body: DeepseekFeedRequest
+  try { body = await request.json() } catch { return json(400, { ok: false, error: 'invalid JSON body' }) }
+
+  // Require at least one of the three sections to be a non-null object — a totally empty push is a
+  // scraper bug, not a valid "all clear", and must NOT overwrite a good cached feed.
+  const sections = [body.active, body.changeList, body.structure]
+  if (!sections.some((s) => s !== null && typeof s === 'object')) {
+    return json(400, { ok: false, error: 'at least one of active/changeList/structure (object) required' })
+  }
+
+  const feed: FlashdutyFeed = {
+    active: (body.active ?? undefined) as FlashdutyFeed['active'],
+    changeList: (body.changeList ?? undefined) as FlashdutyFeed['changeList'],
+    structure: (body.structure ?? undefined) as FlashdutyFeed['structure'],
+  }
+  const stored: StoredFlashdutyFeed = { fetchedAt: new Date().toISOString(), feed }
+  await kvPut(env.STATUS_CACHE, DEEPSEEK_FEED_KV_KEY, JSON.stringify(stored), { expirationTtl: DEEPSEEK_FEED_TTL_S })
+
+  const incidentCount = feed.changeList?.items?.length ?? 0
+  const activeCount = feed.active?.active_changes?.length ?? 0
+  return json(200, { ok: true, stored: true, fetchedAt: stored.fetchedAt, incidents: incidentCount, active: activeCount })
+}
+
 // ── POST /api/admin/rebuild-archive ─────────────────────────────
 // Operator tool to regenerate a specific month's archive:monthly:{YYYY-MM} key.
 // Motivated by the discovery that earlier archive cron runs persisted score: null /
@@ -2208,6 +2259,12 @@ export default {
     // dedup ensures one notice per 5min per surface+slug.
     if (request.method === 'POST' && url.pathname === '/api/internal/edge-fallback') {
       return handleEdgeFallbackAlert(request, env, cors)
+    }
+
+    // POST /api/internal/deepseek-feed — GitHub Action scraper pushes the browser-rendered
+    // Flashduty feed for DeepSeek (#618), cached in KV for fetchService to normalize.
+    if (request.method === 'POST' && url.pathname === '/api/internal/deepseek-feed') {
+      return handleDeepseekFeed(request, env, cors)
     }
 
     // POST /api/admin/rebuild-archive — operator tool to regenerate a specific month's
