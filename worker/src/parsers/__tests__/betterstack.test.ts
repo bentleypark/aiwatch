@@ -1,5 +1,56 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount } from '../betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from '../betterstack'
+
+describe('parseBetterStackComponents (#606 Cat C)', () => {
+  const fixture = {
+    included: [
+      { type: 'status_page_section', id: '231960', attributes: { name: 'Website' } },
+      { type: 'status_page_section', id: '231963', attributes: { name: 'Inference - Chat' } },
+      { type: 'status_page_section', id: '231961', attributes: { name: 'Inference - Images' } },
+      { type: 'status_page_resource', id: '1', attributes: { public_name: 'Website', status: 'operational', status_page_section_id: '231960' } },
+      { type: 'status_page_resource', id: '2', attributes: { public_name: 'Llama 3.3 70B', status: 'operational', status_page_section_id: '231963' } },
+      { type: 'status_page_resource', id: '3', attributes: { public_name: 'Kimi K2', status: 'degraded', status_page_section_id: '231963' } },
+      { type: 'status_page_resource', id: '4', attributes: { public_name: 'FLUX.1', status: 'downtime', status_page_section_id: '231961' } },
+      { type: 'status_page_resource', id: '5', attributes: { public_name: 'Playground', status: 'maintenance' } }, // no section → ungrouped surface
+    ],
+  }
+
+  it('maps resources to components grouped by section, normalizing status; single-member sections demote to surface rows', () => {
+    expect(parseBetterStackComponents(fixture)).toEqual([
+      { id: '1', name: 'Website', status: 'operational' }, // 'Website' section has 1 member → no group
+      { id: '2', name: 'Llama 3.3 70B', status: 'operational', group: 'Inference - Chat' }, // 2 members → grouped
+      { id: '3', name: 'Kimi K2', status: 'degraded', group: 'Inference - Chat' },
+      { id: '4', name: 'FLUX.1', status: 'down' }, // downtime → down; 'Inference - Images' has 1 member → no group
+      { id: '5', name: 'Playground', status: 'operational' }, // maintenance → operational, no section
+    ])
+  })
+
+  it('drops resources/sections matched by the denylist (case-insensitive, by section name too)', () => {
+    const out = parseBetterStackComponents(fixture, { denylist: ['website'] })
+    // Both the Website resource AND any resource in the "Website" section are dropped.
+    expect(out.map((c) => c.name)).toEqual(['Llama 3.3 70B', 'Kimi K2', 'FLUX.1', 'Playground'])
+  })
+
+  it('returns [] when fewer than 2 components survive', () => {
+    const tiny = { included: [{ type: 'status_page_resource', id: '1', attributes: { public_name: 'API', status: 'operational' } }] }
+    expect(parseBetterStackComponents(tiny)).toEqual([])
+    expect(parseBetterStackComponents({})).toEqual([])
+  })
+
+  it('skips resources with no public_name, treats unknown status as operational, and leaves a dangling section ungrouped', () => {
+    const data = {
+      included: [
+        { type: 'status_page_resource', id: '1', attributes: { status: 'operational' } }, // no public_name → skipped
+        { type: 'status_page_resource', id: '2', attributes: { public_name: 'A', status: 'under_maintenance' } }, // unknown → operational
+        { type: 'status_page_resource', id: '3', attributes: { public_name: 'B', status: 'operational', status_page_section_id: '999' } }, // section 999 absent → ungrouped
+      ],
+    }
+    expect(parseBetterStackComponents(data)).toEqual([
+      { id: '2', name: 'A', status: 'operational' },
+      { id: '3', name: 'B', status: 'operational' },
+    ])
+  })
+})
 
 describe('parseRssIncidents', () => {
   it('groups RSS items by guid into incidents', () => {

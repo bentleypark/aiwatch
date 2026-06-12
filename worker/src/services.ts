@@ -17,7 +17,7 @@ import {
   computeDailyImpactFromIncidents,
 } from './parsers/aistudio'
 import { parseInstatusIncidents } from './parsers/instatus'
-import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount } from './parsers/betterstack'
+import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
 import { parseAwsRssIncidents, deriveAwsStatus } from './parsers/aws'
 
@@ -44,8 +44,8 @@ export const SERVICES: ServiceConfig[] = [
   // the rest fold into a collapsible "Models" group (matches the official Endpoints/Models split).
   { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['Coral', 'Infrastructure', 'Playground', 'embeddings'] },
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['API'] },
-  { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed', betterStackUrl: 'https://status.together.ai', flapSuppression: true },
-  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: null, rssFeedUrl: 'https://status.fireworks.ai/feed', betterStackUrl: 'https://status.fireworks.ai', flapSuppression: true },
+  { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed', betterStackUrl: 'https://status.together.ai', flapSuppression: true, componentDenylist: ['Website'] },
+  { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: null, rssFeedUrl: 'https://status.fireworks.ai/feed', betterStackUrl: 'https://status.fireworks.ai', flapSuppression: true, componentDenylist: ['Website'] },
   // Cerebras Inference (#391) — Atlassian Statuspage, 5 components: 4 model surfaces + Developer Console.
   // Multi-component worst-of (#379): statusComponentIds lists all 5 so any degraded model degrades the
   // service; statusComponentId (Developer Console) is the primary for uptime parsing / calendar /
@@ -71,7 +71,7 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'assemblyai', name: 'AssemblyAI', provider: 'AssemblyAI', category: 'api', statusUrl: 'https://status.assemblyai.com', apiUrl: 'https://status.assemblyai.com/api/v2/summary.json', statusComponentId: '50txf4qfk2kv', displayComponentIds: ['kygwc83t1rfg', '20vm7q71wjcn', 'trxjzz9bwdmc', 'psxcg5mfhznq', 'rfh9swc12f9h', '12wrfd55ml3r'] },
   { id: 'deepgram', name: 'Deepgram', provider: 'Deepgram', category: 'api', statusUrl: 'https://status.deepgram.com', apiUrl: 'https://status.deepgram.com/api/v2/summary.json', statusComponentId: 'cv8l6gg3cb9d', displayComponentIds: ['m49xkwqkc4kh', 's6v5z4lsl658', '6854s60zwxgw', 'r2z04fcdhhzb', 'jgfq9ffjsfqk', 'vm1x1v101qtn', 'cvbdk3fslx9v', 't80v4qz2jdsf'] },
   // Inference / Infrastructure
-  { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed', betterStackUrl: 'https://status.huggingface.co', flapSuppression: true },
+  { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed', betterStackUrl: 'https://status.huggingface.co', flapSuppression: true, componentDenylist: ['Website'] },
   // displayComponentIds (#606): curated API/product surfaces — HTTP API, Streaming API, Registry,
   // Official Models, Playground (excludes Billing/Support/Home Page/Hardware×5). Display-only.
   { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: '01JRJYHBWCXHFZ0NHMP1N7T2G3', displayComponentIds: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01J5NNACBNTG5GR693P6RH5Q6J'] },
@@ -82,7 +82,7 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'stability', name: 'Stability AI', provider: 'Stability AI', category: 'api', statusUrl: 'https://status.stability.ai', apiUrl: 'https://status.stability.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.stability.ai/incidents', incidentIoComponentId: '01JW9J39X55NDFZTZT3K5NYR48' },
   // displayComponentIds (#606): API + User Dashboard. Display-only.
   { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr', displayComponentIds: ['g74wmxgm0zxr', 'p4zzcfjd8p5q'] },
-  { id: 'modal', name: 'Modal', provider: 'Modal', category: 'api', statusUrl: 'https://status.modal.com', apiUrl: null, rssFeedUrl: 'https://status.modal.com/feed', betterStackUrl: 'https://status.modal.com', flapSuppression: true },
+  { id: 'modal', name: 'Modal', provider: 'Modal', category: 'api', statusUrl: 'https://status.modal.com', apiUrl: null, rssFeedUrl: 'https://status.modal.com/feed', betterStackUrl: 'https://status.modal.com', flapSuppression: true, componentDenylist: ['Website'] },
   // LangSmith (#561) — LangChain's hosted observability/eval platform. incident.io page exposes a
   // statuspage v2-compatible API so statuspage.ts covers it. Multi-component worst-of (#379): badge
   // tracks the three load-bearing surfaces (Run Ingestion + API + Application); the other components
@@ -109,7 +109,7 @@ export const SERVICES: ServiceConfig[] = [
   // rssFeedUrl (incidents) + betterStackUrl /index.json (status + uptime). flapSuppression: true — the
   // page auto-emits "X went down/recovered/degraded" model blips (#283/#597). Video-native, so no
   // component scoping needed. is-down slug == id ('luma'). Probe-less (API auth-gated).
-  { id: 'luma', name: 'Luma (Dream Machine)', provider: 'Luma', category: 'api', statusUrl: 'https://status.lumalabs.ai', apiUrl: null, rssFeedUrl: 'https://status.lumalabs.ai/feed', betterStackUrl: 'https://status.lumalabs.ai', flapSuppression: true },
+  { id: 'luma', name: 'Luma (Dream Machine)', provider: 'Luma', category: 'api', statusUrl: 'https://status.lumalabs.ai', apiUrl: null, rssFeedUrl: 'https://status.lumalabs.ai/feed', betterStackUrl: 'https://status.lumalabs.ai', flapSuppression: true, componentDenylist: ['Website'] },
   // AI Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   // displayComponentIds (#606): all Character.AI surfaces (single-owner page). Display-only.
@@ -883,6 +883,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       let betterStackUptime: number | null = null
       let betterStackStat: 'operational' | 'degraded' | 'down' | null = null
       let betterStackPartial = 0
+      let betterStackComponents: ServiceComponent[] = []
       let bsDailyImpact: Record<string, DailyImpactLevel> | null = null
       if (betterStackRes && !betterStackRes.ok) {
         console.warn(`[fetchService] ${config.id} BetterStack index.json returned HTTP ${betterStackRes.status}`)
@@ -894,6 +895,9 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           betterStackUptime = parseBetterStackUptime(bsData)
           betterStackStat = parseBetterStackStatus(bsData)
           betterStackPartial = parseBetterStackPartialCount(bsData)
+          // #606 Cat C — per-resource breakdown grouped by status_page_section (display-only;
+          // status/uptime/incidents are unchanged). componentDenylist drops noise sections (e.g. Website).
+          betterStackComponents = parseBetterStackComponents(bsData, { denylist: config.componentDenylist })
           bsDailyImpact = parseBetterStackDailyImpact(bsData)
           // Filter out planned-maintenance events (report_type='maintenance') — signal 3 of 3.
           // Catches custom-titled maintenance events like "Authorization System Restart" (#503)
@@ -972,6 +976,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
         ...(betterStackUptime != null ? { uptime30d: betterStackUptime, uptimeSource: 'platform_avg' as const } : {}),
         ...(betterStackPartial > 0 ? { partialCount: betterStackPartial } : {}),
+        ...(betterStackComponents.length > 0 ? { components: betterStackComponents } : {}),
       }
     }
   } catch (err) {
