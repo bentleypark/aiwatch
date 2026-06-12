@@ -38,6 +38,7 @@
 - **24시간 지연시간 추세** — Chart.js 라인 차트 (5분 간격 probe 스냅샷)
 - **인시던트 이력** — 다양한 상태 페이지 형식의 타임라인 상세 정보
 - **공식 가동률** — Statuspage, incident.io, Better Stack에서 컴포넌트별 가동률
+- **구성요소 상태 분해** — 24개 멀티컴포넌트 서비스의 서비스별 상세 + Is X Down에 구성요소별(모델·API 표면 등) 실시간 상태 표시. 많으면 섹션/모델 그룹으로 접힘
 - **상태 캘린더** — 30일(Statuspage) 또는 14일(incident.io) 일별 상태 시각화
 - **Discord & Slack 알림** — 상태 변경/인시던트 Discord Webhook + Slack 내장 `/feed` RSS 앱(설정 0) + RSS 피드
 - **쿠키 동의** — GA4 Consent Mode v2 (동의/필수만)
