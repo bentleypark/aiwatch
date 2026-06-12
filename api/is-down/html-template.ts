@@ -40,6 +40,9 @@ export interface ServiceData {
   rankTied?: boolean
   totalRanked?: number
   incidentSourceStale?: boolean
+  /** #604 — per-component snapshot for multi-component services. Curated subset preserved
+   *  by the worker (statusComponentIds), present only when ≥2 components matched. */
+  components?: Array<{ id: string; name: string; status: 'operational' | 'degraded' | 'down' }>
 }
 
 interface Fallback {
@@ -287,6 +290,7 @@ ${renderStatusHeader(service, seo)}
 ${renderCTA(seo, service?.status ?? 'operational', slug, service?.id ?? slug)}
 ${renderAIInsight(aiInsight, service?.status, fallbacks)}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
+${renderComponents(service)}
 ${renderIncidents(service)}
 ${renderDescription(seo, service)}
 ${renderFAQ(seo, fallbacks)}
@@ -453,6 +457,28 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
 ${lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}</p>` : '<p class="meta">No recent incidents</p>'}
 ${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${service.rank}${service.rankTied ? ' (tied)' : ''}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'header'})">AIWatch reliability score</a> &middot; <a href="${REPORTS_INDEX_HREF}" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'header'})">${REPORTS_INDEX_LABEL} &rarr;</a></p>` : ''}
 ${service.incidentSourceStale ? `<p class="meta" style="color:var(--amber)">⚠️ ${esc(seo.displayName)}'s status page moved to a source AIWatch can't reach, so its incident feed is frozen — uptime, score, and ranking are omitted until the source is reachable again. Live status above is still measured directly.</p>` : ''}
+</div>`
+}
+
+// #604 — per-component breakdown for multi-component services (cerebras / cursor /
+// copilot / windsurf / langsmith / runway). Reads service.components, the curated
+// statusComponentIds subset the worker preserves (worst-of'd into the headline status).
+// Matches StatusGator / IsDown per-component exposure. Absent for single-component services.
+export function renderComponents(service: ServiceData | null): string {
+  const components = service?.components
+  if (!components || components.length === 0) return ''
+  const anyIssue = components.some((c) => c.status !== 'operational')
+  const rows = components.map((c) => {
+    const color = statusColor(c.status)
+    return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+<span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>
+<span class="mono" style="font-size:13px;color:#c9d1d9">${esc(c.name)}</span>
+<span class="mono" style="font-size:11px;color:${color};margin-left:auto">${esc(statusLabel(c.status))}</span>
+</div>`
+  }).join('')
+  return `<div class="card" style="border-left:3px solid ${anyIssue ? '#e86235' : '#3fb950'}">
+<div class="mono" style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#8b949e;margin-bottom:10px">Component Status</div>
+${rows}
 </div>`
 }
 

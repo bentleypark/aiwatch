@@ -83,6 +83,7 @@ export default async function handler(req: Request) {
             latency: number | null; uptime30d: number | null; uptimeSource?: string
             lastChecked: string; incidents: unknown[]; aiwatchScore?: number | null
             scoreGrade?: string | null; scoreConfidence?: string; incidentSourceStale?: boolean
+            components?: Array<{ id: string; name: string; status: 'operational' | 'degraded' | 'down' }>
           }>
           aiAnalysis?: Record<string, { summary: string; estimatedRecovery: string; affectedScope: string[]; needsFallback?: boolean; analyzedAt: string; incidentId: string; resolvedAt?: string }>
         }

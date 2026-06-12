@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderShareButtons, renderPage, type ServiceData } from '../html-template'
+import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderPage, type ServiceData } from '../html-template'
 import type { ServiceSEO } from '../seo-content'
 import { SLUG_TO_SERVICE, RELATED_SLUGS } from '../slug-map'
 import type { RegionStatusResult } from '../region-status'
@@ -618,6 +618,77 @@ describe('renderRegionRecommendation', () => {
       recommendedRegion: usWest,
     })
     const html = renderRegionRecommendation(rec, 'pinecone')
+    expect(html).not.toContain('<img src=x')
+    expect(html).toContain('&lt;img src=x')
+  })
+})
+
+// ── renderComponents (#604 per-component breakdown) ──────────────────
+//
+// Contract: returns '' when no curated components present; otherwise emits a
+// self-contained card with one row per component (dot + name + status label),
+// left-border colored by whether any component is non-operational. SSR mirror of
+// the dashboard ServiceDetails ComponentBreakdown. esc() guards the page-supplied
+// component name; statusColor/statusLabel are exhaustive over the normalized union.
+
+describe('renderComponents (#604)', () => {
+  it('returns empty string when service is null', () => {
+    expect(renderComponents(null)).toBe('')
+  })
+
+  it('returns empty string when components is absent', () => {
+    expect(renderComponents(mkService())).toBe('')
+  })
+
+  it('returns empty string when components is an empty array', () => {
+    expect(renderComponents(mkService({ components: [] }))).toBe('')
+  })
+
+  it('renders one row per component with its status label', () => {
+    const html = renderComponents(mkService({
+      components: [
+        { id: 'a', name: 'IDE', status: 'operational' },
+        { id: 'b', name: 'Cloud Agents', status: 'degraded' },
+        { id: 'c', name: 'Automations', status: 'down' },
+      ],
+    }))
+    expect(html).toContain('Component Status')
+    expect(html).toContain('IDE')
+    expect(html).toContain('Cloud Agents')
+    expect(html).toContain('Automations')
+    expect(html).toContain('Operational')
+    expect(html).toContain('Degraded Performance')
+    expect(html).toContain('Down')
+  })
+
+  it('uses the green accent border when all components are operational', () => {
+    const html = renderComponents(mkService({
+      components: [
+        { id: 'a', name: 'IDE', status: 'operational' },
+        { id: 'b', name: 'CLI', status: 'operational' },
+      ],
+    }))
+    expect(html).toContain('border-left:3px solid #3fb950')
+    expect(html).not.toContain('border-left:3px solid #e86235')
+  })
+
+  it('flips the accent border to amber when any component is non-operational', () => {
+    const html = renderComponents(mkService({
+      components: [
+        { id: 'a', name: 'IDE', status: 'operational' },
+        { id: 'b', name: 'CLI', status: 'down' },
+      ],
+    }))
+    expect(html).toContain('border-left:3px solid #e86235')
+  })
+
+  it('escapes a component name containing HTML metacharacters (no injection)', () => {
+    const html = renderComponents(mkService({
+      components: [
+        { id: 'a', name: '<img src=x onerror=alert(1)>', status: 'operational' },
+        { id: 'b', name: 'CLI', status: 'operational' },
+      ],
+    }))
     expect(html).not.toContain('<img src=x')
     expect(html).toContain('&lt;img src=x')
   })

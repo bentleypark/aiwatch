@@ -201,6 +201,8 @@ const en = {
   'svc.cal.ago.suffix': 'ago',
   'svc.cal.today': 'Today',
   'svc.status.link': 'Official Status',
+  'svc.components.title': 'Component Status',
+  'svc.components.sub': 'Per-component breakdown from the official status page',
   'svc.deepseek.probeNote': 'Status page (Flashduty) not accessible outside China — monitoring via API probe only since May 2026',
   'svc.rss': 'RSS',
   'svc.rss.copied': 'Copied ✓',
