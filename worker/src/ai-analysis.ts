@@ -450,6 +450,11 @@ export async function refreshOrReanalyze(
   cap = 2,
   now = Date.now(),
   ai?: Ai,
+  // #633 — incidents currently held by the first-seen confirmation gate. They have no analysis key
+  // yet and must NOT be analyzed this cycle (a sub-10min flap blip would otherwise burn one
+  // Gemma/Sonnet call on a phantom). They get analyzed normally on the confirm cycle when the
+  // held alert fires. Empty by default → no behavior change for callers that don't pass it.
+  heldIncIds: Set<string> = new Set(),
 ): Promise<RefreshResult> {
   const result: RefreshResult = { refreshed: [], reanalyzed: [], skipped: [] }
   let reAnalysisCount = 0
@@ -457,7 +462,7 @@ export async function refreshOrReanalyze(
   const analyzedIncidents = new Map<string, string>()
 
   for (const svc of activeServices) {
-    const activeIncs = (svc.incidents ?? []).filter(i => i.status !== 'resolved')
+    const activeIncs = (svc.incidents ?? []).filter(i => i.status !== 'resolved' && !heldIncIds.has(i.id))
     if (activeIncs.length === 0) continue
 
     for (const inc of activeIncs) {

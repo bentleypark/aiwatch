@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, buildRegionHint, parseAlertedRoster } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
 
@@ -759,6 +759,110 @@ describe('flap suppression (#283)', () => {
       const alerts = buildIncidentAlerts([svc], alertedMap(), NOW, new Set(['suppressed']))
       expect(alerts).toHaveLength(1)
       expect(alerts[0].key).toBe('alerted:new:real')
+    })
+  })
+})
+
+describe('first-seen confirmation gate (#633)', () => {
+  const mkInc = (overrides: Partial<Incident> = {}): Incident => ({
+    id: 'inc1',
+    title: 'Web endpoints — down',
+    status: 'investigating',
+    impact: null,
+    startedAt: new Date(NOW - 60_000).toISOString(),
+    timeline: [],
+    ...overrides,
+  })
+  const config = { flapSuppression: true }
+  const firstSight = { alreadyAlerted: false, pendingExists: false }
+
+  describe('pendingNewKey + TTL', () => {
+    it('scopes the marker to the incident id', () => {
+      expect(pendingNewKey('flashduty:abc123')).toBe('pending:new:flashduty:abc123')
+    })
+    it('TTL spans 2 */5 cron cycles so a single skipped run still confirms', () => {
+      expect(PENDING_NEW_TTL_S).toBe(600)
+    })
+  })
+
+  describe('shouldHoldNewIncident', () => {
+    it('HOLDS a flap-shaped new incident on its first sight (monitor-flap service)', () => {
+      expect(shouldHoldNewIncident('modal', config, mkInc(), firstSight)).toBe(true)
+    })
+
+    it('FIRES once the incident survived a prior cycle (pending marker present)', () => {
+      expect(shouldHoldNewIncident('modal', config, mkInc(), { alreadyAlerted: false, pendingExists: true })).toBe(false)
+    })
+
+    it('never re-holds an already-alerted incident (a later cron re-fire)', () => {
+      expect(shouldHoldNewIncident('modal', config, mkInc(), { alreadyAlerted: true, pendingExists: false })).toBe(false)
+    })
+
+    it('does not hold resolved incidents (resolved path is gated by alertedNewMap)', () => {
+      expect(shouldHoldNewIncident('modal', config, mkInc({ status: 'resolved', title: 'Web endpoints — recovered' }), firstSight)).toBe(false)
+    })
+
+    it('does not hold severity-tagged incidents — real outages alert immediately', () => {
+      expect(shouldHoldNewIncident('modal', config, mkInc({ impact: 'major', title: 'Web endpoints — down' }), firstSight)).toBe(false)
+    })
+
+    it('does not hold services without flapSuppression — immediate alert, no regression', () => {
+      expect(shouldHoldNewIncident('anthropic', { flapSuppression: false }, mkInc(), firstSight)).toBe(false)
+      expect(shouldHoldNewIncident('anthropic', {}, mkInc(), firstSight)).toBe(false)
+    })
+
+    it('Tier-1 guard: never holds claude / openai / gemini even with the flag', () => {
+      expect(shouldHoldNewIncident('claude', config, mkInc(), firstSight)).toBe(false)
+      expect(shouldHoldNewIncident('openai', config, mkInc(), firstSight)).toBe(false)
+      expect(shouldHoldNewIncident('gemini', config, mkInc(), firstSight)).toBe(false)
+    })
+  })
+
+  describe('held incident produces no phantom alert (buildIncidentAlerts integration)', () => {
+    it('a held flap incident that recovers inside the window emits neither new nor recovered', () => {
+      // Cycle 1: held → added to suppressedIncIds, no alerted:new written (alertedMap empty).
+      // Cycle 2: the blip self-recovered → status resolved, but it was never in alertedNewMap,
+      // so buildIncidentAlerts emits NO "recovered" (the alertedNewMap.has guard). Net: silent.
+      const recovered = mockService({
+        id: 'modal',
+        status: 'operational',
+        incidents: [{ id: 'flap-blip', title: 'Web endpoints — recovered', status: 'resolved', impact: null, startedAt: recentDate, duration: '3m' }],
+      })
+      const alerts = buildIncidentAlerts([recovered], alertedMap(), NOW, new Set(['flap-blip']))
+      expect(alerts).toHaveLength(0)
+    })
+
+    it('two-cycle hold→confirm: composes shouldHoldNewIncident → suppressedIncIds → buildIncidentAlerts like index.ts', () => {
+      // This drives the SAME two real functions the cron wires together, simulating the pending:new
+      // KV transition (absent on cycle 1 → present on cycle 2). It proves the cross-cycle contract
+      // end-to-end at the function-composition level (the cronAlertCheck glue is otherwise unexported).
+      const inc: Incident = { id: 'flap-x', title: 'Web endpoints — down', status: 'investigating', impact: null, startedAt: recentDate, timeline: [] }
+      const svc = mockService({ id: 'modal', status: 'down', incidents: [inc] })
+      const config = { flapSuppression: true }
+
+      // Cycle 1: no pending marker yet (pendingExists:false) → held → goes into suppressedIncIds.
+      const suppressed1 = new Set<string>()
+      if (shouldHoldNewIncident('modal', config, inc, { alreadyAlerted: false, pendingExists: false })) suppressed1.add(inc.id)
+      expect(suppressed1.has('flap-x')).toBe(true)
+      expect(buildIncidentAlerts([svc], alertedMap(), NOW, suppressed1)).toHaveLength(0) // silent cycle 1
+
+      // Cycle 2: marker written on cycle 1 (pendingExists:true) → NOT held → fires.
+      const suppressed2 = new Set<string>()
+      if (shouldHoldNewIncident('modal', config, inc, { alreadyAlerted: false, pendingExists: true })) suppressed2.add(inc.id)
+      expect(suppressed2.size).toBe(0)
+      const alerts = buildIncidentAlerts([svc], alertedMap(), NOW, suppressed2)
+      expect(alerts.map(a => a.key)).toEqual(['alerted:new:flap-x']) // fires cycle 2
+    })
+
+    it('incId stability: a churned id is treated as a fresh first-sight (re-held) — documents the gate dependency', () => {
+      // The gate keys on pendingNewKey(inc.id); if the feed re-issues a NEW id for the same flap
+      // between cycles, the cycle-2 pending lookup misses and the incident is held again. BetterStack
+      // RSS ids are stable guids (parsers/betterstack.ts), so this degenerate case shouldn't occur —
+      // this test pins the assumption so a future unstable-id source is caught by intent.
+      const config = { flapSuppression: true }
+      const churnedInc: Incident = { id: 'flap-y', title: 'Web endpoints — down', status: 'investigating', impact: null, startedAt: recentDate, timeline: [] }
+      // pending:new was written for 'flap-x' on cycle 1; cycle 2 surfaces 'flap-y' → its marker is absent.
+      expect(shouldHoldNewIncident('modal', config, churnedInc, { alreadyAlerted: false, pendingExists: false })).toBe(true)
     })
   })
 })

@@ -71,6 +71,45 @@ export function isFlapSuppressible(
   return isFlapNotice(inc)
 }
 
+// #633 — first-seen confirmation gate (phantom-alert suppression).
+//
+// BetterStack auto-monitor services (flapSuppression: true) can emit a brand-new flap-shaped
+// incident that self-recovers inside a single */5 cron cycle, with NO declared incident on the
+// official page. flapSuppression only dedups the 2nd+ occurrence of a same-titled flap, so the
+// FIRST one still fires a full new-incident Discord alert + AI analysis that then vanishes from
+// every surface (the Modal "Web endpoints is down" 05:49 phantom).
+//
+// This gate holds a flap-shaped NEW incident for one extra cycle (~5–10min): the caller alerts
+// only once the incident has survived a previous cron cycle (pendingExists). A blip that recovers
+// inside the window never alerts — and buildIncidentAlerts emits no "recovered" for it either,
+// since it was never added to alertedNewMap (see the `alertedNewMap.has` guard in the resolved
+// branch). Severity-tagged incidents and Tier-1 services are never held (isFlapSuppressible is
+// false for them) → immediate alert, no regression.
+//
+// Returns true = HOLD this cycle (suppress the new alert + write pending:new). Mirrors the
+// existing `pending:degraded` debounce, but on the new-incident path.
+const PENDING_NEW_PREFIX = 'pending:new:'
+
+/** TTL for the first-seen pending marker — two 5-min cron cycles of tolerance (survives one skipped run). */
+export const PENDING_NEW_TTL_S = 600
+
+/** KV key for the #633 first-seen pending marker, scoped to the incident id. */
+export function pendingNewKey(incId: string): string {
+  return `${PENDING_NEW_PREFIX}${incId}`
+}
+
+export function shouldHoldNewIncident(
+  svcId: string,
+  config: { flapSuppression?: boolean },
+  inc: Incident,
+  state: { alreadyAlerted: boolean; pendingExists: boolean },
+): boolean {
+  if (state.alreadyAlerted) return false        // already fired in a prior cycle — never re-hold
+  if (state.pendingExists) return false         // survived a prior cycle — confirm + fire now
+  if (inc.status === 'resolved') return false   // resolved path is gated separately (alertedNewMap)
+  return isFlapSuppressible(svcId, config, inc) // flap-shaped on a flap service → hold first sight
+}
+
 export interface AlertCandidate {
   key: string
   title: string
