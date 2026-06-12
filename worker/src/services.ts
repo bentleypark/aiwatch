@@ -52,7 +52,13 @@ export const SERVICES: ServiceConfig[] = [
   // service; statusComponentId (Developer Console) is the primary for uptime parsing / calendar /
   // component-miss alerting. Single-tenant page → no incidentKeywords needed.
   { id: 'cerebras', name: 'Cerebras Inference', provider: 'Cerebras', category: 'api', statusUrl: 'https://status.cerebras.ai', apiUrl: 'https://status.cerebras.ai/api/v2/summary.json', statusComponentId: '83h1cchw4vs4', statusComponentIds: ['83h1cchw4vs4', '7xvps6c9lqwc', 'bhqw2gr7r710', 'hgfykfsb36gn', '8ygyx5vydlm2'] },
-  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com' },
+  // #623 — status.perplexity.com (Instatus, Next.js) has 2 components: "API" (Sonar) + "Website"
+  // (the consumer perplexity.ai). The Next.js parser now resolves each incident's affected components
+  // → componentNames (#623), so `incidentKeywords: ['api']` (matched against componentNames) scopes
+  // the badge/Score to the API: a Website-only incident is dropped, a Website+API incident kept (it
+  // affects the API). Allowlist is correct here — the API component is literally named "API", and
+  // unlike a title-denylist it keeps a multi-component "Website and API" incident.
+  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com', incidentKeywords: ['api'] },
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
   // status.deepseek.com (Flashduty, #507) blocks NON-BROWSER TLS fingerprints — a Worker fetch()
   // is reset at the TLS layer regardless of egress IP (verified 2026-06-12: a real Chromium from

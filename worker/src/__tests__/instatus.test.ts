@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mapInstatusImpact, parseInstatusIncidents } from '../parsers/instatus'
+import { filterIncidents } from '../services'
+import type { ServiceConfig } from '../types'
 
 describe('mapInstatusImpact (#556)', () => {
   it('maps Next.js component-status impact values', () => {
@@ -125,5 +127,47 @@ describe('parseInstatusIncidents — Next.js format impact mapping (#556, Perple
 
   it('maps MAJOROUTAGE → major', () => {
     expect(parseInstatusIncidents(nextHtml('MAJOROUTAGE'))[0].impact).toBe('major')
+  })
+})
+
+describe('parseInstatusIncidents — Next.js component capture (#623, Perplexity)', () => {
+  // Mirrors the real status.perplexity.com payload: a `components` array (id→name: Website, API,
+  // name has ONLY a `default` key) + notices that reference component ids and carry `name:{en,default}`.
+  function nextHtmlWithComponents() {
+    // Real Instatus ids are cuid-style (e.g. clyi6jhgg31469ihojbwbsmeeg) — use that shape so the test
+    // exercises the regex's id charset/length faithfully.
+    const WEB = 'clyi6jhgg31469ihojbwbsmeeg'
+    const API = 'clyiakn7i60113hvojwho6za6j'
+    const components =
+      '\\"components\\":[' +
+      `{\\"id\\":\\"${WEB}\\",\\"name\\":{\\"default\\":\\"Website\\"},\\"status\\":\\"OPERATIONAL\\"},` +
+      `{\\"id\\":\\"${API}\\",\\"name\\":{\\"default\\":\\"API\\"},\\"status\\":\\"OPERATIONAL\\"}]`
+    const n1 =
+      '\\"n1\\":{\\"id\\":\\"n1\\",\\"name\\":{\\"en\\":\\"Website and API incident\\",\\"default\\":\\"Website and API incident\\"},' +
+      '\\"impact\\":\\"DEGRADEDPERFORMANCE\\",\\"started\\":\\"2026-05-08T00:20:00.000Z\\",\\"resolved\\":\\"2026-05-08T04:19:00.000Z\\",' +
+      `\\"status\\":\\"RESOLVED\\",\\"components\\":[{\\"id\\":\\"${WEB}\\"},{\\"id\\":\\"${API}\\"}]}`
+    const n2 =
+      '\\"n2\\":{\\"id\\":\\"n2\\",\\"name\\":{\\"en\\":\\"Connector connectivity issues\\",\\"default\\":\\"Connector connectivity issues\\"},' +
+      '\\"impact\\":\\"PARTIALOUTAGE\\",\\"started\\":\\"2026-06-04T21:10:00.000Z\\",\\"resolved\\":\\"2026-06-05T01:40:00.000Z\\",' +
+      `\\"status\\":\\"RESOLVED\\",\\"components\\":[{\\"id\\":\\"${WEB}\\"}]}`
+    return `<script>self.__next_f.push([1,"x:${components}:notices\\":{${n1},${n2}},\\"metrics\\":{}"])</script>`
+  }
+
+  const perplexity = {
+    id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api',
+    statusUrl: 'https://status.perplexity.com', apiUrl: null, incidentKeywords: ['api'],
+  } as ServiceConfig
+
+  it('resolves each incident’s affected component ids → componentNames', () => {
+    const incidents = parseInstatusIncidents(nextHtmlWithComponents())
+    const byId = Object.fromEntries(incidents.map((i) => [i.id, i.componentNames]))
+    expect(byId['n1']).toEqual(['Website', 'API']) // Website + API
+    expect(byId['n2']).toEqual(['Website'])        // Website only
+  })
+
+  it('incidentKeywords:[api] keeps the Website+API incident, drops the Website-only one', () => {
+    const kept = filterIncidents(parseInstatusIncidents(nextHtmlWithComponents()), perplexity).map((i) => i.id)
+    expect(kept).toContain('n1')     // affects API → kept
+    expect(kept).not.toContain('n2') // Website-only → dropped
   })
 })
