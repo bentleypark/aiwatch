@@ -644,7 +644,7 @@ describe('renderComponents (#604)', () => {
     expect(renderComponents(mkService({ components: [] }))).toBe('')
   })
 
-  it('renders one row per component with its status label', () => {
+  it('renders one row per component; status label visible only for non-operational (#606)', () => {
     const html = renderComponents(mkService({
       components: [
         { id: 'a', name: 'IDE', status: 'operational' },
@@ -656,9 +656,12 @@ describe('renderComponents (#604)', () => {
     expect(html).toContain('IDE')
     expect(html).toContain('Cloud Agents')
     expect(html).toContain('Automations')
-    expect(html).toContain('Operational')
-    expect(html).toContain('Degraded Performance')
-    expect(html).toContain('Down')
+    // degraded/down show a visible <span> status label
+    expect(html).toContain('>Degraded Performance</span>')
+    expect(html).toContain('>Down</span>')
+    // operational shows NO visible status <span> — only the dot + the title attribute
+    expect(html).not.toContain('>Operational</span>')
+    expect(html).toContain('IDE — Operational') // a11y/hover title
   })
 
   it('uses the green accent border when all components are operational', () => {
@@ -691,6 +694,65 @@ describe('renderComponents (#604)', () => {
     }))
     expect(html).not.toContain('<img src=x')
     expect(html).toContain('&lt;img src=x')
+  })
+
+  // #606 grouped collapse (per-model lists like cohere/groq)
+  type C = NonNullable<ServiceData['components']>[number]
+  const mkComponents = (n: number, downIdx: number[] = [], group?: string): C[] =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `m${i}`, name: `model-${i}`,
+      status: (downIdx.includes(i) ? 'down' : 'operational') as 'operational' | 'down',
+      ...(group ? { group } : {}),
+    }))
+
+  it('ungrouped (surface) components render as plain rows, no <details>', () => {
+    const html = renderComponents(mkService({
+      components: [
+        { id: 'api', name: 'API', status: 'operational' },
+        { id: 'con', name: 'Console', status: 'operational' },
+      ],
+    }))
+    expect(html).not.toContain('<details')
+    expect(html).toContain('API')
+    expect(html).toContain('Console')
+  })
+
+  it('grouped components collapse under a <details> header with the count, members inside', () => {
+    const html = renderComponents(mkService({
+      components: [
+        { id: 'api', name: 'API', status: 'operational' },          // surface → outside <details>
+        ...mkComponents(18, [], 'Models'),                          // grouped
+      ],
+    }))
+    expect(html).toContain('<details')
+    expect(html).toContain('Models')
+    expect(html).toContain('18 components')
+    // surface row is outside the <details>; member rows are inside it
+    const detailsIdx = html.indexOf('<details')
+    expect(html.indexOf('API')).toBeLessThan(detailsIdx)
+    expect(html.indexOf('model-17')).toBeGreaterThan(detailsIdx)
+  })
+
+  it('group header dot/label reflects the worst member status', () => {
+    const html = renderComponents(mkService({ components: mkComponents(18, [5], 'Models') }))
+    // one member down → amber card accent + a "Down" status label in the group summary
+    expect(html).toContain('border-left:3px solid #e86235')
+    const summaryEnd = html.indexOf('</summary>')
+    expect(html.slice(0, summaryEnd)).toContain('Down')
+  })
+
+  it('group worst-of: down beats degraded for the header dot color + label', () => {
+    const members: C[] = [
+      { id: 'a', name: 'm-a', status: 'operational', group: 'Models' },
+      { id: 'b', name: 'm-b', status: 'degraded', group: 'Models' },
+      { id: 'c', name: 'm-c', status: 'down', group: 'Models' },
+    ]
+    const html = renderComponents(mkService({ components: members }))
+    const summary = html.slice(0, html.indexOf('</summary>'))
+    // worst-of is `down` → red dot (#f85149) + "Down" label, NOT degraded's amber/label
+    expect(summary).toContain('background:#f85149')
+    expect(summary).toContain('Down')
+    expect(summary).not.toContain('Degraded Performance')
   })
 })
 

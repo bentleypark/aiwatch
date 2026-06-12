@@ -40,9 +40,9 @@ export interface ServiceData {
   rankTied?: boolean
   totalRanked?: number
   incidentSourceStale?: boolean
-  /** #604 — per-component snapshot for multi-component services. Curated subset preserved
-   *  by the worker (statusComponentIds), present only when ≥2 components matched. */
-  components?: Array<{ id: string; name: string; status: 'operational' | 'degraded' | 'down' }>
+  /** #604/#606 — per-component snapshot. Curated subset or dynamic displayAllComponents set
+   *  preserved by the worker; `group` (e.g. 'Models') marks components that collapse together. */
+  components?: Array<{ id: string; name: string; status: 'operational' | 'degraded' | 'down'; group?: string }>
 }
 
 interface Fallback {
@@ -460,25 +460,61 @@ ${service.incidentSourceStale ? `<p class="meta" style="color:var(--amber)">⚠�
 </div>`
 }
 
-// #604 — per-component breakdown for multi-component services (cerebras / cursor /
-// copilot / windsurf / langsmith / runway). Reads service.components, the curated
-// statusComponentIds subset the worker preserves (worst-of'd into the headline status).
-// Matches StatusGator / IsDown per-component exposure. Absent for single-component services.
-export function renderComponents(service: ServiceData | null): string {
-  const components = service?.components
-  if (!components || components.length === 0) return ''
-  const anyIssue = components.some((c) => c.status !== 'operational')
-  const rows = components.map((c) => {
-    const color = statusColor(c.status)
-    return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+type Comp = { id?: string; name: string; status: string; group?: string }
+
+function componentRow(c: Comp): string {
+  const color = statusColor(c.status)
+  const label = statusLabel(c.status)
+  // #606 — operational rows show the dot only (no repeated "Operational" text); the label
+  // appears for degraded/down where it matters. Status kept on `title` for hover/a11y.
+  const labelHtml = c.status !== 'operational'
+    ? `<span class="mono" style="font-size:11px;color:${color};margin-left:auto">${esc(label)}</span>`
+    : ''
+  return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0" title="${esc(c.name)} — ${esc(label)}">
 <span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>
-<span class="mono" style="font-size:13px;color:#c9d1d9">${esc(c.name)}</span>
-<span class="mono" style="font-size:11px;color:${color};margin-left:auto">${esc(statusLabel(c.status))}</span>
+<span class="mono" style="font-size:13px;color:#c9d1d9">${esc(c.name)}</span>${labelHtml}
 </div>`
-  }).join('')
-  return `<div class="card" style="border-left:3px solid ${anyIssue ? '#e86235' : '#3fb950'}">
+}
+
+function worstComponentStatus(members: Comp[]): string {
+  if (members.some((c) => c.status === 'down')) return 'down'
+  if (members.some((c) => c.status === 'degraded')) return 'degraded'
+  return 'operational'
+}
+
+// #606 — a grouped, collapsible section ("Models · 18 components"). Native <details> so the
+// toggle is the header itself (no JS); the disclosure marker gives the expand/collapse affordance.
+function componentGroup(name: string, members: Comp[]): string {
+  const worst = worstComponentStatus(members)
+  const wcolor = statusColor(worst)
+  const statusBadge = worst !== 'operational'
+    ? `<span class="mono" style="font-size:11px;color:${wcolor};margin-left:6px">${esc(statusLabel(worst))}</span>`
+    : ''
+  return `<details style="margin-top:8px">
+<summary style="cursor:pointer;padding:4px 0">
+<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${wcolor};margin:0 6px 0 2px;vertical-align:middle"></span>
+<span class="mono" style="font-size:13px;color:#c9d1d9">${esc(name)}</span>
+<span class="mono" style="font-size:11px;color:#8b949e;margin-left:6px">${members.length} components</span>${statusBadge}
+</summary>
+<div style="margin-top:6px;margin-left:14px;padding-left:12px;border-left:2px solid #30363d">${members.map(componentRow).join('')}</div>
+</details>`
+}
+
+// #604/#606 — per-component breakdown. Reads service.components (curated subset or the dynamic
+// displayAllComponents set). Ungrouped "surface" components render as individual rows; grouped
+// components (group:'Models') collapse under a <details> header — the official Endpoints/Models split.
+export function renderComponents(service: ServiceData | null): string {
+  const components = service?.components as Comp[] | undefined
+  if (!components || components.length === 0) return ''
+  const surfaces = components.filter((c) => !c.group)
+  const groupNames = [...new Set(components.filter((c) => c.group).map((c) => c.group!))]
+  const anyIssue = components.some((c) => c.status !== 'operational')
+  const border = anyIssue ? '#e86235' : '#3fb950'
+
+  return `<div class="card" style="border-left:3px solid ${border}">
 <div class="mono" style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#8b949e;margin-bottom:10px">Component Status</div>
-${rows}
+${surfaces.map(componentRow).join('')}
+${groupNames.map((g) => componentGroup(g, components.filter((c) => c.group === g))).join('')}
 </div>`
 }
 

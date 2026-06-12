@@ -15,6 +15,9 @@ interface StatusConfig {
   statusComponentId?: string
   statusComponentIds?: string[]
   displayComponentIds?: string[]
+  displayAllComponents?: boolean
+  componentDenylist?: string[]
+  componentSurfaces?: string[]
 }
 
 interface SummaryData {
@@ -349,6 +352,63 @@ describe('resolveSvcComponents — per-component snapshot (#604)', () => {
     expect(resolveSvcComponents(displayOnly, summary)).toEqual([])
   })
 
+  // #606 Category A — dynamic "all except denylist" mode (cohere/groq)
+  it('displayAllComponents drops the denylist and tags non-surface components with group:Models', () => {
+    const dyn: StatusConfig = { displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['API'] }
+    const summary: SummaryData = {
+      status: { indicator: 'none' },
+      components: [
+        { id: 'd', name: 'Docs', status: 'operational' },          // denied
+        { id: 'w', name: 'website', status: 'operational' },        // denied (case-insensitive)
+        { id: 'm1', name: 'llama-3.3-70b', status: 'major_outage' }, // normalizes → down
+        { id: 'm2', name: 'whisper-large-v3', status: 'partial_outage' }, // → degraded
+        { id: 'api', name: 'API', status: 'operational' },          // surface → ungrouped
+      ],
+    }
+    expect(resolveSvcComponents(dyn, summary)).toEqual([
+      { id: 'm1', name: 'llama-3.3-70b', status: 'down', group: 'Models' },
+      { id: 'm2', name: 'whisper-large-v3', status: 'degraded', group: 'Models' },
+      { id: 'api', name: 'API', status: 'operational' }, // no group — individual surface row
+    ])
+  })
+
+  it('groups every surviving component when componentSurfaces is absent', () => {
+    const dyn: StatusConfig = { displayAllComponents: true, componentDenylist: [] }
+    const summary: SummaryData = {
+      status: { indicator: 'none' },
+      components: [
+        { id: 'm1', name: 'model-a', status: 'operational' },
+        { id: 'm2', name: 'model-b', status: 'operational' },
+      ],
+    }
+    expect(resolveSvcComponents(dyn, summary).every((c) => c.group === 'Models')).toBe(true)
+  })
+
+  it('displayAllComponents takes precedence over displayComponentIds / statusComponentIds', () => {
+    const dyn: StatusConfig = { displayAllComponents: true, componentDenylist: [], statusComponentIds: ['a'], displayComponentIds: ['b'] }
+    const summary: SummaryData = {
+      status: { indicator: 'none' },
+      components: [
+        { id: 'a', name: 'A', status: 'operational' },
+        { id: 'b', name: 'B', status: 'operational' },
+      ],
+    }
+    // Dynamic mode wins → both components returned (not just the allowlisted one).
+    expect(resolveSvcComponents(dyn, summary).map((c) => c.id)).toEqual(['a', 'b'])
+  })
+
+  it('displayAllComponents still self-gates to [] when <2 survive the denylist', () => {
+    const dyn: StatusConfig = { displayAllComponents: true, componentDenylist: ['Docs', 'Website'] }
+    const summary: SummaryData = {
+      status: { indicator: 'none' },
+      components: [
+        { id: 'd', name: 'Docs', status: 'operational' },
+        { id: 'api', name: 'API', status: 'operational' }, // only 1 survives → []
+      ],
+    }
+    expect(resolveSvcComponents(dyn, summary)).toEqual([])
+  })
+
   it('prefers displayComponentIds over statusComponentIds when both are set', () => {
     const both: StatusConfig = { statusComponentIds: ['a', 'b'], displayComponentIds: ['c', 'd'] }
     const summary: SummaryData = {
@@ -377,6 +437,22 @@ describe('displayComponentIds config sanity (#606)', () => {
       // No duplicate ids in the curated list.
       expect(new Set(svc.displayComponentIds).size, id).toBe(count)
       // Display-only: must not feed the worst-of badge (#606 decoupling), so no statusComponentIds.
+      expect(svc.statusComponentIds, id).toBeUndefined()
+    }
+  })
+
+  it('cohere + groq use dynamic displayAllComponents with the Docs/Website denylist, surface lists, and NO badge ids', () => {
+    const EXPECTED_SURFACES: Record<string, string[]> = {
+      groq: ['API'],
+      cohere: ['Coral', 'Infrastructure', 'Playground', 'embeddings'],
+    }
+    for (const id of ['cohere', 'groq']) {
+      const svc = SERVICES.find((s) => s.id === id)!
+      expect(svc.displayAllComponents, id).toBe(true)
+      expect(svc.componentDenylist, id).toEqual(['Docs', 'Website'])
+      expect(svc.componentSurfaces, id).toEqual(EXPECTED_SURFACES[id])
+      // Dynamic mode is display-only and must not configure id-list breakdowns or feed the badge.
+      expect(svc.displayComponentIds, id).toBeUndefined()
       expect(svc.statusComponentIds, id).toBeUndefined()
     }
   })

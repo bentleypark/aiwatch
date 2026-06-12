@@ -34,8 +34,11 @@ export const SERVICES: ServiceConfig[] = [
   ] },
   { id: 'azureopenai', name: 'Azure OpenAI', provider: 'Microsoft', category: 'api', statusUrl: 'https://azure.status.microsoft/en-us/status', apiUrl: null, azureRssUrl: 'https://rssfeed.azure.status.microsoft/en-us/status/feed/', incidentKeywords: ['Azure OpenAI'] },
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
-  { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE' },
-  { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM' },
+  // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
+  // (dynamic, so new/retired models need no config edit). componentSurfaces stay as individual rows;
+  // the rest fold into a collapsible "Models" group (matches the official Endpoints/Models split).
+  { id: 'cohere', name: 'Cohere API', provider: 'Cohere', category: 'api', statusUrl: 'https://status.cohere.com', apiUrl: 'https://status.cohere.com/api/v2/summary.json', incidentIoBaseUrl: 'https://status.cohere.com/incidents', incidentIoComponentId: '01HQ6CA39NZ5X3PRFPN71Q89TE', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['Coral', 'Infrastructure', 'Playground', 'embeddings'] },
+  { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['API'] },
   { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed', betterStackUrl: 'https://status.together.ai', flapSuppression: true },
   { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: null, rssFeedUrl: 'https://status.fireworks.ai/feed', betterStackUrl: 'https://status.fireworks.ai', flapSuppression: true },
   // Cerebras Inference (#391) — Atlassian Statuspage, 5 components: 4 model surfaces + Developer Console.
@@ -193,6 +196,10 @@ const STATUS_RANK: Record<NormalizedStatus, number> = { operational: 0, degraded
  * Used for `statusComponentIds` multi-component badge resolution: when any tracked
  * surface is degraded, the service's badge reflects the worst case.
  */
+// #606 — group label applied to non-surface components in displayAllComponents mode.
+// Flows through as ServiceComponent.group; the UI collapses same-group components under it.
+export const MODEL_GROUP = 'Models'
+
 export function worstStatus(statuses: NormalizedStatus[]): NormalizedStatus {
   return statuses.reduce<NormalizedStatus>(
     (worst, s) => (STATUS_RANK[s] > STATUS_RANK[worst] ? s : worst),
@@ -209,7 +216,7 @@ type StatusResolverSummary = {
   status?: { indicator?: string } | null
   components?: Array<{ id: string; name: string; status: string }>
 }
-type StatusResolverConfig = Pick<ServiceConfig, 'statusComponent' | 'statusComponentId' | 'statusComponentIds' | 'displayComponentIds'>
+type StatusResolverConfig = Pick<ServiceConfig, 'statusComponent' | 'statusComponentId' | 'statusComponentIds' | 'displayComponentIds' | 'displayAllComponents' | 'componentDenylist' | 'componentSurfaces'>
 
 /**
  * Resolve a service's overall badge status from its config + status page summary.
@@ -266,27 +273,47 @@ export function resolveSvcStatus(
  * subset into one badge; this preserves each matched component (same availability-relevant
  * set) with its own normalized status, in the configured order.
  *
- * Component source is `displayComponentIds ?? statusComponentIds` (#606): a service can
- * supply a display-only list (decoupled from the worst-of badge) for a curated breakdown
- * without changing its status determination; multi-component services reuse their badge ids.
+ * Component source, in precedence order:
+ *   1. `displayAllComponents` (#606 cohere/groq) — DYNAMIC: every page component except
+ *      `componentDenylist` names (case-insensitive). For per-model statuspages where a
+ *      hardcoded id list would go stale; the UI collapses the long list. Takes precedence.
+ *   2. `displayComponentIds ?? statusComponentIds` (#606/#604) — an explicit curated allowlist
+ *      (display-only, decoupled from the badge) or the multi-component badge ids reused.
  *
  * Self-gates to the display rule: returns the matched subset ONLY when **≥2** components
  * resolve, else `[]`. A single row is redundant with the badge, so the ≥2 gate lives
  * here (not at the caller) — there is exactly one consumer (the `components` field), so
  * folding the rule in keeps it a single pure, fully-testable unit.
  *
- * Returns `[]` when: no component list configured (neither field), no page `components`,
- * fewer than 2 of the configured ids resolve (incl. status-page drift that leaves 1), or
- * none resolve. Single-`statusComponentId` services are never expanded.
+ * Returns `[]` when: no component source configured, no page `components`, fewer than 2
+ * components resolve (incl. status-page drift), or none resolve.
  */
 export function resolveSvcComponents(
   config: StatusResolverConfig,
   summaryData: StatusResolverSummary,
 ): ServiceComponent[] {
-  const ids = config.displayComponentIds ?? config.statusComponentIds
-  if (!ids || ids.length === 0 || !summaryData.components) {
-    return []
+  if (!summaryData.components) return []
+
+  // 1. Dynamic mode — all components minus the (small, stable) denylist by name. Each
+  // non-surface component is tagged `group: 'Models'` so the UI collapses them under one
+  // header (#606); `componentSurfaces` names stay ungrouped as individual rows.
+  if (config.displayAllComponents) {
+    const deny = new Set((config.componentDenylist ?? []).map((n) => n.toLowerCase()))
+    const surfaces = new Set((config.componentSurfaces ?? []).map((n) => n.toLowerCase()))
+    const matched = summaryData.components
+      .filter((c) => !deny.has(c.name.toLowerCase()))
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        status: normalizeStatus(c.status),
+        ...(surfaces.has(c.name.toLowerCase()) ? {} : { group: MODEL_GROUP }),
+      }))
+    return matched.length >= 2 ? matched : []
   }
+
+  // 2. Explicit id allowlist (displayComponentIds) or reused badge ids (statusComponentIds).
+  const ids = config.displayComponentIds ?? config.statusComponentIds
+  if (!ids || ids.length === 0) return []
   const matched = ids
     .map((id) => summaryData.components!.find((c) => c.id === id))
     .filter((c): c is NonNullable<typeof c> => c != null)
