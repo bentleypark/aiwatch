@@ -39,7 +39,15 @@ export const SERVICES: ServiceConfig[] = [
     'https://status.aws.amazon.com/rss/bedrock-ap-northeast-1.rss',
   ] },
   { id: 'azureopenai', name: 'Azure OpenAI', provider: 'Microsoft', category: 'api', statusUrl: 'https://azure.status.microsoft/en-us/status', apiUrl: null, azureRssUrl: 'https://rssfeed.azure.status.microsoft/en-us/status/feed/', incidentKeywords: ['Azure OpenAI'] },
-  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
+  // #623 — status.mistral.ai (Instatus, Nuxt) lists API components ("Chat Completions API", …)
+  // alongside non-API surfaces (Le Chat consumer app, Le Console, Documentation, Website). The Nuxt
+  // parser appends the affected component to the incident title ("… · Le Chat"), so a denylist scopes
+  // the "Mistral API" badge/incidents/Score to the API only — the api-vs-app split (cf. OpenAI API
+  // excludes ChatGPT). Denylist (not an `['api']` allowlist) so a real API incident is never dropped.
+  // Known limitation: the Nuxt parser tags the title with only servicesArr[0] (first affected
+  // component) and doesn't populate componentNames, so a *combined* Le-Chat+API incident that lists
+  // Le Chat first would be dropped despite affecting the API. Low-probability; revisit if observed.
+  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1', incidentExclude: ['le chat', 'le console', 'documentation', 'website'] },
   // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
   // (dynamic, so new/retired models need no config edit). componentSurfaces stay as individual rows;
   // the rest fold into a collapsible "Models" group (matches the official Endpoints/Models split).
