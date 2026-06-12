@@ -75,6 +75,7 @@ const STATUS_URL = {
   characterai: 'https://status.character.ai',
   claudeai:    'https://status.claude.com',
   chatgpt:     'https://status.openai.com',
+  deepseekapp: 'https://status.deepseek.com',
   claudecode:  'https://status.claude.com',
   copilot:     'https://githubstatus.com',
   cursor:      'https://status.cursor.com',

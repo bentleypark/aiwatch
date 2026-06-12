@@ -169,7 +169,7 @@ export default async function handler(req: Request) {
           claudecode: 11, codex: 11,
           cursor: 12, windsurf: 12,
           copilot: 13, junie: 13,
-          chatgpt: 21, claudeai: 21, characterai: 21,
+          chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21,
         }
         // Inline tierFor — same warn-once shape as worker/src/fallback.ts and src/utils/constants.js.
         // The Edge Function runs once per request so the warned set is functionally a one-shot per

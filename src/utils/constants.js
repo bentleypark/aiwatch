@@ -19,7 +19,7 @@ export const API_SERVICE_IDS = [
 ]
 
 // AI web apps (no latency — web services, ordered before related API)
-export const APP_SERVICE_IDS = ['claudeai', 'chatgpt', 'characterai']
+export const APP_SERVICE_IDS = ['claudeai', 'chatgpt', 'characterai', 'deepseekapp']
 
 // Coding agents
 export const AGENT_SERVICE_IDS = ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie']
@@ -27,7 +27,7 @@ export const AGENT_SERVICE_IDS = ['claudecode', 'codex', 'cursor', 'copilot', 'w
 // Display order: app → LLM → voice → inference → agent
 export const SERVICE_AND_APP_IDS = [
   // app
-  'claudeai', 'chatgpt', 'characterai',
+  'claudeai', 'chatgpt', 'characterai', 'deepseekapp',
   // LLM API
   'claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq',
   'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'openrouter',
@@ -43,7 +43,7 @@ export const ALL_SERVICE_IDS = [...SERVICE_AND_APP_IDS, ...AGENT_SERVICE_IDS]
 // Sidebar category filters — splits Worker's 'api' into LLM vs Voice/Inference
 export const SERVICE_CATEGORIES = {
   all:       { labelKey: 'filter.all',       ids: null }, // null = show all
-  apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai'] },
+  apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp'] },
   llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
   inference: { labelKey: 'filter.inference', ids: ['elevenlabs', 'assemblyai', 'deepgram', 'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'runway', 'luma'] },
   agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'] },
@@ -63,6 +63,7 @@ const FEED_SLUG_OVERRIDE = {
   claudeai:    'claude-ai',
   characterai: 'character-ai',
   langsmith:   'langchain',
+  deepseekapp: 'deepseek-app',
 }
 
 // Services with no /is-{slug}-down page and therefore no RSS feed — estimate-only
@@ -96,7 +97,7 @@ export const API_TIER = {
   claudecode: 11, codex: 11,
   cursor: 12, windsurf: 12,
   copilot: 13, junie: 13,
-  chatgpt: 21, claudeai: 21, characterai: 21,
+  chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21,
 }
 
 // Sync target for worker/src/fallback.ts TIER_LABEL. Pre-#403 this lived inline in Overview.jsx;

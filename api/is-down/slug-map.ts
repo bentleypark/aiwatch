@@ -44,6 +44,11 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'luma':            { id: 'luma',       name: 'Luma (Dream Machine)', provider: 'Luma',     category: 'api' },
   // AI apps (#263)
   'character-ai':    { id: 'characterai', name: 'Character.AI',    provider: 'Character.AI', category: 'app' },
+  // DeepSeek App (#619) — DeepSeek's consumer chat app (chat.deepseek.com), distinct from the
+  // 'deepseek' (DeepSeek API) page. Slug 'deepseek-app' ≠ worker id 'deepseekapp'; the id≠slug
+  // mapping is mirrored in worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE + src/utils/constants.js
+  // FEED_SLUG_OVERRIDE, pinned by feed-slug-sync.test.ts / feed-slug.test.js.
+  'deepseek-app':    { id: 'deepseekapp', name: 'DeepSeek App',    provider: 'DeepSeek',     category: 'app' },
   // Coding agents (#294) — OpenAI Codex is the current coding-agent product,
   // distinct from the deprecated 2023 Codex code-generation API.
   'codex':           { id: 'codex',       name: 'Codex',           provider: 'OpenAI',      category: 'agent' },
@@ -76,7 +81,7 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'cerebras':       ['groq', 'together', 'fireworks', 'mistral'],
   'perplexity':     ['openai', 'claude', 'gemini'],
   'xai':            ['openai', 'claude', 'gemini'],
-  'deepseek':       ['mistral', 'groq', 'openai', 'claude'],
+  'deepseek':       ['deepseek-app', 'mistral', 'groq', 'openai'],
   'openrouter':     ['openai', 'claude', 'mistral'],
   // Voice — same category
   'elevenlabs':     ['assemblyai', 'deepgram'],
@@ -94,6 +99,7 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'luma':           ['runway', 'replicate', 'stability'],
   // Apps
   'character-ai':   ['chatgpt', 'claude-ai', 'gemini'],
+  'deepseek-app':   ['deepseek', 'chatgpt', 'claude-ai', 'character-ai'],
 }
 
 // Reverse lookup: service ID → URL slug (for internal linking)

@@ -11,8 +11,17 @@ describe('stale-source config (#591)', () => {
     expect(deepseek!.incidentSourceStale).toBe(true)
   })
 
-  it('the flag is opt-in — no OTHER service is stale-flagged today', () => {
+  it('deepseekapp uses incidentSourceStale as its feed-absent fallback flag (#619)', () => {
+    // #619 — the DeepSeek consumer app is feed-only (no apiUrl). When the Flashduty feed is fresh,
+    // readFlashdutyStatus clears the flag; when absent it stays, so a feed outage can't rank an
+    // empty/unknown app. Both DeepSeek services therefore carry the config flag.
+    const app = SERVICES.find((s) => s.id === 'deepseekapp')
+    expect(app).toBeDefined()
+    expect(app!.incidentSourceStale).toBe(true)
+  })
+
+  it('the flag is opt-in — only the two DeepSeek (Flashduty) services are stale-flagged today', () => {
     const flagged = SERVICES.filter((s) => s.incidentSourceStale).map((s) => s.id)
-    expect(flagged).toEqual(['deepseek'])
+    expect(flagged).toEqual(['deepseek', 'deepseekapp'])
   })
 })
