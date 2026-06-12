@@ -1,6 +1,6 @@
 // Better Stack RSS Feed Parser — for HuggingFace, Together, Fireworks, Modal, xAI
 
-import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
+import type { TimelineEntry, Incident, DailyImpactLevel, ServiceComponent } from '../types'
 import { formatDuration } from '../utils'
 
 function decodeXmlEntities(text: string): string {
@@ -238,8 +238,63 @@ export interface BetterStackIndex {
       report_type?: string  // 'manual' | 'maintenance' | 'calculated' (#503)
       title?: string
       starts_at?: string
+      // #606 Cat C — status_page_resource: per-resource display name + its section (group) link.
+      // status_page_section: the section's display name (the group label).
+      public_name?: string
+      status_page_section_id?: string | number
+      name?: string
     }
   }>
+}
+
+/** #606 Cat C — normalize a BetterStack resource status to the component union. */
+function normalizeBetterStackComponentStatus(status: string | undefined): ServiceComponent['status'] {
+  switch (status) {
+    case 'downtime': return 'down'
+    case 'degraded': return 'degraded'
+    // 'operational', 'maintenance' (planned, not an outage), and unknowns → operational
+    default: return 'operational'
+  }
+}
+
+/**
+ * #606 Cat C — extract the per-component breakdown from a BetterStack status page index.json.
+ * Each `status_page_resource` becomes a ServiceComponent; its `status_page_section_id` maps to the
+ * `status_page_section` name → `group`, so the UI collapses each section (e.g. "Inference - Chat")
+ * like the Atlassian Models grouping. `denylist` (case-insensitive) drops resources/sections by
+ * name (e.g. "Website"). Preserves index order. Returns `[]` for <2 survivors (caller omits).
+ */
+export function parseBetterStackComponents(
+  data: BetterStackIndex,
+  opts: { denylist?: string[] } = {},
+): ServiceComponent[] {
+  const inc = data.included ?? []
+  const sections = new Map<string, string>()
+  for (const s of inc) {
+    if (s.type === 'status_page_section' && s.id && s.attributes?.name) sections.set(s.id, s.attributes.name)
+  }
+  const deny = new Set((opts.denylist ?? []).map((n) => n.toLowerCase()))
+  const out: ServiceComponent[] = []
+  for (const r of inc) {
+    if (r.type !== 'status_page_resource') continue
+    const name = r.attributes?.public_name
+    if (!name) continue
+    const sectionId = r.attributes?.status_page_section_id
+    const group = sectionId != null ? sections.get(String(sectionId)) : undefined
+    if (deny.has(name.toLowerCase()) || (group && deny.has(group.toLowerCase()))) continue
+    out.push({
+      id: r.id ?? name,
+      name,
+      status: normalizeBetterStackComponentStatus(r.attributes?.status),
+      ...(group ? { group } : {}),
+    })
+  }
+  // A section with a single member needn't be a collapsible group — demote it to an
+  // individual surface row (clear `group`) so the UI shows it inline, not behind a toggle.
+  const groupCounts = new Map<string, number>()
+  for (const c of out) if (c.group) groupCounts.set(c.group, (groupCounts.get(c.group) ?? 0) + 1)
+  for (const c of out) if (c.group && (groupCounts.get(c.group) ?? 0) < 2) delete c.group
+  return out.length >= 2 ? out : []
 }
 
 /**

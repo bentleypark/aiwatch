@@ -502,6 +502,15 @@ describe('displayComponentIds config sanity (#606)', () => {
     }
   })
 
+  it('the 5 BetterStack services exclude the Website section from their breakdown (#606 Cat C1)', () => {
+    // parseBetterStackComponents reads componentDenylist; without it the marketing "Website" row leaks.
+    for (const id of ['together', 'fireworks', 'huggingface', 'modal', 'luma']) {
+      const svc = SERVICES.find((s) => s.id === id)!
+      expect(svc.betterStackUrl, id).toBeDefined()
+      expect(svc.componentDenylist, id).toEqual(['Website'])
+    }
+  })
+
   it('pins the non-obvious official-group assignments (the ones the comments justify)', () => {
     const has = (id: string, compId: string) => SERVICES.find((s) => s.id === id)!.displayComponentIds!.includes(compId)
     // Compliance API + Agent are ChatGPT (not API) per the official grouping.
