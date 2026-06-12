@@ -17,7 +17,7 @@ import {
   parseAistudioIncidents,
   computeDailyImpactFromIncidents,
 } from './parsers/aistudio'
-import { parseInstatusIncidents } from './parsers/instatus'
+import { parseInstatusIncidents, parseInstatusUptime } from './parsers/instatus'
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
 import { parseAwsRssIncidents, deriveAwsStatus } from './parsers/aws'
@@ -39,7 +39,9 @@ export const SERVICES: ServiceConfig[] = [
     'https://status.aws.amazon.com/rss/bedrock-ap-northeast-1.rss',
   ] },
   { id: 'azureopenai', name: 'Azure OpenAI', provider: 'Microsoft', category: 'api', statusUrl: 'https://azure.status.microsoft/en-us/status', apiUrl: null, azureRssUrl: 'https://rssfeed.azure.status.microsoft/en-us/status/feed/', incidentKeywords: ['Azure OpenAI'] },
-  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1' },
+  // #627 — statusComponent 'API' selects the Instatus "API" group component for the 30-day uptime%
+  // (status.mistral.ai groups all API endpoints under it; → ~99.6% instead of "Not provided").
+  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1', statusComponent: 'API' },
   // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
   // (dynamic, so new/retired models need no config edit). componentSurfaces stay as individual rows;
   // the rest fold into a collapsible "Models" group (matches the official Endpoints/Models split).
@@ -898,6 +900,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       const latency = Date.now() - start
 
       let incidents: Incident[] = []
+      let instatusUptime: number | null = null // #627 — Instatus per-component 30d uptime%
       if (config.onlineOrNotUrl && res.ok) {
         const html = await res.text()
         incidents = parseOnlineOrNotIncidents(html)
@@ -914,22 +917,33 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         console.warn(`[fetchService] ${config.id} OnlineOrNot status page returned ${res.status}`)
         res.body?.cancel()
       } else if (scrapeRes?.ok) {
-        // Cancel statusUrl response body — only res.ok/status is needed for BetterStack/RSS services
-        res.body?.cancel()
         if (config.instatusUrl) {
           incidents = parseInstatusIncidents(await scrapeRes.text())
-        } else if (config.rssFeedUrl) {
-          const rssText = await scrapeRes.text()
-          incidents = config.rssFeedUrl.includes('status.x.ai')
-            ? parseXaiRssIncidents(rssText)
-            : parseRssIncidents(rssText)
-        } else if (config.gcloudProduct) {
-          const data: GCloudIncident[] = await scrapeRes.json()
-          const vertexIncidents = parseGCloudIncidents(data, config.gcloudProduct, config.gcloudProductId)
-          if (config.aistudioStatus) {
-            for (const inc of vertexIncidents) inc.id = `vertex:${inc.id}`
+          // #627 — Instatus exposes uptime per component (no summary.json). It lives on the MAIN
+          // status page (res = statusUrl), not the /incidents listing scraped above — so read res
+          // here to extract the named component's 30-day uptime% (e.g. mistral statusComponent 'API').
+          // Else it shows "Not provided". Next.js Instatus (Perplexity) has no inline uptime → null.
+          if (res.ok && config.statusComponent) {
+            instatusUptime = parseInstatusUptime(await res.text(), config.statusComponent)
+          } else {
+            res.body?.cancel()
           }
-          incidents = vertexIncidents
+        } else {
+          // Cancel statusUrl response body — only res.ok/status is needed for RSS / gcloud services
+          res.body?.cancel()
+          if (config.rssFeedUrl) {
+            const rssText = await scrapeRes.text()
+            incidents = config.rssFeedUrl.includes('status.x.ai')
+              ? parseXaiRssIncidents(rssText)
+              : parseRssIncidents(rssText)
+          } else if (config.gcloudProduct) {
+            const data: GCloudIncident[] = await scrapeRes.json()
+            const vertexIncidents = parseGCloudIncidents(data, config.gcloudProduct, config.gcloudProductId)
+            if (config.aistudioStatus) {
+              for (const inc of vertexIncidents) inc.id = `vertex:${inc.id}`
+            }
+            incidents = vertexIncidents
+          }
         }
       } else {
         // No parser matched — cancel unconsumed response bodies to free connections
@@ -1038,7 +1052,11 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         incidents: filtered,
         calendarDays: has30dCalendar ? 30 : 14,
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
-        ...(betterStackUptime != null ? { uptime30d: betterStackUptime, uptimeSource: 'platform_avg' as const } : {}),
+        ...(betterStackUptime != null
+          ? { uptime30d: betterStackUptime, uptimeSource: 'platform_avg' as const }
+          : instatusUptime != null
+            ? { uptime30d: instatusUptime, uptimeSource: 'official' as const } // #627 — Instatus component uptime
+            : {}),
         ...(betterStackPartial > 0 ? { partialCount: betterStackPartial } : {}),
         ...(betterStackComponents.length > 0 ? { components: betterStackComponents } : {}),
       }
