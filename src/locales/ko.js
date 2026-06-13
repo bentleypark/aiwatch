@@ -117,6 +117,8 @@ const ko = {
   'incidents.col.duration': '기간',
   'incidents.col.status': '상태',
   'incidents.status.ongoing': '진행 중',
+  'incidents.status.investigating': '진행 중',
+  'incidents.status.identified': '진행 중',
   'incidents.status.monitoring': '모니터링',
   'incidents.status.resolved': '해결됨',
   'incidents.duration.ongoing': '진행 중',

@@ -1,7 +1,7 @@
-// #375 — archive supplement for the 90d Incidents filter.
-// These tests pin the live-wins-on-collision contract and the period-gating —
-// 7d/30d must not trigger archive fetches (their windows are smaller than the
-// upstream cap of every service we care about).
+// #375 — archive supplement for the Incidents filter. These tests pin the
+// live-wins-on-collision contract and the period→months mapping. (#587 retired the
+// "7d/30d are live-only" gate — short-window RSS services like Azure/Bedrock surface
+// only ~5d of live incidents, so every period now fetches the months its window spans.)
 
 import { describe, it, expect } from 'vitest'
 import {
@@ -14,10 +14,16 @@ import {
 } from '../archiveMerge'
 
 describe('archiveMonthsForPeriod', () => {
-  it('returns empty for short windows that live data already covers', () => {
+  it('fetches the window-spanning months for 7d/30d too (#587 — short-window services need backfill)', () => {
     const now = new Date('2026-05-09T12:00:00Z')
-    expect(archiveMonthsForPeriod(7, now)).toEqual([])
-    expect(archiveMonthsForPeriod(30, now)).toEqual([])
+    expect(archiveMonthsForPeriod(7, now)).toEqual(['2026-05'])             // current month only
+    expect(archiveMonthsForPeriod(30, now)).toEqual(['2026-04', '2026-05']) // prev + current
+  })
+
+  it('returns empty only when there is no period (0/null = live-only, no fetch)', () => {
+    const now = new Date('2026-05-09T12:00:00Z')
+    expect(archiveMonthsForPeriod(0, now)).toEqual([])
+    expect(archiveMonthsForPeriod(null, now)).toEqual([])
   })
 
   it('returns prev 3 months + current for 90d on 2026-05-09 (#587)', () => {
@@ -67,16 +73,22 @@ describe('archiveIncidentToLive', () => {
     expect(live.serviceName).toBe('Mistral API')
   })
 
+  it('formats a resolved entry\'s durationMin into a duration string (not the "Ongoing" placeholder)', () => {
+    expect(archiveIncidentToLive(archIncident, service).duration).toBe('1h 30m') // 90 min
+    expect(archiveIncidentToLive({ ...archIncident, durationMin: 9 }, service).duration).toBe('9m')
+  })
+
   it('attaches fromArchive: true so the consumer can disable timeline-dependent UI', () => {
     const live = archiveIncidentToLive(archIncident, service)
     expect(live.fromArchive).toBe(true)
     expect(live.timeline).toEqual([])
   })
 
-  it('handles archive entries that never resolved (resolvedAt === null)', () => {
-    const live = archiveIncidentToLive({ ...archIncident, resolvedAt: null, finalStatus: 'monitoring' }, service)
+  it('handles archive entries that never resolved (resolvedAt === null) — duration stays undefined → "Ongoing"', () => {
+    const live = archiveIncidentToLive({ ...archIncident, resolvedAt: null, finalStatus: 'investigating' }, service)
     expect(live.resolvedAt).toBeNull()
-    expect(live.status).toBe('monitoring')
+    expect(live.duration).toBeUndefined()
+    expect(live.status).toBe('investigating') // carried through; the locale key renders it as "In Progress"
   })
 })
 
@@ -168,6 +180,41 @@ describe('mergeArchiveIntoMap (no service filter — raw-id dedup mode)', () => 
     expect(entry.status).toBe('ongoing')           // live timeline/status wins
     expect(entry.timeline).toHaveLength(1)
     expect(entry.affectedNames).toEqual(['Amazon Bedrock'])
+  })
+
+  it('#587 skips frozen investigating/identified archive entries but surfaces resolved + monitoring', () => {
+    // investigating/identified have no STATUS_BADGE_CLASS → green-fallback "In Progress" phantom if a
+    // frozen archive-only entry rendered. resolved (green) + monitoring (amber, impact ended) have a
+    // defined badge + real duration → surfaced. A truly-active incident is shown by live instead.
+    const liveMap = new Map()
+    const archives = { '2026-06': { services: { modal: { incidentList: [
+      { id: 'frozen-1', title: 'Web endpoints is down', startedAt: '2026-06-13T01:00:00Z', resolvedAt: null, durationMin: 0, finalStatus: 'investigating' },
+      { id: 'frozen-2', title: 'cause identified', startedAt: '2026-06-12T01:00:00Z', resolvedAt: null, durationMin: 0, finalStatus: 'identified' },
+      { id: 'monitor-1', title: 'mitigation deployed', startedAt: '2026-06-11T01:00:00Z', resolvedAt: '2026-06-11T01:30:00Z', durationMin: 30, finalStatus: 'monitoring' },
+      { id: 'done-1', title: 'Image builds recovered', startedAt: '2026-06-10T01:00:00Z', resolvedAt: '2026-06-10T02:00:00Z', durationMin: 60, finalStatus: 'resolved' },
+    ] } } } }
+    mergeArchiveIntoMap(liveMap, archives, [{ id: 'modal', name: 'Modal' }])
+    expect(liveMap.has('frozen-1')).toBe(false) // investigating → skipped
+    expect(liveMap.has('frozen-2')).toBe(false) // identified → skipped
+    expect(liveMap.has('monitor-1')).toBe(true) // monitoring → surfaced (amber badge, real duration)
+    expect(liveMap.get('monitor-1').duration).toBe('30m')
+    expect(liveMap.has('done-1')).toBe(true)    // resolved → surfaced
+    expect(liveMap.get('done-1').duration).toBe('1h 0m')
+  })
+
+  it('#587 a NON-resolved archive entry that COLLIDES with a live incident still merges affectedNames (collision check precedes the skip)', () => {
+    // The skip runs AFTER the live-collision check, so a still-active incident present in BOTH live
+    // and the partial archive (under different services sharing one id) accumulates the archive's
+    // service name onto the live card rather than being dropped.
+    const liveMap = new Map([
+      ['shared-x', { id: 'claude:shared-x', title: 'live', status: 'ongoing', startedAt: '2026-06-13T00:00:00Z', timeline: [], serviceId: 'claude', serviceName: 'Claude API', affectedNames: ['Claude API'], fromArchive: undefined }],
+    ])
+    const archives = { '2026-06': { services: { claudeai: { incidentList: [
+      { id: 'shared-x', title: 'archive snapshot', startedAt: '2026-06-13T00:00:00Z', resolvedAt: null, durationMin: 0, finalStatus: 'investigating' },
+    ] } } } }
+    mergeArchiveIntoMap(liveMap, archives, services)
+    expect(liveMap.size).toBe(1)
+    expect(liveMap.get('shared-x').affectedNames).toEqual(['Claude API', 'claude.ai'])
   })
 
   it('skips services that have been renamed/removed (archive serviceId not in live list)', () => {

@@ -47,22 +47,30 @@ test.describe('Incidents — 90d archive merge (#375)', () => {
     expect(fetchedMonths.has(currentMonth)).toBe(true)
   })
 
-  test('7d period does NOT trigger /api/report fetch', async ({ page }) => {
+  test('7d period fetches the current-month archive (#587 — short-window services need backfill)', async ({ page }) => {
+    const periodSelect = page.locator('main select').nth(2)
+    // 7d is the default, so selectOption('7') would be a no-op (no change event) and its initial
+    // fetch already fired during page load. Move to 90d first, THEN switch to 7d so the change
+    // actually fires — and attach the request listener only for that transition.
+    await periodSelect.selectOption('90')
+    await page.waitForTimeout(1000)
+
     const reportUrls = []
     page.on('request', (req) => {
       if (REPORT_PATH_RE.test(req.url())) reportUrls.push(req.url())
     })
 
-    const periodSelect = page.locator('main select').nth(2)
-    // 7d is already the default per Incidents.jsx initial state, but selecting explicitly
-    // exercises the filter-change path the way a user would.
     await periodSelect.selectOption('7')
-    await page.waitForTimeout(800)
+    await page.waitForTimeout(1200)
 
-    expect(reportUrls).toHaveLength(0)
+    // 7d's window doesn't span a prior month, so it fetches ONLY the current month — re-fetched on
+    // the switch because the mutable partial archive is evicted from the client cache each cycle (#587).
+    expect(reportUrls.length).toBeGreaterThan(0)
+    const currentMonth = new Date().toISOString().slice(0, 7)
+    expect(reportUrls.every((u) => u.includes(`month=${currentMonth}`))).toBe(true)
   })
 
-  test('30d period does NOT trigger /api/report fetch (live data covers 30d)', async ({ page }) => {
+  test('30d period fetches archive months (#587 — a rolled-out incident within 30d must show)', async ({ page }) => {
     const reportUrls = []
     page.on('request', (req) => {
       if (REPORT_PATH_RE.test(req.url())) reportUrls.push(req.url())
@@ -70,8 +78,12 @@ test.describe('Incidents — 90d archive merge (#375)', () => {
 
     const periodSelect = page.locator('main select').nth(2)
     await periodSelect.selectOption('30')
-    await page.waitForTimeout(800)
+    await page.waitForTimeout(1200)
 
-    expect(reportUrls).toHaveLength(0)
+    // 30d now fetches the months its window spans (current + possibly the prior month).
+    expect(reportUrls.length).toBeGreaterThan(0)
+    const currentMonth = new Date().toISOString().slice(0, 7)
+    const fetched = new Set(reportUrls.map((u) => u.match(/month=(\d{4}-\d{2})/)?.[1]))
+    expect(fetched.has(currentMonth)).toBe(true)
   })
 })

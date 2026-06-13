@@ -117,6 +117,8 @@ const en = {
   'incidents.col.duration': 'Duration',
   'incidents.col.status': 'Status',
   'incidents.status.ongoing': 'In Progress',
+  'incidents.status.investigating': 'In Progress',
+  'incidents.status.identified': 'In Progress',
   'incidents.status.monitoring': 'Monitoring',
   'incidents.status.resolved': 'Resolved',
   'incidents.duration.ongoing': 'Ongoing',
