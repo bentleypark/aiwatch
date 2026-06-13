@@ -72,8 +72,31 @@ to the now-retired `deferred` label); `tracking` stays for meta umbrellas.
 (NOT labels); only `area`/`urgency` persist. Do NOT store priority as a label; recompute each sweep:
 - **P0** — any `U0-now`. Drop everything.
 - **P1** — high impact + `U1-soon` + small/medium effort. The "do next" set.
+- **P1\*** — **work already shipped; only a dated production-verify remains.** NOT a do-next coding
+  item — see the verify-before-recommend gate below. Keep it off the recommended-pick list. Every
+  `P1*` issue carries the persistent `verify-blocked` label so the next sweep skips it by label alone.
 - **P2** — high impact + large effort (needs a scoping/design pass first), OR medium impact + `U2-later`.
 - **P3** — low impact / `U3-someday`.
+
+### Verify-before-RECOMMEND (the most-missed; same gate as verify-before-close)
+
+> Recurring failure (`feedback_triage_verify_before_recommend`): the "recommended next pick" was tiered
+> from the **body + label alone**, so issues whose code already shipped and are now `verify-after`
+> signal-gated (e.g. #547/#586/#587) kept getting recommended as **P1 do-next**. The `U1-soon` label is
+> an *urgency* axis — it does NOT flip to "done" when the code ships, so a label-only read mis-reads a
+> verify-gated issue as actionable.
+
+Before recommending ANY issue as do-next, verify it the **same way** you'd verify a close candidate:
+1. **Cheap shipped-check on each candidate** (1–2 issues): `git log --all --grep="#N"` + grep the
+   symbol/file. If a linked PR is already **merged**, the coding is likely done.
+2. **Auto-demote to `P1*` (exclude from do-next)** if EITHER: a linked PR is merged, OR the body has a
+   `verify-after` line / a `## Remaining (post-deploy)` (or equiv.) section. Such issues are
+   **signal-gated**, not actionable — their remaining item is a dated GA4/prod-data check, not code.
+3. **Label the gate so the next sweep sees it without re-deriving**: add `verify-blocked` to a
+   verify-gated issue (create the label once if missing). A `verify-blocked`/`verify-overdue` issue is
+   skipped from do-next by **label alone** next time — closing the gap that lets it leak back in.
+
+Only issues that survive this gate (real remaining code work) are eligible for the recommended pick.
 
 Recommend the next pick **balanced across areas** — don't starve biz/marketing/design by always
 picking dev. Surface the per-area counts (count a dual-area issue under its primary) so a lopsided
@@ -89,6 +112,23 @@ board is visible.
   reversible, but the project norm is to confirm closes; see the gates in `ship-issue`).
 - Write issue comments in **English** (repo convention); keep them factual (what shipped / what
   superseded / why the premise changed), with the issue/PR references.
+- **Body is the source of truth — sync the checkboxes, don't just comment.** When a verify/triage step
+  confirms an item shipped, **tick the body `- [ ]` → `- [x]`** (and add a 1-line `> **Status (date):**`
+  block at the top of the body) — do NOT record the outcome only in a comment. Recurring failure: an
+  issue's state ends up scattered across the body Acceptance list + a Post-deploy list + several
+  comments, so `gh issue view` shows `0/N` while the real state (4/N) lives only in the last comment —
+  forcing a comment re-read every sweep. Comments hold **evidence/history**; the **body checkboxes hold
+  current state**. Keep them in sync so the status is readable from the body in one place.
+- **Don't fork the checklist into a comment.** (Additive to the rule above.) Never restate a checklist
+  — an `### Acceptance status` block, a re-listed `- [ ]` set, a phase table — inside a **comment**; it
+  forks the single source of truth and immediately drifts. A progress/verify comment is **prose
+  evidence only**. To change state, edit the **issue body** with `gh issue edit {N} --body-file <f>`
+  (NOT a comment). Collapse multiple body checklist sections (Acceptance + Post-deploy + stray `- [ ]`
+  lists) into one where practical — but **keep the dated `verify-after` line**, since the
+  verify-before-recommend gate above keys its demotion off exactly that line. To clean up a comment that
+  already duplicated a checklist, edit that comment via
+  `gh api -X PATCH /repos/{owner}/{repo}/issues/comments/{id} -f body='…'` — convert its `- [ ]`/`- [x]`
+  markers to plain text (e.g. `⬜`/`✅`) so the boxes live only in the body.
 
 ## Why a skill
 Same reason as `ship-issue`: a periodic ritual described only in CLAUDE.md gets skipped on long
