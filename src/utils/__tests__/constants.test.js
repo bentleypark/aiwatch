@@ -3,7 +3,7 @@
 // because the worker can't import frontend code at runtime.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFallbacks, shouldShowFallback, hasActiveIncident } from '../constants'
+import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFallbacks, getGroupedFallbacksExcludingRegionSwitchable, hasRegionSwitch, shouldShowFallback, hasActiveIncident } from '../constants'
 
 describe('tierFor (#403 frontend warn-once helper)', () => {
   let warnSpy
@@ -253,5 +253,48 @@ describe('shouldShowFallback (#454 status-based modal gate)', () => {
   it('returns false for empty or invalid input', () => {
     expect(shouldShowFallback([], false)).toBe(false)
     expect(shouldShowFallback(null, false)).toBe(false)
+  })
+})
+
+describe('region-switch fallback suppression (#641)', () => {
+  const regionInc = { id: 'oai-r', title: 'errors', status: 'investigating', componentNames: ['us-east-1'] }
+
+  describe('hasRegionSwitch', () => {
+    it('is true for a region-specific outage on a region-aware service', () => {
+      expect(hasRegionSwitch({ id: 'openai', incidents: [regionInc] })).toBe(true)
+    })
+    it('is false for a non-region-aware service (no SERVICE_REGIONS entry)', () => {
+      expect(hasRegionSwitch({ id: 'mistral', incidents: [{ id: 'm', title: 'errors', status: 'investigating' }] })).toBe(false)
+    })
+    it('is false when there is no ongoing incident (openai is not always-show)', () => {
+      expect(hasRegionSwitch({ id: 'openai', incidents: [] })).toBe(false)
+    })
+    it('stays true when a global incident coexists (web predicate intentionally omits hasGlobalIncident)', () => {
+      // Documents the intentional asymmetry vs the Worker's buildRegionHint (which additionally
+      // guards hasGlobalIncident). The web surfaces render the region link + suppress the fallback
+      // here; the Worker keeps the fallback. Pinning so the decision doesn't silently drift.
+      const globalInc = { id: 'oai-g', title: 'Major outage', status: 'investigating' }
+      expect(hasRegionSwitch({ id: 'openai', incidents: [regionInc, globalInc] })).toBe(true)
+    })
+  })
+
+  describe('getGroupedFallbacksExcludingRegionSwitchable', () => {
+    const op = (id, category, provider, aiwatchScore) => ({ id, category, provider, aiwatchScore, status: 'operational', incidents: [] })
+
+    it('excludes a region-switchable service but KEEPS a non-region service\'s fallback (per-service)', () => {
+      const openai = { id: 'openai', category: 'api', provider: 'OpenAI', status: 'degraded', incidents: [regionInc] }
+      const cursor = { id: 'cursor', category: 'agent', provider: 'Cursor', status: 'degraded', incidents: [] }
+      const services = [openai, cursor, op('claude', 'api', 'Anthropic', 95), op('codex', 'agent', 'OpenAI', 88), op('windsurf', 'agent', 'Windsurf', 85)]
+
+      const cats = getGroupedFallbacksExcludingRegionSwitchable([openai, cursor], services).map(g => g.category)
+      expect(cats).toContain('agent')     // cursor (no region map) keeps its fallback
+      expect(cats).not.toContain('api')   // openai (region-switchable) excluded → no api group
+      // Contrast: without the exclusion the api group WOULD appear (proves it's the suppression, not absence)
+      expect(getGroupedFallbacks([openai, cursor], services).map(g => g.category)).toContain('api')
+    })
+
+    it('returns [] for a non-array input', () => {
+      expect(getGroupedFallbacksExcludingRegionSwitchable(null, [])).toEqual([])
+    })
   })
 })

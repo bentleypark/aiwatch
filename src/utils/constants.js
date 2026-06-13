@@ -1,3 +1,5 @@
+import { regionStatusOf } from './regionStatus'
+
 export const VALID_THEMES = ['dark', 'light', 'system']
 
 export const THEME_STORAGE_KEY = 'aiwatch-theme'
@@ -221,6 +223,30 @@ export function getGroupedFallbacks(affected, allServices) {
     groups.push({ category: svc.category, label, items: candidates.slice(0, perGroup) })
   }
   return groups
+}
+
+/**
+ * #641 — whether a service already has an actionable region-switch recommendation. Mirrors the
+ * ActionBanner `regionRecs` filter + the is-down `renderRegionRecommendation` render condition.
+ * NOTE: the web predicate intentionally OMITS `hasGlobalIncident` (a coexisting global outage) —
+ * matching how the region link itself is rendered on the web surfaces. The Worker's `buildRegionHint`
+ * additionally guards `hasGlobalIncident`, so Discord is marginally stricter; that asymmetry is
+ * pre-existing in the region-link logic and inherited here, not introduced by #641.
+ */
+export function hasRegionSwitch(service) {
+  const rs = regionStatusOf(service)
+  return !!(rs && rs.hasRegionSpecific && !rs.allDown && rs.recommendedRegion)
+}
+
+/**
+ * #641 — per-service variant of getGroupedFallbacks that EXCLUDES services which already have a
+ * region-switch recommendation: a region-specific outage is solved by the cheaper same-provider
+ * region switch, so a cross-provider fallback alongside it is redundant noise. Per-service — an
+ * affected service WITHOUT a region switch keeps its cross-service fallback.
+ */
+export function getGroupedFallbacksExcludingRegionSwitchable(affected, allServices) {
+  if (!Array.isArray(affected)) return []
+  return getGroupedFallbacks(affected.filter(s => !hasRegionSwitch(s)), allServices)
 }
 
 /**

@@ -239,6 +239,13 @@ export default async function handler(req: Request) {
       }
     }
 
+    // #641 — when a region switch is offered (the cheaper same-provider fix for a region-specific
+    // outage), suppress the cross-service fallback so the page doesn't push a redundant full provider
+    // switch alongside it. Condition mirrors renderRegionRecommendation + the ActionBanner.
+    if (regionRec && regionRec.hasRegionSpecific && !regionRec.allDown && regionRec.recommendedRegion) {
+      fallbacks = []
+    }
+
     const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec)
 
     // #378: when the upstream Worker fetch failed and we're rendering the

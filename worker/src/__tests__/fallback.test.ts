@@ -178,9 +178,8 @@ describe('buildFallbackText', () => {
     expect(text).toBe('👉 Suggested fallback: Claude API')
   })
 
-  it('returns no-fallback message when empty', () => {
-    const text = buildFallbackText([])
-    expect(text).toBe('⚠️ No operational fallback available. Consider retry logic or caching.')
+  it('returns an empty string when there are no fallbacks (#641 — no subjective "no fallback" claim)', () => {
+    expect(buildFallbackText([])).toBe('')
   })
 })
 
@@ -220,9 +219,8 @@ describe('buildGroupedFallbackText', () => {
     expect(text).not.toContain('Character.AI:')
   })
 
-  it('returns no-fallback message when all excluded', () => {
-    const text = buildGroupedFallbackText(['replicate', 'huggingface'], services)
-    expect(text).toContain('No operational fallback')
+  it('returns an empty string when all services are excluded (#641 — no "no fallback" claim)', () => {
+    expect(buildGroupedFallbackText(['replicate', 'huggingface'], services)).toBe('')
   })
 
   it('returns single tier group when only one affected', () => {

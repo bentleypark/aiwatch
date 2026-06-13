@@ -231,7 +231,11 @@ export function buildIncidentAlerts(
 
   for (const [incId, { names, ids, inc, category, firstSvc }] of newIncidents) {
     const displayName = names.length > 1 ? `${firstSvc.provider} (${names.join(', ')})` : names[0]
-    const fallbackText = firstSvc.status !== 'operational'
+    const regionText = buildRegionHint(firstSvc)
+    // #641 — suppress the cross-service fallback when a region switch is offered: a region-specific
+    // outage is solved by the cheaper same-provider region switch, so a full provider switch
+    // alongside it is redundant noise. (buildRegionHint returns undefined when no switch applies.)
+    const fallbackText = (firstSvc.status !== 'operational' && !regionText)
       ? buildFallbackText(getFallbacks(firstSvc.id, category, services))
       : ''
     alerts.push({
@@ -239,7 +243,7 @@ export function buildIncidentAlerts(
       title: `🔴 ${displayName} — New Incident`,
       description: sanitize(inc.title),
       fallbackText,
-      regionText: buildRegionHint(firstSvc),
+      regionText,
       color: 0xED4245,
       url: `https://ai-watch.dev/#${ids[0]}`,
       svcIds: ids, // #545 — the not-yet-alerted subset (all affected on first fire, only the joiner after)
