@@ -1,7 +1,7 @@
-// #375 — archive supplement for the 90d Incidents filter.
-// These tests pin the live-wins-on-collision contract and the period-gating —
-// 7d/30d must not trigger archive fetches (their windows are smaller than the
-// upstream cap of every service we care about).
+// #375 — archive supplement for the Incidents filter. These tests pin the
+// live-wins-on-collision contract and the period→months mapping. (#587 retired the
+// "7d/30d are live-only" gate — short-window RSS services like Azure/Bedrock surface
+// only ~5d of live incidents, so every period now fetches the months its window spans.)
 
 import { describe, it, expect } from 'vitest'
 import {
@@ -9,30 +9,38 @@ import {
   archiveIncidentToLive,
   mergeArchiveIntoMap,
   archiveSupplementForService,
+  isWithinPeriod,
   MAX_ARCHIVE_MONTHS,
 } from '../archiveMerge'
 
 describe('archiveMonthsForPeriod', () => {
-  it('returns empty for short windows that live data already covers', () => {
+  it('fetches the window-spanning months for 7d/30d too (#587 — short-window services need backfill)', () => {
     const now = new Date('2026-05-09T12:00:00Z')
-    expect(archiveMonthsForPeriod(7, now)).toEqual([])
-    expect(archiveMonthsForPeriod(30, now)).toEqual([])
+    expect(archiveMonthsForPeriod(7, now)).toEqual(['2026-05'])             // current month only
+    expect(archiveMonthsForPeriod(30, now)).toEqual(['2026-04', '2026-05']) // prev + current
   })
 
-  it('returns prev 3 months for 90d on 2026-05-09', () => {
+  it('returns empty only when there is no period (0/null = live-only, no fetch)', () => {
     const now = new Date('2026-05-09T12:00:00Z')
-    expect(archiveMonthsForPeriod(90, now)).toEqual(['2026-02', '2026-03', '2026-04'])
+    expect(archiveMonthsForPeriod(0, now)).toEqual([])
+    expect(archiveMonthsForPeriod(null, now)).toEqual([])
   })
 
-  it('crosses year boundary correctly (90d on 2026-02-15 → Nov/Dec/Jan)', () => {
+  it('returns prev 3 months + current for 90d on 2026-05-09 (#587)', () => {
+    const now = new Date('2026-05-09T12:00:00Z')
+    expect(archiveMonthsForPeriod(90, now)).toEqual(['2026-02', '2026-03', '2026-04', '2026-05'])
+  })
+
+  it('crosses year boundary correctly (90d on 2026-02-15 → Nov/Dec/Jan/Feb)', () => {
     const now = new Date('2026-02-15T12:00:00Z')
-    expect(archiveMonthsForPeriod(90, now)).toEqual(['2025-11', '2025-12', '2026-01'])
+    expect(archiveMonthsForPeriod(90, now)).toEqual(['2025-11', '2025-12', '2026-01', '2026-02'])
   })
 
-  it('excludes the current month from the fetch list (live covers it)', () => {
+  it('INCLUDES the current month (#587 — partial archive backfills rolled-out incidents)', () => {
     const now = new Date('2026-05-09T12:00:00Z')
     const months = archiveMonthsForPeriod(90, now)
-    expect(months).not.toContain('2026-05')
+    expect(months).toContain('2026-05')
+    expect(months[months.length - 1]).toBe('2026-05') // current month is last
   })
 
   it(`caps at MAX_ARCHIVE_MONTHS (${MAX_ARCHIVE_MONTHS}) for ultra-long windows`, () => {
@@ -65,16 +73,22 @@ describe('archiveIncidentToLive', () => {
     expect(live.serviceName).toBe('Mistral API')
   })
 
+  it('formats a resolved entry\'s durationMin into a duration string (not the "Ongoing" placeholder)', () => {
+    expect(archiveIncidentToLive(archIncident, service).duration).toBe('1h 30m') // 90 min
+    expect(archiveIncidentToLive({ ...archIncident, durationMin: 9 }, service).duration).toBe('9m')
+  })
+
   it('attaches fromArchive: true so the consumer can disable timeline-dependent UI', () => {
     const live = archiveIncidentToLive(archIncident, service)
     expect(live.fromArchive).toBe(true)
     expect(live.timeline).toEqual([])
   })
 
-  it('handles archive entries that never resolved (resolvedAt === null)', () => {
-    const live = archiveIncidentToLive({ ...archIncident, resolvedAt: null, finalStatus: 'monitoring' }, service)
+  it('handles archive entries that never resolved (resolvedAt === null) — duration stays undefined → "Ongoing"', () => {
+    const live = archiveIncidentToLive({ ...archIncident, resolvedAt: null, finalStatus: 'investigating' }, service)
     expect(live.resolvedAt).toBeNull()
-    expect(live.status).toBe('monitoring')
+    expect(live.duration).toBeUndefined()
+    expect(live.status).toBe('investigating') // carried through; the locale key renders it as "In Progress"
   })
 })
 
@@ -141,6 +155,66 @@ describe('mergeArchiveIntoMap (no service filter — raw-id dedup mode)', () => 
     expect(entry.timeline).toHaveLength(1)
     // But the archive's service is added to affectedNames
     expect(entry.affectedNames).toEqual(['Claude API', 'claude.ai'])
+  })
+
+  it('#587 current-month partial archive: a live + partial-archive incident sharing one raw id renders once (live wins)', () => {
+    // The invariant that makes "include the current month" safe: an active current-month incident is
+    // in BOTH live /api/status AND the partial archive (synthesized from incidents:monthly). They
+    // share the raw upstream id, so the merge must collapse them to one card with live's fields.
+    const liveMap = new Map([
+      ['aws-bedrock-1', {
+        id: 'bedrock:aws-bedrock-1', title: 'Service impact: Fable 5 and Mythos 5 Access',
+        status: 'ongoing', startedAt: '2026-06-13T01:26:00Z',
+        timeline: [{ stage: 'investigating', at: '2026-06-13T01:26:00Z' }],
+        serviceId: 'bedrock', serviceName: 'Amazon Bedrock', affectedNames: ['Amazon Bedrock'], fromArchive: undefined,
+      }],
+    ])
+    // Shaped exactly as buildPartialIncidentArchive emits (partial: true, services[id].incidentList).
+    const partial = { period: '2026-06', partial: true, services: {
+      bedrock: { incidentList: [{ id: 'aws-bedrock-1', title: 'Service impact: Fable 5 and Mythos 5 Access', startedAt: '2026-06-13T01:26:00Z', resolvedAt: null, durationMin: 0, finalStatus: 'investigating' }] },
+    } }
+    const svcs = [{ id: 'bedrock', name: 'Amazon Bedrock' }]
+    mergeArchiveIntoMap(liveMap, { '2026-06': partial }, svcs)
+    expect(liveMap.size).toBe(1) // no duplicate card
+    const entry = liveMap.get('aws-bedrock-1')
+    expect(entry.status).toBe('ongoing')           // live timeline/status wins
+    expect(entry.timeline).toHaveLength(1)
+    expect(entry.affectedNames).toEqual(['Amazon Bedrock'])
+  })
+
+  it('#587 skips frozen investigating/identified archive entries but surfaces resolved + monitoring', () => {
+    // investigating/identified have no STATUS_BADGE_CLASS → green-fallback "In Progress" phantom if a
+    // frozen archive-only entry rendered. resolved (green) + monitoring (amber, impact ended) have a
+    // defined badge + real duration → surfaced. A truly-active incident is shown by live instead.
+    const liveMap = new Map()
+    const archives = { '2026-06': { services: { modal: { incidentList: [
+      { id: 'frozen-1', title: 'Web endpoints is down', startedAt: '2026-06-13T01:00:00Z', resolvedAt: null, durationMin: 0, finalStatus: 'investigating' },
+      { id: 'frozen-2', title: 'cause identified', startedAt: '2026-06-12T01:00:00Z', resolvedAt: null, durationMin: 0, finalStatus: 'identified' },
+      { id: 'monitor-1', title: 'mitigation deployed', startedAt: '2026-06-11T01:00:00Z', resolvedAt: '2026-06-11T01:30:00Z', durationMin: 30, finalStatus: 'monitoring' },
+      { id: 'done-1', title: 'Image builds recovered', startedAt: '2026-06-10T01:00:00Z', resolvedAt: '2026-06-10T02:00:00Z', durationMin: 60, finalStatus: 'resolved' },
+    ] } } } }
+    mergeArchiveIntoMap(liveMap, archives, [{ id: 'modal', name: 'Modal' }])
+    expect(liveMap.has('frozen-1')).toBe(false) // investigating → skipped
+    expect(liveMap.has('frozen-2')).toBe(false) // identified → skipped
+    expect(liveMap.has('monitor-1')).toBe(true) // monitoring → surfaced (amber badge, real duration)
+    expect(liveMap.get('monitor-1').duration).toBe('30m')
+    expect(liveMap.has('done-1')).toBe(true)    // resolved → surfaced
+    expect(liveMap.get('done-1').duration).toBe('1h 0m')
+  })
+
+  it('#587 a NON-resolved archive entry that COLLIDES with a live incident still merges affectedNames (collision check precedes the skip)', () => {
+    // The skip runs AFTER the live-collision check, so a still-active incident present in BOTH live
+    // and the partial archive (under different services sharing one id) accumulates the archive's
+    // service name onto the live card rather than being dropped.
+    const liveMap = new Map([
+      ['shared-x', { id: 'claude:shared-x', title: 'live', status: 'ongoing', startedAt: '2026-06-13T00:00:00Z', timeline: [], serviceId: 'claude', serviceName: 'Claude API', affectedNames: ['Claude API'], fromArchive: undefined }],
+    ])
+    const archives = { '2026-06': { services: { claudeai: { incidentList: [
+      { id: 'shared-x', title: 'archive snapshot', startedAt: '2026-06-13T00:00:00Z', resolvedAt: null, durationMin: 0, finalStatus: 'investigating' },
+    ] } } } }
+    mergeArchiveIntoMap(liveMap, archives, services)
+    expect(liveMap.size).toBe(1)
+    expect(liveMap.get('shared-x').affectedNames).toEqual(['Claude API', 'claude.ai'])
   })
 
   it('skips services that have been renamed/removed (archive serviceId not in live list)', () => {
@@ -257,5 +331,34 @@ describe('archiveSupplementForService (service filter mode)', () => {
     const liveCompositeIds = new Set()
     const archives = { '2026-04': null }
     expect(() => archiveSupplementForService(liveCompositeIds, 'mistral', archives, services)).not.toThrow()
+  })
+})
+
+describe('isWithinPeriod (#587 — age out stale archive ongoing)', () => {
+  const cutoff = new Date('2026-06-10T00:00:00Z').getTime() // 90d lower bound
+  const old = '2026-03-01T00:00:00Z'   // before cutoff
+  const fresh = '2026-06-12T00:00:00Z' // after cutoff
+
+  it('shows everything when there is no cutoff (period = null/0)', () => {
+    expect(isWithinPeriod({ status: 'resolved', startedAt: old, fromArchive: true }, null)).toBe(true)
+    expect(isWithinPeriod({ status: 'ongoing', startedAt: old, fromArchive: true }, 0)).toBe(true)
+  })
+
+  it('always shows a LIVE ongoing incident even when older than the cutoff', () => {
+    expect(isWithinPeriod({ status: 'ongoing', startedAt: old, fromArchive: undefined }, cutoff)).toBe(true)
+  })
+
+  it('AGES OUT an archive-sourced non-resolved incident older than the cutoff (the #587 fix)', () => {
+    expect(isWithinPeriod({ status: 'ongoing', startedAt: old, fromArchive: true }, cutoff)).toBe(false)
+  })
+
+  it('keeps an archive non-resolved incident that is still within the window', () => {
+    expect(isWithinPeriod({ status: 'ongoing', startedAt: fresh, fromArchive: true }, cutoff)).toBe(true)
+  })
+
+  it('ages out resolved incidents by startedAt regardless of source (unchanged)', () => {
+    expect(isWithinPeriod({ status: 'resolved', startedAt: old, fromArchive: true }, cutoff)).toBe(false)
+    expect(isWithinPeriod({ status: 'resolved', startedAt: old, fromArchive: undefined }, cutoff)).toBe(false)
+    expect(isWithinPeriod({ status: 'resolved', startedAt: fresh, fromArchive: false }, cutoff)).toBe(true)
   })
 })

@@ -12,7 +12,7 @@ All served by the Cloudflare Worker (`aiwatch-worker`, domain `aiwatch-worker.p2
 | `GET /api/status/cached` | KV-only (no live fetch), includes `probe24h` — for "Is X Down" SSR + initial load. **`?src=statusline-*`** returns a ~KB id/name/status-only projection via `buildStatuslinePayload` (`worker/src/statusline.ts`) — skips the ~2 MB probe/latency/AI reads. Statusline snippets (#400) poll this with the tag and target the Worker domain directly, **not** the Vercel-proxied `ai-watch.dev` path, so per-prompt polls don't burn Vercel Fast Data Transfer (#438) |
 | `GET /api/uptime?days=30` | Daily uptime counters |
 | `GET /api/probe/history?days=30` | Daily probe RTT summaries (90d max) |
-| `GET /api/report?month=YYYY-MM` | Monthly archive JSON (permanent) |
+| `GET /api/report?month=YYYY-MM` | Monthly archive JSON (permanent). For the **current** month (no built archive until the 1st of next month) it returns a `partial:true` archive synthesized read-only from the `incidents:monthly:{month}` accumulator (incidentList only) so the dashboard 90-day filter shows current-month incidents that rolled out of the live feed (#587). A KV read/parse error → 502 (not an empty 200); a genuinely absent accumulator → 200 empty partial. Past months with no archive → 404 |
 | `GET /api/v1/status` (+ `/status/:id`) | Public API (lightweight, CORS `*`, rate-limited 60/min/IP). Each served (non-429) request is recorded in Analytics Engine via `recordV1Traffic` (#518) so call volume is queryable via the AE SQL API |
 
 ## Badges / images

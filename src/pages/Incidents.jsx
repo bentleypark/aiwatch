@@ -10,7 +10,7 @@ import { useMonthlyArchives } from '../hooks/useMonthlyArchives'
 import { formatDate } from '../utils/time'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { getResolvedTime, getContextualTime, compareIncidents, compareGroupedRows, dominantGroupStatus, sumGroupDuration, formatDurationMs } from '../utils/incidentSort'
-import { archiveMonthsForPeriod, mergeArchiveIntoMap, archiveSupplementForService } from '../utils/archiveMerge'
+import { archiveMonthsForPeriod, mergeArchiveIntoMap, archiveSupplementForService, isWithinPeriod } from '../utils/archiveMerge'
 import { IncidentsSkeleton } from '../components/SkeletonUI'
 import IncidentTimeline from '../components/IncidentTimeline'
 import EmptyState from '../components/EmptyState'
@@ -334,7 +334,8 @@ export default function Incidents() {
   // Archive merge — see src/utils/archiveMerge.js + src/hooks/useMonthlyArchives.js.
   // Live /api/status only carries the upstream's last-N incidents (~5d for high-frequency
   // services like Mistral/Together), so the 90d filter without archive supplement
-  // overpromises by 4-18×. Months: prev 1-3, current month excluded (covered by live).
+  // overpromises by 4-18×. Months: prev 1-3 + the current month (#587 — its partial archive
+  // backfills current-month incidents that rolled out of the live feed before the 1st-of-month build).
   const archiveMonths = useMemo(() => archiveMonthsForPeriod(period), [period])
   const { archives } = useMonthlyArchives(archiveMonths)
 
@@ -411,7 +412,9 @@ export default function Incidents() {
     return allIncidents
       .filter((inc) => serviceFilter === 'all' || inc.serviceId === serviceFilter)
       .filter((inc) => statusFilter  === 'all' || inc.status    === statusFilter)
-      .filter((inc) => !cutoff || inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= cutoff)
+      // #587 — age out a stale archive-sourced 'ongoing' (frozen finalStatus) by startedAt; only a
+      // genuinely LIVE non-resolved incident gets the always-show exemption. See isWithinPeriod.
+      .filter((inc) => isWithinPeriod(inc, cutoff))
       .sort(compareIncidents)
   }, [allIncidents, serviceFilter, statusFilter, period])
 

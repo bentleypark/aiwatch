@@ -375,6 +375,28 @@ export async function accumulateIncidentsOnlyIfChanged(
   return ok ? 'written' : 'failed'
 }
 
+/** #587 mid-month — synthesize a PARTIAL archive (incidentList only) from the live
+ *  `incidents:monthly:{month}` accumulator. Lets the dashboard 90-day filter show a CURRENT-month
+ *  incident that already rolled out of the upstream live feed, BEFORE the real archive is built
+ *  (cron, 1st of next month). Read-only over the accumulator — does NOT write/rebuild
+ *  archive:monthly, so it cannot race the daily-summary accumulator write (the reason the frontend
+ *  historically excluded the current month). The accumulator already stores per-service
+ *  MonthlyIncidentEntry[], so the emitted incidentList shape matches buildMonthlyArchive verbatim
+ *  (frontend `mergeArchiveIntoMap` reads `archive.services[id].incidentList`; live wins on id
+ *  collision, so an active incident still shown by /api/status is never double-rendered). */
+export function buildPartialIncidentArchive(
+  period: string,
+  incidentData: MonthlyIncidents | null,
+): { period: string; partial: true; services: Record<string, { incidentList: MonthlyIncidentEntry[] }> } {
+  const services: Record<string, { incidentList: MonthlyIncidentEntry[] }> = {}
+  for (const [id, svc] of Object.entries(incidentData?.services ?? {})) {
+    if (svc?.incidents && svc.incidents.length > 0) {
+      services[id] = { incidentList: svc.incidents.map(e => ({ ...e })) }
+    }
+  }
+  return { period, partial: true, services }
+}
+
 /** Map a runtime ServiceStatus.incidents[].status to the archive's finalStatus enum.
  *  Defaults to 'investigating' when the upstream emits a value the archive doesn't
  *  recognize (defensive against future status-page schema additions). */
