@@ -35,13 +35,16 @@ test.describe('Incidents — 90d archive merge (#375)', () => {
     await page.waitForTimeout(1500)
 
     expect(reportUrls.length).toBeGreaterThan(0)
-    // Each URL should specify a YYYY-MM that's NOT the current month (live covers it)
+    // Each URL specifies a valid YYYY-MM, and the CURRENT month is now among them (#587 —
+    // the partial archive backfills current-month incidents that rolled out of the live feed).
     const currentMonth = new Date().toISOString().slice(0, 7)
+    const fetchedMonths = new Set()
     for (const url of reportUrls) {
       const match = url.match(/month=(\d{4}-\d{2})/)
       expect(match).not.toBeNull()
-      expect(match[1]).not.toBe(currentMonth)
+      fetchedMonths.add(match[1])
     }
+    expect(fetchedMonths.has(currentMonth)).toBe(true)
   })
 
   test('7d period does NOT trigger /api/report fetch', async ({ page }) => {

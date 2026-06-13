@@ -1033,7 +1033,7 @@ import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyB
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, type ArchiveScoreInput, type ScoreGrade } from './monthly-archive'
+import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -2856,6 +2856,43 @@ export default {
         })
       }
       if (!raw) {
+        // #587 mid-month: the CURRENT month has no built archive yet (cron builds it on the 1st),
+        // so serve a partial archive (incidentList only) synthesized from the live
+        // `incidents:monthly:{month}` accumulator. This lets the dashboard 90-day filter show a
+        // current-month incident that already rolled out of the upstream live feed (short-window
+        // RSS sources like Azure/Bedrock) before the archive exists. Past months with no archive
+        // stay 404. Short edge cache — the accumulator updates every */5 cron.
+        const currentMonth = todayUTC().slice(0, 7)
+        if (month === currentMonth) {
+          // Read/parse failures must NOT masquerade as "no incidents" (a 200 empty would hide an
+          // accumulated incident, and the frontend caches it session-wide). Surface them as 502
+          // like the sibling archive read above, so the client degrades to live-only + retries
+          // instead of caching an empty current month. A genuinely absent key (null) is the only
+          // path that legitimately yields an empty partial (no incidents accumulated yet).
+          let incRaw: string | null
+          try {
+            incRaw = await env.STATUS_CACHE.get(`incidents:monthly:${month}`)
+          } catch (err) {
+            console.error(`[api/report] incidents:monthly:${month} read failed:`, err instanceof Error ? err.message : err)
+            return new Response(JSON.stringify({ error: 'Failed to read incident data' }), {
+              status: 502, headers: { ...cors, 'Content-Type': 'application/json' },
+            })
+          }
+          let incidentData: MonthlyIncidents | null = null
+          if (incRaw) {
+            try { incidentData = JSON.parse(incRaw) } catch (err) {
+              console.error(`[api/report] corrupt incidents:monthly:${month}:`, err instanceof Error ? err.message : err)
+              return new Response(JSON.stringify({ error: 'Corrupt incident data' }), {
+                status: 502, headers: { ...cors, 'Content-Type': 'application/json' },
+              })
+            }
+          }
+          const partial = buildPartialIncidentArchive(month, incidentData)
+          return new Response(JSON.stringify(partial), {
+            status: 200,
+            headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=60' },
+          })
+        }
         return new Response(JSON.stringify({ error: `No archive found for ${month}` }), {
           status: 404,
           headers: { ...cors, 'Content-Type': 'application/json' },

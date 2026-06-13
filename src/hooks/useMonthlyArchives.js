@@ -30,6 +30,14 @@ export function fetchArchive(month) {
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       return r.json()
     })
+    .then(archive => {
+      // #587 — the CURRENT month is served as a `partial: true` archive synthesized from the live
+      // `incidents:monthly` accumulator, which mutates every */5 cron. Evict it after resolving so a
+      // later-accumulated incident appears without a full page reload (the Worker's max-age=60 edge
+      // cache keeps the re-fetch cheap). Finished months are immutable → stay cached.
+      if (archive?.partial) promiseCache.delete(month)
+      return archive
+    })
     .catch(err => {
       // Surface in operator console without breaking the UI — 90d view degrades to
       // live-only data, which matches pre-#375 behavior. Don't cache the rejection

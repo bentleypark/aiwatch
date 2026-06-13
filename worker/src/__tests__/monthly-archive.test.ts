@@ -10,6 +10,7 @@ import {
   buildMonthlyArchive,
   accumulateMonthlyIncidents,
   accumulateIncidentsOnlyIfChanged,
+  buildPartialIncidentArchive,
   parseDurationMin,
   summarizeSecurityAlerts,
   extractOsvVulnId,
@@ -1558,5 +1559,49 @@ describe('buildMonthlyArchive — degradation integration (#511)', () => {
     const kv = mkKv({ 'probe-degradation:monthly:2026-04': JSON.stringify({ byService: {}, noStatusByService: {} }) })
     const archive = await buildMonthlyArchive(kv, 2026, 4)
     expect(archive.degradation).toBeNull()
+  })
+})
+
+// ── buildPartialIncidentArchive (#587 mid-month) ──────────────────────
+describe('buildPartialIncidentArchive (#587)', () => {
+  const mkEntry = (id: string, over = {}) => ({
+    id, title: `Incident ${id}`, startedAt: '2026-06-13T01:26:00.000Z',
+    resolvedAt: null, durationMin: 0, finalStatus: 'investigating' as const, ...over,
+  })
+  const mkAccumulator = (services: Record<string, unknown>) => ({ lastUpdated: '2026-06-13T02:00:00.000Z', services }) as Parameters<typeof buildPartialIncidentArchive>[1]
+
+  it('emits incidentList per service from the accumulator (shape matches the real archive)', () => {
+    const acc = mkAccumulator({
+      bedrock: { count: 1, totalMinutes: 0, longestMinutes: 0, dates: ['2026-06-13'], incidentIds: ['aws-1'], durations: {}, incidents: [mkEntry('aws-1', { title: 'Service impact: Fable 5 and Mythos 5 Access' })] },
+    })
+    const out = buildPartialIncidentArchive('2026-06', acc)
+    expect(out.partial).toBe(true)
+    expect(out.period).toBe('2026-06')
+    expect(out.services.bedrock.incidentList).toHaveLength(1)
+    expect(out.services.bedrock.incidentList[0].id).toBe('aws-1')
+    expect(out.services.bedrock.incidentList[0].title).toBe('Service impact: Fable 5 and Mythos 5 Access')
+  })
+
+  it('omits services with no incidents (mergeArchiveIntoMap skips empty incidentList anyway)', () => {
+    const acc = mkAccumulator({
+      bedrock: { count: 1, totalMinutes: 0, longestMinutes: 0, dates: [], incidentIds: ['aws-1'], durations: {}, incidents: [mkEntry('aws-1')] },
+      azureopenai: { count: 0, totalMinutes: 0, longestMinutes: 0, dates: [], incidentIds: [], durations: {}, incidents: [] },
+    })
+    const out = buildPartialIncidentArchive('2026-06', acc)
+    expect(out.services.bedrock).toBeDefined()
+    expect(out.services.azureopenai).toBeUndefined()
+  })
+
+  it('returns an empty services map for null/empty accumulator (no archive, no crash)', () => {
+    expect(buildPartialIncidentArchive('2026-06', null).services).toEqual({})
+    expect(buildPartialIncidentArchive('2026-06', mkAccumulator({})).services).toEqual({})
+  })
+
+  it('deep-clones entries (no shared reference into the accumulator)', () => {
+    const entry = mkEntry('aws-1')
+    const acc = mkAccumulator({ bedrock: { count: 1, totalMinutes: 0, longestMinutes: 0, dates: [], incidentIds: ['aws-1'], durations: {}, incidents: [entry] } })
+    const out = buildPartialIncidentArchive('2026-06', acc)
+    expect(out.services.bedrock.incidentList[0]).not.toBe(entry)
+    expect(out.services.bedrock.incidentList[0]).toEqual(entry)
   })
 })
