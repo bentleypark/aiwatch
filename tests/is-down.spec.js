@@ -1,13 +1,16 @@
 import { test, expect } from '@playwright/test'
-// #568: derive the max ranked-services count from the canonical service lists so this
-// assertion never goes stale when a service is added. constants.js is a pure data module
-// (no browser deps) → importable in node/Playwright. NO_FEED_SERVICES (bedrock, azureopenai)
-// is used here as the static proxy for the set api/is-down.ts drops from ranking
-// (`uptimeSource === 'estimate' && incidents.length === 0`); the two are synonymous by
-// convention today. It's an UPPER bound — the real count can be lower when a service lacks a
-// finite score — so a future divergence only weakens the bound, never breaks the test.
-import { ALL_SERVICE_IDS, NO_FEED_SERVICES } from '../src/utils/constants.js'
-const MAX_RANKED = ALL_SERVICE_IDS.length - NO_FEED_SERVICES.length
+// #568/#643: upper bound on the is-down "ranked #X of N" denominator. constants.js is a pure data
+// module (no browser deps) → importable in node/Playwright, so this auto-tracks service additions.
+//
+// #643 — the bound must be the TOTAL service count, not `total − 2`. api/is-down.ts drops a service
+// from the ranked set only when `uptimeSource === 'estimate' && incidents.length === 0` (plus stale
+// sources), which is DYNAMIC: an estimate-only service like bedrock/azureopenai is RANKED while it
+// has a live incident. The old `total − NO_FEED_SERVICES.length` assumed those two are ALWAYS
+// excluded, so the test flaked (denominator rose above the bound) whenever an estimate-only service
+// had an active incident. The only static invariant is `denominator ≤ total`; the exact count varies
+// with live data and can't be asserted statically here.
+import { ALL_SERVICE_IDS } from '../src/utils/constants.js'
+const MAX_RANKED = ALL_SERVICE_IDS.length
 
 const PAGES = [
   // Phase A — original 6 services
@@ -246,7 +249,7 @@ test.describe('Is X Down? SSR pages', () => {
     const m = text.match(/is ranked #(\d+)(\s*\(tied\))? of (\d+) AI services/)
     expect(m).not.toBeNull()
     expect(Number(m[1])).toBeGreaterThanOrEqual(1)
-    expect(Number(m[3])).toBeLessThanOrEqual(MAX_RANKED) // ALL_SERVICE_IDS − estimate-only (bedrock, azureopenai); auto-tracks service additions (#568)
+    expect(Number(m[3])).toBeLessThanOrEqual(MAX_RANKED) // ≤ total service count (#643 — exact ranked count is dynamic)
   })
 
   test('tied rank shows "(tied)" marker for services in a stable tie cluster', async ({ page }) => {
@@ -269,18 +272,21 @@ test.describe('Is X Down? SSR pages', () => {
     expect(foundTied, `none of ${tiedCandidates.join('/')} rendered "(tied)" — score clusters may have drifted; refresh against /api/status`).toBe(true)
   })
 
-  test('rank excludes estimate-only services with zero incidents', async ({ page }) => {
-    // Bedrock + Azure OpenAI are uptimeSource=estimate + 0 incidents → hidden from
-    // dashboard ranking. SEO page must use the same filter so totalRanked matches
-    // the dashboard count (30, not 32 — bedrock+azureopenai have no SEO page either).
+  test('rank denominator stays within the total service count', async ({ page }) => {
+    // The SEO rank line ("ranked #X of N AI services") must use the same ranked set as the
+    // dashboard — which excludes estimate-only-zero-incident + stale-source services. That count is
+    // DYNAMIC (an estimate-only service is ranked while it has a live incident), so we assert the
+    // static `N ≤ total` invariant rather than a hardcoded figure (#643 — the old `total − 2` bound
+    // flaked whenever an estimate-only service had an active incident).
     await page.goto('/is-pinecone-down', { waitUntil: 'domcontentloaded' })
     const rankLine = page.locator('p.meta', { hasText: /is ranked #\d+/ })
     await expect(rankLine).toBeVisible()
     const text = (await rankLine.textContent()) || ''
     const m = text.match(/of (\d+) AI services/)
     expect(m).not.toBeNull()
-    // ≤ MAX_RANKED proves the estimate-only services (bedrock, azureopenai) are excluded,
-    // since MAX_RANKED = total − 2 < total. Auto-tracks service additions (#568).
+    // ≤ total service count. #643 — the ranked set excludes estimate-only-zero-incident + stale
+    // services, but that count is DYNAMIC (an estimate-only service is ranked while it has a live
+    // incident), so we can only assert the static `≤ total` invariant here, not a precise figure.
     expect(Number(m && m[1])).toBeLessThanOrEqual(MAX_RANKED)
   })
 
