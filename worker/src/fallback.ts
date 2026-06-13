@@ -91,7 +91,10 @@ export function getFallbacks(
 }
 
 export function buildFallbackText(fallbacks: Array<{ name: string; score: number | null }>): string {
-  if (fallbacks.length === 0) return '⚠️ No operational fallback available. Consider retry logic or caching.'
+  // #641 — no recommendation → emit nothing (the Discord embed omits an empty fallbackText). We
+  // don't assert "no fallback available": that's a subjective claim from our own (incomplete)
+  // coverage and may be inaccurate — "we have no recommendation" ≠ "no alternative exists".
+  if (fallbacks.length === 0) return ''
   const list = fallbacks.map((f, i) => {
     const label = f.score != null ? `${f.name} (Score ${f.score})` : f.name
     return label
@@ -162,6 +165,6 @@ export function buildGroupedFallbackText(
     }).join(' · ')
     lines.push(`${label}: ${list}`)
   }
-  if (lines.length === 0) return '⚠️ No operational fallback available. Consider retry logic or caching.'
+  if (lines.length === 0) return '' // #641 — no recommendation → emit nothing (see buildFallbackText)
   return `👉 Suggested fallback:\n${lines.join('\n')}`
 }

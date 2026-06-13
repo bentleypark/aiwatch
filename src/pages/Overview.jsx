@@ -9,7 +9,7 @@ import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
 import { isUnreliableUptime } from '../utils/serviceReliability'
-import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacks, ALL_SERVICES_FEED_URL } from '../utils/constants'
+import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionSwitchable, ALL_SERVICES_FEED_URL } from '../utils/constants'
 import RssCopyIcon from '../components/RssCopyIcon'
 import { regionStatusOf } from '../utils/regionStatus'
 import { buildCalendarFromIncidents } from '../utils/calendar'
@@ -404,13 +404,6 @@ function ActionBanner({ services, setPage, t }) {
     </span>
   ))
 
-  // Per-category fallback groups (with API-tier subdivision), shared with the
-  // AnalysisModal via getGroupedFallbacks so both surfaces show identical
-  // per-category alternatives for a multi-service incident (#445). The helper
-  // excludes non-operational + same-provider candidates and uses tierFor/
-  // tierLabelFor (warn-once on missing API_TIER rows) under the hood.
-  const categoryGroups = getGroupedFallbacks(affected, services)
-
   // Region-switch recommendations (refs #422 Phase 1). For each affected service
   // whose status page reports per-region incidents AND has at least one healthy
   // region, surface "Pinecone → AWS US West" alongside the cross-service fallback.
@@ -433,6 +426,12 @@ function ActionBanner({ services, setPage, t }) {
       docsUrl: rs.docsUrl,
     })
   }
+
+  // Per-category fallback groups (#445), EXCLUDING services that already have a region-switch
+  // recommendation (#641 — a region-specific outage is solved by the cheaper same-provider region
+  // switch shown above, so a cross-provider fallback alongside it is redundant noise). Per-service:
+  // an affected service without a region switch keeps its cross-service fallback. Helper is unit-tested.
+  const categoryGroups = getGroupedFallbacksExcludingRegionSwitchable(affected, services)
 
   return (
     <div className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg" style={{ padding: '10px 14px', lineHeight: 1.5, borderLeft: `3px solid ${borderColor}` }}>
@@ -530,11 +529,10 @@ function ActionBanner({ services, setPage, t }) {
             </span>
           ))}
         </div>
-      ) : affected.length > 0 ? (
-        <div className="mono text-[11px] text-[var(--text2)]" style={{ marginTop: '4px' }}>
-          {t('overview.banner.noFallback')}
-        </div>
       ) : null}
+      {/* #641 — when there's no fallback recommendation we render nothing here (no
+          "No direct fallback available" claim — that's a subjective statement from our
+          own incomplete coverage). Region-switch above stays; it's a real alternative. */}
     </div>
   )
 }

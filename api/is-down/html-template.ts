@@ -350,12 +350,12 @@ function renderAIInsight(insight?: { summary: string; estimatedRecovery: string;
   const resolvedBadge = isResolved
     ? '<span class="mono" style="font-size:10px;color:#3fb950;background:rgba(63,185,80,0.15);padding:2px 8px;border-radius:4px">Resolved</span>'
     : ''
-  const fallbackHtml = insight.needsFallback && !isResolved && fallbacks
+  // #641 — only render the Alternatives block when we actually have a recommendation; we don't
+  // assert "No operational alternatives" (a subjective claim from our own incomplete coverage).
+  const fallbackHtml = insight.needsFallback && !isResolved && fallbacks && fallbacks.length > 0
     ? `<div style="margin-top:8px;padding:8px 10px;background:#0d1117;border-radius:6px;border-left:3px solid #d29922">
 <span class="mono" style="font-size:11px;color:#c9d1d9;font-weight:600">🔄 Alternatives</span>
-${fallbacks.length > 0
-    ? fallbacks.map(f => `<div class="mono" style="font-size:11px;color:#c9d1d9;margin-top:3px">• ${esc(f.name)}${f.score != null ? ` (Score: ${f.score})` : ''}</div>`).join('')
-    : '<div class="mono" style="font-size:11px;color:#8b949e;margin-top:3px">No operational alternatives currently available</div>'}
+${fallbacks.map(f => `<div class="mono" style="font-size:11px;color:#c9d1d9;margin-top:3px">• ${esc(f.name)}${f.score != null ? ` (Score: ${f.score})` : ''}</div>`).join('')}
 </div>`
     : ''
   return `<div class="card" style="border-left:3px solid ${isResolved ? '#3fb950' : '#7C3AED'};margin:16px 0${isResolved && !isRecentlyRecovered ? ';opacity:0.75' : ''}">

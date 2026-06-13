@@ -282,6 +282,30 @@ describe('region-switch hint (#422)', () => {
     expect(buildRegionHint(pinecone)).toBe('📍 Try region: AWS EU West')
   })
 
+  it('#641 suppresses the cross-service fallback when a region switch IS offered', () => {
+    // OpenAI is region-aware (SERVICE_REGIONS) AND fallback-eligible (not EXCLUDE_FALLBACK). A
+    // region-specific outage is solved by the cheaper same-provider region switch, so the
+    // cross-service fallback (Claude) must be suppressed to avoid redundant noise.
+    const openai = mockService({ id: 'openai', name: 'OpenAI API', status: 'degraded', incidents: [
+      { id: 'oai-r', title: 'Elevated errors', status: 'investigating', startedAt: recentDate, impact: 'major', componentNames: ['us-east-1'] },
+    ] })
+    const claude = mockService({ id: 'claude', name: 'Claude API', provider: 'Anthropic', status: 'operational', aiwatchScore: 95 })
+    const alert = buildIncidentAlerts([openai, claude], alertedMap(), NOW).find(a => a.key === 'alerted:new:oai-r')
+    expect(alert.regionText).toBe('📍 Try region: US West (us-west-2)')
+    expect(alert.fallbackText).toBe('') // suppressed despite Claude being an operational same-tier fallback
+  })
+
+  it('#641 still shows the cross-service fallback for a GLOBAL (non-region) incident', () => {
+    // No region switch applies → the cross-service fallback is the only actionable alternative.
+    const openai = mockService({ id: 'openai', name: 'OpenAI API', status: 'down', incidents: [
+      { id: 'oai-g', title: 'Major outage', status: 'investigating', startedAt: recentDate, impact: 'critical' },
+    ] })
+    const claude = mockService({ id: 'claude', name: 'Claude API', provider: 'Anthropic', status: 'operational', aiwatchScore: 95 })
+    const alert = buildIncidentAlerts([openai, claude], alertedMap(), NOW).find(a => a.key === 'alerted:new:oai-g')
+    expect(alert.regionText).toBeUndefined()        // global → no region hint
+    expect(alert.fallbackText).toContain('Claude API') // fallback shown
+  })
+
   it('mergeTogetherAlerts preserves regionText from the first merged alert', () => {
     // Together has no region map so this is undefined in practice, but the merge path
     // is generic — pin that a set regionText survives the merge. (#422 Severity-6)

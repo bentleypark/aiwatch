@@ -196,24 +196,20 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                   )
                 })}
 
-                {/* Contextual fallback recommendation — per category for the service group */}
-                {showFallback && (
+                {/* Contextual fallback recommendation — per category for the service group.
+                    #641 — only render when we actually have a recommendation; no
+                    "No operational alternatives" claim (subjective, may be inaccurate). */}
+                {showFallback && fallbackGroups.length > 0 && (
                   <div className="mono text-[10px]" style={{ marginTop: '10px', padding: '8px 10px', background: 'var(--bg1)', borderRadius: '6px', borderLeft: '3px solid var(--amber)' }}>
                     <span style={{ color: 'var(--text1)', fontWeight: 600 }}>🔄 {lang === 'ko' ? '대안 서비스' : 'Alternatives'}</span>
-                    {fallbackGroups.length > 0 ? (
-                      <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                        {fallbackGroups.map(grp => (
-                          <span key={`${grp.category}:${grp.label}`} style={{ color: 'var(--text1)' }}>
-                            <span style={{ color: 'var(--text2)' }}>{grp.label} → </span>
-                            {grp.items.map(f => `${f.name}${f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}`).join(', ')}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <div style={{ marginTop: '4px', color: 'var(--text2)' }}>
-                        {lang === 'ko' ? '현재 운영 중인 대안 서비스가 없습니다' : 'No operational alternatives currently available'}
-                      </div>
-                    )}
+                    <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                      {fallbackGroups.map(grp => (
+                        <span key={`${grp.category}:${grp.label}`} style={{ color: 'var(--text1)' }}>
+                          <span style={{ color: 'var(--text2)' }}>{grp.label} → </span>
+                          {grp.items.map(f => `${f.name}${f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}`).join(', ')}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
