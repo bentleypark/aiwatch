@@ -119,6 +119,16 @@ board is visible.
   comments, so `gh issue view` shows `0/N` while the real state (4/N) lives only in the last comment —
   forcing a comment re-read every sweep. Comments hold **evidence/history**; the **body checkboxes hold
   current state**. Keep them in sync so the status is readable from the body in one place.
+- **Don't fork the checklist into a comment.** (Additive to the rule above.) Never restate a checklist
+  — an `### Acceptance status` block, a re-listed `- [ ]` set, a phase table — inside a **comment**; it
+  forks the single source of truth and immediately drifts. A progress/verify comment is **prose
+  evidence only**. To change state, edit the **issue body** with `gh issue edit {N} --body-file <f>`
+  (NOT a comment). Collapse multiple body checklist sections (Acceptance + Post-deploy + stray `- [ ]`
+  lists) into one where practical — but **keep the dated `verify-after` line**, since the
+  verify-before-recommend gate above keys its demotion off exactly that line. To clean up a comment that
+  already duplicated a checklist, edit that comment via
+  `gh api -X PATCH /repos/{owner}/{repo}/issues/comments/{id} -f body='…'` — convert its `- [ ]`/`- [x]`
+  markers to plain text (e.g. `⬜`/`✅`) so the boxes live only in the body.
 
 ## Why a skill
 Same reason as `ship-issue`: a periodic ritual described only in CLAUDE.md gets skipped on long
