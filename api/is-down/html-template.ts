@@ -319,6 +319,27 @@ function renderJsonLd(slug: string, seo: ServiceSEO, service: ServiceData | null
   return `<script type="application/ld+json">${safeJsonLd(data)}</script>`
 }
 
+// Linkify the curated status/dashboard URLs in an FAQ answer for the ON-PAGE render only (the JSON-LD
+// FAQ answer must stay plain text per schema.org). Targeted prefixes — ai-watch.dev / aistudio.google.com
+// / status.<provider>.<tld> / <provider>status.com (groqstatus.com, replicatestatus.com) — so bare BRAND
+// mentions in the prose (e.g. "claude.ai", "character.ai") are NOT turned into links. esc()s the non-URL
+// segments; the matched URLs are our own curated content. `(?<!\/\/)` skips a domain already preceded by
+// a scheme so we never emit a stray "https://" before the anchor (current FAQ answers use bare domains).
+const FAQ_URL_RE = /(?<!\/\/)(ai-watch\.dev|aistudio\.google\.com|status\.[a-z0-9.-]+\.[a-z]{2,}|[a-z0-9-]+status\.com)(\/[#\w/-]*)?/gi
+export function linkifyFaqAnswer(text: string): string {
+  let out = ''
+  let last = 0
+  for (const m of text.matchAll(FAQ_URL_RE)) {
+    const url = m[0]
+    const start = m.index ?? 0
+    out += esc(text.slice(last, start))
+    out += `<a href="https://${url}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`
+    last = start + url.length
+  }
+  out += esc(text.slice(last))
+  return out
+}
+
 function enhanceFaqAnswer(faq: { q: string; a: string }, fallbacks: Fallback[]): string {
   if (fallbacks.length > 0 && /what should i do|alternative|instead/i.test(faq.q)) {
     const fbList = fallbacks.map(fb => `${fb.name}${fb.score != null ? ` (Score: ${fb.score})` : ''}`).join(' and ')
@@ -678,8 +699,10 @@ function buildDataSummary(service: ServiceData | null, displayName: string): str
     ? `${service.uptime30d.toFixed(2)}%` : null
 
   if (count === 0) {
+    // #654 — lead with uptime as its OWN sentence so the "last 30 days" frame (which scopes only the
+    // incident count) doesn't make the source-window-varying uptime read as a 30-day figure.
     return uptime
-      ? `Based on AIWatch data from the last 30 days, ${displayName} has maintained a clean record with zero incidents. Uptime: ${uptime}.`
+      ? `${displayName}'s reported uptime is ${uptime}. Based on AIWatch data from the last 30 days, it has maintained a clean record with zero incidents.`
       : `Based on AIWatch data from the last 30 days, ${displayName} has maintained a clean record with zero incidents.`
   }
 
@@ -699,8 +722,10 @@ function buildDataSummary(service: ServiceData | null, displayName: string): str
     }
   }
 
+  // #654 — uptime leads as its own sentence (see the count===0 branch); "last 30 days" scopes only
+  // the incident count + MTTR, not the source-window-varying uptime.
   return uptime
-    ? `Based on AIWatch data from the last 30 days, ${displayName} experienced ${count} incident${count > 1 ? 's' : ''}${mttrText}. Uptime: ${uptime}.`
+    ? `${displayName}'s reported uptime is ${uptime}. Based on AIWatch data from the last 30 days, it experienced ${count} incident${count > 1 ? 's' : ''}${mttrText}.`
     : `Based on AIWatch data from the last 30 days, ${displayName} experienced ${count} incident${count > 1 ? 's' : ''}${mttrText}.`
 }
 
@@ -722,7 +747,7 @@ function renderFAQ(seo: ServiceSEO, fallbacks: Fallback[]): string {
     const answer = enhanceFaqAnswer(f, fallbacks)
     return `<div class="faq-item">
 <p class="faq-q">${esc(f.q)}</p>
-<p class="faq-a">${esc(answer)}</p>
+<p class="faq-a">${linkifyFaqAnswer(answer)}</p>
 </div>`
   }).join('\n')
 

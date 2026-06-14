@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderPage, type ServiceData } from '../html-template'
+import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderPage, linkifyFaqAnswer, type ServiceData } from '../html-template'
 import type { ServiceSEO } from '../seo-content'
 import { SLUG_TO_SERVICE, RELATED_SLUGS } from '../slug-map'
 import type { RegionStatusResult } from '../region-status'
@@ -928,5 +928,46 @@ describe('date-literal guard (#443)', () => {
       hits,
       'Hard-coded date literal(s) found — replace with daysAgo(n)/dayAgo(n) so fixtures stay inside the rolling 30-day window (see #443).',
     ).toEqual([])
+  })
+})
+
+describe('linkifyFaqAnswer (#654 — on-page FAQ URL linking)', () => {
+  it('links curated status / dashboard URLs (bare domain → https:// anchor)', () => {
+    const out = linkifyFaqAnswer('Check status.openai.com or the AIWatch dashboard at ai-watch.dev.')
+    expect(out).toContain('<a href="https://status.openai.com" target="_blank" rel="noopener noreferrer">status.openai.com</a>')
+    expect(out).toContain('<a href="https://ai-watch.dev" target="_blank" rel="noopener noreferrer">ai-watch.dev</a>')
+  })
+
+  it('links a path/anchor URL (ai-watch.dev/#ranking) and aistudio status', () => {
+    expect(linkifyFaqAnswer('compare at ai-watch.dev/#ranking now')).toContain('href="https://ai-watch.dev/#ranking"')
+    expect(linkifyFaqAnswer('Google AI Studio status at aistudio.google.com/status here')).toContain('href="https://aistudio.google.com/status"')
+  })
+
+  it('does NOT linkify bare brand domains in prose (claude.ai / character.ai)', () => {
+    const out = linkifyFaqAnswer('claude.ai depends on Claude API. Check ai-watch.dev for details.')
+    expect(out).not.toContain('href="https://claude.ai"')
+    expect(out).toContain('claude.ai depends')           // brand stays plain text
+    expect(out).toContain('href="https://ai-watch.dev"') // real URL still linked
+  })
+
+  it('does not swallow a sentence-ending period into the link', () => {
+    const out = linkifyFaqAnswer('See ai-watch.dev.')
+    expect(out).toContain('>ai-watch.dev</a>.')          // period stays outside the anchor
+  })
+
+  it('escapes non-URL text (no HTML injection)', () => {
+    expect(linkifyFaqAnswer('a <script>x</script> b')).toContain('&lt;script&gt;')
+  })
+
+  it('links the <provider>status.com shape (groqstatus.com / replicatestatus.com) + multi-dot status hosts', () => {
+    expect(linkifyFaqAnswer('check groqstatus.com now')).toContain('href="https://groqstatus.com"')
+    expect(linkifyFaqAnswer('check replicatestatus.com now')).toContain('href="https://replicatestatus.com"')
+    expect(linkifyFaqAnswer('LangSmith status at status.smith.langchain.com here')).toContain('href="https://status.smith.langchain.com"')
+  })
+
+  it('does not double-scheme a domain already prefixed with https:// (no stray https:// before the anchor)', () => {
+    const out = linkifyFaqAnswer('see https://status.openai.com here')
+    expect(out).not.toContain('https://<a')          // no broken stray scheme
+    expect(out).not.toContain('href="https://https://')
   })
 })

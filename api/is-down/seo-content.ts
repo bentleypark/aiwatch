@@ -16,7 +16,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
     whenDown: 'When Claude API is down, developers may experience API request failures, increased latency, or model unavailability. Applications built on the Claude API will be unable to generate responses.',
     faqs: [
       { q: 'Is Claude API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Claude API every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },
-      { q: 'How do I check Claude API status?', a: 'You can check Claude API status on this page (updated every 5 minutes), on the official Anthropic status page at status.anthropic.com, or on the AIWatch dashboard at ai-watch.dev.' },
+      { q: 'How do I check Claude API status?', a: 'You can check Claude API status on this page (updated every 5 minutes), on the official Anthropic status page at status.claude.com, or on the AIWatch dashboard at ai-watch.dev.' },
       { q: 'What should I do when Claude API is down?', a: 'Consider switching to an alternative LLM API such as OpenAI or Gemini. AIWatch provides real-time fallback recommendations based on which services are currently operational and reliable.' },
       { q: 'How often does Claude API go down?', a: 'Claude API uptime and incident history are tracked on this page. Check the recent incidents section and uptime percentage for current reliability data.' },
     ],
