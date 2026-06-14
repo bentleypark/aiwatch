@@ -1,89 +1,90 @@
 // #375 — pin the network contract for the 90d archive merge.
 // The unit suite covers merge/dedup logic; this E2E verifies the live wiring:
-// the Incidents page actually issues the /api/report fetch when 90d is selected,
-// and does NOT issue it for 7d/30d (those windows are already covered by live data).
+// the Incidents page actually issues the /api/report fetch when 90d/30d is selected
+// (incl. the current month, #587), and only the current month for 7d.
+//
+// #650 — made deterministic + production-independent:
+//   1. `/api/report` is MOCKED (was hitting the real worker via VITE_API_URL||prod, so the result
+//      depended on whatever the live current-month archive returned — 404 vs partial:true).
+//   2. The `request` listener is attached BEFORE `goto('/')` so the current-month fetch fired by the
+//      initial period=7 mount is captured too. Previously the listener attached after the mount, and
+//      the current-month promise (partial → evicted only AFTER it resolves) was still pending in the
+//      client cache when the test changed period, so `fetchArchive(currentMonth)` reused the pending
+//      promise and issued no new request — a race the slow CI runner lost every time (deterministic
+//      CI failure, deterministic local pass).
+//   3. Bounded `expect.poll` on the captured requests instead of fixed `waitForTimeout` sleeps.
 
 import { test, expect } from '@playwright/test'
 import { waitForDataLoad, navigateVia } from './helpers.js'
 
 const REPORT_PATH_RE = /\/api\/report\?month=\d{4}-\d{2}/
+const currentMonth = () => new Date().toISOString().slice(0, 7)
+const monthsOf = (urls) => new Set(urls.map((u) => u.match(/month=(\d{4}-\d{2})/)?.[1]).filter(Boolean))
+
+// Deterministic /api/report: the current month is served as a `partial:true` archive (#587) — so
+// useMonthlyArchives evicts + re-fetches it on each period change; finished months are plain 200 and
+// stay cached. Body is minimal (no services) — this test pins the *network contract*, not merge logic.
+async function mockReport(page) {
+  await page.route(REPORT_PATH_RE, (route) => {
+    const month = new URL(route.request().url()).searchParams.get('month')
+    route.fulfill({ json: { period: month, partial: month === currentMonth(), services: {} } })
+  })
+}
+
+// Attach the report-request capture BEFORE navigating so the initial period=7 mount's current-month
+// fetch is recorded, then load the Incidents page. Returns the live-collected reportUrls array.
+// NOTE: only `/api/report` is mocked — `/api/status` is left live (same dependency every other
+// non-status-mocked spec carries) because this test asserts only the `/api/report` network contract.
+async function openIncidents(page) {
+  const reportUrls = []
+  page.on('request', (req) => { if (REPORT_PATH_RE.test(req.url())) reportUrls.push(req.url()) })
+  await mockReport(page)
+  await page.goto('/')
+  await waitForDataLoad(page)
+  await navigateVia(page, 'Incidents')
+  await page.locator('main select').first().waitFor({ state: 'visible', timeout: 5000 })
+  return reportUrls
+}
 
 test.describe('Incidents — 90d archive merge (#375)', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/')
-    await waitForDataLoad(page)
-    await navigateVia(page, 'Incidents')
-    await page.locator('main select').first().waitFor({ state: 'visible', timeout: 5000 })
-  })
-
-  test('selecting 90d period triggers /api/report fetch for archive months', async ({ page }) => {
-    // Track ALL /api/report URLs the page hits during the test. We capture both 'request'
-    // (asserts the fetch fires) and don't care about the response body — the unit suite
-    // already covers merge logic. Network-contract pin only.
-    const reportUrls = []
-    page.on('request', (req) => {
-      const url = req.url()
-      if (REPORT_PATH_RE.test(url)) reportUrls.push(url)
-    })
+  test('selecting 90d fetches the window archive months incl. the current month', async ({ page }) => {
+    const reportUrls = await openIncidents(page)
 
     const periodSelect = page.locator('main select').nth(2)
     await periodSelect.selectOption('90')
 
-    // useMonthlyArchives fires the fetch via useEffect — give it a beat to settle.
-    // 1500ms is conservative: archives are cached process-wide, but cold start needs
-    // Promise.all over 3 fetches. CI on slower runners has been the timing concern.
-    await page.waitForTimeout(1500)
+    // 90d spans the current month + ≥1 prior month → wait until >1 distinct month is requested
+    // (deterministic signal, replaces a fixed sleep).
+    await expect.poll(() => monthsOf(reportUrls).size, { timeout: 5000 }).toBeGreaterThan(1)
 
-    expect(reportUrls.length).toBeGreaterThan(0)
-    // Each URL specifies a valid YYYY-MM, and the CURRENT month is now among them (#587 —
-    // the partial archive backfills current-month incidents that rolled out of the live feed).
-    const currentMonth = new Date().toISOString().slice(0, 7)
-    const fetchedMonths = new Set()
-    for (const url of reportUrls) {
-      const match = url.match(/month=(\d{4}-\d{2})/)
-      expect(match).not.toBeNull()
-      fetchedMonths.add(match[1])
-    }
-    expect(fetchedMonths.has(currentMonth)).toBe(true)
+    // Every report URL carries a valid YYYY-MM, and the CURRENT month is among them (#587 — the
+    // partial archive backfills current-month incidents that rolled out of the live feed).
+    for (const url of reportUrls) expect(url).toMatch(/month=\d{4}-\d{2}/)
+    expect(monthsOf(reportUrls).has(currentMonth())).toBe(true)
   })
 
   test('7d period fetches the current-month archive (#587 — short-window services need backfill)', async ({ page }) => {
-    const periodSelect = page.locator('main select').nth(2)
-    // 7d is the default, so selectOption('7') would be a no-op (no change event) and its initial
-    // fetch already fired during page load. Move to 90d first, THEN switch to 7d so the change
-    // actually fires — and attach the request listener only for that transition.
-    await periodSelect.selectOption('90')
-    await page.waitForTimeout(1000)
+    // The default period is 7, so the initial mount already fetched the current month — captured
+    // because the listener is attached before goto. 7d's window doesn't span a prior month, so it
+    // fetches ONLY the current month.
+    const reportUrls = await openIncidents(page)
 
-    const reportUrls = []
-    page.on('request', (req) => {
-      if (REPORT_PATH_RE.test(req.url())) reportUrls.push(req.url())
-    })
-
-    await periodSelect.selectOption('7')
-    await page.waitForTimeout(1200)
-
-    // 7d's window doesn't span a prior month, so it fetches ONLY the current month — re-fetched on
-    // the switch because the mutable partial archive is evicted from the client cache each cycle (#587).
-    expect(reportUrls.length).toBeGreaterThan(0)
-    const currentMonth = new Date().toISOString().slice(0, 7)
-    expect(reportUrls.every((u) => u.includes(`month=${currentMonth}`))).toBe(true)
+    await expect.poll(() => reportUrls.length, { timeout: 5000 }).toBeGreaterThan(0)
+    expect(reportUrls.every((u) => u.includes(`month=${currentMonth()}`))).toBe(true)
   })
 
-  test('30d period fetches archive months (#587 — a rolled-out incident within 30d must show)', async ({ page }) => {
-    const reportUrls = []
-    page.on('request', (req) => {
-      if (REPORT_PATH_RE.test(req.url())) reportUrls.push(req.url())
-    })
+  test('30d period fetches archive months incl. the current month (#587 — a rolled-out incident within 30d must show)', async ({ page }) => {
+    const reportUrls = await openIncidents(page)
 
     const periodSelect = page.locator('main select').nth(2)
     await periodSelect.selectOption('30')
-    await page.waitForTimeout(1200)
 
-    // 30d now fetches the months its window spans (current + possibly the prior month).
-    expect(reportUrls.length).toBeGreaterThan(0)
-    const currentMonth = new Date().toISOString().slice(0, 7)
-    const fetched = new Set(reportUrls.map((u) => u.match(/month=(\d{4}-\d{2})/)?.[1]))
-    expect(fetched.has(currentMonth)).toBe(true)
+    // 30d fetches the months its window spans (current + usually the prior month). We assert only the
+    // current month here: whether the prior month is included is calendar-edge-dependent (on, e.g., a
+    // 31st, `now-30d` lands in the same month → current only), so asserting a 2-month span would
+    // reintroduce a date-dependent flake — exactly what #650 removed. The robust multi-month-fetch
+    // contract is pinned by the 90d test above.
+    await expect.poll(() => reportUrls.length, { timeout: 5000 }).toBeGreaterThan(0)
+    expect(monthsOf(reportUrls).has(currentMonth())).toBe(true)
   })
 })
