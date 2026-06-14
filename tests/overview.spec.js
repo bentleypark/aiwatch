@@ -57,6 +57,61 @@ test.describe('Overview page', () => {
     await expect(page.locator('main button').filter({ hasText: 'Claude API' })).toBeVisible()
   })
 
+  test('category tabs filter the grid into per-category sections (#646)', async ({ page }) => {
+    // The Overview surfaces the sidebar's category taxonomy as an on-screen control + per-category
+    // section headers (so the active category is visible/changeable here, incl. on mobile).
+    const tablist = page.getByRole('tablist', { name: /Services|서비스/ })
+    await expect(tablist).toBeVisible()
+    // All five category tabs present (locale-agnostic).
+    for (const name of [/^All$|^전체$/, /AI Apps|AI 앱/, /LLM/, /Voice & Inference|음성/, /Coding Agents|코딩 에이전트/]) {
+      await expect(tablist.getByRole('tab', { name }).first()).toBeVisible()
+    }
+
+    // Default 'all' → multiple category section headings render (the structure #646 adds).
+    await expect(page.getByRole('heading', { name: /LLM/ })).toBeVisible()
+    await expect(page.getByRole('heading', { name: /Coding Agents|코딩 에이전트/ })).toBeVisible()
+
+    // Select the LLM tab → only the LLM section renders; the AI Apps section heading disappears
+    // (catServices is scoped to LLM, so the apps section is not built at all).
+    await tablist.getByRole('tab', { name: /LLM/ }).click()
+    await page.waitForTimeout(200)
+    await expect(page.locator('main button').filter({ hasText: 'Claude API' }).first()).toBeVisible()
+    await expect(page.getByRole('heading', { name: /AI Apps|AI 앱/ })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: /Coding Agents|코딩 에이전트/ })).toHaveCount(0)
+  })
+
+  test('status filter composes within a category and resets when the category changes (#646)', async ({ page }) => {
+    // MOCK_SERVICES is merged in, so override the services this test reasons about to known statuses.
+    const op = (id, name, category = 'api') => ({ id, category, name, provider: 'x', status: 'operational', latency: 150, uptime30d: 99.9, calendarDays: 30, incidents: [] })
+    const degraded = (id, name, category = 'api') => ({ ...op(id, name, category), status: 'degraded',
+      incidents: [{ id: `${id}-i`, title: 'Issue', status: 'investigating', impact: 'minor', startedAt: new Date(Date.now() - 60_000).toISOString(), timeline: [] }] })
+    const mockData = { json: { services: [
+      degraded('openai', 'OpenAI API'),               // LLM, degraded
+      op('claude', 'Claude API'),                     // LLM, operational
+      degraded('claudecode', 'Claude Code', 'agent'), // agent, degraded
+      op('cursor', 'Cursor', 'agent'),                // agent, operational
+    ], lastUpdated: new Date().toISOString() } }
+    await page.route('**/api/status**', (route) => route.fulfill(mockData))
+    await page.route('**/api/status/cached', (route) => route.fulfill(mockData))
+    await page.goto('/')
+    await page.locator('main button').first().waitFor({ state: 'visible', timeout: 20000 })
+
+    const tablist = page.getByRole('tablist', { name: /Services|서비스/ })
+    // LLM category + Issues status → only the degraded LLM service shows; the operational LLM is hidden.
+    await tablist.getByRole('tab', { name: /LLM/ }).click()
+    await page.locator('main').getByRole('button', { name: /Issues/ }).click()
+    await page.waitForTimeout(200)
+    await expect(page.locator('main button').filter({ hasText: 'OpenAI API' }).first()).toBeVisible()
+    await expect(page.locator('main button').filter({ hasText: 'Claude API' })).toHaveCount(0)
+
+    // Switching category resets the status filter to All (useEffect on categoryFilter) → the operational
+    // agent (Cursor) is visible, which it would NOT be if the Issues filter had persisted.
+    await tablist.getByRole('tab', { name: /Coding Agents|코딩 에이전트/ }).click()
+    await page.waitForTimeout(200)
+    await expect(page.locator('main button').filter({ hasText: 'Cursor' }).first()).toBeVisible()
+    await expect(page.locator('main button').filter({ hasText: 'Claude Code' }).first()).toBeVisible()
+  })
+
   test('Analyze button shows Coming Soon or Beta based on analysis data', async ({ page }) => {
     // Analyze button should exist in topbar (desktop)
     const analyzeBtn = page.locator('header button, header [aria-disabled]').filter({ hasText: /Analyze/ })
@@ -419,10 +474,12 @@ test.describe('#553 Issues filter — agent-only issue', () => {
     // Select Issues → the agent section must render and the "No Issues" empty state must NOT appear.
     await page.locator('main').getByRole('button', { name: /Issues/ }).click()
 
-    // Positive: assert the *Coding Agents section heading* (renders only when filteredAgents.length > 0),
-    // NOT bare getByText('Claude Code') — the agent name also appears in the Recent Incidents panel below,
-    // which renders regardless of the filter or the fix, so a name-only check would pass even when buggy.
-    await expect(page.locator('main').getByText(/Coding Agents|코딩 에이전트/)).toBeVisible()
+    // Positive: assert the *Coding Agents section heading* (renders only when the agents section has a
+    // matching service), NOT bare getByText('Claude Code') — the agent name also appears in the Recent
+    // Incidents panel below, which renders regardless of the filter or the fix, so a name-only check
+    // would pass even when buggy. Scoped to role=heading because #646 added a CategoryTabs "Coding
+    // Agents" *tab* with the same label — getByText would now match both (strict-mode violation).
+    await expect(page.locator('main').getByRole('heading', { name: /Coding Agents|코딩 에이전트/ })).toBeVisible()
 
     // Negative (load-bearing — this is what fails when the fix is reverted): no "No Issues" empty state.
     // EmptyState type="good" is shared by the issues-grid AND the Recent Incidents panel, but the fixture's
