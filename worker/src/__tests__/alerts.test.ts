@@ -690,9 +690,15 @@ describe('flap suppression (#283)', () => {
       expect(isFlapNotice(mkInc({ title: 'Major Outage' }))).toBe(false)
     })
 
-    it('never matches non-null impact, even with matching suffix', () => {
+    it('excludes only `major` impact — a `minor` or null flap still matches (#633/#565)', () => {
+      // `major` = explicit broad-outage wording (#564) → never a flap, alert immediately.
       expect(isFlapNotice(mkInc({ impact: 'major', title: 'X — recovered' }))).toBe(false)
-      expect(isFlapNotice(mkInc({ impact: 'minor', title: 'X — down' }))).toBe(false)
+      // #564/#565 maps a BetterStack auto-monitor "— down" flap → `minor` (only outage/unavailable/
+      // offline → major). The pre-fix `impact != null` guard wrongly excluded these, silently
+      // disabling the #283 flap-dedup AND the #633 first-seen hold for every BetterStack incident
+      // (the Modal "Web endpoints — down" phantom). A minor/null flap MUST still match.
+      expect(isFlapNotice(mkInc({ impact: 'minor', title: 'X — down' }))).toBe(true)
+      expect(isFlapNotice(mkInc({ impact: null, title: 'X — down' }))).toBe(true)
     })
   })
 
@@ -736,8 +742,10 @@ describe('flap suppression (#283)', () => {
       expect(isFlapSuppressible('fireworks', { flapSuppression: false }, mkInc())).toBe(false)
     })
 
-    it('returns false for non-null impact incidents (real outages never suppressed)', () => {
+    it('returns false for `major` impact (real outages never suppressed) but true for `minor` flaps (#565)', () => {
       expect(isFlapSuppressible('fireworks', config, mkInc({ impact: 'major' }))).toBe(false)
+      // #564/#565 maps BetterStack "— down" flaps to `minor` — these MUST stay suppressible.
+      expect(isFlapSuppressible('fireworks', config, mkInc({ impact: 'minor', title: 'X — down' }))).toBe(true)
     })
 
     it('returns false for titles without the " — recovered" suffix', () => {
@@ -812,6 +820,13 @@ describe('first-seen confirmation gate (#633)', () => {
   describe('shouldHoldNewIncident', () => {
     it('HOLDS a flap-shaped new incident on its first sight (monitor-flap service)', () => {
       expect(shouldHoldNewIncident('modal', config, mkInc(), firstSight)).toBe(true)
+    })
+
+    it('HOLDS the real `minor`-impact phantom shape (Modal "Web endpoints — down", #633/#565)', () => {
+      // Regression: the live BetterStack incident carries impact 'minor' (#564), not null. Pre-fix the
+      // `impact != null` guard made this fire on first sight (the recurred Modal phantom); it must hold.
+      const inc = mkInc({ status: 'investigating', impact: 'minor', title: 'Web endpoints — down' })
+      expect(shouldHoldNewIncident('modal', config, inc, firstSight)).toBe(true)
     })
 
     it('FIRES once the incident survived a prior cycle (pending marker present)', () => {
