@@ -41,9 +41,16 @@ const TIER1_IDS = new Set(['claude', 'openai', 'gemini'])
 // cover both halves.
 const FLAP_TITLE_RE = /\s*—\s*(down|recovered)\s*$/
 
-/** Matches either half of a BetterStack flap cycle. Null-impact only — real incidents tagged with severity are never treated as flaps. */
+// Matches either half of a BetterStack flap cycle. Excludes only `major` — NOT all non-null impact.
+// #564/#565 made `mapBetterStackImpact` always return a non-null impact ('minor'|'major'), mapping an
+// auto-monitor "<component> went down" flap → 'minor' and reserving 'major' for explicit broad-outage
+// wording ('outage'/'unavailable'/'offline'). The original `impact != null` guard (added in #283 when
+// BetterStack flaps were null-impact) therefore silently stopped matching ANY BetterStack incident
+// post-#565 — disabling both the #283 flap-dedup AND the #633 first-seen hold for exactly the
+// flapSuppression services they target (the Modal "Web endpoints — down" phantom recurred for this
+// reason). A flap is now: '— down'/'— recovered' shape AND impact is not 'major' (null or 'minor').
 export function isFlapNotice(inc: Incident): boolean {
-  if (inc.impact != null) return false
+  if (inc.impact === 'major') return false  // explicit broad outage → never a flap (alert immediately)
   return FLAP_TITLE_RE.test(inc.title)
 }
 
