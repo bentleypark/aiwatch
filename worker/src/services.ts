@@ -48,7 +48,7 @@ export const SERVICES: ServiceConfig[] = [
   // Known limitation: the Nuxt parser tags the title with only servicesArr[0] (first affected
   // component) and doesn't populate componentNames, so a *combined* Le-Chat+API incident that lists
   // Le Chat first would be dropped despite affecting the API. Low-probability; revisit if observed.
-  // #627 — statusComponent 'API' selects the Instatus "API" group component for the 30-day uptime%
+  // #627 — statusComponent 'API' selects the Instatus "API" group component for the official uptime%
   // (status.mistral.ai groups all API endpoints under it; → ~99.6% instead of "Not provided").
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1', incidentExclude: ['le chat', 'le console', 'documentation', 'website'], statusComponent: 'API' },
   // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
@@ -69,7 +69,9 @@ export const SERVICES: ServiceConfig[] = [
   // the badge/Score to the API: a Website-only incident is dropped, a Website+API incident kept (it
   // affects the API). Allowlist is correct here — the API component is literally named "API", and
   // unlike a title-denylist it keeps a multi-component "Website and API" incident.
-  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com', incidentKeywords: ['api'] },
+  // #635 — statusComponent 'API' selects the Instatus "API" component for the official uptime% (the
+  // Next.js payload carries componentsUptime[id].uptime, ~90d) instead of "Not provided".
+  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com', incidentKeywords: ['api'], statusComponent: 'API' },
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
   // status.deepseek.com (Flashduty, #507) blocks NON-BROWSER TLS fingerprints — a Worker fetch()
   // is reset at the TLS layer regardless of egress IP (verified 2026-06-12: a real Chromium from
@@ -930,7 +932,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       const latency = Date.now() - start
 
       let incidents: Incident[] = []
-      let instatusUptime: number | null = null // #627 — Instatus per-component 30d uptime%
+      let instatusUptime: number | null = null // #627 — Instatus per-component official uptime%
       if (config.onlineOrNotUrl && res.ok) {
         const html = await res.text()
         incidents = parseOnlineOrNotIncidents(html)
@@ -949,10 +951,10 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       } else if (scrapeRes?.ok) {
         if (config.instatusUrl) {
           incidents = parseInstatusIncidents(await scrapeRes.text())
-          // #627 — Instatus exposes uptime per component (no summary.json). It lives on the MAIN
+          // #627/#635 — Instatus exposes uptime per component (no summary.json). It lives on the MAIN
           // status page (res = statusUrl), not the /incidents listing scraped above — so read res
-          // here to extract the named component's 30-day uptime% (e.g. mistral statusComponent 'API').
-          // Else it shows "Not provided". Next.js Instatus (Perplexity) has no inline uptime → null.
+          // here to extract the named component's uptime% (mistral 'API' Nuxt flat-ref; perplexity
+          // 'API' Next.js componentsUptime[id].uptime). Else it shows "Not provided".
           if (res.ok && config.statusComponent) {
             instatusUptime = parseInstatusUptime(await res.text(), config.statusComponent)
           } else {

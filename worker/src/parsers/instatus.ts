@@ -116,15 +116,49 @@ function parseInstatusNextIncidents(html: string): Incident[] {
   }
 }
 
-// #627 — 30-day uptime % for a named component from an Instatus page. Instatus exposes uptime per
-// component (no Atlassian summary.json), so AIWatch otherwise shows "Not provided". Nuxt encodes it
-// as a flat-array index ref to a direct float (e.g. the "API" group component on status.mistral.ai →
-// 99.599). The Next.js format (Perplexity) does NOT carry an inline per-component uptime % (only
-// daily metrics) → returns null for now (a daily-aggregation follow-up). Returns null when the
-// component isn't found or the value is out of range, so the caller falls back to estimate/null.
+// Quote-aware brace matcher: given the index of an opening `{`, return the index of its matching
+// `}` (or -1). Used to extract a JSON object embedded in a larger string when the object nests
+// arrays/objects (so a naive non-greedy regex can't bound it).
+function matchBrace(s: string, open: number): number {
+  let depth = 0
+  let inStr = false
+  for (let i = open; i < s.length; i++) {
+    const c = s[i]
+    if (inStr) {
+      if (c === '\\') { i++; continue }
+      if (c === '"') inStr = false
+    } else if (c === '"') {
+      inStr = true
+    } else if (c === '{') {
+      depth++
+    } else if (c === '}') {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
+}
+
+// #627/#635 — uptime % for a named component from an Instatus page. Instatus exposes uptime per
+// component (no Atlassian summary.json), so AIWatch otherwise shows "Not provided". The two SSR
+// formats encode it differently:
+//   • Nuxt (Mistral): a flat-array index ref to a direct float (e.g. the "API" group component on
+//     status.mistral.ai → 99.599).
+//   • Next.js (Perplexity, #635): a `componentsUptime` object keyed by component id, each entry
+//     carrying a precomputed aggregate `"uptime":"99.82"` string. The parser reads only the % — not
+//     the page's window (observed ~90d on status.perplexity.com via `maxUptimeDays:90`; per #654 the
+//     window isn't surfaced since it varies by source).
+//     (The #627 "Next.js has no inline uptime" note was outdated — Instatus now serializes it.)
+// Returns null when the component isn't found or the value is out of range, so the caller falls back
+// to estimate/null.
 export function parseInstatusUptime(html: string, componentName: string | undefined): number | null {
   if (!componentName) return null
-  if (!html.includes('__NUXT_DATA__')) return null // Next.js: no inline component uptime (#627 follow-up)
+  if (html.includes('__NUXT_DATA__')) return parseInstatusNuxtUptime(html, componentName)
+  if (html.includes('__next_f')) return parseInstatusNextUptime(html, componentName)
+  return null
+}
+
+function parseInstatusNuxtUptime(html: string, componentName: string): number | null {
   const match = html.match(/__NUXT_DATA__[^>]*>([\s\S]*?)<\/script/)
   if (!match) return null
   try {
@@ -141,6 +175,50 @@ export function parseInstatusUptime(html: string, componentName: string | undefi
     return null
   } catch (err) {
     console.warn('[parseInstatusUptime] failed:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
+// Warn-once (per component) on a Next.js payload-SHAPE change — the component map or the
+// componentsUptime block we depend on went missing — so a parser that used to work silently
+// reverting to "Not provided" is diagnosable, matching the warn-once convention of mapInstatusImpact /
+// parseInstatusNextIncidents. A component that simply has no aggregate uptime is a legitimate null and
+// stays silent (not a shape change).
+const warnedInstatusNextUptime = new Set<string>()
+function warnNextUptimeShape(componentName: string, reason: string): null {
+  if (!warnedInstatusNextUptime.has(componentName)) {
+    warnedInstatusNextUptime.add(componentName)
+    console.warn(`[parseInstatusNextUptime] no uptime for "${componentName}": ${reason} — Instatus Next.js shape may have changed`)
+  }
+  return null
+}
+
+function parseInstatusNextUptime(html: string, componentName: string): number | null {
+  // Resolve component name → id from the escaped payload (buildInstatusComponentMap reads the `\"`
+  // form), then read componentsUptime[id].uptime from the unescaped JSON.
+  let id: string | undefined
+  for (const [cid, name] of buildInstatusComponentMap(html)) {
+    if (name === componentName) { id = cid; break }
+  }
+  if (!id) return warnNextUptimeShape(componentName, 'component not found in the Next.js component map')
+  // Blanket `\"`→`"` unescape is safe here: componentsUptime values are all quote-free (uptime %,
+  // ISO dates, status enums, numeric day-keys). A value with an embedded quote would corrupt the
+  // slice and fail JSON.parse below → null (caught) — acceptable, since the data doesn't carry them.
+  const u = html.replace(/\\"/g, '"')
+  const key = '"componentsUptime":'
+  const ki = u.indexOf(key)
+  if (ki < 0) return warnNextUptimeShape(componentName, 'componentsUptime block absent')
+  const objStart = u.indexOf('{', ki + key.length)
+  const objEnd = objStart < 0 ? -1 : matchBrace(u, objStart)
+  if (objEnd < 0) return warnNextUptimeShape(componentName, 'componentsUptime object could not be bounded')
+  try {
+    const cu = JSON.parse(u.slice(objStart, objEnd + 1)) as Record<string, { uptime?: string | number }>
+    const raw = cu[id]?.uptime
+    const up = typeof raw === 'string' ? parseFloat(raw) : raw
+    if (typeof up === 'number' && !isNaN(up) && up >= 0 && up <= 100) return up
+    return null // component legitimately has no aggregate uptime (or out of range) — not a shape change
+  } catch (err) {
+    console.warn('[parseInstatusNextUptime] failed:', err instanceof Error ? err.message : err)
     return null
   }
 }

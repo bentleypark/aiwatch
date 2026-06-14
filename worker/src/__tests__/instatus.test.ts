@@ -225,10 +225,72 @@ describe('parseInstatusUptime (#627)', () => {
     expect(parseInstatusUptime(nuxtHtmlWithUptime(), 'Le Chat')).toBeCloseTo(99.854, 3)
   })
 
-  it('returns null for an unknown component, missing name, or Next.js format', () => {
+  it('returns null for an unknown component, missing name, or Next.js without componentsUptime', () => {
     expect(parseInstatusUptime(nuxtHtmlWithUptime(), 'Nonexistent')).toBeNull()
     expect(parseInstatusUptime(nuxtHtmlWithUptime(), undefined)).toBeNull()
     expect(parseInstatusUptime('<script>self.__next_f.push([1,"x"])</script>', 'API')).toBeNull()
+  })
+})
+
+describe('parseInstatusUptime — Next.js componentsUptime (#635, Perplexity)', () => {
+  // Mirrors status.perplexity.com: escaped component defs (id→name) + a `componentsUptime` object
+  // keyed by component id, each entry nesting an `outages` array and an aggregate `"uptime"` string.
+  function nextHtmlWithUptime() {
+    const escaped =
+      '\\"id\\":\\"clyi6jhgg31469ihojbwbsmeeg\\",\\"name\\":{\\"default\\":\\"Website\\"}' +
+      '\\"id\\":\\"clyiakn7i60113hvojwho6za6j\\",\\"name\\":{\\"default\\":\\"API\\"}' +
+      '\\"componentsUptime\\":{' +
+        '\\"clyi6jhgg31469ihojbwbsmeeg\\":{\\"5\\":\\"99.47\\",' +
+          '\\"outages\\":[{\\"from\\":\\"2026-06-05T01:00:00.000Z\\",\\"to\\":\\"2026-06-05T01:40:38.000Z\\",\\"status\\":\\"MAJOROUTAGE\\"}],' +
+          '\\"uptime\\":\\"99.82\\"},' +
+        '\\"clyiakn7i60113hvojwho6za6j\\":{\\"outages\\":[],\\"uptime\\":\\"100.0\\"}' +
+      '}'
+    return `<script>self.__next_f.push([1,"${escaped}"])</script>`
+  }
+
+  it('resolves the named component’s uptime% from componentsUptime[id].uptime', () => {
+    expect(parseInstatusUptime(nextHtmlWithUptime(), 'API')).toBeCloseTo(100.0, 3)
+    expect(parseInstatusUptime(nextHtmlWithUptime(), 'Website')).toBeCloseTo(99.82, 2)
+  })
+
+  it('returns null for an unknown component or undefined name', () => {
+    expect(parseInstatusUptime(nextHtmlWithUptime(), 'Nonexistent')).toBeNull()
+    expect(parseInstatusUptime(nextHtmlWithUptime(), undefined)).toBeNull()
+  })
+
+  it('matchBrace ignores braces inside string values (would truncate under a naive regex)', () => {
+    // A nested outage carries `{`/`}` INSIDE string values — the quote-aware matcher must not
+    // miscount them, else the slice truncates and JSON.parse fails → wrong null.
+    const escaped =
+      '\\"id\\":\\"abc123\\",\\"name\\":{\\"default\\":\\"API\\"}' +
+      '\\"componentsUptime\\":{\\"abc123\\":{' +
+        '\\"outages\\":[{\\"status\\":\\"DEGRADED}{\\",\\"noticeId\\":\\"x}y\\"}],' +
+        '\\"uptime\\":\\"97.5\\"}}'
+    const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
+    expect(parseInstatusUptime(html, 'API')).toBeCloseTo(97.5, 2)
+  })
+
+  it('returns null for an uptime value outside [0,100]', () => {
+    const escaped =
+      '\\"id\\":\\"abc123\\",\\"name\\":{\\"default\\":\\"API\\"}' +
+      '\\"componentsUptime\\":{\\"abc123\\":{\\"uptime\\":\\"150.0\\"}}'
+    const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
+    expect(parseInstatusUptime(html, 'API')).toBeNull()
+  })
+
+  it('returns null when the component resolves but has no componentsUptime entry', () => {
+    const escaped =
+      '\\"id\\":\\"abc123\\",\\"name\\":{\\"default\\":\\"API\\"}' +
+      '\\"componentsUptime\\":{\\"other999\\":{\\"uptime\\":\\"99.0\\"}}'
+    const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
+    expect(parseInstatusUptime(html, 'API')).toBeNull()
+  })
+
+  it('returns null (warn-once shape path) when the component resolves but the componentsUptime block is absent', () => {
+    // Resolvable component map but no `componentsUptime` key → the structural-breakage warn path.
+    const escaped = '\\"id\\":\\"abc123\\",\\"name\\":{\\"default\\":\\"API\\"}\\"notices\\":{}'
+    const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
+    expect(parseInstatusUptime(html, 'API')).toBeNull()
   })
 })
 
