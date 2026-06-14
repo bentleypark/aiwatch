@@ -22,6 +22,12 @@
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/git-mutation-gate.sh\"",
             "timeout": 10,
             "statusMessage": "Checking git-mutation gate (#415)..."
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/step35-verify-gate.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Enforcing step-3.5 local-verify gate (#657)..."
           }
         ]
       },
@@ -33,6 +39,12 @@
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/tooling-trigger.sh\"",
             "timeout": 10,
             "statusMessage": "Checking reference-tooling triggers..."
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/step35-verify-gate.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Protecting workflow-gate files (#657)..."
           }
         ]
       }
