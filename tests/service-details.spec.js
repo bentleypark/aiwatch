@@ -498,27 +498,51 @@ test.describe('Estimate-only services (Bedrock, Azure OpenAI)', () => {
   const ESTIMATE_MOCK = {
     services: [
       { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, uptimeSource: 'official', calendarDays: 30, incidents: [], aiwatchScore: 92, scoreGrade: 'excellent', scoreConfidence: 'high' },
-      { id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational', latency: 280, uptime30d: 100, uptimeSource: 'estimate', calendarDays: 14, incidents: [], aiwatchScore: 85, scoreGrade: 'good', scoreConfidence: 'medium' },
-      { id: 'azureopenai', category: 'api', name: 'Azure OpenAI', provider: 'Microsoft', status: 'operational', latency: 350, uptime30d: 100, uptimeSource: 'estimate', calendarDays: 14, incidents: [], aiwatchScore: 85, scoreGrade: 'good', scoreConfidence: 'medium' },
+      // #653 — post-fix the worker emits `uptime30d: null` (not 100) for an estimate service with no
+      // impactful incident; `uptimeSource: 'estimate'` is still set so the gate (estimate + null) fires.
+      { id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational', latency: 280, uptime30d: null, uptimeSource: 'estimate', calendarDays: 14, incidents: [], aiwatchScore: 85, scoreGrade: 'good', scoreConfidence: 'medium' },
+      { id: 'azureopenai', category: 'api', name: 'Azure OpenAI', provider: 'Microsoft', status: 'operational', latency: 350, uptime30d: null, uptimeSource: 'estimate', calendarDays: 14, incidents: [], aiwatchScore: 85, scoreGrade: 'good', scoreConfidence: 'medium' },
       { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'operational', latency: 200, uptime30d: 99.99, uptimeSource: 'official', calendarDays: 30, incidents: [], aiwatchScore: 90, scoreGrade: 'excellent', scoreConfidence: 'high' },
     ],
     lastUpdated: new Date().toISOString(),
   }
 
-  test('shows "Not provided" for estimate service with no incidents', async ({ page }) => {
+  test('estimate service with no incidents: uptime "Not provided" + score hidden, but incidents shown live (#653)', async ({ page }) => {
     await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: ESTIMATE_MOCK })
     })
     await page.goto('/#bedrock')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
-    // Should NOT show 100.00% uptime
+    // No baseless 100% uptime; the uptime card reads "Not provided"
     await expect(page.locator('main').getByText('100.00%')).not.toBeVisible()
-    // "Not provided" should appear in multiple metric cards (uptime, incidents, MTTR) + incident history
-    const notProvided = page.locator('main').getByText(/Not provided|제공되지 않음/)
-    await expect(notProvided.first()).toBeVisible()
-    expect(await notProvided.count()).toBeGreaterThanOrEqual(3)
-    // AIWatch Score section should be hidden
+    await expect(page.locator('main').getByText(/Not provided|제공되지 않음/).first()).toBeVisible()
+    // AIWatch Score section hidden (no reliable basis)
     await expect(page.locator('main').getByText(/AIWatch Score/)).not.toBeVisible()
+    // #653 decoupling — incidents are LIVE data, not blanked: with 0 live incidents the Incident
+    // History shows the "no incidents" empty state (NOT "Not provided"), proving the incident display
+    // is gated on incidentSourceStale, not on estimate-no-data.
+    await expect(page.locator('main').getByText('Incident History')).toBeVisible()
+    await expect(page.locator('main').getByText(/No incidents|이슈 없음|인시던트 없음/).first()).toBeVisible()
+  })
+
+  test('estimate service with an informational incident: uptime "Not provided" but the incident shows in history (#653)', async ({ page }) => {
+    // The exact recurred Bedrock shape: estimate source, no impactful incident (uptime null), but a
+    // live informational (null-impact) incident. Per (b): uptime blanks, the incident still shows.
+    const mock = {
+      services: [
+        { id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational', latency: 280, uptime30d: null, uptimeSource: 'estimate', calendarDays: 14,
+          incidents: [{ id: 'bd-info', title: 'Service impact: Fable 5 Access', status: 'investigating', impact: null, startedAt: new Date(Date.now() - 60_000).toISOString(), resolvedAt: null, duration: null, timeline: [] }] },
+      ],
+      lastUpdated: new Date().toISOString(),
+    }
+    await page.route('**/api/status**', async (route) => { await route.fulfill({ json: mock }) })
+    await page.goto('/#bedrock')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+    // Uptime still "Not provided" (no impactful basis)
+    await expect(page.locator('main').getByText('100.00%')).not.toBeVisible()
+    await expect(page.locator('main').getByText(/Not provided|제공되지 않음/).first()).toBeVisible()
+    // The informational incident MUST appear in the Incident History (not blanked by estimate-no-data)
+    await expect(page.locator('main').getByText(/Service impact: Fable 5 Access/)).toBeVisible()
   })
 
   test('hides 24h Trend chart for non-probe services', async ({ page }) => {

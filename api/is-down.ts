@@ -105,12 +105,16 @@ export default async function handler(req: Request) {
         }
 
         // Calculate rank by AIWatch Score — match dashboard logic (src/pages/Ranking.jsx):
-        // 1. Exclude estimate-only services with 0 incidents (insufficient data)
+        // 1. Exclude estimate-only services with no measured basis — EXACT mirror of
+        //    serviceReliability.js:isEstimateNoData = `estimate source + null uptime30d` (#653). The
+        //    worker emits uptime30d null IFF the 90-day live∪archive set has no impactful incident, so
+        //    keying on uptime30d (not the LIVE incidents' impact, which omits the archive) keeps this
+        //    in lockstep with the dashboard — avoids the cross-surface rank drift #591/#653 prevent.
         // 2. Use competition ranking (1, 2, 4=, 4=, 4=, 7=, ...) based on rounded score,
         //    not array index — otherwise tied services display different ranks per service
         if (Number.isFinite(target?.aiwatchScore)) {
-          const hasReliableData = (s: { uptimeSource?: string; incidents?: unknown[]; incidentSourceStale?: boolean }) =>
-            !(s.uptimeSource === 'estimate' && (s.incidents ?? []).length === 0) && !s.incidentSourceStale
+          const hasReliableData = (s: { uptimeSource?: string; uptime30d?: number | null; incidentSourceStale?: boolean }) =>
+            !(s.uptimeSource === 'estimate' && s.uptime30d == null) && !s.incidentSourceStale
           const targetScore = Math.round(target!.aiwatchScore as number)
           if (!hasReliableData(target!)) {
             // Target itself fails the reliability filter — dedup'd to avoid log spam

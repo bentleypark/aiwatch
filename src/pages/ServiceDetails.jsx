@@ -750,6 +750,12 @@ export default function ServiceDetails({ serviceId }) {
   // uptime / incidents / MTTR / score cards + the status calendar (showing a frozen 30-day window as
   // current would mislead). Latency stays — it's probe-measured + current.
   const isUnreliableData = isUnreliableUptime(service)
+  // #653 — incident displays (count card, MTTR, Incident History) reflect the LIVE incident list and
+  // should blank ONLY for a stale/frozen feed — NOT for estimate-no-data. An estimate-only service
+  // (bedrock/azureopenai) with a live informational incident has a baseless UPTIME (gated by
+  // isUnreliableData) but its incidents are real and must still show (mirrors the status calendar at
+  // :961, which already gates on incidentSourceStale only). isUnreliableData stays on uptime + score.
+  const incidentsBlanked = !!service.incidentSourceStale
   const calendarDays = service.calendarDays ?? 14
 
   const calendarData = buildCalendarFromIncidents(service.incidents, service.dailyImpact, calendarDays)
@@ -822,20 +828,20 @@ export default function ServiceDetails({ serviceId }) {
         />
         <MetricCard
           label={t('svc.incidents')}
-          value={isUnreliableData ? '—' : incidentCount}
-          sub={isUnreliableData ? t('uptime.unavailable') : t('svc.incidents.sub')}
-          colorClass={isUnreliableData ? 'text-[var(--text2)]' : incidentCount > 0 ? 'text-[var(--amber)]' : 'text-[var(--text1)]'}
+          value={incidentsBlanked ? '—' : incidentCount}
+          sub={incidentsBlanked ? t('uptime.unavailable') : t('svc.incidents.sub')}
+          colorClass={incidentsBlanked ? 'text-[var(--text2)]' : incidentCount > 0 ? 'text-[var(--amber)]' : 'text-[var(--text1)]'}
         />
         <MetricCard
           label={t('svc.mttr')}
-          value={isUnreliableData ? '—' : (recovery ? formatRecoveryMin(recovery.medianMin) : '—')}
+          value={incidentsBlanked ? '—' : (recovery ? formatRecoveryMin(recovery.medianMin) : '—')}
           // #557 — headline is the median (typical) recovery; when a longer outage exists in the
           // window, surface it as "worst Xh Ym" so a 29h outage is never hidden by short blips.
-          sub={isUnreliableData ? t('uptime.unavailable')
+          sub={incidentsBlanked ? t('uptime.unavailable')
             : !recovery ? (hasOngoingIncident ? t('svc.mttr.ongoing') : t('svc.mttr.none'))
             : recovery.maxMin > recovery.medianMin ? t('svc.recovery.worst').replace('{d}', formatRecoveryMin(recovery.maxMin))
             : t('svc.incidents.sub')}
-          colorClass={isUnreliableData ? 'text-[var(--text2)]' : recovery ? 'text-[var(--amber)]' : 'text-[var(--text2)]'}
+          colorClass={incidentsBlanked ? 'text-[var(--text2)]' : recovery ? 'text-[var(--amber)]' : 'text-[var(--text2)]'}
         />
       </div>
 
@@ -932,7 +938,7 @@ export default function ServiceDetails({ serviceId }) {
             <span className="mono text-[10px] text-[var(--text2)]">{t('incidents.period.7d')}</span>
           </div>
           <div style={{ padding: '16px' }}>
-            {isUnreliableData || NO_INCIDENT_SUPPORT.has(service.id) ? (
+            {incidentsBlanked || NO_INCIDENT_SUPPORT.has(service.id) ? (
               <div className="flex items-center gap-2 py-4">
                 <span className="text-[var(--text2)] text-sm" aria-hidden="true">—</span>
                 <span className="text-xs text-[var(--text2)]">{t('uptime.unavailable')}</span>

@@ -327,7 +327,7 @@ const ko = {
   'aboutScore.noUptimeDesc': '일부 서비스(Gemini, Mistral 등)는 공식 uptime 수치를 외부에 공개하지 않습니다. 이 경우 업계 평균(99.5%)을 가정하고 10% 패널티를 적용합니다.',
   'aboutScore.naDesc': '모든 서비스에 점수가 산정되며, 인시던트가 없는 경우 인시던트/복구 항목 만점으로 약 86점(중간 신뢰도)이 부여됩니다.',
   'aboutScore.rankExclude': '랭킹 제외 조건',
-  'aboutScore.rankExcludeDesc': '공정한 비교에 필요한 데이터가 충분하지 않은 서비스는 신뢰도 랭킹에서 제외됩니다. 구체적으로, 추정 uptime만 존재하고 기록된 인시던트가 0건인 서비스는 점수 산정에 필요한 관측 데이터가 부족합니다. 공식 uptime 제공 여부만이 기준은 아닙니다 — uptime을 공개하지 않더라도 인시던트 이력이 충분하면 랭킹에 포함됩니다.',
+  'aboutScore.rankExcludeDesc': '공정한 비교에 필요한 데이터가 충분하지 않은 서비스는 신뢰도 랭킹에서 제외됩니다. 구체적으로, 추정 uptime만 존재하고 영향 있는 인시던트가 없는(기록이 0건이거나 정보성 공지뿐인) 서비스는 점수 산정에 필요한 관측 데이터가 부족합니다. 공식 uptime 제공 여부만이 기준은 아닙니다 — uptime을 공개하지 않더라도 인시던트 이력이 충분하면 랭킹에 포함됩니다.',
   'aboutScore.rankExcludeExample': '현재 제외 대상: Amazon Bedrock, Azure OpenAI — 상태 페이지에서 AIWatch가 수집할 수 있는 구조화된 인시던트 또는 uptime 데이터를 제공하지 않습니다.',
   'aboutScore.sources': '데이터 출처',
   'aboutScore.sourceUptime': '각 서비스 공식 status 페이지 (단일 주요 컴포넌트 기준)',
