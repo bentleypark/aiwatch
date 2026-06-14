@@ -23,7 +23,38 @@
 // git-mutation-gate.sh still nudges those). Reload note: settings changes need /hooks opened once.
 
 import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { execSync } from 'node:child_process'
+
+// ── Audit logging (so `npm run hook-audit` can observe this hard gate) ───────
+// Append one line to .claude/hook-audit.jsonl in the SAME schema as _audit.sh
+// ({ts,hook,decision,note}). Without this the gate's deny/pass decisions are
+// invisible to monitoring — a hard gate you can't measure is the worst case
+// (false-positives that block legit commits go unnoticed). #657 follow-up.
+// Only DECISION-relevant events are logged: every `deny` path + a UI/Edge commit
+// that PASSED the gate + an authorized self-edit. The high-volume trivial
+// early-exits (non-commit Bash, non-protected edits, non-UI/Edge commits) are
+// NOT logged — they'd flood the log and drown the signal. decision vocab:
+//   deny  — gate blocked. note: commit:<reason> | no-verify | self-edit:<fp> | fail-closed
+//   pass  — gate evaluated a real gated action and ALLOWED it. note: commit:confirmed | self-edit-authorized:<fp>
+// Non-fatal by construction: a logging failure must never break the turn.
+// Default to the real gitignored log; HOOK_AUDIT_LOG overrides it (tests point it at a temp file so
+// the CLI integration tests don't pollute the production telemetry the monitoring plan depends on).
+const AUDIT_FILE = process.env.HOOK_AUDIT_LOG
+  ? path.resolve(process.env.HOOK_AUDIT_LOG)
+  : path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'hook-audit.jsonl')
+// Pure (exported for tests): build the JSONL line. note is single-lined + JSON-escaped so a stray
+// path char can't corrupt the log. Schema matches _audit.sh exactly so the summary parses both.
+export function auditLine(decision, note = '', ts = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')) {
+  // Strip ALL control chars (not just \r\n\t) → single space, matching _audit.sh's tr -d set, so a
+  // stray byte can never emit invalid JSON the summary would silently drop. Then JSON-escape \\ and ".
+  const esc = String(note).replace(/[\u0000-\u001f]+/g, ' ').replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  return `{"ts":"${ts}","hook":"step35-verify-gate","decision":"${decision}","note":"${esc}"}`
+}
+function audit(decision, note = '') {
+  try { fs.appendFileSync(AUDIT_FILE, auditLine(decision, note) + '\n') } catch { /* best-effort — never break the hook on a logging error */ }
+}
 
 // ── Pure helpers (exported for tests) ───────────────────────────────────────
 
@@ -91,13 +122,15 @@ export function hasUserTurnAfter(entries, afterIdx, re) {
 
 /** The gate decision for a `git commit`. stagedUiEdge = UI/Edge files in the staged diff. */
 export function decideCommit(stagedUiEdge, entries) {
-  if (stagedUiEdge.length === 0) return { deny: false } // not a UI/Edge commit → soft path elsewhere
+  if (stagedUiEdge.length === 0) return { deny: false, reason: 'not-ui' } // not a UI/Edge commit → soft path elsewhere
   const editIdx = lastUiEditIndex(entries)
   // No UI/Edge edit event in this transcript → the edits predate it; we can't verify → fail-closed.
-  // An explicit override anywhere recent still lifts it.
-  if (editIdx === -1) return hasUserTurnAfter(entries, -1, OVERRIDE_RE) ? { deny: false } : { deny: true, reason: 'no-edit-event' }
-  if (hasUserTurnAfter(entries, editIdx, CONFIRM_RE)) return { deny: false }
-  if (hasUserTurnAfter(entries, editIdx, OVERRIDE_RE)) return { deny: false }
+  // An explicit override anywhere recent still lifts it. `reason` distinguishes a genuine in-browser
+  // confirmation from an operator override in the audit log (the override count is the false-positive
+  // proxy for #659 monitoring — a high override rate means the gate is firing on already-verified work).
+  if (editIdx === -1) return hasUserTurnAfter(entries, -1, OVERRIDE_RE) ? { deny: false, reason: 'override' } : { deny: true, reason: 'no-edit-event' }
+  if (hasUserTurnAfter(entries, editIdx, CONFIRM_RE)) return { deny: false, reason: 'confirmed' }
+  if (hasUserTurnAfter(entries, editIdx, OVERRIDE_RE)) return { deny: false, reason: 'override' }
   return { deny: true, reason: 'no-confirmation' }
 }
 
@@ -136,7 +169,8 @@ function main() {
         const tp = input.transcript_path
         if (tp && fs.existsSync(tp)) authorized = hasUserTurnAfter(readEntries(tp), -1, HOOK_WORK_RE)
       } catch { authorized = false }
-      if (authorized) process.exit(0)
+      if (authorized) { audit('pass', `self-edit-authorized:${fp}`); process.exit(0) }
+      audit('deny', `self-edit:${fp}`)
       console.log(denyJson(`#657: editing ${fp} needs explicit user authorization for hook/gate work (none found in the transcript). The user can authorize it ("work on the gate" / "#657" / "훅 작업") or say "검증 생략".`))
       return
     }
@@ -152,6 +186,7 @@ function main() {
   // that merely *discusses* "--no-verify" (like this very commit) isn't mistaken for the flag.
   const cmdHead = cmd.split(/<<-?\s*['"]?\w|(?:^|\s)-m(?:sg)?[\s=]|(?:^|\s)-F[\s=]|(?:^|\s)--message[\s=]|(?:^|\s)--file[\s=]/)[0]
   if (/(?:^|\s)(?:--no-verify|--no-gpg-sign|-n\b)|-c\s+commit\.gpgsign=false/.test(cmdHead)) {
+    audit('deny', 'no-verify')
     console.log(denyJson('#657: `--no-verify` / `--no-gpg-sign` on git commit is blocked unless the user explicitly asked. Drop the flag and let the hooks run.'))
     return
   }
@@ -174,6 +209,7 @@ function main() {
     const entries = tp && fs.existsSync(tp) ? readEntries(tp) : []
     const d = decideCommit(stagedUiEdge, entries)
     if (d.deny) {
+      audit('deny', `commit:${d.reason}`)
       const why = d.reason === 'no-edit-event'
         ? `the staged UI/Edge files (${stagedUiEdge.slice(0, 3).join(', ')}${stagedUiEdge.length > 3 ? '…' : ''}) have no edit event in this session to tie a verification to`
         : `no in-browser confirmation from the USER appears after the last UI/Edge edit (${stagedUiEdge.slice(0, 3).join(', ')}${stagedUiEdge.length > 3 ? '…' : ''})`
@@ -182,9 +218,13 @@ function main() {
       ))
       return
     }
+    audit('pass', `commit:${d.reason}`) // confirmed | override — override = false-positive proxy (#659)
     process.exit(0)
   } catch (err) {
-    // Fail-closed: deny, but make it trivially recoverable.
+    // Fail-closed: deny, but make it trivially recoverable. Logged as `fail-closed` (a GATE-HEALTH
+    // signal, NOT an intercepted violation) so the summary can track it separately — it should trend
+    // to ~0; a nonzero trend means the transcript read is breaking, not that violations are happening.
+    audit('deny', 'fail-closed')
     console.log(denyJson(`#657 step-3.5 gate: could not verify local confirmation (${err instanceof Error ? err.message : 'error'}) — failing closed. If the user has confirmed in-browser, have them reply with a confirmation; or "검증 생략" to override.`))
   }
 }

@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  isUiEdgePath, lastUiEditIndex, hasUserTurnAfter, decideCommit, CONFIRM_RE, OVERRIDE_RE, HOOK_WORK_RE,
+  isUiEdgePath, lastUiEditIndex, hasUserTurnAfter, decideCommit, CONFIRM_RE, OVERRIDE_RE, HOOK_WORK_RE, auditLine,
 } from '../.claude/hooks/step35-verify-gate.mjs'
 
 // ── fixtures matching the real transcript JSONL shape ──
@@ -52,7 +52,7 @@ test('hasUserTurnAfter — only a genuine human text turn counts (not meta/sidec
 })
 
 test('decideCommit — allows non-UI commits without a confirmation', () => {
-  assert.deepEqual(decideCommit([], [edit('worker/src/b.ts')]), { deny: false })
+  assert.deepEqual(decideCommit([], [edit('worker/src/b.ts')]), { deny: false, reason: 'not-ui' })
 })
 
 test('decideCommit — DENIES a UI commit with no post-edit user confirmation (the recurring miss)', () => {
@@ -63,19 +63,19 @@ test('decideCommit — DENIES a UI commit with no post-edit user confirmation (t
 
 test('decideCommit — ALLOWS once a genuine user confirmation follows the last UI edit', () => {
   const e = [edit('src/pages/Overview.jsx'), userText('확인했고 잘 나옴, 커밋해')]
-  assert.deepEqual(decideCommit(['src/pages/Overview.jsx'], e), { deny: false })
+  assert.deepEqual(decideCommit(['src/pages/Overview.jsx'], e), { deny: false, reason: 'confirmed' })
 })
 
 test('decideCommit — a post-edit test/doc edit does NOT re-trigger the gate (confirmation still valid)', () => {
   // edit UI → user confirms → edit a test file (not UI) → commit. The last UI edit is index 0, the
   // confirmation is after it, so it stays allowed even though a later (non-UI) edit happened.
   const e = [edit('src/pages/Overview.jsx'), userText('잘 나옴'), edit('tests/overview.spec.js')]
-  assert.deepEqual(decideCommit(['src/pages/Overview.jsx'], e), { deny: false })
+  assert.deepEqual(decideCommit(['src/pages/Overview.jsx'], e), { deny: false, reason: 'confirmed' })
 })
 
-test('decideCommit — explicit override lifts the gate', () => {
+test('decideCommit — explicit override lifts the gate, tagged as `override` (false-positive proxy)', () => {
   const e = [edit('src/pages/Overview.jsx'), userText('검증 생략하고 커밋해줘')]
-  assert.deepEqual(decideCommit(['src/pages/Overview.jsx'], e), { deny: false })
+  assert.deepEqual(decideCommit(['src/pages/Overview.jsx'], e), { deny: false, reason: 'override' })
 })
 
 test('decideCommit — UI staged but no edit event in transcript → fail-closed deny (override-able)', () => {
@@ -121,8 +121,14 @@ test('hasUserTurnAfter — skips harness-injected user turns (command stdout / t
 // CLI regression (#657): the flag check must read the command HEAD, not the commit MESSAGE body —
 // a message that merely discusses "--no-verify" (this very commit did) must not be mistaken for it.
 import { execFileSync } from 'node:child_process'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+// Isolate the gate's audit write to a throwaway log so these CLI runs don't pollute the real
+// (gitignored) telemetry the #659 monitoring depends on.
+const TMP_AUDIT = join(mkdtempSync(join(tmpdir(), 'step35-')), 'hook-audit.jsonl')
 const runHook = (input) => {
-  try { return execFileSync('node', ['.claude/hooks/step35-verify-gate.mjs'], { input: JSON.stringify(input), encoding: 'utf8' }) }
+  try { return execFileSync('node', ['.claude/hooks/step35-verify-gate.mjs'], { input: JSON.stringify(input), encoding: 'utf8', env: { ...process.env, HOOK_AUDIT_LOG: TMP_AUDIT } }) }
   catch (e) { return e.stdout || '' }
 }
 test('CLI: a commit MESSAGE mentioning --no-verify is NOT blocked; the actual flag IS', () => {
@@ -130,4 +136,27 @@ test('CLI: a commit MESSAGE mentioning --no-verify is NOT blocked; the actual fl
   assert.doesNotMatch(msgBody, /deny/) // message-only mention → allowed
   const realFlag = runHook({ tool_name: 'Bash', tool_input: { command: 'git commit --no-verify -m x' }, cwd: '/tmp' })
   assert.match(realFlag, /"permissionDecision":"deny"/) // actual flag → denied
+})
+
+// #657 follow-up — audit logging so `npm run hook-audit` can observe this hard gate.
+test('auditLine — emits a parseable JSONL line in the _audit.sh schema', () => {
+  const line = auditLine('deny', 'commit:no-confirmation', '2026-06-14T00:00:00Z')
+  const o = JSON.parse(line) // must be valid JSON (corrupt log = blind monitoring)
+  assert.equal(o.hook, 'step35-verify-gate')
+  assert.equal(o.decision, 'deny')
+  assert.equal(o.note, 'commit:no-confirmation')
+  assert.equal(o.ts, '2026-06-14T00:00:00Z')
+  // Same field set/order as _audit.sh so the summary parser treats both identically.
+  assert.deepEqual(Object.keys(o), ['ts', 'hook', 'decision', 'note'])
+})
+
+test('auditLine — single-lines + JSON-escapes the note so a stray char cannot corrupt the log', () => {
+  const line = auditLine('deny', 'self-edit:src/a"b\\c\nnext', '2026-06-14T00:00:00Z')
+  const o = JSON.parse(line) // would throw if escaping were wrong
+  assert.equal(o.note, 'self-edit:src/a"b\\c next') // newline → space; quote/backslash preserved via JSON
+  assert.equal(line.split('\n').length, 1) // never multi-line (one entry = one line)
+})
+
+test('auditLine — default ts is a Z-suffixed second-precision ISO timestamp', () => {
+  assert.match(JSON.parse(auditLine('pass', 'commit:confirmed')).ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
 })
