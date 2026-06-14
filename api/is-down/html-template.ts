@@ -319,6 +319,27 @@ function renderJsonLd(slug: string, seo: ServiceSEO, service: ServiceData | null
   return `<script type="application/ld+json">${safeJsonLd(data)}</script>`
 }
 
+// Linkify the curated status/dashboard URLs in an FAQ answer for the ON-PAGE render only (the JSON-LD
+// FAQ answer must stay plain text per schema.org). Targeted prefixes — ai-watch.dev / aistudio.google.com
+// / status.<provider>.<tld> / <provider>status.com (groqstatus.com, replicatestatus.com) — so bare BRAND
+// mentions in the prose (e.g. "claude.ai", "character.ai") are NOT turned into links. esc()s the non-URL
+// segments; the matched URLs are our own curated content. `(?<!\/\/)` skips a domain already preceded by
+// a scheme so we never emit a stray "https://" before the anchor (current FAQ answers use bare domains).
+const FAQ_URL_RE = /(?<!\/\/)(ai-watch\.dev|aistudio\.google\.com|status\.[a-z0-9.-]+\.[a-z]{2,}|[a-z0-9-]+status\.com)(\/[#\w/-]*)?/gi
+export function linkifyFaqAnswer(text: string): string {
+  let out = ''
+  let last = 0
+  for (const m of text.matchAll(FAQ_URL_RE)) {
+    const url = m[0]
+    const start = m.index ?? 0
+    out += esc(text.slice(last, start))
+    out += `<a href="https://${url}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`
+    last = start + url.length
+  }
+  out += esc(text.slice(last))
+  return out
+}
+
 function enhanceFaqAnswer(faq: { q: string; a: string }, fallbacks: Fallback[]): string {
   if (fallbacks.length > 0 && /what should i do|alternative|instead/i.test(faq.q)) {
     const fbList = fallbacks.map(fb => `${fb.name}${fb.score != null ? ` (Score: ${fb.score})` : ''}`).join(' and ')
@@ -445,7 +466,7 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
   // (the ⚠️ note below explains why). Status/last-checked stay — they're probe-measured + current.
   const stale = !!service.incidentSourceStale
   const metaParts = [`Last checked: ${esc(timeAgo(service.lastChecked))}`]
-  if (hasUptime && !stale) metaParts.push(`Uptime (30d): ${service.uptime30d!.toFixed(2)}%`)
+  if (hasUptime && !stale) metaParts.push(`Uptime: ${service.uptime30d!.toFixed(2)}%`)
   if (service.aiwatchScore != null && !stale) metaParts.push(`AIWatch Score: ${service.aiwatchScore}${esc(gradeStr)}`)
   const incidents = Array.isArray(service.incidents) ? service.incidents : []
   const lastIncident = incidents.length > 0 ? incidents[0] : null
@@ -624,7 +645,7 @@ export function buildMetaDescription(
   const uptimeStr = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d) && !service.incidentSourceStale
     ? `${service.uptime30d.toFixed(2)}%`
     : null
-  const uptimeClause = uptimeStr ? ` 30-day uptime: ${uptimeStr}.` : ''
+  const uptimeClause = uptimeStr ? ` Uptime: ${uptimeStr}.` : ''
   const incidentClause = thirtyDayIncidentCount > 0 ? ` ${thirtyDayIncidentCount} incidents tracked (30d).` : ''
   // #566: answer-first ("No — X is operational" / "Yes — X is down right now") so the
   // SERP snippet leads with the answer; freshness hint stays to frame it as a live tracker.
@@ -672,12 +693,16 @@ function buildDataSummary(service: ServiceData | null, displayName: string): str
   const cutoff = Date.now() - 30 * 86_400_000
   const recent = incidents.filter((i) => new Date(i.startedAt).getTime() >= cutoff)
   const count = recent.length
-  const uptime = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d)
+  // #591 — don't surface a stale-source service's frozen uptime in the narrative either (mirrors the
+  // same gate in buildMetaDescription; exposed by #654's "30-day uptime" → "Uptime" wording unification).
+  const uptime = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d) && !service.incidentSourceStale
     ? `${service.uptime30d.toFixed(2)}%` : null
 
   if (count === 0) {
+    // #654 — lead with uptime as its OWN sentence so the "last 30 days" frame (which scopes only the
+    // incident count) doesn't make the source-window-varying uptime read as a 30-day figure.
     return uptime
-      ? `Based on AIWatch data from the last 30 days, ${displayName} has maintained a clean record with zero incidents. 30-day uptime: ${uptime}.`
+      ? `${displayName}'s reported uptime is ${uptime}. Based on AIWatch data from the last 30 days, it has maintained a clean record with zero incidents.`
       : `Based on AIWatch data from the last 30 days, ${displayName} has maintained a clean record with zero incidents.`
   }
 
@@ -697,8 +722,10 @@ function buildDataSummary(service: ServiceData | null, displayName: string): str
     }
   }
 
+  // #654 — uptime leads as its own sentence (see the count===0 branch); "last 30 days" scopes only
+  // the incident count + MTTR, not the source-window-varying uptime.
   return uptime
-    ? `Based on AIWatch data from the last 30 days, ${displayName} experienced ${count} incident${count > 1 ? 's' : ''}${mttrText}. 30-day uptime: ${uptime}.`
+    ? `${displayName}'s reported uptime is ${uptime}. Based on AIWatch data from the last 30 days, it experienced ${count} incident${count > 1 ? 's' : ''}${mttrText}.`
     : `Based on AIWatch data from the last 30 days, ${displayName} experienced ${count} incident${count > 1 ? 's' : ''}${mttrText}.`
 }
 
@@ -710,7 +737,7 @@ ${summary ? `<p style="font-size:14px;margin-bottom:12px;padding:10px 14px;backg
 <p style="font-size:14px;margin-bottom:12px">${esc(seo.description)}</p>
 ${seo.insight ? `<p style="font-size:14px;margin-bottom:12px;padding:10px 14px;background:#161b22;border-left:3px solid #58a6ff;border-radius:0 4px 4px 0"><strong>AIWatch Insight:</strong> ${esc(seo.insight)}</p>` : ''}
 <p style="font-size:14px;color:#8b949e">${esc(seo.whenDown)}</p>
-<p style="font-size:13px;color:#484f58;margin-top:12px">This page provides real-time status, 30-day uptime history, and recent incident details &mdash; updated every 5 minutes by <a href="https://ai-watch.dev">AIWatch</a>.</p>
+<p style="font-size:13px;color:#484f58;margin-top:12px">This page provides real-time status, uptime history, and recent incident details &mdash; updated every 5 minutes by <a href="https://ai-watch.dev">AIWatch</a>.</p>
 </div>`
 }
 
@@ -720,7 +747,7 @@ function renderFAQ(seo: ServiceSEO, fallbacks: Fallback[]): string {
     const answer = enhanceFaqAnswer(f, fallbacks)
     return `<div class="faq-item">
 <p class="faq-q">${esc(f.q)}</p>
-<p class="faq-a">${esc(answer)}</p>
+<p class="faq-a">${linkifyFaqAnswer(answer)}</p>
 </div>`
   }).join('\n')
 

@@ -103,7 +103,7 @@ describe('buildDailySummary', () => {
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       redditCount: 0,
     })
-    expect(result).toContain('Uptime (30d)')
+    expect(result).toContain('📈 **Uptime**')
     expect(result).toContain('Alpha 100.00%')
     expect(result).toContain('Gamma 97.28%')
   })
@@ -157,7 +157,7 @@ describe('buildDailySummary', () => {
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       redditCount: 0,
     })
-    expect(result).toContain('Uptime (30d)')
+    expect(result).toContain('📈 **Uptime**')
     expect(result).not.toContain('Amazon Bedrock')
     expect(result).not.toContain('Azure OpenAI')
     expect(result).toContain('OpenAI API 99.99%')
@@ -190,7 +190,7 @@ describe('buildDailySummary', () => {
       incidentCountToday: { newCount: 0, resolvedCount: 0 },
       redditCount: 0,
     })
-    expect(result).not.toContain('Uptime (30d)')
+    expect(result).not.toContain('📈 **Uptime**')
   })
 
   it('skips latency section when fewer than 3 services have data', () => {
