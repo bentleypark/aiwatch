@@ -223,6 +223,43 @@ function FilterTabs({ filter, setFilter, total, issueCount, downCount, t }) {
   )
 }
 
+// Service categories rendered as Overview sections (mirrors the sidebar taxonomy, #646).
+// 'all' is the meta-bucket (no section of its own); the four below partition every service.
+const SECTION_KEYS = ['apps', 'llm', 'inference', 'agents']
+const CATEGORY_TAB_KEYS = ['all', ...SECTION_KEYS]
+
+// Category selector on the Overview itself (#646) — mirrors the sidebar's category filter so the
+// active category is both visible AND changeable from the main screen, including on mobile where the
+// sidebar is hidden behind the hamburger. Drives the same shared `categoryFilter` (usePage).
+function CategoryTabs({ categoryFilter, setCategoryFilter, t }) {
+  return (
+    <div className="flex flex-wrap" style={{ gap: '4px' }} role="tablist" aria-label={t('nav.services')}>
+      {CATEGORY_TAB_KEYS.map((key) => {
+        const active = categoryFilter === key
+        return (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={active}
+            onClick={() => { setCategoryFilter(key); trackEvent('category_filter', { category: key, location: 'overview' }) }}
+            className="mono text-[10px] rounded transition-all cursor-pointer"
+            style={{
+              padding: '4px 10px',
+              letterSpacing: '0.03em',
+              whiteSpace: 'nowrap',
+              background: active ? 'var(--bg4)' : 'var(--bg2)',
+              color: active ? 'var(--text0)' : 'var(--text2)',
+              border: active ? '1px solid var(--border-hi)' : '1px solid var(--border)',
+            }}
+          >
+            {t(SERVICE_CATEGORIES[key].labelKey)}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 // Grouped flap incidents (same title, same day) — compact expandable row (#496)
 function GroupIncidentItem({ group, lang, t }) {
   const [expanded, setExpanded] = useState(false)
@@ -580,21 +617,34 @@ export default function Overview() {
     ? (uptimeServices.reduce((sum, s) => sum + s.uptime30d, 0) / uptimeServices.length).toFixed(1)
     : '—'
 
-  const apiAndWebServices = catServices.filter((s) => s.category !== 'agent')
-  const agentServices = catServices.filter((s) => s.category === 'agent')
-
   const statusPriority = { down: 0, degraded: 1, operational: 2 }
   const issueSort = (a, b) => (statusPriority[a.status] - statusPriority[b.status]) || ((a.aiwatchScore ?? 0) - (b.aiwatchScore ?? 0))
+  const applyStatusFilter = (list) =>
+    filter === 'operational' ? list.filter((s) => s.status === 'operational')
+    : filter === 'issues'    ? [...list.filter((s) => s.status !== 'operational')].sort(issueSort)
+    : list
 
-  const filteredServices =
-    filter === 'operational' ? apiAndWebServices.filter((s) => s.status === 'operational')
-    : filter === 'issues'    ? [...apiAndWebServices.filter((s) => s.status !== 'operational')].sort(issueSort)
-    : apiAndWebServices
-
-  const filteredAgents =
-    filter === 'operational' ? agentServices.filter((s) => s.status === 'operational')
-    : filter === 'issues'    ? [...agentServices.filter((s) => s.status !== 'operational')].sort(issueSort)
-    : agentServices
+  // Build per-category sections mirroring the sidebar taxonomy (#646), replacing the old
+  // Services-blob + Coding-Agents-only split. In 'all' mode render all four sections in order; when a
+  // specific category is active, catServices is already scoped to it → render just that one section.
+  const sectionKeys = categoryFilter === 'all' ? SECTION_KEYS : SECTION_KEYS.filter((k) => k === categoryFilter)
+  const matched = new Set()
+  const sections = sectionKeys.map((key) => {
+    const ids = SERVICE_CATEGORIES[key].ids
+    const members = catServices.filter((s) => ids.includes(s.id))
+    members.forEach((s) => matched.add(s.id))
+    return { key, labelKey: SERVICE_CATEGORIES[key].labelKey, services: applyStatusFilter(members) }
+  })
+  // Defensive catch-all (only reachable in 'all' mode — in single-category mode catServices is itself
+  // scoped to that category's ids): a known/enabled service that no category claims (e.g. a new service
+  // added to ALL_SERVICE_IDS but not yet to SERVICE_CATEGORIES) would otherwise silently vanish —
+  // surface it under "Services". The partition invariant is pinned by constants.test.js.
+  const leftover = catServices.filter((s) => !matched.has(s.id))
+  if (leftover.length) sections.push({ key: 'other', labelKey: 'nav.services', services: applyStatusFilter(leftover) })
+  // #553: the empty state spans ALL rendered sections. issueCount and totalShown are both derived from
+  // the category-scoped catServices, so they stay consistent — an issue in any rendered section keeps
+  // "No Issues" from showing.
+  const totalShown = sections.reduce((n, sec) => n + sec.services.length, 0)
 
   const sevenDaysAgo = Date.now() - 7 * 86_400_000
   // Dedup by incident ID (Anthropic bulk-links one incident to claude.ai + Claude API + Claude Code)
@@ -721,58 +771,43 @@ export default function Overview() {
         <StatCard index={3} value={avgUptime === '—' ? '—' : `${avgUptime}%`}  sub={t('overview.stats.uptime.sub')}  labelKey="overview.stats.uptime"       colorClass="text-[var(--blue)]"  t={t} />
       </div>
 
-      {/* ── Section Header + Filter ── */}
-      <div className="flex items-center justify-between">
-        <h2 className="mono text-[10px] text-[var(--text2)] uppercase flex items-center gap-2" style={{ letterSpacing: '0.1em' }}>
-          <span className="text-[var(--green)] font-semibold">//</span>
-          {t('nav.services')}
-        </h2>
+      {/* ── Services controls (#646) ──
+          No standalone "// Services" group title: the category tab row already labels this area, and a
+          group title stacked above the per-category section headers (// AI Apps, // LLM APIs, …) was
+          redundant. Layout: category row above status row on mobile (items-start so the status filter
+          shrinks to its content width instead of stretching full-width); centered single row on desktop. */}
+      <div className="flex flex-col items-start gap-3 md:flex-row md:items-center md:justify-between">
+        <CategoryTabs categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} t={t} />
         <FilterTabs filter={filter} setFilter={setFilter} total={catServices.length} issueCount={issueCount} downCount={downCount} t={t} />
       </div>
 
-      {/* ── Service Grid ── */}
-      {/* #553: the empty state must consider agents too — issueCount counts all categories, but
-          filteredServices excludes agents, so an agent-only issue otherwise shows "No Issues"
-          here while the Coding Agents section below renders the degraded agent. */}
-      {filter === 'issues' && filteredServices.length === 0 && filteredAgents.length === 0 ? (
+      {/* ── Per-category service sections (#646) ──
+          Each category (AI Apps / LLM APIs / Voice & Inference / Coding Agents) is a peer section
+          with its own header — no Coding-Agents-only special case. Empty sections are not rendered;
+          the shared "No Issues" empty state shows only when NO section has a match (#553). */}
+      {filter === 'issues' && totalShown === 0 ? (
         <EmptyState type="good" />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3" style={{ gap: '8px' }}>
-          {filteredServices.map((svc, i) => (
-            <ServiceCard
-              key={svc.id}
-              service={svc}
-              index={i}
-              t={t}
-              isRecovered={!!recentlyRecovered[svc.id]}
-              onClick={() => { trackEvent('select_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }) }}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* ── Coding Agents ── */}
-      {filteredAgents.length > 0 && (
-        <>
-          <div className="flex items-center justify-between" style={{ marginTop: '16px' }}>
+        sections.filter((sec) => sec.services.length > 0).map((sec) => (
+          <section key={sec.key} className="flex flex-col" style={{ gap: '8px' }}>
             <h2 className="mono text-[10px] text-[var(--text2)] uppercase flex items-center gap-2" style={{ letterSpacing: '0.1em' }}>
               <span className="text-[var(--green)] font-semibold">//</span>
-              {t('nav.agents')}
+              {t(sec.labelKey)}
             </h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3" style={{ gap: '8px' }}>
-            {filteredAgents.map((svc, i) => (
-              <ServiceCard
-                key={svc.id}
-                service={svc}
-                index={i}
-                t={t}
-                isRecovered={!!recentlyRecovered[svc.id]}
-                onClick={() => { trackEvent('select_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }) }}
-              />
-            ))}
-          </div>
-        </>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3" style={{ gap: '8px' }}>
+              {sec.services.map((svc, i) => (
+                <ServiceCard
+                  key={svc.id}
+                  service={svc}
+                  index={i}
+                  t={t}
+                  isRecovered={!!recentlyRecovered[svc.id]}
+                  onClick={() => { trackEvent('select_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }) }}
+                />
+              ))}
+            </div>
+          </section>
+        ))
       )}
 
       {/* ── Bottom Panels ── */}

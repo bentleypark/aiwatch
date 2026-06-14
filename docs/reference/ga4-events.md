@@ -20,7 +20,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | `view_incident` | `incident_id` | Incidents page | Incident detail open |
 | `fallback_click` | `from_service`, `to_service`, `location` | ActionBanner, Is X Down | Fallback recommendation click |
 | `change_filter` | `filter` | Overview (filter tabs) | Status filter change |
-| `category_filter` | `category` | Sidebar (category) | Category filter change |
+| `category_filter` | `category`, `location` | Sidebar (category) · Overview (category tabs) | Category filter change. `location` ∈ `sidebar` (omitted on the legacy sidebar call) / `overview` — the Overview surfaces the same category control as on-screen tabs (#646) |
 | `navigate_page` | `page` | Sidebar (nav) | Page navigation |
 | `click_refresh` | — | Topbar | Manual refresh |
 | `click_github_header` | — | Topbar | GitHub link click |
