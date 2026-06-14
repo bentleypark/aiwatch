@@ -5,24 +5,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFallbacks, getGroupedFallbacksExcludingRegionSwitchable, hasRegionSwitch, shouldShowFallback, hasActiveIncident, SERVICE_CATEGORIES, ALL_SERVICE_IDS } from '../constants'
 
-// #646 — the Overview renders one section per SERVICE_CATEGORIES bucket (apps/llm/inference/agents).
-// Its render has a defensive "other" catch-all for any service no bucket claims, but that path should
-// stay empty: the four buckets must PARTITION ALL_SERVICE_IDS exactly. This pins the real failure mode
-// (a new service added to ALL_SERVICE_IDS but forgotten in SERVICE_CATEGORIES → it falls into "other")
-// at the source, so it surfaces in unit tests rather than as a stray "Services" section in the UI.
+// #646 — the Overview renders one section per SERVICE_CATEGORIES bucket (llm/agents/voice/inference/
+// video/apps, #658). Its render has a defensive "other" catch-all for any service no bucket claims,
+// but that path should stay empty: the six buckets must PARTITION ALL_SERVICE_IDS exactly. This pins
+// the real failure mode (a new service added to ALL_SERVICE_IDS but forgotten in SERVICE_CATEGORIES →
+// it falls into "other") at the source, so it surfaces in unit tests rather than as a stray "Services"
+// section in the UI.
 describe('SERVICE_CATEGORIES partitions ALL_SERVICE_IDS (#646 Overview sections)', () => {
-  const SECTION_KEYS = ['apps', 'llm', 'inference', 'agents']
+  const SECTION_KEYS = ['llm', 'agents', 'voice', 'inference', 'video', 'apps'] // #658 — + voice + video, dev-audience order
   const sectionIds = SECTION_KEYS.flatMap((k) => SERVICE_CATEGORIES[k].ids)
 
   it("'all' is the meta-bucket with no id list", () => {
     expect(SERVICE_CATEGORIES.all.ids).toBeNull()
   })
 
-  it('the four section buckets are disjoint (no service in two categories)', () => {
+  it('the six section buckets are disjoint (no service in two categories)', () => {
     expect(sectionIds.length).toBe(new Set(sectionIds).size)
   })
 
-  it('the four section buckets cover every service in ALL_SERVICE_IDS (no leftover, no extra)', () => {
+  it('the six section buckets cover every service in ALL_SERVICE_IDS (no leftover, no extra)', () => {
     expect([...sectionIds].sort()).toEqual([...ALL_SERVICE_IDS].sort())
   })
 })
