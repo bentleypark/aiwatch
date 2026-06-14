@@ -18,13 +18,17 @@
 # The step-3.5 reminder fires on EVERY matched git mutation — it is NOT silenced
 # by a running dev server. Rationale (#415, 2026-05-19 gap): a port probe cannot
 # distinguish "the assistant started a server and curl-checked it itself" from
-# "the user confirmed in the browser" — and the latter (a user message) is the
-# thing step 3.5 actually requires, which a PreToolUse(Bash) hook cannot observe.
-# Treating an up port as a "pass" produced a false silence in the #430 violation.
-# So the port (5173 Vite / 8788 wrangler / 3333 vercel / 4000 jekyll) is now only
-# an INFORMATIONAL hint inside the reminder, never a silence condition. Still soft
-# on purpose; if the audit log shows it's ignored, escalate to a hard block
-# (permissionDecision "deny", exit 0 with that JSON) — see #415.
+# "the user confirmed in the browser". So the port (5173 Vite / 8788 wrangler /
+# 3333 vercel / 4000 jekyll) is only an INFORMATIONAL hint here, never a silence
+# condition. This hook stays SOFT (a nudge for ALL commits incl. non-UI).
+#
+# #657: the HARD enforcement now lives in the sibling `step35-verify-gate.mjs`
+# (PreToolUse Bash + Edit|Write) — it DENIES a `git commit` of a UI/Edge staged
+# diff unless the transcript shows a genuine post-edit USER confirmation. (The old
+# claim here that "the user's in-browser confirmation is a message the hook never
+# sees" was WRONG: PreToolUse hooks receive `transcript_path` and can read the
+# conversation JSONL — that's how #657 keys the gate on an unfabricable
+# `role:user` turn instead of a forgeable port probe.)
 #
 # Every fire is logged via _audit.sh for monitoring. Never blocks on a hook bug:
 # missing jq / parse failure -> exit 0.
