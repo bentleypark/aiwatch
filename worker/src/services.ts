@@ -7,7 +7,8 @@ import { isProbeHealthy, type ProbeSnapshot } from './probe'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
-import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, computeUptimeFromIncidents, enrichIncidentIoText } from './parsers/incident-io'
+import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, computeUptimeFromIncidents, estimateUptimeFromIncidents, enrichIncidentIoText } from './parsers/incident-io'
+import { readArchivedIncidentsForService } from './monthly-archive'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
   AISTUDIO_ENDPOINT,
@@ -546,6 +547,14 @@ async function readFlashdutyStatus(kv: KVNamespace, config: ServiceConfig, base:
   return result
 }
 
+// #653 — union two incident lists, deduped by id with the LIVE entry winning (it carries the
+// up-to-date status/timeline; the archive copy is a frozen snapshot). Used to extend an estimate
+// service's uptime measurement set to 90 days without mutating its live incident list.
+function mergeIncidentsById(live: Incident[], archived: Incident[]): Incident[] {
+  const seen = new Set(live.map((i) => i.id))
+  return [...live, ...archived.filter((a) => !seen.has(a.id))]
+}
+
 async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
   const now = new Date().toISOString()
   let parseErrors = 0 // Track internal parse/fetch failures — prevents resetFetchFailure from masking repeated errors
@@ -675,12 +684,17 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           uptimeValue = ioUptime
           uptimeSrc = 'official'
         } else {
-          // Fallback for services without component_uptimes (Replicate, ElevenLabs)
-          uptimeValue = computeUptimeFromIncidents(filtered)
+          // Fallback for services without component_uptimes (Replicate, ElevenLabs).
+          // #653 — estimateUptimeFromIncidents returns null unless there's an impactful incident, so an
+          // informational-only feed blanks the uptime instead of asserting a baseless 100% (these
+          // services keep their real Score/ranking from component+probe data — only the uptime display
+          // blanks). No 90-day archive merge here: incident.io returns a multi-day window, not a short
+          // RSS feed, so the live set already covers the measurement window (unlike bedrock/azure).
+          uptimeValue = estimateUptimeFromIncidents(filtered)
           uptimeSrc = 'estimate'
         }
       } else if (config.incidentIoComponentId) {
-        uptimeValue = computeUptimeFromIncidents(filtered)
+        uptimeValue = estimateUptimeFromIncidents(filtered)
         uptimeSrc = 'estimate'
       }
 
@@ -833,19 +847,21 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         }
         allIncidents.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
         const filtered = filterIncidents(allIncidents, config)
-        // Uptime semantics — match the main incident.io path (line 326):
-        //   - 0 incidents → 100% (RSS confirmed reachable, no measurable outage)
-        //   - >0 incidents but all unparseable → null (omit uptime30d to avoid claiming 100%)
-        //   - otherwise → computed weighted uptime
-        const uptimeRaw = computeUptimeFromIncidents(filtered)
-        const uptimeEst = filtered.length === 0 ? 100 : uptimeRaw
+        // #653 — estimate uptime over the 90-day live∪archive set (card incident COUNT stays the live
+        // `filtered`; only the uptime% spans 90d). `estimateUptimeFromIncidents` returns null unless the
+        // set has an IMPACTFUL incident, so an informational-only / empty AWS feed yields "— Not
+        // provided" instead of a baseless 100%. `uptimeSource: 'estimate'` is set even when the value is
+        // null so the dashboard gate (`isEstimateNoData` = estimate + null uptime) excludes it.
+        const merged90 = kv ? mergeIncidentsById(filtered, await readArchivedIncidentsForService(kv, config.id, new Date())) : filtered
+        const uptimeEst = estimateUptimeFromIncidents(merged90)
         return {
           ...base,
           status: deriveAwsStatus(filtered),
           latency: config.category === 'api' ? latency : null,
           incidents: filtered,
           calendarDays: 14,
-          ...(uptimeEst != null ? { uptime30d: uptimeEst, uptimeSource: 'estimate' as const } : {}),
+          uptimeSource: 'estimate' as const,
+          ...(uptimeEst != null ? { uptime30d: uptimeEst } : {}),
         }
       }
 
@@ -865,17 +881,17 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         await resetFetchFailure(kv, config.id)
         const incidents = parseAwsRssIncidents(await rssRes.text())
         const filtered = filterIncidents(incidents, config)
-        // Same uptime semantics as the AWS RSS path above — propagate null instead of
-        // silently claiming 100% when all incidents were unparseable.
-        const uptimeRaw = computeUptimeFromIncidents(filtered)
-        const uptimeEst = filtered.length === 0 ? 100 : uptimeRaw
+        // #653 — same 90-day live∪archive estimate as the AWS RSS path above (card count stays live).
+        const merged90 = kv ? mergeIncidentsById(filtered, await readArchivedIncidentsForService(kv, config.id, new Date())) : filtered
+        const uptimeEst = estimateUptimeFromIncidents(merged90)
         return {
           ...base,
           status: deriveAwsStatus(filtered),
           latency: config.category === 'api' ? latency : null,
           incidents: filtered,
           calendarDays: 14,
-          ...(uptimeEst != null ? { uptime30d: uptimeEst, uptimeSource: 'estimate' as const } : {}),
+          uptimeSource: 'estimate' as const,
+          ...(uptimeEst != null ? { uptime30d: uptimeEst } : {}),
         }
       }
 

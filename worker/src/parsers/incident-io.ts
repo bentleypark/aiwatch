@@ -111,6 +111,24 @@ function resolveImpactWeight(impact: Incident['impact']): number | null {
   return -1
 }
 
+/** #653 — does the set contain at least one incident with a real (non-informational) impact? Used to
+ *  gate estimate-uptime emission: an estimate service with only informational/null-impact incidents
+ *  has no measured outage basis, so it must not surface a baseless 100%. */
+export function hasImpactfulIncident(incidents: Incident[]): boolean {
+  return incidents.some((i) => i.impact === 'minor' || i.impact === 'major' || i.impact === 'critical')
+}
+
+/** #653 — estimate uptime that refuses to assert a baseless figure: returns null unless the set has an
+ *  impactful incident (then the impact-weighted `computeUptimeFromIncidents`). Callers leave
+ *  `uptime30d` unset when this is null → the dashboard shows "— Not provided" and ranking excludes it
+ *  (serviceReliability.js `isEstimateNoData` = estimate source + null uptime). For RSS estimate
+ *  services (bedrock/azureopenai) the caller passes the 90-day live∪archive set so a real outage that
+ *  rolled off the short live feed still lowers the figure. */
+export function estimateUptimeFromIncidents(incidents: Incident[]): number | null {
+  if (!hasImpactfulIncident(incidents)) return null
+  return computeUptimeFromIncidents(incidents)
+}
+
 export function computeUptimeFromIncidents(incidents: Incident[]): number | null {
   // No incidents at all → return null (no data) rather than asserting 100%
   if (incidents.length === 0) return null

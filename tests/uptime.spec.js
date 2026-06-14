@@ -33,8 +33,9 @@ test.describe('Uptime Rankings — estimate-only services', () => {
     services: [
       { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, uptimeSource: 'official', calendarDays: 30, incidents: [] },
       { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'operational', latency: 200, uptime30d: 99.99, uptimeSource: 'official', calendarDays: 30, incidents: [] },
-      { id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational', latency: 280, uptime30d: 100, uptimeSource: 'estimate', calendarDays: 14, incidents: [] },
-      { id: 'azureopenai', category: 'api', name: 'Azure OpenAI', provider: 'Microsoft', status: 'operational', latency: 350, uptime30d: 100, uptimeSource: 'estimate', calendarDays: 14, incidents: [] },
+      // #653 — estimate service with no impactful incident → worker emits uptime30d null (was 100).
+      { id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational', latency: 280, uptime30d: null, uptimeSource: 'estimate', calendarDays: 14, incidents: [] },
+      { id: 'azureopenai', category: 'api', name: 'Azure OpenAI', provider: 'Microsoft', status: 'operational', latency: 350, uptime30d: null, uptimeSource: 'estimate', calendarDays: 14, incidents: [] },
       { id: 'gemini', category: 'api', name: 'Gemini API', provider: 'Google', status: 'operational', latency: 150, calendarDays: 14, incidents: [] },
     ],
     lastUpdated: new Date().toISOString(),

@@ -92,9 +92,12 @@ function HistoryBars({ history30d, compact }) {
 
 function ServiceCard({ service, index, onClick, t, isRecovered }) {
   const incidentCount = (service.incidents ?? []).filter((i) => i.status !== 'resolved').length
-  // #591 — estimate-no-data OR stale-source (frozen feed): blank uptime / incident count / score on
-  // the card (showing frozen/assumed figures as current would mislead).
+  // #591 — blank UPTIME / score for estimate-no-data OR stale-source (showing frozen/assumed figures
+  // as current would mislead). #653 — the incident COUNT, however, is the LIVE list and blanks only for
+  // a stale/frozen feed, NOT for estimate-no-data: an estimate-only service with a live informational
+  // incident has a baseless uptime but a real incident count (matches ServiceDetails `incidentsBlanked`).
   const isUnreliable = isUnreliableUptime(service)
+  const incidentsBlanked = !!service.incidentSourceStale
   const hasUptime = service.uptime30d != null && !isUnreliable
   const uptimeColor = !hasUptime ? 'text-[var(--text2)]' : service.uptime30d >= 99 ? 'text-[var(--green)]' : service.uptime30d >= 97 ? 'text-[var(--amber)]' : 'text-[var(--red)]'
   const latencyColor = service.latency == null ? 'text-[var(--text2)]'
@@ -126,7 +129,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered }) {
         <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
           <span className="mono text-[10px] text-[var(--text2)]">
             <span className={uptimeColor}>{uptimeStr}</span>
-            {!isUnreliable && incidentCount > 0 && <>{' · '}<span className="text-[var(--red)]">{incidentCount}{t('overview.card.incidents.compact')}</span></>}
+            {!incidentsBlanked && incidentCount > 0 && <>{' · '}<span className="text-[var(--red)]">{incidentCount}{t('overview.card.incidents.compact')}</span></>}
             {!isUnreliable && scoreStr && <>{' · '}{scoreStr}</>}
           </span>
         </div>
@@ -158,7 +161,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered }) {
             <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.uptime')}</div>
           </div>
           <div>
-            <div className={`mono text-[13px] font-medium ${isUnreliable ? 'text-[var(--text2)]' : 'text-[var(--text0)]'}`}>{isUnreliable ? '—' : incidentCount}</div>
+            <div className={`mono text-[13px] font-medium ${incidentsBlanked ? 'text-[var(--text2)]' : 'text-[var(--text0)]'}`}>{incidentsBlanked ? '—' : incidentCount}</div>
             <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.incidents')}</div>
           </div>
         </div>
