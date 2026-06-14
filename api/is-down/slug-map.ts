@@ -1,61 +1,66 @@
 // URL slug ↔ Worker service ID mapping
 // Bedrock + Azure OpenAI excluded — estimate-only sources with no differentiated data (#263).
-
-export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provider: string; category: string }> = {
+//
+// `category` is the COARSE 3-way (api/app/agent) mirroring worker ServiceStatus.category — the
+// is-down fallback filter (api/is-down.ts) matches it against the worker's value, so it must stay
+// in that vocabulary. `group` is the FINE 6-way display taxonomy (#658) mirroring the dashboard
+// SERVICE_CATEGORIES (apps/llm/voice/inference/video/agents); it drives only the footer "Also
+// check" grouping (renderFooter / FOOTER_CATEGORY_ORDER).
+export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provider: string; category: string; group: string }> = {
   // Phase A — top services
-  'claude':          { id: 'claude',     name: 'Claude API',       provider: 'Anthropic',   category: 'api' },
-  'chatgpt':         { id: 'chatgpt',    name: 'ChatGPT',          provider: 'OpenAI',      category: 'app' },
-  'gemini':          { id: 'gemini',     name: 'Gemini API',       provider: 'Google',      category: 'api' },
-  'github-copilot':  { id: 'copilot',    name: 'GitHub Copilot',   provider: 'Microsoft',   category: 'agent' },
-  'cursor':          { id: 'cursor',     name: 'Cursor',           provider: 'Anysphere',   category: 'agent' },
-  'claude-code':     { id: 'claudecode', name: 'Claude Code',      provider: 'Anthropic',   category: 'agent' },
-  'openai':          { id: 'openai',     name: 'OpenAI API',       provider: 'OpenAI',      category: 'api' },
-  'windsurf':        { id: 'windsurf',   name: 'Windsurf',         provider: 'Codeium',     category: 'agent' },
-  'claude-ai':       { id: 'claudeai',   name: 'claude.ai',        provider: 'Anthropic',   category: 'app' },
+  'claude':          { id: 'claude',     name: 'Claude API',       provider: 'Anthropic',   category: 'api', group: 'llm' },
+  'chatgpt':         { id: 'chatgpt',    name: 'ChatGPT',          provider: 'OpenAI',      category: 'app', group: 'apps' },
+  'gemini':          { id: 'gemini',     name: 'Gemini API',       provider: 'Google',      category: 'api', group: 'llm' },
+  'github-copilot':  { id: 'copilot',    name: 'GitHub Copilot',   provider: 'Microsoft',   category: 'agent', group: 'agents' },
+  'cursor':          { id: 'cursor',     name: 'Cursor',           provider: 'Anysphere',   category: 'agent', group: 'agents' },
+  'claude-code':     { id: 'claudecode', name: 'Claude Code',      provider: 'Anthropic',   category: 'agent', group: 'agents' },
+  'openai':          { id: 'openai',     name: 'OpenAI API',       provider: 'OpenAI',      category: 'api', group: 'llm' },
+  'windsurf':        { id: 'windsurf',   name: 'Windsurf',         provider: 'Codeium',     category: 'agent', group: 'agents' },
+  'claude-ai':       { id: 'claudeai',   name: 'claude.ai',        provider: 'Anthropic',   category: 'app', group: 'apps' },
   // Phase B — LLM APIs (#263)
-  'mistral':         { id: 'mistral',    name: 'Mistral API',      provider: 'Mistral AI',  category: 'api' },
-  'cohere':          { id: 'cohere',     name: 'Cohere API',       provider: 'Cohere',      category: 'api' },
-  'groq':            { id: 'groq',       name: 'Groq Cloud',       provider: 'Groq',        category: 'api' },
-  'together':        { id: 'together',   name: 'Together AI',      provider: 'Together',    category: 'api' },
-  'fireworks':       { id: 'fireworks',  name: 'Fireworks AI',     provider: 'Fireworks',   category: 'api' },
-  'cerebras':        { id: 'cerebras',   name: 'Cerebras Inference', provider: 'Cerebras',  category: 'api' },
-  'perplexity':      { id: 'perplexity', name: 'Perplexity',       provider: 'Perplexity AI', category: 'api' },
-  'xai':             { id: 'xai',        name: 'xAI (Grok)',       provider: 'xAI',         category: 'api' },
-  'deepseek':        { id: 'deepseek',   name: 'DeepSeek API',     provider: 'DeepSeek',    category: 'api' },
-  'openrouter':      { id: 'openrouter', name: 'OpenRouter',       provider: 'OpenRouter',  category: 'api' },
+  'mistral':         { id: 'mistral',    name: 'Mistral API',      provider: 'Mistral AI',  category: 'api', group: 'llm' },
+  'cohere':          { id: 'cohere',     name: 'Cohere API',       provider: 'Cohere',      category: 'api', group: 'llm' },
+  'groq':            { id: 'groq',       name: 'Groq Cloud',       provider: 'Groq',        category: 'api', group: 'llm' },
+  'together':        { id: 'together',   name: 'Together AI',      provider: 'Together',    category: 'api', group: 'llm' },
+  'fireworks':       { id: 'fireworks',  name: 'Fireworks AI',     provider: 'Fireworks',   category: 'api', group: 'llm' },
+  'cerebras':        { id: 'cerebras',   name: 'Cerebras Inference', provider: 'Cerebras',  category: 'api', group: 'llm' },
+  'perplexity':      { id: 'perplexity', name: 'Perplexity',       provider: 'Perplexity AI', category: 'api', group: 'llm' },
+  'xai':             { id: 'xai',        name: 'xAI (Grok)',       provider: 'xAI',         category: 'api', group: 'llm' },
+  'deepseek':        { id: 'deepseek',   name: 'DeepSeek API',     provider: 'DeepSeek',    category: 'api', group: 'llm' },
+  'openrouter':      { id: 'openrouter', name: 'OpenRouter',       provider: 'OpenRouter',  category: 'api', group: 'llm' },
   // Voice & speech AI (#263)
-  'elevenlabs':      { id: 'elevenlabs', name: 'ElevenLabs',       provider: 'ElevenLabs',  category: 'api' },
-  'assemblyai':      { id: 'assemblyai', name: 'AssemblyAI',       provider: 'AssemblyAI',  category: 'api' },
-  'deepgram':        { id: 'deepgram',   name: 'Deepgram',         provider: 'Deepgram',    category: 'api' },
+  'elevenlabs':      { id: 'elevenlabs', name: 'ElevenLabs',       provider: 'ElevenLabs',  category: 'api', group: 'voice' },
+  'assemblyai':      { id: 'assemblyai', name: 'AssemblyAI',       provider: 'AssemblyAI',  category: 'api', group: 'voice' },
+  'deepgram':        { id: 'deepgram',   name: 'Deepgram',         provider: 'Deepgram',    category: 'api', group: 'voice' },
   // Inference / infrastructure (#263)
-  'huggingface':     { id: 'huggingface', name: 'Hugging Face',    provider: 'Hugging Face', category: 'api' },
-  'replicate':       { id: 'replicate',  name: 'Replicate',        provider: 'Replicate',   category: 'api' },
-  'pinecone':        { id: 'pinecone',   name: 'Pinecone',         provider: 'Pinecone',    category: 'api' },
-  'stability':       { id: 'stability',  name: 'Stability AI',     provider: 'Stability AI', category: 'api' },
-  'voyageai':        { id: 'voyageai',   name: 'Voyage AI',        provider: 'Voyage AI',   category: 'api' },
-  'modal':           { id: 'modal',      name: 'Modal',            provider: 'Modal',       category: 'api' },
+  'huggingface':     { id: 'huggingface', name: 'Hugging Face',    provider: 'Hugging Face', category: 'api', group: 'inference' },
+  'replicate':       { id: 'replicate',  name: 'Replicate',        provider: 'Replicate',   category: 'api', group: 'inference' },
+  'pinecone':        { id: 'pinecone',   name: 'Pinecone',         provider: 'Pinecone',    category: 'api', group: 'inference' },
+  'stability':       { id: 'stability',  name: 'Stability AI',     provider: 'Stability AI', category: 'api', group: 'inference' },
+  'voyageai':        { id: 'voyageai',   name: 'Voyage AI',        provider: 'Voyage AI',   category: 'api', group: 'inference' },
+  'modal':           { id: 'modal',      name: 'Modal',            provider: 'Modal',       category: 'api', group: 'inference' },
   // LangChain (LangSmith) (#561) — slug is 'langchain' (search volume) while the worker id is
   // 'langsmith'; the id≠slug mapping is mirrored in worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE and
   // src/utils/constants.js FEED_SLUG_OVERRIDE, pinned by feed-slug-sync.test.ts / feed-slug.test.js.
-  'langchain':       { id: 'langsmith',  name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api' },
+  'langchain':       { id: 'langsmith',  name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', group: 'inference' },
   // Runway (#393) — generative-video AI; slug == worker id ('runway'), no override needed.
-  'runway':          { id: 'runway',     name: 'Runway',           provider: 'Runway',      category: 'api' },
+  'runway':          { id: 'runway',     name: 'Runway',           provider: 'Runway',      category: 'api', group: 'video' },
   // Luma / Dream Machine (#602) — generative-video AI; slug == worker id ('luma'), no override needed.
-  'luma':            { id: 'luma',       name: 'Luma (Dream Machine)', provider: 'Luma',     category: 'api' },
+  'luma':            { id: 'luma',       name: 'Luma (Dream Machine)', provider: 'Luma',     category: 'api', group: 'video' },
   // AI apps (#263)
-  'character-ai':    { id: 'characterai', name: 'Character.AI',    provider: 'Character.AI', category: 'app' },
+  'character-ai':    { id: 'characterai', name: 'Character.AI',    provider: 'Character.AI', category: 'app', group: 'apps' },
   // DeepSeek App (#619) — DeepSeek's consumer chat app (chat.deepseek.com), distinct from the
   // 'deepseek' (DeepSeek API) page. Slug 'deepseek-app' ≠ worker id 'deepseekapp'; the id≠slug
   // mapping is mirrored in worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE + src/utils/constants.js
   // FEED_SLUG_OVERRIDE, pinned by feed-slug-sync.test.ts / feed-slug.test.js.
-  'deepseek-app':    { id: 'deepseekapp', name: 'DeepSeek App',    provider: 'DeepSeek',     category: 'app' },
+  'deepseek-app':    { id: 'deepseekapp', name: 'DeepSeek App',    provider: 'DeepSeek',     category: 'app', group: 'apps' },
   // Coding agents (#294) — OpenAI Codex is the current coding-agent product,
   // distinct from the deprecated 2023 Codex code-generation API.
-  'codex':           { id: 'codex',       name: 'Codex',           provider: 'OpenAI',      category: 'agent' },
+  'codex':           { id: 'codex',       name: 'Codex',           provider: 'OpenAI',      category: 'agent', group: 'agents' },
   // Junie (#336) — JetBrains coding agent. Status page is shared with sibling
   // JetBrains AI products (Grazie, AI Platform, AI Platform China); the worker
   // scopes the badge to the Junie component only via statusComponentId.
-  'junie':           { id: 'junie',       name: 'Junie',           provider: 'JetBrains',   category: 'agent' },
+  'junie':           { id: 'junie',       name: 'Junie',           provider: 'JetBrains',   category: 'agent', group: 'agents' },
 }
 
 // Related services for cross-linking (SEO internal links)

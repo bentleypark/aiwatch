@@ -2,6 +2,30 @@
 // Design: gap 20px, font 11px mono, dot 5px, scrolls 40s linear infinite.
 
 import { usePolling } from '../hooks/usePolling'
+import { SERVICE_CATEGORIES } from '../utils/constants'
+
+// Ticker follows the dev-audience category order (#658): LLM APIs → Coding Agents → Voice →
+// Inference & Infra → Video → AI Apps. Flatten SERVICE_CATEGORIES (minus the 'all' meta-bucket)
+// into a single id sequence so the strip scrolls in that order — no group dividers (continuous
+// stream). A service missing from the map sorts to the end (defensive; the partition test pins
+// SERVICE_CATEGORIES to the full service set).
+const TICKER_ORDER_INDEX = new Map(
+  Object.keys(SERVICE_CATEGORIES)
+    .filter((k) => k !== 'all')
+    .flatMap((k) => SERVICE_CATEGORIES[k].ids)
+    .map((id, i) => [id, i]),
+)
+
+// Sort a raw services array into the dev-audience ticker order (#658). Pure + exported so the
+// ordering invariant (Coding Agents follow LLM APIs, AI Apps last) is unit-testable without
+// rendering the component. Non-mutating; unknown ids sort to the end.
+export function orderServicesForTicker(rawServices) {
+  return [...(rawServices ?? [])].sort(
+    (a, b) =>
+      (TICKER_ORDER_INDEX.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+      (TICKER_ORDER_INDEX.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+  )
+}
 
 const STATUS_DOT_CLASS = {
   operational: 'bg-[var(--green)]',
@@ -28,10 +52,7 @@ function TickerItem({ name, status }) {
 
 export default function TickerBar() {
   const { services: rawServices } = usePolling()
-  const services = rawServices ?? []
-
-  const apiItems = services.filter((s) => s.category !== 'agent')
-  const agentItems = services.filter((s) => s.category === 'agent')
+  const services = orderServicesForTicker(rawServices)
 
   if (services.length === 0) {
     return (
@@ -41,15 +62,9 @@ export default function TickerBar() {
     )
   }
 
-  const separator = <span style={{ color: 'var(--border-hi)', margin: '0 6px' }}>|</span>
-
   const renderItems = (prefix) => (
     <>
-      {apiItems.map((svc) => (
-        <TickerItem key={`${prefix}-${svc.id}`} name={svc.name} status={svc.status} />
-      ))}
-      {agentItems.length > 0 && separator}
-      {agentItems.map((svc) => (
+      {services.map((svc) => (
         <TickerItem key={`${prefix}-${svc.id}`} name={svc.name} status={svc.status} />
       ))}
     </>

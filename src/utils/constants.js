@@ -43,12 +43,20 @@ export const SERVICE_AND_APP_IDS = [
 export const ALL_SERVICE_IDS = [...SERVICE_AND_APP_IDS, ...AGENT_SERVICE_IDS]
 
 // Sidebar category filters — splits Worker's 'api' into LLM vs Voice/Inference
+// Order is dev-audience-first (#658): LLM APIs → Coding Agents → Voice → Inference & Infra →
+// Video → AI Apps. The dashboard's primary audience is developers/infra, who check LLM-API and
+// coding-agent status first; consumer AI Apps (ChatGPT / claude.ai) sit last because the public
+// "is X down?" demand for those is already served by the is-down SEO pages. This object's key
+// order drives BOTH the Sidebar filter chips and the Overview per-category sections (SECTION_KEYS
+// in src/pages/Overview.jsx — keep in sync).
 export const SERVICE_CATEGORIES = {
   all:       { labelKey: 'filter.all',       ids: null }, // null = show all
-  apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp'] },
   llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
-  inference: { labelKey: 'filter.inference', ids: ['elevenlabs', 'assemblyai', 'deepgram', 'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'runway', 'luma'] },
   agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'] },
+  voice:     { labelKey: 'filter.voice',     ids: ['elevenlabs', 'assemblyai', 'deepgram'] }, // #658 — STT/TTS
+  inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'modal', 'stability', 'voyageai', 'pinecone', 'langsmith'] }, // catch-all for non-LLM API infra: model-hosting (hf/replicate/modal) + image (stability) + embeddings (voyageai) + vector (pinecone) + observability (langsmith). Each NON-hosting sub-domain is single-service today — kept under one bucket until #601 adds siblings to warrant splitting
+  video:     { labelKey: 'filter.video',     ids: ['runway', 'luma'] }, // #658 — video-gen (align membership with #601 fallback sub-tier)
+  apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp'] },
 }
 
 // Services excluded from fallback recommendations (not interchangeable with LLM APIs)

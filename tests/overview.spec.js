@@ -62,8 +62,9 @@ test.describe('Overview page', () => {
     // section headers (so the active category is visible/changeable here, incl. on mobile).
     const tablist = page.getByRole('tablist', { name: /Services|서비스/ })
     await expect(tablist).toBeVisible()
-    // All five category tabs present (locale-agnostic).
-    for (const name of [/^All$|^전체$/, /AI Apps|AI 앱/, /LLM/, /Voice & Inference|음성/, /Coding Agents|코딩 에이전트/]) {
+    // All seven category tabs present (locale-agnostic) — dev-audience order (#658):
+    // All · LLM APIs · Coding Agents · Voice · Inference & Infra · Video · AI Apps.
+    for (const name of [/^All$|^전체$/, /LLM/, /Coding Agents|코딩 에이전트/, /^Voice$|^음성$/, /Inference & Infra|추론 & 인프라/, /^Video$|^영상$/, /AI Apps|AI 앱/]) {
       await expect(tablist.getByRole('tab', { name }).first()).toBeVisible()
     }
 
@@ -110,6 +111,29 @@ test.describe('Overview page', () => {
     await page.waitForTimeout(200)
     await expect(page.locator('main button').filter({ hasText: 'Cursor' }).first()).toBeVisible()
     await expect(page.locator('main button').filter({ hasText: 'Claude Code' }).first()).toBeVisible()
+  })
+
+  test('card latency label reflects probe status — "API response" for probed, "status page" otherwise (#658)', async ({ page }) => {
+    // The card's latency value is the direct probe RTT for probed services and status-page timing
+    // otherwise; the label must say which (matches ServiceDetails svc.latency vs svc.latency.statusPage).
+    // probeServiceIds is derived by usePolling from the response's probe24h snapshot, so seed one.
+    const svc = (id, name, category) => ({ id, category, name, provider: 'x', status: 'operational', latency: 150, uptime30d: 99.9, calendarDays: 30, incidents: [] })
+    const mockData = { json: {
+      services: [svc('claude', 'Claude API', 'api'), svc('claudeai', 'claude.ai', 'app')],
+      probe24h: [{ data: { claude: { rtt: 150 } } }], // → probeServiceIds = ['claude']
+      lastUpdated: new Date().toISOString(),
+    } }
+    await page.route('**/api/status**', (route) => route.fulfill(mockData))
+    await page.route('**/api/status/cached', (route) => route.fulfill(mockData))
+    await page.goto('/')
+    const claudeCard = page.locator('main button').filter({ hasText: 'Claude API' }).first()
+    const claudeaiCard = page.locator('main button').filter({ hasText: 'claude.ai' }).first()
+    await claudeCard.waitFor({ state: 'visible', timeout: 20000 })
+    // Probed → "API response" / "API 응답"; not "status page".
+    await expect(claudeCard.getByText(/API response|API 응답/)).toBeVisible()
+    await expect(claudeCard.getByText(/^status page$|^상태 페이지$/)).toHaveCount(0)
+    // Non-probed app → "status page" / "상태 페이지".
+    await expect(claudeaiCard.getByText(/status page|상태 페이지/)).toBeVisible()
   })
 
   test('Analyze button shows Coming Soon or Beta based on analysis data', async ({ page }) => {

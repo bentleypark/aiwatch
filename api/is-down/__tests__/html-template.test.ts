@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderPage, linkifyFaqAnswer, type ServiceData } from '../html-template'
+import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderPage, linkifyFaqAnswer, FOOTER_CATEGORY_ORDER, type ServiceData } from '../html-template'
 import type { ServiceSEO } from '../seo-content'
 import { SLUG_TO_SERVICE, RELATED_SLUGS } from '../slug-map'
 import type { RegionStatusResult } from '../region-status'
@@ -371,20 +371,20 @@ describe('renderFooter — Also check category grouping', () => {
     expect(html).not.toMatch(/href="https:\/\/ai-watch\.dev\/#settings"/)
   })
 
-  it('emits the three category sub-labels in API → AI Apps → Coding Agents order', () => {
-    // Use a slug whose RELATED_SLUGS doesn't drain a whole category, so all
-    // three groups are non-empty. `claude` (api) relates to claude-ai, claude-code,
-    // openai, chatgpt — leaves api/app/agent all populated.
+  it('emits the group sub-labels in FOOTER_CATEGORY_ORDER order', () => {
+    // Use a slug whose RELATED_SLUGS doesn't drain a whole group, so every group
+    // is non-empty. `claude` (llm) relates to claude-ai, claude-code, openai,
+    // chatgpt — leaves llm/apps/voice/inference/video/agents all populated (#658).
     const html = renderFooter('claude')
-    const apiIdx = html.indexOf('<strong style="color:#8b949e">API:</strong>')
-    const appIdx = html.indexOf('<strong style="color:#8b949e">AI Apps:</strong>')
-    const agentIdx = html.indexOf('<strong style="color:#8b949e">Coding Agents:</strong>')
-    expect(apiIdx, 'API sub-label present').toBeGreaterThan(-1)
-    expect(appIdx, 'AI Apps sub-label present').toBeGreaterThan(-1)
-    expect(agentIdx, 'Coding Agents sub-label present').toBeGreaterThan(-1)
-    // Order: API before AI Apps before Coding Agents.
-    expect(apiIdx).toBeLessThan(appIdx)
-    expect(appIdx).toBeLessThan(agentIdx)
+    const idxs = FOOTER_CATEGORY_ORDER.map(({ label }) => {
+      const i = html.indexOf(`<strong style="color:#8b949e">${label}:</strong>`)
+      expect(i, `${label} sub-label present`).toBeGreaterThan(-1)
+      return i
+    })
+    // Labels must appear in declared FOOTER_CATEGORY_ORDER order.
+    for (let k = 1; k < idxs.length; k++) {
+      expect(idxs[k - 1], `${FOOTER_CATEGORY_ORDER[k - 1].label} before ${FOOTER_CATEGORY_ORDER[k].label}`).toBeLessThan(idxs[k])
+    }
   })
 
   it('every non-current, non-related service appears exactly once under exactly one category', () => {
@@ -417,41 +417,59 @@ describe('renderFooter — Also check category grouping', () => {
     // `claude-code` (agent) relates to claude, cursor, github-copilot, windsurf,
     // codex, junie. Every other agent is either current or related → the
     // Coding Agents group is empty and must not render a stray "Coding Agents:"
-    // label. API + AI Apps groups remain.
+    // label. LLM APIs + AI Apps groups remain.
     const html = renderFooter('claude-code')
     expect(html).not.toContain('<strong style="color:#8b949e">Coding Agents:</strong>')
-    expect(html).toContain('<strong style="color:#8b949e">API:</strong>')
+    expect(html).toContain('<strong style="color:#8b949e">LLM APIs:</strong>')
     expect(html).toContain('<strong style="color:#8b949e">AI Apps:</strong>')
   })
 
   it('FOOTER_CATEGORY_ORDER covers every category present in SLUG_TO_SERVICE', () => {
-    // Completeness guard. renderFooter buckets `remaining` into the three
-    // categories API / AI Apps / Coding Agents. If a future service is added
-    // with a 4th category value (the `category` field is typed `string`, not
-    // a union, so this compiles silently), its is-down link would vanish from
-    // the footer with no other test failure — the exact silent SEO-link-loss
-    // this whole #424 change set out to prevent. Fail loudly here instead.
-    const present = new Set(Object.values(SLUG_TO_SERVICE).map(e => e.category))
-    expect([...present].sort()).toEqual(['agent', 'api', 'app'])
+    // Completeness guard. renderFooter buckets `remaining` into the six
+    // categories (apps/llm/voice/inference/video/agents — #658, mirroring the
+    // dashboard SERVICE_CATEGORIES taxonomy). If a future service is added with
+    // a category value not in FOOTER_CATEGORY_ORDER (the `category` field is
+    // typed `string`, not a union, so this compiles silently), its is-down link
+    // would vanish from the footer with no other test failure — the exact
+    // silent SEO-link-loss this whole #424 change set out to prevent. Fail
+    // loudly here instead.
+    const present = new Set(Object.values(SLUG_TO_SERVICE).map(e => e.group))
+    const ordered = new Set(FOOTER_CATEGORY_ORDER.map(g => g.key))
+    for (const c of present) {
+      expect(ordered.has(c), `group "${c}" present in SLUG_TO_SERVICE but missing from FOOTER_CATEGORY_ORDER`).toBe(true)
+    }
+    expect([...present].sort()).toEqual(['agents', 'apps', 'inference', 'llm', 'video', 'voice'])
+  })
+
+  it('`category` stays the COARSE worker vocabulary (api/app/agent) — guards the is-down fallback filter', () => {
+    // #658 — `category` and the fine `group` now sit side by side on every entry. `category` MUST
+    // remain in the worker's 3-way vocabulary because api/is-down.ts filters fallback candidates with
+    // `s.category === entry.category`, where `s.category` is the worker ServiceStatus value (api/app/
+    // agent). If a contributor "aligns" category with the fine group (e.g. sets category:'voice'),
+    // that equality matches NO operational candidate and the service's fallback list silently goes
+    // empty — no runtime error, no other test failure. Pin the coarse vocabulary here so that
+    // mistake fails loudly. (The fine taxonomy is asserted on `group` in the test above.)
+    const cats = new Set(Object.values(SLUG_TO_SERVICE).map(e => e.category))
+    expect([...cats].sort()).toEqual(['agent', 'api', 'app'])
   })
 
   it('grouped links are category-pure — no cross-category leakage within a group', () => {
-    // Pull the API group's text span and assert it contains only api-category
-    // service links. A regression that mis-buckets (e.g. category typo) would
-    // surface as an agent/app link inside the API <span>.
+    // Pull the LLM APIs group's text span and assert it contains only
+    // llm-category service links. A regression that mis-buckets (e.g. category
+    // typo) would surface as an agent/app link inside the LLM APIs <span>.
     // NOTE: the slice below assumes the group markup is a FLAT <span> with no
     // nested <span>. If a future refactor nests spans, update the bounds.
     const html = renderFooter('claude')
-    // The API group is a <span> ... up to the next <span> or </p>.
-    const apiSpanStart = html.indexOf('<strong style="color:#8b949e">API:</strong>')
-    const afterApi = html.slice(apiSpanStart)
-    const apiSpanEnd = afterApi.indexOf('</span>')
-    const apiSpan = afterApi.slice(0, apiSpanEnd)
-    // Every /is-X-down link inside the API span must map to an api-category slug.
-    const linkSlugs = [...apiSpan.matchAll(/\/is-([a-z-]+)-down/g)].map(m => m[1])
+    // The LLM APIs group is a <span> ... up to the next <span> or </p>.
+    const llmSpanStart = html.indexOf('<strong style="color:#8b949e">LLM APIs:</strong>')
+    const afterLlm = html.slice(llmSpanStart)
+    const llmSpanEnd = afterLlm.indexOf('</span>')
+    const llmSpan = afterLlm.slice(0, llmSpanEnd)
+    // Every /is-X-down link inside the LLM APIs span must map to an llm-group slug.
+    const linkSlugs = [...llmSpan.matchAll(/\/is-([a-z-]+)-down/g)].map(m => m[1])
     expect(linkSlugs.length).toBeGreaterThan(0)
     for (const s of linkSlugs) {
-      expect(SLUG_TO_SERVICE[s]?.category, `${s} in API group must be api-category`).toBe('api')
+      expect(SLUG_TO_SERVICE[s]?.group, `${s} in LLM APIs group must be llm-group`).toBe('llm')
     }
   })
 })

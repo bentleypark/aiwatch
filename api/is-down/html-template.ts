@@ -930,13 +930,18 @@ function shareKakao(){
 
 // "Also check" footer cross-links are grouped by category (#424). Without
 // grouping, the links render in `SLUG_TO_SERVICE` insertion order — which is
-// the historical SEO-page rollout order, mixing API / app / agent services
-// with no logic. Grouping gives the SEO internal-link block a coherent
-// structure and lets a reader scan to the category they care about.
-const FOOTER_CATEGORY_ORDER: ReadonlyArray<{ key: string; label: string }> = [
-  { key: 'api', label: 'API' },
-  { key: 'app', label: 'AI Apps' },
-  { key: 'agent', label: 'Coding Agents' },
+// the historical SEO-page rollout order, mixing services with no logic.
+// Grouping gives the SEO internal-link block a coherent structure and lets a
+// reader scan to the category they care about. #658: the taxonomy now mirrors
+// the dashboard SERVICE_CATEGORIES (apps/llm/voice/inference/video/agents) so
+// the is-down footer and the dashboard Overview group services identically.
+export const FOOTER_CATEGORY_ORDER: ReadonlyArray<{ key: string; label: string }> = [
+  { key: 'llm', label: 'LLM APIs' },
+  { key: 'agents', label: 'Coding Agents' },
+  { key: 'voice', label: 'Voice' },
+  { key: 'inference', label: 'Inference & Infra' },
+  { key: 'video', label: 'Video' },
+  { key: 'apps', label: 'AI Apps' },
 ]
 
 // Exported for api/is-down/__tests__/html-template.test.ts — pins the
@@ -956,15 +961,15 @@ export function renderFooter(slug: string): string {
     })
     .join(' &middot; ')
 
-  // Group `remaining` by category. Within each category the existing
-  // deterministic SLUG_TO_SERVICE order is preserved. Empty categories emit
+  // Group `remaining` by the fine `group` taxonomy (#658). Within each group the
+  // existing deterministic SLUG_TO_SERVICE order is preserved. Empty groups emit
   // nothing — no stray sub-label. Every service falls into exactly one of
-  // api / app / agent (all SLUG_TO_SERVICE entries carry one of those three),
-  // so no service is dropped by the grouping.
+  // apps / llm / voice / inference / video / agents (every SLUG_TO_SERVICE
+  // entry carries a `group`), so no service is dropped by the grouping.
   const otherGroups = FOOTER_CATEGORY_ORDER
     .map(({ key, label }) => {
       const links = remaining
-        .filter(s => SLUG_TO_SERVICE[s]?.category === key)
+        .filter(s => SLUG_TO_SERVICE[s]?.group === key)
         .map(s => `<a href="/is-${esc(s)}-down">Is ${esc(SLUG_TO_SERVICE[s]?.name ?? s.replace(/-/g, ' '))} down?</a>`)
       if (links.length === 0) return ''
       return `<span style="display:block;margin-top:4px"><strong style="color:#8b949e">${label}:</strong> ${links.join(' ')}</span>`

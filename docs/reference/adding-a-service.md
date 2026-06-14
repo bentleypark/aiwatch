@@ -30,8 +30,8 @@ When adding a new monitored service, update ALL of the following:
 ## Frontend
 5. `src/utils/constants.js` — update ALL of:
    - `API_SERVICE_IDS` — add new service ID
-   - `SERVICE_AND_APP_IDS` — add at correct display position (app → LLM → voice → inference → agent)
-   - `SERVICE_CATEGORIES` — add to correct category filter (e.g., `llm`, `inference`)
+   - `SERVICE_AND_APP_IDS` — add at correct display position (app → LLM → voice → inference → video → agent)
+   - `SERVICE_CATEGORIES` — add to correct category filter (`apps`/`llm`/`voice`/`inference`/`video`/`agents`, #658). This same 6-way taxonomy drives the Sidebar filter, the Overview per-category sections (`SECTION_KEYS` in `src/pages/Overview.jsx` — keep in sync), and the is-down footer grouping (mirrored as `group` in `api/is-down/slug-map.ts`, below)
    - `EXCLUDE_FALLBACK` — keep in sync with `worker/src/fallback.ts`
    - `API_TIER` — add tier number (keep in sync with `worker/src/fallback.ts`)
 6. `src/hooks/usePolling.js` — add mock entry to `MOCK_SERVICES` at correct position (determines display order via `mergeWithMock`)
@@ -39,6 +39,7 @@ When adding a new monitored service, update ALL of the following:
 8. `src/pages/ServiceDetails.jsx` — add `STATUS_URL` entry for official status page link
 9. `src/pages/Overview.jsx` — verify `TIER_LABEL` (keep in sync with `worker/src/fallback.ts`; `API_TIER` + `getFallbacks` imported from `src/utils/constants.js`)
 10. `api/is-down.ts` — add to `API_TIER` + `EXCLUDE_FALLBACK` (keep in sync with `worker/src/fallback.ts`)
+10a. `api/is-down/slug-map.ts` — add a `SLUG_TO_SERVICE` entry with BOTH `category` (coarse `api`/`app`/`agent`, mirrors worker `ServiceStatus.category` — used by the is-down fallback filter) AND `group` (fine 6-way `apps`/`llm`/`voice`/`inference`/`video`/`agents`, mirrors `SERVICE_CATEGORIES` — drives the footer "Also check" grouping via `FOOTER_CATEGORY_ORDER`, #658). Also add `RELATED_SLUGS` cross-links. Coverage is pinned by `api/is-down/__tests__/html-template.test.ts`.
 10b. (region-aware services only) Region data lives in TWO cross-mirrored copies — both must update together. The sync is pinned by `worker/src/__tests__/region-status-sync.test.ts`:
    - `src/utils/regionStatus.js` — frontend (ServiceDetails RegionalAvailability card, Overview ActionBanner region line). Canonical source for the sync test.
    - `api/is-down/region-status.ts` — Edge SSR (Is X Down? region recommendation line). Duplicated because Vercel Edge bundling cannot import from `src/`. Same shape, TS port.

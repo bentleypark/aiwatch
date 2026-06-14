@@ -90,7 +90,7 @@ function HistoryBars({ history30d, compact }) {
   )
 }
 
-function ServiceCard({ service, index, onClick, t, isRecovered }) {
+function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
   const incidentCount = (service.incidents ?? []).filter((i) => i.status !== 'resolved').length
   // #591 — blank UPTIME / score for estimate-no-data OR stale-source (showing frozen/assumed figures
   // as current would mislead). #653 — the incident COUNT, however, is the LIVE list and blanks only for
@@ -152,7 +152,9 @@ function ServiceCard({ service, index, onClick, t, isRecovered }) {
         <div className="grid grid-cols-3" style={{ gap: '6px', marginBottom: '10px', textAlign: 'center' }}>
           <div>
             <div className={`mono text-[13px] font-medium ${latencyColor}`}>{service.latency != null ? `${service.latency}ms` : '—'}</div>
-            <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.latency')}</div>
+            {/* #658 — probed services (20 API services) show direct API RTT; label must say so, not
+                "status page" (matches ServiceDetails svc.latency vs svc.latency.statusPage). */}
+            <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t(isProbed ? 'overview.card.latency.api' : 'overview.card.latency')}</div>
           </div>
           <div>
             <div className={`mono text-[13px] font-medium ${uptimeColor}`} title={!hasUptime ? t('uptime.unavailable.tooltip') : undefined}>
@@ -226,9 +228,10 @@ function FilterTabs({ filter, setFilter, total, issueCount, downCount, t }) {
   )
 }
 
-// Service categories rendered as Overview sections (mirrors the sidebar taxonomy, #646).
-// 'all' is the meta-bucket (no section of its own); the four below partition every service.
-const SECTION_KEYS = ['apps', 'llm', 'inference', 'agents']
+// Service categories rendered as Overview sections (mirrors the sidebar taxonomy, #646; dev-audience
+// ordering, #658). Order matches SERVICE_CATEGORIES key order — keep the two in sync. 'all' is the
+// meta-bucket (no section of its own); the six below partition every service.
+const SECTION_KEYS = ['llm', 'agents', 'voice', 'inference', 'video', 'apps']
 const CATEGORY_TAB_KEYS = ['all', ...SECTION_KEYS]
 
 // Category selector on the Overview itself (#646) — mirrors the sidebar's category filter so the
@@ -582,7 +585,7 @@ function ActionBanner({ services, setPage, t }) {
 export default function Overview() {
   const { t, lang } = useLang()
   const { setPage, categoryFilter, setCategoryFilter } = usePage()
-  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis, securityAlerts } = usePolling()
+  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis, securityAlerts, probeServiceIds } = usePolling()
   const { settings } = useSettings()
   const services = allServices.filter((s) => settings.enabledServices.includes(s.id))
   const [filter, setFilter] = useState('all')
@@ -628,8 +631,9 @@ export default function Overview() {
     : list
 
   // Build per-category sections mirroring the sidebar taxonomy (#646), replacing the old
-  // Services-blob + Coding-Agents-only split. In 'all' mode render all four sections in order; when a
-  // specific category is active, catServices is already scoped to it → render just that one section.
+  // Services-blob + Coding-Agents-only split. In 'all' mode render all six sections in SECTION_KEYS
+  // (dev-audience) order (#658); when a specific category is active, catServices is already scoped to
+  // it → render just that one section.
   const sectionKeys = categoryFilter === 'all' ? SECTION_KEYS : SECTION_KEYS.filter((k) => k === categoryFilter)
   const matched = new Set()
   const sections = sectionKeys.map((key) => {
@@ -804,6 +808,7 @@ export default function Overview() {
                   service={svc}
                   index={i}
                   t={t}
+                  isProbed={probeServiceIds.includes(svc.id)}
                   isRecovered={!!recentlyRecovered[svc.id]}
                   onClick={() => { trackEvent('select_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }) }}
                 />
