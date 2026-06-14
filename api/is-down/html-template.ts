@@ -445,7 +445,7 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
   // (the ⚠️ note below explains why). Status/last-checked stay — they're probe-measured + current.
   const stale = !!service.incidentSourceStale
   const metaParts = [`Last checked: ${esc(timeAgo(service.lastChecked))}`]
-  if (hasUptime && !stale) metaParts.push(`Uptime (30d): ${service.uptime30d!.toFixed(2)}%`)
+  if (hasUptime && !stale) metaParts.push(`Uptime: ${service.uptime30d!.toFixed(2)}%`)
   if (service.aiwatchScore != null && !stale) metaParts.push(`AIWatch Score: ${service.aiwatchScore}${esc(gradeStr)}`)
   const incidents = Array.isArray(service.incidents) ? service.incidents : []
   const lastIncident = incidents.length > 0 ? incidents[0] : null
@@ -624,7 +624,7 @@ export function buildMetaDescription(
   const uptimeStr = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d) && !service.incidentSourceStale
     ? `${service.uptime30d.toFixed(2)}%`
     : null
-  const uptimeClause = uptimeStr ? ` 30-day uptime: ${uptimeStr}.` : ''
+  const uptimeClause = uptimeStr ? ` Uptime: ${uptimeStr}.` : ''
   const incidentClause = thirtyDayIncidentCount > 0 ? ` ${thirtyDayIncidentCount} incidents tracked (30d).` : ''
   // #566: answer-first ("No — X is operational" / "Yes — X is down right now") so the
   // SERP snippet leads with the answer; freshness hint stays to frame it as a live tracker.
@@ -672,12 +672,14 @@ function buildDataSummary(service: ServiceData | null, displayName: string): str
   const cutoff = Date.now() - 30 * 86_400_000
   const recent = incidents.filter((i) => new Date(i.startedAt).getTime() >= cutoff)
   const count = recent.length
-  const uptime = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d)
+  // #591 — don't surface a stale-source service's frozen uptime in the narrative either (mirrors the
+  // same gate in buildMetaDescription; exposed by #654's "30-day uptime" → "Uptime" wording unification).
+  const uptime = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d) && !service.incidentSourceStale
     ? `${service.uptime30d.toFixed(2)}%` : null
 
   if (count === 0) {
     return uptime
-      ? `Based on AIWatch data from the last 30 days, ${displayName} has maintained a clean record with zero incidents. 30-day uptime: ${uptime}.`
+      ? `Based on AIWatch data from the last 30 days, ${displayName} has maintained a clean record with zero incidents. Uptime: ${uptime}.`
       : `Based on AIWatch data from the last 30 days, ${displayName} has maintained a clean record with zero incidents.`
   }
 
@@ -698,7 +700,7 @@ function buildDataSummary(service: ServiceData | null, displayName: string): str
   }
 
   return uptime
-    ? `Based on AIWatch data from the last 30 days, ${displayName} experienced ${count} incident${count > 1 ? 's' : ''}${mttrText}. 30-day uptime: ${uptime}.`
+    ? `Based on AIWatch data from the last 30 days, ${displayName} experienced ${count} incident${count > 1 ? 's' : ''}${mttrText}. Uptime: ${uptime}.`
     : `Based on AIWatch data from the last 30 days, ${displayName} experienced ${count} incident${count > 1 ? 's' : ''}${mttrText}.`
 }
 
@@ -710,7 +712,7 @@ ${summary ? `<p style="font-size:14px;margin-bottom:12px;padding:10px 14px;backg
 <p style="font-size:14px;margin-bottom:12px">${esc(seo.description)}</p>
 ${seo.insight ? `<p style="font-size:14px;margin-bottom:12px;padding:10px 14px;background:#161b22;border-left:3px solid #58a6ff;border-radius:0 4px 4px 0"><strong>AIWatch Insight:</strong> ${esc(seo.insight)}</p>` : ''}
 <p style="font-size:14px;color:#8b949e">${esc(seo.whenDown)}</p>
-<p style="font-size:13px;color:#484f58;margin-top:12px">This page provides real-time status, 30-day uptime history, and recent incident details &mdash; updated every 5 minutes by <a href="https://ai-watch.dev">AIWatch</a>.</p>
+<p style="font-size:13px;color:#484f58;margin-top:12px">This page provides real-time status, uptime history, and recent incident details &mdash; updated every 5 minutes by <a href="https://ai-watch.dev">AIWatch</a>.</p>
 </div>`
 }
 

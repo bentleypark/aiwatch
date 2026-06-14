@@ -290,28 +290,30 @@ test.describe('Is X Down? SSR pages', () => {
     expect(Number(m && m[1])).toBeLessThanOrEqual(MAX_RANKED)
   })
 
-  test('hides "Uptime (30d): N/A" when no uptime data is available', async ({ page }) => {
+  test('hides "Uptime: N/A" when no uptime data is available', async ({ page }) => {
     // Services like xai/perplexity/gemini/mistral/character-ai/etc. don't always have
     // uptime data. The header meta line must omit the Uptime segment entirely rather
-    // than show "Uptime (30d): N/A" (regression: previously hardcoded with N/A literal).
+    // than show "Uptime: N/A" (regression: previously hardcoded with N/A literal).
+    // #654 — the "(30d)" window qualifier was dropped (the source window varies: official pages
+    // report 30/60/90d, estimate is 90d), so the label is now a neutral "Uptime:".
     await page.goto('/is-xai-down', { waitUntil: 'domcontentloaded' })
     const meta = page.locator('p.meta.mono', { hasText: 'Last checked' })
     await expect(meta).toBeVisible()
     const text = (await meta.textContent()) || ''
-    // Must NEVER show "Uptime (30d): N/A" literal — either hidden or valid percentage
-    expect(text).not.toMatch(/Uptime \(30d\):\s*N\/A/)
+    // Must NEVER show "Uptime: N/A" literal — either hidden or valid percentage
+    expect(text).not.toMatch(/Uptime:\s*N\/A/)
     // If the Uptime segment appears at all, it must be a valid percentage
-    const uptimeMatch = text.match(/Uptime \(30d\):\s*([^\s·&]+)/)
+    const uptimeMatch = text.match(/Uptime:\s*([^\s·&]+)/)
     if (uptimeMatch) expect(uptimeMatch[1]).toMatch(/^\d+\.\d+%$/)
   })
 
-  test('shows uptime when available (groq always has 100% uptime in 30d)', async ({ page }) => {
+  test('shows uptime when available (groq always has ~100% uptime)', async ({ page }) => {
     // Positive control: services with uptime data must still show the segment.
     await page.goto('/is-groq-down', { waitUntil: 'domcontentloaded' })
     const meta = page.locator('p.meta.mono', { hasText: 'Last checked' })
     await expect(meta).toBeVisible()
     const text = (await meta.textContent()) || ''
-    expect(text).toMatch(/Uptime \(30d\):\s*\d+\.\d+%/)
+    expect(text).toMatch(/Uptime:\s*\d+\.\d+%/)
   })
 
   test.describe('CTA placement for outage-moment capture (#297)', () => {

@@ -78,7 +78,7 @@ export function buildDailySummary(data: DailySummaryData): string {
     const sorted = [...withUptime].sort((a, b) => (b.uptime30d ?? 0) - (a.uptime30d ?? 0))
     const best = sorted.slice(0, 2).map(s => `${s.name} ${s.uptime30d!.toFixed(2)}%`).join(' · ')
     const worst = sorted.slice(-2).reverse().map(s => `${s.name} ${s.uptime30d!.toFixed(2)}%`).join(' · ')
-    lines.push(`\n📈 **Uptime (30d)**\n   Best: ${best}\n   Worst: ${worst}`)
+    lines.push(`\n📈 **Uptime**\n   Best: ${best}\n   Worst: ${worst}`)
   }
 
   // Section 5: Probe RTT (24h) — replaces status page latency with direct API endpoint measurement
