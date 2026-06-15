@@ -3,7 +3,7 @@
 // script, not src/worker code.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors } from './verify-reminders.mjs'
+import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors, parseScanRepos, displayRef } from './verify-reminders.mjs'
 
 test('parseVerifyAfter — extracts date + note from a checklist line', () => {
   const body = '- [ ] **verify-after 2026-09-01** — check p95 after 3 months (#511)\nother text'
@@ -58,7 +58,36 @@ test('isValidIsoDate', () => {
 test('parseTrustedAuthors — owner from GITHUB_REPOSITORY + explicit override; empty by default', () => {
   assert.deepEqual([...parseTrustedAuthors({ GITHUB_REPOSITORY: 'bentleypark/aiwatch' })], ['bentleypark'])
   assert.deepEqual([...parseTrustedAuthors({ VERIFY_TRUSTED_AUTHORS: 'a, b', GITHUB_REPOSITORY: 'o/r' })], ['a', 'b', 'o'])
-  assert.equal(parseTrustedAuthors({}).size, 0) // local dev → empty → caller does not filter
+  assert.equal(parseTrustedAuthors({}).size, 0) // pure local → empty → caller does not filter
+})
+
+test('parseTrustedAuthors — also trusts scanned-repo owners (abuse-gate stays closed on a public sibling)', () => {
+  // GITHUB_REPOSITORY empty but a concrete sibling is scanned → gate must NOT open: owner derived from the repo.
+  assert.deepEqual([...parseTrustedAuthors({}, ['bentleypark/aiwatch-reports'])], ['bentleypark'])
+  // main + different-owner sibling → both owners trusted (each gates its own repo's issues)
+  assert.deepEqual([...parseTrustedAuthors({ GITHUB_REPOSITORY: 'o/main' }, ['x/sib'])], ['o', 'x'])
+  // pure-local (repos:[null]) keeps the empty set → no filter
+  assert.equal(parseTrustedAuthors({}, [null]).size, 0)
+})
+
+test('parseScanRepos — main repo + default reports sibling, de-duped, order-preserving', () => {
+  // main repo from GITHUB_REPOSITORY + the default reports sibling
+  assert.deepEqual(parseScanRepos({ GITHUB_REPOSITORY: 'bentleypark/aiwatch' }), ['bentleypark/aiwatch', 'bentleypark/aiwatch-reports'])
+  // explicit extras override the default; main stays first
+  assert.deepEqual(parseScanRepos({ GITHUB_REPOSITORY: 'o/main', VERIFY_EXTRA_REPOS: 'o/a, o/b' }), ['o/main', 'o/a', 'o/b'])
+  // a sibling duplicating the main repo is de-duped
+  assert.deepEqual(parseScanRepos({ GITHUB_REPOSITORY: 'o/r', VERIFY_EXTRA_REPOS: 'o/r' }), ['o/r'])
+  // empty VERIFY_EXTRA_REPOS → main only (no sibling)
+  assert.deepEqual(parseScanRepos({ GITHUB_REPOSITORY: 'o/main', VERIFY_EXTRA_REPOS: '' }), ['o/main'])
+  // local dev (no GITHUB_REPOSITORY, no extras) → [null] = current repo, no --repo
+  assert.deepEqual(parseScanRepos({ VERIFY_EXTRA_REPOS: '' }), [null])
+})
+
+test('displayRef — bare #N for main/local, qualified for a sibling', () => {
+  const env = { GITHUB_REPOSITORY: 'bentleypark/aiwatch' }
+  assert.equal(displayRef('bentleypark/aiwatch', 41, env), '#41')            // main repo → bare
+  assert.equal(displayRef('bentleypark/aiwatch-reports', 41, env), 'aiwatch-reports#41') // sibling → qualified
+  assert.equal(displayRef(null, 41, env), '#41')                            // local/current → bare
 })
 
 test('importing the module runs no side effects (main is guarded)', () => {
