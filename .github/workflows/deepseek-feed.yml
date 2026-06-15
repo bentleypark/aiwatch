@@ -29,18 +29,26 @@ jobs:
   scrape:
     name: Scrape + push Flashduty feed
     runs-on: ubuntu-latest
-    timeout-minutes: 6
-    # Official Playwright image ships Chromium + system deps preinstalled — no per-run browser
-    # download. Pin the tag to the @playwright/test version in package.json (^1.58.2).
-    container:
-      image: mcr.microsoft.com/playwright:v1.58.2-jammy
+    timeout-minutes: 8
+    # #668 — run on the plain runner and install the Chromium browser in-step, instead of the
+    # mcr.microsoft.com/playwright container. The MCR image pull was intermittently BLOCKED by
+    # Microsoft's edge ("The request is blocked", Ref A/B/C) for GitHub's shared runner IPs, killing
+    # the job before any step ran. Browsers download from Playwright's CDN (cached across runs).
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install Playwright (npm pkg only — browsers are in the image)
+      - name: Install Playwright npm package
         run: npm install --no-save playwright@1.58.2
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-1.58.2-${{ runner.os }}
+      - name: Install Chromium (+ system deps)
+        run: npx playwright install --with-deps chromium
       - name: Scrape DeepSeek feed + push to Worker
         run: node scripts/scrape-deepseek-feed.mjs
         env:

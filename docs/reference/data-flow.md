@@ -57,8 +57,9 @@ demoted to an hourly backup):
   → POST api.github.com /actions/workflows/deepseek-feed.yml/dispatches  (Bearer GH_DISPATCH_TOKEN)
                                   │  (GitHub `schedule: 17 * * * *` is a hourly BACKUP only)
                                   ▼
-[GitHub Action]  Playwright headless Chromium (official mcr.microsoft.com/playwright container, pinned)
-  → goto status.deepseek.com         ← real browser TLS/HTTP fingerprint clears the bot wall
+[GitHub Action]  Playwright headless Chromium (ubuntu-latest + `npx playwright install chromium`, cached;
+                 #668 dropped the mcr.microsoft.com/playwright container — its image pull was intermittently edge-blocked)
+  → goto status.deepseek.com (retried, #668)  ← real browser TLS/HTTP fingerprint clears the bot wall
   → in-page fetch() of the clean Flashduty JSON API (scripts/scrape-deepseek-feed.mjs):
        /api/status-page/{pageId}/summary/active            (active incidents + components)
        /api/status-page/{pageId}/change/list   (90d window)  (full incidents incl. timelines)
