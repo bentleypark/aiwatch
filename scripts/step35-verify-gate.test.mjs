@@ -28,11 +28,23 @@ test('isUiEdgePath — dashboard + Edge SSR are UI; worker/docs/tests are not', 
   assert.equal(isUiEdgePath('tests/overview.spec.js'), false)
 })
 
+test('isUiEdgePath — absolute paths (Edit tool supplies absolute file_path, #664)', () => {
+  // The Edit/Write tools require an absolute file_path — the gate must classify these too, else
+  // lastUiEditIndex never finds a UI edit and every UI commit fail-closes.
+  assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/src/pages/ServiceDetails.jsx'), true)
+  assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/api/is-down/html-template.ts'), true)
+  assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/worker/src/services.ts'), false) // absolute worker/src excluded
+  assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/src/utils/__tests__/calendar.test.js'), false) // absolute test excluded
+})
+
 test('lastUiEditIndex — picks the last UI/Edge edit (Edit + Bash write); -1 when none', () => {
   assert.equal(lastUiEditIndex([userText('hi'), edit('src/a.jsx'), userText('ok')]), 1)
   assert.equal(lastUiEditIndex([edit('src/a.jsx'), edit('worker/src/b.ts'), edit('src/c.jsx')]), 2) // worker edit doesn't reset
   assert.equal(lastUiEditIndex([bashWrite('cat > src/x.js <<EOF\n...')]), 0)
   assert.equal(lastUiEditIndex([edit('worker/src/b.ts'), edit('docs/x.md')]), -1) // no UI edit
+  // #664 — absolute file_path (what the Edit tool actually supplies) must be found, not -1
+  assert.equal(lastUiEditIndex([userText('hi'), edit('/Users/x/aiwatch/src/pages/Overview.jsx')]), 1)
+  assert.equal(lastUiEditIndex([edit('/Users/x/aiwatch/worker/src/b.ts')]), -1) // absolute worker edit isn't UI
 })
 
 test('hasUserTurnAfter — detects both string-content (real prompts) and array-text human turns', () => {
