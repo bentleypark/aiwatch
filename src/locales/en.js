@@ -30,9 +30,13 @@ const en = {
 
   // Status
   'status.operational': 'Operational',
-  'status.degraded_perf': 'Degraded',
   'status.degraded': 'Partial Outage',
   'status.down': 'Major Outage',
+  // #663 — calendar's own impact-aligned status labels (decoupled from the 3-state badge status.* above)
+  'cal.status.operational': 'Operational',
+  'cal.status.minor': 'Degraded',
+  'cal.status.major': 'Partial Outage',
+  'cal.status.critical': 'Major Outage',
   'status.partial.suffix': ' affected',
   'status.partial.tooltip': 'Some components are reporting issues on the provider status page; overall service availability is still nominal.',
 

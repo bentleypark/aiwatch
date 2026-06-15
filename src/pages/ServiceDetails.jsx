@@ -87,12 +87,12 @@ const STATUS_URL = {
 // Services that cannot provide incident data (no API, bot-protected, etc.)
 const NO_INCIDENT_SUPPORT = new Set([])
 
-// 30-day calendar status → Tailwind color class
+// Calendar cell status → Tailwind color class (#663 impact-aligned keys, frontend-internal)
 const CALENDAR_CLASS = {
-  operational:    'bg-[var(--green)]',
-  degraded_perf:  'bg-[var(--yellow)]',
-  degraded:       'bg-[var(--amber)]',
-  down:           'bg-[var(--red)]',
+  operational:  'bg-[var(--green)]',
+  minor:        'bg-[var(--yellow)]',
+  major:        'bg-[var(--amber)]',
+  critical:     'bg-[var(--red)]',
 }
 
 // Compute calendar date label for index i (0 = oldest, last = today)
@@ -567,13 +567,14 @@ function RegionalAvailability({ service, t }) {
 }
 
 
-const CALENDAR_OPACITY = { operational: 0.7, degraded: 0.8, down: 0.9 }
+const CALENDAR_OPACITY = { operational: 0.7, major: 0.8, critical: 0.9 } // minor → default 1 (was degraded_perf)
 
 function CalendarCell({ status, date, t }) {
   const [hovered, setHovered] = useState(false)
-  // #662 — show the translated status label ("Degraded"/"Partial Outage"/…), not the raw internal
-  // key (degraded_perf/…). Matches the legend (all four statuses have ko/en labels).
-  const label = t ? t(`status.${status}`) : status
+  // #662/#663 — show the translated label ("Degraded"/"Partial Outage"/…), not the raw internal cell
+  // key (minor/major/critical). cal.status.* is the calendar's own namespace, decoupled from the
+  // 3-state badge `status.*`. Matches the legend (all four keys have ko/en labels).
+  const label = t ? t(`cal.status.${status}`) : status
   const bgCls = CALENDAR_CLASS[status] ?? 'bg-[var(--bg3)]'
   const opacity = CALENDAR_OPACITY[status] ?? 1
 
@@ -974,10 +975,10 @@ export default function ServiceDetails({ serviceId }) {
               {t('svc.cal.legend')}
             </div>
             <div className="flex gap-3">
-              {['operational', 'degraded_perf', 'degraded', 'down'].map((s) => (
+              {['operational', 'minor', 'major', 'critical'].map((s) => (
                 <div key={s} className="flex items-center gap-1">
                   <span className={`rounded-sm ${CALENDAR_CLASS[s]}`} style={{ width: '8px', height: '8px' }} />
-                  <span className="text-[9px] mono text-[var(--text2)]">{t(`status.${s}`)}</span>
+                  <span className="text-[9px] mono text-[var(--text2)]">{t(`cal.status.${s}`)}</span>
                 </div>
               ))}
             </div>

@@ -1,13 +1,17 @@
 // Build status calendar from service data
 // Uses local dates to match how official status pages display dates to users.
-// Returns array of N statuses (default 30, incident.io services use 14):
-//   'down'               — red: full/major outage
-//   'degraded'           — orange: partial outage
-//   'degraded_perf'      — yellow: degraded performance (minor impact)
-//   'operational'        — green: no incidents
-// Index 0 = oldest, last index = today
+// Returns array of N cell statuses (default 30, incident.io services use 14). The cell keys are
+// IMPACT-ALIGNED and frontend-internal (NOT the wire `service.status`) — #663 renamed them from the
+// old degraded_perf/degraded/down so the key name matches the incident impact and the severity order
+// is self-evident, decoupling the calendar from the 3-state badge that shares the `status.*` i18n:
+//   'critical'    — red:    critical impact (major/full outage)
+//   'major'       — orange: major impact (partial outage)
+//   'minor'       — yellow: minor / null / unknown impact (degraded)
+//   'operational' — green:  no incidents
+// User-facing labels are unchanged (Major Outage / Partial Outage / Degraded / Operational) via the
+// `cal.status.*` i18n keys. Index 0 = oldest, last index = today.
 
-const STATUS_RANK = { operational: 0, degraded_perf: 1, degraded: 2, down: 3 }
+const STATUS_RANK = { operational: 0, minor: 1, major: 2, critical: 3 }
 
 function escalate(dayStatus, key, status) {
   if ((STATUS_RANK[status] ?? 0) > (STATUS_RANK[dayStatus[key]] ?? 0)) {
@@ -15,12 +19,12 @@ function escalate(dayStatus, key, status) {
   }
 }
 
-// Map an incident impact to a calendar cell status (single source of truth for Phase 2 + Phase 3).
-// critical → down (red), major → degraded (orange), minor/null/unknown → degraded_perf (yellow).
+// Map an incident impact to a calendar cell status (single source of truth for Phase 1/2/3). The cell
+// keys now equal the impact name (critical/major), with minor/null/unknown → 'minor' (yellow).
 function impactToCellStatus(impact) {
-  if (impact === 'critical') return 'down'
-  if (impact === 'major') return 'degraded'
-  return 'degraded_perf'
+  if (impact === 'critical') return 'critical'
+  if (impact === 'major') return 'major'
+  return 'minor'
 }
 
 // Convert Date to local YYYY-MM-DD string
@@ -32,15 +36,17 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, cu
   const today = new Date()
   const dayStatus = {}
 
-  // Phase 1: Apply dailyImpact (keys are UTC dates from Worker — remap to local)
+  // Phase 1: Apply dailyImpact (keys are UTC dates from Worker — remap to local). dailyImpact values
+  // are impact names (critical/major/minor), which now equal the cell keys — so map via the shared
+  // impactToCellStatus (skips any unknown impact by returning 'minor', but dailyImpact only emits the
+  // three known levels).
   if (dailyImpact) {
-    const impactToStatus = { critical: 'down', major: 'degraded', minor: 'degraded_perf' }
+    const KNOWN_IMPACT = new Set(['critical', 'major', 'minor'])
     for (const [utcDay, impact] of Object.entries(dailyImpact)) {
-      const status = impactToStatus[impact]
-      if (!status) continue
+      if (!KNOWN_IMPACT.has(impact)) continue
       // UTC date key → local date key (may shift ±1 day depending on timezone)
       const localKey = toLocalDateKey(new Date(utcDay + 'T12:00:00Z'))
-      escalate(dayStatus, localKey, status)
+      escalate(dayStatus, localKey, impactToCellStatus(impact))
     }
   }
 
@@ -52,7 +58,7 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, cu
     ;(incidents ?? []).forEach((inc) => {
       if (!inc.startedAt) return
       const key = toLocalDateKey(new Date(inc.startedAt))
-      // Same impact→status map for ongoing and resolved (minor/null/unknown → degraded_perf yellow).
+      // Same impact→cell map for ongoing and resolved (minor/null/unknown → 'minor' yellow).
       escalate(dayStatus, key, impactToCellStatus(inc.impact))
     })
   }
