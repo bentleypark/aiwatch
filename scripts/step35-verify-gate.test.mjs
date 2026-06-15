@@ -28,11 +28,25 @@ test('isUiEdgePath — dashboard + Edge SSR are UI; worker/docs/tests are not', 
   assert.equal(isUiEdgePath('tests/overview.spec.js'), false)
 })
 
+test('isUiEdgePath — absolute paths (Edit tool supplies absolute file_path, #664)', () => {
+  // The Edit/Write tools require an absolute file_path — the gate must classify these too, else
+  // lastUiEditIndex never finds a UI edit and every UI commit fail-closes.
+  assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/src/pages/ServiceDetails.jsx'), true)
+  assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/api/is-down/html-template.ts'), true)
+  assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/worker/src/services.ts'), false) // absolute worker/src excluded
+  assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/src/utils/__tests__/calendar.test.js'), false) // absolute test excluded
+  // worker/src/ guard runs before the api/src match → a worker path nesting api/is-down stays non-UI (ordering pin)
+  assert.equal(isUiEdgePath('worker/src/parsers/api/is-down/x.ts'), false)
+})
+
 test('lastUiEditIndex — picks the last UI/Edge edit (Edit + Bash write); -1 when none', () => {
   assert.equal(lastUiEditIndex([userText('hi'), edit('src/a.jsx'), userText('ok')]), 1)
   assert.equal(lastUiEditIndex([edit('src/a.jsx'), edit('worker/src/b.ts'), edit('src/c.jsx')]), 2) // worker edit doesn't reset
   assert.equal(lastUiEditIndex([bashWrite('cat > src/x.js <<EOF\n...')]), 0)
   assert.equal(lastUiEditIndex([edit('worker/src/b.ts'), edit('docs/x.md')]), -1) // no UI edit
+  // #664 — absolute file_path (what the Edit tool actually supplies) must be found, not -1
+  assert.equal(lastUiEditIndex([userText('hi'), edit('/Users/x/aiwatch/src/pages/Overview.jsx')]), 1)
+  assert.equal(lastUiEditIndex([edit('/Users/x/aiwatch/worker/src/b.ts')]), -1) // absolute worker edit isn't UI
 })
 
 test('hasUserTurnAfter — detects both string-content (real prompts) and array-text human turns', () => {
@@ -64,6 +78,19 @@ test('decideCommit — DENIES a UI commit with no post-edit user confirmation (t
 test('decideCommit — ALLOWS once a genuine user confirmation follows the last UI edit', () => {
   const e = [edit('src/pages/Overview.jsx'), userText('확인했고 잘 나옴, 커밋해')]
   assert.deepEqual(decideCommit(['src/pages/Overview.jsx'], e), { deny: false, reason: 'confirmed' })
+})
+
+test('decideCommit — #664 end-to-end: relative staged + ABSOLUTE edit + confirm → ALLOWS (the exact bug)', () => {
+  // The real invocation mixes formats: stagedUiEdge is git-relative; the edit event's file_path is
+  // absolute (Edit tool). Before #664 the absolute edit was invisible → fail-closed despite a valid
+  // confirmation. This pins that a verified UI commit now PASSES, not just that isUiEdgePath is true.
+  const e = [edit('/Users/x/aiwatch/src/pages/Overview.jsx'), userText('브라우저 확인 OK, 커밋해')]
+  assert.deepEqual(decideCommit(['src/pages/Overview.jsx'], e), { deny: false, reason: 'confirmed' })
+})
+
+test('decideCommit — #664: absolute UI edit with NO confirmation still DENIES (gate not weakened)', () => {
+  const e = [edit('/Users/x/aiwatch/src/pages/Overview.jsx'), toolResult()]
+  assert.equal(decideCommit(['src/pages/Overview.jsx'], e).deny, true)
 })
 
 test('decideCommit — a post-edit test/doc edit does NOT re-trigger the gate (confirmation still valid)', () => {

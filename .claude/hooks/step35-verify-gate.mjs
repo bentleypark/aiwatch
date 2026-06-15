@@ -63,7 +63,12 @@ function audit(decision, note = '') {
 export function isUiEdgePath(p) {
   if (!p) return false
   if (/(?:^|\/)__tests__\/|\.test\.|\.spec\./.test(p)) return false
-  return /^src\//.test(p) || /^api\/(?:is-down|intro)\//.test(p)
+  // Match a `src/` or `api/(is-down|intro)/` segment at any path boundary so this works for BOTH the
+  // git-relative paths from the staged diff (`src/x`) AND the Edit/Write tool's absolute `file_path`
+  // (`/repo/src/x`) — anchoring `^src/` broke the edit-event correlation in lastUiEditIndex (#664,
+  // every UI commit fail-closed). Exclude the worker's own `worker/src/` (not frontend UI).
+  if (/(?:^|\/)worker\/src\//.test(p)) return false
+  return /(?:^|\/)src\//.test(p) || /(?:^|\/)api\/(?:is-down|intro)\//.test(p)
 }
 
 // Genuine in-browser verification confirmation (KO + EN). DELIBERATELY NARROW — bare "확인"
