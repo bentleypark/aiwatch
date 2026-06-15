@@ -35,6 +35,8 @@ test('isUiEdgePath — absolute paths (Edit tool supplies absolute file_path, #6
   assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/api/is-down/html-template.ts'), true)
   assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/worker/src/services.ts'), false) // absolute worker/src excluded
   assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/src/utils/__tests__/calendar.test.js'), false) // absolute test excluded
+  // worker/src/ guard runs before the api/src match → a worker path nesting api/is-down stays non-UI (ordering pin)
+  assert.equal(isUiEdgePath('worker/src/parsers/api/is-down/x.ts'), false)
 })
 
 test('lastUiEditIndex — picks the last UI/Edge edit (Edit + Bash write); -1 when none', () => {
@@ -76,6 +78,19 @@ test('decideCommit — DENIES a UI commit with no post-edit user confirmation (t
 test('decideCommit — ALLOWS once a genuine user confirmation follows the last UI edit', () => {
   const e = [edit('src/pages/Overview.jsx'), userText('확인했고 잘 나옴, 커밋해')]
   assert.deepEqual(decideCommit(['src/pages/Overview.jsx'], e), { deny: false, reason: 'confirmed' })
+})
+
+test('decideCommit — #664 end-to-end: relative staged + ABSOLUTE edit + confirm → ALLOWS (the exact bug)', () => {
+  // The real invocation mixes formats: stagedUiEdge is git-relative; the edit event's file_path is
+  // absolute (Edit tool). Before #664 the absolute edit was invisible → fail-closed despite a valid
+  // confirmation. This pins that a verified UI commit now PASSES, not just that isUiEdgePath is true.
+  const e = [edit('/Users/x/aiwatch/src/pages/Overview.jsx'), userText('브라우저 확인 OK, 커밋해')]
+  assert.deepEqual(decideCommit(['src/pages/Overview.jsx'], e), { deny: false, reason: 'confirmed' })
+})
+
+test('decideCommit — #664: absolute UI edit with NO confirmation still DENIES (gate not weakened)', () => {
+  const e = [edit('/Users/x/aiwatch/src/pages/Overview.jsx'), toolResult()]
+  assert.equal(decideCommit(['src/pages/Overview.jsx'], e).deny, true)
 })
 
 test('decideCommit — a post-edit test/doc edit does NOT re-trigger the gate (confirmation still valid)', () => {
