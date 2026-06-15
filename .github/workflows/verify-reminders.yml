@@ -3,6 +3,12 @@ name: Verify Reminders
 # #541 — daily scan of open issues for `verify-after <YYYY-MM-DD>` lines; pings the operator Discord
 # when a production-data verification is due (and weekly while the issue stays open). Issue = source
 # of truth, so closing the issue / removing the line cancels the reminder.
+#
+# Cross-repo: the scan now also covers the sibling aiwatch-reports repo (where report-generator
+# verify-after lines land). The default GITHUB_TOKEN is scoped to THIS repo only, so reaching the
+# sibling needs a PAT with issues:read+write on both repos, stored as the VERIFY_CROSS_REPO_TOKEN
+# secret. When that secret is absent the job falls back to GITHUB_TOKEN and the sibling scan is
+# skipped best-effort (warn, no failure) — so the primary aiwatch reminder keeps working regardless.
 
 on:
   schedule:
@@ -30,5 +36,10 @@ jobs:
       - name: Scan issues + notify
         run: node scripts/verify-reminders.mjs
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}             # `gh` CLI auth (preinstalled on the runner)
+          # Prefer the cross-repo PAT (covers aiwatch + aiwatch-reports); fall back to the repo-scoped
+          # GITHUB_TOKEN (aiwatch-only — the sibling scan then warn-skips). Set VERIFY_CROSS_REPO_TOKEN
+          # as a repo secret (classic PAT or fine-grained, issues:read+write on both repos) to enable it.
+          GH_TOKEN: ${{ secrets.VERIFY_CROSS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          # Comma-separated sibling repos to also scan (defaults to the reports repo inside the script).
+          VERIFY_EXTRA_REPOS: bentleypark/aiwatch-reports
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}  # reuse the operator channel (#541)
