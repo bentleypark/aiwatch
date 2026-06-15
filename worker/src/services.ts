@@ -754,21 +754,13 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           console.warn(`[fetchService] ${config.id} displayComponentIds missing (breakdown drift): ${missing.join(', ')}`)
         }
       }
-      // Augment dailyImpact with ongoing incidents (source data only includes resolved).
-      // Only when the service itself is non-operational, to avoid marking the calendar
-      // for unrelated incidents that survived the filters but don't affect this component.
-      const augmentedImpact = dailyImpact ? { ...dailyImpact } : {}
-      if (svcStatus !== 'operational') {
-        for (const inc of filtered) {
-          if (inc.status !== 'resolved') {
-            const day = inc.startedAt.split('T')[0]
-            if (day && !augmentedImpact[day]) {
-              augmentedImpact[day] = inc.impact === 'major' || inc.impact === 'critical' ? 'critical'
-                : inc.impact === 'minor' ? 'minor' : 'major'
-            }
-          }
-        }
-      }
+      // #662 — dailyImpact is kept as a PURE official record (no ongoing-incident augmentation here).
+      // The removed augment keyed an ongoing incident by its UTC `startedAt` day, so Phase 1's
+      // noon-UTC→local remap could land the cell on a different local day than the incident's true
+      // local start; it also only ever painted the single start day (never extended to "today") and
+      // used a coarser severity map (major→critical/red). That forward-fill now lives in the frontend
+      // calendar (Phase 3, source-aware), which keys the incident directly in local time so "today" is
+      // unambiguous. (dailyImpact is consumed only by buildCalendarFromIncidents.)
 
       // Successful fetch — reset or track based on parse errors
       if (parseErrors > 0) {
@@ -788,7 +780,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         latency: config.category === 'api' ? latency : null,
         incidents: filtered,
         ...(components.length > 0 ? { components } : {}),
-        ...(Object.keys(augmentedImpact).length > 0 ? { dailyImpact: augmentedImpact } : {}),
+        ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
         calendarDays: config.statusComponentId ? 30 : 14,
         ...(uptimeValue != null ? { uptime30d: uptimeValue, uptimeSource: uptimeSrc } : {}),
       }
