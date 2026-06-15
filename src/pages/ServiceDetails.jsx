@@ -569,8 +569,11 @@ function RegionalAvailability({ service, t }) {
 
 const CALENDAR_OPACITY = { operational: 0.7, degraded: 0.8, down: 0.9 }
 
-function CalendarCell({ status, date }) {
+function CalendarCell({ status, date, t }) {
   const [hovered, setHovered] = useState(false)
+  // #662 — show the translated status label ("Degraded"/"Partial Outage"/…), not the raw internal
+  // key (degraded_perf/…). Matches the legend (all four statuses have ko/en labels).
+  const label = t ? t(`status.${status}`) : status
   const bgCls = CALENDAR_CLASS[status] ?? 'bg-[var(--bg3)]'
   const opacity = CALENDAR_OPACITY[status] ?? 1
 
@@ -589,7 +592,7 @@ function CalendarCell({ status, date }) {
         style={{ width: '18px', height: '18px', borderRadius: '2px', opacity: hovered ? opacity * 0.8 : opacity }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        aria-label={`${date}: ${status}`}
+        aria-label={`${date}: ${label}`}
       />
       {hovered && (
         <div className="fixed z-50 bg-[var(--bg4)] border border-[var(--border)] rounded px-2 py-1
@@ -605,7 +608,7 @@ function CalendarCell({ status, date }) {
                  }
                }
              }}>
-          {date} — {status}
+          {date} — {label}
         </div>
       )}
     </div>
@@ -758,7 +761,7 @@ export default function ServiceDetails({ serviceId }) {
   const incidentsBlanked = !!service.incidentSourceStale
   const calendarDays = service.calendarDays ?? 14
 
-  const calendarData = buildCalendarFromIncidents(service.incidents, service.dailyImpact, calendarDays)
+  const calendarData = buildCalendarFromIncidents(service.incidents, service.dailyImpact, calendarDays, service.status)
 
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>
@@ -982,7 +985,7 @@ export default function ServiceDetails({ serviceId }) {
           <div style={{ padding: '16px' }}>
             <div className="flex flex-wrap" style={{ gap: '2px' }}>
               {calendarData.map((status, i) => (
-                <CalendarCell key={i} status={status} date={calendarDate(i, lang, calendarDays)} />
+                <CalendarCell key={i} status={status} date={calendarDate(i, lang, calendarDays)} t={t} />
               ))}
             </div>
             <div className="flex justify-between mono text-[9px] text-[var(--text2)]" style={{ marginTop: '6px' }}>

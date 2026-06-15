@@ -133,7 +133,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
             {!isUnreliable && scoreStr && <>{' · '}{scoreStr}</>}
           </span>
         </div>
-        <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact)} compact />
+        <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact, 30, service.status)} compact />
       </div>
 
       {/* ── Desktop full layout ── */}
@@ -182,7 +182,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
           </div>
         )}
 
-        <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact)} />
+        <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact, 30, service.status)} />
       </div>
     </button>
   )
