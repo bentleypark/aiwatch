@@ -24,11 +24,12 @@ import EmptyState from '../components/EmptyState'
 
 // Border-left now applied via inline style in ServiceCard
 
+// Calendar cell status → bar color (#663 impact-aligned keys, matches CALENDAR_CLASS in ServiceDetails)
 const HISTORY_CLASS = {
-  operational:    'bg-[var(--green)]',
-  degraded_perf:  'bg-[var(--yellow)]',
-  degraded:       'bg-[var(--amber)]',
-  down:           'bg-[var(--red)]',
+  operational:  'bg-[var(--green)]',
+  minor:        'bg-[var(--yellow)]',
+  major:        'bg-[var(--amber)]',
+  critical:     'bg-[var(--red)]',
 }
 
 const INC_BAR_CLASS = {
