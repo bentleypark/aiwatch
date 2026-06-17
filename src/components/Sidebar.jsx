@@ -69,6 +69,15 @@ function IconReport() {
   )
 }
 
+function IconBook() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ opacity: 0.6 }}>
+      <path d="M7 3.4C5.8 2.5 4 2.3 2.4 2.9v8c1.6-.6 3.4-.4 4.6.5 1.2-.9 3-1.1 4.6-.5v-8C10 2.3 8.2 2.5 7 3.4z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M7 3.4v8" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  )
+}
+
 function IconSend() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ opacity: 0.6 }}>
@@ -218,6 +227,16 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
         >
           <span className="shrink-0"><IconReport /></span>
           {t('nav.reports')}
+        </a>
+        {/* #673 — external link to the public /methodology page (Edge route, not a SPA page) */}
+        <a
+          href="/methodology"
+          onClick={() => { trackEvent('click_methodology', { location: 'sidebar' }); onNavigate?.() }}
+          className="w-full text-left flex items-center transition-all cursor-pointer text-[var(--text1)] hover:bg-[var(--bg3)] hover:text-[var(--text0)]"
+          style={navItemStyle}
+        >
+          <span className="shrink-0"><IconBook /></span>
+          {t('nav.methodology')}
         </a>
         {/* Divider — separates "data viewing" group above from "settings / integrations" group below.
             aria-hidden because this sits inside the nav landmark and is purely visual. */}

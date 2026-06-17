@@ -79,15 +79,14 @@ export default function Ranking() {
         </div>
       )}
 
-      {/* About Score Link */}
+      {/* Score methodology — the public /methodology page (#673, was the in-dashboard #about-score) */}
       <div>
-        <button
-          onClick={() => setPage({ name: 'about-score' })}
+        <a
+          href="/methodology#score"
           className="mono text-[10px] text-[var(--blue)] hover:underline cursor-pointer"
-          style={{ background: 'none', border: 'none', padding: 0 }}
         >
           {t('ranking.aboutScore')} →
-        </button>
+        </a>
       </div>
 
       {/* Full Ranking */}
@@ -139,7 +138,7 @@ export default function Ranking() {
                     {svc.scoreMetrics?.probe?.p50 != null ? `${svc.scoreMetrics.probe.p50}ms` : '—'}
                   </td>
                   <td style={{ padding: '10px 12px', textAlign: 'right' }} className="text-[var(--text1)]">
-                    {svc.scoreMetrics?.affectedDays30d != null ? `${svc.scoreMetrics.affectedDays30d}${t('aboutScore.day')}` : '—'}
+                    {svc.scoreMetrics?.affectedDays30d != null ? `${svc.scoreMetrics.affectedDays30d}${t('ranking.day')}` : '—'}
                   </td>
                 </tr>
               ))}
@@ -158,7 +157,7 @@ export default function Ranking() {
             const metaParts = [
               hasUptime ? `${svc.uptime30d.toFixed(2)}%` : null,
               hasProbe ? `${probeP50}ms` : null,
-              hasAffected ? `${affectedDays}${t('aboutScore.day')}` : null,
+              hasAffected ? `${affectedDays}${t('ranking.day')}` : null,
             ].filter(Boolean)
             return (
               <div

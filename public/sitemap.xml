@@ -102,6 +102,14 @@
     <priority>0.8</priority>
   </url>
 
+  <!-- Methodology page (Edge SSR, #673) -->
+  <url>
+    <loc>https://ai-watch.dev/methodology</loc>
+    <lastmod>2026-06-17</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+
   <!-- Monthly Reports (proxied via Edge Function to reports.ai-watch.dev, #264) -->
   <url>
     <loc>https://ai-watch.dev/reports/</loc>
