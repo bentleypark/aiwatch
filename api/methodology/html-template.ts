@@ -279,7 +279,8 @@ ${CONSENT_INIT_SCRIPT}
     <li><strong>Google Cloud Status · AI Studio Status</strong> <span data-i18n="s1.src.gcloud">— Gemini API (Google Cloud 상태 + AI Studio 컴포넌트 인시던트 병합)</span></li>
     <li><strong>Better Stack</strong>, <strong>Instatus</strong>, <strong>OnlineOrNot</strong> <span data-i18n="s1.src.others">— 그 외 상태 페이지 플랫폼 (인시던트 RSS + 가동률 JSON)</span></li>
     <li><strong>Flashduty</strong> <span data-i18n="s1.src.flashduty">— DeepSeek 상태 피드 정규화 (status.deepseek.com)</span></li>
-    <li><strong>RSS incident feeds</strong> <span data-i18n="s1.src.rss">— AWS Health Dashboard(Bedrock·지역별) · Azure Status(Azure OpenAI) · xAI(status.x.ai) — 가동률 API 없이 인시던트 RSS만 수집</span></li>
+    <li><strong>AWS Health Dashboard</strong> <span data-i18n="s1.src.awshealth">— Amazon Bedrock — 공개 이벤트 JSON API(인시던트 start/end), 가동률 API 없음</span></li>
+    <li><strong>RSS incident feeds</strong> <span data-i18n="s1.src.rss">— Azure Status(Azure OpenAI) · xAI(status.x.ai) — 가동률 API 없이 인시던트 RSS만 수집</span></li>
     <li><strong>Direct RTT probes</strong> <span data-i18n="s1.src.probe">— 20개 AI 서비스의 API 엔드포인트 직접 측정</span></li>
   </ul>
   <h3 data-i18n="s1.secTitle">보안 이슈 모니터링</h3>
@@ -349,7 +350,7 @@ ${CONSENT_INIT_SCRIPT}
       <table class="tbl">
         <thead><tr><th data-i18n="s3.limits.col1">서비스</th><th data-i18n="s3.limits.col2">측정 불가 사유</th></tr></thead>
         <tbody>
-          <tr><td>Amazon Bedrock · Azure OpenAI</td><td data-i18n="s3.limits.estimate">공식 롤링 uptime% 미공개 — RSS 인시던트만 존재 → 추정 전용</td></tr>
+          <tr><td>Amazon Bedrock · Azure OpenAI</td><td data-i18n="s3.limits.estimate">공식 롤링 uptime% 미공개 — 인시던트 피드만 존재 → 추정 전용</td></tr>
           <tr><td>Gemini · OpenRouter · Deepgram</td><td data-i18n="s3.limits.norolling">상태 페이지가 비교 가능한 롤링 30일 % 미노출</td></tr>
           <tr><td>xAI</td><td data-i18n="s3.limits.xai">재시작 이후 엔드포인트별 성공률만 노출 — 30일 수치와 비교 불가</td></tr>
         </tbody>
@@ -386,7 +387,7 @@ ${CONSENT_INIT_SCRIPT}
 
   <div class="limits">
     <div class="limits-label">⚠ <span data-i18n="s6.limit.label">한계</span></div>
-    <p data-i18n="s6.limit.body">RSS 피드에 최근 항목만 짧게 노출되는 출처(Azure·Bedrock)는 잠깐 발생했다 사라지는 인시던트를 놓칠 수 있습니다.</p>
+    <p data-i18n="s6.limit.body">최근 항목만 짧게 노출되는 출처(Azure·Bedrock)는 잠깐 발생했다 사라지는 인시던트를 놓칠 수 있습니다.</p>
   </div>
 </section>
 
@@ -547,7 +548,7 @@ const i18n = {
     's1.lead': 'AIWatch는 LLM API 15개, 코딩 에이전트 6개, 음성 3개, 추론·인프라 7개, 영상 2개, AI 앱 4개 — 총 37개 AI 서비스를 최대 5분 간격으로 폴링합니다. 모든 시각은 UTC 기준입니다.',
     's1.sourcesTitle': '데이터 출처',
     's1.sourcesDesc': '상태·인시던트·uptime 데이터는 각 서비스의 공식 상태 페이지에서 수집됩니다. 제공사가 공개한 데이터가 1차 출처이며, 없는 값을 자체 추정으로 채우지 않습니다 — 공식 uptime이 없는 경우의 처리는 아래 <a href="#uptime">Uptime 섹션</a>에서 다룹니다.',
-    's1.src.atlassian': '— 다수의 주요 제공사', 's1.src.incidentio': '— 컴포넌트 단위 인시던트 + 영향도', 's1.src.gcloud': '— Gemini API (Google Cloud 상태 + AI Studio 컴포넌트 인시던트 병합)', 's1.src.others': '— 그 외 상태 페이지 플랫폼 (인시던트 RSS + 가동률 JSON)', 's1.src.flashduty': '— DeepSeek 상태 피드 정규화 (status.deepseek.com)', 's1.src.rss': '— AWS Health Dashboard(Bedrock·지역별) · Azure Status(Azure OpenAI) · xAI(status.x.ai) — 가동률 API 없이 인시던트 RSS만 수집', 's1.src.probe': '— 20개 AI 서비스의 API 엔드포인트 직접 측정',
+    's1.src.atlassian': '— 다수의 주요 제공사', 's1.src.incidentio': '— 컴포넌트 단위 인시던트 + 영향도', 's1.src.gcloud': '— Gemini API (Google Cloud 상태 + AI Studio 컴포넌트 인시던트 병합)', 's1.src.others': '— 그 외 상태 페이지 플랫폼 (인시던트 RSS + 가동률 JSON)', 's1.src.flashduty': '— DeepSeek 상태 피드 정규화 (status.deepseek.com)', 's1.src.awshealth': '— Amazon Bedrock — 공개 이벤트 JSON API(인시던트 start/end), 가동률 API 없음', 's1.src.rss': '— Azure Status(Azure OpenAI) · xAI(status.x.ai) — 가동률 API 없이 인시던트 RSS만 수집', 's1.src.probe': '— 20개 AI 서비스의 API 엔드포인트 직접 측정',
     's1.secTitle': '보안 이슈 모니터링',
     's1.secDesc': '상태·신뢰도 측정과는 별개로, AI 스택에 영향을 주는 보안 이슈도 함께 추적해 <strong>월간 리포트</strong>에 집계합니다. 이 데이터는 AIWatch Score나 인시던트 집계에는 반영되지 않습니다.',
     's1.sec.osv': '— SDK 취약점 (PyPI · npm 24개 추적 패키지), GitHub Advisories로 상세 보강', 's1.sec.hn': '— AI 서비스 관련 보안 뉴스 (Algolia 검색 API)',
@@ -569,7 +570,7 @@ const i18n = {
     's3.limits.label': '측정 한계와 그 이유',
     's3.limits.intro': '아래 서비스는 공식 상태 페이지에 비교 가능한 30일 롤링 uptime%가 없습니다. 임의로 추측해 채우는 대신 "— Not provided"로 명확히 표시합니다.',
     's3.limits.col1': '서비스', 's3.limits.col2': '측정 불가 사유',
-    's3.limits.estimate': '공식 롤링 uptime% 미공개 — RSS 인시던트만 존재 → 추정 전용',
+    's3.limits.estimate': '공식 롤링 uptime% 미공개 — 인시던트 피드만 존재 → 추정 전용',
     's3.limits.norolling': '상태 페이지가 비교 가능한 롤링 30일 % 미노출',
     's3.limits.xai': '재시작 이후 엔드포인트별 성공률만 노출 — 30일 수치와 비교 불가',
     's4.title': 'AIWatch Score',
@@ -606,7 +607,7 @@ const i18n = {
     's6.detection.title': '탐지 (Detection)',
     's6.detection.body': '탐지 지표는 두 가지입니다 — MTTD(평균 탐지 시간, AIWatch가 인시던트를 감지하기까지 걸린 시간)와 RTT 저하 탐지(probe RTT 급증으로 잡는 조기 신호). 상태 페이지 폴링은 공식 발표보다 늦을 수밖에 없으므로, AIWatch는 <strong>"공식 상태 페이지보다 빠르다"고 절대 주장하지 않고</strong> 이 두 지표로만 정직하게 표현합니다. 이 지표는 월간 리포트에 집계되며, AIWatch Score나 대시보드 숫자에는 반영되지 않습니다.',
     's6.limit.label': '한계',
-    's6.limit.body': 'RSS 피드에 최근 항목만 짧게 노출되는 출처(Azure·Bedrock)는 잠깐 발생했다 사라지는 인시던트를 놓칠 수 있습니다.',
+    's6.limit.body': '최근 항목만 짧게 노출되는 출처(Azure·Bedrock)는 잠깐 발생했다 사라지는 인시던트를 놓칠 수 있습니다.',
     's7.title': '독립성 · 프라이버시',
     's7.lead': 'AIWatch는 AI 서비스 신뢰도를 중립적으로 측정합니다. 그 결과를 데이터로 보여주고, 누구의 영향도 받지 않고 공개합니다.',
     's7.free.title': '무료 · 무가입', 's7.free.body': '공개 대시보드는 완전 무료이며, 계정이나 로그인 없이 누구나 이용할 수 있습니다. 개인정보(PII)는 수집하지 않습니다.',
@@ -629,7 +630,7 @@ const i18n = {
     's1.lead': 'AIWatch polls 37 AI services — 15 LLM APIs, 6 coding agents, 3 voice, 7 inference & infra, 2 video, and 4 AI apps — up to every 5 minutes. All timestamps are in UTC.',
     's1.sourcesTitle': 'Data sources',
     's1.sourcesDesc': 'Status, incident, and uptime data are all collected from each service\\'s official status page. The provider\\'s published data is the primary source, and we never fill a missing value with our own estimate — how a missing official uptime is handled is covered in the <a href="#uptime">Uptime section</a> below.',
-    's1.src.atlassian': '— many major providers', 's1.src.incidentio': '— per-component incidents + impact', 's1.src.gcloud': '— Gemini API (Google Cloud status + AI Studio component incidents, merged)', 's1.src.others': '— additional status-page platforms (incident RSS + uptime JSON)', 's1.src.flashduty': '— normalized DeepSeek status feed (status.deepseek.com)', 's1.src.rss': '— AWS Health Dashboard (Bedrock, per-region) · Azure Status (Azure OpenAI) · xAI (status.x.ai) — incident RSS only, no uptime API', 's1.src.probe': '— direct measurement of 20 AI services\\' API endpoints',
+    's1.src.atlassian': '— many major providers', 's1.src.incidentio': '— per-component incidents + impact', 's1.src.gcloud': '— Gemini API (Google Cloud status + AI Studio component incidents, merged)', 's1.src.others': '— additional status-page platforms (incident RSS + uptime JSON)', 's1.src.flashduty': '— normalized DeepSeek status feed (status.deepseek.com)', 's1.src.awshealth': '— Amazon Bedrock — public events JSON API (incident start/end), no uptime API', 's1.src.rss': '— Azure Status (Azure OpenAI) · xAI (status.x.ai) — incident RSS only, no uptime API', 's1.src.probe': '— direct measurement of 20 AI services\\' API endpoints',
     's1.secTitle': 'Security-issue monitoring',
     's1.secDesc': 'On a track separate from status & reliability, we also track security issues affecting the AI stack, aggregated into the <strong>monthly report</strong>. This data does not feed the AIWatch Score or incident counts.',
     's1.sec.osv': '— SDK vulnerabilities (24 tracked PyPI · npm packages), enriched via GitHub Advisories', 's1.sec.hn': '— security news about AI services (Algolia search API)',
@@ -651,7 +652,7 @@ const i18n = {
     's3.limits.label': 'Coverage & limits — what we can\\'t measure and why',
     's3.limits.intro': 'These services\\' status pages do not expose a comparable rolling 30-day uptime %. We never fill it with a guess — they show "— Not provided".',
     's3.limits.col1': 'Service', 's3.limits.col2': 'Reason',
-    's3.limits.estimate': 'No official rolling uptime published — RSS incidents only → estimate-only',
+    's3.limits.estimate': 'No official rolling uptime published — incident feed only → estimate-only',
     's3.limits.norolling': 'Status page exposes no comparable rolling-30d %',
     's3.limits.xai': 'Exposes a since-restart per-endpoint success rate — not comparable to a 30-day figure',
     's4.title': 'AIWatch Score',
@@ -688,7 +689,7 @@ const i18n = {
     's6.detection.title': 'Detection',
     's6.detection.body': 'Detection is measured two ways — MTTD (mean time to detect: how long AIWatch took to spot the incident) and RTT degradation detection (an early signal from probe RTT spikes). Because status-page polling is necessarily later than an official publish, AIWatch <strong>never claims to be "faster than the official status page"</strong> and reports only these two honest metrics. This is surfaced in the monthly report and does not feed the AIWatch Score or any dashboard number.',
     's6.limit.label': 'Limit',
-    's6.limit.body': 'RSS sources that only retain recent items (Azure · Bedrock) can miss short-lived incidents that appear and disappear quickly.',
+    's6.limit.body': 'Sources that only retain recent items (Azure · Bedrock) can miss short-lived incidents that appear and disappear quickly.',
     's7.title': 'Independence · Privacy',
     's7.lead': 'AIWatch measures AI service reliability — neutrally. It shows the results as data and publishes them free of anyone\\'s influence.',
     's7.free.title': 'Free · No signup', 's7.free.body': 'The public dashboard is completely free and open to anyone — no account, no login. We collect no personally identifiable information (PII).',
