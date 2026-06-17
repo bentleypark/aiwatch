@@ -146,7 +146,7 @@ Parsers (worker/src/parsers/)
   ├── aistudio.ts        → Google AI Studio + direct Gemini API (secondary source, merged with gcloud — #310)
   ├── instatus.ts        → Instatus Nuxt/Next.js SSR
   ├── betterstack.ts     → Better Stack RSS + /index.json uptime API + dailyImpact (status_history)
-  └── aws.ts             → AWS Health Dashboard RSS
+  └── aws.ts             → AWS Health events JSON API (Bedrock) + RSS (Azure OpenAI)
   ↓
 Cloudflare KV
   ├── services:latest      (status cache, TTL 5min)
@@ -380,7 +380,7 @@ worker/
       instatus.ts     # Instatus (2 services)
       betterstack.ts  # Better Stack (4 services)
       onlineornot.ts  # OnlineOrNot (1 service — OpenRouter)
-      aws.ts          # AWS Health Dashboard (1 service — Bedrock)
+      aws.ts          # AWS Health events JSON API — Bedrock (+ RSS parser reused for Azure OpenAI)
     parsers/__tests__/ # Vitest unit tests
 ```
 

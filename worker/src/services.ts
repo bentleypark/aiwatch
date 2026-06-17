@@ -21,7 +21,7 @@ import {
 import { parseInstatusIncidents, parseInstatusUptime } from './parsers/instatus'
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
-import { parseAwsRssIncidents, deriveAwsStatus } from './parsers/aws'
+import { parseAwsRssIncidents, parseAwsHealthEvents, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
 
 export const SERVICES: ServiceConfig[] = [
   // AI API Services
@@ -33,12 +33,10 @@ export const SERVICES: ServiceConfig[] = [
   // Chat Completions / Embeddings / Moderations / the API Login / FedRAMP / Ads Manager.
   { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'login', 'conversation', 'workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMQM1K5', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'], displayComponentIds: ['01JP8CD9JR3HR6Y7G4Q75N4DVW', '01JMXBRMFEMZK0HPK19RYET250', '01JMXBRMFE4MAP2BHSJNZ787WX', '01JMXBRMFE5ESNNV8JDHVCGSRD', '01JMXBRMFEKVBWKK82B44QFMCE', '01JMXBRMFEQW613TFE89F45035', '01JMXBRMFESJCBGJR10PDD3WCQ', '01K9G527YRPY1EFRMHTKB5BKT5', '01JMXBRMFE6N2NNT7DG6XZQ6PW', '01JMXBRMFEV0AJ0VVS68N9CD6R', '01JMXBRMFEVZ7E0X9GD9FWR9WX', '01JSM5RTJWHRWDTS6Q604VEW3B', '01KKAD7C71MCCH3FTREMJH4AAS', '01KTQBYVARFJ5KMCSECM06VKCF'] },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://aistudio.google.com/status', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B', aistudioStatus: true, incidentKeywords: ['vertex', 'gemini', 'us-central1', 'europe-west1', 'asia-northeast1'] },
-  { id: 'bedrock', name: 'Amazon Bedrock', provider: 'AWS', category: 'api', statusUrl: 'https://health.aws.amazon.com/health/status', apiUrl: null, awsRssUrls: [
-    'https://status.aws.amazon.com/rss/bedrock-us-east-1.rss',
-    'https://status.aws.amazon.com/rss/bedrock-us-west-2.rss',
-    'https://status.aws.amazon.com/rss/bedrock-eu-west-1.rss',
-    'https://status.aws.amazon.com/rss/bedrock-ap-northeast-1.rss',
-  ] },
+  { id: 'bedrock', name: 'Amazon Bedrock', provider: 'AWS', category: 'api', statusUrl: 'https://health.aws.amazon.com/health/status', apiUrl: null,
+    // #677 — AWS Health public events JSON (all regions in one fetch, real start+end timestamps)
+    // replaces the per-region RSS that floored resolved durations to 1m + double-counted incidents.
+    awsHealthApi: { url: 'https://health.aws.amazon.com/public/events', service: 'BEDROCK' } },
   { id: 'azureopenai', name: 'Azure OpenAI', provider: 'Microsoft', category: 'api', statusUrl: 'https://azure.status.microsoft/en-us/status', apiUrl: null, azureRssUrl: 'https://rssfeed.azure.status.microsoft/en-us/status/feed/', incidentKeywords: ['Azure OpenAI'] },
   // #623 — status.mistral.ai (Instatus, Nuxt) lists API components ("Chat Completions API", …)
   // alongside non-API surfaces (Le Chat consumer app, Le Console, Documentation, Website). The Nuxt
@@ -787,65 +785,43 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
     } else {
       // No Statuspage API — HTTP check + optional scraping (parallel)
       // Uses fetchWithTimeout (no retry) to stay within 50-subrequest budget
-      // AWS RSS — multi-region parallel fetch, OR logic (any region degraded → degraded)
-      if (config.awsRssUrls) {
+      // #677 — AWS Health public events JSON API (one fetch, all regions, real start+end timestamps)
+      if (config.awsHealthApi) {
         const start = Date.now()
-        const regionResults = await Promise.all(
-          config.awsRssUrls.map(async (url) => {
-            const region = url.match(/bedrock-(.+)\.rss/)?.[1] ?? 'unknown'
-            try {
-              const res = await fetchWithTimeout(url, 5000)
-              if (!res.ok) {
-                console.warn(`[fetchService] ${config.id} AWS RSS ${region} HTTP ${res.status}`)
-                res.body?.cancel()
-                return { region, incidents: [] as Incident[], ok: false }
-              }
-              const incidents = parseAwsRssIncidents(await res.text())
-              // Tag incidents with region via componentNames
-              for (const inc of incidents) {
-                inc.componentNames = [region]
-              }
-              return { region, incidents, ok: true }
-            } catch (err) {
-              console.warn(`[fetchService] ${config.id} AWS RSS ${region} failed:`, err instanceof Error ? err.message : err)
-              return { region, incidents: [] as Incident[], ok: false }
-            }
-          })
-        )
+        const res = await fetchWithTimeout(config.awsHealthApi.url, 8000, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AIWatch/1.0; +https://ai-watch.dev)' },
+        }).catch((err) => {
+          console.warn(`[fetchService] ${config.id} AWS Health API failed:`, err instanceof Error ? err.message : err)
+          return null
+        })
         const latency = Date.now() - start
-        const okCount = regionResults.filter((r) => r.ok).length
-        if (okCount === 0) {
+        if (!res || !res.ok) {
+          if (res) { console.warn(`[fetchService] ${config.id} AWS Health API HTTP ${res.status}`); res.body?.cancel() }
+          const shouldDegrade = await trackFetchFailure(kv, config.id)
+          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], latency: config.category === 'api' ? latency : null }
+        }
+        // Decode the utf-16 (BOM-detected) JSON. A 200 with an unparseable body means the endpoint's
+        // shape/encoding drifted \u2014 treat that like a fetch failure (degrade + trip the persistent-block
+        // alert) instead of resetting the failure counter and silently showing "operational, no
+        // incidents", which would hide a real outage on this undocumented endpoint (#677 review).
+        let json: unknown = null
+        try {
+          json = decodeAwsHealthJson(await res.arrayBuffer(), res.headers.get('content-type'))
+        } catch (err) {
+          console.warn(`[fetchService] ${config.id} AWS Health API decode/parse failed (ct=${res.headers.get('content-type')}):`, err instanceof Error ? err.message : err)
+        }
+        if (json === null) {
           const shouldDegrade = await trackFetchFailure(kv, config.id)
           return { ...base, status: shouldDegrade ? 'degraded' : 'operational', incidents: [], latency: config.category === 'api' ? latency : null }
         }
         await resetFetchFailure(kv, config.id)
-        if (okCount < regionResults.length) {
-          console.warn(`[fetchService] ${config.id} AWS RSS: ${okCount}/${regionResults.length} regions responded`)
-        }
-        // Merge incidents from all regions, deduplicate by ID, merge componentNames for global incidents
-        const seenMap = new Map<string, Incident>()
-        const allIncidents: Incident[] = []
-        for (const r of regionResults) {
-          for (const inc of r.incidents) {
-            const existing = seenMap.get(inc.id)
-            if (existing) {
-              // Global incident: merge region tags
-              const regions = new Set(existing.componentNames ?? [])
-              for (const name of inc.componentNames ?? []) regions.add(name)
-              existing.componentNames = [...regions]
-            } else {
-              seenMap.set(inc.id, inc)
-              allIncidents.push(inc)
-            }
-          }
-        }
-        allIncidents.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
-        const filtered = filterIncidents(allIncidents, config)
+        const incidents = parseAwsHealthEvents(json, config.awsHealthApi.service)
+        const filtered = filterIncidents(incidents, config)
         // #653 — estimate uptime over the 90-day live∪archive set (card incident COUNT stays the live
         // `filtered`; only the uptime% spans 90d). `estimateUptimeFromIncidents` returns null unless the
-        // set has an IMPACTFUL incident, so an informational-only / empty AWS feed yields "— Not
-        // provided" instead of a baseless 100%. `uptimeSource: 'estimate'` is set even when the value is
-        // null so the dashboard gate (`isEstimateNoData` = estimate + null uptime) excludes it.
+        // set has an IMPACTFUL incident, so an informational-only / empty feed yields "— Not provided"
+        // instead of a baseless 100%. `uptimeSource: 'estimate'` is set even when the value is null so
+        // the dashboard gate (`isEstimateNoData` = estimate + null uptime) excludes it.
         const merged90 = kv ? mergeIncidentsById(filtered, await readArchivedIncidentsForService(kv, config.id, new Date())) : filtered
         const uptimeEst = estimateUptimeFromIncidents(merged90)
         return {

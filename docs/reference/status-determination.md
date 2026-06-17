@@ -62,7 +62,7 @@ Both now go through the shared `mapInstatusImpact()` helper: `CRITICAL→critica
 
 ## Estimate-only uptime: the 90-day archive set + the baseless-100% gate (#591/#653)
 
-Services with **no official uptime source** (`bedrock`, `azureopenai` — RSS incidents only; also the incident.io fallback for `replicate`/`elevenlabs`) derive uptime from incidents (`uptimeSource: 'estimate'`). Two footguns, both about not asserting a number we can't measure:
+Services with **no official uptime source** (`bedrock` — AWS Health events JSON API; `azureopenai` — Azure RSS; incidents-only, no uptime%; also the incident.io fallback for `replicate`/`elevenlabs`) derive uptime from incidents (`uptimeSource: 'estimate'`). Two footguns, both about not asserting a number we can't measure:
 
 1. **Baseless 100% from informational-only incidents (#653).** `computeUptimeFromIncidents` skips `null`-impact (informational) incidents, so an estimate service whose only incident is a keyword-less AWS notice (`classifyAwsImpact` → `null`) computes to exactly **100%** — and because it now has `incidents.length > 0`, the old `isEstimateNoData = estimate && length === 0` gate stopped hiding it (the Modal-style "fake 100%"). Fix: `estimateUptimeFromIncidents()` returns **null unless the set has an impactful (`minor`/`major`/`critical`) incident**; callers leave `uptime30d` unset but still set `uptimeSource: 'estimate'`, so the gate is **`isEstimateNoData = estimate source + null uptime30d`** (`src/utils/serviceReliability.js`, mirrored in `api/is-down.ts` `hasReliableData`). Hidden from Ranking/Uptime/fallbacks; shows "— Not provided".
 

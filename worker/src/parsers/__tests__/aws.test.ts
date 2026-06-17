@@ -1,5 +1,36 @@
 import { describe, it, expect } from 'vitest'
-import { parseAwsRssIncidents, deriveAwsStatus } from '../aws'
+import { parseAwsRssIncidents, parseAwsHealthEvents, decodeAwsHealthJson, awsHealthImpact, deriveAwsStatus } from '../aws'
+
+/** Encode a string to an ArrayBuffer in the given encoding with a BOM, to exercise decodeAwsHealthJson
+ *  the way the live AWS endpoint serves it (utf-16 + BOM). */
+function toBuf(str: string, enc: 'utf-16le' | 'utf-16be' | 'utf-8'): ArrayBuffer {
+  if (enc === 'utf-8') return new TextEncoder().encode(str).buffer
+  const bom = enc === 'utf-16le' ? [0xFF, 0xFE] : [0xFE, 0xFF]
+  const bytes: number[] = [...bom]
+  for (const ch of str) {
+    const code = ch.charCodeAt(0)
+    if (enc === 'utf-16le') bytes.push(code & 0xFF, code >> 8)
+    else bytes.push(code >> 8, code & 0xFF)
+  }
+  return new Uint8Array(bytes).buffer
+}
+
+// Real shape from health.aws.amazon.com/public/events (verified live, #677). The 2026-06 Bedrock
+// "Fable 5 and Mythos 5 Access" incident: startTime/endTime are epoch-ms, EVENT_LOG timestamps sec.
+const BEDROCK_EVENT = {
+  service: 'BEDROCK',
+  region: 'us-east-1',
+  typeCode: 'AWS_BEDROCK_OPERATIONAL_ISSUE',
+  startTime: 1781314018000, // 2026-06-13T01:26:58Z
+  endTime: 1781547203000,   // 2026-06-15T18:13:23Z → 64h47m (3887 min)
+  lastUpdatedTime: 1781547203532,
+  metadata: {
+    EVENT_LOG: JSON.stringify([
+      { summary: 'Fable 5 and Mythos 5 Access', message: 'Anthropic has asked us to revoke access to <a href="x">Claude Fable 5</a>.', status: 1, timestamp: 1781314018 },
+      { summary: '[RESOLVED] Fable 5 and Mythos 5 Access', message: 'Models remain unavailable. Resolving this Health event.', status: 1, timestamp: 1781547203 },
+    ]),
+  },
+}
 
 describe('parseAwsRssIncidents', () => {
   it('returns empty for RSS with no items (operational)', () => {
@@ -373,5 +404,119 @@ describe('deriveAwsStatus', () => {
       { id: '3', title: '[RESOLVED] Old issue', status: 'resolved' as const, impact: 'critical' as const, startedAt: '2026-03-24T10:00:00Z', duration: '1h 0m', timeline: [] },
     ]
     expect(deriveAwsStatus(incidents)).toBe('down')
+  })
+})
+
+describe('decodeAwsHealthJson (#677 — utf-16 BOM decode; the live-bug path)', () => {
+  // The live bug: the Worker's response charset was unreliable, so a content-type-based decode read
+  // utf-16 bytes as utf-8 → garbage → JSON.parse threw. Detecting the BOM bytes is the fix.
+  it('decodes utf-16LE (BOM FF FE) — the real AWS endpoint shape', () => {
+    const buf = toBuf('[{"service":"BEDROCK","startTime":1781314018000}]', 'utf-16le')
+    expect(decodeAwsHealthJson(buf, 'application/json;charset=utf-16')).toEqual([{ service: 'BEDROCK', startTime: 1781314018000 }])
+  })
+
+  it('decodes utf-16BE (BOM FE FF)', () => {
+    const buf = toBuf('[{"x":1}]', 'utf-16be')
+    expect(decodeAwsHealthJson(buf, null)).toEqual([{ x: 1 }])
+  })
+
+  it('decodes plain utf-8 (no BOM)', () => {
+    const buf = toBuf('{"ok":true}', 'utf-8')
+    expect(decodeAwsHealthJson(buf, 'application/json')).toEqual({ ok: true })
+  })
+
+  it('falls back to utf-16le when content-type says utf-16 but bytes lack a BOM', () => {
+    // build utf-16le bytes WITHOUT the BOM prefix
+    const s = '[1,2]'
+    const bytes: number[] = []
+    for (const ch of s) { const c = ch.charCodeAt(0); bytes.push(c & 0xFF, c >> 8) }
+    expect(decodeAwsHealthJson(new Uint8Array(bytes).buffer, 'text/json; charset=UTF-16')).toEqual([1, 2])
+  })
+
+  it('THROWS on an undecodable/unparseable body (caller treats it as a fetch failure)', () => {
+    const garbage = new Uint8Array([0xFF, 0xFE, 0x01, 0x00, 0x02, 0x00]).buffer // utf-16le BOM + non-JSON
+    expect(() => decodeAwsHealthJson(garbage, 'application/json;charset=utf-16')).toThrow()
+  })
+})
+
+describe('awsHealthImpact (#677)', () => {
+  it('maps an operational issue to major (service-impacting, conservative non-down)', () => {
+    expect(awsHealthImpact('AWS_BEDROCK_OPERATIONAL_ISSUE')).toBe('major')
+  })
+  it('maps informational/notification to minor', () => {
+    expect(awsHealthImpact('AWS_BEDROCK_INFORMATIONAL_NOTIFICATION')).toBe('minor')
+  })
+  it('returns null for an unrecognized typeCode', () => {
+    expect(awsHealthImpact('AWS_SOMETHING_ELSE')).toBeNull()
+  })
+})
+
+describe('parseAwsHealthEvents (#677 — AWS Health public events JSON)', () => {
+  it('derives the TRUE duration of a resolved event from startTime/endTime (no 1m floor)', () => {
+    const [inc] = parseAwsHealthEvents([BEDROCK_EVENT], 'BEDROCK')
+    expect(inc.status).toBe('resolved')
+    expect(inc.startedAt).toBe('2026-06-13T01:26:58.000Z')
+    expect(inc.resolvedAt).toBe('2026-06-15T18:13:23.000Z')
+    expect(inc.duration).toBe('64h 47m') // the real span — was '1m' under the RSS parser
+    expect(inc.impact).toBe('major')
+    expect(inc.title).toBe('Fable 5 and Mythos 5 Access') // first EVENT_LOG summary
+  })
+
+  it('produces ONE record per incident (no active/resolved double-count)', () => {
+    // The whole #677 win: the RSS split this into 2 records (phantom-ongoing + 1m-resolved).
+    expect(parseAwsHealthEvents([BEDROCK_EVENT], 'BEDROCK')).toHaveLength(1)
+  })
+
+  it('uses a stable id from service + region + startTime', () => {
+    const [inc] = parseAwsHealthEvents([BEDROCK_EVENT], 'BEDROCK')
+    expect(inc.id).toBe('aws:bedrock:us-east-1:1781314018000')
+    expect(inc.componentNames).toEqual(['us-east-1'])
+  })
+
+  it('builds a timeline from EVENT_LOG (seconds→ISO, HTML stripped, [RESOLVED] stage)', () => {
+    const [inc] = parseAwsHealthEvents([BEDROCK_EVENT], 'BEDROCK')
+    expect(inc.timeline).toHaveLength(2)
+    expect(inc.timeline[0].at).toBe('2026-06-13T01:26:58.000Z')
+    expect(inc.timeline[0].text).toBe('Anthropic has asked us to revoke access to Claude Fable 5.') // <a> stripped
+    // The onset entry must NOT inherit the overall 'resolved' status — only the [RESOLVED] entry resolves.
+    expect(inc.timeline[0].stage).toBe('investigating')
+    expect(inc.timeline[1].stage).toBe('resolved') // summary has [RESOLVED]
+  })
+
+  it('treats an event without endTime as active (resolvedAt null, no duration)', () => {
+    const active = { ...BEDROCK_EVENT, endTime: null }
+    const [inc] = parseAwsHealthEvents([active], 'BEDROCK')
+    expect(inc.status).toBe('investigating')
+    expect(inc.resolvedAt).toBeNull()
+    expect(inc.duration).toBeNull()
+  })
+
+  it('filters to the requested service only', () => {
+    const events = [BEDROCK_EVENT, { ...BEDROCK_EVENT, service: 'EC2', region: 'us-west-2' }]
+    const out = parseAwsHealthEvents(events, 'BEDROCK')
+    expect(out).toHaveLength(1)
+    expect(out[0].componentNames).toEqual(['us-east-1'])
+  })
+
+  it('returns [] for non-array / malformed input', () => {
+    expect(parseAwsHealthEvents(null, 'BEDROCK')).toEqual([])
+    expect(parseAwsHealthEvents({}, 'BEDROCK')).toEqual([])
+    expect(parseAwsHealthEvents('nope', 'BEDROCK')).toEqual([])
+  })
+
+  it('skips an event with no startTime', () => {
+    expect(parseAwsHealthEvents([{ service: 'BEDROCK', region: 'us-east-1' }], 'BEDROCK')).toEqual([])
+  })
+
+  it('tolerates a malformed EVENT_LOG (falls back to a single timeline entry)', () => {
+    const ev = { ...BEDROCK_EVENT, metadata: { EVENT_LOG: 'not json' } }
+    const [inc] = parseAwsHealthEvents([ev], 'BEDROCK')
+    expect(inc.timeline).toHaveLength(1)
+    expect(inc.title).toBe('AWS_BEDROCK_OPERATIONAL_ISSUE') // fell back to typeCode (no EVENT_LOG summary)
+  })
+
+  it('caps at 20 incidents', () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ ...BEDROCK_EVENT, startTime: 1781314018000 + i * 1000 }))
+    expect(parseAwsHealthEvents(many, 'BEDROCK')).toHaveLength(20)
   })
 })

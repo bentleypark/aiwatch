@@ -136,8 +136,11 @@ export interface ServiceConfig {
   betterStackUrl?: string
   onlineOrNotUrl?: string
   onlineOrNotComponent?: string
-  awsRssUrls?: string[]
-  azureRssUrl?: string
+  // #677 — AWS Health Dashboard public events JSON API (start+end+typeCode per incident). Replaced
+  // the legacy per-region RSS for Bedrock: real start/end timestamps → correct duration, one event
+  // per incident (no per-update-epoch guid split / 1m floor / double-count). Plain fetch, no scrape.
+  awsHealthApi?: { url: string; service: string }
+  azureRssUrl?: string // Azure OpenAI still uses the Azure status RSS (reuses parseAwsRssIncidents)
   // BetterStack RSS emits "<model> — recovered" per auto-recovery blip; a single day can
   // produce 10-20 alerts per affected model. Opt-in suppression dedups by normalized title
   // in a 60-minute window. See #283 and isFlapSuppressible() in alerts.ts.
