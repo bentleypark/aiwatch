@@ -145,7 +145,7 @@ Cloudflare Worker
   ├── aistudio.ts        → Google AI Studio + Gemini API (gcloud와 병합되는 2차 소스 — #310)
   ├── instatus.ts        → Instatus Nuxt/Next.js SSR
   ├── betterstack.ts     → Better Stack RSS + /index.json 가동률 API + dailyImpact (status_history)
-  └── aws.ts             → AWS Health Dashboard RSS
+  └── aws.ts             → AWS Health events JSON API (Bedrock) + RSS (Azure OpenAI)
   ↓
 Cloudflare KV
   ├── services:latest      (상태 캐시, TTL 5분)
@@ -379,7 +379,7 @@ worker/
       instatus.ts     # Instatus (2개 서비스)
       betterstack.ts  # Better Stack (4개 서비스)
       onlineornot.ts  # OnlineOrNot (1개 서비스 — OpenRouter)
-      aws.ts          # AWS Health Dashboard (1개 서비스 — Bedrock)
+      aws.ts          # AWS Health events JSON API — Bedrock (+ Azure OpenAI는 RSS 파서 재사용)
     parsers/__tests__/ # Vitest 단위 테스트
 ```
 
