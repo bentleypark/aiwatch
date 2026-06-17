@@ -153,7 +153,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
         <div className="grid grid-cols-3" style={{ gap: '6px', marginBottom: '10px', textAlign: 'center' }}>
           <div>
             <div className={`mono text-[13px] font-medium ${latencyColor}`}>{service.latency != null ? `${service.latency}ms` : '—'}</div>
-            {/* #658 — probed services (20 API services) show direct API RTT; label must say so, not
+            {/* #658 — probed services (24 API services, #678) show direct API RTT; label must say so, not
                 "status page" (matches ServiceDetails svc.latency vs svc.latency.statusPage). */}
             <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t(isProbed ? 'overview.card.latency.api' : 'overview.card.latency')}</div>
           </div>

@@ -71,10 +71,11 @@ describe('PROBE_TARGETS', () => {
     'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq', 'together',
     'fireworks', 'cerebras', 'perplexity', 'huggingface', 'replicate', 'elevenlabs', 'xai', 'deepseek',
     'openrouter', 'stability', 'assemblyai', 'deepgram', 'voyageai',
+    'pinecone', 'langsmith', 'runway', 'luma', // #678 — added (stable representative API path)
   ]
 
-  it('has all 20 API service probe targets', () => {
-    expect(PROBE_TARGETS).toHaveLength(20)
+  it('has all 24 API service probe targets', () => {
+    expect(PROBE_TARGETS).toHaveLength(24)
     const ids = PROBE_TARGETS.map((t) => t.id)
     for (const expected of EXPECTED_IDS) {
       expect(ids).toContain(expected)
