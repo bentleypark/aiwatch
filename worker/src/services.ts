@@ -124,14 +124,15 @@ export const SERVICES: ServiceConfig[] = [
   // Atlassian Statuspage (page s9lfdrzmhryw) → statuspage.ts covers it, no new parser. Multi-component
   // worst-of (#379): badge tracks the three availability surfaces (Public API + App + Backend); Billing +
   // Support are excluded so non-availability blips don't flip the badge. Single-tenant page → no
-  // incidentKeywords. Probe-less (API requires auth). is-down slug == id ('runway'), so no slug override.
+  // incidentKeywords. Probed since #678 (api.runwayml.com/v1/tasks → 401, auth not needed for RTT).
+  // is-down slug == id ('runway'), so no slug override.
   // Lumped under `inference` for now (avoid a single-member video category until Luma/Pika are added).
   { id: 'runway', name: 'Runway', provider: 'Runway', category: 'api', statusUrl: 'https://status.runwayml.com', apiUrl: 'https://status.runwayml.com/api/v2/summary.json', statusComponentId: 'w3jcq3dwljp4', statusComponentIds: ['w3jcq3dwljp4', '2fr8tksxj5ns', 'hl94rh0mg6xt'] },
   // Luma / Dream Machine (#602, #601 Phase 1) — generative-video AI (Dream Machine, Ray, UNI-1), added
   // as a Runway sibling. Better Stack status page (status.lumalabs.ai) → betterstack.ts parser via
   // rssFeedUrl (incidents) + betterStackUrl /index.json (status + uptime). flapSuppression: true — the
   // page auto-emits "X went down/recovered/degraded" model blips (#283/#597). Video-native, so no
-  // component scoping needed. is-down slug == id ('luma'). Probe-less (API auth-gated).
+  // component scoping needed. is-down slug == id ('luma'). Probed since #678 (dream-machine/v1/generations → 403).
   { id: 'luma', name: 'Luma (Dream Machine)', provider: 'Luma', category: 'api', statusUrl: 'https://status.lumalabs.ai', apiUrl: null, rssFeedUrl: 'https://status.lumalabs.ai/feed', betterStackUrl: 'https://status.lumalabs.ai', flapSuppression: true, componentDenylist: ['Website'] },
   // AI Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },

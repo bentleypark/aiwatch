@@ -255,7 +255,7 @@ worker/
     monthly-archive.ts # Monthly reliability archive (uptime, score, incidents, latency per service, permanent KV). Also aggregates detection:lead:monthly (#369) + probe-degradation:monthly (#511, RTT degradation total/noStatus via summarizeDegradation) into MonthlyArchive, exposed by /api/report
     monthly-narrative.ts # AI retrospective narrative (Notable Incidents + Observations draft) baked into the archive — hybrid Gemma→Sonnet, #426
     vitals.ts   # Web Vitals aggregation (ingest, KV flush, p75 computation, Discord formatting)
-    probe.ts    # Health check probing — direct RTT measurement (20 API services)
+    probe.ts    # Health check probing — direct RTT measurement (24 API services)
     probe-archival.ts # Daily probe RTT archival + 7-day summary (p50, p95, cvCombined)
     platform-monitor.ts # Status page platform health monitoring (metastatuspage.com for Atlassian)
     detection.ts # Detection Lead entry parsing + incident-aware reset logic
