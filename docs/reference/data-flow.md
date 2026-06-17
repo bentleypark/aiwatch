@@ -12,8 +12,8 @@ Browser (React SPA, 60s polling)
     → platform quorum detection: 70%+ same-platform fetch failures → platform outage → hold operational for all affected services
     → probe cross-validation: individual probe RTT normal → hold operational (prevents false positives during status page failures)
   → React state (usePolling hook via PollingContext)
-    → overlay probe RTT onto service.latency (20 probe services)
-    → non-probe services (bedrock, azureopenai, pinecone) keep status page latency
+    → overlay probe RTT onto service.latency (24 probe services)
+    → non-probe services (bedrock, azureopenai, modal) keep status page latency
   → all pages read from context
 
 Cron Trigger (*/5 min)

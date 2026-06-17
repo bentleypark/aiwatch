@@ -27,7 +27,17 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   { id: 'assemblyai', url: 'https://api.assemblyai.com/v2/transcript' },
   { id: 'deepgram', url: 'https://api.deepgram.com/v1/models' },
   { id: 'voyageai', url: 'https://api.voyageai.com/v1/embeddings' },
-  // Not feasible: bedrock (no public endpoint), azureopenai (tenant-specific), pinecone (index-specific), modal (no public API), langsmith (API requires auth), runway (API requires auth), luma (API requires auth)
+  // #678 — added after a live cross-check showed these have a stable, representative API path that
+  // returns a fast status without auth (the probe measures RTT and treats ANY HTTP response as
+  // "server alive", so the old "requires auth" exclusions were invalid):
+  { id: 'pinecone', url: 'https://api.pinecone.io/indexes' },                       // control-plane, 401
+  { id: 'langsmith', url: 'https://api.smith.langchain.com/info' },                 // public /info, 200
+  { id: 'runway', url: 'https://api.runwayml.com/v1/tasks' },                       // 401
+  { id: 'luma', url: 'https://api.lumalabs.ai/dream-machine/v1/generations' },      // 403
+  // Not probed (#678): bedrock (region-specific runtime endpoint, estimate-only — incident-derived
+  // reliability is enough), azureopenai (tenant-specific {resource}.openai.azure.com — no generic
+  // endpoint), modal (api.modal.com returns a catch-all 200 on every path — not a representative
+  // API-path RTT)
 ]
 
 /** Compute 5-minute aligned slot string from a Date */

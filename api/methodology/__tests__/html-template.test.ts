@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderMethodologyPage } from '../html-template'
+import { PROBE_TARGETS } from '../../../worker/src/probe' // #678 — lockstep source of truth
 
 // #673 — the public /methodology page. Renders once (no per-request data), so these assertions
 // guard: it renders without throwing, carries all 7 section anchors + the SEO head, is bilingual,
@@ -114,13 +115,23 @@ describe('renderMethodologyPage', () => {
     expect(html).not.toContain('class="hero-outer"')
   })
 
-  it('lists the full non-probed set (20 probed of 27 API → 7 excluded) in §4/§5', () => {
-    // PROBE_TARGETS has 20 services; the other 7 API services must be named accurately
-    // (the old copy listed only 3-4, mismatching §4 vs §5).
-    for (const svc of ['Bedrock', 'Azure OpenAI', 'Pinecone', 'Modal', 'LangSmith', 'Runway', 'Luma']) {
+  it('keeps the probe count + non-probed set in LOCKSTEP with PROBE_TARGETS (#678)', () => {
+    // The methodology copy hardcodes the probe count + the non-probed list. Derive the expected
+    // count from the source of truth (worker/src/probe.PROBE_TARGETS) so a change to probe.ts that
+    // forgets to update this page fails HERE — otherwise the two layers drift independently (the
+    // exact regression #678 guards against).
+    const n = PROBE_TARGETS.length // 24
+    expect(html).toContain(`${n} AI service`)  // EN (matches "24 AI services")
+    expect(html).toContain(`${n}개 AI 서비스`)   // KO
+    // the 3 remaining non-probed API services must be named...
+    for (const svc of ['Bedrock', 'Azure OpenAI', 'Modal']) {
       expect(html, `non-probed list should name ${svc}`).toContain(svc)
     }
-    expect(html).toContain('20 AI service') // EN probe count
+    // ...and the now-probed ones must NOT appear in the doc (Runway/Pinecone/LangSmith appear
+    // nowhere else; Luma is also a Platform-uptime example so it's intentionally not asserted here).
+    for (const svc of ['Runway', 'Pinecone', 'LangSmith']) {
+      expect(html, `${svc} is now probed — must not be listed as non-probed`).not.toContain(svc)
+    }
   })
 
   it('keeps the honest detection framing — MTTD + RTT, explicitly disclaiming "faster than official" (#464)', () => {
