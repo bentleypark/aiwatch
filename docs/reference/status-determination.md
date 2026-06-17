@@ -12,6 +12,7 @@ Per-service status is resolved in `worker/src/services.ts` with this priority:
    - If service is `degraded` from fetch failure (no incidents) AND probe RTT is normal → override to `operational`
    - If 70%+ of services on the same platform (Atlassian/incident.io/etc.) fail simultaneously → platform outage → override all to `operational`
    - Conservative: only overrides when evidence is strong (≥2 recent probes healthy, or quorum failure detected)
+   - **#689 — dead-source 4xx** (`classifyStatusPageFailure`, in the statuspage fetch path itself, BEFORE the above): a `4xx` on the status-page API means the page is **deactivated/gone** (the SOURCE is dead, not the service — e.g. Character.AI's Statuspage → 401 "page inactive"), so it returns `operational` + `sourceDead` + `incidentSourceStale` (excluded from rankings) instead of `degraded`. `apiUrl` is kept, so it **auto-recovers** to live status when the page returns `200`. The cross-validation above can't rescue this case (it needs probe data, which apps lack, or a platform-wide quorum). The cron sends a distinct **"status source inactive"** operator alert (not a misleading "degraded"), deduped via `alerted:source-dead:{svcId}`. A `5xx`/network error stays transient → the normal `trackFetchFailure → degraded` path
 
 ## Per-component snapshot — `resolveSvcComponents` (#604)
 

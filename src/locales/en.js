@@ -33,6 +33,7 @@ const en = {
   'status.operational': 'Operational',
   'status.degraded': 'Partial Outage',
   'status.down': 'Major Outage',
+  'status.unknown': 'Unknown',
   // #663 — calendar's own impact-aligned status labels (decoupled from the 3-state badge status.* above)
   'cal.status.operational': 'Operational',
   'cal.status.minor': 'Degraded',
@@ -209,6 +210,9 @@ const en = {
   'svc.cal.ago.suffix': 'ago',
   'svc.cal.today': 'Today',
   'svc.status.link': 'Official Status',
+  'svc.sourceDead.title': 'Status source unavailable',
+  'svc.sourceDead.body': "This provider's status page is inactive, so its operational status can't currently be confirmed. Live status, uptime, and incidents resume automatically when the source recovers.",
+  'svc.sourceDead.bodyProbe': "This provider's status page is inactive, but its API still responds to AIWatch's direct probe — so the service is shown as operational. Uptime and incidents resume when the source recovers.",
   'svc.components.title': 'Component Status',
   'svc.components.sub': 'Per-component breakdown from the official status page',
   'svc.components.groupCount': '{n} components',

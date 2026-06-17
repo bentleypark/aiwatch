@@ -1,7 +1,37 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, buildSourceDeadEmbed } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
+
+describe('shouldAlertSourceDead (#689)', () => {
+  it('alerts on the rising edge (source just went dead, not yet alerted)', () => {
+    expect(shouldAlertSourceDead(true, false)).toBe('alert')
+  })
+  it('does NOT re-alert while still dead + already alerted (deduped)', () => {
+    expect(shouldAlertSourceDead(true, true)).toBe('none')
+  })
+  it('signals recovery on the falling edge (alive again + was alerted)', () => {
+    expect(shouldAlertSourceDead(false, true)).toBe('recovered')
+  })
+  it('stays quiet when healthy + never alerted', () => {
+    expect(shouldAlertSourceDead(false, false)).toBe('none')
+  })
+})
+
+describe('buildSourceDeadEmbed (#689)', () => {
+  it('is a distinct "source inactive" operator alert — yellow, NOT a red "degraded"', () => {
+    const e = buildSourceDeadEmbed('Character.AI', 'https://status.character.ai', false)
+    expect(e.title).toContain('Status Source Inactive')
+    expect(e.description).toContain('NOT a service degradation')
+    expect(e.description).toContain('https://status.character.ai')
+    expect(e.color).toBe(0xFEE75C) // yellow (operator action), not red 0xED4245
+  })
+  it('emits a green recovery note when the source responds again', () => {
+    const e = buildSourceDeadEmbed('Character.AI', 'https://status.character.ai', true)
+    expect(e.title).toContain('Recovered')
+    expect(e.color).toBe(0x57F287)
+  })
+})
 
 const NOW = 1742860800000 // fixed timestamp for deterministic tests
 const recentDate = new Date(NOW - 3600_000).toISOString() // 1h ago

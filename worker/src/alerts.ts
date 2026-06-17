@@ -138,6 +138,34 @@ export interface AlertCandidate {
   svcIds?: string[]
 }
 
+/** #689 — Decide whether a service's dead-source state warrants an operator notification this cron
+ *  cycle. 'alert' on the rising edge (status page just returned 4xx, not yet alerted); 'recovered'
+ *  on the falling edge (was alerted, the source responds again); 'none' otherwise. The caller
+ *  persists/clears the `alerted:source-dead:{svcId}` dedup marker. Pure — unit-tested. */
+export function shouldAlertSourceDead(isDead: boolean, alreadyAlerted: boolean): 'alert' | 'recovered' | 'none' {
+  if (isDead && !alreadyAlerted) return 'alert'
+  if (!isDead && alreadyAlerted) return 'recovered'
+  return 'none'
+}
+
+/** #689 — Operator embed for a status source going inactive (4xx) or recovering. DISTINCT from a
+ *  "degraded" alert so the source death is judged accurately: the service is shown operational+stale
+ *  and excluded from rankings — it is NOT a service degradation. Yellow (operator action), not red. */
+export function buildSourceDeadEmbed(name: string, statusUrl: string, recovered: boolean): { title: string; description: string; color: number } {
+  if (recovered) {
+    return {
+      title: `🟢 ${name} — Status Source Recovered`,
+      description: `The status page is responding again (${statusUrl}). AIWatch resumed reading live status and re-included it in rankings.`,
+      color: 0x57F287,
+    }
+  }
+  return {
+    title: `⚠️ ${name} — Status Source Inactive`,
+    description: `The status page returned a 4xx — likely deactivated/inactive (${statusUrl}). This is NOT a service degradation: AIWatch shows ${name} as operational + stale and excludes it from rankings until the source returns. Verify the status page / config.`,
+    color: 0xFEE75C, // yellow — operator action needed, not an outage
+  }
+}
+
 /**
  * Build the Discord region-switch hint for a new incident, or undefined when no
  * region recommendation applies. A region line is only useful when the outage is

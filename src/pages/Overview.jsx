@@ -124,7 +124,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
           <span className="text-[13px] font-medium text-[var(--text0)] truncate min-w-0">{service.name}</span>
           <div className="flex items-center gap-1.5">
             {isRecovered && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
-            <StatusPill status={service.status} partialCount={service.partialCount} />
+            <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={service.sourceDead && !service.probeConfirmed} />
           </div>
         </div>
         <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
@@ -146,7 +146,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
           </div>
           <div className="flex items-center gap-1.5">
             {isRecovered && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
-            <StatusPill status={service.status} partialCount={service.partialCount} />
+            <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={service.sourceDead && !service.probeConfirmed} />
           </div>
         </div>
 

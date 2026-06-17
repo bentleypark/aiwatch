@@ -1,8 +1,21 @@
 import { describe, it, expect, vi } from 'vitest'
 import { normalizeStatus } from '../parsers/statuspage'
-import { filterIncidents, SERVICES, worstStatus, resolveSvcStatus, resolveSvcComponents, pickBreakdownComponents } from '../services'
+import { filterIncidents, SERVICES, worstStatus, resolveSvcStatus, resolveSvcComponents, pickBreakdownComponents, classifyStatusPageFailure } from '../services'
 import type { Incident, ServiceConfig } from '../types'
 import { type KVLike } from '../utils'
+
+describe('classifyStatusPageFailure (#689)', () => {
+  it('treats a 4xx as a dead source (page deactivated/gone — NOT a service degradation)', () => {
+    for (const s of [400, 401, 403, 404, 410, 451]) {
+      expect(classifyStatusPageFailure(s), `HTTP ${s}`).toBe('dead-source')
+    }
+  })
+  it('treats a 5xx / network-error (0) as transient → keeps the degrade path', () => {
+    for (const s of [500, 502, 503, 504, 0]) {
+      expect(classifyStatusPageFailure(s), `HTTP ${s}`).toBe('transient')
+    }
+  })
+})
 
 /**
  * Tests for the svcStatus determination logic in services.ts.

@@ -556,6 +556,15 @@ function mergeIncidentsById(live: Incident[], archived: Incident[]): Incident[] 
   return [...live, ...archived.filter((a) => !seen.has(a.id))]
 }
 
+/** #689 — Classify a non-OK status-page API response (a real HTTP status from `summaryRes.status`).
+ *  A 4xx means the page is gone / deactivated / misconfigured (the SOURCE is dead, not the service) →
+ *  treat as a stale dead-source (operational, out of rankings), NOT degraded. A 5xx is transient → the
+ *  existing trackFetchFailure → degraded path. (A genuine network error throws and is caught upstream,
+ *  so it never reaches here; the defensive 0 → 'transient' only matters in tests.) Exported for testing. */
+export function classifyStatusPageFailure(httpStatus: number): 'dead-source' | 'transient' {
+  return httpStatus >= 400 && httpStatus < 500 ? 'dead-source' : 'transient'
+}
+
 async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
   const now = new Date().toISOString()
   let parseErrors = 0 // Track internal parse/fetch failures — prevents resetFetchFailure from masking repeated errors
@@ -609,6 +618,15 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           console.error(`[fetchService] ${config.id} summary.json returned HTTP ${summaryRes.status}`)
           summaryRes.body?.cancel()
           incidentsRes?.body?.cancel()
+          // #689 — a 4xx means the status page itself is GONE / deactivated / misconfigured (e.g.
+          // Character.AI deactivated its Statuspage → 302 to an inactive page → 401 "page inactive"),
+          // NOT that the service is degraded. Don't trackFetchFailure → degraded (a false positive);
+          // return a stale base flagged out of rankings (incidentSourceStale). We KEEP fetching apiUrl
+          // every cycle, so it auto-recovers to real status the moment the page returns 200. A 5xx /
+          // network error stays in the transient trackFetchFailure → degraded path below.
+          if (classifyStatusPageFailure(summaryRes.status) === 'dead-source') {
+            return { ...base, status: 'operational', incidentSourceStale: true, sourceDead: true }
+          }
           const shouldDegrade = await trackFetchFailure(kv, config.id)
           return { ...base, status: shouldDegrade ? 'degraded' : 'operational' }
         }
@@ -1293,6 +1311,18 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
           if (kv) await recordProbeSuppression(kv, svc.id, date)
         }
       }
+    }
+  }
+
+  // #689 — for status-source-dead services (4xx → `sourceDead`, already `operational`), mark whether
+  // a healthy direct probe INDEPENDENTLY confirms reachability. The 2nd case: a PROBED service whose
+  // status PAGE died but whose API still responds → `probeConfirmed` → the UI keeps the operational
+  // badge (probe-backed). The un-probed case (e.g. Character.AI, an app) gets no probe → stays
+  // `sourceDead` only → the UI shows a neutral "Unknown". Runs outside the degraded block above since
+  // sourceDead services are operational, not in `degradedFromFetch`.
+  if (probeSnapshots && probeSnapshots.length > 0) {
+    for (const svc of raw) {
+      if (svc.sourceDead && isProbeHealthy(probeSnapshots, svc.id)) svc.probeConfirmed = true
     }
   }
 
