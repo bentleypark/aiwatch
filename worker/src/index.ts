@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, parseAlertedRoster } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, parseAlertedRoster, shouldAlertSourceDead, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
 import { checkPersistentFetchFailures } from './persistent-failure'
@@ -660,6 +660,25 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       }
     } else {
       await kvDel(env.STATUS_CACHE, `detected:${svc.id}`)
+    }
+  }
+
+  // #689 — distinct operator alert when a service's status SOURCE goes inactive (4xx → sourceDead),
+  // so it reads accurately ("status source inactive": service is operational+stale, excluded from
+  // rankings) instead of a misleading "degraded" alert. Deduped per service; on recovery (source
+  // responds again) the marker is cleared and a recovery note is sent.
+  if (env.DISCORD_WEBHOOK_URL) {
+    for (const svc of scored) {
+      const deadKey = `alerted:source-dead:${svc.id}`
+      const alreadyAlerted = (await env.STATUS_CACHE.get(deadKey).catch(() => null)) !== null
+      const decision = shouldAlertSourceDead(!!svc.sourceDead, alreadyAlerted)
+      if (decision === 'none') continue
+      const cfg = SERVICES.find(c => c.id === svc.id)
+      const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, buildSourceDeadEmbed(svc.name, cfg?.statusUrl ?? '', decision === 'recovered'))
+      // Both branches gate the KV mutation on a successful send, so a failed POST retries next cycle
+      // (the dead alert re-fires; the recovery note re-sends) rather than being silently lost.
+      if (decision === 'alert' && sent) await kvPut(env.STATUS_CACHE, deadKey, '1', { expirationTtl: 604800 })
+      else if (decision === 'recovered' && sent) await kvDel(env.STATUS_CACHE, deadKey)
     }
   }
 

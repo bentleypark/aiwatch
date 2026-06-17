@@ -62,6 +62,17 @@ export interface ServiceStatus {
    *  ranking surfaces exclude these (like estimate-only services) so a frozen feed can't rank.
    *  Declared per-service via ServiceConfig.incidentSourceStale; absent when false. */
   incidentSourceStale?: boolean
+  /** #689 — the status-page API returned a 4xx (the page is deactivated/gone, e.g. Character.AI's
+   *  Statuspage → 401 "page inactive"). The service is shown operational+stale (not a false degraded);
+   *  this flag lets the cron send a distinct "status source inactive" operator alert (not a misleading
+   *  "degraded" alert) so the source death is judged accurately. Runtime-only; absent when the source
+   *  responds. */
+  sourceDead?: boolean
+  /** #689 — set when `sourceDead` AND a healthy direct probe independently confirms the service is
+   *  reachable (the 2nd case: a PROBED service whose status PAGE died but whose API still responds).
+   *  Then the badge stays operational (probe-backed) instead of "Unknown"; the un-probed case
+   *  (sourceDead without this) shows "Unknown". Set by the cross-validation in `fetchAllServices`. */
+  probeConfirmed?: boolean
 }
 
 export type DailyImpactLevel = 'minor' | 'major' | 'critical'

@@ -804,9 +804,19 @@ export default function ServiceDetails({ serviceId }) {
         </div>
         <div className="flex items-center gap-1.5">
           {!!recentlyRecovered[service.id] && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
-          <StatusPill status={service.status} partialCount={service.partialCount} />
+          <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={service.sourceDead && !service.probeConfirmed} />
         </div>
       </div>
+
+      {/* #689 — status source inactive (status page 4xx/deactivated): explains the blanked uptime/
+          incidents. Two cases: probeConfirmed (a probed service still reachable via direct probe →
+          operational badge, probe-backed) vs no probe (e.g. Character.AI → neutral "Unknown" badge). */}
+      {service.sourceDead && (
+        <div className="rounded-lg border" style={{ borderColor: 'var(--amber)', background: 'var(--bg2)', padding: '12px 16px' }}>
+          <div className="text-[13px] font-medium" style={{ color: 'var(--amber)' }}>⚠ {t('svc.sourceDead.title')}</div>
+          <div className="mono text-[11px] text-[var(--text1)]" style={{ marginTop: '5px', lineHeight: 1.5 }}>{t(service.probeConfirmed ? 'svc.sourceDead.bodyProbe' : 'svc.sourceDead.body')}</div>
+        </div>
+      )}
 
       {/* ── Metric Cards ── */}
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>
