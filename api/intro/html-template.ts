@@ -496,6 +496,7 @@ ${announcementHtml}
     <div class="nav-links">
       <a href="#how" data-i18n="nav.how">동작 방식</a>
       <a href="#features" data-i18n="nav.features">기능</a>
+      <a href="/methodology" data-i18n="nav.methodology">측정 방법론</a>
       <a href="/reports/" data-i18n="nav.report">월간 리포트</a>
       <a href="https://github.com/bentleypark/aiwatch">GitHub</a>
     </div>
@@ -1101,7 +1102,7 @@ ${announcementHtml}
 <script>
 const i18n = {
   ko: {
-    'nav.features': '기능', 'nav.how': '동작 방식', 'nav.report': '월간 리포트', 'nav.cta': '장애 확인하기 →',
+    'nav.features': '기능', 'nav.how': '동작 방식', 'nav.methodology': '측정 방법론', 'nav.report': '월간 리포트', 'nav.cta': '장애 확인하기 →',
     'hero.badge': 'LIVE MONITORING',
     'hero.title': '<em>AI 서비스</em> 장애를 즉시 파악하고,<br>갈아탈 대안까지 한 번에.',
     'hero.sub': '37개 AI 서비스 상태를 한 화면에서.<span class="hero-sub-line"> AIWatch가 신뢰도를 랭킹하고 장애를 분석해,</span> 멈추는 순간 대안을 즉시 추천합니다. 무료 · 오픈소스 · 무가입.',
@@ -1129,7 +1130,7 @@ const i18n = {
     'footer.report': '월간 리포트', 'footer.alert': '알림 설정'
   },
   en: {
-    'nav.features': 'Features', 'nav.how': 'How it works', 'nav.report': 'Monthly Report', 'nav.cta': 'Check for Outages →',
+    'nav.features': 'Features', 'nav.how': 'How it works', 'nav.methodology': 'Methodology', 'nav.report': 'Monthly Report', 'nav.cta': 'Check for Outages →',
     'hero.badge': 'LIVE MONITORING',
     'hero.title': 'Know when any <em>AI service</em> is down —<br>and what to switch to.',
     'hero.sub': 'Real-time status for 37 AI services in one view.<span class="hero-sub-line"> AIWatch ranks reliability, analyzes incidents,</span> and recommends an instant fallback the moment something breaks. Free & open source — no signup.',

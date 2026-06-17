@@ -220,11 +220,14 @@ api/
     announcements.ts # Reusable campaign-banner config + resolver (?banner=<key>, #265) — empty by default
   is-down.ts        # "Is X Down?" Edge Function (34 services — excludes bedrock/azureopenai per #263)
   reports.ts        # Monthly Reports proxy (/reports/* → bentleypark.github.io/aiwatch-reports/*, fetched directly to bypass the Cloudflare 301 on the public reports.ai-watch.dev hostname) with HTML path rewriting (#264)
+  methodology.ts    # Public "How AIWatch Works" methodology page Edge Function (/methodology, #673) — self-contained SSR, no data fetch
+  methodology/
+    html-template.ts # SSR HTML template (KO/EN i18n, doc-style sticky-TOC scroll-spy, 7 sections) — CSP-clean (no inline handlers); absorbed the retired in-dashboard AboutScore page (#about-score now redirects to /methodology#score)
 src/
   components/   # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, AnalysisModal
-  pages/        # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, AboutScore, Ranking
+  pages/        # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, Ranking, Statusline
   hooks/        # usePolling, useTheme, useLang, useSettings, useGitHubStars
-  utils/        # analytics, calendar, time, pageContext, constants, webhookSubscription (client for the server-side per-user Discord subscription endpoints, #486)
+  utils/        # analytics, calendar, time, pageContext, constants, hashRoute (hash→page routing + #about-score→/methodology#score redirect, #673), webhookSubscription (client for the server-side per-user Discord subscription endpoints, #486)
   locales/      # ko.js, en.js — flat key→string maps (default exports)
 docs/
   aiwatch-landing.html # Landing page design draft (not deployed)

@@ -33,7 +33,6 @@ const Incidents = lazyWithRetry(() => import('./pages/Incidents'))
 const Uptime = lazyWithRetry(() => import('./pages/Uptime'))
 const ServiceDetails = lazyWithRetry(() => import('./pages/ServiceDetails'))
 const Settings = lazyWithRetry(() => import('./pages/Settings'))
-const AboutScore = lazyWithRetry(() => import('./pages/AboutScore'))
 const Ranking = lazyWithRetry(() => import('./pages/Ranking'))
 const Statusline = lazyWithRetry(() => import('./pages/Statusline'))
 
@@ -79,41 +78,8 @@ class ChunkErrorBoundary extends Component {
   }
 }
 
-import { ALL_SERVICE_IDS } from './utils/constants'
 import { initVitals } from './utils/vitals'
-
-const PAGE_NAMES = ['overview', 'latency', 'incidents', 'uptime', 'settings', 'about-score', 'ranking', 'statusline']
-
-// #546: a `?focus=<section>` suffix on a page hash (e.g. #settings?focus=alerts from the
-// Is-X-Down "Notify Me When Fixed" CTA) deep-links to a section so the outage visitor isn't
-// dropped at the page top. The page id itself is still split off before this, so routing is unaffected.
-function hashToFocus(hash) {
-  const q = hash.split('?')[1]
-  return q ? new URLSearchParams(q).get('focus') : null
-}
-
-function hashToPage(hash) {
-  const id = hash.replace(/^#/, '').split(/[?&#]/)[0]
-  if (!id) return { name: 'overview' }
-  if (PAGE_NAMES.includes(id)) {
-    const page = { name: id }
-    if (id === 'settings') {
-      const focus = hashToFocus(hash)
-      if (focus) page.focus = focus
-    }
-    return page
-  }
-  if (ALL_SERVICE_IDS.includes(id)) return { name: 'service', serviceId: id }
-  // Invalid hash — clean up URL and fallback to overview
-  window.history.replaceState(null, '', window.location.pathname)
-  return { name: 'overview' }
-}
-
-function pageToHash(page) {
-  if (page.name === 'service') return `#${page.serviceId}`
-  if (page.name === 'overview') return ''
-  return `#${page.name}`
-}
+import { hashToPage, pageToHash } from './utils/hashRoute'
 
 function resolvePage(page) {
   switch (page.name) {
@@ -123,7 +89,6 @@ function resolvePage(page) {
     case 'uptime':    return <Suspense fallback={<UptimeSkeleton />}><Uptime /></Suspense>
     case 'service':   return <Suspense fallback={<ServiceDetailsSkeleton />}><ServiceDetails serviceId={page.serviceId} /></Suspense>
     case 'settings':  return <Suspense fallback={<SkeletonUI />}><Settings focus={page.focus} /></Suspense>
-    case 'about-score': return <Suspense fallback={<SkeletonUI />}><AboutScore /></Suspense>
     case 'ranking':     return <Suspense fallback={<SkeletonUI />}><Ranking /></Suspense>
     case 'statusline':  return <Suspense fallback={<SkeletonUI />}><Statusline /></Suspense>
     default:          return <Overview />

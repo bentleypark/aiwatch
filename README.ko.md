@@ -46,7 +46,7 @@
 - **다크/라이트 테마** — 시스템 설정 감지 + 수동 전환
 - **한국어/영어** — 이중 언어 지원
 - **모바일 반응형** — 사이드바 오버레이, 모바일 액션 바
-- **AIWatch Score** — uptime, 인시던트, 복구 시간, probe 기반 응답성을 결합한 종합 신뢰도 점수 ([계산 방식](https://ai-watch.dev/#about-score))
+- **AIWatch Score** — uptime, 인시던트, 복구 시간, probe 기반 응답성을 결합한 종합 신뢰도 점수 ([계산 방식](https://ai-watch.dev/methodology#score))
 - **RTT 저하 감지** — AIWatch의 직접 API probe가 공식 상태 페이지에 보고되지 않는 지연(latency) 저하를 포착 (대시보드 배지 + Discord 일일 요약). 공식 발표 대비 ~5분 폴링 주기 내 독립 감지(MTTD); 드물게 발생하는 진짜 조기 RTT 신호는 이벤트별로 표시
 - **리전별 가용성** — xAI, Gemini, OpenAI의 리전별 인시던트 상태 및 전환 추천
 - **스마트 알림** — degraded/down 상태 Discord 알림 (anti-flapping + 인시던트 억제 + 복구 지속 시간)
@@ -325,7 +325,7 @@ Claude API, OpenAI, Gemini, GitHub Copilot 등 37개 AI 서비스의 장애 여�
 ```
 src/
   components/    # 공유 UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, InstallBanner
-  pages/         # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, AboutScore, Ranking
+  pages/         # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, Ranking, Statusline
   hooks/         # usePolling, useTheme, useLang, useSettings
   utils/         # analytics, calendar, time, pageContext, constants
   locales/       # ko.js, en.js (flat key→string 맵)

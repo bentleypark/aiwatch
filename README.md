@@ -47,7 +47,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Dark/Light theme** — System-aware with manual toggle
 - **Bilingual** — Korean / English
 - **Mobile responsive** — Sidebar overlay, mobile action bar
-- **AIWatch Score** — Composite reliability score combining uptime, incidents, recovery time, and probe-based responsiveness ([how it works](https://ai-watch.dev/#about-score))
+- **AIWatch Score** — Composite reliability score combining uptime, incidents, recovery time, and probe-based responsiveness ([how it works](https://ai-watch.dev/methodology#score))
 - **RTT degradation detection** — AIWatch's direct API probes flag latency degradation that official status pages often never report (dashboard badge + Discord daily summary). Independent detection within the ~5-min polling cycle of the official report (MTTD); occasional genuine early-RTT signals are shown per-event
 - **Regional availability** — Per-region incident status for xAI, Gemini, OpenAI with switch recommendation
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
@@ -326,7 +326,7 @@ Properties: single GET per render, 5-min KV-cached on Cloudflare's edge, 2-secon
 ```
 src/
   components/    # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, InstallBanner
-  pages/         # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, AboutScore, Ranking
+  pages/         # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, Ranking, Statusline
   hooks/         # usePolling, useTheme, useLang, useSettings
   utils/         # analytics, calendar, time, pageContext, constants
   locales/       # ko.js, en.js (flat key→string maps)
