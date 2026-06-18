@@ -481,6 +481,13 @@ export const TWEET_DRAFT_SERVICES: Record<string, string> = {
 const TWEET_MAX = 270
 const X_INTENT_BASE = 'https://twitter.com/intent/tweet?text='
 
+// #696 — UTM campaign on the is-down link the operator tweets. X mobile-app clicks strip the HTTP
+// referrer, so without this they bucket as GA4 (direct)/(none) and X-driven outage inflow is
+// invisible (the #547 funnel couldn't separate organic from X). The is-down Edge ignores unknown
+// query params and keeps a clean rel=canonical, so the canonical URL is NOT polluted. Appended AFTER
+// appendStatusHint (which always adds ?e=…), so the separator is always '&'.
+const X_UTM = 'utm_source=x&utm_medium=social&utm_campaign=outage'
+
 /** Single-line, tweet-safe text: drop backticks (would break the Discord blockquote preview AND
  *  read oddly on X) and collapse all whitespace/newlines to single spaces. */
 function cleanForTweet(s: string): string {
@@ -532,7 +539,7 @@ function buildTweetForService(
   // service status has flipped off 'operational', so clamp that edge to 'active' (never emit
   // ?e=operational on an outage share). The only requirement is outage URL ≠ recovery URL.
   const hint = isRecovery ? 'resolved' : svc.status === 'operational' ? 'active' : svc.status
-  const url = appendStatusHint(`https://ai-watch.dev/is-${TWEET_DRAFT_SERVICES[svc.id]}-down`, hint)
+  const url = `${appendStatusHint(`https://ai-watch.dev/is-${TWEET_DRAFT_SERVICES[svc.id]}-down`, hint)}&${X_UTM}`
 
   let text: string
   if (isRecovery) {
