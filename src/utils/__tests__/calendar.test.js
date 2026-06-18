@@ -242,3 +242,32 @@ describe('calendar cell keys ↔ cal.status.* i18n coverage (#663 decoupling pin
     }
   })
 })
+
+// #674 — the service-badge availability axis (status.*) and the calendar impact-severity axis
+// (cal.status.*) are two DIFFERENT taxonomies; no NON-operational label may map to both, or the same
+// word means two things (the old "Partial Outage" = badge `degraded` AND calendar `major` collision).
+// Industry-aligned: badge = Operational/Degraded/Down (aggregator-style); calendar = Operational +
+// Minor/Major/Critical (Statuspage incident-impact). "Operational" is shared but means the same on both.
+describe('status badge ↔ calendar impact label disjointness (#674 anti-collision pin)', () => {
+  for (const lang of ['en', 'ko']) {
+    it(`${lang}: no non-operational label is shared across status.* and cal.status.*`, async () => {
+      // static specifiers (no template literal) so Vite doesn't emit a dynamic-import-vars warning
+      const { default: L } = lang === 'en'
+        ? await import('../../locales/en')
+        : await import('../../locales/ko')
+      const badge = ['status.degraded', 'status.down'].map((k) => L[k])
+      const cal = ['cal.status.minor', 'cal.status.major', 'cal.status.critical'].map((k) => L[k])
+      badge.forEach((b) => expect(b, `badge label ${b} (${lang})`).toBeTruthy())
+      cal.forEach((c) => expect(c, `cal label ${c} (${lang})`).toBeTruthy())
+      const overlap = badge.filter((b) => cal.includes(b))
+      expect(overlap, `${lang}: badge/calendar labels must be disjoint, found shared: ${overlap.join(', ')}`).toEqual([])
+    })
+  }
+
+  it('en: exact label sets match the #674 decision', async () => {
+    const { default: en } = await import('../../locales/en')
+    expect([en['status.operational'], en['status.degraded'], en['status.down']]).toEqual(['Operational', 'Degraded', 'Down'])
+    expect([en['cal.status.operational'], en['cal.status.minor'], en['cal.status.major'], en['cal.status.critical']])
+      .toEqual(['Operational', 'Minor', 'Major', 'Critical'])
+  })
+})

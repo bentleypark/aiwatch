@@ -8,7 +8,7 @@
 //   'major'       — orange: major impact (partial outage)
 //   'minor'       — yellow: minor / null / unknown impact (degraded)
 //   'operational' — green:  no incidents
-// User-facing labels are unchanged (Major Outage / Partial Outage / Degraded / Operational) via the
+// User-facing labels (#674: Critical / Major / Minor / Operational — the Statuspage impact axis) via the
 // `cal.status.*` i18n keys. Index 0 = oldest, last index = today.
 
 const STATUS_RANK = { operational: 0, minor: 1, major: 2, critical: 3 }

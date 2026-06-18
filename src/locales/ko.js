@@ -31,14 +31,14 @@ const ko = {
 
   // Status
   'status.operational': '정상',
-  'status.degraded': '부분 장애',
-  'status.down': '주요 장애',
+  'status.degraded': '성능 저하',
+  'status.down': '다운',
   'status.unknown': '상태 불명',
   // #663 — 캘린더 전용 impact 정렬 상태 라벨 (위 3-state 배지 status.*와 분리)
   'cal.status.operational': '정상',
-  'cal.status.minor': '성능 저하',
-  'cal.status.major': '부분 장애',
-  'cal.status.critical': '주요 장애',
+  'cal.status.minor': '경미',
+  'cal.status.major': '주요',
+  'cal.status.critical': '심각',
   'status.partial.suffix': '개 영향',
   'status.partial.tooltip': '제공사 상태 페이지에서 일부 구성요소에 이슈가 보고됐습니다. 서비스 전체 가용성은 정상 범위입니다.',
 
