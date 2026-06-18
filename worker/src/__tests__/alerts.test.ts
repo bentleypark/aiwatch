@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, buildSourceDeadEmbed } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, formatDetectionLead, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, buildSourceDeadEmbed } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
 
@@ -637,6 +637,140 @@ describe('mergeTogetherAlerts', () => {
     expect(merged[0].title).toContain('2 Incidents Resolved')
     expect(merged[0]._mergedKeys).toHaveLength(2)
     expect(merged[0].svcIds).toEqual(['together']) // #545 — deduped union of the merged rosters
+  })
+})
+
+describe('mergeXaiRegionalAlerts (#686)', () => {
+  const xaiNew = (incId: string, region: string, event: string): AlertCandidate => ({
+    key: `alerted:new:${incId}`,
+    title: '🔴 xAI (Grok) — New Incident',
+    description: `[API (${region}.api.x.ai)] ${event}`,
+    fallbackText: '👉 Suggested fallback: OpenAI',
+    color: 0xed4245,
+    url: 'https://ai-watch.dev/#xai',
+    svcIds: ['xai'],
+  })
+  const xaiRes = (incId: string, region: string, event: string): AlertCandidate => ({
+    key: `alerted:res:${incId}`,
+    title: '🟢 xAI (Grok) — Incident Resolved (30m)',
+    description: `[API (${region}.api.x.ai)] ${event}`,
+    color: 0x57f287,
+    url: 'https://ai-watch.dev/#xai',
+    svcIds: ['xai'],
+  })
+
+  it('merges the SAME event across two regions into one alert listing both regions', () => {
+    const result = mergeXaiRegionalAlerts([
+      xaiNew('us1', 'us-east-1', 'Increased Error rate on Image Generation Endpoint'),
+      xaiNew('eu1', 'eu-west-1', 'Increased Error rate on Image Generation Endpoint'),
+    ])
+    expect(result).toHaveLength(1)
+    expect(result[0].title).toBe('🔴 xAI (Grok) — New Incident (us-east-1, eu-west-1)')
+    expect(result[0].description).toContain('us-east-1.api.x.ai') // each region's original title preserved
+    expect(result[0].description).toContain('eu-west-1.api.x.ai')
+    expect(result[0]._mergedKeys).toEqual(['alerted:new:us1', 'alerted:new:eu1'])
+    expect(result[0].svcIds).toEqual(['xai'])
+    expect(result[0].fallbackText).toContain('Suggested fallback')
+  })
+
+  it('does NOT merge two DISTINCT events (each in two regions → two merged alerts)', () => {
+    const result = mergeXaiRegionalAlerts([
+      xaiNew('a1', 'us-east-1', 'Increased Error rate on Image Generation Endpoint'),
+      xaiNew('a2', 'eu-west-1', 'Increased Error rate on Image Generation Endpoint'),
+      xaiNew('b1', 'us-east-1', 'Increased Failure Rate of Image Generation and Editing'),
+      xaiNew('b2', 'eu-west-1', 'Increased Failure Rate of Image Generation and Editing'),
+    ])
+    expect(result).toHaveLength(2)
+    expect(result.every((a) => a._mergedKeys?.length === 2)).toBe(true)
+    expect(result.some((a) => a.description.includes('Image Generation Endpoint'))).toBe(true)
+    expect(result.some((a) => a.description.includes('Failure Rate'))).toBe(true)
+  })
+
+  it('merges resolved per-region alerts (duration dropped, regions listed)', () => {
+    const result = mergeXaiRegionalAlerts([
+      xaiRes('us1', 'us-east-1', 'Increased Error rate on Image Generation Endpoint'),
+      xaiRes('eu1', 'eu-west-1', 'Increased Error rate on Image Generation Endpoint'),
+    ])
+    expect(result).toHaveLength(1)
+    expect(result[0].title).toBe('🟢 xAI (Grok) — Incident Resolved (us-east-1, eu-west-1)')
+    expect(result[0]._mergedKeys).toEqual(['alerted:res:us1', 'alerted:res:eu1'])
+  })
+
+  it('passes a single xAI alert through unchanged (no _mergedKeys)', () => {
+    const result = mergeXaiRegionalAlerts([xaiNew('us1', 'us-east-1', 'Some event')])
+    expect(result).toHaveLength(1)
+    expect(result[0].title).toBe('🔴 xAI (Grok) — New Incident')
+    expect(result[0]._mergedKeys).toBeUndefined()
+  })
+
+  it('does not merge a non-region-tagged xAI alert with region-tagged ones', () => {
+    const untagged: AlertCandidate = {
+      key: 'alerted:new:c',
+      title: '🔴 xAI (Grok) — New Incident',
+      description: 'Whole-service degradation',
+      color: 0xed4245,
+      url: 'https://ai-watch.dev/#xai',
+      svcIds: ['xai'],
+    }
+    const result = mergeXaiRegionalAlerts([
+      xaiNew('us1', 'us-east-1', 'Event A'),
+      xaiNew('eu1', 'eu-west-1', 'Event A'),
+      untagged,
+    ])
+    expect(result).toHaveLength(2) // the 2 region-tagged merge; the untagged stays separate
+    expect(result.find((a) => a.description === 'Whole-service degradation')).toBeDefined()
+    expect(result.find((a) => a._mergedKeys)?._mergedKeys).toEqual(['alerted:new:us1', 'alerted:new:eu1'])
+  })
+
+  it('leaves non-xAI alerts untouched', () => {
+    const result = mergeXaiRegionalAlerts([
+      { key: 'alerted:new:o', title: '🔴 OpenAI API — New Incident', description: 'x', color: 0xed4245, url: '' },
+      xaiNew('us1', 'us-east-1', 'E'),
+      xaiNew('eu1', 'eu-west-1', 'E'),
+    ])
+    expect(result).toHaveLength(2)
+    expect(result.find((a) => a.title.includes('OpenAI'))).toBeDefined()
+  })
+
+  it('returns the original array when ≤1 xAI alert present', () => {
+    const alerts: AlertCandidate[] = [
+      { key: 'alerted:new:o', title: '🔴 OpenAI API — New Incident', description: 'x', color: 0xed4245, url: '' },
+    ]
+    expect(mergeXaiRegionalAlerts(alerts)).toBe(alerts)
+  })
+
+  it('handles a mixed new + resolved batch (both collapse paths fire in one call)', () => {
+    const result = mergeXaiRegionalAlerts([
+      xaiNew('n1', 'us-east-1', 'Image gen errors'),
+      xaiNew('n2', 'eu-west-1', 'Image gen errors'),
+      xaiRes('r1', 'us-east-1', 'Latency spike'),
+      xaiRes('r2', 'eu-west-1', 'Latency spike'),
+    ])
+    expect(result).toHaveLength(2)
+    const newAlert = result.find((a) => a.title.startsWith('🔴'))!
+    const resAlert = result.find((a) => a.title.startsWith('🟢'))!
+    expect(newAlert._mergedKeys).toEqual(['alerted:new:n1', 'alerted:new:n2'])
+    expect(resAlert._mergedKeys).toEqual(['alerted:res:r1', 'alerted:res:r2'])
+  })
+
+  it('integration: collapses two region alerts from buildIncidentAlerts into one', () => {
+    const xai = mockService({
+      id: 'xai',
+      name: 'xAI (Grok)',
+      status: 'degraded',
+      category: 'api',
+      incidents: [
+        { id: 'us1', title: '[API (us-east-1.api.x.ai)] Increased Error rate on Image Generation Endpoint', status: 'investigating', startedAt: recentDate, impact: 'minor' },
+        { id: 'eu1', title: '[API (eu-west-1.api.x.ai)] Increased Error rate on Image Generation Endpoint', status: 'investigating', startedAt: recentDate, impact: 'minor' },
+      ],
+    })
+    const alerts = buildIncidentAlerts([xai], alertedMap(), NOW)
+    expect(alerts).toHaveLength(2)
+    const merged = mergeXaiRegionalAlerts(alerts)
+    expect(merged).toHaveLength(1)
+    expect(merged[0].title).toBe('🔴 xAI (Grok) — New Incident (us-east-1, eu-west-1)')
+    expect(merged[0]._mergedKeys).toEqual(['alerted:new:us1', 'alerted:new:eu1'])
+    expect(merged[0].svcIds).toEqual(['xai'])
   })
 })
 

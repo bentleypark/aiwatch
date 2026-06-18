@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, parseAlertedRoster, shouldAlertSourceDead, buildSourceDeadEmbed } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, parseAlertedRoster, shouldAlertSourceDead, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
 import { checkPersistentFetchFailures } from './persistent-failure'
@@ -682,8 +682,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     }
   }
 
-  // Merge concurrent Together AI model-level alerts into single grouped alerts
-  const mergedToSend = mergeTogetherAlerts(toSend)
+  // Merge concurrent Together AI model-level (#283) + xAI per-region (#686) alerts into single grouped
+  // alerts. Disjoint services, so order is irrelevant; both set `_mergedKeys` for the roster write below.
+  const mergedToSend = mergeXaiRegionalAlerts(mergeTogetherAlerts(toSend))
 
   // Send + mark as alerted (down/degraded: 2h TTL, incidents/recovery: 7d TTL)
   // For new incidents, run AI analysis with timeout so it can be merged into the embed

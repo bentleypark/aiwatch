@@ -362,6 +362,66 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
   return [...rest, ...merged]
 }
 
+// #686 — xAI publishes the SAME event in multiple regions as separate incidents with distinct guids
+// but near-identical titles differing only by a `[API (<region>.api.x.ai)] ` prefix (live: us-east-1 +
+// eu-west-1). buildIncidentAlerts groups by incidentId, so each region fires its own alert. Strip the
+// region prefix off the alert description (= the incident title) to derive a grouping key, so the SAME
+// event across regions merges while DISTINCT events stay separate. More precise than mergeTogetherAlerts'
+// blunt all-merge. xAI-only by design (other SERVICE_REGIONS feeds aren't verified to split per region).
+const XAI_REGION_RE = /^\[API \(([a-z0-9-]+)\.api\.x\.ai\)\]\s*/i
+
+/**
+ * Merge concurrent xAI (Grok) per-region incident alerts (same event, different region) into one
+ * grouped alert. New + resolved handled independently (a staggered resolve fires individually — same
+ * limitation as mergeTogetherAlerts). Non-region-tagged xAI alerts and all non-xAI alerts pass through.
+ * Sets `_mergedKeys` so every collapsed incidentId lands in the `alerted:new:` roster (no re-fire) and
+ * the daily count still tallies each region (index.ts). svcIds stays `['xai']` so tweets/feed are unaffected.
+ */
+export function mergeXaiRegionalAlerts(alerts: AlertCandidate[]): AlertCandidate[] {
+  const isXai = (a: AlertCandidate) =>
+    a.title.startsWith('🔴 xAI (Grok) — New Incident') || a.title.startsWith('🟢 xAI (Grok) — Incident Resolved')
+  const xai = alerts.filter(isXai)
+  if (xai.length <= 1) return alerts
+  const rest = alerts.filter((a) => !isXai(a))
+
+  const collapse = (group: AlertCandidate[], kind: 'new' | 'res'): AlertCandidate[] => {
+    const buckets = new Map<string, AlertCandidate[]>()
+    const out: AlertCandidate[] = []
+    for (const a of group) {
+      if (!XAI_REGION_RE.test(a.description)) { out.push(a); continue } // not region-tagged → never merge
+      const event = a.description.replace(XAI_REGION_RE, '').trim()
+      const arr = buckets.get(event) ?? []
+      arr.push(a)
+      buckets.set(event, arr)
+    }
+    for (const arr of buckets.values()) {
+      if (arr.length <= 1) { out.push(...arr); continue }
+      const regions = arr.map((a) => XAI_REGION_RE.exec(a.description)?.[1]).filter(Boolean)
+      const merged: AlertCandidate = {
+        key: arr[0].key,
+        title: `${kind === 'new' ? '🔴' : '🟢'} xAI (Grok) — ${kind === 'new' ? 'New Incident' : 'Incident Resolved'} (${regions.join(', ')})`,
+        description: arr.map((a) => a.description).join('\n'), // preserve each region's original title
+        color: kind === 'new' ? 0xED4245 : 0x57F287,
+        url: 'https://ai-watch.dev/#xai',
+        _mergedKeys: arr.map((a) => a.key),
+        svcIds: [...new Set(arr.flatMap((a) => a.svcIds ?? []))], // all 'xai'
+      }
+      if (kind === 'new') {
+        merged.fallbackText = arr[0].fallbackText
+        merged.regionText = arr[0].regionText
+      }
+      out.push(merged)
+    }
+    return out
+  }
+
+  return [
+    ...rest,
+    ...collapse(xai.filter((a) => a.key.startsWith('alerted:new:')), 'new'),
+    ...collapse(xai.filter((a) => a.key.startsWith('alerted:res:')), 'res'),
+  ]
+}
+
 // #394: Atlassian Statuspage clears `incident.status` to `resolved` a few minutes before the
 // component-level `status_indicator` clears back to `operational`. Without suppression, a single
 // outage produces 🔴 New → 🟢 Resolved → 🟠 Degraded → 🟢 Recovered. 15min covers up to ~3 cron
