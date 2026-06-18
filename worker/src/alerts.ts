@@ -5,6 +5,7 @@ import { getFallbacks, buildFallbackText } from './fallback'
 import { sanitize, formatDuration, appendStatusHint } from './utils'
 import { computeLeadMs } from './detection-lead-log'
 import { kindFromKey, svcIdsForAlert, type AlertKind } from './alert-feed'
+import { XAI_REGION_RE } from './xai-regions'
 // #422 Phase 2 — region-switch hint in Discord alerts. We reuse the existing
 // Edge TS port rather than adding a third copy of SERVICE_REGIONS: the Worker
 // bundler (esbuild via wrangler) can import across dirs (unlike Vercel Edge,
@@ -366,9 +367,8 @@ export function mergeTogetherAlerts(alerts: AlertCandidate[]): AlertCandidate[] 
 // but near-identical titles differing only by a `[API (<region>.api.x.ai)] ` prefix (live: us-east-1 +
 // eu-west-1). buildIncidentAlerts groups by incidentId, so each region fires its own alert. Strip the
 // region prefix off the alert description (= the incident title) to derive a grouping key, so the SAME
-// event across regions merges while DISTINCT events stay separate. More precise than mergeTogetherAlerts'
-// blunt all-merge. xAI-only by design (other SERVICE_REGIONS feeds aren't verified to split per region).
-const XAI_REGION_RE = /^\[API \(([a-z0-9-]+)\.api\.x\.ai\)\]\s*/i
+// event across regions merges while DISTINCT events stay separate. The regex lives in xai-regions.ts
+// (#703) so the alert merge + the AI-analysis dedup can't drift. xAI-only by design.
 
 /**
  * Merge concurrent xAI (Grok) per-region incident alerts (same event, different region) into one
