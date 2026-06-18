@@ -158,7 +158,6 @@ Cloudflare KV
   ├── ai:usage:{date}      (일별 AI 사용량 카운터, TTL 2일)
   ├── alerted:*            (알림 중복 방지 키, TTL 2시간-7일)
   ├── detected:{svcId}     (최초 감지 타임스탬프, TTL 7일)
-  ├── detection:lead:{date} (조기 RTT audit 로그, UTC 일별, TTL 7일, 일일 요약에 24h 슬라이딩 윈도우)
   ├── probe-degradation:daily:{svcId}:{date} (RTT 저하 카운터, TTL 48시간, #464)
   ├── reddit:seen:{postId} (Reddit 게시글 중복 방지, TTL 24시간)
   └── vitals:{YYYY-MM-DD}  (Web Vitals 일별 집계, TTL 2일)
@@ -368,8 +367,7 @@ worker/
     probe.ts     # 헬스체크 프로빙 — 직접 RTT 측정
     probe-archival.ts # 일별 probe RTT 아카이브 + 7일 요약
     platform-monitor.ts # 상태 페이지 플랫폼 모니터링 (metastatuspage.com)
-    detection.ts # Detection Lead 파싱 + 리셋 로직
-    detection-lead-log.ts # Detection Lead audit 로그 (#256, 일일 요약)
+    detection.ts # 최초 감지(`detected:{svcId}`) 파싱 + 리셋 로직 — MTTD + #677 AWS 인시던트 시작 앵커에 사용
     reddit.ts    # Reddit 장애 감지 모니터링
     parsers/     # 플랫폼별 파서
       statuspage.ts   # Atlassian Statuspage (7개 서비스)

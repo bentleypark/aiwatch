@@ -3,7 +3,7 @@
 //
 // Option C architecture: the narrative is generated at archive-build time and
 // baked into the archive JSON, alongside the existing `security` and
-// `detectionLead` summaries. The aiwatch-reports `generate-report.js` then
+// `degradation` summaries. The aiwatch-reports `generate-report.js` then
 // renders it as an operator-reviewed auto-draft — it never calls an AI itself.
 //
 // Why not read `ai:analysis:*`: those per-incident keys have 1h/2h TTL and the

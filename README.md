@@ -48,7 +48,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Bilingual** — Korean / English
 - **Mobile responsive** — Sidebar overlay, mobile action bar
 - **AIWatch Score** — Composite reliability score combining uptime, incidents, recovery time, and probe-based responsiveness ([how it works](https://ai-watch.dev/methodology#score))
-- **RTT degradation detection** — AIWatch's direct API probes flag latency degradation that official status pages often never report (dashboard badge + Discord daily summary). Independent detection within the ~5-min polling cycle of the official report (MTTD); occasional genuine early-RTT signals are shown per-event
+- **RTT degradation detection** — AIWatch's direct API probes flag latency degradation that official status pages often never report (dashboard badge + Discord daily summary). Independent detection within the ~5-min polling cycle of the official report (MTTD)
 - **Regional availability** — Per-region incident status for xAI, Gemini, OpenAI with switch recommendation
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
@@ -159,7 +159,6 @@ Cloudflare KV
   ├── ai:usage:{date}      (daily AI usage counter, TTL 2d)
   ├── alerted:*            (alert dedup keys, TTL 2h-7d)
   ├── detected:{svcId}     (earliest detection timestamp, TTL 7d)
-  ├── detection:lead:{date} (early-RTT audit log per UTC day, TTL 7d, 24h sliding window in daily summary)
   ├── probe-degradation:daily:{svcId}:{date} (RTT degradation counter, TTL 48h, #464)
   ├── reddit:seen:{postId} (Reddit post dedup, TTL 24h)
   └── vitals:{YYYY-MM-DD}  (Web Vitals daily aggregation, TTL 2d)
@@ -369,8 +368,7 @@ worker/
     probe.ts     # Health check probing — direct RTT measurement
     probe-archival.ts # Daily probe RTT archival + 7-day summary
     platform-monitor.ts # Status page platform health monitoring (metastatuspage.com)
-    detection.ts # Detection Lead entry parsing + reset logic
-    detection-lead-log.ts # Detection Lead audit log (#256, daily summary)
+    detection.ts # First-detection (`detected:{svcId}`) entry parsing + reset logic — feeds MTTD + the #677 AWS incident-start anchor
     reddit.ts    # Reddit outage chatter monitoring
     parsers/     # Platform-specific parsers
       statuspage.ts   # Atlassian Statuspage (7 services)

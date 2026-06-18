@@ -3,10 +3,20 @@
 import type { ServiceStatus } from './types'
 import type { ProbeSnapshot } from './probe'
 import type { VitalsDaily } from './vitals'
-import type { DetectionLeadEntry, LeadDiag } from './detection-lead-log'
 import { formatVitalsSection } from './vitals'
 import { aggregateProbeDaily } from './probe-archival'
-import { formatDetectionLeadSection, formatLeadDiagSection } from './detection-lead-log'
+
+// #679 — the "detection lead" (faster-than-official) metric was removed (structurally null — status-page
+// polling is always later than the official publish; #464 already retired the framing). The RTT-degradation
+// classifier below is the KEPT, separate part: it flags probe-spike degradations the official pages miss.
+export type DegradationOutcome = 'degradation' | 'degradation_nostatus'
+
+/** Classify a probe-spike degradation by whether the service's official status already reflects it.
+ *  svcStatusOperational === true → the status page shows nothing → 'degradation_nostatus' (our edge).
+ *  Pure + side-effect-free so the rising-edge decision is unit-testable; KV I/O stays in index.ts. */
+export function classifyDegradation(svcStatusOperational: boolean): DegradationOutcome {
+  return svcStatusOperational ? 'degradation_nostatus' : 'degradation'
+}
 
 export interface DailySummaryData {
   services: ServiceStatus[]
@@ -21,8 +31,6 @@ export interface DailySummaryData {
   securityCount?: number
   vitals?: VitalsDaily | null
   probeSnapshots?: ProbeSnapshot[]
-  detectionLeadEntries?: DetectionLeadEntry[]
-  leadDiag?: LeadDiag | null
   fetchFailureCounts?: Record<string, number>   // svcId → times degraded threshold hit today
   crossValidSuppressed?: Record<string, number> // svcId → times probe overrode to operational
   degradationCounts?: Record<string, number>          // svcId → RTT degradation spikes today (#464)
@@ -37,7 +45,7 @@ export interface DailySummaryData {
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
-  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, deliveryCounts, redditCount, vitals, detectionLeadEntries, leadDiag, fetchFailureCounts, crossValidSuppressed, degradationCounts, degradationNoStatusCounts } = data
+  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, deliveryCounts, redditCount, vitals, fetchFailureCounts, crossValidSuppressed, degradationCounts, degradationNoStatusCounts } = data
   const total = services.length
   const operational = services.filter(s => s.status === 'operational').length
   const degraded = services.filter(s => s.status === 'degraded').length
@@ -143,20 +151,6 @@ export function buildDailySummary(data: DailySummaryData): string {
   // Section: Web Vitals
   if (vitals && vitals.count > 0) {
     lines.push(formatVitalsSection(vitals))
-  }
-
-  // Section: Detection Lead audit log (today's events) — verifies the feature is working day-to-day
-  if (detectionLeadEntries && detectionLeadEntries.length > 0) {
-    const nameMap = new Map(services.map(s => [s.id, s.name]))
-    const section = formatDetectionLeadSection(detectionLeadEntries, nameMap)
-    if (section) lines.push(section)
-  }
-
-  // Section: Detection Lead diagnostics (#464) — measures WHY leads are/aren't recorded while the
-  // audit log stays empty. Shown even when there were zero leads, as long as incidents were classified.
-  if (leadDiag) {
-    const diagSection = formatLeadDiagSection(leadDiag)
-    if (diagSection) lines.push(diagSection)
   }
 
   // Section: Status page fetch failures (#500) — surfaces structural URL blocks early.

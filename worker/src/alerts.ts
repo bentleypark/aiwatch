@@ -3,7 +3,6 @@
 
 import { getFallbacks, buildFallbackText } from './fallback'
 import { sanitize, formatDuration, appendStatusHint } from './utils'
-import { computeLeadMs } from './detection-lead-log'
 import { kindFromKey, svcIdsForAlert, type AlertKind } from './alert-feed'
 import { XAI_REGION_RE } from './xai-regions'
 // #422 Phase 2 — region-switch hint in Discord alerts. We reuse the existing
@@ -501,23 +500,6 @@ export function buildServiceAlerts(
   }
 
   return alerts
-}
-
-/**
- * Compute early-RTT-detection text for Discord alerts (#464 reframe).
- * Only renders for genuine cases where AIWatch's RTT probe flagged degradation BEFORE the official
- * status update (computeLeadMs returns null outside [1m, 60m), so negative/stale leads emit nothing).
- * This is an honest per-event signal — the aggregate "average lead" claim is gated separately by
- * MIN_LEAD_SAMPLE_SIZE since diagnostic data showed such genuine leads are rare.
- */
-export function formatDetectionLead(detectedAt: string | null, incidentStartedAt: string): string {
-  if (!detectedAt) return ''
-  // Use computeLeadMs as single source of truth — guarantees Discord display + audit log share the same window.
-  // Math.floor (not round) ensures display never claims 60m when leadMs is in [59m30s, 60m) — the cap is exclusive.
-  const leadMs = computeLeadMs(detectedAt, incidentStartedAt)
-  if (leadMs === null) return ''
-  const mins = Math.floor(leadMs / 60_000)
-  return `⚡ **Early signal: ${mins}m** — AIWatch flagged RTT degradation before the official status update`
 }
 
 // #348 — outage-tweet draft (Phase 1.5: manual-assist, no X API). For Claude/OpenAI-family
