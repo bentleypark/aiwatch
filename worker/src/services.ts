@@ -204,7 +204,13 @@ export const SERVICES: ServiceConfig[] = [
   // displayComponentIds (#606): Junie + its AI Platform dependency only. status.jetbrains.ai is a
   // shared JetBrains page, but junie is the only AIWatch service on it, so excluding the sibling
   // products (AI Assistant, Grazie, AI Platform China) keeps the breakdown Junie-relevant. Display-only.
-  { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.ai', apiUrl: 'https://status.jetbrains.ai/api/v2/summary.json', statusComponentId: '9vbyyqkkjxl4', displayComponentIds: ['9vbyyqkkjxl4', 'x4pcb5vz7jj2'] },
+  // #683 — incidentComponents scopes incidents to Junie's OWN component on the shared
+  // status.jetbrains.ai page (Junie / AI Assistant / Grazie / AI Platform / AI Platform China).
+  // Without it, sibling-only incidents (e.g. a Grazie-only "Raised error rates from NLP services")
+  // leaked onto Junie. Exact-name match to Junie's badge scope (statusComponentId = Junie); AI
+  // Platform is a display dependency (displayComponentIds) but intentionally NOT an incident source,
+  // so the incident scope stays consistent with the Junie-only badge.
+  { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.ai', apiUrl: 'https://status.jetbrains.ai/api/v2/summary.json', statusComponentId: '9vbyyqkkjxl4', displayComponentIds: ['9vbyyqkkjxl4', 'x4pcb5vz7jj2'], incidentComponents: ['Junie'] },
 ]
 
 /**
@@ -400,7 +406,7 @@ export function pickBreakdownComponents(
 }
 
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
-  const { incidentKeywords, incidentExclude } = config
+  const { incidentKeywords, incidentExclude, incidentComponents } = config
   return incidents.filter((inc) => {
     const title = inc.title.toLowerCase()
     if (incidentExclude?.some((kw) => title.includes(kw.toLowerCase()))) {
@@ -421,6 +427,16 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
     // don't mention "gemini" (e.g. "Batch API outage", "File API document
     // processing outage"). See #310.
     if (inc.id.startsWith('aistudio:')) return true
+    // #683 — exact-component-name scoping for a SHARED status page where this is the only AIWatch
+    // service but siblings' incidents leak (Junie on status.jetbrains.ai: a Grazie-only incident
+    // must NOT attribute to Junie). EXACT (case-insensitive) match, NOT substring, so 'AI Platform'
+    // can't collide with the sibling 'AI Platform China'. An untagged incident (no componentNames)
+    // matches nothing → dropped (real Junie incidents always list 'Junie'). Takes precedence over
+    // incidentKeywords (a service sets one or the other).
+    if (incidentComponents && incidentComponents.length > 0) {
+      const allow = new Set(incidentComponents.map((n) => n.toLowerCase()))
+      return (inc.componentNames ?? []).some((n) => allow.has(n.toLowerCase()))
+    }
     if (incidentKeywords && incidentKeywords.length > 0) {
       // Match against title OR affected component names
       const compNames = (inc.componentNames ?? []).map((n) => n.toLowerCase())
