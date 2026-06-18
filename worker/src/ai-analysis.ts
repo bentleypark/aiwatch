@@ -3,6 +3,7 @@
 
 import type { Incident, ServiceStatus } from './types'
 import { sanitize, kvPut, kvDel, type KVLike } from './utils'
+import { collapseXaiRegionalIncidents } from './xai-regions'
 
 // Workers AI model ID for the Gemma primary path. Exported so monthly-narrative.ts
 // (which runs its own hybrid call with a different prompt + response shape) reuses
@@ -462,7 +463,12 @@ export async function refreshOrReanalyze(
   const analyzedIncidents = new Map<string, string>()
 
   for (const svc of activeServices) {
-    const activeIncs = (svc.incidents ?? []).filter(i => i.status !== 'resolved' && !heldIncIds.has(i.id))
+    // #703 — collapse xAI per-region incidents (same event, different region) to ONE, so a 2-region
+    // xAI event is analyzed once (not twice) and the Analyze modal shows a single entry. No-op for
+    // every non-xAI service (only xAI titles carry the `[API (<region>.api.x.ai)]` prefix).
+    const activeIncs = collapseXaiRegionalIncidents(
+      (svc.incidents ?? []).filter(i => i.status !== 'resolved' && !heldIncIds.has(i.id)),
+    )
     if (activeIncs.length === 0) continue
 
     for (const inc of activeIncs) {
