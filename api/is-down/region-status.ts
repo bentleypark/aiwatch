@@ -120,10 +120,27 @@ export function regionStatusOf(service: ServiceLike | null | undefined): RegionS
   if (!Array.isArray(regionDefs) || regionDefs.length === 0) return null
 
   const allIncidents = Array.isArray(service.incidents) ? service.incidents : []
+  // True when an incident names one of THIS service's tracked regions (title or
+  // componentNames substring) — same match the main loop uses below.
+  const mentionsRegion = (inc: IncidentLike): boolean => {
+    const t = (inc.title || '').toLowerCase()
+    const comp = (Array.isArray(inc.componentNames) ? inc.componentNames : []).map((n) => String(n).toLowerCase())
+    return regionDefs.some((r) => {
+      const k = r.key.toLowerCase()
+      return t.includes(k) || comp.some((n) => n.includes(k))
+    })
+  }
+
   // aistudio:-prefixed incidents come from the global direct Gemini API surface,
   // which has no per-region breakdown — including them would trigger the
   // "no region match → mark all regions affected" fallback and overstate the
   // impact. See worker/src/services.ts #310.
+  // Likewise FedRAMP (#693): an OpenAI FedRAMP incident (now surfaced under openai)
+  // is a compliance-isolated plane, NOT one of the tracked commercial regions
+  // (us-east-1/us-west-2/eu-central-1) — its region-less title would otherwise trip
+  // the global fallback and falsely paint all 3 commercial regions down. Excluded
+  // ONLY when it names no tracked region, so a (rare) "us-east-1 and FedRAMP …"
+  // incident still surfaces that real region instead of being silently dropped.
   const ongoing = allIncidents.filter((i): i is IncidentLike => {
     if (!i || typeof i !== 'object') return false
     const inc = i as IncidentLike
@@ -131,7 +148,8 @@ export function regionStatusOf(service: ServiceLike | null | undefined): RegionS
       typeof inc.title === 'string' &&
       inc.status !== 'resolved' &&
       typeof inc.id === 'string' &&
-      !(inc.id as string).startsWith('aistudio:')
+      !(inc.id as string).startsWith('aistudio:') &&
+      !(/fedramp/i.test(inc.title) && !mentionsRegion(inc))
     )
   })
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { filterIncidents, includeUntaggedIncidents, filterByComponentStatus } from '../services'
+import { filterIncidents, includeUntaggedIncidents, filterByComponentStatus, SERVICES } from '../services'
 import { normalizeStatus } from '../parsers/statuspage'
 import type { Incident, ServiceConfig } from '../types'
 
@@ -471,6 +471,51 @@ describe('fetchService cross-contamination guard (#361)', () => {
     // the page (e.g. cohere/groq/elevenlabs/replicate/stability).
     expect(svcStatus).toBe('operational')
     expect(filtered.find((i) => i.id === 'db-1')).toBeUndefined()
+  })
+})
+
+// #693 — FedRAMP API incidents must surface under openai (FedRAMP is a curated openai
+// displayComponentIds surface) instead of being dropped by a bare 'workspaces' exclude, while
+// genuine ChatGPT-Workspace incidents stay excluded. Uses the REAL SERVICES configs so a future
+// edit that reverts the narrowed 'chatgpt workspaces' term (or re-broadens it) fails loudly.
+describe('filterIncidents — OpenAI FedRAMP / workspaces exclude (#693)', () => {
+  const cfg = (id: string): ServiceConfig => {
+    const c = SERVICES.find((s) => s.id === id)
+    if (!c) throw new Error(`missing SERVICES config: ${id}`)
+    return c
+  }
+  // The real production incident (status.openai.com, 2026-06): affects "API orgs", components: [].
+  const fedramp = mockIncident({
+    id: 'fedramp-api-1',
+    title: 'FedRAMP workspaces and API orgs have degraded performance',
+    status: 'investigating',
+    impact: 'minor',
+    componentNames: [],
+  })
+
+  it('openai: KEEPS the FedRAMP API incident (no longer dropped by the workspaces exclude)', () => {
+    expect(filterIncidents([fedramp], cfg('openai')).map((i) => i.id)).toContain('fedramp-api-1')
+  })
+
+  it('chatgpt + codex: do NOT pick up the FedRAMP incident (leak guard — title misses their keywords)', () => {
+    expect(filterIncidents([fedramp], cfg('chatgpt'))).toHaveLength(0)
+    expect(filterIncidents([fedramp], cfg('codex'))).toHaveLength(0)
+  })
+
+  it('openai: still EXCLUDES a genuine ChatGPT Workspaces incident (no regression)', () => {
+    // Both the narrowed 'chatgpt workspaces' term AND the existing 'chatgpt'/'login' excludes catch it.
+    const chatgptWs = mockIncident({
+      id: 'cgpt-ws-1',
+      title: 'ChatGPT Workspaces login errors and API latency',
+      status: 'investigating',
+      componentNames: [],
+    })
+    expect(filterIncidents([chatgptWs], cfg('openai'))).toHaveLength(0)
+  })
+
+  it('openai exclude no longer contains a bare "workspaces" term (pins the #693 narrowing)', () => {
+    expect(cfg('openai').incidentExclude).not.toContain('workspaces')
+    expect(cfg('openai').incidentExclude).toContain('chatgpt workspaces')
   })
 })
 
