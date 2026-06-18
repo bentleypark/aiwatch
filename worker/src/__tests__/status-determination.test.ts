@@ -440,7 +440,7 @@ describe('resolveSvcComponents — per-component snapshot (#604)', () => {
 describe('displayComponentIds config sanity (#606)', () => {
   // Exact curated counts — guards against a careless edit truncating the list
   // (the doc comments enumerate the excluded components, so the count is intentional).
-  const EXPECTED_COUNT: Record<string, number> = { elevenlabs: 6, replicate: 5 }
+  const EXPECTED_COUNT: Record<string, number> = { elevenlabs: 7, replicate: 5 }
 
   it('elevenlabs + replicate carry the exact curated displayComponentIds count and NO statusComponentIds (badge unchanged)', () => {
     for (const [id, count] of Object.entries(EXPECTED_COUNT)) {
@@ -452,6 +452,28 @@ describe('displayComponentIds config sanity (#606)', () => {
       // Display-only: must not feed the worst-of badge (#606 decoupling), so no statusComponentIds.
       expect(svc.statusComponentIds, id).toBeUndefined()
     }
+  })
+
+  it('#685 — surfaces a degraded ElevenCreative in the elevenlabs breakdown (no more all-green-while-badge-degraded)', () => {
+    const elevenlabs = SERVICES.find((s) => s.id === 'elevenlabs')!
+    const CREATIVE = '01JJM5RKYAEWNM3XYRHXM8FJQ3'
+    expect(elevenlabs.displayComponentIds, 'ElevenCreative must be curated in (the #685 fix)').toContain(CREATIVE)
+    // Summary where every curated component is operational EXCEPT ElevenCreative (degraded) — the exact
+    // shape that previously rendered all-green while the badge (overall indicator) read degraded.
+    const summary = {
+      status: { indicator: 'minor' },
+      components: elevenlabs.displayComponentIds!.map((id) => ({
+        id,
+        name: id === CREATIVE ? 'ElevenCreative' : `Surface ${id.slice(-4)}`,
+        status: id === CREATIVE ? 'degraded_performance' : 'operational',
+      })),
+    }
+    const out = resolveSvcComponents(elevenlabs, summary)
+    expect(out).toHaveLength(7)
+    const creative = out.find((c) => c.id === CREATIVE)
+    expect(creative, 'ElevenCreative now appears in the breakdown').toBeDefined()
+    expect(creative!.name).toBe('ElevenCreative')
+    expect(creative!.status).toBe('degraded') // degraded_performance normalized → 'degraded'
   })
 
   it('cohere + groq use dynamic displayAllComponents with the Docs/Website denylist, surface lists, and NO badge ids', () => {

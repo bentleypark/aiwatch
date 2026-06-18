@@ -93,9 +93,14 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, onlineOrNotUrl: 'https://status.openrouter.ai', onlineOrNotComponent: 'Chat (/api/v1/chat/completions)' },
   // Voice & Speech AI
   // displayComponentIds (#606): curated availability surfaces for the breakdown card —
-  // TTS, STT, Conversations, RAG, Telephony, Other API endpoints (excludes UI/Quality/ElevenCreative/Other).
+  // TTS, STT, Conversations, RAG, Telephony, Other API endpoints, + ElevenCreative (excludes UI/Quality/Other).
+  // #685 — ElevenCreative (01JJM5RKYAEWNM3XYRHXM8FJQ3) is the ONLY component reflecting Dubbing health
+  // (a Voice-domain product within the ElevenCreative suite; no standalone Dubbing component exists). It
+  // was previously omitted, so a Dubbing/ElevenCreative degradation flipped the badge (overall indicator)
+  // while the breakdown stayed all-operational — a visible contradiction. The row label reads
+  // 'ElevenCreative' (broader suite), the accepted trade-off since no finer-grained component exists.
   // Display-only: badge stays on the overall page indicator (no statusComponentIds).
-  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['webpage'], displayComponentIds: ['01JP2RQVGDHPEEDAFM5KV2MH9P', '01JYDTNNSJBT4X90MAC47YPM9S', '01JY3H5SJJZNC33AYMAE4SK4TH', '01JY3H5SJJD2BMSGSW5FZE08ST', '01JY3H5SJJJG47J60JPKX882H8', '01JY3H5SJJFKTXYQHG5A8Z1KYH'] },
+  { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['webpage'], displayComponentIds: ['01JP2RQVGDHPEEDAFM5KV2MH9P', '01JYDTNNSJBT4X90MAC47YPM9S', '01JY3H5SJJZNC33AYMAE4SK4TH', '01JY3H5SJJD2BMSGSW5FZE08ST', '01JY3H5SJJJG47J60JPKX882H8', '01JY3H5SJJFKTXYQHG5A8Z1KYH', '01JJM5RKYAEWNM3XYRHXM8FJQ3'] },
   // displayComponentIds (#606): curated user-facing API surfaces for assemblyai + deepgram
   // (excludes internal infra / Website / Billing / Docs, and the badge's umbrella statusComponentId
   // — the card shows the per-surface children). Display-only — badge stays on statusComponentId.
