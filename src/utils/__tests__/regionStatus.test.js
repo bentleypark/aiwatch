@@ -209,6 +209,56 @@ describe('regionStatusOf — global-incident fallback', () => {
   })
 })
 
+describe('regionStatusOf — FedRAMP excluded from region computation (#693)', () => {
+  test('openai with ONLY a FedRAMP incident → null (no card, not all-regions-down)', () => {
+    // The region-less FedRAMP title would otherwise trip the global fallback and paint
+    // all 3 commercial regions down. Excluded → no ongoing incident → card hidden (openai
+    // is not an always-show service), matching the pre-#693 behavior.
+    const result = regionStatusOf({
+      id: 'openai',
+      status: 'degraded',
+      incidents: [
+        { id: 'fr1', status: 'investigating', title: 'FedRAMP workspaces and API orgs have degraded performance' },
+      ],
+    })
+    expect(result).toBeNull()
+  })
+
+  test('FedRAMP ignored but a separate us-east-1 incident still marks only that region', () => {
+    const result = regionStatusOf({
+      id: 'openai',
+      status: 'degraded',
+      incidents: [
+        { id: 'fr1', status: 'investigating', title: 'FedRAMP workspaces and API orgs have degraded performance' },
+        { id: 'r1', status: 'investigating', title: 'Elevated errors in us-east-1' },
+      ],
+    })
+    expect(result.allDown).toBe(false)
+    expect(result.hasGlobalIncident).toBe(false) // FedRAMP no longer counts as a global incident
+    expect(result.ongoingCount).toBe(1) // FedRAMP filtered out
+    const east = result.regions.find((r) => r.key === 'us-east-1')
+    const west = result.regions.find((r) => r.key === 'us-west-2')
+    expect(east.status).toBe('incident')
+    expect(west.status).toBe('ok')
+  })
+
+  test('a FedRAMP incident that ALSO names a real region is NOT dropped (only that region marked)', () => {
+    // The exclusion is gated on "no tracked region mentioned" — a co-mentioned region survives.
+    const result = regionStatusOf({
+      id: 'openai',
+      status: 'degraded',
+      incidents: [
+        { id: 'fr2', status: 'investigating', title: 'Elevated errors in us-east-1 and FedRAMP workspaces' },
+      ],
+    })
+    expect(result).not.toBeNull()
+    expect(result.ongoingCount).toBe(1) // kept — it names us-east-1
+    expect(result.allDown).toBe(false)
+    expect(result.regions.find((r) => r.key === 'us-east-1').status).toBe('incident')
+    expect(result.regions.find((r) => r.key === 'us-west-2').status).toBe('ok')
+  })
+})
+
 describe('regionStatusOf — hasGlobalIncident flag (#422)', () => {
   test('false when every ongoing incident matches a region', () => {
     const result = regionStatusOf({

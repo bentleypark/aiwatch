@@ -119,18 +119,36 @@ export function regionStatusOf(service, opts = {}) {
   if (!Array.isArray(regionDefs) || regionDefs.length === 0) return null
 
   const allIncidents = Array.isArray(service.incidents) ? service.incidents : []
+  // True when an incident names one of THIS service's tracked regions (title or
+  // componentNames substring) — same match the main loop uses below.
+  const mentionsRegion = (inc) => {
+    const t = (inc.title || '').toLowerCase()
+    const comp = (inc.componentNames ?? []).map((n) => String(n).toLowerCase())
+    return regionDefs.some((r) => {
+      const k = r.key.toLowerCase()
+      return t.includes(k) || comp.some((n) => n.includes(k))
+    })
+  }
+
   // aistudio:-prefixed incidents come from the global direct Gemini API surface,
   // which has no per-region breakdown — including them would trigger the
   // "no region match → mark all regions affected" fallback and overstate the
   // impact. Region breakdown only makes sense for Vertex (gcloud) feed entries
   // whose titles include region keywords. See worker/src/services.ts (#310).
+  // Likewise FedRAMP (#693): an OpenAI FedRAMP incident (now surfaced under openai)
+  // is a compliance-isolated plane, NOT one of the tracked commercial regions
+  // (us-east-1/us-west-2/eu-central-1) — its region-less title would otherwise trip
+  // the global fallback and falsely paint all 3 commercial regions down. Excluded
+  // ONLY when it names no tracked region, so a (rare) "us-east-1 and FedRAMP …"
+  // incident still surfaces that real region instead of being silently dropped.
   const ongoing = allIncidents.filter(
     (i) =>
       i &&
       typeof i.title === 'string' &&
       i.status !== 'resolved' &&
       typeof i.id === 'string' &&
-      !i.id.startsWith('aistudio:'),
+      !i.id.startsWith('aistudio:') &&
+      !(/fedramp/i.test(i.title) && !mentionsRegion(i)),
   )
 
   const alwaysShow = ALWAYS_SHOW_REGIONS.has(service.id)
