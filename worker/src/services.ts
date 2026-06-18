@@ -99,8 +99,12 @@ export const SERVICES: ServiceConfig[] = [
   // displayComponentIds (#606): curated user-facing API surfaces for assemblyai + deepgram
   // (excludes internal infra / Website / Billing / Docs, and the badge's umbrella statusComponentId
   // — the card shows the per-surface children). Display-only — badge stays on statusComponentId.
+  // #692 — deepgram includes BOTH '...Voice Agent API' (r2z04fcdhhzb) AND its sibling 'Voice Agent
+  // API: Downstream Providers' (7n3stjcbj4bx, a third-party dependency e.g. Gemini), kept adjacent.
+  // Deepgram degrades only the Downstream component during a provider outage, so omitting it hid a
+  // real degradation behind an operational base row — surfacing it makes the breakdown honest.
   { id: 'assemblyai', name: 'AssemblyAI', provider: 'AssemblyAI', category: 'api', statusUrl: 'https://status.assemblyai.com', apiUrl: 'https://status.assemblyai.com/api/v2/summary.json', statusComponentId: '50txf4qfk2kv', displayComponentIds: ['kygwc83t1rfg', '20vm7q71wjcn', 'trxjzz9bwdmc', 'psxcg5mfhznq', 'rfh9swc12f9h', '12wrfd55ml3r'] },
-  { id: 'deepgram', name: 'Deepgram', provider: 'Deepgram', category: 'api', statusUrl: 'https://status.deepgram.com', apiUrl: 'https://status.deepgram.com/api/v2/summary.json', statusComponentId: 'cv8l6gg3cb9d', displayComponentIds: ['m49xkwqkc4kh', 's6v5z4lsl658', '6854s60zwxgw', 'r2z04fcdhhzb', 'jgfq9ffjsfqk', 'vm1x1v101qtn', 'cvbdk3fslx9v', 't80v4qz2jdsf'] },
+  { id: 'deepgram', name: 'Deepgram', provider: 'Deepgram', category: 'api', statusUrl: 'https://status.deepgram.com', apiUrl: 'https://status.deepgram.com/api/v2/summary.json', statusComponentId: 'cv8l6gg3cb9d', displayComponentIds: ['m49xkwqkc4kh', 's6v5z4lsl658', '6854s60zwxgw', 'r2z04fcdhhzb', '7n3stjcbj4bx', 'jgfq9ffjsfqk', 'vm1x1v101qtn', 'cvbdk3fslx9v', 't80v4qz2jdsf'] },
   // Inference / Infrastructure
   { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed', betterStackUrl: 'https://status.huggingface.co', flapSuppression: true, componentDenylist: ['Website'] },
   // displayComponentIds (#606): curated API/product surfaces — HTTP API, Streaming API, Registry,
