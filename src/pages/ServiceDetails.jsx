@@ -924,6 +924,18 @@ export default function ServiceDetails({ serviceId }) {
                 * {t('score.no_uptime')}
               </div>
             )}
+            {/* #681 — contextual link to the public methodology page (#673). Same-tab internal nav
+                with a "→" affordance — NOT the ↗+new-tab used for the EXTERNAL Official Status link
+                above (methodology is our own page, so a new tab would be the wrong convention). */}
+            <div style={{ marginTop: '12px' }}>
+              <a
+                href="/methodology#score"
+                onClick={() => trackEvent('click_methodology', { location: 'service_details', source: 'score_breakdown' })}
+                className="mono text-[10px] text-[var(--blue)] hover:underline cursor-pointer"
+              >
+                {t('ranking.aboutScore')} →
+              </a>
+            </div>
           </div>
         </section>
       )}

@@ -371,6 +371,13 @@ describe('renderFooter — Also check category grouping', () => {
     expect(html).not.toMatch(/href="https:\/\/ai-watch\.dev\/#settings"/)
   })
 
+  it('footer carries a GA-tracked methodology link to /methodology#score (#681)', () => {
+    const html = renderFooter('claude')
+    expect(html).toContain('href="https://ai-watch.dev/methodology#score"')
+    expect(html).toContain('>How we measure this</a>')
+    expect(html).toContain("gtag('event','click_methodology',{location:'is_down_page',source:'footer'})")
+  })
+
   it('emits the group sub-labels in FOOTER_CATEGORY_ORDER order', () => {
     // Use a slug whose RELATED_SLUGS doesn't drain a whole group, so every group
     // is non-empty. `claude` (llm) relates to claude-ai, claude-code, openai,

@@ -8,6 +8,7 @@ import { useSettings } from '../hooks/useSettings'
 import { SCORE_BG_CLASS, SCORE_TEXT_CLASS } from '../utils/constants'
 import { formatTime } from '../utils/time'
 import { hasReliableScoreData } from '../utils/serviceReliability'
+import { trackEvent } from '../utils/analytics'
 import SkeletonUI from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 
@@ -79,10 +80,13 @@ export default function Ranking() {
         </div>
       )}
 
-      {/* Score methodology — the public /methodology page (#673, was the in-dashboard #about-score) */}
+      {/* Score methodology — the public /methodology page (#673, was the in-dashboard #about-score).
+          #681 — same-tab internal nav + "→" + GA tracking, matching ServiceDetails (NOT ↗+new-tab,
+          which is reserved for EXTERNAL links like Official Status). */}
       <div>
         <a
           href="/methodology#score"
+          onClick={() => trackEvent('click_methodology', { location: 'ranking', source: 'score_link' })}
           className="mono text-[10px] text-[var(--blue)] hover:underline cursor-pointer"
         >
           {t('ranking.aboutScore')} →

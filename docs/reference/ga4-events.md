@@ -38,6 +38,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | `click_cta_alerts` | `location`, `source?` | Is X Down (CTA/footer) | Set Up Alerts click |
 | `click_ranking` | `location`, `source` | Is X Down (header/alternatives) | Ranking link click |
 | `click_service_detail` | `location`, `service_id` | Is X Down (footer) | Service detail page click |
+| `click_methodology` | `location`, `source` | Is X Down (footer) · ServiceDetails (Score breakdown) · Ranking (score link) | Methodology page link click (#681 — `location` ∈ `is_down_page`/`service_details`/`ranking`, `source`=`footer`/`score_breakdown`/`score_link`) |
 | `click_reports` | `location`, `source` | Is X Down (alternatives/footer) | Monthly reports link click (Is X Down) |
 | `copy_rss` | `location`, `service_id` | Is X Down (CTA) · ServiceDetails (header) · Settings (Alerts) · Overview (incident banner) · Sidebar (footer) · Landing (alerts section) | RSS feed URL copied to clipboard. `location` ∈ `is_down_page`/`service_details`/`settings`/`action_banner`/`sidebar`/`landing`; `service_id`=`'all'` for the all-services `/feed.xml`, the page slug for per-service feeds (#430, #432, #433, #434) |
 | `click_announcement` | `id`, `location` | Landing page (announcement banner) | Campaign announcement banner click-through (`?banner=<key>`, #265). `id`=announcement key |
