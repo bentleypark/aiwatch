@@ -80,10 +80,11 @@ test.describe('Is X Down? SSR pages', () => {
       test(`has CTA alert banner`, async ({ page: p }) => {
         await p.goto(`/is-${page.slug}-down`, { waitUntil: 'domcontentloaded' })
         await expect(p.locator('.cta')).toBeVisible()
-        // #547: the PRIMARY CTA is now the zero-friction RSS copy button (the only channel that
-        // converted on the outage day); the Discord double-opt-in is demoted to a
+        // #696: the PRIMARY CTA is the zero-config Slack /feed button (lowest-friction action for the
+        // dev/team audience); RSS is the secondary button; the Discord double-opt-in stays a
         // de-emphasized secondary text link (.cta-alt) that still carries the focus=alerts href.
-        await expect(p.locator('.cta button.btn-primary[data-rss]')).toBeVisible()
+        await expect(p.locator('.cta button.btn-primary[data-slack]')).toBeVisible()
+        await expect(p.locator('.cta button[data-rss]')).toBeVisible()
         await expect(p.locator('.cta a.btn-primary')).toHaveCount(0)
         await expect(p.locator('.cta .cta-alt a')).toHaveAttribute('href', 'https://ai-watch.dev/#settings?focus=alerts')
       })
@@ -344,13 +345,18 @@ test.describe('Is X Down? SSR pages', () => {
       if (aiIdx >= 0) expect(aiIdx).toBeGreaterThan(ctaIdx)
     })
 
-    test('primary CTA is the RSS copy button; Discord demoted to secondary link (#547)', async ({ page }) => {
+    test('primary CTA is the Slack-feed button; RSS secondary; Discord demoted to a text link (#547/#696)', async ({ page }) => {
       await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
-      // Primary = zero-friction RSS button → fires copy_rss (success proxy) via copyRss().
-      const primary = page.locator('.cta button.btn-primary[data-rss]')
+      // #696 Primary = zero-config Slack /feed button → fires copy_slack_feed (success proxy).
+      const primary = page.locator('.cta button.btn-primary[data-slack]')
       await expect(primary).toBeVisible()
-      expect(await primary.getAttribute('onclick')).toContain('copyRss(this)')
-      // Heavy Discord path is now a de-emphasized text link, tagged source=status_banner_secondary
+      expect(await primary.getAttribute('onclick')).toContain('copySlackFeed(this)')
+      // RSS is the secondary button now (.btn, not .btn-primary) → still fires copy_rss.
+      const rss = page.locator('.cta button[data-rss]')
+      await expect(rss).toBeVisible()
+      expect(await rss.getAttribute('onclick')).toContain('copyRss(this)')
+      expect(await rss.getAttribute('class')).not.toContain('btn-primary')
+      // Heavy Discord path is a de-emphasized text link, tagged source=status_banner_secondary
       // so the funnel comparison can tell post-reorder clicks apart from the old primary placement.
       const onclick = await page.locator('.cta .cta-alt a').getAttribute('onclick')
       expect(onclick).toContain("'click_cta_alerts'")
@@ -363,17 +369,16 @@ test.describe('Is X Down? SSR pages', () => {
       // fall back to any is-down page — we check the copy's shape, not the status.
       await page.goto('/is-chatgpt-down', { waitUntil: 'domcontentloaded' })
       const ctaText = await page.locator('.cta').textContent()
-      // Accept either down-state copy (#546: "<svc> is down/having issues right now.
-      // Get notified when it recovers.") or operational copy ("Get notified when X
-      // goes down") — both are acceptable; we check shape, not the live status.
-      const isDownCopy = /is (down|having issues) right now\.\s*Get notified when it recovers/i.test(ctaText || '')
-      const isOperationalCopy = /Get notified when .* goes down/i.test(ctaText || '')
+      // Accept either down-state copy (#696: "<svc> is down/having issues right now.
+      // Stop refreshing — we'll ping you when it's back.") or operational copy
+      // ("Get notified the next time X goes down.") — check shape, not live status.
+      const isDownCopy = /is (down|having issues) right now\.\s*Stop refreshing/i.test(ctaText || '')
+      const isOperationalCopy = /Get notified the next time .* goes down/i.test(ctaText || '')
       expect(isDownCopy || isOperationalCopy).toBe(true)
 
-      // #547: the primary button is now the zero-friction RSS notify button (both states);
-      // the title copy (#546 benefit framing) is unchanged above.
+      // #696: the primary button is the zero-config Slack-feed button (both states).
       const btnText = (await page.locator('.cta button.btn-primary').textContent()) || ''
-      expect(btnText).toMatch(/Notify me via RSS/i)
+      expect(btnText).toMatch(/Get alerts in Slack/i)
     })
   })
 })

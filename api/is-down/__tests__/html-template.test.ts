@@ -867,20 +867,35 @@ describe('RSS feed surfacing on /is-*-down (#430)', () => {
     }
   })
 
-  it('renders the PRIMARY "Notify me via RSS" button that copies the feed URL (#547)', () => {
+  it('renders the PRIMARY Slack-feed button (#696 — zero-config action is primary)', () => {
     const html = renderPage('claude', mkService(), mkSeo(), [])
-    // #547: RSS is the primary (btn-primary) CTA — the only channel that converted on the
-    // outage day. Lock the exact primary markup + label.
+    // #696: Slack /feed (paste a command into any channel) is the lowest-friction ACTION for the
+    // dev/team audience, so it owns btn-primary. Lock the exact primary markup + label.
     expect(html).toContain(
-      '<button type="button" class="btn btn-primary" data-rss="https://ai-watch.dev/feed/claude" data-svc="claude" onclick="copyRss(this)">🔔 Notify me via RSS</button>',
+      '<button type="button" class="btn btn-primary" data-slack="/feed subscribe https://ai-watch.dev/feed/claude" data-svc="claude" onclick="copySlackFeed(this)">💬 Get alerts in Slack</button>',
+    )
+    expect(html).toContain('function copySlackFeed(b)')
+    expect(html).toContain("gtag('event','copy_slack_feed',{location:'is_down_page',service_id:b.dataset.svc})")
+    // prompt() fallback for insecure-context / writeText-rejection paths
+    expect(html).toContain("prompt('Copy Slack command:',c)")
+  })
+
+  it('renders the SECONDARY RSS button + the action-explicit helper line (#696)', () => {
+    const html = renderPage('claude', mkService(), mkSeo(), [])
+    // RSS is demoted to a secondary (.btn, not .btn-primary) and relabeled away from jargon —
+    // "Copy alert link (RSS)" + a helper line spelling out where to paste it (the #696 fix for the
+    // 9-sessions→0-conversions leak: "Notify me via RSS" copied a URL panic visitors couldn't use).
+    expect(html).toContain(
+      '<button type="button" class="btn" data-rss="https://ai-watch.dev/feed/claude" data-svc="claude" onclick="copyRss(this)">🔗 Copy alert link (RSS)</button>',
     )
     expect(html).toContain('function copyRss(b)')
     expect(html).toContain('navigator.clipboard.writeText(u)')
-    // prompt() fallback for insecure-context / writeText-rejection paths (label text unchanged)
     expect(html).toContain("prompt('Copy RSS URL:',u)")
+    // helper line makes each action's destination explicit
+    expect(html).toMatch(/<p class="cta-help">.*Slack.*paste the command.*RSS.*paste the link/)
   })
 
-  it('demotes the Discord double-opt-in to a de-emphasized secondary text link (#547)', () => {
+  it('demotes the Discord double-opt-in to a de-emphasized secondary text link (#547/#696)', () => {
     const html = renderPage('claude', mkService(), mkSeo(), [])
     // The heavy Discord per-user push keeps the #546 deep-link (scrolls to the Alerts section)
     // but is no longer a btn-primary; it is a .cta-alt text link tagged status_banner_secondary
@@ -890,19 +905,8 @@ describe('RSS feed surfacing on /is-*-down (#430)', () => {
     // No "email" channel exists yet — the link must not advertise one.
     expect(html).toContain('Prefer Discord push alerts?')
     expect(html).not.toContain('email push')
-    // The Discord path must NOT be a btn-primary anchor anymore (RSS owns btn-primary).
+    // The Discord path must NOT be a btn-primary anchor (the Slack button owns btn-primary, #696).
     expect(html).not.toMatch(/<a[^>]*class="btn btn-primary"/)
-  })
-
-  it('renders a "Copy Slack command" button with the per-service /feed subscribe command (#467)', () => {
-    const html = renderPage('claude', mkService(), mkSeo(), [])
-    expect(html).toContain(
-      '<button type="button" class="btn" data-slack="/feed subscribe https://ai-watch.dev/feed/claude" data-svc="claude" onclick="copySlackFeed(this)">Copy Slack command</button>',
-    )
-    expect(html).toContain('function copySlackFeed(b)')
-    expect(html).toContain("gtag('event','copy_slack_feed',{location:'is_down_page',service_id:b.dataset.svc})")
-    // prompt() fallback for insecure-context / writeText-rejection paths
-    expect(html).toContain("prompt('Copy Slack command:',c)")
   })
 
   it('keys data-svc on the service ID, not the page slug, so copy_rss matches other per-service events', () => {

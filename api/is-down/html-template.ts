@@ -266,6 +266,7 @@ button.btn{cursor:pointer;font-family:inherit;line-height:inherit}
 .cta{background:#0d1117;border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:16px 20px;text-align:center;margin:16px 0}
 .cta-title{font-size:14px;font-weight:600;margin-bottom:10px}
 .cta-buttons{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.cta-help{font-size:11.5px;margin-top:8px;color:#8b949e;line-height:1.5}
 .cta-alt{font-size:12px;margin-top:10px;color:#8b949e}
 .cta-alt a{color:#8b949e;text-decoration:underline}
 .cta-alt a:hover{color:#c9d1d9}
@@ -552,24 +553,27 @@ function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string)
     ? `${seo.displayName} is down right now.`
     : `${seo.displayName} is having issues right now.`
   const message = isDown
-    ? `${stateLead} Get notified when it recovers.`
-    : `Get notified when ${seo.displayName} goes down`
-  // #547: the outage-day funnel leaked — 3 clicks on the Discord double-opt-in CTA,
-  // 0 webhook_register; the only channel that converted was the zero-config RSS copy
-  // (copy_rss 3×). So lead with the lowest-friction channel: RSS is the PRIMARY button,
-  // Slack /feed the secondary, and the heavy Discord per-user push (double opt-in) is demoted
-  // to a de-emphasized text link so it no longer out-competes the converting channel for the
-  // click. (copy_rss remains the success proxy; we compare its rate vs the 3→0 baseline.)
-  // data-rss uses the page slug (feed URL is /feed/{slug}); data-svc uses the service ID
-  // so copy_rss keys on the same id as fallback_click / click_service_detail (id and slug
-  // diverge for claude-code, github-copilot, etc.).
+    ? `${stateLead} Stop refreshing — we'll ping you when it's back.`
+    : `Get notified the next time ${seo.displayName} goes down.`
+  // #547/#696: the outage-day funnel leaked — 9 is-down sessions on the 6/11 Claude outage → 0
+  // copy_rss / 0 click_cta_alerts. "Notify me via RSS" reads as power-user jargon (it copies a feed
+  // URL the panic visitor can't use without an RSS reader). So #696 reframes around the lowest-friction
+  // ACTION for this audience: Slack /feed (zero-config — paste a command into any channel) is the
+  // PRIMARY button, the RSS link is secondary (explicitly "paste into Slack/Teams/any reader"), and
+  // the heavy Discord per-user push (double opt-in) stays a de-emphasized text link. A one-line helper
+  // makes each action's destination explicit. Success proxies: copy_slack_feed (primary) + copy_rss
+  // (secondary), compared vs the 3→0 baseline on the next larger-n outage.
+  // data-rss/data-slack use the page slug (feed URL is /feed/{slug}); data-svc uses the service ID
+  // so the events key on the same id as fallback_click / click_service_detail (id and slug diverge
+  // for claude-code, github-copilot, etc.).
   return `<div class="cta">
 <p class="cta-title">${esc(message)}</p>
 <div class="cta-buttons">
-<button type="button" class="btn btn-primary" data-rss="https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" onclick="copyRss(this)">🔔 Notify me via RSS</button>
 <!-- Slack subscribes via its native /feed RSS app (#467) — paste into any channel, zero webhook setup. -->
-<button type="button" class="btn" data-slack="/feed subscribe https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" onclick="copySlackFeed(this)">Copy Slack command</button>
+<button type="button" class="btn btn-primary" data-slack="/feed subscribe https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" onclick="copySlackFeed(this)">💬 Get alerts in Slack</button>
+<button type="button" class="btn" data-rss="https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" onclick="copyRss(this)">🔗 Copy alert link (RSS)</button>
 </div>
+<p class="cta-help">💬 Slack: paste the command into any channel — done. &middot; 🔗 RSS: paste the link into Slack, Teams, or any reader.</p>
 <p class="cta-alt"><a href="https://ai-watch.dev/#settings?focus=alerts" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'status_banner_secondary'})">Prefer Discord push alerts? Set up here &rarr;</a></p>
 </div>
 <script>
@@ -580,8 +584,8 @@ function copyRss(b){
   else{prompt('Copy RSS URL:',u)}
 }
 function copySlackFeed(b){
-  var c=b.dataset.slack;
-  function done(){b.textContent='Copied!';setTimeout(function(){b.textContent='Copy Slack command'},2000);typeof gtag==='function'&&gtag('event','copy_slack_feed',{location:'is_down_page',service_id:b.dataset.svc})}
+  var c=b.dataset.slack, orig=b.textContent;
+  function done(){b.textContent='Copied! Paste into any Slack channel';setTimeout(function(){b.textContent=orig},2200);typeof gtag==='function'&&gtag('event','copy_slack_feed',{location:'is_down_page',service_id:b.dataset.svc})}
   if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(c).then(done).catch(function(){prompt('Copy Slack command:',c)})}
   else{prompt('Copy Slack command:',c)}
 }
