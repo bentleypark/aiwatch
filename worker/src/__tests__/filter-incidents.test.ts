@@ -169,6 +169,67 @@ describe('filterIncidents', () => {
   })
 })
 
+// #683 — exact-component-name incident scoping (Junie on the shared status.jetbrains.ai page).
+// Uses the REAL junie config from SERVICES so a regression that drops `incidentComponents` fails here.
+describe('filterIncidents — incidentComponents exact-name scoping (#683)', () => {
+  const junie = (): ServiceConfig => {
+    const c = SERVICES.find((s) => s.id === 'junie')
+    if (!c) throw new Error('junie config missing')
+    return c
+  }
+
+  it('drops a sibling-only (Grazie) incident not listing Junie — the 2026-06-17 false positive', () => {
+    const inc = mockIncident({
+      id: 'grazie-nlp',
+      title: 'Raised error rates from NLP services',
+      status: 'resolved',
+      componentNames: ['Grazie'],
+    })
+    expect(filterIncidents([inc], junie())).toHaveLength(0)
+  })
+
+  it('keeps a genuine Junie-affecting incident (componentNames includes Junie)', () => {
+    const inc = mockIncident({
+      id: 'junie-auth',
+      title: 'Auth & licensing service issues',
+      componentNames: ['AI Assistant', 'AI Platform', 'Grazie', 'Junie'],
+    })
+    expect(filterIncidents([inc], junie()).map((i) => i.id)).toEqual(['junie-auth'])
+  })
+
+  it('drops an untagged incident (no componentNames) — nothing to match', () => {
+    const inc = mockIncident({ id: 'untagged', title: 'AI Platform LLM APIs outage', componentNames: [] })
+    expect(filterIncidents([inc], junie())).toHaveLength(0)
+  })
+
+  it('uses EXACT (not substring) match — config of "AI Platform" must NOT keep "AI Platform China"', () => {
+    const config = mockConfig({ id: 'x', incidentComponents: ['AI Platform'] })
+    const platform = mockIncident({ id: 'p', title: 'outage', componentNames: ['AI Platform'] })
+    const china = mockIncident({ id: 'c', title: 'outage', componentNames: ['AI Platform China'] })
+    const kept = filterIncidents([platform, china], config).map((i) => i.id)
+    expect(kept).toEqual(['p']) // exact 'AI Platform' kept; 'AI Platform China' dropped (no collision)
+  })
+
+  it('match is case-insensitive', () => {
+    const config = mockConfig({ id: 'x', incidentComponents: ['Junie'] })
+    const inc = mockIncident({ id: 'j', title: 'x', componentNames: ['junie'] })
+    expect(filterIncidents([inc], config)).toHaveLength(1)
+  })
+
+  it('incidentExclude is still applied first (excluded → dropped even if the component matches)', () => {
+    const config = mockConfig({ id: 'x', incidentComponents: ['Junie'], incidentExclude: ['maintenance'] })
+    const inc = mockIncident({ id: 'm', title: 'Scheduled maintenance', componentNames: ['Junie'] })
+    expect(filterIncidents([inc], config)).toHaveLength(0) // exclude runs before the component gate
+  })
+
+  it('includeUntaggedIncidents does NOT resurrect an untagged incident for an incidentComponents-only service', () => {
+    // The real safety guarantee for the "page-wide incident hidden?" concern: the untagged-include
+    // path early-returns unless incidentKeywords is set, and junie uses incidentComponents instead.
+    const untagged = mockIncident({ id: 'pagewide', title: 'AI Platform LLM APIs outage', status: 'identified', componentNames: [] })
+    expect(includeUntaggedIncidents([], [untagged], junie(), [], 'major')).toHaveLength(0)
+  })
+})
+
 describe('includeUntaggedIncidents', () => {
   const apiIncident = mockIncident({
     id: 'api-inc',

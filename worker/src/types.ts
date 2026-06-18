@@ -94,6 +94,13 @@ export interface ServiceConfig {
   rssFeedUrl?: string
   incidentKeywords?: string[]
   incidentExclude?: string[]
+  // #683 — exact-component-name incident scoping for a SHARED status page where this is the only
+  // AIWatch service but siblings' component incidents leak (Junie on status.jetbrains.ai: a
+  // Grazie-only incident must NOT attribute to Junie). When set, filterIncidents keeps an incident
+  // only if its `componentNames` contains an EXACT (case-insensitive) match — NOT substring, so
+  // 'AI Platform' can't collide with the sibling 'AI Platform China'. Takes precedence over
+  // incidentKeywords; an untagged incident (no componentNames) matches nothing and is dropped.
+  incidentComponents?: string[]
   incidentIoBaseUrl?: string
   statusComponent?: string
   statusComponentId?: string
