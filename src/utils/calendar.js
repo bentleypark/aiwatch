@@ -55,11 +55,38 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, cu
   // adding incidents would introduce noise from unrelated components.
   // incident.io (14-day) and others: supplement Phase 1 with keyword-filtered incidents.
   if (!(dailyImpact && days === 30)) {
+    const windowStart = new Date(today.getTime() - (days - 1) * 86_400_000)
     ;(incidents ?? []).forEach((inc) => {
       if (!inc.startedAt) return
-      const key = toLocalDateKey(new Date(inc.startedAt))
-      // Same impact→cell map for ongoing and resolved (minor/null/unknown → 'minor' yellow).
-      escalate(dayStatus, key, impactToCellStatus(inc.impact))
+      const start = new Date(inc.startedAt)
+      if (isNaN(start.getTime())) return
+      const status = impactToCellStatus(inc.impact) // same map for ongoing/resolved (minor/null → yellow)
+      // dailyImpact services (incident.io 14-day): the official per-day record (Phase 1) owns the
+      // days — supplement only the START day to avoid spanning noise across unrelated components.
+      // Ongoing incidents likewise paint only the start day here (Phase 3 extends them to today).
+      // no-dailyImpact services (RSS/JSON-only: Bedrock/Azure) with a RESOLVED incident have no
+      // per-day record, so the incident must span its OWN days startedAt→resolvedAt (window-clamped),
+      // else a multi-day outage shows only its start day (#691 — surfaced by #677's real durations).
+      if (dailyImpact || !inc.resolvedAt) {
+        escalate(dayStatus, toLocalDateKey(start), status)
+        return
+      }
+      const end = new Date(inc.resolvedAt)
+      // A malformed OR inverted (resolvedAt < startedAt) range can't be spanned — paint the start
+      // day only, never nothing (an inverted range would make the loop run zero times otherwise).
+      if (isNaN(end.getTime()) || end.getTime() < start.getTime()) {
+        escalate(dayStatus, toLocalDateKey(start), status)
+        return
+      }
+      const from = start < windowStart ? windowStart : start
+      const endClamped = end.getTime() > today.getTime() ? today : end // guard a future resolvedAt
+      const endKey = toLocalDateKey(endClamped)
+      // step day-by-day (noon-anchored, DST-safe) from start → resolved, inclusive
+      for (let cur = new Date(from.getFullYear(), from.getMonth(), from.getDate(), 12);
+           toLocalDateKey(cur) <= endKey;
+           cur.setDate(cur.getDate() + 1)) {
+        escalate(dayStatus, toLocalDateKey(cur), status)
+      }
     })
   }
 
