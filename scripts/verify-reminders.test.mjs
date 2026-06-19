@@ -48,6 +48,22 @@ test('parseVerifyAfter — skips calendar-invalid dates (rollover guard)', () =>
   assert.equal(parseVerifyAfter('verify-after 2026-02-28 ok')[0].date, '2026-02-28')
 })
 
+test('parseVerifyAfter — skips a CHECKED checkbox line; unchecked + prose still fire (#541/#586)', () => {
+  // A done item (`- [x]`) must STOP firing — ticking the box is the SSOT "done" action.
+  assert.deepEqual(parseVerifyAfter('- [x] **verify-after 2026-06-12** — done'), [])
+  assert.deepEqual(parseVerifyAfter('* [X] verify-after 2026-06-12 done (alt marker + caps)'), [])
+  assert.deepEqual(parseVerifyAfter('+ [x] verify-after 2026-06-12 done (+ marker)'), [])
+  assert.deepEqual(parseVerifyAfter('   - [x] verify-after 2026-06-12 indented done'), [])
+  // Unchecked + prose lines are unaffected.
+  assert.equal(parseVerifyAfter('- [ ] verify-after 2026-07-02 still open')[0].date, '2026-07-02')
+  assert.equal(parseVerifyAfter('Open: verify-after 2026-07-02 (prose ref)')[0].date, '2026-07-02')
+  // GFM needs a space after the marker — `-[x]` is literal text (NOT a checked task) → must still fire.
+  assert.equal(parseVerifyAfter('-[x] verify-after 2026-07-02 not a real checkbox')[0].date, '2026-07-02')
+  // The #586 shape: one done (skipped) + one open (fires) → only the open date returns.
+  const body = '- [x] **verify-after 2026-06-12** — daily cron counters\n- [ ] **verify-after 2026-07-02** — archive month'
+  assert.deepEqual(parseVerifyAfter(body), [{ date: '2026-07-02', note: 'archive month' }])
+})
+
 test('isValidIsoDate', () => {
   assert.equal(isValidIsoDate('2026-06-03'), true)
   assert.equal(isValidIsoDate('2026-02-29'), false) // 2026 not a leap year
