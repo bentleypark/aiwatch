@@ -147,46 +147,81 @@ describe('calculateAIWatchScore', () => {
     expect(scoreUnprobed(makeSvc({ incidents })).metrics.mttrHours).toBe(3)
   })
 
-  it('applies fallback + 0.9 penalty when uptime is null', () => {
-    const withUptime = scoreUnprobed(makeSvc({ uptime30d: 100, incidents: [makeIncident(1)] }))
+  it('#713: no official uptime + no probe → score WITHHELD (null), confidence low', () => {
+    // Only 2 of 4 components (incidents+recovery) measured → over-scores under the rescale, so the
+    // figure is withheld (null) rather than surfaced. The breakdown still shows the partial computation.
     const noUptime = scoreUnprobed(makeSvc({ uptime30d: null, incidents: [makeIncident(1)] }))
-
-    expect(noUptime.confidence).toBe('medium')
+    expect(noUptime.confidence).toBe('low')
+    expect(noUptime.score).toBeNull()
+    expect(noUptime.grade).toBeNull()
     expect(noUptime.breakdown.uptime).toBeNull()
-    expect(noUptime.score!).toBeLessThan(withUptime.score!)
+    expect(noUptime.breakdown.incidents).toBeGreaterThan(0)   // partial breakdown still computed (transparency)
   })
 
-  it('returns estimated score when no uptime and no incidents', () => {
-    // Base = (36 + 25 + 15) * 0.9 = 68.4 → scaled to 100: 68.4 * 1.25 = 85.5 → 86
-    // After #260/#261 threshold tightening (excellent ≥90), 86 is 'good' not 'excellent'
+  it('#713: no official uptime + no probe → still null even with a clean record (no fabricated 100)', () => {
     const result = scoreUnprobed(makeSvc({ uptime30d: null, incidents: [] }))
-    expect(result.score).toBe(86)
-    expect(result.grade).toBe('good')
-    expect(result.confidence).toBe('medium')
-    expect(result.breakdown.uptime).toBeNull()
+    expect(result.score).toBeNull()        // NOT a baseless 100 (and no assumed-99.5%/86 either) — withheld
+    expect(result.grade).toBeNull()
+    expect(result.confidence).toBe('low')
+    expect(result.breakdown.incidents).toBe(25)  // breakdown still shows what we measured
+    expect(result.breakdown.recovery).toBe(15)
   })
 
-  it('applies 0.9 penalty for estimate uptimeSource', () => {
-    const official = scoreUnprobed(makeSvc({ uptime30d: 99.5 }))
-    const estimate = scoreUnprobed(makeSvc({ uptime30d: 99.5, uptimeSource: 'estimate' }))
-
-    expect(estimate.confidence).toBe('medium')
-    expect(estimate.score!).toBeLessThan(official.score!)
-    expect(estimate.score).toBe(Math.round(official.score! * 0.9))
+  it('#713: no official uptime BUT a probe → score IS emitted (confidence medium, rankable)', () => {
+    const probed = scoreWithProbe(makeSvc({ uptime30d: null, incidents: [] }), probeAvailable({ p50: 200, cvCombined: 0.4 }))
+    expect(probed.confidence).toBe('medium')      // a real responsiveness signal → enough to score
+    expect(probed.score).not.toBeNull()
+    expect(probed.grade).not.toBeNull()
+    expect(probed.breakdown.uptime).toBeNull()
+    expect(probed.breakdown.responsiveness).not.toBeNull()
   })
 
-  it('never returns null score for any input combination', () => {
-    const cases = [
+  it('#713: no official uptime + INSUFFICIENT probe (<7d data) → still null/low (no usable responsiveness yet)', () => {
+    // An insufficient probe is NOT a responsiveness signal (no component, only a 5% penalty), so a
+    // no-uptime service in its probe warm-up week has only incidents+recovery measured → withheld.
+    // Intended: it re-appears once ≥7d of probe data accumulates (→ confidence medium). Symmetric with
+    // a no-uptime+no-probe service; the difference from an official-uptime service (which stays 'high'
+    // with an insufficient probe) is that here there's no uptime to anchor the score.
+    const r = scoreWithProbe(makeSvc({ uptime30d: null, incidents: [] }), probeInsufficient)
+    expect(r.confidence).toBe('low')
+    expect(r.score).toBeNull()
+    expect(r.grade).toBeNull()
+    expect(r.breakdown.responsiveness).toBeNull()
+  })
+
+  it('#713: uptime source no longer affects the score (the estimate ×0.9 penalty is removed)', () => {
+    const official = scoreUnprobed(makeSvc({ uptime30d: 99.5, uptimeSource: 'official' }))
+    const platform = scoreUnprobed(makeSvc({ uptime30d: 99.5, uptimeSource: 'platform_avg' }))
+    expect(official.confidence).toBe('high')           // any official uptime present → high
+    expect(platform.score).toBe(official.score)        // source is irrelevant to the score now
+    expect(platform.confidence).toBe('high')
+  })
+
+  it('#713: null score ONLY for confidence-low (no uptime + no probe); non-null otherwise', () => {
+    // confidence 'low' (no official uptime AND no probe) → score withheld
+    for (const svc of [
       makeSvc({ uptime30d: null, incidents: [] }),
       makeSvc({ uptime30d: null, incidents: [makeIncident(1)] }),
+    ]) {
+      const result = scoreUnprobed(svc)
+      expect(result.score).toBeNull()
+      expect(result.grade).toBeNull()
+      expect(result.confidence).toBe('low')
+    }
+    // any official uptime present → confidence 'high' → real score
+    for (const svc of [
       makeSvc({ uptime30d: 0, incidents: [] }),
       makeSvc({ uptime30d: 100, incidents: [] }),
-    ]
-    for (const svc of cases) {
+    ]) {
       const result = scoreUnprobed(svc)
       expect(result.score).not.toBeNull()
       expect(result.grade).not.toBeNull()
+      expect(result.confidence).toBe('high')
     }
+    // no uptime but a probe → confidence 'medium' → real score
+    const probed = scoreWithProbe(makeSvc({ uptime30d: null, incidents: [] }), probeAvailable({ p50: 200, cvCombined: 0.4 }))
+    expect(probed.score).not.toBeNull()
+    expect(probed.confidence).toBe('medium')
   })
 
   it('filters incidents to 30 days only', () => {
@@ -311,7 +346,7 @@ describe('calculateAIWatchScore', () => {
   it('full Responsiveness path scores lower than probe-less perfect service when probe metrics are weak', () => {
     const probed = scoreWithProbe(makeSvc({ uptime30d: 100 }), probeAvailable({ p50: 500, p95: 1000, cvCombined: 0.8, validDays: 7 }))
     const probeLess = scoreUnprobed(makeSvc({ uptime30d: 100 }))
-    expect(probed.score).toBeLessThan(probeLess.score)
+    expect(probed.score!).toBeLessThan(probeLess.score!)
   })
 
   // ── Real-world calibration locks (issue #132 reference data) ──
@@ -328,7 +363,7 @@ describe('calculateAIWatchScore', () => {
     // speed=10*exp(-1409/400)≈0.30, stability=10*exp(-0.44/0.5)≈4.14 → ~4.4
     const slow = scoreWithProbe(makeSvc({ uptime30d: 99.0, incidents: [makeIncident(2, '4h')] }), probeAvailable({ p50: 1409, p95: 2860, cvCombined: 0.44, validDays: 7 }))
     const fast = scoreWithProbe(makeSvc({ uptime30d: 99.0, incidents: [makeIncident(2, '4h')] }), probeAvailable({ p50: 100, p95: 200, cvCombined: 0.44, validDays: 7 }))
-    expect(slow.score).toBeLessThan(fast.score)
+    expect(slow.score!).toBeLessThan(fast.score!)
   })
 
   // ── Boundary tests ──

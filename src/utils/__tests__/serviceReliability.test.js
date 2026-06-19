@@ -1,36 +1,39 @@
 import { describe, it, expect } from 'vitest'
-import { isEstimateNoData, isEstimateNoIncidents, isUnreliableUptime, hasReliableScoreData } from '../serviceReliability'
+import { noOfficialUptime, isUnreliableUptime, hasReliableScoreData } from '../serviceReliability'
 
-// #707 — isEstimateNoIncidents distinguishes "estimate source, no impactful incident in window"
-// (honest wording: "No reliability incidents in this period") from the genuinely-unavailable /
-// frozen-stale cases ("Not provided"). A null-impact compliance advisory is NOT impactful, so the
-// worker leaves uptime30d null and the service lands here.
-describe('serviceReliability predicates (#707 isEstimateNoIncidents)', () => {
-  const estimateNoData = { uptimeSource: 'estimate', uptime30d: null }
-  const estimateWithData = { uptimeSource: 'estimate', uptime30d: 99 }
-  const estimateNoDataStale = { uptimeSource: 'estimate', uptime30d: null, incidentSourceStale: true }
-  const official = { uptimeSource: 'official', uptime30d: null }
+// #713 — AIWatch no longer invents a uptime % for services without an official figure (the old
+// `uptimeSource: 'estimate'` was removed). A no-official-uptime service carries `uptime30d: null` and
+// is incident-tracked + scored on its measured components: shown as "No official uptime —
+// incident-tracked". A frozen/stale feed is a separate case. Ranking uses `scoreConfidence`:
+//   high   = has an official uptime %
+//   medium = no uptime, but a real probe (responsiveness) signal  → still rankable
+//   low    = NEITHER uptime nor probe (only incidents+recovery)    → over-scores, NOT ranked
+describe('serviceReliability predicates (#713)', () => {
+  const official = { uptimeSource: 'official', uptime30d: 99.5, scoreConfidence: 'high' }
+  const probedNoUptime = { uptime30d: null, scoreConfidence: 'medium' }   // Gemini/xAI-shaped (probe, no uptime)
+  const thinNoUptime = { uptime30d: null, scoreConfidence: 'low' }        // Bedrock/Azure-shaped (no uptime, no probe)
+  const staleService = { uptime30d: 99.9, scoreConfidence: 'high', incidentSourceStale: true } // frozen feed
 
-  it('true for an estimate service with a working source but null uptime (no impactful incident)', () => {
-    expect(isEstimateNoIncidents(estimateNoData)).toBe(true)
+  it('noOfficialUptime: true when uptime is null and the feed is NOT stale', () => {
+    expect(noOfficialUptime(probedNoUptime)).toBe(true)
+    expect(noOfficialUptime(thinNoUptime)).toBe(true)
   })
 
-  it('false once the source is frozen/stale — then it really is unknown, not "no incidents"', () => {
-    expect(isEstimateNoData(estimateNoDataStale)).toBe(true)       // still estimate-no-data
-    expect(isEstimateNoIncidents(estimateNoDataStale)).toBe(false) // but NOT "no incidents" (stale)
+  it('noOfficialUptime: false for a frozen/stale feed, and for a real official uptime %', () => {
+    expect(noOfficialUptime({ uptime30d: null, incidentSourceStale: true })).toBe(false)
+    expect(noOfficialUptime(official)).toBe(false)
   })
 
-  it('false for an estimate service that DOES have a measured uptime', () => {
-    expect(isEstimateNoIncidents(estimateWithData)).toBe(false)
+  it('isUnreliableUptime: true for any null uptime OR a stale feed; false with a real %', () => {
+    expect(isUnreliableUptime(probedNoUptime)).toBe(true)   // null uptime → blank the uptime display
+    expect(isUnreliableUptime(staleService)).toBe(true)     // stale → frozen, not current
+    expect(isUnreliableUptime(official)).toBe(false)
   })
 
-  it('false for a non-estimate (official) service with null uptime', () => {
-    expect(isEstimateNoIncidents(official)).toBe(false)
-  })
-
-  it('does not change the existing exclude-from-ranking semantics', () => {
-    // estimate-no-data (incl. our compliance-advisory-only Bedrock) stays excluded from score ranking
-    expect(isUnreliableUptime(estimateNoData)).toBe(true)
-    expect(hasReliableScoreData(estimateNoData)).toBe(false)
+  it('hasReliableScoreData: rankable unless stale, and unless confidence is "low" (no uptime + no probe)', () => {
+    expect(hasReliableScoreData(official)).toBe(true)         // official uptime → high → ranked
+    expect(hasReliableScoreData(probedNoUptime)).toBe(true)   // #713 — probe signal (medium) → ranked
+    expect(hasReliableScoreData(thinNoUptime)).toBe(false)    // no uptime + no probe (low) → NOT ranked
+    expect(hasReliableScoreData(staleService)).toBe(false)    // stale feed → NOT ranked
   })
 })

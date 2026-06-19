@@ -2651,7 +2651,10 @@ export default {
             status: svc.status, latency: svc.latency, uptime30d: svc.uptime30d,
             uptimeSource: svc.uptimeSource, lastChecked: svc.lastChecked,
             incidentCount: (svc.incidents ?? []).length,
-            aiwatchScore: scoreData.score, scoreGrade: scoreData.grade,
+            // #713 — scoreConfidence disambiguates a null aiwatchScore (low-confidence: no official
+            // uptime + no probe → score withheld) from a missing/errored value, matching the
+            // single-service response below.
+            aiwatchScore: scoreData.score, scoreGrade: scoreData.grade, scoreConfidence: scoreData.confidence,
           }
         }),
         cachedAt: cached.cachedAt,

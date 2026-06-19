@@ -8,7 +8,7 @@ import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { UptimeSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
-import { isUnreliableUptime, isEstimateNoIncidents } from '../utils/serviceReliability'
+import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -75,14 +75,13 @@ function UptimeBar({ service, sla, t }) {
         />
       </div>
       <span className={`w-16 shrink-0 text-right text-xs mono font-medium ${textColorClass}`}
-            title={!hasUptime ? t(isEstimateNoIncidents(service) ? 'uptime.noIncidents.tooltip' : 'uptime.unavailable.tooltip') : undefined}>
+            title={!hasUptime ? t(noOfficialUptime(service) ? 'uptime.noOfficial.tooltip' : 'uptime.unavailable.tooltip') : undefined}>
         {hasUptime ? `${uptime.toFixed(2)}%` : t('uptime.unavailable.short')}
       </span>
       <span className="w-8 shrink-0 text-right text-[9px] mono text-[var(--text2)]"
             title={service.uptimeSource === 'official' ? t('uptime.sub.official')
-              : service.uptimeSource === 'platform_avg' ? t('uptime.sub.platform_avg')
-              : service.uptimeSource === 'estimate' ? t('uptime.sub.estimate') : undefined}>
-        {!hasUptime ? '' : service.uptimeSource === 'official' ? 'off' : service.uptimeSource === 'platform_avg' ? 'avg' : service.uptimeSource === 'estimate' ? 'est' : ''}
+              : service.uptimeSource === 'platform_avg' ? t('uptime.sub.platform_avg') : undefined}>
+        {!hasUptime ? '' : service.uptimeSource === 'official' ? 'off' : service.uptimeSource === 'platform_avg' ? 'avg' : ''}
       </span>
     </div>
   )

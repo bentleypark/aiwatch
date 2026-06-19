@@ -7,8 +7,7 @@ import { isProbeHealthy, type ProbeSnapshot } from './probe'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
-import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, computeUptimeFromIncidents, estimateUptimeFromIncidents, enrichIncidentIoText } from './parsers/incident-io'
-import { readArchivedIncidentsForService } from './monthly-archive'
+import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
   AISTUDIO_ENDPOINT,
@@ -583,14 +582,6 @@ async function readFlashdutyStatus(kv: KVNamespace, config: ServiceConfig, base:
   return result
 }
 
-// #653 — union two incident lists, deduped by id with the LIVE entry winning (it carries the
-// up-to-date status/timeline; the archive copy is a frozen snapshot). Used to extend an estimate
-// service's uptime measurement set to 90 days without mutating its live incident list.
-function mergeIncidentsById(live: Incident[], archived: Incident[]): Incident[] {
-  const seen = new Set(live.map((i) => i.id))
-  return [...live, ...archived.filter((a) => !seen.has(a.id))]
-}
-
 /** #689 — Classify a non-OK status-page API response (a real HTTP status from `summaryRes.status`).
  *  A 4xx means the page is gone / deactivated / misconfigured (the SOURCE is dead, not the service) →
  *  treat as a stale dead-source (operational, out of rankings), NOT degraded. A 5xx is transient → the
@@ -728,7 +719,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
 
       // Uptime%: Statuspage uptimeData > incident.io component_uptimes > incident duration estimate
       let uptimeValue: number | null = null
-      let uptimeSrc: 'official' | 'estimate' | undefined
+      let uptimeSrc: 'official' | undefined
       if (uptimeResult?.uptimePercent != null) {
         uptimeValue = uptimeResult.uptimePercent
         uptimeSrc = 'official'
@@ -737,20 +728,12 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         if (ioUptime != null) {
           uptimeValue = ioUptime
           uptimeSrc = 'official'
-        } else {
-          // Fallback for services without component_uptimes (Replicate, ElevenLabs).
-          // #653 — estimateUptimeFromIncidents returns null unless there's an impactful incident, so an
-          // informational-only feed blanks the uptime instead of asserting a baseless 100% (these
-          // services keep their real Score/ranking from component+probe data — only the uptime display
-          // blanks). No 90-day archive merge here: incident.io returns a multi-day window, not a short
-          // RSS feed, so the live set already covers the measurement window (unlike bedrock/azure).
-          uptimeValue = estimateUptimeFromIncidents(filtered)
-          uptimeSrc = 'estimate'
         }
-      } else if (config.incidentIoComponentId) {
-        uptimeValue = estimateUptimeFromIncidents(filtered)
-        uptimeSrc = 'estimate'
+        // #713 — NO estimate fallback: if incident.io exposes no component_uptimes for this component
+        // (Replicate/ElevenLabs edge), leave uptime null rather than inventing a value. The service is
+        // scored on its incidents + recovery (+ probe), and the uptime display reads "No official uptime".
       }
+      // (a bare incidentIoComponentId with no uptime HTML also leaves uptime null — same #713 rule.)
 
       // Filter out active incidents when component is operational (#228)
       filtered = filterByComponentStatus(filtered, svcStatus, config)
@@ -871,21 +854,15 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         await resetFetchFailure(kv, config.id)
         const incidents = parseAwsHealthEvents(json, config.awsHealthApi.service)
         const filtered = filterIncidents(incidents, config)
-        // #653 — estimate uptime over the 90-day live∪archive set (card incident COUNT stays the live
-        // `filtered`; only the uptime% spans 90d). `estimateUptimeFromIncidents` returns null unless the
-        // set has an IMPACTFUL incident, so an informational-only / empty feed yields "— Not provided"
-        // instead of a baseless 100%. `uptimeSource: 'estimate'` is set even when the value is null so
-        // the dashboard gate (`isEstimateNoData` = estimate + null uptime) excludes it.
-        const merged90 = kv ? mergeIncidentsById(filtered, await readArchivedIncidentsForService(kv, config.id, new Date())) : filtered
-        const uptimeEst = estimateUptimeFromIncidents(merged90)
+        // #713 — AWS Health is an incident feed, NOT a rolling uptime %. We do NOT invent an estimate:
+        // uptime stays null (display: "No official uptime — incident-tracked") and the Score is computed
+        // on incidents + recovery only. The honest "official-first, no fabricated value" position.
         return {
           ...base,
           status: deriveAwsStatus(filtered),
           latency: config.category === 'api' ? latency : null,
           incidents: filtered,
           calendarDays: 14,
-          uptimeSource: 'estimate' as const,
-          ...(uptimeEst != null ? { uptime30d: uptimeEst } : {}),
         }
       }
 
@@ -905,17 +882,14 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         await resetFetchFailure(kv, config.id)
         const incidents = parseAwsRssIncidents(await rssRes.text())
         const filtered = filterIncidents(incidents, config)
-        // #653 — same 90-day live∪archive estimate as the AWS RSS path above (card count stays live).
-        const merged90 = kv ? mergeIncidentsById(filtered, await readArchivedIncidentsForService(kv, config.id, new Date())) : filtered
-        const uptimeEst = estimateUptimeFromIncidents(merged90)
+        // #713 — Azure RSS is an incident feed, not a rolling uptime %. No invented estimate: uptime
+        // stays null ("No official uptime — incident-tracked"), Score computed on incidents + recovery.
         return {
           ...base,
           status: deriveAwsStatus(filtered),
           latency: config.category === 'api' ? latency : null,
           incidents: filtered,
           calendarDays: 14,
-          uptimeSource: 'estimate' as const,
-          ...(uptimeEst != null ? { uptime30d: uptimeEst } : {}),
         }
       }
 

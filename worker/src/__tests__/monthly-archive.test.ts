@@ -10,7 +10,6 @@ import {
   buildMonthlyArchive,
   accumulateMonthlyIncidents,
   accumulateIncidentsOnlyIfChanged,
-  readArchivedIncidentsForService,
   buildPartialIncidentArchive,
   parseDurationMin,
   summarizeSecurityAlerts,
@@ -1415,47 +1414,5 @@ describe('buildPartialIncidentArchive (#587)', () => {
     const out = buildPartialIncidentArchive('2026-06', acc)
     expect(out.services.bedrock.incidentList[0]).not.toBe(entry)
     expect(out.services.bedrock.incidentList[0]).toEqual(entry)
-  })
-})
-
-describe('readArchivedIncidentsForService (#653 — 90d estimate-uptime source)', () => {
-  const mkKV = (seed: Record<string, string> = {}) =>
-    ({ get: async (k: string) => seed[k] ?? null } as unknown as KVNamespace)
-  const now = new Date('2026-06-14T00:00:00Z')
-  const monthly = (svcId: string, incidents: unknown[]) =>
-    JSON.stringify({ lastUpdated: now.toISOString(), services: { [svcId]: { count: incidents.length, totalMinutes: 0, longestMinutes: 0, dates: [], incidentIds: [], durations: {}, incidents } } })
-
-  it('reads current + previous 2 months and maps entries to Incident[] (impact + duration carried)', async () => {
-    const kv = mkKV({
-      'incidents:monthly:2026-06': monthly('bedrock', [
-        { id: 'a', title: 'Endpoints — down', startedAt: '2026-06-02T10:00:00Z', resolvedAt: '2026-06-02T11:00:00Z', durationMin: 60, finalStatus: 'resolved', impact: 'major' },
-      ]),
-      'incidents:monthly:2026-04': monthly('bedrock', [
-        { id: 'b', title: 'Info notice', startedAt: '2026-04-01T10:00:00Z', resolvedAt: null, durationMin: 0, finalStatus: 'investigating', impact: null },
-      ]),
-    })
-    const out = await readArchivedIncidentsForService(kv, 'bedrock', now)
-    expect(out.map((i) => i.id).sort()).toEqual(['a', 'b'])
-    const a = out.find((i) => i.id === 'a')!
-    expect(a.impact).toBe('major')
-    expect(a.status).toBe('resolved')
-    expect(a.duration).toBe('1h 0m') // reconstructed from durationMin=60
-    const b = out.find((i) => i.id === 'b')!
-    expect(b.impact).toBeNull()       // informational
-    expect(b.duration).toBeNull()     // durationMin 0 → no duration string
-  })
-
-  it('treats a pre-#653 entry without impact as null (no fabricated outage)', async () => {
-    const kv = mkKV({
-      'incidents:monthly:2026-06': monthly('bedrock', [
-        { id: 'old', title: 'Legacy', startedAt: '2026-06-02T10:00:00Z', resolvedAt: null, durationMin: 0, finalStatus: 'investigating' /* no impact field */ },
-      ]),
-    })
-    const out = await readArchivedIncidentsForService(kv, 'bedrock', now)
-    expect(out[0].impact).toBeNull()
-  })
-
-  it('returns [] when no archive exists for the service', async () => {
-    expect(await readArchivedIncidentsForService(mkKV(), 'bedrock', now)).toEqual([])
   })
 })
