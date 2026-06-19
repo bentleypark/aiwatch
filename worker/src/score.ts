@@ -4,8 +4,10 @@ import type { ProbeSummary, ServiceStatus } from './types'
 import { INCIDENT_IO_IMPACT_WEIGHTS } from './parsers/impact-weights'
 
 export interface AIWatchScore {
-  score: number
-  grade: 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
+  // #713 — null for a 'low'-confidence service (no official uptime AND no probe): scored on only
+  // incidents+recovery, which over-scores under the rescale, so we withhold the figure entirely.
+  score: number | null
+  grade: 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable' | null
   confidence: 'high' | 'medium' | 'low'
   breakdown: {
     uptime: number | null
@@ -42,11 +44,15 @@ export const REFERENCE_CV = 0.5
 export const MIN_VALID_DAYS = 7
 export const P50_FLOOR_MS = 50 // prevents bimodal distributions (e.g., Claude CDN routing) from dominating
 
-// Score totals — base (uptime + incidents + recovery) maxes at 80, leaving 20 for Responsiveness.
-// Services without Responsiveness data rescale base 80 → 100 to keep the 0–100 contract uniform.
-const BASE_SCORE_MAX = 80
+// Component maxes (sum = 100 when all four are present). #713 — the score is computed on the
+// components we can actually MEASURE and rescaled to 100 by their AVAILABLE max, so a missing
+// component (no official uptime, or no probe) is simply omitted — never filled with an assumed/
+// estimated value. This generalizes the old "no-probe rescale 80→100" to "no-uptime" too.
+const UPTIME_SCORE_MAX = 40
+const INCIDENTS_SCORE_MAX = 25
+const RECOVERY_SCORE_MAX = 15
+const RESPONSIVENESS_SCORE_MAX = 20
 const TOTAL_SCORE_MAX = 100
-const NO_PROBE_RESCALE = TOTAL_SCORE_MAX / BASE_SCORE_MAX // 1.25
 const INSUFFICIENT_PROBE_PENALTY = 0.95 // 5% confidence penalty for probed services lacking ≥7d data
 
 function parseDurationMin(d: string): number {
@@ -178,55 +184,64 @@ export function calculateAIWatchScore(
     ? 15 * Math.exp(-mttrHours / 4)
     : impactfulIncidents30d.length > 0 ? 0 : 15
 
-  // Base score (uptime + incidents + recovery)
-  let baseScore: number
-  let confidence: 'high' | 'medium' | 'low'
-  const isEstimate = service.uptimeSource === 'estimate'
-
-  if (hasUptime && !isEstimate) {
-    baseScore = uptimeScore! + incidentScore + recoveryScore
-    confidence = 'high'
-  } else if (hasUptime && isEstimate) {
-    baseScore = (uptimeScore! + incidentScore + recoveryScore) * 0.9
-    confidence = 'medium'
-  } else {
-    // No uptime data → assume industry average (99.5% on new 40-pt scale = 36) + 10% penalty
-    const assumedUptime = 36 // (0.995 - 0.95) / 0.05 * 40
-    baseScore = (assumedUptime + incidentScore + recoveryScore) * 0.9
-    confidence = 'medium'
-  }
-
-  // Combine base with probe-aware tail. Exhaustive switch — adding a new ProbeContext kind
-  // is a compile error here until the new branch is handled. Responsiveness math lives inside
-  // the 'available' case so all probe-kind handling has a single source of truth.
-  let score: number
+  // Responsiveness (probe) — compute first so the rescale below knows whether it's an available
+  // component. Exhaustive switch — adding a new ProbeContext kind is a compile error until handled.
   let responsivenessScore: number | null = null
   let summary: ProbeSummary | null = null
+  let probeAvailable = false
+  let probePenalty = 1
   switch (probe.kind) {
     case 'available': {
       summary = probe.summary
       const { speed, stability } = computeResponsiveness(summary)
       responsivenessScore = speed + stability
-      score = baseScore + responsivenessScore
+      probeAvailable = true
       break
     }
     case 'insufficient':
-      score = baseScore * NO_PROBE_RESCALE * INSUFFICIENT_PROBE_PENALTY
+      // Probe exists but <7d valid data → no responsiveness component + a 5% confidence penalty.
+      probePenalty = INSUFFICIENT_PROBE_PENALTY
       break
     case 'unsupported':
     case 'unavailable':
-      score = baseScore * NO_PROBE_RESCALE
       break
     default:
       assertNever(probe)
   }
 
-  score = Math.round(Math.max(0, Math.min(100, score)))
-  if (score < 1) score = 0
+  // #713 — sum the AVAILABLE component scores and rescale to 100 by their available max. A service
+  // with no official uptime omits the uptime component entirely (no assumed/estimated value); a
+  // service with no probe omits responsiveness (the pre-#713 80→100 rescale, now a special case).
+  // Backward-compatible: uptime+probe → /100 (unchanged); uptime, no probe → /80 = ×1.25 (unchanged).
+  let sumScores = incidentScore + recoveryScore
+  let availableMax = INCIDENTS_SCORE_MAX + RECOVERY_SCORE_MAX
+  if (hasUptime) {
+    sumScores += uptimeScore!
+    availableMax += UPTIME_SCORE_MAX
+  }
+  if (probeAvailable) {
+    sumScores += responsivenessScore!
+    availableMax += RESPONSIVENESS_SCORE_MAX
+  }
+  let scoreNum = (sumScores / availableMax) * TOTAL_SCORE_MAX * probePenalty
+
+  // Confidence by data completeness — official uptime is the strongest signal; a service scored on
+  // only incidents + recovery (no official uptime, no probe — e.g. Bedrock/Azure) is 'low'.
+  const confidence: 'high' | 'medium' | 'low' = hasUptime ? 'high' : probeAvailable ? 'medium' : 'low'
+
+  scoreNum = Math.round(Math.max(0, Math.min(100, scoreNum)))
+  if (scoreNum < 1) scoreNum = 0
+
+  // #713 — a 'low'-confidence service (NEITHER official uptime NOR a probe — e.g. Bedrock/Azure) is
+  // scored on only incidents + recovery (2 of 4 components), which over-scores under the rescale. We do
+  // NOT surface that figure: emit a null score/grade (the breakdown + confidence stay so consumers see
+  // WHY). This keeps it out of the ranking AND the detail-page score card — no hidden/misleading number.
+  const score = confidence === 'low' ? null : scoreNum
+  const grade = score === null ? null : scoreToGrade(score)
 
   return {
     score,
-    grade: scoreToGrade(score),
+    grade,
     confidence,
     breakdown: {
       uptime: uptimeScore != null ? Math.round(uptimeScore * 10) / 10 : null,

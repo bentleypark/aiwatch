@@ -8,7 +8,7 @@ import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
-import { isUnreliableUptime, isEstimateNoIncidents } from '../utils/serviceReliability'
+import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
 import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionSwitchable, ALL_SERVICES_FEED_URL } from '../utils/constants'
 import RssCopyIcon from '../components/RssCopyIcon'
 import { regionStatusOf } from '../utils/regionStatus'
@@ -131,7 +131,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
           <span className="mono text-[10px] text-[var(--text2)]">
             <span className={uptimeColor}>{uptimeStr}</span>
             {!incidentsBlanked && incidentCount > 0 && <>{' · '}<span className="text-[var(--red)]">{incidentCount}{t('overview.card.incidents.compact')}</span></>}
-            {!isUnreliable && scoreStr && <>{' · '}{scoreStr}</>}
+            {!incidentsBlanked && scoreStr && <>{' · '}{scoreStr}</>}
           </span>
         </div>
         <HistoryBars history30d={buildCalendarFromIncidents(service.incidents, service.dailyImpact, 30, service.status)} compact />
@@ -158,7 +158,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
             <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t(isProbed ? 'overview.card.latency.api' : 'overview.card.latency')}</div>
           </div>
           <div>
-            <div className={`mono text-[13px] font-medium ${uptimeColor}`} title={!hasUptime ? t(isEstimateNoIncidents(service) ? 'uptime.noIncidents.tooltip' : 'uptime.unavailable.tooltip') : undefined}>
+            <div className={`mono text-[13px] font-medium ${uptimeColor}`} title={!hasUptime ? t(noOfficialUptime(service) ? 'uptime.noOfficial.tooltip' : 'uptime.unavailable.tooltip') : undefined}>
               {uptimeStr}
             </div>
             <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.uptime')}</div>
@@ -169,7 +169,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
           </div>
         </div>
 
-        {service.aiwatchScore != null && !isUnreliable && (
+        {service.aiwatchScore != null && !incidentsBlanked && (
           <div className="flex items-center gap-2" style={{ marginBottom: '8px' }}>
             <span className="mono text-[9px] text-[var(--text2)]">{t('score.bar.label')}</span>
             <div className="flex-1 bg-[var(--bg3)] rounded-full" style={{ height: '4px' }}>
@@ -657,8 +657,12 @@ export default function Overview() {
   const sevenDaysAgo = Date.now() - 7 * 86_400_000
   // Dedup by incident ID (Anthropic bulk-links one incident to claude.ai + Claude API + Claude Code)
   // while collecting every affected service name. Mirrors the Incidents.jsx aggregation pattern.
+  // Recent Incidents intentionally spans ALL enabled services (`services`), NOT the category-filtered
+  // `catServices` — a category filter scopes the stats/sections/latency, but the incidents panel is a
+  // cross-category "what's happening right now" view, so picking a category must not hide live incidents
+  // from other categories. (Still honors the user's enabled-services subset via `services`.)
   const incMap = new Map()
-  for (const s of catServices) {
+  for (const s of services) {
     for (const inc of s.incidents ?? []) {
       const existing = incMap.get(inc.id)
       if (existing) {

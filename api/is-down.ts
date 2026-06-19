@@ -105,22 +105,23 @@ export default async function handler(req: Request) {
         }
 
         // Calculate rank by AIWatch Score — match dashboard logic (src/pages/Ranking.jsx):
-        // 1. Exclude estimate-only services with no measured basis — EXACT mirror of
-        //    serviceReliability.js:isEstimateNoData = `estimate source + null uptime30d` (#653). The
-        //    worker emits uptime30d null IFF the 90-day live∪archive set has no impactful incident, so
-        //    keying on uptime30d (not the LIVE incidents' impact, which omits the archive) keeps this
-        //    in lockstep with the dashboard — avoids the cross-surface rank drift #591/#653 prevent.
+        // 1. A service is score-rankable when its feed is live AND `scoreConfidence !== 'low'` — EXACT
+        //    mirror of serviceReliability.js:hasReliableScoreData (#713). `low` confidence means the
+        //    worker found NEITHER an official uptime % NOR a real probe (e.g. Bedrock/Azure — scored on
+        //    only incidents+recovery, which over-scores under the rescale), so it's excluded from the
+        //    rank; a `high`/`medium` service (has official uptime, or a probe) is ranked. Keeps this in
+        //    lockstep with the dashboard (avoids the cross-surface drift #591/#713).
         // 2. Use competition ranking (1, 2, 4=, 4=, 4=, 7=, ...) based on rounded score,
         //    not array index — otherwise tied services display different ranks per service
         if (Number.isFinite(target?.aiwatchScore)) {
-          const hasReliableData = (s: { uptimeSource?: string; uptime30d?: number | null; incidentSourceStale?: boolean }) =>
-            !(s.uptimeSource === 'estimate' && s.uptime30d == null) && !s.incidentSourceStale
+          const hasReliableData = (s: { scoreConfidence?: string; incidentSourceStale?: boolean }) =>
+            !s.incidentSourceStale && s.scoreConfidence !== 'low'
           const targetScore = Math.round(target!.aiwatchScore as number)
           if (!hasReliableData(target!)) {
             // Target itself fails the reliability filter — dedup'd to avoid log spam
             if (!warnedExcludedSlugs.has(slug)) {
               warnedExcludedSlugs.add(slug)
-              console.warn(`[is-down/${slug}] target excluded from ranked set (estimate source with 0 incidents, or stale incident source #591) — check SLUG_TO_SERVICE vs uptimeSource/incidentSourceStale`)
+              console.warn(`[is-down/${slug}] target excluded from ranked set (low-confidence score — no official uptime + no probe, or stale incident source #591/#713) — check SLUG_TO_SERVICE vs scoreConfidence/incidentSourceStale`)
             }
           } else {
             // Use Number.isFinite instead of != null so NaN scores (from a corrupt pipeline)

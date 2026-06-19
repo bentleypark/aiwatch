@@ -170,8 +170,6 @@ const ko = {
   'uptime.sub.official': '공식 status page 기준',
   'uptime.label.platform_avg': '플랫폼 평균',
   'uptime.sub.platform_avg': '전체 리소스 uptime 평균',
-  'uptime.label.estimate': '추정 Uptime',
-  'uptime.sub.estimate': '인시던트 기반 추정',
   'svc.incidents': '인시던트',
   'svc.mttr': '복구 시간',
   'svc.recovery.worst': '최장 {d} · 7일',
@@ -179,10 +177,10 @@ const ko = {
   'uptime.unavailable': '공식 데이터 미제공',
   'uptime.unavailable.short': '—',
   'uptime.unavailable.tooltip': '이 서비스는 공식 uptime 데이터를 제공하지 않습니다',
-  // #707 — 추정 소스이고 피드는 정상이나 기간 내 영향 인시던트가 없는 경우: "데이터 없음"이 아니라
-  // "신뢰성 인시던트 없음"이 정확한 표현.
-  'uptime.noIncidents': '이 기간 내 신뢰성 인시던트 없음',
-  'uptime.noIncidents.tooltip': '인시던트 기반 추정 — 이 기간 내 영향 인시던트 없음',
+  // #713 — 공식 uptime%가 없는 서비스(Bedrock/Azure 등): 수치를 만들지 않고 인시던트로 추적하며
+  // 인시던트·복구로 점수를 산정한다.
+  'uptime.noOfficial': '공식 uptime 미제공 — 인시던트 추적',
+  'uptime.noOfficial.tooltip': '공식 uptime%를 제공하지 않는 서비스 — 인시던트로 추적하고 인시던트·복구로 점수 산정',
   'score.tooltip': 'Uptime, 인시던트 영향 일수, 복구 시간 기반 종합 점수',
   'uptime.sla.label': 'SLA 기준',
   'svc.mttr.none': '최근 7일 인시던트 없음',

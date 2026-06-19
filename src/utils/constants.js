@@ -59,6 +59,19 @@ export const SERVICE_CATEGORIES = {
   apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp'] },
 }
 
+// #676 — the rankable category buckets in #658 canonical order (LLM → Agents → Voice → Inference →
+// Video → Apps), excluding `all` (ids:null). Single source of truth for ordering a flat service list.
+const RANKABLE_CATEGORY_KEYS = Object.keys(SERVICE_CATEGORIES).filter((k) => SERVICE_CATEGORIES[k].ids)
+
+// #676 — a service's category rank = the index of its bucket in RANKABLE_CATEGORY_KEYS, so a flat
+// service list can be sorted to mirror the filter chips + Overview sections (Agents before Apps, Apps
+// last). Unknown id → Infinity (sorts last). Used by the Sidebar service list; shareable by any
+// consumer that needs the canonical category order.
+export function categoryRankOf(id) {
+  const r = RANKABLE_CATEGORY_KEYS.findIndex((k) => SERVICE_CATEGORIES[k].ids.includes(id))
+  return r === -1 ? Infinity : r
+}
+
 // Services excluded from fallback recommendations (not interchangeable with LLM APIs)
 // Keep in sync with worker/src/fallback.ts EXCLUDE_FALLBACK
 export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'characterai', 'bedrock', 'azureopenai']

@@ -80,8 +80,9 @@ export function buildDailySummary(data: DailySummaryData): string {
     lines.push(`\n🤖 **AI Analysis Usage**\n   Today: ${aiUsage.calls} calls (${aiUsage.success} success, ${aiUsage.failed} failed)${modelBreakdown}\n   Est. cost: $${sonnetCost} (Sonnet only)`)
   }
 
-  // Section 4: Uptime Best/Worst (exclude estimate-only services — misleading 100%)
-  const withUptime = services.filter(s => s.uptime30d != null && !isNaN(s.uptime30d!) && !(s.uptimeSource === 'estimate' && (s.incidents ?? []).length === 0))
+  // Section 4: Uptime Best/Worst — only services that report an official uptime%. #713: services with
+  // no official uptime now leave `uptime30d` null (no estimate), so the null check alone excludes them.
+  const withUptime = services.filter(s => s.uptime30d != null && !isNaN(s.uptime30d!))
   if (withUptime.length >= 3) {
     const sorted = [...withUptime].sort((a, b) => (b.uptime30d ?? 0) - (a.uptime30d ?? 0))
     const best = sorted.slice(0, 2).map(s => `${s.name} ${s.uptime30d!.toFixed(2)}%`).join(' · ')

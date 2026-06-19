@@ -170,8 +170,6 @@ const en = {
   'uptime.sub.official': 'Official status page',
   'uptime.label.platform_avg': 'Platform Average',
   'uptime.sub.platform_avg': 'All resources avg uptime',
-  'uptime.label.estimate': 'Estimated Uptime',
-  'uptime.sub.estimate': 'Based on incident durations',
   'svc.incidents': 'Incidents',
   'svc.mttr': 'Recovery',
   'svc.recovery.worst': 'worst {d} · 7d',
@@ -179,10 +177,10 @@ const en = {
   'uptime.unavailable': 'Not provided',
   'uptime.unavailable.short': '—',
   'uptime.unavailable.tooltip': 'This service does not provide public uptime data',
-  // #707 — estimate-source service with a working feed but no impactful incident in the window:
-  // "no reliability incidents" is the honest read, not "no data".
-  'uptime.noIncidents': 'No reliability incidents in this period',
-  'uptime.noIncidents.tooltip': 'Estimated from incidents — none impactful in this period',
+  // #713 — service with no official uptime % (Bedrock/Azure etc.): we don't invent a number; it's
+  // tracked by incidents and scored on incidents + recovery.
+  'uptime.noOfficial': 'No official uptime — incident-tracked',
+  'uptime.noOfficial.tooltip': 'This service publishes no official uptime %; it is incident-tracked and scored on incidents + recovery',
   'score.tooltip': 'Based on uptime, incident affected days, and recovery time',
   'uptime.sla.label': 'SLA threshold',
   'svc.mttr.none': 'No incidents in 7 days',

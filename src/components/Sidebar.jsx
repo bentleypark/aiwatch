@@ -6,7 +6,7 @@ import { usePage } from '../utils/pageContext'
 import { useLang } from '../hooks/useLang'
 import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
-import { SERVICE_CATEGORIES, ALL_SERVICES_FEED_URL } from '../utils/constants'
+import { SERVICE_CATEGORIES, ALL_SERVICES_FEED_URL, categoryRankOf } from '../utils/constants'
 import { isUnreliableUptime } from '../utils/serviceReliability'
 import RssCopyIcon from './RssCopyIcon'
 
@@ -169,6 +169,10 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
   const categoryServices = categoryIds
     ? visibleServices.filter((s) => categoryIds.includes(s.id))
     : visibleServices
+  // #676 — order the flat list by category rank (LLM → Agents → Voice → Inference → Video → Apps) so it
+  // matches the filter chips + Overview sections (Apps last, Agents directly after LLM) instead of the
+  // raw worker order (api → apps → agents). Stable sort keeps the worker order WITHIN each bucket.
+  const orderedServices = [...categoryServices].sort((a, b) => categoryRankOf(a.id) - categoryRankOf(b.id))
 
   const issueCount = useMemo(() => services.filter((s) => s.status !== 'operational').length, [services])
   // Count only unresolved incidents (investigating/identified/monitoring), deduplicated
@@ -299,15 +303,9 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
         </div>
       </div>
 
-      {/* ── Filtered service list (unified, divider between non-agent/agent in All tab) ── */}
-      <nav className="overflow-y-auto" style={{ padding: '0 12px' }}>
-        {categoryServices.filter((s) => s.category !== 'agent').map((svc) => (
-          <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} onNavigate={onNavigate} />
-        ))}
-        {categoryFilter === 'all' && categoryServices.some((s) => s.category === 'agent') && (
-          <div style={{ height: '1px', background: 'var(--border)', margin: '6px 0' }} />
-        )}
-        {categoryServices.filter((s) => s.category === 'agent').map((svc) => (
+      {/* ── Filtered service list — single flat list in #658 category order (#676) ── */}
+      <nav className="overflow-y-auto" style={{ padding: '0 12px' }} aria-label={t('nav.services')}>
+        {orderedServices.map((svc) => (
           <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} onNavigate={onNavigate} />
         ))}
       </nav>

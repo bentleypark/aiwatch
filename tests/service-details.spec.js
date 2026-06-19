@@ -524,44 +524,48 @@ test.describe('Non-probe service latency card', () => {
   })
 })
 
-test.describe('Estimate-only services (Bedrock, Azure OpenAI)', () => {
+test.describe('No-official-uptime services (Bedrock, Azure OpenAI)', () => {
   const ESTIMATE_MOCK = {
     services: [
       { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, uptimeSource: 'official', calendarDays: 30, incidents: [], aiwatchScore: 92, scoreGrade: 'excellent', scoreConfidence: 'high' },
-      // #653 — post-fix the worker emits `uptime30d: null` (not 100) for an estimate service with no
-      // impactful incident; `uptimeSource: 'estimate'` is still set so the gate (estimate + null) fires.
-      { id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational', latency: 280, uptime30d: null, uptimeSource: 'estimate', calendarDays: 14, incidents: [], aiwatchScore: 85, scoreGrade: 'good', scoreConfidence: 'medium' },
-      { id: 'azureopenai', category: 'api', name: 'Azure OpenAI', provider: 'Microsoft', status: 'operational', latency: 350, uptime30d: null, uptimeSource: 'estimate', calendarDays: 14, incidents: [], aiwatchScore: 85, scoreGrade: 'good', scoreConfidence: 'medium' },
+      // #713 — no official uptime + NO probe → confidence 'low' (scored on only incidents+recovery →
+      // over-scores under the rescale) → the worker WITHHOLDS the score: aiwatchScore/scoreGrade null.
+      // Kept OUT of the Ranking; uptime display reads "No official uptime".
+      { id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational', latency: 280, uptime30d: null, calendarDays: 14, incidents: [], aiwatchScore: null, scoreGrade: null, scoreConfidence: 'low' },
+      { id: 'azureopenai', category: 'api', name: 'Azure OpenAI', provider: 'Microsoft', status: 'operational', latency: 350, uptime30d: null, calendarDays: 14, incidents: [], aiwatchScore: null, scoreGrade: null, scoreConfidence: 'low' },
+      // #713 — no official uptime BUT a real probe → confidence 'medium' → STAYS in the Ranking on its measured score.
+      { id: 'gemini', category: 'api', name: 'Gemini API', provider: 'Google', status: 'operational', latency: 150, uptime30d: null, calendarDays: 14, incidents: [], aiwatchScore: 80, scoreGrade: 'good', scoreConfidence: 'medium' },
       { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'operational', latency: 200, uptime30d: 99.99, uptimeSource: 'official', calendarDays: 30, incidents: [], aiwatchScore: 90, scoreGrade: 'excellent', scoreConfidence: 'high' },
     ],
     lastUpdated: new Date().toISOString(),
   }
 
-  test('estimate service with no incidents: uptime "No reliability incidents" + score hidden, but incidents shown live (#653/#707)', async ({ page }) => {
+  test('no-official-uptime service: uptime "No official uptime" + score hidden, but incidents shown live (#713)', async ({ page }) => {
     await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: ESTIMATE_MOCK })
     })
     await page.goto('/#bedrock')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
-    // No baseless 100% uptime; #707 — a working estimate source with no impactful incident reads
-    // "No reliability incidents in this period" (NOT the misleading "Not provided").
+    // No invented uptime; #713 — a service with no official uptime reads "No official uptime —
+    // incident-tracked" (NOT a number, NOT the misleading "Not provided").
     await expect(page.locator('main').getByText('100.00%')).not.toBeVisible()
-    await expect(page.locator('main').getByText(/No reliability incidents in this period|이 기간 내 신뢰성 인시던트 없음/).first()).toBeVisible()
-    // AIWatch Score section hidden (no reliable basis)
+    await expect(page.locator('main').getByText(/No official uptime — incident-tracked|공식 uptime 미제공 — 인시던트 추적/).first()).toBeVisible()
+    // AIWatch Score section hidden — the worker withheld the score (aiwatchScore null for a
+    // low-confidence service), so the card gates it out (#713).
     await expect(page.locator('main').getByText(/AIWatch Score/)).not.toBeVisible()
     // #653 decoupling — incidents are LIVE data, not blanked: with 0 live incidents the Incident
     // History shows the "no incidents" empty state (NOT "Not provided"), proving the incident display
-    // is gated on incidentSourceStale, not on estimate-no-data.
+    // is gated on incidentSourceStale, not on the no-uptime state.
     await expect(page.locator('main').getByText('Incident History')).toBeVisible()
     await expect(page.locator('main').getByText(/No incidents|이슈 없음|인시던트 없음/).first()).toBeVisible()
   })
 
-  test('estimate service with an informational incident: uptime "No reliability incidents" but the incident shows in history (#653/#707)', async ({ page }) => {
-    // The exact recurred Bedrock shape: estimate source, no impactful incident (uptime null), but a
-    // live informational (null-impact) incident. Per (b): uptime blanks, the incident still shows.
+  test('no-official-uptime service with an informational incident: uptime "No official uptime", incident shown (#713)', async ({ page }) => {
+    // The Bedrock shape: no official uptime (uptime null), plus a live informational (null-impact)
+    // incident. Uptime reads "No official uptime"; the incident still shows in history.
     const mock = {
       services: [
-        { id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational', latency: 280, uptime30d: null, uptimeSource: 'estimate', calendarDays: 14,
+        { id: 'bedrock', category: 'api', name: 'Amazon Bedrock', provider: 'AWS', status: 'operational', latency: 280, uptime30d: null, calendarDays: 14,
           incidents: [{ id: 'bd-info', title: 'Service impact: Fable 5 Access', status: 'investigating', impact: null, startedAt: new Date(Date.now() - 60_000).toISOString(), resolvedAt: null, duration: null, timeline: [] }] },
       ],
       lastUpdated: new Date().toISOString(),
@@ -569,11 +573,28 @@ test.describe('Estimate-only services (Bedrock, Azure OpenAI)', () => {
     await page.route('**/api/status**', async (route) => { await route.fulfill({ json: mock }) })
     await page.goto('/#bedrock')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
-    // #707 — uptime reads "No reliability incidents in this period" (null-impact advisory = no basis)
+    // #713 — uptime reads "No official uptime — incident-tracked" (no invented value)
     await expect(page.locator('main').getByText('100.00%')).not.toBeVisible()
-    await expect(page.locator('main').getByText(/No reliability incidents in this period|이 기간 내 신뢰성 인시던트 없음/).first()).toBeVisible()
-    // The informational incident MUST appear in the Incident History (not blanked by estimate-no-data)
+    await expect(page.locator('main').getByText(/No official uptime — incident-tracked|공식 uptime 미제공 — 인시던트 추적/).first()).toBeVisible()
+    // The informational incident MUST appear in the Incident History (not blanked by the no-uptime state)
     await expect(page.locator('main').getByText(/Service impact: Fable 5 Access/)).toBeVisible()
+  })
+
+  test('#713 probed no-uptime service (Gemini): uptime "No official uptime" BUT the Score card IS shown', async ({ page }) => {
+    // Cross-surface consistency fix: Gemini has no official uptime (uptime card blanked) but a real
+    // probe → confidence 'medium' → a non-null, RANKED score. The detail-page Score card must show it
+    // (gated on aiwatchScore != null, NOT on isUnreliableUptime) so a user clicking it from the ranking
+    // doesn't land on a page with the score mysteriously gone.
+    await page.route('**/api/status**', async (route) => {
+      await route.fulfill({ json: ESTIMATE_MOCK })
+    })
+    await page.goto('/#gemini')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+    // uptime % blanked (no official uptime)
+    await expect(page.locator('main').getByText(/No official uptime — incident-tracked|공식 uptime 미제공 — 인시던트 추적/).first()).toBeVisible()
+    // but the AIWatch Score breakdown IS visible, with its measured score
+    await expect(page.locator('main').getByText(/AIWatch Score/).first()).toBeVisible()
+    await expect(page.locator('main').getByText('80', { exact: true }).first()).toBeVisible()
   })
 
   test('hides 24h Trend chart for non-probe services', async ({ page }) => {
@@ -586,18 +607,20 @@ test.describe('Estimate-only services (Bedrock, Azure OpenAI)', () => {
     await expect(page.locator('main').getByText(/24h Trend|24시간 추이/)).not.toBeVisible()
   })
 
-  test('excludes estimate services from Ranking scored list', async ({ page }) => {
+  test('#713 Ranking: low-confidence (no-uptime+no-probe) excluded; probed no-uptime included', async ({ page }) => {
     await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: ESTIMATE_MOCK })
     })
     await page.goto('/#ranking')
     await expect(page.locator('h2').filter({ hasText: /랭킹|Ranking/i })).toBeVisible({ timeout: 20000 })
-    // Claude and OpenAI should be ranked in the table
     const rankingTable = page.locator('table').first()
     await expect(rankingTable).toBeVisible({ timeout: 10000 })
+    // Official-uptime services are ranked
     await expect(rankingTable.getByText('Claude API')).toBeVisible()
     await expect(rankingTable.getByText('OpenAI API')).toBeVisible()
-    // Bedrock and Azure OpenAI should NOT be in the scored ranking table
+    // #713 — a no-official-uptime service WITH a probe (confidence 'medium') stays ranked on its measured score
+    await expect(rankingTable.getByText('Gemini API')).toBeVisible()
+    // #713 — no-uptime AND no-probe (confidence 'low') are NOT in the scored ranking (they over-score)
     await expect(rankingTable.getByText('Amazon Bedrock')).not.toBeVisible()
     await expect(rankingTable.getByText('Azure OpenAI')).not.toBeVisible()
   })

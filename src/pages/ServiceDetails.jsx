@@ -14,7 +14,7 @@ import { groupIncidents } from '../utils/incidentGrouping'
 import { compareGroupedRows, dominantGroupStatus } from '../utils/incidentSort'
 import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
 import { computeRecoveryStats, formatRecoveryMin } from '../utils/recovery'
-import { isUnreliableUptime, isEstimateNoIncidents } from '../utils/serviceReliability'
+import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
 import { regionStatusOf, SERVICE_REGIONS } from '../utils/regionStatus'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
@@ -767,14 +767,16 @@ export default function ServiceDetails({ serviceId }) {
   // uptime / incidents / MTTR / score cards + the status calendar (showing a frozen 30-day window as
   // current would mislead). Latency stays — it's probe-measured + current.
   const isUnreliableData = isUnreliableUptime(service)
-  // #707 — distinguish "estimate source, no impactful incident in window" (honest: "No reliability
-  // incidents in this period") from the genuinely-unavailable / frozen-stale cases ("Not provided").
-  const noIncidentsEstimate = isEstimateNoIncidents(service)
+  // #713 — distinguish "no official uptime source" (honest: "No official uptime — incident-tracked")
+  // from the frozen-stale case ("Not provided"). No invented uptime % for these services.
+  const noOfficialUptimeFlag = noOfficialUptime(service)
   // #653 — incident displays (count card, MTTR, Incident History) reflect the LIVE incident list and
-  // should blank ONLY for a stale/frozen feed — NOT for estimate-no-data. An estimate-only service
-  // (bedrock/azureopenai) with a live informational incident has a baseless UPTIME (gated by
+  // should blank ONLY for a stale/frozen feed — NOT for a missing official uptime. A no-official-uptime
+  // service (bedrock/azureopenai) with a live informational incident has no UPTIME % (gated by
   // isUnreliableData) but its incidents are real and must still show (mirrors the status calendar at
-  // :961, which already gates on incidentSourceStale only). isUnreliableData stays on uptime + score.
+  // :961, which already gates on incidentSourceStale only). isUnreliableData stays on the UPTIME display
+  // only; the Score card gates on its own validity (#713 — the worker already nulls the score for a
+  // no-uptime+no-probe service, while a probed no-uptime service keeps a real, rankable score).
   const incidentsBlanked = !!service.incidentSourceStale
   const calendarDays = service.calendarDays ?? 14
 
@@ -848,13 +850,13 @@ export default function ServiceDetails({ serviceId }) {
         <MetricCard
           label={isUnreliableData
             ? t('svc.uptime30d')
-            : t({ official: 'uptime.label.official', platform_avg: 'uptime.label.platform_avg', estimate: 'uptime.label.estimate' }[service.uptimeSource] ?? 'svc.uptime30d')}
+            : t({ official: 'uptime.label.official', platform_avg: 'uptime.label.platform_avg' }[service.uptimeSource] ?? 'svc.uptime30d')}
           value={isUnreliableData
             ? '—'
             : service.uptime30d != null ? `${service.uptime30d.toFixed(2)}%` : '—'}
           sub={isUnreliableData
-            ? t(noIncidentsEstimate ? 'uptime.noIncidents' : 'uptime.unavailable')
-            : t({ official: 'uptime.sub.official', platform_avg: 'uptime.sub.platform_avg', estimate: 'uptime.sub.estimate' }[service.uptimeSource] ?? 'uptime.unavailable')}
+            ? t(noOfficialUptimeFlag ? 'uptime.noOfficial' : 'uptime.unavailable')
+            : t({ official: 'uptime.sub.official', platform_avg: 'uptime.sub.platform_avg' }[service.uptimeSource] ?? 'uptime.unavailable')}
           colorClass="text-[var(--green)]"
         />
         <MetricCard
@@ -877,7 +879,7 @@ export default function ServiceDetails({ serviceId }) {
       </div>
 
       {/* ── AIWatch Score Breakdown ── */}
-      {service.aiwatchScore != null && !isUnreliableData && (
+      {service.aiwatchScore != null && !incidentsBlanked && (
         <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
             <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">

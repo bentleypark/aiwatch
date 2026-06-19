@@ -311,48 +311,6 @@ export function accumulateMonthlyIncidents(
   return result
 }
 
-/** #653 — read a service's archived incidents from the recent monthly accumulators (current + previous
- *  2 calendar months, ≈60–90 days depending on day-of-month; bounded in practice by the 60-day
- *  `incidents:monthly` TTL — older keys have expired) and return them as `Incident[]` for
- *  estimate-uptime weighting. `computeUptimeFromIncidents` clamps to its own 90-day window downstream.
- *  The estimate-only RSS services
- *  (bedrock/azureopenai) read a short live window; merging the archive lets a real outage that already
- *  rolled out of the live RSS still lower the estimated uptime. `impact` is carried from the #653
- *  archive field (absent on pre-#653 entries → null = informational → contributes no downtime, so old
- *  data never fabricates an outage). Reconstructs a `duration` string from `durationMin` so
- *  `computeUptimeFromIncidents` measures resolved spans; unresolved entries stay ongoing. */
-export async function readArchivedIncidentsForService(
-  kv: KVNamespace,
-  svcId: string,
-  now: Date,
-): Promise<Incident[]> {
-  const out: Incident[] = []
-  for (let i = 0; i < 3; i++) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))
-    const month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
-    const raw = await kv.get(`incidents:monthly:${month}`).catch(() => null)
-    if (!raw) continue
-    try {
-      const parsed = JSON.parse(raw) as MonthlyIncidents
-      for (const e of parsed.services?.[svcId]?.incidents ?? []) {
-        out.push({
-          id: e.id,
-          title: e.title,
-          status: e.finalStatus,
-          impact: e.impact ?? null,
-          startedAt: e.startedAt,
-          resolvedAt: e.resolvedAt ?? null,
-          duration: e.durationMin > 0 ? `${Math.floor(e.durationMin / 60)}h ${e.durationMin % 60}m` : null,
-          timeline: [],
-        })
-      }
-    } catch (err) {
-      console.warn(`[readArchivedIncidentsForService] ${svcId} ${month} parse failed:`, err instanceof Error ? err.message : err)
-    }
-  }
-  return out
-}
-
 /** #587 — read `incidents:monthly:{month}`, accumulate the current services onto it, and write
  *  back ONLY when the incident data actually changed.
  *

@@ -49,7 +49,7 @@ export interface ServiceStatus {
   components?: ServiceComponent[]
   dailyImpact?: Record<string, DailyImpactLevel>
   calendarDays?: number
-  uptimeSource?: 'official' | 'platform_avg' | 'estimate'
+  uptimeSource?: 'official' | 'platform_avg' // #713 — 'estimate' removed; no invented uptime
   detectedAt?: string
   /** BetterStack only: count of resources reporting a real issue (degraded/downtime)
    *  while the service stays operational under the <30% threshold (#447). UI shows a
@@ -68,6 +68,13 @@ export interface ServiceStatus {
    *  "degraded" alert) so the source death is judged accurately. Runtime-only; absent when the source
    *  responds. */
   sourceDead?: boolean
+  /** #714 — set on a transient/indeterminate fetch outcome (the status-page fetch threw, or the
+   *  summary.json returned 5xx) — as opposed to `sourceDead` (a confirmed 4xx, incl. 429) or a clean
+   *  success (neither flag = alive).
+   *  Mutually exclusive with `sourceDead` (set on disjoint return paths). The source-inactive operator
+   *  alert reads this so a single transient hiccup mid-dead-source is held as 'unknown' rather than
+   *  misread as a 'recovered' signal (the #714 Inactive/Recovered flap). Runtime-only. */
+  sourceUnknown?: boolean
   /** #689 — set when `sourceDead` AND a healthy direct probe independently confirms the service is
    *  reachable (the 2nd case: a PROBED service whose status PAGE died but whose API still responds).
    *  Then the badge stays operational (probe-backed) instead of "Unknown"; the un-probed case
