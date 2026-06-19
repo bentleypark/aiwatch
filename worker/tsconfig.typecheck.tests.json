@@ -1,0 +1,11 @@
+{
+  "//": "TEST-source type-check config for the worker (#533 Phase 4). Extends the build tsconfig, never emits, and scopes to ONLY the worker test files. Adds @types/node + allowJs because the tests run under vitest/Node and legitimately use node:fs / __dirname (the source-sync invariant tests) and import a few frontend .js helpers (e.g. src/utils/regionStatus.js). These relaxations are deliberately ISOLATED to tests — production source is checked WITHOUT node types by tsconfig.typecheck.json so a prod node-API misuse still fails the gate. rootDir is the repo root for the same cross-boundary reason. scripts/typecheck-worker.mjs runs this AND the prod config; both must be 0-error.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "..",
+    "types": ["@cloudflare/workers-types", "node"],
+    "allowJs": true
+  },
+  "include": ["src/**/__tests__/**/*.ts", "src/**/*.test.ts"]
+}

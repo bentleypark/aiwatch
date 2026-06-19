@@ -26,7 +26,7 @@ describe('mapBetterStackImpact (#564)', () => {
 
 describe('parseRssIncidents impact mapping (#564)', () => {
   const NOW = Date.parse('2026-06-02T00:00:00Z')
-  const item = (title, desc, incId) =>
+  const item = (title: string, desc: string, incId: string) =>
     `<item><title>${title}</title><link>https://status.modal.com/incident/${incId}</link>` +
     `<pubDate>Mon, 01 Jun 2026 10:00:00 -0000</pubDate>` +
     `<guid>https://status.modal.com/incident/${incId}#a</guid><description>${desc}</description></item>`
@@ -68,7 +68,7 @@ describe('parseRssIncidents impact mapping (#564)', () => {
   it('aggregates severity across ALL events in a grouped incident (escalation degraded → outage = major)', () => {
     // Two updates of ONE incident (same /incident/ link). First "degraded", later escalates to "outage".
     // severityText joins all events, so the "outage" wording must win → major (not minor from event 1).
-    const ev = (title, desc, date) =>
+    const ev = (title: string, desc: string, date: string) =>
       `<item><title>${title}</title><link>https://status.modal.com/incident/2001</link>` +
       `<pubDate>${date}</pubDate><guid>https://status.modal.com/incident/2001#${date}</guid>` +
       `<description>${desc}</description></item>`
@@ -83,7 +83,7 @@ describe('parseRssIncidents impact mapping (#564)', () => {
   })
 
   it('still drops sub-60s micro-incidents (unchanged by #564)', () => {
-    const ev = (title, desc, date) =>
+    const ev = (title: string, desc: string, date: string) =>
       `<item><title>${title}</title><link>https://status.modal.com/incident/2002</link>` +
       `<pubDate>${date}</pubDate><guid>https://status.modal.com/incident/2002#${date}</guid>` +
       `<description>${desc}</description></item>`
@@ -135,7 +135,7 @@ describe('parseXaiRssIncidents impact mapping (#564)', () => {
 describe('parseRssIncidents — stale-ongoing guard (#602)', () => {
   const NOW = Date.parse('2026-06-02T00:00:00Z')
   // Single unresolved item (no "recovered/resolved" wording), human-titled like Luma's feed.
-  const lone = (title, date, incId) =>
+  const lone = (title: string, date: string, incId: string) =>
     `<item><title>${title}</title><link>https://status.lumalabs.ai/incident/${incId}</link>` +
     `<pubDate>${date}</pubDate><guid>https://status.lumalabs.ai/incident/${incId}#a</guid>` +
     `<description>${title}</description></item>`

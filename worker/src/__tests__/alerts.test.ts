@@ -60,10 +60,17 @@ function alertedMap(entries: Record<string, string[]> = {}): Map<string, Set<str
   return new Map(Object.entries(entries).map(([incId, ids]) => [incId, new Set(ids)]))
 }
 
+// Typed incident factory: fills the required `impact`/`duration`/`timeline` defaults so inline
+// mocks only specify the fields a test cares about. Defaults are the neutral empty values
+// (impact null, duration null, empty timeline) — overridable via the partial.
+function inc(o: Partial<Incident> & Pick<Incident, 'id' | 'title' | 'status' | 'startedAt'>): Incident {
+  return { impact: null, duration: null, timeline: [], ...o }
+}
+
 describe('buildIncidentAlerts', () => {
   it('creates new incident alert for recent non-resolved incident', () => {
     const svc = mockService({
-      incidents: [{ id: 'inc1', title: 'API Error', status: 'investigating', startedAt: recentDate, impact: 'major' }],
+      incidents: [inc({ id: 'inc1', title: 'API Error', status: 'investigating', startedAt: recentDate, impact: 'major' })],
     })
     const alerts = buildIncidentAlerts([svc], alertedMap(), NOW)
     expect(alerts).toHaveLength(1)
@@ -73,7 +80,7 @@ describe('buildIncidentAlerts', () => {
 
   it('skips already-alerted new incidents', () => {
     const svc = mockService({
-      incidents: [{ id: 'inc1', title: 'API Error', status: 'investigating', startedAt: recentDate, impact: 'major' }],
+      incidents: [inc({ id: 'inc1', title: 'API Error', status: 'investigating', startedAt: recentDate, impact: 'major' })],
     })
     const alerts = buildIncidentAlerts([svc], alertedMap({ inc1: ['openai'] }), NOW)
     expect(alerts).toHaveLength(0)
@@ -81,7 +88,7 @@ describe('buildIncidentAlerts', () => {
 
   it('skips incidents older than 24 hours', () => {
     const svc = mockService({
-      incidents: [{ id: 'inc1', title: 'Old Error', status: 'investigating', startedAt: oldDate, impact: 'major' }],
+      incidents: [inc({ id: 'inc1', title: 'Old Error', status: 'investigating', startedAt: oldDate, impact: 'major' })],
     })
     const alerts = buildIncidentAlerts([svc], alertedMap(), NOW)
     expect(alerts).toHaveLength(0)
@@ -89,7 +96,7 @@ describe('buildIncidentAlerts', () => {
 
   it('creates resolved alert only if previously alerted as new', () => {
     const svc = mockService({
-      incidents: [{ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, duration: '30m', impact: 'major' }],
+      incidents: [inc({ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, duration: '30m', impact: 'major' })],
     })
 
     // Not previously alerted → no resolved alert
@@ -105,7 +112,7 @@ describe('buildIncidentAlerts', () => {
   it('includes fallback text as separate field for degraded service', () => {
     const openai = mockService({
       id: 'openai', status: 'degraded',
-      incidents: [{ id: 'inc1', title: 'Slow', status: 'investigating', startedAt: recentDate, impact: 'minor' }],
+      incidents: [inc({ id: 'inc1', title: 'Slow', status: 'investigating', startedAt: recentDate, impact: 'minor' })],
     })
     const claude = mockService({ id: 'claude', name: 'Claude API', aiwatchScore: 90 })
     const alerts = buildIncidentAlerts([openai, claude], alertedMap(), NOW)
@@ -116,7 +123,7 @@ describe('buildIncidentAlerts', () => {
   it('omits fallback when service is operational (incident without outage)', () => {
     const openai = mockService({
       id: 'openai', status: 'operational',
-      incidents: [{ id: 'inc1', title: 'Minor issue', status: 'investigating', startedAt: recentDate, impact: 'minor' }],
+      incidents: [inc({ id: 'inc1', title: 'Minor issue', status: 'investigating', startedAt: recentDate, impact: 'minor' })],
     })
     const claude = mockService({ id: 'claude', name: 'Claude API', aiwatchScore: 90 })
     const alerts = buildIncidentAlerts([openai, claude], alertedMap(), NOW)
@@ -132,7 +139,7 @@ describe('buildIncidentAlerts', () => {
 
   it('groups shared-incidentId services into single alert with all service names', () => {
     // Claude API, claude.ai, Claude Code share Anthropic status page → same inc.id
-    const sharedIncident = { id: 'shared1', title: 'Elevated errors', status: 'investigating', startedAt: recentDate, impact: 'major' }
+    const sharedIncident = inc({ id: 'shared1', title: 'Elevated errors', status: 'investigating', startedAt: recentDate, impact: 'major' })
     const claude = mockService({ id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', incidents: [sharedIncident] })
     const claudeai = mockService({ id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', incidents: [sharedIncident] })
     const claudecode = mockService({ id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent', incidents: [sharedIncident] })
@@ -150,7 +157,7 @@ describe('buildIncidentAlerts', () => {
   })
 
   it('shows same-category fallback only for shared incidents (no cross-category)', () => {
-    const sharedIncident = { id: 'shared2', title: 'Opus errors', status: 'investigating', startedAt: recentDate, impact: 'major' }
+    const sharedIncident = inc({ id: 'shared2', title: 'Opus errors', status: 'investigating', startedAt: recentDate, impact: 'major' })
     const claude = mockService({ id: 'claude', name: 'Claude API', category: 'api', status: 'degraded', incidents: [sharedIncident], aiwatchScore: 80 })
     const claudecode = mockService({ id: 'claude-code', name: 'Claude Code', category: 'agent', status: 'degraded', incidents: [sharedIncident], aiwatchScore: 70 })
     const openai = mockService({ id: 'openai', name: 'OpenAI API', category: 'api', status: 'operational', aiwatchScore: 90 })
@@ -168,8 +175,8 @@ describe('buildIncidentAlerts', () => {
   it('handles multiple incidents per service', () => {
     const svc = mockService({
       incidents: [
-        { id: 'inc1', title: 'Error 1', status: 'investigating', startedAt: recentDate, impact: 'major' },
-        { id: 'inc2', title: 'Error 2', status: 'resolved', startedAt: recentDate, duration: '10m', impact: 'minor' },
+        inc({ id: 'inc1', title: 'Error 1', status: 'investigating', startedAt: recentDate, impact: 'major' }),
+        inc({ id: 'inc2', title: 'Error 2', status: 'resolved', startedAt: recentDate, duration: '10m', impact: 'minor' }),
       ],
     })
     const alerts = buildIncidentAlerts([svc], alertedMap({ inc2: ['openai'] }), NOW)
@@ -182,7 +189,7 @@ describe('buildIncidentAlerts', () => {
   // (e.g. OpenAI renames "Issue with Codex" → "…Codex and ChatGPT", so chatgpt's keyword now matches
   // the same incidentId) must still get its own alert — scoped to only the joiner.
   describe('#545 late-joining service', () => {
-    const shared = { id: 'oai-multi', title: 'Elevated errors on Codex and ChatGPT', status: 'investigating' as const, startedAt: recentDate, impact: 'major' as const }
+    const shared = inc({ id: 'oai-multi', title: 'Elevated errors on Codex and ChatGPT', status: 'investigating' as const, startedAt: recentDate, impact: 'major' as const })
     const codex = mockService({ id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', status: 'down', incidents: [shared] })
     const chatgpt = mockService({ id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', status: 'down', incidents: [shared] })
 
@@ -247,10 +254,10 @@ describe('parseAlertedRoster (#545)', () => {
 describe('region-switch hint (#422)', () => {
   // Pinecone is region-aware (SERVICE_REGIONS) with AWS us-east-1 listed first and
   // AWS us-west-2 second — so a us-east-1-only outage recommends "AWS US West".
-  const regionSpecific: Incident = {
+  const regionSpecific: Incident = inc({
     id: 'pc1', title: 'Index unavailable', status: 'investigating',
     startedAt: recentDate, impact: 'major', componentNames: ['AWS us-east-1'],
-  }
+  })
 
   it('buildRegionHint recommends the first healthy region for a region-specific outage', () => {
     const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', status: 'degraded', incidents: [regionSpecific] })
@@ -260,14 +267,14 @@ describe('region-switch hint (#422)', () => {
   it('buildRegionHint returns undefined for a non-region-aware service', () => {
     // mistral has no SERVICE_REGIONS entry → regionStatusOf returns null
     const mistral = mockService({ id: 'mistral', name: 'Mistral API', status: 'degraded',
-      incidents: [{ id: 'm1', title: 'Errors', status: 'investigating', startedAt: recentDate, impact: 'major' }] })
+      incidents: [inc({ id: 'm1', title: 'Errors', status: 'investigating', startedAt: recentDate, impact: 'major' })] })
     expect(buildRegionHint(mistral)).toBeUndefined()
   })
 
   it('buildRegionHint returns undefined for a global (non-region-specific) incident', () => {
     // No region in title/components → every region marked down via fallback → allDown → no recommendation
     const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', status: 'down',
-      incidents: [{ id: 'pc-global', title: 'Major outage', status: 'investigating', startedAt: recentDate, impact: 'critical' }] })
+      incidents: [inc({ id: 'pc-global', title: 'Major outage', status: 'investigating', startedAt: recentDate, impact: 'critical' })] })
     expect(buildRegionHint(pinecone)).toBeUndefined()
   })
 
@@ -294,7 +301,7 @@ describe('region-switch hint (#422)', () => {
     // takes down. Must suppress. (#422 — pr-test-analyzer Severity-9 finding)
     const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', status: 'down', incidents: [
       regionSpecific,
-      { id: 'pc-global', title: 'Major outage', status: 'investigating', startedAt: recentDate, impact: 'critical' },
+      inc({ id: 'pc-global', title: 'Major outage', status: 'investigating', startedAt: recentDate, impact: 'critical' }),
     ] })
     expect(buildRegionHint(pinecone)).toBeUndefined()
     const alerts = buildIncidentAlerts([pinecone], alertedMap(), NOW)
@@ -306,8 +313,8 @@ describe('region-switch hint (#422)', () => {
     // Two region-specific incidents knock out AWS us-east-1 + us-west-2 → first
     // remaining healthy region in SERVICE_REGIONS order is AWS eu-west-1 ("AWS EU West").
     const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', status: 'degraded', incidents: [
-      { id: 'pc-e', title: 'Outage', status: 'investigating', startedAt: recentDate, impact: 'major', componentNames: ['AWS us-east-1'] },
-      { id: 'pc-w', title: 'Outage', status: 'investigating', startedAt: recentDate, impact: 'major', componentNames: ['AWS us-west-2'] },
+      inc({ id: 'pc-e', title: 'Outage', status: 'investigating', startedAt: recentDate, impact: 'major', componentNames: ['AWS us-east-1'] }),
+      inc({ id: 'pc-w', title: 'Outage', status: 'investigating', startedAt: recentDate, impact: 'major', componentNames: ['AWS us-west-2'] }),
     ] })
     expect(buildRegionHint(pinecone)).toBe('📍 Try region: AWS EU West')
   })
@@ -317,23 +324,25 @@ describe('region-switch hint (#422)', () => {
     // region-specific outage is solved by the cheaper same-provider region switch, so the
     // cross-service fallback (Claude) must be suppressed to avoid redundant noise.
     const openai = mockService({ id: 'openai', name: 'OpenAI API', status: 'degraded', incidents: [
-      { id: 'oai-r', title: 'Elevated errors', status: 'investigating', startedAt: recentDate, impact: 'major', componentNames: ['us-east-1'] },
+      inc({ id: 'oai-r', title: 'Elevated errors', status: 'investigating', startedAt: recentDate, impact: 'major', componentNames: ['us-east-1'] }),
     ] })
     const claude = mockService({ id: 'claude', name: 'Claude API', provider: 'Anthropic', status: 'operational', aiwatchScore: 95 })
     const alert = buildIncidentAlerts([openai, claude], alertedMap(), NOW).find(a => a.key === 'alerted:new:oai-r')
-    expect(alert.regionText).toBe('📍 Try region: US West (us-west-2)')
-    expect(alert.fallbackText).toBe('') // suppressed despite Claude being an operational same-tier fallback
+    expect(alert).toBeDefined()
+    expect(alert!.regionText).toBe('📍 Try region: US West (us-west-2)')
+    expect(alert!.fallbackText).toBe('') // suppressed despite Claude being an operational same-tier fallback
   })
 
   it('#641 still shows the cross-service fallback for a GLOBAL (non-region) incident', () => {
     // No region switch applies → the cross-service fallback is the only actionable alternative.
     const openai = mockService({ id: 'openai', name: 'OpenAI API', status: 'down', incidents: [
-      { id: 'oai-g', title: 'Major outage', status: 'investigating', startedAt: recentDate, impact: 'critical' },
+      inc({ id: 'oai-g', title: 'Major outage', status: 'investigating', startedAt: recentDate, impact: 'critical' }),
     ] })
     const claude = mockService({ id: 'claude', name: 'Claude API', provider: 'Anthropic', status: 'operational', aiwatchScore: 95 })
     const alert = buildIncidentAlerts([openai, claude], alertedMap(), NOW).find(a => a.key === 'alerted:new:oai-g')
-    expect(alert.regionText).toBeUndefined()        // global → no region hint
-    expect(alert.fallbackText).toContain('Claude API') // fallback shown
+    expect(alert).toBeDefined()
+    expect(alert!.regionText).toBeUndefined()        // global → no region hint
+    expect(alert!.fallbackText).toContain('Claude API') // fallback shown
   })
 
   it('mergeTogetherAlerts preserves regionText from the first merged alert', () => {
@@ -375,7 +384,7 @@ describe('buildServiceAlerts', () => {
   it('suppresses status alert when ongoing incidents exist', () => {
     const svc = mockService({
       status: 'degraded',
-      incidents: [{ id: 'inc1', title: 'Errors', status: 'investigating', startedAt: recentDate, impact: 'major' }],
+      incidents: [inc({ id: 'inc1', title: 'Errors', status: 'investigating', startedAt: recentDate, impact: 'major' })],
     })
     const alerts = buildServiceAlerts([svc], new Map(), new Map())
     expect(alerts).toHaveLength(0)
@@ -384,7 +393,7 @@ describe('buildServiceAlerts', () => {
   it('suppresses down alert when ongoing incidents exist', () => {
     const svc = mockService({
       status: 'down',
-      incidents: [{ id: 'inc1', title: 'Outage', status: 'identified', startedAt: recentDate, impact: 'critical' }],
+      incidents: [inc({ id: 'inc1', title: 'Outage', status: 'identified', startedAt: recentDate, impact: 'critical' })],
     })
     const alerts = buildServiceAlerts([svc], new Map(), new Map())
     expect(alerts).toHaveLength(0)
@@ -393,7 +402,7 @@ describe('buildServiceAlerts', () => {
   it('does not suppress when all incidents are resolved without resolvedAt', () => {
     const svc = mockService({
       status: 'degraded',
-      incidents: [{ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, duration: '10m', impact: 'minor' }],
+      incidents: [inc({ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, duration: '10m', impact: 'minor' })],
     })
     const alerts = buildServiceAlerts([svc], new Map(), new Map())
     expect(alerts).toHaveLength(1)
@@ -407,7 +416,7 @@ describe('buildServiceAlerts', () => {
       const resolvedAt = new Date(NOW - 5 * 60_000).toISOString() // 5min ago
       const svc = mockService({
         status: 'degraded',
-        incidents: [{ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, resolvedAt, duration: '7m', impact: 'major' }],
+        incidents: [inc({ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, resolvedAt, duration: '7m', impact: 'major' })],
       })
       expect(buildServiceAlerts([svc], new Map(), new Map(), NOW)).toHaveLength(0)
     })
@@ -416,7 +425,7 @@ describe('buildServiceAlerts', () => {
       const resolvedAt = new Date(NOW - 16 * 60_000).toISOString()
       const svc = mockService({
         status: 'degraded',
-        incidents: [{ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, resolvedAt, duration: '7m', impact: 'major' }],
+        incidents: [inc({ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, resolvedAt, duration: '7m', impact: 'major' })],
       })
       const alerts = buildServiceAlerts([svc], new Map(), new Map(), NOW)
       expect(alerts).toHaveLength(1)
@@ -427,7 +436,7 @@ describe('buildServiceAlerts', () => {
       const resolvedAt = new Date(NOW - 5 * 60_000).toISOString()
       const svc = mockService({
         status: 'down',
-        incidents: [{ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, resolvedAt, duration: '7m', impact: 'major' }],
+        incidents: [inc({ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, resolvedAt, duration: '7m', impact: 'major' })],
       })
       const alerts = buildServiceAlerts([svc], new Map(), new Map(), NOW)
       expect(alerts).toHaveLength(1)
@@ -437,7 +446,7 @@ describe('buildServiceAlerts', () => {
     it('handles invalid resolvedAt without throwing — falls through to degraded fire', () => {
       const svc = mockService({
         status: 'degraded',
-        incidents: [{ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, resolvedAt: 'not-a-date', duration: '7m', impact: 'major' }],
+        incidents: [inc({ id: 'inc1', title: 'Fixed', status: 'resolved', startedAt: recentDate, resolvedAt: 'not-a-date', duration: '7m', impact: 'major' })],
       })
       const alerts = buildServiceAlerts([svc], new Map(), new Map(), NOW)
       expect(alerts).toHaveLength(1)
@@ -608,9 +617,9 @@ describe('mergeTogetherAlerts', () => {
     const together = mockService({
       id: 'together', name: 'Together AI', status: 'degraded', category: 'api',
       incidents: [
-        { id: 'inc1', title: 'FLUX.1 Krea [dev] — down', status: 'investigating', startedAt: recentDate, impact: 'major' },
-        { id: 'inc2', title: 'ZAI GLM 5 FP4 — down', status: 'investigating', startedAt: recentDate, impact: 'major' },
-        { id: 'inc3', title: 'Kokoro-82M — down', status: 'investigating', startedAt: recentDate, impact: 'major' },
+        inc({ id: 'inc1', title: 'FLUX.1 Krea [dev] — down', status: 'investigating', startedAt: recentDate, impact: 'major' }),
+        inc({ id: 'inc2', title: 'ZAI GLM 5 FP4 — down', status: 'investigating', startedAt: recentDate, impact: 'major' }),
+        inc({ id: 'inc3', title: 'Kokoro-82M — down', status: 'investigating', startedAt: recentDate, impact: 'major' }),
       ],
     })
     const alerts = buildIncidentAlerts([together], alertedMap(), NOW)
@@ -626,8 +635,8 @@ describe('mergeTogetherAlerts', () => {
     const together = mockService({
       id: 'together', name: 'Together AI', status: 'operational', category: 'api',
       incidents: [
-        { id: 'inc1', title: 'FLUX.1 Krea [dev]', status: 'resolved', startedAt: recentDate, duration: '13m', impact: 'major' },
-        { id: 'inc2', title: 'ZAI GLM 5 FP4', status: 'resolved', startedAt: recentDate, duration: '15m', impact: 'major' },
+        inc({ id: 'inc1', title: 'FLUX.1 Krea [dev]', status: 'resolved', startedAt: recentDate, duration: '13m', impact: 'major' }),
+        inc({ id: 'inc2', title: 'ZAI GLM 5 FP4', status: 'resolved', startedAt: recentDate, duration: '15m', impact: 'major' }),
       ],
     })
     const alerts = buildIncidentAlerts([together], alertedMap({ inc1: ['together'], inc2: ['together'] }), NOW)
@@ -760,8 +769,8 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
       status: 'degraded',
       category: 'api',
       incidents: [
-        { id: 'us1', title: '[API (us-east-1.api.x.ai)] Increased Error rate on Image Generation Endpoint', status: 'investigating', startedAt: recentDate, impact: 'minor' },
-        { id: 'eu1', title: '[API (eu-west-1.api.x.ai)] Increased Error rate on Image Generation Endpoint', status: 'investigating', startedAt: recentDate, impact: 'minor' },
+        inc({ id: 'us1', title: '[API (us-east-1.api.x.ai)] Increased Error rate on Image Generation Endpoint', status: 'investigating', startedAt: recentDate, impact: 'minor' }),
+        inc({ id: 'eu1', title: '[API (eu-west-1.api.x.ai)] Increased Error rate on Image Generation Endpoint', status: 'investigating', startedAt: recentDate, impact: 'minor' }),
       ],
     })
     const alerts = buildIncidentAlerts([xai], alertedMap(), NOW)
@@ -935,9 +944,9 @@ describe('flap suppression (#283)', () => {
         status: 'operational',
         incidents: [
           // Down half of a second flap in the same 60min window
-          { id: 'flap2-down', title: 'X — down', status: 'investigating', impact: null, startedAt: recentDate },
+          inc({ id: 'flap2-down', title: 'X — down', status: 'investigating', impact: null, startedAt: recentDate }),
           // Resolved half of the same flap (would normally fire alerted:res if alertedNewIds had it)
-          { id: 'flap2-res', title: 'X — recovered', status: 'resolved', impact: null, startedAt: recentDate, duration: '5m' },
+          inc({ id: 'flap2-res', title: 'X — recovered', status: 'resolved', impact: null, startedAt: recentDate, duration: '5m' }),
         ],
       })
       const suppressed = new Set(['flap2-down', 'flap2-res'])
@@ -948,8 +957,8 @@ describe('flap suppression (#283)', () => {
     it('does not affect non-suppressed incidents on the same service', () => {
       const svc = mockService({
         incidents: [
-          { id: 'suppressed', title: 'X — down', status: 'investigating', impact: null, startedAt: recentDate },
-          { id: 'real', title: 'Actual Outage', status: 'investigating', impact: 'major', startedAt: recentDate },
+          inc({ id: 'suppressed', title: 'X — down', status: 'investigating', impact: null, startedAt: recentDate }),
+          inc({ id: 'real', title: 'Actual Outage', status: 'investigating', impact: 'major', startedAt: recentDate }),
         ],
       })
       const alerts = buildIncidentAlerts([svc], alertedMap(), NOW, new Set(['suppressed']))
@@ -960,7 +969,7 @@ describe('flap suppression (#283)', () => {
 })
 
 describe('first-seen confirmation gate (#633)', () => {
-  const mkInc = (overrides: Partial<Incident> = {}): Incident => ({
+  const mkInc = (overrides: Partial<Incident> = {}): Incident => inc({
     id: 'inc1',
     title: 'Web endpoints — down',
     status: 'investigating',
@@ -1029,7 +1038,7 @@ describe('first-seen confirmation gate (#633)', () => {
       const recovered = mockService({
         id: 'modal',
         status: 'operational',
-        incidents: [{ id: 'flap-blip', title: 'Web endpoints — recovered', status: 'resolved', impact: null, startedAt: recentDate, duration: '3m' }],
+        incidents: [inc({ id: 'flap-blip', title: 'Web endpoints — recovered', status: 'resolved', impact: null, startedAt: recentDate, duration: '3m' })],
       })
       const alerts = buildIncidentAlerts([recovered], alertedMap(), NOW, new Set(['flap-blip']))
       expect(alerts).toHaveLength(0)
@@ -1039,7 +1048,7 @@ describe('first-seen confirmation gate (#633)', () => {
       // This drives the SAME two real functions the cron wires together, simulating the pending:new
       // KV transition (absent on cycle 1 → present on cycle 2). It proves the cross-cycle contract
       // end-to-end at the function-composition level (the cronAlertCheck glue is otherwise unexported).
-      const inc: Incident = { id: 'flap-x', title: 'Web endpoints — down', status: 'investigating', impact: null, startedAt: recentDate, timeline: [] }
+      const inc: Incident = { id: 'flap-x', title: 'Web endpoints — down', status: 'investigating', impact: null, startedAt: recentDate, duration: null, timeline: [] }
       const svc = mockService({ id: 'modal', status: 'down', incidents: [inc] })
       const config = { flapSuppression: true }
 
@@ -1063,7 +1072,7 @@ describe('first-seen confirmation gate (#633)', () => {
       // RSS ids are stable guids (parsers/betterstack.ts), so this degenerate case shouldn't occur —
       // this test pins the assumption so a future unstable-id source is caught by intent.
       const config = { flapSuppression: true }
-      const churnedInc: Incident = { id: 'flap-y', title: 'Web endpoints — down', status: 'investigating', impact: null, startedAt: recentDate, timeline: [] }
+      const churnedInc: Incident = { id: 'flap-y', title: 'Web endpoints — down', status: 'investigating', impact: null, startedAt: recentDate, duration: null, timeline: [] }
       // pending:new was written for 'flap-x' on cycle 1; cycle 2 surfaces 'flap-y' → its marker is absent.
       expect(shouldHoldNewIncident('modal', config, churnedInc, { alreadyAlerted: false, pendingExists: false })).toBe(true)
     })

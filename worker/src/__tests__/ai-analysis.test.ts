@@ -530,8 +530,10 @@ function mockService(id: string, incidents: Partial<Incident>[] = []): ServiceSt
     id,
     name: id.charAt(0).toUpperCase() + id.slice(1),
     provider: 'Test',
+    category: 'api',
     status: 'degraded',
     latency: null,
+    uptime30d: 99.9,
     lastChecked: new Date().toISOString(),
     incidents: incidents.map(i => ({
       id: i.id ?? 'inc-1',

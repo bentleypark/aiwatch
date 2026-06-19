@@ -114,10 +114,13 @@ describe('queryV1Traffic (#518)', () => {
   })
 
   it('POSTs SQL to the AE endpoint with a Bearer token and parses the result', async () => {
-    const fetchSpy = vi.fn(async () => okResponse({ data: [
-      { variant: 'v1-status-all', requests: 7 },
-      { variant: 'v1-status-service', requests: 3 },
-    ] }))
+    const fetchSpy = vi.fn(
+      async (_url: string, _init: { method: string; headers: { Authorization: string }; body: string }) =>
+        okResponse({ data: [
+          { variant: 'v1-status-all', requests: 7 },
+          { variant: 'v1-status-service', requests: 3 },
+        ] }),
+    )
     const r = await queryV1Traffic('acct123', 'secret-tok', fetchSpy as unknown as typeof fetch)
     expect(r).toEqual({ all: 7, service: 3, total: 10 })
     const [url, init] = fetchSpy.mock.calls[0]

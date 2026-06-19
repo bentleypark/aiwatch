@@ -4,7 +4,7 @@ import { parseAwsRssIncidents, parseAwsHealthEvents, decodeAwsHealthJson, awsHea
 /** Encode a string to an ArrayBuffer in the given encoding with a BOM, to exercise decodeAwsHealthJson
  *  the way the live AWS endpoint serves it (utf-16 + BOM). */
 function toBuf(str: string, enc: 'utf-16le' | 'utf-16be' | 'utf-8'): ArrayBuffer {
-  if (enc === 'utf-8') return new TextEncoder().encode(str).buffer
+  if (enc === 'utf-8') return Uint8Array.from(new TextEncoder().encode(str)).buffer
   const bom = enc === 'utf-16le' ? [0xFF, 0xFE] : [0xFE, 0xFF]
   const bytes: number[] = [...bom]
   for (const ch of str) {
