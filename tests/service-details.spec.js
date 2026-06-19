@@ -52,6 +52,36 @@ test.describe('ServiceDetails page', () => {
   })
 })
 
+test.describe('#717 — multi-source status links', () => {
+  test('Gemini detail surfaces BOTH AI Studio and Google Cloud status links', async ({ page }) => {
+    await page.goto('/')
+    await waitForDataLoad(page)
+    const card = page.locator('main button').filter({ hasText: 'Gemini API' }).first()
+    await card.evaluate((el) => el.click())
+    await expect(page.locator('main').getByText('Status Calendar')).toBeVisible({ timeout: 5000 })
+
+    const main = page.locator('main')
+    const aistudio = main.getByRole('link', { name: /AI Studio Status/ })
+    const gcloud = main.getByRole('link', { name: /Google Cloud Status/ })
+    await expect(aistudio).toBeVisible()
+    await expect(gcloud).toBeVisible()
+    await expect(aistudio).toHaveAttribute('href', 'https://aistudio.google.com/status')
+    await expect(gcloud).toHaveAttribute('href', 'https://status.cloud.google.com')
+  })
+
+  test('single-source service (Claude) shows only the generic Official Status link', async ({ page }) => {
+    await page.goto('/')
+    await waitForDataLoad(page)
+    const card = page.locator('main button').filter({ hasText: 'Claude API' }).first()
+    await card.evaluate((el) => el.click())
+    await expect(page.locator('main').getByText('Status Calendar')).toBeVisible({ timeout: 5000 })
+
+    const main = page.locator('main')
+    await expect(main.getByRole('link', { name: /Official Status/ })).toBeVisible()
+    await expect(main.getByRole('link', { name: /Google Cloud Status/ })).not.toBeVisible()
+  })
+})
+
 test.describe('#581 Recovery card — ongoing (unresolved) incident', () => {
   const baseSvc = (incidents) => ({
     id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic',
