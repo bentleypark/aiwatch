@@ -141,10 +141,20 @@ describe('/api/status/cached scoreBreakdown (probed services)', () => {
   // (Claude, OpenAI, etc.) the response shape includes non-null responsiveness + metrics.probe.
 
   function buildProbedResponse(summary: ProbeSummary | null) {
-    const svc = { id: 'claude', status: 'operational', uptime30d: 100, incidents: [] }
+    const svc: ServiceStatus = {
+      id: 'claude',
+      name: 'Claude',
+      provider: 'Anthropic',
+      category: 'api',
+      status: 'operational',
+      latency: null,
+      uptime30d: 100,
+      lastChecked: '2026-04-20T10:00:00Z',
+      incidents: [],
+    }
     const summaries = summary ? new Map([['claude', summary]]) : undefined
     const probe = classifyProbe(svc.id, true, summaries)
-    const s = calculateAIWatchScore(svc as ServiceStatus, 30, probe)
+    const s = calculateAIWatchScore(svc, 30, probe)
     return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics }
   }
 

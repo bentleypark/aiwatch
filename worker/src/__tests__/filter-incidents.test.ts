@@ -456,14 +456,14 @@ describe('fetchService cross-contamination guard (#361)', () => {
     id: '01KQDM1K1826RP1FFN86ZNA3WG',
     title: 'Partial Disruption of ChatGPT Workspace Connector Write Actions',
     status: 'identified',
-    componentNames: null,
+    componentNames: undefined,
   })
   const codexResolved = mockIncident({
     id: 'codex-old-1',
     title: 'Elevated errors in Codex',
     status: 'resolved',
     resolvedAt: '2026-04-25T00:00:00Z',
-    componentNames: null,
+    componentNames: undefined,
   })
   const allIncidents = [chatgptUntagged, codexResolved]
 
@@ -516,7 +516,7 @@ describe('fetchService cross-contamination guard (#361)', () => {
       id: 'db-1',
       title: 'Database outage',
       status: 'identified',
-      componentNames: null,
+      componentNames: undefined,
     })
     const soloConfig = mockConfig({
       id: 'solo',
@@ -609,7 +609,7 @@ describe('filterIncidents — GitHub Copilot scoping (#397)', () => {
   it('keeps incident when "copilot" is in the title even with null componentNames', () => {
     const inc = mockIncident({
       title: 'Disruption with Copilot Coding Agent sessions',
-      componentNames: null,
+      componentNames: undefined,
     })
     expect(filterIncidents([inc], copilotConfig)).toHaveLength(1)
   })
@@ -661,7 +661,7 @@ describe('filterIncidents — GitHub Copilot scoping (#397)', () => {
     // surface there even if the incident itself stays hidden.
     const inc = mockIncident({
       title: 'Disruption with some GitHub services',
-      componentNames: null,
+      componentNames: undefined,
     })
     expect(filterIncidents([inc], copilotConfig)).toHaveLength(0)
   })

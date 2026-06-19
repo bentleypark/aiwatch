@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { buildStatuslinePayload, isStatuslineRequest } from '../statusline'
 import type { ServiceStatus } from '../types'
 
-function svc(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
+function svc(overrides: Partial<ServiceStatus> & Record<string, unknown> = {}): ServiceStatus {
   return {
     id: 'claude',
     name: 'Claude API',
@@ -79,7 +79,7 @@ describe('WAE writeDataPoint contract (#494)', () => {
   // Pins: blob1/double1/index shape, 32-byte safeSrc cap, optional-binding guard.
   function dispatchWithWae(
     search: string,
-    analytics: { writeDataPoint: ReturnType<typeof vi.fn> } | undefined,
+    analytics: { writeDataPoint: ReturnType<typeof vi.fn<(arg: { blobs: string[]; doubles: number[]; indexes: string[] }) => void>> } | undefined,
   ) {
     const sp = new URLSearchParams(search)
     if (!isStatuslineRequest(sp)) return

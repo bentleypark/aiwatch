@@ -40,9 +40,15 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
+      # #533 Phase 4: the type-check gate type-checks worker source, which imports worker-only
+      # runtime deps (@resvg/resvg-wasm) + worker type packages (@cloudflare/workers-types,
+      # @types/node) that live in worker/node_modules. Root `npm ci` doesn't install them (no
+      # workspaces), so install the worker package here or tsc fails with TS2307/TS2688.
+      - run: npm ci --prefix worker
       - run: npm run test:worker
-      # #533 Phase 1: fail on undefined-name / missing-import (TS2304) in worker
-      # source — the #532 bug class that esbuild / `wrangler --dry-run` can't catch.
+      # #533: full `tsc --noEmit` gate (Phase 4) — fails on ANY type error across worker source
+      # incl tests; prod pass is workers-types-only so a node-API use (no nodejs_compat → runtime
+      # crash, the #532 class) also fails. Two passes (prod strict / tests with @types/node).
       - run: npm run typecheck:worker
       # #541: node:test unit tests for scripts/*.mjs (verify-reminders parse/fire logic)
       - run: npm run test:scripts
