@@ -17,20 +17,34 @@ import { execFileSync } from 'node:child_process'
 // line as a free-form note. Case-insensitive; `after` may be followed by space, `:` or `-`.
 const VERIFY_RE = /verify-after[\s:-]+(\d{4}-\d{2}-\d{2})([^\n]*)/gi
 
+// A CHECKED markdown task-list marker at the start of a line (`- [x]` / `* [X]` / `+ [x]`, leading
+// indent ok). Ticking the box is the SSOT "this verify is done" action, so a verify-after on such a
+// line must STOP firing — otherwise a completed item re-fires forever (the old whole-body scan
+// ignored the checkbox; #586's done `- [x] verify-after 2026-06-12` re-fired for 7 days). Unchecked
+// boxes (`- [ ]`) and plain prose lines still fire. The marker→`[` space is REQUIRED (`\s+`): GFM
+// renders `-[x]` (no space) as literal text, NOT a checked task, so it must still fire (don't
+// over-suppress a genuinely-open reminder).
+const CHECKED_BOX_RE = /^\s*[-*+]\s+\[[xX]\]/
+
 /** True only for a real calendar date (rejects 2026-02-30, which Date would silently roll over). */
 export function isValidIsoDate(s) {
   const d = new Date(`${s}T00:00:00Z`)
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s
 }
 
-/** Extract every {date, note} pair from an issue body. Calendar-invalid dates are skipped. */
+/** Extract every {date, note} pair from an issue body. Calendar-invalid dates are skipped, and a
+ *  verify-after on a CHECKED checkbox line (`- [x]`) is skipped — a done item must not keep firing. */
 export function parseVerifyAfter(body) {
   const out = []
   if (!body) return out
-  for (const m of body.matchAll(VERIFY_RE)) {
-    if (!isValidIsoDate(m[1])) continue
-    const note = m[2].replace(/^[\s—–:*_)·-]+/, '').replace(/\*+$/, '').trim()
-    out.push({ date: m[1], note })
+  // Scan line-by-line so a per-line CHECKED checkbox can suppress that line's verify-after.
+  for (const line of body.split('\n')) {
+    if (CHECKED_BOX_RE.test(line)) continue
+    for (const m of line.matchAll(VERIFY_RE)) {
+      if (!isValidIsoDate(m[1])) continue
+      const note = m[2].replace(/^[\s—–:*_)·-]+/, '').replace(/\*+$/, '').trim()
+      out.push({ date: m[1], note })
+    }
   }
   return out
 }
