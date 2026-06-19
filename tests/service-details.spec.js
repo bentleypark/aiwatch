@@ -30,10 +30,10 @@ test.describe('ServiceDetails page', () => {
 
   test('renders status calendar with legend', async ({ page }) => {
     const main = page.locator('main')
-    // Calendar legend should show status labels
+    // Calendar legend shows the impact-severity axis (#674): Operational / Minor / Major / Critical
     await expect(main.getByText(/Operational|정상/).first()).toBeVisible()
-    await expect(main.getByText(/Partial Outage|부분 장애/).first()).toBeVisible()
-    await expect(main.getByText(/Major Outage|주요 장애/).first()).toBeVisible()
+    await expect(main.getByText(/Minor|경미/).first()).toBeVisible()
+    await expect(main.getByText(/Critical|심각/).first()).toBeVisible()
     // Calendar should have 30 cells
     const calendarCells = main.locator('[aria-label*=":"]')
     await expect(calendarCells.first()).toBeVisible()

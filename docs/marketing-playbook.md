@@ -161,7 +161,7 @@ Adapt to the specific thread — never copy-paste verbatim across subreddits.
 It's down for everyone — just pulled this from AIWatch
 (ai-watch.dev/is-claude-down):
 
-- Status: Major Outage (confirmed [HH:MM UTC — pull from dashboard])
+- Status: Down (confirmed [HH:MM UTC — pull from dashboard])
 - Early RTT signal: [X minutes — ONLY if the dashboard shows one] — our probe
   flagged latency degradation before the official status update
 - AI analysis: [paste the current AIWatch AI analysis summary, 1-2 sentences]

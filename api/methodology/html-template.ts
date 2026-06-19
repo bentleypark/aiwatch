@@ -295,12 +295,12 @@ ${CONSENT_INIT_SCRIPT}
 <section class="section" id="status">
   <p class="section-label">// 02</p>
   <h2 data-i18n="s2.title">상태 결정</h2>
-  <p class="lead" data-i18n="s2.lead">서비스별 상태는 계층화된 우선순위 체인으로 결정되며, 화면에는 <strong>Operational · Partial Outage · Major Outage</strong> 로 표기됩니다. 규칙은 위에서부터 순서대로 확인하며, 처음 일치하는 규칙에서 상태가 결정됩니다.</p>
+  <p class="lead" data-i18n="s2.lead">서비스별 상태는 계층화된 우선순위 체인으로 결정되며, 화면에는 <strong>Operational · Degraded · Down</strong> 로 표기됩니다. 규칙은 위에서부터 순서대로 확인하며, 처음 일치하는 규칙에서 상태가 결정됩니다.</p>
   <div class="chain">
     <div class="chain-step">
       <div class="cs-num">1 · <span data-i18n="s2.1.tag">worst-of</span></div>
       <div class="cs-title" data-i18n="s2.1.title">멀티 컴포넌트 worst-of</div>
-      <div class="cs-body" data-i18n="s2.1.body">하나의 서비스가 여러 컴포넌트로 구성된 경우(예: Cursor의 IDE + Cloud Agents + CLI), 그중 가장 심각한 상태를 서비스 배지에 표시합니다 (Major Outage &gt; Partial Outage &gt; Operational).</div>
+      <div class="cs-body" data-i18n="s2.1.body">하나의 서비스가 여러 컴포넌트로 구성된 경우(예: Cursor의 IDE + Cloud Agents + CLI), 그중 가장 심각한 상태를 서비스 배지에 표시합니다 (Down &gt; Degraded &gt; Operational).</div>
     </div>
     <div class="chain-step">
       <div class="cs-num">2 · <span data-i18n="s2.2.tag">component match</span></div>
@@ -341,7 +341,7 @@ ${CONSENT_INIT_SCRIPT}
     <li><strong data-i18n="s3.platform">Platform</strong> <span data-i18n="s3.platformDesc">— 상태 페이지 플랫폼(Better Stack)이 자체 모니터로 측정한 가동률 (Together · Fireworks · HuggingFace · Modal · Luma). 제공사 공식 SLA가 아닌 플랫폼 측정치입니다.</span></li>
     <li><strong data-i18n="s3.estimate">Estimate</strong> <span data-i18n="s3.estimateDesc">— 공식 수치가 없는 서비스(Bedrock·Azure OpenAI)는 최근 90일의 라이브·아카이브 인시던트를 합쳐 추정합니다. 영향을 준 인시던트가 없으면 %를 아예 산출하지 않습니다.</span></li>
   </ul>
-  <p data-i18n="s3.weighted"><strong>Atlassian 가중 영향 일수:</strong> 다운타임은 단순 인시던트 건수가 아니라, 각 날짜를 그날의 가장 심각한 영향도로 가중한 "영향 일수"로 집계합니다 — critical · major = 1.0 (Major Outage / Partial Outage), minor = 0.3 (Degraded), 정보성/null = 제외. uptime과 score 모두 같은 가중 방식을 씁니다.</p>
+  <p data-i18n="s3.weighted"><strong>Atlassian 가중 영향 일수:</strong> 다운타임은 단순 인시던트 건수가 아니라, 각 날짜를 그날의 가장 심각한 영향도로 가중한 "영향 일수"로 집계합니다 — critical · major = 1.0, minor = 0.3, 정보성/null = 제외. uptime과 score 모두 같은 가중 방식을 씁니다.</p>
 
   <div class="limits">
     <div class="limits-label">⚠ <span data-i18n="s3.limits.label">측정 한계와 그 이유</span></div>
@@ -553,8 +553,8 @@ const i18n = {
     's1.secDesc': '상태·신뢰도 측정과는 별개로, AI 스택에 영향을 주는 보안 이슈도 함께 추적해 <strong>월간 리포트</strong>에 집계합니다. 이 데이터는 AIWatch Score나 인시던트 집계에는 반영되지 않습니다.',
     's1.sec.osv': '— SDK 취약점 (PyPI · npm 24개 추적 패키지), GitHub Advisories로 상세 보강', 's1.sec.hn': '— AI 서비스 관련 보안 뉴스 (Algolia 검색 API)',
     's2.title': '상태 결정',
-    's2.lead': '서비스별 상태는 계층화된 우선순위 체인으로 결정되며, 화면에는 <strong>Operational · Partial Outage · Major Outage</strong> 로 표기됩니다. 규칙은 위에서부터 순서대로 확인하며, 처음 일치하는 규칙에서 상태가 결정됩니다.',
-    's2.1.tag': 'worst-of', 's2.1.title': '멀티 컴포넌트 worst-of', 's2.1.body': '하나의 서비스가 여러 컴포넌트로 구성된 경우(예: Cursor의 IDE + Cloud Agents + CLI), 그중 가장 심각한 상태를 서비스 배지에 표시합니다 (Major Outage > Partial Outage > Operational).',
+    's2.lead': '서비스별 상태는 계층화된 우선순위 체인으로 결정되며, 화면에는 <strong>Operational · Degraded · Down</strong> 로 표기됩니다. 규칙은 위에서부터 순서대로 확인하며, 처음 일치하는 규칙에서 상태가 결정됩니다.',
+    's2.1.tag': 'worst-of', 's2.1.title': '멀티 컴포넌트 worst-of', 's2.1.body': '하나의 서비스가 여러 컴포넌트로 구성된 경우(예: Cursor의 IDE + Cloud Agents + CLI), 그중 가장 심각한 상태를 서비스 배지에 표시합니다 (Down > Degraded > Operational).',
     's2.2.tag': 'component match', 's2.2.title': '컴포넌트 매칭', 's2.2.body': '해당 서비스의 주요 컴포넌트가 지정되어 있으면 그 컴포넌트의 상태를 사용합니다.',
     's2.3.tag': 'overall indicator', 's2.3.title': '전체 인디케이터 폴백', 's2.3.body': '컴포넌트를 찾지 못하면 상태 페이지의 전체 인디케이터로 폴백합니다. 단, 필터링 후 관련된 미해결 인시던트가 없으면 정상으로 간주해, 공유 상태 페이지에서 다른 서비스의 인시던트가 섞이는 것을 막습니다(예: ChatGPT 인시던트가 OpenAI API 상태에 영향을 주지 않도록).',
     's2.4.tag': 'incidentExclude bypass', 's2.4.title': 'incidentExclude 컴포넌트 우회', 's2.4.body': '제목 기반 제외 패턴에 걸리더라도, 인시던트의 컴포넌트 태그가 해당 서비스의 주요 컴포넌트로 시작하면 포함합니다. 제목 문자열 매칭보다 컴포넌트 태그를 더 우선하기 때문입니다.',
@@ -566,7 +566,7 @@ const i18n = {
     's3.official': 'Official', 's3.officialDesc': '— 상태 페이지가 공개한 %를 그대로 읽습니다(페이지마다 집계 기간이 다름).',
     's3.estimate': 'Estimate', 's3.estimateDesc': '— 공식 수치가 없는 서비스(Bedrock·Azure OpenAI)는 최근 90일의 라이브·아카이브 인시던트를 합쳐 추정합니다. 영향을 준 인시던트가 없으면 %를 아예 산출하지 않습니다.',
     's3.platform': 'Platform', 's3.platformDesc': '— 상태 페이지 플랫폼(Better Stack)이 자체 모니터로 측정한 가동률 (Together · Fireworks · HuggingFace · Modal · Luma). 제공사 공식 SLA가 아닌 플랫폼 측정치입니다.',
-    's3.weighted': '<strong>Atlassian 가중 영향 일수:</strong> 다운타임은 단순 인시던트 건수가 아니라, 각 날짜를 그날의 가장 심각한 영향도로 가중한 "영향 일수"로 집계합니다 — critical · major = 1.0 (Major Outage / Partial Outage), minor = 0.3 (Degraded), 정보성/null = 제외. uptime과 score 모두 같은 가중 방식을 씁니다.',
+    's3.weighted': '<strong>Atlassian 가중 영향 일수:</strong> 다운타임은 단순 인시던트 건수가 아니라, 각 날짜를 그날의 가장 심각한 영향도로 가중한 "영향 일수"로 집계합니다 — critical · major = 1.0, minor = 0.3, 정보성/null = 제외. uptime과 score 모두 같은 가중 방식을 씁니다.',
     's3.limits.label': '측정 한계와 그 이유',
     's3.limits.intro': '아래 서비스는 공식 상태 페이지에 비교 가능한 30일 롤링 uptime%가 없습니다. 임의로 추측해 채우는 대신 "— Not provided"로 명확히 표시합니다.',
     's3.limits.col1': '서비스', 's3.limits.col2': '측정 불가 사유',
@@ -635,8 +635,8 @@ const i18n = {
     's1.secDesc': 'On a track separate from status & reliability, we also track security issues affecting the AI stack, aggregated into the <strong>monthly report</strong>. This data does not feed the AIWatch Score or incident counts.',
     's1.sec.osv': '— SDK vulnerabilities (24 tracked PyPI · npm packages), enriched via GitHub Advisories', 's1.sec.hn': '— security news about AI services (Algolia search API)',
     's2.title': 'Status determination',
-    's2.lead': 'Per-service status is resolved by a layered priority chain and shown as <strong>Operational · Partial Outage · Major Outage</strong>. Rules apply top-to-bottom and stop at the first match.',
-    's2.1.tag': 'worst-of', 's2.1.title': 'Multi-component worst-of', 's2.1.body': 'When a user-facing surface spans multiple components (e.g. Cursor IDE + Cloud Agents + CLI), the worst of their statuses becomes the badge (Major Outage > Partial Outage > Operational).',
+    's2.lead': 'Per-service status is resolved by a layered priority chain and shown as <strong>Operational · Degraded · Down</strong>. Rules apply top-to-bottom and stop at the first match.',
+    's2.1.tag': 'worst-of', 's2.1.title': 'Multi-component worst-of', 's2.1.body': 'When a user-facing surface spans multiple components (e.g. Cursor IDE + Cloud Agents + CLI), the worst of their statuses becomes the badge (Down > Degraded > Operational).',
     's2.2.tag': 'component match', 's2.2.title': 'Component match', 's2.2.body': 'If the service has a designated primary component, use that component\\'s status.',
     's2.3.tag': 'overall indicator', 's2.3.title': 'Overall-indicator fallback', 's2.3.body': 'If no component is found, fall back to the page\\'s overall indicator — but if no relevant unresolved incidents remain after filtering, treat as operational. This prevents cross-contamination on shared status pages (e.g. a ChatGPT incident shouldn\\'t affect OpenAI API status).',
     's2.4.tag': 'incidentExclude bypass', 's2.4.title': 'incidentExclude component bypass', 's2.4.body': 'Even when a title-based exclude pattern matches, the incident is kept if its component tag starts with the service\\'s primary component. Component tagging is more authoritative than title substring matching.',
@@ -648,7 +648,7 @@ const i18n = {
     's3.official': 'Official', 's3.officialDesc': '— read directly from the % the status page publishes (window varies by page).',
     's3.estimate': 'Estimate', 's3.estimateDesc': '— services with no official metric (Bedrock · Azure OpenAI) are estimated from the combined 90-day live + archived incident set. If there is no impactful incident, no % is produced at all.',
     's3.platform': 'Platform', 's3.platformDesc': '— uptime measured by the status-page platform\\'s own monitors (Better Stack) — a platform measurement, not the provider\\'s official SLA (Together · Fireworks · HuggingFace · Modal · Luma).',
-    's3.weighted': '<strong>Atlassian-weighted affected days:</strong> downtime is counted not as raw incident count but as "affected days," where each day is weighted by its worst impact — critical · major = 1.0 (Major Outage / Partial Outage), minor = 0.3 (Degraded), informational/null = excluded. Uptime and the Score share the same weighting.',
+    's3.weighted': '<strong>Atlassian-weighted affected days:</strong> downtime is counted not as raw incident count but as "affected days," where each day is weighted by its worst impact — critical · major = 1.0, minor = 0.3, informational/null = excluded. Uptime and the Score share the same weighting.',
     's3.limits.label': 'Coverage & limits — what we can\\'t measure and why',
     's3.limits.intro': 'These services\\' status pages do not expose a comparable rolling 30-day uptime %. We never fill it with a guess — they show "— Not provided".',
     's3.limits.col1': 'Service', 's3.limits.col2': 'Reason',

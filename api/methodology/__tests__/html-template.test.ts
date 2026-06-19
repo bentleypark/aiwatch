@@ -86,15 +86,15 @@ describe('renderMethodologyPage', () => {
     expect(html).toMatch(/does not feed the AIWatch Score|Score나 인시던트 집계에는 반영되지 않/)
   })
 
-  it('uses the UI-facing status labels, not the raw internal names', () => {
-    // §2 must match what the dashboard actually shows: Operational / Partial Outage / Major Outage
+  it('uses the UI-facing status labels, not the raw internal names (#674 — badge ≠ impact axis)', () => {
+    // §2 must match the dashboard service BADGE (availability axis): Operational / Degraded / Down
     // (status.* labels), and the worst-of priority is stated in those displayed terms.
-    expect(html).toContain('Partial Outage')
-    expect(html).toContain('Major Outage')
-    expect(html).toContain('Major Outage > Partial Outage > Operational')
-    // §3 impact weights map to the calendar's 4-level labels (minor→Degraded, major→Partial, critical→Major)
-    expect(html).toMatch(/Major Outage \/ Partial Outage/)
-    expect(html).toMatch(/\(Degraded\)/)
+    expect(html).toContain('Operational · Degraded · Down')
+    expect(html).toContain('Down &gt; Degraded &gt; Operational')
+    // #674 — the badge axis must NOT carry the calendar's impact-scale words ("Partial Outage" /
+    // "Major Outage" are the OLD colliding labels; the calendar impact axis is now Minor/Major/Critical).
+    expect(html).not.toContain('Partial Outage')
+    expect(html).not.toContain('Major Outage')
     // §2 note links out to the open-source status-determination reference
     expect(html).toContain('docs/reference/status-determination.md')
   })

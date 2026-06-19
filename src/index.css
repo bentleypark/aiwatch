@@ -17,7 +17,7 @@
   --bg3: #1c2230;
   --bg4: #242b38;
 
-  /* Status: Operational / Degraded Performance / Partial Outage / Down */
+  /* Service badge (availability axis, #674): Operational (green) / Degraded (amber) / Down (red) */
   --green: #3fb950;
   --yellow: #faa72a;
   --amber: #e86235;

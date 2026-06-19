@@ -571,7 +571,7 @@ const CALENDAR_OPACITY = { operational: 0.7, major: 0.8, critical: 0.9 } // mino
 
 function CalendarCell({ status, date, t }) {
   const [hovered, setHovered] = useState(false)
-  // #662/#663 — show the translated label ("Degraded"/"Partial Outage"/…), not the raw internal cell
+  // #662/#663 — show the translated label ("Minor"/"Major"/"Critical"/…), not the raw internal cell
   // key (minor/major/critical). cal.status.* is the calendar's own namespace, decoupled from the
   // 3-state badge `status.*`. Matches the legend (all four keys have ko/en labels).
   const label = t ? t(`cal.status.${status}`) : status

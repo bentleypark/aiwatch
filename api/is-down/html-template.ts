@@ -793,7 +793,7 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
   const aiSuffix = aiInsight ? `\nAI Analysis: ${aiInsight.summary.slice(0, 100)}. Est. recovery: ${formatRecoveryDisplay(aiInsight.estimatedRecovery)}.` : ''
   const n = seo.displayName
   const downTexts = [
-    `Is ${n} down? Current status: Major Outage.`,
+    `Is ${n} down? Current status: Down.`,
     `${n} is currently experiencing a major outage.`,
     `Heads up — ${n} appears to be down right now.`,
     `${n} outage detected. Check real-time status:`,
