@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation } from '../daily-summary'
 import type { ServiceStatus } from '../types'
 
 function makeSvc(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
@@ -290,31 +290,32 @@ describe('buildDailySummary', () => {
     expect(result).toContain('5 posts detected')
   })
 
-  it('appends Detection Lead section when entries present', () => {
+  // #679 — the "detection lead" (faster-than-official) section was removed (structurally null).
+  it('no longer emits any Detection Lead section', () => {
     const result = buildDailySummary({
       services: [makeSvc({ id: 'together', name: 'Together AI' })],
       aiUsage: null,
       latencySnapshots: [],
       incidentCountToday: { newCount: 1, resolvedCount: 0 },
       redditCount: 0,
-      detectionLeadEntries: [
-        { svcId: 'together', incId: 'i1', leadMs: 7 * 60_000, detectedAt: '2026-04-18T11:53:00Z', officialAt: '2026-04-18T12:00:00Z' },
-      ],
-    })
-    expect(result).toContain('Early RTT detections (last 24h)')
-    expect(result).toContain('Together AI: 7m before official update')
-  })
-
-  it('omits Detection Lead section when entries empty', () => {
-    const result = buildDailySummary({
-      services: [makeSvc({ id: 'a' })],
-      aiUsage: null,
-      latencySnapshots: [],
-      incidentCountToday: { newCount: 0, resolvedCount: 0 },
-      redditCount: 0,
-      detectionLeadEntries: [],
     })
     expect(result).not.toContain('Detection Lead')
+    expect(result).not.toContain('before official update')
+  })
+})
+
+// #679 — classifyDegradation moved here from the (deleted) detection-lead-log module; it is the
+// KEPT RTT-degradation classifier (separate from the removed lead metric).
+describe('classifyDegradation (#464/#511)', () => {
+  it('operational service → degradation_nostatus (not on the status page — the differentiator)', () => {
+    expect(classifyDegradation(true)).toBe('degradation_nostatus')
+  })
+  it('non-operational service → degradation (already reflected on the status page)', () => {
+    expect(classifyDegradation(false)).toBe('degradation')
+  })
+  it('pins the exact outcome literals — index.ts derives isNoStatus via `=== "degradation_nostatus"`', () => {
+    expect(new Set([classifyDegradation(true), classifyDegradation(false)]))
+      .toEqual(new Set(['degradation_nostatus', 'degradation']))
   })
 })
 

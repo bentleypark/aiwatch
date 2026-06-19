@@ -4,12 +4,11 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, formatDetectionLead, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, parseAlertedRoster, shouldAlertSourceDead, buildSourceDeadEmbed } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, parseAlertedRoster, shouldAlertSourceDead, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
-import { appendDetectionLead, readDetectionLeadEntries, formatDetectionLeadSection, computeLeadMs, classifyLead, appendLeadDiag, readLeadDiag, classifyDegradation, DAYS_FOR_DAILY_SUMMARY } from './detection-lead-log'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
 import { refreshStatusCacheOnChange } from './cache-refresh'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey } from './webhook-subscriptions'
@@ -767,13 +766,12 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       }))
     }
 
-    // For new incidents: lookup service/incident once, then run AI analysis + Detection Lead
+    // For new incidents: lookup service/incident once, then run AI analysis
     // Skip AI analysis for merged alerts (Together AI model-level grouping — individual model incidents don't need deep analysis)
     let analysisSection = ''
-    let detectionLeadSection = ''
     if (alert.key.startsWith('alerted:new:')) {
       const incId = alert.key.replace('alerted:new:', '')
-      // #545: scope AI analysis + Detection Lead to the service this alert actually represents
+      // #545: scope AI analysis to the service this alert actually represents
       // (alert.svcIds[0]) — for a late joiner that's the newly-affected service (e.g. ChatGPT), not
       // the incident's first service (Codex). Falls back to first-incident-match for older shapes.
       const primaryId = alert.svcIds?.[0]
@@ -825,39 +823,16 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
             console.error('[cron] AI analysis failed:', err instanceof Error ? err.message : err)
           }
         }
-        // Detection Lead: show early detection advantage in Discord alert + persist to audit log
-        try {
-          const detectRaw = await env.STATUS_CACHE.get(`detected:${svc.id}`).catch(() => null)
-          const detectedAt = getDetectionTimestamp(detectRaw)
-          detectionLeadSection = formatDetectionLead(detectedAt, inc.startedAt)
-          // #464 diagnostics: record WHY this new incident did/didn't produce a lead, split by probe
-          // coverage. Best-effort, never blocks the alert. No change to the audit-log behavior below.
-          await appendLeadDiag(env.STATUS_CACHE, classifyLead(detectedAt, inc.startedAt), PROBED_SERVICE_IDS.has(svc.id))
-            .catch((err) => console.warn('[cron] detection lead diag failed:', err instanceof Error ? err.message : err))
-          // Persist to audit log: computeLeadMs returns null outside [1m, 60m) — single source of truth
-          // shared with formatDetectionLead, so audit log can never drift from Discord display rules.
-          if (detectedAt) {
-            const leadMs = computeLeadMs(detectedAt, inc.startedAt)
-            if (leadMs !== null) {
-              const result = await appendDetectionLead(env.STATUS_CACHE, {
-                svcId: svc.id, incId: inc.id, leadMs, detectedAt, officialAt: inc.startedAt,
-              })
-              // Tagged return ('persisted' | 'duplicate' | 'failed') — only 'failed' is a real drift signal;
-              // 'duplicate' fires on legitimate idempotent re-runs of the same incident across cron ticks.
-              if (result === 'failed') {
-                console.warn('[cron] detection lead displayed in Discord but NOT persisted to audit log:', { svcId: svc.id, incId: inc.id, leadMs })
-              }
-            }
-          }
-        } catch (err) {
-          console.error('[cron] detection lead failed:', err instanceof Error ? err.message : err)
-        }
+        // #679 — the "detection lead" (faster-than-official) per-incident signal + its audit log/diag
+        // were removed: status-page polling is structurally LATER than the official publish, so the
+        // lead was always negative (never displayed). `detected:{svcId}` itself is still written above
+        // (kept for #677's AWS duration anchor + the MTTD framing); only the lead-vs-official surfacing
+        // is gone. RTT-degradation early-warning is a separate, kept signal.
       }
     }
 
-    // Build sectioned description: incident → detection lead → AI analysis → fallback → link
+    // Build sectioned description: incident → AI analysis → fallback → link
     const parts = [alert.description]
-    if (detectionLeadSection) parts.push(detectionLeadSection)
     if (analysisSection) parts.push(analysisSection)
     if (alert.fallbackText && alert.fallbackText.startsWith('👉')) {
       const list = alert.fallbackText.replace('👉 Suggested fallback: ', '')
@@ -1047,7 +1022,7 @@ import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
 import { detectNewRepos, formatGitHubAlert } from './competitive'
-import { buildDailySummary, isInSummaryWindow } from './daily-summary'
+import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
 import { collectChangelogs, getStaleSources } from './changelog'
 import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
@@ -2074,24 +2049,8 @@ export default {
             return null
           })
 
-          // Detection Lead audit log — read today + yesterday keys (DAYS_FOR_DAILY_SUMMARY=2) so entries
-          // from yesterday's 09:00–24:00 window are surfaced. windowMs=24h filters the union to a sliding
-          // 24h window ending now, preventing entries already shown in yesterday's 09:00 summary from being
-          // re-reported today. Internal dedup by (svcId, incId) handles same-incident overlap.
-          // .catch boundary: defensive — readDetectionLeadEntries returns [] internally on every error
-          // path today, but a future refactor introducing a synchronous throw would otherwise crash the
-          // entire daily summary cron. Cheap to keep.
-          const detectionLeadEntries = await readDetectionLeadEntries(env.STATUS_CACHE, new Date(), { days: DAYS_FOR_DAILY_SUMMARY, windowMs: 24 * 3_600_000 })
-            .catch((err) => {
-              console.error('[daily-summary] detection lead read failed:', err instanceof Error ? err.message : err)
-              return []
-            })
-          // #464 — diagnostic counter breakdown (why leads are/aren't landing). Best-effort.
-          const leadDiag = await readLeadDiag(env.STATUS_CACHE, new Date(), DAYS_FOR_DAILY_SUMMARY)
-            .catch((err) => {
-              console.error('[daily-summary] detection lead diag read failed:', err instanceof Error ? err.message : err)
-              return null
-            })
+          // #679 — the Detection Lead audit log + diagnostics reads were removed (the lead metric was
+          // structurally null). RTT-degradation counters below are the kept observability signal.
 
           // #500 — status page fetch failure observability: read per-service daily counters.
           // fetch-fail:daily:{svcId}:{date}: threshold crossings today (rising-edge incremented).
@@ -2177,8 +2136,6 @@ export default {
             securityCount,
             vitals: vitalsSummary,
             probeSnapshots,
-            detectionLeadEntries,
-            leadDiag,
             fetchFailureCounts,
             crossValidSuppressed,
             degradationCounts,

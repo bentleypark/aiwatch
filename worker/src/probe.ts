@@ -141,7 +141,7 @@ export function computeMedianRtt(snapshots: ProbeSnapshot[], serviceId: string):
 // same-title incident grouping in `src/utils/incidentGrouping.js`, which consolidates noise
 // uniformly across all services without overriding what status pages report.
 //
-// `computeMedianRtt` is still exported below — it's used by detection-lead probe-spike-first logic
+// `computeMedianRtt` is still exported below — it's used by the probe-spike degradation logic
 // in alerts.ts, independently of the removed corroboration path.
 
 /**

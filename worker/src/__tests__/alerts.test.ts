@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, formatDetectionLead, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, buildSourceDeadEmbed } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, buildSourceDeadEmbed } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
 
@@ -771,56 +771,6 @@ describe('mergeXaiRegionalAlerts (#686)', () => {
     expect(merged[0].title).toBe('🔴 xAI (Grok) — New Incident (us-east-1, eu-west-1)')
     expect(merged[0]._mergedKeys).toEqual(['alerted:new:us1', 'alerted:new:eu1'])
     expect(merged[0].svcIds).toEqual(['xai'])
-  })
-})
-
-describe('formatDetectionLead', () => {
-  it('returns lead text when detected before official report', () => {
-    const detected = new Date(NOW - 10 * 60_000).toISOString() // 10min before startedAt
-    const started = new Date(NOW).toISOString()
-    const result = formatDetectionLead(detected, started)
-    expect(result).toContain('Early signal: 10m')
-    expect(result).toContain('AIWatch flagged RTT degradation')
-  })
-
-  it('returns empty when detectedAt is null', () => {
-    expect(formatDetectionLead(null, new Date(NOW).toISOString())).toBe('')
-  })
-
-  it('returns empty when detected after official report', () => {
-    const detected = new Date(NOW + 5 * 60_000).toISOString()
-    const started = new Date(NOW).toISOString()
-    expect(formatDetectionLead(detected, started)).toBe('')
-  })
-
-  it('returns empty when lead is less than 1 minute', () => {
-    const detected = new Date(NOW - 59_000).toISOString() // 59s before (floor → 0m)
-    const started = new Date(NOW).toISOString()
-    expect(formatDetectionLead(detected, started)).toBe('')
-  })
-
-  it('returns empty when lead exceeds 60 minutes (stale detection)', () => {
-    const detected = new Date(NOW - 90 * 60_000).toISOString() // 90min before
-    const started = new Date(NOW).toISOString()
-    expect(formatDetectionLead(detected, started)).toBe('')
-  })
-
-  it('handles invalid date strings', () => {
-    expect(formatDetectionLead('not-a-date', new Date(NOW).toISOString())).toBe('')
-    expect(formatDetectionLead(new Date(NOW).toISOString(), 'not-a-date')).toBe('')
-  })
-
-  it('returns empty for exactly 60 min lead (capped at 59m, #189)', () => {
-    const detected = new Date(NOW - 60 * 60_000).toISOString()
-    const started = new Date(NOW).toISOString()
-    expect(formatDetectionLead(detected, started)).toBe('')
-  })
-
-  it('returns result for 59 min lead (max valid)', () => {
-    const detected = new Date(NOW - 59 * 60_000).toISOString()
-    const started = new Date(NOW).toISOString()
-    const result = formatDetectionLead(detected, started)
-    expect(result).toContain('59m')
   })
 })
 

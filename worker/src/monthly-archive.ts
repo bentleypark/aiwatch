@@ -10,8 +10,6 @@ import type { ProbeDailyData } from './probe-archival'
 import type { ServiceStatus, Incident } from './types'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey } from './security-monitor'
-import type { DetectionLeadEntry } from './detection-lead-log'
-import { detectionLeadMonthlyKey, isValidEntry as isValidDetectionLeadEntry, MIN_LEAD_SAMPLE_SIZE } from './detection-lead-log'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
 import { kvPut } from './utils'
 
@@ -74,10 +72,7 @@ export interface MonthlyArchive {
   // Optional — null for months before this feature shipped (or no detections).
   // Sourced from security:monthly:{period} at archive build time before its 60d TTL lapses (#290).
   security?: MonthlySecuritySummary | null
-  // Optional — null for months before this feature shipped (or no detections recorded).
-  // Sourced from detection:lead:monthly:{period} (60d TTL accumulator, #369) so the archive
-  // can carry detection-lead figures past the 7d TTL on the per-day audit log keys.
-  detectionLead?: MonthlyDetectionLeadSummary | null
+  // #679 — the detection-lead (faster-than-official) summary was removed (structurally null).
   // Optional — null for months before this feature shipped (or no degradations recorded).
   // Sourced from probe-degradation:monthly:{period} (60d TTL accumulator, #511) — RTT latency
   // degradations the official status pages often don't report. The `noStatus*` figures are the
@@ -122,46 +117,12 @@ export interface MonthlySecuritySummary {
   topFindings: MonthlySecurityTopFinding[]         // sorted by severity desc, max 10
 }
 
-// ── Monthly detection lead summary (#369) ───────────────────────────
-//
-// Aggregated from detection:lead:monthly:{YYYY-MM} (60d TTL accumulator) at archive
-// build time. The accumulator is dual-written by appendDetectionLead alongside the
-// per-day audit log so the archive cron on the 1st can still see entries that the
-// 7d-TTL daily keys lost long before. Mirrors the security:monthly:* / archive pattern.
-
-export interface MonthlyDetectionLeadExample {
-  svcId: string
-  incId: string                  // for traceability — matches the original incident
-  leadMs: number
-  detectedAt: string             // ISO 8601 — when AIWatch first noticed
-}
-
-export interface MonthlyDetectionLeadSummary {
-  count: number                                  // total detection lead entries this month
-  avgLeadMs: number                              // mean lead time across all entries
-  medianLeadMs: number                           // median (resilient to outliers)
-  maxLeadMs: number                              // longest single lead — the headline figure
-  byService: Record<string, number>              // svcId → count, for "most-detected services"
-  topExamples: MonthlyDetectionLeadExample[]     // up to 5, sorted by leadMs desc
-}
-
-/** #464 — whether the monthly detection-lead AVERAGE may be presented as a headline/marketing
- *  figure. Returns false below MIN_LEAD_SAMPLE_SIZE entries (`summary.count`) so a public claim
- *  never rests on thin/zero samples. The raw summary is still stored in the archive for inspection —
- *  only the averaged claim is gated. INTENDED CONSUMERS are the report-rendering surfaces that live
- *  OUTSIDE this repo (the aiwatch-reports monthly template, and the future /press page #266) — this
- *  worker stores the raw `avgLeadMs` and exposes this guard for them; nothing in this repo renders
- *  the average yet. Per-event `topExamples` remain honest to show regardless of the gate. */
-export function canPresentLeadAverage(summary: MonthlyDetectionLeadSummary | null | undefined): boolean {
-  return !!summary && summary.count >= MIN_LEAD_SAMPLE_SIZE
-}
-
 // ── Monthly RTT degradation summary (#511, follow-up to #464) ───────
 //
 // Accumulated from probe-degradation:monthly:{YYYY-MM} (60d TTL) — incremented on each
 // probe-spike rising edge alongside the daily counter so the archive cron on the 1st can carry
-// month-complete figures past the 48h TTL on the per-day keys. Mirrors the detection:lead:monthly
-// pattern. `noStatus*` = degradations flagged while the service's official status was still
+// month-complete figures past the 48h TTL on the per-day keys.
+// `noStatus*` = degradations flagged while the service's official status was still
 // operational (NOT on the status page) — the headline differentiator from #464.
 
 /** Raw monthly accumulator shape stored at probe-degradation:monthly:{period}. */
@@ -178,7 +139,7 @@ export interface MonthlyDegradationSummary {
 }
 
 /** Monthly degradation accumulator key (60d TTL) — written alongside the daily counter so the
- *  archive cron can read month-complete figures past the daily 48h TTL. Mirrors detectionLeadMonthlyKey. */
+ *  archive cron can read month-complete figures past the daily 48h TTL (mirrors the security:monthly pattern). */
 export function degradationMonthlyKey(date: Date = new Date()): string {
   const m = String(date.getUTCMonth() + 1).padStart(2, '0')
   return `probe-degradation:monthly:${date.getUTCFullYear()}-${m}`
@@ -218,7 +179,7 @@ export function normalizeDegradationMonthly(parsed: unknown): DegradationMonthly
 }
 
 /** Aggregate the raw monthly accumulator into a permanent archive summary. Returns null on empty
- *  input — caller decides whether to attach `degradation: null`, mirroring detectionLead/security. */
+ *  input — caller decides whether to attach `degradation: null`, mirroring how security is handled. */
 export function summarizeDegradation(raw: DegradationMonthly | null | undefined): MonthlyDegradationSummary | null {
   if (!raw) return null
   const byService = raw.byService ?? {}
@@ -647,47 +608,6 @@ export function summarizeSecurityAlerts(entries: MonthlySecurityEntry[]): Monthl
 }
 
 /**
- * Aggregate raw DetectionLeadEntry[] (from the detection:lead:monthly:{period} accumulator)
- * into a permanent monthly summary (#369). Returns null on empty input — caller decides
- * whether to attach `detectionLead: null` or omit the field, mirroring how security is
- * handled. Stats (avg / median / max) computed on entries' leadMs only — every entry is
- * already validated by isValidDetectionLeadEntry at read time, so leadMs is finite and in
- * [MIN_LEAD_MS, MAX_LEAD_MS).
- */
-export function summarizeDetectionLead(entries: DetectionLeadEntry[]): MonthlyDetectionLeadSummary | null {
-  if (entries.length === 0) return null
-
-  const leadValues = entries.map(e => e.leadMs)
-  const sum = leadValues.reduce((a, b) => a + b, 0)
-  const avgLeadMs = Math.round(sum / leadValues.length)
-  const sorted = [...leadValues].sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  const medianLeadMs = sorted.length % 2 === 0
-    ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
-    : sorted[mid]
-  const maxLeadMs = sorted[sorted.length - 1]
-
-  const byService: Record<string, number> = {}
-  for (const e of entries) byService[e.svcId] = (byService[e.svcId] ?? 0) + 1
-
-  const topExamples = [...entries]
-    .sort((a, b) => {
-      if (b.leadMs !== a.leadMs) return b.leadMs - a.leadMs
-      // Tie-break on detectedAt desc — most recent occurrence wins for equal leads
-      return b.detectedAt.localeCompare(a.detectedAt)
-    })
-    .slice(0, 5)
-    .map((e): MonthlyDetectionLeadExample => ({
-      svcId: e.svcId,
-      incId: e.incId,
-      leadMs: e.leadMs,
-      detectedAt: e.detectedAt,
-    }))
-
-  return { count: entries.length, avgLeadMs, medianLeadMs, maxLeadMs, byService, topExamples }
-}
-
-/**
  * Extract the OSV vuln ID (GHSA-* or CVE-*) from a finding URL.
  * Works for the two shapes our writer currently produces: osv.dev/vulnerability/{id}
  * and github.com/advisories/{id}. Returns null if the URL doesn't carry a recognizable id.
@@ -830,37 +750,10 @@ export async function buildMonthlyArchive(
     }
   }
 
-  // Snapshot detection-lead audit log before the 60d TTL lapses (#369). The daily
-  // keys (detection:lead:{date}) carry only 7d TTL — far too short to read at archive
-  // time — so we read from the dedicated monthly accumulator written by
-  // appendDetectionLead. Missing or malformed data must not fail the archive.
-  // Build the period key from the archive's own period string (not "now") so the cron
-  // archives the *previous* month's accumulator, matching how the rest of this builder
-  // resolves the period.
-  const detKey = `detection:lead:monthly:${period}`
-  const detRaw = await kv.get(detKey).catch(() => null)
-  let detectionLead: MonthlyDetectionLeadSummary | null = null
-  if (detRaw) {
-    try {
-      const parsed = JSON.parse(detRaw)
-      if (Array.isArray(parsed)) {
-        // Filter to validated entries — defensive against malformed values that could
-        // skew avg/median (NaN propagation) or surface as fictitious topExamples.
-        const validEntries = parsed.filter((e): e is DetectionLeadEntry => isValidDetectionLeadEntry(e))
-        detectionLead = summarizeDetectionLead(validEntries)
-      } else {
-        // Non-array means the schema was overwritten unexpectedly — surface so the silent
-        // null in the archive doesn't get mistaken for "no detections this month".
-        console.warn(`[monthly-archive] detection lead accumulator at ${detKey} is not an array (got ${typeof parsed}) — archive will record null`)
-      }
-    } catch (err) {
-      console.warn(`[monthly-archive] corrupt detection lead accumulation for ${period}:`, err instanceof Error ? err.message : err)
-    }
-  }
-
-  // Snapshot RTT-degradation monthly accumulator before its 60d TTL lapses (#511). Same pattern
-  // as detection lead: the per-day probe-degradation:* keys carry only 48h TTL, so the archive
-  // reads the dedicated monthly accumulator. Missing/malformed must not fail the archive.
+  // Snapshot RTT-degradation monthly accumulator before its 60d TTL lapses (#511). The per-day
+  // probe-degradation:* keys carry only 48h TTL, so the archive reads the dedicated monthly
+  // accumulator (built from the archive's own period string, not "now", so the cron archives the
+  // *previous* month). Missing/malformed must not fail the archive.
   const degKey = `probe-degradation:monthly:${period}`
   const degRaw = await kv.get(degKey).catch(() => null)
   let degradation: MonthlyDegradationSummary | null = null
@@ -941,7 +834,6 @@ export async function buildMonthlyArchive(
     daysCollected,
     services,
     security,
-    detectionLead,
     degradation,
   }
 
