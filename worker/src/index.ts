@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, parseAlertedRoster, shouldAlertSourceDead, buildSourceDeadEmbed } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
 import { checkPersistentFetchFailures } from './persistent-failure'
@@ -662,22 +662,57 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     }
   }
 
-  // #689 — distinct operator alert when a service's status SOURCE goes inactive (4xx → sourceDead),
+  // #689/#714 — distinct operator alert when a service's status SOURCE goes inactive (4xx → sourceDead),
   // so it reads accurately ("status source inactive": service is operational+stale, excluded from
-  // rankings) instead of a misleading "degraded" alert. Deduped per service; on recovery (source
-  // responds again) the marker is cleared and a recovery note is sent.
+  // rankings) instead of a misleading "degraded" alert. Deduped per service; on a GENUINE recovery
+  // (source returns 200 again → liveness 'alive') the marker is cleared and a recovery note is sent.
+  // #714 — the decision is driven by 3-state liveness (dead/alive/unknown), NOT a boolean: an
+  // indeterminate cycle (throw / 5xx / 429 → 'unknown') HOLDS the prior dead state instead of firing a
+  // false 'recovered' (the repeating Inactive/Recovered flap). The 'alert' edge is further debounced by
+  // a 1-cycle confirmation marker (pending:source-dead:) so a single-cycle 4xx blip never alerts.
   if (env.DISCORD_WEBHOOK_URL) {
     for (const svc of scored) {
       const deadKey = `alerted:source-dead:${svc.id}`
+      const pendingKey = pendingSourceDeadKey(svc.id)
+      const liveness = sourceLivenessOf(svc)
+      // deadKey read failure → treat as not-alerted (favor FIRING a real dead-source alert over
+      // suppressing it). pendingKey read failure → fail OPEN (treat as present) so a KV hiccup can't
+      // hold a real dead source forever — it confirms + alerts rather than silently re-debouncing.
+      // The asymmetry is deliberate: both directions bias toward surfacing a real dead source. The
+      // worst case from a simultaneous double-read blip is ONE duplicate 'Inactive' (self-corrected
+      // next cycle once the reads succeed) — never the repeating Inactive/Recovered pair #714 fixes.
       const alreadyAlerted = (await env.STATUS_CACHE.get(deadKey).catch(() => null)) !== null
-      const decision = shouldAlertSourceDead(!!svc.sourceDead, alreadyAlerted)
-      if (decision === 'none') continue
+      const pendingExists = (await env.STATUS_CACHE.get(pendingKey).catch(() => '1')) !== null
+      const action = decideSourceDeadAction(liveness, { alreadyAlerted, pendingExists })
+      if (action === 'hold-unknown') continue // indeterminate while alerted — keep markers, send nothing
+      if (action === 'hold-confirm') {
+        // #714 — first dead sighting: debounce one cycle so a single-cycle 4xx blip never alerts. Check
+        // the write (mirrors #633): a silently-failed pending write would re-debounce forever, delaying
+        // the real dead-source alert indefinitely — so surface it.
+        const ok = await kvPut(env.STATUS_CACHE, pendingKey, '1', { expirationTtl: PENDING_SOURCE_DEAD_TTL_S })
+        if (!ok) console.error('[cron] #714 pending:source-dead write FAILED — dead-source alert may be delayed a cycle:', svc.id)
+        continue
+      }
+      if (action === 'none') {
+        // A held-dead source that turned 'alive' before its confirmation cycle: drop the stale pending
+        // so it doesn't later fire on its own (no 'Inactive' was ever sent → no 'recovered' either).
+        // Gate on pendingExists so a healthy source isn't issued a no-op delete every cron cycle.
+        if (liveness === 'alive' && pendingExists) await kvDel(env.STATUS_CACHE, pendingKey)
+        continue
+      }
       const cfg = SERVICES.find(c => c.id === svc.id)
-      const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, buildSourceDeadEmbed(svc.name, cfg?.statusUrl ?? '', decision === 'recovered'))
-      // Both branches gate the KV mutation on a successful send, so a failed POST retries next cycle
-      // (the dead alert re-fires; the recovery note re-sends) rather than being silently lost.
-      if (decision === 'alert' && sent) await kvPut(env.STATUS_CACHE, deadKey, '1', { expirationTtl: 604800 })
-      else if (decision === 'recovered' && sent) await kvDel(env.STATUS_CACHE, deadKey)
+      const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, buildSourceDeadEmbed(svc.name, cfg?.statusUrl ?? '', action === 'recovered'))
+      // Gate the KV mutation on a successful send, so a failed POST retries next cycle (the dead alert
+      // re-fires; the recovery note re-sends) rather than being silently lost. NOTE the 'alert' retry is
+      // valid only within the pending TTL window — if Discord is down >2 cycles the pending expires and
+      // a still-dead source re-debounces one extra cycle once Discord recovers (self-healing, minor).
+      if (action === 'alert' && sent) {
+        await kvPut(env.STATUS_CACHE, deadKey, '1', { expirationTtl: 604800 })
+        await kvDel(env.STATUS_CACHE, pendingKey) // confirmed + alerted — clear the pending marker
+      } else if (action === 'recovered' && sent) {
+        await kvDel(env.STATUS_CACHE, deadKey)
+        await kvDel(env.STATUS_CACHE, pendingKey)
+      }
     }
   }
 

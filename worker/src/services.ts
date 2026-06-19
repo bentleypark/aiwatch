@@ -653,8 +653,12 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           if (classifyStatusPageFailure(summaryRes.status) === 'dead-source') {
             return { ...base, status: 'operational', incidentSourceStale: true, sourceDead: true }
           }
+          // #714 — a 5xx is an INDETERMINATE source verdict, not a recovery. Flag `sourceUnknown` so
+          // the source-inactive alert HOLDS a prior dead state this cycle instead of misreading the
+          // non-4xx outcome as "source recovered" (the Inactive/Recovered flap). (A 4xx — incl. 429 —
+          // is classified `dead-source` above, NOT unknown.)
           const shouldDegrade = await trackFetchFailure(kv, config.id)
-          return { ...base, status: shouldDegrade ? 'degraded' : 'operational' }
+          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', sourceUnknown: true }
         }
         summaryData = await summaryRes.json()
         if (incidentsRes?.ok) {
@@ -1094,8 +1098,12 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
     // Require 3 consecutive failures before marking degraded to avoid transient timeout noise
     // (e.g., Together's status page is slow ~3s, intermittent timeouts under load).
     console.error(`[fetchService] ${config.id} failed:`, err)
+    // #714 — a thrown fetch (timeout / connection reset / the cross-host 302→4xx redirect-follow
+    // throwing from CF egress) is an INDETERMINATE verdict, NOT a recovery. Flag `sourceUnknown` so the
+    // source-inactive alert holds a prior dead state instead of misreading the throw as "recovered"
+    // (the #714 flap reproduced only from CF egress, where the redirect intermittently throws).
     const shouldDegrade = await trackFetchFailure(kv, config.id)
-    return { ...base, status: shouldDegrade ? 'degraded' : 'operational' }
+    return { ...base, status: shouldDegrade ? 'degraded' : 'operational', sourceUnknown: true }
   }
 }
 

@@ -1,20 +1,123 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, buildSourceDeadEmbed } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
 
-describe('shouldAlertSourceDead (#689)', () => {
-  it('alerts on the rising edge (source just went dead, not yet alerted)', () => {
-    expect(shouldAlertSourceDead(true, false)).toBe('alert')
+describe('sourceLivenessOf (#714)', () => {
+  it('dead when sourceDead (confirmed 4xx)', () => {
+    expect(sourceLivenessOf({ sourceDead: true })).toBe('dead')
+  })
+  it('unknown when sourceUnknown (throw / 5xx / 429)', () => {
+    expect(sourceLivenessOf({ sourceUnknown: true })).toBe('unknown')
+  })
+  it('alive when neither flag (clean fetch)', () => {
+    expect(sourceLivenessOf({})).toBe('alive')
+  })
+  it('dead takes precedence if both somehow set (defensive)', () => {
+    expect(sourceLivenessOf({ sourceDead: true, sourceUnknown: true })).toBe('dead')
+  })
+})
+
+describe('shouldAlertSourceDead (#689/#714 — 3-state liveness)', () => {
+  it('alerts on the rising edge (dead, not yet alerted)', () => {
+    expect(shouldAlertSourceDead('dead', false)).toBe('alert')
   })
   it('does NOT re-alert while still dead + already alerted (deduped)', () => {
-    expect(shouldAlertSourceDead(true, true)).toBe('none')
+    expect(shouldAlertSourceDead('dead', true)).toBe('none')
   })
-  it('signals recovery on the falling edge (alive again + was alerted)', () => {
-    expect(shouldAlertSourceDead(false, true)).toBe('recovered')
+  it('signals recovery ONLY on a genuine alive observation while alerted', () => {
+    expect(shouldAlertSourceDead('alive', true)).toBe('recovered')
   })
-  it('stays quiet when healthy + never alerted', () => {
-    expect(shouldAlertSourceDead(false, false)).toBe('none')
+  it('stays quiet when alive + never alerted', () => {
+    expect(shouldAlertSourceDead('alive', false)).toBe('none')
+  })
+
+  // #714 — the core fix: an indeterminate (unknown) cycle is NOT a recovery
+  it('HOLDS on unknown while alerted — never a false recovery (the #714 flap)', () => {
+    expect(shouldAlertSourceDead('unknown', true)).toBe('hold')
+  })
+  it('stays quiet on unknown when never alerted', () => {
+    expect(shouldAlertSourceDead('unknown', false)).toBe('none')
+  })
+
+  it('#714 flap sequence: dead→unknown→dead fires NO recovery (was the repeating Inactive/Recovered)', () => {
+    // Cycle A: dead, not alerted → alert (then caller sets the marker)
+    expect(shouldAlertSourceDead('dead', false)).toBe('alert')
+    // Cycle B: a transient throw mid-dead-source → unknown, alerted → HOLD (pre-#714 this was 'recovered')
+    expect(shouldAlertSourceDead('unknown', true)).toBe('hold')
+    // Cycle C: dead again, still alerted → none (no re-alert; marker was never cleared by the hold)
+    expect(shouldAlertSourceDead('dead', true)).toBe('none')
+  })
+
+  it('#714 genuine recovery: dead→alive fires exactly one recovery', () => {
+    expect(shouldAlertSourceDead('dead', false)).toBe('alert')   // A: rising edge
+    expect(shouldAlertSourceDead('alive', true)).toBe('recovered') // B: page returns 200 → real recovery
+    expect(shouldAlertSourceDead('alive', false)).toBe('none')   // C: marker cleared → quiet
+  })
+})
+
+describe('pendingSourceDeadKey / PENDING_SOURCE_DEAD_TTL_S (#714)', () => {
+  it('scopes the confirmation marker per service', () => {
+    expect(pendingSourceDeadKey('characterai')).toBe('pending:source-dead:characterai')
+  })
+  it('TTL spans two cron cycles (survives one skipped run), mirroring PENDING_NEW_TTL_S', () => {
+    expect(PENDING_SOURCE_DEAD_TTL_S).toBe(600)
+    expect(PENDING_SOURCE_DEAD_TTL_S).toBe(PENDING_NEW_TTL_S)
+  })
+})
+
+describe('decideSourceDeadAction (#714 — liveness edge + 1-cycle confirmation gate)', () => {
+  const at = (liveness: 'dead' | 'alive' | 'unknown', alreadyAlerted: boolean, pendingExists: boolean) =>
+    decideSourceDeadAction(liveness, { alreadyAlerted, pendingExists })
+
+  it('first dead sighting is HELD one cycle (debounce a single-cycle 4xx blip)', () => {
+    expect(at('dead', false, false)).toBe('hold-confirm')
+  })
+  it('dead confirmed a second consecutive cycle (pending set) → fires the alert', () => {
+    expect(at('dead', false, true)).toBe('alert')
+  })
+  it('does not re-alert once already alerted', () => {
+    expect(at('dead', true, false)).toBe('none')
+    expect(at('dead', true, true)).toBe('none')
+  })
+  it('unknown while alerted → hold-unknown (no false recovery — the #714 bug)', () => {
+    expect(at('unknown', true, false)).toBe('hold-unknown')
+  })
+  it('genuine alive while alerted → recovered', () => {
+    expect(at('alive', true, false)).toBe('recovered')
+  })
+  it('alive while not alerted → none (caller clears any stale pending)', () => {
+    expect(at('alive', false, true)).toBe('none')
+  })
+
+  // ── Full cron-cycle sequences (the acceptance criteria) ──
+
+  it('CONSISTENTLY DEAD source (Character.AI): exactly one alert, then quiet — no repeating pairs', () => {
+    // A: first dead → held (pending written by caller)
+    expect(at('dead', false, false)).toBe('hold-confirm')
+    // B: still dead, pending present → fire ONE 'Inactive' (caller sets deadKey, clears pending)
+    expect(at('dead', false, true)).toBe('alert')
+    // C+: still dead, already alerted → silence (no Inactive/Recovered churn)
+    expect(at('dead', true, false)).toBe('none')
+    expect(at('dead', true, false)).toBe('none')
+  })
+
+  it('the #714 flap (dead→transient→dead AFTER alerting): a transient cycle never fabricates recovery', () => {
+    // already alerted (deadKey set, pending cleared)
+    expect(at('unknown', true, false)).toBe('hold-unknown') // throw/5xx mid-dead → HOLD (was 'recovered')
+    expect(at('dead', true, false)).toBe('none')            // dead again → still silent (marker kept)
+  })
+
+  it('single-cycle 4xx blip that self-recovers: held, then recovered before confirming → no alert at all', () => {
+    expect(at('dead', false, false)).toBe('hold-confirm')   // A: blip → held (pending set)
+    expect(at('alive', false, true)).toBe('none')           // B: back to 200 before confirm → none (no Inactive)
+    // → caller drops the stale pending; no 'Inactive' was sent, so no 'Recovered' either
+  })
+
+  it('genuine recovery after a confirmed alert fires exactly one Recovered', () => {
+    expect(at('dead', false, true)).toBe('alert')           // confirmed dead → alert (deadKey set)
+    expect(at('alive', true, false)).toBe('recovered')      // page returns 200 → one Recovered (deadKey cleared)
+    expect(at('alive', false, false)).toBe('none')          // quiet thereafter
   })
 })
 
