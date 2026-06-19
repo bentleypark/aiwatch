@@ -449,6 +449,27 @@ describe('awsHealthImpact (#677)', () => {
   it('returns null for an unrecognized typeCode', () => {
     expect(awsHealthImpact('AWS_SOMETHING_ELSE')).toBeNull()
   })
+
+  // #707 — text-aware down-classification: a non-reliability advisory (compliance / access revocation /
+  // deprecation) carries the SAME generic OPERATIONAL_ISSUE typeCode as a real outage; only the
+  // EVENT_LOG text distinguishes them. The real "Fable 5 and Mythos 5 Access" event motivated this.
+  it('#707: down-classifies a compliance / access-revocation advisory (no outage signal) to null', () => {
+    const text =
+      'To support compliance with the US Government export control directive, Anthropic has asked us to ' +
+      'revoke access to Claude Fable 5 and Claude Mythos 5. All other models are not affected.'
+    expect(awsHealthImpact('AWS_BEDROCK_OPERATIONAL_ISSUE', text)).toBeNull()
+  })
+  it('#707: a deprecation/retirement advisory is also null', () => {
+    expect(awsHealthImpact('AWS_BEDROCK_OPERATIONAL_ISSUE', 'This model version is being deprecated and will be retired.')).toBeNull()
+  })
+  it('#707: keeps a genuine operational issue as major when an outage signal is present (outage wins)', () => {
+    // advisory word ("compliance") co-occurs with an outage signal → NOT down-classified
+    expect(awsHealthImpact('AWS_BEDROCK_OPERATIONAL_ISSUE', 'Elevated error rates invoking models; a compliance review is ongoing.')).toBe('major')
+  })
+  it('#707: an operational issue with no EVENT_LOG text stays major (typeCode fallback + 1-arg back-compat)', () => {
+    expect(awsHealthImpact('AWS_BEDROCK_OPERATIONAL_ISSUE', '')).toBe('major')
+    expect(awsHealthImpact('AWS_BEDROCK_OPERATIONAL_ISSUE')).toBe('major')
+  })
 })
 
 describe('parseAwsHealthEvents (#677 — AWS Health public events JSON)', () => {
@@ -458,7 +479,7 @@ describe('parseAwsHealthEvents (#677 — AWS Health public events JSON)', () => 
     expect(inc.startedAt).toBe('2026-06-13T01:26:58.000Z')
     expect(inc.resolvedAt).toBe('2026-06-15T18:13:23.000Z')
     expect(inc.duration).toBe('64h 47m') // the real span — was '1m' under the RSS parser
-    expect(inc.impact).toBe('major')
+    expect(inc.impact).toBeNull() // #707 — compliance/access-revocation advisory ("revoke access"), NOT a reliability outage
     expect(inc.title).toBe('Fable 5 and Mythos 5 Access') // first EVENT_LOG summary
   })
 
@@ -481,6 +502,18 @@ describe('parseAwsHealthEvents (#677 — AWS Health public events JSON)', () => 
     // The onset entry must NOT inherit the overall 'resolved' status — only the [RESOLVED] entry resolves.
     expect(inc.timeline[0].stage).toBe('investigating')
     expect(inc.timeline[1].stage).toBe('resolved') // summary has [RESOLVED]
+  })
+
+  it('#707: a Health event with outage text classifies as major through the parse (control case)', () => {
+    // Same generic typeCode, but the EVENT_LOG describes a real fault → stays major (not down-classified).
+    const outage = {
+      ...BEDROCK_EVENT,
+      metadata: { EVENT_LOG: JSON.stringify([
+        { summary: 'Increased error rates', message: 'Elevated error rates invoking Bedrock models in us-east-1.', timestamp: 1781314018 },
+      ]) },
+    }
+    const [inc] = parseAwsHealthEvents([outage], 'BEDROCK')
+    expect(inc.impact).toBe('major')
   })
 
   it('treats an event without endTime as active (resolvedAt null, no duration)', () => {

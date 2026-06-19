@@ -179,6 +179,10 @@ const en = {
   'uptime.unavailable': 'Not provided',
   'uptime.unavailable.short': '—',
   'uptime.unavailable.tooltip': 'This service does not provide public uptime data',
+  // #707 — estimate-source service with a working feed but no impactful incident in the window:
+  // "no reliability incidents" is the honest read, not "no data".
+  'uptime.noIncidents': 'No reliability incidents in this period',
+  'uptime.noIncidents.tooltip': 'Estimated from incidents — none impactful in this period',
   'score.tooltip': 'Based on uptime, incident affected days, and recovery time',
   'uptime.sla.label': 'SLA threshold',
   'svc.mttr.none': 'No incidents in 7 days',

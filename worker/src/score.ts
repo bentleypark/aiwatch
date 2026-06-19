@@ -142,8 +142,13 @@ export function calculateAIWatchScore(
   }
   const weightedAffectedDays = Array.from(dailyMaxWeight.values()).reduce((a, b) => a + b, 0)
 
-  // MTTR calculation (resolved incidents with positive duration only)
-  const durations = incidents30d
+  // MTTR calculation (resolved incidents with positive duration only). #707 — EXCLUDE null-impact
+  // incidents: an informational/advisory event (component rename, post-mortem, compliance access-
+  // revocation, deprecation) has a duration but is NOT a reliability recovery, so counting it would
+  // zero the Recovery score on a service that never actually went down (symmetric with the #261
+  // null-impact exclusion from affectedDays / the uptime estimate).
+  const impactfulIncidents30d = incidents30d.filter((i) => i.impact != null)
+  const durations = impactfulIncidents30d
     .filter((i) => i.status === 'resolved' && i.duration)
     .map((i) => parseDurationMin(i.duration!))
     .filter((m) => m > 0)
@@ -167,9 +172,11 @@ export function calculateAIWatchScore(
   // a service with N critical days — symmetric with the uptime weight in #259.
   const incidentScore = 25 * Math.exp(-weightedAffectedDays / 10)
 
+  // Recovery default keys off IMPACTFUL incidents (#707): a window whose only incidents are
+  // null-impact advisories has no reliability recovery to penalize → full 15, not 0.
   const recoveryScore = mttrHours != null
     ? 15 * Math.exp(-mttrHours / 4)
-    : incidentCount > 0 ? 0 : 15
+    : impactfulIncidents30d.length > 0 ? 0 : 15
 
   // Base score (uptime + incidents + recovery)
   let baseScore: number

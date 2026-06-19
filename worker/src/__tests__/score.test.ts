@@ -218,6 +218,27 @@ describe('calculateAIWatchScore', () => {
     expect(scoreUnprobed(makeSvc({ incidents })).metrics.mttrHours).toBe(2)
   })
 
+  // ── #707: null-impact incidents are informational (compliance/advisory) — excluded from MTTR/recovery
+  // (symmetric with the #261 exclusion from affectedDays + the uptime estimate), so a non-reliability
+  // event doesn't zero a service's Recovery score on a window where it never actually went down.
+  const nullImpactInc = (daysAgo: number, duration: string) => ({
+    ...makeIncident(daysAgo, duration), impact: null as null,
+  })
+
+  it('#707: a null-impact resolved incident does NOT penalize recovery (informational advisory)', () => {
+    // a single 64.8h compliance event — pre-#707 this zeroed recovery (15·e^-16.2 ≈ 0)
+    const result = scoreUnprobed(makeSvc({ incidents: [nullImpactInc(2, '64h 47m')] }))
+    expect(result.metrics.mttrHours).toBeNull()  // excluded from the MTTR set
+    expect(result.breakdown.recovery).toBe(15)   // no reliability recovery to penalize → full 15
+    expect(result.breakdown.incidents).toBe(25)  // null-impact also excluded from affectedDays (#261)
+  })
+
+  it('#707: MTTR ignores a null-impact incident when a real (impactful) one is present', () => {
+    const incidents = [makeIncident(1, '2h 0m'), nullImpactInc(2, '100h 0m')]
+    // only the real 2h incident drives MTTR — not diluted/dominated by the 100h advisory
+    expect(scoreUnprobed(makeSvc({ incidents })).metrics.mttrHours).toBe(2)
+  })
+
   // ── Responsiveness component (probe-supported services) ──
 
   it('adds Responsiveness when probe context is "available"', () => {

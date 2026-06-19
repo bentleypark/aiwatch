@@ -8,7 +8,7 @@ import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
-import { isUnreliableUptime } from '../utils/serviceReliability'
+import { isUnreliableUptime, isEstimateNoIncidents } from '../utils/serviceReliability'
 import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionSwitchable, ALL_SERVICES_FEED_URL } from '../utils/constants'
 import RssCopyIcon from '../components/RssCopyIcon'
 import { regionStatusOf } from '../utils/regionStatus'
@@ -158,7 +158,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
             <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t(isProbed ? 'overview.card.latency.api' : 'overview.card.latency')}</div>
           </div>
           <div>
-            <div className={`mono text-[13px] font-medium ${uptimeColor}`} title={!hasUptime ? t('uptime.unavailable.tooltip') : undefined}>
+            <div className={`mono text-[13px] font-medium ${uptimeColor}`} title={!hasUptime ? t(isEstimateNoIncidents(service) ? 'uptime.noIncidents.tooltip' : 'uptime.unavailable.tooltip') : undefined}>
               {uptimeStr}
             </div>
             <div className="mono text-[9px] text-[var(--text2)]" style={{ letterSpacing: '0.04em' }}>{t('overview.card.uptime')}</div>

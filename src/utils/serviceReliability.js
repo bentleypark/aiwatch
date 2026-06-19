@@ -18,6 +18,13 @@
  *  90-day incident set (live ∪ archive) has no impactful incident (#591, #653). */
 export const isEstimateNoData = (s) => s.uptimeSource === 'estimate' && s.uptime30d == null
 
+/** Estimate service whose source is WORKING (not frozen/stale) but had NO impactful incident in the
+ *  90-day basis — so the null uptime means "no reliability incidents in this period", NOT "no data
+ *  source". Drives the honest display wording (#707): "No reliability incidents in this period" instead
+ *  of "Not provided". (A null-impact advisory like the AWS compliance access-revocation, #707, is not an
+ *  impactful incident, so a service whose only event is such an advisory lands here.) */
+export const isEstimateNoIncidents = (s) => isEstimateNoData(s) && !s.incidentSourceStale
+
 /** Uptime30d is not a reliable current figure — either estimate-no-data or a frozen stale source.
  *  Use to exclude from uptime ranking/sort/averages and to blank uptime displays. */
 export const isUnreliableUptime = (s) => isEstimateNoData(s) || !!s.incidentSourceStale
