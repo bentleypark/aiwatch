@@ -8,7 +8,7 @@ import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { UptimeSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
-import { isUnreliableUptime } from '../utils/serviceReliability'
+import { isUnreliableUptime, isEstimateNoIncidents } from '../utils/serviceReliability'
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -75,7 +75,7 @@ function UptimeBar({ service, sla, t }) {
         />
       </div>
       <span className={`w-16 shrink-0 text-right text-xs mono font-medium ${textColorClass}`}
-            title={!hasUptime ? t('uptime.unavailable.tooltip') : undefined}>
+            title={!hasUptime ? t(isEstimateNoIncidents(service) ? 'uptime.noIncidents.tooltip' : 'uptime.unavailable.tooltip') : undefined}>
         {hasUptime ? `${uptime.toFixed(2)}%` : t('uptime.unavailable.short')}
       </span>
       <span className="w-8 shrink-0 text-right text-[9px] mono text-[var(--text2)]"

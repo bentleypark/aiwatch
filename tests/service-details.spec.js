@@ -507,15 +507,16 @@ test.describe('Estimate-only services (Bedrock, Azure OpenAI)', () => {
     lastUpdated: new Date().toISOString(),
   }
 
-  test('estimate service with no incidents: uptime "Not provided" + score hidden, but incidents shown live (#653)', async ({ page }) => {
+  test('estimate service with no incidents: uptime "No reliability incidents" + score hidden, but incidents shown live (#653/#707)', async ({ page }) => {
     await page.route('**/api/status**', async (route) => {
       await route.fulfill({ json: ESTIMATE_MOCK })
     })
     await page.goto('/#bedrock')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
-    // No baseless 100% uptime; the uptime card reads "Not provided"
+    // No baseless 100% uptime; #707 — a working estimate source with no impactful incident reads
+    // "No reliability incidents in this period" (NOT the misleading "Not provided").
     await expect(page.locator('main').getByText('100.00%')).not.toBeVisible()
-    await expect(page.locator('main').getByText(/Not provided|제공되지 않음/).first()).toBeVisible()
+    await expect(page.locator('main').getByText(/No reliability incidents in this period|이 기간 내 신뢰성 인시던트 없음/).first()).toBeVisible()
     // AIWatch Score section hidden (no reliable basis)
     await expect(page.locator('main').getByText(/AIWatch Score/)).not.toBeVisible()
     // #653 decoupling — incidents are LIVE data, not blanked: with 0 live incidents the Incident
@@ -525,7 +526,7 @@ test.describe('Estimate-only services (Bedrock, Azure OpenAI)', () => {
     await expect(page.locator('main').getByText(/No incidents|이슈 없음|인시던트 없음/).first()).toBeVisible()
   })
 
-  test('estimate service with an informational incident: uptime "Not provided" but the incident shows in history (#653)', async ({ page }) => {
+  test('estimate service with an informational incident: uptime "No reliability incidents" but the incident shows in history (#653/#707)', async ({ page }) => {
     // The exact recurred Bedrock shape: estimate source, no impactful incident (uptime null), but a
     // live informational (null-impact) incident. Per (b): uptime blanks, the incident still shows.
     const mock = {
@@ -538,9 +539,9 @@ test.describe('Estimate-only services (Bedrock, Azure OpenAI)', () => {
     await page.route('**/api/status**', async (route) => { await route.fulfill({ json: mock }) })
     await page.goto('/#bedrock')
     await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
-    // Uptime still "Not provided" (no impactful basis)
+    // #707 — uptime reads "No reliability incidents in this period" (null-impact advisory = no basis)
     await expect(page.locator('main').getByText('100.00%')).not.toBeVisible()
-    await expect(page.locator('main').getByText(/Not provided|제공되지 않음/).first()).toBeVisible()
+    await expect(page.locator('main').getByText(/No reliability incidents in this period|이 기간 내 신뢰성 인시던트 없음/).first()).toBeVisible()
     // The informational incident MUST appear in the Incident History (not blanked by estimate-no-data)
     await expect(page.locator('main').getByText(/Service impact: Fable 5 Access/)).toBeVisible()
   })

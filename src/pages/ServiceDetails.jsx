@@ -14,7 +14,7 @@ import { groupIncidents } from '../utils/incidentGrouping'
 import { compareGroupedRows, dominantGroupStatus } from '../utils/incidentSort'
 import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
 import { computeRecoveryStats, formatRecoveryMin } from '../utils/recovery'
-import { isUnreliableUptime } from '../utils/serviceReliability'
+import { isUnreliableUptime, isEstimateNoIncidents } from '../utils/serviceReliability'
 import { regionStatusOf, SERVICE_REGIONS } from '../utils/regionStatus'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
@@ -754,6 +754,9 @@ export default function ServiceDetails({ serviceId }) {
   // uptime / incidents / MTTR / score cards + the status calendar (showing a frozen 30-day window as
   // current would mislead). Latency stays — it's probe-measured + current.
   const isUnreliableData = isUnreliableUptime(service)
+  // #707 — distinguish "estimate source, no impactful incident in window" (honest: "No reliability
+  // incidents in this period") from the genuinely-unavailable / frozen-stale cases ("Not provided").
+  const noIncidentsEstimate = isEstimateNoIncidents(service)
   // #653 — incident displays (count card, MTTR, Incident History) reflect the LIVE incident list and
   // should blank ONLY for a stale/frozen feed — NOT for estimate-no-data. An estimate-only service
   // (bedrock/azureopenai) with a live informational incident has a baseless UPTIME (gated by
@@ -836,7 +839,7 @@ export default function ServiceDetails({ serviceId }) {
             ? '—'
             : service.uptime30d != null ? `${service.uptime30d.toFixed(2)}%` : '—'}
           sub={isUnreliableData
-            ? t('uptime.unavailable')
+            ? t(noIncidentsEstimate ? 'uptime.noIncidents' : 'uptime.unavailable')
             : t({ official: 'uptime.sub.official', platform_avg: 'uptime.sub.platform_avg', estimate: 'uptime.sub.estimate' }[service.uptimeSource] ?? 'uptime.unavailable')}
           colorClass="text-[var(--green)]"
         />

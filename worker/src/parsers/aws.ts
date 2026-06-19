@@ -71,13 +71,36 @@ export function decodeAwsHealthJson(buf: ArrayBuffer, contentType: string | null
   return JSON.parse(text)
 }
 
-/** Map an AWS Health `typeCode` to AIWatch impact. The events API carries no explicit severity, but
- *  a `*_OPERATIONAL_ISSUE` is a service-impacting event (AWS labels these "Impacted"). We map it to
+// #707 — phrases that mark a NON-reliability advisory: a deliberate provider/policy action
+// (compliance, export control, access revocation, deprecation, scheduled change), NOT a service
+// fault. AWS tags these with the SAME generic `*_OPERATIONAL_ISSUE` typeCode as a real outage, so the
+// typeCode alone can't tell them apart — only the EVENT_LOG text can. The motivating case: the 2026-06
+// "Fable 5 and Mythos 5 Access" event ("…export control directive, Anthropic has asked us to revoke
+// access to Claude Fable 5 and Claude Mythos 5… all other models are not affected, use in full
+// confidence") was a compliance model-removal, yet scored as a `major` 64.8h outage and tanked
+// Bedrock's AIWatch Score to 43. We down-classify such advisories to `null` (informational) so they're
+// excluded from the reliability score while still showing in the incident list.
+const NON_RELIABILITY_RE =
+  /export control|compliance|regulatory|revoke|revoked|revoking|deprecat|end[ -]of[ -]life|retir(?:e|ed|ing|ement)|sunset|discontinu|scheduled (?:maintenance|change)/i
+// Outage/fault signals — if ANY appear, it's a real reliability event regardless of advisory wording,
+// so we do NOT down-classify (the advisory regex must NOT win over a genuine fault — a false-positive
+// here would HIDE a real outage by scoring it as informational, the more dangerous direction). Note:
+// "unavailable" is deliberately ABSENT — a compliance removal makes a model "unavailable" by design.
+const OUTAGE_SIGNAL_RE =
+  /error rate|elevated error|5xx|disruption|outage|partial outage|degraded|unable to|throttl|increased latency|timeouts?|failure|not responding|impair/i
+
+/** Map an AWS Health event to AIWatch impact. The events API carries no explicit severity, but a
+ *  `*_OPERATIONAL_ISSUE` is a service-impacting event (AWS labels these "Impacted"). We map it to
  *  `major` — the conservative non-"down" level; a full outage is ALSO an OPERATIONAL_ISSUE and is
- *  indistinguishable from the typeCode alone, so we don't over-claim `critical`. */
-export function awsHealthImpact(typeCode: string): 'minor' | 'major' | 'critical' | null {
+ *  indistinguishable from the typeCode alone, so we don't over-claim `critical`.
+ *  #707: when the EVENT_LOG `text` shows a clear NON-reliability advisory AND carries no outage signal,
+ *  classify `null` (informational) so a compliance/deprecation/scheduled event doesn't score as a fault. */
+export function awsHealthImpact(typeCode: string, text = ''): 'minor' | 'major' | 'critical' | null {
   const t = typeCode.toLowerCase()
   if (t.includes('informational') || t.includes('notification')) return 'minor'
+  // #707 — a clear non-reliability advisory with NO outage signal is informational, not a reliability
+  // incident: classify null so it's excluded from the AIWatch Score (uptime/incidents/recovery).
+  if (text && NON_RELIABILITY_RE.test(text) && !OUTAGE_SIGNAL_RE.test(text)) return null
   if (t.includes('operational_issue') || t.includes('disruption') || t.includes('outage')) return 'major'
   return null
 }
@@ -107,6 +130,9 @@ export function parseAwsHealthEvents(json: unknown, service: string): Incident[]
     const log = parseEventLog(ev.metadata?.EVENT_LOG)
     const firstSummary = log[0]?.summary?.trim()
     const title = decodeXmlEntities(stripCdata(firstSummary || ev.typeCode || `${service} event`))
+    // #707 — classify impact from the human EVENT_LOG text (summary + message across all entries),
+    // not the generic typeCode alone, so a compliance/access-policy advisory isn't scored as an outage.
+    const classificationText = log.map((e) => `${e.summary ?? ''} ${e.message ?? ''}`).join(' ').trim() || title
     const region = ev.region || 'unknown'
     const resolved = typeof ev.endTime === 'number' && ev.endTime > 0
     const startedAt = new Date(ev.startTime).toISOString()
@@ -129,7 +155,7 @@ export function parseAwsHealthEvents(json: unknown, service: string): Incident[]
       id: `aws:${service.toLowerCase()}:${region}:${ev.startTime}`,
       title,
       status,
-      impact: awsHealthImpact(ev.typeCode || ''),
+      impact: awsHealthImpact(ev.typeCode || '', classificationText),
       componentNames: [region],
       startedAt,
       resolvedAt,
