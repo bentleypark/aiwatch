@@ -70,9 +70,9 @@ describe('calculateAIWatchScore', () => {
   it('excludes null-impact incidents from affectedDays (#261)', () => {
     // Mix: 3 informational (null) + 2 major. Only the major days should count.
     const incidents = [
-      { ...makeIncident(1), impact: null as const },
-      { ...makeIncident(2), impact: null as const },
-      { ...makeIncident(3), impact: null as const },
+      { ...makeIncident(1), impact: null },
+      { ...makeIncident(2), impact: null },
+      { ...makeIncident(3), impact: null },
       makeIncident(10), // major
       makeIncident(11), // major
     ]
@@ -85,9 +85,9 @@ describe('calculateAIWatchScore', () => {
 
   it('null-only feed treats incidents as if there were none (#261)', () => {
     const incidents = [
-      { ...makeIncident(1), impact: null as const },
-      { ...makeIncident(2), impact: null as const },
-      { ...makeIncident(5), impact: null as const },
+      { ...makeIncident(1), impact: null },
+      { ...makeIncident(2), impact: null },
+      { ...makeIncident(5), impact: null },
     ]
     const r = scoreUnprobed(makeSvc({ incidents }))
     expect(r.metrics.affectedDays30d).toBe(0)

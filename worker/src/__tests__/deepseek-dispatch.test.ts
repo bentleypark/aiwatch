@@ -45,7 +45,7 @@ describe('maybeDispatchDeepseekFeed (#629)', () => {
   })
 
   it('dispatches + sets the cooldown on HTTP 204', async () => {
-    const fetchSpy = vi.fn(async () => new Response(null, { status: 204 }))
+    const fetchSpy = vi.fn(async (_url: string, _opts?: RequestInit) => new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetchSpy)
     const kv = mockKV()
     await maybeDispatchDeepseekFeed({ GH_DISPATCH_TOKEN: 't', STATUS_CACHE: kv as unknown as KVNamespace })

@@ -96,7 +96,7 @@ npm run lint       # Run ESLint
 npm test           # Run Playwright E2E tests
 npm run test:src   # Run frontend unit tests (vitest, src/**/*.test.js)
 npm run test:worker # Run Worker unit tests (vitest)
-npm run typecheck:worker # tsc gate — fails on undefined-name/missing-import (TS2304) in worker source (#533)
+npm run typecheck:worker # tsc gate — full `tsc --noEmit`, fails on ANY type error across worker source incl tests (#533 Phase 4; two-pass: prod strict workers-types-only + tests with @types/node)
 npm run test:scripts # node:test unit tests for scripts/*.mjs (e.g. verify-reminders, #541)
 ```
 
@@ -161,7 +161,7 @@ gh pr merge --squash --delete-branch
 2. **Design check** (UI only) — diff against `docs/AIWatch_화면디자인_초안_v2.html`; list every difference first
 3. **Code**
 3.5. **Local verify** — start the right dev server (see "Local verification by page type"); get the USER's **in-browser confirmation** (curl/Playwright/tests do NOT count). Reachability gate: if the change needs a specific state (incident / `down` / error / flag), set up the trigger + verify yourself first, revert it before commit. **STOP and wait.**
-4. **Build + test** by scope — frontend: `npm run build` + `npm run test:src` + `npm test`; worker: `npx wrangler deploy --config worker/wrangler.toml --dry-run` + `npm run test:worker` + `npm run typecheck:worker` (the dry-run uses esbuild — it does **not** type-check, so the TS2304 gate is what catches a missing import like #532). New worker/util logic → exported fn + unit test; **every bug fix → a test that catches it**
+4. **Build + test** by scope — frontend: `npm run build` + `npm run test:src` + `npm test`; worker: `npx wrangler deploy --config worker/wrangler.toml --dry-run` + `npm run test:worker` + `npm run typecheck:worker` (the dry-run uses esbuild — it does **not** type-check, so this full-`tsc` gate (#533 Phase 4) is what catches a missing import like #532 OR any other type error; prod source is checked workers-types-ONLY so a `process`/`node:fs` use that would crash the no-`nodejs_compat` runtime also fails). New worker/util logic → exported fn + unit test; **every bug fix → a test that catches it**
 5. **PR review** before commit — `/pr-review-toolkit:review-pr`
 6. **Fix → re-test → re-review, auto-loop** until 0 Critical/Important (Suggestions-only = converged)
 7. **Docs update** — CLAUDE.md (lean, **~40k-char guideline**; detail → `docs/reference/`), the relevant `docs/reference/*`, README(.ko), `CONTRIBUTING.md`, `index.html` SEO, `aiwatch-reports/`

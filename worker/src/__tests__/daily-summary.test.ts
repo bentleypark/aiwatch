@@ -36,7 +36,7 @@ describe('buildDailySummary', () => {
       services: [
         makeSvc({ id: 'a', name: 'A', status: 'operational' }),
         makeSvc({ id: 'b', name: 'B', status: 'degraded' }),
-        makeSvc({ id: 'c', name: 'C', status: 'down', incidents: [{ id: 'inc1', title: 'Down', status: 'investigating', startedAt: new Date(Date.now() - 3600000).toISOString(), impact: 'major', updates: [] }] }),
+        makeSvc({ id: 'c', name: 'C', status: 'down', incidents: [{ id: 'inc1', title: 'Down', status: 'investigating', startedAt: new Date(Date.now() - 3600000).toISOString(), impact: 'major', duration: null, timeline: [] }] }),
       ],
       aiUsage: null,
       latencySnapshots: [],
@@ -54,7 +54,7 @@ describe('buildDailySummary', () => {
       services: [
         makeSvc({
           id: 'x', name: 'X Service', status: 'down',
-          incidents: [{ id: 'i1', title: 'API Error', status: 'investigating', startedAt: new Date(Date.now() - 7200000).toISOString(), impact: 'major', updates: [] }],
+          incidents: [{ id: 'i1', title: 'API Error', status: 'investigating', startedAt: new Date(Date.now() - 7200000).toISOString(), impact: 'major', duration: null, timeline: [] }],
         }),
       ],
       aiUsage: null,
@@ -132,7 +132,7 @@ describe('buildDailySummary', () => {
     const result = buildDailySummary({
       services: [makeSvc({
         id: 'x', name: 'X', status: 'down',
-        incidents: [{ id: 'i1', title: 'Bad', status: 'investigating', startedAt: 'not-a-date', impact: 'major', updates: [] }],
+        incidents: [{ id: 'i1', title: 'Bad', status: 'investigating', startedAt: 'not-a-date', impact: 'major', duration: null, timeline: [] }],
       })],
       aiUsage: null,
       latencySnapshots: [],
@@ -167,7 +167,7 @@ describe('buildDailySummary', () => {
   it('includes estimate services with incidents in uptime best/worst', () => {
     const result = buildDailySummary({
       services: [
-        makeSvc({ id: 'bedrock', name: 'Amazon Bedrock', uptime30d: 99.80, uptimeSource: 'estimate' as const, incidents: [{ id: 'i1', title: 'Outage', status: 'resolved', startedAt: '2026-04-01T00:00:00Z', impact: 'major', updates: [] }] }),
+        makeSvc({ id: 'bedrock', name: 'Amazon Bedrock', uptime30d: 99.80, uptimeSource: 'estimate' as const, incidents: [{ id: 'i1', title: 'Outage', status: 'resolved', startedAt: '2026-04-01T00:00:00Z', impact: 'major', duration: null, timeline: [] }] }),
         makeSvc({ id: 'openai', name: 'OpenAI API', uptime30d: 99.99 }),
         makeSvc({ id: 'claude', name: 'Claude API', uptime30d: 99.50 }),
       ],

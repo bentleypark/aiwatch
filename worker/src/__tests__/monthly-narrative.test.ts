@@ -70,9 +70,9 @@ describe('selectIncidentCandidates', () => {
   it('flattens every service incidentList and tags it with the service name', () => {
     const archive = mkArchive({
       services: {
-        gemini: { uptime: 99, score: 80, grade: 'good', incidents: 1, avgResolutionMin: 60, totalDowntimeMin: 60, longestIncidentMin: 60, avgLatencyMs: 200,
+        gemini: { uptime: 99, score: 80, grade: 'good', incidents: 1, avgResolutionMin: 60, totalDowntimeMin: 60, longestIncidentMin: 60, avgLatencyMs: 200, officialUptime: 99, p95LatencyMs: 320, latencySpikes: 2,
           incidentList: [mkIncident({ id: 'g1', title: 'Vertex slowness' })] },
-        claude: { uptime: 98, score: 70, grade: 'fair', incidents: 1, avgResolutionMin: 30, totalDowntimeMin: 30, longestIncidentMin: 30, avgLatencyMs: 150,
+        claude: { uptime: 98, score: 70, grade: 'fair', incidents: 1, avgResolutionMin: 30, totalDowntimeMin: 30, longestIncidentMin: 30, avgLatencyMs: 150, officialUptime: 98, p95LatencyMs: 240, latencySpikes: 1,
           incidentList: [mkIncident({ id: 'c1', title: 'API errors' })] },
       },
     })
@@ -84,7 +84,7 @@ describe('selectIncidentCandidates', () => {
   it('falls back to the service id when no display name is supplied', () => {
     const archive = mkArchive({
       services: {
-        gemini: { uptime: 99, score: 80, grade: 'good', incidents: 1, avgResolutionMin: 60, totalDowntimeMin: 60, longestIncidentMin: 60, avgLatencyMs: 200,
+        gemini: { uptime: 99, score: 80, grade: 'good', incidents: 1, avgResolutionMin: 60, totalDowntimeMin: 60, longestIncidentMin: 60, avgLatencyMs: 200, officialUptime: 99, p95LatencyMs: 320, latencySpikes: 2,
           incidentList: [mkIncident({ id: 'g1' })] },
       },
     })
@@ -95,7 +95,7 @@ describe('selectIncidentCandidates', () => {
   it('ranks unresolved incidents above resolved ones', () => {
     const archive = mkArchive({
       services: {
-        a: { uptime: 99, score: 80, grade: 'good', incidents: 2, avgResolutionMin: 60, totalDowntimeMin: 600, longestIncidentMin: 600, avgLatencyMs: 200,
+        a: { uptime: 99, score: 80, grade: 'good', incidents: 2, avgResolutionMin: 60, totalDowntimeMin: 600, longestIncidentMin: 600, avgLatencyMs: 200, officialUptime: 99, p95LatencyMs: 320, latencySpikes: 3,
           incidentList: [
             mkIncident({ id: 'resolved-long', durationMin: 600, finalStatus: 'resolved' }),
             mkIncident({ id: 'open-short', durationMin: 10, finalStatus: 'investigating', resolvedAt: null }),
@@ -111,7 +111,7 @@ describe('selectIncidentCandidates', () => {
   it('ranks resolved incidents by descending duration', () => {
     const archive = mkArchive({
       services: {
-        a: { uptime: 99, score: 80, grade: 'good', incidents: 3, avgResolutionMin: 60, totalDowntimeMin: 900, longestIncidentMin: 500, avgLatencyMs: 200,
+        a: { uptime: 99, score: 80, grade: 'good', incidents: 3, avgResolutionMin: 60, totalDowntimeMin: 900, longestIncidentMin: 500, avgLatencyMs: 200, officialUptime: 99, p95LatencyMs: 320, latencySpikes: 4,
           incidentList: [
             mkIncident({ id: 'mid', durationMin: 200 }),
             mkIncident({ id: 'long', durationMin: 500 }),
@@ -128,7 +128,7 @@ describe('selectIncidentCandidates', () => {
       mkIncident({ id: `i${i}`, durationMin: i * 10 }))
     const archive = mkArchive({
       services: {
-        a: { uptime: 99, score: 80, grade: 'good', incidents: 30, avgResolutionMin: 60, totalDowntimeMin: 4350, longestIncidentMin: 290, avgLatencyMs: 200, incidentList },
+        a: { uptime: 99, score: 80, grade: 'good', incidents: 30, avgResolutionMin: 60, totalDowntimeMin: 4350, longestIncidentMin: 290, avgLatencyMs: 200, officialUptime: 99, p95LatencyMs: 320, latencySpikes: 12, incidentList },
       },
     })
     const out = selectIncidentCandidates(archive, {})
@@ -140,7 +140,7 @@ describe('selectIncidentCandidates', () => {
   it('handles services with no incidentList (undefined) without crashing', () => {
     const archive = mkArchive({
       services: {
-        a: { uptime: 100, score: 100, grade: 'excellent', incidents: 0, avgResolutionMin: null, totalDowntimeMin: null, longestIncidentMin: null, avgLatencyMs: 120 },
+        a: { uptime: 100, score: 100, grade: 'excellent', incidents: 0, avgResolutionMin: null, totalDowntimeMin: null, longestIncidentMin: null, avgLatencyMs: 120, officialUptime: 100, p95LatencyMs: null, latencySpikes: null },
       },
     })
     expect(selectIncidentCandidates(archive, {})).toEqual([])
@@ -152,9 +152,9 @@ describe('selectIncidentCandidates', () => {
 describe('buildMonthlyNarrativePrompt', () => {
   const archive = mkArchive({
     services: {
-      gemini: { uptime: 96, score: 61, grade: 'fair', incidents: 3, avgResolutionMin: 240, totalDowntimeMin: 720, longestIncidentMin: 600, avgLatencyMs: 210,
+      gemini: { uptime: 96, score: 61, grade: 'fair', incidents: 3, avgResolutionMin: 240, totalDowntimeMin: 720, longestIncidentMin: 600, avgLatencyMs: 210, officialUptime: 96, p95LatencyMs: 340, latencySpikes: 5,
         incidentList: [mkIncident({ id: 'g1', title: 'Vertex API key issue', durationMin: 600 })] },
-      claude: { uptime: 99.9, score: 95, grade: 'excellent', incidents: 0, avgResolutionMin: null, totalDowntimeMin: null, longestIncidentMin: null, avgLatencyMs: 170 },
+      claude: { uptime: 99.9, score: 95, grade: 'excellent', incidents: 0, avgResolutionMin: null, totalDowntimeMin: null, longestIncidentMin: null, avgLatencyMs: 170, officialUptime: 99.9, p95LatencyMs: null, latencySpikes: null },
     },
   })
 
@@ -174,7 +174,7 @@ describe('buildMonthlyNarrativePrompt', () => {
   it('shows a placeholder line when the month had zero incidents', () => {
     const calm = mkArchive({
       services: {
-        claude: { uptime: 100, score: 100, grade: 'excellent', incidents: 0, avgResolutionMin: null, totalDowntimeMin: null, longestIncidentMin: null, avgLatencyMs: 170 },
+        claude: { uptime: 100, score: 100, grade: 'excellent', incidents: 0, avgResolutionMin: null, totalDowntimeMin: null, longestIncidentMin: null, avgLatencyMs: 170, officialUptime: 100, p95LatencyMs: null, latencySpikes: null },
       },
     })
     const prompt = buildMonthlyNarrativePrompt(calm, { claude: 'Claude API' })
@@ -271,7 +271,7 @@ describe('parseMonthlyNarrative', () => {
 describe('generateMonthlyNarrative', () => {
   const archive = mkArchive({
     services: {
-      gemini: { uptime: 96, score: 61, grade: 'fair', incidents: 1, avgResolutionMin: 600, totalDowntimeMin: 600, longestIncidentMin: 600, avgLatencyMs: 210,
+      gemini: { uptime: 96, score: 61, grade: 'fair', incidents: 1, avgResolutionMin: 600, totalDowntimeMin: 600, longestIncidentMin: 600, avgLatencyMs: 210, officialUptime: 96, p95LatencyMs: 340, latencySpikes: 5,
         incidentList: [mkIncident({ id: 'g1', title: 'Vertex API key issue', durationMin: 600 })] },
     },
   })

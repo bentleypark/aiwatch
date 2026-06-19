@@ -23,7 +23,7 @@ describe('accumulateComponentCounters (#605)', () => {
   })
 
   it('is a no-op when the service has no components', () => {
-    const entry: { ok: number; total: number; components?: Record<string, unknown> } = { ok: 5, total: 5 }
+    const entry: { ok: number; total: number; components?: Record<string, { ok: number; total: number; name: string }> } = { ok: 5, total: 5 }
     accumulateComponentCounters(entry, undefined)
     accumulateComponentCounters(entry, [])
     expect(entry.components).toBeUndefined()
