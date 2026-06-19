@@ -214,6 +214,8 @@ const en = {
   'svc.cal.ago.suffix': 'ago',
   'svc.cal.today': 'Today',
   'svc.status.link': 'Official Status',
+  'svc.status.linkAistudio': 'AI Studio Status',
+  'svc.status.linkGcloud': 'Google Cloud Status',
   'svc.sourceDead.title': 'Status source unavailable',
   'svc.sourceDead.body': "This provider's status page is inactive, so its operational status can't currently be confirmed. Live status, uptime, and incidents resume automatically when the source recovers.",
   'svc.sourceDead.bodyProbe': "This provider's status page is inactive, but its API still responds to AIWatch's direct probe — so the service is shown as operational. Uptime and incidents resume when the source recovers.",

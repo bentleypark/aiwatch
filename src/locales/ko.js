@@ -214,6 +214,8 @@ const ko = {
   'svc.cal.ago.suffix': '전',
   'svc.cal.today': '오늘',
   'svc.status.link': '공식 Status',
+  'svc.status.linkAistudio': 'AI Studio Status',
+  'svc.status.linkGcloud': 'Google Cloud Status',
   'svc.sourceDead.title': '상태 출처 비활성화',
   'svc.sourceDead.body': '이 서비스의 공식 상태 페이지가 비활성화되어 현재 운영 상태를 확인할 수 없습니다. 실시간 상태·업타임·인시던트는 출처가 복구되면 자동으로 갱신됩니다.',
   'svc.sourceDead.bodyProbe': '이 서비스의 공식 상태 페이지는 비활성화됐지만, AIWatch가 API 엔드포인트를 직접 확인한 결과 정상 응답하고 있어 운영 중으로 표시합니다. 업타임·인시던트는 출처가 복구되면 다시 제공됩니다.',

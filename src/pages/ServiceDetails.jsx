@@ -84,6 +84,16 @@ const STATUS_URL = {
   codex:       'https://status.openai.com',
 }
 
+// #717 — services whose status is sourced from MORE THAN ONE upstream status page. The worker
+// already merges both feeds (e.g. Gemini = AI Studio + Google Cloud / Vertex); this surfaces both
+// links so users can reach either source. Services absent here fall back to the single STATUS_URL.
+const STATUS_SOURCES = {
+  gemini: [
+    { url: 'https://aistudio.google.com/status', labelKey: 'svc.status.linkAistudio' },
+    { url: 'https://status.cloud.google.com',    labelKey: 'svc.status.linkGcloud' },
+  ],
+}
+
 // Services that cannot provide incident data (no API, bot-protected, etc.)
 const NO_INCIDENT_SUPPORT = new Set([])
 
@@ -734,6 +744,9 @@ export default function ServiceDetails({ serviceId }) {
   }
 
   const statusUrl = STATUS_URL[service.id]
+  // #717 — one anchor per upstream status source. Multi-source services (e.g. Gemini) use
+  // STATUS_SOURCES; everyone else renders the single STATUS_URL with the generic label.
+  const statusSources = STATUS_SOURCES[service.id] ?? (statusUrl ? [{ url: statusUrl, labelKey: 'svc.status.link' }] : [])
   // Per-service incident RSS feed (#432) — null for estimate-only services
   // (bedrock / azureopenai) that have no /is-*-down page or feed.
   const feedUrl = feedUrlOf(service.id)
@@ -792,16 +805,17 @@ export default function ServiceDetails({ serviceId }) {
           <h1 className="text-xl font-medium text-[var(--text0)]" style={{ marginBottom: '3px' }}>{service.name}</h1>
           <div className="mono text-[11px] text-[var(--text2)]" style={{ marginBottom: '10px' }}>{service.provider}</div>
           <div className="flex items-center" style={{ gap: '14px' }}>
-            {statusUrl && (
+            {statusSources.map(({ url, labelKey }) => (
               <a
-                href={statusUrl}
+                key={url}
+                href={url}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mono text-[10px] text-[var(--blue)] hover:underline flex items-center gap-1"
               >
-                ↗ {t('svc.status.link')}
+                ↗ {t(labelKey)}
               </a>
-            )}
+            ))}
             {feedUrl && <RssLink feedUrl={feedUrl} serviceId={service.id} t={t} />}
           </div>
         </div>

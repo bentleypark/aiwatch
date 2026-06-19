@@ -229,20 +229,76 @@ export const SERVICES: ServiceConfig[] = [
  * fetch-failure counter can degrade the service after repeated failures.
  * Response body is cancelled on every non-consumed path.
  */
+// #717 — how long a held aistudio incident may be carried over across failed fetches before it's
+// dropped. The cache `cachedAt` can't bound this (every cron write refreshes it, even while it's
+// carrying the held incident), so the cap is on the incident's own age: an aistudio incident still
+// "active" 24h after it started, with no successful refresh confirming it, is almost certainly
+// resolved-but-stuck — stop pinning it. A genuinely shorter intermittent outage self-corrects the
+// moment one aistudio fetch succeeds (a success returns the authoritative set, incl. resolution).
+export const AISTUDIO_CARRYOVER_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
+/**
+ * #717 — Pick the last-known **active** `aistudio:` incidents from a previous snapshot to carry over
+ * when the live aistudio fetch fails (threw / non-OK / unparseable). The gated aistudio source is
+ * intermittent, and silently dropping its incidents on a transient failure made a Gemini incident
+ * flap in/out of the dashboard per refresh (badge flipping operational⇄degraded). Holding the last
+ * known active incidents keeps the display stable until a successful fetch reasserts the truth.
+ * Pure (no I/O) so it's unit-testable. Resolved incidents are NOT carried (they don't affect the
+ * badge and a successful fetch will re-list them); incidents older than the age cap are dropped.
+ */
+export function carryOverAistudioIncidents(
+  prevIncidents: Incident[] | undefined,
+  now: number,
+  maxAgeMs: number = AISTUDIO_CARRYOVER_MAX_AGE_MS,
+): Incident[] {
+  if (!prevIncidents) return []
+  return prevIncidents.filter((i) => {
+    if (!i.id.startsWith('aistudio:')) return false
+    if (i.status === 'resolved') return false
+    const started = Date.parse(i.startedAt ?? '')
+    if (Number.isFinite(started) && now - started > maxAgeMs) return false
+    return true
+  })
+}
+
 export async function mergeAistudioIncidents(
   primary: Incident[],
-  aistudioRes: Response,
+  // #717 — null when the aistudio fetch THREW upstream (caught → null). All three failure modes
+  // (threw / non-OK / unparseable) funnel through the single `holdAndReturn` path so they share
+  // one tested code path instead of a duplicated inline hold at the call site.
+  aistudioRes: Response | null,
   serviceId: string,
-): Promise<{ incidents: Incident[]; merged: number; parseErrors: number }> {
+  // #717 — invoked ONLY on a failed aistudio read to recover the last-known active aistudio
+  // incidents instead of silently returning vertex-only. Lazy so the happy path pays no KV read.
+  getCarryOver?: () => Promise<Incident[]>,
+): Promise<{ incidents: Incident[]; merged: number; parseErrors: number; held: number }> {
   const cancelBody = () => {
-    aistudioRes.body?.cancel().catch((e) =>
+    aistudioRes?.body?.cancel().catch((e) =>
       console.warn(`[fetchService] ${serviceId} aistudio body cancel failed:`, e),
     )
+  }
+  const holdAndReturn = async (parseErrors: number, reason: string) => {
+    // Defense-in-depth: carry-over is resilience code — it must never throw into the primary fetch
+    // path it exists to protect. getCarryOver already defends internally; this is a belt-and-braces
+    // guard so a future change there can't take down an otherwise-successful service result.
+    let held: Incident[] = []
+    try {
+      held = getCarryOver ? await getCarryOver() : []
+    } catch (err) {
+      console.warn(`[fetchService] ${serviceId} aistudio carry-over read threw:`, err instanceof Error ? err.message : err)
+    }
+    if (held.length > 0) {
+      console.info(`[${serviceId}] aistudio read failed (${reason}) — held ${held.length} last-known incident(s)`)
+    }
+    return { incidents: [...primary, ...held], merged: 0, parseErrors, held: held.length }
+  }
+  if (!aistudioRes) {
+    return holdAndReturn(0, 'fetch threw')
   }
   if (!aistudioRes.ok) {
     console.warn(`[fetchService] ${serviceId} aistudio HTTP ${aistudioRes.status}`)
     cancelBody()
-    return { incidents: primary, merged: 0, parseErrors: 0 }
+    return holdAndReturn(0, `HTTP ${aistudioRes.status}`)
   }
   try {
     const raw = await aistudioRes.json()
@@ -253,14 +309,40 @@ export async function mergeAistudioIncidents(
     if (primary.length > 0 || extras.length > 0) {
       console.info(`[${serviceId}] merged vertex=${primary.length} aistudio=${extras.length}`)
     }
-    return { incidents: [...primary, ...extras], merged: extras.length, parseErrors: 0 }
+    return { incidents: [...primary, ...extras], merged: extras.length, parseErrors: 0, held: 0 }
   } catch (err) {
     console.warn(
       `[fetchService] ${serviceId} aistudio parse failed:`,
       err instanceof Error ? err.message : err,
     )
     cancelBody()
-    return { incidents: primary, merged: 0, parseErrors: 1 }
+    return holdAndReturn(1, 'parse failed')
+  }
+}
+
+/**
+ * #717 — Read the last-known active aistudio incidents for a service from the cached snapshot
+ * (`services:latest`). Returns [] on ANY miss/corruption/throw — a single outer try/catch makes the
+ * never-throw contract structural (the fetch path relies on it, and it runs AFTER the primary fetch,
+ * so a throw here would discard an otherwise-successful result). CACHE_KEY is referenced at call
+ * time (defined later in module init), so the forward reference is safe. Age-capped via
+ * `carryOverAistudioIncidents`. Exported for unit testing of the KV-read branches.
+ */
+export async function readLastKnownAistudioIncidents(
+  kv: KVNamespace | undefined,
+  serviceId: string,
+  now: number,
+): Promise<Incident[]> {
+  if (!kv) return []
+  try {
+    const raw = await kv.get(CACHE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as { services?: ServiceStatus[] }
+    const prev = parsed.services?.find((s) => s.id === serviceId)
+    return carryOverAistudioIncidents(prev?.incidents, now)
+  } catch (err) {
+    console.warn(`[fetchService] ${serviceId} aistudio carry-over read failed:`, err instanceof Error ? err.message : err)
+    return []
   }
 }
 
@@ -1005,8 +1087,14 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         scrapeRes?.body?.cancel()
       }
 
-      if (config.aistudioStatus && aistudioRes) {
-        const merge = await mergeAistudioIncidents(incidents, aistudioRes, config.id)
+      if (config.aistudioStatus) {
+        // #717 — recover the last-known active aistudio incidents from the prior snapshot when the
+        // gated/intermittent aistudio read fails (threw → null / non-OK / unparseable), instead of
+        // silently dropping to vertex-only (which made a Gemini incident flap in/out of the dashboard
+        // per refresh). All three failure modes funnel through mergeAistudioIncidents; the KV read is
+        // lazy (only on a failed read).
+        const getCarryOver = () => readLastKnownAistudioIncidents(kv, config.id, Date.now())
+        const merge = await mergeAistudioIncidents(incidents, aistudioRes, config.id, getCarryOver)
         incidents = merge.incidents
         parseErrors += merge.parseErrors
       }
