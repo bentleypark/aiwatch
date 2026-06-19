@@ -123,7 +123,7 @@ export function regionStatusOf(service: ServiceLike | null | undefined): RegionS
   // True when an incident names one of THIS service's tracked regions (title or
   // componentNames substring) — same match the main loop uses below.
   const mentionsRegion = (inc: IncidentLike): boolean => {
-    const t = (inc.title || '').toLowerCase()
+    const t = String(inc.title || '').toLowerCase() // title is typed `unknown` (#533 Phase 2 — coerce, never throw)
     const comp = (Array.isArray(inc.componentNames) ? inc.componentNames : []).map((n) => String(n).toLowerCase())
     return regionDefs.some((r) => {
       const k = r.key.toLowerCase()
