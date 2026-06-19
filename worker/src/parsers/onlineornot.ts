@@ -1,6 +1,6 @@
 // OnlineOrNot (React Router SSR) Parser — for status pages like OpenRouter
 
-import type { Incident } from '../types'
+import type { Incident, TimelineEntry } from '../types'
 import { formatDuration } from '../utils'
 
 /**
@@ -90,7 +90,7 @@ export function parseOnlineOrNotIncidents(html: string): Incident[] {
     const endDate = ended ? new Date(ended) : null
     const isResolved = endDate != null && !isNaN(endDate.getTime())
 
-    const timeline: { stage: string; text: string; at: string }[] = [
+    const timeline: TimelineEntry[] = [
       { stage: 'investigating', text: title, at: startDate.toISOString() },
     ]
     if (isResolved) {

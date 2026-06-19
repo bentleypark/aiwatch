@@ -1167,7 +1167,8 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
   const { service, incident } = active
   const similar = findSimilarIncidents(incident.title, service.incidents ?? [])
   const prompt = buildAnalysisPrompt(service.name, {
-    id: incident.id, title: incident.title, status: incident.status,
+    // #533 Phase 2 — buildAnalysisPrompt's param has no `id` (unused by the prompt); drop the excess key.
+    title: incident.title, status: incident.status,
     startedAt: incident.startedAt, impact: incident.impact, timeline: incident.timeline,
   }, similar)
   const timelineAt = incident.timeline?.at(-1)?.at ?? ''

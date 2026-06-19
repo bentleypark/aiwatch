@@ -36,10 +36,10 @@
  * @returns The string to send back as `Access-Control-Allow-Origin`, or `''`
  *   when the origin is not allowed.
  */
-export function matchOrigin(origin: string, allowedOrigin: string | undefined): string {
+export function matchOrigin(origin: string | null, allowedOrigin: string | undefined): string {
   if (!allowedOrigin) return ''
   if (allowedOrigin === '*') return '*'
-  if (!origin) return ''
+  if (!origin) return '' // narrows `origin` to a non-null string for the matching below
   for (const raw of allowedOrigin.split(',')) {
     const pattern = raw.trim()
     if (!pattern) continue
@@ -61,8 +61,12 @@ export function matchOrigin(origin: string, allowedOrigin: string | undefined): 
  * CORS response headers for the matched origin, or `{}` when not allowed.
  * `Vary: Origin` ensures CDN/proxy caches don't serve a response targeted
  * at one origin to a different one.
+ *
+ * Returns a concrete `Record<string, string>` (not the wider `HeadersInit`) so callers can both
+ * spread it (`{ ...cors }`) and pass it to handlers typed `Record<string, string>` (#533 Phase 2).
+ * `origin` accepts `null` — the raw `request.headers.get('Origin')` — since `matchOrigin` fails closed.
  */
-export function corsHeaders(origin: string, allowedOrigin: string | undefined): HeadersInit {
+export function corsHeaders(origin: string | null, allowedOrigin: string | undefined): Record<string, string> {
   const allowOrigin = matchOrigin(origin, allowedOrigin)
   if (!allowOrigin) return {}
 
