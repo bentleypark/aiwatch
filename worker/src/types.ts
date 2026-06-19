@@ -49,7 +49,7 @@ export interface ServiceStatus {
   components?: ServiceComponent[]
   dailyImpact?: Record<string, DailyImpactLevel>
   calendarDays?: number
-  uptimeSource?: 'official' | 'platform_avg' | 'estimate'
+  uptimeSource?: 'official' | 'platform_avg' // #713 — 'estimate' removed; no invented uptime
   detectedAt?: string
   /** BetterStack only: count of resources reporting a real issue (degraded/downtime)
    *  while the service stays operational under the <30% threshold (#447). UI shows a

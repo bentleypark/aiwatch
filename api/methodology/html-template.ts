@@ -335,11 +335,10 @@ ${CONSENT_INIT_SCRIPT}
 <section class="section" id="uptime">
   <p class="section-label">// 03</p>
   <h2 data-i18n="s3.title">Uptime</h2>
-  <p class="lead" data-i18n="s3.lead">Uptime%는 출처에 따라 세 가지 방식으로 나뉩니다.</p>
+  <p class="lead" data-i18n="s3.lead">Uptime%는 출처에 따라 두 가지 방식으로 나뉩니다.</p>
   <ul>
     <li><strong data-i18n="s3.official">Official</strong> <span data-i18n="s3.officialDesc">— 상태 페이지가 공개한 %를 그대로 읽습니다(페이지마다 집계 기간이 다름).</span></li>
     <li><strong data-i18n="s3.platform">Platform</strong> <span data-i18n="s3.platformDesc">— 상태 페이지 플랫폼(Better Stack)이 자체 모니터로 측정한 가동률 (Together · Fireworks · HuggingFace · Modal · Luma). 제공사 공식 SLA가 아닌 플랫폼 측정치입니다.</span></li>
-    <li><strong data-i18n="s3.estimate">Estimate</strong> <span data-i18n="s3.estimateDesc">— 공식 수치가 없는 서비스(Bedrock·Azure OpenAI)는 최근 90일의 라이브·아카이브 인시던트를 합쳐 추정합니다. 영향을 준 인시던트가 없으면 %를 아예 산출하지 않습니다.</span></li>
   </ul>
   <p data-i18n="s3.weighted"><strong>Atlassian 가중 영향 일수:</strong> 다운타임은 단순 인시던트 건수가 아니라, 각 날짜를 그날의 가장 심각한 영향도로 가중한 "영향 일수"로 집계합니다 — critical · major = 1.0, minor = 0.3, 정보성/null = 제외. uptime과 score 모두 같은 가중 방식을 씁니다.</p>
 
@@ -350,7 +349,7 @@ ${CONSENT_INIT_SCRIPT}
       <table class="tbl">
         <thead><tr><th data-i18n="s3.limits.col1">서비스</th><th data-i18n="s3.limits.col2">측정 불가 사유</th></tr></thead>
         <tbody>
-          <tr><td>Amazon Bedrock · Azure OpenAI</td><td data-i18n="s3.limits.estimate">공식 롤링 uptime% 미공개 — 인시던트 피드만 존재 → 추정 전용</td></tr>
+          <tr><td>Amazon Bedrock · Azure OpenAI</td><td data-i18n="s3.limits.estimate">공식 롤링 uptime% 미공개 — 인시던트 피드만 존재</td></tr>
           <tr><td>Gemini · OpenRouter · Deepgram</td><td data-i18n="s3.limits.norolling">상태 페이지가 비교 가능한 롤링 30일 % 미노출</td></tr>
           <tr><td>xAI</td><td data-i18n="s3.limits.xai">재시작 이후 엔드포인트별 성공률만 노출 — 30일 수치와 비교 불가</td></tr>
         </tbody>
@@ -468,16 +467,16 @@ ${CONSENT_INIT_SCRIPT}
     <div class="formula"><span class="fl-sub" data-i18n="s4.resp.speed">Speed (0~10) — p50 RTT 지수 감쇠</span><br>10 × exp(−max(p50, 50ms) / 400ms)</div>
     <div class="formula"><span class="fl-sub" data-i18n="s4.resp.stability">Stability (0~10) — 결합 변동계수 지수 감쇠</span><br>10 × exp(−CV_combined / 0.5)</div>
     <p data-i18n="s4.resp.na1">앱과 코딩 에이전트는 측정할 API 엔드포인트가 없어 probe 대상이 아니며, probe 세트(24개)에 들지 않은 나머지 3개 AI 서비스(Bedrock · Azure OpenAI · Modal)도 probe하지 않습니다.</p>
-    <p data-i18n="s4.resp.na2">이 경우 80점 만점을 100점으로 환산하고, 응답성 신호가 없으므로 5% 페널티를 적용합니다.</p>
-    <div class="formula">Score = (Uptime + Incidents + Recovery) × 0.9 → ×(100/80)<br><span class="fl-sub" data-i18n="s4.resp.naFormula">probe-less: base 80 → 100 환산 + 5% 신뢰도 페널티</span></div>
+    <p data-i18n="s4.resp.na2">이 경우 80점 만점을 100점으로 환산합니다(가용 컴포넌트만으로 산정).</p>
+    <div class="formula">Score = (Uptime + Incidents + Recovery) / 80 × 100<br><span class="fl-sub" data-i18n="s4.resp.naFormula">probe-less: base 80 → 100 환산</span></div>
     <p class="note" data-i18n="s4.resp.insufficient">새로 추가된 probe 대상 서비스는 7일치 데이터가 쌓이기 전까지 5% 페널티를 적용합니다.</p>
   </div>
 
   <!-- No uptime data -->
   <div class="subscore">
     <h3 data-i18n="s4.noUptime.title">Uptime 미제공 서비스</h3>
-    <p data-i18n="s4.noUptime.desc">일부 서비스(Gemini, xAI 등)는 공식 uptime 수치가 없습니다. 이 경우 업계 평균(99.5%, 40점 척도에서 36점)을 가정하고 10% 페널티를 적용합니다.</p>
-    <div class="formula">Score = (36 + Incidents + Recovery) × 0.9</div>
+    <p data-i18n="s4.noUptime.desc">일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 가정값을 넣지 않고 uptime 컴포넌트(40점)를 제외한 뒤 나머지 가용 컴포넌트만으로 100점 환산합니다. probe가 있는 서비스(Gemini·xAI·OpenRouter 등)는 인시던트·복구·응답성으로 점수를 산정해 랭킹에 포함합니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.</p>
+    <div class="formula">Score = (가용 컴포넌트 점수 합) / (가용 컴포넌트 max 합) × 100 <span class="fl-sub">— uptime 40점 제외</span></div>
   </div>
 
   <!-- Grades -->
@@ -562,15 +561,14 @@ const i18n = {
     's2.6.tag': 'fetch-failure cross-validation', 's2.6.title': '수집 실패 보정', 's2.6.body': '상태 페이지를 못 읽어 저하로 잡혔더라도 probe RTT가 정상이면 다시 정상으로 되돌립니다. 같은 플랫폼의 70% 이상이 동시에 실패하면 플랫폼 자체 장애로 판단해 모두 정상으로 처리합니다. 확실한 근거가 있을 때만 보수적으로 덮어씁니다.',
     's2.note': '규칙의 전체 순서와 각 규칙의 근거는 오픈소스 저장소의 <a href="https://github.com/bentleypark/aiwatch/blob/main/docs/reference/status-determination.md" target="_blank" rel="noopener">status-determination 문서</a>에 공개되어 있습니다.',
     's3.title': 'Uptime',
-    's3.lead': 'Uptime%는 출처에 따라 세 가지 방식으로 나뉩니다.',
+    's3.lead': 'Uptime%는 출처에 따라 두 가지 방식으로 나뉩니다.',
     's3.official': 'Official', 's3.officialDesc': '— 상태 페이지가 공개한 %를 그대로 읽습니다(페이지마다 집계 기간이 다름).',
-    's3.estimate': 'Estimate', 's3.estimateDesc': '— 공식 수치가 없는 서비스(Bedrock·Azure OpenAI)는 최근 90일의 라이브·아카이브 인시던트를 합쳐 추정합니다. 영향을 준 인시던트가 없으면 %를 아예 산출하지 않습니다.',
     's3.platform': 'Platform', 's3.platformDesc': '— 상태 페이지 플랫폼(Better Stack)이 자체 모니터로 측정한 가동률 (Together · Fireworks · HuggingFace · Modal · Luma). 제공사 공식 SLA가 아닌 플랫폼 측정치입니다.',
     's3.weighted': '<strong>Atlassian 가중 영향 일수:</strong> 다운타임은 단순 인시던트 건수가 아니라, 각 날짜를 그날의 가장 심각한 영향도로 가중한 "영향 일수"로 집계합니다 — critical · major = 1.0, minor = 0.3, 정보성/null = 제외. uptime과 score 모두 같은 가중 방식을 씁니다.',
     's3.limits.label': '측정 한계와 그 이유',
     's3.limits.intro': '아래 서비스는 공식 상태 페이지에 비교 가능한 30일 롤링 uptime%가 없습니다. 임의로 추측해 채우는 대신 "— Not provided"로 명확히 표시합니다.',
     's3.limits.col1': '서비스', 's3.limits.col2': '측정 불가 사유',
-    's3.limits.estimate': '공식 롤링 uptime% 미공개 — 인시던트 피드만 존재 → 추정 전용',
+    's3.limits.estimate': '공식 롤링 uptime% 미공개 — 인시던트 피드만 존재',
     's3.limits.norolling': '상태 페이지가 비교 가능한 롤링 30일 % 미노출',
     's3.limits.xai': '재시작 이후 엔드포인트별 성공률만 노출 — 30일 수치와 비교 불가',
     's4.title': 'AIWatch Score',
@@ -588,11 +586,11 @@ const i18n = {
     's4.resp.speed': 'Speed (0~10) — p50 RTT 지수 감쇠',
     's4.resp.stability': 'Stability (0~10) — 결합 변동계수 지수 감쇠',
     's4.resp.na1': '앱과 코딩 에이전트는 측정할 API 엔드포인트가 없어 probe 대상이 아니며, probe 세트(24개)에 들지 않은 나머지 3개 AI 서비스(Bedrock · Azure OpenAI · Modal)도 probe하지 않습니다.',
-    's4.resp.na2': '이 경우 80점 만점을 100점으로 환산하고, 응답성 신호가 없으므로 5% 페널티를 적용합니다.',
-    's4.resp.naFormula': 'probe-less: base 80 → 100 환산 + 5% 신뢰도 페널티',
+    's4.resp.na2': '이 경우 80점 만점을 100점으로 환산합니다(가용 컴포넌트만으로 산정).',
+    's4.resp.naFormula': 'probe-less: base 80 → 100 환산',
     's4.resp.insufficient': '새로 추가된 probe 대상 서비스는 7일치 데이터가 쌓이기 전까지 5% 페널티를 적용합니다.',
     's4.noUptime.title': 'Uptime 미제공 서비스',
-    's4.noUptime.desc': '일부 서비스(Gemini, xAI 등)는 공식 uptime 수치가 없습니다. 이 경우 업계 평균(99.5%, 40점 척도에서 36점)을 가정하고 10% 페널티를 적용합니다.',
+    's4.noUptime.desc': '일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 가정값을 넣지 않고 uptime 컴포넌트(40점)를 제외한 뒤 나머지 가용 컴포넌트만으로 100점 환산합니다. probe가 있는 서비스(Gemini·xAI·OpenRouter 등)는 인시던트·복구·응답성으로 점수를 산정해 랭킹에 포함합니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.',
     's4.grades.title': '등급 기준',
     's5.title': '레이턴시 (Probe RTT)',
     's5.lead': '24개 AI 서비스의 API 엔드포인트를 Cloudflare Workers 엣지에서 5분 간격으로 직접 측정합니다. p50 / p75 / p95 분위수를 산출합니다.',
@@ -644,15 +642,14 @@ const i18n = {
     's2.6.tag': 'fetch-failure cross-validation', 's2.6.title': 'Fetch-failure cross-validation', 's2.6.body': 'If a degraded status came from a fetch failure but probe RTT is normal, revert to operational. If 70%+ of services on the same platform fail at once, treat it as a platform outage and revert all to operational. We only override when the evidence is strong.',
     's2.note': 'The full ordered rules and the rationale for each are published in the open-source <a href="https://github.com/bentleypark/aiwatch/blob/main/docs/reference/status-determination.md" target="_blank" rel="noopener">status-determination reference</a>.',
     's3.title': 'Uptime',
-    's3.lead': 'Uptime% comes from one of three source types.',
+    's3.lead': 'Uptime% comes from one of two source types.',
     's3.official': 'Official', 's3.officialDesc': '— read directly from the % the status page publishes (window varies by page).',
-    's3.estimate': 'Estimate', 's3.estimateDesc': '— services with no official metric (Bedrock · Azure OpenAI) are estimated from the combined 90-day live + archived incident set. If there is no impactful incident, no % is produced at all.',
     's3.platform': 'Platform', 's3.platformDesc': '— uptime measured by the status-page platform\\'s own monitors (Better Stack) — a platform measurement, not the provider\\'s official SLA (Together · Fireworks · HuggingFace · Modal · Luma).',
     's3.weighted': '<strong>Atlassian-weighted affected days:</strong> downtime is counted not as raw incident count but as "affected days," where each day is weighted by its worst impact — critical · major = 1.0, minor = 0.3, informational/null = excluded. Uptime and the Score share the same weighting.',
     's3.limits.label': 'Coverage & limits — what we can\\'t measure and why',
     's3.limits.intro': 'These services\\' status pages do not expose a comparable rolling 30-day uptime %. We never fill it with a guess — they show "— Not provided".',
     's3.limits.col1': 'Service', 's3.limits.col2': 'Reason',
-    's3.limits.estimate': 'No official rolling uptime published — incident feed only → estimate-only',
+    's3.limits.estimate': 'No official rolling uptime — incident feed only',
     's3.limits.norolling': 'Status page exposes no comparable rolling-30d %',
     's3.limits.xai': 'Exposes a since-restart per-endpoint success rate — not comparable to a 30-day figure',
     's4.title': 'AIWatch Score',
@@ -670,11 +667,11 @@ const i18n = {
     's4.resp.speed': 'Speed (0–10) — exp decay on p50 RTT',
     's4.resp.stability': 'Stability (0–10) — exp decay on combined coefficient of variation',
     's4.resp.na1': 'Apps and coding agents have no API endpoint to measure; and 3 other AI services outside the 24-service probe set (Bedrock, Azure OpenAI, Modal) are not probed either.',
-    's4.resp.na2': 'Their score is rescaled from the 80-point base to 100, with a 5% penalty applied to reflect the missing responsiveness signal.',
-    's4.resp.naFormula': 'probe-less: rescale base 80 → 100 + 5% confidence penalty',
+    's4.resp.na2': 'Their score is rescaled from the 80-point base to 100 (computed on the available components).',
+    's4.resp.naFormula': 'probe-less: rescale base 80 → 100',
     's4.resp.insufficient': 'Newly added probed services receive a 5% penalty until 7 days of probe data accumulate.',
     's4.noUptime.title': 'Services without uptime data',
-    's4.noUptime.desc': 'Some services (Gemini, xAI, etc.) do not publish official uptime. In that case an industry average (99.5%, which is 36 on the 40-point scale) is assumed with a 10% penalty applied.',
+    's4.noUptime.desc': 'Some services (Gemini, xAI, Bedrock, etc.) publish no official uptime. We assume no value — the 40-point uptime component is dropped and the score is rescaled over the remaining available components. Services that ARE probed (Gemini, xAI, OpenRouter, etc.) are scored on incidents + recovery + responsiveness and included in the ranking. Services with no probe either (Bedrock, Azure OpenAI) have only incidents + recovery left as signals — too thin for a trustworthy score, so we publish no score for them and provide incident tracking only.',
     's4.grades.title': 'Grade thresholds',
     's5.title': 'Latency (Probe RTT)',
     's5.lead': 'We measure the API endpoints of 24 AI services directly from the Cloudflare Workers edge every 5 minutes, producing p50 / p75 / p95 percentiles.',
