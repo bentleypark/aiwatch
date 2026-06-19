@@ -155,8 +155,11 @@ export async function appendDetectionLead(
   // Defensive: enforce all DetectionLeadEntry invariants at the write boundary so corrupt entries
   // never reach KV. isValidEntry runs the same checks downstream readers apply, keeping append +
   // read symmetry — a future producer bug can't write garbage that read silently drops.
+  // Read the log fields BEFORE the guard: `isValidEntry` is a type predicate, so inside the failure
+  // branch TS narrows `entry` to `never` (#533 Phase 2). Destructuring up here keeps them typed.
+  const { svcId, incId, leadMs } = entry
   if (!isValidEntry(entry, now.getTime())) {
-    console.warn('[detection-lead] rejecting invalid entry at append:', { svcId: entry.svcId, incId: entry.incId, leadMs: entry.leadMs })
+    console.warn('[detection-lead] rejecting invalid entry at append:', { svcId, incId, leadMs })
     return 'failed'
   }
   const key = detectionLeadKey(now)

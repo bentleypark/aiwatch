@@ -391,7 +391,10 @@ export async function analyzeWithSonnet(
  * Hybrid analysis: try Gemma first (Workers AI), fall back to Sonnet on failure.
  */
 export async function analyzeIncident(
-  apiKey: string,
+  // #533 Phase 2 — honest type: callers gate on `(apiKey || ai)`, so apiKey may be undefined here when
+  // only the Gemma binding is present. The `if (!apiKey) return null` guard below already handles it
+  // (Sonnet is skipped), so this is a type-accuracy fix, not a behavior change.
+  apiKey: string | undefined,
   serviceName: string,
   currentIncident: { id: string; title: string; status: string; startedAt: string; impact: string | null; timeline?: Array<{ stage: string; text: string | null; at: string }> },
   allIncidents: Incident[],
