@@ -180,6 +180,31 @@ test.describe('Overview page', () => {
     expect(entryText).toContain('Claude Code')
   })
 
+  test('Recent Incidents spans all categories — a category filter does not hide other-category incidents (#676)', async ({ page }) => {
+    // The category filter scopes the stats/sections/latency to one bucket, but Recent Incidents is a
+    // cross-category "what's live right now" panel: picking a category must NOT hide an active incident
+    // from another category. Pre-#676 it iterated the category-filtered list, so an LLM filter hid an
+    // app outage from the panel.
+    const appInc = { id: 'app-outage-676', title: 'ChatGPT app outage 676', status: 'investigating', impact: 'major', startedAt: new Date(Date.now() - 60_000).toISOString(), duration: null, timeline: [] }
+    const mock = { json: { services: [
+      { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.9, calendarDays: 30, incidents: [] },
+      { id: 'chatgpt', category: 'app', name: 'ChatGPT', provider: 'OpenAI', status: 'degraded', latency: 150, uptime30d: 99.5, calendarDays: 30, incidents: [appInc] },
+    ], lastUpdated: new Date().toISOString() } }
+    await page.route('**/api/status**', (route) => route.fulfill(mock))
+    await page.route('**/api/status/cached', (route) => route.fulfill(mock))
+    await page.goto('/')
+    await waitForDataLoad(page)
+    // Under default 'all', the app incident shows in Recent Incidents.
+    await expect(page.locator('main').getByText(/ChatGPT app outage 676/).first()).toBeVisible({ timeout: 10000 })
+    // Filter to LLM → the ChatGPT card leaves the grid (it's an app)…
+    const tablist = page.getByRole('tablist', { name: /Services|서비스/ })
+    await tablist.getByRole('tab', { name: /LLM/ }).click()
+    await page.waitForTimeout(200)
+    await expect(page.locator('main button').filter({ hasText: 'ChatGPT' })).toHaveCount(0)
+    // …but its incident is STILL listed in Recent Incidents (cross-category panel, #676).
+    await expect(page.locator('main').getByText(/ChatGPT app outage 676/).first()).toBeVisible()
+  })
+
   test('Recent Incidents date label exposes contextual label via tooltip (#406)', async ({ page }) => {
     // Vitest suite covers `getContextualTime` correctness directly; this test guards the
     // Overview.jsx call site so reverting `incident.startedAt` or dropping the `title` attribute
