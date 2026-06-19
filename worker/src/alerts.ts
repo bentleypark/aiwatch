@@ -138,13 +138,68 @@ export interface AlertCandidate {
   svcIds?: string[]
 }
 
-/** #689 — Decide whether a service's dead-source state warrants an operator notification this cron
- *  cycle. 'alert' on the rising edge (status page just returned 4xx, not yet alerted); 'recovered'
- *  on the falling edge (was alerted, the source responds again); 'none' otherwise. The caller
- *  persists/clears the `alerted:source-dead:{svcId}` dedup marker. Pure — unit-tested. */
-export function shouldAlertSourceDead(isDead: boolean, alreadyAlerted: boolean): 'alert' | 'recovered' | 'none' {
-  if (isDead && !alreadyAlerted) return 'alert'
-  if (!isDead && alreadyAlerted) return 'recovered'
+/** #714 — the status SOURCE's observed liveness this cron cycle, distinct from the service's status.
+ *  `dead` = the status-page fetch completed + 4xx (deactivated/gone); `alive` = a clean fetch+parse
+ *  (the ONLY genuine recovery signal); `unknown` = the fetch threw or returned 5xx (indeterminate
+ *  — NOT a recovery; a 4xx incl. 429 is `dead`). Pre-#714 the boolean `sourceDead` conflated `alive`
+ *  and `unknown` as `false`, so a
+ *  single transient throw mid-dead-source fabricated a 'recovered' → next-cycle 'alert' flap. */
+export type SourceLiveness = 'dead' | 'alive' | 'unknown'
+
+/** #714 — derive the 3-state source liveness from a service's runtime flags. `sourceDead` (confirmed
+ *  4xx, incl. 429) and `sourceUnknown` (throw / 5xx) are set on disjoint return paths in services.ts;
+ *  neither set = a clean fetch = `alive`. `dead` takes precedence defensively. Pure — unit-tested. */
+export function sourceLivenessOf(svc: { sourceDead?: boolean; sourceUnknown?: boolean }): SourceLiveness {
+  if (svc.sourceDead) return 'dead'
+  if (svc.sourceUnknown) return 'unknown'
+  return 'alive'
+}
+
+/** #689/#714 — Decide whether a service's status-source state warrants an operator notification this
+ *  cron cycle, from the 3-state liveness. 'alert' on the rising edge (4xx, not yet alerted); 'recovered'
+ *  ONLY on a genuine `alive` observation while alerted; 'hold' on an `unknown` observation while alerted
+ *  (keep the dead marker, send nothing — a transient hiccup is NOT a recovery, the #714 fix); 'none'
+ *  otherwise. 'alert' is further gated by a 1-cycle confirmation (pendingSourceDeadKey) in the caller.
+ *  The caller persists/clears `alerted:source-dead:{svcId}`. Pure — unit-tested. */
+export function shouldAlertSourceDead(liveness: SourceLiveness, alreadyAlerted: boolean): 'alert' | 'recovered' | 'hold' | 'none' {
+  if (liveness === 'dead') return alreadyAlerted ? 'none' : 'alert'
+  if (liveness === 'alive') return alreadyAlerted ? 'recovered' : 'none'
+  return alreadyAlerted ? 'hold' : 'none' // unknown — indeterminate, never a recovery
+}
+
+/** TTL for the #714 first-seen dead-source confirmation marker — two 5-min cron cycles (survives one
+ *  skipped run), mirroring PENDING_NEW_TTL_S (#633). */
+export const PENDING_SOURCE_DEAD_TTL_S = 600
+
+/** #714 — KV key for the dead-source 1-cycle confirmation marker, scoped to the service id. Mirrors
+ *  pendingNewKey (#633): a dead source is HELD one cycle before the 'Inactive' alert fires, so a
+ *  single-cycle 4xx blip that self-recovers never alerts. */
+export function pendingSourceDeadKey(svcId: string): string {
+  return `pending:source-dead:${svcId}`
+}
+
+/** #714 — the action the caller takes this cron cycle, combining the 3-state liveness edge with the
+ *  1-cycle confirmation gate. The caller maps each to KV ops + an optional Discord send:
+ *   - `alert`        → send 'Inactive'; on success set deadKey + clear pendingKey
+ *   - `hold-confirm` → first dead sighting: set pendingKey, send nothing (debounce a single-cycle blip)
+ *   - `recovered`    → send 'Recovered'; on success clear deadKey; clear pendingKey
+ *   - `hold-unknown` → indeterminate while alerted: keep both markers, send nothing (the #714 fix)
+ *   - `none`         → nothing to send; clear a stale pendingKey if the source is alive again */
+export type SourceDeadAction = 'alert' | 'hold-confirm' | 'recovered' | 'hold-unknown' | 'none'
+
+/** #714 — full per-cycle dead-source decision (pure). Combines `shouldAlertSourceDead` (the liveness
+ *  edge) with the #633-style 1-cycle confirmation gate: the rising 'alert' edge is HELD on its first
+ *  sighting (no `pending` marker yet) and only fires once a second consecutive cycle confirms it.
+ *  Unit-tested — proves the flap (dead→unknown→dead) and single-cycle blips never produce a stray
+ *  Inactive/Recovered pair. */
+export function decideSourceDeadAction(
+  liveness: SourceLiveness,
+  state: { alreadyAlerted: boolean; pendingExists: boolean },
+): SourceDeadAction {
+  const edge = shouldAlertSourceDead(liveness, state.alreadyAlerted)
+  if (edge === 'alert') return state.pendingExists ? 'alert' : 'hold-confirm'
+  if (edge === 'recovered') return 'recovered'
+  if (edge === 'hold') return 'hold-unknown'
   return 'none'
 }
 
