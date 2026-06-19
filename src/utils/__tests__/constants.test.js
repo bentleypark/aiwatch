@@ -3,7 +3,7 @@
 // because the worker can't import frontend code at runtime.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFallbacks, getGroupedFallbacksExcludingRegionSwitchable, hasRegionSwitch, shouldShowFallback, hasActiveIncident, SERVICE_CATEGORIES, ALL_SERVICE_IDS } from '../constants'
+import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFallbacks, getGroupedFallbacksExcludingRegionSwitchable, hasRegionSwitch, shouldShowFallback, hasActiveIncident, SERVICE_CATEGORIES, ALL_SERVICE_IDS, categoryRankOf } from '../constants'
 
 // #646 — the Overview renders one section per SERVICE_CATEGORIES bucket (llm/agents/voice/inference/
 // video/apps, #658). Its render has a defensive "other" catch-all for any service no bucket claims,
@@ -25,6 +25,40 @@ describe('SERVICE_CATEGORIES partitions ALL_SERVICE_IDS (#646 Overview sections)
 
   it('the six section buckets cover every service in ALL_SERVICE_IDS (no leftover, no extra)', () => {
     expect([...sectionIds].sort()).toEqual([...ALL_SERVICE_IDS].sort())
+  })
+})
+
+// #676 — the sidebar service list sorts by categoryRankOf so it mirrors the filter chips + Overview
+// sections (LLM → Agents → Voice → Inference → Video → Apps; Agents before Apps, Apps last).
+describe('categoryRankOf (#676 sidebar/list category order)', () => {
+  const SECTION_KEYS = ['llm', 'agents', 'voice', 'inference', 'video', 'apps']
+
+  it('ranks each bucket by its #658 canonical position (llm=0 … apps=5)', () => {
+    SECTION_KEYS.forEach((key, rank) => {
+      for (const id of SERVICE_CATEGORIES[key].ids) {
+        expect(categoryRankOf(id), `${id} (${key})`).toBe(rank)
+      }
+    })
+  })
+
+  it('orders Agents before Apps, and Apps last (the #676 fix)', () => {
+    expect(categoryRankOf('claudecode')).toBeLessThan(categoryRankOf('claudeai')) // agent < app
+    const appRank = categoryRankOf('chatgpt')
+    for (const id of ALL_SERVICE_IDS) {
+      if (!SERVICE_CATEGORIES.apps.ids.includes(id)) {
+        expect(categoryRankOf(id), `${id} must rank before apps`).toBeLessThan(appRank)
+      }
+    }
+  })
+
+  it('sorting ALL_SERVICE_IDS by rank yields a stable LLM→Agents→Voice→Inference→Video→Apps grouping', () => {
+    const sorted = [...ALL_SERVICE_IDS].sort((a, b) => categoryRankOf(a) - categoryRankOf(b))
+    const ranks = sorted.map(categoryRankOf)
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b)) // non-decreasing → buckets contiguous + ordered
+  })
+
+  it('returns Infinity for an unknown id (sorts last, never throws)', () => {
+    expect(categoryRankOf('not-a-service')).toBe(Infinity)
   })
 })
 
