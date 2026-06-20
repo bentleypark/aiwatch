@@ -41,11 +41,37 @@ const HN_SECURITY_KEYWORDS = [
   'RCE', 'injection', 'exfiltration',
 ]
 
-function buildHNQuery(): string {
-  // "(openai OR anthropic OR claude OR ...) AND (breach OR leak OR ...)"
-  const ai = HN_AI_KEYWORDS.map(k => `"${k}"`).join(' OR ')
-  const sec = HN_SECURITY_KEYWORDS.map(k => `"${k}"`).join(' OR ')
-  return `(${ai}) AND (${sec})`
+// HN Algolia treats `query` as plain keyword text with all-words-AND semantics —
+// it does NOT parse OR/AND/parentheses as boolean operators (#720). The old
+// `("openai" OR ...) AND ("breach" ...)` string therefore required every keyword
+// (incl. the literal words "OR"/"AND") to co-occur, which no story ever does, so
+// HN returned 0 hits for its entire lifetime. We instead query the AI keyword set
+// with `optionalWords` (Algolia's OR knob — any subset may match), pull a broad
+// recent batch, and apply the real (AI AND security) precision filter client-side
+// in `titleMatchesAiSecurity` below.
+export function buildHNQuery(): string {
+  return HN_AI_KEYWORDS.join(' ')
+}
+
+// Build a single case-insensitive word-boundary matcher for a keyword set. Word
+// boundaries are essential: a substring filter matched "rce" inside "sou**rce**"
+// and "leak" inside "**leak**ed" (financial-loss stories), producing ~80% false
+// positives (#720). All keywords are alphanumeric/space, so `\b` behaves.
+function buildKeywordMatcher(keywords: string[]): RegExp {
+  const alternation = keywords
+    .map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')
+  return new RegExp(`\\b(?:${alternation})\\b`, 'i')
+}
+
+const AI_KEYWORD_RE = buildKeywordMatcher(HN_AI_KEYWORDS)
+const SECURITY_KEYWORD_RE = buildKeywordMatcher(HN_SECURITY_KEYWORDS)
+
+// A story qualifies only if its title mentions BOTH an AI service AND a security
+// concept (word-boundary). This is the AND-of-groups the Algolia query string
+// cannot express — see buildHNQuery.
+export function titleMatchesAiSecurity(title: string): boolean {
+  return AI_KEYWORD_RE.test(title) && SECURITY_KEYWORD_RE.test(title)
 }
 
 interface HNHit {
@@ -58,12 +84,16 @@ interface HNHit {
 
 export async function fetchHNSecurityPosts(): Promise<SecurityAlert[]> {
   const oneDayAgo = Math.floor(Date.now() / 1000) - 86400
-  const query = buildHNQuery()
   const params = new URLSearchParams({
-    query,
+    query: buildHNQuery(),
     tags: 'story',
     numericFilters: `created_at_i>${oneDayAgo}`,
-    hitsPerPage: '10',
+    // optionalWords turns the default all-words-AND into "any subset may match",
+    // so the query behaves like (kw1 OR kw2 OR ...) across the AI keyword set.
+    optionalWords: HN_AI_KEYWORDS.join(','),
+    // Wider page than the old 10 — the (AI AND security) post-filter is strict, so
+    // we need a broad recent pull to avoid relevance-ranking burying real findings.
+    hitsPerPage: '50',
   })
 
   const res = await fetch(`https://hn.algolia.com/api/v1/search?${params}`, {
@@ -81,7 +111,7 @@ export async function fetchHNSecurityPosts(): Promise<SecurityAlert[]> {
   if (!json.hits) return []
 
   return json.hits
-    .filter(hit => hit.title && hit.objectID)
+    .filter(hit => hit.title && hit.objectID && titleMatchesAiSecurity(hit.title))
     .map(hit => ({
       source: 'hackernews' as const,
       id: hit.objectID,
