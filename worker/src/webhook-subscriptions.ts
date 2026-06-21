@@ -501,3 +501,16 @@ export async function deliverToSubscribers(
   }
   return stats
 }
+
+// #548 — new-today delta for the confirmed-subscriber count, the consent-free retention signal
+// surfaced in the daily summary. Pure + unit-tested. Returns null when there's no usable prior
+// snapshot (first day / KV gap / corrupt value) so the summary omits the delta rather than show a
+// bogus "+N from zero". The delta is SIGNED — a negative value (churn) is reported honestly.
+export function computeSubscriberDelta(todayCount: number, prevSnapshotRaw: string | null): number | null {
+  // Guard the empty string too: Number('') === 0 (a JS footgun) would misread a corrupt/empty
+  // snapshot as "0 subscribers yesterday" and report a bogus full-count jump. Empty = no baseline.
+  if (prevSnapshotRaw == null || prevSnapshotRaw.trim() === '') return null
+  const prev = Number(prevSnapshotRaw)
+  if (!Number.isFinite(prev)) return null
+  return todayCount - prev
+}

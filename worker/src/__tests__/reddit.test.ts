@@ -278,6 +278,8 @@ describe('formatRedditAlert', () => {
     expect(formatted.title).toBe('📢 Reddit: r/ClaudeAI [🎯 PROMOTE]')
     expect(formatted.description).toContain('Is Claude down?')
     expect(formatted.description).toContain('ai-watch.dev/is-claude-down')
+    // #548 — the promote share link carries the Reddit-channel utm (after the #539 ?e=reddit hint).
+    expect(formatted.description).toContain('?e=reddit&utm_source=reddit&utm_medium=social&utm_campaign=outage')
     expect(formatted.description).not.toContain('Suggested reply')
     expect(formatted.color).toBe(0x3fb950)
   })

@@ -2,7 +2,7 @@
 // Uses Reddit's public JSON search endpoint (no OAuth required)
 
 import { defuseAutolinkDomain } from './alerts'
-import { appendStatusHint } from './utils'
+import { appendStatusHint, appendUtm } from './utils'
 
 export interface RedditPost {
   id: string
@@ -265,7 +265,8 @@ export function formatRedditAlert(alert: RedditAlert): { title: string; descript
   // (this is a community-mention alert, not a status event). Post title is defused so a bare
   // "claude.ai" in it doesn't auto-link in the operator channel.
   const slug = SUBREDDIT_SLUG[alert.subreddit]
-  const shareLink = slug ? `\n🔗 ${appendStatusHint(`https://ai-watch.dev/is-${slug}-down`, 'reddit')}` : ''
+  // #548 — utm_source=reddit so GA4 attributes clicks from the promote share to the Reddit channel.
+  const shareLink = slug ? `\n🔗 ${appendUtm(appendStatusHint(`https://ai-watch.dev/is-${slug}-down`, 'reddit'), 'reddit')}` : ''
 
   return {
     title: `📢 Reddit: r/${alert.subreddit} [🎯 PROMOTE]`,

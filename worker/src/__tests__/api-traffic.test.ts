@@ -5,6 +5,11 @@ import {
   buildV1TrafficSql,
   parseV1TrafficResponse,
   queryV1Traffic,
+  feedVariant,
+  recordFeedTraffic,
+  buildFeedTrafficSql,
+  parseFeedTrafficResponse,
+  queryFeedTraffic,
 } from '../api-traffic'
 
 describe('v1Variant (#518)', () => {
@@ -138,5 +143,78 @@ describe('queryV1Traffic (#518)', () => {
   it('returns null (never throws) when fetch rejects', async () => {
     const fetchSpy = vi.fn(async () => { throw new Error('network down') })
     await expect(queryV1Traffic('acct', 'tok', fetchSpy as unknown as typeof fetch)).resolves.toBeNull()
+  })
+})
+
+// ── Feed-poll traffic (#548) ──────────────────────────────────────────────
+describe('feedVariant (#548)', () => {
+  it('classifies /feed.xml as feed-all, /feed/:slug as feed-service', () => {
+    expect(feedVariant('/feed.xml')).toBe('feed-all')
+    expect(feedVariant('/feed/claude-code')).toBe('feed-service')
+    expect(feedVariant('/feed/openai')).toBe('feed-service')
+  })
+})
+
+describe('recordFeedTraffic (#548)', () => {
+  it('writes one data point with index feed-poll and the variant blob', () => {
+    const writeDataPoint = vi.fn()
+    recordFeedTraffic({ writeDataPoint } as unknown as AnalyticsEngineDataset, '/feed.xml')
+    expect(writeDataPoint).toHaveBeenCalledWith({ blobs: ['feed-all'], doubles: [1], indexes: ['feed-poll'] })
+    recordFeedTraffic({ writeDataPoint } as unknown as AnalyticsEngineDataset, '/feed/claude')
+    expect(writeDataPoint).toHaveBeenLastCalledWith({ blobs: ['feed-service'], doubles: [1], indexes: ['feed-poll'] })
+  })
+
+  it('is a no-op when the binding is absent (local dev / tests)', () => {
+    expect(() => recordFeedTraffic(undefined, '/feed.xml')).not.toThrow()
+  })
+
+  it('swallows a writeDataPoint throw (never aborts the response)', () => {
+    const writeDataPoint = vi.fn(() => { throw new Error('WAE down') })
+    expect(() => recordFeedTraffic({ writeDataPoint } as unknown as AnalyticsEngineDataset, '/feed.xml')).not.toThrow()
+  })
+})
+
+describe('buildFeedTrafficSql (#548)', () => {
+  it('filters on index1 = feed-poll over the last day', () => {
+    const sql = buildFeedTrafficSql()
+    expect(sql).toContain("index1 = 'feed-poll'")
+    expect(sql).toContain("SUM(_sample_interval)")
+    expect(sql).toContain("INTERVAL '1' DAY")
+  })
+})
+
+describe('parseFeedTrafficResponse (#548)', () => {
+  it('sums feed-all + feed-service into total', () => {
+    const json = { data: [{ variant: 'feed-all', requests: '120' }, { variant: 'feed-service', requests: 45 }] }
+    expect(parseFeedTrafficResponse(json)).toEqual({ all: 120, service: 45, total: 165 })
+  })
+
+  it('returns null for a malformed payload', () => {
+    expect(parseFeedTrafficResponse({})).toBeNull()
+    expect(parseFeedTrafficResponse(null)).toBeNull()
+  })
+
+  it('ignores unknown variants and coerces NaN to 0', () => {
+    const json = { data: [{ variant: 'feed-all', requests: 'oops' }, { variant: 'other', requests: 9 }] }
+    expect(parseFeedTrafficResponse(json)).toEqual({ all: 0, service: 0, total: 0 })
+  })
+})
+
+describe('queryFeedTraffic (#548)', () => {
+  it('returns null without account id / token (no SQL call)', async () => {
+    const fetchImpl = vi.fn()
+    expect(await queryFeedTraffic(undefined, 'tok', fetchImpl)).toBeNull()
+    expect(await queryFeedTraffic('acc', undefined, fetchImpl)).toBeNull()
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('returns null on a non-OK HTTP response', async () => {
+    const fetchImpl = vi.fn(async () => new Response('err', { status: 500 }))
+    expect(await queryFeedTraffic('acc', 'tok', fetchImpl as unknown as typeof fetch)).toBeNull()
+  })
+
+  it('parses a successful response', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ data: [{ variant: 'feed-all', requests: 7 }] }), { status: 200 }))
+    expect(await queryFeedTraffic('acc', 'tok', fetchImpl as unknown as typeof fetch)).toEqual({ all: 7, service: 0, total: 7 })
   })
 })

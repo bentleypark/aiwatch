@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection } from '../daily-summary'
 import type { ServiceStatus } from '../types'
 
 function makeSvc(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
@@ -512,5 +512,55 @@ describe('formatV1TrafficSection (#518)', () => {
     })
     expect(out).toContain('Public API (/api/v1)')
     expect(out).toContain('Last 24h: 7')
+  })
+})
+
+describe('formatSubscriberDelta (#548)', () => {
+  it('renders a positive delta with a + sign', () => {
+    expect(formatSubscriberDelta(3)).toBe(' (+3 today)')
+  })
+  it('renders a negative delta (churn) with a Unicode minus', () => {
+    expect(formatSubscriberDelta(-2)).toBe(' (−2 today)')
+  })
+  it('returns empty for null (no baseline) or 0 (no change) so the line stays clean', () => {
+    expect(formatSubscriberDelta(null)).toBe('')
+    expect(formatSubscriberDelta(undefined)).toBe('')
+    expect(formatSubscriberDelta(0)).toBe('')
+  })
+})
+
+describe('formatFeedTrafficSection (#548)', () => {
+  it('renders the 24h total with the all-vs-per-service split', () => {
+    const out = formatFeedTrafficSection({ all: 120, service: 45, total: 165 })
+    expect(out).toContain('Feed Polls')
+    expect(out).toContain('Last 24h: 165')
+    expect(out).toContain('all-feed 120')
+    expect(out).toContain('~45') // per-service marked approximate
+  })
+  it('returns empty string when feed traffic is unavailable (SQL API not configured)', () => {
+    expect(formatFeedTrafficSection(null)).toBe('')
+    expect(formatFeedTrafficSection(undefined)).toBe('')
+  })
+})
+
+describe('buildDailySummary — #548 webhook delta + feed section', () => {
+  const base = {
+    services: [], aiUsage: null, latencySnapshots: [],
+    incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0,
+  } as Parameters<typeof buildDailySummary>[0]
+
+  it('appends the new-today delta to the Active Discord Webhooks line', () => {
+    const out = buildDailySummary({ ...base, webhookCounts: { discord: 12, newToday: 3 } })
+    expect(out).toContain('🔗 **Active Discord Webhooks**: 12 (+3 today)')
+  })
+  it('omits the delta when there is no baseline', () => {
+    const out = buildDailySummary({ ...base, webhookCounts: { discord: 12, newToday: null } })
+    expect(out).toContain('🔗 **Active Discord Webhooks**: 12')
+    expect(out).not.toContain('today)')
+  })
+  it('renders the feed-poll section when feedTraffic is present', () => {
+    const out = buildDailySummary({ ...base, feedTraffic: { all: 10, service: 5, total: 15 } })
+    expect(out).toContain('📡 **Feed Polls (RSS/Slack)**')
+    expect(out).toContain('Last 24h: 15')
   })
 })
