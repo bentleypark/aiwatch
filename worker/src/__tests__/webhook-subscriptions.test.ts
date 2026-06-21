@@ -15,6 +15,7 @@ import {
   updateFilters,
   unsubscribe,
   deliverToSubscribers,
+  toPerUserEntry,
   readConfirmed,
   readPending,
   CONFIRM_BUDGET_MAX,
@@ -284,6 +285,75 @@ describe('updateFilters / unsubscribe', () => {
   })
 })
 
+describe('toPerUserEntry — per-user is-down link rewrite (#726)', () => {
+  const desc = (link: string) => `🔴 Down\n[View on AIWatch](${link})`
+
+  it('rewrites the operator dashboard link to the is-down page', () => {
+    const out = toPerUserEntry(feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc('https://ai-watch.dev/#claude'), color: 1 } }))
+    expect(out.embed.description).toContain('[View on AIWatch](https://ai-watch.dev/is-claude-down)')
+    expect(out.embed.description).not.toContain('ai-watch.dev/#claude')
+  })
+
+  it('uses the is-down slug for dash-dropped ids (claudecode → claude-code)', () => {
+    const out = toPerUserEntry(feedEntry({ embed: { title: 't', description: desc('https://ai-watch.dev/#claudecode'), color: 1 } }))
+    expect(out.embed.description).toContain('https://ai-watch.dev/is-claude-code-down')
+  })
+
+  it('keeps the dashboard hash for a no-is-down-page service (azureopenai) — no-op, same entry ref', () => {
+    const entry = feedEntry({ embed: { title: 't', description: desc('https://ai-watch.dev/#azureopenai'), color: 1 } })
+    const out = toPerUserEntry(entry)
+    expect(out).toBe(entry) // unchanged → same reference (azureopenai has no is-down page)
+    expect(out.embed.description).toContain('ai-watch.dev/#azureopenai')
+  })
+
+  it('preserves title/color and returns the same entry when there is no dashboard link', () => {
+    const entry = feedEntry({ embed: { title: 'Title', description: 'no link here', color: 42 } })
+    const out = toPerUserEntry(entry)
+    expect(out).toBe(entry)
+    expect(out.embed.title).toBe('Title')
+    expect(out.embed.color).toBe(42)
+  })
+
+  // Pins the cross-file invariant: the rewrite must match the EXACT `[View on AIWatch](${alert.url})`
+  // markup index.ts emits (alert.url = `${SITE}/#${id}`). If the host/format ever drifts there, this
+  // breaks the build rather than silently shipping the operator link to every general subscriber.
+  it('rewrites the exact "[View on AIWatch](…)" markup the operator embed emits (format pin)', () => {
+    const operatorLink = '[View on AIWatch](https://ai-watch.dev/#openai)'
+    const out = toPerUserEntry(feedEntry({ svcIds: ['openai'], embed: { title: 't', description: `🔴 Down\n${operatorLink}`, color: 1 } }))
+    expect(out.embed.description).toContain('[View on AIWatch](https://ai-watch.dev/is-openai-down)')
+    expect(out.embed.description).not.toContain(operatorLink)
+  })
+
+  // The `/g` flag is load-bearing: a future description section could add a second dashboard link.
+  it('rewrites EVERY dashboard link (global), each to its own is-down page', () => {
+    const out = toPerUserEntry(feedEntry({ svcIds: ['claude', 'openai'], embed: { title: 't', description: `${desc('https://ai-watch.dev/#claude')}\nalso [b](https://ai-watch.dev/#openai)`, color: 1 } }))
+    expect(out.embed.description).toContain('https://ai-watch.dev/is-claude-down')
+    expect(out.embed.description).toContain('https://ai-watch.dev/is-openai-down')
+    expect(out.embed.description).not.toContain('ai-watch.dev/#')
+  })
+
+  // Mixed eligibility in one description: the per-link isDownUrl branch diverges within a single pass.
+  it('rewrites an is-down-eligible service but leaves a no-page service hash in the same description', () => {
+    const out = toPerUserEntry(feedEntry({ svcIds: ['claude', 'bedrock'], embed: { title: 't', description: `${desc('https://ai-watch.dev/#claude')}\nalso [b](https://ai-watch.dev/#bedrock)`, color: 1 } }))
+    expect(out.embed.description).toContain('https://ai-watch.dev/is-claude-down')
+    expect(out.embed.description).toContain('https://ai-watch.dev/#bedrock') // no is-down page → hash kept
+    expect(out.embed.description).not.toContain('ai-watch.dev/#claude')
+  })
+
+  it('is idempotent — a second pass over an already-rewritten entry is a no-op (same ref)', () => {
+    const once = toPerUserEntry(feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc('https://ai-watch.dev/#claude'), color: 1 } }))
+    const twice = toPerUserEntry(once)
+    expect(twice).toBe(once)
+    expect(twice.embed.description).toContain('https://ai-watch.dev/is-claude-down')
+  })
+
+  it('does not mutate the input entry (returns a copy)', () => {
+    const entry = feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc('https://ai-watch.dev/#claude'), color: 1 } })
+    toPerUserEntry(entry)
+    expect(entry.embed.description).toContain('ai-watch.dev/#claude') // original untouched
+  })
+})
+
 describe('deliverToSubscribers', () => {
   async function seedSub(kv: ReturnType<typeof makeKV>, url: string, filters: SubscriptionFilters, failCount = 0) {
     const hash = await sha256Hex(url)
@@ -304,6 +374,17 @@ describe('deliverToSubscribers', () => {
     expect(s2.delivered).toBe(0)
     expect(post).toHaveBeenCalledTimes(1)
   })
+  it('#726 — delivers the per-user (is-down) link, not the operator dashboard link', async () => {
+    const kv = makeKV()
+    await seedSub(kv, URL_OK, FILTERS_ALL)
+    const feed = [feedEntry({ svcIds: ['claude'], embed: { title: 't', description: '🔴 Down\n[View on AIWatch](https://ai-watch.dev/#claude)', color: 1 } })]
+    let sentDesc = ''
+    const post = vi.fn(async (_url: string, entry: AlertFeedEntry) => { sentDesc = entry.embed.description; return 204 })
+    await deliverToSubscribers(kv, KEY, feed, post, 1)
+    expect(sentDesc).toContain('https://ai-watch.dev/is-claude-down')
+    expect(sentDesc).not.toContain('ai-watch.dev/#claude')
+  })
+
   it('applies per-sub filters', async () => {
     const kv = makeKV()
     await seedSub(kv, URL_OK, { ...FILTERS_ALL, alertTarget: 'custom', alertServices: ['openai'] })
