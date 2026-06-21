@@ -229,32 +229,32 @@ describe('renderPage — stale incident source (#591)', () => {
   })
 })
 
-describe('renderIncidents — 30-day window + grouping', () => {
+describe('renderIncidents — 7-day window + grouping', () => {
   it('returns empty string when service is null or incidents array is empty', () => {
     expect(renderIncidents(null)).toBe('')
     expect(renderIncidents(mkService({ incidents: [] }))).toBe('')
   })
 
-  it('renders "No incidents in the last 30 days" when everything is outside the window', () => {
+  it('renders "No incidents in the last 7 days" when everything is outside the window', () => {
     const svc = mkService({
       incidents: [
         mkInc({ startedAt: new Date(Date.now() - 40 * 86_400_000).toISOString() }),
       ],
     })
     const html = renderIncidents(svc)
-    expect(html).toContain('Last 30 days')
-    expect(html).toContain('No incidents in the last 30 days')
+    expect(html).toContain('Last 7 days')
+    expect(html).toContain('No incidents in the last 7 days')
   })
 
   it('#591 stale source: shows "history unavailable", NOT a false "No incidents" all-clear', () => {
-    // frozen feed — incidents exist but are all old (can\'t fetch recent), so the 30-day window is empty
+    // frozen feed — incidents exist but are all old (can\'t fetch recent), so the 7-day window is empty
     const svc = mkService({
       incidentSourceStale: true,
       incidents: [mkInc({ startedAt: new Date(Date.now() - 40 * 86_400_000).toISOString() })],
     })
     const html = renderIncidents(svc)
     expect(html).toContain('Incident history unavailable')
-    expect(html).not.toContain('No incidents in the last 30 days')
+    expect(html).not.toContain('No incidents in the last 7 days')
   })
 
   it('#591 stale source with an EMPTY incident array still renders the unavailable message', () => {
@@ -262,12 +262,12 @@ describe('renderIncidents — 30-day window + grouping', () => {
     expect(html).toContain('Incident history unavailable')
   })
 
-  it('30-day boundary: 29d included, 31d excluded', () => {
+  it('7-day boundary: 6d included, 8d excluded', () => {
     const now = Date.now()
     const svc = mkService({
       incidents: [
-        mkInc({ id: 'in-29d', title: 'Recent', startedAt: new Date(now - 29 * 86_400_000).toISOString() }),
-        mkInc({ id: 'out-31d', title: 'Stale', startedAt: new Date(now - 31 * 86_400_000).toISOString() }),
+        mkInc({ id: 'in-6d', title: 'Recent', startedAt: new Date(now - 6 * 86_400_000).toISOString() }),
+        mkInc({ id: 'out-8d', title: 'Stale', startedAt: new Date(now - 8 * 86_400_000).toISOString() }),
       ],
     })
     const html = renderIncidents(svc)
@@ -379,6 +379,72 @@ describe('renderIncidents — 30-day window + grouping', () => {
     expect(invIdx).toBeGreaterThan(-1)
     expect(newestResolvedIdx).toBeGreaterThan(-1)
     expect(invIdx).toBeLessThan(newestResolvedIdx)
+  })
+
+  it('shows the first 5 rows, collapses the rest behind a "Show N more" toggle (#incident-history-collapse)', () => {
+    const now = Date.now()
+    // 8 unique-title incidents within the 7-day window → no grouping → 8 single rows.
+    const svc = mkService({
+      incidents: Array.from({ length: 8 }, (_, i) => mkInc({
+        id: `u${i}`,
+        title: `Unique incident ${i}`,
+        startedAt: new Date(now - i * 3600_000).toISOString(),
+      })),
+    })
+    const html = renderIncidents(svc)
+    // All 8 still in the HTML (collapsed content stays crawlable, no JS).
+    expect((html.match(/class="incident-item"/g) ?? []).length).toBe(8)
+    // The overflow (8 - 5 = 3) is wrapped in exactly one CSS-only reveal container.
+    expect((html.match(/class="ih-rest"/g) ?? []).length).toBe(1)
+    // Both label states are present; CSS swaps them on the checkbox :checked state.
+    expect(html).toContain('Show 3 more')
+    expect(html).toContain('Show less')
+    // The overflow rows reveal between the preview and the toggle; the toggle label
+    // is anchored at the BOTTOM (renders after the last overflow row).
+    const restIdx = html.indexOf('class="ih-rest"')
+    const fifthIdx = html.indexOf('Unique incident 4')   // 5th newest (index 4) — last preview row
+    const sixthIdx = html.indexOf('Unique incident 5')   // 6th newest → inside .ih-rest
+    const labelIdx = html.indexOf('ih-more-label')
+    expect(fifthIdx).toBeLessThan(restIdx)
+    expect(restIdx).toBeLessThan(sixthIdx)
+    // Structural anchor (decoupled from title-order/sort internals): the toggle label
+    // renders after the LAST incident row, so the overflow reveals above the toggle.
+    expect(html.lastIndexOf('class="incident-item"')).toBeLessThan(labelIdx)
+  })
+
+  it('exactly 6 rows → "Show 1 more" (singular), 1 row collapsed', () => {
+    const now = Date.now()
+    const svc = mkService({
+      incidents: Array.from({ length: 6 }, (_, i) => mkInc({
+        id: `u${i}`,
+        title: `Unique incident ${i}`,
+        startedAt: new Date(now - i * 3600_000).toISOString(),
+      })),
+    })
+    const html = renderIncidents(svc)
+    expect((html.match(/class="incident-item"/g) ?? []).length).toBe(6)
+    expect(html).toContain('Show 1 more')
+    expect(html).toContain('Show less')
+    // Only the 6th row (index 5) is inside the reveal container.
+    const restIdx = html.indexOf('class="ih-rest"')
+    expect(html.indexOf('Unique incident 4')).toBeLessThan(restIdx) // 5th → preview
+    expect(restIdx).toBeLessThan(html.indexOf('Unique incident 5')) // 6th → collapsed
+  })
+
+  it('does NOT render the "show more" toggle at exactly 5 rows (boundary: > not >=)', () => {
+    const now = Date.now()
+    const svc = mkService({
+      incidents: Array.from({ length: 5 }, (_, i) => mkInc({
+        id: `u${i}`,
+        title: `Unique incident ${i}`,
+        startedAt: new Date(now - i * 3600_000).toISOString(),
+      })),
+    })
+    const html = renderIncidents(svc)
+    expect((html.match(/class="incident-item"/g) ?? []).length).toBe(5)
+    expect(html).not.toContain('ih-rest')
+    expect(html).not.toContain('ih-more-label')
+    expect(html).not.toMatch(/Show \d+ more/)
   })
 })
 

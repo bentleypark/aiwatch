@@ -255,6 +255,17 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 .incident-group-meta{font-size:12px;color:#8b949e;white-space:nowrap}
 .incident-group-entries{margin:6px 0 0 20px;padding-left:10px;border-left:1px solid rgba(255,255,255,0.08)}
 .incident-group-entries .incident-item{padding:6px 0}
+.ih-toggle{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.ih-rest{display:none}
+.ih-toggle:checked~.ih-rest{display:block}
+.ih-more-label{display:inline-block;cursor:pointer;font-size:12px;color:#8b949e;padding:10px 0 2px;user-select:none}
+.ih-more-label:hover{color:#c9d1d9}
+.ih-more-label::before{content:"▾";display:inline-block;color:#8b949e;margin-right:6px;transition:transform 0.15s}
+.ih-toggle:checked~.ih-more-label::before{transform:rotate(180deg)}
+.ih-more-close{display:none}
+.ih-toggle:checked~.ih-more-label .ih-more-open{display:none}
+.ih-toggle:checked~.ih-more-label .ih-more-close{display:inline}
+.ih-toggle:focus-visible~.ih-more-label{outline:2px solid #58a6ff;outline-offset:2px}
 .faq-item{margin:16px 0}
 .faq-q{font-weight:600;font-size:15px;margin-bottom:6px}
 .faq-a{font-size:14px;color:#8b949e}
@@ -608,6 +619,10 @@ function copySlackFeed(b){
 // for the busiest service (claudeai), and grouping further compresses high-churn feeds.
 const INCIDENT_ROW_CAP = 20
 
+// Rows shown before the "Show N more" collapse (#incident-history-collapse). Mirrors the
+// dashboard ServiceDetails INCIDENT_HISTORY_PREVIEW so both surfaces preview the same count.
+const INCIDENT_PREVIEW_ROWS = 5
+
 function renderIncidentSingle(inc: GroupingIncident): string {
   const impactCls = inc.impact === 'major' || inc.impact === 'critical' ? 'impact-major' : inc.impact === 'minor' ? 'impact-minor' : ''
   const statusColor = inc.status === 'resolved' ? '#3fb950' : inc.status === 'monitoring' ? '#58a6ff' : '#e86235'
@@ -674,9 +689,11 @@ export function renderIncidents(service: ServiceData | null): string {
   // frozen incident array is empty; only a non-stale service with no incidents renders nothing.
   if (!service || (incidents.length === 0 && !service.incidentSourceStale)) return ''
 
-  const cutoff = Date.now() - 30 * 86_400_000
+  // 7-day window to match the dashboard ServiceDetails "Incident History" (both surfaces
+  // share the same recency horizon; #incident-history-collapse).
+  const cutoff = Date.now() - 7 * 86_400_000
   const recent = incidents.filter((inc) => new Date(inc.startedAt).getTime() >= cutoff) as GroupingIncident[]
-  const heading = `<h2>Recent Incidents <span class="mono" style="font-size:12px;color:#8b949e;font-weight:400;margin-left:8px">&middot; Last 30 days</span></h2>`
+  const heading = `<h2>Recent Incidents <span class="mono" style="font-size:12px;color:#8b949e;font-weight:400;margin-left:8px">&middot; Last 7 days</span></h2>`
 
   // #591 — the incident feed is frozen, so we can't fetch recent incidents. A "No incidents" message
   // here would be a false all-clear; say the history is unavailable instead.
@@ -687,19 +704,34 @@ export function renderIncidents(service: ServiceData | null): string {
 
   if (recent.length === 0) {
     return `${heading}
-<div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">No incidents in the last 30 days</p></div>`
+<div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">No incidents in the last 7 days</p></div>`
   }
 
   // Re-sort groupIncidents() output so ongoing/monitoring rows survive the
   // INCIDENT_ROW_CAP slice — see compareGroupedRows. Sort must run before
-  // .slice() or a resolved-heavy 30-day window can truncate an active row.
+  // .slice() or a resolved-heavy window can truncate an active row.
   const rows = groupIncidents(recent, { timeZone: 'UTC' })
     .slice()
     .sort(compareGroupedRows)
     .slice(0, INCIDENT_ROW_CAP)
-  const body = rows.map((row) => row.kind === 'group' ? renderIncidentGroup(row) : renderIncidentSingle((row as SingleRow).incident)).join('\n')
+  const renderRow = (row: GroupRow | SingleRow): string =>
+    row.kind === 'group' ? renderIncidentGroup(row) : renderIncidentSingle((row as SingleRow).incident)
+  // Show the first INCIDENT_PREVIEW_ROWS rows; collapse the rest behind a CSS-only toggle that
+  // stays anchored at the BOTTOM of the list (the overflow rows reveal ABOVE the toggle, matching
+  // the dashboard ServiceDetails "show more" button). A checkbox-hack (no JS, CSP-clean) is used
+  // instead of <details> because a <details> summary is pinned above its content, which left the
+  // toggle awkwardly mid-list when expanded. Collapsed rows stay in the HTML so crawlers read them.
+  const preview = rows.slice(0, INCIDENT_PREVIEW_ROWS).map(renderRow).join('\n')
+  const rest = rows.slice(INCIDENT_PREVIEW_ROWS)
+  // The fixed id="ih-more" assumes ONE incident list per page (renderIncidents is called once,
+  // see the single call site) — revisit if a future page renders two service incident lists.
+  const moreSection = rest.length > 0
+    ? `<input type="checkbox" id="ih-more" class="ih-toggle" aria-label="Show ${rest.length} more incidents">
+<div class="ih-rest">${rest.map(renderRow).join('\n')}</div>
+<label for="ih-more" class="ih-more-label mono"><span class="ih-more-open">Show ${rest.length} more</span><span class="ih-more-close">Show less</span></label>`
+    : ''
   return `${heading}
-<div class="card">${body}</div>`
+<div class="card">${preview}${moreSection}</div>`
 }
 
 function buildDataSummary(service: ServiceData | null, displayName: string): string {

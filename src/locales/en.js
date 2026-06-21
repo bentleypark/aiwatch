@@ -205,6 +205,8 @@ const en = {
   'svc.mttr.sub': 'Collecting data',
   'svc.cal.legend': 'Status Calendar',
   'svc.incidents.history': 'Incident History',
+  'svc.incidents.showMore': 'Show {n} more',
+  'svc.incidents.showLess': 'Show less',
   'svc.no.incidents': 'No incidents',
   'svc.no.incidents.limited': 'No incidents reported — this service\'s status page provides limited data.',
   'svc.no.incidents.realtime': 'No active incidents. Real-time monitoring only — historical data shown during outages.',

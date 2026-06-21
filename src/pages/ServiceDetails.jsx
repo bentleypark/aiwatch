@@ -716,6 +716,10 @@ function RssLink({ feedUrl, serviceId, t }) {
 
 // ── Main Component ───────────────────────────────────────────
 
+// Incident History rows shown before the "show more" toggle (#incident-history-collapse).
+// Mirrors the is-down Edge page (api/is-down/html-template.ts) so both surfaces match.
+const INCIDENT_HISTORY_PREVIEW = 5
+
 export default function ServiceDetails({ serviceId }) {
   const { t, lang } = useLang()
   const { setPage } = usePage()
@@ -729,6 +733,12 @@ export default function ServiceDetails({ serviceId }) {
     const svc = services.find((s) => s.id === serviceId)
     return computeRecoveryStats(svc?.incidents, Date.now(), 7)
   }, [services, serviceId])
+
+  // Incident History preview/expand (#incident-history-collapse): show the first
+  // INCIDENT_HISTORY_PREVIEW grouped rows, reveal the rest behind a toggle. Reset when the
+  // viewed service changes (the component stays mounted across in-app service navigation).
+  const [historyExpanded, setHistoryExpanded] = useState(false)
+  useEffect(() => { setHistoryExpanded(false) }, [serviceId])
 
   if (loading && services.length === 0) return <ServiceDetailsSkeleton />
   if (!loading && services.length === 0 && error) return <EmptyState type="offline" onAction={refresh} />
@@ -763,6 +773,9 @@ export default function ServiceDetails({ serviceId }) {
   // monitoring rows back above newer resolved ones. See incidentSort.js.
   const groupedIncidents = groupIncidents(recentIncidents).slice().sort(compareGroupedRows)
   const incidentCount = recentIncidents.length
+  // Show the first INCIDENT_HISTORY_PREVIEW rows by default; the rest reveal on toggle.
+  const visibleIncidents = historyExpanded ? groupedIncidents : groupedIncidents.slice(0, INCIDENT_HISTORY_PREVIEW)
+  const hiddenIncidentCount = groupedIncidents.length - visibleIncidents.length
   // #591 — estimate-no-data OR stale-source (frozen feed, e.g. DeepSeek → Flashduty): blank the
   // uptime / incidents / MTTR / score cards + the status calendar (showing a frozen 30-day window as
   // current would mislead). Latency stays — it's probe-measured + current.
@@ -995,11 +1008,25 @@ export default function ServiceDetails({ serviceId }) {
               </div>
             ) : (
               <div className="flex flex-col" style={{ gap: '8px' }}>
-                {groupedIncidents.map((row) => row.kind === 'group' ? (
+                {visibleIncidents.map((row) => row.kind === 'group' ? (
                   <IncidentGroupRow key={`group:${row.dayKey}:${row.normalizedTitle}`} group={row} t={t} lang={lang} />
                 ) : (
                   <IncidentRow key={row.incident.id} incident={row.incident} isRecentlyRecovered={!!(recentlyRecovered[service.id] ?? []).includes(row.incident.id)} t={t} lang={lang} />
                 ))}
+                {(hiddenIncidentCount > 0 || historyExpanded) && groupedIncidents.length > INCIDENT_HISTORY_PREVIEW && (
+                  <button
+                    type="button"
+                    onClick={() => setHistoryExpanded((v) => !v)}
+                    aria-expanded={historyExpanded}
+                    className="mono text-[10px] text-[var(--text2)] hover:text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5 self-start"
+                    style={{ padding: '6px 2px' }}
+                  >
+                    <span aria-hidden="true">{historyExpanded ? '▴' : '▾'}</span>
+                    {historyExpanded
+                      ? t('svc.incidents.showLess')
+                      : t('svc.incidents.showMore').replace('{n}', String(hiddenIncidentCount))}
+                  </button>
+                )}
               </div>
             )}
           </div>
