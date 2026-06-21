@@ -122,6 +122,20 @@ function statusAnswer(status: string): { yesno: string; phrase: string } {
 // latest-month, both overkill for a header link. Instead link the /reports/ index, which is
 // always live and lists reports newest-first → the reader lands on the latest published one.
 const REPORTS_INDEX_HREF = '/reports/'
+
+// #575 — crowd-report collect endpoint (worker). Hardcoded like the OG image URL above; a one-line
+// swap to http://localhost:8788/api/report-issue is the only change needed for local verification.
+const REPORT_ENDPOINT = 'https://aiwatch-worker.p2c2kbf.workers.dev/api/report-issue'
+
+// Category labels for the gated report display. KEEP IN SYNC with worker/src/report.ts
+// REPORT_CATEGORY_LABELS (the worker validates the ids; this only labels them for display).
+const REPORT_CATEGORY_LABELS: Record<string, string> = {
+  outage: 'Outage',
+  degraded: 'Degraded performance',
+  errors: 'Errors',
+  login: 'Login / Auth',
+  other: 'Other',
+}
 const REPORTS_INDEX_LABEL = 'Monthly Reports'
 
 function statusColor(status: string): string {
@@ -173,6 +187,10 @@ export function renderPage(
   // when the service has no region map, no relevant incident, or every region
   // is hit (allDown — no useful recommendation).
   regionRec?: RegionStatusResult | null,
+  // #575 — recent crowd "Report an issue" entries for the GATED display. The caller (api/is-down.ts)
+  // only populates this when an independent signal already shows a problem, so a non-empty list here
+  // is already corroborated; an operational page passes [] and the section renders nothing.
+  reports?: Array<{ cat: string; desc: string; ts: number }>,
 ): string {
   // #566: lead the SERP title with the live status answer (falls back to "Live Status"
   // when status data is unavailable) so the result answers the query before the click.
@@ -284,6 +302,35 @@ button.btn{cursor:pointer;font-family:inherit;line-height:inherit}
 .cta-help{font-size:11.5px;margin-top:8px;color:#8b949e;line-height:1.5}
 .cta-alt{font-size:12px;margin-top:10px;color:#8b949e}
 .cta-alt a{color:#8b949e;text-decoration:underline}
+.report-issue{background:none;border:none;color:#8b949e;font-size:12px;cursor:pointer;text-decoration:underline;padding:0;font-family:inherit}
+.report-issue:hover{color:#c9d1d9}
+.report-issue:disabled{cursor:default;text-decoration:none;color:#3fb950}
+.report-modal{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
+.report-modal[hidden]{display:none}
+.report-modal-card{background:#161b22;border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:24px;width:100%;max-width:460px;text-align:left}
+.report-modal-card h2{font-size:20px;margin:0 0 16px}
+.report-label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#8b949e;margin:0 0 6px;font-weight:600}
+.report-label-row{display:flex;justify-content:space-between;align-items:baseline;margin-top:14px}
+.report-count{font-size:12px;color:#8b949e}
+.report-input{width:100%;box-sizing:border-box;background:#0d1117;border:1px solid rgba(255,255,255,0.14);border-radius:6px;color:#e6edf3;font-size:14px;font-family:inherit;padding:10px 12px}
+select.report-input{appearance:none;-webkit-appearance:none;padding-right:38px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%238b949e' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center}
+textarea.report-input{min-height:72px;resize:vertical}
+.report-actions{display:flex;gap:10px;margin-top:18px}
+.report-actions .btn{flex:1}
+.report-msg{margin:12px 0 0;font-size:13px;color:#3fb950}
+.report-feed-note{font-size:12px;color:#8b949e;margin:0 0 10px;line-height:1.5}
+.report-feed-desc{color:#c9d1d9}
+.rep-toggle{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.rep-rest{display:none}
+.rep-toggle:checked~.rep-rest{display:block}
+.rep-more-label{display:inline-block;cursor:pointer;font-size:12px;color:#8b949e;padding:10px 0 2px;user-select:none}
+.rep-more-label:hover{color:#c9d1d9}
+.rep-more-label::before{content:"▾";display:inline-block;color:#8b949e;margin-right:6px;transition:transform 0.15s}
+.rep-toggle:checked~.rep-more-label::before{transform:rotate(180deg)}
+.rep-more-close{display:none}
+.rep-toggle:checked~.rep-more-label .rep-more-open{display:none}
+.rep-toggle:checked~.rep-more-label .rep-more-close{display:inline}
+.rep-toggle:focus-visible~.rep-more-label{outline:2px solid #58a6ff;outline-offset:2px}
 .cta-alt a:hover{color:#c9d1d9}
 .links{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .links a{font-size:13px;padding:6px 12px;background:#161b22;border:1px solid rgba(255,255,255,0.07);border-radius:4px;color:#8b949e}
@@ -308,6 +355,7 @@ ${renderAIInsight(aiInsight, service?.status, fallbacks)}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
 ${renderComponents(service)}
 ${renderIncidents(service)}
+${renderReportFeed(reports, seo)}
 ${renderDescription(seo, service)}
 ${renderFAQ(seo, fallbacks)}
 ${renderFallbacks(seo, fallbacks, service?.id)}
@@ -562,6 +610,45 @@ ${groupNames.map((g) => componentGroup(g, components.filter((c) => c.group === g
 </div>`
 }
 
+/** Relative "Xm ago" / "Xh ago" for a report timestamp (SSR render time). */
+function reportRelTime(ts: number, now: number): string {
+  const m = Math.max(0, Math.round((now - ts) / 60_000))
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
+  return `${Math.round(m / 60)}h ago`
+}
+
+/**
+ * #575 — GATED crowd-report display. `reports` is non-empty ONLY when the caller (api/is-down.ts)
+ * confirmed an independent signal already shows a problem, so this list can't contradict an
+ * operational page. Returns '' (renders nothing) otherwise. Descriptions are HTML-escaped (the
+ * worker also sanitizes on store — defense-in-depth against UGC injection).
+ */
+const REPORT_FEED_PREVIEW = 5
+
+function renderReportFeed(reports: Array<{ cat: string; desc: string; ts: number }> | undefined, _seo: ServiceSEO): string {
+  const list = Array.isArray(reports) ? reports : []
+  if (list.length === 0) return ''
+  const now = Date.now()
+  const row = (r: { cat: string; desc: string; ts: number }) => {
+    const label = REPORT_CATEGORY_LABELS[r.cat] ?? 'Other'
+    const desc = r.desc ? ` &mdash; <span class="report-feed-desc">${esc(r.desc)}</span>` : ''
+    return `<div class="incident-item"><div class="incident-title">${esc(label)}${desc}</div><div class="incident-meta mono">${esc(reportRelTime(r.ts, now))}</div></div>`
+  }
+  const capped = list.slice(0, 20)
+  // First 5 shown; the rest collapse behind a bottom-anchored CSS-only toggle (same UX as the
+  // incident-history collapse). A `rep-` prefix keeps the ids/classes distinct from that list's.
+  const preview = capped.slice(0, REPORT_FEED_PREVIEW).map(row).join('\n')
+  const rest = capped.slice(REPORT_FEED_PREVIEW)
+  const more = rest.length > 0
+    ? `<input type="checkbox" id="rep-more" class="rep-toggle" aria-label="Show ${rest.length} more reports">
+<div class="rep-rest">${rest.map(row).join('\n')}</div>
+<label for="rep-more" class="rep-more-label mono"><span class="rep-more-open">Show ${rest.length} more</span><span class="rep-more-close">Show less</span></label>`
+    : ''
+  return `<h2>Recent user reports <span class="mono" style="font-size:12px;color:#8b949e;font-weight:400;margin-left:8px">&middot; Last 24h &middot; community-submitted</span></h2>
+<div class="card"><p class="report-feed-note">Visitor-submitted and shown only because an independent signal also indicates a problem &mdash; not an official AIWatch verdict.</p><div id="report-feed-list">${preview}${more}</div></div>`
+}
+
 function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string): string {
   const isDown = status === 'down' || status === 'degraded'
   // Positioned directly below the status header (#297) so the alert-subscription
@@ -597,6 +684,30 @@ function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string)
 </div>
 <p class="cta-help">💬 Slack: paste the command into any channel — done. &middot; 🔗 RSS: paste the link into Slack, Teams, or any reader.</p>
 <p class="cta-alt"><a href="https://ai-watch.dev/#settings?focus=alerts" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'status_banner_secondary'})">Prefer Discord push alerts? Set up here &rarr;</a></p>
+<!-- #575: 1st-party crowd report (category + short description). We COLLECT it; the recent-report
+     list is shown ONLY on a gated surface (when an independent signal already shows a problem) — we
+     never render a public "N reporting" verdict that could contradict an operational status. -->
+<p class="cta-alt"><button type="button" class="report-issue" id="report-open">⚠️ Seeing a problem with ${esc(seo.displayName)}? Report an issue</button></p>
+</div>
+<div id="report-modal" class="report-modal" hidden>
+<div class="report-modal-card" role="dialog" aria-modal="true" aria-labelledby="report-modal-title">
+<h2 id="report-modal-title">Report an Issue</h2>
+<label class="report-label" for="report-cat">Category</label>
+<select id="report-cat" class="report-input">
+<option value="outage">Outage</option>
+<option value="degraded">Degraded performance</option>
+<option value="errors">Errors</option>
+<option value="login">Login / Auth</option>
+<option value="other">Other</option>
+</select>
+<div class="report-label-row"><label class="report-label" for="report-desc">Description</label><span class="report-count"><span id="report-desc-n">0</span> / 80</span></div>
+<textarea id="report-desc" class="report-input" maxlength="80" placeholder="Brief description, e.g. API 500 errors in EU"></textarea>
+<div class="report-actions">
+<button type="button" class="btn btn-primary" id="report-submit" data-svc="${esc(svcId)}">Submit</button>
+<button type="button" class="btn" id="report-cancel">Cancel</button>
+</div>
+<p id="report-msg" class="report-msg" hidden></p>
+</div>
 </div>
 <script>
 function copyRss(b){
@@ -611,6 +722,46 @@ function copySlackFeed(b){
   if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(c).then(done).catch(function(){prompt('Copy Slack command:',c)})}
   else{prompt('Copy Slack command:',c)}
 }
+// #575 crowd-report modal (no framework — plain DOM). The honest feedback NEVER shows a count; the
+// localStorage guard mirrors the server's per-IP/day dedup. NOTE this adds an inline <script> like
+// the existing copyRss/copySlackFeed ones — fine under today's report-only CSP, but it's part of the
+// Phase-3 inline-handler refactor debt tracked in docs/reference/reference-csp.md.
+(function(){
+  var modal=document.getElementById('report-modal'), openBtn=document.getElementById('report-open');
+  if(!modal||!openBtn) return;
+  var submit=document.getElementById('report-submit'), cancel=document.getElementById('report-cancel');
+  var cat=document.getElementById('report-cat'), desc=document.getElementById('report-desc');
+  var descN=document.getElementById('report-desc-n'), msg=document.getElementById('report-msg');
+  var svc=submit.dataset.svc, k='aiwatch-reported-'+svc;
+  function reported(){try{return !!localStorage.getItem(k)}catch(e){return false}}
+  function markDone(){openBtn.textContent='✓ Already reported — thanks';openBtn.disabled=true;}
+  function close(){modal.hidden=true;}
+  // Optimistic, XSS-safe prepend of the just-submitted report to the gated feed (only when the
+  // feed is already on the page — i.e. an independent signal corroborated, so the gate holds).
+  var REP_LABELS={outage:'Outage',degraded:'Degraded performance',errors:'Errors',login:'Login / Auth',other:'Other'};
+  function prependReport(catId,descText){
+    var listEl=document.getElementById('report-feed-list'); if(!listEl) return;
+    var item=document.createElement('div'); item.className='incident-item';
+    var t=document.createElement('div'); t.className='incident-title';
+    var lab=document.createElement('span'); lab.textContent=REP_LABELS[catId]||'Other'; t.appendChild(lab);
+    if(descText){var d=document.createElement('span'); d.className='report-feed-desc'; d.textContent=' — '+descText; t.appendChild(d);}
+    var m=document.createElement('div'); m.className='incident-meta mono'; m.textContent='just now';
+    item.appendChild(t); item.appendChild(m); listEl.insertBefore(item,listEl.firstChild);
+  }
+  openBtn.addEventListener('click',function(){if(reported()){markDone();return}modal.hidden=false;cat.focus();typeof gtag==='function'&&gtag('event','report_open',{location:'is_down_page',service_id:svc});});
+  cancel.addEventListener('click',close);
+  modal.addEventListener('click',function(e){if(e.target===modal)close();});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!modal.hidden)close();});
+  desc.addEventListener('input',function(){descN.textContent=String(desc.value.length);});
+  submit.addEventListener('click',function(){
+    submit.disabled=true;
+    fetch(${JSON.stringify(REPORT_ENDPOINT)},{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({svcId:svc,category:cat.value,description:desc.value})})
+      .then(function(r){return r.ok?r.json().catch(function(){return{}}):Promise.reject()})
+      .then(function(){try{localStorage.setItem(k,'1')}catch(e){}prependReport(cat.value,desc.value.trim());msg.hidden=false;msg.textContent='✓ Thanks — we factor this into our monitoring';typeof gtag==='function'&&gtag('event','report_issue',{location:'is_down_page',service_id:svc,category:cat.value});markDone();setTimeout(close,1400);})
+      .catch(function(){msg.hidden=false;msg.textContent='Could not send — please try again later';submit.disabled=false;});
+  });
+  if(reported())markDone();
+})();
 </script>`
 }
 

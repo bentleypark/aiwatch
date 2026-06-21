@@ -18,6 +18,7 @@ import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic } 
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
+import { isReportableService, hashIp, reportDateKey, reportCountKey, reportSeenKey, nextCount, REPORT_COUNT_TTL_SECONDS, REPORT_SEEN_TTL_SECONDS, REPORT_MAX_PER_HOUR, formatReportCountsSection, isValidCategory, sanitizeReportDescription, reportFeedKey, appendReportFeed, recentReportFeed, REPORT_FEED_TTL_SECONDS, type ReportFeedEntry } from './report'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -82,6 +83,8 @@ const publicApiRate = new Map<string, { start: number; count: number }>() // rat
 // 20/hour/IP (brute-force hardening atop the 10^6 code space + the KV-side global confirm budget).
 const webhookSubRate = new Map<string, { start: number; count: number }>()   // /subscribe + /update: 10/hour/IP
 const webhookConfirmRate = new Map<string, { start: number; count: number }>() // /confirm: 20/hour/IP
+const reportRate = new Map<string, { start: number; count: number }>()         // /api/report-issue: per-IP/hour (#575)
+const REPORTABLE_IDS = new Set(SERVICES.map((s) => s.id))                       // #575 — valid report targets
 const HOUR_MS = 3_600_000
 /** Fixed-window per-IP limiter (in-memory, per-isolate — same mechanism as the existing
  *  alertProxyRate/webhookPingRate counters, just an hour window). Returns true if over the limit.
@@ -2203,6 +2206,20 @@ export default {
             console.warn('[daily-summary] feed traffic read failed:', err instanceof Error ? err.message : err)
           }
 
+          // #575 — internal demand signal: today's per-service crowd "Report an issue" counts.
+          // Bounded read (one GET per known service, no KV list); surfaced only inside the operator
+          // summary, never as a public "N reporting" verdict (that gating is Phase B).
+          const reportCounts: Record<string, number> = {}
+          try {
+            await Promise.all(SERVICES.map(async (s) => {
+              const v = await env.STATUS_CACHE.get(reportCountKey(s.id, today)).catch(() => null)
+              const n = v ? parseInt(v, 10) : 0
+              if (Number.isFinite(n) && n > 0) reportCounts[s.id] = n
+            }))
+          } catch (err) {
+            console.warn('[daily-summary] report counts read failed:', err instanceof Error ? err.message : err)
+          }
+
           const description = buildDailySummary({
             services: dailyServices,
             aiUsage,
@@ -2221,6 +2238,7 @@ export default {
             degradationNoStatusCounts,
             v1Traffic,
             feedTraffic,
+            reportCounts,
           })
 
           if (isCatchUp) console.log(`[daily-summary] catch-up run for ${today}`)
@@ -2353,6 +2371,83 @@ export default {
           status: 500, headers: { ...cors, 'Content-Type': 'application/json' },
         })
       }
+    }
+
+    // POST /api/report-issue — #575 Phase A crowd "Report an issue" (COLLECT ONLY, no public
+    // display). Per-service per-UTC-day KV counter + IP-hash dedup; the count is used only as an
+    // internal demand signal (daily summary). NEVER a "N reporting" verdict — gated corroboration
+    // is Phase B. The honest 200 ack is identical whether or not this report was counted (a repeat
+    // from the same IP/day is silently not double-counted), so the response can't be probed for
+    // dedup state.
+    if (request.method === 'POST' && url.pathname === '/api/report-issue') {
+      const now = Date.now()
+      const clientIp = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim() ?? 'local'
+      if (overRateLimit(reportRate, clientIp, REPORT_MAX_PER_HOUR, now)) {
+        return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), {
+          status: 429, headers: { ...cors, 'Content-Type': 'application/json' },
+        })
+      }
+      let body: { svcId?: unknown; category?: unknown; description?: unknown }
+      try { body = await request.json() as typeof body } catch { body = {} }
+      const svcId = body.svcId
+      if (!isReportableService(svcId, REPORTABLE_IDS)) {
+        return new Response(JSON.stringify({ error: 'Unknown service' }), {
+          status: 400, headers: { ...cors, 'Content-Type': 'application/json' },
+        })
+      }
+      // Category is required + allowlisted; description is optional free text (sanitized for storage,
+      // escaped again at render — it surfaces on the gated public display).
+      const category = body.category
+      if (!isValidCategory(category)) {
+        return new Response(JSON.stringify({ error: 'Invalid category' }), {
+          status: 400, headers: { ...cors, 'Content-Type': 'application/json' },
+        })
+      }
+      const description = sanitizeReportDescription(body.description)
+      const date = reportDateKey(now)
+      const ipHash = await hashIp(clientIp, env.ADMIN_API_KEY ?? '')
+      const seenKey = reportSeenKey(svcId, ipHash, date)
+      const already = await env.STATUS_CACHE.get(seenKey).catch(() => null)
+      if (!already) {
+        const countKey = reportCountKey(svcId, date)
+        const cur = await env.STATUS_CACHE.get(countKey).catch(() => null)
+        // Read-modify-write — KV has no atomic increment. At AIWatch's volume (~22 visitors/incident)
+        // a concurrent collision that loses one increment/append is acceptable for this soft demand
+        // signal; not worth a Durable Object.
+        const counted = await kvPut(env.STATUS_CACHE, countKey, String(nextCount(cur)), { expirationTtl: REPORT_COUNT_TTL_SECONDS })
+        // Mark the IP "seen" (+ append to the feed) ONLY after the count actually persisted —
+        // otherwise a failed count-write would lock the IP out for 24h with nothing recorded, silently
+        // dropping the report with no retry. The feed powers the GATED display (#575).
+        if (counted) {
+          await kvPut(env.STATUS_CACHE, seenKey, '1', { expirationTtl: REPORT_SEEN_TTL_SECONDS })
+          const feedKey = reportFeedKey(svcId)
+          let feed: ReportFeedEntry[] = []
+          try { const raw = await env.STATUS_CACHE.get(feedKey); feed = raw ? JSON.parse(raw) : [] } catch { feed = [] }
+          const updated = appendReportFeed(recentReportFeed(feed, now), { cat: category, desc: description, ts: now })
+          await kvPut(env.STATUS_CACHE, feedKey, JSON.stringify(updated), { expirationTtl: REPORT_FEED_TTL_SECONDS })
+        }
+      }
+      return new Response(JSON.stringify({ ok: true, message: 'Thanks — we factor this into our monitoring.' }), {
+        status: 200, headers: { ...cors, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // GET /api/report-feed?svc=:id — recent (24h) crowd reports for one service (#575). The
+    // is-down Edge fetches this ONLY when an independent signal already shows a problem (the gate),
+    // so a public "N reporting" feed never contradicts an official `operational`. The endpoint
+    // itself is a cheap KV read; the gating lives at the call site.
+    if (request.method === 'GET' && url.pathname === '/api/report-feed') {
+      const svc = url.searchParams.get('svc') ?? ''
+      if (!REPORTABLE_IDS.has(svc)) {
+        return new Response(JSON.stringify({ error: 'Unknown service' }), {
+          status: 400, headers: { ...cors, 'Content-Type': 'application/json' },
+        })
+      }
+      let feed: ReportFeedEntry[] = []
+      try { const raw = await env.STATUS_CACHE.get(reportFeedKey(svc)); feed = raw ? JSON.parse(raw) : [] } catch { feed = [] }
+      return new Response(JSON.stringify({ reports: recentReportFeed(feed, Date.now()) }), {
+        status: 200, headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'max-age=30' },
+      })
     }
 
     // POST /api/admin/analyze — operator override to run Sonnet analysis on a specific

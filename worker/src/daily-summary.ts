@@ -5,6 +5,7 @@ import type { ProbeSnapshot } from './probe'
 import type { VitalsDaily } from './vitals'
 import { formatVitalsSection } from './vitals'
 import { aggregateProbeDaily } from './probe-archival'
+import { formatReportCountsSection } from './report'
 
 // #679 — the "detection lead" (faster-than-official) metric was removed (structurally null — status-page
 // polling is always later than the official publish; #464 already retired the framing). The RTT-degradation
@@ -46,6 +47,9 @@ export interface DailySummaryData {
   // #548 — feed-poll volume (last-24h, from WAE): the consent-free retention proxy. Absent (null)
   // when the SQL API isn't configured. No cumulative — the daily value (a post-outage step-up) is the signal.
   feedTraffic?: { all: number; service: number; total: number } | null
+  // #575 Phase A — crowd "Report an issue" counts today (svcId → count). Internal demand signal
+  // only (coverage priority); never a public "N reporting" verdict. Empty/absent → section omitted.
+  reportCounts?: Record<string, number>
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
@@ -192,6 +196,13 @@ export function buildDailySummary(data: DailySummaryData): string {
   // Section: feed-poll volume (#548) — consent-free retention proxy (post-outage step-up = retained subs).
   const feedSection = formatFeedTrafficSection(data.feedTraffic)
   if (feedSection) lines.push(feedSection)
+
+  // Section: crowd "Report an issue" counts (#575 Phase A) — internal demand signal only.
+  if (data.reportCounts) {
+    const nameOf = new Map(services.map((s) => [s.id, s.name]))
+    const reportSection = formatReportCountsSection(data.reportCounts, (id) => nameOf.get(id) ?? id)
+    if (reportSection) lines.push(reportSection)
+  }
 
   return lines.join('\n')
 }
