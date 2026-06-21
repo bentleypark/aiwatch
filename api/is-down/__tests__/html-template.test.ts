@@ -164,6 +164,35 @@ describe('renderPage <title> — live status (#566)', () => {
   })
 })
 
+// #722 — when a BetterStack service reads operational but `partialCount > 0` (sub-threshold
+// component outage), the header shows a yellow "N components affected" note — WITHOUT changing
+// the SEO answer/title (the service IS up overall: "Is X down? → No, operational").
+describe('renderPage — partial-outage note (#722)', () => {
+  it('renders the affected-components note when operational + partialCount > 0', () => {
+    const html = renderPage('together', mkService({ status: 'operational', partialCount: 1 }), mkSeo(), [])
+    expect(html).toContain('1 component affected')
+    // SEO answer + title stay operational — the service is up overall.
+    expect(html).toContain('No &mdash; Claude is operational')
+    expect(html).toContain('Operational | AIWatch')
+  })
+
+  it('pluralizes for multiple affected components', () => {
+    const html = renderPage('together', mkService({ status: 'operational', partialCount: 3 }), mkSeo(), [])
+    expect(html).toContain('3 components affected')
+  })
+
+  it('omits the note when partialCount is 0 or absent', () => {
+    const html = renderPage('together', mkService({ status: 'operational' }), mkSeo(), [])
+    expect(html).not.toContain('component affected')
+    expect(html).not.toContain('components affected')
+  })
+
+  it('does not render the note for a degraded service (the badge already conveys it)', () => {
+    const html = renderPage('together', mkService({ status: 'degraded', partialCount: 2 }), mkSeo(), [])
+    expect(html).not.toContain('components affected')
+  })
+})
+
 // #591 — a stale-source service (frozen feed; is-down.ts never sets a rank for it) must not surface
 // its frozen uptime/score, and must show the honest "source moved/can't reach" note instead.
 describe('renderPage — stale incident source (#591)', () => {

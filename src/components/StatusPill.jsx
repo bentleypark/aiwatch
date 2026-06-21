@@ -3,11 +3,15 @@
 // Unknown status values fall back silently to 'operational'
 
 import { useLang } from '../hooks/useLang'
+import { resolveStatusDisplay } from '../utils/statusDisplay'
 
 const PILL_CLASS = {
-  operational: 'bg-[var(--status-bg-green)] text-[var(--green)]',
-  degraded:    'bg-[var(--status-bg-amber)] text-[var(--amber)]',
-  down:        'bg-[var(--status-bg-red)]   text-[var(--red)]',
+  operational: 'bg-[var(--status-bg-green)]  text-[var(--green)]',
+  // #722 — intermediate "Partial" state (yellow), distinct from degraded (amber).
+  // 4-step gradient: operational(green) → partial(yellow) → degraded(amber) → down(red).
+  partial:     'bg-[var(--status-bg-yellow)] text-[var(--yellow)]',
+  degraded:    'bg-[var(--status-bg-amber)]  text-[var(--amber)]',
+  down:        'bg-[var(--status-bg-red)]    text-[var(--red)]',
   unknown:     'bg-[var(--bg3)] text-[var(--text2)]', // #689 — status source inactive: can't confirm
 }
 
@@ -16,32 +20,37 @@ export default function StatusPill({ status = 'operational', partialCount = 0, s
   // #689 — when the status source is inactive (4xx / deactivated page) AIWatch cannot confirm the
   // service's status, so show a NEUTRAL "Unknown" pill rather than a misleading green "Operational"
   // (which would then need an awkward "but it's just a default" disclaimer). Honest > reassuring.
-  const effective = sourceDead ? 'unknown' : status
+  // #722 — when the service reads operational but some underlying resources report issues
+  // (BetterStack <threshold case, #447), promote the PILL ITSELF to a yellow "Partial" state rather
+  // than a green pill + tiny chip: the provider page shows "Some services are down" and peers
+  // (StatusGator/IsDown) use an intermediate "warn" state — a green pill understated the gap.
+  // Render-time relabel only — it never changes the `status` field, so it can't itself escalate the
+  // service to degraded or fire a degraded alert (those key off `status`). It does NOT shield the
+  // Score/ranking from the real outage: that already flows in via uptime/incidents (server-side,
+  // intended). resolveStatusDisplay also maps sourceDead → 'unknown' (#689) so a dead-source pill
+  // never reads partial (component counts aren't trustworthy then).
+  const effective = resolveStatusDisplay(status, partialCount, sourceDead)
+  const isPartial = effective === 'partial'
   const cls = PILL_CLASS[effective] ?? PILL_CLASS.operational
-  // Show the "N affected" chip only when the service reads operational but some
-  // underlying resources report issues (BetterStack <30% threshold case, #447).
-  // On degraded/down the pill itself already conveys the problem. Gating on `effective`
-  // (not `status`) also suppresses the chip for a sourceDead "Unknown" pill — we can't
-  // trust component counts when the source is dead (#689).
-  const showPartial = effective === 'operational' && partialCount > 0
 
   const pill = (
     <span
       role="status"
       className={`inline-flex items-center mono font-medium uppercase text-[9px] tracking-[0.06em] whitespace-nowrap shrink-0 ${cls}`}
       style={{ padding: '3px 7px', borderRadius: '4px' }}
+      title={isPartial ? t('status.partial.tooltip') : undefined}
     >
       {t(`status.${effective}`)}
     </span>
   )
 
-  if (!showPartial) return pill
+  if (!isPartial) return pill
 
   return (
     <span className="inline-flex items-center gap-1.5">
       {pill}
       <span
-        className="inline-flex items-center mono font-medium text-[9px] whitespace-nowrap shrink-0 bg-[var(--status-bg-amber)] text-[var(--amber)]"
+        className="inline-flex items-center mono font-medium text-[9px] whitespace-nowrap shrink-0 bg-[var(--status-bg-yellow)] text-[var(--yellow)]"
         style={{ padding: '3px 7px', borderRadius: '4px' }}
         title={t('status.partial.tooltip')}
       >
