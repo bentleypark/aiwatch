@@ -319,12 +319,13 @@ describe('isValidFeedSegment', () => {
 describe('buildRssFeed — item link', () => {
   it('links to the /is-{id}-down SEO page for identity-slug services', () => {
     const xml = buildRssFeed([service({ id: 'openai', incidents: [incident()] })], { scope: 'all' }, NOW)
-    expect(xml).toContain('<link>https://ai-watch.dev/is-openai-down?e=active</link>') // #539 status hint
+    // #539 status hint (?e=) + #548 utm (&amp; XML-escaped). The link <link>s through escapeXml.
+    expect(xml).toContain('<link>https://ai-watch.dev/is-openai-down?e=active&amp;utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>')
   })
 
   it('applies the slug override for dash-dropped service IDs', () => {
     const xml = buildRssFeed([service({ id: 'claudecode', name: 'Claude Code', incidents: [incident()] })], { scope: 'all' }, NOW)
-    expect(xml).toContain('<link>https://ai-watch.dev/is-claude-code-down?e=active</link>') // #539 status hint
+    expect(xml).toContain('<link>https://ai-watch.dev/is-claude-code-down?e=active&amp;utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>') // #539 hint + #548 utm
   })
 
   it('falls back to the dashboard hash route for services with no is-down page', () => {

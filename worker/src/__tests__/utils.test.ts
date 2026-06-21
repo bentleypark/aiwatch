@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike } from '../utils'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike } from '../utils'
 
 describe('appendStatusHint (#539)', () => {
   it('uses ? when the URL has no query, & when it already has one', () => {
@@ -9,6 +9,18 @@ describe('appendStatusHint (#539)', () => {
 
   it('url-encodes the hint value', () => {
     expect(appendStatusHint('https://x.dev/p', 'a b')).toBe('https://x.dev/p?e=a%20b')
+  })
+})
+
+describe('appendUtm (#548)', () => {
+  it('appends channel-specific utm (rss → medium=feed, reddit → medium=social), campaign=outage', () => {
+    expect(appendUtm('https://ai-watch.dev/is-claude-down', 'rss')).toBe('https://ai-watch.dev/is-claude-down?utm_source=rss&utm_medium=feed&utm_campaign=outage')
+    expect(appendUtm('https://ai-watch.dev/is-claude-down', 'reddit')).toBe('https://ai-watch.dev/is-claude-down?utm_source=reddit&utm_medium=social&utm_campaign=outage')
+  })
+
+  it('uses & when the URL already has a query (e.g. after the ?e= status hint)', () => {
+    expect(appendUtm(appendStatusHint('https://ai-watch.dev/is-openai-down', 'down'), 'rss'))
+      .toBe('https://ai-watch.dev/is-openai-down?e=down&utm_source=rss&utm_medium=feed&utm_campaign=outage')
   })
 })
 

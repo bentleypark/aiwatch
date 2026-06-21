@@ -16,6 +16,7 @@ import {
   unsubscribe,
   deliverToSubscribers,
   toPerUserEntry,
+  computeSubscriberDelta,
   readConfirmed,
   readPending,
   CONFIRM_BUDGET_MAX,
@@ -465,5 +466,20 @@ describe('deliverToSubscribers', () => {
     expect(stats.pruned).toBe(1)
     expect(post).toHaveBeenCalledTimes(1) // stopped after the first entry's 410
     expect(kv._store.has(`${SUB_PREFIX}${hash}`)).toBe(false)
+  })
+})
+
+describe('computeSubscriberDelta (#548)', () => {
+  it('returns the signed day-over-day delta against a prior snapshot', () => {
+    expect(computeSubscriberDelta(15, '12')).toBe(3)   // growth
+    expect(computeSubscriberDelta(10, '12')).toBe(-2)  // churn (signed, reported honestly)
+    expect(computeSubscriberDelta(12, '12')).toBe(0)   // no change
+  })
+  it('returns null when there is no prior snapshot (first day / KV gap)', () => {
+    expect(computeSubscriberDelta(15, null)).toBeNull()
+  })
+  it('returns null for a corrupt snapshot value rather than NaN', () => {
+    expect(computeSubscriberDelta(15, 'oops')).toBeNull()
+    expect(computeSubscriberDelta(15, '')).toBeNull()
   })
 })
