@@ -324,15 +324,24 @@ export function parseBetterStackResolvedIds(data: BetterStackIndex): Set<string>
   return resolved
 }
 
+// #722 — resource-level threshold: below this fraction of non-operational resources the service
+// badge collapses to `operational` (single-model churn ≠ service-level degradation, #159).
+//
+// History: introduced at 10% (#159/#160), then escalated 10→15→30% (#161/#162/#163) chasing
+// recurring false-degraded alerts — but #162 found the REAL cause was the Cloudflare Workers
+// connection limit (fixed in #164), NOT aggregate_state sensitivity. The 30% value was the residue
+// of that misdiagnosis and was never re-validated post-#164. #722 returns it to the #159-justified
+// ~10% so a genuine MULTI-model outage (≥10%, e.g. 3/29) registers as `degraded`, while a single
+// model down (e.g. 1/29 = 3.4%) stays `operational` — and the #722 "Partial" display state (driven
+// by `parseBetterStackPartialCount`, decoupled from this status) surfaces that single-model case
+// without a Score penalty. RSS incidents still take priority in services.ts derivedStatus.
+export const BETTERSTACK_DEGRADE_THRESHOLD = 0.1
+
 export function parseBetterStackStatus(data: BetterStackIndex): 'operational' | 'degraded' | 'down' | null {
   const state = data.data?.attributes?.aggregate_state
   if (!state) return null
   if (state === 'operational') return 'operational'
 
-  // Resource-level threshold: if <30% of resources are non-operational, treat as operational
-  // BetterStack services (Together, Fireworks, HuggingFace, Modal) have many individual monitors.
-  // Individual model churn (e.g., 5/28 = 17%) ≠ service-level degradation.
-  // This is a backup signal — RSS incidents take priority in services.ts derivedStatus.
   const resources = (data.included ?? []).filter(
     (r) => r.type === 'status_page_resource' && r.attributes?.status
   )
@@ -340,7 +349,7 @@ export function parseBetterStackStatus(data: BetterStackIndex): 'operational' | 
 
   if (state === 'maintenance') {
     // Planned maintenance is not an outage on its own — escalate to `degraded` only when real
-    // unplanned issues (degraded/downtime resources) coexist AND those issues exceed the 30%
+    // unplanned issues (degraded/downtime resources) coexist AND those issues exceed the
     // threshold against the *non-maintenance* fleet. Counting against `resources.length`
     // would let widespread maintenance (e.g. 25/31 in maintenance) dilute a coexisting real
     // outage to a noise-band ratio. The intent — treat planned maintenance as not-an-outage —
@@ -358,15 +367,15 @@ export function parseBetterStackStatus(data: BetterStackIndex): 'operational' | 
     // Defensive: realIssues > 0 implies nonMaintenanceTotal > 0 (a resource can't be both
     // maintenance and downtime simultaneously). Explicit guard makes the safety obvious.
     if (nonMaintenanceTotal === 0) return 'operational'
-    if (realIssues / nonMaintenanceTotal < 0.3) return 'operational'
+    if (realIssues / nonMaintenanceTotal < BETTERSTACK_DEGRADE_THRESHOLD) return 'operational'
     return 'degraded'
   }
   if (state === 'degraded') {
-    if (resources.length > 0 && nonOpCount / resources.length < 0.3) return 'operational'
+    if (resources.length > 0 && nonOpCount / resources.length < BETTERSTACK_DEGRADE_THRESHOLD) return 'operational'
     return 'degraded'
   }
   if (state === 'downtime') {
-    if (resources.length > 0 && nonOpCount / resources.length < 0.3) return 'operational'
+    if (resources.length > 0 && nonOpCount / resources.length < BETTERSTACK_DEGRADE_THRESHOLD) return 'operational'
     if (resources.length > 0) {
       const downCount = resources.filter((r) => r.attributes?.status === 'downtime').length
       return downCount > resources.length / 2 ? 'down' : 'degraded'

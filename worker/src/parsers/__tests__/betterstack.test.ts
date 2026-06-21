@@ -737,9 +737,9 @@ describe('parseBetterStackStatus', () => {
     })).toBe('operational')
   })
 
-  it('returns operational for "maintenance" when real issues are below 30% of the non-maintenance fleet', () => {
+  it('returns operational for "maintenance" when real issues are below the threshold of the non-maintenance fleet', () => {
     // 8 maintenance + 1 downtime + 11 operational = 20 resources.
-    // Threshold against non-maintenance peers: realIssues / (20 - 8) = 1/12 = 8.3% < 30%
+    // Threshold against non-maintenance peers: realIssues / (20 - 8) = 1/12 = 8.3% < 10% (#722)
     // → individual model blip during maintenance, parser stays operational so users don't
     // see a false-positive amber tile.
     const resources: Array<{ type: string; attributes: { status: string } }> = []
@@ -752,7 +752,7 @@ describe('parseBetterStackStatus', () => {
     })).toBe('operational')
   })
 
-  it('returns degraded for "maintenance" when ≥30% of NON-maintenance resources are real issues', () => {
+  it('returns degraded for "maintenance" when real issues exceed the threshold of NON-maintenance resources', () => {
     // Maintenance announcement coexisting with widespread real outage. The threshold is
     // applied against non-maintenance peers only — counting against the full fleet would
     // let widespread maintenance dilute the signal of a coexisting real outage.
@@ -782,8 +782,22 @@ describe('parseBetterStackStatus', () => {
     })).toBe('degraded')
   })
 
-  it('returns operational for "degraded" when <30% of resources are non-operational (#162)', () => {
-    // Together AI scenario: 7 out of 28 models down (25%) → below 30% threshold
+  it('returns operational for "degraded" when a single model is down (<10%, #722)', () => {
+    // #722 — single-model churn (1/28 = 3.6% < 10%) stays operational; the "Partial" display
+    // state (parseBetterStackPartialCount) surfaces it without a Score penalty.
+    const resources = Array.from({ length: 28 }, () => ({
+      type: 'status_page_resource', attributes: { status: 'operational' },
+    }))
+    resources[0] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
+    expect(parseBetterStackStatus({
+      data: { attributes: { aggregate_state: 'degraded' } },
+      included: resources,
+    })).toBe('operational')
+  })
+
+  it('returns degraded for "degraded" when a genuine multi-model subset is down (≥10%, #722)', () => {
+    // #722 — 7/28 = 25% was OPERATIONAL under the old 30% threshold (a #162 connection-limit
+    // artifact). Now ≥10% → degraded: a real multi-model outage registers as such.
     const resources = Array.from({ length: 28 }, () => ({
       type: 'status_page_resource', attributes: { status: 'operational' },
     }))
@@ -791,23 +805,23 @@ describe('parseBetterStackStatus', () => {
     expect(parseBetterStackStatus({
       data: { attributes: { aggregate_state: 'degraded' } },
       included: resources,
-    })).toBe('operational')
-  })
-
-  it('returns degraded for "degraded" when ≥30% of resources are non-operational', () => {
-    // 4 out of 10 down = 40% → genuinely degraded
-    const resources = Array.from({ length: 10 }, () => ({
-      type: 'status_page_resource', attributes: { status: 'operational' },
-    }))
-    for (let i = 0; i < 4; i++) resources[i] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
-    expect(parseBetterStackStatus({
-      data: { attributes: { aggregate_state: 'degraded' } },
-      included: resources,
     })).toBe('degraded')
   })
 
-  it('returns operational for "downtime" when <30% of resources are non-operational (#162)', () => {
-    // 5 out of 20 down = 25% → below 30% threshold
+  it('returns operational for "downtime" when a single model is down (<10%, #722)', () => {
+    // Live Together AI 2026-06-20: 1/29 = 3.4% (Gemma 4 31B IT down) < 10% → operational.
+    const resources = Array.from({ length: 29 }, () => ({
+      type: 'status_page_resource', attributes: { status: 'operational' },
+    }))
+    resources[0] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
+    expect(parseBetterStackStatus({
+      data: { attributes: { aggregate_state: 'downtime' } },
+      included: resources,
+    })).toBe('operational')
+  })
+
+  it('returns degraded for "downtime" when ≥10% (but <50%) of resources are down (#722)', () => {
+    // 5/20 = 25% was OPERATIONAL under old 30%; now ≥10% and <50% → degraded.
     const resources = Array.from({ length: 20 }, () => ({
       type: 'status_page_resource', attributes: { status: 'operational' },
     }))
@@ -815,7 +829,45 @@ describe('parseBetterStackStatus', () => {
     expect(parseBetterStackStatus({
       data: { attributes: { aggregate_state: 'downtime' } },
       included: resources,
-    })).toBe('operational')
+    })).toBe('degraded')
+  })
+
+  // #722 — pin the EXACT threshold boundary. The comparator is strict `<` against
+  // BETTERSTACK_DEGRADE_THRESHOLD (0.1), so exactly 10% is NOT below → degraded, and
+  // just under 10% → operational. A regression that flips `<`→`<=` or nudges the
+  // constant would otherwise pass (the other tests sit well clear of the edge).
+  it('returns degraded for "downtime" at EXACTLY the 10% threshold (3/30, strict <)', () => {
+    const resources = Array.from({ length: 30 }, () => ({
+      type: 'status_page_resource', attributes: { status: 'operational' },
+    }))
+    for (let i = 0; i < 3; i++) resources[i] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
+    expect(parseBetterStackStatus({
+      data: { attributes: { aggregate_state: 'downtime' } },
+      included: resources,
+    })).toBe('degraded') // 3/30 = 0.1, NOT < 0.1 → escalates
+  })
+
+  it('returns operational for "downtime" just BELOW the 10% threshold (2/21 ≈ 9.5%)', () => {
+    const resources = Array.from({ length: 21 }, () => ({
+      type: 'status_page_resource', attributes: { status: 'operational' },
+    }))
+    for (let i = 0; i < 2; i++) resources[i] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
+    expect(parseBetterStackStatus({
+      data: { attributes: { aggregate_state: 'downtime' } },
+      included: resources,
+    })).toBe('operational') // 2/21 = 9.52% < 0.1
+  })
+
+  it('returns down for "downtime" when >50% of resources are down (down branch unchanged by #722)', () => {
+    // The 10% lowering must NOT make the `down` escalation easier — it still needs >50% down.
+    const resources = Array.from({ length: 20 }, () => ({
+      type: 'status_page_resource', attributes: { status: 'operational' },
+    }))
+    for (let i = 0; i < 11; i++) resources[i] = { type: 'status_page_resource', attributes: { status: 'downtime' } }
+    expect(parseBetterStackStatus({
+      data: { attributes: { aggregate_state: 'downtime' } },
+      included: resources,
+    })).toBe('down') // 11/20 = 55% > 50%
   })
 
   it('returns degraded with warning for unknown state', () => {
@@ -1149,16 +1201,16 @@ describe('parseBetterStackPartialCount (#447)', () => {
     expect(parseBetterStackPartialCount({ included: [] })).toBe(0)
   })
 
-  it('reflects the partial-outage gap: status operational (<30%) yet partialCount > 0', () => {
-    // 2 downtime out of 10 → parseBetterStackStatus collapses to operational, but the
-    // 2 affected resources are still surfaced via partialCount (the #447 perception gap).
+  it('reflects the partial-outage gap: status operational (<threshold) yet partialCount > 0', () => {
+    // Live Together AI 2026-06-20: 1 downtime out of 29 (3.4% < 10%) → parseBetterStackStatus
+    // collapses to operational, but the affected resource is still surfaced via partialCount —
+    // the #447 perception gap that the #722 "Partial" display state renders (decoupled from status).
     const included = [
-      ...Array.from({ length: 8 }, () => resource('operational')),
-      resource('downtime'),
+      ...Array.from({ length: 28 }, () => resource('operational')),
       resource('downtime'),
     ]
     const data = { data: { attributes: { aggregate_state: 'downtime' } }, included }
-    expect(parseBetterStackStatus(data)).toBe('operational')  // <30% threshold
-    expect(parseBetterStackPartialCount(data)).toBe(2)        // but 2 are affected
+    expect(parseBetterStackStatus(data)).toBe('operational')  // 3.4% < 10% threshold
+    expect(parseBetterStackPartialCount(data)).toBe(1)        // but 1 is affected
   })
 })

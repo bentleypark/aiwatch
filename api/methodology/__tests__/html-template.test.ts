@@ -87,9 +87,9 @@ describe('renderMethodologyPage', () => {
   })
 
   it('uses the UI-facing status labels, not the raw internal names (#674 — badge ≠ impact axis)', () => {
-    // §2 must match the dashboard service BADGE (availability axis): Operational / Degraded / Down
-    // (status.* labels), and the worst-of priority is stated in those displayed terms.
-    expect(html).toContain('Operational · Degraded · Down')
+    // §2 must match the dashboard service BADGE (availability axis): Operational / Partial / Degraded
+    // / Down (status.* labels; Partial added #722), and the worst-of priority is stated in those terms.
+    expect(html).toContain('Operational · Partial · Degraded · Down')
     expect(html).toContain('Down &gt; Degraded &gt; Operational')
     // #674 — the badge axis must NOT carry the calendar's impact-scale words ("Partial Outage" /
     // "Major Outage" are the OLD colliding labels; the calendar impact axis is now Minor/Major/Critical).

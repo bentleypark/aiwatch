@@ -40,6 +40,10 @@ export interface ServiceData {
   rankTied?: boolean
   totalRanked?: number
   incidentSourceStale?: boolean
+  /** #722 — BetterStack sub-threshold affected-resource count (degraded+downtime). When the
+   *  service reads operational but this is >0, the provider page shows "Some services are down";
+   *  surfaced as a yellow "partial" note. SEO answer stays "operational" — the service IS up overall. */
+  partialCount?: number
   /** #604/#606 — per-component snapshot. Curated subset or dynamic displayAllComponents set
    *  preserved by the worker; `group` (e.g. 'Models') marks components that collapse together. */
   components?: Array<{ id: string; name: string; status: 'operational' | 'degraded' | 'down'; group?: string }>
@@ -461,6 +465,12 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
 
   const color = statusColor(service.status)
   const answer = statusAnswer(service.status) // #566 — on-page direct answer (feeds Google's auto-snippet)
+  // #722 — provider reports a sub-threshold partial issue (some components down) while the service
+  // reads operational. Surface it as a distinct yellow note so the page doesn't contradict the
+  // provider's "Some services are down" header. The SEO answer/title/emoji stay on the raw status
+  // ("Is X down? → No, operational") — the service IS up overall; only specific components are affected.
+  const partialCount = typeof service.partialCount === 'number' ? service.partialCount : 0
+  const isPartial = service.status === 'operational' && partialCount > 0
   const hasUptime = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d)
   const gradeStr = service.scoreGrade ? ` (${service.scoreGrade.charAt(0).toUpperCase() + service.scoreGrade.slice(1)})` : ''
   // #591 — a stale-source service carries a frozen uptime30d + an inflated score; omit both here
@@ -476,6 +486,7 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
 <h1>${statusEmoji(service.status)} Is ${esc(seo.displayName)} Down?</h1>
 <p style="font-size:20px;font-weight:600;color:${color};margin:12px 0">${answer.yesno} &mdash; ${esc(seo.displayName)} ${answer.phrase}</p>
 <p class="meta mono">${metaParts.join(' &middot; ')}</p>
+${isPartial ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; ${partialCount} component${partialCount > 1 ? 's' : ''} affected &mdash; the provider status page reports a partial issue (overall service operational)</p>` : ''}
 ${lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}</p>` : '<p class="meta">No recent incidents</p>'}
 ${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${service.rank}${service.rankTied ? ' (tied)' : ''}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'header'})">AIWatch reliability score</a> &middot; <a href="${REPORTS_INDEX_HREF}" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'header'})">${REPORTS_INDEX_LABEL} &rarr;</a></p>` : ''}
 ${service.incidentSourceStale ? `<p class="meta" style="color:var(--amber)">⚠️ ${esc(seo.displayName)}'s status page moved to a source AIWatch can't reach, so its incident feed is frozen — uptime, score, and ranking are omitted until the source is reachable again. Live status above is still measured directly.</p>` : ''}
