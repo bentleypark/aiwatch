@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { buildRssFeed, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse, dedupeSharedIncidents } from '../rss'
+import { buildRssFeed, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse, dedupeSharedIncidents, type RssAiAnalysisMap } from '../rss'
+import { getFallbacks } from '../fallback'
 import type { ServiceStatus, Incident } from '../types'
 
 function incident(over: Partial<Incident> = {}): Incident {
@@ -412,8 +413,9 @@ describe('buildRssFeed — shared incident (per-surface providers)', () => {
     const xml = buildRssFeed(anthropic, { scope: 'all' }, NOW)
     // One item, not three — the Slack /feed subscriber gets a single consolidated message
     expect((xml.match(/<item>/g) ?? []).length).toBe(1)
-    // Primary = first in SERVICES order (Claude API); its "Also affecting" names the rest
-    expect(xml).toContain('🔴 Claude API: Elevated errors') // default incident impact 'major' → 🔴
+    // #724 — provider-grouped title (mirrors Discord "Anthropic (Claude API, claude.ai, Claude Code)").
+    // Primary = first in SERVICES order (Claude API); its "Also affecting" still names the rest.
+    expect(xml).toContain('🔴 Anthropic (Claude API, claude ai, Claude Code): Elevated errors') // 'major' → 🔴, #539 brand defused
     expect(xml).toContain('Also affecting: claude ai, Claude Code') // #539 brand defused
     // The other surfaces' items (and their inverse "Also affecting" lines) are gone
     expect(xml).not.toContain('Also affecting: Claude API, Claude Code')
@@ -518,5 +520,138 @@ describe('buildFeedResponse — HTTP decision', () => {
     expect(all.ok).toBe(true)
     expect(one.ok).toBe(true)
     if (one.ok) expect(one.xml).toContain('<title>AIWatch — Claude Incidents</title>')
+  })
+})
+
+// #724 — align the Slack /feed item with the Discord operator embed: carry the 🤖 AI analysis
+// summary, match the fallback ranking, and use a provider-grouped title — while staying PUBLIC-safe
+// (the operator-only tweet draft must never appear).
+describe('buildRssFeed — AI analysis block (#724)', () => {
+  const analysisMap: RssAiAnalysisMap = {
+    claude: [{ incidentId: 'inc-1', summary: 'Opus 4.8 elevated errors', estimatedRecovery: '1-3h', affectedScope: ['Claude API', 'Opus 4.8'] }],
+  }
+
+  it('renders the AI analysis summary + recovery + scope for an active incident', () => {
+    const xml = buildRssFeed([service({ status: 'degraded', incidents: [incident({ id: 'inc-1' })] })], { scope: 'all' }, NOW, analysisMap)
+    expect(xml).toContain('🤖 AI analysis: Opus 4.8 elevated errors')
+    expect(xml).toContain('Est. recovery: 1-3h')
+    expect(xml).toContain('Scope: Claude API, Opus 4.8')
+  })
+
+  it('maps an N/A recovery via formatRecoveryDisplay (parity with Discord)', () => {
+    const map: RssAiAnalysisMap = { claude: [{ incidentId: 'inc-1', summary: 'x', estimatedRecovery: 'N/A', affectedScope: [] }] }
+    const xml = buildRssFeed([service({ status: 'degraded', incidents: [incident({ id: 'inc-1' })] })], { scope: 'all' }, NOW, map)
+    expect(xml).toContain('Est. recovery: Exceeded typical pattern')
+  })
+
+  it('omits the AI block when no analysis is present', () => {
+    const xml = buildRssFeed([service({ status: 'degraded', incidents: [incident({ id: 'inc-1' })] })], { scope: 'all' }, NOW)
+    expect(xml).not.toContain('🤖 AI analysis')
+  })
+
+  it('does not render the AI block on a resolved item (it already reads "Resolved")', () => {
+    const xml = buildRssFeed(
+      [service({ incidents: [incident({ id: 'inc-1', status: 'resolved', resolvedAt: '2026-05-10T14:00:00.000Z', duration: '34m' })] })],
+      { scope: 'all' }, NOW, analysisMap,
+    )
+    expect(xml).not.toContain('🤖 AI analysis')
+  })
+
+  it('does not render the AI block for a `monitoring` incident even if the map has an entry (rss.ts self-consistent)', () => {
+    // The /feed handler excludes monitoring from the analysis map, but buildRssFeed must enforce it too
+    // (monitoring = recovery confirmed). Guard lives in the tested layer, not only the handler.
+    const xml = buildRssFeed([service({ status: 'degraded', incidents: [incident({ id: 'inc-1', status: 'monitoring' })] })], { scope: 'all' }, NOW, analysisMap)
+    expect(xml).not.toContain('🤖 AI analysis')
+  })
+
+  it('picks the right summary when one service has TWO simultaneous active incidents (analysisFor by incidentId)', () => {
+    const map: RssAiAnalysisMap = { claude: [
+      { incidentId: 'a', summary: 'analysis A', estimatedRecovery: '1h', affectedScope: [] },
+      { incidentId: 'b', summary: 'analysis B', estimatedRecovery: '2h', affectedScope: [] },
+    ] }
+    const xml = buildRssFeed([service({ status: 'degraded', incidents: [
+      incident({ id: 'a', title: 'Incident A' }), incident({ id: 'b', title: 'Incident B' }),
+    ] })], { scope: 'all' }, NOW, map)
+    // each item carries ITS OWN summary
+    const itemA = xml.split('<item>').find((s) => s.includes('Incident A')) ?? ''
+    const itemB = xml.split('<item>').find((s) => s.includes('Incident B')) ?? ''
+    expect(itemA).toContain('analysis A')
+    expect(itemA).not.toContain('analysis B')
+    expect(itemB).toContain('analysis B')
+    expect(itemB).not.toContain('analysis A')
+  })
+
+  it('never leaks the operator-only tweet draft into the public feed', () => {
+    const xml = buildRssFeed([service({ status: 'degraded', incidents: [incident({ id: 'inc-1' })] })], { scope: 'all' }, NOW, analysisMap)
+    expect(xml).not.toContain('TWEET DRAFT')
+    expect(xml).not.toContain('✍️')
+  })
+
+  it('keeps the AI block on the surviving consolidated item of a deduped shared incident', () => {
+    // dedupeSharedIncidents (#520) keeps the SERVICES-order primary; its analysis (keyed by that
+    // primary's svcId) must survive the collapse → the single Slack item still carries the 🤖 block.
+    const shared = incident({ id: 'opus48', title: 'Elevated errors' })
+    const xml = buildRssFeed([
+      service({ id: 'claude', name: 'Claude API', provider: 'Anthropic', status: 'degraded', incidents: [shared] }),
+      service({ id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', status: 'degraded', incidents: [shared] }),
+    ], { scope: 'all' }, NOW, { claude: [{ incidentId: 'opus48', summary: 'Opus 4.8 elevated errors', estimatedRecovery: '1-3h', affectedScope: [] }] })
+    expect((xml.match(/<item>/g) ?? []).length).toBe(1)         // collapsed to one
+    expect(xml).toContain('🤖 AI analysis: Opus 4.8 elevated errors') // analysis survives the collapse
+  })
+})
+
+describe('buildRssFeed — provider-grouped title (#724)', () => {
+  it('keeps the plain "<service>: …" title for a single-surface incident', () => {
+    const xml = buildRssFeed([service({ name: 'Mistral API', status: 'degraded', incidents: [incident({ id: 'solo', title: 'Errors' })] })], { scope: 'all' }, NOW)
+    expect(xml).toContain('Mistral API: Errors')
+    expect(xml).not.toContain('(Mistral API)') // no group parens for a solo incident
+  })
+
+  it('groups a RESOLVED shared incident title too (the recovery message)', () => {
+    const resolved = { id: 'shared', title: 'Elevated errors', status: 'resolved' as const, impact: 'minor' as const, startedAt: '2026-05-10T12:00:00.000Z', resolvedAt: '2026-05-10T14:00:00.000Z', duration: '2h', timeline: [] }
+    const xml = buildRssFeed([
+      service({ id: 'claude', name: 'Claude API', provider: 'Anthropic', incidents: [resolved] }),
+      service({ id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', incidents: [resolved] }),
+    ], { scope: 'all' }, NOW)
+    expect(xml).toContain('🟢 Anthropic (Claude API, claude ai): Resolved — Elevated errors')
+  })
+
+  it('falls back to the service name when provider is empty (defensive guard)', () => {
+    const shared = incident({ id: 'shared', title: 'Errors' })
+    const xml = buildRssFeed([
+      service({ id: 'a', name: 'Svc A', provider: '', status: 'degraded', incidents: [shared] }),
+      service({ id: 'b', name: 'Svc B', provider: '', status: 'degraded', incidents: [shared] }),
+    ], { scope: 'all' }, NOW)
+    expect(xml).toContain('Svc A (Svc A, Svc B): Errors') // no leading " (" / "undefined ("
+    expect(xml).not.toContain('undefined (')
+  })
+})
+
+describe('buildRssFeed — fallback ranking parity with Discord (#724)', () => {
+  it('orders "Try instead" by the same getFallbacks ranking when services carry aiwatchScore', () => {
+    // services:latest has no aiwatchScore, so the feed handler attaches it before calling buildRssFeed.
+    // With scores present, the "Try instead" line must match getFallbacks() (the Discord/dashboard oracle).
+    const down = { ...service({ id: 'cohere', name: 'Cohere', category: 'api', status: 'down', incidents: [incident({ id: 'd' })] }), aiwatchScore: 40 }
+    const candidates = [
+      { ...service({ id: 'groq', name: 'Groq Cloud', category: 'api', status: 'operational' }), aiwatchScore: 50 },
+      { ...service({ id: 'mistral', name: 'Mistral API', category: 'api', status: 'operational' }), aiwatchScore: 92 },
+    ]
+    const all = [down, ...candidates] as ServiceStatus[]
+    const expected = getFallbacks('cohere', 'api', all).map((f) => f.name)
+    expect(expected.length).toBeGreaterThan(0)
+    const xml = buildRssFeed(all, { scope: 'all' }, NOW)
+    const tryLine = xml.split('\n').find((l) => l.includes('Try instead')) ?? ''
+    // the feed's candidate order matches getFallbacks exactly (proves scored services are used)
+    expect(tryLine).toContain(`Try instead: ${expected.join(' · ')}`)
+  })
+})
+
+describe('buildFeedResponse — threads AI analysis (#724)', () => {
+  it('passes the analysis map through to the rendered feed', () => {
+    const cached = { services: [service({ status: 'degraded', incidents: [incident({ id: 'inc-1' })] })], cachedAt: NOW.toISOString() }
+    const map: RssAiAnalysisMap = { claude: [{ incidentId: 'inc-1', summary: 'piped through', estimatedRecovery: '1h', affectedScope: [] }] }
+    const res = buildFeedResponse(cached, { scope: 'all' }, NOW, map)
+    expect(res.ok).toBe(true)
+    if (res.ok) expect(res.xml).toContain('🤖 AI analysis: piped through')
   })
 })

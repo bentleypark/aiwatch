@@ -6,9 +6,27 @@ import type { ServiceStatus, Incident } from './types'
 import { escapeXml } from './badge'
 import { getFallbacks } from './fallback'
 import { defuseAutolinkDomain } from './alerts'
+import { formatRecoveryDisplay } from './ai-analysis'
 import { appendStatusHint } from './utils'
 
 const SITE = 'https://ai-watch.dev'
+
+// #724 — public-safe subset of an AIAnalysisResult the RSS/Slack item surfaces, keyed per service.
+// Mirrors the Discord embed's 🤖 AI ANALYSIS block (summary + recovery + scope) — the operator-only
+// 🐦 TWEET DRAFT is deliberately NOT part of this shape (the feed is public). `incidentId` matches it
+// to the right incident; the handler passes Record<svcId, RssAiAnalysis[]> read from ai:analysis:*.
+export interface RssAiAnalysis {
+  incidentId: string
+  summary: string
+  estimatedRecovery: string
+  affectedScope: string[]
+}
+export type RssAiAnalysisMap = Record<string, RssAiAnalysis[]>
+
+/** Find the analysis entry for a given service+incident (matched by incidentId). */
+function analysisFor(map: RssAiAnalysisMap | undefined, svcId: string, incId: string): RssAiAnalysis | undefined {
+  return map?.[svcId]?.find((a) => a.incidentId === incId)
+}
 
 // Cache-bust token for the stylesheet URL. The <?xml-stylesheet?> PI points at
 // /feed.xsl?v=${FEED_XSL_VERSION}; /feed.xsl is cacheable, so without a version a returning
@@ -222,7 +240,7 @@ function descHtml(
   service: ServiceStatus,
   inc: Incident,
   coAffected: string[],
-  opts: { kind: ItemKind; fallbackText?: string },
+  opts: { kind: ItemKind; fallbackText?: string; analysis?: RssAiAnalysis },
 ): string {
   const isResolved = opts.kind === 'resolved'
   const latest = inc.timeline.length > 0 ? inc.timeline[inc.timeline.length - 1] : null
@@ -239,6 +257,16 @@ function descHtml(
   // #539: defuse bare "claude.ai" in co-affected service names + timeline text (Slack /feed unfurl).
   if (coAffected.length > 0) lines.push(`<p>Also affecting: ${escHtml(defuseAutolinkDomain(coAffected.join(', ')))}</p>`)
   if (latest?.text) lines.push(`<p>${escHtml(defuseAutolinkDomain(latest.text))}</p>`)
+  // #724 — mirror the Discord embed's 🤖 AI ANALYSIS block (active items only; resolved items already
+  // read "Resolved"). Public-safe fields only — never the operator-only tweet draft. defuse the
+  // summary/scope so a bare brand domain doesn't auto-link in the Slack /feed unfurl.
+  if (!isResolved && opts.analysis) {
+    const a = opts.analysis
+    lines.push(`<p>🤖 AI analysis: ${escHtml(defuseAutolinkDomain(a.summary))}</p>`)
+    const detail = [`Est. recovery: ${escHtml(formatRecoveryDisplay(a.estimatedRecovery))}`]
+    if (a.affectedScope.length > 0) detail.push(`Scope: ${escHtml(defuseAutolinkDomain(a.affectedScope.join(', ')))}`)
+    lines.push(`<p>${detail.join(' · ')}</p>`)
+  }
   if (opts.fallbackText) lines.push(`<p>↪ ${escHtml(opts.fallbackText)}</p>`)
   // Join with a newline, not '' (#479): block-level <p> render with a break in real RSS readers,
   // but Slack's /feed app FLATTENS the tags and would otherwise concatenate adjacent paragraphs
@@ -251,13 +279,19 @@ function itemXml(
   service: ServiceStatus,
   inc: Incident,
   incidentServices: Map<string, string[]>,
-  opts: { kind: ItemKind; pubDate: string; fallbackText?: string },
+  opts: { kind: ItemKind; pubDate: string; fallbackText?: string; analysis?: RssAiAnalysis },
 ): string {
   const isResolved = opts.kind === 'resolved'
   const coAffected = (incidentServices.get(inc.id) ?? []).filter((n) => n !== service.name)
   const emoji = severityEmoji(service, inc, isResolved)
+  // #724 — provider-grouped header for a multi-surface (shared) incident, mirroring the Discord
+  // embed ("Anthropic (Claude API, claude.ai, Claude Code) — …") instead of an API-centric
+  // "Claude API: …". Single-surface incidents keep the plain "<service>: …" lead.
   // #539: defuse the bare "claude.ai" brand so Slack /feed doesn't auto-link/unfurl it.
-  const title = defuseAutolinkDomain(`${emoji} ${service.name}: ${isResolved ? 'Resolved — ' : ''}${inc.title}`)
+  const lead = coAffected.length > 0
+    ? `${service.provider || service.name} (${[service.name, ...coAffected].join(', ')})`
+    : service.name
+  const title = defuseAutolinkDomain(`${emoji} ${lead}: ${isResolved ? 'Resolved — ' : ''}${inc.title}`)
   const guid = isResolved ? `aiwatch:${service.id}:${inc.id}:resolved` : `aiwatch:${service.id}:${inc.id}`
 
   return `    <item>
@@ -310,6 +344,7 @@ export function buildRssFeed(
   services: ServiceStatus[],
   opts: FeedScope,
   now: Date = new Date(),
+  aiAnalysis?: RssAiAnalysisMap,
 ): string {
   const incidentServices = buildIncidentServiceMap(services)
   const sources = opts.scope === 'service' ? [opts.service] : services
@@ -318,14 +353,20 @@ export function buildRssFeed(
   // item (guid `aiwatch:svc:inc:resolved`, green). The guid flips on resolution, so RSS readers /
   // Slack /feed re-notify the recovery — without ever showing a contradictory "🔴 … resolved"
   // base row. Sort by each item's own pubDate (resolution time for resolved items).
-  type Entry = { svc: ServiceStatus; incident: Incident; kind: ItemKind; pubDate: string; fallbackText?: string }
+  type Entry = { svc: ServiceStatus; incident: Incident; kind: ItemKind; pubDate: string; fallbackText?: string; analysis?: RssAiAnalysis }
   const items: Entry[] = []
   for (const svc of sources) {
     for (const incident of svc.incidents ?? []) {
       if (incident.status === 'resolved') {
         items.push({ svc, incident, kind: 'resolved', pubDate: resolvedAtOf(incident) })
       } else {
-        items.push({ svc, incident, kind: 'active', pubDate: incident.startedAt, fallbackText: fallbackLine(svc, services) })
+        items.push({
+          svc, incident, kind: 'active', pubDate: incident.startedAt,
+          fallbackText: fallbackLine(svc, services),
+          // #724 — no AI block for a `monitoring` incident (recovery already confirmed). Gating HERE
+          // (not only in the /feed handler) keeps rss.ts self-consistent regardless of the map passed.
+          analysis: incident.status === 'monitoring' ? undefined : analysisFor(aiAnalysis, svc.id, incident.id),
+        })
       }
     }
   }
@@ -350,7 +391,7 @@ export function buildRssFeed(
     opts.scope === 'service' ? `/feed/${feedSlug(opts.service.id)}` : '/feed.xml'
 
   const itemsXml = capped
-    .map((e) => itemXml(e.svc, e.incident, incidentServices, { kind: e.kind, pubDate: e.pubDate, fallbackText: e.fallbackText }))
+    .map((e) => itemXml(e.svc, e.incident, incidentServices, { kind: e.kind, pubDate: e.pubDate, fallbackText: e.fallbackText, analysis: e.analysis }))
     .join('\n')
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -391,6 +432,7 @@ export function buildFeedResponse(
   cached: { services: ServiceStatus[] } | null,
   req: FeedRequest,
   now?: Date,
+  aiAnalysis?: RssAiAnalysisMap,
 ): FeedResult {
   if (req.scope === 'service' && !isValidFeedSegment(req.segment)) {
     return { ok: false, status: 400, message: 'Invalid service slug' }
@@ -399,11 +441,11 @@ export function buildFeedResponse(
     return { ok: false, status: 503, message: 'Status data is temporarily unavailable' }
   }
   if (req.scope === 'all') {
-    return { ok: true, xml: buildRssFeed(cached.services, { scope: 'all' }, now) }
+    return { ok: true, xml: buildRssFeed(cached.services, { scope: 'all' }, now, aiAnalysis) }
   }
   const service = resolveFeedService(cached.services, req.segment)
   if (!service) {
     return { ok: false, status: 404, message: 'Service not found' }
   }
-  return { ok: true, xml: buildRssFeed(cached.services, { scope: 'service', service }, now) }
+  return { ok: true, xml: buildRssFeed(cached.services, { scope: 'service', service }, now, aiAnalysis) }
 }

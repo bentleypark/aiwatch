@@ -1052,7 +1052,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
 // corsHeaders moved to ./cors — also handles team-scoped suffix patterns for Vercel preview origins.
 
 import { generateBadgeSvg } from './badge'
-import { buildFeedResponse, FEED_XSL, type FeedRequest } from './rss'
+import { buildFeedResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
@@ -2517,7 +2517,40 @@ export default {
           ? { scope: 'all' }
           : { scope: 'service', segment: url.pathname.split('/')[2] ?? '' }
       const cached = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
-      const result = buildFeedResponse(cached, feedReq)
+      // #724 — align the Slack /feed item with the Discord embed: (a) attach aiwatchScore to the
+      // cached services so the "Try instead" fallback ranks identically to Discord (services:latest
+      // has no score; getFallbacks needs it), and (b) read the per-incident AI analysis so the item
+      // carries the same 🤖 summary. Public-safe — the operator-only tweet draft is never included.
+      let feedCached = cached
+      let feedAiAnalysis: RssAiAnalysisMap | undefined
+      if (cached && env.STATUS_CACHE) {
+        const feedProbe = await readProbeSummaries(env.STATUS_CACHE, 'feed')
+        feedCached = {
+          ...cached,
+          services: cached.services.map((svc) => {
+            const s = scoreFor(svc, feedProbe)
+            return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
+          }),
+        }
+        const analysis: RssAiAnalysisMap = {}
+        await Promise.all(cached.services.flatMap((svc) =>
+          (svc.incidents ?? [])
+            .filter((i) => i.status !== 'resolved' && i.status !== 'monitoring')
+            .map(async (inc) => {
+              const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
+              if (!raw) return
+              try {
+                const a = JSON.parse(raw) as AIAnalysisResult
+                ;(analysis[svc.id] ??= []).push({
+                  incidentId: inc.id, summary: a.summary,
+                  estimatedRecovery: a.estimatedRecovery, affectedScope: a.affectedScope ?? [],
+                })
+              } catch (err) { console.warn('[rss] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
+            }),
+        ))
+        if (Object.keys(analysis).length > 0) feedAiAnalysis = analysis
+      }
+      const result = buildFeedResponse(feedCached, feedReq, undefined, feedAiAnalysis)
       if (!result.ok && result.status === 503) {
         // Same severity as /api/report's KV-read failure — log at error so it
         // lands in the same operator alerting tier.

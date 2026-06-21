@@ -15,7 +15,7 @@ Consequence: user alerts fire at **cron cadence (≤~5min, same time as the oper
 - Per-subscriber delivery is isolated (`Promise.allSettled`) — one dead webhook never blocks the rest. Dead webhooks (Discord 410/404, or `MAX_FAIL_COUNT` consecutive failures) are pruned. Per-sub per-alert dedup via `webhook:sent:{hash}:{alertKey}` (2h).
 - `postEmbed` re-validates the decrypted URL with `isAllowedAlertWebhook` (defense in depth) before POSTing.
 - `/api/alert` is a CORS/SSRF-guarded Discord proxy (Discord hosts only, #468) — still used by the Settings "Send test alert" button.
-- Slack subscriptions use Slack's native `/feed` RSS app (no webhook stored).
+- Slack subscriptions use Slack's native `/feed` RSS app (no webhook stored). **#724 — the `/feed` item structure is aligned with the Discord operator embed**: it carries the 🤖 AI analysis summary (the `/feed` handler reads `ai:analysis:*` for active incidents → `RssAiAnalysisMap`), uses a **provider-grouped title** for shared incidents (mirroring "Anthropic (Claude API, claude.ai, Claude Code)"), and ranks "Try instead" identically (the handler attaches `aiwatchScore` to `services:latest` via `scoreFor` first, since `getFallbacks` needs it). The feed is **public**, so the operator-only 🐦 tweet draft is deliberately never emitted there (Discord operator embed only). Delivery model still differs: Discord is real-time cron push; Slack `/feed` polls on its own cadence.
 - Per-user filter honors `alertCondition` (`down`/`all`, #470) + `alertTarget` (`all`/`custom` picker) + `alertIncidents` (default on); the filter (`shouldDeliver`) is byte-parity with the former client `shouldRelay`.
 
 ### History
