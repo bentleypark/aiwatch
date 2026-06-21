@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { mapOSVSeverity, detectSecurityAlerts, fetchOSVAlerts, fetchEPSS, enrichAlertsWithEPSS, formatEpssTag, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, EPSS_ACTIVE, EPSS_ELEVATED, OSV_PACKAGES, shouldAppendTimeline, appendTimelineEntry, osvTimelineKey, planOsvTimelineCycle } from '../security-monitor'
+import { mapOSVSeverity, detectSecurityAlerts, fetchOSVAlerts, fetchEPSS, enrichAlertsWithEPSS, formatEpssTag, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, EPSS_ACTIVE, EPSS_ELEVATED, OSV_PACKAGES, shouldAppendTimeline, appendTimelineEntry, osvTimelineKey, planOsvTimelineCycle, buildHNQuery, titleMatchesAiSecurity, fetchHNSecurityPosts } from '../security-monitor'
 import type { SecurityAlert, SecurityAlertMeta, OsvTimeline } from '../security-monitor'
 
 // #325: OSV_PACKAGES drives both querybatch input and the post-fetch enrichment
@@ -51,6 +51,117 @@ describe('OSV_PACKAGES invariants', () => {
     // merge or truncation that would silently shrink OSV coverage — the other
     // invariants pass for any subset, so a length floor is the only guard.
     expect(OSV_PACKAGES.length).toBeGreaterThanOrEqual(20)
+  })
+})
+
+// #720: the HN source returned 0 hits for its entire lifetime because the query
+// was a boolean string ("a" OR "b") AND ("c" ...) that HN Algolia treats as
+// literal all-words-AND text. The fix is an AI-keyword query + optionalWords with
+// a client-side word-boundary (AI AND security) post-filter. These tests pin both
+// the query shape and the filter precision (the false positives that motivated it).
+describe('buildHNQuery (#720)', () => {
+  it('emits plain space-joined keywords — NO boolean operators or parentheses', () => {
+    const q = buildHNQuery()
+    // The literal "OR"/"AND"/parens were the bug: HN searched for them as words.
+    expect(q).not.toMatch(/\bOR\b/)
+    expect(q).not.toMatch(/\bAND\b/)
+    expect(q).not.toContain('(')
+    expect(q).not.toContain(')')
+    expect(q).not.toContain('"')
+  })
+
+  it('includes core AI service keywords (drives optionalWords OR-match)', () => {
+    const q = buildHNQuery()
+    expect(q).toContain('openai')
+    expect(q).toContain('anthropic')
+    expect(q).toContain('claude')
+  })
+})
+
+describe('titleMatchesAiSecurity (#720)', () => {
+  it('keeps genuine AI security stories (AI keyword AND security keyword)', () => {
+    expect(titleMatchesAiSecurity('Captured Logs Reveal Hackers Using Claude and Codex to Breach Companies')).toBe(true)
+    expect(titleMatchesAiSecurity('Critical Copilot vulnerability allowed hackers to steal 2FA code')).toBe(true)
+    expect(titleMatchesAiSecurity('SearchLeak: We Turned M365 Copilot into a One-Click Data Exfiltration Weapon')).toBe(true)
+  })
+
+  it('is case-insensitive both ways (uppercase title, and uppercase keyword RCE/CVE in lowercase title)', () => {
+    expect(titleMatchesAiSecurity('OPENAI VULNERABILITY disclosed')).toBe(true)
+    // RCE/CVE are stored uppercase in the keyword set; a lowercase title must still
+    // match (guards against someone dropping the 'i' flag on the matcher).
+    expect(titleMatchesAiSecurity('openai plugin rce flaw found')).toBe(true)
+    expect(titleMatchesAiSecurity('new cve affects the anthropic sdk')).toBe(true)
+  })
+
+  it('rejects "rce" inside "source" — word boundary, not substring', () => {
+    // The substring bug: "open source" matched the "rce" security keyword.
+    expect(titleMatchesAiSecurity('Show HN: An open source job search plugin for Claude Code')).toBe(false)
+  })
+
+  it('rejects "leaked" as the sole security candidate — \\bleak\\b needs a trailing boundary', () => {
+    // Isolated to the leak/leaked boundary: AI term present (Claude), and "leaked"
+    // is the ONLY candidate security word — so a regression to substring matching
+    // would flip this to true. (\bleak\b fails: "leaked" has a word char after "leak".)
+    expect(titleMatchesAiSecurity('Claude user data leaked online')).toBe(false)
+  })
+
+  it('requires BOTH groups — AI-only or security-only titles are dropped', () => {
+    expect(titleMatchesAiSecurity('OpenAI co-founder joins a new lab')).toBe(false)        // AI, no security
+    expect(titleMatchesAiSecurity('Major data breach at an unrelated retailer')).toBe(false) // security, no AI
+    expect(titleMatchesAiSecurity('New CVE found in nginx')).toBe(false)                    // generic infra CVE, no AI
+  })
+
+  it('matches multi-word keywords ("hugging face", "data exposure", "security incident")', () => {
+    expect(titleMatchesAiSecurity('Hugging Face data exposure affects model repos')).toBe(true)
+    expect(titleMatchesAiSecurity('OpenAI hit by major security incident')).toBe(true)
+  })
+})
+
+describe('fetchHNSecurityPosts — request wiring + post-filter (#720)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('sends optionalWords + hitsPerPage and applies the (AI AND security) post-filter', async () => {
+    let capturedUrl = ''
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      capturedUrl = String(input)
+      return new Response(JSON.stringify({
+        hits: [
+          // kept — AI + security
+          { objectID: '1', title: 'Critical Copilot vulnerability lets hackers steal codes', url: 'https://ex/1', points: 10, created_at_i: 1 },
+          // dropped — AI only (the optionalWords pull surfaces generic AI stories)
+          { objectID: '2', title: 'OpenAI ships a new model', url: 'https://ex/2', points: 5, created_at_i: 2 },
+          // dropped — security only
+          { objectID: '3', title: 'New CVE found in nginx', url: null, points: 3, created_at_i: 3 },
+          // dropped — substring-only false positive ("source" → rce)
+          { objectID: '4', title: 'Show HN: open source Claude tool', url: 'https://ex/4', points: 1, created_at_i: 4 },
+        ],
+      }), { status: 200 })
+    }))
+
+    const alerts = await fetchHNSecurityPosts()
+
+    // optionalWords is half the fix — without it the space-joined query reverts to
+    // all-words-AND and returns 0 hits (the original #720 bug). Pin it on the wire.
+    expect(capturedUrl).toContain('optionalWords=')
+    expect(capturedUrl).toContain('hitsPerPage=50')
+
+    // Only the genuine AI-security story survives the post-filter.
+    expect(alerts.map(a => a.id)).toEqual(['1'])
+    expect(alerts[0]).toMatchObject({ source: 'hackernews', kvKey: 'security:seen:hn:1' })
+  })
+
+  it('falls back to the HN item URL when a hit has no external url', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      hits: [{ objectID: '42', title: 'Claude data breach exposed users', url: null, points: 1, created_at_i: 1 }],
+    }), { status: 200 })))
+
+    const alerts = await fetchHNSecurityPosts()
+    expect(alerts[0].url).toBe('https://news.ycombinator.com/item?id=42')
+  })
+
+  it('returns [] on HTTP error without throwing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('rate limited', { status: 429 })))
+    expect(await fetchHNSecurityPosts()).toEqual([])
   })
 })
 
