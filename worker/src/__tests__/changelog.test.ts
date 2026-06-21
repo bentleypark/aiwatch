@@ -14,15 +14,13 @@ import {
 } from '../changelog'
 
 describe('CHANGELOG_SOURCES', () => {
-  it('has 4 sources (3 pilot + copilot)', () => {
-    expect(CHANGELOG_SOURCES).toHaveLength(4)
-    expect(CHANGELOG_SOURCES.map((s) => s.id)).toEqual(['openai', 'google', 'anthropic', 'copilot'])
+  it('has 3 sources (openai, google, anthropic) — Copilot dropped (#733)', () => {
+    expect(CHANGELOG_SOURCES).toHaveLength(3)
+    expect(CHANGELOG_SOURCES.map((s) => s.id)).toEqual(['openai', 'google', 'anthropic'])
   })
 
-  it('copilot source uses rss type with pre-filtered changelog feed', () => {
-    const copilot = CHANGELOG_SOURCES.find((s) => s.id === 'copilot')!
-    expect(copilot.type).toBe('rss')
-    expect(copilot.feedUrl).toContain('github.blog/changelog/label/copilot')
+  it('no longer includes the GitHub Copilot changelog source (#733)', () => {
+    expect(CHANGELOG_SOURCES.find((s) => s.id === 'copilot')).toBeUndefined()
   })
 
   it('anthropic source uses html type', () => {
@@ -249,14 +247,6 @@ describe('isRelevantEntry', () => {
       expect(isRelevantEntry('Partnering with schools in Kenya', 'google')).toBe(false)
     })
   })
-
-  describe('GitHub Copilot changelog', () => {
-    it('all entries are relevant (pre-filtered feed)', () => {
-      expect(isRelevantEntry('Enable Copilot cloud agent via custom properties', 'copilot')).toBe(true)
-      expect(isRelevantEntry('Model selection for Claude and Codex agents on github.com', 'copilot')).toBe(true)
-      expect(isRelevantEntry('Copilot now supports multi-file edits', 'copilot')).toBe(true)
-    })
-  })
 })
 
 describe('formatChangelogSection', () => {
@@ -316,14 +306,46 @@ describe('formatChangelogSection', () => {
     expect(formatChangelogSection([])).toBe('No service changes detected this week.')
   })
 
-  it('limits to 8 items and sorts by date descending', () => {
+  it('limits to 8 items, sorts by date descending, and appends an overflow line (#733)', () => {
     const entries: ChangelogEntry[] = Array.from({ length: 12 }, (_, i) => ({
       source: 'openai', title: `Item ${i}`, url: 'https://example.com', date: `2026-04-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
     }))
     const lines = formatChangelogSection(entries).split('\n')
-    expect(lines).toHaveLength(8)
+    // 8 entry lines + 1 overflow line
+    expect(lines).toHaveLength(9)
     // First line should be most recent
     expect(lines[0]).toContain('4/12')
+    // The 4 truncated entries are surfaced, not silently dropped
+    expect(lines[8]).toBe('• …and 4 more from OpenAI')
+  })
+
+  // #733 — the actual reported bug: one high-volume source (Copilot-style, 10 entries) used to fill
+  // all 8 slots in a flat date-desc cap and crowd out the low-volume major providers, so the briefing
+  // read as "only that source had changes". Source-fair round-robin must preserve the quiet sources.
+  it('does not let one high-volume source crowd out low-volume sources (#733)', () => {
+    const entries: ChangelogEntry[] = [
+      ...Array.from({ length: 10 }, (_, i) => ({
+        source: 'google', title: `Google ${i}`, url: 'https://blog.google/x', date: `2026-06-${String(19 - (i % 3)).padStart(2, '0')}T0${i % 9}:00:00Z`,
+      })),
+      { source: 'openai', title: 'Introducing LifeSciBench', url: 'https://openai.com/news/a', date: '2026-06-17T00:00:00Z' },
+      { source: 'anthropic', title: 'Introducing Claude Opus 4.8', url: 'https://www.anthropic.com/news/b', date: '2026-06-16T00:00:00Z' },
+    ]
+    const result = formatChangelogSection(entries)
+    // The two low-volume providers survive despite Google's volume
+    expect(result).toContain('OpenAI: [Introducing LifeSciBench]')
+    expect(result).toContain('Anthropic: [Introducing Claude Opus 4.8]')
+    // Truncation is surfaced
+    expect(result).toContain('…and ')
+    expect(result).toContain('Google AI')
+  })
+
+  it('omits the overflow line when nothing is truncated (#733)', () => {
+    const entries: ChangelogEntry[] = [
+      { source: 'openai', title: 'A', url: 'https://o/a', date: '2026-06-17T00:00:00Z' },
+      { source: 'anthropic', title: 'B', url: 'https://a/b', date: '2026-06-16T00:00:00Z' },
+    ]
+    const result = formatChangelogSection(entries)
+    expect(result).not.toContain('…and ')
   })
 })
 
@@ -422,7 +444,6 @@ describe('getStaleSources / formatStaleSourcesWarning (#274)', () => {
       [lastFetchKey('openai')]: recentIso,
       [lastFetchKey('google')]: recentIso,
       [lastFetchKey('anthropic')]: oldIso, // 3d > 2d threshold → stale
-      [lastFetchKey('copilot')]: recentIso,
     }
     const stale = await getStaleSources(makeKV(data))
     expect(stale).toHaveLength(1)
@@ -432,7 +453,7 @@ describe('getStaleSources / formatStaleSourcesWarning (#274)', () => {
 
   it('reports source with no record at all (TTL expired or never fetched)', async () => {
     const stale = await getStaleSources(makeKV({}))
-    // All 4 sources missing → all stale with hoursStale=null
+    // All sources missing → all stale with hoursStale=null
     expect(stale).toHaveLength(CHANGELOG_SOURCES.length)
     for (const s of stale) expect(s.hoursStale).toBeNull()
   })
@@ -461,7 +482,6 @@ describe('getStaleSources / formatStaleSourcesWarning (#274)', () => {
       [lastFetchKey('openai')]: 'not-a-valid-iso',
       [lastFetchKey('google')]: new Date(Date.now() - 3600_000).toISOString(),
       [lastFetchKey('anthropic')]: new Date(Date.now() - 3600_000).toISOString(),
-      [lastFetchKey('copilot')]: new Date(Date.now() - 3600_000).toISOString(),
     }
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {

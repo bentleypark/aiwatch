@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike } from '../utils'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, worstUnresolvedImpact, countsAsUptimeOk, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike } from '../utils'
+import type { Incident } from '../types'
 
 describe('appendStatusHint (#539)', () => {
   it('uses ? when the URL has no query, & when it already has one', () => {
@@ -339,5 +340,59 @@ describe('resetComponentMiss', () => {
 
   it('does nothing when kv is undefined', async () => {
     await resetComponentMiss(undefined, 'openai') // no throw
+  })
+})
+
+describe('worstUnresolvedImpact (#733)', () => {
+  const inc = (impact: Incident['impact'], status: Incident['status'] = 'investigating'): Incident =>
+    ({ id: 'x', title: 't', status, impact, startedAt: '2026-06-17T00:00:00Z', resolvedAt: null, duration: null, timeline: [] }) as Incident
+
+  it('returns null for no incidents / empty / undefined', () => {
+    expect(worstUnresolvedImpact(undefined)).toBeNull()
+    expect(worstUnresolvedImpact([])).toBeNull()
+  })
+
+  it('ignores resolved incidents', () => {
+    expect(worstUnresolvedImpact([inc('major', 'resolved')])).toBeNull()
+  })
+
+  it('ignores null-impact incidents', () => {
+    expect(worstUnresolvedImpact([inc(null)])).toBeNull()
+  })
+
+  it('returns the worst (critical > major > minor) among unresolved', () => {
+    expect(worstUnresolvedImpact([inc('minor'), inc('major')])).toBe('major')
+    expect(worstUnresolvedImpact([inc('minor'), inc('major'), inc('critical')])).toBe('critical')
+    expect(worstUnresolvedImpact([inc('minor')])).toBe('minor')
+  })
+})
+
+describe('countsAsUptimeOk (#733)', () => {
+  const inc = (impact: Incident['impact']): Incident =>
+    ({ id: 'x', title: 't', status: 'investigating', impact, startedAt: '2026-06-17T00:00:00Z', resolvedAt: null, duration: null, timeline: [] }) as Incident
+
+  it('operational always counts as up', () => {
+    expect(countsAsUptimeOk('operational', undefined)).toBe(true)
+    expect(countsAsUptimeOk('operational', [inc('major')])).toBe(true) // status wins
+  })
+
+  it('down always counts as down', () => {
+    expect(countsAsUptimeOk('down', undefined)).toBe(false)
+    expect(countsAsUptimeOk('down', [inc('minor')])).toBe(false)
+  })
+
+  it('degraded with a minor incident counts as UP (the OpenAI FedRAMP / Deepgram case)', () => {
+    expect(countsAsUptimeOk('degraded', [inc('minor')])).toBe(true)
+  })
+
+  it('degraded with NO incident counts as up (transient fetch hiccup is not a real outage)', () => {
+    expect(countsAsUptimeOk('degraded', [])).toBe(true)
+    expect(countsAsUptimeOk('degraded', undefined)).toBe(true)
+  })
+
+  it('degraded with a major/critical incident counts as DOWN', () => {
+    expect(countsAsUptimeOk('degraded', [inc('major')])).toBe(false)
+    expect(countsAsUptimeOk('degraded', [inc('critical')])).toBe(false)
+    expect(countsAsUptimeOk('degraded', [inc('minor'), inc('major')])).toBe(false) // worst wins
   })
 })

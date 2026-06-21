@@ -31,6 +31,10 @@ export interface WeeklyBriefingData {
   changelog: ChangelogEntry[]
   incidents: WeeklyIncidentSummary[]
   stabilityChanges: WeeklyStabilityChange[]
+  /** #733 — false when the comparison inputs were unavailable (services:latest unreadable, or no
+   *  prev-week history baseline). Distinguishes "data couldn't be compared" from a genuinely calm
+   *  week so the section never silently reads as "No significant changes." Defaults to available. */
+  stabilityDataAvailable?: boolean
   security?: WeeklySecuritySummary
   /** Per-source last-fetch staleness — surfaces silent collection gaps (#274) */
   staleSources?: StaleSourceInfo[]
@@ -145,19 +149,37 @@ export function buildIncidentSummary(
  * Build stability changes from daily uptime counters.
  * Compares this week's uptime vs previous week.
  */
+export interface WeeklyUptimeCounter {
+  ok: number
+  total: number
+  // #733 — most-recent non-null status-page rolling-30d uptime snapshot in the week window.
+  officialUptime?: number | null
+}
+
+/**
+ * #733 — Weekly stability = change in OFFICIAL status-page uptime (rolling-30d), NOT the AIWatch
+ * ok/total served-status counter (which is noise for incident-only / probeless / sticky-degraded
+ * services — Bedrock logged 0–5% on flap days, ElevenLabs 72% vs an official 99%).
+ *
+ * `currentUptime` is the LIVE `uptime30d` per service read from `services:latest`, with no-official-
+ * uptime / stale-source services already set to `null` (= the dashboard's `isUnreliableUptime`,
+ * #713). Using the live value as "this week" — rather than a historical snapshot — is what reliably
+ * excludes a service like Bedrock whose past `officialUptime` snapshots were intermittently non-null
+ * (a pre-#713 estimate residue) even though it currently publishes no uptime. `prevWeek` supplies the
+ * ~7-day-ago official snapshot. A service is reported only when BOTH figures exist and differ > 0.5%.
+ */
 export function buildStabilityChanges(
-  thisWeek: Record<string, { ok: number; total: number }>,
-  prevWeek: Record<string, { ok: number; total: number }>,
+  currentUptime: Record<string, number | null>,
+  prevWeek: Record<string, WeeklyUptimeCounter>,
   serviceNames: Record<string, string>,
 ): WeeklyStabilityChange[] {
   const changes: WeeklyStabilityChange[] = []
-  for (const [id, curr] of Object.entries(thisWeek)) {
-    const prev = prevWeek[id]
-    if (!prev || prev.total === 0 || curr.total === 0) continue
-    const currUptime = (curr.ok / curr.total) * 100
-    const prevUptime = (prev.ok / prev.total) * 100
+  for (const [id, currUptime] of Object.entries(currentUptime)) {
+    if (currUptime == null) continue // no official uptime now (isUnreliableUptime) → excluded
+    const prevUptime = prevWeek[id]?.officialUptime
+    if (prevUptime == null) continue
     const diff = currUptime - prevUptime
-    // Only report changes > 0.5%
+    // Only report changes > 0.5% (a meaningful move in a slow rolling-30d figure)
     if (Math.abs(diff) > 0.5) {
       changes.push({
         serviceId: id,
@@ -203,7 +225,12 @@ export function buildWeeklyBriefing(data: WeeklyBriefingData): string {
 
   // Section 3: Stability Trend
   lines.push(`\n📊 **Stability Trend**`)
-  if (data.stabilityChanges.length === 0) {
+  if (data.stabilityDataAvailable === false) {
+    // #733 — inputs missing (services:latest unreadable / no prev-week baseline). Don't print the
+    // reassuring "No significant changes." which would hide a possible decline (same principle as
+    // the changelog stale-source warning).
+    lines.push('Stability data unavailable this week.')
+  } else if (data.stabilityChanges.length === 0) {
     lines.push('No significant changes.')
   } else {
     const improved = data.stabilityChanges.filter((c) => c.currUptime > c.prevUptime)

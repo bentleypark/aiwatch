@@ -52,25 +52,37 @@ describe('buildIncidentSummary', () => {
   })
 })
 
-describe('buildStabilityChanges', () => {
-  it('reports changes > 0.5%', () => {
-    const thisWeek = { groq: { ok: 998, total: 1000 }, mistral: { ok: 980, total: 1000 } }
-    const prevWeek = { groq: { ok: 990, total: 1000 }, mistral: { ok: 999, total: 1000 } }
+describe('buildStabilityChanges (#733 — live official uptime vs prev-week snapshot)', () => {
+  it('reports changes > 0.5% (currentUptime vs prev officialUptime), sorted declined-first', () => {
+    const currentUptime = { groq: 99.8, mistral: 98.0 }
+    const prevWeek = {
+      groq: { ok: 1, total: 1, officialUptime: 99.0 },
+      mistral: { ok: 1, total: 1, officialUptime: 99.5 },
+    }
     const names = { groq: 'Groq Cloud', mistral: 'Mistral API' }
-    const result = buildStabilityChanges(thisWeek, prevWeek, names)
+    const result = buildStabilityChanges(currentUptime, prevWeek, names)
     expect(result).toHaveLength(2)
-    // Sorted by change ascending (declined first)
-    expect(result[0].serviceId).toBe('mistral')
+    expect(result[0].serviceId).toBe('mistral') // declined first
     expect(result[0].currUptime).toBeCloseTo(98.0)
     expect(result[1].serviceId).toBe('groq')
     expect(result[1].currUptime).toBeCloseTo(99.8)
   })
 
   it('ignores changes <= 0.5%', () => {
-    const thisWeek = { groq: { ok: 998, total: 1000 } }
-    const prevWeek = { groq: { ok: 995, total: 1000 } }
-    const result = buildStabilityChanges(thisWeek, prevWeek, { groq: 'Groq' })
-    expect(result).toHaveLength(0) // 0.3% change
+    expect(buildStabilityChanges({ groq: 99.8 }, { groq: { ok: 1, total: 1, officialUptime: 99.5 } }, { groq: 'Groq' })).toHaveLength(0)
+  })
+
+  it('excludes a service whose LIVE uptime is null — no-official-uptime/stale, even if prev-week had a (stale) snapshot (#733 — Bedrock)', () => {
+    // Bedrock currently publishes no uptime → currentUptime null → excluded, regardless of a leftover
+    // pre-#713 prev-week officialUptime snapshot (the exact leak the live-gate fixes).
+    const currentUptime = { bedrock: null }
+    const prevWeek = { bedrock: { ok: 48, total: 981, officialUptime: 100 } }
+    expect(buildStabilityChanges(currentUptime, prevWeek, { bedrock: 'Amazon Bedrock' })).toHaveLength(0)
+  })
+
+  it('excludes a service with no prev-week official snapshot', () => {
+    expect(buildStabilityChanges({ x: 95 }, { x: { ok: 1, total: 1, officialUptime: null } }, { x: 'X' })).toHaveLength(0)
+    expect(buildStabilityChanges({ x: 95 }, {}, { x: 'X' })).toHaveLength(0)
   })
 })
 
@@ -115,6 +127,20 @@ describe('buildWeeklyBriefing', () => {
     expect(result).toContain('No service changes detected')
     expect(result).toContain('No incidents this week')
     expect(result).toContain('No significant changes')
+  })
+
+  it('renders "data unavailable" (not "No significant changes") when stabilityDataAvailable is false (#733)', () => {
+    const data: WeeklyBriefingData = {
+      weekStart: '2026-04-06',
+      weekEnd: '2026-04-12',
+      changelog: [],
+      incidents: [],
+      stabilityChanges: [],
+      stabilityDataAvailable: false,
+    }
+    const result = buildWeeklyBriefing(data)
+    expect(result).toContain('Stability data unavailable this week')
+    expect(result).not.toContain('No significant changes')
   })
 
   it('includes security section when security data is present', () => {

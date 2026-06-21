@@ -6,7 +6,7 @@ import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type Serv
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
-import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook } from './utils'
+import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk } from './utils'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
@@ -120,6 +120,9 @@ export function accumulateComponentCounters(
   for (const c of components) {
     const cc = (comps[c.id] ??= { ok: 0, total: 0, name: c.name })
     cc.total++
+    // Per-component uptime stays a strict operational-only count — deliberately NOT impact-gated
+    // like the service-level counter (#733): `Incident.impact` is service-scoped, not per-component,
+    // so there's no per-component impact to gate on. Component granularity is its own signal.
     if (c.status === 'operational') cc.ok++
     cc.name = c.name // keep the latest display name (status pages rename components)
   }
@@ -149,7 +152,11 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl
   services.forEach((s) => {
     if (!counters[s.id]) counters[s.id] = { ok: 0, total: 0 }
     counters[s.id].total++
-    if (s.status === 'operational') counters[s.id].ok++
+    // #733 — impact-gated: a `degraded` snapshot only counts as down when a major/critical
+    // unresolved incident backs it; a minor/partial-scope or no-incident degraded counts as up
+    // (mirrors official rolling-uptime weighting — prevents a sticky minor incident from cratering
+    // uptime/Stability/Score while the status page reads ~100%).
+    if (countsAsUptimeOk(s.status, s.incidents)) counters[s.id].ok++
     // #586 — snapshot the live status-page rolling-30d uptime each cycle (last-write-wins = the
     // day's most-recent value). The monthly archive reads the month-end day's value as the
     // "Official Uptime" display number, so it stays month-accurate and survives a later rebuild
@@ -1808,43 +1815,54 @@ export default {
           }
           const incidents = buildIncidentSummary(allMonthlyIncidents, weekStart, weekEnd)
 
-          // Read daily uptime counters for stability comparison
-          const thisWeekCounters: Record<string, { ok: number; total: number }> = {}
-          const prevWeekCounters: Record<string, { ok: number; total: number }> = {}
-          for (let i = 0; i < 7; i++) {
-            const d = new Date(now)
-            d.setUTCDate(d.getUTCDate() - i)
-            const key = `history:${d.toISOString().split('T')[0]}`
-            const raw = await env.STATUS_CACHE.get(key).catch(() => null)
-            if (raw) {
-              try {
-                const data = JSON.parse(raw)
-                for (const [svcId, counts] of Object.entries(data) as [string, { ok: number; total: number }][]) {
-                  const c = thisWeekCounters[svcId] ?? { ok: 0, total: 0 }
-                  c.ok += counts.ok; c.total += counts.total
-                  thisWeekCounters[svcId] = c
-                }
-              } catch { console.warn(`[cron] ${key} parse failed`) }
-            }
-            // Previous week
+          // #733 — Stability Trend compares OFFICIAL status-page uptime, gated on the LIVE current
+          // value. `currentUptime` = live `uptime30d` from services:latest, with no-official-uptime /
+          // stale-source services set to null (= dashboard `isUnreliableUptime`, #713) so they're
+          // excluded. The previous-week official snapshot comes from the history counters' stored
+          // `officialUptime` (i=7→13 below; i ascending = most-recent-first, so the first non-null is
+          // the most recent). The current week is NOT read from history — a service like Bedrock had
+          // intermittently non-null `officialUptime` snapshots (pre-#713 estimate residue) that would
+          // otherwise leak it back in despite publishing no uptime now.
+          type WeekCounter = { ok: number; total: number; officialUptime?: number | null }
+          const prevWeekCounters: Record<string, WeekCounter> = {}
+          for (let i = 7; i < 14; i++) {
             const pd = new Date(now)
-            pd.setUTCDate(pd.getUTCDate() - i - 7)
+            pd.setUTCDate(pd.getUTCDate() - i)
             const pkey = `history:${pd.toISOString().split('T')[0]}`
             const praw = await env.STATUS_CACHE.get(pkey).catch(() => null)
-            if (praw) {
-              try {
-                const pdata = JSON.parse(praw)
-                for (const [svcId, counts] of Object.entries(pdata) as [string, { ok: number; total: number }][]) {
-                  const c = prevWeekCounters[svcId] ?? { ok: 0, total: 0 }
-                  c.ok += counts.ok; c.total += counts.total
-                  prevWeekCounters[svcId] = c
-                }
-              } catch { console.warn(`[cron] ${pkey} parse failed`) }
-            }
+            if (!praw) continue
+            try {
+              const pdata = JSON.parse(praw) as Record<string, { ok: number; total: number; officialUptime?: number | null }>
+              for (const [svcId, counts] of Object.entries(pdata)) {
+                const c = prevWeekCounters[svcId] ?? { ok: 0, total: 0, officialUptime: null }
+                c.ok += counts.ok; c.total += counts.total
+                if (c.officialUptime == null && counts.officialUptime != null) c.officialUptime = counts.officialUptime
+                prevWeekCounters[svcId] = c
+              }
+            } catch { console.warn(`[cron] ${pkey} parse failed`) }
           }
           const serviceNames: Record<string, string> = {}
           for (const svc of SERVICES) serviceNames[svc.id] = svc.name
-          const stabilityChanges = buildStabilityChanges(thisWeekCounters, prevWeekCounters, serviceNames)
+          // Live current official uptime (isUnreliableUptime → null → excluded)
+          const currentUptime: Record<string, number | null> = {}
+          const latestRaw = await env.STATUS_CACHE.get('services:latest').catch(() => null)
+          if (latestRaw) {
+            try {
+              const p = JSON.parse(latestRaw)
+              const live: ServiceStatus[] = Array.isArray(p) ? p : (p.services ?? [])
+              for (const s of live) {
+                const unreliable = s.uptime30d == null || !!s.incidentSourceStale
+                currentUptime[s.id] = unreliable ? null : s.uptime30d!
+              }
+            } catch { console.warn('[cron] services:latest parse failed for stability') }
+          }
+          const stabilityChanges = buildStabilityChanges(currentUptime, prevWeekCounters, serviceNames)
+          // #733 — a genuine comparison requires at least one service with BOTH a live official
+          // uptime AND a prev-week official snapshot; otherwise the section says "data unavailable"
+          // rather than the reassuring "No significant changes." (which would hide a possible decline).
+          const stabilityDataAvailable = Object.entries(currentUptime).some(
+            ([id, v]) => v != null && prevWeekCounters[id]?.officialUptime != null,
+          )
 
           // Security summary: count security:seen:* keys (7d TTL — approximate week coverage, ±1d)
           // KV list returns max 1000 keys — sufficient for weekly security alerts (~50-100 typical)
@@ -1860,7 +1878,7 @@ export default {
 
           // Per-source last-fetch staleness check — surfaces silent collection gaps (#274)
           const staleSources = await getStaleSources(env.STATUS_CACHE).catch(() => [])
-          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, security, staleSources })
+          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, stabilityDataAvailable, security, staleSources })
           await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
             title: `📋 Weekly Briefing (${weekStart} ~ ${weekEnd})`,
             description: briefing,
