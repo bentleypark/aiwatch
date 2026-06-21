@@ -59,6 +59,11 @@ interface FallbackCandidate {
    *  same product surface. */
   incidentSourceStale?: boolean
   aiwatchScore?: number | null
+  /** #554 — provider is intentionally NOT read by selection here: the worker has no same-provider
+   *  exclusion (the dashboard dropped its dashboard-only one for parity). Carried only so the #554
+   *  parity-guard test can prove a same-provider clean candidate is kept — re-adding a provider
+   *  filter that reads this field would break that test, catching the drift. */
+  provider?: string
 }
 
 /** #550 — a service with any unresolved incident (investigating/identified/monitoring) is not a

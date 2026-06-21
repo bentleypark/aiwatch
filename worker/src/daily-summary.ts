@@ -25,7 +25,8 @@ export interface DailySummaryData {
   incidentCountToday: { newCount: number; resolvedCount: number }
   alertCounts?: { incidents: number; resolved: number; down: number; degraded: number; recovered: number } | null
   // Discord-only since #467 — Slack moved to native /feed RSS (no per-user webhook registered or proxied).
-  webhookCounts?: { discord: number }
+  // #548 — newToday is the signed day-over-day delta of confirmed subscribers (null = no prior baseline).
+  webhookCounts?: { discord: number; newToday?: number | null }
   deliveryCounts?: { discord: number; failed: number } | null
   redditCount: number
   securityCount?: number
@@ -42,6 +43,9 @@ export interface DailySummaryData {
     cumulative: number
     since: string
   } | null
+  // #548 — feed-poll volume (last-24h, from WAE): the consent-free retention proxy. Absent (null)
+  // when the SQL API isn't configured. No cumulative — the daily value (a post-outage step-up) is the signal.
+  feedTraffic?: { all: number; service: number; total: number } | null
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
@@ -144,7 +148,7 @@ export function buildDailySummary(data: DailySummaryData): string {
     lines.push(`📨 **User Webhook Delivery**: ${deliveryCounts.discord} Discord${failText}`)
   }
   if (webhookCounts) {
-    lines.push(`🔗 **Active Discord Webhooks**: ${webhookCounts.discord}`)
+    lines.push(`🔗 **Active Discord Webhooks**: ${webhookCounts.discord}${formatSubscriberDelta(webhookCounts.newToday)}`)
   }
   if (redditCount > 0) lines.push(`📢 **Reddit**: ${redditCount} posts detected`)
   if (data.securityCount && data.securityCount > 0) lines.push(`🔒 **Security**: ${data.securityCount} alerts detected`)
@@ -185,7 +189,35 @@ export function buildDailySummary(data: DailySummaryData): string {
   const v1Section = formatV1TrafficSection(data.v1Traffic)
   if (v1Section) lines.push(v1Section)
 
+  // Section: feed-poll volume (#548) — consent-free retention proxy (post-outage step-up = retained subs).
+  const feedSection = formatFeedTrafficSection(data.feedTraffic)
+  if (feedSection) lines.push(feedSection)
+
   return lines.join('\n')
+}
+
+// #548 — render the signed day-over-day subscriber delta as a compact suffix on the webhook line.
+// Empty when null (no baseline) or 0 (no change) so the line stays clean. Unicode minus to match the
+// brand's status-hint style and avoid an ASCII hyphen reading as a list bullet in Discord.
+export function formatSubscriberDelta(newToday: number | null | undefined): string {
+  if (newToday == null || newToday === 0) return ''
+  return newToday > 0 ? ` (+${newToday} today)` : ` (−${Math.abs(newToday)} today)`
+}
+
+/**
+ * Format the feed-poll volume as a Discord section (#548). Empty string when unavailable (SQL API not
+ * configured) so the caller skips it. The per-service split shares the v1 caveat (counts include any
+ * malformed /feed/:slug path), so it's shown with `~`. Both counts are WAE sampling estimates
+ * (SUM(_sample_interval)); the day-over-day *step-up* is the signal, not the absolute precision.
+ */
+export function formatFeedTrafficSection(
+  feed: DailySummaryData['feedTraffic'],
+): string {
+  if (!feed) return ''
+  return (
+    `\n📡 **Feed Polls (RSS/Slack)**\n` +
+    `   Last 24h: ${feed.total} (all-feed ${feed.all} · per-service ~${feed.service})`
+  )
 }
 
 /**

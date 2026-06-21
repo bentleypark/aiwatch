@@ -15,12 +15,17 @@ Thank you for your interest in contributing to AIWatch!
 
 ## Development Workflow
 
-Follow the steps in [CLAUDE.md](../CLAUDE.md) — especially:
+Use [AGENTS.md](./AGENTS.md) as the shared repository entrypoint.
+
+If you are working with Claude Code, also follow [CLAUDE.md](./CLAUDE.md) for Claude-specific
+workflow and automation details.
+
+Shared workflow — especially:
 
 1. **Build + Test** before committing
 2. **Code review** before committing
 3. **Fix all Critical/Important** review findings
-4. Include `closes #N` in commit messages
+4. Include `closes #N` in commit messages when the work is fully verified
 
 ## Code Style
 

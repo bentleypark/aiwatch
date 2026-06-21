@@ -7,7 +7,7 @@ import { escapeXml } from './badge'
 import { getFallbacks } from './fallback'
 import { defuseAutolinkDomain } from './alerts'
 import { formatRecoveryDisplay } from './ai-analysis'
-import { appendStatusHint } from './utils'
+import { appendStatusHint, appendUtm } from './utils'
 
 const SITE = 'https://ai-watch.dev'
 
@@ -155,8 +155,10 @@ export function isDownUrl(serviceId: string): string {
 // reusing the cached outage card. The hash fallback (estimate-only services) gets no hint — it has
 // no is-down OG page to unfurl.
 function serviceLink(serviceId: string, kind: ItemKind): string {
+  // NO_IS_DOWN_PAGE services fall back to the dashboard hash (no OG page) → no hint and no utm.
   if (NO_IS_DOWN_PAGE.has(serviceId)) return isDownUrl(serviceId)
-  return appendStatusHint(isDownUrl(serviceId), kind)
+  // #548 — utm_source=rss so GA4 attributes feed-reader/Slack clicks to the RSS channel (consent-free).
+  return appendUtm(appendStatusHint(isDownUrl(serviceId), kind), 'rss')
 }
 
 // XML 1.0 forbids most C0 control characters. escapeXml handles & < > " but

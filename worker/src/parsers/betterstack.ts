@@ -393,8 +393,19 @@ export function parseBetterStackStatus(data: BetterStackIndex): 'operational' | 
  * `operational` via the <30% threshold (#447) — closes the perception gap between
  * BetterStack's "Some services are down" header and the AIWatch card without
  * reintroducing the per-model flap noise the threshold deliberately suppresses.
+ *
+ * #731 — gate on the provider roll-up: when `aggregate_state === 'operational'` BetterStack's
+ * own page header is all-green (no incident), so a stray resource-level degraded/downtime is a
+ * transient model-monitor blip, NOT a partial outage. Surfacing the yellow Partial pill here would
+ * contradict the provider's own all-clear (phantom Partial — Together AI, 2026-06-21, flapping
+ * in/out per 60s `/api/status` poll). The intended #722 Partial case (provider shows "Some
+ * services are down" while AIWatch's threshold collapses the badge to operational) ALWAYS has a
+ * non-operational aggregate_state, so it's preserved. Only `operational` is gated: a `maintenance`
+ * aggregate deliberately falls through (a real degraded/downtime resource during a maintenance
+ * window is still a partial), diverging from `parseBetterStackStatus`'s collapse-to-operational.
  */
 export function parseBetterStackPartialCount(data: BetterStackIndex): number {
+  if (data.data?.attributes?.aggregate_state === 'operational') return 0
   return (data.included ?? []).filter(
     (r) =>
       r.type === 'status_page_resource' &&

@@ -1213,4 +1213,39 @@ describe('parseBetterStackPartialCount (#447)', () => {
     expect(parseBetterStackStatus(data)).toBe('operational')  // 3.4% < 10% threshold
     expect(parseBetterStackPartialCount(data)).toBe(1)        // but 1 is affected
   })
+
+  // #731 — provider roll-up gate: when aggregate_state is 'operational' the official page header is
+  // all-green (no incident), so a stray resource-level degraded/downtime is a transient monitor blip,
+  // not a partial outage. Returning >0 here produced a phantom yellow "Partial" pill that flapped
+  // in/out per 60s /api/status poll (Together AI, 2026-06-21) while official showed all-green.
+  it('returns 0 when aggregate_state is operational despite a stray degraded/downtime resource (#731)', () => {
+    const data = {
+      data: { attributes: { aggregate_state: 'operational' } },
+      included: [resource('operational'), resource('downtime'), resource('degraded')],
+    }
+    // Invariant the fix relies on: operational aggregate ⇒ status operational ⇒ partialCount 0,
+    // so there is no contradictory green-badge + yellow-Partial-pill state (the #731 phantom).
+    expect(parseBetterStackStatus(data)).toBe('operational')
+    expect(parseBetterStackPartialCount(data)).toBe(0)
+  })
+
+  it('still counts when aggregate_state is non-operational — #722 Partial case preserved (#731)', () => {
+    // The intended #722 Partial: provider shows "Some services are down" (non-op aggregate) while
+    // AIWatch's threshold collapses the badge to operational. partialCount must stay > 0 here.
+    expect(parseBetterStackPartialCount({
+      data: { attributes: { aggregate_state: 'degraded' } },
+      included: [resource('operational'), resource('degraded')],
+    })).toBe(1)
+  })
+
+  it('does NOT gate maintenance aggregate_state — a real degraded resource during maintenance is still partial (#731)', () => {
+    // Deliberate divergence from parseBetterStackStatus (which collapses pure maintenance to
+    // operational after filtering): the gate is operational-only, so a genuine concurrent
+    // degraded/downtime resource during a page-level maintenance window still surfaces. Pins the
+    // fall-through so a future "align with parseBetterStackStatus" edit can't silently hide it.
+    expect(parseBetterStackPartialCount({
+      data: { attributes: { aggregate_state: 'maintenance' } },
+      included: [resource('maintenance'), resource('downtime')],
+    })).toBe(1)
+  })
 })

@@ -56,6 +56,96 @@ export interface V1TrafficCounts {
   total: number    // all + service
 }
 
+// ── Feed-poll traffic (#548) ──────────────────────────────────────────────
+// The RSS feeds (/feed.xml + /feed/:slug) are the consent-free retention proxy GA4 can't give:
+// a step-up in poll volume after an outage = retained RSS/Slack subscribers. Mirrors the v1
+// pattern above on the SAME dataset, distinguished by a separate index ('feed-poll').
+//   index1  = 'feed-poll'                     → total feed traffic via one index filter
+//   blob1   = 'feed-all' | 'feed-service'     → /feed.xml vs /feed/:slug split
+//   double1 = 1                               → request counter (SUM in AE SQL)
+export type FeedVariant = 'feed-all' | 'feed-service'
+
+const FEED_INDEX = 'feed-poll'
+
+/** Classify a feed request path: /feed.xml = all-services, /feed/:slug = per-service. */
+export function feedVariant(pathname: string): FeedVariant {
+  return pathname === '/feed.xml' ? 'feed-all' : 'feed-service'
+}
+
+/** Record one feed-poll data point. Best-effort (guarded binding + try/catch), like recordV1Traffic. */
+export function recordFeedTraffic(
+  analytics: AnalyticsEngineDataset | undefined,
+  pathname: string,
+): void {
+  if (!analytics) return
+  try {
+    analytics.writeDataPoint({
+      blobs: [feedVariant(pathname)],
+      doubles: [1],
+      indexes: [FEED_INDEX],
+    })
+  } catch (err) {
+    console.warn('[wae] feed writeDataPoint failed:', err instanceof Error ? err.message : err)
+  }
+}
+
+export interface FeedTrafficCounts {
+  all: number      // /feed.xml polls
+  service: number  // /feed/:slug polls
+  total: number    // all + service
+}
+
+/** AE SQL summing the last-24h feed poll count per variant (sampling-corrected via SUM(_sample_interval)). */
+export function buildFeedTrafficSql(dataset = V1_DATASET): string {
+  return (
+    `SELECT blob1 AS variant, SUM(_sample_interval) AS requests ` +
+    `FROM ${dataset} ` +
+    `WHERE index1 = '${FEED_INDEX}' AND timestamp > NOW() - INTERVAL '1' DAY ` +
+    `GROUP BY blob1 ` +
+    `FORMAT JSON`
+  )
+}
+
+/** Parse the AE SQL feed-traffic JSON into per-variant counts. Tolerant of string/number requests. */
+export function parseFeedTrafficResponse(json: unknown): FeedTrafficCounts | null {
+  const data = (json as { data?: unknown })?.data
+  if (!Array.isArray(data)) return null
+  let all = 0
+  let service = 0
+  for (const row of data) {
+    const r = row as { variant?: unknown; requests?: unknown }
+    const parsed = Number(r.requests)
+    const n = Number.isFinite(parsed) ? parsed : 0
+    if (r.variant === 'feed-all') all += n
+    else if (r.variant === 'feed-service') service += n
+  }
+  return { all, service, total: all + service }
+}
+
+/** Query the last-24h feed poll count via the AE SQL API. Best-effort: null on missing creds /
+ *  HTTP failure / unparseable response. Never throws. */
+export async function queryFeedTraffic(
+  accountId: string | undefined,
+  token: string | undefined,
+  fetchImpl: typeof fetch = fetch,
+): Promise<FeedTrafficCounts | null> {
+  if (!accountId || !token) return null
+  try {
+    const res = await fetchImpl(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: buildFeedTrafficSql() },
+    )
+    if (!res.ok) {
+      console.warn(`[wae] feed SQL query failed: HTTP ${res.status}`)
+      return null
+    }
+    return parseFeedTrafficResponse(await res.json())
+  } catch (err) {
+    console.warn('[wae] feed SQL query error:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
 /** The WAE dataset name (matches wrangler.toml [[analytics_engine_datasets]].dataset). */
 export const V1_DATASET = 'aiwatch_statusline'
 

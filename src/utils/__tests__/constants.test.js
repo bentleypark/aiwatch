@@ -153,12 +153,28 @@ describe('getGroupedFallbacks (#445 multi-category incident alternatives)', () =
     expect(single[0].items.map(i => i.id)).toEqual(['groq', 'fireworks'])  // up to 2
   })
 
-  it('excludes candidates sharing a provider with any affected service', () => {
-    // OpenAI runs both an affected (chatgpt as affected) and a candidate (codex) — codex must drop.
+  it('#554 — KEEPS an operational same-provider candidate (parity with worker; no blanket provider exclusion)', () => {
+    // OpenAI runs both an affected service (chatgpt down) and an operational candidate (codex).
+    // The former dashboard-only rule dropped codex for sharing the OpenAI provider; #554 keeps it —
+    // codex is itself operational + incident-free, and the worker/is-down surfaces never excluded it.
     const affectedOpenAI = [{ ...op('chatgpt', 'app', 'OpenAI', 80), status: 'down' }, affected[1]]
     const groups = getGroupedFallbacks(affectedOpenAI, all)
     const agentGroup = groups.find(g => g.category === 'agent')
-    expect(agentGroup?.items.map(i => i.id) ?? []).not.toContain('codex')
+    expect(agentGroup?.items.map(i => i.id) ?? []).toContain('codex')
+  })
+
+  it('#554 — ChatGPT gets claude.ai as an app fallback even when Claude Code (Anthropic) is degraded', () => {
+    // The reported empty-fallback hole: claude.ai is operational (only Claude Code, a different
+    // Anthropic surface, is degraded), but the old blanket provider rule dropped it because Anthropic
+    // counted as "affected" → ChatGPT's app group collapsed to zero. #554 recommends it.
+    const affected2 = [
+      { ...op('chatgpt', 'app', 'OpenAI', 80), status: 'down' },
+      { ...op('codex', 'agent', 'OpenAI', 80), status: 'down' },
+      { ...op('claudecode', 'agent', 'Anthropic', 80), status: 'degraded' },
+    ]
+    const pool = [...affected2, op('claudeai', 'app', 'Anthropic', 84)]  // claudeai operational
+    const appGroup = getGroupedFallbacks(affected2, pool).find(g => g.category === 'app')
+    expect(appGroup?.items.map(i => i.id) ?? []).toContain('claudeai')
   })
 
   it('does not recommend a non-operational candidate', () => {

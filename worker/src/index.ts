@@ -11,10 +11,10 @@ import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
 import { refreshStatusCacheOnChange } from './cache-refresh'
-import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey } from './webhook-subscriptions'
+import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
 import { corsHeaders } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
-import { recordV1Traffic, queryV1Traffic } from './api-traffic'
+import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
@@ -2068,10 +2068,25 @@ export default {
           // Count active webhook subscriptions. Since #486 PR3 this is the number of confirmed
           // server-side subscriptions (webhook:sub:*) — the source of truth now that delivery is
           // server-side (replaced the legacy webhook:reg:* count removed with the browser relay).
-          let webhookCounts = { discord: 0 }
+          let webhookCounts: { discord: number; newToday: number | null } = { discord: 0, newToday: null }
           try {
             const hashes = await listConfirmedHashes(env.STATUS_CACHE)
             webhookCounts.discord = hashes.length
+            // #548 — new-today delta: diff against yesterday's snapshot, then persist today's for
+            // tomorrow's diff (7d TTL so a missed day still leaves a baseline). Consent-free signal.
+            const yesterday = new Date(now.getTime() - 86_400_000).toISOString().split('T')[0]
+            const prevRaw = await env.STATUS_CACHE.get(`webhook:sub:count:${yesterday}`).catch(() => null)
+            webhookCounts.newToday = computeSubscriberDelta(hashes.length, prevRaw)
+            // #548 — a CORRUPT baseline (present but non-numeric) collapses to null like a clean
+            // first-day, which would silently kill the retention signal forever. Log that case (only)
+            // so a stuck "no delta" is debuggable — mirrors the v1 block's self-healing visibility.
+            if (prevRaw != null && prevRaw.trim() !== '' && webhookCounts.newToday === null) {
+              console.warn(`[daily-summary] subscriber snapshot corrupt for ${yesterday}: ${JSON.stringify(prevRaw)}`)
+            }
+            // Best-effort write, but log a failure: a silent KV write fault here makes tomorrow's
+            // "why did the delta stop?" un-debuggable (the count read three lines up is already logged).
+            await env.STATUS_CACHE.put(`webhook:sub:count:${today}`, String(hashes.length), { expirationTtl: 7 * 86400 })
+              .catch((err) => console.warn('[daily-summary] subscriber snapshot write failed:', err instanceof Error ? err.message : err))
           } catch (err) {
             console.warn('[daily-summary] Failed to count webhooks:', err instanceof Error ? err.message : err)
           }
@@ -2178,6 +2193,16 @@ export default {
             console.warn('[daily-summary] v1 traffic read failed:', err instanceof Error ? err.message : err)
           }
 
+          // #548 — feed-poll volume (last 24h) as the consent-free retention proxy. Best-effort, like
+          // v1; null (skipped) when the AE token/account is absent. No cumulative — the daily value is
+          // the signal (a post-outage step-up = retained RSS/Slack subscribers).
+          let feedTraffic = null
+          try {
+            feedTraffic = await queryFeedTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+          } catch (err) {
+            console.warn('[daily-summary] feed traffic read failed:', err instanceof Error ? err.message : err)
+          }
+
           const description = buildDailySummary({
             services: dailyServices,
             aiUsage,
@@ -2195,6 +2220,7 @@ export default {
             degradationCounts,
             degradationNoStatusCounts,
             v1Traffic,
+            feedTraffic,
           })
 
           if (isCatchUp) console.log(`[daily-summary] catch-up run for ${today}`)
@@ -2530,6 +2556,9 @@ export default {
       request.method === 'GET' &&
       (url.pathname === '/feed.xml' || url.pathname.startsWith('/feed/'))
     ) {
+      // #548 — record the poll in WAE (consent-free retention proxy: a post-outage step-up in feed
+      // volume = retained RSS/Slack subscribers). Best-effort, before the KV read so a 503 still counts.
+      recordFeedTraffic(env.ANALYTICS, url.pathname)
       const feedReq: FeedRequest =
         url.pathname === '/feed.xml'
           ? { scope: 'all' }

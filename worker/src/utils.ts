@@ -266,6 +266,16 @@ export function appendStatusHint(url: string, hint: string): string {
   return `${url}${sep}e=${encodeURIComponent(hint)}`
 }
 
+// #548 — UTM tags for outage-share links so GA4 cleanly attributes consent-free, channel-specific
+// inflow (the X tweet path already carries its own `X_UTM` in alerts.ts; this covers the RSS feed
+// item links + Reddit promote links). campaign=outage matches the X constant so all share channels
+// roll up under one campaign. `source` is the channel (rss/reddit); medium groups feed vs social.
+const UTM_MEDIUM: Record<'rss' | 'reddit', string> = { rss: 'feed', reddit: 'social' }
+export function appendUtm(url: string, source: 'rss' | 'reddit'): string {
+  const sep = url.includes('?') ? '&' : '?'
+  return `${url}${sep}utm_source=${source}&utm_medium=${UTM_MEDIUM[source]}&utm_campaign=outage`
+}
+
 export async function fetchWithTimeout(
   url: string,
   timeoutMs = 8000,
