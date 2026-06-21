@@ -654,3 +654,66 @@ test.describe('ServiceDetails RSS feed link (#432)', () => {
     await expect(page.locator('main').getByRole('button', { name: /RSS/ })).not.toBeVisible()
   })
 })
+
+test.describe('Incident History — preview + show-more (#incident-history-collapse)', () => {
+  const svc = (incidents) => ({
+    id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic',
+    status: 'operational', latency: 120, uptime30d: 99.5, uptimeSource: 'official',
+    calendarDays: 30, incidents, aiwatchScore: 80, scoreGrade: 'good', scoreConfidence: 'high',
+    scoreBreakdown: { uptime: 39, incidents: 22, recovery: 15, responsiveness: 12, responsivenessStatus: 'available' },
+    scoreMetrics: { uptimePct: 99.5, incidents30d: incidents.length, affectedDays30d: 1, mttrHours: null, probe: { p50: 178, p95: 311, cvCombined: 0.5, validDays: 7 } },
+  })
+  const mount = async (page, incidents) => {
+    const mock = { json: { services: [svc(incidents)], lastUpdated: new Date().toISOString() } }
+    await page.route('**/api/status**', (route) => route.fulfill(mock))
+    await page.route('**/api/status/cached', (route) => route.fulfill(mock))
+    await page.goto('/#claude')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+  }
+  // 7 resolved incidents with UNIQUE titles within the 7-day window → no grouping → 7 rows.
+  const sevenIncidents = Array.from({ length: 7 }, (_, i) => ({
+    id: `h${i}`, status: 'resolved', title: `Unique history item ${i}`,
+    startedAt: new Date(Date.now() - (i + 1) * 3600_000).toISOString(), impact: 'minor', duration: '12m',
+  }))
+
+  test('shows only 5 rows by default with a "Show 2 more" toggle, then reveals the rest', async ({ page }) => {
+    await mount(page, sevenIncidents)
+    const main = page.locator('main')
+    // First 5 visible, 6th/7th hidden until expanded.
+    await expect(main.getByText('Unique history item 0')).toBeVisible()
+    await expect(main.getByText('Unique history item 4')).toBeVisible()
+    await expect(main.getByText('Unique history item 5')).toHaveCount(0)
+    const toggle = main.getByRole('button', { name: /Show 2 more|2개 더 보기/ })
+    await expect(toggle).toBeVisible()
+    await toggle.click()
+    await expect(main.getByText('Unique history item 5')).toBeVisible()
+    await expect(main.getByText('Unique history item 6')).toBeVisible()
+    // Toggle flips to "Show less".
+    await expect(main.getByRole('button', { name: /Show less|접기/ })).toBeVisible()
+    // Collapse back: clicking "Show less" hides the overflow again and restores "Show 2 more".
+    await main.getByRole('button', { name: /Show less|접기/ }).click()
+    await expect(main.getByText('Unique history item 5')).toHaveCount(0)
+    await expect(main.getByRole('button', { name: /Show 2 more|2개 더 보기/ })).toBeVisible()
+  })
+
+  test('exactly 6 rows: "Show 1 more", and the toggle stays as "Show less" once expanded (hiddenCount→0 branch)', async ({ page }) => {
+    await mount(page, sevenIncidents.slice(0, 6))
+    const main = page.locator('main')
+    await expect(main.getByText('Unique history item 4')).toBeVisible() // 5th → preview
+    await expect(main.getByText('Unique history item 5')).toHaveCount(0) // 6th → collapsed
+    const toggle = main.getByRole('button', { name: /Show 1 more|1개 더 보기/ })
+    await expect(toggle).toBeVisible()
+    await toggle.click()
+    // After expanding the single hidden row, the collapse control must remain (the
+    // `|| historyExpanded` branch keeps it even though hiddenIncidentCount is now 0).
+    await expect(main.getByText('Unique history item 5')).toBeVisible()
+    await expect(main.getByRole('button', { name: /Show less|접기/ })).toBeVisible()
+  })
+
+  test('no toggle at exactly 5 rows (boundary: > not >=)', async ({ page }) => {
+    await mount(page, sevenIncidents.slice(0, 5))
+    const main = page.locator('main')
+    await expect(main.getByText('Unique history item 4')).toBeVisible() // all 5 shown
+    await expect(main.getByRole('button', { name: /Show \d+ more|\d+개 더 보기/ })).toHaveCount(0)
+  })
+})

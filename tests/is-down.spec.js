@@ -141,12 +141,13 @@ test.describe('Is X Down? SSR pages', () => {
   })
 
   // #321 — 30-day incident window + grouping on SSR page for SEO depth.
-  test('Recent Incidents heading says "Last 30 days"', async ({ page }) => {
+  test('Recent Incidents heading says "Last 7 days"', async ({ page }) => {
     await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
-    // Claude reliably has incidents in any 30-day window, so the heading is rendered.
+    // #incident-history-collapse — the incident-history window aligned 30d → 7d. Claude reliably
+    // has incidents in any recent 7-day window, so the heading is rendered.
     const heading = page.locator('h2', { hasText: 'Recent Incidents' })
     await expect(heading).toBeVisible()
-    await expect(heading).toContainText('Last 30 days')
+    await expect(heading).toContainText('Last 7 days')
   })
 
   test('meta description on operational page includes 30-day incident count when > 0', async ({ page }) => {
