@@ -1095,3 +1095,76 @@ describe('linkifyFaqAnswer (#654 — on-page FAQ URL linking)', () => {
     expect(out).not.toContain('href="https://https://')
   })
 })
+
+// #575 — crowd "Report an issue" modal (collect) + GATED recent-reports display.
+describe('renderPage — Report an issue modal (#575)', () => {
+  it('renders the modal trigger + category/description form on an operational page, honest copy, no public count', () => {
+    const html = renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [])
+    // Trigger button + modal scaffold present (operational too — the "looks down but we show
+    // operational" corroboration case is exactly when a report is most valuable).
+    expect(html).toContain('id="report-open"')
+    expect(html).toContain('id="report-modal"')
+    // Richer input: category dropdown + 80-char description (claudestatus.com parity).
+    expect(html).toContain('<option value="outage">Outage</option>')
+    expect(html).toContain('<option value="degraded">Degraded performance</option>')
+    expect(html).toContain('id="report-desc"')
+    expect(html).toContain('maxlength="80"')
+    expect(html).toContain('<button type="button" class="btn btn-primary" id="report-submit" data-svc="claude"')
+    // POSTs to the worker collect endpoint.
+    expect(html).toContain('/api/report-issue')
+    // Honest feedback, never a public "N people reporting" verdict.
+    expect(html).toContain('we factor this into our monitoring')
+    expect(html).not.toMatch(/\d+\s+(people|users)\s+(are\s+)?reporting/i)
+  })
+
+  it('renders the modal on a down page too', () => {
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [])
+    expect(html).toContain('id="report-open"')
+    expect(html).toContain('data-svc="claude"')
+  })
+
+  it('does NOT render the gated "Recent user reports" section when no reports are passed', () => {
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [], null, null, [])
+    expect(html).not.toContain('Recent user reports')
+  })
+
+  it('renders the gated reports section when reports are passed, escaping the description (UGC XSS guard)', () => {
+    const reports = [
+      { cat: 'outage', desc: '500 errors <script>alert(1)</script>', ts: Date.now() - 3 * 60_000 },
+      { cat: 'errors', desc: '', ts: Date.now() - 30 * 60_000 },
+    ]
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [], null, null, reports)
+    expect(html).toContain('Recent user reports')
+    expect(html).toContain('Outage')
+    expect(html).toContain('Errors')
+    // Description is HTML-escaped — no live script tag in the output.
+    expect(html).toContain('&lt;script&gt;')
+    expect(html).not.toContain('<script>alert(1)</script>')
+    // Explicitly framed as community-submitted, not an AIWatch verdict.
+    expect(html).toContain('not an official AIWatch verdict')
+  })
+
+  it('collapses report rows past the first 5 behind a "Show N more" toggle', () => {
+    const now = Date.now()
+    const reports = Array.from({ length: 8 }, (_, i) => ({ cat: 'errors', desc: `report ${i}`, ts: now - i * 60_000 }))
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [], null, null, reports)
+    // All 8 rows present in the HTML (collapsed ones stay crawlable).
+    expect((html.match(/report \d/g) ?? []).length).toBe(8)
+    // 8 - 5 = 3 collapsed behind the toggle.
+    expect(html).toContain('class="rep-rest"')
+    expect(html).toContain('Show 3 more')
+    expect(html).toContain('Show less')
+    // The optimistic-prepend container is present.
+    expect(html).toContain('id="report-feed-list"')
+  })
+
+  it('does NOT render the report toggle at 5 or fewer reports', () => {
+    const now = Date.now()
+    const reports = Array.from({ length: 5 }, (_, i) => ({ cat: 'outage', desc: `r${i}`, ts: now - i * 60_000 }))
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [], null, null, reports)
+    // Assert on markup (not the always-present CSS rule .rep-rest{...}).
+    expect(html).not.toContain('class="rep-rest"')
+    expect(html).not.toContain('id="rep-more"')
+    expect(html).not.toMatch(/Show \d+ more/)
+  })
+})

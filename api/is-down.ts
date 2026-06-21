@@ -252,7 +252,21 @@ export default async function handler(req: Request) {
       fallbacks = []
     }
 
-    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec)
+    // #575 — GATED crowd-report display. Fetch recent user reports ONLY when an independent signal
+    // already shows a problem (official degraded/down, OR a BetterStack sub-threshold `partial`).
+    // When the official status is operational with no signal we skip the fetch entirely, so the
+    // public report list can NEVER contradict an `operational` page (the load-bearing constraint).
+    let reports: Array<{ cat: string; desc: string; ts: number }> = []
+    if (serviceData && (serviceData.status !== 'operational' || (serviceData.partialCount ?? 0) > 0)) {
+      try {
+        const r = await fetch(`${WORKER_API}/api/report-feed?svc=${encodeURIComponent(entry.id)}`, { signal: AbortSignal.timeout(2000) })
+        if (r.ok) reports = ((await r.json()) as { reports?: Array<{ cat: string; desc: string; ts: number }> }).reports ?? []
+      } catch (err) {
+        console.warn(`[is-down/${slug}] report-feed fetch failed:`, err instanceof Error ? err.message : err)
+      }
+    }
+
+    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports)
 
     // #378: when the upstream Worker fetch failed and we're rendering the
     // "Status data is temporarily unavailable" fallback, the response must NOT
