@@ -200,17 +200,30 @@ const CATEGORY_LABEL = { api: 'API', app: 'AI Apps', agent: 'Coding' }
  * instead of collapsing to a single affected service's category (#445).
  *
  * Shares the per-category "label → list" SHAPE with the Discord
- * `buildGroupedFallbackText` (worker/src/fallback.ts) but its SELECTION rules
- * intentionally differ: this helper additionally excludes same-provider
- * candidates and applies a perGroup cap, neither of which the worker does — so
- * the two are deliberately not a 1:1 mirror.
+ * `buildGroupedFallbackText` (worker/src/fallback.ts). The CANDIDATE-selection rule
+ * is now the same on both surfaces — a candidate just has to be live-clean
+ * (operational, no active incident, non-stale; enforced by getFallbacks via
+ * #550/#616), with no same-provider exclusion on either. This helper only
+ * additionally applies a `perGroup` cap (the dashboard banner is a cramped single
+ * row; Discord is a roomy multi-line embed), a display bound — not a candidate
+ * filter. Pinned by the #554 parity-guard tests on both surfaces
+ * (`src/utils/__tests__/constants.test.js` + `worker/src/__tests__/fallback.test.ts`);
+ * re-adding a provider exclusion to either breaks them.
  *
- * Excludes candidates that share a provider with any affected service. When the
- * affected services span a single group, each group shows up to 2 alternatives;
- * with multiple groups, 1 each (to bound banner width).
+ * #554 — the former blanket "exclude any candidate sharing a provider with an
+ * affected service" rule was REMOVED: it existed only here (never in the worker
+ * or is-down), so the two surfaces recommended different sets for the same
+ * incident, and it dropped an operational sibling (e.g. claude.ai for ChatGPT
+ * when only Claude Code was degraded) → ChatGPT got zero fallback. The genuine
+ * correlated-risk case (the candidate itself is hit) is already caught by the
+ * candidate's own hasActiveIncident/status filter (#550), so the provider rule
+ * was redundant there and harmful in the operational-sibling case.
  *
- * @param {object[]} affected - Affected services (need .id, .category, .provider)
- * @param {object[]} allServices - All services (need .id, .category, .status, .provider, .aiwatchScore)
+ * When the affected services span a single group, each group shows up to 2
+ * alternatives; with multiple groups, 1 each (to bound banner width).
+ *
+ * @param {object[]} affected - Affected services (need .id, .category)
+ * @param {object[]} allServices - All services (need .id, .category, .status, .incidents, .aiwatchScore)
  * @returns {{ category: string, label: string, items: { id: string, name: string, aiwatchScore: number | null }[] }[]}
  */
 export function getGroupedFallbacks(affected, allServices) {
@@ -218,7 +231,6 @@ export function getGroupedFallbacks(affected, allServices) {
   // Defensive: getFallbacks already excludes non-operational AND active-incident candidates (#550),
   // so this set currently never drops anything — kept as a guard in case that contract changes.
   const nonOperationalIds = new Set(allServices.filter(s => s.status !== 'operational' || hasActiveIncident(s)).map(s => s.id))
-  const affectedProviders = new Set(affected.map(s => s.provider).filter(Boolean))
   const eligibleAffected = affected.filter(a => !EXCLUDE_FALLBACK.includes(a.id))
   const numGroups = new Set(eligibleAffected.map(a => {
     const tierLabel = tierLabelFor(tierFor(a.id))
@@ -233,12 +245,9 @@ export function getGroupedFallbacks(affected, allServices) {
     const groupKey = tierLabel ? `${svc.category}:${tierLabel}` : svc.category
     if (seenGroups.has(groupKey)) continue
     seenGroups.add(groupKey)
-    const candidates = getFallbacks(svc, allServices).filter(f => {
-      if (nonOperationalIds.has(f.id)) return false
-      const fSvc = allServices.find(s => s.id === f.id)
-      if (fSvc?.provider && affectedProviders.has(fSvc.provider)) return false
-      return true
-    })
+    // #554 — selection parity with the worker: keep only the live-clean guard (getFallbacks
+    // already enforces it; nonOperationalIds is a defensive backstop). No same-provider exclusion.
+    const candidates = getFallbacks(svc, allServices).filter(f => !nonOperationalIds.has(f.id))
     if (candidates.length === 0) continue
     const label = tierLabel || CATEGORY_LABEL[svc.category] || svc.category
     groups.push({ category: svc.category, label, items: candidates.slice(0, perGroup) })

@@ -230,6 +230,23 @@ describe('buildGroupedFallbackText', () => {
     expect(text).not.toContain('Coding Agent:')
   })
 
+  it('#554 — keeps a candidate whose provider matches an affected service (parity guard vs dashboard)', () => {
+    // Faithful mirror of the dashboard `#554` headline test: ChatGPT (OpenAI) down + Claude Code
+    // (Anthropic) degraded; claude.ai (Anthropic) is operational. claude.ai's provider (Anthropic)
+    // matches an affected service (Claude Code), so the dashboard's former blanket rule dropped it →
+    // empty fallback. The worker has no such rule, so claude.ai IS recommended. The `provider` fields
+    // are populated so that if a future change re-adds a provider exclusion reading them, claude.ai
+    // would drop and this test breaks — catching the cross-surface drift.
+    const svcs = [
+      { id: 'chatgpt', category: 'app', name: 'ChatGPT', provider: 'OpenAI', status: 'down', aiwatchScore: 67 },
+      { id: 'claude-code', category: 'agent', name: 'Claude Code', provider: 'Anthropic', status: 'degraded', aiwatchScore: 70 },
+      { id: 'claudeai', category: 'app', name: 'claude.ai', provider: 'Anthropic', status: 'operational', aiwatchScore: 84 },
+      { id: 'characterai', category: 'app', name: 'Character.AI', provider: 'Character AI', status: 'operational', aiwatchScore: 79 },
+    ]
+    const text = buildGroupedFallbackText(['chatgpt', 'claude-code'], svcs)
+    expect(text).toContain('claude.ai')  // recommended despite sharing Anthropic with the degraded Claude Code
+  })
+
   it('uses tier label (Voice) instead of category label (API) for voice services', () => {
     const voiceServices = [
       { id: 'elevenlabs', category: 'api', name: 'ElevenLabs', status: 'degraded', aiwatchScore: 54 },
