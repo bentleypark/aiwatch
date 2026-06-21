@@ -17,7 +17,7 @@ Thank you for your interest in contributing to AIWatch!
 
 Use [AGENTS.md](./AGENTS.md) as the shared repository entrypoint.
 
-If you are working with Claude Code, also follow [CLAUDE.md](../CLAUDE.md) for Claude-specific
+If you are working with Claude Code, also follow [CLAUDE.md](./CLAUDE.md) for Claude-specific
 workflow and automation details.
 
 Shared workflow — especially:
