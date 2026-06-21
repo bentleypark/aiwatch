@@ -1,5 +1,45 @@
 // Shared utility functions for AIWatch Worker
 
+import type { Incident } from './types'
+
+const IMPACT_RANK: Record<string, number> = { critical: 3, major: 2, minor: 1 }
+
+/** Worst impact among a service's UNRESOLVED incidents, or null if none. */
+export function worstUnresolvedImpact(
+  incidents: Incident[] | undefined,
+): 'critical' | 'major' | 'minor' | null {
+  let worst: 'critical' | 'major' | 'minor' | null = null
+  let rank = 0
+  for (const inc of incidents ?? []) {
+    if (inc.status === 'resolved') continue
+    const imp = inc.impact
+    if (imp !== 'critical' && imp !== 'major' && imp !== 'minor') continue
+    const r = IMPACT_RANK[imp]
+    if (r > rank) { rank = r; worst = imp }
+  }
+  return worst
+}
+
+/**
+ * #733 — does this status snapshot count as UP for the daily uptime counter (ok/total)?
+ *
+ * `operational` → up; `down` → down. A `degraded` snapshot counts as DOWN only when a
+ * **major/critical** unresolved incident backs it. A `degraded` from a minor/partial-scope
+ * incident (e.g. OpenAI's FedRAMP "degraded performance", Deepgram's Voice-Agent downstream
+ * component) — or from a transient no-incident fetch hiccup — is NOT a real service-wide
+ * outage, so it counts as up. This mirrors the official rolling-uptime weighting (minor impact
+ * barely dents uptime) and stops a single sticky minor incident from cratering weekly uptime to
+ * ~50% while the status page's own uptime reads ~100%. The counter feeds /api/uptime, the weekly
+ * Stability Trend, AND the AIWatch Score's uptime component, so all three align with official.
+ */
+export function countsAsUptimeOk(status: string, incidents: Incident[] | undefined): boolean {
+  if (status === 'operational') return true
+  if (status === 'down') return false
+  // degraded: down for uptime only when a major/critical unresolved incident justifies it
+  const worst = worstUnresolvedImpact(incidents)
+  return worst !== 'major' && worst !== 'critical'
+}
+
 export function formatDuration(start: Date, end: Date): string {
   const diffMs = end.getTime() - start.getTime()
   const totalMin = Math.max(1, Math.ceil(diffMs / 60_000))

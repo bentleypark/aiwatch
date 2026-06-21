@@ -4,7 +4,7 @@
 import { kvPut } from './utils'
 
 export interface ChangelogEntry {
-  source: string    // 'openai' | 'google' | 'anthropic' | 'copilot'
+  source: string    // 'openai' | 'google' | 'anthropic'
   title: string
   url: string
   date: string      // ISO date
@@ -21,7 +21,10 @@ export const CHANGELOG_SOURCES: ChangelogSource[] = [
   { id: 'openai', name: 'OpenAI', feedUrl: 'https://openai.com/blog/rss.xml', type: 'rss' },
   { id: 'google', name: 'Google AI', feedUrl: 'https://blog.google/technology/ai/rss/', type: 'rss' },
   { id: 'anthropic', name: 'Anthropic', feedUrl: 'https://www.anthropic.com/news', type: 'html' },
-  { id: 'copilot', name: 'GitHub Copilot', feedUrl: 'https://github.blog/changelog/label/copilot/feed/', type: 'rss' },
+  // #733 — GitHub Copilot dropped: its changelog is high-volume product-feature churn
+  // (per-surface availability, UI tweaks, deprecations) that monopolized the briefing's 8-slot
+  // section and crowded out the major LLM providers. (Copilot status/uptime monitoring is unaffected
+  // — that's services.ts, a separate pipeline from this changelog briefing source.)
 ]
 
 // OpenAI/Google blog RSS contains non-API content — filter to relevant items
@@ -37,8 +40,6 @@ export function isRelevantEntry(title: string, source: string): boolean {
     if (ANTHROPIC_NOISE.test(title)) return false
     return ANTHROPIC_RELEVANCE.test(title)
   }
-  // Pre-filtered changelog sources — all entries are relevant
-  if (source === 'copilot') return true
   // Blog posts: require relevance keyword, reject noise
   if (NOISE_KEYWORDS.test(title)) return false
   return RELEVANCE_KEYWORDS.test(title)
@@ -394,12 +395,46 @@ export function formatChangelogSection(entries: ChangelogEntry[]): string {
     openai: 'OpenAI',
     google: 'Google AI',
     anthropic: 'Anthropic',
-    copilot: 'GitHub Copilot',
   }
 
-  const sorted = entries
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .slice(0, 8) // max 8 items in Discord embed
+  const MAX_ITEMS = 8 // Discord embed budget
+
+  // #733 — source-fair selection. A flat date-desc top-N let a single high-volume source
+  // (GitHub Copilot, 10 entries in one week) fill every slot and silently crowd out the major
+  // LLM providers — the briefing then read as "only that source had changes". Instead: group by
+  // source (date-desc within), order sources by recency, and round-robin so EACH source with
+  // entries gets a slot before any source gets a second. With 3 sources / 8 slots this guarantees
+  // every active source appears. Anything truncated is surfaced via an explicit overflow line.
+  const bySource = new Map<string, ChangelogEntry[]>()
+  for (const e of [...entries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())) {
+    if (!bySource.has(e.source)) bySource.set(e.source, [])
+    bySource.get(e.source)!.push(e)
+  }
+  // Source order: most-recent entry first (each source's list is already date-desc, so [0] is newest).
+  const sourceOrder = [...bySource.keys()].sort(
+    (s1, s2) => new Date(bySource.get(s2)![0].date).getTime() - new Date(bySource.get(s1)![0].date).getTime(),
+  )
+  const selected: ChangelogEntry[] = []
+  let progressed = true
+  while (selected.length < MAX_ITEMS && progressed) {
+    progressed = false
+    for (const s of sourceOrder) {
+      if (selected.length >= MAX_ITEMS) break
+      const arr = bySource.get(s)!
+      if (arr.length === 0) continue
+      selected.push(arr.shift()!)
+      progressed = true
+    }
+  }
+  // Overflow: whatever remains per source after the round-robin (selection is capped, not the input).
+  const droppedCount = entries.length - selected.length
+  const droppedSources = sourceOrder
+    .filter((s) => bySource.get(s)!.length > 0)
+    .map((s) => sourceNames[s] ?? s)
+
+  // Render selected entries chronologically (newest first) — round-robin interleaves sources,
+  // but the list reads better in date order.
+  const sorted = selected.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
   const droppedSamples: string[] = []
   const lines = sorted.map((e) => {
@@ -424,6 +459,12 @@ export function formatChangelogSection(entries: ChangelogEntry[]): string {
   // format with parens) doesn't silently degrade every entry to plain text.
   if (droppedSamples.length > 0) {
     console.warn(`[changelog] dropped ${droppedSamples.length} unsafe URL(s) from briefing markdown — samples: ${droppedSamples.join(' | ')}`)
+  }
+
+  // #733 — surface truncation so an over-budget week never silently looks like "nothing else changed".
+  if (droppedCount > 0) {
+    const from = droppedSources.length > 0 ? ` from ${droppedSources.join(', ')}` : ''
+    lines.push(`• …and ${droppedCount} more${from}`)
   }
 
   return lines.join('\n')
