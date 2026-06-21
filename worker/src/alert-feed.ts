@@ -19,7 +19,10 @@ import type { ServiceStatus } from './services'
 export type AlertKind = 'new' | 'resolved' | 'down' | 'degraded' | 'recovered'
 
 /** The verbatim Discord embed core shared by the operator send and the per-user relay (the #475
- *  "byte-identical" contract). Footer + timestamp are added at delivery, not stored here. */
+ *  "byte-identical" contract). Footer + timestamp are added at delivery, not stored here.
+ *  Per-user exceptions (deliberate deviations from byte-identical): the operator-only tweet draft is
+ *  never in the feed, and #726 rewrites the "View on AIWatch" link to the is-down page (general
+ *  subscribers) via `toPerUserEntry` in the relay — the stored embed keeps the operator dashboard link. */
 export interface AlertEmbed {
   title: string
   description: string

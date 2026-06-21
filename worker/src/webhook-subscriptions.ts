@@ -17,6 +17,7 @@
 // removed the old browser relay in the same release so the two paths never double-send.
 
 import { kvPut, kvDel, isAllowedAlertWebhook } from './utils'
+import { isDownUrl } from './rss'
 import type { AlertFeedEntry, AlertKind } from './alert-feed'
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -403,6 +404,26 @@ export function classifyDelivery(status: number | null): DeliveryOutcome {
   return 'retry'
 }
 
+// #726 — per-user (general subscriber) parity exception to the #475 byte-identical contract, the
+// same kind of exception as the operator-only tweet draft (which is stripped from the feed). The
+// operator embed's "View on AIWatch" link points at the operator dashboard (ai-watch.dev/#{svc});
+// general subscribers should land on the friendlier is-down page instead (matching Slack /feed).
+// Today the only `ai-watch.dev/#<id>` in the description is that single "View on AIWatch" link
+// (built in index.ts), but the rewrite does NOT depend on that: it's GLOBAL (`/g` — maps EVERY
+// hash link to its is-down URL) and IDEMPOTENT (an already-rewritten `is-…-down` URL has no hash to
+// match), so it stays correct even if a future section adds a second dashboard link. NO_IS_DOWN_PAGE
+// services (bedrock/azureopenai) map back to the same hash → per-link no-op. Operator delivery is a
+// direct cron post (not via deliverToSubscribers), so the operator link is never touched.
+// The link format is pinned by a test (toPerUserEntry rewrites the exact `[View on AIWatch](url)`
+// markup index.ts emits) so a host/format drift breaks the build, not silently per-user delivery.
+const DASHBOARD_HASH_LINK_RE = /https:\/\/ai-watch\.dev\/#([a-z0-9]+)/g
+export function toPerUserEntry(entry: AlertFeedEntry): AlertFeedEntry {
+  const desc = entry.embed.description
+  if (!desc) return entry
+  const rewritten = desc.replace(DASHBOARD_HASH_LINK_RE, (_m, id) => isDownUrl(id))
+  return rewritten === desc ? entry : { ...entry, embed: { ...entry.embed, description: rewritten } }
+}
+
 /** Fan-out the recent alert feed to all confirmed subscribers. Each sub: decrypt URL → filter →
  *  dedup (webhook:sent:) → POST. Isolated per sub (one dead webhook never blocks the rest). Dead
  *  webhooks (410/404, or MAX_FAIL_COUNT consecutive retries) are pruned. Wired into the cron in #486
@@ -438,7 +459,8 @@ export async function deliverToSubscribers(
         const already = await kv.get(sentKey).catch(() => null)
         if (already) continue
         stats.attempted++
-        const status = await postEmbed(url, entry).catch(() => null)
+        // #726 — general subscribers get the is-down link, not the operator dashboard link.
+        const status = await postEmbed(url, toPerUserEntry(entry)).catch(() => null)
         const outcome = classifyDelivery(status)
         if (outcome === 'prune') {
           await deleteConfirmed(kv, hash)

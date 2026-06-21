@@ -137,6 +137,16 @@ export function resolveFeedService(
   )
 }
 
+// Canonical is-down page URL for a service (no status hint). /is-{slug}-down is a real
+// crawlable SSR page; no-official-uptime services excluded from the is-down SEO set (#263,
+// NO_IS_DOWN_PAGE — bedrock/azureopenai) fall back to the dashboard hash. Precondition: pass a
+// KNOWN service id — no validation is performed, so an unknown id yields a URL to a 404 is-down page.
+// Single source of truth — reused by serviceLink (RSS item link, #467) and the per-user Discord
+// relay (#726) so the "general subscriber → is-down" target can't drift from the feed slug map.
+export function isDownUrl(serviceId: string): string {
+  return NO_IS_DOWN_PAGE.has(serviceId) ? `${SITE}/#${serviceId}` : `${SITE}/is-${feedSlug(serviceId)}-down`
+}
+
 // Item <link> target. /is-{slug}-down is a real crawlable URL (feed readers and
 // Googlebot ignore the dashboard's `#hash` route); estimate-only services with
 // no SEO page fall back to the hash route.
@@ -145,8 +155,8 @@ export function resolveFeedService(
 // reusing the cached outage card. The hash fallback (estimate-only services) gets no hint — it has
 // no is-down OG page to unfurl.
 function serviceLink(serviceId: string, kind: ItemKind): string {
-  if (NO_IS_DOWN_PAGE.has(serviceId)) return `${SITE}/#${serviceId}`
-  return appendStatusHint(`${SITE}/is-${feedSlug(serviceId)}-down`, kind)
+  if (NO_IS_DOWN_PAGE.has(serviceId)) return isDownUrl(serviceId)
+  return appendStatusHint(isDownUrl(serviceId), kind)
 }
 
 // XML 1.0 forbids most C0 control characters. escapeXml handles & < > " but
