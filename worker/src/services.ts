@@ -40,7 +40,7 @@ export const SERVICES: ServiceConfig[] = [
   // incident therefore ALSO flips the openai badge to the page's overall status (e.g. degraded /
   // "Partial System Degradation") — accepted in #693: it mirrors what OpenAI itself reports, and the
   // surfaced incident clarifies the FedRAMP scope.
-  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'login', 'conversation', 'chatgpt workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMQM1K5', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'], displayComponentIds: ['01JP8CD9JR3HR6Y7G4Q75N4DVW', '01JMXBRMFEMZK0HPK19RYET250', '01JMXBRMFE4MAP2BHSJNZ787WX', '01JMXBRMFE5ESNNV8JDHVCGSRD', '01JMXBRMFEKVBWKK82B44QFMCE', '01JMXBRMFEQW613TFE89F45035', '01JMXBRMFESJCBGJR10PDD3WCQ', '01K9G527YRPY1EFRMHTKB5BKT5', '01JMXBRMFE6N2NNT7DG6XZQ6PW', '01JMXBRMFEV0AJ0VVS68N9CD6R', '01JMXBRMFEVZ7E0X9GD9FWR9WX', '01JSM5RTJWHRWDTS6Q604VEW3B', '01KKAD7C71MCCH3FTREMJH4AAS', '01KTQBYVARFJ5KMCSECM06VKCF'] },
+  { id: 'openai', name: 'OpenAI API', provider: 'OpenAI', category: 'api', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentExclude: ['chatgpt', 'excel plugin', 'gpts', 'voice mode', 'deep research', 'pinned', 'sora', 'sign-in', 'login', 'conversation', 'chatgpt workspaces', 'logged out', 'codex', 'support chat', 'file', 'download', 'preview', 'upload', 'project files'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMQM1K5', incidentKeywords: ['api', 'us-east-1', 'us-west-2', 'eu-central-1'], statusComponentId: '01JMXBRMFE6N2NNT7DG6XZQ6PW', statusComponentIds: ['01JMXBRMFE6N2NNT7DG6XZQ6PW', '01JP8CD9JR3HR6Y7G4Q75N4DVW', '01JMXBRMFEMZK0HPK19RYET250', '01JMXBRMFEV0AJ0VVS68N9CD6R', '01JMXBRMFE4MAP2BHSJNZ787WX', '01JMXBRMFE5ESNNV8JDHVCGSRD', '01JMXBRMFEKVBWKK82B44QFMCE', '01JMXBRMFEVZ7E0X9GD9FWR9WX', '01JMXBRMFEQW613TFE89F45035', '01JMXBRMFESJCBGJR10PDD3WCQ', '01JSM5RTJWHRWDTS6Q604VEW3B', '01K9G527YRPY1EFRMHTKB5BKT5'], displayComponentIds: ['01JP8CD9JR3HR6Y7G4Q75N4DVW', '01JMXBRMFEMZK0HPK19RYET250', '01JMXBRMFE4MAP2BHSJNZ787WX', '01JMXBRMFE5ESNNV8JDHVCGSRD', '01JMXBRMFEKVBWKK82B44QFMCE', '01JMXBRMFEQW613TFE89F45035', '01JMXBRMFESJCBGJR10PDD3WCQ', '01K9G527YRPY1EFRMHTKB5BKT5', '01JMXBRMFE6N2NNT7DG6XZQ6PW', '01JMXBRMFEV0AJ0VVS68N9CD6R', '01JMXBRMFEVZ7E0X9GD9FWR9WX', '01JSM5RTJWHRWDTS6Q604VEW3B'] },
   { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api', statusUrl: 'https://aistudio.google.com/status', apiUrl: null, gcloudProduct: 'Vertex Gemini API', gcloudProductId: 'Z0FZJAMvEB4j3NbCJs6B', aistudioStatus: true, incidentKeywords: ['vertex', 'gemini', 'us-central1', 'europe-west1', 'asia-northeast1'] },
   { id: 'bedrock', name: 'Amazon Bedrock', provider: 'AWS', category: 'api', statusUrl: 'https://health.aws.amazon.com/health/status', apiUrl: null,
     // #677 — AWS Health public events JSON (all regions in one fetch, real start+end timestamps)
@@ -167,7 +167,7 @@ export const SERVICES: ServiceConfig[] = [
   // Display-only; disjoint from openai/codex. Compliance API + Agent belong to ChatGPT per the
   // official grouping (not the API group, despite the names). Login here is the ChatGPT Login
   // (the APIs group has a separate API-Login id absent from summary.json).
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', displayComponentIds: ['01JNKS9D9S72PMP1938PVFFQN4', '01K8C008QVXHA6JX98PAS42VPD', '01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ'] },
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K8C008QVXHA6JX98PAS42VPD', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ'], displayComponentIds: ['01K8C008QVXHA6JX98PAS42VPD', '01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ'] },
   // #619 — DeepSeek's consumer app (chat.deepseek.com, "DeepSeek App"). Same Flashduty feed as
   // DeepSeek API (#618), scoped to the Web Chat component — the api-vs-app split mirror of
   // OpenAI API↔ChatGPT. Feed-only (no apiUrl): when the scraper feed is fresh it supersedes +
@@ -201,7 +201,7 @@ export const SERVICES: ServiceConfig[] = [
   // displayComponentIds (#606 Cat B): the official "Codex" group (5) on status.openai.com.
   // Display-only; disjoint from openai/chatgpt. App shares Codex's id prefix (01KMKFAMWK) and
   // is in neither the ChatGPT(12) nor APIs(12) official group → Codex.
-  { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', incidentIoGroupId: '01KMKF9EBTCD8BN9PG8DJZXRSQ', displayComponentIds: ['01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK', '01KMP3KP5MGE23B80K1EK4S8PV', '01KMKFAMWKQ81YWSE1Z18R6VHR'] },
+  { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', incidentIoGroupId: '01KMKF9EBTCD8BN9PG8DJZXRSQ', statusComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', statusComponentIds: ['01KMP3KP5MGE23B80K1EK4S8PV', '01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK', '01KMKFAMWKQ81YWSE1Z18R6VHR'], displayComponentIds: ['01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK', '01KMP3KP5MGE23B80K1EK4S8PV', '01KMKFAMWKQ81YWSE1Z18R6VHR'] },
   // cursor badge reflects worst-of: IDE primary + Cloud Agents + Automations + CLI (#379).
   // Bugbot/cursor.com/Marketplace are auxiliary surfaces and intentionally excluded.
   { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c'] },
@@ -797,11 +797,22 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       const uptimeResult = (prefetched?.uptimeHtml && config.statusComponentId)
         ? parseUptimeData(prefetched.uptimeHtml, config.statusComponentId)
         : null
+      // Aggregate the impact calendar over the whole badge group (statusComponentIds) when set, so a
+      // multi-component service's calendar matches its badge scope + the official group calendar
+      // (#693 follow-up); else the single primary component. incident.io HTML carries impacts for ALL
+      // components (incl. ones absent from summary.json), so the group calendar can be more complete
+      // than the summary.json-sourced badge.
       const ioDailyImpact = (prefetched?.uptimeHtml && config.incidentIoComponentId)
-        ? parseIncidentIoComponentImpacts(prefetched.uptimeHtml, config.incidentIoComponentId)
+        ? parseIncidentIoComponentImpacts(prefetched.uptimeHtml, config.statusComponentIds ?? config.incidentIoComponentId)
         : null
-      const dailyImpact = uptimeResult?.dailyImpact
-        ?? (ioDailyImpact && Object.keys(ioDailyImpact).length > 0 ? ioDailyImpact : null)
+      // Statuspage uptimeData is the preferred per-day source — but ONLY when it actually produced
+      // days. For an incident.io service, parseUptimeData(incident.io HTML) returns an EMPTY map, which
+      // must NOT clobber the incident.io impacts (the #693-follow-up calendar-blank regression). So
+      // fall through to ioDailyImpact unless the Statuspage map is non-empty.
+      const statuspageDaily = uptimeResult?.dailyImpact
+      const dailyImpact = (statuspageDaily && Object.keys(statuspageDaily).length > 0)
+        ? statuspageDaily
+        : (ioDailyImpact && Object.keys(ioDailyImpact).length > 0 ? ioDailyImpact : null)
 
       // Uptime%: Statuspage uptimeData > incident.io component_uptimes > incident duration estimate
       let uptimeValue: number | null = null

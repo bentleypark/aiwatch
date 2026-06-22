@@ -42,11 +42,13 @@ export function buildCalendarFromIncidents(incidents, dailyImpact, days = 30, cu
   // three known levels).
   if (dailyImpact) {
     const KNOWN_IMPACT = new Set(['critical', 'major', 'minor'])
-    for (const [utcDay, impact] of Object.entries(dailyImpact)) {
+    for (const [key, impact] of Object.entries(dailyImpact)) {
       if (!KNOWN_IMPACT.has(impact)) continue
-      // UTC date key → local date key (may shift ±1 day depending on timezone)
-      const localKey = toLocalDateKey(new Date(utcDay + 'T12:00:00Z'))
-      escalate(dayStatus, localKey, impactToCellStatus(impact))
+      // incident.io emits full ISO timestamps → bucket the REAL instant to the viewer's local day
+      // (fixes the UTC-vs-local off-by-one, #693 follow-up). statuspage/betterstack emit bare UTC
+      // dates (already the source's daily bucket) → anchor at noon UTC to keep the same local day.
+      const d = key.includes('T') ? new Date(key) : new Date(key + 'T12:00:00Z')
+      escalate(dayStatus, toLocalDateKey(d), impactToCellStatus(impact))
     }
   }
 
