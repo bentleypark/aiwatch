@@ -33,29 +33,16 @@ export default function StatusPill({ status = 'operational', partialCount = 0, s
   const isPartial = effective === 'partial'
   const cls = PILL_CLASS[effective] ?? PILL_CLASS.operational
 
-  const pill = (
+  // #744 — single chip for partial: the "Partial" pill already conveys the state, so fold the count
+  // into it (`⚠ Partial · N`) instead of a redundant second `⚠ N affected` chip.
+  return (
     <span
       role="status"
       className={`inline-flex items-center mono font-medium uppercase text-[9px] tracking-[0.06em] whitespace-nowrap shrink-0 ${cls}`}
       style={{ padding: '3px 7px', borderRadius: '4px' }}
       title={isPartial ? t('status.partial.tooltip') : undefined}
     >
-      {t(`status.${effective}`)}
-    </span>
-  )
-
-  if (!isPartial) return pill
-
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      {pill}
-      <span
-        className="inline-flex items-center mono font-medium text-[9px] whitespace-nowrap shrink-0 bg-[var(--status-bg-yellow)] text-[var(--yellow)]"
-        style={{ padding: '3px 7px', borderRadius: '4px' }}
-        title={t('status.partial.tooltip')}
-      >
-        ⚠ {partialCount}{t('status.partial.suffix')}
-      </span>
+      {isPartial ? `⚠ ${t('status.partial')} · ${partialCount}` : t(`status.${effective}`)}
     </span>
   )
 }

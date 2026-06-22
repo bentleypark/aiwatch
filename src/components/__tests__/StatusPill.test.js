@@ -10,17 +10,20 @@ const { default: StatusPill } = await import('../StatusPill')
 
 const render = (props) => renderToStaticMarkup(createElement(StatusPill, props))
 
-// #722 — the JSX render of the intermediate "Partial" pill + "⚠ N affected" chip.
-// The decision (resolveStatusDisplay) is unit-tested separately; this pins the
-// component wiring: which label key, the yellow class, and the count chip.
-describe('StatusPill render (#722 partial)', () => {
-  it('renders a yellow Partial pill + count chip when operational with partialCount>0', () => {
+// #722/#744 — the JSX render of the intermediate "Partial" pill. The decision
+// (resolveStatusDisplay) is unit-tested separately; this pins the component wiring:
+// the label key, the yellow class, and the SINGLE merged chip (⚠ Partial · N).
+describe('StatusPill render (#722/#744 partial)', () => {
+  it('renders a SINGLE yellow Partial pill with the count folded in (⚠ Partial · N) when operational + partialCount>0', () => {
     const html = render({ status: 'operational', partialCount: 3 })
     expect(html).toContain('status.partial')          // pill label key
     expect(html).toContain('status-bg-yellow')        // yellow state, not green
-    expect(html).toContain('⚠ 3')                     // affected-count chip
-    expect(html).toContain('status.partial.suffix')   // chip suffix key
+    expect(html).toContain('⚠')                       // warning glyph in the pill
+    expect(html).toContain('· 3')                      // count folded into the pill
+    expect(html).not.toContain('status.partial.suffix') // the old separate count chip is gone
     expect(html).not.toContain('status-bg-green')
+    // single chip — the yellow class appears exactly once (was twice: pill + count chip)
+    expect((html.match(/status-bg-yellow/g) || []).length).toBe(1)
   })
 
   it('renders a bare green Operational pill (no chip) when nothing is affected', () => {

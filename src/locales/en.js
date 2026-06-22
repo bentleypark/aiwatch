@@ -40,7 +40,6 @@ const en = {
   'cal.status.major': 'Major',
   'cal.status.critical': 'Critical',
   'status.partial': 'Partial',
-  'status.partial.suffix': ' affected',
   'status.partial.tooltip': 'Some components are reporting issues on the provider status page; overall service availability is still nominal.',
 
   // Overview

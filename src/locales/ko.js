@@ -40,7 +40,6 @@ const ko = {
   'cal.status.major': '주요',
   'cal.status.critical': '심각',
   'status.partial': '부분 장애',
-  'status.partial.suffix': '개 영향',
   'status.partial.tooltip': '제공사 상태 페이지에서 일부 구성요소에 이슈가 보고됐습니다. 서비스 전체 가용성은 정상 범위입니다.',
 
   // Overview

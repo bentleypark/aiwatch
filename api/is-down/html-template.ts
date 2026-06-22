@@ -83,6 +83,7 @@ function escJsForAttr(jsLiteral: string): string {
 
 function statusEmoji(status: string): string {
   if (status === 'operational') return '&#x1F7E2;'
+  if (status === 'partial') return '&#x1F7E1;'   // #722/#744 — yellow (visible header only)
   if (status === 'degraded') return '&#x1F7E1;'
   return '&#x1F534;'
 }
@@ -140,6 +141,7 @@ const REPORTS_INDEX_LABEL = 'Monthly Reports'
 
 function statusColor(status: string): string {
   if (status === 'operational') return '#3fb950'
+  if (status === 'partial') return '#d29922'   // #722/#744 — yellow (visible header only)
   if (status === 'degraded') return '#e86235'
   return '#f85149'
 }
@@ -316,9 +318,11 @@ button.btn{cursor:pointer;font-family:inherit;line-height:inherit}
 .cta-help{font-size:11.5px;margin-top:8px;color:#8b949e;line-height:1.5}
 .cta-alt{font-size:12px;margin-top:10px;color:#8b949e}
 .cta-alt a{color:#8b949e;text-decoration:underline}
-.report-issue{background:none;border:none;color:#8b949e;font-size:12px;cursor:pointer;text-decoration:underline;padding:0;font-family:inherit}
-.report-issue:hover{color:#c9d1d9}
-.report-issue:disabled{cursor:default;text-decoration:none;color:#3fb950}
+/* #575/#744 — floating "Report an issue" entry (mirrors the dashboard Overview FAB): always visible,
+   decoupled from the alert CTA. Bottom-right, clears the share bar / mobile footer by scroll. */
+.report-fab{position:fixed;bottom:20px;right:20px;z-index:40;display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:999px;font-size:13px;font-weight:500;font-family:inherit;background:#161b22;color:#e6edf3;border:1px solid rgba(255,255,255,0.18);box-shadow:0 4px 12px rgba(0,0,0,0.4);cursor:pointer}
+.report-fab:hover{filter:brightness(1.15)}
+.report-fab:disabled{cursor:default;color:#3fb950;border-color:#3fb950}
 .report-modal{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
 .report-modal[hidden]{display:none}
 .report-modal-card{background:#161b22;border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:24px;width:100%;max-width:460px;text-align:left}
@@ -536,14 +540,19 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
 </div>`
   }
 
-  const color = statusColor(service.status)
-  const answer = statusAnswer(service.status) // #566 — on-page direct answer (feeds Google's auto-snippet)
   // #722 — provider reports a sub-threshold partial issue (some components down) while the service
-  // reads operational. Surface it as a distinct yellow note so the page doesn't contradict the
-  // provider's "Some services are down" header. The SEO answer/title/emoji stay on the raw status
-  // ("Is X down? → No, operational") — the service IS up overall; only specific components are affected.
+  // reads operational. The VISIBLE header (dot + answer line) reflects this as a yellow "Partial"
+  // state (#744 — it used to read flat green "operational", contradicting the partial badge/note),
+  // but the SEO `<title>` + meta description stay on the raw status ("Is X down? → No, operational")
+  // since the service IS up overall — only specific components are affected (no SERP-snippet flip).
   const partialCount = typeof service.partialCount === 'number' ? service.partialCount : 0
   const isPartial = service.status === 'operational' && partialCount > 0
+  const displayStatus = isPartial ? 'partial' : service.status // VISIBLE header only — never the title/meta
+  const color = statusColor(displayStatus)
+  const compStr = `${partialCount} component${partialCount > 1 ? 's' : ''}`
+  const answer = isPartial
+    ? { yesno: 'Partial', phrase: `has ${compStr} affected (operational overall)` }
+    : statusAnswer(service.status) // #566 — on-page direct answer (feeds Google's auto-snippet)
   const hasUptime = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d)
   const gradeStr = service.scoreGrade ? ` (${service.scoreGrade.charAt(0).toUpperCase() + service.scoreGrade.slice(1)})` : ''
   // #591 — a stale-source service carries a frozen uptime30d + an inflated score; omit both here
@@ -556,10 +565,9 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
   const lastIncident = incidents.length > 0 ? incidents[0] : null
 
   return `<div class="header">
-<h1>${statusEmoji(service.status)} Is ${esc(seo.displayName)} Down?</h1>
+<h1>${statusEmoji(displayStatus)} Is ${esc(seo.displayName)} Down?</h1>
 <p style="font-size:20px;font-weight:600;color:${color};margin:12px 0">${answer.yesno} &mdash; ${esc(seo.displayName)} ${answer.phrase}</p>
 <p class="meta mono">${metaParts.join(' &middot; ')}</p>
-${isPartial ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; ${partialCount} component${partialCount > 1 ? 's' : ''} affected &mdash; the provider status page reports a partial issue (overall service operational)</p>` : ''}
 ${lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}</p>` : '<p class="meta">No recent incidents</p>'}
 ${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${service.rank}${service.rankTied ? ' (tied)' : ''}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'header'})">AIWatch reliability score</a> &middot; <a href="${REPORTS_INDEX_HREF}" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'header'})">${REPORTS_INDEX_LABEL} &rarr;</a></p>` : ''}
 ${service.incidentSourceStale ? `<p class="meta" style="color:var(--amber)">⚠️ ${esc(seo.displayName)}'s status page moved to a source AIWatch can't reach, so its incident feed is frozen — uptime, score, and ranking are omitted until the source is reachable again. Live status above is still measured directly.</p>` : ''}
@@ -701,7 +709,7 @@ function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string)
 <!-- #575: 1st-party crowd report (category + short description). We COLLECT it; the recent-report
      list is shown ONLY on a gated surface (when an independent signal already shows a problem) — we
      never render a public "N reporting" verdict that could contradict an operational status. -->
-<p class="cta-alt"><button type="button" class="report-issue" id="report-open">⚠️ Seeing a problem with ${esc(seo.displayName)}? Report an issue</button></p>
+<button type="button" class="report-fab" id="report-open" aria-label="Report an issue with ${esc(seo.displayName)}"><span aria-hidden="true">⚠️</span> Report an issue</button>
 </div>
 <div id="report-modal" class="report-modal" hidden>
 <div class="report-modal-card" role="dialog" aria-modal="true" aria-labelledby="report-modal-title">
