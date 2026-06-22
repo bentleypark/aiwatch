@@ -164,16 +164,17 @@ describe('renderPage <title> — live status (#566)', () => {
   })
 })
 
-// #722 — when a BetterStack service reads operational but `partialCount > 0` (sub-threshold
-// component outage), the header shows a yellow "N components affected" note — WITHOUT changing
-// the SEO answer/title (the service IS up overall: "Is X down? → No, operational").
-describe('renderPage — partial-outage note (#722)', () => {
-  it('renders the affected-components note when operational + partialCount > 0', () => {
+// #722/#744 — when a BetterStack service reads operational but `partialCount > 0` (sub-threshold
+// component outage), the VISIBLE header reflects a yellow "Partial" state (dot + answer line) so it
+// doesn't read flat-green "operational" while the badge/note say partial — but the SEO `<title>` +
+// meta description STAY operational (the service IS up overall: no "Is X down? → No" SERP flip).
+describe('renderPage — partial-outage header (#722/#744)', () => {
+  it('reflects partial in the VISIBLE header (yellow dot + "Partial" answer) but keeps the SEO title operational', () => {
     const html = renderPage('together', mkService({ status: 'operational', partialCount: 1 }), mkSeo(), [])
-    expect(html).toContain('1 component affected')
-    // SEO answer + title stay operational — the service is up overall.
-    expect(html).toContain('No &mdash; Claude is operational')
-    expect(html).toContain('Operational | AIWatch')
+    expect(html).toContain('&#x1F7E1; Is Claude Down?')            // VISIBLE: yellow dot in the H1
+    expect(html).toContain('Partial &mdash; Claude has 1 component affected') // VISIBLE: partial answer line
+    expect(html).not.toContain('No &mdash; Claude is operational') // the old flat-green verdict is gone
+    expect(html).toContain('Operational | AIWatch')                // SEO title UNCHANGED (no SERP flip)
   })
 
   it('pluralizes for multiple affected components', () => {
@@ -181,10 +182,12 @@ describe('renderPage — partial-outage note (#722)', () => {
     expect(html).toContain('3 components affected')
   })
 
-  it('omits the note when partialCount is 0 or absent', () => {
+  it('omits the partial header + keeps the green dot when partialCount is 0 or absent', () => {
     const html = renderPage('together', mkService({ status: 'operational' }), mkSeo(), [])
     expect(html).not.toContain('component affected')
     expect(html).not.toContain('components affected')
+    expect(html).toContain('&#x1F7E2; Is Claude Down?')            // green dot — fully operational
+    expect(html).toContain('No &mdash; Claude is operational')
   })
 
   it('does not render the note for a degraded service (the badge already conveys it)', () => {

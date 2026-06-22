@@ -20,6 +20,7 @@ import { groupIncidents } from '../utils/incidentGrouping'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
 import StatusPill from '../components/StatusPill'
+import { resolveStatusDisplay } from '../utils/statusDisplay'
 import EmptyState from '../components/EmptyState'
 
 // ── Status color maps ────────────────────────────────────────
@@ -117,7 +118,12 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
                  hover:border-t-[var(--border-hi)] hover:border-r-[var(--border-hi)] hover:border-b-[var(--border-hi)] transition-colors animate-[fade-in_0.3s_ease_both]"
       style={{
         animationDelay: `${index * 80}ms`,
-        borderLeft: `3px solid ${service.status === 'down' ? 'var(--red)' : service.status === 'degraded' ? 'var(--amber)' : 'var(--green)'}`,
+        // #744 — match the StatusPill badge: partial (operational + partialCount) → yellow, not green.
+        borderLeft: `3px solid ${
+          service.status === 'down' ? 'var(--red)'
+          : service.status === 'degraded' ? 'var(--amber)'
+          : resolveStatusDisplay(service.status, service.partialCount, service.sourceDead && !service.probeConfirmed) === 'partial' ? 'var(--yellow)'
+          : 'var(--green)'}`,
       }}
     >
       {/* ── Mobile compact layout ── */}
