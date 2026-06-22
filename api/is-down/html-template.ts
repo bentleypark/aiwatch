@@ -163,6 +163,10 @@ function formatDate(iso: string): string {
   return `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`
 }
 
+// #539→og-fix — maps the social share `?e=` hint to an OG card status the generator renders
+// (operational/degraded/down). 'reddit'/unknown/absent → fall through to live status (see renderPage).
+const HINT_TO_OG_STATUS: Record<string, string> = { down: 'down', degraded: 'degraded', active: 'operational', resolved: 'operational' }
+
 function formatElapsed(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime()
   if (ms < 0 || Number.isNaN(ms)) return ''
@@ -191,6 +195,12 @@ export function renderPage(
   // only populates this when an independent signal already shows a problem, so a non-empty list here
   // is already corroborated; an operational page passes [] and the section renders nothing.
   reports?: Array<{ cat: string; desc: string; ts: number }>,
+  // OG status hint (the `?e=` share param, #539→og-fix). When a tweet/social link carries a status
+  // hint (an outage/recovery share built by buildTweetDrafts), PIN the OG card's status to it so the
+  // unfurled card matches the post's moment — instead of the live status, which can have already
+  // drifted (the incident resolved/flapped) by the time the platform fetches the card. The page body
+  // still shows live status; only the social card is pinned. Absent / `reddit` → live status.
+  ogStatusHint?: string | null,
 ): string {
   // #566: lead the SERP title with the live status answer (falls back to "Live Status"
   // when status data is unavailable) so the result answers the query before the click.
@@ -200,8 +210,12 @@ export function renderPage(
   const desc = buildMetaDescription(seo, service, aiInsight ?? null)
   const canonical = `https://ai-watch.dev/is-${slug}-down`
 
-  // Dynamic OG image URL — cache busted per 10-min window
-  const ogParams = new URLSearchParams({ service: seo.displayName, status: service?.status ?? 'operational' })
+  // Dynamic OG image URL — cache busted per 10-min window.
+  // Pin the card status to the share hint when present (so a tweet's card matches the post moment,
+  // not the live status that may have drifted by unfurl time). HINT_TO_OG_STATUS (module scope) maps
+  // the `?e=` hint → an og status the generator knows; 'reddit'/unknown/absent falls through to live.
+  const ogStatus = (ogStatusHint && HINT_TO_OG_STATUS[ogStatusHint]) || service?.status || 'operational'
+  const ogParams = new URLSearchParams({ service: seo.displayName, status: ogStatus })
   if (service?.aiwatchScore != null && Number.isFinite(service.aiwatchScore)) ogParams.set('score', String(service.aiwatchScore))
   if (typeof service?.uptime30d === 'number' && !Number.isNaN(service.uptime30d)) ogParams.set('uptime', service.uptime30d.toFixed(2))
   ogParams.set('v', String(Math.floor(Date.now() / 600_000))) // 10-min cache bust
