@@ -937,6 +937,26 @@ describe('renderShareButtons onclick attributes (quote-escape contract)', () => 
   })
 })
 
+// Copy-link share text must carry "AIWatch" on EVERY status — the outage templates dropped it, so a
+// share posted during an incident lost the attribution (and the branding e2e went red whenever a real
+// incident was live). Deterministic here (no incident-state dependency).
+describe('renderShareButtons — copy text keeps AIWatch branding across statuses', () => {
+  const seo = mkSeo({ displayName: 'Claude API' })
+  const canonical = 'https://ai-watch.dev/is-claude-down'
+  const ogImage = 'https://aiwatch-worker.p2c2kbf.workers.dev/api/og?v=1'
+  const copyDataText = (status: string): string => {
+    const html = renderShareButtons(seo, mkService({ status }), canonical, ogImage)
+    const container = document.createElement('div')
+    container.innerHTML = html
+    return container.querySelector('button.share-copy')!.getAttribute('data-text') ?? ''
+  }
+  for (const status of ['down', 'degraded', 'operational']) {
+    it(`copy data-text contains "AIWatch" when ${status}`, () => {
+      expect(copyDataText(status)).toContain('AIWatch')
+    })
+  }
+})
+
 describe('RSS feed surfacing on /is-*-down (#430)', () => {
   it('emits a per-service RSS autodiscovery <link> in <head>', () => {
     const html = renderPage('claude', mkService(), mkSeo({ displayName: 'Claude' }), [])

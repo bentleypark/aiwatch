@@ -1034,10 +1034,14 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
     `${n} status: operational. No issues detected — tracked on AIWatch.`,
   ]
   const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
+  // Brand the down/degraded copy text too — the operational templates carry "AIWatch" inline but the
+  // outage ones didn't, so a share posted DURING an incident (the highest-share moment) dropped the
+  // attribution. A consistent branding tail keeps it on every status (and makes the branding e2e
+  // deterministic instead of incident-state-dependent).
   const copyText = rawStatus === 'down'
-    ? `${pick(downTexts)}${aiSuffix}\n${canonical}`
+    ? `${pick(downTexts)}${aiSuffix}\nTracked live on AIWatch:\n${canonical}`
     : rawStatus === 'degraded'
-    ? `${pick(degradedTexts)}${aiSuffix}\n${canonical}`
+    ? `${pick(degradedTexts)}${aiSuffix}\nTracked live on AIWatch:\n${canonical}`
     : pick(operationalTexts)
 
   // X hashtag from display name (e.g. "Claude" → "#Claude", "GitHub Copilot" → "#GitHubCopilot")
