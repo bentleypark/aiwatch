@@ -717,3 +717,47 @@ test.describe('Incident History — preview + show-more (#incident-history-colla
     await expect(main.getByRole('button', { name: /Show \d+ more|\d+개 더 보기/ })).toHaveCount(0)
   })
 })
+
+// #575 — ServiceDetails crowd reports: gated section + header report button (preset modal).
+test.describe('ServiceDetails — crowd reports (#575)', () => {
+  const now = Date.now()
+  const svc = {
+    id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic',
+    status: 'degraded', latency: 120, uptime30d: 99.5, uptimeSource: 'official', calendarDays: 30,
+    incidents: [{ id: 'c1', title: 'Elevated errors', status: 'investigating', impact: 'minor', startedAt: new Date(now - 60_000).toISOString(), timeline: [] }],
+    aiwatchScore: 80, scoreGrade: 'good', scoreConfidence: 'high',
+  }
+  const mockJson = {
+    services: [svc],
+    reportFeed: { claude: Array.from({ length: 7 }, (_, i) => ({ cat: 'errors', desc: `udesc ${i}`, ts: now - i * 60_000 })) },
+    lastUpdated: new Date().toISOString(),
+  }
+  const mount = async (page) => {
+    const mock = { json: mockJson }
+    await page.route('**/api/status**', (route) => route.fulfill(mock))
+    await page.route('**/api/status/cached', (route) => route.fulfill(mock))
+    await page.goto('/#claude')
+    await expect(page.locator('main').getByText(/Status Calendar|상태 캘린더/)).toBeVisible({ timeout: 20000 })
+  }
+
+  test('gated reports section renders with 5 preview + show-more toggle', async ({ page }) => {
+    await mount(page)
+    const main = page.locator('main')
+    await expect(main.getByText(/Recent user reports|최근 사용자 신고/)).toBeVisible()
+    await expect(main.getByText('udesc 0')).toBeVisible()
+    await expect(main.getByText('udesc 4')).toBeVisible()
+    await expect(main.getByText('udesc 5')).toHaveCount(0)
+    await main.getByRole('button', { name: /Show 2 more|2개 더 보기/ }).click()
+    await expect(main.getByText('udesc 6')).toBeVisible()
+  })
+
+  test('header report button opens the modal preset to this service (service locked)', async ({ page }) => {
+    await mount(page)
+    await page.locator('main').getByRole('button', { name: /Report an issue|문제 신고/ }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    // Service is fixed (no select dropdown), shown as the locked name.
+    await expect(dialog.locator('#report-svc')).toHaveCount(0)
+    await expect(dialog.getByText('Claude API')).toBeVisible()
+  })
+})

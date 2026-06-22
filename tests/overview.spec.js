@@ -537,3 +537,65 @@ test.describe('#553 Issues filter — agent-only issue', () => {
     await expect(page.locator('main').getByText(/No Issues|이슈 없음/)).toHaveCount(0)
   })
 })
+
+// #575 — crowd "Report an issue": floating button + modal + gated "Recent user reports" panel.
+test.describe('Overview — crowd reports (#575)', () => {
+  const baseSvc = (id, name, status = 'operational') => ({ id, category: 'api', name, provider: 'x', status, latency: 150, uptime30d: 99.9, calendarDays: 30, incidents: status === 'operational' ? [] : [{ id: `${id}-i`, title: 'Issue', status: 'investigating', impact: 'minor', startedAt: new Date(Date.now() - 60_000).toISOString(), timeline: [] }] })
+  const now = Date.now()
+  const withReports = {
+    json: {
+      services: [baseSvc('claude', 'Claude API', 'degraded'), baseSvc('openai', 'OpenAI API')],
+      reportFeed: { claude: Array.from({ length: 6 }, (_, i) => ({ cat: 'errors', desc: `report ${i}`, ts: now - i * 60_000 })) },
+      lastUpdated: new Date().toISOString(),
+    },
+  }
+  const noReports = { json: { services: [baseSvc('claude', 'Claude API'), baseSvc('openai', 'OpenAI API')], lastUpdated: new Date().toISOString() } }
+
+  test('gated panel renders with reports + 5-row preview and a "show more" toggle', async ({ page }) => {
+    await page.route('**/api/status**', (route) => route.fulfill(withReports))
+    await page.route('**/api/status/cached', (route) => route.fulfill(withReports))
+    await page.goto('/')
+    await page.locator('main button').first().waitFor({ state: 'visible', timeout: 20000 })
+    const main = page.locator('main')
+    await expect(main.getByText(/Recent user reports|최근 사용자 신고/)).toBeVisible()
+    await expect(main.getByText('report 0')).toBeVisible()
+    await expect(main.getByText('report 4')).toBeVisible()        // 5th (index 4) in preview
+    await expect(main.getByText('report 5')).toHaveCount(0)        // 6th hidden until expanded
+    const toggle = main.getByRole('button', { name: /Show 1 more|1개 더 보기/ })
+    await expect(toggle).toBeVisible()
+    await toggle.click()
+    await expect(main.getByText('report 5')).toBeVisible()
+  })
+
+  test('no panel when there are no corroborated reports (gate)', async ({ page }) => {
+    await page.route('**/api/status**', (route) => route.fulfill(noReports))
+    await page.route('**/api/status/cached', (route) => route.fulfill(noReports))
+    await page.goto('/')
+    await page.locator('main button').first().waitFor({ state: 'visible', timeout: 20000 })
+    await expect(page.locator('main').getByText(/Recent user reports|최근 사용자 신고/)).toHaveCount(0)
+  })
+
+  test('floating report button opens the modal; submit posts and thanks', async ({ page }) => {
+    await page.route('**/api/status**', (route) => route.fulfill(noReports))
+    await page.route('**/api/status/cached', (route) => route.fulfill(noReports))
+    let posted = null
+    await page.route('**/api/report-issue', async (route) => {
+      posted = route.request().postDataJSON()
+      await route.fulfill({ status: 200, json: { ok: true, message: 'Thanks' } })
+    })
+    // Returning-user state: consent set so the one-time cookie banner (bottom, full-width) doesn't
+    // overlap the bottom-right floating button.
+    await page.addInitScript(() => { try { localStorage.setItem('aiwatch-cookie-consent', 'granted') } catch { /* private mode */ } })
+    await page.goto('/')
+    await page.locator('main button').first().waitFor({ state: 'visible', timeout: 20000 })
+    await page.getByRole('button', { name: /Report an issue|문제 신고/ }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await dialog.locator('#report-svc').selectOption('openai')
+    await dialog.locator('#report-cat').selectOption('outage')
+    await dialog.locator('#report-desc').fill('cannot reach api')
+    await dialog.getByRole('button', { name: /^Submit$|^제출$/ }).click()
+    await expect(dialog.getByText(/Thanks|감사/)).toBeVisible()
+    expect(posted).toMatchObject({ svcId: 'openai', category: 'outage', description: 'cannot reach api' })
+  })
+})

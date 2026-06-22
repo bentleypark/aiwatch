@@ -3,7 +3,7 @@
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, kvPut } from './utils'
-import { isProbeHealthy, type ProbeSnapshot } from './probe'
+import { isProbeHealthy, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
@@ -1451,6 +1451,16 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     }
     return svc
   })
+
+  // #575 Phase B — flag an active consecutive probe-RTT spike per service (reuses the same probe
+  // snapshots as the cross-validation above; no extra fetch). The crowd-report display gate
+  // cross-matches this: an operational page + a probe spike + enough crowd reports = early warning.
+  if (probeSnapshots && probeSnapshots.length > 0) {
+    const spiking = new Set(detectConsecutiveSpikes(probeSnapshots, enriched.map((s) => s.id)).map((sp) => sp.serviceId))
+    for (const svc of enriched) {
+      if (spiking.has(svc.id)) svc.probeSpike = true
+    }
+  }
 
   return { raw, enriched }
 }
