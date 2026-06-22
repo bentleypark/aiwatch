@@ -141,3 +141,25 @@ export function formatReportCountsSection(
   // "today" not "24h": the daily cron reads the current-UTC-day counter (a partial day at send time).
   return `\n🗳️ **User Reports (today)**: ${total} total · ${list}`
 }
+
+// ── Display gate (#575 Phase B) ────────────────────────────────────────────────
+// Crowd reports surface on a service's page ONLY when an INDEPENDENT signal corroborates a problem,
+// so a public list can never contradict an `operational` status (the load-bearing #575 constraint):
+//   - official: status degraded/down OR a sub-threshold `partialCount` (#722), OR
+//   - probe: an active RTT spike (`probeSpike`) with the crowd clearing REPORT_DISPLAY_MIN.
+// Crowd-alone (operational + clean probe) NEVER surfaces. Pure + unit-tested; the worker uses this to
+// decide which services' feeds to include in the /api/status `reportFeed` map.
+export const REPORT_DISPLAY_MIN = 3
+
+export function shouldSurfaceReports(opts: {
+  status: string
+  partialCount?: number
+  probeSpike?: boolean
+  reportCount: number
+}): boolean {
+  if (opts.reportCount <= 0) return false
+  const officialProblem = opts.status !== 'operational' || (opts.partialCount ?? 0) > 0
+  if (officialProblem) return true
+  // operational page → require an independent probe spike AND baseline crowd volume.
+  return !!opts.probeSpike && opts.reportCount >= REPORT_DISPLAY_MIN
+}

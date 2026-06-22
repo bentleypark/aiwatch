@@ -18,7 +18,7 @@ import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic } 
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
-import { isReportableService, hashIp, reportDateKey, reportCountKey, reportSeenKey, nextCount, REPORT_COUNT_TTL_SECONDS, REPORT_SEEN_TTL_SECONDS, REPORT_MAX_PER_HOUR, formatReportCountsSection, isValidCategory, sanitizeReportDescription, reportFeedKey, appendReportFeed, recentReportFeed, REPORT_FEED_TTL_SECONDS, type ReportFeedEntry } from './report'
+import { isReportableService, hashIp, reportDateKey, reportCountKey, reportSeenKey, nextCount, REPORT_COUNT_TTL_SECONDS, REPORT_SEEN_TTL_SECONDS, REPORT_MAX_PER_HOUR, formatReportCountsSection, isValidCategory, sanitizeReportDescription, reportFeedKey, appendReportFeed, recentReportFeed, REPORT_FEED_TTL_SECONDS, shouldSurfaceReports, type ReportFeedEntry } from './report'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -85,6 +85,25 @@ const webhookSubRate = new Map<string, { start: number; count: number }>()   // 
 const webhookConfirmRate = new Map<string, { start: number; count: number }>() // /confirm: 20/hour/IP
 const reportRate = new Map<string, { start: number; count: number }>()         // /api/report-issue: per-IP/hour (#575)
 const REPORTABLE_IDS = new Set(SERVICES.map((s) => s.id))                       // #575 — valid report targets
+
+/** #575 Phase B — build the gated `reportFeed` map for /api/status responses: per-service recent
+ *  crowd reports, but ONLY for services where an independent signal corroborates (shouldSurfaceReports).
+ *  Reads KV feeds only for candidate services (status not operational, or a partial/probe-spike) — a
+ *  small bounded set, usually empty — so a public list can never contradict an operational page and
+ *  the read cost stays low. Centralizes the gating used by the dashboard (Overview + ServiceDetails). */
+async function buildReportFeedMap(kv: KVNamespace, services: ServiceStatus[]): Promise<Record<string, ReportFeedEntry[]>> {
+  const candidates = services.filter((s) => s.status !== 'operational' || (s.partialCount ?? 0) > 0 || s.probeSpike)
+  const out: Record<string, ReportFeedEntry[]> = {}
+  await Promise.all(candidates.map(async (s) => {
+    let feed: ReportFeedEntry[] = []
+    try { const raw = await kv.get(reportFeedKey(s.id)); feed = raw ? JSON.parse(raw) : [] } catch (err) { console.warn('[report] feed read failed:', s.id, err instanceof Error ? err.message : err); feed = [] }
+    const recent = recentReportFeed(feed, Date.now())
+    if (shouldSurfaceReports({ status: s.status, partialCount: s.partialCount, probeSpike: s.probeSpike, reportCount: recent.length })) {
+      out[s.id] = recent
+    }
+  }))
+  return out
+}
 const HOUR_MS = 3_600_000
 /** Fixed-window per-IP limiter (in-memory, per-isolate — same mechanism as the existing
  *  alertProxyRate/webhookPingRate counters, just an hour window). Returns true if over the limit.
@@ -2422,7 +2441,9 @@ export default {
           await kvPut(env.STATUS_CACHE, seenKey, '1', { expirationTtl: REPORT_SEEN_TTL_SECONDS })
           const feedKey = reportFeedKey(svcId)
           let feed: ReportFeedEntry[] = []
-          try { const raw = await env.STATUS_CACHE.get(feedKey); feed = raw ? JSON.parse(raw) : [] } catch { feed = [] }
+          // Log on parse failure — here the empty fallback then OVERWRITES the stored feed (read-
+          // modify-write), so a corrupt value silently drops prior reports; make it observable.
+          try { const raw = await env.STATUS_CACHE.get(feedKey); feed = raw ? JSON.parse(raw) : [] } catch (err) { console.warn('[report] feed read (write path) failed:', svcId, err instanceof Error ? err.message : err); feed = [] }
           const updated = appendReportFeed(recentReportFeed(feed, now), { cat: category, desc: description, ts: now })
           await kvPut(env.STATUS_CACHE, feedKey, JSON.stringify(updated), { expirationTtl: REPORT_FEED_TTL_SECONDS })
         }
@@ -2444,7 +2465,7 @@ export default {
         })
       }
       let feed: ReportFeedEntry[] = []
-      try { const raw = await env.STATUS_CACHE.get(reportFeedKey(svc)); feed = raw ? JSON.parse(raw) : [] } catch { feed = [] }
+      try { const raw = await env.STATUS_CACHE.get(reportFeedKey(svc)); feed = raw ? JSON.parse(raw) : [] } catch (err) { console.warn('[report] feed read (api) failed:', svc, err instanceof Error ? err.message : err); feed = [] }
       return new Response(JSON.stringify({ reports: recentReportFeed(feed, Date.now()) }), {
         status: 200, headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'max-age=30' },
       })
@@ -2981,6 +3002,8 @@ export default {
 
         // #475 — canonical per-user alert feed (see /api/status). Both endpoints emit it.
         const alertFeed = await readAlertFeed(env.STATUS_CACHE!)
+        // #575 Phase B — gated crowd-report map (only corroborated services; see buildReportFeedMap).
+        const reportFeed = await buildReportFeedMap(env.STATUS_CACHE!, cached.services)
 
         // Calculate scores for cached services (same as /api/status)
         const cachedProbeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'status-cached')
@@ -2999,6 +3022,7 @@ export default {
           ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),
           ...(securityAlerts.length > 0 ? { securityAlerts } : {}),
           ...(alertFeed.length > 0 ? { alertFeed } : {}),
+          ...(Object.keys(reportFeed).length > 0 ? { reportFeed } : {}),
         }), {
           status: 200,
           headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
@@ -3214,6 +3238,8 @@ export default {
       // #475 — canonical per-user alert feed (cron-produced embeds the dashboard relays). Both
       // /api/status and /api/status/cached must emit it so a browser on either path can relay.
       const alertFeed = env.STATUS_CACHE ? await readAlertFeed(env.STATUS_CACHE) : []
+      // #575 Phase B — gated crowd-report map (only corroborated services; see buildReportFeedMap).
+      const reportFeed = env.STATUS_CACHE ? await buildReportFeedMap(env.STATUS_CACHE, servicesWithScore) : {}
 
       return new Response(JSON.stringify({
         services: servicesWithScore,
@@ -3224,6 +3250,7 @@ export default {
         ...(Object.keys(recentlyRecovered).length > 0 ? { recentlyRecovered } : {}),
         ...(securityAlerts.length > 0 ? { securityAlerts } : {}),
         ...(alertFeed.length > 0 ? { alertFeed } : {}),
+        ...(Object.keys(reportFeed).length > 0 ? { reportFeed } : {}),
       }), {
         status: 200,
         headers: {

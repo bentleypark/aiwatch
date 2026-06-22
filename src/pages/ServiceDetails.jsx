@@ -4,6 +4,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import IncidentTimeline from '../components/IncidentTimeline'
+import ReportModal from '../components/ReportModal'
+import RecentUserReports from '../components/RecentUserReports'
 import { useLang } from '../hooks/useLang'
 import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
@@ -723,8 +725,9 @@ const INCIDENT_HISTORY_PREVIEW = 5
 export default function ServiceDetails({ serviceId }) {
   const { t, lang } = useLang()
   const { setPage } = usePage()
-  const { services: rawServices, loading, error, probe24h, latency24h, probeServiceIds, refresh, recentlyRecovered, securityAlerts } = usePolling()
+  const { services: rawServices, loading, error, probe24h, latency24h, probeServiceIds, refresh, recentlyRecovered, securityAlerts, reportFeed } = usePolling()
   const services = rawServices ?? []
+  const [reportOpen, setReportOpen] = useState(false)
 
   // useMemo must be called before any early returns (Rules of Hooks)
   // #557 — median (typical recovery, robust to many short component blips) + worst, replacing the
@@ -836,9 +839,19 @@ export default function ServiceDetails({ serviceId }) {
         </div>
         <div className="flex items-center gap-1.5">
           {!!recentlyRecovered[service.id] && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
+          {/* #575 — report entry (always available; input never gated). Opens the modal preset to this service. */}
+          <button
+            type="button"
+            onClick={() => setReportOpen(true)}
+            className="mono text-[9px] uppercase rounded border border-[var(--border)] text-[var(--text2)] hover:text-[var(--text0)]"
+            style={{ padding: '3px 8px', letterSpacing: '0.04em' }}
+          >
+            ⚠ {t('report.button')}
+          </button>
           <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={service.sourceDead && !service.probeConfirmed} />
         </div>
       </div>
+      <ReportModal isOpen={reportOpen} onClose={() => setReportOpen(false)} services={services} presetServiceId={service.id} />
 
       {/* #689 — status source inactive (status page 4xx/deactivated): explains the blanked uptime/
           incidents. Two cases: probeConfirmed (a probed service still reachable via direct probe →
@@ -1063,6 +1076,24 @@ export default function ServiceDetails({ serviceId }) {
             </div>
           </div>
         </section>}
+
+      {/* ── #575 — gated "Recent user reports" for this service. reportFeed only carries this
+            service when the worker confirmed an independent signal corroborates (so it never
+            contradicts an operational badge). Absent otherwise → section not rendered. ── */}
+      {(reportFeed?.[service.id]?.length ?? 0) > 0 && (
+        <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+          <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+            <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+              <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--purple)' }} />
+              {t('report.feed.title')}
+            </div>
+            <span className="mono text-[10px] text-[var(--text2)]">{t('report.feed.sub')}</span>
+          </div>
+          <div style={{ padding: '16px' }}>
+            <RecentUserReports items={(reportFeed[service.id] ?? []).map((e) => ({ cat: e.cat, desc: e.desc, ts: e.ts }))} />
+          </div>
+        </section>
+      )}
 
       {/* ── Security Alerts (service-specific) ── */}
       {(() => {

@@ -42,6 +42,11 @@ export interface ServiceStatus {
   uptime30d: number | null
   lastChecked: string
   incidents: Incident[]
+  /** #575 Phase B — an active consecutive probe-RTT spike (≥3 cycles >3× median or failed), via
+   *  detectConsecutiveSpikes. An independent "the API looks unhealthy" signal. Used to cross-match
+   *  crowd reports: an operational page + a probe spike + enough crowd reports surfaces the gated
+   *  "Recent user reports" early-warning. Absent when no spike / no probe data. */
+  probeSpike?: boolean
   /** #604 — per-component snapshot for multi-component services (cerebras / cursor /
    *  copilot / windsurf / langsmith / runway). The curated `statusComponentIds` subset,
    *  worst-of'd into `status` above but retained here for the ServiceDetails / is-down

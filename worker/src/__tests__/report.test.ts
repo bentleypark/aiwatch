@@ -15,6 +15,8 @@ import {
   REPORT_FEED_MAX,
   REPORT_DESC_MAX,
   type ReportFeedEntry,
+  shouldSurfaceReports,
+  REPORT_DISPLAY_MIN,
 } from '../report'
 
 describe('report — key builders', () => {
@@ -154,5 +156,28 @@ describe('report feed', () => {
     ]
     const recent = recentReportFeed(entries, now)
     expect(recent.map((e) => e.desc)).toEqual(['fresh'])
+  })
+})
+
+
+describe('shouldSurfaceReports (#575 Phase B gate)', () => {
+  it('never surfaces with zero reports', () => {
+    expect(shouldSurfaceReports({ status: 'down', reportCount: 0 })).toBe(false)
+    expect(shouldSurfaceReports({ status: 'operational', probeSpike: true, reportCount: 0 })).toBe(false)
+  })
+  it('official problem (degraded/down) surfaces any reports', () => {
+    expect(shouldSurfaceReports({ status: 'degraded', reportCount: 1 })).toBe(true)
+    expect(shouldSurfaceReports({ status: 'down', reportCount: 1 })).toBe(true)
+  })
+  it('operational + partialCount surfaces any reports', () => {
+    expect(shouldSurfaceReports({ status: 'operational', partialCount: 2, reportCount: 1 })).toBe(true)
+  })
+  it('operational + probe spike requires the baseline crowd volume', () => {
+    expect(shouldSurfaceReports({ status: 'operational', probeSpike: true, reportCount: REPORT_DISPLAY_MIN - 1 })).toBe(false)
+    expect(shouldSurfaceReports({ status: 'operational', probeSpike: true, reportCount: REPORT_DISPLAY_MIN })).toBe(true)
+  })
+  it('operational, clean probe, reports present → NEVER surfaces (crowd-alone, load-bearing)', () => {
+    expect(shouldSurfaceReports({ status: 'operational', reportCount: 99 })).toBe(false)
+    expect(shouldSurfaceReports({ status: 'operational', probeSpike: false, reportCount: 99 })).toBe(false)
   })
 })

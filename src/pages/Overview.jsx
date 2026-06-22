@@ -1,8 +1,10 @@
 // Overview — summary stats, service grid, recent incidents, latency rankings, AI panel.
 // Design mockup: svc-card with left border, provider, 3-col metrics, variable-height history bars.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import IncidentTimeline from '../components/IncidentTimeline'
+import ReportModal from '../components/ReportModal'
+import RecentUserReports from '../components/RecentUserReports'
 import { useLang } from '../hooks/useLang'
 import { usePage } from '../utils/pageContext'
 import { usePolling } from '../hooks/usePolling'
@@ -586,10 +588,20 @@ function ActionBanner({ services, setPage, t }) {
 export default function Overview() {
   const { t, lang } = useLang()
   const { setPage, categoryFilter, setCategoryFilter } = usePage()
-  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis, securityAlerts, probeServiceIds } = usePolling()
+  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis, securityAlerts, probeServiceIds, reportFeed } = usePolling()
   const { settings } = useSettings()
   const services = allServices.filter((s) => settings.enabledServices.includes(s.id))
   const [filter, setFilter] = useState('all')
+  const [reportOpen, setReportOpen] = useState(false)
+
+  // #575 — flatten the gated crowd-report map into a single newest-first list for the panel.
+  const reportItems = useMemo(() => {
+    const nameOf = new Map(allServices.map((s) => [s.id, s.name]))
+    return Object.entries(reportFeed ?? {})
+      .flatMap(([id, entries]) => (entries ?? []).map((e) => ({ serviceName: nameOf.get(id) ?? id, cat: e.cat, desc: e.desc, ts: e.ts })))
+      .sort((a, b) => b.ts - a.ts)
+      .slice(0, 20)
+  }, [reportFeed, allServices])
 
   // Reset status filter when category changes
   useEffect(() => { setFilter('all') }, [categoryFilter])
@@ -687,6 +699,20 @@ export default function Overview() {
 
   return (
     <div className="flex flex-col" style={{ gap: '20px' }}>
+
+      {/* ── #575 — crowd report entry: a floating action button (no layout row; reachable while
+            scrolling). Input is never gated; the modal picks the service. The gated "Recent user
+            reports" panel is at the bottom. ── */}
+      <button
+        type="button"
+        onClick={() => setReportOpen(true)}
+        aria-label={t('report.button')}
+        className="fixed flex items-center gap-1.5 mono text-[11px] text-[var(--text0)] rounded-full shadow-lg hover:brightness-110 z-40"
+        style={{ bottom: '20px', right: '20px', padding: '10px 16px', background: 'var(--bg3)', border: '1px solid var(--border-hi)' }}
+      >
+        <span aria-hidden="true">⚠</span> {t('report.button')}
+      </button>
+      <ReportModal isOpen={reportOpen} onClose={() => setReportOpen(false)} services={services} />
 
       {/* ── Action Banner (outage fallback) ── */}
       <ActionBanner services={services} setPage={setPage} t={t} />
@@ -823,8 +849,10 @@ export default function Overview() {
         ))
       )}
 
-      {/* ── Bottom Panels ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '10px' }}>
+      {/* ── Recent Incidents (official) vs Recent user reports (crowd) — side by side so the two can
+            be compared. The crowd panel is gated (#575): rendered only when the worker surfaced
+            corroborated reports; when absent, Recent Incidents takes the full width. ── */}
+      <div className={reportItems.length > 0 ? 'grid grid-cols-1 lg:grid-cols-2' : ''} style={{ gap: '10px' }}>
         <Panel title={t('overview.incidents.title')} dotColor="var(--red)" subtitle={t('overview.panel.incidents.sub')}>
           {recentIncidents.length === 0 ? (
             <EmptyState type="good" />
@@ -839,14 +867,21 @@ export default function Overview() {
           )}
         </Panel>
 
-        <Panel title={t('overview.latency.title')} dotColor="var(--teal)" subtitle={t('overview.panel.latency.sub')}>
-          <div className="flex flex-col" style={{ gap: '8px' }}>
-            {sortedByLatency.map((svc) => (
-              <LatencyBar key={svc.id} service={svc} maxLatency={maxLatency} />
-            ))}
-          </div>
-        </Panel>
+        {reportItems.length > 0 && (
+          <Panel title={t('report.feed.title')} dotColor="var(--purple)" subtitle={t('report.feed.sub')}>
+            <RecentUserReports items={reportItems} />
+          </Panel>
+        )}
       </div>
+
+      {/* ── Latency Rankings — full width, at the very bottom ── */}
+      <Panel title={t('overview.latency.title')} dotColor="var(--teal)" subtitle={t('overview.panel.latency.sub')}>
+        <div className="flex flex-col" style={{ gap: '8px' }}>
+          {sortedByLatency.map((svc) => (
+            <LatencyBar key={svc.id} service={svc} maxLatency={maxLatency} />
+          ))}
+        </div>
+      </Panel>
 
     </div>
   )
