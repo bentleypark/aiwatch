@@ -1190,3 +1190,56 @@ describe('renderPage — OG status pinned to share hint (?e=)', () => {
     expect(ogStatus(renderPage('claude', down, mkSeo(), [], null, null, [], 'bogus'))).toBe('down')   // unknown → live
   })
 })
+
+// og:url + og:title also pin to the hint so the card IDENTITY is distinct per share moment (platforms
+// cache by og:url, not the fetched URL) and the headline matches the pinned image. canonical stays
+// clean for SEO. (#740 follow-up — a query-less og:url collapsed every share onto one cached card.)
+describe('renderPage — og:url + og:title pinned to share hint (?e=)', () => {
+  const ogUrl = (html: string): string | null => {
+    const m = html.match(/<meta property="og:url" content="([^"]*)"/)
+    return m ? m[1] : null
+  }
+  const ogTitle = (html: string): string | null => {
+    const m = html.match(/<meta property="og:title" content="([^"]*)"/)
+    return m ? m[1] : null
+  }
+  const twitterTitle = (html: string): string | null => {
+    const m = html.match(/<meta name="twitter:title" content="([^"]*)"/)
+    return m ? m[1] : null
+  }
+  const canonicalHref = (html: string): string | null => {
+    const m = html.match(/<link rel="canonical" href="([^"]*)"/)
+    return m ? m[1] : null
+  }
+  const op = mkService({ status: 'operational' })
+
+  it('appends ?e=<hint> to og:url so each share moment is a distinct card identity', () => {
+    expect(ogUrl(renderPage('claude', op, mkSeo(), [], null, null, [], 'down'))).toBe('https://ai-watch.dev/is-claude-down?e=down')
+    expect(ogUrl(renderPage('claude', op, mkSeo(), [], null, null, [], 'degraded'))).toBe('https://ai-watch.dev/is-claude-down?e=degraded')
+    expect(ogUrl(renderPage('claude', op, mkSeo(), [], null, null, [], 'resolved'))).toBe('https://ai-watch.dev/is-claude-down?e=resolved')
+  })
+
+  it('keeps og:url clean (no ?e=) when the hint is absent or non-status', () => {
+    expect(ogUrl(renderPage('claude', op, mkSeo(), [], null, null, []))).toBe('https://ai-watch.dev/is-claude-down')
+    expect(ogUrl(renderPage('claude', op, mkSeo(), [], null, null, [], 'reddit'))).toBe('https://ai-watch.dev/is-claude-down')
+    expect(ogUrl(renderPage('claude', op, mkSeo(), [], null, null, [], 'bogus'))).toBe('https://ai-watch.dev/is-claude-down')
+  })
+
+  it('pins og:title to the hint status, overriding live (card headline matches the pinned image)', () => {
+    expect(ogTitle(renderPage('claude', op, mkSeo(), [], null, null, [], 'down'))).toContain('Down Right Now')
+    expect(ogTitle(renderPage('claude', op, mkSeo(), [], null, null, [], 'degraded'))).toContain('Having Issues')
+    // no hint → live status
+    expect(ogTitle(renderPage('claude', op, mkSeo(), [], null, null, []))).toContain('Operational')
+    expect(ogTitle(renderPage('claude', mkService({ status: 'down' }), mkSeo(), [], null, null, []))).toContain('Down Right Now')
+  })
+
+  it('twitter:title carries the same pinned status as og:title (parity)', () => {
+    const html = renderPage('claude', op, mkSeo(), [], null, null, [], 'down')
+    expect(twitterTitle(html)).toBe(ogTitle(html))
+    expect(twitterTitle(html)).toContain('Down Right Now')
+  })
+
+  it('keeps <link rel="canonical"> clean even when the hint pins the social card (SEO unaffected)', () => {
+    expect(canonicalHref(renderPage('claude', op, mkSeo(), [], null, null, [], 'down'))).toBe('https://ai-watch.dev/is-claude-down')
+  })
+})
