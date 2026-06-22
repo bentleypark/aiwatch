@@ -48,6 +48,9 @@ export default async function handler(req: Request) {
   try {
     const url = new URL(req.url)
     const slug = url.searchParams.get('slug') ?? ''
+    // Social share status hint (`?e=`, #539): pins the OG card status to the share moment so a
+    // tweet's unfurled card matches the post (not the live status, which may have drifted by then).
+    const ogStatusHint = url.searchParams.get('e')
 
     const entry = SLUG_TO_SERVICE[slug]
     if (!entry) {
@@ -266,7 +269,7 @@ export default async function handler(req: Request) {
       }
     }
 
-    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports)
+    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint)
 
     // #378: when the upstream Worker fetch failed and we're rendering the
     // "Status data is temporarily unavailable" fallback, the response must NOT

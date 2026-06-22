@@ -20,7 +20,7 @@ All served by the Cloudflare Worker (`aiwatch-worker`, domain `aiwatch-worker.p2
 | Endpoint | Notes |
 |---|---|
 | `GET /badge/:serviceId` | SVG status badge |
-| `GET /api/og` | Dynamic OG image PNG (1200×630, resvg-wasm) |
+| `GET /api/og` | Dynamic OG image PNG (1200×630, resvg-wasm). Purely query-param-driven (`service`/`status`/`score`/`uptime`/`v`) — no live status re-fetch. The is-down page sets the `status` param from the share `?e=` hint when present (pins a tweet's card to the post moment, see status-determination.md), else from live status |
 
 ## Incident RSS feed (#54, #467)
 

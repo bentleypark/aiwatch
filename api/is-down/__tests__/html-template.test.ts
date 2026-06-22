@@ -1168,3 +1168,25 @@ describe('renderPage — Report an issue modal (#575)', () => {
     expect(html).not.toMatch(/Show \d+ more/)
   })
 })
+
+// OG card status pinned to the social share hint (?e=) so a tweet's card matches the post moment.
+describe('renderPage — OG status pinned to share hint (?e=)', () => {
+  const ogStatus = (html: string): string | null => {
+    const m = html.match(/\/api\/og\?[^"']*status=([a-z]+)/)
+    return m ? m[1] : null
+  }
+  it('pins the og:image status to the hint, overriding live status', () => {
+    const op = mkService({ status: 'operational' })
+    expect(ogStatus(renderPage('claude', op, mkSeo(), [], null, null, [], 'down'))).toBe('down')
+    expect(ogStatus(renderPage('claude', op, mkSeo(), [], null, null, [], 'degraded'))).toBe('degraded')
+    // recovery/active hints → an operational card (the generator has no separate "recovered" style)
+    expect(ogStatus(renderPage('claude', op, mkSeo(), [], null, null, [], 'resolved'))).toBe('operational')
+    expect(ogStatus(renderPage('claude', mkService({ status: 'down' }), mkSeo(), [], null, null, [], 'active'))).toBe('operational')
+  })
+  it('falls through to live status when the hint is absent or non-status (reddit)', () => {
+    const down = mkService({ status: 'down' })
+    expect(ogStatus(renderPage('claude', down, mkSeo(), [], null, null, []))).toBe('down')            // no hint → live
+    expect(ogStatus(renderPage('claude', down, mkSeo(), [], null, null, [], 'reddit'))).toBe('down')  // reddit → live
+    expect(ogStatus(renderPage('claude', down, mkSeo(), [], null, null, [], 'bogus'))).toBe('down')   // unknown → live
+  })
+})
