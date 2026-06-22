@@ -770,6 +770,27 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
 
       let filtered = filterIncidents(incidents, config)
 
+      // #606 Cat B / #693 follow-up — source the component list from componentsUrl (components.json, a
+      // SUPERSET on shared pages like status.openai.com) when set, else summary.json. The page OVERALL
+      // indicator, incidents, and uptime still come from summaryData; only the component LIST changes —
+      // and it's now read by the BADGE worst-of, the component-miss alert, AND the breakdown alike. This
+      // matters because OpenAI's summary.json OMITS core API components (Chat Completions / Embeddings /
+      // Moderations); without the superset the badge couldn't see a Chat Completions outage and the
+      // statusComponentId miss-check false-fired the migration alert every cycle. One fetch, moved up.
+      let breakdownComponents = summaryData.components
+      if (config.componentsUrl) {
+        const cRes = await fetchWithTimeout(config.componentsUrl, 8000).catch(() => null)
+        if (cRes?.ok) {
+          try {
+            const cJson = await cRes.json() as { components?: unknown }
+            breakdownComponents = pickBreakdownComponents(summaryData.components, cJson.components)
+          } catch (err) {
+            console.warn(`[fetchService] ${config.id} components.json parse failed — using summary.json:`, err instanceof Error ? err.message : err)
+          }
+        } else cRes?.body?.cancel()
+      }
+      const badgeSummary = { ...summaryData, components: breakdownComponents }
+
       // Compute svcStatus BEFORE includeUntaggedIncidents so the
       // cross-contamination guard (#361) can suppress untagged-include for
       // services on shared status pages whose keyword filter found nothing.
@@ -780,13 +801,13 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       // non-operational. Computing svcStatus first lets the no-component
       // branch detect the empty-filtered case and treat the service as
       // operational, suppressing untagged-include entirely.
-      const svcStatus = resolveSvcStatus(config, summaryData, filtered)
+      const svcStatus = resolveSvcStatus(config, badgeSummary, filtered)
 
       // Only fall back to untagged-include when this service is genuinely
       // non-operational. Operational services per the cross-contamination
       // guard above cannot legitimately have untagged incidents to surface.
       if (svcStatus !== 'operational') {
-        filtered = includeUntaggedIncidents(filtered, incidents, config, summaryData.components ?? [], summaryData.status?.indicator ?? 'none')
+        filtered = includeUntaggedIncidents(filtered, incidents, config, breakdownComponents ?? [], summaryData.status?.indicator ?? 'none')
       }
       if (config.incidentIoBaseUrl) {
         filtered = await enrichIncidentIoText(filtered, config.incidentIoBaseUrl, pageUrls, kv)
@@ -839,40 +860,26 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       // Primary statusComponentId drives the alerted-on tracker. Additional ids
       // from statusComponentIds (#379) are warn-logged so operators can reconcile
       // without triggering Discord alerts that would fire repeatedly per surface.
-      if (config.statusComponentId && summaryData.components) {
-        const compFound = summaryData.components.some((c) => c.id === config.statusComponentId)
+      // Track component ID misses against breakdownComponents (the SAME superset the badge resolves
+      // from) — so a components.json-only primary (OpenAI's Chat Completions, absent from summary.json)
+      // is correctly found and the migration alert (#135) doesn't false-fire (#693 follow-up).
+      if (config.statusComponentId && breakdownComponents) {
+        const compFound = breakdownComponents.some((c) => c.id === config.statusComponentId)
         if (!compFound) {
-          const available = summaryData.components.map((c) => `${c.id}:${c.name}`).join(', ')
+          const available = breakdownComponents.map((c) => `${c.id}:${c.name}`).join(', ')
           console.warn(`[fetchService] Component ID not found: ${config.id} (${config.statusComponentId}). Available: ${available}`)
           await trackComponentMiss(kv, config.id)
         } else {
           await resetComponentMiss(kv, config.id)
         }
       }
-      if (config.statusComponentIds && summaryData.components) {
+      if (config.statusComponentIds && breakdownComponents) {
         const missing = config.statusComponentIds.filter(
-          (id) => id !== config.statusComponentId && !summaryData.components!.some((c) => c.id === id),
+          (id) => id !== config.statusComponentId && !breakdownComponents!.some((c) => c.id === id),
         )
         if (missing.length > 0) {
           console.warn(`[fetchService] ${config.id} additional component ids missing: ${missing.join(', ')}`)
         }
-      }
-      // #606 Cat B — source the breakdown component list from componentsUrl (components.json, a
-      // superset on shared pages like status.openai.com) when set, else summary.json. Computed here
-      // (before the drift check) so the drift signal checks the SAME source the breakdown resolves
-      // from — otherwise openai's components.json-only ids would false-flag every cycle. Status,
-      // incidents, and uptime still come from summaryData; only the component list changes.
-      let breakdownComponents = summaryData.components
-      if (config.componentsUrl) {
-        const cRes = await fetchWithTimeout(config.componentsUrl, 8000).catch(() => null)
-        if (cRes?.ok) {
-          try {
-            const cJson = await cRes.json() as { components?: unknown }
-            breakdownComponents = pickBreakdownComponents(summaryData.components, cJson.components)
-          } catch (err) {
-            console.warn(`[fetchService] ${config.id} components.json parse failed — using summary.json:`, err instanceof Error ? err.message : err)
-          }
-        } else cRes?.body?.cancel()
       }
       // #606 — drift signal for the display-only breakdown list. These services have no
       // statusComponentId/Ids, so without this a renamed/removed curated component would silently
