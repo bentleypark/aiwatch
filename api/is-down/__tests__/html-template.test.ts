@@ -940,6 +940,26 @@ describe('renderShareButtons onclick attributes (quote-escape contract)', () => 
   })
 })
 
+// Copy-link share text must carry "AIWatch" on EVERY status — the outage templates dropped it, so a
+// share posted during an incident lost the attribution (and the branding e2e went red whenever a real
+// incident was live). Deterministic here (no incident-state dependency).
+describe('renderShareButtons — copy text keeps AIWatch branding across statuses', () => {
+  const seo = mkSeo({ displayName: 'Claude API' })
+  const canonical = 'https://ai-watch.dev/is-claude-down'
+  const ogImage = 'https://aiwatch-worker.p2c2kbf.workers.dev/api/og?v=1'
+  const copyDataText = (status: string): string => {
+    const html = renderShareButtons(seo, mkService({ status }), canonical, ogImage)
+    const container = document.createElement('div')
+    container.innerHTML = html
+    return container.querySelector('button.share-copy')!.getAttribute('data-text') ?? ''
+  }
+  for (const status of ['down', 'degraded', 'operational']) {
+    it(`copy data-text contains "AIWatch" when ${status}`, () => {
+      expect(copyDataText(status)).toContain('AIWatch')
+    })
+  }
+})
+
 describe('RSS feed surfacing on /is-*-down (#430)', () => {
   it('emits a per-service RSS autodiscovery <link> in <head>', () => {
     const html = renderPage('claude', mkService(), mkSeo({ displayName: 'Claude' }), [])
@@ -1191,5 +1211,58 @@ describe('renderPage — OG status pinned to share hint (?e=)', () => {
     expect(ogStatus(renderPage('claude', down, mkSeo(), [], null, null, []))).toBe('down')            // no hint → live
     expect(ogStatus(renderPage('claude', down, mkSeo(), [], null, null, [], 'reddit'))).toBe('down')  // reddit → live
     expect(ogStatus(renderPage('claude', down, mkSeo(), [], null, null, [], 'bogus'))).toBe('down')   // unknown → live
+  })
+})
+
+// og:url + og:title also pin to the hint so the card IDENTITY is distinct per share moment (platforms
+// cache by og:url, not the fetched URL) and the headline matches the pinned image. canonical stays
+// clean for SEO. (#740 follow-up — a query-less og:url collapsed every share onto one cached card.)
+describe('renderPage — og:url + og:title pinned to share hint (?e=)', () => {
+  const ogUrl = (html: string): string | null => {
+    const m = html.match(/<meta property="og:url" content="([^"]*)"/)
+    return m ? m[1] : null
+  }
+  const ogTitle = (html: string): string | null => {
+    const m = html.match(/<meta property="og:title" content="([^"]*)"/)
+    return m ? m[1] : null
+  }
+  const twitterTitle = (html: string): string | null => {
+    const m = html.match(/<meta name="twitter:title" content="([^"]*)"/)
+    return m ? m[1] : null
+  }
+  const canonicalHref = (html: string): string | null => {
+    const m = html.match(/<link rel="canonical" href="([^"]*)"/)
+    return m ? m[1] : null
+  }
+  const op = mkService({ status: 'operational' })
+
+  it('appends ?e=<hint> to og:url so each share moment is a distinct card identity', () => {
+    expect(ogUrl(renderPage('claude', op, mkSeo(), [], null, null, [], 'down'))).toBe('https://ai-watch.dev/is-claude-down?e=down')
+    expect(ogUrl(renderPage('claude', op, mkSeo(), [], null, null, [], 'degraded'))).toBe('https://ai-watch.dev/is-claude-down?e=degraded')
+    expect(ogUrl(renderPage('claude', op, mkSeo(), [], null, null, [], 'resolved'))).toBe('https://ai-watch.dev/is-claude-down?e=resolved')
+  })
+
+  it('keeps og:url clean (no ?e=) when the hint is absent or non-status', () => {
+    expect(ogUrl(renderPage('claude', op, mkSeo(), [], null, null, []))).toBe('https://ai-watch.dev/is-claude-down')
+    expect(ogUrl(renderPage('claude', op, mkSeo(), [], null, null, [], 'reddit'))).toBe('https://ai-watch.dev/is-claude-down')
+    expect(ogUrl(renderPage('claude', op, mkSeo(), [], null, null, [], 'bogus'))).toBe('https://ai-watch.dev/is-claude-down')
+  })
+
+  it('pins og:title to the hint status, overriding live (card headline matches the pinned image)', () => {
+    expect(ogTitle(renderPage('claude', op, mkSeo(), [], null, null, [], 'down'))).toContain('Down Right Now')
+    expect(ogTitle(renderPage('claude', op, mkSeo(), [], null, null, [], 'degraded'))).toContain('Having Issues')
+    // no hint → live status
+    expect(ogTitle(renderPage('claude', op, mkSeo(), [], null, null, []))).toContain('Operational')
+    expect(ogTitle(renderPage('claude', mkService({ status: 'down' }), mkSeo(), [], null, null, []))).toContain('Down Right Now')
+  })
+
+  it('twitter:title carries the same pinned status as og:title (parity)', () => {
+    const html = renderPage('claude', op, mkSeo(), [], null, null, [], 'down')
+    expect(twitterTitle(html)).toBe(ogTitle(html))
+    expect(twitterTitle(html)).toContain('Down Right Now')
+  })
+
+  it('keeps <link rel="canonical"> clean even when the hint pins the social card (SEO unaffected)', () => {
+    expect(canonicalHref(renderPage('claude', op, mkSeo(), [], null, null, [], 'down'))).toBe('https://ai-watch.dev/is-claude-down')
   })
 })

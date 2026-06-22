@@ -216,12 +216,26 @@ export function renderPage(
   // Pin the card status to the share hint when present (so a tweet's card matches the post moment,
   // not the live status that may have drifted by unfurl time). HINT_TO_OG_STATUS (module scope) maps
   // the `?e=` hint → an og status the generator knows; 'reddit'/unknown/absent falls through to live.
-  const ogStatus = (ogStatusHint && HINT_TO_OG_STATUS[ogStatusHint]) || service?.status || 'operational'
+  const pinnedHint = ogStatusHint && HINT_TO_OG_STATUS[ogStatusHint] ? ogStatusHint : null
+  const ogStatus = (pinnedHint && HINT_TO_OG_STATUS[pinnedHint]) || service?.status || 'operational'
   const ogParams = new URLSearchParams({ service: seo.displayName, status: ogStatus })
   if (service?.aiwatchScore != null && Number.isFinite(service.aiwatchScore)) ogParams.set('score', String(service.aiwatchScore))
   if (typeof service?.uptime30d === 'number' && !Number.isNaN(service.uptime30d)) ogParams.set('uptime', service.uptime30d.toFixed(2))
   ogParams.set('v', String(Math.floor(Date.now() / 600_000))) // 10-min cache bust
   const ogImageUrl = `https://aiwatch-worker.p2c2kbf.workers.dev/api/og?${ogParams.toString()}`
+
+  // og:url carries the `?e=` hint so each share MOMENT is a distinct social-card identity. Social
+  // platforms (Twitter/FB/LinkedIn) cache + dedupe cards by og:url, NOT by the URL actually fetched —
+  // so with a query-less og:url every `?e=down`/`?e=resolved` share collapses onto the same cached
+  // card (the bug: an outage tweet showed the stale operational card #740 had already pinned the
+  // IMAGE for). canonical stays clean (`.../is-…-down`) for SEO — Google indexes that, not og:url.
+  const ogUrl = pinnedHint ? `${canonical}?e=${encodeURIComponent(pinnedHint)}` : canonical
+  // og:title / twitter:title pin to the hint too (via ogStatus) so the card headline matches the
+  // pinned IMAGE — otherwise the card reads "Operational" (live) over a "Degraded" image. The page
+  // <title>/canonical/JSON-LD stay LIVE (the body shows live status); only the social card is pinned.
+  const ogTitle = service
+    ? `Is ${seo.displayName} Down? ${statusTitleLabel(ogStatus)} | AIWatch`
+    : title
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -236,15 +250,15 @@ export function renderPage(
 
 <!-- Open Graph -->
 <meta property="og:type" content="website">
-<meta property="og:url" content="${esc(canonical)}">
-<meta property="og:title" content="${esc(title)}">
+<meta property="og:url" content="${esc(ogUrl)}">
+<meta property="og:title" content="${esc(ogTitle)}">
 <meta property="og:description" content="${esc(desc)}">
 <meta property="og:image" content="${esc(ogImageUrl)}">
 <meta property="og:site_name" content="AIWatch">
 
 <!-- Twitter -->
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="${esc(title)}">
+<meta name="twitter:title" content="${esc(ogTitle)}">
 <meta name="twitter:description" content="${esc(desc)}">
 <meta name="twitter:image" content="${esc(ogImageUrl)}">
 
@@ -1028,10 +1042,14 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
     `${n} status: operational. No issues detected — tracked on AIWatch.`,
   ]
   const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
+  // Brand the down/degraded copy text too — the operational templates carry "AIWatch" inline but the
+  // outage ones didn't, so a share posted DURING an incident (the highest-share moment) dropped the
+  // attribution. A consistent branding tail keeps it on every status (and makes the branding e2e
+  // deterministic instead of incident-state-dependent).
   const copyText = rawStatus === 'down'
-    ? `${pick(downTexts)}${aiSuffix}\n${canonical}`
+    ? `${pick(downTexts)}${aiSuffix}\nTracked live on AIWatch:\n${canonical}`
     : rawStatus === 'degraded'
-    ? `${pick(degradedTexts)}${aiSuffix}\n${canonical}`
+    ? `${pick(degradedTexts)}${aiSuffix}\nTracked live on AIWatch:\n${canonical}`
     : pick(operationalTexts)
 
   // X hashtag from display name (e.g. "Claude" → "#Claude", "GitHub Copilot" → "#GitHubCopilot")
