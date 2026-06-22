@@ -52,6 +52,10 @@ export interface ServiceStatus {
    *  worst-of'd into `status` above but retained here for the ServiceDetails / is-down
    *  breakdown. Present only when ≥2 components matched; absent otherwise. */
   components?: ServiceComponent[]
+  // Per-day impact for the status calendar. Keys are either a bare UTC date `YYYY-MM-DD`
+  // (statuspage/betterstack — already the source's daily bucket) OR a full ISO timestamp
+  // (incident.io — so the client can bucket the real instant into the VIEWER's local day, fixing the
+  // UTC-vs-local off-by-one; #693 follow-up). buildCalendarFromIncidents handles both key forms.
   dailyImpact?: Record<string, DailyImpactLevel>
   calendarDays?: number
   uptimeSource?: 'official' | 'platform_avg' // #713 — 'estimate' removed; no invented uptime

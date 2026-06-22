@@ -63,9 +63,10 @@ describe('parseIncidentIoComponentImpacts', () => {
       ]),
       'c1'
     )
-    expect(result['2026-03-01']).toBe('critical')
-    expect(result['2026-03-02']).toBe('major')
-    expect(result['2026-03-03']).toBe('minor')
+    // #693 follow-up — keys are the impact's real ISO start (so the client buckets to the local day)
+    expect(result['2026-03-01T10:00:00.000Z']).toBe('critical')
+    expect(result['2026-03-02T10:00:00.000Z']).toBe('major')
+    expect(result['2026-03-03T10:00:00.000Z']).toBe('minor')
   })
 
   it('skips impacts shorter than 10 minutes', () => {
@@ -86,7 +87,7 @@ describe('parseIncidentIoComponentImpacts', () => {
       ]),
       'c1'
     )
-    expect(Object.keys(result)).toEqual(['2026-03-01'])
+    expect(Object.keys(result)).toEqual(['2026-03-01T10:00:00.000Z'])
   })
 
   it('spans multi-day impacts', () => {
@@ -96,9 +97,10 @@ describe('parseIncidentIoComponentImpacts', () => {
       ]),
       'c1'
     )
-    expect(result['2026-03-01']).toBe('minor')
-    expect(result['2026-03-02']).toBe('minor')
-    expect(result['2026-03-03']).toBe('minor')
+    // span → real start (day 1) + noon (full middle day) + real end (day 3)
+    expect(result['2026-03-01T22:00:00.000Z']).toBe('minor')
+    expect(result['2026-03-02T12:00:00.000Z']).toBe('minor')
+    expect(result['2026-03-03T02:00:00.000Z']).toBe('minor')
   })
 })
 

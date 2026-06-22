@@ -493,21 +493,39 @@ describe('displayComponentIds config sanity (#606)', () => {
   })
 
   // #606 Category B — shared status.openai.com page split across 3 services by the official groups.
-  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 14, chatgpt: 12, codex: 5 }
+  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 12, chatgpt: 11, codex: 5 }
 
-  it('openai/chatgpt/codex carry their official-group displayComponentIds count and NO statusComponentIds', () => {
+  // #693 follow-up — openai/chatgpt/codex now SCOPE the badge to their official-group components
+  // via a worst-of statusComponentIds (was: no statusComponentIds → overall page indicator). This
+  // stops a non-API component (FedRAMP/Ads Manager) from flipping the OpenAI API badge, and gives a
+  // 30-day calendar (calendarDays keys off statusComponentId). The curated group == displayComponentIds.
+  const SHARED_PAGE_PRIMARY: Record<string, string> = {
+    openai: '01JMXBRMFE6N2NNT7DG6XZQ6PW',   // Chat Completions
+    chatgpt: '01JMXBNJXGV1T5GT2M9XA83XNG',  // Conversations
+    codex: '01KMP3KP5MGE23B80K1EK4S8PV',    // Codex API
+  }
+  it('openai/chatgpt/codex scope the badge to their official-group worst-of statusComponentIds (#693 follow-up)', () => {
     for (const [id, count] of Object.entries(SHARED_PAGE_COUNT)) {
       const svc = SERVICES.find((s) => s.id === id)!
-      expect(svc.displayComponentIds, id).toBeDefined()
       expect(svc.displayComponentIds!.length, id).toBe(count)
       expect(new Set(svc.displayComponentIds).size, id).toBe(count)
-      expect(svc.statusComponentIds, id).toBeUndefined()
+      // Badge now follows the curated group (worst-of), not the overall indicator.
+      expect(svc.statusComponentIds, id).toBeDefined()
+      expect(svc.statusComponentIds!.length, id).toBe(count)
+      expect(new Set(svc.statusComponentIds).size, id).toBe(count)
+      // Same id set as the breakdown (badge scope == displayed group).
+      expect(new Set(svc.statusComponentIds), id).toEqual(new Set(svc.displayComponentIds))
+      // primary statusComponentId = incidentIoComponentId (uptime/calendar/component-miss anchor),
+      // listed first in statusComponentIds (#379 convention).
+      expect(svc.statusComponentId, id).toBe(SHARED_PAGE_PRIMARY[id])
+      expect(svc.statusComponentIds![0], id).toBe(SHARED_PAGE_PRIMARY[id])
     }
   })
 
-  it('openai sources the breakdown from components.json (summary.json omits 6 of its 14 ids)', () => {
-    // The APIs Login / Chat Completions / Embeddings / Moderations + Platform FedRAMP / Ads Manager
-    // are components.json-only, so openai must set componentsUrl; chatgpt/codex are summary.json-complete.
+  it('openai sources the breakdown from components.json (summary.json omits 4 of its 12 ids)', () => {
+    // The APIs Login / Chat Completions / Embeddings / Moderations are components.json-only, so openai
+    // must set componentsUrl; chatgpt/codex are summary.json-complete. (FedRAMP / Ads Manager were
+    // dropped from openai's set in the #693 follow-up — non-API Platform surfaces.)
     expect(SERVICES.find((s) => s.id === 'openai')!.componentsUrl).toBe('https://status.openai.com/api/v2/components.json')
     expect(SERVICES.find((s) => s.id === 'chatgpt')!.componentsUrl).toBeUndefined()
     expect(SERVICES.find((s) => s.id === 'codex')!.componentsUrl).toBeUndefined()
@@ -518,7 +536,7 @@ describe('displayComponentIds config sanity (#606)', () => {
     const all = lists.flat()
     // Every id assigned to exactly one service → flat length === unique count.
     expect(new Set(all).size).toBe(all.length)
-    expect(all.length).toBe(14 + 12 + 5)
+    expect(all.length).toBe(12 + 11 + 5)
   })
 
   // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing
@@ -548,14 +566,16 @@ describe('displayComponentIds config sanity (#606)', () => {
 
   it('pins the non-obvious official-group assignments (the ones the comments justify)', () => {
     const has = (id: string, compId: string) => SERVICES.find((s) => s.id === id)!.displayComponentIds!.includes(compId)
-    // Compliance API + Agent are ChatGPT (not API) per the official grouping.
-    expect(has('chatgpt', '01JNKS9D9S72PMP1938PVFFQN4'), 'Compliance API → chatgpt').toBe(true)
+    // Agent is ChatGPT (not API) per the official grouping.
     expect(has('chatgpt', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ'), 'Agent → chatgpt').toBe(true)
-    // Sora + the API Login + the Platform FedRAMP/Ads Manager are OpenAI API.
+    // Sora + the API Login are OpenAI API.
     expect(has('openai', '01K9G527YRPY1EFRMHTKB5BKT5'), 'Sora → openai').toBe(true)
     expect(has('openai', '01JSM5RTJWHRWDTS6Q604VEW3B'), 'API Login → openai').toBe(true)
-    expect(has('openai', '01KKAD7C71MCCH3FTREMJH4AAS'), 'FedRAMP → openai').toBe(true)
-    expect(has('openai', '01KTQBYVARFJ5KMCSECM06VKCF'), 'Ads Manager → openai').toBe(true)
+    // #693 follow-up — FedRAMP / Ads Manager / Compliance API are non-API Platform surfaces, now in
+    // NO monitored service's breakdown (orphaned by design, so they never flip openai/chatgpt).
+    expect(has('openai', '01KKAD7C71MCCH3FTREMJH4AAS'), 'FedRAMP NOT in openai').toBe(false)
+    expect(has('openai', '01KTQBYVARFJ5KMCSECM06VKCF'), 'Ads Manager NOT in openai').toBe(false)
+    expect(has('chatgpt', '01JNKS9D9S72PMP1938PVFFQN4'), 'Compliance API NOT in chatgpt').toBe(false)
     // App is Codex.
     expect(has('codex', '01KMKFAMWKQ81YWSE1Z18R6VHR'), 'App → codex').toBe(true)
     // The two Logins are distinct ids (ChatGPT login vs API login) — both present, no collision.
@@ -708,14 +728,16 @@ describe('ChatGPT without statusComponentId (#292)', () => {
 
   const chatgptConfig = SERVICES.find((s) => s.id === 'chatgpt') as ServiceConfig
 
-  it('config carries no statusComponentId / statusComponent / incidentExclude — cross-contamination guard depends on this (#292)', () => {
-    // The "no relevant unresolved incidents → operational" guard at the !statusComponent &&
-    // !statusComponentId branch in fetchService is what protects chatgpt from inheriting
-    // OpenAI API page-level non-operational states. Re-adding either of those fields would
-    // bypass that guard. incidentKeywords must remain the sole filter for incident
-    // selection, with no overriding incidentExclude list.
+  it('config scopes the badge to its consumer components via statusComponentIds; incidentKeywords stays the sole incident filter (#292 → #693 follow-up)', () => {
+    // #693 follow-up: chatgpt now scopes its BADGE to its own consumer components (Conversations,
+    // Search, Voice mode, …) via a worst-of statusComponentIds. This REPLACES the old #292
+    // cross-contamination protection (no statusComponentId → overall-indicator path + the "no relevant
+    // incident → operational" guard) with a STRONGER one: the badge follows chatgpt's OWN components,
+    // so an OpenAI-API page-level state (e.g. FedRAMP degraded) can't flip it — the API components
+    // aren't in chatgpt's set. incidentExclude stays absent so incidentKeywords remains the sole filter.
     expect(chatgptConfig).toBeDefined()
-    expect(chatgptConfig.statusComponentId).toBeUndefined()
+    expect(chatgptConfig.statusComponentId).toBe('01JMXBNJXGV1T5GT2M9XA83XNG') // Conversations (primary)
+    expect(chatgptConfig.statusComponentIds).toBeDefined()
     expect(chatgptConfig.statusComponent).toBeUndefined()
     expect(chatgptConfig.incidentExclude).toBeUndefined()
     expect(chatgptConfig.incidentKeywords).toContain('chatgpt')
@@ -814,9 +836,11 @@ describe('OpenAI Codex without statusComponentId (#294)', () => {
     expect(codexConfig).toBeDefined()
     expect(codexConfig.category).toBe('agent')
     expect(codexConfig.provider).toBe('OpenAI')
-    // statusComponentId stays absent — status determination still uses the
-    // overall indicator + cross-contamination guard (#294).
-    expect(codexConfig.statusComponentId).toBeUndefined()
+    // #693 follow-up: codex now scopes its badge to its own surfaces (Codex API/CLI/VS Code/Web/App)
+    // via a worst-of statusComponentIds, replacing the old overall-indicator + cross-contamination
+    // guard (#294) with direct component-scoping. incidentExclude stays absent (incidentKeywords only).
+    expect(codexConfig.statusComponentId).toBe('01KMP3KP5MGE23B80K1EK4S8PV') // Codex API (primary)
+    expect(codexConfig.statusComponentIds).toBeDefined()
     expect(codexConfig.statusComponent).toBeUndefined()
     expect(codexConfig.incidentExclude).toBeUndefined()
     // incidentIoComponentId = Codex API (#301) — kept as fallback if the group
@@ -936,5 +960,36 @@ describe('component miss tracking (#135)', () => {
       kv,
     )
     expect(result).toBe('skipped')
+  })
+})
+
+// #693 follow-up — the badge-scoping fix: a non-API component (FedRAMP/Ads Manager) must NOT flip the
+// OpenAI API badge, while a real API component still does. This is the behavior the original bug
+// violated (FedRAMP "degraded performance" drove openai to degraded via the overall indicator).
+describe('OpenAI API badge scoping (#693 follow-up) — non-API components do not flip the badge', () => {
+  const openai = SERVICES.find((s) => s.id === 'openai')!
+  const FEDRAMP = '01KKAD7C71MCCH3FTREMJH4AAS'
+  const CHAT_COMPLETIONS = '01JMXBRMFE6N2NNT7DG6XZQ6PW'
+
+  // Overall page indicator is intentionally BAD (e.g. driven by the FedRAMP incident); the worst-of
+  // statusComponentIds path must ignore it and the FedRAMP component (neither is in the curated group).
+  const summaryWith = (overrides: Record<string, string>): SummaryData => ({
+    status: { indicator: 'major' },
+    components: [
+      ...openai.statusComponentIds!.map((id) => ({ id, name: id, status: overrides[id] ?? 'operational' })),
+      { id: FEDRAMP, name: 'FedRAMP', status: overrides[FEDRAMP] ?? 'operational' },
+    ],
+  })
+
+  it('FedRAMP down + overall indicator "major" → openai stays operational (FedRAMP not in statusComponentIds)', () => {
+    expect(determineSvcStatus(openai, summaryWith({ [FEDRAMP]: 'major_outage' }), [])).toBe('operational')
+  })
+
+  it('a real API component (Chat Completions) down → openai is down (worst-of the curated group)', () => {
+    expect(determineSvcStatus(openai, summaryWith({ [CHAT_COMPLETIONS]: 'major_outage' }), [])).toBe('down')
+  })
+
+  it('a real API component degraded → openai degraded', () => {
+    expect(determineSvcStatus(openai, summaryWith({ [CHAT_COMPLETIONS]: 'degraded_performance' }), [])).toBe('degraded')
   })
 })

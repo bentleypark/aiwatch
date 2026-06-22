@@ -44,7 +44,12 @@ export function parseIncidentIoUptime(html: string, componentId: string, groupId
   return null
 }
 
-export function parseIncidentIoComponentImpacts(html: string, componentId: string): Record<string, DailyImpactLevel> {
+// componentId accepts a single id OR a list (the service's statusComponentIds group): the per-day
+// result is the WORST impact across all matched components — so a service whose badge spans several
+// components (e.g. the OpenAI "APIs" group) gets a calendar reflecting the whole group, not just the
+// primary component, matching the official group calendar (#693 follow-up).
+export function parseIncidentIoComponentImpacts(html: string, componentId: string | string[]): Record<string, DailyImpactLevel> {
+  const idSet = new Set(Array.isArray(componentId) ? componentId : [componentId])
   const result: Record<string, DailyImpactLevel> = {}
   const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
   for (const chunk of chunks) {
@@ -66,8 +71,8 @@ export function parseIncidentIoComponentImpacts(html: string, componentId: strin
       const impacts = JSON.parse(raw) as Array<{
         component_id: string; start_at: string; end_at: string; status: string
       }>
-      // Filter by target component for Phase 1 accuracy; Phase 2 (incidents) fills in other components
-      const mine = impacts.filter((i) => i.component_id === componentId)
+      // Filter to the target component(s); worst-of per day across them (loop below escalates).
+      const mine = impacts.filter((i) => idSet.has(i.component_id))
       for (const impact of mine) {
         const start = new Date(impact.start_at)
         const end = new Date(impact.end_at)
@@ -81,17 +86,26 @@ export function parseIncidentIoComponentImpacts(html: string, componentId: strin
           : impact.status === 'partial_outage' ? 'major'
           : 'minor' // degraded_performance
 
-        // Mark each UTC day the impact spans
+        // Emit one entry per UTC day the impact spans, keyed by an ISO TIMESTAMP within the impact's
+        // coverage (NOT a bare UTC date) so the client buckets each to the correct LOCAL day — fixing
+        // the UTC-vs-local off-by-one for impacts in the UTC evening, which fall on the next local day
+        // for east-of-UTC viewers (#693 follow-up). Start day → real start; end day → real end; full
+        // middle days → noon. The client merges worst-of per local day, so no pre-merge needed here;
+        // escalate only guards the rare exact-key collision.
         const dayMs = 86_400_000
-        const startDay = new Date(start.toISOString().split('T')[0]).getTime()
-        const endDay = new Date(end.toISOString().split('T')[0]).getTime()
-        for (let d = startDay; d <= endDay; d += dayMs) {
-          const dateStr = new Date(d).toISOString().split('T')[0]
-          // Keep worst level per day: critical > major > minor
-          const existing = result[dateStr]
-          if (!existing || level === 'critical' || (level === 'major' && existing === 'minor')) {
-            result[dateStr] = level
-          }
+        const startDayMs = Date.parse(start.toISOString().slice(0, 10) + 'T00:00:00.000Z')
+        const endDayMs = Date.parse(end.toISOString().slice(0, 10) + 'T00:00:00.000Z')
+        const escalate = (key: string) => {
+          const existing = result[key]
+          if (!existing || level === 'critical' || (level === 'major' && existing === 'minor')) result[key] = level
+        }
+        for (let d = startDayMs; d <= endDayMs; d += dayMs) {
+          // Single-day impact (startDayMs === endDayMs) → start key only; its end is the same local
+          // day, so no separate end key is needed. Multi-day → start ISO + noon(middle) + end ISO.
+          const key = d === startDayMs ? start.toISOString()
+            : d === endDayMs ? end.toISOString()
+            : new Date(d + dayMs / 2).toISOString() // noon of a fully-covered middle day
+          escalate(key)
         }
       }
     } catch (err) {
