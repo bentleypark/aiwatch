@@ -373,6 +373,30 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How do I check LangSmith status?', a: 'You can check status on this page, on the official LangSmith status page at status.smith.langchain.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
+  helicone: {
+    displayName: 'Helicone',
+    description: 'Helicone is an open-source LLM observability and gateway platform. Developers route LLM requests through it to log, monitor, cache, and analyze usage, latency, and cost across providers.',
+    insight: 'AIWatch tracks Helicone via its Better Stack status page (official uptime + incident history), so a gateway or logging-pipeline degradation is reflected with real availability numbers rather than a binary up/down.',
+    whenDown: 'When Helicone is down, requests proxied through its gateway can fail or stall, and logging/analytics ingestion stops — so teams lose live observability into their LLM traffic, and a hard gateway outage can break the request path itself if not bypassed.',
+    faqs: [
+      { q: 'Is Helicone down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Helicone every 5 minutes and shows real-time operational status.' },
+      { q: 'Why are my Helicone logs not appearing?', a: 'Missing logs often indicate a logging-pipeline incident even when the app loads. Check this page for active incidents, then verify your API key and integration.' },
+      { q: 'What are alternatives to Helicone?', a: 'For LLM observability, LangSmith and Langfuse are alternatives. AIWatch shows current availability across the AI stack.' },
+      { q: 'How do I check Helicone status?', a: 'You can check status on this page, on the official Helicone status page at status.helicone.ai, or on the AIWatch dashboard at ai-watch.dev.' },
+    ],
+  },
+  langfuse: {
+    displayName: 'Langfuse',
+    description: 'Langfuse is an open-source LLM engineering platform for tracing, evaluation, prompt management, and metrics. Developers use it to debug and monitor LLM applications and agents in production.',
+    insight: 'AIWatch tracks Langfuse via its incident.io status page (ingestion, public API, and prompts surfaces), using a worst-of badge so a trace-ingestion incident is reflected even when other surfaces are healthy.',
+    whenDown: 'When Langfuse is down, trace ingestion stalls so runs stop appearing, prompt and evaluation workflows fail to record, and teams lose live observability into their LLM apps — though the underlying LLM calls usually keep working.',
+    faqs: [
+      { q: 'Is Langfuse down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Langfuse every 5 minutes and shows real-time operational status.' },
+      { q: 'Why are my Langfuse traces not showing up?', a: 'Missing traces often indicate an ingestion incident even when the app loads. Check this page for active incidents, then verify your API keys and SDK configuration.' },
+      { q: 'What are alternatives to Langfuse?', a: 'For LLM observability, LangSmith and Helicone are alternatives. AIWatch shows current availability across the AI stack.' },
+      { q: 'How do I check Langfuse status?', a: 'You can check status on this page, on the official Langfuse status page at status.langfuse.com, or on the AIWatch dashboard at ai-watch.dev.' },
+    ],
+  },
   runway: {
     displayName: 'Runway',
     description: 'Runway is a hosted generative-video AI platform (Gen-4 video, Act-Two character animation) used to generate and edit video from text and image prompts. Developers reach it through the web app and the Public API.',

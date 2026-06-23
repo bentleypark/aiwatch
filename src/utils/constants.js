@@ -17,7 +17,7 @@ export const API_SERVICE_IDS = [
   'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq',
   'together', 'fireworks', 'cerebras', 'perplexity', 'huggingface', 'replicate',
   'elevenlabs', 'xai', 'deepseek', 'openrouter', 'bedrock', 'azureopenai',
-  'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'runway', 'luma', 'assemblyai', 'deepgram',
+  'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'helicone', 'langfuse', 'runway', 'luma', 'assemblyai', 'deepgram',
 ]
 
 // AI web apps (no latency — web services, ordered before related API)
@@ -36,7 +36,11 @@ export const SERVICE_AND_APP_IDS = [
   // voice & speech AI
   'elevenlabs', 'assemblyai', 'deepgram',
   // inference / infrastructure
-  'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'runway', 'luma',
+  'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal',
+  // LLM observability (#601)
+  'langsmith', 'helicone', 'langfuse',
+  // video-gen
+  'runway', 'luma',
 ]
 
 // All service IDs
@@ -54,13 +58,14 @@ export const SERVICE_CATEGORIES = {
   llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
   agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'] },
   voice:     { labelKey: 'filter.voice',     ids: ['elevenlabs', 'assemblyai', 'deepgram'] }, // #658 — STT/TTS
-  inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'modal', 'stability', 'voyageai', 'pinecone', 'langsmith'] }, // catch-all for non-LLM API infra: model-hosting (hf/replicate/modal) + image (stability) + embeddings (voyageai) + vector (pinecone) + observability (langsmith). Each NON-hosting sub-domain is single-service today — kept under one bucket until #601 adds siblings to warrant splitting
+  inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'modal', 'stability', 'voyageai', 'pinecone'] }, // catch-all for non-LLM API infra: model-hosting (hf/replicate/modal) + image (stability) + embeddings (voyageai) + vector (pinecone). Observability split out to its own category (#601); remaining single-service sub-domains stay here until #601 adds siblings
+  observability: { labelKey: 'filter.observability', ids: ['langsmith', 'helicone', 'langfuse'] }, // #601 — LLM observability/eval split out (LangSmith + Helicone + Langfuse recommend each other, fallback tier 6)
   video:     { labelKey: 'filter.video',     ids: ['runway', 'luma'] }, // #658 — video-gen (align membership with #601 fallback sub-tier)
   apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp'] },
 }
 
 // #676 — the rankable category buckets in #658 canonical order (LLM → Agents → Voice → Inference →
-// Video → Apps), excluding `all` (ids:null). Single source of truth for ordering a flat service list.
+// Observability → Video → Apps), excluding `all` (ids:null). Single source of truth for ordering a flat service list.
 const RANKABLE_CATEGORY_KEYS = Object.keys(SERVICE_CATEGORIES).filter((k) => SERVICE_CATEGORIES[k].ids)
 
 // #676 — a service's category rank = the index of its bucket in RANKABLE_CATEGORY_KEYS, so a flat
@@ -74,7 +79,7 @@ export function categoryRankOf(id) {
 
 // Services excluded from fallback recommendations (not interchangeable with LLM APIs)
 // Keep in sync with worker/src/fallback.ts EXCLUDE_FALLBACK
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'characterai', 'bedrock', 'azureopenai']
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
 
 // Per-service incident RSS feed (#432). The feed URL uses the /is-{slug}-down
 // page slug, which differs from the worker service ID for the few services
@@ -113,10 +118,12 @@ export const ALL_SERVICES_FEED_URL = 'https://ai-watch.dev/feed.xml'
 export const API_TIER = {
   claude: 1, openai: 1, gemini: 1,
   mistral: 2, cohere: 2, groq: 2, together: 2, fireworks: 2, cerebras: 2, deepseek: 2, xai: 2, perplexity: 2,
-  bedrock: 3, azureopenai: 3, openrouter: 3, langsmith: 3,
+  bedrock: 3, azureopenai: 3, openrouter: 3,
   elevenlabs: 4, assemblyai: 4, deepgram: 4,
   // Tier 5 = generative Video (#602 / #601 step B) — keep in sync with worker/src/fallback.ts.
   runway: 5, luma: 5,
+  // Tier 6 = LLM Observability (#601) — LangSmith + Helicone + Langfuse; LangSmith un-excluded.
+  langsmith: 6, helicone: 6, langfuse: 6,
   claudecode: 11, codex: 11,
   cursor: 12, windsurf: 12,
   copilot: 13, junie: 13,
@@ -126,7 +133,7 @@ export const API_TIER = {
 // Sync target for worker/src/fallback.ts TIER_LABEL. Pre-#403 this lived inline in Overview.jsx;
 // promoted here so the sync test can compare both copies via a single import without parsing JSX.
 export const TIER_LABEL = {
-  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video',
+  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability',
   11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
   21: 'AI Apps',
 }

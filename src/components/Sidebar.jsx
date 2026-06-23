@@ -303,8 +303,11 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
         </div>
       </div>
 
-      {/* ── Filtered service list — single flat list in #658 category order (#676) ── */}
-      <nav className="overflow-y-auto" style={{ padding: '0 12px' }} aria-label={t('nav.services')}>
+      {/* ── Filtered service list — single flat list in #658 category order (#676).
+           flex-1 min-h-0 so the list takes the remaining height and scrolls WITHIN itself
+           (not the whole sidebar), keeping the footer pinned + always-visible regardless of
+           how many services are listed (#601 — broke at 39 services without this). ── */}
+      <nav className="flex-1 min-h-0 overflow-y-auto" style={{ padding: '0 12px' }} aria-label={t('nav.services')}>
         {orderedServices.map((svc) => (
           <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} onNavigate={onNavigate} />
         ))}

@@ -543,7 +543,7 @@ describe('renderFooter — Also check category grouping', () => {
     for (const c of present) {
       expect(ordered.has(c), `group "${c}" present in SLUG_TO_SERVICE but missing from FOOTER_CATEGORY_ORDER`).toBe(true)
     }
-    expect([...present].sort()).toEqual(['agents', 'apps', 'inference', 'llm', 'video', 'voice'])
+    expect([...present].sort()).toEqual(['agents', 'apps', 'inference', 'llm', 'observability', 'video', 'voice'])
   })
 
   it('`category` stays the COARSE worker vocabulary (api/app/agent) — guards the is-down fallback filter', () => {

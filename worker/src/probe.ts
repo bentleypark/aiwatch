@@ -34,6 +34,9 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   { id: 'langsmith', url: 'https://api.smith.langchain.com/info' },                 // public /info, 200
   { id: 'runway', url: 'https://api.runwayml.com/v1/tasks' },                       // 401
   { id: 'luma', url: 'https://api.lumalabs.ai/dream-machine/v1/generations' },      // 403
+  // #601 — LLM observability siblings; both expose a public, no-auth health endpoint (verified 2026-06-23)
+  { id: 'helicone', url: 'https://api.helicone.ai/healthcheck' },                   // public 200 {"status":"healthy :)"}
+  { id: 'langfuse', url: 'https://cloud.langfuse.com/api/public/health' },          // public 200 {"status":"OK"}
   // Not probed (#678): bedrock (region-specific runtime endpoint, estimate-only — incident-derived
   // reliability is enough), azureopenai (tenant-specific {resource}.openai.azure.com — no generic
   // endpoint), modal (api.modal.com returns a catch-all 200 on every path — not a representative

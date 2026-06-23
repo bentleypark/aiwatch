@@ -486,6 +486,11 @@ test.describe('RSS subscribe affordances (#433)', () => {
 
   test('sidebar footer shows an always-visible RSS copy icon', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    // Pre-grant cookie consent so the first-visit cookie banner (a fixed full-width bottom overlay,
+    // z-9999) isn't racing the click on the bottom-of-sidebar RSS icon. The banner covers the bottom
+    // ~125px including the sidebar footer until dismissed; this test asserts the RSS affordance itself,
+    // not first-visit consent layout, so removing that orthogonal overlay keeps the click deterministic.
+    await page.addInitScript(() => { try { localStorage.setItem('aiwatch-cookie-consent', 'granted') } catch { /* ignore */ } })
     await page.goto('/')
     // Sidebar footer is static chrome — renders without waiting on service data.
     await expect(page.getByRole('link', { name: 'AIWatch' }).first()).toBeVisible({ timeout: 15000 })

@@ -69,6 +69,8 @@ const STATUS_URL = {
   voyageai:    'https://voyageai-status.statuspage.io',
   modal:       'https://status.modal.com',
   langsmith:   'https://status.smith.langchain.com',
+  helicone:    'https://status.helicone.ai',
+  langfuse:    'https://status.langfuse.com',
   runway:      'https://status.runwayml.com',
   luma:        'https://status.lumalabs.ai',
   assemblyai:  'https://status.assemblyai.com',

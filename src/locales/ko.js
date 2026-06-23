@@ -60,6 +60,7 @@ const ko = {
   'filter.apps': 'AI 앱',
   'filter.voice': '음성',
   'filter.inference': '추론 & 인프라',
+  'filter.observability': '관측',
   'filter.video': '영상',
   'overview.incidents.title': '최근 인시던트',
   'overview.latency.title': '레이턴시 순위',
