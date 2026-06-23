@@ -357,6 +357,13 @@ export function buildRssFeed(
   opts: FeedScope,
   now: Date = new Date(),
   aiAnalysis?: RssAiAnalysisMap,
+  // #750 — incId → ISO time AIWatch FIRST detected/published the incident. The active item's pubDate
+  // must be fresh when the item appears in the feed, NOT the provider's backdated `startedAt`: RSS
+  // readers (Slack /feed) decide "is this new?" by pubDate freshness (the same reason #467 gives the
+  // resolved item a *later* pubDate). A BetterStack flap / #633-held incident surfaces hours after its
+  // `startedAt`, so a `startedAt` pubDate looks "already past" the reader's last poll → the outage
+  // post is silently dropped (Discord push still fired). Falls back to `startedAt` when unknown.
+  firstSeen?: Record<string, string>,
 ): string {
   const incidentServices = buildIncidentServiceMap(services)
   const sources = opts.scope === 'service' ? [opts.service] : services
@@ -373,7 +380,7 @@ export function buildRssFeed(
         items.push({ svc, incident, kind: 'resolved', pubDate: resolvedAtOf(incident) })
       } else {
         items.push({
-          svc, incident, kind: 'active', pubDate: incident.startedAt,
+          svc, incident, kind: 'active', pubDate: firstSeen?.[incident.id] ?? incident.startedAt,
           fallbackText: fallbackLine(svc, services),
           // #724 — no AI block for a `monitoring` incident (recovery already confirmed). Gating HERE
           // (not only in the /feed handler) keeps rss.ts self-consistent regardless of the map passed.
@@ -445,6 +452,7 @@ export function buildFeedResponse(
   req: FeedRequest,
   now?: Date,
   aiAnalysis?: RssAiAnalysisMap,
+  firstSeen?: Record<string, string>, // #750 — incId → first-detected ISO; fresh active-item pubDate
 ): FeedResult {
   if (req.scope === 'service' && !isValidFeedSegment(req.segment)) {
     return { ok: false, status: 400, message: 'Invalid service slug' }
@@ -453,11 +461,11 @@ export function buildFeedResponse(
     return { ok: false, status: 503, message: 'Status data is temporarily unavailable' }
   }
   if (req.scope === 'all') {
-    return { ok: true, xml: buildRssFeed(cached.services, { scope: 'all' }, now, aiAnalysis) }
+    return { ok: true, xml: buildRssFeed(cached.services, { scope: 'all' }, now, aiAnalysis, firstSeen) }
   }
   const service = resolveFeedService(cached.services, req.segment)
   if (!service) {
     return { ok: false, status: 404, message: 'Service not found' }
   }
-  return { ok: true, xml: buildRssFeed(cached.services, { scope: 'service', service }, now, aiAnalysis) }
+  return { ok: true, xml: buildRssFeed(cached.services, { scope: 'service', service }, now, aiAnalysis, firstSeen) }
 }

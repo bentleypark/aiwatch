@@ -780,6 +780,24 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
         for (const id of newSvcIds) roster.add(id)
         const ok = await kvPut(env.STATUS_CACHE, k, JSON.stringify([...roster]), { expirationTtl: 604800 })
         if (!ok) console.error('[cron] #545 alerted:new roster write FAILED — incident will re-alert next cycle:', k)
+        // #750 — stamp the incident's first-detected time ONCE (get-or-set; first write wins so the
+        // value stays STABLE across cycles + service joiners). The /feed active item reads this as its
+        // pubDate so a backdated provider `startedAt` can't make Slack /feed treat the outage post as
+        // "already past" and skip it (Discord push is unaffected). 7d TTL, matches the alerted:new roster.
+        const fsKey = `feed:firstseen:${incId}`
+        let fsExisting: string | null = null
+        try {
+          fsExisting = await env.STATUS_CACHE.get(fsKey)
+        } catch (err) {
+          // get THREW (KV hiccup) — do NOT treat as absent: re-stamping would overwrite an existing
+          // value and break first-write-wins. Skip this cycle (a later cycle retries); log a breadcrumb.
+          fsExisting = '\x00' // sentinel: "not absent" → skip the put below
+          console.warn('[cron] #750 feed:firstseen get failed, skipping stamp:', incId, err instanceof Error ? err.message : err)
+        }
+        // Only stamp on a genuine clean miss (null), so the first cycle to detect the incident wins.
+        if (fsExisting === null) {
+          await kvPut(env.STATUS_CACHE, fsKey, new Date().toISOString(), { expirationTtl: 604800 })
+        }
       }))
     } else {
       await Promise.all(keysToWrite.map(k => kvPut(env.STATUS_CACHE, k, kvValue, { expirationTtl: ttl })))
@@ -2686,6 +2704,7 @@ export default {
       // carries the same 🤖 summary. Public-safe — the operator-only tweet draft is never included.
       let feedCached = cached
       let feedAiAnalysis: RssAiAnalysisMap | undefined
+      let feedFirstSeen: Record<string, string> | undefined // #750 — incId → first-detected ISO
       if (cached && env.STATUS_CACHE) {
         const feedProbe = await readProbeSummaries(env.STATUS_CACHE, 'feed')
         feedCached = {
@@ -2695,6 +2714,19 @@ export default {
             return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
           }),
         }
+        // #750 — first-detected stamp for each ACTIVE incident → a FRESH active-item pubDate (a
+        // backdated provider startedAt makes Slack /feed skip the outage post). Written once by the
+        // cron's alerted:new path; absent → rss.ts falls back to startedAt (legacy behavior).
+        const firstSeen: Record<string, string> = {}
+        await Promise.all(cached.services.flatMap((svc) =>
+          (svc.incidents ?? [])
+            .filter((i) => i.status !== 'resolved')
+            .map(async (inc) => {
+              const ts = await env.STATUS_CACHE!.get(`feed:firstseen:${inc.id}`).catch(() => null)
+              if (ts) firstSeen[inc.id] = ts
+            }),
+        ))
+        if (Object.keys(firstSeen).length > 0) feedFirstSeen = firstSeen
         const analysis: RssAiAnalysisMap = {}
         await Promise.all(cached.services.flatMap((svc) =>
           (svc.incidents ?? [])
@@ -2713,7 +2745,7 @@ export default {
         ))
         if (Object.keys(analysis).length > 0) feedAiAnalysis = analysis
       }
-      const result = buildFeedResponse(feedCached, feedReq, undefined, feedAiAnalysis)
+      const result = buildFeedResponse(feedCached, feedReq, undefined, feedAiAnalysis, feedFirstSeen)
       if (!result.ok && result.status === 503) {
         // Same severity as /api/report's KV-read failure — log at error so it
         // lands in the same operator alerting tier.
