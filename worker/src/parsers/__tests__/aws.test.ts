@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseAwsRssIncidents, parseAwsHealthEvents, decodeAwsHealthJson, awsHealthImpact, deriveAwsStatus } from '../aws'
+import { parseAwsRssIncidents, parseAwsHealthEvents, parseAwsRegionHealth, decodeAwsHealthJson, awsHealthImpact, deriveAwsStatus } from '../aws'
 
 /** Encode a string to an ArrayBuffer in the given encoding with a BOM, to exercise decodeAwsHealthJson
  *  the way the live AWS endpoint serves it (utf-16 + BOM). */
@@ -551,5 +551,47 @@ describe('parseAwsHealthEvents (#677 — AWS Health public events JSON)', () => 
   it('caps at 20 incidents', () => {
     const many = Array.from({ length: 25 }, (_, i) => ({ ...BEDROCK_EVENT, startTime: 1781314018000 + i * 1000 }))
     expect(parseAwsHealthEvents(many, 'BEDROCK')).toHaveLength(20)
+  })
+})
+
+// #574 — currently-degraded AWS regions from the public-events JSON (all AWS services), for the
+// supply-chain banner. Reuses awsHealthImpact (so a #707 non-reliability advisory → excluded).
+describe('parseAwsRegionHealth (#574)', () => {
+  const ev = (o: Record<string, unknown>) => ({
+    service: 'EC2', region: 'us-east-1', typeCode: 'AWS_EC2_OPERATIONAL_ISSUE', startTime: 1781314018000,
+    metadata: { EVENT_LOG: JSON.stringify([{ summary: 'Increased API error rates in us-east-1', message: 'investigating', timestamp: 1781314018 }]) },
+    ...o,
+  })
+
+  it('maps an ACTIVE operational issue to a degraded region (+summary)', () => {
+    expect(parseAwsRegionHealth([ev({})])).toEqual({ 'us-east-1': { level: 'degraded', summary: 'Increased API error rates in us-east-1' } })
+  })
+
+  it('excludes RESOLVED events (endTime set)', () => {
+    expect(parseAwsRegionHealth([ev({ endTime: 1781317618000 })])).toEqual({})
+  })
+
+  it('excludes a non-reliability advisory (#707 — impact null) and unknown/missing regions', () => {
+    const advisory = ev({ region: 'eu-west-1', metadata: { EVENT_LOG: JSON.stringify([{ summary: 'Scheduled deprecation: access will be revoked for compliance', message: 'export-control policy update' }]) } })
+    expect(parseAwsRegionHealth([advisory])).toEqual({})
+    expect(parseAwsRegionHealth([ev({ region: undefined })])).toEqual({})
+  })
+
+  it('aggregates multiple events per region (worst-of) across DIFFERENT AWS services', () => {
+    const out = parseAwsRegionHealth([ev({ service: 'EC2' }), ev({ service: 'S3' }), ev({ region: 'us-west-2', service: 'LAMBDA' })])
+    expect(Object.keys(out).sort()).toEqual(['us-east-1', 'us-west-2'])
+    expect(out['us-east-1'].level).toBe('degraded')
+  })
+
+  it('EXCLUDES BEDROCK events (an AI service we track separately — avoids the circular #574 signal)', () => {
+    const bedrockEv = ev({ service: 'BEDROCK', region: 'us-east-1' })
+    expect(parseAwsRegionHealth([bedrockEv])).toEqual({}) // bedrock-only → no infra region signal
+    // but a real INFRA event in the same feed still registers
+    expect(Object.keys(parseAwsRegionHealth([bedrockEv, ev({ service: 'EC2', region: 'us-east-1' })]))).toEqual(['us-east-1'])
+  })
+
+  it('returns {} for non-array / empty input', () => {
+    expect(parseAwsRegionHealth(null)).toEqual({})
+    expect(parseAwsRegionHealth([])).toEqual({})
   })
 })

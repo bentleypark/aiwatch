@@ -20,7 +20,7 @@ import {
 import { parseInstatusIncidents, parseInstatusUptime } from './parsers/instatus'
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
-import { parseAwsRssIncidents, parseAwsHealthEvents, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
+import { parseAwsRssIncidents, parseAwsHealthEvents, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
 
 export const SERVICES: ServiceConfig[] = [
   // AI API Services
@@ -958,6 +958,9 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         await resetFetchFailure(kv, config.id)
         const incidents = parseAwsHealthEvents(json, config.awsHealthApi.service)
         const filtered = filterIncidents(incidents, config)
+        // #574 — derive currently-degraded AWS regions from the SAME events JSON (all AWS services),
+        // attached to bedrock so the supply-chain banner can correlate without an extra fetch.
+        const awsRegionHealth = config.id === 'bedrock' ? parseAwsRegionHealth(json) : undefined
         // #713 — AWS Health is an incident feed, NOT a rolling uptime %. We do NOT invent an estimate:
         // uptime stays null (display: "No official uptime — incident-tracked") and the Score is computed
         // on incidents + recovery only. The honest "official-first, no fabricated value" position.
@@ -967,6 +970,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           latency: config.category === 'api' ? latency : null,
           incidents: filtered,
           calendarDays: 14,
+          ...(awsRegionHealth && Object.keys(awsRegionHealth).length > 0 ? { awsRegionHealth } : {}),
         }
       }
 

@@ -203,6 +203,9 @@ export function renderPage(
   // drifted (the incident resolved/flapped) by the time the platform fetches the card. The page body
   // still shows live status; only the social card is pinned. Absent / `reddit` → live status.
   ogStatusHint?: string | null,
+  // #574 — supply-chain note for THIS service (set by api/is-down.ts when it's in the banner's
+  // affectedNow/mayBeAffected). `confirmed` = currently degraded (vs estimated AWS-dependent). null otherwise.
+  supplyChainNote?: { regions: string; confirmed: boolean } | null,
 ): string {
   // #566: lead the SERP title with the live status answer (falls back to "Live Status"
   // when status data is unavailable) so the result answers the query before the click.
@@ -384,6 +387,7 @@ textarea.report-input{min-height:72px;resize:vertical}
 ${renderStatusHeader(service, seo)}
 ${renderCTA(seo, service?.status ?? 'operational', slug, service?.id ?? slug)}
 ${renderAIInsight(aiInsight, service?.status, fallbacks)}
+${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS infrastructure issue (${esc(supplyChainNote.regions)}) &mdash; ${supplyChainNote.confirmed ? `${esc(seo.displayName)} is degraded and attributes it to an AWS/upstream issue` : `${esc(seo.displayName)} runs on AWS and may be affected`}</p>` : ''}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
 ${renderComponents(service)}
 ${renderIncidents(service)}

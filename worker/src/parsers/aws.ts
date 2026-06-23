@@ -166,6 +166,48 @@ export function parseAwsHealthEvents(json: unknown, service: string): Incident[]
   return incidents
 }
 
+/** A currently-degraded AWS region: worst-of level across its active events + a short summary. */
+export interface AwsRegionHealthEntry { level: 'degraded' | 'down'; summary?: string }
+
+/**
+ * #574 — Derive CURRENTLY-DEGRADED AWS regions from the SAME public-events JSON the Bedrock fetch
+ * already pulls (`health.aws.amazon.com/public/events`), across ALL AWS services (not just BEDROCK) —
+ * so the supply-chain banner can correlate a cloud-region issue with dependent AI services. Reuses
+ * `awsHealthImpact` (so a #707 non-reliability advisory → null → excluded). Only ACTIVE events
+ * (no resolved endTime) count; worst-of per region (down > degraded). Returns {} when all clear.
+ */
+// AWS Health `service` codes that are AIWatch-MONITORED AI services (not shared infrastructure).
+// Excluded from the region-health signal so "AWS region degraded" reflects the INFRASTRUCTURE
+// substrate (EC2 / Route53 / MULTIPLE_SERVICES / …), not an AI service we already track separately —
+// otherwise a Bedrock-only outage would circularly read as "AWS down → may affect Bedrock" (#574).
+const AWS_REGION_HEALTH_EXCLUDE = new Set(['BEDROCK'])
+
+export function parseAwsRegionHealth(json: unknown): Record<string, AwsRegionHealthEntry> {
+  const out: Record<string, AwsRegionHealthEntry> = {}
+  if (!Array.isArray(json)) return out
+  for (const ev of json as AwsHealthEvent[]) {
+    if (!ev || typeof ev.startTime !== 'number') continue
+    if (ev.service && AWS_REGION_HEALTH_EXCLUDE.has(ev.service)) continue // AI service, not infra
+    if (typeof ev.endTime === 'number' && ev.endTime > 0) continue // resolved → not current
+    const region = ev.region
+    if (!region || region === 'unknown') continue
+    const log = parseEventLog(ev.metadata?.EVENT_LOG)
+    const summary = decodeXmlEntities(stripCdata(log[0]?.summary?.trim() || ev.typeCode || ''))
+    const classificationText = log.map((e) => `${e.summary ?? ''} ${e.message ?? ''}`).join(' ').trim() || summary
+    const impact = awsHealthImpact(ev.typeCode || '', classificationText)
+    if (impact === null) continue // informational/advisory → not a region-health signal
+    const level: 'degraded' | 'down' = impact === 'critical' ? 'down' : 'degraded'
+    const existing = out[region]
+    // worst-of per region: down beats degraded. On overwrite, keep a summary (prefer the new event's,
+    // else retain the existing one) so a summary-less worse event doesn't blank the region's text.
+    if (!existing || (level === 'down' && existing.level !== 'down')) {
+      const keptSummary = summary || existing?.summary
+      out[region] = { level, ...(keptSummary ? { summary: keptSummary } : {}) }
+    }
+  }
+  return out
+}
+
 /** Derive overall service status from active (unresolved) incidents */
 export function deriveAwsStatus(incidents: Incident[]): 'operational' | 'degraded' | 'down' {
   const active = incidents.filter((i) => i.status !== 'resolved')

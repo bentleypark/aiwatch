@@ -74,6 +74,13 @@ const ko = {
   'overview.banner.degraded': '성능 저하',
   'overview.banner.down': '서비스 중단',
   'overview.banner.affected': '{n}개 서비스 장애',
+  // #574 — 공급망 상관 배너 (AWS 리전 저하 + 의존 AI 서비스 저하)
+  'supplychain.title': 'AWS 인프라 이슈',
+  // 서비스 자신이 확인: 저하 + 자체 상태페이지가 원인을 AWS/upstream으로 명시(StatusGator식 크로스체크) — 단순 시간 우연 아님.
+  'supplychain.affectingNow': '저하 · AWS 귀속 확인:',
+  'supplychain.mayAffect': 'AWS 의존 · 영향 가능:',
+  'supplychain.region.degraded': '성능 저하',
+  'supplychain.region.down': '주요 장애',
   'overview.banner.fallback': '대체 추천:',
   'overview.banner.regionSwitch': '리전 전환:',
   'overview.banner.viewIssues': 'Issues 탭에서 확인',

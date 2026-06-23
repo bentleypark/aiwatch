@@ -74,6 +74,14 @@ const en = {
   'overview.banner.degraded': 'Partially Degraded',
   'overview.banner.down': 'Down',
   'overview.banner.affected': '{n} services affected',
+  // #574 — supply-chain correlation banner (AWS region degraded + dependent AI service degraded)
+  'supplychain.title': 'AWS infrastructure issue',
+  // Confirmed by the service ITSELF: these are degraded AND their own status page attributes the
+  // issue to AWS / an upstream provider (StatusGator-style cross-check) — not a mere timing coincidence.
+  'supplychain.affectingNow': 'Degraded · AWS-attributed:',
+  'supplychain.mayAffect': 'Other AWS-dependent · may be affected:',
+  'supplychain.region.degraded': 'degraded',
+  'supplychain.region.down': 'major outage',
   'overview.banner.fallback': 'Suggested fallback:',
   'overview.banner.regionSwitch': 'Switch region:',
   'overview.banner.viewIssues': 'View Issues tab for details',

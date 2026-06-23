@@ -42,6 +42,11 @@ export interface ServiceStatus {
   uptime30d: number | null
   lastChecked: string
   incidents: Incident[]
+  /** #574 — set ONLY on `bedrock`: currently-degraded AWS regions derived from the same AWS Health
+   *  public-events fetch (all AWS services, via parseAwsRegionHealth). The supply-chain banner reads
+   *  this off the bedrock entry to correlate a cloud-region issue with AWS-dependent AI services.
+   *  Rides on bedrock's ServiceStatus → persisted in services:latest (live + cached both have it). */
+  awsRegionHealth?: Record<string, { level: 'degraded' | 'down'; summary?: string }>
   /** #575 Phase B — an active consecutive probe-RTT spike (≥3 cycles >3× median or failed), via
    *  detectConsecutiveSpikes. An independent "the API looks unhealthy" signal. Used to cross-match
    *  crowd reports: an operational page + a probe spike + enough crowd reports surfaces the gated

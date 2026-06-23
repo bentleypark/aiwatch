@@ -599,3 +599,43 @@ test.describe('Overview — crowd reports (#575)', () => {
     expect(posted).toMatchObject({ svcId: 'openai', category: 'outage', description: 'cannot reach api' })
   })
 })
+
+// #574 — supply-chain correlation banner (AWS region degraded + dependent AI service degraded).
+test.describe('Overview — supply-chain banner (#574)', () => {
+  const svc = (id, name, status = 'operational') => ({ id, category: 'api', name, provider: 'x', status, latency: 150, uptime30d: 99.9, calendarDays: 30, incidents: [] })
+  const withBanner = { json: {
+    services: [svc('claude', 'Claude API', 'degraded'), svc('bedrock', 'Amazon Bedrock'), svc('together', 'Together AI')],
+    supplyChainBanner: {
+      cloud: 'aws', severity: 'degraded',
+      regions: [{ region: 'us-east-1', level: 'degraded', summary: 'Increased error rates in us-east-1' }],
+      affectedNow: [{ id: 'claude', name: 'Claude API' }],
+      mayBeAffected: [{ id: 'bedrock', name: 'Amazon Bedrock', confidence: 'certain' }, { id: 'together', name: 'Together AI', confidence: 'medium' }],
+    },
+    lastUpdated: new Date().toISOString(),
+  } }
+  const noBanner = { json: { services: [svc('claude', 'Claude API')], lastUpdated: new Date().toISOString() } }
+
+  test('renders the banner with region, affected-now + may-be-affected services', async ({ page }) => {
+    await page.route('**/api/status**', (route) => route.fulfill(withBanner))
+    await page.route('**/api/status/cached', (route) => route.fulfill(withBanner))
+    await page.goto('/')
+    await page.locator('main button').first().waitFor({ state: 'visible', timeout: 20000 })
+    const main = page.locator('main')
+    await expect(main.getByText(/AWS infrastructure issue.*us-east-1|AWS 인프라 이슈.*us-east-1/)).toBeVisible()
+    await expect(main.getByText('Increased error rates in us-east-1')).toBeVisible()
+    await expect(main.getByText(/AWS-attributed|AWS 귀속/)).toBeVisible()
+    await expect(main.getByText(/may be affected|영향 가능/)).toBeVisible()
+    // the affected/estimated service NAMES render inside the banner (scoped to avoid the service-card collision)
+    const banner = page.getByTestId('supply-chain-banner')
+    await expect(banner.getByText('Claude API')).toBeVisible()   // affectedNow
+    await expect(banner.getByText('Amazon Bedrock')).toBeVisible() // mayBeAffected
+  })
+
+  test('no banner when supplyChainBanner is absent (gate)', async ({ page }) => {
+    await page.route('**/api/status**', (route) => route.fulfill(noBanner))
+    await page.route('**/api/status/cached', (route) => route.fulfill(noBanner))
+    await page.goto('/')
+    await page.locator('main button').first().waitFor({ state: 'visible', timeout: 20000 })
+    await expect(page.locator('main').getByText(/AWS infrastructure issue|AWS 인프라 이슈/)).toHaveCount(0)
+  })
+})

@@ -68,6 +68,8 @@ export default async function handler(req: Request) {
     let serviceData = null
     let fallbacks: Array<{ id: string; name: string; score: number | null; status: string }> = []
     let aiInsight: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string } | null = null
+    // #574 — supply-chain note for THIS service (set if it's in the banner's affectedNow/mayBeAffected).
+    let supplyChainNote: { regions: string; confirmed: boolean } | null = null
     // Track the precise reason for the fallback render so the Discord alert can
     // distinguish operational classes (timeout vs HTTP failure vs missing service
     // vs JSON parse error). Defaults to a generic label that should never ship —
@@ -90,6 +92,13 @@ export default async function handler(req: Request) {
             components?: Array<{ id: string; name: string; status: 'operational' | 'degraded' | 'down'; group?: string }>
           }>
           aiAnalysis?: Record<string, { summary: string; estimatedRecovery: string; affectedScope: string[]; needsFallback?: boolean; analyzedAt: string; incidentId: string; resolvedAt?: string }>
+          // #574 — supply-chain banner: when this service is in affectedNow/mayBeAffected, render a note.
+          supplyChainBanner?: {
+            severity: 'degraded' | 'down'
+            regions: Array<{ region: string; level: string; summary?: string }>
+            affectedNow: Array<{ id: string; name: string }>
+            mayBeAffected: Array<{ id: string; name: string; confidence: string }>
+          }
         }
         const allServices = data.services ?? []
 
@@ -219,6 +228,14 @@ export default async function handler(req: Request) {
         if (analysis) {
           aiInsight = analysis
         }
+
+        // #574 — supply-chain note: if this service is in the banner (confirmed-affected or estimated).
+        const scb = data.supplyChainBanner
+        if (scb) {
+          const confirmed = scb.affectedNow.some(s => s.id === entry.id)
+          const listed = confirmed || scb.mayBeAffected.some(s => s.id === entry.id)
+          if (listed) supplyChainNote = { regions: scb.regions.map(r => r.region).join(', '), confirmed }
+        }
       } catch (parseErr) {
         fallbackReason = 'parse_error'
         console.error(`[is-down/${slug}] JSON parse failed:`, parseErr instanceof Error ? parseErr.message : parseErr)
@@ -269,7 +286,7 @@ export default async function handler(req: Request) {
       }
     }
 
-    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint)
+    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote)
 
     // #378: when the upstream Worker fetch failed and we're rendering the
     // "Status data is temporarily unavailable" fallback, the response must NOT
