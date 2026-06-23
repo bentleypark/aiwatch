@@ -146,6 +146,45 @@ export async function queryFeedTraffic(
   }
 }
 
+// ── New-feed-items count (#748) ───────────────────────────────────────────
+// The poll volume above is mostly EMPTY no-op fetches (Slack RSS polls ~every 15min regardless of
+// content). The figure that actually matters — how many alert-worthy items were published — is the
+// count of incidents AIWatch FIRST detected in the window. Reuses the #750 `feed:firstseen:{incId}`
+// markers (ISO first-detected time, 7d TTL) — NO new write surface. It's the upper bound on the
+// notifications any subscriber could have received (a poll only notifies on a genuinely new item).
+const FIRST_SEEN_PREFIX = 'feed:firstseen:'
+
+/** Pure: count first-seen ISO timestamps within the 24h window ending at `now` (invalid/empty skipped). */
+export function countFirstSeenWithin24h(values: (string | null | undefined)[], now: Date): number {
+  const end = now.getTime()
+  const start = end - 24 * 60 * 60 * 1000
+  let n = 0
+  for (const v of values) {
+    if (!v) continue
+    const t = new Date(v).getTime()
+    if (Number.isFinite(t) && t >= start && t <= end) n++
+  }
+  return n
+}
+
+/** List the `feed:firstseen:` markers and count those first-detected in the last 24h. Best-effort:
+ *  null on KV failure (caller omits the "new items" suffix). 7d-TTL markers keep the set tiny
+ *  (~one per incident), so a single un-paginated list + per-key get is well within budget. */
+export async function countNewFeedItems(kv: KVNamespace, now: Date = new Date()): Promise<number | null> {
+  try {
+    const list = await kv.list({ prefix: FIRST_SEEN_PREFIX })
+    // Single page is safe (7d TTL × ~5/day ≈ tiny); warn if that ever stops holding so a future
+    // fan-out in feed sources surfaces instead of silently undercounting past the 1000-key page.
+    if (!list.list_complete) console.warn('[wae] countNewFeedItems: feed:firstseen list truncated — undercounting')
+    if (list.keys.length === 0) return 0
+    const values = await Promise.all(list.keys.map((k) => kv.get(k.name).catch(() => null)))
+    return countFirstSeenWithin24h(values, now)
+  } catch (err) {
+    console.warn('[wae] countNewFeedItems failed:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
 /** The WAE dataset name (matches wrangler.toml [[analytics_engine_datasets]].dataset). */
 export const V1_DATASET = 'aiwatch_statusline'
 

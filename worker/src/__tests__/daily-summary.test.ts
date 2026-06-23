@@ -541,6 +541,23 @@ describe('formatFeedTrafficSection (#548)', () => {
     expect(formatFeedTrafficSection(null)).toBe('')
     expect(formatFeedTrafficSection(undefined)).toBe('')
   })
+  // #748 — "new feed items" suffix (alert-worthy events, distinct from poll noise)
+  it('appends "· N new items" + labels polls when newItems is present', () => {
+    const out = formatFeedTrafficSection({ all: 64, service: 7, total: 71, newItems: 2 })
+    expect(out).toContain('Last 24h: 71 polls (all-feed 64 · per-service ~7) · 2 new items')
+  })
+  it('uses the singular "item" for a count of 1', () => {
+    expect(formatFeedTrafficSection({ all: 1, service: 0, total: 1, newItems: 1 })).toContain('· 1 new item')
+    expect(formatFeedTrafficSection({ all: 1, service: 0, total: 1, newItems: 1 })).not.toContain('1 new items')
+  })
+  it('shows "· 0 new items" on a quiet day (count present but zero)', () => {
+    expect(formatFeedTrafficSection({ all: 30, service: 0, total: 30, newItems: 0 })).toContain('· 0 new items')
+  })
+  it('omits the suffix entirely when newItems is absent (KV read failed)', () => {
+    const out = formatFeedTrafficSection({ all: 30, service: 0, total: 30 })
+    expect(out).toContain('Last 24h: 30 polls')
+    expect(out).not.toContain('new item')
+  })
 })
 
 describe('buildDailySummary — #548 webhook delta + feed section', () => {

@@ -14,7 +14,7 @@ import { refreshStatusCacheOnChange } from './cache-refresh'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
 import { corsHeaders } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
-import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic } from './api-traffic'
+import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, countNewFeedItems } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
@@ -2241,6 +2241,13 @@ export default {
             feedTraffic = await queryFeedTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
           } catch (err) {
             console.warn('[daily-summary] feed traffic read failed:', err instanceof Error ? err.message : err)
+          }
+          // #748 — attach the "new feed items / 24h" count (incidents AIWatch first-detected in the
+          // window, via #750 feed:firstseen markers) so the poll volume isn't misread as alerts-sent.
+          // Only when the poll section is shown (feedTraffic present); count null (KV fail) → no suffix.
+          if (feedTraffic) {
+            const newItems = await countNewFeedItems(env.STATUS_CACHE)
+            if (newItems != null) feedTraffic = { ...feedTraffic, newItems }
           }
 
           // #575 — internal demand signal: today's per-service crowd "Report an issue" counts.

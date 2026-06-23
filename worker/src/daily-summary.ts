@@ -46,7 +46,9 @@ export interface DailySummaryData {
   } | null
   // #548 — feed-poll volume (last-24h, from WAE): the consent-free retention proxy. Absent (null)
   // when the SQL API isn't configured. No cumulative — the daily value (a post-outage step-up) is the signal.
-  feedTraffic?: { all: number; service: number; total: number } | null
+  // `newItems` (#748) — incidents AIWatch first-detected in the 24h window (alert-worthy events),
+  // distinct from the mostly-empty poll volume; absent when the KV read failed.
+  feedTraffic?: { all: number; service: number; total: number; newItems?: number } | null
   // #575 Phase A — crowd "Report an issue" counts today (svcId → count). Internal demand signal
   // only (coverage priority); never a public "N reporting" verdict. Empty/absent → section omitted.
   reportCounts?: Record<string, number>
@@ -220,14 +222,19 @@ export function formatSubscriberDelta(newToday: number | null | undefined): stri
  * configured) so the caller skips it. The per-service split shares the v1 caveat (counts include any
  * malformed /feed/:slug path), so it's shown with `~`. Both counts are WAE sampling estimates
  * (SUM(_sample_interval)); the day-over-day *step-up* is the signal, not the absolute precision.
+ * #748 — appends "· N new items": incidents AIWatch first-detected in the window (the alert-worthy
+ * event count), so the poll volume isn't misread as "alerts sent" (polls are mostly empty no-ops).
  */
 export function formatFeedTrafficSection(
   feed: DailySummaryData['feedTraffic'],
 ): string {
   if (!feed) return ''
+  const newItems = feed.newItems != null
+    ? ` · ${feed.newItems} new item${feed.newItems === 1 ? '' : 's'}`
+    : ''
   return (
     `\n📡 **Feed Polls (RSS/Slack)**\n` +
-    `   Last 24h: ${feed.total} (all-feed ${feed.all} · per-service ~${feed.service})`
+    `   Last 24h: ${feed.total} polls (all-feed ${feed.all} · per-service ~${feed.service})${newItems}`
   )
 }
 
