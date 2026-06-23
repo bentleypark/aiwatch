@@ -124,6 +124,45 @@ describe('buildRssFeed — service scope', () => {
   })
 })
 
+describe('buildRssFeed — active item pubDate = first-seen, not backdated startedAt (#750)', () => {
+  const STARTED = '2026-05-10T12:00:00.000Z'      // provider-reported (backdated)
+  const FIRST_SEEN = '2026-05-19T08:55:00.000Z'   // AIWatch first detection (fresh, ~now)
+  const inc = incident({ id: 'p1', title: 'Ray2 queue times', status: 'investigating', startedAt: STARTED })
+
+  it('uses firstSeen as the active item pubDate when provided (overrides backdated startedAt)', () => {
+    const xml = buildRssFeed([service({ incidents: [inc] })], { scope: 'all' }, NOW, undefined, { p1: FIRST_SEEN })
+    expect(xml).toContain(`<pubDate>${new Date(FIRST_SEEN).toUTCString()}</pubDate>`)
+    expect(xml).not.toContain(`<pubDate>${new Date(STARTED).toUTCString()}</pubDate>`)
+    // guid is unchanged (still the active guid) — only the pubDate freshness changed.
+    expect(xml).toContain('aiwatch:claude:p1</guid>')
+  })
+
+  it('falls back to startedAt when no firstSeen entry exists (legacy behavior preserved)', () => {
+    const xml = buildRssFeed([service({ incidents: [inc] })], { scope: 'all' }, NOW)
+    expect(xml).toContain(`<pubDate>${new Date(STARTED).toUTCString()}</pubDate>`)
+  })
+
+  it('falls back to startedAt for incidents missing from the firstSeen map', () => {
+    const xml = buildRssFeed([service({ incidents: [inc] })], { scope: 'all' }, NOW, undefined, { other: FIRST_SEEN })
+    expect(xml).toContain(`<pubDate>${new Date(STARTED).toUTCString()}</pubDate>`)
+  })
+
+  it('does NOT touch a resolved item pubDate (still resolvedAt, #467 invariant intact)', () => {
+    const resolved = incident({ id: 'p1', status: 'resolved', startedAt: STARTED, resolvedAt: '2026-05-19T09:00:00.000Z', duration: '1m' })
+    const xml = buildRssFeed([service({ incidents: [resolved] })], { scope: 'all' }, NOW, undefined, { p1: FIRST_SEEN })
+    // resolved item keeps resolvedAt; firstSeen only affects the ACTIVE branch.
+    expect(xml).toContain(`<pubDate>${new Date('2026-05-19T09:00:00.000Z').toUTCString()}</pubDate>`)
+    expect(xml).not.toContain(`<pubDate>${new Date(FIRST_SEEN).toUTCString()}</pubDate>`)
+  })
+
+  it('buildFeedResponse threads firstSeen through to the service-scope feed', () => {
+    const target = service({ id: 'claude', name: 'Claude', incidents: [inc] })
+    const res = buildFeedResponse({ services: [target] }, { scope: 'service', segment: 'claude' }, NOW, undefined, { p1: FIRST_SEEN })
+    expect(res.ok).toBe(true)
+    if (res.ok) expect(res.xml).toContain(`<pubDate>${new Date(FIRST_SEEN).toUTCString()}</pubDate>`)
+  })
+})
+
 describe('buildRssFeed — resolution notifications (#467)', () => {
   it('emits ONLY the resolved item (distinct guid, no contradictory active row) for a resolved incident', () => {
     const inc = incident({
