@@ -461,6 +461,20 @@ const MOCK_SERVICES = [
     ],
   },
   {
+    id: 'helicone', category: 'api', name: 'Helicone', provider: 'Helicone', status: 'operational',
+    latency: null, uptime30d: 99.20,
+    history30d: hist([15]),
+    history3m: [{ month: '2026-01', uptime: 99.40 }, { month: '2026-02', uptime: 98.90 }, { month: '2026-03', uptime: 99.20 }],
+    incidents: [],
+  },
+  {
+    id: 'langfuse', category: 'api', name: 'Langfuse', provider: 'Langfuse', status: 'operational',
+    latency: null, uptime30d: null,
+    history30d: hist([11, 24]),
+    history3m: null,
+    incidents: [],
+  },
+  {
     id: 'runway', category: 'api', name: 'Runway', provider: 'Runway', status: 'operational',
     latency: 412, uptime30d: 99.82,
     history30d: hist([21]),

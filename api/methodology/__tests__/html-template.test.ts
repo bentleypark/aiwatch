@@ -31,6 +31,26 @@ describe('renderMethodologyPage', () => {
     expect(html).not.toMatch(/\son(click|error|mouseover|load|change)=/i)
   })
 
+  it('every inline <script> is syntactically valid JS (guards i18n quote-escaping)', () => {
+    // Regression for the pre-existing break where an i18n string used an unescaped apostrophe
+    // (e.g. KO 'degraded') — inside the `return \`...\`` template literal a source `\'` collapses to
+    // `'` in the rendered output, ending the JS string early ("Unexpected identifier") and killing
+    // the WHOLE inline script (so setLang/the lang toggle silently never ran). new Function() compiles
+    // the body without executing it, so undefined globals (document/navigator/gtag) don't matter — it
+    // throws ONLY on a real syntax error.
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1].trim()).filter(Boolean)
+    expect(scripts.length).toBeGreaterThan(0)
+    for (const body of scripts) {
+      expect(() => new Function(body), `inline script must parse: ${body.slice(0, 60)}…`).not.toThrow()
+    }
+  })
+
+  it('the language toggle defaults to English (active = EN)', () => {
+    // #601 follow-up — methodology is <html lang="en"> + English-indexed; default render is English.
+    expect(html).toMatch(/class="lang-btn active" data-lang="en"/)
+    expect(html).toMatch(/let currentLang = 'en'/)
+  })
+
   it('is bilingual (KO + EN copy both present)', () => {
     // the transparency principle line in both languages (client-side toggle keeps both in the DOM)
     expect(html).toMatch(/can measure/i)        // EN

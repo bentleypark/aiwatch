@@ -42,7 +42,10 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   // LangChain (LangSmith) (#561) — slug is 'langchain' (search volume) while the worker id is
   // 'langsmith'; the id≠slug mapping is mirrored in worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE and
   // src/utils/constants.js FEED_SLUG_OVERRIDE, pinned by feed-slug-sync.test.ts / feed-slug.test.js.
-  'langchain':       { id: 'langsmith',  name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', group: 'inference' },
+  'langchain':       { id: 'langsmith',  name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', group: 'observability' },
+  // #601 — LLM observability siblings
+  'helicone':        { id: 'helicone',   name: 'Helicone',         provider: 'Helicone',    category: 'api', group: 'observability' },
+  'langfuse':        { id: 'langfuse',   name: 'Langfuse',         provider: 'Langfuse',    category: 'api', group: 'observability' },
   // Runway (#393) — generative-video AI; slug == worker id ('runway'), no override needed.
   'runway':          { id: 'runway',     name: 'Runway',           provider: 'Runway',      category: 'api', group: 'video' },
   // Luma / Dream Machine (#602) — generative-video AI; slug == worker id ('luma'), no override needed.
@@ -99,7 +102,9 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'stability':      ['replicate', 'huggingface'],
   'voyageai':       ['pinecone', 'cohere'],
   'modal':          ['replicate', 'huggingface'],
-  'langchain':      ['pinecone', 'openai', 'claude'],
+  'langchain':      ['helicone', 'langfuse'],
+  'helicone':       ['langchain', 'langfuse'],
+  'langfuse':       ['langchain', 'helicone'],
   'runway':         ['replicate', 'stability', 'huggingface'],
   'luma':           ['runway', 'replicate', 'stability'],
   // Apps

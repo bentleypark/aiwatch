@@ -12,18 +12,18 @@ import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFa
 // it falls into "other") at the source, so it surfaces in unit tests rather than as a stray "Services"
 // section in the UI.
 describe('SERVICE_CATEGORIES partitions ALL_SERVICE_IDS (#646 Overview sections)', () => {
-  const SECTION_KEYS = ['llm', 'agents', 'voice', 'inference', 'video', 'apps'] // #658 — + voice + video, dev-audience order
+  const SECTION_KEYS = ['llm', 'agents', 'voice', 'inference', 'observability', 'video', 'apps'] // #658/#601 — + voice + observability + video, dev-audience order
   const sectionIds = SECTION_KEYS.flatMap((k) => SERVICE_CATEGORIES[k].ids)
 
   it("'all' is the meta-bucket with no id list", () => {
     expect(SERVICE_CATEGORIES.all.ids).toBeNull()
   })
 
-  it('the six section buckets are disjoint (no service in two categories)', () => {
+  it('the section buckets are disjoint (no service in two categories)', () => {
     expect(sectionIds.length).toBe(new Set(sectionIds).size)
   })
 
-  it('the six section buckets cover every service in ALL_SERVICE_IDS (no leftover, no extra)', () => {
+  it('the section buckets cover every service in ALL_SERVICE_IDS (no leftover, no extra)', () => {
     expect([...sectionIds].sort()).toEqual([...ALL_SERVICE_IDS].sort())
   })
 })
@@ -31,9 +31,9 @@ describe('SERVICE_CATEGORIES partitions ALL_SERVICE_IDS (#646 Overview sections)
 // #676 — the sidebar service list sorts by categoryRankOf so it mirrors the filter chips + Overview
 // sections (LLM → Agents → Voice → Inference → Video → Apps; Agents before Apps, Apps last).
 describe('categoryRankOf (#676 sidebar/list category order)', () => {
-  const SECTION_KEYS = ['llm', 'agents', 'voice', 'inference', 'video', 'apps']
+  const SECTION_KEYS = ['llm', 'agents', 'voice', 'inference', 'observability', 'video', 'apps']
 
-  it('ranks each bucket by its #658 canonical position (llm=0 … apps=5)', () => {
+  it('ranks each bucket by its #658/#601 canonical position (llm=0 … apps=6)', () => {
     SECTION_KEYS.forEach((key, rank) => {
       for (const id of SERVICE_CATEGORIES[key].ids) {
         expect(categoryRankOf(id), `${id} (${key})`).toBe(rank)

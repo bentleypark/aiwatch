@@ -136,6 +136,17 @@ export const SERVICES: ServiceConfig[] = [
   // statusComponentIds[1], so it doubles as one of the three worst-of badge inputs AND (via
   // incidentIoComponentId) the source of official uptime + calendar impact + text enrichment.
   { id: 'langsmith', name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', statusUrl: 'https://status.smith.langchain.com', apiUrl: 'https://status.smith.langchain.com/api/v2/summary.json', statusComponentId: '01JT46QKH7HC0HA6RHD82GQYME', statusComponentIds: ['01JT46QKH7HC0HA6RHD82GQYME', '01JT46QKH7CWH1K3K3CAVMSQ7E', '01JT46QKH7PSQYR4CKSVXJ7PHS'], incidentIoBaseUrl: 'https://status.smith.langchain.com/incidents', incidentIoComponentId: '01JT46QKH7CWH1K3K3CAVMSQ7E' },
+  // #601 — LLM observability siblings for LangSmith (un-blocks the observability fallback sub-tier).
+  // Helicone: Better Stack (mirror together/luma — official uptime + RSS). Langfuse: incident.io
+  // (mirror langsmith — summary.json + incidents). Both data-rich (verified uptime / incident history).
+  // Langfuse note: its status page region-duplicates the core components (Ingestion/Public/Prompts API
+  // appear once per region). The badge worst-of (`statusComponentIds`) deliberately scopes to the
+  // PRIMARY region's Ingestion/Public/Prompts — a single-region incident in a non-primary region won't
+  // escalate the live badge, but it STILL surfaces in the incident list/calendar (incidentIoBaseUrl is
+  // not component-scoped). Acceptable: a real Langfuse outage hits the primary region; widen the ID set
+  // here if cross-region badge escalation is later wanted.
+  { id: 'helicone', name: 'Helicone', provider: 'Helicone', category: 'api', statusUrl: 'https://status.helicone.ai', apiUrl: null, rssFeedUrl: 'https://status.helicone.ai/feed', betterStackUrl: 'https://status.helicone.ai', flapSuppression: true, componentDenylist: ['Website'] },
+  { id: 'langfuse', name: 'Langfuse', provider: 'Langfuse', category: 'api', statusUrl: 'https://status.langfuse.com', apiUrl: 'https://status.langfuse.com/api/v2/summary.json', statusComponentId: '01KS5BHY7AKJD8YEM4MFYMB35Z', statusComponentIds: ['01KS5BHY7AKJD8YEM4MFYMB35Z', '01KS5BHY7AX99XYA7AS7AAP7QG', '01KS5BHY7AH52EZHZQ9TYD53TY'], incidentIoBaseUrl: 'https://status.langfuse.com/incidents', incidentIoComponentId: '01KS5BHY7AKJD8YEM4MFYMB35Z' },
   // Runway (#393) — hosted generative-video AI (Gen-4 / Act-Two), AIWatch's first video provider. Native
   // Atlassian Statuspage (page s9lfdrzmhryw) → statuspage.ts covers it, no new parser. Multi-component
   // worst-of (#379): badge tracks the three availability surfaces (Public API + App + Backend); Billing +

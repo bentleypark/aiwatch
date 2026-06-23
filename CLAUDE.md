@@ -195,8 +195,8 @@ When adding a new monitored service, files across worker, frontend, docs, SEO me
 
 ## Architecture
 
-**AIWatch** is a React SPA that monitors 37 AI services in real time:
-- **27 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Fireworks, Cerebras, Perplexity, HuggingFace, Replicate, ElevenLabs, AssemblyAI, Deepgram, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, Stability AI, Voyage AI, Modal, LangChain (LangSmith), Runway, Luma (Dream Machine)
+**AIWatch** is a React SPA that monitors 39 AI services in real time:
+- **29 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Fireworks, Cerebras, Perplexity, HuggingFace, Replicate, ElevenLabs, AssemblyAI, Deepgram, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, Stability AI, Voyage AI, Modal, LangChain (LangSmith), Helicone, Langfuse, Runway, Luma (Dream Machine)
 - **4 AI apps**: claude.ai, ChatGPT, Character.AI, DeepSeek App
 - **6 coding agents**: Claude Code, Codex, Cursor, GitHub Copilot, Windsurf, Junie
 
@@ -255,7 +255,7 @@ worker/
     monthly-archive.ts # Monthly reliability archive (uptime, score, incidents, latency per service, permanent KV). Also aggregates probe-degradation:monthly (#511, RTT degradation total/noStatus via summarizeDegradation) into MonthlyArchive, exposed by /api/report (#679 removed the structurally-null detection-lead summary)
     monthly-narrative.ts # AI retrospective narrative (Notable Incidents + Observations draft) baked into the archive — hybrid Gemma→Sonnet, #426
     vitals.ts   # Web Vitals aggregation (ingest, KV flush, p75 computation, Discord formatting)
-    probe.ts    # Health check probing — direct RTT measurement (24 API services)
+    probe.ts    # Health check probing — direct RTT measurement (26 API services)
     probe-archival.ts # Daily probe RTT archival + 7-day summary (p50, p95, cvCombined)
     platform-monitor.ts # Status page platform health monitoring (metastatuspage.com for Atlassian)
     detection.ts # Detection Lead entry parsing + incident-aware reset logic
@@ -297,7 +297,7 @@ All events use `trackEvent()` from `src/utils/analytics.js`; GA4 activates only 
 Per-service status is resolved in `worker/src/services.ts` with a layered priority chain (multi-component worst-of → component match → overall-indicator fallback → `incidentExclude` bypass → component-status filter → fetch-failure cross-validation). The full ordered rules and their #-issue rationale are in **[docs/reference/status-determination.md](docs/reference/status-determination.md)** — read it before changing status resolution.
 
 ### Status Data Flow
-Browser (60s polling) → Worker `/api/status` (parallel 37-service fetch, normalize, KV write, platform/probe cross-validation) → React state → pages. Cron (`*/5`) handles probing, incident detection + Discord alerts, AI analysis, daily/monthly aggregation, changelog/security/weekly briefing. The full annotated request + cron + Web Vitals flow diagram is in **[docs/reference/data-flow.md](docs/reference/data-flow.md)**.
+Browser (60s polling) → Worker `/api/status` (parallel 39-service fetch, normalize, KV write, platform/probe cross-validation) → React state → pages. Cron (`*/5`) handles probing, incident detection + Discord alerts, AI analysis, daily/monthly aggregation, changelog/security/weekly briefing. The full annotated request + cron + Web Vitals flow diagram is in **[docs/reference/data-flow.md](docs/reference/data-flow.md)**.
 
 ### SPA Navigation
 No React Router. Hash-based routing in `App.jsx` — `#claude` for service details, `#latency` for pages. `PageContext` shares current page state. Browser back/forward supported via `popstate` listener.

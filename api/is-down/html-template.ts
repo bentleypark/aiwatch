@@ -1182,6 +1182,7 @@ export const FOOTER_CATEGORY_ORDER: ReadonlyArray<{ key: string; label: string }
   { key: 'agents', label: 'Coding Agents' },
   { key: 'voice', label: 'Voice' },
   { key: 'inference', label: 'Inference & Infra' },
+  { key: 'observability', label: 'Observability' },
   { key: 'video', label: 'Video' },
   { key: 'apps', label: 'AI Apps' },
 ]

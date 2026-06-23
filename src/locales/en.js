@@ -60,6 +60,7 @@ const en = {
   'filter.apps': 'AI Apps',
   'filter.voice': 'Voice',
   'filter.inference': 'Inference & Infra',
+  'filter.observability': 'Observability',
   'filter.video': 'Video',
   'overview.incidents.title': 'Recent Incidents',
   'overview.latency.title': 'Latency Rankings',

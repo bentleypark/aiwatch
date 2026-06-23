@@ -74,8 +74,8 @@ describe('PROBE_TARGETS', () => {
     'pinecone', 'langsmith', 'runway', 'luma', // #678 — added (stable representative API path)
   ]
 
-  it('has all 24 API service probe targets', () => {
-    expect(PROBE_TARGETS).toHaveLength(24)
+  it('has all 26 API service probe targets', () => {
+    expect(PROBE_TARGETS).toHaveLength(26)
     const ids = PROBE_TARGETS.map((t) => t.id)
     for (const expected of EXPECTED_IDS) {
       expect(ids).toContain(expected)
