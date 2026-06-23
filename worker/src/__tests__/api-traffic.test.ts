@@ -10,6 +10,8 @@ import {
   buildFeedTrafficSql,
   parseFeedTrafficResponse,
   queryFeedTraffic,
+  countFirstSeenWithin24h,
+  countNewFeedItems,
 } from '../api-traffic'
 
 describe('v1Variant (#518)', () => {
@@ -216,5 +218,57 @@ describe('queryFeedTraffic (#548)', () => {
   it('parses a successful response', async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ data: [{ variant: 'feed-all', requests: 7 }] }), { status: 200 }))
     expect(await queryFeedTraffic('acc', 'tok', fetchImpl as unknown as typeof fetch)).toEqual({ all: 7, service: 0, total: 7 })
+  })
+})
+
+describe('countFirstSeenWithin24h (#748)', () => {
+  const NOW = new Date('2026-06-23T00:00:00.000Z')
+  it('counts only timestamps within the 24h window ending at now', () => {
+    const values = [
+      '2026-06-22T23:00:00.000Z', // 1h ago — in
+      '2026-06-22T00:30:00.000Z', // 23.5h ago — in
+      '2026-06-21T23:00:00.000Z', // 25h ago — out
+      '2026-06-23T00:00:00.000Z', // exactly now — in (inclusive)
+    ]
+    expect(countFirstSeenWithin24h(values, NOW)).toBe(3)
+  })
+  it('skips null / empty / unparseable values', () => {
+    expect(countFirstSeenWithin24h([null, undefined, '', 'not-a-date', '2026-06-22T23:00:00.000Z'], NOW)).toBe(1)
+  })
+  it('returns 0 for an empty list', () => {
+    expect(countFirstSeenWithin24h([], NOW)).toBe(0)
+  })
+})
+
+describe('countNewFeedItems (#748)', () => {
+  const NOW = new Date('2026-06-23T00:00:00.000Z')
+  const kvOf = (entries: Record<string, string>, opts: { listThrows?: boolean; getThrows?: boolean } = {}) => ({
+    list: vi.fn(async () => {
+      if (opts.listThrows) throw new Error('kv list down')
+      return { keys: Object.keys(entries).map((name) => ({ name })), list_complete: true }
+    }),
+    get: vi.fn(async (k: string) => {
+      if (opts.getThrows) throw new Error('kv get down')
+      return entries[k] ?? null
+    }),
+  }) as unknown as KVNamespace
+
+  it('lists feed:firstseen markers and counts those in the last 24h', async () => {
+    const kv = kvOf({
+      'feed:firstseen:a': '2026-06-22T23:00:00.000Z', // in
+      'feed:firstseen:b': '2026-06-20T00:00:00.000Z', // out (3d ago)
+      'feed:firstseen:c': '2026-06-22T12:00:00.000Z', // in
+    })
+    expect(await countNewFeedItems(kv, NOW)).toBe(2)
+  })
+  it('returns 0 when there are no markers', async () => {
+    expect(await countNewFeedItems(kvOf({}), NOW)).toBe(0)
+  })
+  it('returns null (best-effort) when KV list throws', async () => {
+    expect(await countNewFeedItems(kvOf({}, { listThrows: true }), NOW)).toBeNull()
+  })
+  it('treats a failed per-key get as absent (not a throw)', async () => {
+    const kv = kvOf({ 'feed:firstseen:a': '2026-06-22T23:00:00.000Z' }, { getThrows: true })
+    expect(await countNewFeedItems(kv, NOW)).toBe(0)
   })
 })
