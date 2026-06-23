@@ -89,3 +89,35 @@ Concretely:
 
 ### Uptime window label is source-neutral (#654)
 The `uptime30d` field holds figures over **different windows by source**: `official` = the status page's published % over **its own (varying) window** (Anthropic status.claude.com = "past 60 days"; other incident.io/statuspage pages = 30/90), `platform_avg` = the **upstream platform's** window (BetterStack avg-of-resources / OnlineOrNot — not AIWatch-controlled). The official parsers read only the *percentage*, not the page's "past N days" window. So no surface claims a specific window: the card title is the neutral **"Uptime"** (`svc.uptime30d`) or the source-specific label ("Official Uptime" / "Platform Average"), the Uptime-page basis label is "reported uptime" (`uptime.basis`), and the is-down SEO meta/narrative say "Uptime: X%" (the "30-day"/"(30d)" qualifier was dropped). The **Score** keeps its "30-day" framing (`aboutScore.intro`, Ranking "30d basis") — `score.ts` genuinely computes over a 30-day window (`incidents30d` + daily counters), so that claim is accurate and is intentionally NOT changed.
+
+## Supply-chain correlation banner (#574, Phase 1: AWS)
+
+A LIVE banner correlating a cloud-region issue with dependent AI services — surfaced ONLY when an
+**AWS infrastructure region is degraded AND ≥1 AWS-dependent AI service is degraded AND attributes the
+issue to AWS in its own incident text**. Differentiator vs AIDown.io's *static* dependency map (always
+shown, no live correlation) and vs a naive timing correlation (over-alarmist).
+
+- **AWS region health** (`parseAwsRegionHealth`, `parsers/aws.ts`): derived from the SAME AWS Health
+  public-events JSON the Bedrock fetch already pulls (`health.aws.amazon.com/public/events`, all AWS
+  services) — **no extra subrequest**. Currently-active (unresolved) events per region, via the shared
+  `awsHealthImpact` (so a #707 non-reliability advisory is excluded). **`BEDROCK` is excluded** from
+  this signal (`AWS_REGION_HEALTH_EXCLUDE`) — it's an AI service we track separately, so counting it
+  would make a Bedrock-only outage circularly read as "AWS down → may affect Bedrock". Attached to the
+  bedrock `ServiceStatus.awsRegionHealth` (rides in `services:latest` → live + cached both have it).
+- **Dependency map** (`SUPPLY_CHAIN_AWS_DEPS`, `supply-chain.ts`): curated AWS-dependent monitored
+  services + confidence — bedrock (certain), Anthropic claude/claudeai/claudecode (high — public $100B+
+  AWS Trainium/Bedrock commitment), huggingface + pinecone (medium). **Together was removed** (runs its
+  own AI-native GPU cloud, not AWS — AIDown's 60% was wrong). Worker-side only (no client sync).
+- **Attribution cross-check** (`buildSupplyChainBanner`, StatusGator-style): a degraded dependent is
+  **`affectedNow` only if its OWN active incident title/timeline text names AWS / a region / an
+  upstream-provider** (`AWS_ATTRIBUTION_RE`: aws, us-east-1…, ec2/ebs, "upstream/cloud/infrastructure/
+  third-party provider"). Bedrock is auto-attributed (AWS-native). A degraded-but-unattributed service
+  is OMITTED (no causation claim — the regular outage banner covers it). Verified empirically: Pinecone
+  tags `[AWS][us-east-1]` in 29/50 incidents (region-matchable), Anthropic 0/50 (so Claude only ever
+  appears under `mayBeAffected`, never confirmed — correct). Healthy map members → `mayBeAffected`
+  ("AWS-dependent · may be affected", hedged). **Gate**: ≥1 region degraded AND ≥1 `affectedNow`, else null.
+- **Surfaces**: `/api/status`(+cached) `supplyChainBanner` field → dashboard `<SupplyChainBanner>`
+  (Overview, above the summary cards) + an is-down per-service note (`affectedNow` → "attributes it to
+  an AWS/upstream issue"; `mayBeAffected` → "runs on AWS and may be affected"). is-down SEO title/verdict unchanged.
+- **Verify**: rare-but-accurate by design (fires only on a real AWS event where dependents self-attribute);
+  `verify-after` during the next real AWS regional incident; tune `AWS_ATTRIBUTION_RE` against observed phrasings.

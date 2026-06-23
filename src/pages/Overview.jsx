@@ -436,6 +436,44 @@ function Panel({ title, dotColor, subtitle, children }) {
 
 // ── Action Banner — shows fallback recommendations during outages ──
 
+// #574 — Supply-chain correlation banner: an AWS region is degraded AND ≥1 AWS-dependent AI service
+// is also degraded (the worker's correlation gate; `banner` is null otherwise). Rendered as a sibling
+// ABOVE ActionBanner. AIWatch's differentiator vs AIDown's static dependency map = this LIVE gate.
+function SupplyChainBanner({ banner, setPage, t }) {
+  if (!banner) return null
+  const isDown = banner.severity === 'down'
+  const borderColor = isDown ? 'var(--red)' : 'var(--amber)'
+  const regionStr = banner.regions.map(r => r.region).join(', ')
+  const sevLabel = t(isDown ? 'supplychain.region.down' : 'supplychain.region.degraded')
+  const summary = banner.regions.find(r => r.summary)?.summary
+  const names = (list) => list.map((s, i) => (
+    <span key={s.id}>
+      {i > 0 && ', '}
+      <span className="hover:underline cursor-pointer" onClick={() => setPage({ name: 'service', serviceId: s.id })}>{s.name}</span>
+    </span>
+  ))
+  // NOTE: spacing via inline style — this project's Tailwind build does NOT compile the p-/m-/gap-
+  // scale utilities (e.g. `.p-4` resolves to 0), so all padding/margins are inline (see StatCard).
+  return (
+    <div data-testid="supply-chain-banner" className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg" style={{ borderLeft: `3px solid ${borderColor}`, padding: '14px 16px' }}>
+      <div className="mono text-[12px] font-medium" style={{ color: borderColor }}>
+        ⚠ {t('supplychain.title')} — {regionStr} ({sevLabel})
+      </div>
+      {summary && <div className="mono text-[11px] text-[var(--text2)]" style={{ marginTop: '4px' }}>{summary}</div>}
+      {banner.affectedNow.length > 0 && (
+        <div className="mono text-[11px] text-[var(--text1)]" style={{ marginTop: '8px' }}>
+          <span className="text-[var(--text2)]">{t('supplychain.affectingNow')} </span>{names(banner.affectedNow)}
+        </div>
+      )}
+      {banner.mayBeAffected.length > 0 && (
+        <div className="mono text-[11px] text-[var(--text2)]" style={{ marginTop: '4px' }}>
+          {t('supplychain.mayAffect')} {names(banner.mayBeAffected)}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ActionBanner({ services, setPage, t }) {
   const affected = services.filter(s => s.status === 'down' || s.status === 'degraded')
   const withActiveIncidents = services.filter(s => s.status === 'operational' && (s.incidents ?? []).some(i => i.status !== 'resolved'))
@@ -594,7 +632,7 @@ function ActionBanner({ services, setPage, t }) {
 export default function Overview() {
   const { t, lang } = useLang()
   const { setPage, categoryFilter, setCategoryFilter } = usePage()
-  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis, securityAlerts, probeServiceIds, reportFeed } = usePolling()
+  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis, securityAlerts, probeServiceIds, reportFeed, supplyChainBanner } = usePolling()
   const { settings } = useSettings()
   const services = allServices.filter((s) => settings.enabledServices.includes(s.id))
   const [filter, setFilter] = useState('all')
@@ -806,6 +844,9 @@ export default function Overview() {
           </div>
         )
       })()}
+
+      {/* #574 — supply-chain banner: directly ABOVE the "Operational · N services running" summary cards. */}
+      <SupplyChainBanner banner={supplyChainBanner} setPage={setPage} t={t} />
 
       {/* ── Summary Stats ── */}
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>

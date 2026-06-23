@@ -642,6 +642,7 @@ function usePollingInternal() {
     recentlyRecovered: {},
     securityAlerts: [],
     reportFeed: {},
+    supplyChainBanner: null, // #574 — AWS region degraded + dependent AI service degraded; null otherwise
   })
   const cancelledRef = useRef(false)
   const controllerRef = useRef(null)
@@ -731,6 +732,7 @@ function usePollingInternal() {
           recentlyRecovered: data.recentlyRecovered ?? {},
           securityAlerts: data.securityAlerts ?? [],
           reportFeed: data.reportFeed ?? {},
+          supplyChainBanner: data.supplyChainBanner ?? null,
         })
       }
     } catch (err) {

@@ -10,6 +10,7 @@ import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, 
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
+import { buildSupplyChainBanner } from './supply-chain'
 import { refreshStatusCacheOnChange } from './cache-refresh'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
 import { corsHeaders } from './cors'
@@ -3051,6 +3052,9 @@ export default {
           return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics }
         })
 
+        // #574 — supply-chain banner (AWS region degraded + dependent AI service also degraded).
+        const supplyChainBanner = buildSupplyChainBanner(scoredCached)
+
         return new Response(JSON.stringify({
           services: scoredCached,
           lastUpdated: cached.cachedAt,
@@ -3062,6 +3066,7 @@ export default {
           ...(securityAlerts.length > 0 ? { securityAlerts } : {}),
           ...(alertFeed.length > 0 ? { alertFeed } : {}),
           ...(Object.keys(reportFeed).length > 0 ? { reportFeed } : {}),
+          ...(supplyChainBanner ? { supplyChainBanner } : {}),
         }), {
           status: 200,
           headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
@@ -3279,6 +3284,8 @@ export default {
       const alertFeed = env.STATUS_CACHE ? await readAlertFeed(env.STATUS_CACHE) : []
       // #575 Phase B — gated crowd-report map (only corroborated services; see buildReportFeedMap).
       const reportFeed = env.STATUS_CACHE ? await buildReportFeedMap(env.STATUS_CACHE, servicesWithScore) : {}
+      // #574 — supply-chain banner (AWS region degraded + dependent AI service also degraded).
+      const supplyChainBanner = buildSupplyChainBanner(servicesWithScore)
 
       return new Response(JSON.stringify({
         services: servicesWithScore,
@@ -3290,6 +3297,7 @@ export default {
         ...(securityAlerts.length > 0 ? { securityAlerts } : {}),
         ...(alertFeed.length > 0 ? { alertFeed } : {}),
         ...(Object.keys(reportFeed).length > 0 ? { reportFeed } : {}),
+        ...(supplyChainBanner ? { supplyChainBanner } : {}),
       }), {
         status: 200,
         headers: {

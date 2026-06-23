@@ -1266,3 +1266,26 @@ describe('renderPage — og:url + og:title pinned to share hint (?e=)', () => {
     expect(canonicalHref(renderPage('claude', op, mkSeo(), [], null, null, [], 'down'))).toBe('https://ai-watch.dev/is-claude-down')
   })
 })
+
+// #574 — supply-chain note: shown when api/is-down.ts passes a supplyChainNote for THIS service
+// (it's in the worker banner's affectedNow/mayBeAffected). SEO header/verdict unchanged.
+describe('renderPage — supply-chain note (#574)', () => {
+  const args = (note: { regions: string; confirmed: boolean } | null) =>
+    renderPage('claude', mkService({ status: 'degraded' }), mkSeo(), [], null, null, [], null, note)
+
+  it('confirmed (AWS-attributed) service → "attributes it to an AWS/upstream issue" note with the region', () => {
+    const html = args({ regions: 'us-east-1', confirmed: true })
+    expect(html).toContain('AWS infrastructure issue (us-east-1)')
+    expect(html).toContain('attributes it to an AWS/upstream issue')
+  })
+
+  it('estimated (AWS-dependent, not yet degraded) → "runs on AWS and may be affected"', () => {
+    const html = args({ regions: 'us-east-1, eu-west-1', confirmed: false })
+    expect(html).toContain('AWS infrastructure issue (us-east-1, eu-west-1)')
+    expect(html).toContain('runs on AWS and may be affected')
+  })
+
+  it('no note → nothing rendered', () => {
+    expect(args(null)).not.toContain('AWS infrastructure issue')
+  })
+})
