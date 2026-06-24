@@ -377,6 +377,13 @@ const MOCK_SERVICES = [
     ],
   },
   {
+    id: 'fal', category: 'api', name: 'fal.ai', provider: 'fal', status: 'operational',
+    latency: 312, uptime30d: 99.80,
+    history30d: hist([]),
+    history3m: [{ month: '2026-01', uptime: 99.95 }, { month: '2026-02', uptime: 99.88 }, { month: '2026-03', uptime: 99.80 }],
+    incidents: [],
+  },
+  {
     id: 'elevenlabs', category: 'api', name: 'ElevenLabs', provider: 'ElevenLabs', status: 'degraded',
     latency: 156, uptime30d: 99.80,
     history30d: hist([0]),

@@ -35,6 +35,8 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   // Inference / infrastructure (#263)
   'huggingface':     { id: 'huggingface', name: 'Hugging Face',    provider: 'Hugging Face', category: 'api', group: 'inference' },
   'replicate':       { id: 'replicate',  name: 'Replicate',        provider: 'Replicate',   category: 'api', group: 'inference' },
+  // fal.ai (#758) — generative-media inference platform (image/video/audio/3D). Slug == worker id ('fal').
+  'fal':             { id: 'fal',        name: 'fal.ai',           provider: 'fal',         category: 'api', group: 'inference' },
   'pinecone':        { id: 'pinecone',   name: 'Pinecone',         provider: 'Pinecone',    category: 'api', group: 'inference' },
   'stability':       { id: 'stability',  name: 'Stability AI',     provider: 'Stability AI', category: 'api', group: 'image' }, // #756 — image category (split from inference)
   // Black Forest Labs / FLUX (#756) — slug is 'flux' (search volume) while the worker id is 'bfl';
@@ -100,8 +102,9 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'assemblyai':     ['deepgram', 'elevenlabs'],
   'deepgram':       ['assemblyai', 'elevenlabs'],
   // Inference / vector / image
-  'huggingface':    ['replicate', 'modal', 'together'],
-  'replicate':      ['huggingface', 'stability', 'modal'],
+  'huggingface':    ['replicate', 'fal', 'modal', 'together'],
+  'replicate':      ['huggingface', 'fal', 'stability', 'modal'],
+  'fal':            ['replicate', 'huggingface', 'modal'], // #758 — generative-media inference siblings
   'pinecone':       ['voyageai'],
   'stability':      ['flux', 'replicate', 'huggingface'], // #756 — image sibling first
   'flux':           ['stability', 'replicate', 'huggingface'], // #756

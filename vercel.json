@@ -42,6 +42,7 @@
     { "source": "/is-deepgram-down", "destination": "/api/is-down?slug=deepgram" },
     { "source": "/is-huggingface-down", "destination": "/api/is-down?slug=huggingface" },
     { "source": "/is-replicate-down", "destination": "/api/is-down?slug=replicate" },
+    { "source": "/is-fal-down", "destination": "/api/is-down?slug=fal" },
     { "source": "/is-pinecone-down", "destination": "/api/is-down?slug=pinecone" },
     { "source": "/is-stability-down", "destination": "/api/is-down?slug=stability" },
     { "source": "/is-flux-down", "destination": "/api/is-down?slug=flux" },

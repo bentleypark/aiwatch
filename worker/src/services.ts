@@ -114,6 +114,13 @@ export const SERVICES: ServiceConfig[] = [
   // displayComponentIds (#606): curated API/product surfaces — HTTP API, Streaming API, Registry,
   // Official Models, Playground (excludes Billing/Support/Home Page/Hardware×5). Display-only.
   { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: '01JRJYHBWCXHFZ0NHMP1N7T2G3', displayComponentIds: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01J5NNACBNTG5GR693P6RH5Q6J'] },
+  // fal.ai (#758) — generative-media inference platform (image/video/audio/3D, 600+ models incl.
+  // FLUX/Kling/Hailuo). Peer of Replicate/Hugging Face. Instatus (Next.js) page like Perplexity:
+  // `statusComponent: 'API'` selects the Instatus "API" group component for the official uptime%
+  // (parseInstatusNextUptime), and `incidentKeywords: ['api']` (matched against componentNames, #623)
+  // scopes the badge + incident list to API-affecting incidents — a Website/Dashboard-only incident is
+  // dropped. Single-tenant page → no incidentExclude needed.
+  { id: 'fal', name: 'fal.ai', provider: 'fal', category: 'api', statusUrl: 'https://status.fal.ai', apiUrl: null, instatusUrl: 'https://status.fal.ai', incidentKeywords: ['api'], statusComponent: 'API' },
   // displayComponentIds (#606): pinecone's FUNCTIONAL surfaces (Console, Pod/Serverless Indexes
   // group headers, Index Management, Inference, Assistant). The 22 region components are excluded
   // — the Region card already covers per-region status. Display-only — badge stays on statusComponentId.

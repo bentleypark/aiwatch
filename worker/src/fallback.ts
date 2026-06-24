@@ -3,7 +3,7 @@
 // Keep in sync with src/utils/constants.js EXCLUDE_FALLBACK
 // #756 — stability un-excluded now that the image category has ≥2 members (Stability + FLUX recommend
 // each other in Tier 7); bfl is fallback-eligible from the start (never added here).
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'pinecone', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
 
 // Tier-based priority — same-tier services sorted by Score, then adjacent tiers by distance.
 // API tiers (1-4) and agent tiers (11-13) use distinct number ranges so TIER_LABEL stays unambiguous

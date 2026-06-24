@@ -312,6 +312,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How do I check Replicate status?', a: 'You can check Replicate status on this page, on the official Replicate status page at replicatestatus.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
+  fal: {
+    displayName: 'fal.ai',
+    description: 'fal.ai is a serverless generative-media inference platform that runs image, video, audio, and 3D models (FLUX, Kling, Hailuo, and 600+ others) over a single fast API on dedicated GPU infrastructure. It is built for real-time creative tools where low-latency generation matters.',
+    insight: 'fal runs hundreds of models on a shared serverless engine, so a single model can degrade without taking down the whole platform. AIWatch monitors the platform API component most relevant to API consumers — a Dashboard- or Website-only issue may not trigger an API incident.',
+    whenDown: 'When fal.ai is down, apps calling its inference API for image, video, audio, or 3D generation will see failed or queued requests. Real-time creative tools built on fal lose their generation backend until it recovers.',
+    faqs: [
+      { q: 'Is fal.ai down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors fal.ai every 5 minutes and shows real-time operational status.' },
+      { q: 'Why is my fal.ai request slow or queued?', a: 'fal requests can queue during GPU capacity spikes. Check this page for active platform incidents; if the platform is healthy, the issue may be specific to the model you are calling.' },
+      { q: 'What are alternatives to fal.ai?', a: 'For serverless model inference, Replicate and Modal are the closest alternatives; Hugging Face Inference also hosts many of the same open models. AIWatch shows current availability across providers.' },
+      { q: 'How do I check fal.ai status?', a: 'You can check fal.ai status on this page, on the official fal status page at status.fal.ai, or on the AIWatch dashboard at ai-watch.dev.' },
+    ],
+  },
   pinecone: {
     displayName: 'Pinecone',
     description: 'Pinecone is a fully-managed vector database for production-grade similarity search and retrieval-augmented generation (RAG). It powers semantic search, recommendations, and AI memory in many large applications.',
