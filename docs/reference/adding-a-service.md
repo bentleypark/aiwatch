@@ -4,6 +4,20 @@
 
 When adding a new monitored service, update ALL of the following:
 
+## 0. Pre-flight — data-richness audit (do this BEFORE writing any code, #601/#680)
+
+A service is only worth adding if its source carries real signal. **Fetch the candidate's status source directly and grade it** — don't assume:
+
+| Signal | How to check | Rich | Thin (avoid) |
+|---|---|---|---|
+| **Official uptime %** | Atlassian `…/api/v2/summary.json` / Better Stack `…/index.json` (`availability`) / incident.io | present | **absent** (gcloud `incidents.json` gives incidents only) |
+| **Incident history** | `…/api/v2/incidents.json` count + date span, or the feed's records | populated, recent | **0 / sparse** (gcloud feed is ~3 entries; e.g. Veo/Imagen have 0 ever) |
+| **Probeable endpoint** | a public, no-auth GET that returns fast (any HTTP status = alive) | yes → adds latency + Responsiveness score | no (auth-gated) → score relies on uptime only |
+
+- **Thin sources → the service renders like Bedrock/Azure** (operational, "No official uptime", `score` withheld at low confidence, ~never an incident) — a near-empty card that lowers dashboard quality. **gcloud-`incidents.json`-only services are thin** (Veo/Imagen/STT/Vertex Vector — #680 held for this reason). Gemini looks rich only because it ALSO merges the AI Studio source (`aistudioStatus`).
+- **Prefer candidates that are BOTH data-rich AND fill a single-service category gap** (#601). If a thin category (video/image/vector/observability/embeddings) needs a sibling, pick a Better Stack / Atlassian / incident.io competitor over a gcloud product.
+- Record the audit verdict (and the source URLs you checked) in the issue before implementing.
+
 ## Worker (backend)
 1. `worker/src/services.ts` — add `ServiceConfig` entry at correct position in `SERVICES` array (determines API response order: LLM → voice → infra → apps → agents). If the status page hosts unrelated components (multi-tenant Atlassian / incident.io / metastatuspage feeds — e.g. `githubstatus.com`, `status.openai.com`, `status.claude.com`), set `incidentKeywords` to scope the visible incident list — otherwise the service card will surface every incident on the page (#397)
 
@@ -62,6 +76,13 @@ When adding a new monitored service, update ALL of the following:
     - dashboard preview mock: services running count, "All N", "Operational N", "+ N more" (KO/EN)
     - i18n strings KO/EN with service count (~12+ occurrences)
 17. `docs/aiwatch-landing.html` — same as intro template (design draft)
+
+## Methodology page (`/methodology`, #673)
+17a. `api/methodology/html-template.ts` — self-contained Edge SSR, **KO + EN i18n duplicated TWICE** (inline `data-i18n` defaults AND the `i18n` JS maps), so each count appears ~4×. Update ALL:
+    - `hero.meta` service count ("N services · polled every 5 min") + the `<meta name="description">` count
+    - **`s1.lead` category breakdown** — "N AI services — X LLM APIs, Y coding agents, Z voice, … inference & infra, … observability, … video, … AI apps" (KO `…개` + EN). The sub-counts MUST sum to the total; update the right bucket(s) for the new service's category.
+    - **probe count** (only if the new service is probed — search the page for the probe phrasings: "directly-probed" / "are probed" / `probe 세트(N개)` / "N AI services … health-check probes"; currently 26) — kept in **LOCKSTEP with `PROBE_TARGETS.length`** by `api/methodology/__tests__/html-template.test.ts` (#678); that test FAILS until the methodology count matches the new probe-target count.
+    - **GOTCHA — quote escaping**: the page is `return \`…\``; a literal apostrophe in an i18n string must be `\\'` (NOT `\'`, which the template literal collapses to `'` → breaks the served inline `<script>` → the lang toggle silently dies). A test asserts every inline `<script>` parses (`new Function`).
 
 ## Is X Down (if adding a dedicated page)
 18. `api/is-down.ts` — add service to `SERVICES` map

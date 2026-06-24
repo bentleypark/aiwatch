@@ -191,7 +191,7 @@ Every fire is logged to `.claude/hook-audit.jsonl` (gitignored). `npm run hook-a
 
 ### Adding a new service (checklist)
 
-When adding a new monitored service, files across worker, frontend, docs, SEO meta, landing page, Is-X-Down, the reports site, and assets must all update together (service count + sync invariants). Follow the full 34-step checklist in **[docs/reference/adding-a-service.md](docs/reference/adding-a-service.md)** — do not skip steps.
+When adding a new monitored service, files across worker, frontend, docs, SEO meta, landing page, Is-X-Down, **the `/methodology` page** (service count + category breakdown + probe count, lockstep-tested), the reports site, and assets must all update together (service count + sync invariants). Follow the full checklist in **[docs/reference/adding-a-service.md](docs/reference/adding-a-service.md)** — do not skip steps. **Start with the Step-0 data-richness audit** (#601/#680): fetch the candidate's status source and confirm it carries official uptime + incident history (+ ideally a probeable endpoint) BEFORE coding — gcloud-`incidents.json`-only sources (e.g. Veo/Imagen) are thin (no uptime, ~0 incidents → bedrock-like empty card) and usually not worth adding.
 
 ## Architecture
 
