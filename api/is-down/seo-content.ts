@@ -336,6 +336,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How do I check Stability AI status?', a: 'You can check Stability status on this page, on the official Stability status page at status.stability.ai, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
+  flux: {
+    displayName: 'Black Forest Labs (FLUX)',
+    description: 'Black Forest Labs develops the FLUX family of image-generation models (FLUX.1, FLUX.1 Kontext, FLUX.2) and provides API access at api.bfl.ai for text-to-image generation, editing, and finetuning. FLUX is widely used in creative tools, design apps, and content-generation pipelines.',
+    insight: 'Black Forest Labs publishes per-model-tier status (FLUX.1 [pro]/[dev], Kontext, FLUX.2) on its Atlassian status page. AIWatch scopes the badge to the developer-facing API surface and the overall image-generation group, so a single model-tier blip does not flip the service status unless the API or the whole image group degrades.',
+    whenDown: 'When FLUX is down, apps generating or editing images via api.bfl.ai will fail. Creative pipelines and design tools that integrate the FLUX API lose their generation capability until service recovers.',
+    faqs: [
+      { q: 'Is FLUX down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Black Forest Labs every 5 minutes and shows real-time operational status.' },
+      { q: 'Why is the FLUX API failing?', a: 'Black Forest Labs may be experiencing high demand, specific model-tier degradation, or upstream infrastructure issues. Check this page for active incidents.' },
+      { q: 'What are alternatives to FLUX?', a: 'For image generation, Stability AI provides the Stable Diffusion API, Replicate hosts FLUX and other image models, and OpenAI provides image generation via the API. AIWatch shows current availability.' },
+      { q: 'How do I check Black Forest Labs status?', a: 'You can check FLUX status on this page, on the official Black Forest Labs status page at status.bfl.ml, or on the AIWatch dashboard at ai-watch.dev.' },
+    ],
+  },
   voyageai: {
     displayName: 'Voyage AI',
     description: 'Voyage AI provides best-in-class embedding and reranking APIs optimized for retrieval-augmented generation (RAG). It is widely used to improve search quality in enterprise RAG pipelines.',

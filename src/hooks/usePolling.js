@@ -427,6 +427,13 @@ const MOCK_SERVICES = [
     incidents: [],
   },
   {
+    id: 'bfl', category: 'api', name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', status: 'operational',
+    latency: 120, uptime30d: 99.92,
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
+  },
+  {
     id: 'voyageai', category: 'api', name: 'Voyage AI', provider: 'Voyage AI', status: 'operational',
     latency: 95, uptime30d: 99.95,
     history30d: hist(),

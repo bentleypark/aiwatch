@@ -240,7 +240,7 @@ function FilterTabs({ filter, setFilter, total, issueCount, downCount, t }) {
 // Service categories rendered as Overview sections (mirrors the sidebar taxonomy, #646; dev-audience
 // ordering, #658). Order matches SERVICE_CATEGORIES key order — keep the two in sync. 'all' is the
 // meta-bucket (no section of its own); the seven below partition every service.
-const SECTION_KEYS = ['llm', 'agents', 'voice', 'inference', 'observability', 'video', 'apps']
+const SECTION_KEYS = ['llm', 'agents', 'voice', 'inference', 'observability', 'video', 'image', 'apps']
 const CATEGORY_TAB_KEYS = ['all', ...SECTION_KEYS]
 
 // Category selector on the Overview itself (#646) — mirrors the sidebar's category filter so the

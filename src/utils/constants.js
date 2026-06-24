@@ -17,7 +17,7 @@ export const API_SERVICE_IDS = [
   'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq',
   'together', 'fireworks', 'cerebras', 'perplexity', 'huggingface', 'replicate',
   'elevenlabs', 'xai', 'deepseek', 'openrouter', 'bedrock', 'azureopenai',
-  'pinecone', 'stability', 'voyageai', 'modal', 'langsmith', 'helicone', 'langfuse', 'runway', 'luma', 'assemblyai', 'deepgram',
+  'pinecone', 'stability', 'bfl', 'voyageai', 'modal', 'langsmith', 'helicone', 'langfuse', 'runway', 'luma', 'assemblyai', 'deepgram',
 ]
 
 // AI web apps (no latency — web services, ordered before related API)
@@ -36,7 +36,7 @@ export const SERVICE_AND_APP_IDS = [
   // voice & speech AI
   'elevenlabs', 'assemblyai', 'deepgram',
   // inference / infrastructure
-  'huggingface', 'replicate', 'pinecone', 'stability', 'voyageai', 'modal',
+  'huggingface', 'replicate', 'pinecone', 'stability', 'bfl', 'voyageai', 'modal',
   // LLM observability (#601)
   'langsmith', 'helicone', 'langfuse',
   // video-gen
@@ -58,9 +58,10 @@ export const SERVICE_CATEGORIES = {
   llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
   agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'] },
   voice:     { labelKey: 'filter.voice',     ids: ['elevenlabs', 'assemblyai', 'deepgram'] }, // #658 — STT/TTS
-  inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'modal', 'stability', 'voyageai', 'pinecone'] }, // catch-all for non-LLM API infra: model-hosting (hf/replicate/modal) + image (stability) + embeddings (voyageai) + vector (pinecone). Observability split out to its own category (#601); remaining single-service sub-domains stay here until #601 adds siblings
+  inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'modal', 'voyageai', 'pinecone'] }, // catch-all for non-LLM API infra: model-hosting (hf/replicate/modal) + embeddings (voyageai) + vector (pinecone). Observability (#601) and image (#756) split out to their own categories; remaining single-service sub-domains stay here until they gain siblings
   observability: { labelKey: 'filter.observability', ids: ['langsmith', 'helicone', 'langfuse'] }, // #601 — LLM observability/eval split out (LangSmith + Helicone + Langfuse recommend each other, fallback tier 6)
   video:     { labelKey: 'filter.video',     ids: ['runway', 'luma'] }, // #658 — video-gen (align membership with #601 fallback sub-tier)
+  image:     { labelKey: 'filter.image',     ids: ['stability', 'bfl'] }, // #756 — image-gen split out (Stability + FLUX recommend each other, fallback tier 7); mirrors the video/observability precedent
   apps:      { labelKey: 'filter.apps',      ids: ['claudeai', 'chatgpt', 'characterai', 'deepseekapp'] },
 }
 
@@ -79,7 +80,7 @@ export function categoryRankOf(id) {
 
 // Services excluded from fallback recommendations (not interchangeable with LLM APIs)
 // Keep in sync with worker/src/fallback.ts EXCLUDE_FALLBACK
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai'] // #756 — stability un-excluded (image sibling FLUX added)
 
 // Per-service incident RSS feed (#432). The feed URL uses the /is-{slug}-down
 // page slug, which differs from the worker service ID for the few services
@@ -92,6 +93,7 @@ const FEED_SLUG_OVERRIDE = {
   characterai: 'character-ai',
   langsmith:   'langchain',
   deepseekapp: 'deepseek-app',
+  bfl:         'flux', // #756 — SEO-friendly "is flux down" slug
 }
 
 // Services with no /is-{slug}-down page and therefore no RSS feed — estimate-only
@@ -124,6 +126,8 @@ export const API_TIER = {
   runway: 5, luma: 5,
   // Tier 6 = LLM Observability (#601) — LangSmith + Helicone + Langfuse; LangSmith un-excluded.
   langsmith: 6, helicone: 6, langfuse: 6,
+  // Tier 7 = Image generation (#756) — Stability + FLUX; both un-excluded (≥2 members).
+  stability: 7, bfl: 7,
   claudecode: 11, codex: 11,
   cursor: 12, windsurf: 12,
   copilot: 13, junie: 13,
@@ -133,7 +137,7 @@ export const API_TIER = {
 // Sync target for worker/src/fallback.ts TIER_LABEL. Pre-#403 this lived inline in Overview.jsx;
 // promoted here so the sync test can compare both copies via a single import without parsing JSX.
 export const TIER_LABEL = {
-  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability',
+  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image',
   11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
   21: 'AI Apps',
 }

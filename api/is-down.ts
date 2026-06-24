@@ -9,7 +9,7 @@ export const config = { runtime: 'edge' }
 
 const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 // Keep in sync with worker/src/fallback.ts and src/utils/constants.js
-const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
+const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai'] // #756 — stability un-excluded (image sibling FLUX added)
 
 // #378: notify the Worker when this Edge Function falls back to a degraded
 // render so an operator Discord alert fires. Worker handles 5-min KV dedup, so
@@ -185,6 +185,7 @@ export default async function handler(req: Request) {
           elevenlabs: 4, assemblyai: 4, deepgram: 4,
           runway: 5, luma: 5, // Video (#602 / #601 step B) — keep in sync with worker/src/fallback.ts
           langsmith: 6, helicone: 6, langfuse: 6, // Observability (#601) — keep in sync with worker/src/fallback.ts
+          stability: 7, bfl: 7, // Image (#756) — keep in sync with worker/src/fallback.ts
           claudecode: 11, codex: 11,
           cursor: 12, windsurf: 12,
           copilot: 13, junie: 13,

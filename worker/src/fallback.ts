@@ -1,7 +1,9 @@
 // Fallback recommendation logic for incident alerts
 
 // Keep in sync with src/utils/constants.js EXCLUDE_FALLBACK
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'stability', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
+// #756 — stability un-excluded now that the image category has ≥2 members (Stability + FLUX recommend
+// each other in Tier 7); bfl is fallback-eligible from the start (never added here).
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'pinecone', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
 
 // Tier-based priority — same-tier services sorted by Score, then adjacent tiers by distance.
 // API tiers (1-4) and agent tiers (11-13) use distinct number ranges so TIER_LABEL stays unambiguous
@@ -22,6 +24,10 @@ export const API_TIER: Record<string, number> = {
   // Tier 6 = LLM Observability (#601 step B). LangSmith + Helicone + Langfuse recommend each other;
   // LangSmith un-excluded from EXCLUDE_FALLBACK now that the category has ≥2 members.
   langsmith: 6, helicone: 6, langfuse: 6,
+  // Tier 7 = Image generation (#756 / #601 step B). Stability + FLUX recommend each other; both
+  // un-excluded from EXCLUDE_FALLBACK now that the category has ≥2 members. A distinct tier so a
+  // degraded image service recommends its image sibling (distance 0) over an LLM/voice/infra service.
+  stability: 7, bfl: 7,
   claudecode: 11, codex: 11,
   cursor: 12, windsurf: 12,
   copilot: 13, junie: 13,
@@ -121,7 +127,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 // Exported for the cross-mirror sync test (#403). Mirrored as TIER_LABEL in src/utils/constants.js;
 // Overview.jsx imports from there so there is no third inline copy to drift against.
 export const TIER_LABEL: Record<number, string> = {
-  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability',
+  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image',
   11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
   21: 'AI Apps', // matches CATEGORY_LABEL[app] so the existing buildGroupedFallbackText copy stays consistent
 }

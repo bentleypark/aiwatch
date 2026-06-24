@@ -358,6 +358,37 @@ describe('EXCLUDE_FALLBACK', () => {
     expect(EXCLUDE_FALLBACK).not.toContain('claudecode')
     expect(EXCLUDE_FALLBACK).not.toContain('windsurf')
   })
+
+  it('#756 — does not exclude the image-generation siblings (Stability + FLUX)', () => {
+    expect(EXCLUDE_FALLBACK).not.toContain('stability')
+    expect(EXCLUDE_FALLBACK).not.toContain('bfl')
+  })
+})
+
+describe('#756 image fallback sub-tier (Stability ↔ FLUX)', () => {
+  const svc = (id: string, name: string, status = 'operational', aiwatchScore = 90) =>
+    ({ id, name, category: 'api', status, aiwatchScore })
+
+  it('a degraded image service recommends its image sibling over an LLM/voice service', () => {
+    const services = [
+      svc('bfl', 'Black Forest Labs (FLUX)', 'down'),
+      svc('stability', 'Stability AI', 'operational', 88),
+      svc('claude', 'Claude API', 'operational', 95),
+      svc('elevenlabs', 'ElevenLabs', 'operational', 92),
+    ]
+    const result = getFallbacks('bfl', 'api', services)
+    expect(result[0].name).toBe('Stability AI') // Tier 7 dist 0 beats any LLM/voice tier
+  })
+
+  it('is symmetric — Stability recommends FLUX', () => {
+    const services = [
+      svc('stability', 'Stability AI', 'down'),
+      svc('bfl', 'Black Forest Labs (FLUX)', 'operational', 84),
+      svc('claude', 'Claude API', 'operational', 95),
+    ]
+    const result = getFallbacks('stability', 'api', services)
+    expect(result[0].name).toBe('Black Forest Labs (FLUX)')
+  })
 })
 
 // #403 — pin the warn-once behavior for the silent-fallback hardening helpers.

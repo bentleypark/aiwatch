@@ -44,6 +44,7 @@
     { "source": "/is-replicate-down", "destination": "/api/is-down?slug=replicate" },
     { "source": "/is-pinecone-down", "destination": "/api/is-down?slug=pinecone" },
     { "source": "/is-stability-down", "destination": "/api/is-down?slug=stability" },
+    { "source": "/is-flux-down", "destination": "/api/is-down?slug=flux" },
     { "source": "/is-voyageai-down", "destination": "/api/is-down?slug=voyageai" },
     { "source": "/is-modal-down", "destination": "/api/is-down?slug=modal" },
     { "source": "/is-langchain-down", "destination": "/api/is-down?slug=langchain" },

@@ -13,7 +13,7 @@
 
 **English** | [한국어](README.ko.md)
 
-Real-time monitoring dashboard for **39 AI services** — track status, latency, uptime, and incidents across major AI providers.
+Real-time monitoring dashboard for **40 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[Dashboard](https://ai-watch.dev)** · **[Landing Page](https://ai-watch.dev/intro)**
 
@@ -33,7 +33,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 ## Features
 
-- **Real-time status** — Operational / Degraded / Down for 39 AI services
+- **Real-time status** — Operational / Degraded / Down for 40 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
 - **Latency monitoring** — Direct API endpoint response time (RTT) for 26 probe-capable services, status page timing as fallback
 - **24h latency trend** — Chart.js line chart with 5-min probe snapshots
@@ -52,8 +52,8 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Regional availability** — Per-region incident status for xAI, Gemini, OpenAI with switch recommendation
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
-- **Is X Down SEO pages** — 34 services (all monitored services except Bedrock / Azure OpenAI) with dynamic OG images (PNG), share buttons, AIWatch rank (matches dashboard with tied-rank display), and fallback recommendations
-- **Health check probing** — Direct RTT measurement to API endpoints (26 API services) with early outage detection via consecutive spike alerts and RTT degradation tracking
+- **Is X Down SEO pages** — 38 services (all monitored services except Bedrock / Azure OpenAI) with dynamic OG images (PNG), share buttons, AIWatch rank (matches dashboard with tied-rank display), and fallback recommendations
+- **Health check probing** — Direct RTT measurement to API endpoints (27 API services) with early outage detection via consecutive spike alerts and RTT degradation tracking
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 - **AI Analysis (Beta)** — Hybrid AI auto-analysis on incidents (Gemma 4 primary + Sonnet fallback): cause estimation, recovery time, affected scope, contextual fallback recommendations. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 - **Landing page** — Landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, optional `?banner=` campaign slot, and GA4 tracking
@@ -64,7 +64,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 ## Monitored Services
 
-Grouped by the dashboard's category taxonomy (39 total — sidebar filters / Overview sections mirror these).
+Grouped by the dashboard's category taxonomy (40 total — sidebar filters / Overview sections mirror these).
 
 ### LLM APIs (15)
 
@@ -105,14 +105,13 @@ Grouped by the dashboard's category taxonomy (39 total — sidebar filters / Ove
 | AssemblyAI | AssemblyAI | Atlassian Statuspage |
 | Deepgram | Deepgram | Atlassian Statuspage |
 
-### Inference & Infra (6)
+### Inference & Infra (5)
 
 | Service | Provider | Status Source |
 |---------|----------|---------------|
 | Hugging Face | HuggingFace | Better Stack RSS + uptime API |
 | Replicate | Replicate | incident.io (Atlassian compat) |
 | Pinecone | Pinecone | Atlassian Statuspage |
-| Stability AI | Stability AI | Atlassian Statuspage |
 | Voyage AI | Voyage AI | Atlassian Statuspage |
 | Modal | Modal | Better Stack RSS + uptime API |
 
@@ -130,6 +129,13 @@ Grouped by the dashboard's category taxonomy (39 total — sidebar filters / Ove
 |---------|----------|---------------|
 | Runway | Runway | Atlassian Statuspage |
 | Luma (Dream Machine) | Luma | Better Stack RSS + uptime API |
+
+### Image (2)
+
+| Service | Provider | Status Source |
+|---------|----------|---------------|
+| Stability AI | Stability AI | Atlassian Statuspage |
+| Black Forest Labs (FLUX) | Black Forest Labs | Atlassian Statuspage |
 
 ### AI Apps (4)
 
@@ -158,7 +164,7 @@ Grouped by the dashboard's category taxonomy (39 total — sidebar filters / Ove
 Browser (React SPA, 60s polling)
   ↓
 Cloudflare Worker
-  ├── GET /api/status    → parallel fetch (39 services) → normalize
+  ├── GET /api/status    → parallel fetch (40 services) → normalize
   ├── GET /api/uptime    → daily uptime history
   └── POST /api/alert   → Discord webhook proxy (SSRF protected)
   ↓
@@ -177,7 +183,7 @@ Cloudflare KV
   ├── daily:YYYY-MM-DD     (uptime counters, TTL 2d)
   ├── history:YYYY-MM-DD   (archived counters, TTL 90d)
   ├── latency:24h          (30-min snapshots, max 48, TTL 25h)
-  ├── probe:24h            (health check probes, max 2016, TTL 7d, 26 API services)
+  ├── probe:24h            (health check probes, max 2016, TTL 7d, 27 API services)
   ├── ai:analysis:{svcId}:{incId}  (AI per-incident analysis, TTL 1h, refreshed while active)
   ├── ai:reanalysis-skip:* (re-analysis failure cooldown, TTL 30min)
   ├── ai:usage:{date}      (daily AI usage counter, TTL 2d)
@@ -325,7 +331,7 @@ Embed real-time status badges in your README, docs, or blog.
 
 ## Claude Code Statusline Integration
 
-Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and 29 more — directly in your [Claude Code statusline](https://docs.claude.com/en/docs/claude-code/statusline). The recommended preset keeps an always-on, clickable **AIWatch** label (`AIWatch 🟢` while all healthy, `AIWatch 🔴 Claude API` when something breaks — cmd/ctrl+click opens the dashboard). Prefer zero footprint when healthy? A minimalist preset that stays empty until something degrades is on the [presets page](https://ai-watch.dev/#statusline).
+Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and 36 more — directly in your [Claude Code statusline](https://docs.claude.com/en/docs/claude-code/statusline). The recommended preset keeps an always-on, clickable **AIWatch** label (`AIWatch 🟢` while all healthy, `AIWatch 🔴 Claude API` when something breaks — cmd/ctrl+click opens the dashboard). Prefer zero footprint when healthy? A minimalist preset that stays empty until something degrades is on the [presets page](https://ai-watch.dev/#statusline).
 
 Quickest install — add to `~/.claude/settings.json`:
 
@@ -357,7 +363,7 @@ api/
   intro.ts             # Vercel Edge Function — landing page (/intro)
   intro/
     html-template.ts   # Landing page SSR template (i18n, dashboard mock, GA4)
-  is-down.ts           # Vercel Edge Function — "Is X Down?" SSR pages (34 services)
+  is-down.ts           # Vercel Edge Function — "Is X Down?" SSR pages (38 services)
   is-down/
     slug-map.ts        # URL slug ↔ service ID mapping
     seo-content.ts     # Per-service SEO text + FAQ
