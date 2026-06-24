@@ -16,7 +16,7 @@ function relTime(ts, now) {
   const m = Math.max(0, Math.round((now - ts) / 60_000))
   if (m < 1) return 'just now'
   if (m < 60) return `${m}m ago`
-  return `${Math.round(m / 60)}h ago`
+  return `${Math.floor(m / 60)}h ago`
 }
 
 /**
