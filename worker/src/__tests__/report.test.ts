@@ -12,6 +12,9 @@ import {
   reportFeedKey,
   appendReportFeed,
   recentReportFeed,
+  reportWindowFloor,
+  REPORT_PRE_INCIDENT_BUFFER_MS,
+  REPORT_SPIKE_FALLBACK_MS,
   REPORT_FEED_MAX,
   REPORT_DESC_MAX,
   type ReportFeedEntry,
@@ -179,5 +182,74 @@ describe('shouldSurfaceReports (#575 Phase B gate)', () => {
   it('operational, clean probe, reports present → NEVER surfaces (crowd-alone, load-bearing)', () => {
     expect(shouldSurfaceReports({ status: 'operational', reportCount: 99 })).toBe(false)
     expect(shouldSurfaceReports({ status: 'operational', probeSpike: false, reportCount: 99 })).toBe(false)
+  })
+})
+
+describe('reportWindowFloor (#772) — anchor surfaced reports to the current incident', () => {
+  const NOW = Date.parse('2026-06-24T12:00:00.000Z')
+  const H = 3_600_000
+  const active = (startedAt: string | null) => ({ status: 'investigating', startedAt })
+  const resolved = (startedAt: string | null) => ({ status: 'resolved', startedAt })
+
+  it('active incident → floor = earliest startedAt − 2h buffer', () => {
+    const start = NOW - 1 * H // incident started 1h ago
+    const floor = reportWindowFloor({ incidents: [active(new Date(start).toISOString())] }, NOW)
+    expect(floor).toBe(start - REPORT_PRE_INCIDENT_BUFFER_MS)
+  })
+
+  it('keeps an EARLY reporter (before the official start, within the buffer) but excludes a prior-incident report', () => {
+    const start = NOW - 1 * H
+    const floor = reportWindowFloor({ incidents: [active(new Date(start).toISOString())] }, NOW)
+    const early = start - 30 * 60_000   // reported 30m BEFORE the official start
+    const prior = NOW - 23 * H          // a report from ~yesterday's incident
+    expect(early >= floor).toBe(true)   // early reporter surfaces
+    expect(prior >= floor).toBe(false)  // 23h-old prior report does NOT
+  })
+
+  it('uses the EARLIEST start across multiple active incidents', () => {
+    const s1 = NOW - 1 * H, s2 = NOW - 4 * H
+    const floor = reportWindowFloor({ incidents: [active(new Date(s1).toISOString()), active(new Date(s2).toISOString())] }, NOW)
+    expect(floor).toBe(s2 - REPORT_PRE_INCIDENT_BUFFER_MS)
+  })
+
+  it('ignores resolved incidents (only active anchor the window)', () => {
+    const floor = reportWindowFloor({ incidents: [resolved(new Date(NOW - 1 * H).toISOString())] }, NOW)
+    expect(floor).toBe(NOW - REPORT_SPIKE_FALLBACK_MS) // no ACTIVE incident → fallback
+  })
+
+  it('no dated active incident (probeSpike/partial only) → now − 3h fallback', () => {
+    expect(reportWindowFloor({ incidents: [] }, NOW)).toBe(NOW - REPORT_SPIKE_FALLBACK_MS)
+    expect(reportWindowFloor({}, NOW)).toBe(NOW - REPORT_SPIKE_FALLBACK_MS)
+  })
+
+  it('active incident with missing/invalid startedAt → fallback (not Infinity/NaN)', () => {
+    expect(reportWindowFloor({ incidents: [active(null)] }, NOW)).toBe(NOW - REPORT_SPIKE_FALLBACK_MS)
+    expect(reportWindowFloor({ incidents: [active('not-a-date')] }, NOW)).toBe(NOW - REPORT_SPIKE_FALLBACK_MS)
+  })
+
+  it('a RESOLVED incident with an earlier start does NOT pull the floor back (only active anchor)', () => {
+    const resolvedEarly = resolved(new Date(NOW - 10 * H).toISOString()) // older, but resolved
+    const activeRecent = active(new Date(NOW - 1 * H).toISOString())
+    const floor = reportWindowFloor({ incidents: [resolvedEarly, activeRecent] }, NOW)
+    expect(floor).toBe((NOW - 1 * H) - REPORT_PRE_INCIDENT_BUFFER_MS) // anchored to the ACTIVE start only
+  })
+
+  // Integration: mirror buildReportFeedMap's core (recentReportFeed → floor filter → gate) so the
+  // user-visible #772 regression can't reappear via a wiring change without a test failing.
+  it('end-to-end filter: stale-only feed does NOT surface; mixed feed surfaces only the in-window report', () => {
+    const incidentStart = NOW - 1 * H
+    const svc = { incidents: [active(new Date(incidentStart).toISOString())] }
+    const floor = reportWindowFloor(svc, NOW)
+    const stale = { cat: 'errors' as const, desc: 'prior incident', ts: NOW - 23 * H }
+    const fresh = { cat: 'outage' as const, desc: 'current incident', ts: incidentStart - 30 * 60_000 } // early reporter
+    const surface = (feed: ReportFeedEntry[]) => recentReportFeed(feed, NOW).filter((e) => e.ts >= floor)
+
+    const staleOnly = surface([stale])
+    expect(staleOnly).toHaveLength(0)
+    expect(shouldSurfaceReports({ status: 'down', reportCount: staleOnly.length })).toBe(false) // not surfaced
+
+    const mixed = surface([stale, fresh])
+    expect(mixed.map((e) => e.desc)).toEqual(['current incident']) // only the in-window one
+    expect(shouldSurfaceReports({ status: 'down', reportCount: mixed.length })).toBe(true)
   })
 })

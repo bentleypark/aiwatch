@@ -102,6 +102,46 @@ export function recentReportFeed(entries: ReportFeedEntry[], now: number, window
   )
 }
 
+// #772 — anchor SURFACED reports to the CURRENT problem, not the flat 24h KV retention. A report from
+// a PRIOR incident lingers in the 24h feed and would otherwise resurface during a new, unrelated
+// incident (observed: a 23h-old Claude report reappearing on a fresh Anthropic incident — hidden all
+// day while operational, then surfaced when status flipped). These bound how far BACK a surfaced
+// report may be relative to the current incident.
+export const REPORT_PRE_INCIDENT_BUFFER_MS = 2 * 3_600_000  // 2h — keep EARLY reporters who flagged the
+                                                            // problem before the official (often backdated) startedAt
+export const REPORT_SPIKE_FALLBACK_MS = 3 * 3_600_000       // 3h — probeSpike/partial with no dated incident
+
+/**
+ * #772 — lower bound (epoch ms) for surfacing a service's crowd reports, anchored to the current
+ * problem. The caller keeps reports with `ts >= floor` (still inside the 24h retention via
+ * recentReportFeed). Pure + unit-tested.
+ *
+ *  - Active (non-resolved) incident(s): floor = EARLIEST `startedAt` − PRE_INCIDENT_BUFFER. The buffer
+ *    preserves an early reporter who flagged the problem before the official (usually backdated)
+ *    start — the #575 early-signal value — while still excluding a prior-incident report from hours
+ *    earlier. Providers backdate `startedAt` to the real start, so reports during the actual problem
+ *    already fall after it; the buffer covers the rest.
+ *  - No dated active incident (probeSpike / partial only): floor = now − SPIKE_FALLBACK. The crowd
+ *    report IS the early signal here, so surface only genuinely recent ones (not the full 24h).
+ */
+export function reportWindowFloor(
+  svc: { incidents?: Array<{ status: string; startedAt?: string | null }> },
+  now: number,
+  bufferMs: number = REPORT_PRE_INCIDENT_BUFFER_MS,
+  fallbackMs: number = REPORT_SPIKE_FALLBACK_MS,
+): number {
+  const activeStarts = (svc.incidents ?? [])
+    .filter((i) => i.status !== 'resolved')
+    .map((i) => (i.startedAt ? new Date(i.startedAt).getTime() : NaN))
+    .filter((t) => Number.isFinite(t)) as number[]
+  if (activeStarts.length === 0) return now - fallbackMs
+  // A future-dated startedAt (clock skew / a scheduled-maintenance entry mislabeled active) yields a
+  // future floor → every report is excluded → the service surfaces ZERO reports. That's a graceful
+  // no-op (no WRONG/stale report is ever shown), so it's left unclamped — clamping to `now − fallback`
+  // would instead over-widen a genuinely fresh incident's window back to 3h.
+  return Math.min(...activeStarts) - bufferMs
+}
+
 /**
  * Privacy-preserving client fingerprint: SHA-256 of `salt + ip`, truncated to 128 bits (hex).
  * The raw IP is NEVER stored — only this hash, and only as a short-TTL dedup key. The salt (a

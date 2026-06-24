@@ -19,7 +19,7 @@ import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, c
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
-import { isReportableService, hashIp, reportDateKey, reportCountKey, reportSeenKey, nextCount, REPORT_COUNT_TTL_SECONDS, REPORT_SEEN_TTL_SECONDS, REPORT_MAX_PER_HOUR, formatReportCountsSection, isValidCategory, sanitizeReportDescription, reportFeedKey, appendReportFeed, recentReportFeed, REPORT_FEED_TTL_SECONDS, shouldSurfaceReports, type ReportFeedEntry } from './report'
+import { isReportableService, hashIp, reportDateKey, reportCountKey, reportSeenKey, nextCount, REPORT_COUNT_TTL_SECONDS, REPORT_SEEN_TTL_SECONDS, REPORT_MAX_PER_HOUR, formatReportCountsSection, isValidCategory, sanitizeReportDescription, reportFeedKey, appendReportFeed, recentReportFeed, reportWindowFloor, REPORT_FEED_TTL_SECONDS, shouldSurfaceReports, type ReportFeedEntry } from './report'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -98,7 +98,11 @@ async function buildReportFeedMap(kv: KVNamespace, services: ServiceStatus[]): P
   await Promise.all(candidates.map(async (s) => {
     let feed: ReportFeedEntry[] = []
     try { const raw = await kv.get(reportFeedKey(s.id)); feed = raw ? JSON.parse(raw) : [] } catch (err) { console.warn('[report] feed read failed:', s.id, err instanceof Error ? err.message : err); feed = [] }
-    const recent = recentReportFeed(feed, Date.now())
+    const now = Date.now()
+    // #772 — anchor surfaced reports to the CURRENT incident so a prior-incident report retained in
+    // the 24h feed doesn't resurface during a new, unrelated incident. Gating reads the FILTERED count.
+    const floor = reportWindowFloor(s, now)
+    const recent = recentReportFeed(feed, now).filter((e) => e.ts >= floor)
     if (shouldSurfaceReports({ status: s.status, partialCount: s.partialCount, probeSpike: s.probeSpike, reportCount: recent.length })) {
       out[s.id] = recent
     }
