@@ -89,6 +89,15 @@ export const FEED_XSL = `<?xml version="1.0" encoding="UTF-8"?>
 // The cached incident list is already small (recent + unresolved only).
 const MAX_ITEMS = 50
 
+// #759 — publish-before-analysis hold window. A freshly-detected active incident becomes visible in
+// the feed the moment it enters `services:latest`, but the cron writes `ai:analysis:{svcId}:{incId}`
+// only AFTER the alert/firstseen step (a few-second window). Slack's `/feed` app dedups by guid and
+// NEVER re-renders a posted item, so an item published in that window freezes WITHOUT the 🤖 AI block
+// forever. We hold an AI-less investigating/identified active item until either its analysis lands or
+// its first-seen age exceeds this window — bounded so a genuinely skipped/timed-out incident still
+// posts (just without AI). Usually adds zero latency (AI lands within seconds).
+const AI_HOLD_MS = 6 * 60_000
+
 // Service IDs whose ID differs from their /is-{slug}-down SEO page slug.
 // Most services use their ID verbatim; only these dropped a dash in the ID.
 // Canonical source: SERVICE_ID_TO_SLUG in api/is-down/slug-map.ts — this copy
@@ -380,12 +389,22 @@ export function buildRssFeed(
       if (incident.status === 'resolved') {
         items.push({ svc, incident, kind: 'resolved', pubDate: resolvedAtOf(incident) })
       } else {
+        // #724 — no AI block for a `monitoring` incident (recovery already confirmed). Gating HERE
+        // (not only in the /feed handler) keeps rss.ts self-consistent regardless of the map passed.
+        const analysis = incident.status === 'monitoring' ? undefined : analysisFor(aiAnalysis, svc.id, incident.id)
+        const seen = firstSeen?.[incident.id]
+        // #759 — hold an AI-less investigating/identified active item inside the AI_HOLD_MS window so
+        // Slack /feed doesn't freeze a forever-AI-less message (publish-before-analysis race). Released
+        // once `analysis` exists OR first-seen age ≥ AI_HOLD_MS. `monitoring` is never held (AI excluded
+        // by design); fail-open when first-seen is unknown (post rather than hold indefinitely).
+        if (incident.status !== 'monitoring' && !analysis && seen) {
+          const ageMs = now.getTime() - new Date(seen).getTime()
+          if (ageMs >= 0 && ageMs < AI_HOLD_MS) continue
+        }
         items.push({
-          svc, incident, kind: 'active', pubDate: firstSeen?.[incident.id] ?? incident.startedAt,
+          svc, incident, kind: 'active', pubDate: seen ?? incident.startedAt,
           fallbackText: fallbackLine(svc, services),
-          // #724 — no AI block for a `monitoring` incident (recovery already confirmed). Gating HERE
-          // (not only in the /feed handler) keeps rss.ts self-consistent regardless of the map passed.
-          analysis: incident.status === 'monitoring' ? undefined : analysisFor(aiAnalysis, svc.id, incident.id),
+          analysis,
         })
       }
     }
