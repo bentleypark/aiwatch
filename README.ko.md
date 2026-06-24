@@ -63,7 +63,9 @@
 
 ## 모니터링 서비스
 
-### AI API 서비스 (29개)
+대시보드 카테고리 분류 기준(총 39개 — 사이드바 필터 / Overview 섹션과 동일).
+
+### LLM API (15개)
 
 | 서비스 | 제공업체 | 상태 소스 |
 |--------|----------|-----------|
@@ -77,34 +79,11 @@
 | Fireworks AI | Fireworks | Better Stack RSS + 가동률 API |
 | Cerebras Inference | Cerebras | Atlassian Statuspage (멀티 컴포넌트 worst-of) |
 | Perplexity | Perplexity AI | Instatus (Next.js SSR) |
-| Hugging Face | HuggingFace | Better Stack RSS + 가동률 API |
-| Replicate | Replicate | incident.io (Atlassian 호환) |
-| ElevenLabs | ElevenLabs | incident.io (Atlassian 호환) |
-| AssemblyAI | AssemblyAI | Atlassian Statuspage |
-| Deepgram | Deepgram | Atlassian Statuspage |
 | xAI (Grok) | xAI | RSS 피드 |
 | DeepSeek API | DeepSeek | Flashduty (브라우저 렌더 피드) |
 | OpenRouter | OpenRouter | OnlineOrNot (React Router SSR) |
 | Amazon Bedrock | AWS | AWS Health Dashboard |
-| Pinecone | Pinecone | Atlassian Statuspage |
-| Stability AI | Stability AI | Atlassian Statuspage |
-| Voyage AI | Voyage AI | Atlassian Statuspage |
-| Modal | Modal | Better Stack RSS + 가동률 API |
-| LangChain (LangSmith) | LangChain | Atlassian Statuspage (incident.io) |
-| Helicone | Helicone | Better Stack RSS + 가동률 API |
-| Langfuse | Langfuse | incident.io (Atlassian compat) |
-| Runway | Runway | Atlassian Statuspage |
-| Luma (Dream Machine) | Luma | Better Stack RSS + 가동률 API |
 | Azure OpenAI | Microsoft | Azure Status RSS |
-
-### AI 앱 (4개)
-
-| 서비스 | 제공업체 |
-|--------|----------|
-| claude.ai | Anthropic |
-| ChatGPT | OpenAI |
-| Character.AI | Character AI |
-| DeepSeek App | DeepSeek |
 
 ### 코딩 에이전트 (6개)
 
@@ -116,6 +95,49 @@
 | GitHub Copilot | Microsoft |
 | Windsurf | Codeium |
 | Junie | JetBrains |
+
+### 음성 (3개)
+
+| 서비스 | 제공업체 | 상태 소스 |
+|--------|----------|-----------|
+| ElevenLabs | ElevenLabs | incident.io (Atlassian 호환) |
+| AssemblyAI | AssemblyAI | Atlassian Statuspage |
+| Deepgram | Deepgram | Atlassian Statuspage |
+
+### 추론 & 인프라 (6개)
+
+| 서비스 | 제공업체 | 상태 소스 |
+|--------|----------|-----------|
+| Hugging Face | HuggingFace | Better Stack RSS + 가동률 API |
+| Replicate | Replicate | incident.io (Atlassian 호환) |
+| Pinecone | Pinecone | Atlassian Statuspage |
+| Stability AI | Stability AI | Atlassian Statuspage |
+| Voyage AI | Voyage AI | Atlassian Statuspage |
+| Modal | Modal | Better Stack RSS + 가동률 API |
+
+### 관측 (3개)
+
+| 서비스 | 제공업체 | 상태 소스 |
+|--------|----------|-----------|
+| LangChain (LangSmith) | LangChain | Atlassian Statuspage (incident.io) |
+| Helicone | Helicone | Better Stack RSS + 가동률 API |
+| Langfuse | Langfuse | incident.io (Atlassian 호환) |
+
+### 영상 (2개)
+
+| 서비스 | 제공업체 | 상태 소스 |
+|--------|----------|-----------|
+| Runway | Runway | Atlassian Statuspage |
+| Luma (Dream Machine) | Luma | Better Stack RSS + 가동률 API |
+
+### AI 앱 (4개)
+
+| 서비스 | 제공업체 |
+|--------|----------|
+| claude.ai | Anthropic |
+| ChatGPT | OpenAI |
+| Character.AI | Character AI |
+| DeepSeek App | DeepSeek |
 
 ## 기술 스택
 
