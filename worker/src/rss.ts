@@ -28,6 +28,18 @@ function analysisFor(map: RssAiAnalysisMap | undefined, svcId: string, incId: st
   return map?.[svcId]?.find((a) => a.incidentId === incId)
 }
 
+// #776 — decide the `feed:firstseen` value for an active incident in the /feed handler, get-or-set
+// style. The #759 publish-before-analysis hold needs a firstseen anchor to engage; but firstseen was
+// stamped ONLY by the cron's alerted:new path, which can run AFTER the incident is already /feed-
+// visible (a regular /api/status write to services:latest precedes the cron). In that window the hold
+// fails OPEN (no anchor) and an AI-less item leaks to Slack, which then re-posts when AI lands.
+// Stamping at feed-visibility closes the window. Pure (the caller does the KV put when `stamp`):
+//   - existing value present → USE it, never re-stamp (preserves #750 first-write-wins → stable pubDate)
+//   - clean miss (null)      → USE nowIso AND stamp it
+export function resolveFeedFirstSeen(existing: string | null, nowIso: string): { use: string; stamp: boolean } {
+  return existing ? { use: existing, stamp: false } : { use: nowIso, stamp: true }
+}
+
 // Cache-bust token for the stylesheet URL. The <?xml-stylesheet?> PI points at
 // /feed.xsl?v=${FEED_XSL_VERSION}; /feed.xsl is cacheable, so without a version a returning
 // visitor keeps a stale XSL after a format change (#467 — e.g. an old XSL rendering literal

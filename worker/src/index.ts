@@ -1104,7 +1104,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
 // corsHeaders moved to ./cors — also handles team-scoped suffix patterns for Vercel preview origins.
 
 import { generateBadgeSvg } from './badge'
-import { buildFeedResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
+import { buildFeedResponse, resolveFeedFirstSeen, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
@@ -2730,12 +2730,29 @@ export default {
         // backdated provider startedAt makes Slack /feed skip the outage post). Written once by the
         // cron's alerted:new path; absent → rss.ts falls back to startedAt (legacy behavior).
         const firstSeen: Record<string, string> = {}
+        const nowIso = new Date().toISOString()
         await Promise.all(cached.services.flatMap((svc) =>
           (svc.incidents ?? [])
             .filter((i) => i.status !== 'resolved')
             .map(async (inc) => {
-              const ts = await env.STATUS_CACHE!.get(`feed:firstseen:${inc.id}`).catch(() => null)
-              if (ts) firstSeen[inc.id] = ts
+              const fsKey = `feed:firstseen:${inc.id}`
+              // get THREW (KV hiccup) → skip entirely: do NOT stamp (would risk clobbering an existing
+              // value and breaking #750 first-write-wins) and do NOT add to the map (rss.ts falls back).
+              let existing: string | null
+              try { existing = await env.STATUS_CACHE!.get(fsKey) } catch { return }
+              // #776 — stamp at FEED-VISIBILITY on a clean miss so the #759 hold engages in the pre-cron
+              // window (else an AI-less item leaks to Slack + re-posts when AI lands). get-or-set; the
+              // cron's alerted:new path stamps the same key with the same 7d TTL — whichever fires first
+              // wins. One write per incident (only on the clean miss). NOTE this makes /feed a SECOND
+              // feed:firstseen write surface (previously cron-only), so it now also stamps incidents the
+              // cron held/suppressed/never-alerted (flap, monitoring) — which widens the population that
+              // #748 countNewFeedItems counts. Harmless: that metric is an explicit upper bound.
+              const { use, stamp } = resolveFeedFirstSeen(existing, nowIso)
+              if (stamp) {
+                const ok = await kvPut(env.STATUS_CACHE!, fsKey, use, { expirationTtl: 604800 })
+                if (!ok) return // write failed → leave unanchored this cycle (retried next poll)
+              }
+              firstSeen[inc.id] = use
             }),
         ))
         if (Object.keys(firstSeen).length > 0) feedFirstSeen = firstSeen

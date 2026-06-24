@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildRssFeed, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse, dedupeSharedIncidents, type RssAiAnalysisMap } from '../rss'
+import { buildRssFeed, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse, dedupeSharedIncidents, resolveFeedFirstSeen, type RssAiAnalysisMap } from '../rss'
 import { getFallbacks } from '../fallback'
 import type { ServiceStatus, Incident } from '../types'
 
@@ -778,6 +778,13 @@ describe('buildRssFeed — publish-before-analysis hold (#759)', () => {
     expect(xml).toContain('aiwatch:claude:inc-1</guid>')
   })
 
+  it('#776 visibility-leak guard: a freshly-stamped firstseen (age 0, no AI) is HELD — not leaked to Slack', () => {
+    // The #776 fix: /feed stamps firstseen at visibility (resolveFeedFirstSeen) so a pre-cron poll
+    // anchors the hold instead of failing open. Simulate that: firstseen = NOW (age 0), no AI → held.
+    const xml = buildRssFeed([service({ incidents: [activeInc] })], { scope: 'all' }, NOW, undefined, { 'inc-1': NOW.toISOString() })
+    expect(xml).not.toContain('aiwatch:claude:inc-1</guid>') // held — no AI-less leak
+  })
+
   it('never holds a `monitoring` item (AI excluded by design — posts immediately)', () => {
     const monitoringInc = incident({ id: 'inc-1', status: 'monitoring' })
     const xml = buildRssFeed([service({ incidents: [monitoringInc] })], { scope: 'all' }, NOW, undefined, { 'inc-1': FRESH })
@@ -846,5 +853,18 @@ describe('buildRssFeed — #760 feed format polish (dividers + no redundant "Als
     const xml = buildRssFeed(svcs, { scope: 'all' }, NOW)
     expect(xml).toContain('Anthropic') // provider-grouped title present
     expect(xml).not.toContain('Also affecting')
+  })
+})
+
+describe('resolveFeedFirstSeen (#776) — stamp firstseen at feed-visibility so the #759 hold engages', () => {
+  const NOW = '2026-06-24T13:24:00.000Z'
+
+  it('clean miss (null) → use now AND stamp it (anchors the hold in the pre-cron window)', () => {
+    expect(resolveFeedFirstSeen(null, NOW)).toEqual({ use: NOW, stamp: true })
+  })
+
+  it('existing value → use it, never re-stamp (preserves #750 first-write-wins / stable pubDate)', () => {
+    const earlier = '2026-06-24T13:20:00.000Z'
+    expect(resolveFeedFirstSeen(earlier, NOW)).toEqual({ use: earlier, stamp: false })
   })
 })
