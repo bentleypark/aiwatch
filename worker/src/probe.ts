@@ -19,6 +19,7 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   { id: 'perplexity', url: 'https://api.perplexity.ai/chat/completions' },
   { id: 'huggingface', url: 'https://huggingface.co/api/models?limit=1' },
   { id: 'replicate', url: 'https://api.replicate.com/v1/models' },
+  { id: 'fal', url: 'https://fal.run/fal-ai/flux/dev' },                            // #758 — real inference gateway model path, 401 (auth not required for RTT)
   { id: 'elevenlabs', url: 'https://api.elevenlabs.io/v1/voices' },
   { id: 'xai', url: 'https://api.x.ai/v1/models' },
   { id: 'deepseek', url: 'https://api.deepseek.com/v1/models' },

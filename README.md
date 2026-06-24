@@ -13,7 +13,7 @@
 
 **English** | [한국어](README.ko.md)
 
-Real-time monitoring dashboard for **40 AI services** — track status, latency, uptime, and incidents across major AI providers.
+Real-time monitoring dashboard for **41 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[Dashboard](https://ai-watch.dev)** · **[Landing Page](https://ai-watch.dev/intro)**
 
@@ -33,9 +33,9 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 ## Features
 
-- **Real-time status** — Operational / Degraded / Down for 40 AI services
+- **Real-time status** — Operational / Degraded / Down for 41 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
-- **Latency monitoring** — Direct API endpoint response time (RTT) for 26 probe-capable services, status page timing as fallback
+- **Latency monitoring** — Direct API endpoint response time (RTT) for 28 probe-capable services, status page timing as fallback
 - **24h latency trend** — Chart.js line chart with 5-min probe snapshots
 - **Incident history** — Timeline with details from multiple status page formats
 - **Official uptime** — Per-component uptime from Statuspage, incident.io, Better Stack
@@ -64,7 +64,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 ## Monitored Services
 
-Grouped by the dashboard's category taxonomy (40 total — sidebar filters / Overview sections mirror these).
+Grouped by the dashboard's category taxonomy (41 total — sidebar filters / Overview sections mirror these).
 
 ### LLM APIs (15)
 
@@ -105,12 +105,13 @@ Grouped by the dashboard's category taxonomy (40 total — sidebar filters / Ove
 | AssemblyAI | AssemblyAI | Atlassian Statuspage |
 | Deepgram | Deepgram | Atlassian Statuspage |
 
-### Inference & Infra (5)
+### Inference & Infra (6)
 
 | Service | Provider | Status Source |
 |---------|----------|---------------|
 | Hugging Face | HuggingFace | Better Stack RSS + uptime API |
 | Replicate | Replicate | incident.io (Atlassian compat) |
+| fal.ai | fal | Instatus (Next.js) |
 | Pinecone | Pinecone | Atlassian Statuspage |
 | Voyage AI | Voyage AI | Atlassian Statuspage |
 | Modal | Modal | Better Stack RSS + uptime API |
@@ -164,7 +165,7 @@ Grouped by the dashboard's category taxonomy (40 total — sidebar filters / Ove
 Browser (React SPA, 60s polling)
   ↓
 Cloudflare Worker
-  ├── GET /api/status    → parallel fetch (40 services) → normalize
+  ├── GET /api/status    → parallel fetch (41 services) → normalize
   ├── GET /api/uptime    → daily uptime history
   └── POST /api/alert   → Discord webhook proxy (SSRF protected)
   ↓
@@ -327,7 +328,7 @@ Embed real-time status badges in your README, docs, or blog.
 | `assemblyai` | AssemblyAI | `deepgram` | Deepgram |
 | `characterai` | Character.AI | `modal` | Modal |
 | `voyageai` | Voyage AI | `codex` | Codex |
-| `cerebras` | Cerebras Inference | | |
+| `cerebras` | Cerebras Inference | `fal` | fal.ai |
 
 ## Claude Code Statusline Integration
 
