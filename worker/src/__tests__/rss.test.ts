@@ -290,10 +290,12 @@ describe('buildRssFeed — item formatting (#467)', () => {
     expect(xml).toContain('<title>🟢 Claude: Resolved — Outage</title>')
   })
 
-  it('renders the description as CDATA HTML paragraphs with a bold impact label', () => {
+  it('renders the active description as CDATA HTML with a bold impact label (status-invariant, #768)', () => {
     const xml = buildRssFeed([service({ name: 'ElevenLabs', status: 'degraded', incidents: [incident({ id: 'm', impact: 'minor', status: 'identified', timeline: [{ stage: 'identified', text: 'Scaling resources', at: '2026-05-10T12:30:00.000Z' }] })] })], { scope: 'all' }, NOW)
-    expect(xml).toContain('<description><![CDATA[<p>🟡 <strong>Minor</strong> · identified</p>')
-    expect(xml).toContain('<p>Scaling resources</p>')
+    // #768 — active item is status-invariant: impact label only, NO status word, NO per-update text.
+    expect(xml).toContain('<description><![CDATA[<p>🟡 <strong>Minor</strong></p>')
+    expect(xml).not.toContain('· identified')      // status word dropped
+    expect(xml).not.toContain('Scaling resources')  // per-update timeline text dropped on active
     expect(xml).toContain(']]></description>')
   })
 
@@ -305,7 +307,8 @@ describe('buildRssFeed — item formatting (#467)', () => {
   })
 
   it('escapes HTML-significant characters inside the CDATA description (no injection)', () => {
-    const xml = buildRssFeed([service({ status: 'down', incidents: [incident({ id: 'x', impact: 'major', timeline: [{ stage: 'investigating', text: '<img src=x onerror=alert(1)>', at: '2026-05-10T12:00:00.000Z' }] })] })], { scope: 'all' }, NOW)
+    // #768 — the per-update timeline text now renders only on RESOLVED items, so test escaping there.
+    const xml = buildRssFeed([service({ status: 'operational', incidents: [incident({ id: 'x', status: 'resolved', impact: 'major', resolvedAt: '2026-05-10T13:00:00.000Z', duration: '1h', timeline: [{ stage: 'resolved', text: '<img src=x onerror=alert(1)>', at: '2026-05-10T13:00:00.000Z' }] })] })], { scope: 'all' }, NOW)
     expect(xml).toContain('&lt;img src=x onerror=alert(1)&gt;')
     expect(xml).not.toContain('<img src=x')
   })
@@ -403,16 +406,20 @@ describe('buildRssFeed — item fields', () => {
     expect(noImpact).not.toContain('<category>')
   })
 
-  it('includes the latest timeline update in the description', () => {
+  it('includes the latest timeline update in the description (resolved item, #768)', () => {
+    // #768 — per-update timeline text + duration render on the RESOLVED item (one-time, stable); the
+    // active item is status-invariant (covered separately). Only the latest entry is shown.
     const xml = buildRssFeed(
       [
         service({
           incidents: [
             incident({
+              status: 'resolved',
+              resolvedAt: '2026-05-10T13:20:00.000Z',
               duration: '1h 20m',
               timeline: [
                 { stage: 'investigating', text: 'looking into it', at: '2026-05-10T12:00:00.000Z' },
-                { stage: 'identified', text: 'root cause found', at: '2026-05-10T12:30:00.000Z' },
+                { stage: 'resolved', text: 'root cause found', at: '2026-05-10T13:20:00.000Z' },
               ],
             }),
           ],
@@ -421,8 +428,6 @@ describe('buildRssFeed — item fields', () => {
       { scope: 'all' },
       NOW,
     )
-    // Description is now structured HTML (#467): the latest timeline text is its own <p>,
-    // duration folds into the meta line. Only the latest entry is shown, never earlier ones.
     expect(xml).toContain('<p>root cause found</p>')
     expect(xml).toContain('1h 20m')
     expect(xml).not.toContain('looking into it')
@@ -434,14 +439,59 @@ describe('buildRssFeed — item fields', () => {
   })
 
   it('strips XML-forbidden C0 control characters but keeps tab/newline/CR', () => {
+    // #768 — timeline text renders on the resolved item now; title sanitization applies to both.
     const xml = buildRssFeed(
-      [service({ incidents: [incident({ title: 'errors\x00\x08\x1Fhere', timeline: [{ stage: 'investigating', text: 'line1\nline2\ttab', at: '2026-05-10T12:00:00.000Z' }] })] })],
+      [service({ incidents: [incident({ title: 'errors\x00\x08\x1Fhere', status: 'resolved', resolvedAt: '2026-05-10T13:00:00.000Z', duration: '1h', timeline: [{ stage: 'resolved', text: 'line1\nline2\ttab', at: '2026-05-10T13:00:00.000Z' }] })] })],
       { scope: 'all' },
       NOW,
     )
     expect(xml).toContain('errorshere')
     expect(xml).not.toMatch(/[\x00\x08\x1F]/)
     expect(xml).toContain('line1\nline2\ttab')
+  })
+})
+
+describe('buildRssFeed — active item content is status-invariant (#768)', () => {
+  // The active item's description must be byte-identical across investigating→identified→monitoring
+  // so Slack /feed (re-notifies on content change) posts it ONCE. AI is present from first emit via
+  // the #759 hold; here we pass it so the item emits and assert stability across statuses.
+  const ai: RssAiAnalysisMap = { claude: [{ incidentId: 'k', summary: 'analysis text', estimatedRecovery: '1h', affectedScope: ['Claude API'] }] }
+  const descOf = (xml: string) => (xml.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/) || [])[1]
+  const buildAt = (status: 'investigating' | 'identified' | 'monitoring', text: string) =>
+    buildRssFeed(
+      [service({ status: 'down', incidents: [incident({ id: 'k', title: 'Outage', impact: 'major', status, timeline: [{ stage: status, text, at: '2026-05-10T12:00:00.000Z' }] })] })],
+      { scope: 'all' }, NOW, ai, { k: '2026-05-19T08:55:00.000Z' },
+    )
+
+  it('description is identical across investigating → identified (the common churn the user saw)', () => {
+    const d1 = descOf(buildAt('investigating', 'We are investigating'))
+    const d2 = descOf(buildAt('identified', 'Root cause identified, fixing'))
+    expect(d1).toBeTruthy()
+    expect(d1).toBe(d2) // no Slack re-post on the investigating→identified transition
+    // Stable payload (impact label + AI), NOT the volatile status word / per-update text.
+    expect(d1).toContain('<strong>Major</strong>')
+    expect(d1).toContain('🤖 AI analysis: analysis text')
+    expect(d1).not.toContain('investigating')
+    expect(d1).not.toContain('Root cause identified')
+  })
+
+  it('monitoring is the documented exception — AI block dropped (#724), so it differs by design', () => {
+    // The #724 monitoring gate intentionally drops the AI block (recovery confirmed), so the
+    // identified→monitoring transition is a distinct (rare, near-recovery) update — acceptable.
+    expect(descOf(buildAt('identified', 'x'))).toContain('🤖 AI analysis')
+    expect(descOf(buildAt('monitoring', 'x'))).not.toContain('🤖 AI analysis')
+  })
+
+  it('escapes markup in active-only fields (AI summary) — the active path stays injection-safe', () => {
+    // The img-onerror/C0 tests moved to resolved items (timeline text is resolved-only now); cover
+    // the fields that DO render on an active item (the AI summary) so the escaping path isn't lost.
+    const evil: RssAiAnalysisMap = { claude: [{ incidentId: 'k', summary: '<img src=x onerror=alert(1)>', estimatedRecovery: '1h', affectedScope: [] }] }
+    const xml = buildRssFeed(
+      [service({ status: 'down', incidents: [incident({ id: 'k', title: 'Outage', impact: 'major', status: 'identified' })] })],
+      { scope: 'all' }, NOW, evil, { k: '2026-05-19T08:55:00.000Z' },
+    )
+    expect(xml).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    expect(xml).not.toContain('<img src=x')
   })
 })
 
