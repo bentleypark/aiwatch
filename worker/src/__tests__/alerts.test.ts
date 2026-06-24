@@ -611,6 +611,42 @@ describe('buildServiceAlerts', () => {
     expect(alerts).toHaveLength(1)
     expect(alerts[0].title).toBe('🟢 OpenAI API — Service Recovered')
   })
+
+  describe('#767 — service-status alerts restricted to a Tier-1 safety net', () => {
+    it('does NOT emit a down alert for a NON-Tier-1 service (incident alerts are canonical)', () => {
+      const svc = mockService({ id: 'assemblyai', name: 'AssemblyAI', provider: 'AssemblyAI', status: 'down' })
+      expect(buildServiceAlerts([svc], new Map(), new Map())).toHaveLength(0)
+    })
+
+    it('does NOT emit a degraded alert for a NON-Tier-1 service', () => {
+      const svc = mockService({ id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', status: 'degraded' })
+      expect(buildServiceAlerts([svc], new Map(), new Map())).toHaveLength(0)
+    })
+
+    it('does NOT emit a recovery alert for a NON-Tier-1 service even if a stale alerted-down map entry exists', () => {
+      // Defensive: down/degraded are no longer emitted for non-Tier-1, so the map shouldn't carry
+      // them — but if a stale entry lingers, the recovery must still be suppressed.
+      const svc = mockService({ id: 'assemblyai', name: 'AssemblyAI', status: 'operational' })
+      expect(buildServiceAlerts([svc], new Map([['assemblyai', '2026-03-24T00:00:00Z']]), new Map())).toHaveLength(0)
+    })
+
+    it('STILL emits a down alert for each Tier-1 service (claude/openai/gemini safety net)', () => {
+      for (const [id, name] of [['claude', 'Claude API'], ['openai', 'OpenAI API'], ['gemini', 'Gemini API']] as const) {
+        const svc = mockService({ id, name, status: 'down' })
+        const alerts = buildServiceAlerts([svc], new Map(), new Map())
+        expect(alerts, `${id} should still page`).toHaveLength(1)
+        expect(alerts[0].key).toBe(`alerted:down:${id}`)
+      }
+    })
+
+    it('Tier-1 down + non-Tier-1 down → only the Tier-1 alert fires', () => {
+      const t1 = mockService({ id: 'claude', name: 'Claude API', status: 'down' })
+      const nonT1 = mockService({ id: 'assemblyai', name: 'AssemblyAI', status: 'down' })
+      const alerts = buildServiceAlerts([t1, nonT1], new Map(), new Map())
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].key).toBe('alerted:down:claude')
+    })
+  })
 })
 
 describe('mergeTogetherAlerts', () => {

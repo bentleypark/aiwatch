@@ -1,7 +1,7 @@
 // Alert detection logic — pure functions for testability
 // Used by cronAlertCheck in index.ts
 
-import { getFallbacks, buildFallbackText } from './fallback'
+import { getFallbacks, buildFallbackText, API_TIER } from './fallback'
 import { sanitize, formatDuration, appendStatusHint } from './utils'
 import { kindFromKey, svcIdsForAlert, type AlertKind } from './alert-feed'
 import { XAI_REGION_RE } from './xai-regions'
@@ -500,6 +500,15 @@ export function buildServiceAlerts(
   const alerts: AlertCandidate[] = []
 
   for (const svc of services) {
+    // #767 — service-status edge alerts (Down / Partially Degraded / Recovered) are now a
+    // **Tier-1-only safety net**. The canonical alert is incident-based (buildIncidentAlerts); a
+    // status-edge alert only ever fired in the incident-less gap (the `!hasOngoingIncident` guard
+    // below), which is usually a transient indicator-before-incident race the incident alert covers
+    // ~1 cron cycle later (the #759 AssemblyAI double: 6:18 "Service Down" → 6:23 "New Incident").
+    // So for non-Tier-1 services we drop these entirely and rely on incident alerts; Tier-1
+    // (claude/openai/gemini) keeps them so a Tier-1 hard-down with NO parseable incident still pages.
+    if (API_TIER[svc.id] !== 1) continue
+
     // Suppress status alerts if ongoing incidents exist (incident alert already covers it)
     const hasOngoingIncident = (svc.incidents ?? []).some((i) => i.status !== 'resolved')
 
