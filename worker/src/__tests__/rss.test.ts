@@ -128,9 +128,12 @@ describe('buildRssFeed — active item pubDate = first-seen, not backdated start
   const STARTED = '2026-05-10T12:00:00.000Z'      // provider-reported (backdated)
   const FIRST_SEEN = '2026-05-19T08:55:00.000Z'   // AIWatch first detection (fresh, ~now)
   const inc = incident({ id: 'p1', title: 'Ray2 queue times', status: 'investigating', startedAt: STARTED })
+  // AI present so the #759 publish-before-analysis hold doesn't suppress this fresh active item —
+  // isolates the pubDate-freshness assertion from the hold (an AI-less fresh item would be held).
+  const aiReady: RssAiAnalysisMap = { claude: [{ incidentId: 'p1', summary: 'queue backlog', estimatedRecovery: '1h', affectedScope: [] }] }
 
   it('uses firstSeen as the active item pubDate when provided (overrides backdated startedAt)', () => {
-    const xml = buildRssFeed([service({ incidents: [inc] })], { scope: 'all' }, NOW, undefined, { p1: FIRST_SEEN })
+    const xml = buildRssFeed([service({ incidents: [inc] })], { scope: 'all' }, NOW, aiReady, { p1: FIRST_SEEN })
     expect(xml).toContain(`<pubDate>${new Date(FIRST_SEEN).toUTCString()}</pubDate>`)
     expect(xml).not.toContain(`<pubDate>${new Date(STARTED).toUTCString()}</pubDate>`)
     // guid is unchanged (still the active guid) — only the pubDate freshness changed.
@@ -157,7 +160,7 @@ describe('buildRssFeed — active item pubDate = first-seen, not backdated start
 
   it('buildFeedResponse threads firstSeen through to the service-scope feed', () => {
     const target = service({ id: 'claude', name: 'Claude', incidents: [inc] })
-    const res = buildFeedResponse({ services: [target] }, { scope: 'service', segment: 'claude' }, NOW, undefined, { p1: FIRST_SEEN })
+    const res = buildFeedResponse({ services: [target] }, { scope: 'service', segment: 'claude' }, NOW, aiReady, { p1: FIRST_SEEN })
     expect(res.ok).toBe(true)
     if (res.ok) expect(res.xml).toContain(`<pubDate>${new Date(FIRST_SEEN).toUTCString()}</pubDate>`)
   })
@@ -693,5 +696,68 @@ describe('buildFeedResponse — threads AI analysis (#724)', () => {
     const res = buildFeedResponse(cached, { scope: 'all' }, NOW, map)
     expect(res.ok).toBe(true)
     if (res.ok) expect(res.xml).toContain('🤖 AI analysis: piped through')
+  })
+})
+
+describe('buildRssFeed — publish-before-analysis hold (#759)', () => {
+  // AI_HOLD_MS = 6 min. NOW = 09:00:00Z.
+  const FRESH = '2026-05-19T08:57:00.000Z'   // 3 min ago — inside the hold window
+  const OLD = '2026-05-19T08:53:00.000Z'     // 7 min ago — past the hold window
+  const aiMap: RssAiAnalysisMap = { claude: [{ incidentId: 'inc-1', summary: 'root cause found', estimatedRecovery: '1h', affectedScope: ['Claude API'] }] }
+  const activeInc = incident({ id: 'inc-1', status: 'identified' })
+
+  it('HOLDS an AI-less identified active item inside the hold window (item not emitted)', () => {
+    const xml = buildRssFeed([service({ incidents: [activeInc] })], { scope: 'all' }, NOW, undefined, { 'inc-1': FRESH })
+    expect(xml).not.toContain('aiwatch:claude:inc-1</guid>') // held — no item
+    expect(xml).not.toContain('API errors')
+  })
+
+  it('EMITS the item once AI analysis exists, even inside the window', () => {
+    const xml = buildRssFeed([service({ incidents: [activeInc] })], { scope: 'all' }, NOW, aiMap, { 'inc-1': FRESH })
+    expect(xml).toContain('aiwatch:claude:inc-1</guid>')
+    expect(xml).toContain('🤖 AI analysis: root cause found')
+  })
+
+  it('RELEASES (emits without AI) once first-seen age ≥ AI_HOLD_MS', () => {
+    const xml = buildRssFeed([service({ incidents: [activeInc] })], { scope: 'all' }, NOW, undefined, { 'inc-1': OLD })
+    expect(xml).toContain('aiwatch:claude:inc-1</guid>') // released
+    expect(xml).not.toContain('🤖 AI analysis')           // still no AI block (genuinely skipped/timed-out)
+  })
+
+  it('fail-open: an AI-less active item with NO first-seen entry is emitted (not held indefinitely)', () => {
+    const xml = buildRssFeed([service({ incidents: [activeInc] })], { scope: 'all' }, NOW)
+    expect(xml).toContain('aiwatch:claude:inc-1</guid>')
+  })
+
+  it('never holds a `monitoring` item (AI excluded by design — posts immediately)', () => {
+    const monitoringInc = incident({ id: 'inc-1', status: 'monitoring' })
+    const xml = buildRssFeed([service({ incidents: [monitoringInc] })], { scope: 'all' }, NOW, undefined, { 'inc-1': FRESH })
+    expect(xml).toContain('aiwatch:claude:inc-1</guid>') // emitted despite no AI + fresh first-seen
+    expect(xml).not.toContain('🤖 AI analysis')
+  })
+
+  it('does NOT hold resolved items (the hold is active-only)', () => {
+    const resolvedInc = incident({ id: 'inc-1', status: 'resolved', resolvedAt: '2026-05-19T08:58:00.000Z', duration: '1m' })
+    const xml = buildRssFeed([service({ incidents: [resolvedInc] })], { scope: 'all' }, NOW, undefined, { 'inc-1': FRESH })
+    expect(xml).toContain('aiwatch:claude:inc-1:resolved</guid>')
+  })
+
+  it('holds ALL surfaces of an AI-less shared incident — no item leaks under a sibling guid', () => {
+    // A shared incidentId across 3 surfaces, all AI-less + fresh. The hold is per-surface, so verify
+    // the dedup can't surface the incident under a sibling guid while the primary is held.
+    const shared = incident({ id: 'sh-1', status: 'identified' })
+    const svcs = [
+      service({ id: 'claude', name: 'Claude API', incidents: [shared] }),
+      service({ id: 'claudeai', name: 'claude.ai', incidents: [shared] }),
+      service({ id: 'claudecode', name: 'Claude Code', incidents: [shared] }),
+    ]
+    const xml = buildRssFeed(svcs, { scope: 'all' }, NOW, undefined, { 'sh-1': FRESH })
+    expect(xml).not.toContain('sh-1') // every surface held → zero items, no leak
+  })
+
+  it('releases exactly at the AI_HOLD_MS boundary (< is exclusive → 6 min posts)', () => {
+    const SIX_MIN_AGO = '2026-05-19T08:54:00.000Z' // exactly 6 min before NOW
+    const xml = buildRssFeed([service({ incidents: [activeInc] })], { scope: 'all' }, NOW, undefined, { 'inc-1': SIX_MIN_AGO })
+    expect(xml).toContain('aiwatch:claude:inc-1</guid>') // age === AI_HOLD_MS → released
   })
 })
