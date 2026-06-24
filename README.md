@@ -64,7 +64,9 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 ## Monitored Services
 
-### AI API Services (29)
+Grouped by the dashboard's category taxonomy (39 total — sidebar filters / Overview sections mirror these).
+
+### LLM APIs (15)
 
 | Service | Provider | Status Source |
 |---------|----------|---------------|
@@ -78,34 +80,11 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 | Fireworks AI | Fireworks | Better Stack RSS + uptime API |
 | Cerebras Inference | Cerebras | Atlassian Statuspage (multi-component worst-of) |
 | Perplexity | Perplexity AI | Instatus (Next.js SSR) |
-| Hugging Face | HuggingFace | Better Stack RSS + uptime API |
-| Replicate | Replicate | incident.io (Atlassian compat) |
-| ElevenLabs | ElevenLabs | incident.io (Atlassian compat) |
-| AssemblyAI | AssemblyAI | Atlassian Statuspage |
-| Deepgram | Deepgram | Atlassian Statuspage |
 | xAI (Grok) | xAI | RSS feed |
 | DeepSeek API | DeepSeek | Flashduty (browser-rendered feed) |
 | OpenRouter | OpenRouter | OnlineOrNot (React Router SSR) |
 | Amazon Bedrock | AWS | AWS Health Dashboard |
-| Pinecone | Pinecone | Atlassian Statuspage |
-| Stability AI | Stability AI | Atlassian Statuspage |
-| Voyage AI | Voyage AI | Atlassian Statuspage |
-| Modal | Modal | Better Stack RSS + uptime API |
-| LangChain (LangSmith) | LangChain | Atlassian Statuspage (incident.io) |
-| Helicone | Helicone | Better Stack RSS + uptime API |
-| Langfuse | Langfuse | incident.io (Atlassian compat) |
-| Runway | Runway | Atlassian Statuspage |
-| Luma (Dream Machine) | Luma | Better Stack RSS + uptime API |
 | Azure OpenAI | Microsoft | Azure Status RSS |
-
-### AI Apps (4)
-
-| Service | Provider |
-|---------|----------|
-| claude.ai | Anthropic |
-| ChatGPT | OpenAI |
-| Character.AI | Character AI |
-| DeepSeek App | DeepSeek |
 
 ### Coding Agents (6)
 
@@ -117,6 +96,49 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 | GitHub Copilot | Microsoft |
 | Windsurf | Codeium |
 | Junie | JetBrains |
+
+### Voice (3)
+
+| Service | Provider | Status Source |
+|---------|----------|---------------|
+| ElevenLabs | ElevenLabs | incident.io (Atlassian compat) |
+| AssemblyAI | AssemblyAI | Atlassian Statuspage |
+| Deepgram | Deepgram | Atlassian Statuspage |
+
+### Inference & Infra (6)
+
+| Service | Provider | Status Source |
+|---------|----------|---------------|
+| Hugging Face | HuggingFace | Better Stack RSS + uptime API |
+| Replicate | Replicate | incident.io (Atlassian compat) |
+| Pinecone | Pinecone | Atlassian Statuspage |
+| Stability AI | Stability AI | Atlassian Statuspage |
+| Voyage AI | Voyage AI | Atlassian Statuspage |
+| Modal | Modal | Better Stack RSS + uptime API |
+
+### Observability (3)
+
+| Service | Provider | Status Source |
+|---------|----------|---------------|
+| LangChain (LangSmith) | LangChain | Atlassian Statuspage (incident.io) |
+| Helicone | Helicone | Better Stack RSS + uptime API |
+| Langfuse | Langfuse | incident.io (Atlassian compat) |
+
+### Video (2)
+
+| Service | Provider | Status Source |
+|---------|----------|---------------|
+| Runway | Runway | Atlassian Statuspage |
+| Luma (Dream Machine) | Luma | Better Stack RSS + uptime API |
+
+### AI Apps (4)
+
+| Service | Provider |
+|---------|----------|
+| claude.ai | Anthropic |
+| ChatGPT | OpenAI |
+| Character.AI | Character AI |
+| DeepSeek App | DeepSeek |
 
 ## Tech Stack
 
