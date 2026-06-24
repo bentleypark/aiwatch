@@ -66,6 +66,7 @@ const STATUS_URL = {
   bedrock:     'https://health.aws.amazon.com/health/status',
   pinecone:    'https://status.pinecone.io',
   stability:   'https://status.stability.ai',
+  bfl:         'https://status.bfl.ml',
   voyageai:    'https://voyageai-status.statuspage.io',
   modal:       'https://status.modal.com',
   langsmith:   'https://status.smith.langchain.com',

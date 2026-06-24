@@ -119,6 +119,15 @@ export const SERVICES: ServiceConfig[] = [
   // — the Region card already covers per-region status. Display-only — badge stays on statusComponentId.
   { id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', statusUrl: 'https://status.pinecone.io', apiUrl: 'https://status.pinecone.io/api/v2/summary.json', statusComponentId: 'r7tngp2p3sjd', displayComponentIds: ['jhky1rj0ps27', 'g7400gqyfhh9', 'r7tngp2p3sjd', 'hrgtfbcqygpc', '34h37xk5ltv1', 'pxr1b208pdh1'] },
   { id: 'stability', name: 'Stability AI', provider: 'Stability AI', category: 'api', statusUrl: 'https://status.stability.ai', apiUrl: 'https://status.stability.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.stability.ai/incidents', incidentIoComponentId: '01JW9J39X55NDFZTZT3K5NYR48' },
+  // Black Forest Labs / FLUX (#756) — image-generation sibling for Stability AI (un-blocks the image
+  // fallback sub-tier, #601). Single-tenant Atlassian Statuspage (no incidentKeywords needed). Badge
+  // worst-of (#379): the developer-facing API surface + the "Image Generation Services" group (rolls
+  // up every FLUX model tier), so a single model-tier blip doesn't flip the badge unless API or the
+  // whole image group degrades. statusComponentId (API) is the primary for uptime parsing / calendar.
+  // Per-component breakdown (#606): displayAllComponents per-model page — API + Finetuning stay
+  // individual surfaces; the FLUX model tiers fold into the collapsed "Models" group; the "Image
+  // Generation Services" group-header component is denylisted (its children are already shown).
+  { id: 'bfl', name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', category: 'api', statusUrl: 'https://status.bfl.ml', apiUrl: 'https://status.bfl.ml/api/v2/summary.json', statusComponentId: 'ws9rrzk6n2j7', statusComponentIds: ['ws9rrzk6n2j7', 'm991l9z7y6jj'], displayAllComponents: true, componentDenylist: ['Image Generation Services'], componentSurfaces: ['API (api.bfl.ai)', 'Finetuning'] },
   // displayComponentIds (#606): API + User Dashboard. Display-only.
   { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr', displayComponentIds: ['g74wmxgm0zxr', 'p4zzcfjd8p5q'] },
   { id: 'modal', name: 'Modal', provider: 'Modal', category: 'api', statusUrl: 'https://status.modal.com', apiUrl: null, rssFeedUrl: 'https://status.modal.com/feed', betterStackUrl: 'https://status.modal.com', flapSuppression: true, componentDenylist: ['Website'] },

@@ -306,6 +306,14 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 .incident-group-meta{font-size:12px;color:#8b949e;white-space:nowrap}
 .incident-group-entries{margin:6px 0 0 20px;padding-left:10px;border-left:1px solid rgba(255,255,255,0.08)}
 .incident-group-entries .incident-item{padding:6px 0}
+/* #756 — component group (e.g. "Models · 11 components"): native <details> marker hidden, replaced
+   by a larger (13px) custom chevron rendered next to the count text (NOT floated to the far right —
+   margin-left:auto was dropped per UX feedback so the toggle reads as part of the label). */
+.comp-group>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;padding:4px 0}
+.comp-group>summary::-webkit-details-marker{display:none}
+.comp-group-chev{font-size:13px;line-height:1;color:#c9d1d9}
+.comp-group-chev::after{content:"▾";display:inline-block;transition:transform 0.15s}
+.comp-group:not([open]) .comp-group-chev::after{transform:rotate(-90deg)}
 .ih-toggle{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 .ih-rest{display:none}
 .ih-toggle:checked~.ih-rest{display:block}
@@ -622,11 +630,12 @@ function componentGroup(name: string, members: Comp[]): string {
   const statusBadge = worst !== 'operational'
     ? `<span class="mono" style="font-size:11px;color:${wcolor};margin-left:6px">${esc(statusLabel(worst))}</span>`
     : ''
-  return `<details style="margin-top:8px">
-<summary style="cursor:pointer;padding:4px 0">
-<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${wcolor};margin:0 6px 0 2px;vertical-align:middle"></span>
+  return `<details class="comp-group" style="margin-top:8px">
+<summary>
+<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${wcolor};flex-shrink:0"></span>
 <span class="mono" style="font-size:13px;color:#c9d1d9">${esc(name)}</span>
-<span class="mono" style="font-size:11px;color:#8b949e;margin-left:6px">${members.length} components</span>${statusBadge}
+<span class="mono" style="font-size:11px;color:#8b949e">${members.length} components</span>${statusBadge}
+<span class="comp-group-chev" aria-hidden="true"></span>
 </summary>
 <div style="margin-top:6px;margin-left:14px;padding-left:12px;border-left:2px solid #30363d">${members.map(componentRow).join('')}</div>
 </details>`
@@ -1184,6 +1193,7 @@ export const FOOTER_CATEGORY_ORDER: ReadonlyArray<{ key: string; label: string }
   { key: 'inference', label: 'Inference & Infra' },
   { key: 'observability', label: 'Observability' },
   { key: 'video', label: 'Video' },
+  { key: 'image', label: 'Image' }, // #756
   { key: 'apps', label: 'AI Apps' },
 ]
 

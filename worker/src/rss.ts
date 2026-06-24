@@ -100,6 +100,7 @@ export const IS_DOWN_SLUG_OVERRIDE: Record<string, string> = {
   copilot: 'github-copilot',
   langsmith: 'langchain',
   deepseekapp: 'deepseek-app',
+  bfl: 'flux', // #756
 }
 
 // Services with no /is-{slug}-down page — estimate-only, excluded per #263.

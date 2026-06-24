@@ -543,7 +543,7 @@ describe('renderFooter — Also check category grouping', () => {
     for (const c of present) {
       expect(ordered.has(c), `group "${c}" present in SLUG_TO_SERVICE but missing from FOOTER_CATEGORY_ORDER`).toBe(true)
     }
-    expect([...present].sort()).toEqual(['agents', 'apps', 'inference', 'llm', 'observability', 'video', 'voice'])
+    expect([...present].sort()).toEqual(['agents', 'apps', 'image', 'inference', 'llm', 'observability', 'video', 'voice'])
   })
 
   it('`category` stays the COARSE worker vocabulary (api/app/agent) — guards the is-down fallback filter', () => {
@@ -855,6 +855,25 @@ describe('renderComponents (#604)', () => {
     const detailsIdx = html.indexOf('<details')
     expect(html.indexOf('API')).toBeLessThan(detailsIdx)
     expect(html.indexOf('model-17')).toBeGreaterThan(detailsIdx)
+  })
+
+  // #756 — the group toggle uses the comp-group chevron (native marker hidden), rendered next to
+  // the count text rather than pushed to the far right edge (margin-left:auto was removed per UX
+  // feedback). The chevron sits AFTER the count inside the summary.
+  it('group summary uses the comp-group chevron placed after the count (not a far-right marker)', () => {
+    const html = renderComponents(mkService({
+      components: [
+        { id: 'api', name: 'API', status: 'operational' },
+        ...mkComponents(11, [], 'Models'),
+      ],
+    }))
+    expect(html).toContain('class="comp-group"')
+    const summary = html.slice(html.indexOf('<summary'), html.indexOf('</summary>') + 10)
+    expect(summary).toContain('comp-group-chev')
+    // chevron comes AFTER the "11 components" count within the summary (next to text, not floated)
+    expect(summary.indexOf('11 components')).toBeLessThan(summary.indexOf('comp-group-chev'))
+    // the far-right float was removed
+    expect(html).not.toContain('.comp-group-chev{margin-left:auto')
   })
 
   it('group header dot/label reflects the worst member status', () => {

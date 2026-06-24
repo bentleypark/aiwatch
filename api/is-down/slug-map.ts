@@ -36,7 +36,11 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'huggingface':     { id: 'huggingface', name: 'Hugging Face',    provider: 'Hugging Face', category: 'api', group: 'inference' },
   'replicate':       { id: 'replicate',  name: 'Replicate',        provider: 'Replicate',   category: 'api', group: 'inference' },
   'pinecone':        { id: 'pinecone',   name: 'Pinecone',         provider: 'Pinecone',    category: 'api', group: 'inference' },
-  'stability':       { id: 'stability',  name: 'Stability AI',     provider: 'Stability AI', category: 'api', group: 'inference' },
+  'stability':       { id: 'stability',  name: 'Stability AI',     provider: 'Stability AI', category: 'api', group: 'image' }, // #756 — image category (split from inference)
+  // Black Forest Labs / FLUX (#756) — slug is 'flux' (search volume) while the worker id is 'bfl';
+  // the id≠slug mapping is mirrored in worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE and
+  // src/utils/constants.js FEED_SLUG_OVERRIDE, pinned by feed-slug-sync.test.ts / feed-slug.test.js.
+  'flux':            { id: 'bfl',        name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', category: 'api', group: 'image' },
   'voyageai':        { id: 'voyageai',   name: 'Voyage AI',        provider: 'Voyage AI',   category: 'api', group: 'inference' },
   'modal':           { id: 'modal',      name: 'Modal',            provider: 'Modal',       category: 'api', group: 'inference' },
   // LangChain (LangSmith) (#561) — slug is 'langchain' (search volume) while the worker id is
@@ -99,7 +103,8 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'huggingface':    ['replicate', 'modal', 'together'],
   'replicate':      ['huggingface', 'stability', 'modal'],
   'pinecone':       ['voyageai'],
-  'stability':      ['replicate', 'huggingface'],
+  'stability':      ['flux', 'replicate', 'huggingface'], // #756 — image sibling first
+  'flux':           ['stability', 'replicate', 'huggingface'], // #756
   'voyageai':       ['pinecone', 'cohere'],
   'modal':          ['replicate', 'huggingface'],
   'langchain':      ['helicone', 'langfuse'],

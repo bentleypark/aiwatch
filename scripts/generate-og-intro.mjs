@@ -12,7 +12,7 @@ const sharp = require('sharp')
 const path = require('path')
 const fs = require('fs')
 
-const SERVICE_COUNT = 39
+const SERVICE_COUNT = 40
 const rootDir = path.resolve(import.meta.dirname, '..')
 
 // Resize icon-192.png and encode as base64 for SVG embedding

@@ -62,6 +62,7 @@ const en = {
   'filter.inference': 'Inference & Infra',
   'filter.observability': 'Observability',
   'filter.video': 'Video',
+  'filter.image': 'Image',
   'overview.incidents.title': 'Recent Incidents',
   'overview.latency.title': 'Latency Rankings',
   'overview.card.latency': 'status page',

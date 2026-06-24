@@ -24,6 +24,7 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   { id: 'deepseek', url: 'https://api.deepseek.com/v1/models' },
   { id: 'openrouter', url: 'https://openrouter.ai/api/v1/models' },
   { id: 'stability', url: 'https://api.stability.ai/v1/engines/list' },
+  { id: 'bfl', url: 'https://api.bfl.ai/v1/get_result' },                            // #756 — real API handler, 422 (missing id), no auth for RTT
   { id: 'assemblyai', url: 'https://api.assemblyai.com/v2/transcript' },
   { id: 'deepgram', url: 'https://api.deepgram.com/v1/models' },
   { id: 'voyageai', url: 'https://api.voyageai.com/v1/embeddings' },

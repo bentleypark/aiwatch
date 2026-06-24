@@ -62,6 +62,7 @@ const ko = {
   'filter.inference': '추론 & 인프라',
   'filter.observability': '관측',
   'filter.video': '영상',
+  'filter.image': '이미지',
   'overview.incidents.title': '최근 인시던트',
   'overview.latency.title': '레이턴시 순위',
   'overview.card.latency': '상태 페이지',
