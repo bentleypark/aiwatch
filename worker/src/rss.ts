@@ -98,6 +98,12 @@ const MAX_ITEMS = 50
 // posts (just without AI). Usually adds zero latency (AI lands within seconds).
 const AI_HOLD_MS = 6 * 60_000
 
+// #760 — section divider mirroring the Discord operator embed's `┈┈…` (index.ts DIV), so the Slack
+// `/feed` description (which flattens the <p> tags) renders the same scannable section breaks. A
+// `<p>` so it joins with the same `\n` separator as the other paragraphs; box-drawing chars only (no
+// HTML-significant chars → no escaping needed).
+const FEED_DIV = '<p>┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈</p>'
+
 // Service IDs whose ID differs from their /is-{slug}-down SEO page slug.
 // Most services use their ID verbatim; only these dropped a dash in the ID.
 // Canonical source: SERVICE_ID_TO_SLUG in api/is-down/slug-map.ts — this copy
@@ -192,8 +198,9 @@ function rfc822(iso: string): string {
 
 // Map of incident ID → every service name carrying it. A provider that reports
 // per-surface (Anthropic: Claude API / claude.ai / Claude Code) links one root
-// incident to multiple services, so the same ID surfaces as several items —
-// the "Also affecting" note tells a subscriber it's one event, not three.
+// incident to multiple services, so the same ID would surface as several items —
+// the provider-grouped title ("Anthropic (Claude API, claude.ai, Claude Code): …", #724) tells a
+// subscriber it's one event, not three (the old "Also affecting" line was dropped in #760 as a dup).
 function buildIncidentServiceMap(services: ServiceStatus[]): Map<string, string[]> {
   const map = new Map<string, string[]>()
   for (const svc of services) {
@@ -261,7 +268,6 @@ function cap(s: string): string {
 function descHtml(
   service: ServiceStatus,
   inc: Incident,
-  coAffected: string[],
   opts: { kind: ItemKind; fallbackText?: string; analysis?: RssAiAnalysis },
 ): string {
   const isResolved = opts.kind === 'resolved'
@@ -279,28 +285,31 @@ function descHtml(
     // by the #759 hold. The evolving detail lives on the linked is-down / dashboard page; recovery is
     // a separate `:resolved` item (#467). Net per incident lifecycle: 1 active post + 1 resolved post.
     // NOTE this freezes only the status-driven churn — a SEMANTICALLY meaningful change still re-posts
-    // (and should): an impact escalation (major→critical), a surface joining "Also affecting", an AI
+    // (and should): an impact escalation (major→critical), a surface joining the provider-grouped title, an AI
     // re-analysis rewriting the summary, or a fallback recommendation flip. Stability holds *given*
     // stable impact / co-affected / AI / fallback — which is the common case across investigating→identified.
     const label = inc.impact ? cap(inc.impact) : service.status === 'down' ? 'Down' : 'Degraded'
     lines.push(`<p>${severityEmoji(service, inc, false)} <strong>${escHtml(label)}</strong></p>`)
   }
-  // #539: defuse bare "claude.ai" in co-affected service names + timeline text (Slack /feed unfurl).
-  if (coAffected.length > 0) lines.push(`<p>Also affecting: ${escHtml(defuseAutolinkDomain(coAffected.join(', ')))}</p>`)
+  // #760 — no "Also affecting" line: it only ever appeared when coAffected.length>0, which is EXACTLY
+  // when itemXml's title is provider-grouped ("Anthropic (Claude API, claude.ai, Claude Code): …") and
+  // already lists those services — pure duplication. The provider-grouped title carries the set.
   // #768 — per-update timeline text is shown ONLY on the resolved item (a one-time, stable resolution
-  // message). On the active item it churns across status transitions → Slack re-post.
+  // message; #539 defuses a bare brand domain in it). On the active item it churns across status
+  // transitions → Slack re-post.
   if (isResolved && latest?.text) lines.push(`<p>${escHtml(defuseAutolinkDomain(latest.text))}</p>`)
   // #724 — mirror the Discord embed's 🤖 AI ANALYSIS block (active items only; resolved items already
   // read "Resolved"). Public-safe fields only — never the operator-only tweet draft. defuse the
   // summary/scope so a bare brand domain doesn't auto-link in the Slack /feed unfurl.
   if (!isResolved && opts.analysis) {
     const a = opts.analysis
+    lines.push(FEED_DIV) // #760 — divider before the 🤖 AI block (mirrors Discord)
     lines.push(`<p>🤖 AI analysis: ${escHtml(defuseAutolinkDomain(a.summary))}</p>`)
     const detail = [`Est. recovery: ${escHtml(formatRecoveryDisplay(a.estimatedRecovery))}`]
     if (a.affectedScope.length > 0) detail.push(`Scope: ${escHtml(defuseAutolinkDomain(a.affectedScope.join(', ')))}`)
     lines.push(`<p>${detail.join(' · ')}</p>`)
   }
-  if (opts.fallbackText) lines.push(`<p>↪ ${escHtml(opts.fallbackText)}</p>`)
+  if (opts.fallbackText) { lines.push(FEED_DIV); lines.push(`<p>↪ ${escHtml(opts.fallbackText)}</p>`) } // #760 — divider before Try-instead
   // Join with a newline, not '' (#479): block-level <p> render with a break in real RSS readers,
   // but Slack's /feed app FLATTENS the tags and would otherwise concatenate adjacent paragraphs
   // ("lasted 14m" + "Qwen3…" → "14mQwen3…"). The newline is insignificant whitespace between block
@@ -332,7 +341,7 @@ function itemXml(
       <link>${xml(serviceLink(service.id, opts.kind))}</link>
       <guid isPermaLink="false">${xml(guid)}</guid>
       <pubDate>${rfc822(opts.pubDate)}</pubDate>${inc.impact ? `\n      <category>${xml(inc.impact)}</category>` : ''}
-      <description><![CDATA[${descHtml(service, inc, coAffected, opts)}]]></description>
+      <description><![CDATA[${descHtml(service, inc, opts)}]]></description>
     </item>`
 }
 
@@ -342,7 +351,7 @@ function itemXml(
  * root incident to several services, which would otherwise emit N near-identical items in the
  * all-services feed — and N Slack /feed messages. Callers pass entries in SERVICES order, so the
  * survivor is the deterministic "primary" surface (e.g. Claude API ahead of claude.ai / Claude Code);
- * itemXml's "Also affecting" line still names the rest. Exported for unit testing.
+ * itemXml's provider-grouped title names the rest (#724/#760). Exported for unit testing.
  *
  * Accepted edge: the survivor's guid is the primary's (`aiwatch:{primaryId}:{incId}`). If the primary
  * surface recovers BEFORE its siblings (partial recovery), the still-active item's primary shifts to the
@@ -423,8 +432,8 @@ export function buildRssFeed(
   // All-services feed (#520): collapse a multi-surface incident (one incidentId across Claude API /
   // claude.ai / Claude Code) into ONE item per (incidentId, kind) so a Slack /feed subscriber to
   // /feed.xml gets a single consolidated message instead of N near-identical ones. `sources` iterates
-  // in SERVICES order so the surviving "primary" is deterministic; itemXml's "Also affecting" lists
-  // the rest. Per-service feeds (scope:'service') have a single source, so this is a no-op there.
+  // in SERVICES order so the surviving "primary" is deterministic; itemXml's provider-grouped title
+  // names the rest (#760). Per-service feeds (scope:'service') have a single source, so this is a no-op there.
   const deduped = opts.scope === 'all' ? dedupeSharedIncidents(items) : items
   deduped.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime())
   const capped = deduped.slice(0, MAX_ITEMS)

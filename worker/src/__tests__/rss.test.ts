@@ -507,12 +507,10 @@ describe('buildRssFeed — shared incident (per-surface providers)', () => {
     // One item, not three — the Slack /feed subscriber gets a single consolidated message
     expect((xml.match(/<item>/g) ?? []).length).toBe(1)
     // #724 — provider-grouped title (mirrors Discord "Anthropic (Claude API, claude.ai, Claude Code)").
-    // Primary = first in SERVICES order (Claude API); its "Also affecting" still names the rest.
+    // Primary = first in SERVICES order (Claude API); the title carries the full co-affected set.
     expect(xml).toContain('🔴 Anthropic (Claude API, claude ai, Claude Code): Elevated errors') // 'major' → 🔴, #539 brand defused
-    expect(xml).toContain('Also affecting: claude ai, Claude Code') // #539 brand defused
-    // The other surfaces' items (and their inverse "Also affecting" lines) are gone
-    expect(xml).not.toContain('Also affecting: Claude API, Claude Code')
-    expect(xml).not.toContain('Also affecting: Claude API, claude.ai')
+    // #760 — the redundant "Also affecting" line is dropped; the grouped title already lists the set.
+    expect(xml).not.toContain('Also affecting')
   })
 
   it('uses a per-incident guid for the collapsed item (no Slack re-post churn)', () => {
@@ -528,9 +526,10 @@ describe('buildRssFeed — shared incident (per-surface providers)', () => {
     expect(xml).not.toContain('Also affecting:')
   })
 
-  it('keeps the note + single item in a service-scoped feed using the full service list', () => {
+  it('keeps a single consolidated item in a service-scoped feed; the grouped title carries the co-affected set (#760)', () => {
     const xml = buildRssFeed(anthropic, { scope: 'service', service: anthropic[0] }, NOW)
-    expect(xml).toContain('Also affecting: claude ai, Claude Code') // #539 brand defused
+    expect(xml).toContain('🔴 Anthropic (Claude API, claude ai, Claude Code): Elevated errors') // #539 brand defused
+    expect(xml).not.toContain('Also affecting') // #760 — dropped (redundant with the grouped title)
     expect((xml.match(/<item>/g) ?? []).length).toBe(1)
   })
 
@@ -809,5 +808,43 @@ describe('buildRssFeed — publish-before-analysis hold (#759)', () => {
     const SIX_MIN_AGO = '2026-05-19T08:54:00.000Z' // exactly 6 min before NOW
     const xml = buildRssFeed([service({ incidents: [activeInc] })], { scope: 'all' }, NOW, undefined, { 'inc-1': SIX_MIN_AGO })
     expect(xml).toContain('aiwatch:claude:inc-1</guid>') // age === AI_HOLD_MS → released
+  })
+})
+
+describe('buildRssFeed — #760 feed format polish (dividers + no redundant "Also affecting")', () => {
+  const DIV = '<p>┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈</p>'
+  const ai: RssAiAnalysisMap = { claude: [{ incidentId: 'inc-1', summary: 'root cause', estimatedRecovery: '1h', affectedScope: ['Claude API'] }] }
+
+  it('inserts a divider before the 🤖 AI block and before the ↪ Try-instead line (mirrors Discord)', () => {
+    // Down service so the fallback ("Try instead") line is present; AI present so the AI block is too.
+    const svcs = [
+      service({ id: 'claude', name: 'Claude API', status: 'down', incidents: [incident({ id: 'inc-1', impact: 'major' })] }),
+      service({ id: 'openai', name: 'OpenAI API', status: 'operational', uptime30d: 99.9 }),
+    ]
+    const xml = buildRssFeed(svcs, { scope: 'all' }, NOW, ai, { 'inc-1': NOW.toISOString() })
+    const desc = (xml.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/) || [])[1] ?? ''
+    // two dividers: one before AI, one before Try-instead (count full DIV strings, not a substring)
+    expect(desc.split(DIV).length - 1).toBe(2)
+    // ordering: impact label … DIV … AI … DIV … Try instead
+    expect(desc.indexOf(DIV)).toBeLessThan(desc.indexOf('🤖 AI analysis'))
+    expect(desc.indexOf('🤖 AI analysis')).toBeLessThan(desc.lastIndexOf(DIV))
+    expect(desc.lastIndexOf(DIV)).toBeLessThan(desc.indexOf('↪'))
+  })
+
+  it('no divider on a plain active item with neither AI nor fallback', () => {
+    // operational-status service can still carry an incident; no fallback (not down/degraded), no AI.
+    const xml = buildRssFeed([service({ status: 'operational', incidents: [incident({ id: 'inc-1' })] })], { scope: 'all' }, NOW, undefined, { 'inc-1': NOW.toISOString() })
+    const desc = (xml.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/) || [])[1] ?? ''
+    expect(desc).not.toContain('┈┈┈┈┈┈')
+  })
+
+  it('drops "Also affecting" for a multi-surface incident (title already lists the set)', () => {
+    const svcs = [
+      service({ id: 'claude', name: 'Claude API', incidents: [incident({ id: 'shared', title: 'Errors' })] }),
+      service({ id: 'claudeai', name: 'claude.ai', incidents: [incident({ id: 'shared', title: 'Errors' })] }),
+    ]
+    const xml = buildRssFeed(svcs, { scope: 'all' }, NOW)
+    expect(xml).toContain('Anthropic') // provider-grouped title present
+    expect(xml).not.toContain('Also affecting')
   })
 })
