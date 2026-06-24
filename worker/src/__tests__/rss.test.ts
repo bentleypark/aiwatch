@@ -868,3 +868,38 @@ describe('resolveFeedFirstSeen (#776) — stamp firstseen at feed-visibility so 
     expect(resolveFeedFirstSeen(earlier, NOW)).toEqual({ use: earlier, stamp: false })
   })
 })
+
+describe('buildRssFeed — #781 grouped per-category "Try instead" (feed parity with dashboard)', () => {
+  const tryLine = (xml: string) => (xml.match(/Try instead:[^<]*/g) || [])[0] ?? ''
+  // operational fallback candidates across categories
+  const ops = [
+    service({ id: 'openai', name: 'OpenAI API', category: 'api', status: 'operational', uptime30d: 99.9 }),
+    service({ id: 'gemini', name: 'Gemini API', category: 'api', status: 'operational', uptime30d: 99.8 }),
+    service({ id: 'chatgpt', name: 'ChatGPT', category: 'app', status: 'operational', uptime30d: 99.7 }),
+    service({ id: 'codex', name: 'Codex', category: 'agent', status: 'operational', uptime30d: 99.6 }),
+  ]
+
+  it('single-category incident → flat "Try instead: A · B" (unchanged top-2)', () => {
+    const claude = service({ id: 'claude', name: 'Claude API', category: 'api', status: 'down', incidents: [incident({ id: 'solo', title: 'Errors' })] })
+    const xml = buildRssFeed([claude, ...ops], { scope: 'all' }, NOW, undefined, { solo: '2026-05-19T08:45:00.000Z' })
+    const line = tryLine(xml)
+    expect(line).toContain('OpenAI API')
+    expect(line).toContain('Gemini API')
+    expect(line).not.toContain('→') // no category labels for a single-category incident
+  })
+
+  it('multi-category incident → labeled per-category groups (LLM/App/CLI Agent)', () => {
+    const shared = incident({ id: 'multi', title: 'Opus errors' })
+    const svcs = [
+      service({ id: 'claude', name: 'Claude API', category: 'api', status: 'down', incidents: [shared] }),
+      service({ id: 'claudeai', name: 'claude.ai', category: 'app', status: 'down', incidents: [shared] }),
+      service({ id: 'claudecode', name: 'Claude Code', category: 'agent', status: 'down', incidents: [shared] }),
+      ...ops,
+    ]
+    const xml = buildRssFeed(svcs, { scope: 'all' }, NOW, undefined, { multi: '2026-05-19T08:45:00.000Z' })
+    const line = tryLine(xml)
+    expect(line).toContain('LLM → OpenAI API')
+    expect(line).toContain('AI Apps → ChatGPT')
+    expect(line).toContain('CLI Agent → Codex')
+  })
+})

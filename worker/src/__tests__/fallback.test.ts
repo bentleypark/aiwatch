@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { getFallbacks, buildFallbackText, buildGroupedFallbackText, EXCLUDE_FALLBACK, tierFor, tierLabelFor, API_TIER } from '../fallback'
+import { getFallbacks, buildFallbackText, buildGroupedFallbackText, getGroupedFallbacks, EXCLUDE_FALLBACK, tierFor, tierLabelFor, API_TIER } from '../fallback'
 
 const mockServices = [
   { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 85 },
@@ -449,5 +449,44 @@ describe('tierLabelFor (#403)', () => {
     tierLabelFor(8888)
     tierLabelFor(8888)
     expect(warnSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('getGroupedFallbacks (#781) — per-category structure + perGroup parity', () => {
+  const svcs = [
+    { id: 'claude', category: 'api', name: 'Claude API', status: 'degraded', aiwatchScore: 80 },
+    { id: 'claudeai', category: 'app', name: 'claude.ai', status: 'down', aiwatchScore: 60 },
+    { id: 'claudecode', category: 'agent', name: 'Claude Code', status: 'degraded', aiwatchScore: 70 },
+    { id: 'openai', category: 'api', name: 'OpenAI API', status: 'operational', aiwatchScore: 90 },
+    { id: 'gemini', category: 'api', name: 'Gemini API', status: 'operational', aiwatchScore: 63 },
+    { id: 'chatgpt', category: 'app', name: 'ChatGPT', status: 'operational', aiwatchScore: 85 },
+    { id: 'codex', category: 'agent', name: 'Codex', status: 'operational', aiwatchScore: 75 },
+  ]
+
+  it('single-category incident → ONE group with the top-2 alternatives (flat parity)', () => {
+    const groups = getGroupedFallbacks(['claude'], svcs)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].fallbacks.map(f => f.name)).toEqual(['OpenAI API', 'Gemini API'])
+  })
+
+  it('multi-category incident → one group per category, ONE alternative each (dashboard parity)', () => {
+    const groups = getGroupedFallbacks(['claude', 'claudeai', 'claudecode'], svcs)
+    const byLabel = Object.fromEntries(groups.map(g => [g.label, g.fallbacks.map(f => f.name)]))
+    expect(byLabel['LLM']).toEqual(['OpenAI API'])
+    expect(byLabel['AI Apps']).toEqual(['ChatGPT'])
+    expect(byLabel['CLI Agent']).toEqual(['Codex']) // claudecode/codex are tier 11 → 'CLI Agent' label
+  })
+
+  it('excludes operational / EXCLUDE_FALLBACK affected services from anchoring a group', () => {
+    const groups = getGroupedFallbacks(['claude', 'openai'], svcs)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].label).toBe('LLM')
+  })
+
+  it('buildGroupedFallbackText renders the groups (multi-category → labeled lines)', () => {
+    const text = buildGroupedFallbackText(['claude', 'claudecode'], svcs)
+    expect(text).toContain('👉 Suggested fallback:')
+    expect(text).toContain('LLM: OpenAI API')
+    expect(text).toContain('CLI Agent: Codex') // claudecode/codex tier 11 → 'CLI Agent'
   })
 })

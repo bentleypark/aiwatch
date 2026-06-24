@@ -1,7 +1,7 @@
 // Alert detection logic — pure functions for testability
 // Used by cronAlertCheck in index.ts
 
-import { getFallbacks, buildFallbackText, API_TIER } from './fallback'
+import { buildGroupedFallbackText, API_TIER } from './fallback'
 import { sanitize, formatDuration, appendStatusHint } from './utils'
 import { kindFromKey, svcIdsForAlert, type AlertKind } from './alert-feed'
 import { XAI_REGION_RE } from './xai-regions'
@@ -286,7 +286,7 @@ export function buildIncidentAlerts(
   suppressedIncIds: Set<string> = new Set(),
 ): AlertCandidate[] {
   // Group services by incidentId to show all affected services in one alert
-  const newIncidents = new Map<string, { names: string[]; ids: string[]; inc: Incident; category: string; firstSvc: ScoredService }>()
+  const newIncidents = new Map<string, { names: string[]; ids: string[]; inc: Incident; firstSvc: ScoredService }>()
   const resolvedIncidents = new Map<string, { names: string[]; ids: string[]; inc: Incident; firstSvc: ScoredService }>()
 
   for (const svc of services) {
@@ -303,7 +303,7 @@ export function buildIncidentAlerts(
           if (!existing.names.includes(svc.name)) existing.names.push(svc.name)
           if (!existing.ids.includes(svc.id)) existing.ids.push(svc.id)
         } else {
-          newIncidents.set(inc.id, { names: [svc.name], ids: [svc.id], inc, category: svc.category, firstSvc: svc })
+          newIncidents.set(inc.id, { names: [svc.name], ids: [svc.id], inc, firstSvc: svc })
         }
       } else if (inc.status === 'resolved' && alertedNewMap.has(inc.id)) {
         const existing = resolvedIncidents.get(inc.id)
@@ -319,14 +319,17 @@ export function buildIncidentAlerts(
 
   const alerts: AlertCandidate[] = []
 
-  for (const [incId, { names, ids, inc, category, firstSvc }] of newIncidents) {
+  for (const [incId, { names, ids, inc, firstSvc }] of newIncidents) {
     const displayName = names.length > 1 ? `${firstSvc.provider} (${names.join(', ')})` : names[0]
     const regionText = buildRegionHint(firstSvc)
     // #641 — suppress the cross-service fallback when a region switch is offered: a region-specific
     // outage is solved by the cheaper same-provider region switch, so a full provider switch
     // alongside it is redundant noise. (buildRegionHint returns undefined when no switch applies.)
+    // #781 — grouped per-category fallbacks across ALL affected surfaces of the incident (not just the
+    // primary's category), matching the dashboard: a multi-surface Anthropic incident now recommends
+    // an LLM + an App + a Coding-Agent alternative, not just two LLMs.
     const fallbackText = (firstSvc.status !== 'operational' && !regionText)
-      ? buildFallbackText(getFallbacks(firstSvc.id, category, services))
+      ? buildGroupedFallbackText(ids, services)
       : ''
     alerts.push({
       key: `alerted:new:${incId}`,
