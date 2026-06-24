@@ -271,14 +271,25 @@ function descHtml(
   if (isResolved) {
     lines.push(`<p>🟢 <strong>Resolved</strong>${inc.duration ? ` · lasted ${escHtml(inc.duration)}` : ''}</p>`)
   } else {
+    // #768 — the active item's description is STATUS-INVARIANT: severity + impact label only. The
+    // status word (investigating→identified→monitoring), the running duration, and the per-update
+    // timeline text (dropped below) all change as the incident progresses; including them made Slack
+    // `/feed` (which re-notifies on ANY item content change) re-post the same incident on every
+    // transition. Keeping the active content stable means Slack posts it ONCE — with AI, guaranteed
+    // by the #759 hold. The evolving detail lives on the linked is-down / dashboard page; recovery is
+    // a separate `:resolved` item (#467). Net per incident lifecycle: 1 active post + 1 resolved post.
+    // NOTE this freezes only the status-driven churn — a SEMANTICALLY meaningful change still re-posts
+    // (and should): an impact escalation (major→critical), a surface joining "Also affecting", an AI
+    // re-analysis rewriting the summary, or a fallback recommendation flip. Stability holds *given*
+    // stable impact / co-affected / AI / fallback — which is the common case across investigating→identified.
     const label = inc.impact ? cap(inc.impact) : service.status === 'down' ? 'Down' : 'Degraded'
-    const meta = [`${severityEmoji(service, inc, false)} <strong>${escHtml(label)}</strong>`, escHtml(inc.status)]
-    if (inc.duration) meta.push(escHtml(inc.duration))
-    lines.push(`<p>${meta.join(' · ')}</p>`)
+    lines.push(`<p>${severityEmoji(service, inc, false)} <strong>${escHtml(label)}</strong></p>`)
   }
   // #539: defuse bare "claude.ai" in co-affected service names + timeline text (Slack /feed unfurl).
   if (coAffected.length > 0) lines.push(`<p>Also affecting: ${escHtml(defuseAutolinkDomain(coAffected.join(', ')))}</p>`)
-  if (latest?.text) lines.push(`<p>${escHtml(defuseAutolinkDomain(latest.text))}</p>`)
+  // #768 — per-update timeline text is shown ONLY on the resolved item (a one-time, stable resolution
+  // message). On the active item it churns across status transitions → Slack re-post.
+  if (isResolved && latest?.text) lines.push(`<p>${escHtml(defuseAutolinkDomain(latest.text))}</p>`)
   // #724 — mirror the Discord embed's 🤖 AI ANALYSIS block (active items only; resolved items already
   // read "Resolved"). Public-safe fields only — never the operator-only tweet draft. defuse the
   // summary/scope so a bare brand domain doesn't auto-link in the Slack /feed unfurl.
