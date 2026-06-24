@@ -45,6 +45,47 @@ function buildInstatusComponentMap(html: string): Map<string, string> {
   return map
 }
 
+// #761 — map an Instatus component-status string to the Atlassian-Statuspage vocabulary that
+// `normalizeStatus()` understands, so `parseInstatusComponents` output can flow through
+// `resolveSvcComponents` (which calls normalizeStatus on each component) unchanged. Instatus
+// component states: OPERATIONAL / UNDERMAINTENANCE / DEGRADEDPERFORMANCE / PARTIALOUTAGE /
+// MAJOROUTAGE. Maintenance → operational (a scheduled-maintenance row shouldn't read as an outage).
+function instatusComponentStatusToStatuspage(raw: string): string {
+  switch ((raw ?? '').toUpperCase()) {
+    case 'MAJOROUTAGE': return 'major_outage'
+    case 'PARTIALOUTAGE': return 'partial_outage'
+    case 'DEGRADEDPERFORMANCE': return 'degraded_performance'
+    default: return 'operational' // OPERATIONAL / UNDERMAINTENANCE / unknown
+  }
+}
+
+// #761 — per-component snapshot for the ServiceDetails / is-down breakdown card. ONLY the Next.js
+// Instatus SSR exposes a per-component `status` field; the Nuxt payload carries name/uptime/days but
+// NO component status, so Nuxt services (e.g. Mistral) return [] here (status snapshot deferred for
+// them). Reuses `buildInstatusComponentMap` — which isolates the TOP-LEVEL components (their children,
+// e.g. fal's "Model API"/"Serverless API" under the "API" group, serialize differently and aren't
+// matched), giving a uniform top-level granularity across services — then reads each component's
+// `status` from the unescaped payload. Returns the Atlassian-shaped {id,name,status} so it feeds
+// `resolveSvcComponents()` (with the service's `displayComponentIds`) exactly like a summary.json
+// component list.
+export function parseInstatusComponents(html: string): Array<{ id: string; name: string; status: string }> {
+  if (!html.includes('__next_f') || html.includes('__NUXT_DATA__')) return []
+  // Blanket `\"`→`"` unescape (safe — same rationale as parseInstatusNextUptime): component objects
+  // carry no embedded quotes in the fields we read (id, name.default, status enum).
+  const u = html.replace(/\\"/g, '"')
+  const out: Array<{ id: string; name: string; status: string }> = []
+  for (const [id, name] of buildInstatusComponentMap(html)) {
+    const anchor = `"id":"${id}","name":{"default":`
+    const at = u.indexOf(anchor)
+    if (at < 0) continue
+    // The component's own `status` is the first one after the anchor (it precedes any `children`
+    // array), so a bounded forward search reads the parent's status, not a child's.
+    const m = u.slice(at, at + 600).match(/"status":"([A-Z_]+)"/)
+    out.push({ id, name, status: instatusComponentStatusToStatuspage(m ? m[1] : 'OPERATIONAL') })
+  }
+  return out
+}
+
 function parseInstatusNextIncidents(html: string): Incident[] {
   try {
     // Next.js SSR payload has escaped quotes: notices\":{\"id\":{...}}

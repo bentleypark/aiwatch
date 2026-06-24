@@ -17,7 +17,7 @@ import {
   parseAistudioIncidents,
   computeDailyImpactFromIncidents,
 } from './parsers/aistudio'
-import { parseInstatusIncidents, parseInstatusUptime } from './parsers/instatus'
+import { parseInstatusIncidents, parseInstatusUptime, parseInstatusComponents } from './parsers/instatus'
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
 import { parseAwsRssIncidents, parseAwsHealthEvents, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
@@ -78,7 +78,9 @@ export const SERVICES: ServiceConfig[] = [
   // unlike a title-denylist it keeps a multi-component "Website and API" incident.
   // #635 — statusComponent 'API' selects the Instatus "API" component for the official uptime% (the
   // Next.js payload carries componentsUptime[id].uptime, ~90d) instead of "Not provided".
-  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com', incidentKeywords: ['api'], statusComponent: 'API' },
+  // displayComponentIds (#761): top-level Instatus components API (Sonar) + Website. Display-only —
+  // badge stays on statusComponent 'API'. Next.js Instatus exposes per-component status.
+  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com', incidentKeywords: ['api'], statusComponent: 'API', displayComponentIds: ['clyiakn7i60113hvojwho6za6j', 'clyi6jhgg31469ihojbwbsmeeg'] },
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
   // status.deepseek.com (Flashduty, #507) blocks NON-BROWSER TLS fingerprints — a Worker fetch()
   // is reset at the TLS layer regardless of egress IP (verified 2026-06-12: a real Chromium from
@@ -120,7 +122,10 @@ export const SERVICES: ServiceConfig[] = [
   // (parseInstatusNextUptime), and `incidentKeywords: ['api']` (matched against componentNames, #623)
   // scopes the badge + incident list to API-affecting incidents — a Website/Dashboard-only incident is
   // dropped. Single-tenant page → no incidentExclude needed.
-  { id: 'fal', name: 'fal.ai', provider: 'fal', category: 'api', statusUrl: 'https://status.fal.ai', apiUrl: null, instatusUrl: 'https://status.fal.ai', incidentKeywords: ['api'], statusComponent: 'API' },
+  // displayComponentIds (#761): ALL top-level Instatus components — API, Website, Official Models
+  // (uniform "show every top-level component" rule, same as perplexity). Display-only — badge stays on
+  // statusComponent 'API'. Next.js Instatus exposes per-component status.
+  { id: 'fal', name: 'fal.ai', provider: 'fal', category: 'api', statusUrl: 'https://status.fal.ai', apiUrl: null, instatusUrl: 'https://status.fal.ai', incidentKeywords: ['api'], statusComponent: 'API', displayComponentIds: ['clzmj6mnv0283gwmwtdqtt9u3', 'clzmj6mni0276gwmw95xftvtd', 'clzu5ivf0385762icocgwepue4u'] },
   // displayComponentIds (#606): pinecone's FUNCTIONAL surfaces (Console, Pod/Serverless Indexes
   // group headers, Index Management, Inference, Assistant). The 22 region components are excluded
   // — the Region card already covers per-region status. Display-only — badge stays on statusComponentId.
@@ -1064,6 +1069,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
 
       let incidents: Incident[] = []
       let instatusUptime: number | null = null // #627 — Instatus per-component official uptime%
+      let instatusComponents: ServiceComponent[] = [] // #761 — Instatus per-component snapshot (Next.js only)
       if (config.onlineOrNotUrl && res.ok) {
         const html = await res.text()
         incidents = parseOnlineOrNotIncidents(html)
@@ -1086,8 +1092,17 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           // status page (res = statusUrl), not the /incidents listing scraped above — so read res
           // here to extract the named component's uptime% (mistral 'API' Nuxt flat-ref; perplexity
           // 'API' Next.js componentsUptime[id].uptime). Else it shows "Not provided".
-          if (res.ok && config.statusComponent) {
-            instatusUptime = parseInstatusUptime(await res.text(), config.statusComponent)
+          // #761 — the same main-page HTML also carries the per-component snapshot (Next.js only), so
+          // read it ONCE and parse uptime + components from it.
+          if (res.ok) {
+            const mainHtml = await res.text()
+            if (config.statusComponent) {
+              instatusUptime = parseInstatusUptime(mainHtml, config.statusComponent)
+            }
+            const instatusComps = parseInstatusComponents(mainHtml)
+            if (instatusComps.length > 0) {
+              instatusComponents = resolveSvcComponents(config, { components: instatusComps })
+            }
           } else {
             res.body?.cancel()
           }
@@ -1227,7 +1242,11 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
             ? { uptime30d: instatusUptime, uptimeSource: 'official' as const } // #627 — Instatus component uptime
             : {}),
         ...(betterStackPartial > 0 ? { partialCount: betterStackPartial } : {}),
-        ...(betterStackComponents.length > 0 ? { components: betterStackComponents } : {}),
+        ...(betterStackComponents.length > 0
+          ? { components: betterStackComponents }
+          : instatusComponents.length > 0
+            ? { components: instatusComponents } // #761 — Instatus per-component snapshot (Next.js)
+            : {}),
       }
     }
   } catch (err) {

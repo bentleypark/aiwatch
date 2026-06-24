@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { mapInstatusImpact, parseInstatusIncidents, parseInstatusUptime } from '../parsers/instatus'
-import { filterIncidents } from '../services'
+import { mapInstatusImpact, parseInstatusIncidents, parseInstatusUptime, parseInstatusComponents } from '../parsers/instatus'
+import { filterIncidents, resolveSvcComponents } from '../services'
 import type { ServiceConfig } from '../types'
 
 describe('mapInstatusImpact (#556)', () => {
@@ -333,5 +333,59 @@ describe('parseInstatusIncidents — Next.js component capture (#623, Perplexity
     const kept = filterIncidents(parseInstatusIncidents(nextHtmlWithComponents()), perplexity).map((i) => i.id)
     expect(kept).toContain('n1')     // affects API → kept
     expect(kept).not.toContain('n2') // Website-only → dropped
+  })
+})
+
+describe('parseInstatusComponents (#761) — per-component snapshot', () => {
+  // Mirrors the real status.fal.ai / status.perplexity.com Next.js payload: top-level component
+  // definitions carry `"id":"…","name":{"default":"…"},…,"status":"<STATE>"`. Children (e.g. fal's
+  // "Model API" under the "API" group) serialize differently and are intentionally NOT matched, so
+  // the snapshot stays at a uniform top-level granularity.
+  function nextHtmlWithComponents(states: Record<string, string>) {
+    const comp = (id: string, name: string, status: string) =>
+      `\\"id\\":\\"${id}\\",\\"name\\":{\\"default\\":\\"${name}\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003e${name}\\u003c/p\\u003e\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"${status}\\",\\"isParent\\":false,\\"children\\":[]`
+    const escaped =
+      comp('clzmj6mni0276gwmw95xftvtd', 'Website', states.web ?? 'OPERATIONAL') + ',' +
+      comp('clzmj6mnv0283gwmwtdqtt9u3', 'API', states.api ?? 'OPERATIONAL') + ',' +
+      comp('clzu5ivf0385762icocgwepue4u', 'Official Models', states.models ?? 'OPERATIONAL')
+    return `<script>self.__next_f.push([1,"x:${escaped}"])</script>`
+  }
+
+  it('extracts top-level components with status mapped to the Atlassian vocabulary', () => {
+    const comps = parseInstatusComponents(nextHtmlWithComponents({ api: 'MAJOROUTAGE', models: 'DEGRADEDPERFORMANCE' }))
+    const byName = Object.fromEntries(comps.map((c) => [c.name, c.status]))
+    expect(byName['Website']).toBe('operational')
+    expect(byName['API']).toBe('major_outage')           // MAJOROUTAGE → major_outage
+    expect(byName['Official Models']).toBe('degraded_performance') // DEGRADEDPERFORMANCE → degraded_performance
+  })
+
+  it('maps PARTIALOUTAGE → partial_outage and UNDERMAINTENANCE → operational', () => {
+    const comps = parseInstatusComponents(nextHtmlWithComponents({ api: 'PARTIALOUTAGE', models: 'UNDERMAINTENANCE' }))
+    const byName = Object.fromEntries(comps.map((c) => [c.name, c.status]))
+    expect(byName['API']).toBe('partial_outage')
+    expect(byName['Official Models']).toBe('operational')
+  })
+
+  it('feeds resolveSvcComponents — respects displayComponentIds order and drops unlisted ids', () => {
+    // Generic resolveSvcComponents demonstration (a 2-id subset that omits Website) — shows order is
+    // displayComponentIds order and an unlisted component is dropped. fal's REAL config lists all
+    // three top-level components (pinned in fal-config.test.ts); this just exercises the resolver.
+    const raw = parseInstatusComponents(nextHtmlWithComponents({ api: 'MAJOROUTAGE' }))
+    const resolved = resolveSvcComponents(
+      { displayComponentIds: ['clzu5ivf0385762icocgwepue4u', 'clzmj6mnv0283gwmwtdqtt9u3'] } as any,
+      { components: raw },
+    )
+    expect(resolved.map((c) => c.name)).toEqual(['Official Models', 'API']) // order follows displayComponentIds; Website (unlisted) dropped
+    expect(resolved.find((c) => c.name === 'API')!.status).toBe('down')      // major_outage → normalizeStatus → down
+  })
+
+  it('returns [] for a Nuxt payload (no per-component status field exposed) — Mistral deferred', () => {
+    const arr = [{ uptime: 1, name: 2 }, 99.6, 'API']
+    const html = `<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`
+    expect(parseInstatusComponents(html)).toEqual([])
+  })
+
+  it('returns [] for a non-Instatus / empty payload', () => {
+    expect(parseInstatusComponents('<html></html>')).toEqual([])
   })
 })

@@ -26,6 +26,19 @@ describe('#758 fal.ai inference service config', () => {
     expect(s!.incidentKeywords).toEqual(['api'])
   })
 
+  it('fal has the #761 per-component snapshot config (all top-level: API, Website, Official Models)', () => {
+    const s = SERVICES.find((x) => x.id === 'fal')!
+    // Display-only — ALL top-level Instatus components (uniform rule); badge stays on statusComponent 'API'.
+    expect(s.displayComponentIds).toEqual(['clzmj6mnv0283gwmwtdqtt9u3', 'clzmj6mni0276gwmw95xftvtd', 'clzu5ivf0385762icocgwepue4u'])
+  })
+
+  it('perplexity has the #761 per-component snapshot config (API + Website)', () => {
+    // Pinned because resolveSvcComponents is ≥2-gated: a single stale/typo'd id would silently drop
+    // the breakdown to [] with no other failing test.
+    const s = SERVICES.find((x) => x.id === 'perplexity')!
+    expect(s!.displayComponentIds).toEqual(['clyiakn7i60113hvojwho6za6j', 'clyi6jhgg31469ihojbwbsmeeg'])
+  })
+
   it('fal is excluded from fallback (self-serve inference platform, like Replicate/Hugging Face)', () => {
     expect(EXCLUDE_FALLBACK.includes('fal'), 'fal must be in EXCLUDE_FALLBACK').toBe(true)
     // Excluded peers carry no API_TIER entry (never surface as the affected service in a fallback flow).
