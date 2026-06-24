@@ -259,7 +259,7 @@ describe('buildIncidentAlerts', () => {
     expect(alerts[0].title).toContain('Anthropic')
   })
 
-  it('shows same-category fallback only for shared incidents (no cross-category)', () => {
+  it('#781 — groups fallbacks PER CATEGORY for a shared multi-category incident (LLM + Coding Agent, not LLM-only)', () => {
     const sharedIncident = inc({ id: 'shared2', title: 'Opus errors', status: 'investigating', startedAt: recentDate, impact: 'major' })
     const claude = mockService({ id: 'claude', name: 'Claude API', category: 'api', status: 'degraded', incidents: [sharedIncident], aiwatchScore: 80 })
     const claudecode = mockService({ id: 'claude-code', name: 'Claude Code', category: 'agent', status: 'degraded', incidents: [sharedIncident], aiwatchScore: 70 })
@@ -267,12 +267,14 @@ describe('buildIncidentAlerts', () => {
     const cursor = mockService({ id: 'cursor', name: 'Cursor', category: 'agent', status: 'operational', aiwatchScore: 75 })
 
     const alerts = buildIncidentAlerts([claude, claudecode, openai, cursor], alertedMap(), NOW)
-    // Dedup: only first alert for shared2 is sent
     const first = alerts.find(a => a.key === 'alerted:new:shared2')!
-    // Claude API alert should only have API fallbacks, not Coding Agent
-    expect(first.fallbackText).toContain('OpenAI API')
-    expect(first.fallbackText).not.toContain('Cursor')
-    expect(first.fallbackText).not.toContain('Coding Agent')
+    // The incident spans api (Claude API) + agent (Claude Code), so the fallback now lists BOTH an LLM
+    // alternative AND a Coding-Agent alternative (the old behavior wrongly showed LLM-only) — matching
+    // the dashboard's per-category grouping (#781).
+    expect(first.fallbackText).toContain('OpenAI API') // LLM group
+    expect(first.fallbackText).toContain('Cursor')      // Coding Agent group (was excluded before)
+    expect(first.fallbackText).toContain('LLM')
+    expect(first.fallbackText).toContain('Coding Agent')
   })
 
   it('handles multiple incidents per service', () => {

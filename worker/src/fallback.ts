@@ -148,37 +148,58 @@ export function tierLabelFor(tier: number): string | undefined {
 }
 
 /**
- * Build fallback text for a group of affected services (possibly spanning multiple categories).
- * Returns multi-line text when multiple categories are affected.
+ * #781 — structured per-category grouped fallbacks for a (possibly multi-surface) incident. ONE group
+ * per distinct `category:tierLabel` among the affected, non-operational services; within a group the
+ * candidates come from getFallbacks (operational + incident-free + same category, Score-ordered).
+ *
+ * perGroup mirrors the frontend `getGroupedFallbacks` (src/utils/constants.js) for dashboard parity:
+ * **2 when there is a single group** (a same-category incident → top-2 alternatives, the old flat
+ * behavior), **1 when there are multiple groups** (a multi-category incident → one alternative per
+ * category, so the line stays scannable). Pure; the worker surfaces (Discord alert via
+ * buildGroupedFallbackText, RSS feed via fallbackLine) render this structure their own way.
  */
+export function getGroupedFallbacks(
+  affectedServiceIds: string[],
+  services: FallbackCandidate[],
+): Array<{ label: string; fallbacks: Array<{ name: string; score: number | null }> }> {
+  const groupKeyOf = (svc: FallbackCandidate) => {
+    const tierLabel = tierLabelFor(tierFor(svc.id))
+    return tierLabel ? `${svc.category}:${tierLabel}` : svc.category
+  }
+  // An affected surface anchors a group when it's genuinely having a problem — non-operational OR
+  // operational-but-carrying-an-active-incident (#550, the partial-degradation case where status stays
+  // 'operational'). Matches the frontend getGroupedFallbacks intent (which trusts its `affected` list);
+  // here the list comes from the incident's own surfaces, so an operational member is the #550 edge, not
+  // a clean service. EXCLUDE_FALLBACK members never anchor (we have no recommendation discipline for them).
+  const eligible = affectedServiceIds
+    .map(id => services.find(s => s.id === id))
+    .filter((s): s is FallbackCandidate =>
+      !!s && !EXCLUDE_FALLBACK.includes(s.id) && (s.status !== 'operational' || hasActiveIncident(s)))
+  const numGroups = new Set(eligible.map(groupKeyOf)).size
+  const perGroup = numGroups <= 1 ? 2 : 1
+  const seen = new Set<string>()
+  const groups: Array<{ label: string; fallbacks: Array<{ name: string; score: number | null }> }> = []
+  for (const svc of eligible) {
+    const key = groupKeyOf(svc)
+    if (seen.has(key)) continue
+    seen.add(key)
+    const fbs = getFallbacks(svc.id, svc.category, services).slice(0, perGroup)
+    if (fbs.length === 0) continue
+    const tierLabel = tierLabelFor(tierFor(svc.id))
+    groups.push({ label: tierLabel || CATEGORY_LABEL[svc.category] || svc.category, fallbacks: fbs })
+  }
+  return groups
+}
+
 export function buildGroupedFallbackText(
   affectedServiceIds: string[],
   services: FallbackCandidate[],
 ): string {
-  const seen = new Set<string>()
-  const lines: string[] = []
-  for (const svcId of affectedServiceIds) {
-    if (EXCLUDE_FALLBACK.includes(svcId)) continue
-    const svc = services.find(s => s.id === svcId)
-    if (!svc) {
-      console.warn(`[fallback] buildGroupedFallbackText: service ID "${svcId}" not found`)
-      continue
-    }
-    if (svc.status === 'operational') continue
-    const tier = tierFor(svcId)
-    const tierLabel = tierLabelFor(tier)
-    const groupKey = tierLabel ? `${svc.category}:${tierLabel}` : svc.category
-    if (seen.has(groupKey)) continue
-    seen.add(groupKey)
-    const fallbacks = getFallbacks(svcId, svc.category, services)
-    if (fallbacks.length === 0) continue
-    const label = tierLabel || CATEGORY_LABEL[svc.category] || svc.category
-    const list = fallbacks.map((f, i) => {
-      const name = f.score != null ? `${f.name} (Score ${f.score})` : f.name
-      return name
-    }).join(' · ')
-    lines.push(`${label}: ${list}`)
-  }
-  if (lines.length === 0) return '' // #641 — no recommendation → emit nothing (see buildFallbackText)
+  const groups = getGroupedFallbacks(affectedServiceIds, services)
+  if (groups.length === 0) return '' // #641 — no recommendation → emit nothing (see buildFallbackText)
+  const lines = groups.map(g => {
+    const list = g.fallbacks.map(f => (f.score != null ? `${f.name} (Score ${f.score})` : f.name)).join(' · ')
+    return `${g.label}: ${list}`
+  })
   return `👉 Suggested fallback:\n${lines.join('\n')}`
 }

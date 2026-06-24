@@ -4,7 +4,7 @@
 
 import type { ServiceStatus, Incident } from './types'
 import { escapeXml } from './badge'
-import { getFallbacks } from './fallback'
+import { getGroupedFallbacks } from './fallback'
 import { defuseAutolinkDomain } from './alerts'
 import { formatRecoveryDisplay } from './ai-analysis'
 import { appendStatusHint, appendUtm } from './utils'
@@ -246,11 +246,16 @@ function resolvedAtOf(inc: Incident): string {
 // tier-aware ranking as Discord/dashboard fallbacks. services:latest carries no aiwatchScore,
 // so the ordering is tier-distance-first (intra-tier order arbitrary) and names are shown
 // without scores — enough to point a subscriber somewhere useful.
-function fallbackLine(svc: ServiceStatus, services: ServiceStatus[]): string | undefined {
+function fallbackLine(svc: ServiceStatus, inc: Incident, services: ServiceStatus[]): string | undefined {
   if (svc.status === 'operational') return undefined
-  const fbs = getFallbacks(svc.id, svc.category, services)
-  if (fbs.length === 0) return undefined
-  return `Try instead: ${fbs.map((f) => f.name).join(' · ')}`
+  // #781 — grouped per-category fallbacks across ALL surfaces of THIS incident (matching the dashboard
+  // + Discord), not just the primary service's category. A single-category incident keeps the flat
+  // "A · B" top-2; a multi-category one lists one alternative per category ("LLM → OpenAI · App → ChatGPT").
+  const affectedIds = services.filter((s) => (s.incidents ?? []).some((i) => i.id === inc.id)).map((s) => s.id)
+  const groups = getGroupedFallbacks(affectedIds.length > 0 ? affectedIds : [svc.id], services)
+  if (groups.length === 0) return undefined
+  if (groups.length === 1) return `Try instead: ${groups[0].fallbacks.map((f) => f.name).join(' · ')}`
+  return `Try instead: ${groups.map((g) => `${g.label} → ${g.fallbacks.map((f) => f.name).join('/')}`).join(' · ')}`
 }
 
 // Severity dot for the title + meta line (#467). Resolved → green; critical/major impact or a
@@ -435,7 +440,7 @@ export function buildRssFeed(
         }
         items.push({
           svc, incident, kind: 'active', pubDate: seen ?? incident.startedAt,
-          fallbackText: fallbackLine(svc, services),
+          fallbackText: fallbackLine(svc, incident, services),
           analysis,
         })
       }
