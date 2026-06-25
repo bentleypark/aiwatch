@@ -21,6 +21,10 @@ import { XAI_REGION_RE } from './xai-regions'
 // purity here). If a tsc typecheck is ever added for the worker, add this path to
 // the tsconfig `include` or relocate the shared port.
 import { regionStatusOf } from '../../api/is-down/region-status'
+// #777 — is-down slug for the copyable reply draft's live-status link. SERVICE_ID_TO_SLUG is pure data
+// (no @vercel/edge deps, same module the tweet-draft-slug-sync test imports) and covers gemini, which
+// TWEET_DRAFT_SERVICES does not. Same cross-dir-import trade-off as regionStatusOf above (#422).
+import { SERVICE_ID_TO_SLUG } from '../../api/is-down/slug-map'
 import type { ServiceStatus } from './services'
 import type { Incident } from './types'
 
@@ -596,6 +600,10 @@ const X_INTENT_BASE = 'https://twitter.com/intent/tweet?text='
 // query params and keeps a clean rel=canonical, so the canonical URL is NOT polluted. Appended AFTER
 // appendStatusHint (which always adds ?e=…), so the separator is always '&'.
 const X_UTM = 'utm_source=x&utm_medium=social&utm_campaign=outage'
+// #777 — the copyable REPLY link adds utm_content=reply so GA4 can split reply-driven inflow from the
+// 🐦 standalone-compose draft (both stay in campaign=outage → total X inflow still rolls up). This tests
+// the core #777 hypothesis: replying to a viral tweet converts better than a fresh post (2026-06-23).
+const X_REPLY_UTM = `${X_UTM}&utm_content=reply`
 
 /** Single-line, tweet-safe text: drop backticks (would break the Discord blockquote preview AND
  *  read oddly on X) and collapse all whitespace/newlines to single spaces. */
@@ -775,6 +783,158 @@ export function appendTweetDraftSection(description: string, drafts: TweetDraft[
   if (fit.length === 0) return description
   const more = drafts.length - fit.length
   return `${description}${intro}${fit.join(' · ')}${more > 0 ? ` · +${more} more` : ''}`
+}
+
+// #777 — operator-only X-search links to find the viral "is X down??" tweet to REPLY to during an
+// incident. Replying to a tweet that's already trending rides its engagement, which converts far better
+// than a fresh compose (the #348 draft above): on 2026-06-23 one manual reply to a viral Anthropic tweet
+// drove ~38 GA4 new users (all Twitter) off a single incident. The draft answers "what to post"; this
+// answers "where to post it". The query is the plain natural phrase people actually tweet/search during
+// an outage ("is claude down") — NOT an advanced-operator query: an earlier `min_faves:N -filter:replies`
+// version returned ZERO results (operator-tested) because it over-filtered. Engagement ranking is handled
+// by the `f=top` sort (the "Top" tab), so no min_faves floor is needed. Curated per-service phrasing so
+// surfaces stay distinct (`claudeai` → "is claude.ai down" vs `claude` → "is claude down"). Scope mirrors
+// TWEET_DRAFT_SERVICES + `gemini`
+// (the surfaces that spawn viral outage tweets). OPERATOR-ONLY: appended after the per-user feed entry
+// like the tweet draft, so it never reaches a relayed webhook (#475). Pinned by tweet-search-scope.test.ts.
+export const TWEET_SEARCH_TERMS: Record<string, string> = {
+  claude: 'is claude down',
+  openai: 'is openai down',
+  claudeai: 'is claude.ai down',
+  chatgpt: 'is chatgpt down',
+  claudecode: 'is claude code down',
+  codex: 'is codex down',
+  gemini: 'is gemini down',
+}
+
+const X_SEARCH_BASE = 'https://x.com/search?q='
+
+/** Build the engagement-sorted ("Top" tab) X-search URL for ONE in-scope service. Top is the reply
+ *  target — it surfaces the already-trending outage tweet to ride; the operator can flip to the Latest
+ *  tab on the result page in one click if they need the freshest tweets, so only Top is linked (#777).
+ *  Returns null for an out-of-scope service (the caller skips it). */
+export function buildTweetSearchUrl(svcId: string): string | null {
+  const term = TWEET_SEARCH_TERMS[svcId]
+  if (!term) return null
+  return `${X_SEARCH_BASE}${encodeURIComponent(term)}&f=top`
+}
+
+export interface TweetSearch {
+  serviceId: string
+  serviceName: string
+  url: string
+}
+
+/**
+ * Build a search-link entry per in-scope service the alert covers, mirroring buildTweetDrafts' svcIds
+ * resolution (#545 svcIds → merged keys → legacy key-tail). Identical search queries collapse (dedupe by
+ * URL) so a grouped same-provider incident doesn't list three near-identical "Claude" searches. Empty
+ * when the alert covers no in-scope service. Operator-only.
+ */
+export function buildTweetSearches(alert: AlertCandidate, services: ScoredService[]): TweetSearch[] {
+  const kind = kindFromKey(alert.key)
+  if (!kind) return []
+  const keys = alert._mergedKeys ?? [alert.key]
+  const svcIds = alert.svcIds ?? svcIdsForAlert(keys, kind, services)
+  const out: TweetSearch[] = []
+  const seen = new Set<string>()
+  for (const id of svcIds) {
+    const url = buildTweetSearchUrl(id)
+    if (!url) continue // not an in-scope service
+    if (seen.has(url)) continue // identical search already added
+    seen.add(url)
+    const svc = services.find((s) => s.id === id)
+    out.push({ serviceId: id, serviceName: svc ? svc.name : id, url })
+  }
+  return out
+}
+
+export interface ReplyDraft {
+  serviceId: string
+  serviceName: string
+  text: string
+}
+
+/**
+ * Build ONE casual, copy-paste-ready REPLY for the alert's primary in-scope service (#777 follow-up). The
+ * 🐦 TWEET DRAFT compose link can't pre-fill a *reply* to someone else's viral "is X down" tweet — the
+ * operator has to paste text — so this provides that text, rendered in a Discord code block (one-click
+ * copy on desktop) right above the 🔎 search links. Conversational tone so it blends into the reply thread
+ * (not a press release). Primary = the first service in svcIds order that's in search scope (one reply per
+ * alert: a grouped Anthropic incident → reply to "claude down" tweets with the Claude API surface). The
+ * live-status link reuses the same `?e=` hint + X UTM as the tweet draft, and the service name is defused
+ * (`claude.ai` → `claude ai`) since the operator pastes this into X where a bare domain auto-links (#539).
+ */
+export function buildReplyDraft(alert: AlertCandidate, services: ScoredService[]): ReplyDraft | null {
+  const kind = kindFromKey(alert.key)
+  if (!kind) return null
+  const keys = alert._mergedKeys ?? [alert.key]
+  const svcIds = alert.svcIds ?? svcIdsForAlert(keys, kind, services)
+  const id = svcIds.find((s) => TWEET_SEARCH_TERMS[s]) // primary in-scope service
+  if (!id) return null
+  const svc = services.find((s) => s.id === id)
+  const slug = SERVICE_ID_TO_SLUG[id]
+  if (!svc || !slug) return null
+
+  const isRecovery = kind === 'resolved' || kind === 'recovered'
+  const hint = isRecovery ? 'resolved' : svc.status === 'operational' ? 'active' : svc.status
+  const url = `${appendStatusHint(`https://ai-watch.dev/is-${slug}-down`, hint)}&${X_REPLY_UTM}`
+  const name = defuseAutolinkDomain(svc.name)
+  const text = isRecovery
+    ? `update — ${name} is back up. live status → ${url}`
+    : svc.status === 'degraded'
+      ? `yes — ${name} is having issues (degraded) right now. live status & details → ${url}`
+      : `yes — ${name} is down right now. live status, affected components & recovery ETA → ${url}`
+  return { serviceId: id, serviceName: svc.name, text }
+}
+
+/**
+ * Append the operator-only "find tweets to reply to" section to a Discord embed description: a copyable
+ * reply (code block, one-click copy) above the 🔎 Top-search link(s). Same 4096-char guard as
+ * appendTweetDraftSection (these are an optional nicety and must never push the critical operator alert
+ * over Discord's limit) — when space is tight it trims in priority order: extra service links first
+ * (`+N more`), then the reply block, then the whole section, so the alert always sends.
+ */
+export function appendTweetSearchSection(
+  description: string,
+  searches: TweetSearch[],
+  reply: ReplyDraft | null,
+  div: string,
+): string {
+  if (searches.length === 0) return description
+  const SAFETY = 16 // headroom for the "+N more" suffix / multibyte rounding
+  const cap = DISCORD_EMBED_DESC_MAX - SAFETY
+  const header = `\n${div}\n🔎 **FIND TWEETS TO REPLY TO**`
+  // Reply text lives in a ``` code block so Discord shows a one-click Copy button on desktop.
+  const replyBlock = reply ? `\n💬 Copy this reply, then open a tweet:\n\`\`\`\n${reply.text}\n\`\`\`` : ''
+
+  if (searches.length === 1) {
+    const links = `\n→ [🔥 Top tweets](${searches[0].url})`
+    const full = header + replyBlock + links
+    if (description.length + full.length <= cap) return description + full
+    const lean = header + links // drop the reply block before dropping the link
+    if (description.length + lean.length <= cap) return description + lean
+    return description
+  }
+
+  // Multi-service picker: try with the reply block, then without, fitting links into the remaining budget.
+  const build = (withReply: boolean): string | null => {
+    const prefix = `${header}${withReply ? replyBlock : ''}\n→ pick a service:\n`
+    const budget = cap - description.length - prefix.length
+    const links = searches.map((s) => `[🔥 ${defuseAutolinkDomain(s.serviceName)}](${s.url})`)
+    const fit: string[] = []
+    let used = 0
+    for (const link of links) {
+      const add = (fit.length ? 3 : 0) /* " · " */ + link.length
+      if (used + add > budget) break
+      fit.push(link)
+      used += add
+    }
+    if (fit.length === 0) return null
+    const more = searches.length - fit.length
+    return `${description}${prefix}${fit.join(' · ')}${more > 0 ? ` · +${more} more` : ''}`
+  }
+  return build(true) ?? build(false) ?? description
 }
 
 /** Detect service count drop — returns missing service IDs if below threshold */
