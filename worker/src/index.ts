@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildReplyDraft, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk } from './utils'
 import { checkPersistentFetchFailures } from './persistent-failure'
@@ -955,7 +955,19 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     // the draft's X intent URL keeps the real branded "claude.ai" tweet text (the blockquote/label
     // inside appendTweetDraftSection are defused there). The per-user feed (built above from the
     // clean `description`) is intentionally untouched — this is the operator surface only.
-    const operatorDescription = appendTweetDraftSection(defuseAutolinkDomain(description), drafts, DIV)
+    const withDrafts = appendTweetDraftSection(defuseAutolinkDomain(description), drafts, DIV)
+    // #777 — operator-only "find tweets to reply to" X-search links, appended after the draft. Same
+    // length-guard + same operator-only boundary (never on the per-user feed built above). Guarded like
+    // the draft build so a bug here can't abort the critical operator send.
+    let searches: ReturnType<typeof buildTweetSearches> = []
+    let reply: ReturnType<typeof buildReplyDraft> = null
+    try {
+      searches = buildTweetSearches(alert, scored)
+      reply = buildReplyDraft(alert, scored)
+    } catch (err) {
+      console.error('[cron] tweet search build failed (alert still sent):', alert.key, err instanceof Error ? err.message : err)
+    }
+    const operatorDescription = appendTweetSearchSection(withDrafts, searches, reply, DIV)
     await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
       title: defuseAutolinkDomain(alert.title),
       description: operatorDescription,
