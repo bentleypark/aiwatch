@@ -233,7 +233,7 @@ export const SERVICES: ServiceConfig[] = [
   // displayComponentIds (#606 Cat B): the official "Codex" group (5) on status.openai.com.
   // Display-only; disjoint from openai/chatgpt. App shares Codex's id prefix (01KMKFAMWK) and
   // is in neither the ChatGPT(12) nor APIs(12) official group → Codex.
-  { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', incidentIoGroupId: '01KMKF9EBTCD8BN9PG8DJZXRSQ', statusComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', statusComponentIds: ['01KMP3KP5MGE23B80K1EK4S8PV', '01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK', '01KMKFAMWKQ81YWSE1Z18R6VHR'], displayComponentIds: ['01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK', '01KMP3KP5MGE23B80K1EK4S8PV', '01KMKFAMWKQ81YWSE1Z18R6VHR'] },
+  { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', incidentIoGroupId: '01KMKF9EBTCD8BN9PG8DJZXRSQ', statusComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', statusComponentIds: ['01KMP3KP5MGE23B80K1EK4S8PV', '01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK', '01KMKFAMWKQ81YWSE1Z18R6VHR'], displayComponentIds: ['01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK', '01KMP3KP5MGE23B80K1EK4S8PV', '01KMKFAMWKQ81YWSE1Z18R6VHR'] },
   // cursor badge reflects worst-of: IDE primary + Cloud Agents + Automations + CLI (#379).
   // Bugbot/cursor.com/Marketplace are auxiliary surfaces and intentionally excluded.
   { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c'] },
@@ -829,10 +829,12 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       // Without this ordering, an untagged ChatGPT-only incident on
       // status.openai.com leaks into Codex's filtered set: filterIncidents
       // (correctly) drops it, then includeUntaggedIncidents adds it back
-      // because Codex has no statusComponent/Id and the page overall is
-      // non-operational. Computing svcStatus first lets the no-component
-      // branch detect the empty-filtered case and treat the service as
-      // operational, suppressing untagged-include entirely.
+      // because the page overall is non-operational. Computing svcStatus first
+      // lets resolveSvcStatus detect the empty-filtered case (its scoped
+      // statusComponentIds worst-of finds no Codex-component problem) and treat
+      // the service as operational, suppressing untagged-include entirely.
+      // (Pre-#693 Codex had no statusComponentId and this rode the no-component
+      // branch; #693 gave it a scoped worst-of, which now serves the same role.)
       const svcStatus = resolveSvcStatus(config, badgeSummary, filtered)
 
       // Only fall back to untagged-include when this service is genuinely
