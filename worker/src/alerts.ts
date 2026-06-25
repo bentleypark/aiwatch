@@ -937,6 +937,40 @@ export function appendTweetSearchSection(
   return build(true) ?? build(false) ?? description
 }
 
+// #778 — phone-push scope: the surfaces whose outages spawn viral "is X down" tweets (Tier-1 LLMs +
+// the consumer ChatGPT / claude.ai apps). NARROWER than the search scope (TWEET_SEARCH_TERMS, 7) on
+// purpose — a phone push is urgent + DND-bypassing, so it's reserved for the highest-volume moments;
+// claudecode/codex outages rarely trend on X. Every id here is also in TWEET_SEARCH_TERMS, so
+// buildTweetSearchUrl always resolves the push Click target.
+const PUSH_SCOPE = new Set(['claude', 'openai', 'gemini', 'chatgpt', 'claudeai'])
+
+export interface PushTarget {
+  svcId: string
+  serviceName: string
+}
+
+/**
+ * Decide whether a NEW Tier-1-family down/degraded incident warrants an operator phone push (#778), and
+ * for WHICH service — returns that primary service (for the push title + the Click X-search URL), or null
+ * to skip. Gating: (1) NEW-incident edge only (`alerted:new` — never a status edge, recovery, or TTL
+ * refresh); (2) a service in PUSH_SCOPE; (3) incident impact non-null (down/degraded — never an
+ * informational / maintenance null-impact notice). Per-incident dedup is handled UPSTREAM by the cron's
+ * `alerted:new` roster: the push fires in the same already-deduped send path as the Discord alert, so a
+ * confirmed incident pushes exactly once. v1 excludes recovery pushes by the kind!=='new' guard.
+ */
+export function pushTargetFor(alert: AlertCandidate, services: ServiceStatus[]): PushTarget | null {
+  if (kindFromKey(alert.key) !== 'new') return null
+  const keys = alert._mergedKeys ?? [alert.key]
+  const svcIds = alert.svcIds ?? svcIdsForAlert(keys, 'new', services)
+  const id = svcIds.find((s) => PUSH_SCOPE.has(s)) // primary in-push-scope service
+  if (!id) return null
+  const incId = alert.key.slice('alerted:new:'.length)
+  const inc = findIncident(services, incId)
+  if (!inc || inc.impact == null) return null // informational / no-impact → no push
+  const svc = services.find((s) => s.id === id)
+  return { svcId: id, serviceName: svc ? svc.name : id }
+}
+
 /** Detect service count drop — returns missing service IDs if below threshold */
 export function detectServiceCountDrop(
   returnedIds: string[],
