@@ -942,7 +942,7 @@ export function appendTweetSearchSection(
 // purpose — a phone push is urgent + DND-bypassing, so it's reserved for the highest-volume moments;
 // claudecode/codex outages rarely trend on X. Every id here is also in TWEET_SEARCH_TERMS, so
 // buildTweetSearchUrl always resolves the push Click target.
-const PUSH_SCOPE = new Set(['claude', 'openai', 'gemini', 'chatgpt', 'claudeai'])
+export const PUSH_SCOPE = new Set(['claude', 'openai', 'gemini', 'chatgpt', 'claudeai'])
 
 export interface PushTarget {
   svcId: string

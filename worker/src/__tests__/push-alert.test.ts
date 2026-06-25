@@ -1,6 +1,6 @@
 // #778 — operator phone-push gating for Tier-1-family NEW down/degraded incidents.
 import { describe, it, expect } from 'vitest'
-import { pushTargetFor } from '../alerts'
+import { pushTargetFor, buildTweetSearchUrl, PUSH_SCOPE } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 
 function svc(id: string, name: string, impact: 'minor' | 'major' | 'critical' | null = 'major', incId = 'inc1'): ScoredService {
@@ -72,5 +72,15 @@ describe('pushTargetFor — skips out-of-gate cases', () => {
     // svcIdsForAlert maps the new-incident key to whichever service carries inc1
     const t = pushTargetFor(a, [svc('claude', 'Claude API', 'major', 'inc1')])
     expect(t?.svcId).toBe('claude')
+  })
+})
+
+// Sync invariant: PUSH_SCOPE ⊆ TWEET_SEARCH_TERMS. The cron's push Click target is
+// buildTweetSearchUrl(target.svcId); if a service is added to PUSH_SCOPE but not to
+// TWEET_SEARCH_TERMS, the push still fires but the tap falls back to a generic URL (silent
+// regression). Pin it here, mirroring tweet-search-scope.test.ts / api-tier-sync.test.ts.
+describe('PUSH_SCOPE ⊆ TWEET_SEARCH_TERMS (push Click-target resolves)', () => {
+  it.each([...PUSH_SCOPE])('buildTweetSearchUrl resolves a Top-search URL for push-scope %s', (id) => {
+    expect(buildTweetSearchUrl(id)).not.toBeNull()
   })
 })
