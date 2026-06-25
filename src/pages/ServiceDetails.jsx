@@ -726,6 +726,8 @@ function RssLink({ feedUrl, serviceId, t }) {
 // Incident History rows shown before the "show more" toggle (#incident-history-collapse).
 // Mirrors the is-down Edge page (api/is-down/html-template.ts) so both surfaces match.
 const INCIDENT_HISTORY_PREVIEW = 5
+// Security Alerts shown before the "show more" toggle (#785) — same convention as incidents.
+const SECURITY_PREVIEW = 5
 
 export default function ServiceDetails({ serviceId }) {
   const { t, lang } = useLang()
@@ -747,6 +749,11 @@ export default function ServiceDetails({ serviceId }) {
   // viewed service changes (the component stays mounted across in-app service navigation).
   const [historyExpanded, setHistoryExpanded] = useState(false)
   useEffect(() => { setHistoryExpanded(false) }, [serviceId])
+
+  // Security Alerts preview/expand (#785): same first-SECURITY_PREVIEW + toggle pattern as the
+  // incident history, so a service with many findings doesn't dump them all. Reset on service change.
+  const [securityExpanded, setSecurityExpanded] = useState(false)
+  useEffect(() => { setSecurityExpanded(false) }, [serviceId])
 
   if (loading && services.length === 0) return <ServiceDetailsSkeleton />
   if (!loading && services.length === 0 && error) return <EmptyState type="offline" onAction={refresh} />
@@ -1104,6 +1111,7 @@ export default function ServiceDetails({ serviceId }) {
       {(() => {
         if (!securityAlerts?.length) return null
         const nameLC = service.name.toLowerCase()
+        const providerLC = service.provider?.toLowerCase() ?? ''
         // Map OSV service field → specific AIWatch service ID (SDK alerts are API-specific)
         // Keep in sync with OSV_PACKAGES in worker/src/security-monitor.ts
         const OSV_SERVICE_MAP = {
@@ -1116,11 +1124,17 @@ export default function ServiceDetails({ serviceId }) {
         const filtered = securityAlerts.filter(a => {
           // OSV: match by mapped service ID (e.g., "Anthropic (Claude)" → only "claude", not "claudeai")
           if (a.service) return OSV_SERVICE_MAP[a.service] === service.id
-          // HN: match by service name in title (exact service, not provider-wide)
+          // HN (#785): match by service NAME or PROVIDER in the title — consistent with the Overview
+          // banner's tag derivation (Overview.jsx). Provider-scoped on purpose: an HN news item naming
+          // only the provider (e.g. "OpenAI agent actions" → ChatGPT/Codex/OpenAI all share provider
+          // "OpenAI") was tagged in the banner but had no detail-page home under name-only matching.
           const titleLC = a.title?.toLowerCase() ?? ''
-          return titleLC.includes(nameLC)
+          return titleLC.includes(nameLC) || (providerLC && titleLC.includes(providerLC))
         })
         if (filtered.length === 0) return null
+        // #785 — first SECURITY_PREVIEW, rest behind a toggle (same as incident history).
+        const visibleAlerts = securityExpanded ? filtered : filtered.slice(0, SECURITY_PREVIEW)
+        const hiddenAlertCount = filtered.length - visibleAlerts.length
         return (
           <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
             <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
@@ -1135,7 +1149,7 @@ export default function ServiceDetails({ serviceId }) {
                  Below EPSS_ELEVATED we skip the prefix to avoid crowding low-signal advisories.
                  Thresholds must stay in sync with EPSS_ACTIVE / EPSS_ELEVATED in
                  worker/src/security-monitor.ts. */}
-              {filtered.map((a, i) => {
+              {visibleAlerts.map((a, i) => {
                 const safeUrl = a.url?.startsWith('https://') ? a.url : '#'
                 const epss = a.epssPercentile
                 let epssPrefix = null
@@ -1157,6 +1171,20 @@ export default function ServiceDetails({ serviceId }) {
                   </a>
                 )
               })}
+              {(hiddenAlertCount > 0 || securityExpanded) && filtered.length > SECURITY_PREVIEW && (
+                <button
+                  type="button"
+                  onClick={() => setSecurityExpanded((v) => !v)}
+                  aria-expanded={securityExpanded}
+                  className="mono text-[10px] text-[var(--text2)] hover:text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5 self-start"
+                  style={{ padding: '6px 2px' }}
+                >
+                  <span aria-hidden="true">{securityExpanded ? '▴' : '▾'}</span>
+                  {securityExpanded
+                    ? t('svc.incidents.showLess')
+                    : t('svc.incidents.showMore').replace('{n}', String(hiddenAlertCount))}
+                </button>
+              )}
             </div>
           </section>
         )
