@@ -3,6 +3,7 @@
 import { SLUG_TO_SERVICE } from './is-down/slug-map'
 import { getSEOContent } from './is-down/seo-content'
 import { renderPage } from './is-down/html-template'
+import { computeRankPosition } from './is-down/ranking'
 import { regionStatusOf, type RegionStatusResult } from './is-down/region-status'
 
 export const config = { runtime: 'edge' }
@@ -151,13 +152,13 @@ export default async function handler(req: Request) {
             const scored = allServices
               .filter(s => Number.isFinite(s.aiwatchScore) && hasReliableData(s))
               .sort((a, b) => (b.aiwatchScore as number) - (a.aiwatchScore as number))
-            // findIndex by rounded score (not id) — gives the first-tied position, matching competition ranking
-            const rank = scored.findIndex(s => Math.round(s.aiwatchScore as number) === targetScore) + 1
-            const isTied = scored.filter(s => Math.round(s.aiwatchScore as number) === targetScore).length > 1
+            // #787 — rank by ROUNDED score (competition ranking: tied services share the first
+            // position), derivation extracted to the pure computeRankPosition for deterministic tests.
+            const { rank, tied: isTied, total } = computeRankPosition(scored as Array<{ aiwatchScore: number }>, targetScore)
             if (rank > 0) {
               (serviceData as any).rank = rank;
               (serviceData as any).rankTied = isTied;
-              (serviceData as any).totalRanked = scored.length
+              (serviceData as any).totalRanked = total
             } else {
               // Should be unreachable — target passed all filters but isn't in scored.
               // Log so the asymmetry between target-check and filter-check is visible.

@@ -162,6 +162,19 @@ describe('renderPage <title> — live status (#566)', () => {
     expect(html).toContain('Monthly Reports &rarr;')
     expect(html).not.toContain('/reports/2026-03/') // the old hardcoded link is gone
   })
+
+  // #787 — DETERMINISTIC guard for the `${service.rankTied ? ' (tied)' : ''}` render branch. The old
+  // e2e (`tests/is-down.spec.js`) asserted a LIVE score tie existed among 6 services, which false-failed
+  // whenever scores drifted apart (it blocked unrelated PR #786's Edge E2E). The render path is pure, so
+  // it belongs in a unit test driven by an explicit rankTied flag — no live data, no flake.
+  it('renders "(tied)" iff rankTied is set', () => {
+    const tied = renderPage('claude', mkService({ status: 'operational', rank: 5, totalRanked: 31, rankTied: true }), mkSeo(), [])
+    expect(tied).toContain('is ranked <strong>#5 (tied)</strong>')
+
+    const untied = renderPage('claude', mkService({ status: 'operational', rank: 5, totalRanked: 31, rankTied: false }), mkSeo(), [])
+    expect(untied).toContain('is ranked <strong>#5</strong>')
+    expect(untied).not.toContain('(tied)')
+  })
 })
 
 // #722/#744 — when a BetterStack service reads operational but `partialCount > 0` (sub-threshold

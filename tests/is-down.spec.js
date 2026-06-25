@@ -254,25 +254,12 @@ test.describe('Is X Down? SSR pages', () => {
     expect(Number(m[3])).toBeLessThanOrEqual(MAX_RANKED) // ≤ total service count (#643 — exact ranked count is dynamic)
   })
 
-  test('tied rank shows "(tied)" marker for services in a stable tie cluster', async ({ page }) => {
-    // Guards the rankTied render path — deleting ${service.rankTied ? ' (tied)' : ''} would fail this.
-    // AIWatch Scores drift with live data, so pinning a single tie pair is fragile: the old
-    // Cohere/Fireworks/DeepSeek "tied at 83" cluster un-tied. Instead scan a broad set spanning
-    // multiple clusters — the lower-60s band (claude/elevenlabs/deepgram) is a large, drift-stable
-    // multi-way tie, with deepseek/fireworks/cohere as secondary fallbacks. Passes if ANY candidate's
-    // SSR page renders "(tied)"; only if every cluster un-ties at once, refresh against /api/status.
-    const tiedCandidates = ['claude', 'elevenlabs', 'deepgram', 'deepseek', 'fireworks', 'cohere']
-    let foundTied = false
-    for (const slug of tiedCandidates) {
-      await page.goto(`/is-${slug}-down`, { waitUntil: 'domcontentloaded' })
-      const rankLine = page.locator('p.meta', { hasText: /is ranked #\d+/ })
-      if (await rankLine.isVisible().catch(() => false)) {
-        const text = (await rankLine.textContent()) || ''
-        if (text.includes('(tied)')) { foundTied = true; break }
-      }
-    }
-    expect(foundTied, `none of ${tiedCandidates.join('/')} rendered "(tied)" — score clusters may have drifted; refresh against /api/status`).toBe(true)
-  })
+  // #787 — the "(tied)" coverage moved to DETERMINISTIC unit tests: the render branch in
+  // api/is-down/__tests__/html-template.test.ts ('renders "(tied)" iff rankTied is set') and the
+  // rank+tie DERIVATION in api/is-down/__tests__/ranking.test.ts (computeRankPosition). The old e2e
+  // here asserted a LIVE score tie existed among 6 services, which false-failed whenever scores
+  // drifted apart (it blocked unrelated PR #786's Edge E2E). The SSR rank LINE stays covered by the
+  // 'is ranked #N' e2e; both halves of the tie path now need no live data.
 
   test('rank denominator stays within the total service count', async ({ page }) => {
     // The SEO rank line ("ranked #X of N AI services") must use the same ranked set as the
