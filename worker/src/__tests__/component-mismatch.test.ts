@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { COMPONENT_ID_SERVICES } from '../services'
+import { COMPONENT_ID_SERVICES, SERVICES } from '../services'
 import { detectComponentMismatches, type KVLike } from '../utils'
 
 function mockKV(store: Record<string, string> = {}): KVLike {
@@ -26,6 +26,24 @@ describe('COMPONENT_ID_SERVICES', () => {
     expect(ids).toContain('claude')
     expect(ids).toContain('claudeai')
     expect(ids).toContain('claudecode')
+  })
+})
+
+describe('#783 — OpenAI shared-page services with a summary-omitted primary must set componentsUrl', () => {
+  // status.openai.com's summary.json OMITS core API components (Chat Completions for openai, "Codex API"
+  // for codex), so the primary statusComponentId lives only in the components.json SUPERSET. Without
+  // componentsUrl the badge can't see the primary AND the statusComponentId miss-check false-fires the
+  // migration alert every cycle (the #783 Codex regression; openai already had the fix). chatgpt's primary
+  // ("Conversations") IS in summary.json, so it intentionally does NOT need componentsUrl.
+  const COMPONENTS_JSON = 'https://status.openai.com/api/v2/components.json'
+
+  it.each(['openai', 'codex'])('%s sources its component list from components.json', (id) => {
+    const svc = SERVICES.find((s) => s.id === id)!
+    expect(svc).toBeTruthy()
+    expect(svc.apiUrl).toContain('summary.json')      // overall/incidents still from summary.json
+    expect(svc.componentsUrl).toBe(COMPONENTS_JSON)    // component LIST from the superset
+    // the primary must be one of the worst-of statusComponentIds it scopes the badge to
+    expect(svc.statusComponentIds).toContain(svc.statusComponentId)
   })
 })
 
