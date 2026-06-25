@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildReplyDraft, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk } from './utils'
 import { checkPersistentFetchFailures } from './persistent-failure'
@@ -52,6 +52,10 @@ interface Env {
   // workflow_dispatch the deepseek-feed Action (GitHub's own schedule is throttled to ~2h). Set via
   // `wrangler secret put GH_DISPATCH_TOKEN`. Absent → the worker skips dispatch (GH schedule backup only).
   GH_DISPATCH_TOKEN?: string
+  // #778: operator phone-push topic for Tier-1-family NEW down/degraded incidents (ntfy.sh). A bare
+  // topic name or a full https://ntfy.sh/<topic> URL. Set via `wrangler secret put NTFY_TOPIC`. Absent
+  // → push is fail-soft skipped (the Discord operator alert is unaffected). Operator-only side-channel.
+  NTFY_TOPIC?: string
   AI?: Ai
   STATUS_CACHE: KVNamespace
   // #494: Workers Analytics Engine dataset for statusline traffic measurement.
@@ -413,6 +417,33 @@ async function sendDiscordAlert(webhookUrl: string, embed: { title: string; desc
     return true
   } catch (err) {
     console.error('[discord] webhook failed:', err instanceof Error ? err.message : err)
+    return false
+  }
+}
+
+// #778 — operator phone push for a Tier-1-family NEW down/degraded incident (ntfy.sh). The `Click`
+// header makes tapping the notification open the X "is {service} down" Top search directly → the
+// operator replies to the viral tweet within the short window. Fail-soft: no NTFY_TOPIC secret → skip
+// (returns false, Discord alert already sent). ntfy headers must be ASCII (latin-1), so the title/body
+// carry no emoji — the Click URL is the payload. Mirrors sendDiscordAlert's boolean retry semantics.
+async function sendPushAlert(env: Env, title: string, body: string, clickUrl: string): Promise<boolean> {
+  const topic = env.NTFY_TOPIC
+  if (!topic) return false // push disabled
+  const url = topic.startsWith('http') ? topic : `https://ntfy.sh/${topic}`
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { Title: title, Priority: 'urgent', Tags: 'rotating_light', Click: clickUrl },
+      body,
+    })
+    if (!resp.ok) {
+      console.error(`[push] ntfy returned ${resp.status}: ${await resp.text().catch(() => '')}`)
+      return false
+    }
+    resp.body?.cancel()
+    return true
+  } catch (err) {
+    console.error('[push] ntfy failed (Discord alert unaffected):', err instanceof Error ? err.message : err)
     return false
   }
 }
@@ -973,6 +1004,25 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       description: operatorDescription,
       color: alert.color,
     })
+    // #778 — operator phone push for a Tier-1-family NEW down/degraded incident, so the short (~1–2h)
+    // reply window isn't missed when the Discord channel is buried. Gated + scoped by pushTargetFor;
+    // the Click target is the same #777 Top-search URL (push → tap → viral tweets). Fires AFTER the
+    // Discord send and is fully isolated (its own try + sendPushAlert fail-soft) so it can never block
+    // or abort the critical operator alert. Skipped entirely when NTFY_TOPIC is unset.
+    try {
+      const pushTarget = pushTargetFor(alert, scored)
+      if (pushTarget) {
+        const clickUrl = buildTweetSearchUrl(pushTarget.svcId) ?? alert.url
+        await sendPushAlert(
+          env,
+          `${pushTarget.serviceName} incident detected`,
+          'Tap to find tweets to reply to — the reply window is short.',
+          clickUrl,
+        )
+      }
+    } catch (err) {
+      console.error('[cron] push alert failed (Discord alert sent):', alert.key, err instanceof Error ? err.message : err)
+    }
   }
   // #475 — single read-modify-write after the send loop (alerts are infrequent; negligible KV budget).
   // Best-effort (must not affect the operator sends above), but a failure means EVERY per-user webhook
