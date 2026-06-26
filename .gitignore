@@ -45,6 +45,9 @@ playwright/.edge-bypass-state.json
 !.env.example
 .vercel
 
+# Discovery / B2B monetization (private — strategy, lead lists, outreach, competitive intel; NOT for public repo)
+discovery/
+
 # MemPalace
 .mempalace/
 entities.json
