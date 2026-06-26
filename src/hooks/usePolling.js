@@ -25,52 +25,10 @@ function hist(degraded = [], down = []) {
   })
 }
 
-const MOCK_SERVICES = [
-  {
-    id: 'claudeai', category: 'app', name: 'claude.ai', provider: 'Anthropic', status: 'operational',
-    latency: null, uptime30d: 99.00,
-    history30d: hist([3, 9, 13, 19, 27]),
-    history3m: [{ month: '2026-01', uptime: 99.40 }, { month: '2026-02', uptime: 99.10 }, { month: '2026-03', uptime: 99.00 }],
-    incidents: [],
-  },
-  {
-    id: 'chatgpt', category: 'app', name: 'ChatGPT', provider: 'OpenAI', status: 'operational',
-    latency: null, uptime30d: 98.20,
-    history30d: hist([1, 4, 8, 12, 18, 22, 28]),
-    history3m: [{ month: '2026-01', uptime: 98.90 }, { month: '2026-02', uptime: 97.50 }, { month: '2026-03', uptime: 98.20 }],
-    incidents: [
-      { id: 'cg-1', title: 'Slow Response Times', startedAt: ago(1 * D + 3 * H), duration: '1h 20m', status: 'resolved',
-        timeline: [
-          { stage: 'investigating', text: 'ChatGPT 응답 시간이 평소보다 느립니다.', at: ago(1 * D + 3 * H) },
-          { stage: 'resolved', text: '캐시 서버 재시작 후 정상화.', at: ago(1 * D + 3 * H - 80 * M) },
-        ] },
-      { id: 'cg-2', title: 'Image Upload Failures', startedAt: ago(3 * D + 5 * H), duration: '45m', status: 'resolved',
-        timeline: [
-          { stage: 'investigating', text: '이미지 업로드가 간헐적으로 실패합니다.', at: ago(3 * D + 5 * H) },
-          { stage: 'resolved', text: 'CDN 설정 복구 후 정상화.', at: ago(3 * D + 5 * H - 45 * M) },
-        ] },
-      { id: 'cg-3', title: 'Login Errors for Some Users', startedAt: ago(5 * D), duration: '2h 10m', status: 'resolved',
-        timeline: [
-          { stage: 'investigating', text: '일부 사용자가 로그인에 실패하고 있습니다.', at: ago(5 * D) },
-          { stage: 'identified', text: 'OAuth 토큰 갱신 문제로 확인.', at: ago(5 * D - 30 * M) },
-          { stage: 'resolved', text: '토큰 서비스 패치 후 정상화.', at: ago(5 * D - 130 * M) },
-        ] },
-    ],
-  },
-  {
-    id: 'characterai', category: 'app', name: 'Character.AI', provider: 'Character AI', status: 'operational',
-    latency: null, uptime30d: null,
-    history30d: hist(),
-    history3m: null,
-    incidents: [],
-  },
-  {
-    id: 'deepseekapp', category: 'app', name: 'DeepSeek App', provider: 'DeepSeek', status: 'operational',
-    latency: null, uptime30d: 99.48,
-    history30d: hist([13, 18, 22]),
-    history3m: null,
-    incidents: [],
-  },
+// Exported for the #796 order-invariant test. The array order is load-bearing: mergeWithMock
+// preserves it, and the Incidents service-filter dropdown renders services unsorted, so this MUST
+// stay in the canonical api → app → agent order (matching worker/src/services.ts + the live API).
+export const MOCK_SERVICES = [
   // ── LLM API ──
   {
     id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational',
@@ -513,6 +471,55 @@ const MOCK_SERVICES = [
           { stage: 'resolved', text: 'Ray/UNI-1 추론 용량 복구 후 정상화.', at: ago(2 * D - 64 * M) },
         ] },
     ],
+  },
+  // ── AI Apps ──
+  // Ordered after the APIs (before the agents) to match the canonical worker SERVICES order
+  // (api → app → agent) and the live /api/status order; mergeWithMock preserves this order, so the
+  // Incidents service-filter dropdown (renders services unsorted) lists APIs first too (#796).
+  {
+    id: 'claudeai', category: 'app', name: 'claude.ai', provider: 'Anthropic', status: 'operational',
+    latency: null, uptime30d: 99.00,
+    history30d: hist([3, 9, 13, 19, 27]),
+    history3m: [{ month: '2026-01', uptime: 99.40 }, { month: '2026-02', uptime: 99.10 }, { month: '2026-03', uptime: 99.00 }],
+    incidents: [],
+  },
+  {
+    id: 'chatgpt', category: 'app', name: 'ChatGPT', provider: 'OpenAI', status: 'operational',
+    latency: null, uptime30d: 98.20,
+    history30d: hist([1, 4, 8, 12, 18, 22, 28]),
+    history3m: [{ month: '2026-01', uptime: 98.90 }, { month: '2026-02', uptime: 97.50 }, { month: '2026-03', uptime: 98.20 }],
+    incidents: [
+      { id: 'cg-1', title: 'Slow Response Times', startedAt: ago(1 * D + 3 * H), duration: '1h 20m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: 'ChatGPT 응답 시간이 평소보다 느립니다.', at: ago(1 * D + 3 * H) },
+          { stage: 'resolved', text: '캐시 서버 재시작 후 정상화.', at: ago(1 * D + 3 * H - 80 * M) },
+        ] },
+      { id: 'cg-2', title: 'Image Upload Failures', startedAt: ago(3 * D + 5 * H), duration: '45m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: '이미지 업로드가 간헐적으로 실패합니다.', at: ago(3 * D + 5 * H) },
+          { stage: 'resolved', text: 'CDN 설정 복구 후 정상화.', at: ago(3 * D + 5 * H - 45 * M) },
+        ] },
+      { id: 'cg-3', title: 'Login Errors for Some Users', startedAt: ago(5 * D), duration: '2h 10m', status: 'resolved',
+        timeline: [
+          { stage: 'investigating', text: '일부 사용자가 로그인에 실패하고 있습니다.', at: ago(5 * D) },
+          { stage: 'identified', text: 'OAuth 토큰 갱신 문제로 확인.', at: ago(5 * D - 30 * M) },
+          { stage: 'resolved', text: '토큰 서비스 패치 후 정상화.', at: ago(5 * D - 130 * M) },
+        ] },
+    ],
+  },
+  {
+    id: 'characterai', category: 'app', name: 'Character.AI', provider: 'Character AI', status: 'operational',
+    latency: null, uptime30d: null,
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
+  },
+  {
+    id: 'deepseekapp', category: 'app', name: 'DeepSeek App', provider: 'DeepSeek', status: 'operational',
+    latency: null, uptime30d: 99.48,
+    history30d: hist([13, 18, 22]),
+    history3m: null,
+    incidents: [],
   },
   // ── Coding Agents ──
   {

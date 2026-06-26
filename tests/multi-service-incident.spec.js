@@ -72,7 +72,9 @@ test.describe('Multi-service incident display', () => {
     await expect(page.getByText('Opus 4.6 elevated rate of errors').first()).toBeVisible({ timeout: 20000 })
 
     const main = page.locator('main')
-    // All 3 affected service names should appear together (order depends on mock services array)
-    await expect(main.getByText(/claude\.ai, Claude API, Claude Code/).first()).toBeVisible()
+    // All 3 affected service names should appear together. Order follows the merged services-array
+    // order (mergeWithMock reorders the injected mock into MOCK_SERVICES order), which is the canonical
+    // api → app → agent order (#796): Claude API (api) → claude.ai (app) → Claude Code (agent).
+    await expect(main.getByText(/Claude API, claude\.ai, Claude Code/).first()).toBeVisible()
   })
 })
