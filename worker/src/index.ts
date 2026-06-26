@@ -1166,7 +1166,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
 // corsHeaders moved to ./cors — also handles team-scoped suffix patterns for Vercel preview origins.
 
 import { generateBadgeSvg } from './badge'
-import { buildFeedResponse, resolveFeedFirstSeen, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
+import { buildFeedResponse, resolveFeedFirstSeen, isActiveItemHeld, resolveFeedService, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
@@ -2779,6 +2779,12 @@ export default {
       let feedCached = cached
       let feedAiAnalysis: RssAiAnalysisMap | undefined
       let feedFirstSeen: Record<string, string> | undefined // #750 — incId → first-detected ISO
+      let feedServedActive: Set<string> | undefined // #793 — resolved incIds whose active item was served
+      // #793 — ONE clock for both the emitted-marker stamp decision (handler) AND the hold/emit decision
+      // (buildRssFeed), threaded as buildFeedResponse's `now`. If buildRssFeed defaulted its own (later)
+      // `new Date()`, an item right at the AI_HOLD_MS boundary could be "held" at stamp time yet "released"
+      // at serve time → emitted WITHOUT a marker → its resolution later wrongly suppressed.
+      const feedNow = new Date()
       if (cached && env.STATUS_CACHE) {
         const feedProbe = await readProbeSummaries(env.STATUS_CACHE, 'feed')
         feedCached = {
@@ -2835,8 +2841,57 @@ export default {
             }),
         ))
         if (Object.keys(analysis).length > 0) feedAiAnalysis = analysis
+        // #793 — orphan-resolution guard. Stamp `feed:active-emitted:{incId}` for each active item that
+        // is actually SERVED this render (not held by the #759 AI-hold, via the shared isActiveItemHeld
+        // predicate); then read those markers for RESOLVED incidents → servedActive. buildRssFeed
+        // suppresses a resolved item whose active item was never served, so a short blip whose entire
+        // active window fell between reader polls doesn't post a lone "Resolved · 19m" with no prior
+        // outage post (the Slack orphan-resolution). 7d TTL, get-or-set (one write per incident).
+        // Scope the marker to the services THIS feed actually serves: a /feed/openai poll does NOT carry
+        // langfuse's active item, so it must not stamp langfuse's marker (else langfuse-feed subscribers
+        // still get an orphan). All-scope serves every service; service-scope serves the resolved one only.
+        const servedSvcIds: Set<string> | null = feedReq.scope === 'all'
+          ? null // null = all services served
+          : (() => { const s = resolveFeedService(cached.services, feedReq.segment); return s ? new Set([s.id]) : new Set<string>() })()
+        const inServedScope = (svcId: string) => servedSvcIds === null || servedSvcIds.has(svcId)
+        await Promise.all(cached.services.filter((svc) => inServedScope(svc.id)).flatMap((svc) =>
+          (svc.incidents ?? [])
+            .filter((i) => i.status !== 'resolved')
+            .map(async (inc) => {
+              const a = (analysis[svc.id] ?? []).find((x) => x.incidentId === inc.id)
+              if (isActiveItemHeld(inc, a, firstSeen[inc.id], feedNow)) return // held → not served yet
+              const key = `feed:active-emitted:${inc.id}`
+              // get-or-set. CRITICAL: a missing marker fails UNSAFE here (suppresses the later resolved —
+              // unlike feed:firstseen which falls back to startedAt and still emits), so a GET throw must
+              // NOT skip the write: bias toward recording "served" (attempt the idempotent put anyway).
+              // The whole point of #793 is a single-poll-wide blip, where there's no retry to self-heal.
+              let existing: string | null = null
+              try { existing = await env.STATUS_CACHE!.get(key) }
+              catch (err) { console.warn('[rss] #793 active-emitted get failed — stamping anyway:', inc.id, err instanceof Error ? err.message : err) }
+              if (existing) return // already stamped (first-write-wins)
+              const ok = await kvPut(env.STATUS_CACHE!, key, feedNow.toISOString(), { expirationTtl: 604800 })
+              if (!ok) console.warn('[rss] #793 active-emitted put failed — resolution may suppress until re-stamped:', inc.id)
+            }),
+        ))
+        const servedActive = new Set<string>()
+        await Promise.all(cached.services.filter((svc) => inServedScope(svc.id)).flatMap((svc) =>
+          (svc.incidents ?? [])
+            .filter((i) => i.status === 'resolved')
+            .map(async (inc) => {
+              // Clean miss (null) → leave OUT → buildRssFeed suppresses the orphan resolved item.
+              // A KV throw is indistinguishable from "never served", so fail OPEN (add → emit the
+              // resolved) — dropping a legit recovery notice is worse than letting one orphan through.
+              try {
+                if (await env.STATUS_CACHE!.get(`feed:active-emitted:${inc.id}`)) servedActive.add(inc.id)
+              } catch (err) {
+                console.warn('[rss] #793 active-emitted read failed — failing open (emit resolved):', inc.id, err instanceof Error ? err.message : err)
+                servedActive.add(inc.id)
+              }
+            }),
+        ))
+        feedServedActive = servedActive
       }
-      const result = buildFeedResponse(feedCached, feedReq, undefined, feedAiAnalysis, feedFirstSeen)
+      const result = buildFeedResponse(feedCached, feedReq, feedNow, feedAiAnalysis, feedFirstSeen, feedServedActive)
       if (!result.ok && result.status === 503) {
         // Same severity as /api/report's KV-read failure — log at error so it
         // lands in the same operator alerting tier.

@@ -110,6 +110,27 @@ const MAX_ITEMS = 50
 // posts (just without AI). Usually adds zero latency (AI lands within seconds).
 const AI_HOLD_MS = 6 * 60_000
 
+// #759/#793 — whether an active incident's feed item is currently HELD (skipped this render). Held =
+// an AI-less investigating/identified item still inside the AI_HOLD_MS window (waiting for analysis so
+// Slack doesn't freeze an AI-less message). `monitoring` is never held (AI excluded by design); fail
+// open when first-seen is unknown (post rather than hold indefinitely). Extracted so both buildRssFeed
+// AND the /feed handler share ONE predicate: the handler stamps `feed:active-emitted:{incId}` only when
+// NOT held (i.e. the item is actually served), and #793 suppresses a resolved item whose active item
+// was never served — preventing a Slack "orphan resolution" (a "Resolved · 19m" with no prior outage
+// post) for a blip whose entire active window fell between reader polls. Pure — unit-tested.
+export function isActiveItemHeld(
+  incident: Incident,
+  analysis: RssAiAnalysis | undefined,
+  firstSeen: string | undefined,
+  now: Date,
+): boolean {
+  if (incident.status === 'monitoring') return false
+  if (analysis) return false
+  if (!firstSeen) return false
+  const ageMs = now.getTime() - new Date(firstSeen).getTime()
+  return ageMs >= 0 && ageMs < AI_HOLD_MS
+}
+
 // #760 — section divider mirroring the Discord operator embed's `┈┈…` (index.ts DIV), so the Slack
 // `/feed` description (which flattens the <p> tags) renders the same scannable section breaks. A
 // `<p>` so it joins with the same `\n` separator as the other paragraphs; box-drawing chars only (no
@@ -411,6 +432,12 @@ export function buildRssFeed(
   // `startedAt`, so a `startedAt` pubDate looks "already past" the reader's last poll → the outage
   // post is silently dropped (Discord push still fired). Falls back to `startedAt` when unknown.
   firstSeen?: Record<string, string>,
+  // #793 — incIds whose ACTIVE item has actually been served in a prior /feed response (the
+  // `feed:active-emitted:{incId}` markers, read by the handler). When provided, a resolved incident
+  // NOT in this set is suppressed (its outage was never announced → don't emit an orphan "Resolved"
+  // item). Absent → fail-open (emit every resolved item, the pre-#793 behavior), so direct callers /
+  // unit tests that don't thread it are unaffected.
+  servedActive?: Set<string>,
 ): string {
   const incidentServices = buildIncidentServiceMap(services)
   const sources = opts.scope === 'service' ? [opts.service] : services
@@ -424,6 +451,11 @@ export function buildRssFeed(
   for (const svc of sources) {
     for (const incident of svc.incidents ?? []) {
       if (incident.status === 'resolved') {
+        // #793 — suppress an "orphan resolution": if the active item was never served to /feed (no
+        // `feed:active-emitted` marker), the outage was never announced, so a lone "Resolved" item
+        // would confuse subscribers (a recovery for an event they never saw). Fail-open when
+        // servedActive is absent (direct callers / tests) → emit as before.
+        if (servedActive && !servedActive.has(incident.id)) continue
         items.push({ svc, incident, kind: 'resolved', pubDate: resolvedAtOf(incident) })
       } else {
         // #724 — no AI block for a `monitoring` incident (recovery already confirmed). Gating HERE
@@ -431,13 +463,9 @@ export function buildRssFeed(
         const analysis = incident.status === 'monitoring' ? undefined : analysisFor(aiAnalysis, svc.id, incident.id)
         const seen = firstSeen?.[incident.id]
         // #759 — hold an AI-less investigating/identified active item inside the AI_HOLD_MS window so
-        // Slack /feed doesn't freeze a forever-AI-less message (publish-before-analysis race). Released
-        // once `analysis` exists OR first-seen age ≥ AI_HOLD_MS. `monitoring` is never held (AI excluded
-        // by design); fail-open when first-seen is unknown (post rather than hold indefinitely).
-        if (incident.status !== 'monitoring' && !analysis && seen) {
-          const ageMs = now.getTime() - new Date(seen).getTime()
-          if (ageMs >= 0 && ageMs < AI_HOLD_MS) continue
-        }
+        // Slack /feed doesn't freeze a forever-AI-less message (publish-before-analysis race). The hold
+        // predicate is shared with the handler's emitted-marker stamping (#793) via isActiveItemHeld.
+        if (isActiveItemHeld(incident, analysis, seen, now)) continue
         items.push({
           svc, incident, kind: 'active', pubDate: seen ?? incident.startedAt,
           fallbackText: fallbackLine(svc, incident, services),
@@ -510,6 +538,7 @@ export function buildFeedResponse(
   now?: Date,
   aiAnalysis?: RssAiAnalysisMap,
   firstSeen?: Record<string, string>, // #750 — incId → first-detected ISO; fresh active-item pubDate
+  servedActive?: Set<string>, // #793 — incIds whose active item was already served (suppress orphan resolved)
 ): FeedResult {
   if (req.scope === 'service' && !isValidFeedSegment(req.segment)) {
     return { ok: false, status: 400, message: 'Invalid service slug' }
@@ -518,11 +547,11 @@ export function buildFeedResponse(
     return { ok: false, status: 503, message: 'Status data is temporarily unavailable' }
   }
   if (req.scope === 'all') {
-    return { ok: true, xml: buildRssFeed(cached.services, { scope: 'all' }, now, aiAnalysis, firstSeen) }
+    return { ok: true, xml: buildRssFeed(cached.services, { scope: 'all' }, now, aiAnalysis, firstSeen, servedActive) }
   }
   const service = resolveFeedService(cached.services, req.segment)
   if (!service) {
     return { ok: false, status: 404, message: 'Service not found' }
   }
-  return { ok: true, xml: buildRssFeed(cached.services, { scope: 'service', service }, now, aiAnalysis, firstSeen) }
+  return { ok: true, xml: buildRssFeed(cached.services, { scope: 'service', service }, now, aiAnalysis, firstSeen, servedActive) }
 }
