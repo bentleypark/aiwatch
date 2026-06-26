@@ -181,10 +181,10 @@ test.describe('Overview page', () => {
   })
 
   test('Recent Incidents spans all categories — a category filter does not hide other-category incidents (#676)', async ({ page }) => {
-    // The category filter scopes the stats/sections/latency to one bucket, but Recent Incidents is a
+    // The category filter scopes the stats/sections to one bucket, but Recent Incidents is a
     // cross-category "what's live right now" panel: picking a category must NOT hide an active incident
     // from another category. Pre-#676 it iterated the category-filtered list, so an LLM filter hid an
-    // app outage from the panel.
+    // app outage from the panel. (Latency Rankings is likewise cross-category — see the #798 test below.)
     const appInc = { id: 'app-outage-676', title: 'ChatGPT app outage 676', status: 'investigating', impact: 'major', startedAt: new Date(Date.now() - 60_000).toISOString(), duration: null, timeline: [] }
     const mock = { json: { services: [
       { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.9, calendarDays: 30, incidents: [] },
@@ -203,6 +203,30 @@ test.describe('Overview page', () => {
     await expect(page.locator('main button').filter({ hasText: 'ChatGPT' })).toHaveCount(0)
     // …but its incident is STILL listed in Recent Incidents (cross-category panel, #676).
     await expect(page.locator('main').getByText(/ChatGPT app outage 676/).first()).toBeVisible()
+  })
+
+  test('Latency Rankings spans all categories — a category filter does not hide other-category latency (#798)', async ({ page }) => {
+    // Mirror of #676 for the Latency Rankings panel: it ranks fastest/slowest across EVERYTHING, so a
+    // category filter must not drop an app/agent's latency bar. Pre-#798 it iterated the category-filtered
+    // catServices, so an LLM filter hid the ChatGPT (app) bar from the rankings.
+    const mock = { json: { services: [
+      { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.9, calendarDays: 30, incidents: [] },
+      { id: 'chatgpt', category: 'app', name: 'ChatGPT', provider: 'OpenAI', status: 'operational', latency: 150, uptime30d: 99.5, calendarDays: 30, incidents: [] },
+    ], lastUpdated: new Date().toISOString() } }
+    await page.route('**/api/status**', (route) => route.fulfill(mock))
+    await page.route('**/api/status/cached', (route) => route.fulfill(mock))
+    await page.goto('/')
+    await waitForDataLoad(page)
+    // Under 'all', the ChatGPT card is in the grid (a <button>).
+    await expect(page.locator('main button').filter({ hasText: 'ChatGPT' }).first()).toBeVisible({ timeout: 10000 })
+    // Filter to LLM → the ChatGPT CARD leaves the grid (it's an app)…
+    const tablist = page.getByRole('tablist', { name: /Services|서비스/ })
+    await tablist.getByRole('tab', { name: /LLM/ }).click()
+    await page.waitForTimeout(200)
+    await expect(page.locator('main button').filter({ hasText: 'ChatGPT' })).toHaveCount(0)
+    // …but its latency bar (a non-button <span> name) is STILL in the Latency Rankings panel (#798).
+    // With the card gone, the only remaining ChatGPT text in main is the latency-bar label.
+    await expect(page.locator('main').getByText('ChatGPT', { exact: true }).first()).toBeVisible()
   })
 
   test('Recent Incidents date label exposes contextual label via tooltip (#406)', async ({ page }) => {
