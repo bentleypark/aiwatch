@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { normalizeStatus } from '../parsers/statuspage'
-import { filterIncidents, SERVICES, worstStatus, resolveSvcStatus, resolveSvcComponents, pickBreakdownComponents, classifyStatusPageFailure } from '../services'
+import { filterIncidents, SERVICES, worstStatus, resolveSvcStatus, resolveSvcComponents, pickBreakdownComponents, classifyStatusPageFailure, coverageDaysFrom, MIN_COVERAGE_DAYS } from '../services'
 import type { Incident, ServiceConfig } from '../types'
 import { type KVLike } from '../utils'
 
@@ -537,6 +537,38 @@ describe('displayComponentIds config sanity (#606)', () => {
     // The production wiring of the #800 recurring-alert suppression. A silent drop of this flag would
     // resume the daily #500 + weekly #689 dead-source alerts for an acknowledged dead source, so pin it.
     expect(SERVICES.find((s) => s.id === 'characterai')!.statusSourceDeactivated).toBe(true)
+  })
+
+  describe('coverageDaysFrom (#802)', () => {
+    const NOW = '2026-06-26T00:00:00.000Z'
+    it('returns null for an absent addedAt (established service → full coverage)', () => {
+      expect(coverageDaysFrom(undefined, NOW)).toBe(null)
+    })
+    it('returns floored whole days since addedAt', () => {
+      expect(coverageDaysFrom('2026-06-24', NOW)).toBe(2)
+      expect(coverageDaysFrom('2026-05-27', NOW)).toBe(30) // exactly at the boundary
+    })
+    it('never negative (a future addedAt clamps to 0)', () => {
+      expect(coverageDaysFrom('2026-07-01', NOW)).toBe(0)
+    })
+    it('returns null on an unparseable date (fail-open — no coverage gate)', () => {
+      expect(coverageDaysFrom('not-a-date', NOW)).toBe(null)
+    })
+    it('MIN_COVERAGE_DAYS is 30', () => {
+      expect(MIN_COVERAGE_DAYS).toBe(30)
+    })
+  })
+
+  it('#802 — every service carrying addedAt uses an ISO YYYY-MM-DD date (drives coverageDays)', () => {
+    // addedAt is stamped on recently-added services; absent on established ones. Any present value must
+    // be a valid ISO date so coverageDaysFrom doesn't fail-open and silently drop the ranking gate.
+    const ISO = /^\d{4}-\d{2}-\d{2}$/
+    for (const s of SERVICES) {
+      if (s.addedAt != null) {
+        expect(ISO.test(s.addedAt), `${s.id} addedAt`).toBe(true)
+        expect(Number.isNaN(Date.parse(s.addedAt)), `${s.id} addedAt parseable`).toBe(false)
+      }
+    }
   })
 
   it('LEAK GUARD: the 3 shared-page services have DISJOINT component ids (no sibling-service leak)', () => {

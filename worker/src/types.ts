@@ -42,6 +42,12 @@ export interface ServiceStatus {
   uptime30d: number | null
   lastChecked: string
   incidents: Incident[]
+  /** #802 — days AIWatch has monitored this service, from `ServiceConfig.addedAt` (now − addedAt).
+   *  ABSENT when the service has no `addedAt` (= an established service well past the window → treated
+   *  as full coverage). A service with `coverageDays < 30` is excluded from the Reliability Ranking
+   *  (its incident/recovery/responsiveness Score components are based on a thin observed window, so it
+   *  would rank off insufficient data) and routed to the "Insufficient Data" group until 30d accrue. */
+  coverageDays?: number
   /** #574 — set ONLY on `bedrock`: currently-degraded AWS regions derived from the same AWS Health
    *  public-events fetch (all AWS services, via parseAwsRegionHealth). The supply-chain banner reads
    *  this off the bedrock entry to correlate a cloud-region issue with AWS-dependent AI services.
@@ -203,6 +209,12 @@ export interface ServiceConfig {
   // (daily) sweep skips it, and the #689 source-dead RISING-edge "Inactive" (weekly) is suppressed
   // (marker still written so a RECOVERY is still detected + notified). REMOVE when the page reactivates.
   statusSourceDeactivated?: boolean
+  // #802 — ISO date (YYYY-MM-DD) AIWatch began monitoring this service. Used to derive
+  // ServiceStatus.coverageDays (now − addedAt); a service with <30 days of coverage is held out of the
+  // Reliability Ranking (thin observed window → inflated Score). ABSENT = an established service (added
+  // well before the 30-day window) → treated as full coverage. Stamp on EVERY newly-added service (see
+  // the adding-a-service checklist); old services are intentionally left absent.
+  addedAt?: string
   // #618 — the service's live status comes from a browser-rendered Flashduty feed pushed to KV by
   // the deepseek-feed GitHub Action (status.deepseek.com is bot-walled to a plain Worker fetch).
   // When set, fetchService reads DEEPSEEK_FEED_KV_KEY first; a FRESH feed supersedes apiUrl and

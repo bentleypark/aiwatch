@@ -924,6 +924,11 @@ export default function ServiceDetails({ serviceId }) {
               <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--teal)' }} />
               {t('score.label')}
               <span className="text-[var(--text2)] font-normal">— 30{t('settings.period.suffix')}</span>
+              {/* #802 — a recently-added service (<30d coverage) shows its Score here but is held out of
+                  the Reliability Ranking until a full window accrues; note that explicitly. */}
+              {service.coverageDays != null && service.coverageDays < 30 && (
+                <span className="text-[var(--amber)] font-normal normal-case tracking-normal">· {t('score.coverage.insufficient')}</span>
+              )}
             </div>
             <span className={`mono text-[18px] font-semibold ${SCORE_TEXT_CLASS[service.scoreGrade] ?? 'text-[var(--text2)]'}`}>
               {service.aiwatchScore}
