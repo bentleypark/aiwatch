@@ -533,6 +533,12 @@ describe('displayComponentIds config sanity (#606)', () => {
     expect(SERVICES.find((s) => s.id === 'chatgpt')!.componentsUrl).toBeUndefined()
   })
 
+  it('#800 — characterai is flagged statusSourceDeactivated (its Statuspage is a known 401 deactivation)', () => {
+    // The production wiring of the #800 recurring-alert suppression. A silent drop of this flag would
+    // resume the daily #500 + weekly #689 dead-source alerts for an acknowledged dead source, so pin it.
+    expect(SERVICES.find((s) => s.id === 'characterai')!.statusSourceDeactivated).toBe(true)
+  })
+
   it('LEAK GUARD: the 3 shared-page services have DISJOINT component ids (no sibling-service leak)', () => {
     const lists = ['openai', 'chatgpt', 'codex'].map((id) => SERVICES.find((s) => s.id === id)!.displayComponentIds!)
     const all = lists.flat()

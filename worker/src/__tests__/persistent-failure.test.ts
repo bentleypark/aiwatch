@@ -88,6 +88,27 @@ describe('checkPersistentFetchFailures (#500)', () => {
     expect(send).toHaveBeenCalledTimes(2)
   })
 
+  it('#800 — skips a KNOWN-deactivated source (suppressedIds), even when it would otherwise alert', async () => {
+    const kv = mockKV({ 'fetch-fail:since:characterai': twoHoursAgo })
+    const send = vi.fn<DiscordSend>(async () => true)
+    const svcsWithCai = [...svcs, { id: 'characterai', name: 'Character.AI' }]
+    await checkPersistentFetchFailures(kv, DISCORD, svcsWithCai, NOW, send, new Set(['characterai']))
+    expect(send).not.toHaveBeenCalled()
+    expect(kv.store['alerted:fetch-persistent:characterai']).toBeUndefined()
+  })
+
+  it('#800 — suppressedIds scopes to the flagged service only — others still alert', async () => {
+    const kv = mockKV({
+      'fetch-fail:since:characterai': twoHoursAgo,
+      'fetch-fail:since:deepseek': twoHoursAgo,
+    })
+    const send = vi.fn<DiscordSend>(async () => true)
+    const svcsWithCai = [...svcs, { id: 'characterai', name: 'Character.AI' }]
+    await checkPersistentFetchFailures(kv, DISCORD, svcsWithCai, NOW, send, new Set(['characterai']))
+    expect(send).toHaveBeenCalledOnce()
+    expect(send.mock.calls[0][1].title).toContain('DeepSeek API')
+  })
+
   it('never throws — a KV list failure is swallowed (best-effort, cron-safe)', async () => {
     const kv = { list: vi.fn(async () => { throw new Error('KV down') }), get: vi.fn(), put: vi.fn(), delete: vi.fn() }
     const send = vi.fn<DiscordSend>(async () => true)

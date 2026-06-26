@@ -4,7 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk } from './utils'
 import { checkPersistentFetchFailures } from './persistent-failure'
@@ -766,6 +766,19 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
         continue
       }
       const cfg = SERVICES.find(c => c.id === svc.id)
+      // #800 — a KNOWN-deactivated source (operator-acknowledged, e.g. Character.AI): suppress the
+      // recurring rising-edge "Inactive" send, but still mark it alerted so a future RECOVERY is
+      // detected + notified (recovery is never suppressed). Mirrors the `action === 'alert'` success path.
+      if (cfg && shouldSuppressSourceDeadAlert(action, cfg)) {
+        // This marker is the SOLE enabler of a future recovery alert (a still-dead source reads as
+        // 'none' once alerted; a reactivation reads as 'recovered' only while the marker exists), so
+        // check the write like the sibling #714/#545 marker writes — a silent failure would disarm
+        // recovery detection until a later cycle re-writes it (self-healing, but otherwise invisible).
+        const ok = await kvPut(env.STATUS_CACHE, deadKey, '1', { expirationTtl: 604800 })
+        if (!ok) console.error('[cron] #800 source-dead marker write FAILED — recovery detection disarmed until re-written:', svc.id)
+        await kvDel(env.STATUS_CACHE, pendingKey)
+        continue
+      }
       const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, buildSourceDeadEmbed(svc.name, cfg?.statusUrl ?? '', action === 'recovered'))
       // Gate the KV mutation on a successful send, so a failed POST retries next cycle (the dead alert
       // re-fires; the recovery note re-sends) rather than being silently lost. NOTE the 'alert' retry is
@@ -1126,7 +1139,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
 
   // #500 — persistent (1h+) status-page block alert. Independent of the status-alert path above:
   // sweeps the fetch-fail:since markers and warns the operator once per blocked service per 24h.
-  await checkPersistentFetchFailures(env.STATUS_CACHE, env.DISCORD_WEBHOOK_URL, services, Date.now(), sendDiscordAlert)
+  // #800 — skip the daily persistent-failure warning for KNOWN-deactivated sources (operator-acknowledged).
+  const deactivatedSourceIds = new Set(SERVICES.filter(c => c.statusSourceDeactivated).map(c => c.id))
+  await checkPersistentFetchFailures(env.STATUS_CACHE, env.DISCORD_WEBHOOK_URL, services, Date.now(), sendDiscordAlert, deactivatedSourceIds)
 
   // Refresh TTL on existing AI analyses / re-analyze missing ones (max 2 per cron)
   // monitoring = "recovery confirmed, verifying" — treat as inactive (no TTL refresh)

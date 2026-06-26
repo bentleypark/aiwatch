@@ -196,6 +196,13 @@ export interface ServiceConfig {
   // ServiceStatus.incidentSourceStale → all ranking surfaces exclude it (a frozen empty 30-day
   // incident window would otherwise inflate the Score). REMOVE once the feed is reachable again.
   incidentSourceStale?: boolean
+  // #800 — the status page is a KNOWN, acknowledged, long-running DEACTIVATION (e.g. Character.AI's
+  // Statuspage went "Page Inactive"/401 ~2026-06-18 with no replacement, #689). The runtime sourceDead
+  // path still shows the service operational+stale + excluded from rankings; this flag only SUPPRESSES
+  // the recurring operator alerts the operator has already acknowledged: the #500 persistent-failure
+  // (daily) sweep skips it, and the #689 source-dead RISING-edge "Inactive" (weekly) is suppressed
+  // (marker still written so a RECOVERY is still detected + notified). REMOVE when the page reactivates.
+  statusSourceDeactivated?: boolean
   // #618 — the service's live status comes from a browser-rendered Flashduty feed pushed to KV by
   // the deepseek-feed GitHub Action (status.deepseek.com is bot-walled to a plain Worker fetch).
   // When set, fetchService reads DEEPSEEK_FEED_KV_KEY first; a FRESH feed supersedes apiUrl and

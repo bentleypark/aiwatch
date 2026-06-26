@@ -29,6 +29,9 @@ export async function checkPersistentFetchFailures(
   services: Array<{ id: string; name: string }>,
   nowMs: number,
   send: DiscordSend,
+  // #800 — svcIds whose status page is a KNOWN, acknowledged deactivation (statusSourceDeactivated):
+  // skip the daily persistent-failure alert (the operator already knows it's structurally blocked).
+  suppressedIds: Set<string> = new Set(),
 ): Promise<void> {
   if (!kv || !discordUrl) return
   try {
@@ -36,6 +39,7 @@ export async function checkPersistentFetchFailures(
     const listed = await kv.list({ prefix: SINCE_PREFIX })
     for (const key of listed.keys) {
       const svcId = key.name.slice(SINCE_PREFIX.length)
+      if (suppressedIds.has(svcId)) continue // #800 — acknowledged dead source, don't re-warn
       const since = await kv.get(key.name).catch(() => null)
       if (!shouldAlertPersistentFailure(since, nowMs)) continue
       const dedupKey = `alerted:fetch-persistent:${svcId}`
