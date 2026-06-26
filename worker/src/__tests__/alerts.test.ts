@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
 
@@ -118,6 +118,25 @@ describe('decideSourceDeadAction (#714 — liveness edge + 1-cycle confirmation 
     expect(at('dead', false, true)).toBe('alert')           // confirmed dead → alert (deadKey set)
     expect(at('alive', true, false)).toBe('recovered')      // page returns 200 → one Recovered (deadKey cleared)
     expect(at('alive', false, false)).toBe('none')          // quiet thereafter
+  })
+})
+
+describe('shouldSuppressSourceDeadAlert (#800)', () => {
+  const dead = { statusSourceDeactivated: true }
+  it('SUPPRESSES the recurring rising-edge alert for a known-deactivated source', () => {
+    expect(shouldSuppressSourceDeadAlert('alert', dead)).toBe(true)
+  })
+  it('NEVER suppresses a recovery — a reactivation is worth one alert', () => {
+    expect(shouldSuppressSourceDeadAlert('recovered', dead)).toBe(false)
+  })
+  it('does NOT suppress when the flag is absent/false (normal services re-alert as before)', () => {
+    expect(shouldSuppressSourceDeadAlert('alert', {})).toBe(false)
+    expect(shouldSuppressSourceDeadAlert('alert', { statusSourceDeactivated: false })).toBe(false)
+  })
+  it('only the alert edge is in scope — hold/none never reach the send anyway', () => {
+    for (const a of ['hold-confirm', 'hold-unknown', 'none'] as const) {
+      expect(shouldSuppressSourceDeadAlert(a, dead)).toBe(false)
+    }
   })
 })
 

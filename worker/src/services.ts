@@ -185,7 +185,7 @@ export const SERVICES: ServiceConfig[] = [
   // AI Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   // displayComponentIds (#606): all Character.AI surfaces (single-owner page). Display-only.
-  { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl', displayComponentIds: ['fw8g76r7dqcl', 'ngscynkb3c53', 'v58xb4x4tg0l', '8b8kpp2h7w82', 'dtcqb0ffqv21'] },
+  { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl', displayComponentIds: ['fw8g76r7dqcl', 'ngscynkb3c53', 'v58xb4x4tg0l', '8b8kpp2h7w82', 'dtcqb0ffqv21'], statusSourceDeactivated: true }, // #800 — Statuspage deactivated (401) since ~2026-06-18 (#689), no replacement; suppress recurring dead-source alerts. REMOVE when the page reactivates.
   // ChatGPT has no single umbrella status-page component, but status.openai.com
   // does publish a ChatGPT group aggregate over its sub-components — that's the
   // user-facing uptime number on the page. Status determination still uses the

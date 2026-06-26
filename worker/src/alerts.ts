@@ -231,6 +231,18 @@ export function decideSourceDeadAction(
   return 'none'
 }
 
+/** #800 — whether to SUPPRESS the source-dead Discord SEND for a KNOWN-deactivated status page. Only the
+ *  recurring rising-edge 'alert' ("Inactive") is suppressed — the operator has already acknowledged the
+ *  deactivation (e.g. Character.AI, #689), so re-alerting weekly is noise. 'recovered' is NEVER suppressed
+ *  (a reactivation is news worth one alert). The caller still writes `alerted:source-dead` when suppressing,
+ *  so the dead state is tracked and a later recovery is detected. Pure — unit-tested. */
+export function shouldSuppressSourceDeadAlert(
+  action: SourceDeadAction,
+  config: { statusSourceDeactivated?: boolean },
+): boolean {
+  return !!config.statusSourceDeactivated && action === 'alert'
+}
+
 /** #689 — Operator embed for a status source going inactive (4xx) or recovering. DISTINCT from a
  *  "degraded" alert so the source death is judged accurately: the service is shown operational+stale
  *  and excluded from rankings — it is NOT a service degradation. Yellow (operator action), not red. */
