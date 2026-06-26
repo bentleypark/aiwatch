@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildRssFeed, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse, dedupeSharedIncidents, resolveFeedFirstSeen, type RssAiAnalysisMap } from '../rss'
+import { buildRssFeed, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse, dedupeSharedIncidents, resolveFeedFirstSeen, isActiveItemHeld, type RssAiAnalysisMap } from '../rss'
 import { getFallbacks } from '../fallback'
 import type { ServiceStatus, Incident } from '../types'
 
@@ -815,6 +815,80 @@ describe('buildRssFeed — publish-before-analysis hold (#759)', () => {
     const SIX_MIN_AGO = '2026-05-19T08:54:00.000Z' // exactly 6 min before NOW
     const xml = buildRssFeed([service({ incidents: [activeInc] })], { scope: 'all' }, NOW, undefined, { 'inc-1': SIX_MIN_AGO })
     expect(xml).toContain('aiwatch:claude:inc-1</guid>') // age === AI_HOLD_MS → released
+  })
+})
+
+describe('isActiveItemHeld (#759/#793 — shared hold predicate)', () => {
+  // NOW = 09:00:00Z, AI_HOLD_MS = 6 min.
+  const FRESH = '2026-05-19T08:57:00.000Z' // 3 min ago — inside window
+  const OLD = '2026-05-19T08:53:00.000Z'   // 7 min ago — past window
+  const ai = { incidentId: 'inc-1', summary: 's', estimatedRecovery: '1h', affectedScope: [] }
+
+  it('HELD: AI-less investigating/identified item inside the window', () => {
+    expect(isActiveItemHeld(incident({ status: 'identified' }), undefined, FRESH, NOW)).toBe(true)
+  })
+  it('NOT held once analysis exists (released for AI)', () => {
+    expect(isActiveItemHeld(incident({ status: 'identified' }), ai, FRESH, NOW)).toBe(false)
+  })
+  it('NOT held past the window (age ≥ AI_HOLD_MS)', () => {
+    expect(isActiveItemHeld(incident({ status: 'identified' }), undefined, OLD, NOW)).toBe(false)
+  })
+  it('NOT held when first-seen is unknown (fail-open)', () => {
+    expect(isActiveItemHeld(incident({ status: 'identified' }), undefined, undefined, NOW)).toBe(false)
+  })
+  it('NEVER holds a monitoring item (AI excluded by design)', () => {
+    expect(isActiveItemHeld(incident({ status: 'monitoring' }), undefined, FRESH, NOW)).toBe(false)
+  })
+  it('boundary: exactly AI_HOLD_MS is released (< is exclusive)', () => {
+    expect(isActiveItemHeld(incident({ status: 'identified' }), undefined, '2026-05-19T08:54:00.000Z', NOW)).toBe(false)
+  })
+})
+
+describe('buildRssFeed — orphan-resolution suppression (#793)', () => {
+  // A short blip whose active item was NEVER served (no feed:active-emitted marker) must not post a
+  // lone "Resolved" item. servedActive carries the incIds whose active item WAS served.
+  const resolvedInc = incident({ id: 'inc-1', status: 'resolved', resolvedAt: '2026-05-19T08:58:00.000Z', duration: '19m' })
+
+  it('SUPPRESSES the resolved item when its active item was never served (incId absent from servedActive)', () => {
+    const xml = buildRssFeed([service({ incidents: [resolvedInc] })], { scope: 'all' }, NOW, undefined, undefined, new Set())
+    expect(xml).not.toContain('aiwatch:claude:inc-1:resolved</guid>')
+    expect(xml).not.toContain('<item>')
+  })
+
+  it('EMITS the resolved item when its active item WAS served (incId present in servedActive)', () => {
+    const xml = buildRssFeed([service({ incidents: [resolvedInc] })], { scope: 'all' }, NOW, undefined, undefined, new Set(['inc-1']))
+    expect(xml).toContain('aiwatch:claude:inc-1:resolved</guid>')
+  })
+
+  it('fail-open: with servedActive ABSENT, every resolved item is emitted (pre-#793 behavior preserved)', () => {
+    const xml = buildRssFeed([service({ incidents: [resolvedInc] })], { scope: 'all' }, NOW)
+    expect(xml).toContain('aiwatch:claude:inc-1:resolved</guid>')
+  })
+
+  it('does NOT affect active items — servedActive only gates the resolved branch', () => {
+    // Active item with AI present (so the #759 hold doesn't suppress it) and an EMPTY servedActive:
+    // the active item must still emit (servedActive must never suppress an active item).
+    const ai: RssAiAnalysisMap = { claude: [{ incidentId: 'inc-1', summary: 's', estimatedRecovery: '1h', affectedScope: [] }] }
+    const xml = buildRssFeed([service({ incidents: [incident({ id: 'inc-1', status: 'identified' })] })], { scope: 'all' }, NOW, ai, { 'inc-1': NOW.toISOString() }, new Set())
+    expect(xml).toContain('aiwatch:claude:inc-1</guid>')
+  })
+
+  it('suppresses ALL surfaces of a shared resolved incident when unserved (keyed by incId)', () => {
+    const shared = incident({ id: 'sh-1', status: 'resolved', resolvedAt: '2026-05-19T08:58:00.000Z', duration: '5m' })
+    const svcs = [
+      service({ id: 'claude', name: 'Claude API', incidents: [shared] }),
+      service({ id: 'claudeai', name: 'claude.ai', incidents: [shared] }),
+    ]
+    const xml = buildRssFeed(svcs, { scope: 'all' }, NOW, undefined, undefined, new Set())
+    expect(xml).not.toContain('sh-1')
+  })
+
+  it('buildFeedResponse threads servedActive through to the feed', () => {
+    const cached = { services: [service({ incidents: [resolvedInc] })] }
+    const suppressed = buildFeedResponse(cached, { scope: 'all' }, NOW, undefined, undefined, new Set())
+    expect(suppressed.ok && !suppressed.xml.includes('inc-1:resolved')).toBe(true)
+    const emitted = buildFeedResponse(cached, { scope: 'all' }, NOW, undefined, undefined, new Set(['inc-1']))
+    expect(emitted.ok && emitted.xml.includes('inc-1:resolved')).toBe(true)
   })
 })
 
