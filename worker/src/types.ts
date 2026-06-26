@@ -184,6 +184,13 @@ export interface ServiceConfig {
   // produce 10-20 alerts per affected model. Opt-in suppression dedups by normalized title
   // in a 60-minute window. See #283 and isFlapSuppressible() in alerts.ts.
   flapSuppression?: boolean
+  // #792 — hold ANY new non-major incident one cron cycle (reuses the #633 pending:new gate) for
+  // services that fire frequent short `minor` blips AND backdate their resolution (e.g. Langfuse:
+  // many <30m ingestion/latency incidents). Without it, a blip already resolving when our */5 cron
+  // first catches it fires a New+Resolved Discord double-alert the live dashboard never reflects.
+  // Distinct from flapSuppression (which only holds the BetterStack "— down/recovered" title shape).
+  // See isShortIncidentHoldable() in alerts.ts. `major` + Tier-1 always alert immediately.
+  holdShortIncidents?: boolean
   // #591 — mark a service whose status page migrated to a server-side-unreachable platform, so
   // the feed AIWatch reads is FROZEN (e.g. DeepSeek → Flashduty, #507). Propagated to
   // ServiceStatus.incidentSourceStale → all ranking surfaces exclude it (a frozen empty 30-day

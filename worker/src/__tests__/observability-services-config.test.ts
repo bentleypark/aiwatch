@@ -22,6 +22,10 @@ describe('#601 observability sibling configs (Helicone + Langfuse)', () => {
     expect(s!.apiUrl).toBe('https://status.langfuse.com/api/v2/summary.json')
     expect(s!.incidentIoBaseUrl).toBe('https://status.langfuse.com/incidents')
     expect(s!.statusComponentId).toBeTruthy()
+    // #792 — the production wiring of the short-incident hold (Langfuse fires frequent short `minor`
+    // ingestion blips that backdate resolution → New+Resolved Discord double-alert). A silent drop of
+    // this flag would recur the bug with every unit test still green, so pin it here.
+    expect(s!.holdShortIncidents, 'langfuse must opt into the #792 short-incident hold').toBe(true)
   })
 
   it('all three observability services share fallback tier 6 (Observability) and none are excluded', () => {

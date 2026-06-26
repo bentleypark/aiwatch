@@ -643,7 +643,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
         })
         const pendingExists = pendingRaw !== null
         if (shouldHoldNewIncident(svc.id, config, inc, { alreadyAlerted, pendingExists })) {
-          console.log('[cron] #633 holding flap-shaped new incident one cycle (phantom-alert gate):', svc.id, inc.id)
+          console.log('[cron] #633/#792 holding new incident one cycle (phantom-alert / short-blip gate):', svc.id, inc.id)
           suppressedIncIds.add(inc.id)
           heldNewIncIds.add(inc.id)
           pendingNewToWrite.add(inc.id)
