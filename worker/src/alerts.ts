@@ -109,16 +109,40 @@ export function pendingNewKey(incId: string): string {
   return `${PENDING_NEW_PREFIX}${incId}`
 }
 
+// #792 — generalized short-incident hold. Where isFlapSuppressible targets the BetterStack
+// "<model> — down/recovered" flap title shape, this holds ANY new non-major incident one cron cycle
+// on a `holdShortIncidents` service. Such services (e.g. Langfuse) fire frequent short `minor`
+// ingestion/latency incidents AND backdate the resolution, so our */5 cron often first catches the
+// incident only as it's already resolving → a New+Resolved Discord double-alert for a blip the live
+// dashboard never reflected. Holding one cycle means a sub-cycle blip that self-resolves never alerts
+// (no New, and no Resolved via the alertedNewMap.has guard in buildIncidentAlerts' resolved branch);
+// a genuinely ongoing incident just alerts one cycle (~5min) later. `major`/`critical` (real broad
+// outage) and Tier-1 (claude/openai/gemini) always alert immediately. Pure — unit-tested.
+// NOTE: unlike isFlapNotice (which excludes only `major` because the "— down/recovered" title regex
+// already screens out a real critical incident), this path has no title guard, so it must exclude
+// BOTH severe levels — a Langfuse statuspage incident maps `critical` through (parsers/statuspage.ts).
+export function isShortIncidentHoldable(
+  svcId: string,
+  config: { holdShortIncidents?: boolean },
+  inc: Incident,
+): boolean {
+  if (TIER1_IDS.has(svcId)) return false
+  if (!config.holdShortIncidents) return false
+  if (inc.impact === 'major' || inc.impact === 'critical') return false
+  return true
+}
+
 export function shouldHoldNewIncident(
   svcId: string,
-  config: { flapSuppression?: boolean },
+  config: { flapSuppression?: boolean; holdShortIncidents?: boolean },
   inc: Incident,
   state: { alreadyAlerted: boolean; pendingExists: boolean },
 ): boolean {
   if (state.alreadyAlerted) return false        // already fired in a prior cycle — never re-hold
   if (state.pendingExists) return false         // survived a prior cycle — confirm + fire now
   if (inc.status === 'resolved') return false   // resolved path is gated separately (alertedNewMap)
-  return isFlapSuppressible(svcId, config, inc) // flap-shaped on a flap service → hold first sight
+  // flap-shaped on a flap service, OR any non-major new incident on a short-incident-hold service.
+  return isFlapSuppressible(svcId, config, inc) || isShortIncidentHoldable(svcId, config, inc)
 }
 
 export interface AlertCandidate {

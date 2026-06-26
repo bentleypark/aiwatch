@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
 
@@ -1166,6 +1166,126 @@ describe('first-seen confirmation gate (#633)', () => {
       const churnedInc: Incident = { id: 'flap-y', title: 'Web endpoints — down', status: 'investigating', impact: null, startedAt: recentDate, duration: null, timeline: [] }
       // pending:new was written for 'flap-x' on cycle 1; cycle 2 surfaces 'flap-y' → its marker is absent.
       expect(shouldHoldNewIncident('modal', config, churnedInc, { alreadyAlerted: false, pendingExists: false })).toBe(true)
+    })
+  })
+})
+
+describe('short-incident hold (#792)', () => {
+  // Langfuse-class: a normal-titled, short, `minor` incident that backdates its resolution, so the
+  // */5 cron first catches it as it's already resolving → New+Resolved Discord double-alert while the
+  // live dashboard never reflected it. Unlike #633's flap gate, this holds ANY non-major new incident
+  // (no " — down/recovered" title required) on a `holdShortIncidents` service, one cron cycle.
+  const mkInc = (overrides: Partial<Incident> = {}): Incident => inc({
+    id: 'lf-inc1',
+    title: '[EU] Elevated ingestion times',
+    status: 'investigating',
+    impact: 'minor',
+    startedAt: new Date(NOW - 60_000).toISOString(),
+    timeline: [],
+    ...overrides,
+  })
+  const config = { holdShortIncidents: true }
+  const firstSight = { alreadyAlerted: false, pendingExists: false }
+
+  describe('isShortIncidentHoldable', () => {
+    it('holds a NORMAL-titled minor incident on an opted-in service (no flap title needed)', () => {
+      expect(isShortIncidentHoldable('langfuse', config, mkInc())).toBe(true)
+    })
+
+    it('holds null-impact too — any non-major qualifies', () => {
+      expect(isShortIncidentHoldable('langfuse', config, mkInc({ impact: null }))).toBe(true)
+    })
+
+    it('does NOT hold `major` impact — a real broad outage alerts immediately', () => {
+      expect(isShortIncidentHoldable('langfuse', config, mkInc({ impact: 'major' }))).toBe(false)
+    })
+
+    it('does NOT hold `critical` impact either — no title guard here, so both severe levels bypass', () => {
+      // Langfuse's statuspage feed maps Atlassian `critical` → 'critical' (parsers/statuspage.ts), and
+      // this path (unlike isFlapNotice) has no "— down/recovered" title screen, so `critical` must be
+      // excluded explicitly or the most-severe incident would be delayed a cycle.
+      expect(isShortIncidentHoldable('langfuse', config, mkInc({ impact: 'critical' }))).toBe(false)
+    })
+
+    it('does NOT hold services without the flag (no regression for everyone else)', () => {
+      expect(isShortIncidentHoldable('langfuse', {}, mkInc())).toBe(false)
+      expect(isShortIncidentHoldable('langfuse', { holdShortIncidents: false }, mkInc())).toBe(false)
+    })
+
+    it('Tier-1 guard: never holds claude / openai / gemini even with the flag', () => {
+      expect(isShortIncidentHoldable('claude', config, mkInc())).toBe(false)
+      expect(isShortIncidentHoldable('openai', config, mkInc())).toBe(false)
+      expect(isShortIncidentHoldable('gemini', config, mkInc())).toBe(false)
+    })
+  })
+
+  describe('shouldHoldNewIncident — broadened gate', () => {
+    it('HOLDS a normal-titled minor incident on its first sight (the Langfuse double-alert fix)', () => {
+      expect(shouldHoldNewIncident('langfuse', config, mkInc(), firstSight)).toBe(true)
+    })
+
+    it('FIRES once the incident survived a prior cycle (pending marker present → genuinely ongoing)', () => {
+      expect(shouldHoldNewIncident('langfuse', config, mkInc(), { alreadyAlerted: false, pendingExists: true })).toBe(false)
+    })
+
+    it('does NOT hold `major` — alerts immediately even on a hold service', () => {
+      expect(shouldHoldNewIncident('langfuse', config, mkInc({ impact: 'major' }), firstSight)).toBe(false)
+    })
+
+    it('does NOT hold resolved incidents (resolved path gated by alertedNewMap)', () => {
+      expect(shouldHoldNewIncident('langfuse', config, mkInc({ status: 'resolved' }), firstSight)).toBe(false)
+    })
+
+    it('never re-holds an already-alerted incident', () => {
+      expect(shouldHoldNewIncident('langfuse', config, mkInc(), { alreadyAlerted: true, pendingExists: false })).toBe(false)
+    })
+
+    it('does NOT hold a service carrying neither flap nor short-incident flag', () => {
+      expect(shouldHoldNewIncident('langfuse', {}, mkInc(), firstSight)).toBe(false)
+    })
+
+    it('does NOT widen the net for flapSuppression-ONLY services — a normal-titled minor stays immediate', () => {
+      // Regression guard: the OR with isFlapSuppressible must NOT make existing flap services
+      // (together/fireworks/huggingface/modal/luma) start holding ordinary, normal-titled minor
+      // incidents. Only the "— down/recovered" flap shape is held for them; a real incident fires now.
+      const flapOnly = { flapSuppression: true }
+      expect(shouldHoldNewIncident('modal', flapOnly, mkInc({ title: '[EU] Elevated ingestion times', impact: 'minor' }), firstSight)).toBe(false)
+    })
+
+    it('Tier-1 guard at the composed level: never holds claude / openai / gemini even with the flag', () => {
+      expect(shouldHoldNewIncident('claude', config, mkInc(), firstSight)).toBe(false)
+      expect(shouldHoldNewIncident('openai', config, mkInc(), firstSight)).toBe(false)
+      expect(shouldHoldNewIncident('gemini', config, mkInc(), firstSight)).toBe(false)
+    })
+  })
+
+  describe('held short incident produces no phantom pair (buildIncidentAlerts integration)', () => {
+    it('a held Langfuse blip that self-resolves inside the window emits neither new nor recovered', () => {
+      // Cycle 1: held (suppressedIncIds), no alerted:new written. Cycle 2: status resolved but never
+      // in alertedNewMap → buildIncidentAlerts emits NO recovered (alertedNewMap.has guard). Net: silent.
+      const recovered = mockService({
+        id: 'langfuse',
+        status: 'operational',
+        incidents: [inc({ id: 'lf-blip', title: '[EU] Elevated ingestion times', status: 'resolved', impact: 'minor', startedAt: recentDate, duration: '19m' })],
+      })
+      const alerts = buildIncidentAlerts([recovered], alertedMap(), NOW, new Set(['lf-blip']))
+      expect(alerts).toHaveLength(0)
+    })
+
+    it('two-cycle hold→confirm: a genuinely ongoing Langfuse incident still alerts one cycle later', () => {
+      const ongoing: Incident = { id: 'lf-real', title: '[EU] Elevated ingestion times', status: 'investigating', impact: 'minor', startedAt: recentDate, duration: null, timeline: [] }
+      const svc = mockService({ id: 'langfuse', status: 'degraded', incidents: [ongoing] })
+
+      // Cycle 1: no pending marker → held → silent.
+      const suppressed1 = new Set<string>()
+      if (shouldHoldNewIncident('langfuse', config, ongoing, { alreadyAlerted: false, pendingExists: false })) suppressed1.add(ongoing.id)
+      expect(suppressed1.has('lf-real')).toBe(true)
+      expect(buildIncidentAlerts([svc], alertedMap(), NOW, suppressed1)).toHaveLength(0)
+
+      // Cycle 2: marker present → NOT held → fires.
+      const suppressed2 = new Set<string>()
+      if (shouldHoldNewIncident('langfuse', config, ongoing, { alreadyAlerted: false, pendingExists: true })) suppressed2.add(ongoing.id)
+      expect(buildIncidentAlerts([svc], alertedMap(), NOW, suppressed2).map(a => a.key)).toEqual(['alerted:new:lf-real'])
     })
   })
 })
