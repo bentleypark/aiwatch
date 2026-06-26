@@ -714,9 +714,11 @@ export default function Overview() {
   // Dedup by incident ID (Anthropic bulk-links one incident to claude.ai + Claude API + Claude Code)
   // while collecting every affected service name. Mirrors the Incidents.jsx aggregation pattern.
   // Recent Incidents intentionally spans ALL enabled services (`services`), NOT the category-filtered
-  // `catServices` — a category filter scopes the stats/sections/latency, but the incidents panel is a
+  // `catServices` — a category filter scopes the stats/sections, but the incidents panel is a
   // cross-category "what's happening right now" view, so picking a category must not hide live incidents
   // from other categories. (Still honors the user's enabled-services subset via `services`.)
+  // #798 — Latency Rankings (below) is ALSO cross-category for the same reason: it ranks fastest/slowest
+  // across everything, so it uses `services`, not `catServices` — only stats + the service grid scope.
   const incMap = new Map()
   for (const s of services) {
     for (const inc of s.incidents ?? []) {
@@ -737,7 +739,7 @@ export default function Overview() {
       .sort(compareIncidents)
   ).sort(compareGroupedRows).slice(0, 5)
 
-  const withLatency = catServices.filter((s) => s.latency != null)
+  const withLatency = services.filter((s) => s.latency != null) // #798 — all services, not catServices (cross-category like Recent Incidents)
   const sortedByLatency = [...withLatency].sort((a, b) => a.latency - b.latency)
   const maxLatency = withLatency.length ? Math.max(...withLatency.map((s) => s.latency)) : 1
 
