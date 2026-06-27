@@ -13,6 +13,7 @@ import { trackEvent } from '../utils/analytics'
 import { formatDate } from '../utils/time'
 import { buildCalendarFromIncidents } from '../utils/calendar'
 import { groupIncidents } from '../utils/incidentGrouping'
+import { buildBadgeMarkdown } from '../utils/badge'
 import { compareGroupedRows, dominantGroupStatus } from '../utils/incidentSort'
 import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
 import { computeRecoveryStats, formatRecoveryMin } from '../utils/recovery'
@@ -635,8 +636,9 @@ function CalendarCell({ status, date, t }) {
 
 function BadgeCode({ serviceId, serviceName, t }) {
   const [copied, setCopied] = useState(false)
-  const baseUrl = 'https://aiwatch-worker.p2c2kbf.workers.dev'
-  const code = `[![${serviceName}](${baseUrl}/badge/${serviceId})](https://ai-watch.dev/#${serviceId})`
+  // #805 — link the badge to the crawlable is-down page (not the SPA hash route) so embeds pass
+  // backlink authority to the page that ranks for "is {service} down". Logic in src/utils/badge.js.
+  const code = buildBadgeMarkdown(serviceId, serviceName)
 
   const handleCopy = () => {
     const done = () => {

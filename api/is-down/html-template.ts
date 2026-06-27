@@ -404,6 +404,7 @@ ${renderDescription(seo, service)}
 ${renderFAQ(seo, fallbacks)}
 ${renderFallbacks(seo, fallbacks, service?.id)}
 ${renderShareButtons(seo, service, canonical, ogImageUrl, aiInsight)}
+${renderBadgeEmbed(slug, seo)}
 ${renderFooter(slug)}
 
 </div>
@@ -1143,6 +1144,11 @@ function copyLink(btn){
     prompt('Copy this:',copyText);setTimeout(function(){btn.innerHTML=_copyOrig},500)
   })
 }
+function copyBadge(btn){
+  var t=btn.dataset.text,o=btn.textContent;
+  function done(){btn.textContent='Copied!';setTimeout(function(){btn.textContent=o},2000);typeof gtag==='function'&&gtag('event','copy_badge',{location:'is_down_page',service_id:btn.dataset.svc})}
+  if(navigator.clipboard){navigator.clipboard.writeText(t).then(done).catch(function(){prompt('Copy this:',t)})}else{prompt('Copy this:',t)}
+}
 function shareKakao(){
   if(!window.Kakao||!Kakao.isInitialized())return;
   try{
@@ -1199,6 +1205,25 @@ export const FOOTER_CATEGORY_ORDER: ReadonlyArray<{ key: string; label: string }
 
 // Exported for api/is-down/__tests__/html-template.test.ts — pins the
 // category-grouped "Also check" structure (#424).
+// #805 (Problem B) — surface the embeddable status badge on the high-traffic is-down page itself
+// (not just the deep SPA detail route) so the right audience — developers checking if the service is
+// down — can grab it. The markdown links back to THIS crawlable is-down page (the backlink authority
+// that makes the badge an SEO asset; see src/utils/badge.js + #805 Problem A).
+export function renderBadgeEmbed(slug: string, seo: ServiceSEO): string {
+  const serviceId = SLUG_TO_SERVICE[slug]?.id ?? slug
+  const badgeImg = `https://aiwatch-worker.p2c2kbf.workers.dev/badge/${serviceId}`
+  const markdown = `[![${seo.displayName}](${badgeImg})](https://ai-watch.dev/is-${slug}-down)`
+  return `<div style="margin:28px 0;padding:16px;background:#0d1117;border:1px solid rgba(255,255,255,0.08);border-radius:8px">
+<h2 style="margin:0 0 4px">Embed this status badge</h2>
+<p class="meta" style="margin:0 0 12px">Show your users ${esc(seo.displayName)}'s live status — drop this badge in your README, docs, or status page. It links back to this live page.</p>
+<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+<img src="${esc(badgeImg)}" alt="${esc(seo.displayName)} status" height="20" loading="lazy">
+<input type="text" readonly value="${esc(markdown)}" onclick="this.select()" aria-label="Badge markdown" class="mono" style="flex:1;min-width:200px;font-size:11px;padding:6px 8px;background:#161b22;border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#adbac7;outline:none">
+<button class="share-btn badge-copy" data-text="${esc(markdown)}" data-svc="${esc(serviceId)}" onclick="copyBadge(this)" style="background:#161b22;color:#e6edf3;border-color:rgba(255,255,255,0.14)">Copy</button>
+</div>
+</div>`
+}
+
 export function renderFooter(slug: string): string {
   // Related services first (SEO cross-linking), then everything else grouped
   // by category.
