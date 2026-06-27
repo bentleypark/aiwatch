@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderPage, linkifyFaqAnswer, FOOTER_CATEGORY_ORDER, type ServiceData } from '../html-template'
+import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderBadgeEmbed, renderPage, linkifyFaqAnswer, FOOTER_CATEGORY_ORDER, type ServiceData } from '../html-template'
 import type { ServiceSEO } from '../seo-content'
 import { SLUG_TO_SERVICE, RELATED_SLUGS } from '../slug-map'
 import type { RegionStatusResult } from '../region-status'
@@ -1319,5 +1319,27 @@ describe('renderPage — supply-chain note (#574)', () => {
 
   it('no note → nothing rendered', () => {
     expect(args(null)).not.toContain('AWS infrastructure issue')
+  })
+})
+
+describe('renderBadgeEmbed (#805 Problem B — discoverability)', () => {
+  it('renders the embed markdown linking to the crawlable is-down page (not a hash route)', () => {
+    const html = renderBadgeEmbed('claude', mkSeo())
+    expect(html).toContain('](https://ai-watch.dev/is-claude-down)')
+    expect(html).not.toContain('ai-watch.dev/#claude')
+    expect(html).toContain('/badge/claude)') // worker badge image, serviceId == slug here
+  })
+
+  it('uses the worker service id (not the slug) for the badge image when they differ', () => {
+    // slug "claude-ai" → worker id "claudeai"; the page link keeps the slug, the badge uses the id
+    const html = renderBadgeEmbed('claude-ai', mkSeo({ displayName: 'claude.ai' }))
+    expect(html).toContain('/badge/claudeai)')
+    expect(html).toContain('](https://ai-watch.dev/is-claude-ai-down)')
+  })
+
+  it('is wired into the full page after the share buttons', () => {
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [])
+    expect(html).toContain('Embed this status badge')
+    expect(html).toContain('](https://ai-watch.dev/is-claude-down)')
   })
 })
