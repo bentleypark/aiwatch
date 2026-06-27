@@ -530,6 +530,14 @@ export function pickBreakdownComponents(
 /** #802 — minimum days of AIWatch coverage before a service is eligible for the Reliability Ranking. */
 export const MIN_COVERAGE_DAYS = 30
 
+/** #809 — id → static `addedAt` ISO date, only for services that carry one. Persisted per-service into
+ *  the monthly archive (`/api/report`) so the report-side coverage gate (aiwatch-reports#45) can detect
+ *  a service added mid-month by comparing this STATIC date to the report month — `coverageDays` (live,
+ *  now-relative) is unusable for a historical month. Absent id = established service = full coverage. */
+export const SERVICE_ADDED_AT: Record<string, string> = Object.fromEntries(
+  SERVICES.filter((s) => s.addedAt).map((s) => [s.id, s.addedAt as string]),
+)
+
 /** #802 — whole days AIWatch has monitored a service, from its `addedAt` date. null when `addedAt` is
  *  absent (an established service → treated as full coverage). Floor of (now − addedAt) in days, never
  *  negative; null on an unparseable date (fail-open: no coverage gate). Pure — unit-tested. */

@@ -11,6 +11,7 @@ import type { ServiceStatus, Incident } from './types'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
+import { SERVICE_ADDED_AT } from './services'
 import { kvPut } from './utils'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
@@ -62,6 +63,11 @@ export interface MonthlyServiceData {
   // absent for single-component services and pre-#605 archives. Feeds the report's per-component
   // reliability table / "weakest component this month" ranking (Phase 3).
   components?: Array<{ id: string; name: string; uptime: number }>
+  // #809 — static `addedAt` ISO date (from ServiceConfig), for services that carry one. Lets the
+  // report-side coverage gate (aiwatch-reports#45) detect a service added mid-month by comparing this
+  // date to the report month. Absent = established service (full coverage). NOT `coverageDays` (live,
+  // now-relative → wrong for a historical month).
+  addedAt?: string
 }
 
 export interface MonthlyArchive {
@@ -783,6 +789,7 @@ export async function buildMonthlyArchive(
       ...(incidentList ? { incidentList } : {}),
       ...(scoreSvc?.incidentSourceStale ? { incidentSourceStale: true } : {}),
       ...(componentUptimeMap[id] ? { components: componentUptimeMap[id] } : {}), // #605 Phase 2
+      ...(SERVICE_ADDED_AT[id] ? { addedAt: SERVICE_ADDED_AT[id] } : {}), // #809 — report-side coverage gate
     }
   }
 

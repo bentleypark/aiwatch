@@ -27,6 +27,7 @@ import {
 import type { ServiceStatus, Incident } from '../types'
 import type { MonthlySecurityEntry, MonthlySecuritySummary } from '../monthly-archive'
 import type { OsvTimeline } from '../security-monitor'
+import { SERVICE_ADDED_AT } from '../services'
 
 // ── parseDurationMin ─────────────────────────────────────────────────
 
@@ -833,6 +834,17 @@ describe('buildMonthlyArchive', () => {
     expect(archive.services.deepseek.incidentSourceStale).toBe(true)
     // absent (not false) for non-stale services — the report generator treats absence as not-stale
     expect(archive.services.claude.incidentSourceStale).toBeUndefined()
+  })
+
+  it('#809 threads static addedAt into the archive (present for configured, absent for established)', async () => {
+    const recentId = Object.keys(SERVICE_ADDED_AT)[0] // a service that carries an addedAt date
+    expect(recentId).toBeDefined()
+    const archive = await buildMonthlyArchive(mockKV, 2026, 3, [
+      { id: recentId, aiwatchScore: 80, scoreGrade: 'good' as const },
+      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const },
+    ])
+    expect(archive.services[recentId].addedAt).toBe(SERVICE_ADDED_AT[recentId]) // static config date, for the report-side gate
+    expect(archive.services.claude.addedAt).toBeUndefined() // established service → absent = full coverage
   })
 
   it('#586 daily snapshot WINS over the build-time scoreData fallback', async () => {
