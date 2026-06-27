@@ -1219,7 +1219,7 @@ export function renderBadgeEmbed(slug: string, seo: ServiceSEO): string {
 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
 <img src="${esc(badgeImg)}" alt="${esc(seo.displayName)} status" height="20" loading="lazy">
 <input type="text" readonly value="${esc(markdown)}" onclick="this.select()" aria-label="Badge markdown" class="mono" style="flex:1;min-width:200px;font-size:11px;padding:6px 8px;background:#161b22;border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#adbac7;outline:none">
-<button class="share-btn share-copy" data-text="${esc(markdown)}" data-svc="${esc(serviceId)}" onclick="copyBadge(this)">Copy</button>
+<button class="share-btn badge-copy" data-text="${esc(markdown)}" data-svc="${esc(serviceId)}" onclick="copyBadge(this)" style="background:#161b22;color:#e6edf3;border-color:rgba(255,255,255,0.14)">Copy</button>
 </div>
 </div>`
 }

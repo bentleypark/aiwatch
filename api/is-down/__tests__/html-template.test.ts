@@ -1342,4 +1342,12 @@ describe('renderBadgeEmbed (#805 Problem B — discoverability)', () => {
     expect(html).toContain('Embed this status badge')
     expect(html).toContain('](https://ai-watch.dev/is-claude-down)')
   })
+
+  it('does NOT reuse the share-copy class (keeps button.share-copy unique for the e2e selector)', () => {
+    // Regression: the badge Copy button originally shared class="share-copy" with the share-bar
+    // Copy-Link button → Playwright strict-mode `button.share-copy` matched 2 elements and failed.
+    expect(renderBadgeEmbed('claude', mkSeo())).not.toContain('share-copy')
+    const page = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [])
+    expect(page.match(/class="[^"]*\bshare-copy\b[^"]*"/g) ?? []).toHaveLength(1)
+  })
 })
