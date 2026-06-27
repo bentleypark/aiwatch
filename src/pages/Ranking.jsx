@@ -7,7 +7,7 @@ import { usePage } from '../utils/pageContext'
 import { useSettings } from '../hooks/useSettings'
 import { SCORE_BG_CLASS, SCORE_TEXT_CLASS } from '../utils/constants'
 import { formatTime } from '../utils/time'
-import { hasReliableScoreData } from '../utils/serviceReliability'
+import { hasReliableScoreData, MIN_COVERAGE_DAYS } from '../utils/serviceReliability'
 import { trackEvent } from '../utils/analytics'
 import SkeletonUI from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
@@ -31,7 +31,16 @@ export default function Ranking() {
         return { ...svc, rank, isTied }
       })
     const na = services.filter((s) => s.aiwatchScore == null || !hasReliableScoreData(s))
-    return { scored, na }
+    // #802 — split the not-ranked bucket by REASON so "recently added" isn't conflated with "not enough
+    // measurement signal". A service is "recently added" ONLY when coverage is its sole disqualifier
+    // (it has a score + a non-low confidence + a live feed, just <30d of history) — otherwise it's in
+    // the insufficient-measurement group (no uptime + no probe → low confidence, or a stale feed).
+    const recentlyAdded = na.filter((s) =>
+      s.aiwatchScore != null && !s.incidentSourceStale && s.scoreConfidence !== 'low'
+      && s.coverageDays != null && s.coverageDays < MIN_COVERAGE_DAYS)
+    const recentIds = new Set(recentlyAdded.map((s) => s.id))
+    const insufficient = na.filter((s) => !recentIds.has(s.id))
+    return { scored, recentlyAdded, insufficient }
   }, [services])
 
   if (loading && services.length === 0) return <SkeletonUI />
@@ -194,8 +203,33 @@ export default function Ranking() {
         </div>
       </section>
 
-      {/* N/A Services */}
-      {ranked.na.length > 0 && (
+      {/* #802 — Recently Added (excluded only for a <30d window — distinct from insufficient data) */}
+      {ranked.recentlyAdded.length > 0 && (
+        <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+          <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+            <div className="mono text-[10px] text-[var(--text2)] uppercase tracking-wider">
+              {t('ranking.na.recent')}
+            </div>
+          </div>
+          <div style={{ padding: '16px' }}>
+            <p className="text-[11px] text-[var(--text2)]" style={{ marginBottom: '10px' }}>{t('ranking.na.recentReason')}</p>
+            <div className="flex flex-col gap-2">
+              {ranked.recentlyAdded.map((svc) => (
+                <div key={svc.id} className="flex items-center gap-2 text-[11px] text-[var(--text2)]">
+                  <span>•</span>
+                  <span className="text-[var(--text1)]">{svc.name}</span>
+                  {svc.coverageDays != null && (
+                    <span className="text-[var(--text2)]">— {t('ranking.na.ranksIn').replace('{n}', String(Math.max(1, MIN_COVERAGE_DAYS - svc.coverageDays)))}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Insufficient measurement data — no official uptime + no probe (low confidence), or a stale feed */}
+      {ranked.insufficient.length > 0 && (
         <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
           <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
             <div className="mono text-[10px] text-[var(--text2)] uppercase tracking-wider">
@@ -207,7 +241,7 @@ export default function Ranking() {
                 instead of repeating it on every row. */}
             <p className="text-[11px] text-[var(--text2)]" style={{ marginBottom: '10px' }}>{t('ranking.naReason')}</p>
             <div className="flex flex-col gap-2">
-              {ranked.na.map((svc) => (
+              {ranked.insufficient.map((svc) => (
                 <div key={svc.id} className="flex items-center gap-2 text-[11px] text-[var(--text2)]">
                   <span>•</span>
                   <span className="text-[var(--text1)]">{svc.name}</span>

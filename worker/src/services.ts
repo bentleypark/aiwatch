@@ -125,7 +125,7 @@ export const SERVICES: ServiceConfig[] = [
   // displayComponentIds (#761): ALL top-level Instatus components — API, Website, Official Models
   // (uniform "show every top-level component" rule, same as perplexity). Display-only — badge stays on
   // statusComponent 'API'. Next.js Instatus exposes per-component status.
-  { id: 'fal', name: 'fal.ai', provider: 'fal', category: 'api', statusUrl: 'https://status.fal.ai', apiUrl: null, instatusUrl: 'https://status.fal.ai', incidentKeywords: ['api'], statusComponent: 'API', displayComponentIds: ['clzmj6mnv0283gwmwtdqtt9u3', 'clzmj6mni0276gwmw95xftvtd', 'clzu5ivf0385762icocgwepue4u'] },
+  { id: 'fal', name: 'fal.ai', provider: 'fal', category: 'api', statusUrl: 'https://status.fal.ai', apiUrl: null, instatusUrl: 'https://status.fal.ai', incidentKeywords: ['api'], statusComponent: 'API', displayComponentIds: ['clzmj6mnv0283gwmwtdqtt9u3', 'clzmj6mni0276gwmw95xftvtd', 'clzu5ivf0385762icocgwepue4u'], addedAt: '2026-06-24' }, // #802
   // displayComponentIds (#606): pinecone's FUNCTIONAL surfaces (Console, Pod/Serverless Indexes
   // group headers, Index Management, Inference, Assistant). The 22 region components are excluded
   // — the Region card already covers per-region status. Display-only — badge stays on statusComponentId.
@@ -139,7 +139,7 @@ export const SERVICES: ServiceConfig[] = [
   // Per-component breakdown (#606): displayAllComponents per-model page — API + Finetuning stay
   // individual surfaces; the FLUX model tiers fold into the collapsed "Models" group; the "Image
   // Generation Services" group-header component is denylisted (its children are already shown).
-  { id: 'bfl', name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', category: 'api', statusUrl: 'https://status.bfl.ml', apiUrl: 'https://status.bfl.ml/api/v2/summary.json', statusComponentId: 'ws9rrzk6n2j7', statusComponentIds: ['ws9rrzk6n2j7', 'm991l9z7y6jj'], displayAllComponents: true, componentDenylist: ['Image Generation Services'], componentSurfaces: ['API (api.bfl.ai)', 'Finetuning'] },
+  { id: 'bfl', name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', category: 'api', statusUrl: 'https://status.bfl.ml', apiUrl: 'https://status.bfl.ml/api/v2/summary.json', statusComponentId: 'ws9rrzk6n2j7', statusComponentIds: ['ws9rrzk6n2j7', 'm991l9z7y6jj'], displayAllComponents: true, componentDenylist: ['Image Generation Services'], componentSurfaces: ['API (api.bfl.ai)', 'Finetuning'], addedAt: '2026-06-24' }, // #802
   // displayComponentIds (#606): API + User Dashboard. Display-only.
   { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr', displayComponentIds: ['g74wmxgm0zxr', 'p4zzcfjd8p5q'] },
   { id: 'modal', name: 'Modal', provider: 'Modal', category: 'api', statusUrl: 'https://status.modal.com', apiUrl: null, rssFeedUrl: 'https://status.modal.com/feed', betterStackUrl: 'https://status.modal.com', flapSuppression: true, componentDenylist: ['Website'] },
@@ -156,7 +156,7 @@ export const SERVICES: ServiceConfig[] = [
   // reads ~100% despite the incidents, so it would understate. That API component is also
   // statusComponentIds[1], so it doubles as one of the three worst-of badge inputs AND (via
   // incidentIoComponentId) the source of official uptime + calendar impact + text enrichment.
-  { id: 'langsmith', name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', statusUrl: 'https://status.smith.langchain.com', apiUrl: 'https://status.smith.langchain.com/api/v2/summary.json', statusComponentId: '01JT46QKH7HC0HA6RHD82GQYME', statusComponentIds: ['01JT46QKH7HC0HA6RHD82GQYME', '01JT46QKH7CWH1K3K3CAVMSQ7E', '01JT46QKH7PSQYR4CKSVXJ7PHS'], incidentIoBaseUrl: 'https://status.smith.langchain.com/incidents', incidentIoComponentId: '01JT46QKH7CWH1K3K3CAVMSQ7E' },
+  { id: 'langsmith', name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', statusUrl: 'https://status.smith.langchain.com', apiUrl: 'https://status.smith.langchain.com/api/v2/summary.json', statusComponentId: '01JT46QKH7HC0HA6RHD82GQYME', statusComponentIds: ['01JT46QKH7HC0HA6RHD82GQYME', '01JT46QKH7CWH1K3K3CAVMSQ7E', '01JT46QKH7PSQYR4CKSVXJ7PHS'], incidentIoBaseUrl: 'https://status.smith.langchain.com/incidents', incidentIoComponentId: '01JT46QKH7CWH1K3K3CAVMSQ7E', addedAt: '2026-06-11' }, // #802
   // #601 — LLM observability siblings for LangSmith (un-blocks the observability fallback sub-tier).
   // Helicone: Better Stack (mirror together/luma — official uptime + RSS). Langfuse: incident.io
   // (mirror langsmith — summary.json + incidents). Both data-rich (verified uptime / incident history).
@@ -166,8 +166,8 @@ export const SERVICES: ServiceConfig[] = [
   // escalate the live badge, but it STILL surfaces in the incident list/calendar (incidentIoBaseUrl is
   // not component-scoped). Acceptable: a real Langfuse outage hits the primary region; widen the ID set
   // here if cross-region badge escalation is later wanted.
-  { id: 'helicone', name: 'Helicone', provider: 'Helicone', category: 'api', statusUrl: 'https://status.helicone.ai', apiUrl: null, rssFeedUrl: 'https://status.helicone.ai/feed', betterStackUrl: 'https://status.helicone.ai', flapSuppression: true, componentDenylist: ['Website'] },
-  { id: 'langfuse', name: 'Langfuse', provider: 'Langfuse', category: 'api', statusUrl: 'https://status.langfuse.com', apiUrl: 'https://status.langfuse.com/api/v2/summary.json', statusComponentId: '01KS5BHY7AKJD8YEM4MFYMB35Z', statusComponentIds: ['01KS5BHY7AKJD8YEM4MFYMB35Z', '01KS5BHY7AX99XYA7AS7AAP7QG', '01KS5BHY7AH52EZHZQ9TYD53TY'], incidentIoBaseUrl: 'https://status.langfuse.com/incidents', incidentIoComponentId: '01KS5BHY7AKJD8YEM4MFYMB35Z', holdShortIncidents: true },
+  { id: 'helicone', name: 'Helicone', provider: 'Helicone', category: 'api', statusUrl: 'https://status.helicone.ai', apiUrl: null, rssFeedUrl: 'https://status.helicone.ai/feed', betterStackUrl: 'https://status.helicone.ai', flapSuppression: true, componentDenylist: ['Website'], addedAt: '2026-06-23' }, // #802
+  { id: 'langfuse', name: 'Langfuse', provider: 'Langfuse', category: 'api', statusUrl: 'https://status.langfuse.com', apiUrl: 'https://status.langfuse.com/api/v2/summary.json', statusComponentId: '01KS5BHY7AKJD8YEM4MFYMB35Z', statusComponentIds: ['01KS5BHY7AKJD8YEM4MFYMB35Z', '01KS5BHY7AX99XYA7AS7AAP7QG', '01KS5BHY7AH52EZHZQ9TYD53TY'], incidentIoBaseUrl: 'https://status.langfuse.com/incidents', incidentIoComponentId: '01KS5BHY7AKJD8YEM4MFYMB35Z', holdShortIncidents: true, addedAt: '2026-06-23' }, // #802
   // Runway (#393) — hosted generative-video AI (Gen-4 / Act-Two), AIWatch's first video provider. Native
   // Atlassian Statuspage (page s9lfdrzmhryw) → statuspage.ts covers it, no new parser. Multi-component
   // worst-of (#379): badge tracks the three availability surfaces (Public API + App + Backend); Billing +
@@ -175,13 +175,13 @@ export const SERVICES: ServiceConfig[] = [
   // incidentKeywords. Probed since #678 (api.runwayml.com/v1/tasks → 401, auth not needed for RTT).
   // is-down slug == id ('runway'), so no slug override.
   // Lumped under `inference` for now (avoid a single-member video category until Luma/Pika are added).
-  { id: 'runway', name: 'Runway', provider: 'Runway', category: 'api', statusUrl: 'https://status.runwayml.com', apiUrl: 'https://status.runwayml.com/api/v2/summary.json', statusComponentId: 'w3jcq3dwljp4', statusComponentIds: ['w3jcq3dwljp4', '2fr8tksxj5ns', 'hl94rh0mg6xt'] },
+  { id: 'runway', name: 'Runway', provider: 'Runway', category: 'api', statusUrl: 'https://status.runwayml.com', apiUrl: 'https://status.runwayml.com/api/v2/summary.json', statusComponentId: 'w3jcq3dwljp4', statusComponentIds: ['w3jcq3dwljp4', '2fr8tksxj5ns', 'hl94rh0mg6xt'], addedAt: '2026-06-11' }, // #802
   // Luma / Dream Machine (#602, #601 Phase 1) — generative-video AI (Dream Machine, Ray, UNI-1), added
   // as a Runway sibling. Better Stack status page (status.lumalabs.ai) → betterstack.ts parser via
   // rssFeedUrl (incidents) + betterStackUrl /index.json (status + uptime). flapSuppression: true — the
   // page auto-emits "X went down/recovered/degraded" model blips (#283/#597). Video-native, so no
   // component scoping needed. is-down slug == id ('luma'). Probed since #678 (dream-machine/v1/generations → 403).
-  { id: 'luma', name: 'Luma (Dream Machine)', provider: 'Luma', category: 'api', statusUrl: 'https://status.lumalabs.ai', apiUrl: null, rssFeedUrl: 'https://status.lumalabs.ai/feed', betterStackUrl: 'https://status.lumalabs.ai', flapSuppression: true, componentDenylist: ['Website'] },
+  { id: 'luma', name: 'Luma (Dream Machine)', provider: 'Luma', category: 'api', statusUrl: 'https://status.lumalabs.ai', apiUrl: null, rssFeedUrl: 'https://status.lumalabs.ai/feed', betterStackUrl: 'https://status.lumalabs.ai', flapSuppression: true, componentDenylist: ['Website'], addedAt: '2026-06-12' }, // #802
   // AI Apps
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   // displayComponentIds (#606): all Character.AI surfaces (single-owner page). Display-only.
@@ -205,7 +205,7 @@ export const SERVICES: ServiceConfig[] = [
   // OpenAI API↔ChatGPT. Feed-only (no apiUrl): when the scraper feed is fresh it supersedes +
   // clears incidentSourceStale; when absent, fetchService returns an empty stale base (it does NOT
   // fetch the bot-walled status.deepseek.com directly). incidentSourceStale is the feed-absent flag.
-  { id: 'deepseekapp', name: 'DeepSeek App', provider: 'DeepSeek', category: 'app', statusUrl: 'https://status.deepseek.com', apiUrl: null, incidentSourceStale: true, flashdutyFeed: true, flashdutyPrimaryComponentId: '01KR3NC9ETESRRQ4GABE0TGW53' },
+  { id: 'deepseekapp', name: 'DeepSeek App', provider: 'DeepSeek', category: 'app', statusUrl: 'https://status.deepseek.com', apiUrl: null, incidentSourceStale: true, flashdutyFeed: true, flashdutyPrimaryComponentId: '01KR3NC9ETESRRQ4GABE0TGW53', addedAt: '2026-06-12' }, // #802
   // Coding Agents
   // claudecode intentionally tracks only the Claude Code component for the badge.
   // Adding Claude API as a multi-component dependency would conflict with the
@@ -527,6 +527,19 @@ export function pickBreakdownComponents(
   return summaryComponents
 }
 
+/** #802 — minimum days of AIWatch coverage before a service is eligible for the Reliability Ranking. */
+export const MIN_COVERAGE_DAYS = 30
+
+/** #802 — whole days AIWatch has monitored a service, from its `addedAt` date. null when `addedAt` is
+ *  absent (an established service → treated as full coverage). Floor of (now − addedAt) in days, never
+ *  negative; null on an unparseable date (fail-open: no coverage gate). Pure — unit-tested. */
+export function coverageDaysFrom(addedAt: string | undefined, nowIso: string): number | null {
+  if (!addedAt) return null
+  const ms = Date.parse(nowIso) - Date.parse(addedAt)
+  if (Number.isNaN(ms)) return null
+  return Math.max(0, Math.floor(ms / 86_400_000))
+}
+
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
   const { incidentKeywords, incidentExclude, incidentComponents } = config
   return incidents.filter((inc) => {
@@ -721,6 +734,9 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
     // #591 — propagated from config to every return path (all spread `...base`), so a stale-source
     // service is flagged regardless of which fetch branch produces its status.
     ...(config.incidentSourceStale ? { incidentSourceStale: true } : {}),
+    // #802 — coverage days from addedAt (absent when established), propagated like incidentSourceStale
+    // so the ranking gate sees it on every return path. Computed once here at the service's lastChecked.
+    ...(config.addedAt ? { coverageDays: coverageDaysFrom(config.addedAt, now) ?? undefined } : {}),
   }
 
   try {

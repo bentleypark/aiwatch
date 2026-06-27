@@ -128,8 +128,11 @@ export default async function handler(req: Request) {
         // 2. Use competition ranking (1, 2, 4=, 4=, 4=, 7=, ...) based on rounded score,
         //    not array index — otherwise tied services display different ranks per service
         if (Number.isFinite(target?.aiwatchScore)) {
-          const hasReliableData = (s: { scoreConfidence?: string; incidentSourceStale?: boolean }) =>
-            !s.incidentSourceStale && s.scoreConfidence !== 'low'
+          // #802 — ALSO exclude a recently-added service (<30d coverage) from the ranked set: its
+          // incident/recovery/responsiveness Score components are based on a thin observed window, so it
+          // would rank off insufficient data. `coverageDays` absent = established → full coverage.
+          const hasReliableData = (s: { scoreConfidence?: string; incidentSourceStale?: boolean; coverageDays?: number }) =>
+            !s.incidentSourceStale && s.scoreConfidence !== 'low' && (s.coverageDays == null || s.coverageDays >= 30)
           const targetScore = Math.round(target!.aiwatchScore as number)
           if (!hasReliableData(target!)) {
             // Target itself fails the reliability filter — dedup'd to avoid log spam

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { noOfficialUptime, isUnreliableUptime, hasReliableScoreData } from '../serviceReliability'
+import { noOfficialUptime, isUnreliableUptime, hasReliableScoreData, hasSufficientCoverage } from '../serviceReliability'
 
 // #713 — AIWatch no longer invents a uptime % for services without an official figure (the old
 // `uptimeSource: 'estimate'` was removed). A no-official-uptime service carries `uptime30d: null` and
@@ -35,5 +35,20 @@ describe('serviceReliability predicates (#713)', () => {
     expect(hasReliableScoreData(probedNoUptime)).toBe(true)   // #713 — probe signal (medium) → ranked
     expect(hasReliableScoreData(thinNoUptime)).toBe(false)    // no uptime + no probe (low) → NOT ranked
     expect(hasReliableScoreData(staleService)).toBe(false)    // stale feed → NOT ranked
+  })
+
+  it('#802 — hasSufficientCoverage: absent coverageDays = established (full); <30d = insufficient', () => {
+    expect(hasSufficientCoverage(official)).toBe(true)                          // no coverageDays → established
+    expect(hasSufficientCoverage({ ...official, coverageDays: 30 })).toBe(true) // boundary inclusive
+    expect(hasSufficientCoverage({ ...official, coverageDays: 31 })).toBe(true)
+    expect(hasSufficientCoverage({ ...official, coverageDays: 29 })).toBe(false)
+    expect(hasSufficientCoverage({ ...official, coverageDays: 2 })).toBe(false)
+  })
+
+  it('#802 — hasReliableScoreData EXCLUDES a recently-added (<30d) service even with high confidence', () => {
+    // The exact ranking-distortion case: a new service WITH official uptime (high confidence) must still
+    // be held out of the ranking until it accrues a full 30-day window.
+    expect(hasReliableScoreData({ ...official, coverageDays: 10 })).toBe(false)
+    expect(hasReliableScoreData({ ...official, coverageDays: 30 })).toBe(true) // rejoins at 30d
   })
 })

@@ -175,6 +175,15 @@ describe('renderPage <title> — live status (#566)', () => {
     expect(untied).toContain('is ranked <strong>#5</strong>')
     expect(untied).not.toContain('(tied)')
   })
+
+  // #802 — a <30d-coverage service is excluded from the ranked SET (so other services' `of M`
+  // denominator matches the dashboard), but is-down adds NO on-page note for it (the page is already
+  // information-dense): its rank is simply absent. The exclusion itself lives in is-down.ts's filter.
+  it('does NOT render a "recently added" note (no extra is-down clutter for a <30d service)', () => {
+    const recent = renderPage('runway', mkService({ status: 'operational', scoreConfidence: 'high' }), mkSeo(), [])
+    expect(recent).not.toContain('recently added')
+    expect(recent).not.toContain('to go)')
+  })
 })
 
 // #722/#744 — when a BetterStack service reads operational but `partialCount > 0` (sub-threshold
