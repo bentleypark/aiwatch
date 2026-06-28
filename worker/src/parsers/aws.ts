@@ -1,7 +1,7 @@
 // AWS Health Dashboard RSS Parser — for Amazon Bedrock
 
 import type { Incident, TimelineEntry } from '../types'
-import { formatDuration } from '../utils'
+import { formatDuration, isNonReliabilityAdvisory } from '../utils'
 
 function decodeXmlEntities(text: string): string {
   return text
@@ -80,14 +80,9 @@ export function decodeAwsHealthJson(buf: ArrayBuffer, contentType: string | null
 // confidence") was a compliance model-removal, yet scored as a `major` 64.8h outage and tanked
 // Bedrock's AIWatch Score to 43. We down-classify such advisories to `null` (informational) so they're
 // excluded from the reliability score while still showing in the incident list.
-const NON_RELIABILITY_RE =
-  /export control|compliance|regulatory|revoke|revoked|revoking|deprecat|end[ -]of[ -]life|retir(?:e|ed|ing|ement)|sunset|discontinu|scheduled (?:maintenance|change)/i
-// Outage/fault signals — if ANY appear, it's a real reliability event regardless of advisory wording,
-// so we do NOT down-classify (the advisory regex must NOT win over a genuine fault — a false-positive
-// here would HIDE a real outage by scoring it as informational, the more dangerous direction). Note:
-// "unavailable" is deliberately ABSENT — a compliance removal makes a model "unavailable" by design.
-const OUTAGE_SIGNAL_RE =
-  /error rate|elevated error|5xx|disruption|outage|partial outage|degraded|unable to|throttl|increased latency|timeouts?|failure|not responding|impair/i
+// #811 — the non-reliability/outage-signal classification moved to utils.ts (`isNonReliabilityAdvisory`)
+// so the fallback selector (#811) shares ONE source of truth with this AWS down-classification (#707).
+// The shared NON_RELIABILITY_RE gained `suspend` for the Claude model-access-suspension incident.io wording.
 
 /** Map an AWS Health event to AIWatch impact. The events API carries no explicit severity, but a
  *  `*_OPERATIONAL_ISSUE` is a service-impacting event (AWS labels these "Impacted"). We map it to
@@ -100,7 +95,7 @@ export function awsHealthImpact(typeCode: string, text = ''): 'minor' | 'major' 
   if (t.includes('informational') || t.includes('notification')) return 'minor'
   // #707 — a clear non-reliability advisory with NO outage signal is informational, not a reliability
   // incident: classify null so it's excluded from the AIWatch Score (uptime/incidents/recovery).
-  if (text && NON_RELIABILITY_RE.test(text) && !OUTAGE_SIGNAL_RE.test(text)) return null
+  if (text && isNonReliabilityAdvisory(text)) return null
   if (t.includes('operational_issue') || t.includes('disruption') || t.includes('outage')) return 'major'
   return null
 }

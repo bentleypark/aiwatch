@@ -89,3 +89,31 @@ describe('TIER_LABEL cross-mirror sync (#403)', () => {
     }
   })
 })
+
+// #811 — pin the worker ↔ frontend parity of isNonReliabilityAdvisory (worker/src/utils.ts mirrored in
+// src/utils/constants.js). Drift would mean the Discord/RSS fallback (worker) and the dashboard fallback
+// (frontend) disagree on whether a service's advisory incident disqualifies it as a candidate.
+import { isNonReliabilityAdvisory as workerAdvisory } from '../utils'
+import { isNonReliabilityAdvisory as frontendAdvisory } from '../../../src/utils/constants'
+
+describe('isNonReliabilityAdvisory cross-mirror sync (#811)', () => {
+  const CASES = [
+    "We've suspended access to Claude Mythos 5 and Claude Fable 5", // #811 live case → advisory
+    'export control directive — revoke access',                    // #707 AWS case → advisory
+    'Model deprecation: gpt-4-0314 retired',                       // advisory
+    'Scheduled maintenance window',                                // advisory
+    'Access suspended due to elevated error rates',                // outage signal wins → NOT advisory
+    'Partial outage — API timeouts',                               // outage → NOT advisory
+    'Elevated 5xx on the Messages API',                            // outage → NOT advisory
+    '',                                                            // empty → NOT advisory
+  ]
+  it('worker and frontend classify every case identically', () => {
+    for (const c of CASES) {
+      expect(frontendAdvisory(c), `mismatch for: "${c}"`).toBe(workerAdvisory(c))
+    }
+  })
+  it('the #811 + #707 advisory cases are TRUE; outage/empty are FALSE (sanity, both copies)', () => {
+    expect(workerAdvisory("We've suspended access to Claude Mythos 5 and Claude Fable 5")).toBe(true)
+    expect(frontendAdvisory('Access suspended due to elevated error rates')).toBe(false)
+  })
+})

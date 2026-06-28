@@ -167,16 +167,31 @@ export function tierLabelFor(tier) {
   return undefined
 }
 
+// #707/#811 — MIRROR of worker/src/utils.ts `isNonReliabilityAdvisory` (+ the two regexes). A NON-
+// reliability advisory (compliance / export-control / access revocation OR suspension / deprecation /
+// scheduled change) with NO outage signal must not disqualify an operational fallback candidate (#811 —
+// a Claude model-access suspension must not exclude Claude Code when ChatGPT is down). Parity with the
+// worker copy is pinned by a sync test. An outage-signal term ALWAYS wins (never hide a real fault).
+const NON_RELIABILITY_RE =
+  /export control|compliance|regulatory|revoke|revoked|revoking|suspend(?:ed|ing|s)?|deprecat|end[ -]of[ -]life|retir(?:e|ed|ing|ement)|sunset|discontinu|scheduled (?:maintenance|change)/i
+const OUTAGE_SIGNAL_RE =
+  /error rate|elevated error|5xx|disruption|outage|partial outage|degraded|unable to|throttl|increased latency|timeouts?|failure|not responding|impair/i
+export function isNonReliabilityAdvisory(text) {
+  return !!text && NON_RELIABILITY_RE.test(text) && !OUTAGE_SIGNAL_RE.test(text)
+}
+
 /**
- * Whether a service has an unresolved incident (investigating/identified/monitoring — anything not
- * 'resolved'). A service can be `status: 'operational'` while carrying such an incident (the phase
+ * Whether a service has an unresolved RELIABILITY incident (investigating/identified/monitoring — anything
+ * not 'resolved'). A service can be `status: 'operational'` while carrying such an incident (the phase
  * hasn't flipped its status, or the impact is minor), and recommending it as a healthy fallback is
  * misleading — the Overview banner shows it as an active incident on the same screen (#550).
+ * #811 — a non-reliability ADVISORY (access suspension / compliance / deprecation, no outage signal) is
+ * NOT a reliability incident, so it does not disqualify an otherwise-operational candidate.
  * @param {object} s - Service (needs .incidents)
  * @returns {boolean}
  */
 export function hasActiveIncident(s) {
-  return (s?.incidents ?? []).some(i => i.status !== 'resolved')
+  return (s?.incidents ?? []).some(i => i.status !== 'resolved' && !isNonReliabilityAdvisory(i.title ?? ''))
 }
 
 /**

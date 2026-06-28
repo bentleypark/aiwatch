@@ -53,6 +53,35 @@ describe('getFallbacks', () => {
     expect(result.find(f => f.name === 'Together AI')).toBeDefined()     // only a resolved incident → eligible
   })
 
+  it('#811 — a non-reliability ADVISORY (Claude model-access suspension) does NOT disqualify an operational candidate', () => {
+    // The live 2026-06-27 case: Claude carries "We've suspended access to Claude Mythos 5 and Claude
+    // Fable 5" (status monitoring, badge operational — an access advisory, not an outage). Pre-#811 the
+    // bare status!==resolved rule dropped it; now it stays eligible. An outage-signal title still drops it.
+    const ADVISORY = "We've suspended access to Claude Mythos 5 and Claude Fable 5"
+    const services = [
+      { id: 'openai', category: 'api', name: 'OpenAI API', status: 'degraded', aiwatchScore: 70 },
+      { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 95, incidents: [{ status: 'monitoring', title: ADVISORY }] },
+      { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 60 },
+    ]
+    expect(getFallbacks('openai', 'api', services).find(f => f.name === 'Claude API')).toBeDefined() // advisory ignored → eligible
+
+    // Same incident phase, but an OUTAGE-signal title → still disqualified (#550 preserved).
+    const outage = [
+      { id: 'openai', category: 'api', name: 'OpenAI API', status: 'degraded', aiwatchScore: 70 },
+      { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 95, incidents: [{ status: 'monitoring', title: 'Elevated error rates on the Messages API' }] },
+      { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 60 },
+    ]
+    expect(getFallbacks('openai', 'api', outage).find(f => f.name === 'Claude API')).toBeUndefined() // outage signal → dropped
+
+    // A title-less unresolved incident (legacy data) still disqualifies — no regression to #550.
+    const legacy = [
+      { id: 'openai', category: 'api', name: 'OpenAI API', status: 'degraded', aiwatchScore: 70 },
+      { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 95, incidents: [{ status: 'investigating' }] },
+      { id: 'mistral', category: 'api', name: 'Mistral API', status: 'operational', aiwatchScore: 60 },
+    ]
+    expect(getFallbacks('openai', 'api', legacy).find(f => f.name === 'Claude API')).toBeUndefined() // no title → still counts
+  })
+
   it('#616 — excludes a stale-source candidate (incidentSourceStale, #591) even when operational with a high Score', () => {
     // deepseek is excluded from Score ranking because its incident feed is stale (#591). It is
     // operational with an inflated Score and not in EXCLUDE_FALLBACK, so without the guard it would
