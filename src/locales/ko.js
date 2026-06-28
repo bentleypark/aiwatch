@@ -13,6 +13,7 @@ const ko = {
   'nav.dashboard': '대시보드',
   'nav.reports': '월간 리포트',
   'nav.methodology': '측정 방법론',
+  'nav.badges': '상태 배지',
   'nav.requestService': '서비스 추가 요청',
   'nav.services': '서비스',
   'nav.agents': '코딩 에이전트',

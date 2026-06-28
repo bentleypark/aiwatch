@@ -223,6 +223,9 @@ api/
   methodology.ts    # Public "How AIWatch Works" methodology page Edge Function (/methodology, #673) — self-contained SSR, no data fetch
   methodology/
     html-template.ts # SSR HTML template (KO/EN i18n, doc-style sticky-TOC scroll-spy, 7 sections) — CSP-clean (no inline handlers); absorbed the retired in-dashboard AboutScore page (#about-score now redirects to /methodology#score)
+  badges.ts         # Public "AI Status Badges" gallery Edge Function (/badges, #805 Problem B) — self-contained SSR, no data fetch
+  badges/
+    html-template.ts # SSR gallery: every service's live /badge/:id + copy-markdown linking to the crawlable /is-{slug}-down page (badgeMarkdownFor), grouped by the display taxonomy (GROUP_ORDER mirrors is-down FOOTER_CATEGORY_ORDER). The one canonical "grab a badge" destination + an SEO page; copy_badge GA4 event (location:badges_page)
 src/
   components/   # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, AnalysisModal
   pages/        # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, Ranking, Statusline
