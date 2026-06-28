@@ -13,6 +13,7 @@ const en = {
   'nav.dashboard': 'Dashboard',
   'nav.reports': 'Reports',
   'nav.methodology': 'Methodology',
+  'nav.badges': 'Status Badges',
   'nav.requestService': 'Request a Service',
   'nav.services': 'Services',
   'nav.agents': 'Coding Agents',

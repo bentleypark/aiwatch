@@ -86,6 +86,15 @@ function IconSend() {
   )
 }
 
+function IconBadge() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ opacity: 0.6 }}>
+      <path d="M2.6 2.6h4.6c.3 0 .6.1.8.4l3.4 3.4c.4.4.4 1 0 1.4l-3 3c-.4.4-1 .4-1.4 0L3.6 7.4a1.1 1.1 0 0 1-.4-.8V2.6z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <circle cx="5" cy="5" r="0.9" fill="currentColor" />
+    </svg>
+  )
+}
+
 function IconTerminal() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ opacity: 0.6 }}>
@@ -241,6 +250,16 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
         >
           <span className="shrink-0"><IconBook /></span>
           {t('nav.methodology')}
+        </a>
+        {/* #805 — external link to the public /badges gallery (Edge route, not a SPA page) */}
+        <a
+          href="/badges"
+          onClick={() => { trackEvent('click_badges', { location: 'sidebar' }); onNavigate?.() }}
+          className="w-full text-left flex items-center transition-all cursor-pointer text-[var(--text1)] hover:bg-[var(--bg3)] hover:text-[var(--text0)]"
+          style={navItemStyle}
+        >
+          <span className="shrink-0"><IconBadge /></span>
+          {t('nav.badges')}
         </a>
         {/* Divider — separates "data viewing" group above from "settings / integrations" group below.
             aria-hidden because this sits inside the nav landmark and is purely visual. */}
