@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatPushLine } from '../daily-summary'
 import type { ServiceStatus } from '../types'
 
 function makeSvc(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
@@ -579,5 +579,21 @@ describe('buildDailySummary — #548 webhook delta + feed section', () => {
     const out = buildDailySummary({ ...base, feedTraffic: { all: 10, service: 5, total: 15 } })
     expect(out).toContain('📡 **Feed Polls (RSS/Slack)**')
     expect(out).toContain('Last 24h: 15')
+  })
+})
+
+describe('formatPushLine (#815 — Tier-1 push observability)', () => {
+  const minimal = { services: [makeSvc()], aiUsage: null, latencySnapshots: [], incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+  it('renders the count line when pushes were delivered', () => {
+    expect(formatPushLine(3)).toBe('\n📱 **Tier-1 Pushes Sent**: 3')
+  })
+  it('is empty on quiet days (0 / null / undefined) so the summary stays clean', () => {
+    expect(formatPushLine(0)).toBe('')
+    expect(formatPushLine(null)).toBe('')
+    expect(formatPushLine(undefined)).toBe('')
+  })
+  it('appears in the full daily summary only when pushCount > 0', () => {
+    expect(buildDailySummary({ ...minimal, pushCount: 2 })).toContain('📱 **Tier-1 Pushes Sent**: 2')
+    expect(buildDailySummary({ ...minimal, pushCount: 0 })).not.toContain('Tier-1 Pushes Sent')
   })
 })
