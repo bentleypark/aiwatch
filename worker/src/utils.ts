@@ -276,6 +276,22 @@ export function appendUtm(url: string, source: 'rss' | 'reddit'): string {
   return `${url}${sep}utm_source=${source}&utm_medium=${UTM_MEDIUM[source]}&utm_campaign=outage`
 }
 
+// #707/#811 — classify an incident's TEXT as a NON-reliability advisory (compliance / export-control /
+// access revocation OR SUSPENSION / deprecation / scheduled change) rather than a service fault. Two uses:
+//   (a) #707 — down-classify an AWS Health advisory to `null` impact (aws.ts) so it doesn't tank the Score
+//   (b) #811 — keep an operational service whose ONLY unresolved incident is such an advisory eligible as a
+//       fallback candidate (a Claude model-access SUSPENSION must not exclude Claude Code when ChatGPT is
+//       down). Mirrored in src/utils/constants.js (frontend getFallbacks); parity pinned by a sync test.
+// An OUTAGE_SIGNAL term ALWAYS wins (never down-classify a real fault — the false-positive that would HIDE
+// an outage is the dangerous direction). `suspend` (the #811 incident.io wording) joins #707's `revoke`.
+export const NON_RELIABILITY_RE =
+  /export control|compliance|regulatory|revoke|revoked|revoking|suspend(?:ed|ing|s)?|deprecat|end[ -]of[ -]life|retir(?:e|ed|ing|ement)|sunset|discontinu|scheduled (?:maintenance|change)/i
+export const OUTAGE_SIGNAL_RE =
+  /error rate|elevated error|5xx|disruption|outage|partial outage|degraded|unable to|throttl|increased latency|timeouts?|failure|not responding|impair/i
+export function isNonReliabilityAdvisory(text: string): boolean {
+  return !!text && NON_RELIABILITY_RE.test(text) && !OUTAGE_SIGNAL_RE.test(text)
+}
+
 export async function fetchWithTimeout(
   url: string,
   timeoutMs = 8000,

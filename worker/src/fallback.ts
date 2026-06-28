@@ -1,5 +1,7 @@
 // Fallback recommendation logic for incident alerts
 
+import { isNonReliabilityAdvisory } from './utils'
+
 // Keep in sync with src/utils/constants.js EXCLUDE_FALLBACK
 // #756 — stability un-excluded now that the image category has ≥2 members (Stability + FLUX recommend
 // each other in Tier 7); bfl is fallback-eligible from the start (never added here).
@@ -61,8 +63,10 @@ interface FallbackCandidate {
   category: string
   name: string
   status: string
-  /** #550 — used to exclude candidates with an unresolved incident (operational-but-incident). */
-  incidents?: Array<{ status: string }>
+  /** #550 — used to exclude candidates with an unresolved incident (operational-but-incident).
+   *  #811 — `title` lets `hasActiveIncident` ignore a non-reliability ADVISORY (access suspension /
+   *  compliance / deprecation), which must NOT disqualify an otherwise-operational candidate. */
+  incidents?: Array<{ status: string; title?: string }>
   /** #616 — stale incident source (#591). Excluded from Score ranking, so it must also be excluded
    *  as a fallback candidate: recommending a service we don't trust enough to rank contradicts the
    *  same product surface. */
@@ -75,10 +79,14 @@ interface FallbackCandidate {
   provider?: string
 }
 
-/** #550 — a service with any unresolved incident (investigating/identified/monitoring) is not a
- *  healthy fallback even when its computed status is still 'operational'. */
+/** #550 — a service with an unresolved RELIABILITY incident (investigating/identified/monitoring) is not
+ *  a healthy fallback even when its computed status is still 'operational' (the partial-degradation case).
+ *  #811 — but a non-reliability ADVISORY (e.g. a Claude model-access suspension: operational badge, no
+ *  outage signal) must NOT disqualify the candidate — recommending Claude Code when ChatGPT is down is
+ *  correct even while Anthropic carries a Mythos/Fable access-suspension notice. An outage-signal title
+ *  still counts (isNonReliabilityAdvisory returns false for it), preserving #550 for genuine degradations. */
 function hasActiveIncident(s: FallbackCandidate): boolean {
-  return (s.incidents ?? []).some(i => i.status !== 'resolved')
+  return (s.incidents ?? []).some(i => i.status !== 'resolved' && !isNonReliabilityAdvisory(i.title ?? ''))
 }
 
 export function getFallbacks(

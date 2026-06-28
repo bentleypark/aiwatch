@@ -253,6 +253,18 @@ describe('hasActiveIncident / getFallbacks active-incident exclusion (#550)', ()
     expect(ids).toContain('windsurf')
   })
 
+  it('#811 — a non-reliability advisory (Claude model-access suspension) does NOT exclude an operational candidate', () => {
+    // The live 2026-06-27 case: Claude Code carries the Anthropic "suspended access to Mythos 5/Fable 5"
+    // advisory (operational badge). When another agent (Cursor) is down, Claude Code must stay recommendable.
+    const source = { id: 'cursor', category: 'agent', status: 'degraded', incidents: [inc('investigating')] }
+    const ADVISORY = "We've suspended access to Claude Mythos 5 and Claude Fable 5"
+    const claudecode = op('claudecode', 'agent', 95, { incidents: [{ id: 'adv', status: 'monitoring', title: ADVISORY }] })
+    expect(getFallbacks(source, [source, claudecode]).map(f => f.id)).toContain('claudecode') // advisory ignored
+    // An OUTAGE-signal title still disqualifies (#550 preserved).
+    const claudecodeOutage = op('claudecode', 'agent', 95, { incidents: [{ id: 'o', status: 'monitoring', title: 'Elevated error rates on Claude Code' }] })
+    expect(getFallbacks(source, [source, claudecodeOutage]).map(f => f.id)).not.toContain('claudecode')
+  })
+
   it('still recommends a candidate whose only incident is resolved', () => {
     const source = { id: 'claudecode', category: 'agent', status: 'degraded', incidents: [inc('investigating')] }
     const codexResolved = op('codex', 'agent', 89, { incidents: [inc('resolved')] })

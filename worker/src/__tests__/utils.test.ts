@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike } from '../utils'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike } from '../utils'
 import type { Incident } from '../types'
 
 describe('appendStatusHint (#539)', () => {
@@ -406,5 +406,22 @@ describe('countsAsUptimeOk (#733)', () => {
     expect(countsAsUptimeOk('degraded', [inc('major')])).toBe(false)
     expect(countsAsUptimeOk('degraded', [inc('critical')])).toBe(false)
     expect(countsAsUptimeOk('degraded', [inc('minor'), inc('major')])).toBe(false) // worst wins
+  })
+})
+
+describe('isNonReliabilityAdvisory (#707/#811)', () => {
+  it('TRUE for non-reliability advisories (compliance / access revoke|suspend / deprecation)', () => {
+    expect(isNonReliabilityAdvisory("We've suspended access to Claude Mythos 5 and Claude Fable 5")).toBe(true) // #811 live case
+    expect(isNonReliabilityAdvisory('export control directive — Anthropic asked us to revoke access')).toBe(true) // #707 AWS case
+    expect(isNonReliabilityAdvisory('Model deprecation: gpt-4-0314 retired')).toBe(true)
+    expect(isNonReliabilityAdvisory('Scheduled maintenance window')).toBe(true)
+  })
+  it('FALSE when an OUTAGE signal is present — never down-classify a real fault', () => {
+    expect(isNonReliabilityAdvisory('Access suspended due to elevated error rates')).toBe(false) // outage wins over suspend
+    expect(isNonReliabilityAdvisory('Partial outage — API timeouts')).toBe(false)
+  })
+  it('FALSE for empty/ordinary text', () => {
+    expect(isNonReliabilityAdvisory('')).toBe(false)
+    expect(isNonReliabilityAdvisory('Elevated 5xx on the Messages API')).toBe(false)
   })
 })
