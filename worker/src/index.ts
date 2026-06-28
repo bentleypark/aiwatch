@@ -806,6 +806,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // dashboard can relay byte-identical alerts to a visitor's own Discord webhook (single source of
   // truth; kills the browser/operator divergence that #473/#474 chased).
   const feedEntries: AlertFeedEntry[] = []
+  let pushesSent = 0 // #815 — count delivered Tier-1 ntfy pushes for the daily-summary observability line
   for (const alert of sent) {
     const isStatusAlert = alert.key.startsWith('alerted:down:') || alert.key.startsWith('alerted:degraded:')
     const isRecoveryAlert = alert.key.startsWith('alerted:recovered:')
@@ -1026,12 +1027,13 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       const pushTarget = pushTargetFor(alert, scored)
       if (pushTarget) {
         const clickUrl = buildTweetSearchUrl(pushTarget.svcId) ?? alert.url
-        await sendPushAlert(
+        const delivered = await sendPushAlert(
           env,
           `${pushTarget.serviceName} incident detected`,
           'Tap to find tweets to reply to — the reply window is short.',
           clickUrl,
         )
+        if (delivered) pushesSent++ // #815 — only count an actually-delivered push (observability)
       }
     } catch (err) {
       console.error('[cron] push alert failed (Discord alert sent):', alert.key, err instanceof Error ? err.message : err)
@@ -1113,6 +1115,20 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       await kvPut(env.STATUS_CACHE, countKey, JSON.stringify(counts), { expirationTtl: 172800 })
     } catch (err) {
       console.error('[cron] alert count update failed:', err instanceof Error ? err.message : err)
+    }
+  }
+
+  // #815 — track delivered Tier-1 ntfy pushes (#778) so the daily summary can surface a count;
+  // makes the push observable without needing the phone (closes the #778 verify gap). Accumulating
+  // 2-day-TTL counter, mirrors alert:count. Best-effort — never affects the alert path.
+  if (pushesSent > 0) {
+    try {
+      const today = new Date().toISOString().split('T')[0]
+      const pushKey = `push:count:${today}`
+      const prev = parseInt((await env.STATUS_CACHE.get(pushKey).catch(() => null)) ?? '0', 10) || 0
+      await kvPut(env.STATUS_CACHE, pushKey, String(prev + pushesSent), { expirationTtl: 172800 })
+    } catch (err) {
+      console.error('[cron] push count update failed:', err instanceof Error ? err.message : err)
     }
   }
 
@@ -2187,6 +2203,9 @@ export default {
             console.error('[daily-summary] Failed to parse alert counts:', err instanceof Error ? err.message : err)
           }
 
+          // #815 — Tier-1 ntfy push count (#778 observability)
+          const pushCount = parseInt((await env.STATUS_CACHE.get(`push:count:${today}`).catch(() => null)) ?? '0', 10) || 0
+
           // Count active webhook subscriptions. Since #486 PR3 this is the number of confirmed
           // server-side subscriptions (webhook:sub:*) — the source of truth now that delivery is
           // server-side (replaced the legacy webhook:reg:* count removed with the browser relay).
@@ -2352,6 +2371,7 @@ export default {
             latencySnapshots: latSnapshots,
             incidentCountToday: { newCount: result.newCount, resolvedCount: result.resolvedCount },
             alertCounts,
+            pushCount,
             webhookCounts,
             deliveryCounts,
             redditCount,

@@ -25,6 +25,8 @@ export interface DailySummaryData {
   latencySnapshots: Array<{ t: string; data: Record<string, number> }>
   incidentCountToday: { newCount: number; resolvedCount: number }
   alertCounts?: { incidents: number; resolved: number; down: number; degraded: number; recovered: number } | null
+  // #815 — Tier-1 ntfy phone pushes delivered today (#778); makes the otherwise-unobservable push visible.
+  pushCount?: number | null
   // Discord-only since #467 — Slack moved to native /feed RSS (no per-user webhook registered or proxied).
   // #548 — newToday is the signed day-over-day delta of confirmed subscribers (null = no prior baseline).
   webhookCounts?: { discord: number; newToday?: number | null }
@@ -55,7 +57,7 @@ export interface DailySummaryData {
 }
 
 export function buildDailySummary(data: DailySummaryData): string {
-  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, webhookCounts, deliveryCounts, redditCount, vitals, fetchFailureCounts, crossValidSuppressed, degradationCounts, degradationNoStatusCounts } = data
+  const { services, aiUsage, latencySnapshots, incidentCountToday, alertCounts, pushCount, webhookCounts, deliveryCounts, redditCount, vitals, fetchFailureCounts, crossValidSuppressed, degradationCounts, degradationNoStatusCounts } = data
   const total = services.length
   const operational = services.filter(s => s.status === 'operational').length
   const degraded = services.filter(s => s.status === 'degraded').length
@@ -149,6 +151,10 @@ export function buildDailySummary(data: DailySummaryData): string {
     if (incidentCountToday.resolvedCount > 0) incParts.push(`${incidentCountToday.resolvedCount} resolved`)
     if (incParts.length > 0) lines.push(`\n📬 **Alerts Sent Today**: ${incParts.join(' · ')}`)
   }
+  // #815 — Tier-1 ntfy phone-push count (#778). Makes the otherwise-unobservable push visible so the
+  // operator can confirm it fires on a real incident (closes the #778 verify gap).
+  const pushLine = formatPushLine(pushCount)
+  if (pushLine) lines.push(pushLine)
   if (deliveryCounts && (deliveryCounts.discord > 0 || deliveryCounts.failed > 0)) {
     const failText = deliveryCounts.failed > 0 ? ` (${deliveryCounts.failed} failed)` : ''
     lines.push(`📨 **User Webhook Delivery**: ${deliveryCounts.discord} Discord${failText}`)
@@ -215,6 +221,14 @@ export function buildDailySummary(data: DailySummaryData): string {
 export function formatSubscriberDelta(newToday: number | null | undefined): string {
   if (newToday == null || newToday === 0) return ''
   return newToday > 0 ? ` (+${newToday} today)` : ` (−${Math.abs(newToday)} today)`
+}
+
+// #815 — Tier-1 ntfy phone-push count line (#778). Empty when no push fired today (or absent), so the
+// daily summary stays clean on quiet days; a non-zero count is the operator's confirmation the push
+// path actually fires on a real incident. Pure + unit-tested.
+export function formatPushLine(pushCount: number | null | undefined): string {
+  if (!pushCount || pushCount <= 0) return ''
+  return `\n📱 **Tier-1 Pushes Sent**: ${pushCount}`
 }
 
 /**
