@@ -25,5 +25,20 @@ export const CONSENT_INIT_COMMENT = `<!-- GA4: Consent Mode v2 default-denied fo
      src/utils/analytics.js. Cookieless pings still flow under default-denied for aggregate
      measurement, but no analytics or ad cookies persist. -->`
 
+const CONSENT_INIT_BODY = `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied'});var c='';try{c=localStorage.getItem('aiwatch-cookie-consent');}catch(err){}if(c==='granted'){gtag('consent','update',{analytics_storage:'granted'});}else{var h=location.hostname,EXP='expires=Thu, 01 Jan 1970 00:00:00 GMT';document.cookie.split(';').forEach(function(x){var n=x.split('=')[0].trim();if(n.indexOf('_ga')===0||n.indexOf('_gid')===0||n.indexOf('_gcl_au')===0){document.cookie=n+'=;'+EXP+';path=/;domain=.'+h+';SameSite=Lax';document.cookie=n+'=;'+EXP+';path=/;domain='+h+';SameSite=Lax';document.cookie=n+'=;'+EXP+';path=/;SameSite=Lax';}});}gtag('config','${GA4_MEASUREMENT_ID}');`
+
 export const CONSENT_INIT_SCRIPT = `<script async src="https://www.googletagmanager.com/gtag/js?id=${GA4_MEASUREMENT_ID}"></script>
-<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('consent','default',{analytics_storage:'denied',ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied'});var c='';try{c=localStorage.getItem('aiwatch-cookie-consent');}catch(err){}if(c==='granted'){gtag('consent','update',{analytics_storage:'granted'});}else{var h=location.hostname,EXP='expires=Thu, 01 Jan 1970 00:00:00 GMT';document.cookie.split(';').forEach(function(x){var n=x.split('=')[0].trim();if(n.indexOf('_ga')===0||n.indexOf('_gid')===0||n.indexOf('_gcl_au')===0){document.cookie=n+'=;'+EXP+';path=/;domain=.'+h+';SameSite=Lax';document.cookie=n+'=;'+EXP+';path=/;domain='+h+';SameSite=Lax';document.cookie=n+'=;'+EXP+';path=/;SameSite=Lax';}});}gtag('config','${GA4_MEASUREMENT_ID}');</script>`
+<script>${CONSENT_INIT_BODY}</script>`
+
+/**
+ * #482 — nonce-stamped GA4 bootstrap for the migrated Edge pages. Both the gtag.js loader AND
+ * the inline init `<script>` carry `nonce` so an enforcing CSP (no `'unsafe-inline'` in
+ * script-src) admits them — and GA4 propagates the loader's nonce to any script it injects.
+ * Byte-identical body to `CONSENT_INIT_SCRIPT` (the un-migrated callers + the Jekyll copy still
+ * use that const); only the `nonce=` attributes differ. Pass '' to get the no-nonce form.
+ */
+export function consentInitScript(nonce?: string): string {
+  const n = nonce ? ` nonce="${nonce}"` : ''
+  return `<script async${n} src="https://www.googletagmanager.com/gtag/js?id=${GA4_MEASUREMENT_ID}"></script>
+<script${n}>${CONSENT_INIT_BODY}</script>`
+}

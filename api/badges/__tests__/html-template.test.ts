@@ -56,3 +56,34 @@ describe('renderBadgesPage', () => {
     expect(html).toContain('function copyBadge(')
   })
 })
+
+// #482 — CSP Phase 2: no inline event handlers, all interactivity via delegated listeners,
+// every inline <script> nonce-stamped so an enforcing CSP (no 'unsafe-inline') admits them.
+describe('renderBadgesPage — CSP-clean (#482)', () => {
+  const INLINE_HANDLER = /\son(click|change|input|submit|load|error|mouseover|mouseout|mousedown|mouseup|keydown|keyup|focus|blur)\s*=/i
+
+  it('has ZERO inline event-handler attributes', () => {
+    expect(INLINE_HANDLER.test(renderBadgesPage('n0'))).toBe(false)
+    // the no-arg form (pre-#482 callers/tests) is clean too
+    expect(INLINE_HANDLER.test(renderBadgesPage())).toBe(false)
+  })
+
+  it('wires the removed handlers as delegated listeners (select + copy)', () => {
+    const html = renderBadgesPage('n0')
+    expect(html).toMatch(/querySelectorAll\('\.badge-input'\)[\s\S]*addEventListener\('click'/)
+    expect(html).toMatch(/querySelectorAll\('\.badge-copy'\)[\s\S]*addEventListener\('click'/)
+  })
+
+  it('stamps the nonce on EVERY inline <script> (consent + copyBadge + cookie banner)', () => {
+    const html = renderBadgesPage('NONCE123')
+    const scripts = html.match(/<script(?![^>]*\bsrc=)[^>]*>/g) ?? [] // inline (no src) script open-tags
+    expect(scripts.length).toBeGreaterThanOrEqual(3) // consent init + copyBadge + cookie banner
+    for (const tag of scripts) expect(tag).toContain('nonce="NONCE123"')
+    // the gtag.js loader (has src) is also nonce-stamped for GA4 nonce propagation
+    expect(html).toMatch(/<script async nonce="NONCE123" src="https:\/\/www\.googletagmanager\.com/)
+  })
+
+  it('omits the nonce attribute entirely when no nonce is passed (no stray nonce="")', () => {
+    expect(renderBadgesPage()).not.toContain('nonce="')
+  })
+})
