@@ -10,10 +10,11 @@
 // addEventListener inside the single inline <script> block using data-attributes +
 // delegated listeners, so this page stays off the Phase-2 inline-handler refactor list.
 
-import { CONSENT_INIT_COMMENT, CONSENT_INIT_SCRIPT } from '../_shared/consent-init'
-import { COOKIE_BANNER_HTML } from '../_shared/cookie-banner'
+import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
+import { cookieBannerHtml } from '../_shared/cookie-banner'
+import { nonceAttr } from '../_shared/csp-nonce'
 
-export function renderMethodologyPage(): string {
+export function renderMethodologyPage(nonce?: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -23,7 +24,7 @@ export function renderMethodologyPage(): string {
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>How AIWatch Works — Methodology | AIWatch</title>
 ${CONSENT_INIT_COMMENT}
-${CONSENT_INIT_SCRIPT}
+${consentInitScript(nonce)}
 <meta name="description" content="Transparent, independent measurement of AI service reliability. How AIWatch determines status, computes uptime and the AIWatch Score, and — explicitly — what we can't measure and why. 41 services, polled every 5 min, UTC.">
 <meta name="robots" content="index, follow">
 <meta property="og:type" content="website">
@@ -533,7 +534,7 @@ ${CONSENT_INIT_SCRIPT}
 </footer>
 </div>
 
-<script>
+<script${nonceAttr(nonce)}>
 const i18n = {
   ko: {
     'nav.report': '월간 리포트', 'nav.github': 'GitHub', 'nav.cta': '대시보드 열기 →',
@@ -790,7 +791,7 @@ try {
   }
 } catch (e) { console.error('[methodology] Client init failed:', e); }
 </script>
-${COOKIE_BANNER_HTML}
+${cookieBannerHtml(nonce)}
 </body>
 </html>
 `

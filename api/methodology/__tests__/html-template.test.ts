@@ -31,6 +31,19 @@ describe('renderMethodologyPage', () => {
     expect(html).not.toMatch(/\son(click|error|mouseover|load|change)=/i)
   })
 
+  it('stamps the per-response nonce on every inline <script> when given one (#482)', () => {
+    const withNonce = renderMethodologyPage('NONCE123')
+    // every EXECUTABLE inline <script> (no src, not the JSON-LD data block) carries the nonce
+    const tags = (withNonce.match(/<script(?![^>]*\bsrc=)(?![^>]*application\/ld\+json)[^>]*>/g) ?? [])
+    expect(tags.length).toBeGreaterThanOrEqual(2) // consent init + the i18n/interactivity script (+ cookie banner)
+    for (const tag of tags) expect(tag).toContain('nonce="NONCE123"')
+    // gtag.js loader (src) also nonce-stamped for GA4 propagation; JSON-LD stays clean
+    expect(withNonce).toMatch(/<script async nonce="NONCE123" src="https:\/\/www\.googletagmanager\.com/)
+    expect(withNonce).toMatch(/<script type="application\/ld\+json">/) // unchanged, no nonce needed
+    // no stray nonce when omitted
+    expect(renderMethodologyPage()).not.toContain('nonce="')
+  })
+
   it('every inline <script> is syntactically valid JS (guards i18n quote-escaping)', () => {
     // Regression for the pre-existing break where an i18n string used an unescaped apostrophe
     // (e.g. KO 'degraded') — inside the `return \`...\`` template literal a source `\'` collapses to

@@ -5,17 +5,28 @@
 // data fetch) — mirrors api/methodology.ts.
 
 import { renderBadgesPage } from './badges/html-template'
+import { generateNonce, buildCsp } from './_shared/csp-nonce'
 
 export const config = { runtime: 'edge' }
 
 export default async function handler(_req: Request) {
   try {
-    const html = renderBadgesPage()
+    // #482 — per-response nonce: each inline <script> is stamped with it and the page sets its
+    // own CSP header carrying 'nonce-…'. Report-Only for now (Phase 2); flipped to enforcing in
+    // Phase 3 once every Edge surface is locally verified clean.
+    const nonce = generateNonce()
+    const csp = buildCsp(nonce)
+    const html = renderBadgesPage(nonce)
     return new Response(html, {
       status: 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+        // #482 — a per-response CSP nonce is incompatible with caching: a cached page would serve
+        // the SAME nonce to every visitor for the cache window, defeating the nonce's per-response
+        // uniqueness (a publicly-readable static nonce gives no XSS protection). So this page is
+        // no-store. Acceptable — /badges is a low-traffic, self-contained SSR page.
+        'Cache-Control': 'no-store',
+        [csp.key]: csp.value,
       },
     })
   } catch (err) {

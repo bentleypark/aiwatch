@@ -7,8 +7,9 @@
 // api/methodology/html-template.ts chrome (tokens, nav, footer).
 
 import { SLUG_TO_SERVICE } from '../is-down/slug-map'
-import { CONSENT_INIT_COMMENT, CONSENT_INIT_SCRIPT } from '../_shared/consent-init'
-import { COOKIE_BANNER_HTML } from '../_shared/cookie-banner'
+import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
+import { cookieBannerHtml } from '../_shared/cookie-banner'
+import { nonceAttr } from '../_shared/csp-nonce'
 
 const WORKER = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 
@@ -46,8 +47,8 @@ function renderCard(slug: string): string {
   return `<div class="badge-card">
   <a href="/is-${esc(slug)}-down" class="badge-preview"><img src="${esc(WORKER)}/badge/${esc(id)}" alt="${esc(name)} status" height="20" loading="lazy"></a>
   <div class="badge-copy-row">
-    <input type="text" readonly value="${esc(markdown)}" onclick="this.select()" aria-label="${esc(name)} badge markdown" class="mono badge-input">
-    <button class="badge-copy" data-text="${esc(markdown)}" data-svc="${esc(id)}" onclick="copyBadge(this)">Copy</button>
+    <input type="text" readonly value="${esc(markdown)}" aria-label="${esc(name)} badge markdown" class="mono badge-input">
+    <button class="badge-copy" data-text="${esc(markdown)}" data-svc="${esc(id)}">Copy</button>
   </div>
 </div>`
 }
@@ -67,7 +68,7 @@ function renderGroups(): string {
     .join('\n')
 }
 
-export function renderBadgesPage(): string {
+export function renderBadgesPage(nonce?: string): string {
   const total = Object.keys(SLUG_TO_SERVICE).length
   return `<!DOCTYPE html>
 <html lang="en">
@@ -78,7 +79,7 @@ export function renderBadgesPage(): string {
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>AI Status Badges — Embed Live AI Service Status | AIWatch</title>
 ${CONSENT_INIT_COMMENT}
-${CONSENT_INIT_SCRIPT}
+${consentInitScript(nonce)}
 <meta name="description" content="Embed a live, real-time status badge for any of ${total} AI services (Claude, OpenAI, Gemini, and more) in your README, docs, or status page. Free, auto-updating, links to the live AIWatch status page.">
 <meta name="robots" content="index, follow">
 <meta property="og:type" content="website">
@@ -162,14 +163,17 @@ ${CONSENT_INIT_SCRIPT}
 <footer>
   © 2026 AIWatch · AGPL-3.0 · <a href="https://ai-watch.dev">Dashboard</a> · <a href="https://ai-watch.dev/methodology">Methodology</a> · <a href="https://github.com/bentleypark/aiwatch">GitHub</a>
 </footer>
-<script>
+<script${nonceAttr(nonce)}>
+// CSP-safe (#482): no inline on*= handlers — interactivity wired via delegated listeners.
 function copyBadge(btn){
   var t=btn.dataset.text,o=btn.textContent;
   function done(){btn.classList.add('copied');btn.textContent='Copied!';setTimeout(function(){btn.classList.remove('copied');btn.textContent=o},2000);typeof gtag==='function'&&gtag('event','copy_badge',{location:'badges_page',service_id:btn.dataset.svc})}
   if(navigator.clipboard){navigator.clipboard.writeText(t).then(done).catch(function(){prompt('Copy this:',t)})}else{prompt('Copy this:',t)}
 }
+document.querySelectorAll('.badge-input').forEach(function(el){el.addEventListener('click',function(){el.select();});});
+document.querySelectorAll('.badge-copy').forEach(function(btn){btn.addEventListener('click',function(){copyBadge(btn);});});
 </script>
-${COOKIE_BANNER_HTML}
+${cookieBannerHtml(nonce)}
 </body>
 </html>`
 }
