@@ -53,10 +53,27 @@ script/handler** → refactor in Phase 2.
 
 ## Roadmap
 
-- **Phase 2** — refactor the inline `onclick`/`onerror` handlers → delegated `addEventListener`; nonce
-  (per-request, Edge-injected) or hash the remaining static inline `<script>` blocks per surface.
-- **Phase 3** — flip to enforcing `Content-Security-Policy` (`script-src 'self' 'nonce-…'`), keep the
-  allowlist + `object-src 'none'` / `base-uri 'self'` / `frame-ancestors 'none'`.
+- **Phase 2 — IN PROGRESS (per-surface, still Report-Only).** Each Edge SSR page now sets its OWN CSP
+  header (so the per-surface nonce/hash works) and refactors every inline `on*=` handler → delegated
+  `addEventListener`. The mechanism splits by **whether the page is cached**:
+  - **Low-traffic, no-store pages → per-response NONCE** (`api/_shared/csp-nonce.ts`): badges +
+    methodology (#823), intro (#828). The handler mints a nonce, stamps it on each inline `<script>`,
+    and sets `Cache-Control: no-store` — a nonce is incompatible with caching (a cached page would
+    reuse one nonce for all visitors). Fine here: these pages are low-traffic, self-contained SSR.
+  - **High-traffic /is-down → per-response HASH** (`api/_shared/csp-hash.ts`, #482 PR3): the handler
+    hashes the rendered inline scripts (`cspForHtml`) into `script-src 'sha256-…'`. A content hash is
+    derived from the served bytes, so it stays valid when the page is **edge-cached** — `/is-down`
+    keeps its `s-maxage=60` cache (it's the busiest, outage-viral SEO surface). The delegated handlers
+    are a single always-rendered dispatcher (`[data-ga]` for GA4 + `[data-action]` for copy/share);
+    this retired the `escJsForAttr` JS-string-in-attribute footgun.
+  - The SPA keeps the static `vercel.json` Report-Only header.
+- **Phase 3** — flip each surface's own header to enforcing `Content-Security-Policy`, and **scope the
+  `vercel.json` `/(.*)` CSP to exclude the migrated Edge routes** (else its nonce/hash-less policy
+  co-applies and the browser, enforcing the intersection of all delivered policies, blocks the inline
+  scripts). Keep the allowlist + `object-src 'none'` / `base-uri 'self'` / `frame-ancestors 'none'`.
+- **Verification is log-free**: each surface is checked by serving its own header in ENFORCING mode
+  locally and confirming zero console CSP violations + every control still works (the prod-log review
+  is infeasible on the free Vercel plan; that's why the original Phase-2 gate was re-scoped).
 
 ## Tests
 - `api/__tests__/csp-report.test.ts` — `parseCspReports` (both wire formats + garbage → no throw) +

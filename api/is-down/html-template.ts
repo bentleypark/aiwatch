@@ -4,8 +4,12 @@ import type { ServiceSEO } from './seo-content'
 import { SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE, RELATED_SLUGS } from './slug-map'
 import { groupIncidents, type GroupingIncident, type GroupRow, type SingleRow } from './incident-grouping'
 import { compareGroupedRows } from './incident-sort'
-import { CONSENT_INIT_COMMENT, CONSENT_INIT_SCRIPT } from '../_shared/consent-init'
-import { COOKIE_BANNER_HTML } from '../_shared/cookie-banner'
+// #482 — is-down uses HASH-based CSP (not nonce): it stays edge-cached (s-maxage=60), and the
+// handler hashes the rendered inline scripts per-response (a content hash survives caching, unlike a
+// random nonce). So the no-nonce static script forms are used here; the inline handlers are still
+// refactored to delegated listeners (CSP can't admit inline on*= via hashes cleanly).
+import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
+import { cookieBannerHtml } from '../_shared/cookie-banner'
 import type { RegionStatusResult } from './region-status'
 
 /** Format recovery display — shared with worker/src/ai-analysis.ts */
@@ -65,21 +69,9 @@ function safeJsonLd(data: unknown): string {
   return JSON.stringify(data).replace(/</g, '\\u003c')
 }
 
-// Encode a JSON.stringify output (or any JS-string-literal-wrapped value) so the
-// inner `"` survives being embedded inside a double-quoted HTML attribute like
-// `onclick="..."`. Without this, the HTML tokenizer treats the first inner `"`
-// as the attribute terminator → truncates the JS body → the rest leaks as
-// stray attributes → the inline handler silently never runs. The browser
-// entity-decodes `&quot;` back to `"` before invoking the JS compiler, so the
-// embedded handler executes as intended.
-//
-// Discovered in #422 Phase 2 review round 3 (region recommendation onclick) and
-// audited across the file in round 4 — also fixes the pre-existing share-button
-// GA4 fire that has been silently dead. Centralized here so future
-// inline-onclick + JSON.stringify combinations don't re-discover the bug.
-function escJsForAttr(jsLiteral: string): string {
-  return jsLiteral.replace(/"/g, '&quot;')
-}
+// (#482 removed escJsForAttr — the inline `onclick="...gtag(...JSON.stringify...)"` handlers it
+//  guarded are gone; GA4 now fires from a delegated [data-ga] listener reading data-* attributes,
+//  so there's no more JS-string-literal-inside-an-HTML-attribute to entity-escape.)
 
 function statusEmoji(status: string): string {
   if (status === 'operational') return '&#x1F7E2;'
@@ -279,7 +271,7 @@ export function renderPage(
 <meta name="theme-color" content="#080c10">
 
 ${CONSENT_INIT_COMMENT}
-${CONSENT_INIT_SCRIPT}
+${consentInitScript()}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -419,9 +411,45 @@ ${renderBadgeEmbed(slug, seo)}
 ${renderFooter(slug)}
 
 </div>
-${COOKIE_BANNER_HTML}
+${renderDelegatedListeners()}
+${cookieBannerHtml()}
 </body>
 </html>`
+}
+
+// #482 — one always-rendered, CSP-safe delegated-listener block replacing every inline on*= handler.
+// GA4 link clicks fire from data-ga (+ data-ga-loc / -source / -svc / -region / -from / -to /
+// -method / -item); the copy/share buttons fire from data-action, calling the global functions
+// defined in the renderCTA / renderShareButtons inline scripts (looked up at click time, so script
+// order doesn't matter). This <script> is hashed into the page CSP by the api/is-down.ts handler.
+function renderDelegatedListeners(): string {
+  return `<script>
+document.addEventListener('click', function (e) {
+  var g = e.target.closest('[data-ga]');
+  if (g && typeof gtag === 'function') {
+    var d = g.dataset, p = {};
+    if (d.gaLoc) p.location = d.gaLoc;
+    if (d.gaSource) p.source = d.gaSource;
+    if (d.gaSvc) p.service_id = d.gaSvc;
+    if (d.gaRegion) p.recommended_region = d.gaRegion;
+    if (d.gaFrom) p.from_service = d.gaFrom;
+    if (d.gaTo) p.to_service = d.gaTo;
+    if (d.gaMethod) { p.method = d.gaMethod; p.content_type = 'is_x_down'; }
+    if (d.gaItem) p.item_id = d.gaItem;
+    gtag('event', d.ga, p);
+  }
+  var a = e.target.closest('[data-action]');
+  if (!a) return;
+  switch (a.getAttribute('data-action')) {
+    case 'copy-rss': if (typeof copyRss === 'function') copyRss(a); break;
+    case 'copy-slack': if (typeof copySlackFeed === 'function') copySlackFeed(a); break;
+    case 'copy-link': if (typeof copyLink === 'function') copyLink(a); break;
+    case 'copy-badge': if (typeof copyBadge === 'function') copyBadge(a); break;
+    case 'share-kakao': if (typeof shareKakao === 'function') shareKakao(); break;
+    case 'select': a.select(); break;
+  }
+});
+</script>`
 }
 
 function renderJsonLd(slug: string, seo: ServiceSEO, service: ServiceData | null): string {
@@ -544,18 +572,9 @@ export function renderRegionRecommendation(rec: RegionStatusResult | null, slug:
 
   // Inline styles match the AI Insight callout's visual language: bg #161b22,
   // 3px left border in the accent color (blue here, matching the region-card
-  // theme on /#service detail pages). The GA4 hook fires `region_switch_intent`
-  // with location=is_down_page so we can tell SSR-driven clicks from
-  // dashboard-driven clicks in the funnel data.
-  //
-  // Region key (e.g. Pinecone's "AWS us-west-2" — has a space) is serialized
-  // via JSON.stringify for a safe JS string literal, then HTML-attribute-
-  // encoded via escJsForAttr() so it survives being interpolated into the
-  // double-quoted `onclick="..."` attribute below. See escJsForAttr's docstring
-  // for the full contract.
-  const recKeyJs = escJsForAttr(JSON.stringify(rec.recommendedRegion.key))
-  const ga4OnClick = `typeof gtag==='function'&&gtag('event','region_switch_intent',{service_id:'${esc(slug)}',recommended_region:${recKeyJs},location:'is_down_page'})`
-
+  // theme on /#service detail pages). The GA4 `region_switch_intent` hook
+  // (location=is_down_page) fires from the delegated [data-ga] listener (#482) —
+  // the region key rides on data-ga-region (no JS-string-in-attribute escaping needed).
   return `
 <div style="font-size:14px;margin:16px 0;padding:14px 16px;background:#161b22;border-left:3px solid #58a6ff;border-radius:0 6px 6px 0">
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
@@ -564,7 +583,7 @@ export function renderRegionRecommendation(rec: RegionStatusResult | null, slug:
 </div>
 <div style="font-size:12px;color:#8b949e;line-height:1.5">
 <span>Currently affected: ${affected}.</span>
-${docsHref ? `<br><a href="${docsHref}" target="_blank" rel="noopener noreferrer" onclick="${ga4OnClick}" style="color:#58a6ff">Region docs →</a>` : ''}
+${docsHref ? `<br><a href="${docsHref}" target="_blank" rel="noopener noreferrer" data-ga="region_switch_intent" data-ga-svc="${esc(slug)}" data-ga-region="${esc(rec.recommendedRegion.key)}" data-ga-loc="is_down_page" style="color:#58a6ff">Region docs →</a>` : ''}
 </div>
 </div>`
 }
@@ -574,7 +593,7 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
     return `<div class="header">
 <h1>Is ${esc(seo.displayName)} Down?</h1>
 <p class="meta">Status data is temporarily unavailable. Please check back shortly.</p>
-<p class="meta" style="margin-top:12px"><a href="https://ai-watch.dev" class="btn" onclick="typeof gtag==='function'&&gtag('event','click_dashboard',{location:'is_down_page',source:'fallback'})">View AIWatch Dashboard</a></p>
+<p class="meta" style="margin-top:12px"><a href="https://ai-watch.dev" class="btn" data-ga="click_dashboard" data-ga-loc="is_down_page" data-ga-source="fallback">View AIWatch Dashboard</a></p>
 </div>`
   }
 
@@ -607,7 +626,7 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
 <p style="font-size:20px;font-weight:600;color:${color};margin:12px 0">${answer.yesno} &mdash; ${esc(seo.displayName)} ${answer.phrase}</p>
 <p class="meta mono">${metaParts.join(' &middot; ')}</p>
 ${lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}</p>` : '<p class="meta">No recent incidents</p>'}
-${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${service.rank}${service.rankTied ? ' (tied)' : ''}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'header'})">AIWatch reliability score</a> &middot; <a href="${REPORTS_INDEX_HREF}" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'header'})">${REPORTS_INDEX_LABEL} &rarr;</a></p>` : ''}
+${service.rank ? `<p class="meta">${esc(seo.displayName)} is ranked <strong>#${service.rank}${service.rankTied ? ' (tied)' : ''}</strong> of ${service.totalRanked} AI services by <a href="https://ai-watch.dev/#ranking" data-ga="click_ranking" data-ga-loc="is_down_page" data-ga-source="header">AIWatch reliability score</a> &middot; <a href="${REPORTS_INDEX_HREF}" data-ga="click_reports" data-ga-loc="is_down_page" data-ga-source="header">${REPORTS_INDEX_LABEL} &rarr;</a></p>` : ''}
 ${service.incidentSourceStale ? `<p class="meta" style="color:var(--amber)">⚠️ ${esc(seo.displayName)}'s status page moved to a source AIWatch can't reach, so its incident feed is frozen — uptime, score, and ranking are omitted until the source is reachable again. Live status above is still measured directly.</p>` : ''}
 </div>`
 }
@@ -740,11 +759,11 @@ function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string)
 <p class="cta-title">${esc(message)}</p>
 <div class="cta-buttons">
 <!-- Slack subscribes via its native /feed RSS app (#467) — paste into any channel, zero webhook setup. -->
-<button type="button" class="btn btn-primary" data-slack="/feed subscribe https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" onclick="copySlackFeed(this)">💬 Get alerts in Slack</button>
-<button type="button" class="btn" data-rss="https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" onclick="copyRss(this)">🔗 Copy alert link (RSS)</button>
+<button type="button" class="btn btn-primary" data-slack="/feed subscribe https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" data-action="copy-slack">💬 Get alerts in Slack</button>
+<button type="button" class="btn" data-rss="https://ai-watch.dev/feed/${esc(slug)}" data-svc="${esc(svcId)}" data-action="copy-rss">🔗 Copy alert link (RSS)</button>
 </div>
 <p class="cta-help">💬 Slack: paste the command into any channel — done. &middot; 🔗 RSS: paste the link into Slack, Teams, or any reader.</p>
-<p class="cta-alt"><a href="https://ai-watch.dev/#settings?focus=alerts" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'status_banner_secondary'})">Prefer Discord push alerts? Set up here &rarr;</a></p>
+<p class="cta-alt"><a href="https://ai-watch.dev/#settings?focus=alerts" data-ga="click_cta_alerts" data-ga-loc="is_down_page" data-ga-source="status_banner_secondary">Prefer Discord push alerts? Set up here &rarr;</a></p>
 <!-- #575: 1st-party crowd report (category + short description). We COLLECT it; the recent-report
      list is shown ONLY on a gated surface (when an independent signal already shows a problem) — we
      never render a public "N reporting" verdict that could contradict an operational status. -->
@@ -1021,7 +1040,7 @@ function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string
     const color = statusColor(f.status)
     const label = statusLabel(f.status)
     const fbSlug = SERVICE_ID_TO_SLUG[f.id]
-    const gaClick = fromId ? ` onclick="typeof gtag==='function'&&gtag('event','fallback_click',{from_service:'${esc(fromId)}',to_service:'${esc(f.id)}',location:'is_down_page'})"` : ''
+    const gaClick = fromId ? ` data-ga="fallback_click" data-ga-from="${esc(fromId)}" data-ga-to="${esc(f.id)}" data-ga-loc="is_down_page"` : ''
     const nameHtml = fbSlug ? `<a href="/is-${esc(fbSlug)}-down" style="color:#e6edf3"${gaClick}>${esc(f.name)}</a>` : esc(f.name)
     return `<div class="fallback-item">
 <span class="fallback-name">${nameHtml}</span>
@@ -1033,8 +1052,8 @@ function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string
 <div class="card">
 ${items}
 <div class="links" style="margin-top:12px">
-<a href="https://ai-watch.dev/#ranking" onclick="typeof gtag==='function'&&gtag('event','click_ranking',{location:'is_down_page',source:'alternatives'})">Reliability rankings &rarr;</a>
-<a href="/reports/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'alternatives'})">Monthly reports &rarr;</a>
+<a href="https://ai-watch.dev/#ranking" data-ga="click_ranking" data-ga-loc="is_down_page" data-ga-source="alternatives">Reliability rankings &rarr;</a>
+<a href="/reports/" data-ga="click_reports" data-ga-loc="is_down_page" data-ga-source="alternatives">Monthly reports &rarr;</a>
 </div>
 </div>`
 }
@@ -1114,29 +1133,28 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
   const xUrlParam = encodedUrl ? `&amp;url=${encodedUrl}` : ''
 
   // Use JSON.stringify for safe JS string interpolation (prevents XSS via backslash/newline).
-  // jsDisplayNameAttr is the attribute-safe form for embedding inside `onclick="..."` —
-  // see escJsForAttr docstring. The raw `jsDisplayName` etc. are kept for `<script>` bodies
-  // where the inner `"` is correct (script content is CDATA-like, not HTML-attribute parsed).
+  // These are used inside `<script>` bodies (script content is CDATA-like, the inner `"` is correct).
+  // #482: the share GA4 item_id moved to data-ga-item (read by the delegated [data-ga] listener), so
+  // the attribute-safe `escJsForAttr` form is no longer needed.
   const jsDisplayName = JSON.stringify(seo.displayName)
-  const jsDisplayNameAttr = escJsForAttr(jsDisplayName)
   const jsCanonical = JSON.stringify(canonical)
   const jsOgImageUrl = JSON.stringify(ogImageUrl)
   const jsStatus = JSON.stringify(status)
 
   return `<div class="share-bar">
-<a href="https://x.com/intent/tweet?text=${encodedText}${xUrlParam}" target="_blank" rel="noopener" class="share-btn share-x" onclick="gtag('event','share',{method:'x',content_type:'is_x_down',item_id:${jsDisplayNameAttr}})">
+<a href="https://x.com/intent/tweet?text=${encodedText}${xUrlParam}" target="_blank" rel="noopener" class="share-btn share-x" data-ga="share" data-ga-method="x" data-ga-item="${esc(seo.displayName)}">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
 Post
 </a>
-<a href="https://www.threads.net/intent/post?text=${encodedText}${encodedUrl ? '%20' + encodedUrl : ''}" target="_blank" rel="noopener" class="share-btn share-threads" onclick="gtag('event','share',{method:'threads',content_type:'is_x_down',item_id:${jsDisplayNameAttr}})">
+<a href="https://www.threads.net/intent/post?text=${encodedText}${encodedUrl ? '%20' + encodedUrl : ''}" target="_blank" rel="noopener" class="share-btn share-threads" data-ga="share" data-ga-method="threads" data-ga-item="${esc(seo.displayName)}">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12.186 24h-.007c-3.581-.024-6.334-1.205-8.184-3.509C2.35 18.44 1.5 15.586 1.472 12.01v-.017c.03-3.579.879-6.43 2.525-8.482C5.845 1.205 8.6.024 12.18 0h.014c2.746.02 5.043.725 6.826 2.098 1.677 1.29 2.858 3.13 3.509 5.467l-2.04.569c-1.104-3.96-3.898-5.984-8.304-6.015-2.91.022-5.11.936-6.54 2.717C4.307 6.504 3.616 8.914 3.59 12c.025 3.083.718 5.496 2.057 7.164 1.432 1.783 3.631 2.698 6.54 2.717 2.623-.02 4.358-.631 5.8-2.045 1.647-1.613 1.618-3.593 1.09-4.798-.346-.789-.96-1.42-1.757-1.846-.184 2.985-1.086 5.27-2.844 6.39-1.34.853-3.065 1.062-4.62.559-1.72-.557-3.09-1.843-3.37-3.583-.203-1.264.066-2.418.757-3.248.86-1.032 2.278-1.578 3.952-1.578 2.37 0 3.877 1.128 4.453 2.325.153-.915.177-1.937.073-3.065l2.023-.235c.203 2.153.015 4.027-.735 5.483a5.997 5.997 0 0 0 1.013.607c1.27.605 2.567.665 3.557-.12 1.258-1 1.554-2.79 1.168-4.34-.478-1.922-1.806-3.598-3.853-4.85C17.257 5.282 14.907 4.725 12.2 4.708h-.015c-3.34.024-5.886 1.348-7.357 3.832C3.622 10.52 3.088 12.947 3.088 12c0-.96.533-3.504 1.74-5.488 1.41-2.319 3.756-3.568 6.857-3.655h.02c2.467.02 4.57.527 6.25 1.508 1.735 1.012 3.032 2.488 3.558 4.282.65 2.214.23 4.685-1.496 6.055-1.497 1.187-3.366 1.065-4.868.348a7.89 7.89 0 0 1-.778-.42c-.66 1.345-1.68 2.276-3.063 2.788-.986.365-2.103.432-3.243.19-1.882-.401-3.466-1.576-4.156-3.216-.475-1.13-.53-2.394-.155-3.586.468-1.484 1.634-2.632 3.288-3.063 1.918-.5 3.728-.074 5.02 1.182.574.558 1.005 1.26 1.283 2.094.228-.76.382-1.581.455-2.46l-.005-.038z"/></svg>
 Share
 </a>
-<button id="kakao-share" class="share-btn share-kakao" style="display:none" onclick="shareKakao()">
+<button id="kakao-share" class="share-btn share-kakao" style="display:none" data-action="share-kakao">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="#191919"><path d="M12 3C6.477 3 2 6.463 2 10.691c0 2.754 1.862 5.18 4.67 6.532-.16.578-.583 2.096-.668 2.421-.104.397.146.392.306.285.126-.084 2.005-1.36 2.816-1.912.93.134 1.891.205 2.876.205 5.523 0 10-3.463 10-7.691S17.523 3 12 3z"/></svg>
 KakaoTalk
 </button>
-<button class="share-btn share-copy" onclick="copyLink(this)" data-url="${esc(canonical)}" data-text="${esc(copyText)}">
+<button class="share-btn share-copy" data-action="copy-link" data-url="${esc(canonical)}" data-text="${esc(copyText)}">
 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
 Copy Link
 </button>
@@ -1229,8 +1247,8 @@ export function renderBadgeEmbed(slug: string, seo: ServiceSEO): string {
 <p class="meta" style="margin:0 0 12px">Show your users ${esc(seo.displayName)}'s live status — drop this badge in your README, docs, or status page. It links back to this live page.</p>
 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
 <img src="${esc(badgeImg)}" alt="${esc(seo.displayName)} status" height="20" loading="lazy">
-<input type="text" readonly value="${esc(markdown)}" onclick="this.select()" aria-label="Badge markdown" class="mono" style="flex:1;min-width:200px;font-size:11px;padding:6px 8px;background:#161b22;border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#adbac7;outline:none">
-<button class="share-btn badge-copy" data-text="${esc(markdown)}" data-svc="${esc(serviceId)}" onclick="copyBadge(this)" style="background:#161b22;color:#e6edf3;border-color:rgba(255,255,255,0.14)">Copy</button>
+<input type="text" readonly value="${esc(markdown)}" data-action="select" aria-label="Badge markdown" class="mono" style="flex:1;min-width:200px;font-size:11px;padding:6px 8px;background:#161b22;border:1px solid rgba(255,255,255,0.1);border-radius:4px;color:#adbac7;outline:none">
+<button class="share-btn badge-copy" data-text="${esc(markdown)}" data-svc="${esc(serviceId)}" data-action="copy-badge" style="background:#161b22;color:#e6edf3;border-color:rgba(255,255,255,0.14)">Copy</button>
 </div>
 </div>`
 }
@@ -1267,8 +1285,8 @@ export function renderFooter(slug: string): string {
     .join('')
 
   return `<div class="footer">
-<p style="margin-bottom:12px"><a href="https://ai-watch.dev" class="btn" onclick="typeof gtag==='function'&&gtag('event','click_dashboard',{location:'is_down_page',source:'footer'})">View Full Dashboard</a></p>
-<p><a href="https://ai-watch.dev/#${esc(seoEntry?.id ?? slug)}" onclick="typeof gtag==='function'&&gtag('event','click_service_detail',{location:'is_down_page',service_id:'${esc(seoEntry?.id ?? slug)}'})">Detailed service page</a> &middot; <a href="/reports/" onclick="typeof gtag==='function'&&gtag('event','click_reports',{location:'is_down_page',source:'footer'})">Monthly reports</a> &middot; <a href="https://ai-watch.dev/#settings?focus=alerts" onclick="typeof gtag==='function'&&gtag('event','click_cta_alerts',{location:'is_down_page',source:'footer'})">Set up alerts</a> &middot; <a href="https://ai-watch.dev/methodology#score" onclick="typeof gtag==='function'&&gtag('event','click_methodology',{location:'is_down_page',source:'footer'})">How we measure this</a></p>
+<p style="margin-bottom:12px"><a href="https://ai-watch.dev" class="btn" data-ga="click_dashboard" data-ga-loc="is_down_page" data-ga-source="footer">View Full Dashboard</a></p>
+<p><a href="https://ai-watch.dev/#${esc(seoEntry?.id ?? slug)}" data-ga="click_service_detail" data-ga-loc="is_down_page" data-ga-svc="${esc(seoEntry?.id ?? slug)}">Detailed service page</a> &middot; <a href="/reports/" data-ga="click_reports" data-ga-loc="is_down_page" data-ga-source="footer">Monthly reports</a> &middot; <a href="https://ai-watch.dev/#settings?focus=alerts" data-ga="click_cta_alerts" data-ga-loc="is_down_page" data-ga-source="footer">Set up alerts</a> &middot; <a href="https://ai-watch.dev/methodology#score" data-ga="click_methodology" data-ga-loc="is_down_page" data-ga-source="footer">How we measure this</a></p>
 ${relatedLinks ? `<p style="margin-top:12px;font-size:13px">Related: ${relatedLinks}</p>` : ''}
 ${otherGroups ? `<p style="margin-top:8px;font-size:12px">Also check:${otherGroups}</p>` : ''}
 <p style="margin-top:12px">&copy; 2026 AIWatch. Real-time AI service status monitoring.</p>

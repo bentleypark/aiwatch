@@ -495,7 +495,8 @@ describe('renderFooter — Also check category grouping', () => {
     const html = renderFooter('claude')
     expect(html).toContain('href="https://ai-watch.dev/methodology#score"')
     expect(html).toContain('>How we measure this</a>')
-    expect(html).toContain("gtag('event','click_methodology',{location:'is_down_page',source:'footer'})")
+    // #482 — GA4 fires from the delegated [data-ga] listener (no inline onclick)
+    expect(html).toContain('data-ga="click_methodology" data-ga-loc="is_down_page" data-ga-source="footer"')
   })
 
   it('emits the group sub-labels in FOOTER_CATEGORY_ORDER order', () => {
@@ -693,56 +694,22 @@ describe('renderRegionRecommendation', () => {
     expect(html).not.toMatch(/<a /)
   })
 
-  it('fires region_switch_intent GA4 event with location=is_down_page', () => {
+  it('fires region_switch_intent GA4 via the delegated [data-ga] listener (#482)', () => {
     // Pinned to keep the SSR-driven click attribution distinct from
     // ServiceDetails (service_details) and ActionBanner (action_banner).
-    // Without this, GA funnel data can't tell which surface drove the click.
-    const html = renderRegionRecommendation(mkRegionRec(), 'pinecone')
-    expect(html).toContain("gtag('event','region_switch_intent'")
-    expect(html).toContain("location:'is_down_page'")
-    expect(html).toContain("service_id:'pinecone'")
-    // The recommended region key is JSON-encoded so a key with spaces (e.g.
-    // "AWS us-west-2") stays valid JS literal — assert that encoding holds.
-    // Quote-escape contract: inner `"` from JSON.stringify must be HTML-encoded
-    // as `&quot;` so the outer `onclick="..."` attribute doesn't truncate.
-    // See the regression test below ("onclick attribute parses as a single
-    // intact JS expression") for the DOM-level integrity check.
-    expect(html).toContain('recommended_region:&quot;AWS us-west-2&quot;')
-  })
-
-  it('onclick attribute parses as a single intact JS expression (regression: quote-escape contract)', () => {
-    // Regression pin for the Phase-2 review-round-3 Critical finding: the GA4
-    // onclick body contains `recommended_region:"AWS us-west-2"` which, if
-    // left as raw `"`, would prematurely close the outer `onclick="..."`
-    // attribute. HTML parser truncates at the first inner `"`, the rest of
-    // the JS body is interpreted as bogus HTML attributes, and the GA4
-    // event silently never fires. We escape inner `"` to `&quot;`.
-    //
-    // Reparse the rendered HTML through the test environment's DOM and pull
-    // the onclick attribute back out to verify it's whole. If a future
-    // contributor swaps the escape strategy (single-quoting, delegated
-    // listeners, etc.) we want this test to catch any regression that
-    // re-breaks the attribute boundary.
+    // #482: fires from the delegated [data-ga] listener (no inline onclick) — the region key
+    // (a key with spaces, e.g. "AWS us-west-2") rides on data-ga-region with NO JS-string-in-
+    // attribute escaping (the old escJsForAttr quote-escape footgun is gone).
     const html = renderRegionRecommendation(mkRegionRec(), 'pinecone')
     const container = document.createElement('div')
     container.innerHTML = html
-    const anchor = container.querySelector('a[onclick]')
-    expect(anchor, 'expected an anchor with onclick to be present').not.toBeNull()
-    const onclick = anchor!.getAttribute('onclick') ?? ''
-    // The full JS body must end with `})` — the closing of gtag(...) call.
-    // If the attribute was truncated, the value would end at `recommended_region:`
-    // and the trailing characters would have become separate attributes.
-    expect(onclick).toMatch(/\}\)$/)
-    // The recommended_region value is present, contains a space (Pinecone-shaped
-    // key), and the JSON.stringify quotes are entity-decoded back to literal `"`
-    // by the HTML parser when we read getAttribute (verified below).
-    expect(onclick).toContain('recommended_region:"AWS us-west-2"')
-    expect(onclick).toContain("location:'is_down_page'")
-    expect(onclick).toContain("service_id:'pinecone'")
-    // No stray HTML attributes leaked from a truncated onclick — the fix
-    // ensures the value is whole, so anchor has exactly the expected attrs.
-    const attrNames = anchor!.getAttributeNames().sort()
-    expect(attrNames).toEqual(['href', 'onclick', 'rel', 'style', 'target'])
+    const anchor = container.querySelector('a[data-ga]')
+    expect(anchor, 'expected an anchor with data-ga to be present').not.toBeNull()
+    expect(anchor!.getAttribute('data-ga')).toBe('region_switch_intent')
+    expect(anchor!.getAttribute('data-ga-svc')).toBe('pinecone')
+    expect(anchor!.getAttribute('data-ga-region')).toBe('AWS us-west-2')
+    expect(anchor!.getAttribute('data-ga-loc')).toBe('is_down_page')
+    expect(anchor!.getAttribute('onclick')).toBeNull() // no inline handler
   })
 
   it('escapes label content (defensive vs upstream-injected labels)', () => {
@@ -921,63 +888,34 @@ describe('renderComponents (#604)', () => {
   })
 })
 
-// ── renderShareButtons (quote-escape contract — same class as #422 region rec) ──
+// ── renderShareButtons share GA4 (#482 — delegated [data-ga], no inline onclick) ──
 //
-// Phase 2 review round 4 audit caught a pre-existing instance of the same
-// quote-truncation bug in the share buttons: `item_id:${jsDisplayName}` from
-// JSON.stringify embeds a raw `"` into the double-quoted `onclick="..."`
-// attribute. HTML parser truncates → `gtag('event','share',...)` never fires
-// → bogus stray attributes leak. The fix (escJsForAttr helper) applies the same
-// shape across both call sites; this regression test mirrors the region-rec
-// pin so a future split/merge of the helper can't silently revert one side.
-
-describe('renderShareButtons onclick attributes (quote-escape contract)', () => {
-  // Minimal SEO fixture — only the display name + faqs are read by the
-  // share-button code path. The display name carries an embedded space so the
-  // JSON.stringify output has the inner `"` that the bug truncates on.
+// The old escJsForAttr quote-escape contract (Phase-2 review rounds 3-4) is retired: the share
+// buttons' GA4 `share` event no longer lives in an `onclick="...gtag(...JSON.stringify...)"`
+// attribute (which truncated on the inner `"`). It fires from the delegated [data-ga] listener,
+// with the display name carried plain on data-ga-item — so there's no JS-string-in-attribute to
+// escape, and the whole class of quote-truncation bug is structurally gone.
+describe('renderShareButtons share GA4 (#482 — data-ga, no inline onclick)', () => {
   const seo = mkSeo({ displayName: 'Claude API' })
   const service = mkService({ status: 'down' })
   const canonical = 'https://ai-watch.dev/is-claude-down'
   const ogImage = 'https://aiwatch-worker.p2c2kbf.workers.dev/api/og?v=1'
 
-  it('share-x onclick attribute parses as a single intact JS expression', () => {
+  it('share-x / share-threads carry the GA4 event on data-* attrs, with a plain item_id, no onclick', () => {
     const html = renderShareButtons(seo, service, canonical, ogImage)
     const container = document.createElement('div')
     container.innerHTML = html
-    const anchor = container.querySelector('a.share-x')
-    expect(anchor, 'share-x anchor missing').not.toBeNull()
-    const onclick = anchor!.getAttribute('onclick') ?? ''
-    // Whole gtag call survives.
-    expect(onclick).toMatch(/\}\)$/)
-    // Entity-decoded inner double quotes around the displayName.
-    expect(onclick).toContain('item_id:"Claude API"')
-    // No truncation residue — anchor has exactly the documented attrs.
-    expect(anchor!.getAttributeNames().sort()).toEqual(['class', 'href', 'onclick', 'rel', 'target'])
-  })
-
-  it('share-threads onclick attribute parses as a single intact JS expression', () => {
-    const html = renderShareButtons(seo, service, canonical, ogImage)
-    const container = document.createElement('div')
-    container.innerHTML = html
-    const anchor = container.querySelector('a.share-threads')
-    expect(anchor, 'share-threads anchor missing').not.toBeNull()
-    const onclick = anchor!.getAttribute('onclick') ?? ''
-    expect(onclick).toMatch(/\}\)$/)
-    expect(onclick).toContain('item_id:"Claude API"')
-    expect(anchor!.getAttributeNames().sort()).toEqual(['class', 'href', 'onclick', 'rel', 'target'])
-  })
-
-  it('share-x and share-threads onclick wire-format uses the entity-escaped form', () => {
-    // Raw HTML inspection — a future refactor that drops escJsForAttr but uses
-    // a different fix (delegated listeners, single-quoted attrs) must update
-    // this assertion deliberately. Pins the wire format alongside the DOM
-    // parse to give both layers their own regression signal.
-    const html = renderShareButtons(seo, service, canonical, ogImage)
-    // Single quotes inside an HTML attribute value don't need entity-encoding
-    // (the attribute is double-quoted, so `'` is just a literal). Only the
-    // double quotes from JSON.stringify need the `&quot;` treatment.
-    expect(html).toContain(`method:'x',content_type:'is_x_down',item_id:&quot;Claude API&quot;`)
-    expect(html).toContain(`method:'threads',content_type:'is_x_down',item_id:&quot;Claude API&quot;`)
+    for (const [cls, method] of [['a.share-x', 'x'], ['a.share-threads', 'threads']] as const) {
+      const a = container.querySelector(cls)
+      expect(a, `${cls} missing`).not.toBeNull()
+      expect(a!.getAttribute('data-ga')).toBe('share')
+      expect(a!.getAttribute('data-ga-method')).toBe(method)
+      // the display name (with its space) rides plain on data-ga-item — no &quot; escaping needed
+      expect(a!.getAttribute('data-ga-item')).toBe('Claude API')
+      expect(a!.getAttribute('onclick')).toBeNull()
+    }
+    // the old entity-escaped wire format is gone
+    expect(html).not.toContain('item_id:&quot;')
   })
 })
 
@@ -1038,7 +976,7 @@ describe('RSS feed surfacing on /is-*-down (#430)', () => {
     // #696: Slack /feed (paste a command into any channel) is the lowest-friction ACTION for the
     // dev/team audience, so it owns btn-primary. Lock the exact primary markup + label.
     expect(html).toContain(
-      '<button type="button" class="btn btn-primary" data-slack="/feed subscribe https://ai-watch.dev/feed/claude" data-svc="claude" onclick="copySlackFeed(this)">💬 Get alerts in Slack</button>',
+      '<button type="button" class="btn btn-primary" data-slack="/feed subscribe https://ai-watch.dev/feed/claude" data-svc="claude" data-action="copy-slack">💬 Get alerts in Slack</button>',
     )
     expect(html).toContain('function copySlackFeed(b)')
     expect(html).toContain("gtag('event','copy_slack_feed',{location:'is_down_page',service_id:b.dataset.svc})")
@@ -1052,7 +990,7 @@ describe('RSS feed surfacing on /is-*-down (#430)', () => {
     // "Copy alert link (RSS)" + a helper line spelling out where to paste it (the #696 fix for the
     // 9-sessions→0-conversions leak: "Notify me via RSS" copied a URL panic visitors couldn't use).
     expect(html).toContain(
-      '<button type="button" class="btn" data-rss="https://ai-watch.dev/feed/claude" data-svc="claude" onclick="copyRss(this)">🔗 Copy alert link (RSS)</button>',
+      '<button type="button" class="btn" data-rss="https://ai-watch.dev/feed/claude" data-svc="claude" data-action="copy-rss">🔗 Copy alert link (RSS)</button>',
     )
     expect(html).toContain('function copyRss(b)')
     expect(html).toContain('navigator.clipboard.writeText(u)')
@@ -1067,7 +1005,7 @@ describe('RSS feed surfacing on /is-*-down (#430)', () => {
     // but is no longer a btn-primary; it is a .cta-alt text link tagged status_banner_secondary
     // so the funnel comparison can tell post-reorder clicks from the old primary placement.
     expect(html).toContain('<p class="cta-alt"><a href="https://ai-watch.dev/#settings?focus=alerts"')
-    expect(html).toContain("gtag('event','click_cta_alerts',{location:'is_down_page',source:'status_banner_secondary'})")
+    expect(html).toContain('data-ga="click_cta_alerts" data-ga-loc="is_down_page" data-ga-source="status_banner_secondary"')
     // No "email" channel exists yet — the link must not advertise one.
     expect(html).toContain('Prefer Discord push alerts?')
     expect(html).not.toContain('email push')
@@ -1398,5 +1336,44 @@ describe('renderBadgeEmbed (#805 Problem B — discoverability)', () => {
     expect(renderBadgeEmbed('claude', mkSeo())).not.toContain('share-copy')
     const page = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [])
     expect(page.match(/class="[^"]*\bshare-copy\b[^"]*"/g) ?? []).toHaveLength(1)
+  })
+})
+
+// #482 — CSP Phase 2 (option C: HASH-based, so /is-down keeps its edge cache). The page must carry
+// NO inline event handlers (all wired via the delegated dispatcher), and every executable inline
+// <script> the page renders must be covered by the hash-CSP the handler emits.
+describe('renderPage — CSP-clean + hash-covered (#482)', () => {
+  const INLINE_HANDLER = /\son(click|change|input|submit|mouseover|mouseout|mousedown|mouseup|keydown|keyup|focus|blur)\s*=/i
+
+  it('has ZERO inline event-handler attributes on a down page (the busiest, most-interactive state)', () => {
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [
+      { id: 'openai', name: 'OpenAI API', score: 90, status: 'operational' },
+    ])
+    expect(INLINE_HANDLER.test(html)).toBe(false)
+  })
+
+  it('renders the delegated dispatcher with both the [data-ga] and [data-action] paths', () => {
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [])
+    expect(html).toMatch(/closest\('\[data-ga\]'\)[\s\S]*gtag\('event'/)
+    expect(html).toMatch(/closest\('\[data-action\]'\)/)
+    for (const a of ['copy-rss', 'copy-slack', 'copy-link', 'copy-badge', 'share-kakao', 'select']) {
+      expect(html, `dispatcher should handle data-action=${a}`).toContain(`case '${a}'`)
+    }
+  })
+
+  it('the hash-CSP covers EVERY executable inline script the page renders', async () => {
+    const { cspForHtml, extractInlineScripts, sha256Base64 } = await import('../../_shared/csp-hash')
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [
+      { id: 'openai', name: 'OpenAI API', score: 90, status: 'operational' },
+    ])
+    const { value } = await cspForHtml(html)
+    const scripts = extractInlineScripts(html)
+    expect(scripts.length).toBeGreaterThanOrEqual(3) // consent init + share + kakao + dispatcher (+ CTA)
+    for (const body of scripts) {
+      expect(value, 'every inline script must be hashed into the CSP').toContain(`'sha256-${await sha256Base64(body)}'`)
+    }
+    // script-src is hash-locked (no 'unsafe-inline'); style-src keeps it (inline style="" is fine)
+    const scriptSrc = value.split(';').map((d) => d.trim()).find((d) => d.startsWith('script-src'))!
+    expect(scriptSrc).not.toContain("'unsafe-inline'")
   })
 })
