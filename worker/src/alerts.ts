@@ -674,6 +674,24 @@ function findIncident(services: ServiceStatus[], incId: string): Incident | null
   return null
 }
 
+/**
+ * #804 — a per-incident token for an operator share link's og:url. Social platforms cache + dedupe a
+ * card by **og:url** (not the fetched URL) for ~7 days (#740), and the "{service} down" link is byte-
+ * identical every outage (`is-{slug}-down?e=down` + constant UTM) — so a NEW outage within that window
+ * reused the PREVIOUS outage's stale card. The token is the incident id (the `alerted:new:` /
+ * `alerted:res:` key tail): stable within one incident (every share of it dedups to one card) yet
+ * unique across incidents → a new outage becomes a distinct card identity → the platform re-scrapes a
+ * fresh card. Returns null for status-EDGE alerts (down/degraded/recovered), whose key tail is a svcId
+ * not an incident — those are Tier-1-only safety nets (#767) firing in the incident-less gap, not the
+ * viral-reply path this targets. Merged alerts use `alert.key` (the representative incident).
+ */
+export function incidentTokenForAlert(alert: AlertCandidate): string | null {
+  const kind = kindFromKey(alert.key)
+  if (kind !== 'new' && kind !== 'resolved') return null
+  const tail = alert.key.slice(alert.key.indexOf(':', 'alerted:'.length) + 1)
+  return tail || null
+}
+
 /** Build the tweet text + X compose link for ONE specific in-scope service. The caller has already
  *  confirmed `svc.id` is in TWEET_DRAFT_SERVICES. The incident title/impact (for `new` alerts) comes
  *  from the shared incident, but the phrasing/status/url are the service's own. */
@@ -692,7 +710,10 @@ function buildTweetForService(
   // service status has flipped off 'operational', so clamp that edge to 'active' (never emit
   // ?e=operational on an outage share). The only requirement is outage URL ≠ recovery URL.
   const hint = isRecovery ? 'resolved' : svc.status === 'operational' ? 'active' : svc.status
-  const url = `${appendStatusHint(`https://ai-watch.dev/is-${TWEET_DRAFT_SERVICES[svc.id]}-down`, hint)}&${X_UTM}`
+  // #804 — append the per-incident token (when this is an incident alert) so the og:url is distinct
+  // per outage and the platform re-scrapes a fresh card instead of reusing the prior `?e=down` cache.
+  const token = incidentTokenForAlert(alert)
+  const url = `${appendStatusHint(`https://ai-watch.dev/is-${TWEET_DRAFT_SERVICES[svc.id]}-down`, hint)}&${X_UTM}${token ? `&i=${encodeURIComponent(token)}` : ''}`
 
   let text: string
   if (isRecovery) {
@@ -914,7 +935,9 @@ export function buildReplyDraft(alert: AlertCandidate, services: ScoredService[]
 
   const isRecovery = kind === 'resolved' || kind === 'recovered'
   const hint = isRecovery ? 'resolved' : svc.status === 'operational' ? 'active' : svc.status
-  const url = `${appendStatusHint(`https://ai-watch.dev/is-${slug}-down`, hint)}&${X_REPLY_UTM}`
+  // #804 — per-incident token (incident alerts only) → distinct og:url per outage, fresh card on re-share.
+  const token = incidentTokenForAlert(alert)
+  const url = `${appendStatusHint(`https://ai-watch.dev/is-${slug}-down`, hint)}&${X_REPLY_UTM}${token ? `&i=${encodeURIComponent(token)}` : ''}`
   const name = defuseAutolinkDomain(svc.name)
   const text = isRecovery
     ? `update — ${name} is back up. live status → ${url}`

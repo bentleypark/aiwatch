@@ -1,6 +1,6 @@
 // #348 — outage-tweet draft attached to operator Discord alerts for the Claude/OpenAI family.
 import { describe, it, expect } from 'vitest'
-import { buildTweetDraft, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, DISCORD_EMBED_DESC_MAX } from '../alerts'
+import { buildTweetDraft, buildTweetDrafts, appendTweetDraftSection, defuseAutolinkDomain, incidentTokenForAlert, DISCORD_EMBED_DESC_MAX } from '../alerts'
 import type { AlertCandidate, ScoredService, TweetDraft } from '../alerts'
 
 const X_INTENT = 'https://twitter.com/intent/tweet?text='
@@ -41,7 +41,7 @@ describe('buildTweetDraft', () => {
     })
     const draft = buildTweetDraft(alert(), [svc])
     expect(draft).not.toBeNull()
-    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: API returning 500s. Live status → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage')
+    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: API returning 500s. Live status → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&i=inc1')
     expect(draft!.intentUrl).toBe(X_INTENT + encodeURIComponent(draft!.text))
   })
 
@@ -72,7 +72,7 @@ describe('buildTweetDraft', () => {
       incidents: [{ id: 'inc1', title: 'Slow responses', status: 'investigating', startedAt: new Date().toISOString(), impact: 'minor' } as any],
     })
     const draft = buildTweetDraft(alert(), [svc])
-    expect(draft!.text).toBe('🔴 Claude API is reporting degraded performance: Slow responses. Live status → https://ai-watch.dev/is-claude-down?e=degraded&utm_source=x&utm_medium=social&utm_campaign=outage')
+    expect(draft!.text).toBe('🔴 Claude API is reporting degraded performance: Slow responses. Live status → https://ai-watch.dev/is-claude-down?e=degraded&utm_source=x&utm_medium=social&utm_campaign=outage&i=inc1')
   })
 
   it('builds a recovery draft with duration parsed from the resolved title (claude.ai slug)', () => {
@@ -81,7 +81,7 @@ describe('buildTweetDraft', () => {
       incidents: [{ id: 'incX', title: 'Resolved', status: 'resolved', startedAt: new Date().toISOString(), duration: '1h 20m', impact: 'major' } as any],
     })
     const draft = buildTweetDraft(alert({ key: 'alerted:res:incX', title: '🟢 claude.ai — Incident Resolved (1h 20m)' }), [svc])
-    expect(draft!.text).toBe('🟢 claude ai recovered after 1h 20m. Live status → https://ai-watch.dev/is-claude-ai-down?e=resolved&utm_source=x&utm_medium=social&utm_campaign=outage')
+    expect(draft!.text).toBe('🟢 claude ai recovered after 1h 20m. Live status → https://ai-watch.dev/is-claude-ai-down?e=resolved&utm_source=x&utm_medium=social&utm_campaign=outage&i=incX')
   })
 
   it('builds a recovery draft from a service-recovered status alert', () => {
@@ -102,7 +102,7 @@ describe('buildTweetDraft', () => {
       incidents: [{ id: 'inc1', title: 'CLI down', status: 'investigating', startedAt: new Date().toISOString(), impact: 'critical' } as any],
     })
     const draft = buildTweetDraft(alert(), [svc])
-    expect(draft!.text).toBe('🔴 Claude Code is reporting a major outage: CLI down. Live status → https://ai-watch.dev/is-claude-code-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage')
+    expect(draft!.text).toBe('🔴 Claude Code is reporting a major outage: CLI down. Live status → https://ai-watch.dev/is-claude-code-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&i=inc1')
   })
 
   it('skips a non-target sibling and resolves the in-scope service in a shared-incident group', () => {
@@ -112,7 +112,7 @@ describe('buildTweetDraft', () => {
     const gemini = mockService({ id: 'gemini', name: 'Gemini API', provider: 'Google', status: 'down', incidents: [inc] })
     const claude = mockService({ status: 'down', incidents: [inc] })
     const draft = buildTweetDraft(alert(), [gemini, claude])
-    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: Shared multi-provider outage. Live status → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage')
+    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: Shared multi-provider outage. Live status → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&i=inc1')
   })
 
   it('consults _mergedKeys when resolving the covered service', () => {
@@ -122,7 +122,8 @@ describe('buildTweetDraft', () => {
       incidents: [{ id: 'incA', title: 'Merged incident', status: 'investigating', startedAt: new Date().toISOString(), impact: 'major' } as any],
     })
     const draft = buildTweetDraft(alert({ key: 'alerted:new:incA', _mergedKeys: ['alerted:new:incA', 'alerted:new:incB'] }), [svc])
-    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: Merged incident. Live status → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage')
+    // #804 — token derives from the representative alert.key (incA), not the merged tail
+    expect(draft!.text).toBe('🔴 Claude API is reporting a major outage: Merged incident. Live status → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&i=incA')
   })
 
   it('returns null for a non-target service', () => {
@@ -203,7 +204,7 @@ describe('buildTweetDrafts (#521 — operator picks the surface)', () => {
   it('builds recovery drafts per surface for a resolved multi-surface incident', () => {
     const drafts = buildTweetDrafts(alert({ key: 'alerted:res:opus47', title: '🟢 Claude API — Incident Resolved (34m)' }), anthropic)
     expect(drafts).toHaveLength(3)
-    expect(drafts[0].text).toBe('🟢 Claude API recovered after 34m. Live status → https://ai-watch.dev/is-claude-down?e=resolved&utm_source=x&utm_medium=social&utm_campaign=outage')
+    expect(drafts[0].text).toBe('🟢 Claude API recovered after 34m. Live status → https://ai-watch.dev/is-claude-down?e=resolved&utm_source=x&utm_medium=social&utm_campaign=outage&i=opus47')
     expect(drafts[1].text).toContain('🟢 claude ai recovered after 34m') // #539: brand defused
   })
 
@@ -376,5 +377,38 @@ describe('buildTweetForService brand defuse + status hint (#539)', () => {
     expect(down.text).toContain('is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage')
     // the two transitions yield different URLs → fresh unfurl
     expect(rec.text).not.toBe(down.text)
+  })
+})
+
+// #804 — a per-incident token (&i=<incId>) on the share link so a NEW outage gets a distinct og:url
+// (and therefore a fresh Twitter card) instead of colliding with the prior `?e=down` share's ~7-day
+// cached card. Only incident alerts (new/resolved) carry it — status-edge alerts have no incident id.
+describe('incidentTokenForAlert / share-link per-incident token (#804)', () => {
+  const downSvc = () => mockService({ status: 'down', incidents: [{ id: 'inc1', title: 'API errors', status: 'investigating', startedAt: new Date().toISOString(), impact: 'major' } as any] })
+
+  it('returns the incident id for a NEW incident alert and null for a status-edge alert', () => {
+    expect(incidentTokenForAlert(alert({ key: 'alerted:new:inc1' }))).toBe('inc1')
+    expect(incidentTokenForAlert(alert({ key: 'alerted:res:incX' }))).toBe('incX')
+    expect(incidentTokenForAlert(alert({ key: 'alerted:down:claude' }))).toBeNull()
+    expect(incidentTokenForAlert(alert({ key: 'alerted:degraded:chatgpt' }))).toBeNull()
+    expect(incidentTokenForAlert(alert({ key: 'alerted:recovered:claude' }))).toBeNull()
+  })
+
+  it('appends &i=<incId> to the tweet link for an incident alert, last (after the UTM)', () => {
+    const draft = buildTweetDraft(alert({ key: 'alerted:new:abc123', svcIds: ['claude'] }), [downSvc()])!
+    expect(draft.text).toContain('&utm_campaign=outage&i=abc123')
+  })
+
+  it('omits &i= for a status-edge alert (no incident id to scope by)', () => {
+    const draft = buildTweetDraft(alert({ key: 'alerted:down:claude', title: '🔴 Claude API — Service Down' }), [mockService({ status: 'down' })])!
+    expect(draft.text).not.toContain('&i=')
+  })
+
+  it('two DIFFERENT incidents on the same service produce different share URLs (the cross-outage fix)', () => {
+    const a = buildTweetDraft(alert({ key: 'alerted:new:incA', svcIds: ['claude'] }), [downSvc()])!
+    const b = buildTweetDraft(alert({ key: 'alerted:new:incB', svcIds: ['claude'] }), [downSvc()])!
+    expect(a.text).not.toBe(b.text)
+    expect(a.text).toContain('&i=incA')
+    expect(b.text).toContain('&i=incB')
   })
 })

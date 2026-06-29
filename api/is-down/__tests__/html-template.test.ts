@@ -1308,6 +1308,46 @@ describe('renderPage — og:url + og:title pinned to share hint (?e=)', () => {
   })
 })
 
+// #804 — a per-incident token (`&i=`) on og:url so a NEW outage is a distinct social-card identity
+// from the PRIOR `?e=down` share (platforms cache the card by og:url for ~7d, so a byte-identical
+// og:url across outages reused the stale card). Token rides og:url only; canonical/<title> stay clean.
+describe('renderPage — og:url per-incident token (#804)', () => {
+  // og:url is HTML-attribute-escaped (multi-param `&` → `&amp;`, which is correct HTML the platform
+  // unescapes); decode it back so assertions read as the semantic URL the platform actually keys on.
+  const ogUrl = (html: string): string | null => {
+    const m = html.match(/<meta property="og:url" content="([^"]*)"/)
+    return m ? m[1].replace(/&amp;/g, '&') : null
+  }
+  const canonicalHref = (html: string): string | null => {
+    const m = html.match(/<link rel="canonical" href="([^"]*)"/)
+    return m ? m[1] : null
+  }
+  // positional args: …reports, ogStatusHint(8th), supplyChainNote(9th), ogIncidentToken(10th)
+  const page = (hint: string | null, token: string | null) =>
+    renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [], null, null, [], hint, null, token)
+
+  it('appends &i=<token> to og:url alongside the status hint (distinct card per outage)', () => {
+    expect(ogUrl(page('down', 'incA'))).toBe('https://ai-watch.dev/is-claude-down?e=down&i=incA')
+  })
+
+  it('makes og:url differ across incident tokens — the cross-outage cache-collision fix', () => {
+    expect(ogUrl(page('down', 'incA'))).not.toBe(ogUrl(page('down', 'incB')))
+  })
+
+  it('includes the token even without a status hint (still a distinct card)', () => {
+    expect(ogUrl(page(null, 'incA'))).toBe('https://ai-watch.dev/is-claude-down?i=incA')
+  })
+
+  it('omits &i= when no token is passed (unchanged #740 behavior)', () => {
+    expect(ogUrl(page('down', null))).toBe('https://ai-watch.dev/is-claude-down?e=down')
+    expect(ogUrl(page(null, null))).toBe('https://ai-watch.dev/is-claude-down')
+  })
+
+  it('keeps canonical clean — the token rides og:url only, never the SEO canonical', () => {
+    expect(canonicalHref(page('down', 'incA'))).toBe('https://ai-watch.dev/is-claude-down')
+  })
+})
+
 // #574 — supply-chain note: shown when api/is-down.ts passes a supplyChainNote for THIS service
 // (it's in the worker banner's affectedNow/mayBeAffected). SEO header/verdict unchanged.
 describe('renderPage — supply-chain note (#574)', () => {
