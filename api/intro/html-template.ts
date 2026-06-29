@@ -1,21 +1,24 @@
 // SSR HTML template for the /intro landing page
 
-import { CONSENT_INIT_COMMENT, CONSENT_INIT_SCRIPT } from '../_shared/consent-init'
-import { COOKIE_BANNER_HTML } from '../_shared/cookie-banner'
+import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
+import { cookieBannerHtml } from '../_shared/cookie-banner'
+import { nonceAttr } from '../_shared/csp-nonce'
 import type { Announcement } from './announcements'
 
 interface LandingOptions {
   /** Optional campaign banner to surface at the top of the page (#265). */
   announcement?: Announcement | null
+  /** #482 — per-response CSP nonce stamped on every inline <script>. */
+  nonce?: string
 }
 
 function renderAnnouncementBanner(a: Announcement): string {
   // a.html / a.href / a.id are author-controlled trusted config (never user input) —
-  // interpolated raw on purpose. a.id is the map key (see announcements.ts), so it is
-  // also safe inside the single-quoted onclick JS string below.
-  const onclick = `onclick="typeof gtag==='function'&&gtag('event','click_announcement',{id:'${a.id}',location:'landing_banner'})"`
+  // interpolated raw on purpose. #482: the GA4 click fires from a delegated [data-ga] listener
+  // (no inline onclick), with a.id on data-ga-id.
+  const ga = `data-ga="click_announcement" data-ga-loc="landing_banner" data-ga-id="${a.id}"`
   const inner = a.href
-    ? `<a href="${a.href}" target="_blank" rel="noopener" ${onclick} style="display:inline-flex;align-items:center;gap:12px;font-size:13px;color:var(--blue);font-family:var(--font-mono);text-decoration:none;">${a.html}</a>`
+    ? `<a href="${a.href}" target="_blank" rel="noopener" ${ga} style="display:inline-flex;align-items:center;gap:12px;font-size:13px;color:var(--blue);font-family:var(--font-mono);text-decoration:none;">${a.html}</a>`
     : `<span style="font-size:13px;color:var(--text1);font-family:var(--font-mono);">${a.html}</span>`
   return `<!-- ANNOUNCEMENT BANNER -->
 <div id="announcement-banner" style="background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 24px;text-align:center;">
@@ -26,6 +29,7 @@ function renderAnnouncementBanner(a: Announcement): string {
 export function renderLandingPage(opts: LandingOptions = {}): string {
   const announcementHtml = opts.announcement ? renderAnnouncementBanner(opts.announcement) : ''
   const reportUrl = '/reports/'
+  const nonce = opts.nonce
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -35,7 +39,7 @@ export function renderLandingPage(opts: LandingOptions = {}): string {
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>AIWatch — Real-time AI Service Monitoring</title>
 ${CONSENT_INIT_COMMENT}
-${CONSENT_INIT_SCRIPT}
+${consentInitScript(nonce)}
 <meta name="description" content="Track Claude, OpenAI, Gemini, Cursor and more. AI analyzes incidents and recommends fallback options instantly. Free.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://ai-watch.dev/intro">
@@ -487,6 +491,8 @@ ${CONSENT_INIT_SCRIPT}
     .footer-inner { flex-direction: column; align-items: flex-start; gap: 16px; }
     .footer-links { flex-wrap: wrap; gap: 12px; }
   }
+  /* #482 — tech-stack GitHub link hover (was an inline onmouseover/onmouseout handler). */
+  .stack-gh-link:hover { border-color: #58a6ff !important; }
 </style>
 </head>
 <body>
@@ -508,10 +514,10 @@ ${announcementHtml}
       <a href="https://github.com/bentleypark/aiwatch">GitHub</a>
     </div>
     <div class="lang-toggle">
-      <button class="lang-btn active" onclick="setLang('ko')">KO</button>
-      <button class="lang-btn" onclick="setLang('en')">EN</button>
+      <button class="lang-btn active" data-lang="ko">KO</button>
+      <button class="lang-btn" data-lang="en">EN</button>
     </div>
-    <a href="https://ai-watch.dev" class="nav-cta" data-i18n="nav.cta" onclick="gtag('event','click_dashboard',{location:'landing_nav',source:'intro'})">대시보드 열기 →</a>
+    <a href="https://ai-watch.dev" class="nav-cta" data-i18n="nav.cta" data-ga="click_dashboard" data-ga-loc="landing_nav">대시보드 열기 →</a>
   </div>
 </nav>
 
@@ -522,8 +528,8 @@ ${announcementHtml}
     <h1 data-i18n="hero.title"><em>AI 서비스</em> 장애를 즉시 파악하고,<br>갈아탈 대안까지 한 번에.</h1>
     <p data-i18n="hero.sub">41개 AI 서비스 상태를 한 화면에서.<span class="hero-sub-line"> AIWatch가 신뢰도를 랭킹하고 장애를 분석해,</span> 멈추는 순간 대안을 즉시 추천합니다. 무료 · 오픈소스 · 무가입.</p>
     <div class="hero-ctas">
-      <a href="https://ai-watch.dev" class="btn-primary" data-i18n="hero.cta1" onclick="gtag('event','click_dashboard',{location:'landing_hero',source:'intro'})">대시보드 열기 →</a>
-      <a href="https://github.com/bentleypark/aiwatch" target="_blank" rel="noopener noreferrer" class="btn-secondary" data-i18n="hero.cta2" onclick="gtag('event','click_github_header',{location:'landing_hero',source:'intro'})">GitHub에서 보기</a>
+      <a href="https://ai-watch.dev" class="btn-primary" data-i18n="hero.cta1" data-ga="click_dashboard" data-ga-loc="landing_hero">대시보드 열기 →</a>
+      <a href="https://github.com/bentleypark/aiwatch" target="_blank" rel="noopener noreferrer" class="btn-secondary" data-i18n="hero.cta2" data-ga="click_github_header" data-ga-loc="landing_hero">GitHub에서 보기</a>
     </div>
     <p class="hero-trust" data-i18n="hero.trust">로그인 없음 · 실시간 상태 · 완전 무료 오픈소스 (AGPL)</p>
     <div class="hero-pills">
@@ -957,12 +963,12 @@ ${announcementHtml}
     <h2 class="section-title" data-i18n="alert.title">장애 알림, 원하는 방식으로</h2>
     <p class="section-sub" data-i18n="alert.sub">장애 발생 시 실시간 알림 + AI 분석 + Fallback 추천까지 한 번에. 무료입니다.</p>
     <div class="alert-channels">
-      <a class="ch-badge ch-discord" href="https://ai-watch.dev/#settings?focus=alerts" title="Set up Discord push alerts" onclick="gtag('event','click_cta_alerts',{location:'landing_alert',source:'discord_badge'})"><svg width="14" height="14" viewBox="0 0 24 24" fill="#5865F2" aria-hidden="true"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028 14.09 14.09 0 001.226-1.994.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03z"/></svg>Discord</a>
-      <button type="button" class="ch-badge ch-slack" onclick="copySlackFeed(this)" title="Copy Slack /feed command" aria-label="Copy Slack /feed command"><svg width="13" height="13" viewBox="0 0 24 24" fill="#E01E5A" aria-hidden="true"><path d="M5.042 15.165a2.528 2.528 0 01-2.52 2.523A2.528 2.528 0 010 15.165a2.527 2.527 0 012.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 012.521-2.52 2.527 2.527 0 012.521 2.52v6.313A2.528 2.528 0 018.834 24a2.528 2.528 0 01-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 01-2.521-2.52A2.528 2.528 0 018.834 0a2.528 2.528 0 012.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 012.521 2.521 2.528 2.528 0 01-2.521 2.521H2.522A2.528 2.528 0 010 8.834a2.528 2.528 0 012.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 012.522-2.521A2.528 2.528 0 0124 8.834a2.528 2.528 0 01-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 01-2.523 2.521 2.527 2.527 0 01-2.52-2.521V2.522A2.527 2.527 0 0115.165 0a2.528 2.528 0 012.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 012.523 2.522A2.528 2.528 0 0115.165 24a2.527 2.527 0 01-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 01-2.52-2.523 2.526 2.526 0 012.52-2.52h6.313A2.527 2.527 0 0124 15.165a2.528 2.528 0 01-2.522 2.523h-6.313z"/></svg><span class="slack-label">Slack</span></button>
-      <button type="button" class="ch-badge ch-rss" onclick="copyRss(this)" title="Copy RSS feed URL" aria-label="Copy RSS feed URL"><svg width="13" height="13" viewBox="0 0 24 24" fill="#f26522" aria-hidden="true"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83C19.56 11.4 12.6 4.44 4 4.44zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z"/></svg><span class="rss-label">RSS</span></button>
+      <a class="ch-badge ch-discord" href="https://ai-watch.dev/#settings?focus=alerts" title="Set up Discord push alerts" data-ga="click_cta_alerts" data-ga-loc="landing_alert" data-ga-source="discord_badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="#5865F2" aria-hidden="true"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028 14.09 14.09 0 001.226-1.994.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03z"/></svg>Discord</a>
+      <button type="button" class="ch-badge ch-slack" data-action="copy-slack" title="Copy Slack /feed command" aria-label="Copy Slack /feed command"><svg width="13" height="13" viewBox="0 0 24 24" fill="#E01E5A" aria-hidden="true"><path d="M5.042 15.165a2.528 2.528 0 01-2.52 2.523A2.528 2.528 0 010 15.165a2.527 2.527 0 012.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 012.521-2.52 2.527 2.527 0 012.521 2.52v6.313A2.528 2.528 0 018.834 24a2.528 2.528 0 01-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 01-2.521-2.52A2.528 2.528 0 018.834 0a2.528 2.528 0 012.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 012.521 2.521 2.528 2.528 0 01-2.521 2.521H2.522A2.528 2.528 0 010 8.834a2.528 2.528 0 012.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 012.522-2.521A2.528 2.528 0 0124 8.834a2.528 2.528 0 01-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 01-2.523 2.521 2.527 2.527 0 01-2.52-2.521V2.522A2.527 2.527 0 0115.165 0a2.528 2.528 0 012.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 012.523 2.522A2.528 2.528 0 0115.165 24a2.527 2.527 0 01-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 01-2.52-2.523 2.526 2.526 0 012.52-2.52h6.313A2.527 2.527 0 0124 15.165a2.528 2.528 0 01-2.522 2.523h-6.313z"/></svg><span class="slack-label">Slack</span></button>
+      <button type="button" class="ch-badge ch-rss" data-action="copy-rss" title="Copy RSS feed URL" aria-label="Copy RSS feed URL"><svg width="13" height="13" viewBox="0 0 24 24" fill="#f26522" aria-hidden="true"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83C19.56 11.4 12.6 4.44 4 4.44zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z"/></svg><span class="rss-label">RSS</span></button>
     </div>
     <div class="alert-cta">
-      <button type="button" class="btn-primary alert-slack-btn" onclick="copySlackFeed(this)" aria-label="Copy Slack /feed command"><span class="slack-label" data-i18n="alert.slack.btn">💬 Slack으로 알림 받기</span></button>
+      <button type="button" class="btn-primary alert-slack-btn" data-action="copy-slack" aria-label="Copy Slack /feed command"><span class="slack-label" data-i18n="alert.slack.btn">💬 Slack으로 알림 받기</span></button>
       <p class="alert-cta-help" data-i18n="alert.slack.help">Slack 채널에 명령어만 붙여넣으면 끝 — 설정 불필요</p>
     </div>
     <div class="alert-grid">
@@ -1059,7 +1065,7 @@ ${announcementHtml}
   <text x="160" y="350" text-anchor="middle" fill="#484f58" font-size="8" data-i18n="report.chart.note">* Lower scores may reflect reporting granularity, not actual instability</text>
 </svg>
   </div>
-  <a href="${reportUrl}" class="report-link" onclick="gtag('event','click_reports',{location:'landing_report',source:'intro'})">
+  <a href="${reportUrl}" class="report-link" data-ga="click_reports" data-ga-loc="landing_report">
     <span data-i18n="report.link">전체 리포트 보기 →</span>
   </a>
   </div>
@@ -1067,7 +1073,7 @@ ${announcementHtml}
 
 <div class="stack-section">
   <div class="stack-inner">
-    <div style="display:flex;align-items:center;justify-content:space-between;width:100%;flex-wrap:wrap;gap:12px;"><div class="stack-label">// tech stack</div><a href="https://github.com/bentleypark/aiwatch" style="display:inline-flex;align-items:center;gap:6px;background:#21262d;border:1px solid #30363d;color:#e6edf3;font-size:12px;font-family:var(--font-mono);padding:5px 12px;border-radius:6px;text-decoration:none;transition:border-color 0.2s;" onmouseover="this.style.borderColor='#58a6ff'" onmouseout="this.style.borderColor='#30363d'" onclick="gtag('event','click_github_header',{location:'landing_stack',source:'intro'})"><svg width="14" height="14" viewBox="0 0 16 16" fill="#e6edf3"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>Star on GitHub</a></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;width:100%;flex-wrap:wrap;gap:12px;"><div class="stack-label">// tech stack</div><a href="https://github.com/bentleypark/aiwatch" class="stack-gh-link" style="display:inline-flex;align-items:center;gap:6px;background:#21262d;border:1px solid #30363d;color:#e6edf3;font-size:12px;font-family:var(--font-mono);padding:5px 12px;border-radius:6px;text-decoration:none;transition:border-color 0.2s;" data-ga="click_github_header" data-ga-loc="landing_stack"><svg width="14" height="14" viewBox="0 0 16 16" fill="#e6edf3"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>Star on GitHub</a></div>
     <div class="stack-pills">
       <span class="stack-pill"><svg width="14" height="14" viewBox="0 0 128 128"><path d="M64.1 115.8L2.3 68.4l22-15.5L64.1 81l39.8-28.1 22 15.5z" fill="#f6821f"/><path d="M102.8 41.3l-7.1-2.4-.4 1.3c-3.1 10.7-11.6 14.8-22.4 12l-8.2-2.1c-3.5-.9-5.3 1.6-5.7 3.2l-4.7 17.4 47.7 12.9 4.6-17c.9-3.3.5-6-1.1-8.1-1.3-1.8-3.5-3.1-6.2-3.8l3.5-13.4z" fill="#fbad41"/><path d="M87.5 38.5c3-11.2-3.3-22.8-14.1-25.9L62.6 9.8c-10.8-2.9-22 3.7-25 14.9l-3.5 13.4 6.2 1.7.4-1.3c3.1-10.7 11.6-14.8 22.4-12l8.2 2.1c3.5.9 5.3-1.6 5.7-3.2l.4-1.3 6.2 1.7z" fill="#fff"/></svg>Cloudflare Workers</span>
       <span class="stack-pill"><svg width="14" height="14" viewBox="0 0 128 128"><path d="M64.1 115.8L2.3 68.4l22-15.5L64.1 81l39.8-28.1 22 15.5z" fill="#f6821f"/><path d="M64 12L2.3 59.4l22 15.5L64 47l39.8 28 22-15.5z" fill="#fbad41"/></svg>Cloudflare KV</span>
@@ -1085,11 +1091,11 @@ ${announcementHtml}
     <h2 data-i18n="cta.title">지금 바로 확인하세요</h2>
     <p data-i18n="cta.sub">완전 무료 · 설치 불필요 · Discord/Slack 알림 무료</p>
     <div class="cta-btns">
-      <a href="https://ai-watch.dev" class="btn-primary" style="font-size:16px;padding:14px 32px;" data-i18n="cta.btn1" onclick="gtag('event','click_dashboard',{location:'landing_cta',source:'intro'})">대시보드 열기 →</a>
-      <a href="https://ai-watch.dev/#settings?focus=alerts" class="btn-secondary" style="font-size:14px;padding:12px 24px;" data-i18n="cta.btn2" onclick="gtag('event','click_cta_alerts',{location:'landing_cta',source:'intro'})">알림 설정하기</a>
+      <a href="https://ai-watch.dev" class="btn-primary" style="font-size:16px;padding:14px 32px;" data-i18n="cta.btn1" data-ga="click_dashboard" data-ga-loc="landing_cta">대시보드 열기 →</a>
+      <a href="https://ai-watch.dev/#settings?focus=alerts" class="btn-secondary" style="font-size:14px;padding:12px 24px;" data-i18n="cta.btn2" data-ga="click_cta_alerts" data-ga-loc="landing_cta">알림 설정하기</a>
     </div>
     <div class="cta-rss">
-      <button type="button" onclick="copyRss(this)" title="Copy RSS feed URL">
+      <button type="button" data-action="copy-rss" title="Copy RSS feed URL">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="#f26522" aria-hidden="true"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83C19.56 11.4 12.6 4.44 4 4.44zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z"/></svg>
         <span class="rss-label" data-i18n="cta.rss">RSS로 구독</span>
       </button>
@@ -1103,14 +1109,14 @@ ${announcementHtml}
     <div class="footer-links">
       <a href="https://github.com/bentleypark/aiwatch">GitHub</a>
       <a href="/reports/" data-i18n="footer.report">월간 리포트</a>
-      <a href="https://ai-watch.dev/#settings?focus=alerts" data-i18n="footer.alert" onclick="gtag('event','click_cta_alerts',{location:'landing_footer',source:'intro'})">알림 설정</a>
+      <a href="https://ai-watch.dev/#settings?focus=alerts" data-i18n="footer.alert" data-ga="click_cta_alerts" data-ga-loc="landing_footer">알림 설정</a>
       <a href="https://ai-watch.dev/is-claude-down">Is Claude Down?</a>
     </div>
   </div>
 </footer>
 </div><!-- .page-wrap -->
 
-<script>
+<script${nonceAttr(nonce)}>
 const i18n = {
   ko: {
     'nav.features': '기능', 'nav.how': '동작 방식', 'nav.methodology': '측정 방법론', 'nav.report': '월간 리포트', 'nav.cta': '장애 확인하기 →',
@@ -1236,6 +1242,29 @@ function copySlackFeed(btn) {
 try {
   setLang(currentLang);
 
+  // CSP-safe (#482): all interactivity via delegated listeners — no inline on*= handlers.
+  // Lang toggle.
+  document.querySelectorAll('.lang-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () { var l = btn.getAttribute('data-lang'); if (l) setLang(l); });
+  });
+  // Copy buttons (RSS feed + Slack /feed command), wired by their data-action.
+  document.querySelectorAll('[data-action="copy-rss"]').forEach(function (btn) {
+    btn.addEventListener('click', function () { copyRss(btn); });
+  });
+  document.querySelectorAll('[data-action="copy-slack"]').forEach(function (btn) {
+    btn.addEventListener('click', function () { copySlackFeed(btn); });
+  });
+  // GA4 link clicks — from data-ga (+ data-ga-loc / optional data-ga-source / data-ga-id),
+  // delegated on the document. data-ga-source defaults to 'intro' but the Discord badge overrides it.
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest('[data-ga]');
+    if (!el || typeof gtag !== 'function') return;
+    var p = { location: el.getAttribute('data-ga-loc') || 'intro', source: el.getAttribute('data-ga-source') || 'intro' };
+    var id = el.getAttribute('data-ga-id');
+    if (id) p.id = id;
+    gtag('event', el.getAttribute('data-ga'), p);
+  });
+
   // Flow widget: IO detects visibility → add .show to all → CSS transition-delay handles sequencing
   var _fwStarted = false;
   var _flowEl = document.querySelector('.flow-wrap');
@@ -1275,7 +1304,7 @@ try {
 } catch (e) { console.error('[intro] Client init failed:', e); }
 
 </script>
-${COOKIE_BANNER_HTML}
+${cookieBannerHtml(nonce)}
 </body>
 </html>
 `

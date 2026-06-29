@@ -2,6 +2,7 @@
 
 import { renderLandingPage } from './intro/html-template'
 import { resolveAnnouncement } from './intro/announcements'
+import { generateNonce, buildCsp } from './_shared/csp-nonce'
 
 export const config = { runtime: 'edge' }
 
@@ -10,13 +11,19 @@ export default async function handler(req: Request) {
     const url = new URL(req.url)
     // Optional campaign banner via ?banner=<key> (#265). Defaults to none.
     const announcement = resolveAnnouncement(url.searchParams.get('banner'))
-    const html = renderLandingPage({ announcement })
+    // #482 — per-response nonce + own CSP header (Report-Only in Phase 2 → enforcing in Phase 3).
+    const nonce = generateNonce()
+    const csp = buildCsp(nonce)
+    const html = renderLandingPage({ announcement, nonce })
 
     return new Response(html, {
       status: 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=86400',
+        // #482 — per-response nonce is incompatible with caching (a cached page reuses one nonce
+        // for every visitor → no XSS protection). no-store.
+        'Cache-Control': 'no-store',
+        [csp.key]: csp.value,
       },
     })
   } catch (err) {
