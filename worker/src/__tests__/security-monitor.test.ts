@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { mapOSVSeverity, detectSecurityAlerts, fetchOSVAlerts, fetchEPSS, enrichAlertsWithEPSS, formatEpssTag, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, EPSS_ACTIVE, EPSS_ELEVATED, OSV_PACKAGES, shouldAppendTimeline, appendTimelineEntry, osvTimelineKey, planOsvTimelineCycle, buildHNQuery, titleMatchesAiSecurity, fetchHNSecurityPosts } from '../security-monitor'
+import { mapOSVSeverity, detectSecurityAlerts, fetchOSVAlerts, fetchEPSS, enrichAlertsWithEPSS, formatEpssTag, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, EPSS_ACTIVE, EPSS_ELEVATED, OSV_PACKAGES, shouldAppendTimeline, appendTimelineEntry, osvTimelineKey, planOsvTimelineCycle, buildHNQuery, titleMatchesAiSecurity, isShowOrLaunchHN, fetchHNSecurityPosts } from '../security-monitor'
 import type { SecurityAlert, SecurityAlertMeta, OsvTimeline } from '../security-monitor'
 
 // #325: OSV_PACKAGES drives both querybatch input and the post-fetch enrichment
@@ -32,10 +32,11 @@ describe('OSV_PACKAGES invariants', () => {
 
   it('every service label is also a key in the frontend OSV_SERVICE_MAP', () => {
     // Cross-layer invariant: adding a `service` label here without also adding it
-    // to OSV_SERVICE_MAP in src/pages/ServiceDetails.jsx silently drops those
+    // to OSV_SERVICE_MAP in src/utils/securityAlerts.js silently drops those
     // alerts from the Security Alerts card — the filter there evaluates
     // `OSV_SERVICE_MAP[a.service] === service.id`, which is `undefined === id`
-    // (false) for unmapped labels. This mirror enforces the sync at test time.
+    // (false) for unmapped labels. This mirror is a worker-local tripwire; the
+    // authoritative sync (against the real map) lives in securityAlerts.test.js (#821).
     const KNOWN_SERVICE_LABELS = new Set([
       'OpenAI', 'Anthropic (Claude)', 'Google (Gemini)', 'Cohere', 'Mistral',
       'Hugging Face', 'LangChain',
@@ -117,6 +118,21 @@ describe('titleMatchesAiSecurity (#720)', () => {
   })
 })
 
+describe('isShowOrLaunchHN (#821)', () => {
+  it('flags Show HN / Launch HN announcements (the third-party-promo shape)', () => {
+    // The real false positive: trips titleMatchesAiSecurity (openai + prompt injection) yet
+    // is a promo for a tool that DEFENDS OpenAI agents, not an OpenAI security event.
+    expect(isShowOrLaunchHN('Show HN: Lelu – gate OpenAI agent actions on confidence and prompt injection')).toBe(true)
+    expect(isShowOrLaunchHN('Launch HN: Acme (YC W26) – AI breach detection')).toBe(true)
+    expect(isShowOrLaunchHN('show hn: openai vulnerability scanner')).toBe(true) // case-insensitive
+  })
+
+  it('does not flag genuine reporting that merely contains "show" elsewhere', () => {
+    expect(isShowOrLaunchHN('Logs show OpenAI keys leaked in a breach')).toBe(false)
+    expect(isShowOrLaunchHN('Critical Copilot vulnerability lets hackers steal codes')).toBe(false)
+  })
+})
+
 describe('fetchHNSecurityPosts — request wiring + post-filter (#720)', () => {
   afterEach(() => vi.unstubAllGlobals())
 
@@ -134,6 +150,8 @@ describe('fetchHNSecurityPosts — request wiring + post-filter (#720)', () => {
           { objectID: '3', title: 'New CVE found in nginx', url: null, points: 3, created_at_i: 3 },
           // dropped — substring-only false positive ("source" → rce)
           { objectID: '4', title: 'Show HN: open source Claude tool', url: 'https://ex/4', points: 1, created_at_i: 4 },
+          // dropped (#821) — passes (AI AND security) but is a Show HN promo, not a security event
+          { objectID: '5', title: 'Show HN: Lelu – gate OpenAI agent actions on confidence and prompt injection', url: 'https://github.com/Lelu-ai/lelu', points: 1, created_at_i: 5 },
         ],
       }), { status: 200 })
     }))
