@@ -3,6 +3,7 @@
 import { SLUG_TO_SERVICE } from './is-down/slug-map'
 import { getSEOContent } from './is-down/seo-content'
 import { renderPage } from './is-down/html-template'
+import { cspForHtml } from './_shared/csp-hash'
 import { computeRankPosition } from './is-down/ranking'
 import { regionStatusOf, type RegionStatusResult } from './is-down/region-status'
 
@@ -314,6 +315,11 @@ export default async function handler(req: Request) {
     // Worker so the operator gets a Discord alert.
     const isFallback = serviceData === null
     if (isFallback) await notifyEdgeFallback(slug, fallbackReason)
+    // #482 — HASH-based CSP (not nonce): hash THIS response's inline scripts so the policy is
+    // derived from the served content. Unlike a random nonce, a content hash stays valid when the
+    // page is edge-cached (the cached header's hashes match the cached body), so /is-down keeps its
+    // s-maxage=60 edge cache (it's the busiest, outage-viral SEO surface). Report-Only in Phase 2.
+    const csp = await cspForHtml(html)
     return new Response(html, {
       status: isFallback ? 503 : 200,
       headers: {
@@ -321,6 +327,7 @@ export default async function handler(req: Request) {
         'Cache-Control': isFallback
           ? 'no-store, max-age=0, must-revalidate'
           : 'public, s-maxage=60, stale-while-revalidate=300',
+        [csp.key]: csp.value,
       },
     })
   } catch (err) {

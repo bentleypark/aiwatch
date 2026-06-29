@@ -335,21 +335,24 @@ test.describe('Is X Down? SSR pages', () => {
 
     test('primary CTA is the Slack-feed button; RSS secondary; Discord demoted to a text link (#547/#696)', async ({ page }) => {
       await page.goto('/is-claude-down', { waitUntil: 'domcontentloaded' })
-      // #696 Primary = zero-config Slack /feed button → fires copy_slack_feed (success proxy).
+      // #696 Primary = zero-config Slack /feed button → copy_slack_feed (success proxy).
+      // #482: the click fires from the delegated [data-action] dispatcher (no inline onclick).
       const primary = page.locator('.cta button.btn-primary[data-slack]')
       await expect(primary).toBeVisible()
-      expect(await primary.getAttribute('onclick')).toContain('copySlackFeed(this)')
-      // RSS is the secondary button now (.btn, not .btn-primary) → still fires copy_rss.
+      expect(await primary.getAttribute('data-action')).toBe('copy-slack')
+      expect(await primary.getAttribute('onclick')).toBeNull()
+      // RSS is the secondary button now (.btn, not .btn-primary).
       const rss = page.locator('.cta button[data-rss]')
       await expect(rss).toBeVisible()
-      expect(await rss.getAttribute('onclick')).toContain('copyRss(this)')
+      expect(await rss.getAttribute('data-action')).toBe('copy-rss')
       expect(await rss.getAttribute('class')).not.toContain('btn-primary')
       // Heavy Discord path is a de-emphasized text link, tagged source=status_banner_secondary
-      // so the funnel comparison can tell post-reorder clicks apart from the old primary placement.
-      const onclick = await page.locator('.cta .cta-alt a').getAttribute('onclick')
-      expect(onclick).toContain("'click_cta_alerts'")
-      expect(onclick).toContain("source:'status_banner_secondary'")
-      expect(onclick).toContain("location:'is_down_page'")
+      // (GA4 on the delegated [data-ga] listener) so the funnel comparison can tell post-reorder
+      // clicks apart from the old primary placement.
+      const alt = page.locator('.cta .cta-alt a')
+      expect(await alt.getAttribute('data-ga')).toBe('click_cta_alerts')
+      expect(await alt.getAttribute('data-ga-source')).toBe('status_banner_secondary')
+      expect(await alt.getAttribute('data-ga-loc')).toBe('is_down_page')
     })
 
     test('down/degraded copy uses benefit-framed wording', async ({ page }) => {
