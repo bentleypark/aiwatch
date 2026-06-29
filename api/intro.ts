@@ -11,9 +11,10 @@ export default async function handler(req: Request) {
     const url = new URL(req.url)
     // Optional campaign banner via ?banner=<key> (#265). Defaults to none.
     const announcement = resolveAnnouncement(url.searchParams.get('banner'))
-    // #482 — per-response nonce + own CSP header (Report-Only in Phase 2 → enforcing in Phase 3).
+    // #482 — per-response nonce + own ENFORCING CSP header (Phase 3). The SPA's vercel.json
+    // Report-Only header co-applies here but Report-Only never blocks, so the nonce policy enforces.
     const nonce = generateNonce()
-    const csp = buildCsp(nonce)
+    const csp = buildCsp(nonce, { enforce: true })
     const html = renderLandingPage({ announcement, nonce })
 
     return new Response(html, {

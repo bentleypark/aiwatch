@@ -11,11 +11,11 @@ export const config = { runtime: 'edge' }
 
 export default async function handler(_req: Request) {
   try {
-    // #482 — per-response nonce: each inline <script> is stamped with it and the page sets its
-    // own CSP header carrying 'nonce-…'. Report-Only for now (Phase 2); flipped to enforcing in
-    // Phase 3 once every Edge surface is locally verified clean.
+    // #482 — per-response nonce: each inline <script> is stamped with it and the page sets its own
+    // ENFORCING CSP header carrying 'nonce-…' (Phase 3). The SPA's vercel.json Report-Only header
+    // co-applies but Report-Only never blocks, so the nonce policy is what enforces here.
     const nonce = generateNonce()
-    const csp = buildCsp(nonce)
+    const csp = buildCsp(nonce, { enforce: true })
     const html = renderBadgesPage(nonce)
     return new Response(html, {
       status: 200,

@@ -3,11 +3,21 @@
 AIWatch ships a CSP across the Vercel-served surfaces (SPA + Edge SSR). Rolled out **phased**:
 **Report-Only first → refactor inline → enforce**, so a strict policy never breaks the live site.
 
-## Current state — Phase 1 (Report-Only)
+## Current state — Phase 3 (Edge SSR ENFORCING; SPA still Report-Only)
 
-- **Header**: `Content-Security-Policy-Report-Only` (NOT enforcing) on `source: "/(.*)"` in
-  **`vercel.json`** (`headers` block), plus a `Reporting-Endpoints: csp="/api/csp-report"` header.
-  Vercel applies these to the SPA (`index.html`) and the Edge SSR routes (`/is-*-down`, `/intro`).
+- **Edge SSR pages ENFORCE their own per-response CSP** (#823/#828/#829 + the Phase-3 flip): badges /
+  methodology / intro via a **nonce** (`api/_shared/csp-nonce.ts`, `Cache-Control: no-store`), is-down
+  via a **content hash** (`api/_shared/csp-hash.ts` `cspForHtml`, keeps `s-maxage=60`). Each handler
+  sets `Content-Security-Policy` (enforcing) itself; every inline `on*=` handler was refactored to a
+  delegated listener first, so nothing breaks.
+- **SPA still `Content-Security-Policy-Report-Only`** via `vercel.json` `source: "/(.*)"`. That global
+  header ALSO co-applies on the Edge routes, but Report-Only never blocks — the Edge's own enforcing
+  policy is what gates those pages (verified). Enforcing the SPA is the remaining #482 work: `index.html`
+  has inline `<link onload/onerror>` handlers + an inline `<script>` that must be hashed/refactored
+  first; only then flip vercel.json to enforcing AND scope its `/(.*)` source to exclude the Edge
+  routes (so two enforcing policies don't intersect-block the Edge scripts).
+- `Reporting-Endpoints: csp="/api/csp-report"` is still set; both the SPA Report-Only header and each
+  Edge enforcing header point their `report-uri`/`report-to` at the same sink.
 - **Sink**: **`api/csp-report.ts`** (Vercel Edge Function) receives violation reports via the policy's
   `report-uri` (legacy `application/csp-report`) + `report-to` (modern `application/reports+json`),
   normalizes both wire formats (`parseCspReports`), and logs one compact line per violation

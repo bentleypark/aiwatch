@@ -3,9 +3,10 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
-// #482 Phase 1 — vercel.json must ship a Content-Security-Policy-REPORT-ONLY header (not enforcing
-// yet) covering all routes, with the target strict policy so report-only surfaces exactly the inline
-// scripts/handlers to refactor in Phase 2. Guards: (a) it stays Report-Only until the refactor lands,
+// #482 — vercel.json's `/(.*)` header is the SPA's CSP and must stay Content-Security-Policy-REPORT-ONLY.
+// (Phase 3 flipped the EDGE SSR pages to enforcing via their OWN per-response headers — see the Edge
+// handlers — but the SPA stays Report-Only here because index.html still has un-refactored inline
+// handlers; enforcing it is the remaining #482 work.) Guards: (a) the global header stays Report-Only,
 // (b) script-src does NOT carry 'unsafe-inline' (which would suppress the very reports we want),
 // (c) the origins the SPA + Edge SSR actually use are allowlisted, (d) the report sink is wired.
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -21,7 +22,7 @@ function cspHeaderValue(): string {
   return csp!.value
 }
 
-describe('vercel.json CSP (#482 Phase 1)', () => {
+describe('vercel.json CSP — SPA Report-Only (#482; Edge SSR enforces via its own headers)', () => {
   it('ships report-only (NOT enforcing) so it cannot break the live site during rollout', () => {
     const block = vercelConfig.headers?.find((h) => h.source === '/(.*)')
     const enforcing = block?.headers.find((h) => h.key === 'Content-Security-Policy')
