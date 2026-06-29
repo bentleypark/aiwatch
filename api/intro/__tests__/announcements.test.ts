@@ -94,7 +94,9 @@ describe('intro handler wiring (?banner → resolve → render)', () => {
     // #482 — a per-response nonce can't be cached (a cached page would reuse one nonce for everyone).
     expect(res.headers.get('Cache-Control')).toBe('no-store')
     expect(res.headers.get('Vary')).toBeNull()
-    const csp = res.headers.get('Content-Security-Policy-Report-Only')
+    // #482 Phase 3 — the handler emits its OWN ENFORCING header (not Report-Only) carrying the nonce.
+    expect(res.headers.get('Content-Security-Policy-Report-Only')).toBeNull()
+    const csp = res.headers.get('Content-Security-Policy')
     expect(csp).toMatch(/script-src[^;]*'nonce-[^']+'/)
   })
 

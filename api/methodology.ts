@@ -11,9 +11,9 @@ export const config = { runtime: 'edge' }
 
 export default async function handler(_req: Request) {
   try {
-    // #482 — per-response nonce + own CSP header (Report-Only in Phase 2 → enforcing in Phase 3).
+    // #482 — per-response nonce + own ENFORCING CSP header (Phase 3; SPA stays Report-Only).
     const nonce = generateNonce()
-    const csp = buildCsp(nonce)
+    const csp = buildCsp(nonce, { enforce: true })
     const html = renderMethodologyPage(nonce)
 
     return new Response(html, {

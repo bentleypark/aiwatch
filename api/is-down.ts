@@ -318,8 +318,9 @@ export default async function handler(req: Request) {
     // #482 — HASH-based CSP (not nonce): hash THIS response's inline scripts so the policy is
     // derived from the served content. Unlike a random nonce, a content hash stays valid when the
     // page is edge-cached (the cached header's hashes match the cached body), so /is-down keeps its
-    // s-maxage=60 edge cache (it's the busiest, outage-viral SEO surface). Report-Only in Phase 2.
-    const csp = await cspForHtml(html)
+    // s-maxage=60 edge cache (it's the busiest, outage-viral SEO surface). ENFORCING (Phase 3); the
+    // SPA's vercel.json Report-Only header co-applies but never blocks, so the hash policy enforces.
+    const csp = await cspForHtml(html, { enforce: true })
     return new Response(html, {
       status: isFallback ? 503 : 200,
       headers: {
