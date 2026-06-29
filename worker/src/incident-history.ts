@@ -1,0 +1,210 @@
+// Durable incident history — #827 Phase 1 keystone.
+//
+// At resolution, the AI prediction (ai:analysis:*, 1h/2h TTL) and the actual
+// recovery time (recovered:*, 2h TTL) BOTH exist for ~2 hours, then expire —
+// and the permanent monthly archive keeps only incident metadata, no AI fields.
+// So today nothing joins "what the AI predicted" with "what actually happened",
+// and the AI summaries needed for retrieval-augmented analysis are gone within
+// hours.
+//
+// This module persists ONE durable record per resolved incident, joining the
+// prediction with the actual outcome. That single record is simultaneously:
+//   - the prediction-accuracy ledger (#827 Feature 1), and
+//   - the RAG corpus future analyses retrieve from (#827 Feature 2).
+//
+// Storage: a rolling per-service list at `incident:history:{svcId}` with NO TTL
+// (durable), capped to the most-recent HISTORY_CAP records to keep the KV value
+// bounded. Writes are best-effort — a KV failure is logged and swallowed so it
+// can never abort the cron's recovery flow.
+
+import type { KVLike } from './utils'
+import { kvPut } from './utils'
+
+/** One durable resolved-incident record. `predicted*`/`affectedScope`/`model`
+ *  are present only when an AI analysis existed at resolution time — a record is
+ *  still written without them (the actual outcome alone is corpus-worthy). */
+export interface IncidentHistoryRecord {
+  svcId: string
+  incId: string
+  title: string
+  provider: string
+  category: 'api' | 'app' | 'agent'
+  impact: 'minor' | 'major' | 'critical' | null
+  startedAt: string
+  resolvedAt: string
+  /** Actual duration in minutes (startedAt → resolvedAt). */
+  durationMin: number
+  /** AI-predicted recovery, upper bound of the range in hours (from
+   *  AIAnalysisResult.estimatedRecoveryHours). Absent when no analysis. */
+  predictedRecoveryHours?: number
+  /** AI summary text at resolution. Absent when no analysis. */
+  predictedSummary?: string
+  affectedScope?: string[]
+  model?: 'gemma' | 'sonnet'
+}
+
+/** Rolling per-service durable history key (no TTL). */
+export function historyKey(svcId: string): string {
+  return `incident:history:${svcId}`
+}
+
+/** Max records retained per service. 50 × ~0.4KB ≈ 20KB — well under the KV
+ *  25MB value limit, while covering many months of a service's incidents. */
+export const HISTORY_CAP = 50
+
+/** Actual incident duration in whole minutes. Returns 0 for malformed or
+ *  out-of-order timestamps (never negative). */
+export function durationMinOf(startedAt: string, resolvedAt: string): number {
+  const start = new Date(startedAt).getTime()
+  const end = new Date(resolvedAt).getTime()
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 0
+  return Math.round((end - start) / 60000)
+}
+
+/** How the AI's predicted recovery compared to reality. The prediction is the
+ *  UPPER BOUND of a range ("1–3h" → 3h via parseRecoveryHours), so:
+ *    - actual > predicted upper bound        → the model was too optimistic
+ *    - actual far below the predicted bound   → the model was too pessimistic
+ *    - actual within a sensible band of it    → accurate
+ *  Pure — reused by the prompt grounding (PR-B) and the monthly accuracy
+ *  aggregate (Feature 1). */
+export type AccuracyVerdict = 'accurate' | 'over-predicted' | 'under-predicted' | 'unknown'
+
+export function accuracyOf(rec: { predictedRecoveryHours?: number; durationMin: number }): AccuracyVerdict {
+  const predicted = rec.predictedRecoveryHours
+  if (predicted == null || predicted <= 0) return 'unknown'
+  const actualHours = rec.durationMin / 60
+  if (actualHours > predicted) return 'under-predicted'   // took longer than the predicted upper bound
+  if (actualHours < predicted * 0.5) return 'over-predicted' // recovered far faster than predicted
+  return 'accurate'                                        // landed within [0.5×, 1×] of the bound
+}
+
+/** Keep only a model value inside the AIAnalysisResult union. The cron only ever
+ *  stores 'gemma'/'sonnet', but normalizing on write means a future drift (e.g. a
+ *  raw model id leaking in) can never put an off-union string into the durable
+ *  corpus. */
+function normalizeModel(model: string | undefined): { model?: 'gemma' | 'sonnet' } {
+  return model === 'gemma' || model === 'sonnet' ? { model } : {}
+}
+
+const MAX_TITLE = 200
+const MAX_SUMMARY = 500
+
+/**
+ * Build a durable history record from a just-recovered service's incident, joining
+ * the AI prediction (when an analysis existed at resolution) with the actual outcome.
+ * Pure — so the gating + field mapping are unit-testable apart from the cron/KV.
+ *
+ * Returns null (skip) unless the incident is in a terminal/near-terminal state:
+ *   - `resolved`  — done.
+ *   - `monitoring` — fix deployed, service already back to operational (#550 lets a
+ *     service edge to operational while an incident is still `monitoring`; the
+ *     recovery alert fires on the SERVICE-status edge, so there may be no later
+ *     edge when it finally flips to `resolved` → recording here closes that gap).
+ * `investigating`/`identified` at a recovery edge are intentionally NOT recorded —
+ * stamping a still-diagnosing incident as resolved would mis-measure its duration.
+ *
+ * Duration is measured to the incident's own `resolvedAt` when present (the source's
+ * authoritative resolution time), else to `now` (the recovery-detection cycle) — the
+ * latter for `monitoring`, which has no `resolvedAt` yet. Title/summary are length-
+ * capped so the per-service value stays honestly bounded.
+ */
+export function buildHistoryRecord(
+  svc: { id: string; provider: string; category: 'api' | 'app' | 'agent' },
+  inc: { id: string; title?: string; impact?: 'minor' | 'major' | 'critical' | null; status: string; startedAt?: string; resolvedAt?: string | null },
+  analysis: { estimatedRecoveryHours?: number; summary?: string; affectedScope?: string[]; model?: string } | null,
+  now: string,
+): IncidentHistoryRecord | null {
+  if (!inc.startedAt) return null
+  if (inc.status !== 'resolved' && inc.status !== 'monitoring') return null
+  const resolvedAt = inc.resolvedAt ?? now
+  return {
+    svcId: svc.id,
+    incId: inc.id,
+    title: (inc.title ?? '').slice(0, MAX_TITLE),
+    provider: svc.provider,
+    category: svc.category,
+    impact: inc.impact ?? null,
+    startedAt: inc.startedAt,
+    resolvedAt,
+    durationMin: durationMinOf(inc.startedAt, resolvedAt),
+    ...(analysis?.estimatedRecoveryHours != null && { predictedRecoveryHours: analysis.estimatedRecoveryHours }),
+    ...(analysis?.summary && { predictedSummary: analysis.summary.slice(0, MAX_SUMMARY) }),
+    ...(analysis?.affectedScope?.length ? { affectedScope: analysis.affectedScope } : {}),
+    ...normalizeModel(analysis?.model),
+  }
+}
+
+/**
+ * Append one or more resolved-incident records for a SINGLE service in ONE
+ * read-modify-write. Batching is the fix for the lost-update race when a service
+ * resolves ≥2 incidents in the same cron cycle: the cron's recovery handler runs
+ * its per-incident work inside `Promise.all`, so racing one RMW per incident
+ * against the shared `incident:history:{svcId}` key would drop all but the last
+ * write. The caller collects records during the map, then calls this once.
+ *
+ * Idempotent (dedups by incId against existing + within the batch); caps to the
+ * most-recent HISTORY_CAP (newest last); records whose svcId doesn't match are
+ * ignored (guards against a mixed-service batch). Best-effort — returns false
+ * (and logs) on any KV error or corrupt value rather than throwing, so the
+ * caller's recovery flow is never aborted.
+ */
+export async function appendIncidentHistoryBatch(
+  kv: KVLike,
+  svcId: string,
+  records: IncidentHistoryRecord[],
+): Promise<boolean> {
+  if (records.length === 0) return true
+  const key = historyKey(svcId)
+  try {
+    // NOTE: a get THROW must NOT be swallowed to null here — unlike a genuine miss, treating a
+    // transient read failure as "empty" would make the kvPut below overwrite the entire durable,
+    // no-TTL corpus with only this batch (losing up to HISTORY_CAP-1 prior records). Let it throw
+    // → the outer catch returns false (best-effort) and the existing corpus is left intact.
+    const raw = await kv.get(key)
+    let list: IncidentHistoryRecord[] = []
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) list = parsed
+      } catch {
+        // corrupt value — start fresh rather than lose this write
+      }
+    }
+    const seen = new Set(list.map(r => r.incId))
+    let added = false
+    for (const rec of records) {
+      if (rec.svcId !== svcId || seen.has(rec.incId)) continue // wrong-service / already recorded
+      seen.add(rec.incId)
+      list.push(rec)
+      added = true
+    }
+    if (!added) return true // nothing new — idempotent no-op
+    if (list.length > HISTORY_CAP) list = list.slice(list.length - HISTORY_CAP)
+    return await kvPut(kv, key, JSON.stringify(list)) // no TTL → durable
+  } catch (err) {
+    console.warn('[incident-history] batch append failed:', svcId, err instanceof Error ? err.message : err)
+    return false
+  }
+}
+
+/**
+ * Append a single resolved-incident record. Thin wrapper over
+ * appendIncidentHistoryBatch (same idempotency / cap / best-effort semantics).
+ */
+export function appendIncidentHistory(kv: KVLike, record: IncidentHistoryRecord): Promise<boolean> {
+  return appendIncidentHistoryBatch(kv, record.svcId, [record])
+}
+
+/** Read the durable history for one service (newest last). Returns [] on miss,
+ *  corrupt value, or KV error — a read failure must never break a caller. */
+export async function readIncidentHistory(kv: KVLike, svcId: string): Promise<IncidentHistoryRecord[]> {
+  try {
+    const raw = await kv.get(historyKey(svcId)).catch(() => null)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
