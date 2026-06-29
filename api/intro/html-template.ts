@@ -329,7 +329,14 @@ ${CONSENT_INIT_SCRIPT}
   .alert-channels { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 20px 0 20px; }
   .ch-badge { display: inline-flex; align-items: center; gap: 6px; background: var(--bg2); border: 1px solid var(--border); border-radius: 999px; padding: 7px 14px; font-size: 13px; font-weight: 500; font-family: var(--font-mono); color: var(--text1); }
   button.ch-badge { cursor: pointer; transition: border-color 0.2s; }
+  a.ch-badge { text-decoration: none; cursor: pointer; transition: border-color 0.2s; }
   button.ch-rss:hover { border-color: #f26522; }
+  button.ch-slack:hover { border-color: #E01E5A; }
+  a.ch-discord:hover { border-color: #5865F2; }
+  /* Slack /feed primary CTA (#824) — mirrors the Is-X-Down zero-config Slack action */
+  .alert-cta { text-align: center; margin: 4px 0 8px; }
+  .alert-slack-btn { border: none; cursor: pointer; font-family: var(--font-mono); }
+  .alert-cta-help { font-size: 12px; color: var(--text2); margin-top: 8px; font-family: var(--font-mono); }
   /* RSS subscribe link in the final CTA box (#434) */
   .cta-rss { margin-top: 16px; }
   .cta-rss button { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; color: var(--text2); font-size: 13px; font-family: var(--font-mono); cursor: pointer; }
@@ -520,7 +527,7 @@ ${announcementHtml}
     </div>
     <p class="hero-trust" data-i18n="hero.trust">로그인 없음 · 실시간 상태 · 완전 무료 오픈소스 (AGPL)</p>
     <div class="hero-pills">
-      <div class="stat-pill"><span class="stat-pill-num">36</span> <span data-i18n="hero.pill1">AI 서비스</span></div>
+      <div class="stat-pill"><span class="stat-pill-num">41</span> <span data-i18n="hero.pill1">AI 서비스</span></div>
       <div class="stat-pill"><span class="stat-pill-num" data-i18n="hero.pill2v">실시간</span> <span data-i18n="hero.pill2">알림</span></div>
       <div class="stat-pill"><span class="stat-pill-num">AGPL</span> <span data-i18n="hero.pill3">오픈소스</span></div>
     </div>
@@ -916,7 +923,7 @@ ${announcementHtml}
         </tr>
         <tr>
           <td data-i18n="compare.r3">AIWatch Score</td>
-          <td class="no" data-i18n="compare.r3a">업타임 % 뿐</td>
+          <td class="no" data-i18n="compare.r3a">종합 점수 없음 (업타임 %만)</td>
           <td class="yes" data-i18n="compare.r3b">AIWatch Score — Uptime + 영향 일수 + 복구 + 응답성</td>
         </tr>
         <tr>
@@ -950,9 +957,13 @@ ${announcementHtml}
     <h2 class="section-title" data-i18n="alert.title">장애 알림, 원하는 방식으로</h2>
     <p class="section-sub" data-i18n="alert.sub">장애 발생 시 실시간 알림 + AI 분석 + Fallback 추천까지 한 번에. 무료입니다.</p>
     <div class="alert-channels">
-      <span class="ch-badge"><svg width="14" height="14" viewBox="0 0 24 24" fill="#5865F2" aria-hidden="true"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028 14.09 14.09 0 001.226-1.994.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03z"/></svg>Discord</span>
-      <span class="ch-badge"><svg width="13" height="13" viewBox="0 0 24 24" fill="#E01E5A" aria-hidden="true"><path d="M5.042 15.165a2.528 2.528 0 01-2.52 2.523A2.528 2.528 0 010 15.165a2.527 2.527 0 012.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 012.521-2.52 2.527 2.527 0 012.521 2.52v6.313A2.528 2.528 0 018.834 24a2.528 2.528 0 01-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 01-2.521-2.52A2.528 2.528 0 018.834 0a2.528 2.528 0 012.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 012.521 2.521 2.528 2.528 0 01-2.521 2.521H2.522A2.528 2.528 0 010 8.834a2.528 2.528 0 012.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 012.522-2.521A2.528 2.528 0 0124 8.834a2.528 2.528 0 01-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 01-2.523 2.521 2.527 2.527 0 01-2.52-2.521V2.522A2.527 2.527 0 0115.165 0a2.528 2.528 0 012.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 012.523 2.522A2.528 2.528 0 0115.165 24a2.527 2.527 0 01-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 01-2.52-2.523 2.526 2.526 0 012.52-2.52h6.313A2.527 2.527 0 0124 15.165a2.528 2.528 0 01-2.522 2.523h-6.313z"/></svg>Slack</span>
+      <a class="ch-badge ch-discord" href="https://ai-watch.dev/#settings?focus=alerts" title="Set up Discord push alerts" onclick="gtag('event','click_cta_alerts',{location:'landing_alert',source:'discord_badge'})"><svg width="14" height="14" viewBox="0 0 24 24" fill="#5865F2" aria-hidden="true"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028 14.09 14.09 0 001.226-1.994.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03z"/></svg>Discord</a>
+      <button type="button" class="ch-badge ch-slack" onclick="copySlackFeed(this)" title="Copy Slack /feed command" aria-label="Copy Slack /feed command"><svg width="13" height="13" viewBox="0 0 24 24" fill="#E01E5A" aria-hidden="true"><path d="M5.042 15.165a2.528 2.528 0 01-2.52 2.523A2.528 2.528 0 010 15.165a2.527 2.527 0 012.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 012.521-2.52 2.527 2.527 0 012.521 2.52v6.313A2.528 2.528 0 018.834 24a2.528 2.528 0 01-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 01-2.521-2.52A2.528 2.528 0 018.834 0a2.528 2.528 0 012.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 012.521 2.521 2.528 2.528 0 01-2.521 2.521H2.522A2.528 2.528 0 010 8.834a2.528 2.528 0 012.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 012.522-2.521A2.528 2.528 0 0124 8.834a2.528 2.528 0 01-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 01-2.523 2.521 2.527 2.527 0 01-2.52-2.521V2.522A2.527 2.527 0 0115.165 0a2.528 2.528 0 012.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 012.523 2.522A2.528 2.528 0 0115.165 24a2.527 2.527 0 01-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 01-2.52-2.523 2.526 2.526 0 012.52-2.52h6.313A2.527 2.527 0 0124 15.165a2.528 2.528 0 01-2.522 2.523h-6.313z"/></svg><span class="slack-label">Slack</span></button>
       <button type="button" class="ch-badge ch-rss" onclick="copyRss(this)" title="Copy RSS feed URL" aria-label="Copy RSS feed URL"><svg width="13" height="13" viewBox="0 0 24 24" fill="#f26522" aria-hidden="true"><circle cx="6.18" cy="17.82" r="2.18"/><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83C19.56 11.4 12.6 4.44 4 4.44zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9z"/></svg><span class="rss-label">RSS</span></button>
+    </div>
+    <div class="alert-cta">
+      <button type="button" class="btn-primary alert-slack-btn" onclick="copySlackFeed(this)" aria-label="Copy Slack /feed command"><span class="slack-label" data-i18n="alert.slack.btn">💬 Slack으로 알림 받기</span></button>
+      <p class="alert-cta-help" data-i18n="alert.slack.help">Slack 채널에 명령어만 붙여넣으면 끝 — 설정 불필요</p>
     </div>
     <div class="alert-grid">
       <div>
@@ -1075,7 +1086,7 @@ ${announcementHtml}
     <p data-i18n="cta.sub">완전 무료 · 설치 불필요 · Discord/Slack 알림 무료</p>
     <div class="cta-btns">
       <a href="https://ai-watch.dev" class="btn-primary" style="font-size:16px;padding:14px 32px;" data-i18n="cta.btn1" onclick="gtag('event','click_dashboard',{location:'landing_cta',source:'intro'})">대시보드 열기 →</a>
-      <a href="https://ai-watch.dev/#settings" class="btn-secondary" style="font-size:14px;padding:12px 24px;" data-i18n="cta.btn2" onclick="gtag('event','click_cta_alerts',{location:'landing_cta',source:'intro'})">알림 설정하기</a>
+      <a href="https://ai-watch.dev/#settings?focus=alerts" class="btn-secondary" style="font-size:14px;padding:12px 24px;" data-i18n="cta.btn2" onclick="gtag('event','click_cta_alerts',{location:'landing_cta',source:'intro'})">알림 설정하기</a>
     </div>
     <div class="cta-rss">
       <button type="button" onclick="copyRss(this)" title="Copy RSS feed URL">
@@ -1092,7 +1103,7 @@ ${announcementHtml}
     <div class="footer-links">
       <a href="https://github.com/bentleypark/aiwatch">GitHub</a>
       <a href="/reports/" data-i18n="footer.report">월간 리포트</a>
-      <a href="https://ai-watch.dev/#settings" data-i18n="footer.alert">알림 설정</a>
+      <a href="https://ai-watch.dev/#settings?focus=alerts" data-i18n="footer.alert" onclick="gtag('event','click_cta_alerts',{location:'landing_footer',source:'intro'})">알림 설정</a>
       <a href="https://ai-watch.dev/is-claude-down">Is Claude Down?</a>
     </div>
   </div>
@@ -1117,7 +1128,7 @@ const i18n = {
     'feat.3.title': 'Fallback 추천', 'feat.3.desc': '장애 중인 서비스의 대안을 같은 카테고리 Score 상위 순으로 즉시 제안합니다. 같은 제공사 서비스는 자동 제외됩니다.',
     'feat.4.title': '"Is X Down?" 전용 페이지', 'feat.4.desc': 'ai-watch.dev/is-claude-down 같은 전용 페이지에서 실시간 상태, AI 분석, 대안 추천을 한 번에 확인합니다.',
     'how.title': '이렇게 동작합니다', 'how.sub': '각 서비스의 공식 상태 페이지 데이터를 기반으로 동작합니다',
-    'compare.title': '공식 상태 페이지와 무엇이 다른가요?', 'compare.sub': '공식 페이지 데이터를 기반으로, 41개를 한 화면에서 통합합니다', 'compare.col1': '공식 상태 페이지', 'compare.r2': '장애 알림', 'compare.r2a': '제공사마다 개별 구독', 'compare.r2b': '41개를 한 곳에서 — Discord · Slack · RSS', 'compare.r3': 'AIWatch Score', 'compare.r3a': '서비스별 개별 확인', 'compare.r3b': 'AIWatch Score — Uptime + 영향 일수 + 복구 + 응답성', 'compare.r4': '장애 분석', 'compare.r4b': 'AI가 원인 · 복구 시간 분석', 'compare.r5': '대안 추천', 'compare.r5b': 'Fallback 서비스 즉시 제안', 'compare.r6': '월간 리포트', 'compare.r6b': '매월 리포트 공개', 'compare.r7': '비용', 'compare.r7a': '무료', 'compare.r7b': '완전 무료 · 오픈소스',
+    'compare.title': '공식 상태 페이지와 무엇이 다른가요?', 'compare.sub': '공식 페이지 데이터를 기반으로, 41개를 한 화면에서 통합합니다', 'compare.col1': '공식 상태 페이지', 'compare.r2': '장애 알림', 'compare.r2a': '제공사마다 개별 구독', 'compare.r2b': '41개를 한 곳에서 — Discord · Slack · RSS', 'compare.r3': 'AIWatch Score', 'compare.r3a': '종합 점수 없음 (업타임 %만)', 'compare.r3b': 'AIWatch Score — Uptime + 영향 일수 + 복구 + 응답성', 'compare.r4': '장애 분석', 'compare.r4b': 'AI가 원인 · 복구 시간 분석', 'compare.r5': '대안 추천', 'compare.r5b': 'Fallback 서비스 즉시 제안', 'compare.r6': '월간 리포트', 'compare.r6b': '매월 리포트 공개', 'compare.r7': '비용', 'compare.r7a': '무료', 'compare.r7b': '완전 무료 · 오픈소스',
     'how.1.badge': '자동', 'how.2.badge': '장애 감지 시', 'how.3.badge': '실시간', 'how.4.badge': '매월',
     'how.1.title': '수집', 'how.1.desc': '공식 상태 페이지를 최대 5분 간격으로 자동 갱신',
     'how.2.title': '분석', 'how.2.desc': '하이브리드 AI(Gemma 4 + Claude Sonnet fallback)가 패턴 · 복구 시간 · 영향 범위 분석',
@@ -1126,6 +1137,7 @@ const i18n = {
     'cta.title': '지금 바로 확인하세요', 'cta.sub': '완전 무료 · 설치 불필요 · Discord · Slack · RSS 알림', 'cta.btn1': '지금 장애 확인하기 →', 'cta.btn2': '알림 설정하기', 'cta.rss': 'RSS로 구독',
     'alert.title': '장애 알림, 원하는 방식으로', 'alert.sub': '장애 발생 시 실시간 알림 + AI 분석 + Fallback 추천까지 한 번에. 무료입니다.',
     'alert.rss.copied': '복사됨 ✓', 'alert.rss.prompt': 'RSS 피드 URL 복사:',
+    'alert.slack.btn': '💬 Slack으로 알림 받기', 'alert.slack.help': 'Slack 채널에 명령어만 붙여넣으면 끝 — 설정 불필요', 'alert.slack.copied': '복사됨! Slack 채널에 붙여넣으세요', 'alert.slack.prompt': 'Slack 명령어 복사:',
     'report.title': '월간 AI 서비스 신뢰도 리포트', 'report.hook': '가장 안정적인 AI 서비스는? 답은 의외일 수 있습니다.', 'report.link': '전체 리포트 보기 →', 'report.sub': '매월 41개 서비스의 AIWatch Score 순위, 인시던트 요약, 공식 업타임, 주요 장애 분석, 프로바이더 추천까지 한 리포트로 공개합니다.', 'report.chart.note': '* 하위 점수는 리포팅 방식 차이일 수 있으며, 실제 불안정성을 의미하지 않습니다',
     'footer.report': '월간 리포트', 'footer.alert': '알림 설정'
   },
@@ -1145,7 +1157,7 @@ const i18n = {
     'feat.3.title': 'Fallback Recommendations', 'feat.3.desc': 'Get instant alternative suggestions ranked by Score within the same category. Same-provider services are automatically excluded.',
     'feat.4.title': '"Is X Down?" Dedicated Pages', 'feat.4.desc': 'Pages like ai-watch.dev/is-claude-down show real-time status, AI analysis, and fallback recommendations — all in one place.',
     'how.title': 'How it works', 'how.sub': 'Powered by official status page data from each provider',
-    'compare.title': 'How is AIWatch different?', 'compare.sub': 'Built on official status data — aggregated across 41 services in one place', 'compare.col1': 'Official Status Page', 'compare.r2': 'Alerts', 'compare.r2a': 'Subscribe per provider, separately', 'compare.r2b': 'All 41 in one — Discord · Slack · RSS', 'compare.r3': 'AIWatch Score', 'compare.r3a': 'Per-service, separate pages', 'compare.r3b': 'AIWatch Score — Uptime + Impact days + Recovery + Responsiveness', 'compare.r4': 'Incident analysis', 'compare.r4b': 'AI analyzes cause & recovery', 'compare.r5': 'Fallback', 'compare.r5b': 'Alternative services suggested', 'compare.r6': 'Monthly report', 'compare.r6b': 'Monthly report published', 'compare.r7': 'Cost', 'compare.r7a': 'Free', 'compare.r7b': 'Free & open source',
+    'compare.title': 'How is AIWatch different?', 'compare.sub': 'Built on official status data — aggregated across 41 services in one place', 'compare.col1': 'Official Status Page', 'compare.r2': 'Alerts', 'compare.r2a': 'Subscribe per provider, separately', 'compare.r2b': 'All 41 in one — Discord · Slack · RSS', 'compare.r3': 'AIWatch Score', 'compare.r3a': 'No composite score (uptime % only)', 'compare.r3b': 'AIWatch Score — Uptime + Impact days + Recovery + Responsiveness', 'compare.r4': 'Incident analysis', 'compare.r4b': 'AI analyzes cause & recovery', 'compare.r5': 'Fallback', 'compare.r5b': 'Alternative services suggested', 'compare.r6': 'Monthly report', 'compare.r6b': 'Monthly report published', 'compare.r7': 'Cost', 'compare.r7a': 'Free', 'compare.r7b': 'Free & open source',
     'how.1.badge': 'Auto', 'how.2.badge': 'On detection', 'how.3.badge': 'Real-time', 'how.4.badge': 'Monthly',
     'how.1.title': 'Collect', 'how.1.desc': 'Official status pages auto-refreshed up to every 5 min',
     'how.2.title': 'Analyze', 'how.2.desc': 'Hybrid AI (Gemma 4 + Claude Sonnet fallback) analyzes pattern, recovery time & scope',
@@ -1154,6 +1166,7 @@ const i18n = {
     'cta.title': 'Check it out now', 'cta.sub': 'Completely free · No installation · Discord · Slack · RSS alerts', 'cta.btn1': 'Check for Outages Now →', 'cta.btn2': 'Set Up Alerts', 'cta.rss': 'Subscribe via RSS',
     'alert.title': 'Get notified, your way', 'alert.sub': 'Real-time incident alerts with AI analysis and fallback recommendations. Free.',
     'alert.rss.copied': 'Copied ✓', 'alert.rss.prompt': 'Copy this RSS feed URL:',
+    'alert.slack.btn': '💬 Get alerts in Slack', 'alert.slack.help': 'Paste the command into any Slack channel — done. No setup.', 'alert.slack.copied': 'Copied! Paste into any Slack channel', 'alert.slack.prompt': 'Copy Slack command:',
     'report.title': 'Monthly AI Reliability Report', 'report.hook': 'Which AI service is most reliable? The answer may surprise you.', 'report.link': 'View All Reports →', 'report.sub': 'AIWatch Score rankings, incident summaries, official uptime, notable outage analysis, and provider recommendations — all in one monthly report for 41 services.', 'report.chart.note': '* Lower scores may reflect reporting granularity, not actual instability',
     'footer.report': 'Monthly Report', 'footer.alert': 'Alert Settings'
   }
@@ -1195,6 +1208,27 @@ function copyRss(btn) {
   function fallback() { el.removeAttribute('data-busy'); window.prompt(i18n[currentLang]['alert.rss.prompt'], url); }
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url).then(done).catch(fallback);
+  } else {
+    fallback();
+  }
+}
+// Slack /feed subscribe (#824) — zero-config: copies the command to paste into any channel.
+// Mirrors copyRss (i18n label swap, data-busy re-click guard); the Slack badge swaps its
+// .slack-label, the primary CTA button swaps its inner .slack-label too.
+function copySlackFeed(btn) {
+  var cmd = '/feed subscribe https://ai-watch.dev/feed.xml';
+  var el = btn.querySelector('.slack-label') || btn;
+  if (el.getAttribute('data-busy')) return;
+  var orig = el.textContent;
+  el.setAttribute('data-busy', '1');
+  function done() {
+    setTimeout(function () { el.textContent = orig; el.removeAttribute('data-busy'); }, 2200);
+    el.textContent = i18n[currentLang]['alert.slack.copied'];
+    if (typeof gtag === 'function') gtag('event', 'copy_slack_feed', { location: 'landing', service_id: 'all' });
+  }
+  function fallback() { el.removeAttribute('data-busy'); window.prompt(i18n[currentLang]['alert.slack.prompt'], cmd); }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(cmd).then(done).catch(fallback);
   } else {
     fallback();
   }
