@@ -3,11 +3,11 @@
   "ignoreCommand": "git diff --quiet HEAD^ HEAD -- src/ public/ index.html api/ vercel.json",
   "headers": [
     {
-      "source": "/(.*)",
+      "source": "/((?!is-[^/]+-down(?:/|$)|(?:intro|badges|methodology|reports|confirm|api)(?:/|$)|feed(?:[./]|$)).*)",
       "headers": [
         {
-          "key": "Content-Security-Policy-Report-Only",
-          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://www.googletagmanager.com https://t1.kakaocdn.net; connect-src 'self' https://aiwatch-worker.p2c2kbf.workers.dev https://www.google-analytics.com https://region1.google-analytics.com https://www.googletagmanager.com; img-src 'self' data: https://ai-watch.dev https://aiwatch-worker.p2c2kbf.workers.dev; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; report-uri /api/csp-report; report-to csp"
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'sha256-2B1sCm49TPGPwCZBhdTRCDfrWKCAirss7T99/VV2yUI=' 'sha256-XPXXe4vmZ6SnDWPlMsfi5r8L6LlXRHwN0QmAo9577gg=' https://www.googletagmanager.com https://t1.kakaocdn.net; connect-src 'self' https://aiwatch-worker.p2c2kbf.workers.dev https://www.google-analytics.com https://region1.google-analytics.com https://www.googletagmanager.com; img-src 'self' data: https://ai-watch.dev https://aiwatch-worker.p2c2kbf.workers.dev; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; report-uri /api/csp-report; report-to csp"
         },
         {
           "key": "Reporting-Endpoints",

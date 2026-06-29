@@ -56,7 +56,7 @@ describe('buildCsp (#482)', () => {
 // silently gives the migrated Edge pages a stale, more-restrictive policy. Mirrors the repo's
 // other sync-pin tests (api-tier-sync, feed-slug-sync).
 describe('buildCsp ↔ vercel.json drift pin (#482)', () => {
-  it('matches the vercel.json CSP directive-for-directive except the nonce token', () => {
+  it('matches the vercel.json CSP directive-for-directive (modulo the nonce vs SPA hashes)', () => {
     // vitest runs from the repo root (cwd), where vercel.json lives.
     const vercel = JSON.parse(readFileSync(resolve(process.cwd(), 'vercel.json'), 'utf8'))
     const headerEntry = vercel.headers
@@ -65,9 +65,13 @@ describe('buildCsp ↔ vercel.json drift pin (#482)', () => {
     expect(headerEntry, 'vercel.json must carry a CSP header').toBeTruthy()
 
     const nonce = 'TESTNONCE'
-    // buildCsp == vercel policy + "'nonce-…' " injected into script-src → strip it back out
+    // Both policies share every directive + origin; they differ ONLY in script-src's per-page tokens —
+    // buildCsp (Edge nonce pages) carries `'nonce-…'`, vercel.json (the SPA) carries the index.html
+    // inline-script `'sha256-…'` hashes. Strip both token kinds, then the rest must be identical (so a
+    // new origin added to vercel.json can't silently desync the Edge nonce policy).
     const built = buildCsp(nonce).value.replace(`'nonce-${nonce}' `, '')
-    expect(built).toBe(headerEntry.value)
+    const vercelStripped = headerEntry.value.replace(/'sha256-[^']+' /g, '')
+    expect(built).toBe(vercelStripped)
   })
 })
 
