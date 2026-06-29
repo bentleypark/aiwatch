@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, parseAnalysisResponse, type KVLike } from '../ai-analysis'
+import { findSimilarIncidents, buildAnalysisPrompt, buildHistorySection, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, parseAnalysisResponse, type KVLike } from '../ai-analysis'
+import type { IncidentHistoryRecord } from '../incident-history'
 import type { Incident, ServiceStatus } from '../types'
 
 const mockIncident = (overrides: Partial<Incident> = {}): Incident => ({
@@ -296,6 +297,44 @@ describe('buildAnalysisPrompt', () => {
     expect(prompt).not.toContain('JSON format')
   })
 
+  // #827 Feature 2 — RAG grounding from the durable corpus
+  const histRec = (over: Partial<IncidentHistoryRecord> = {}): IncidentHistoryRecord => ({
+    svcId: 'claude', incId: 'h1', title: 'Elevated errors on Messages API', provider: 'Anthropic',
+    category: 'api', impact: 'major', startedAt: '2026-06-01T10:00:00Z', resolvedAt: '2026-06-01T10:52:00Z',
+    durationMin: 52, predictedRecoveryHours: 1, predictedSummary: 'Network errors on the API', model: 'gemma', ...over,
+  })
+
+  it('prefers the durable-corpus grounding over the title-only list when history is supplied', () => {
+    const similar = [mockIncident({ title: 'Old inmemory incident', duration: '45m' })]
+    const prompt = buildAnalysisPrompt(
+      'Claude API',
+      { title: 'Elevated errors', status: 'investigating', startedAt: '2026-06-02T10:00:00Z', impact: 'major' },
+      similar,
+      undefined,
+      [histRec()],
+    )
+    expect(prompt).toContain('actual recovery 52m')           // actual outcome
+    expect(prompt).toContain('we estimated ~1h')              // our prior estimate
+    expect(prompt).toContain('Prior read:')                   // prior AI summary
+    expect(prompt).toContain('ACTUALLY happened')             // the corpus label
+    expect(prompt).not.toContain('Historical Data (last 30 days)') // title-only label suppressed
+    expect(prompt).not.toContain('Old inmemory incident')     // title-only list suppressed
+  })
+
+  it('falls back to the in-memory title-only list when no corpus records supplied', () => {
+    const similar = [mockIncident({ title: 'Past Error 1', duration: '45m' })]
+    const prompt = buildAnalysisPrompt(
+      'OpenAI',
+      { title: 'Current error', status: 'investigating', startedAt: '2026-06-02T10:00:00Z', impact: null },
+      similar,
+      undefined,
+      [],
+    )
+    expect(prompt).toContain('Historical Data (last 30 days)')
+    expect(prompt).toContain('Past Error 1')
+    expect(prompt).not.toContain('actual recovery')
+  })
+
   it('includes timeline updates in prompt when provided', () => {
     const prompt = buildAnalysisPrompt(
       'AssemblyAI',
@@ -350,6 +389,28 @@ describe('buildAnalysisPrompt', () => {
       'Deepgram', { title: 'Voice API Error', status: 'investigating', startedAt: '2026-03-27T03:00:00Z', impact: 'major' }, [],
     )
     expect(prompt).not.toContain('Previous Prediction')
+  })
+})
+
+describe('buildHistorySection (#827)', () => {
+  const base: IncidentHistoryRecord = {
+    svcId: 'claude', incId: 'h1', title: 'Streaming latency', provider: 'Anthropic', category: 'api',
+    impact: 'minor', startedAt: '2026-06-01T10:00:00Z', resolvedAt: '2026-06-01T13:10:00Z', durationMin: 190,
+  }
+  it('renders actual recovery; omits prediction clause when no prediction', () => {
+    const out = buildHistorySection([base])
+    expect(out).toContain('actual recovery 3h 10m')
+    expect(out).not.toContain('we estimated')
+    expect(out).not.toContain('Prior read')
+  })
+  it('labels accuracy: accurate / under-estimated / over-estimated', () => {
+    expect(buildHistorySection([{ ...base, durationMin: 50, predictedRecoveryHours: 1 }])).toContain('(accurate)')
+    expect(buildHistorySection([{ ...base, durationMin: 200, predictedRecoveryHours: 1 }])).toContain('(we under-estimated)')
+    expect(buildHistorySection([{ ...base, durationMin: 20, predictedRecoveryHours: 3 }])).toContain('(we over-estimated)')
+  })
+  it('includes the prior AI summary when present', () => {
+    const out = buildHistorySection([{ ...base, predictedSummary: 'Network errors on the API' }])
+    expect(out).toContain('Prior read: "Network errors on the API"')
   })
 })
 
@@ -1227,6 +1288,7 @@ describe('refreshOrReanalyze', () => {
       'key', expect.any(String), expect.any(Object), expect.any(Array),
       expect.objectContaining({ estimatedRecoveryHours: 4, elapsedHours: expect.closeTo(11, 0.1) }),
       undefined,
+      expect.any(Array), // #827 — svcHistory (corpus) passed as the 7th arg (empty here)
     )
   })
 

@@ -4,6 +4,7 @@
 import type { Incident, ServiceStatus } from './types'
 import { sanitize, kvPut, kvDel, type KVLike } from './utils'
 import { collapseXaiRegionalIncidents } from './xai-regions'
+import { findSimilarHistory, formatDurationMin, accuracyOf, readIncidentHistory, type IncidentHistoryRecord } from './incident-history'
 
 // Workers AI model ID for the Gemma primary path. Exported so monthly-narrative.ts
 // (which runs its own hybrid call with a different prompt + response shape) reuses
@@ -228,17 +229,50 @@ Rules:
 /**
  * Build user message with incident data (untrusted — separated from system instructions).
  */
+/**
+ * Build the RAG grounding block from durable incident-history records (#827
+ * Feature 2): each line carries the ACTUAL recovery time, our prior estimate +
+ * how it landed (accuracyOf), and the prior AI read. This is strictly richer than
+ * the title-only `historyText` (it adds real outcomes + the model's own track
+ * record so it can self-calibrate), so buildAnalysisPrompt prefers it when
+ * present and falls back to historyText when the corpus has no match yet.
+ */
+export function buildHistorySection(records: IncidentHistoryRecord[]): string {
+  return records.map(r => {
+    let line = `- "${sanitize(r.title).slice(0, 100)}" — actual recovery ${formatDurationMin(r.durationMin)}`
+    if (r.predictedRecoveryHours != null) {
+      const verdict = accuracyOf(r)
+      const phrase = verdict === 'accurate' ? 'accurate'
+        : verdict === 'under-predicted' ? 'we under-estimated'
+        : verdict === 'over-predicted' ? 'we over-estimated'
+        : ''
+      line += `; we estimated ~${r.predictedRecoveryHours}h${phrase ? ` (${phrase})` : ''}`
+    }
+    if (r.predictedSummary) line += `. Prior read: "${sanitize(r.predictedSummary).slice(0, 120)}"`
+    return line
+  }).join('\n').slice(0, 1200)
+}
+
 export function buildAnalysisPrompt(
   serviceName: string,
   currentIncident: { title: string; status: string; startedAt: string; impact: string | null; timeline?: Array<{ stage: string; text: string | null; at: string }> },
   similarIncidents: Incident[],
   prevPrediction?: { estimatedRecoveryHours: number; elapsedHours: number },
+  similarHistory: IncidentHistoryRecord[] = [],
 ): string {
-  const historyText = similarIncidents.length > 0
-    ? similarIncidents.map(i =>
-        `- "${sanitize(i.title).slice(0, 100)}" (${sanitize(i.duration ?? 'unknown duration').slice(0, 30)}, impact: ${sanitize(i.impact ?? 'unknown').slice(0, 20)})`
-      ).join('\n').slice(0, 1000)
-    : 'No similar past incidents found.'
+  // Prefer the durable-corpus grounding (actual outcomes + our prior estimate's accuracy) when
+  // available; fall back to the in-memory title-only list before the corpus has a matching record.
+  const useCorpus = similarHistory.length > 0
+  const historyLabel = useCorpus
+    ? 'Past resolved incidents on this service — our prior estimate vs what ACTUALLY happened (calibrate against these)'
+    : 'Historical Data (last 30 days)'
+  const historyText = useCorpus
+    ? buildHistorySection(similarHistory)
+    : similarIncidents.length > 0
+      ? similarIncidents.map(i =>
+          `- "${sanitize(i.title).slice(0, 100)}" (${sanitize(i.duration ?? 'unknown duration').slice(0, 30)}, impact: ${sanitize(i.impact ?? 'unknown').slice(0, 20)})`
+        ).join('\n').slice(0, 1000)
+      : 'No similar past incidents found.'
 
   const safeName = sanitize(serviceName).slice(0, 100)
   const safeTitle = sanitize(currentIncident.title).slice(0, 200)
@@ -266,7 +300,7 @@ Status: ${safeStatus}
 Started: ${sanitize(currentIncident.startedAt).slice(0, 30)}
 Impact: ${safeImpact}
 ${prevPredictionText}${timelineText ? `\nTimeline Updates:\n${timelineText}\n` : ''}
-Historical Data (last 30 days):
+${historyLabel}:
 ${historyText}
 </incident_data>`
 }
@@ -400,9 +434,14 @@ export async function analyzeIncident(
   allIncidents: Incident[],
   prevPrediction?: { estimatedRecoveryHours: number; elapsedHours: number },
   ai?: Ai,
+  // #827 Feature 2 — durable history corpus for RAG grounding (caller-supplied: Phase 1 = this
+  // service's own history). findSimilarHistory picks the relevant subset; empty → prompt falls
+  // back to the in-memory title-only history (no behavior change before the corpus accumulates).
+  historyRecords: IncidentHistoryRecord[] = [],
 ): Promise<AIAnalysisResult | null> {
   const similar = findSimilarIncidents(currentIncident.title, allIncidents)
-  const prompt = buildAnalysisPrompt(serviceName, currentIncident, similar, prevPrediction)
+  const similarHistory = findSimilarHistory({ title: currentIncident.title }, historyRecords, 3, currentIncident.id)
+  const prompt = buildAnalysisPrompt(serviceName, currentIncident, similar, prevPrediction, similarHistory)
   const timelineAt = currentIncident.timeline?.at(-1)?.at ?? ''
 
   // Primary: Gemma via Workers AI
@@ -535,12 +574,16 @@ export async function refreshOrReanalyze(
               : undefined
             reAnalysisCount++
             try {
+              // #827 — RAG grounding from this service's durable history (read lazily here, only
+              // when actually re-analyzing — capped at `cap`/cron — not for every TTL refresh).
+              const svcHistory = await readIncidentHistory(kv, svc.id)
               const newAnalysis = await analyzeFn(
                 apiKey, svc.name,
                 { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline },
                 svc.incidents ?? [],
                 prevPrediction,
                 ai,
+                svcHistory,
               )
               // Track usage
               const today = new Date(now).toISOString().split('T')[0]
@@ -627,6 +670,9 @@ export async function refreshOrReanalyze(
 
       reAnalysisCount++
       try {
+        // #827 — RAG grounding from this service's durable history (read lazily — only on an
+        // actual re-analysis, capped per cron).
+        const svcHistory = await readIncidentHistory(kv, svc.id)
         const analysis = await analyzeFn(
           apiKey,
           svc.name,
@@ -634,6 +680,7 @@ export async function refreshOrReanalyze(
           svc.incidents ?? [],
           undefined,
           ai,
+          svcHistory,
         )
 
         // Track in ai:usage daily counter

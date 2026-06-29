@@ -208,3 +208,55 @@ export async function readIncidentHistory(kv: KVLike, svcId: string): Promise<In
     return []
   }
 }
+
+/** Title tokenizer — lowercased words >3 chars, same split as ai-analysis.ts
+ *  `findSimilarIncidents`. */
+function tokenize(text: string): string[] {
+  return text.toLowerCase().split(/[\s\-—·:,]+/).filter(w => w.length > 3)
+}
+
+/**
+ * Retrieve the past resolved incidents most similar to a current one, for RAG
+ * grounding (#827 Feature 2). Scores by title-token overlap (dominant) using the
+ * SAME substring containment as `findSimilarIncidents` (so "error" matches a past
+ * "errors" — exact token-set membership would miss such morphological variants),
+ * plus a small same-category bonus that ONLY applies once a record already has
+ * title overlap (so category never surfaces a zero-title-overlap record as noise
+ * — relevant once the Phase 3 graph starts passing a cross-category cohort).
+ *
+ * Pure and **cross-service-capable** — the caller decides the candidate set:
+ * Phase 1 passes the same service's own history (a single KV read); Phase 3's
+ * graph will pass a provider/category cohort. Records whose `incId` equals
+ * `excludeIncId` (the current incident) are skipped so it never grounds on itself.
+ */
+export function findSimilarHistory(
+  current: { title: string; category?: string },
+  records: IncidentHistoryRecord[],
+  limit = 3,
+  excludeIncId?: string,
+): IncidentHistoryRecord[] {
+  const titleTokens = tokenize(current.title)
+  if (titleTokens.length === 0) return []
+  return records
+    .filter(r => r.incId !== excludeIncId)
+    .map(r => {
+      const titleLower = r.title.toLowerCase()
+      let score = titleTokens.filter(t => titleLower.includes(t)).length * 2
+      if (score > 0 && current.category && r.category === current.category) score += 1 // tiebreak only
+      return { r, score }
+    })
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score || b.r.resolvedAt.localeCompare(a.r.resolvedAt))
+    .slice(0, limit)
+    .map(x => x.r)
+}
+
+/** Format a whole-minute duration as compact human text: "45m", "1h", "3h 10m". */
+export function formatDurationMin(min: number): string {
+  if (!Number.isFinite(min) || min <= 0) return '0m'
+  const h = Math.floor(min / 60)
+  const m = Math.round(min % 60)
+  if (h === 0) return `${m}m`
+  if (m === 0) return `${h}h`
+  return `${h}h ${m}m`
+}
