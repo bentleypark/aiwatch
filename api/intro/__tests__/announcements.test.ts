@@ -64,8 +64,12 @@ describe('renderLandingPage announcement banner', () => {
     // click-through must open safely and be tracked
     expect(html).toContain('target="_blank"')
     expect(html).toContain('rel="noopener"')
-    expect(html).toContain("click_announcement")
-    expect(html).toContain("id:'launch'")
+    // #482 — GA4 fires from a delegated [data-ga] listener (no inline onclick); the announcement id
+    // rides on data-ga-id, location on data-ga-loc.
+    expect(html).toContain('data-ga="click_announcement"')
+    expect(html).toContain('data-ga-loc="landing_banner"')
+    expect(html).toContain('data-ga-id="launch"')
+    expect(html).not.toContain('onclick=')
   })
 
   it('renders a plain span banner (no anchor, no tracking) when an announcement has no href', () => {
@@ -83,12 +87,15 @@ describe('renderLandingPage announcement banner', () => {
 describe('intro handler wiring (?banner → resolve → render)', () => {
   const get = (path: string) => handler(new Request(`https://ai-watch.dev${path}`))
 
-  it('serves /intro with a static, query-independent cache policy and no Vary', async () => {
+  it('serves /intro no-store (per-response CSP nonce → uncacheable, #482) + a nonce-bearing CSP header', async () => {
     const res = await get('/intro')
     expect(res.status).toBe(200)
     expect(res.headers.get('Content-Type')).toContain('text/html')
-    expect(res.headers.get('Cache-Control')).toBe('public, s-maxage=3600, stale-while-revalidate=86400')
+    // #482 — a per-response nonce can't be cached (a cached page would reuse one nonce for everyone).
+    expect(res.headers.get('Cache-Control')).toBe('no-store')
     expect(res.headers.get('Vary')).toBeNull()
+    const csp = res.headers.get('Content-Security-Policy-Report-Only')
+    expect(csp).toMatch(/script-src[^;]*'nonce-[^']+'/)
   })
 
   it('reads ?banner but renders no banner for an unknown key (empty default map)', async () => {
