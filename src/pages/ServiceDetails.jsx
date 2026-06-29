@@ -921,8 +921,8 @@ export default function ServiceDetails({ serviceId }) {
       {/* ── AIWatch Score Breakdown ── */}
       {service.aiwatchScore != null && !incidentsBlanked && (
         <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
-          <div className="flex items-center justify-between border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
-            <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
+          <div className="flex items-center justify-between gap-3 border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
+            <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center flex-wrap gap-1.5 min-w-0">
               <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--teal)' }} />
               {t('score.label')}
               <span className="text-[var(--text2)] font-normal">— 30{t('settings.period.suffix')}</span>
@@ -932,7 +932,7 @@ export default function ServiceDetails({ serviceId }) {
                 <span className="text-[var(--amber)] font-normal normal-case tracking-normal">· {t('score.coverage.insufficient')}</span>
               )}
             </div>
-            <span className={`mono text-[18px] font-semibold ${SCORE_TEXT_CLASS[service.scoreGrade] ?? 'text-[var(--text2)]'}`}>
+            <span className={`mono text-[18px] font-semibold shrink-0 ${SCORE_TEXT_CLASS[service.scoreGrade] ?? 'text-[var(--text2)]'}`}>
               {service.aiwatchScore}
             </span>
           </div>

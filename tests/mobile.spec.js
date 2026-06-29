@@ -166,4 +166,40 @@ test.describe('Mobile viewport', () => {
     // Mobile sidebar should be gone (the entire overlay is removed from DOM)
     await expect(mobileSidebar).toHaveCount(0)
   })
+
+  // #817 — the score-card header's coverage notice (a recently-added <30d service shows
+  // "Building data (<30 days) — not yet ranked") used to overrun into the large score
+  // number on narrow widths because the left label group could not wrap/shrink and the
+  // score span was not shrink-protected. Assert the notice never invades the score.
+  test('#817 — score coverage notice does not overlap the score number on mobile', async ({ page }) => {
+    const mock = { json: { services: [
+      { id: 'bfl', category: 'api', name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs',
+        status: 'operational', latency: 700, uptime30d: 100, aiwatchScore: 95, scoreGrade: 'excellent',
+        scoreConfidence: 'high', coverageDays: 4, calendarDays: 30, incidents: [],
+        scoreBreakdown: { uptime: 40, incidents: 25, recovery: 15, responsiveness: 15, responsivenessStatus: 'available' } },
+    ], lastUpdated: new Date().toISOString() } }
+    await page.route('**/api/status**', (route) => route.fulfill(mock))
+    await page.route('**/api/status/cached', (route) => route.fulfill(mock))
+    await page.goto('/#bfl')
+    await page.reload()
+
+    const header = page.locator('section').filter({ hasText: 'AIWatch Score' }).locator('> div').first()
+    const notice = header.getByText(/Building data \(<30 days\)|데이터 수집 중 \(30일 미만\)/)
+    const score = header.locator(':scope > span') // the score number is the header's only direct span child
+    await expect(notice).toBeVisible({ timeout: 10000 })
+    // Pin `score` to the one score-number node so the geometry assertion can't silently
+    // degrade into measuring the wrong box if a refactor adds another direct-span child.
+    await expect(score).toHaveCount(1)
+    await expect(score).toHaveText('95')
+
+    const noticeBox = await notice.boundingBox()
+    const scoreBox = await score.boundingBox()
+    // The notice (in the left label group) must keep a real gap to the LEFT of the score number.
+    // In the buggy layout the un-wrappable label group pushed the notice's right edge flush
+    // against the score (gap ≈ 0px, the cramped IMG_7655 look); the fix wraps the notice within
+    // a min-w-0 column separated from the shrink-protected score by `gap-3` (≥12px). A required
+    // ≥8px gap distinguishes the two without being brittle to sub-pixel font rounding.
+    const gap = scoreBox.x - (noticeBox.x + noticeBox.width)
+    expect(gap).toBeGreaterThanOrEqual(8)
+  })
 })
