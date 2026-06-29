@@ -2,32 +2,79 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { createHash } from 'node:crypto'
 
-// #482 — vercel.json's `/(.*)` header is the SPA's CSP and must stay Content-Security-Policy-REPORT-ONLY.
-// (Phase 3 flipped the EDGE SSR pages to enforcing via their OWN per-response headers — see the Edge
-// handlers — but the SPA stays Report-Only here because index.html still has un-refactored inline
-// handlers; enforcing it is the remaining #482 work.) Guards: (a) the global header stays Report-Only,
-// (b) script-src does NOT carry 'unsafe-inline' (which would suppress the very reports we want),
+// #482 (complete) — vercel.json ships the SPA's ENFORCING Content-Security-Policy. The EDGE SSR pages
+// enforce via their OWN per-response headers (see the Edge handlers); this header is SPA-only (its
+// `source` is a boundary-anchored negative lookahead excluding the Edge surfaces + proxy routes), and
+// `script-src` is hash-locked to index.html's two inline scripts (font-swap + FOUC theme). Guards:
+// (a) it's enforcing (not Report-Only), (b) script-src carries both index.html hashes (drift pin) and
+// NO 'unsafe-inline', (c) the source admits SPA paths + excludes Edge/proxy routes,
 // (c) the origins the SPA + Edge SSR actually use are allowlisted, (d) the report sink is wired.
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
 const vercelConfig = JSON.parse(readFileSync(join(repoRoot, 'vercel.json'), 'utf8')) as {
   headers?: Array<{ source: string; headers: Array<{ key: string; value: string }> }>
 }
 
+// #482 — the SPA header source is now a negative-lookahead that excludes the Edge SSR surfaces (own
+// enforcing headers) + the proxy routes (reports/confirm/feed/api). Locate the block by its CSP key.
+function spaCspBlock() {
+  const block = vercelConfig.headers?.find((h) => h.headers.some((x) => x.key === 'Content-Security-Policy'))
+  expect(block, 'the SPA enforcing-CSP headers block must exist').toBeDefined()
+  return block!
+}
+
 function cspHeaderValue(): string {
-  const block = vercelConfig.headers?.find((h) => h.source === '/(.*)')
-  expect(block, 'a catch-all /(.*) headers block must exist').toBeDefined()
-  const csp = block!.headers.find((h) => h.key === 'Content-Security-Policy-Report-Only')
-  expect(csp, 'Content-Security-Policy-Report-Only header must be present').toBeDefined()
+  const csp = spaCspBlock().headers.find((h) => h.key === 'Content-Security-Policy')
   return csp!.value
 }
 
-describe('vercel.json CSP — SPA Report-Only (#482; Edge SSR enforces via its own headers)', () => {
-  it('ships report-only (NOT enforcing) so it cannot break the live site during rollout', () => {
-    const block = vercelConfig.headers?.find((h) => h.source === '/(.*)')
-    const enforcing = block?.headers.find((h) => h.key === 'Content-Security-Policy')
-    expect(enforcing, 'must NOT ship an enforcing Content-Security-Policy yet (Phase 3)').toBeUndefined()
-    cspHeaderValue() // report-only present
+// SHA-256 (base64) of each EXECUTABLE inline <script> in index.html (skip src loaders + JSON-LD) —
+// the served dist/index.html is byte-identical (Vite preserves these inline scripts).
+function indexHtmlScriptHashes(): string[] {
+  const html = readFileSync(join(repoRoot, 'index.html'), 'utf8')
+  const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/g
+  const out: string[] = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(html)) !== null) {
+    if (/\bsrc=/.test(m[1]) || /application\/ld\+json/.test(m[1])) continue
+    out.push(createHash('sha256').update(m[2], 'utf8').digest('base64'))
+  }
+  return out
+}
+
+describe('vercel.json CSP — SPA ENFORCING (#482 complete; Edge SSR enforces via its own headers)', () => {
+  it('ships an ENFORCING Content-Security-Policy (not Report-Only) for the SPA', () => {
+    const block = spaCspBlock()
+    expect(block.headers.some((h) => h.key === 'Content-Security-Policy')).toBe(true)
+    // the Report-Only header is retired now the SPA is hash-locked
+    expect(block.headers.some((h) => h.key === 'Content-Security-Policy-Report-Only')).toBe(false)
+  })
+
+  it('script-src is hash-locked to the two index.html inline scripts (drift pin)', () => {
+    const scriptSrc = cspHeaderValue().split(';').map((d) => d.trim()).find((d) => d.startsWith('script-src '))!
+    const hashes = indexHtmlScriptHashes()
+    expect(hashes.length, 'index.html should have 2 executable inline scripts (font-swap + theme)').toBe(2)
+    for (const h of hashes) {
+      expect(scriptSrc, `script-src must carry the index.html inline-script hash 'sha256-${h}'`).toContain(`'sha256-${h}'`)
+    }
+  })
+
+  it('the SPA header source EXCLUDES the Edge SSR + proxy routes (so their own/external policies are not double-gated)', () => {
+    const src = spaCspBlock().source
+    expect(src).toContain('?!') // negative lookahead, not the bare /(.*)
+    for (const r of ['is-', 'intro', 'badges', 'methodology', 'reports', 'confirm', 'feed', 'api']) {
+      expect(src, `source lookahead must exclude ${r}`).toContain(r)
+    }
+    // The lookahead must admit SPA routes (incl. fallback paths that merely START with an excluded
+    // token) and reject every real Edge/proxy route. Boundary-anchored so /introspect ≠ /intro etc.
+    const re = new RegExp('^' + src + '$')
+    for (const p of ['/', '/dashboard', '/introspect', '/feedback', '/feeds', '/reports-archive', '/api-docs']) {
+      expect(re.test(p), `SPA path ${p} must KEEP the CSP header`).toBe(true)
+    }
+    for (const p of ['/is-claude-down', '/intro', '/badges', '/methodology', '/reports', '/reports/', '/reports/2026-03', '/confirm', '/feed.xml', '/feed.xsl', '/feed/claude', '/api/csp-report']) {
+      expect(re.test(p), `Edge/proxy route ${p} must be excluded from the SPA header`).toBe(false)
+    }
   })
 
   it('script-src omits unsafe-inline (else inline violations are never reported)', () => {
@@ -65,8 +112,7 @@ describe('vercel.json CSP — SPA Report-Only (#482; Edge SSR enforces via its o
   })
 
   it('declares the Reporting-Endpoints csp group → /api/csp-report', () => {
-    const block = vercelConfig.headers?.find((h) => h.source === '/(.*)')
-    const re = block?.headers.find((h) => h.key === 'Reporting-Endpoints')
+    const re = spaCspBlock().headers.find((h) => h.key === 'Reporting-Endpoints')
     expect(re?.value).toContain('csp=')
     expect(re?.value).toContain('/api/csp-report')
   })

@@ -52,12 +52,24 @@
          onerror reports CDN/network failures via GA4 — without this, font load failure is silent
          (page renders in system fallback indefinitely with no signal). -->
     <link
+      id="font-css"
       rel="preload"
       as="style"
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap"
-      onload="this.onload=null;this.rel='stylesheet'"
-      onerror="this.onerror=null;window.gtag&&gtag('event','font_load_failed',{transport_type:'beacon'})"
     />
+    <!-- #482 CSP: the preload-to-stylesheet swap + GA4 error report were inline on*= handlers (blocked
+         under an enforcing CSP). Moved here into a hash-allowed inline script, attached synchronously
+         right after the link so the (async) load event is never missed. -->
+    <script>
+      (function () {
+        var l = document.getElementById('font-css');
+        if (!l) return;
+        l.addEventListener('load', function () { l.rel = 'stylesheet'; });
+        l.addEventListener('error', function () {
+          if (window.gtag) gtag('event', 'font_load_failed', { transport_type: 'beacon' });
+        });
+      })();
+    </script>
     <noscript>
       <link
         rel="stylesheet"

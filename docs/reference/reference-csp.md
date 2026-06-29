@@ -3,21 +3,23 @@
 AIWatch ships a CSP across the Vercel-served surfaces (SPA + Edge SSR). Rolled out **phased**:
 **Report-Only first → refactor inline → enforce**, so a strict policy never breaks the live site.
 
-## Current state — Phase 3 (Edge SSR ENFORCING; SPA still Report-Only)
+## Current state — ENFORCING everywhere (#482 complete)
 
-- **Edge SSR pages ENFORCE their own per-response CSP** (#823/#828/#829 + the Phase-3 flip): badges /
-  methodology / intro via a **nonce** (`api/_shared/csp-nonce.ts`, `Cache-Control: no-store`), is-down
-  via a **content hash** (`api/_shared/csp-hash.ts` `cspForHtml`, keeps `s-maxage=60`). Each handler
-  sets `Content-Security-Policy` (enforcing) itself; every inline `on*=` handler was refactored to a
-  delegated listener first, so nothing breaks.
-- **SPA still `Content-Security-Policy-Report-Only`** via `vercel.json` `source: "/(.*)"`. That global
-  header ALSO co-applies on the Edge routes, but Report-Only never blocks — the Edge's own enforcing
-  policy is what gates those pages (verified). Enforcing the SPA is the remaining #482 work: `index.html`
-  has inline `<link onload/onerror>` handlers + an inline `<script>` that must be hashed/refactored
-  first; only then flip vercel.json to enforcing AND scope its `/(.*)` source to exclude the Edge
-  routes (so two enforcing policies don't intersect-block the Edge scripts).
-- `Reporting-Endpoints: csp="/api/csp-report"` is still set; both the SPA Report-Only header and each
-  Edge enforcing header point their `report-uri`/`report-to` at the same sink.
+- **Edge SSR pages enforce their own per-response CSP** (#823/#828/#829/#830): badges / methodology /
+  intro via a **nonce** (`api/_shared/csp-nonce.ts`, `Cache-Control: no-store`), is-down via a
+  **content hash** (`api/_shared/csp-hash.ts` `cspForHtml`, keeps `s-maxage=60`). Each handler sets
+  `Content-Security-Policy` (enforcing) itself.
+- **SPA also ENFORCES** (`vercel.json`, the SPA-enforce PR): `Content-Security-Policy` (not Report-Only),
+  `script-src` hash-locked to `index.html`'s two inline scripts (the font preload→stylesheet swap, moved
+  out of `<link onload/onerror>`; and the FOUC theme script) — bundle is `'self'` (no eval/Worker/blob).
+  The header `source` is a **negative lookahead** that EXCLUDES the Edge SSR surfaces (own enforcing
+  headers) + the proxy routes (`reports`/`confirm`/`feed`/`api`, which serve external/worker content):
+  `"/((?!is-[^/]+-down|intro|badges|methodology|reports|confirm|feed|api/).*)"` — so each surface is
+  gated by exactly one policy (no two enforcing policies intersect-blocking). Update the two
+  `'sha256-…'` if the `index.html` inline scripts change (pinned by `api/__tests__/csp-headers.test.ts`,
+  which hashes them and asserts the source scoping).
+- Every inline `on*=` handler across all surfaces was refactored to a delegated listener first.
+- `Reporting-Endpoints: csp="/api/csp-report"` still set; all headers report to the same sink.
 - **Sink**: **`api/csp-report.ts`** (Vercel Edge Function) receives violation reports via the policy's
   `report-uri` (legacy `application/csp-report`) + `report-to` (modern `application/reports+json`),
   normalizes both wire formats (`parseCspReports`), and logs one compact line per violation
