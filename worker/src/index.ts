@@ -7,6 +7,7 @@ import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk } from './utils'
+import { buildHistoryRecord, appendIncidentHistoryBatch, type IncidentHistoryRecord } from './incident-history'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
@@ -872,6 +873,12 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       const svc = scored.find(s => s.id === svcId)
       const now = new Date().toISOString()
       const incidents = svc?.incidents ?? []
+      // #827 Phase 1 — collect durable history records during the per-incident map, then write
+      // them in ONE batched read-modify-write below. Racing one RMW per incident against the
+      // shared incident:history:{svcId} key inside Promise.all would lose-update when a service
+      // resolves ≥2 incidents in a cycle (the per-incId recovered: markers below use distinct
+      // keys, so they're safe to race).
+      const historyRecords: IncidentHistoryRecord[] = []
       await Promise.all(incidents.map(async (inc) => {
         // Independent recovery marker (works even without AI analysis)
         const duration = inc.startedAt ? formatDuration(new Date(inc.startedAt), new Date(now)) : undefined
@@ -881,21 +888,36 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
           duration: duration ?? '',
         }), { expirationTtl: 7200 })
         if (!recoveredOk) console.error('[cron] failed to write recovery marker:', svcId, inc.id)
-        // Also mark AI analysis as resolved if it exists
+        // Also mark AI analysis as resolved if it exists (kept for the #827 history record below)
         const key = analysisKey(svcId, inc.id)
         const analysisRaw = await env.STATUS_CACHE.get(key).catch(() => null)
-        if (!analysisRaw) return
-        try {
-          const analysis = JSON.parse(analysisRaw) as AIAnalysisResult
-          if (!analysis.resolvedAt) {
-            analysis.resolvedAt = now
-            await kvPut(env.STATUS_CACHE, key, JSON.stringify(analysis), { expirationTtl: 7200 })
+        let analysis: AIAnalysisResult | null = null
+        if (analysisRaw) {
+          try {
+            analysis = JSON.parse(analysisRaw) as AIAnalysisResult
+            if (!analysis.resolvedAt) {
+              analysis.resolvedAt = now
+              await kvPut(env.STATUS_CACHE, key, JSON.stringify(analysis), { expirationTtl: 7200 })
+            }
+          } catch (err) {
+            console.warn('[kv] ai:analysis parse failed during recovery mark:', svcId, inc.id, err instanceof Error ? err.message : err)
+            await kvDel(env.STATUS_CACHE, key)
+            analysis = null
           }
-        } catch (err) {
-          console.warn('[kv] ai:analysis parse failed during recovery mark:', svcId, inc.id, err instanceof Error ? err.message : err)
-          await kvDel(env.STATUS_CACHE, key)
+        }
+        // #827 Phase 1 keystone — durable record joining the AI prediction (when an analysis
+        // existed) with the actual outcome. buildHistoryRecord gates terminal states + measures
+        // duration to inc.resolvedAt; null = skip. Collected here, written once below.
+        if (svc) {
+          const rec = buildHistoryRecord(svc, inc, analysis, now)
+          if (rec) historyRecords.push(rec)
         }
       }))
+      // Single batched, idempotent write — outlives the 2h ai:analysis/recovered TTLs →
+      // prediction-accuracy ledger (Feature 1) + RAG corpus (Feature 2). Best-effort.
+      if (historyRecords.length > 0) {
+        await appendIncidentHistoryBatch(env.STATUS_CACHE, svcId, historyRecords)
+      }
     }
 
     // For new incidents: lookup service/incident once, then run AI analysis
