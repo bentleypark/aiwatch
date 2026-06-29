@@ -6,6 +6,8 @@ import {
   readIncidentHistory,
   durationMinOf,
   accuracyOf,
+  findSimilarHistory,
+  formatDurationMin,
   historyKey,
   HISTORY_CAP,
   type IncidentHistoryRecord,
@@ -264,6 +266,80 @@ describe('appendIncidentHistory', () => {
     expect(withRec.model).toBe('gemma')
     expect(withoutRec.predictedRecoveryHours).toBeUndefined()
     expect(withoutRec.predictedSummary).toBeUndefined()
+  })
+})
+
+describe('formatDurationMin', () => {
+  it('formats minutes / hours / mixed', () => {
+    expect(formatDurationMin(45)).toBe('45m')
+    expect(formatDurationMin(60)).toBe('1h')
+    expect(formatDurationMin(190)).toBe('3h 10m')
+  })
+  it('guards non-positive / non-finite', () => {
+    expect(formatDurationMin(0)).toBe('0m')
+    expect(formatDurationMin(-5)).toBe('0m')
+    expect(formatDurationMin(NaN)).toBe('0m')
+  })
+})
+
+describe('findSimilarHistory', () => {
+  const recs: IncidentHistoryRecord[] = [
+    rec({ incId: 'a', title: 'Elevated errors on the Messages API', category: 'api', resolvedAt: '2026-06-01T00:00:00Z' }),
+    rec({ incId: 'b', title: 'Streaming latency degradation', category: 'api', resolvedAt: '2026-06-02T00:00:00Z' }),
+    rec({ incId: 'c', title: 'Console login issue', category: 'api', resolvedAt: '2026-06-03T00:00:00Z' }),
+  ]
+
+  it('ranks by title-token overlap', () => {
+    const out = findSimilarHistory({ title: 'Elevated errors on Messages API requests' }, recs)
+    expect(out[0].incId).toBe('a') // shares "elevated"/"errors"/"messages"
+  })
+
+  it('returns [] when no token overlaps any candidate', () => {
+    expect(findSimilarHistory({ title: 'zzzz qqqq' }, recs)).toEqual([])
+  })
+
+  it('excludes the current incident by id (never grounds on itself)', () => {
+    const out = findSimilarHistory({ title: 'Elevated errors Messages' }, recs, 3, 'a')
+    expect(out.find(r => r.incId === 'a')).toBeUndefined()
+  })
+
+  it('respects the limit', () => {
+    const many = Array.from({ length: 10 }, (_, i) => rec({ incId: `m${i}`, title: 'Streaming latency spike' }))
+    expect(findSimilarHistory({ title: 'Streaming latency' }, many, 2)).toHaveLength(2)
+  })
+
+  it('returns [] for a title with no usable tokens', () => {
+    expect(findSimilarHistory({ title: 'a b c' }, recs)).toEqual([])
+  })
+
+  it('breaks ties by most-recent resolvedAt', () => {
+    const tie = [
+      rec({ incId: 'old', title: 'Streaming latency', resolvedAt: '2026-05-01T00:00:00Z' }),
+      rec({ incId: 'new', title: 'Streaming latency', resolvedAt: '2026-06-30T00:00:00Z' }),
+    ]
+    expect(findSimilarHistory({ title: 'Streaming latency' }, tie, 1)[0].incId).toBe('new')
+  })
+
+  it('matches morphological variants via substring (current "error" → past "errors")', () => {
+    const out = findSimilarHistory({ title: 'API error spike' }, [rec({ incId: 'e', title: 'Elevated errors on the API' })])
+    expect(out.map(r => r.incId)).toContain('e') // "error" ⊂ "errors", "api"... ("api" is len-3, filtered; "error" carries it)
+  })
+
+  it('same-category bonus is a tiebreak ONLY — never surfaces a zero-title-overlap record', () => {
+    const recs2 = [
+      rec({ incId: 'noOverlap', title: 'Totally unrelated wording', category: 'api' }),
+      rec({ incId: 'overlap', title: 'Streaming latency degradation', category: 'app' }),
+    ]
+    const out = findSimilarHistory({ title: 'Streaming latency', category: 'api' }, recs2)
+    expect(out.map(r => r.incId)).toEqual(['overlap'])      // category-only match excluded
+  })
+
+  it('same-category bonus ranks an overlapping same-category record above a same-overlap other-category one', () => {
+    const recs2 = [
+      rec({ incId: 'sameCat', title: 'Streaming latency', category: 'api', resolvedAt: '2026-06-01T00:00:00Z' }),
+      rec({ incId: 'otherCat', title: 'Streaming latency', category: 'app', resolvedAt: '2026-06-01T00:00:00Z' }),
+    ]
+    expect(findSimilarHistory({ title: 'Streaming latency', category: 'api' }, recs2, 1)[0].incId).toBe('sameCat')
   })
 })
 

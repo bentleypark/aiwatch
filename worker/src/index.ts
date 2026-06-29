@@ -7,7 +7,7 @@ import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk } from './utils'
-import { buildHistoryRecord, appendIncidentHistoryBatch, type IncidentHistoryRecord } from './incident-history'
+import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, type IncidentHistoryRecord } from './incident-history'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
@@ -949,8 +949,10 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
             const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0, gemma: 0, sonnet: 0 }
             usage.calls++
             const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))
+            // #827 Feature 2 — RAG grounding from this service's durable incident history.
+            const svcHistory = await readIncidentHistory(env.STATUS_CACHE, svc.id)
             const analysis = await Promise.race([
-              analyzeIncident(env.ANTHROPIC_API_KEY ?? '', svc.name, { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline }, svc.incidents ?? [], undefined, env.AI),
+              analyzeIncident(env.ANTHROPIC_API_KEY ?? '', svc.name, { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline }, svc.incidents ?? [], undefined, env.AI, svcHistory),
               timeout,
             ])
             if (analysis) {
@@ -1386,7 +1388,7 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
       analysis = await analyzeIncident(env.ANTHROPIC_API_KEY, service.name, {
         id: incident.id, title: incident.title, status: incident.status,
         startedAt: incident.startedAt, impact: incident.impact, timeline: incident.timeline,
-      }, service.incidents ?? [], undefined, env.AI)
+      }, service.incidents ?? [], undefined, env.AI, await readIncidentHistory(env.STATUS_CACHE, service.id))
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'analysis failed'
