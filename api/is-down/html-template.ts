@@ -206,6 +206,12 @@ export function renderPage(
   // #574 — supply-chain note for THIS service (set by api/is-down.ts when it's in the banner's
   // affectedNow/mayBeAffected). `confirmed` = currently degraded (vs estimated AWS-dependent). null otherwise.
   supplyChainNote?: { regions: string; confirmed: boolean } | null,
+  // #804 — per-incident token (the share link's `&i=`). Included in og:url ONLY (alongside the `?e=`
+  // hint) so a NEW outage is a distinct social-card identity from the prior `?e=down` share — platforms
+  // cache/dedupe the card by og:url (not the fetched URL) for ~7d, so without it a fresh outage reused
+  // the stale card. canonical / <title> / JSON-LD stay clean (SEO indexes those, not og:url). The caller
+  // (api/is-down.ts) has already sanitized it to id-safe chars.
+  ogIncidentToken?: string | null,
 ): string {
   // #566: lead the SERP title with the live status answer (falls back to "Live Status"
   // when status data is unavailable) so the result answers the query before the click.
@@ -227,12 +233,17 @@ export function renderPage(
   ogParams.set('v', String(Math.floor(Date.now() / 600_000))) // 10-min cache bust
   const ogImageUrl = `https://aiwatch-worker.p2c2kbf.workers.dev/api/og?${ogParams.toString()}`
 
-  // og:url carries the `?e=` hint so each share MOMENT is a distinct social-card identity. Social
-  // platforms (Twitter/FB/LinkedIn) cache + dedupe cards by og:url, NOT by the URL actually fetched —
-  // so with a query-less og:url every `?e=down`/`?e=resolved` share collapses onto the same cached
-  // card (the bug: an outage tweet showed the stale operational card #740 had already pinned the
-  // IMAGE for). canonical stays clean (`.../is-…-down`) for SEO — Google indexes that, not og:url.
-  const ogUrl = pinnedHint ? `${canonical}?e=${encodeURIComponent(pinnedHint)}` : canonical
+  // og:url carries the `?e=` hint AND the #804 per-incident token so each share MOMENT/OUTAGE is a
+  // distinct social-card identity. Social platforms (Twitter/FB/LinkedIn) cache + dedupe cards by
+  // og:url, NOT by the URL actually fetched — so with a query-less og:url every `?e=down`/`?e=resolved`
+  // share collapses onto the same cached card (#740: an outage tweet showed the stale operational
+  // card), and even with `?e=down` pinned, a NEW outage reused the PRIOR outage's cached card because
+  // the og:url was byte-identical across outages (#804: the `&i=<incId>` token fixes that). canonical
+  // stays clean (`.../is-…-down`) for SEO — Google indexes that, not og:url.
+  const ogQuery = new URLSearchParams()
+  if (pinnedHint) ogQuery.set('e', pinnedHint)
+  if (ogIncidentToken) ogQuery.set('i', ogIncidentToken)
+  const ogUrl = [...ogQuery.keys()].length ? `${canonical}?${ogQuery.toString()}` : canonical
   // og:title / twitter:title pin to the hint too (via ogStatus) so the card headline matches the
   // pinned IMAGE — otherwise the card reads "Operational" (live) over a "Degraded" image. The page
   // <title>/canonical/JSON-LD stay LIVE (the body shows live status); only the social card is pinned.

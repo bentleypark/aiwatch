@@ -104,7 +104,7 @@ describe('buildReplyDraft', () => {
     expect(reply).not.toBeNull()
     expect(reply!.serviceId).toBe('claude')
     expect(reply!.text).toBe(
-      'yes — Claude API is down right now. live status, affected components & recovery ETA → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&utm_content=reply',
+      'yes — Claude API is down right now. live status, affected components & recovery ETA → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&utm_content=reply&i=inc1',
     )
   })
 
@@ -119,6 +119,13 @@ describe('buildReplyDraft', () => {
     const reply = buildReplyDraft(a, [mockService({ id: 'chatgpt', name: 'ChatGPT', status: 'degraded' })])
     expect(reply!.text).toContain('having issues (degraded)')
     expect(reply!.text).toContain('https://ai-watch.dev/is-chatgpt-down?e=degraded')
+  })
+
+  it('#804 — carries the per-incident token last on a NEW incident reply, omits it for a status-edge alert', () => {
+    expect(buildReplyDraft(alert({ key: 'alerted:new:abc123', svcIds: ['claude'] }), [mockService()])!.text)
+      .toContain('&utm_content=reply&i=abc123') // appended after the reply UTM
+    const edge = alert({ key: 'alerted:down:claude', title: '🔴 Claude API — Down', svcIds: ['claude'] })
+    expect(buildReplyDraft(edge, [mockService()])!.text).not.toContain('&i=')
   })
 
   it('uses recovery phrasing for a resolved alert', () => {

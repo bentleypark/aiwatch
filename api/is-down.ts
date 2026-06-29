@@ -52,6 +52,17 @@ export default async function handler(req: Request) {
     // Social share status hint (`?e=`, #539): pins the OG card status to the share moment so a
     // tweet's unfurled card matches the post (not the live status, which may have drifted by then).
     const ogStatusHint = url.searchParams.get('e')
+    // #804 — per-incident token (`&i=`, appended by buildTweetDrafts/buildReplyDraft). Included in
+    // og:url ONLY so a NEW outage is a distinct social card from the prior `?e=down` share (platforms
+    // cache the card by og:url for ~7d). It only namespaces a cache key, so sanitize defensively:
+    // restrict to id-safe chars + cap length (the real ids are short alphanumeric statuspage ids).
+    // NOTE colon-bearing ids (e.g. Gemini's `aistudio:`/`vertex:`-prefixed incident ids, reachable via
+    // the reply draft) are intentionally COLLAPSED here (`:` stripped) — the strip is deterministic, so
+    // the token stays stable across re-shares of the same incident and unique-enough across incidents.
+    const rawIncidentToken = url.searchParams.get('i')
+    const ogIncidentToken = rawIncidentToken
+      ? rawIncidentToken.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || null
+      : null
 
     const entry = SLUG_TO_SERVICE[slug]
     if (!entry) {
@@ -292,7 +303,7 @@ export default async function handler(req: Request) {
       }
     }
 
-    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote)
+    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken)
 
     // #378: when the upstream Worker fetch failed and we're rendering the
     // "Status data is temporarily unavailable" fallback, the response must NOT
