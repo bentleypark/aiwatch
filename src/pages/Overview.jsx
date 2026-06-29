@@ -11,6 +11,7 @@ import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
+import { tagServiceForAlert } from '../utils/securityAlerts'
 import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionSwitchable, ALL_SERVICES_FEED_URL } from '../utils/constants'
 import RssCopyIcon from '../components/RssCopyIcon'
 import { regionStatusOf } from '../utils/regionStatus'
@@ -811,11 +812,14 @@ export default function Overview() {
               </span>
               {recent.slice(0, 3).map((a, i) => {
                 const safeUrl = a.url?.startsWith('https://') ? a.url : '#'
-                // Derive service tag: use service field (OSV) or detect from title (HN)
+                // Derive service tag: use service field (OSV) or detect from title (HN).
+                // #821 — provider-only HN matches resolve to the provider's primary service
+                // (shared helper, mirrors the detail-page matcher). Logic in src/utils/securityAlerts.js.
                 let tag = a.service || ''
                 if (!tag) {
-                  const titleLC = a.title?.toLowerCase() ?? ''
-                  const match = services.find(s => titleLC.includes(s.name.toLowerCase()) || titleLC.includes(s.provider.toLowerCase()))
+                  // Use the FULL service list (not the enabled-filtered `services`) so the
+                  // provider-primary resolution matches the detail page, which sees all services.
+                  const match = tagServiceForAlert(a, allServices)
                   if (match) tag = match.name
                 }
                 // #326: EPSS prefix mirroring ServiceDetails. Thresholds duplicated

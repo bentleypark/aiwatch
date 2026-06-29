@@ -18,6 +18,7 @@ import { compareGroupedRows, dominantGroupStatus } from '../utils/incidentSort'
 import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
 import { computeRecoveryStats, formatRecoveryMin } from '../utils/recovery'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
+import { filterSecurityAlertsForService } from '../utils/securityAlerts'
 import { regionStatusOf, SERVICE_REGIONS } from '../utils/regionStatus'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
@@ -1117,27 +1118,10 @@ export default function ServiceDetails({ serviceId }) {
       {/* ── Security Alerts (service-specific) ── */}
       {(() => {
         if (!securityAlerts?.length) return null
-        const nameLC = service.name.toLowerCase()
-        const providerLC = service.provider?.toLowerCase() ?? ''
-        // Map OSV service field → specific AIWatch service ID (SDK alerts are API-specific)
-        // Keep in sync with OSV_PACKAGES in worker/src/security-monitor.ts
-        const OSV_SERVICE_MAP = {
-          'OpenAI': 'openai', 'Anthropic (Claude)': 'claude', 'Google (Gemini)': 'gemini',
-          'Cohere': 'cohere', 'Mistral': 'mistral', 'Hugging Face': 'huggingface',
-          'Together': 'together', 'Groq': 'groq', 'Replicate': 'replicate',
-          'AssemblyAI': 'assemblyai', 'Deepgram': 'deepgram',
-          'LangChain': 'langsmith', // #561 — langchain ecosystem CVEs now have a detail-page home
-        }
-        const filtered = securityAlerts.filter(a => {
-          // OSV: match by mapped service ID (e.g., "Anthropic (Claude)" → only "claude", not "claudeai")
-          if (a.service) return OSV_SERVICE_MAP[a.service] === service.id
-          // HN (#785): match by service NAME or PROVIDER in the title — consistent with the Overview
-          // banner's tag derivation (Overview.jsx). Provider-scoped on purpose: an HN news item naming
-          // only the provider (e.g. "OpenAI agent actions" → ChatGPT/Codex/OpenAI all share provider
-          // "OpenAI") was tagged in the banner but had no detail-page home under name-only matching.
-          const titleLC = a.title?.toLowerCase() ?? ''
-          return titleLC.includes(nameLC) || (providerLC && titleLC.includes(providerLC))
-        })
+        // #785/#821 — OSV matches by mapped service id; HN matches by service name (exact) or,
+        // when only the provider is named, the provider's single primary service (no sibling
+        // fan-out). Logic + OSV_SERVICE_MAP in src/utils/securityAlerts.js.
+        const filtered = filterSecurityAlertsForService(securityAlerts, service, services)
         if (filtered.length === 0) return null
         // #785 — first SECURITY_PREVIEW, rest behind a toggle (same as incident history).
         const visibleAlerts = securityExpanded ? filtered : filtered.slice(0, SECURITY_PREVIEW)

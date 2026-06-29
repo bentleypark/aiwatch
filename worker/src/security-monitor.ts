@@ -74,6 +74,17 @@ export function titleMatchesAiSecurity(title: string): boolean {
   return AI_KEYWORD_RE.test(title) && SECURITY_KEYWORD_RE.test(title)
 }
 
+// "Show HN" / "Launch HN" posts are, by HN convention, "here's a thing I built"
+// announcements (#821). A tool that integrates with or DEFENDS a provider names
+// that provider as an integration TARGET, not as the subject of a breach — e.g.
+// "Show HN: Lelu – gate OpenAI agent actions on confidence and prompt injection"
+// trips titleMatchesAiSecurity (openai + prompt injection) but is a third-party
+// promo, not an OpenAI security event. Drop these from the security feed.
+const SHOW_LAUNCH_HN_RE = /^\s*(?:show|launch)\s+hn[:\s]/i
+export function isShowOrLaunchHN(title: string): boolean {
+  return SHOW_LAUNCH_HN_RE.test(title)
+}
+
 interface HNHit {
   objectID: string
   title: string
@@ -111,7 +122,7 @@ export async function fetchHNSecurityPosts(): Promise<SecurityAlert[]> {
   if (!json.hits) return []
 
   return json.hits
-    .filter(hit => hit.title && hit.objectID && titleMatchesAiSecurity(hit.title))
+    .filter(hit => hit.title && hit.objectID && titleMatchesAiSecurity(hit.title) && !isShowOrLaunchHN(hit.title))
     .map(hit => ({
       source: 'hackernews' as const,
       id: hit.objectID,
@@ -123,9 +134,10 @@ export async function fetchHNSecurityPosts(): Promise<SecurityAlert[]> {
 
 // ---------- OSV.dev (AI SDK vulnerabilities) ----------
 
-// Keep the OSV_SERVICE_MAP in src/pages/ServiceDetails.jsx in sync when editing
+// Keep the OSV_SERVICE_MAP in src/utils/securityAlerts.js in sync when editing
 // — its keys must cover every `service` label used here or the Security Alerts
-// card will silently drop entries for the unmapped service.
+// card will silently drop entries for the unmapped service. The cross-layer
+// invariant is enforced at test time in src/utils/securityAlerts.test.js (#821).
 // Exported for invariant tests only; production callers never import it directly.
 export const OSV_PACKAGES = [
   // Major LLM providers — PyPI
