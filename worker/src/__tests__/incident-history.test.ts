@@ -9,6 +9,7 @@ import {
   findSimilarHistory,
   formatDurationMin,
   predictedVsActualText,
+  summarizeAccuracy,
   historyKey,
   HISTORY_CAP,
   type IncidentHistoryRecord,
@@ -356,6 +357,59 @@ describe('predictedVsActualText (alert/feed phrase, mirrors SPA wording)', () =>
   it('returns null when no prediction to compare', () => {
     expect(predictedVsActualText({ durationMin: 42 })).toBeNull()
     expect(predictedVsActualText({ predictedRecoveryHours: 0, durationMin: 42 })).toBeNull()
+  })
+})
+
+describe('summarizeAccuracy', () => {
+  it('ignores records without a prediction (denominator = predicted records only)', () => {
+    const recs = [
+      rec({ incId: 'p', predictedRecoveryHours: 1, durationMin: 50 }), // accurate
+      rec({ incId: 'np1' }),                                            // no prediction
+      rec({ incId: 'np2', predictedRecoveryHours: 0, durationMin: 30 }),// 0 prediction → ignored
+    ]
+    const s = summarizeAccuracy(recs)
+    expect(s.total).toBe(1)
+    expect(s.accurate).toBe(1)
+    expect(s.hitRate).toBe(1)
+  })
+
+  it('counts accurate / under / over and computes hit-rate', () => {
+    const recs = [
+      rec({ incId: 'a', predictedRecoveryHours: 1, durationMin: 50 }),   // accurate (within band)
+      rec({ incId: 'b', predictedRecoveryHours: 1, durationMin: 200 }),  // under-predicted
+      rec({ incId: 'c', predictedRecoveryHours: 3, durationMin: 20 }),   // over-predicted
+      rec({ incId: 'd', predictedRecoveryHours: 2, durationMin: 120 }),  // accurate (at bound)
+    ]
+    const s = summarizeAccuracy(recs)
+    expect(s.total).toBe(4)
+    expect(s.accurate).toBe(2)
+    expect(s.underPredicted).toBe(1)
+    expect(s.overPredicted).toBe(1)
+    expect(s.hitRate).toBe(0.5)
+  })
+
+  it('computes median absolute error in hours', () => {
+    const recs = [
+      rec({ incId: 'a', predictedRecoveryHours: 1, durationMin: 90 }),  // |1.5-1| = 0.5
+      rec({ incId: 'b', predictedRecoveryHours: 2, durationMin: 120 }), // |2-2| = 0
+      rec({ incId: 'c', predictedRecoveryHours: 1, durationMin: 180 }), // |3-1| = 2
+    ]
+    expect(summarizeAccuracy(recs).medianAbsErrorHours).toBe(0.5) // median of [0, 0.5, 2]
+  })
+
+  it('computes an EVEN-length median (averages the two middle errors)', () => {
+    const recs = [
+      rec({ incId: 'a', predictedRecoveryHours: 1, durationMin: 60 }),  // |1-1| = 0
+      rec({ incId: 'b', predictedRecoveryHours: 1, durationMin: 120 }), // |2-1| = 1
+      rec({ incId: 'c', predictedRecoveryHours: 1, durationMin: 180 }), // |3-1| = 2
+      rec({ incId: 'd', predictedRecoveryHours: 1, durationMin: 300 }), // |5-1| = 4
+    ]
+    expect(summarizeAccuracy(recs).medianAbsErrorHours).toBe(1.5) // (1 + 2) / 2 of [0,1,2,4]
+  })
+
+  it('returns zeroed stats (no NaN) for an empty / prediction-less set', () => {
+    expect(summarizeAccuracy([])).toEqual({ total: 0, accurate: 0, underPredicted: 0, overPredicted: 0, hitRate: 0, medianAbsErrorHours: 0 })
+    expect(summarizeAccuracy([rec({ incId: 'np' })]).hitRate).toBe(0)
   })
 })
 

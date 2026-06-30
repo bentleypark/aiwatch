@@ -7,7 +7,7 @@ import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk } from './utils'
-import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, type IncidentHistoryRecord } from './incident-history'
+import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
@@ -2402,6 +2402,17 @@ export default {
             console.warn('[daily-summary] report counts read failed:', err instanceof Error ? err.message : err)
           }
 
+          // #827 Feature 1 — AI recovery-prediction accuracy across the durable incident:history
+          // corpus (predicted vs actual). Bounded read (one GET per service, once/day), like
+          // reportCounts above; null on failure → section omitted.
+          let accuracy: AccuracyStats | null = null
+          try {
+            const allHistory = (await Promise.all(SERVICES.map(s => readIncidentHistory(env.STATUS_CACHE, s.id)))).flat()
+            accuracy = summarizeAccuracy(allHistory)
+          } catch (err) {
+            console.warn('[daily-summary] accuracy aggregate failed:', err instanceof Error ? err.message : err)
+          }
+
           const description = buildDailySummary({
             services: dailyServices,
             aiUsage,
@@ -2409,6 +2420,7 @@ export default {
             incidentCountToday: { newCount: result.newCount, resolvedCount: result.resolvedCount },
             alertCounts,
             pushCount,
+            accuracy,
             webhookCounts,
             deliveryCounts,
             redditCount,

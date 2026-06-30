@@ -278,3 +278,51 @@ export function predictedVsActualText(rec: { predictedRecoveryHours?: number; du
     : `within ~${predText} est.`
   return `${actualText} (${within})`
 }
+
+/** Aggregate prediction-accuracy stats over a set of history records (#827
+ *  Feature 1). Only records carrying a prediction count toward the rates. */
+export interface AccuracyStats {
+  total: number             // records that had a prediction (the denominator)
+  accurate: number          // actual landed within [0.5×, 1×] of the predicted upper bound
+  underPredicted: number    // actual exceeded the prediction (we were too optimistic)
+  overPredicted: number     // actual far below the prediction (we were too cautious)
+  hitRate: number           // accurate / total, 0..1 (0 when total === 0)
+  medianAbsErrorHours: number // median |actualHours − predictedHours| (0 when total === 0)
+}
+
+/** Median of a numeric list (0 for empty). Pure helper. */
+function median(xs: number[]): number {
+  if (xs.length === 0) return 0
+  const s = [...xs].sort((a, b) => a - b)
+  const mid = Math.floor(s.length / 2)
+  return s.length % 2 === 0 ? (s[mid - 1] + s[mid]) / 2 : s[mid]
+}
+
+/**
+ * Aggregate prediction accuracy across history records (#827 Feature 1). Records
+ * without a prediction are ignored (they carry an actual outcome but nothing to
+ * score against). Pure — the caller supplies the record set (e.g. the flattened
+ * cross-service corpus) and decides any time window. Sample is inherently small
+ * (a handful of resolved incidents/day), so this is meaningful only in aggregate.
+ */
+export function summarizeAccuracy(records: IncidentHistoryRecord[]): AccuracyStats {
+  const withPred = records.filter(r => r.predictedRecoveryHours != null && r.predictedRecoveryHours > 0)
+  let accurate = 0, underPredicted = 0, overPredicted = 0
+  const absErrors: number[] = []
+  for (const r of withPred) {
+    const verdict = accuracyOf(r)
+    if (verdict === 'accurate') accurate++
+    else if (verdict === 'under-predicted') underPredicted++
+    else if (verdict === 'over-predicted') overPredicted++
+    absErrors.push(Math.abs(r.durationMin / 60 - (r.predictedRecoveryHours as number)))
+  }
+  const total = withPred.length
+  return {
+    total,
+    accurate,
+    underPredicted,
+    overPredicted,
+    hitRate: total > 0 ? accurate / total : 0,
+    medianAbsErrorHours: median(absErrors),
+  }
+}

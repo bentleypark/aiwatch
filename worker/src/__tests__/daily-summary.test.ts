@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatPushLine } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatPushLine, formatAccuracyLine } from '../daily-summary'
 import type { ServiceStatus } from '../types'
+import type { AccuracyStats } from '../incident-history'
 
 function makeSvc(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
   return {
@@ -595,5 +596,42 @@ describe('formatPushLine (#815 — Tier-1 push observability)', () => {
   it('appears in the full daily summary only when pushCount > 0', () => {
     expect(buildDailySummary({ ...minimal, pushCount: 2 })).toContain('📱 **Tier-1 Pushes Sent**: 2')
     expect(buildDailySummary({ ...minimal, pushCount: 0 })).not.toContain('Tier-1 Pushes Sent')
+  })
+})
+
+describe('formatAccuracyLine (#827 Feature 1 — prediction accuracy)', () => {
+  const minimal = { services: [makeSvc()], aiUsage: null, latencySnapshots: [], incidentCountToday: { newCount: 0, resolvedCount: 0 }, redditCount: 0 }
+  const stats = (over: Partial<AccuracyStats> = {}): AccuracyStats => ({
+    total: 4, accurate: 2, underPredicted: 1, overPredicted: 1, hitRate: 0.5, medianAbsErrorHours: 0.5, ...over,
+  })
+
+  it('renders a labeled block: header (count), on-target %, typical miss, bias', () => {
+    const out = formatAccuracyLine(stats())
+    expect(out).toContain('🎯 **AI Recovery Prediction Accuracy** (4 forecasts scored)')
+    expect(out).toContain('On-target: 50% — actual recovery landed within the predicted time')
+    expect(out).toContain('Typical miss: 30m off the estimate')
+  })
+  it('singularizes the header for a single forecast', () => {
+    expect(formatAccuracyLine(stats({ total: 1, accurate: 1, underPredicted: 0, overPredicted: 0 }))).toContain('(1 forecast scored)')
+  })
+  it('formats miss <1h in minutes, ≥1h in hours (incl. the 1h boundary)', () => {
+    expect(formatAccuracyLine(stats({ medianAbsErrorHours: 2.5 }))).toContain('Typical miss: 2.5h off the estimate')
+    expect(formatAccuracyLine(stats({ medianAbsErrorHours: 1 }))).toContain('Typical miss: 1.0h off the estimate') // boundary: err===1 → hours
+    expect(formatAccuracyLine(stats({ medianAbsErrorHours: 0.99 }))).toContain('Typical miss: 59m off the estimate')
+  })
+  it('reports directional bias in plain language (incl. all-accurate → balanced)', () => {
+    expect(formatAccuracyLine(stats({ underPredicted: 3, overPredicted: 0 }))).toContain('Bias: under-estimates (incidents ran longer than predicted)')
+    expect(formatAccuracyLine(stats({ underPredicted: 0, overPredicted: 3 }))).toContain('Bias: over-estimates (recovered faster than predicted)')
+    expect(formatAccuracyLine(stats({ underPredicted: 1, overPredicted: 1 }))).toContain('Bias: balanced')
+    expect(formatAccuracyLine(stats({ accurate: 4, underPredicted: 0, overPredicted: 0 }))).toContain('Bias: balanced')
+  })
+  it('is empty until the corpus has a predicted incident (omit, never "0%")', () => {
+    expect(formatAccuracyLine(stats({ total: 0 }))).toBe('')
+    expect(formatAccuracyLine(null)).toBe('')
+    expect(formatAccuracyLine(undefined)).toBe('')
+  })
+  it('appears in the full daily summary only when total > 0', () => {
+    expect(buildDailySummary({ ...minimal, accuracy: stats() })).toContain('AI Recovery Prediction Accuracy')
+    expect(buildDailySummary({ ...minimal, accuracy: stats({ total: 0 }) })).not.toContain('AI Recovery Prediction Accuracy')
   })
 })

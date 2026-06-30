@@ -6,6 +6,7 @@ import type { VitalsDaily } from './vitals'
 import { formatVitalsSection } from './vitals'
 import { aggregateProbeDaily } from './probe-archival'
 import { formatReportCountsSection } from './report'
+import type { AccuracyStats } from './incident-history'
 
 // #679 — the "detection lead" (faster-than-official) metric was removed (structurally null — status-page
 // polling is always later than the official publish; #464 already retired the framing). The RTT-degradation
@@ -27,6 +28,9 @@ export interface DailySummaryData {
   alertCounts?: { incidents: number; resolved: number; down: number; degraded: number; recovered: number } | null
   // #815 — Tier-1 ntfy phone pushes delivered today (#778); makes the otherwise-unobservable push visible.
   pushCount?: number | null
+  // #827 Feature 1 — AI recovery-prediction accuracy aggregated across the durable incident:history
+  // corpus (predicted vs actual). Absent/empty until the corpus accumulates resolved incidents.
+  accuracy?: AccuracyStats | null
   // Discord-only since #467 — Slack moved to native /feed RSS (no per-user webhook registered or proxied).
   // #548 — newToday is the signed day-over-day delta of confirmed subscribers (null = no prior baseline).
   webhookCounts?: { discord: number; newToday?: number | null }
@@ -91,6 +95,10 @@ export function buildDailySummary(data: DailySummaryData): string {
     const modelBreakdown = gemma || sonnet ? ` (Gemma: ${gemma}, Sonnet: ${sonnet})` : ''
     lines.push(`\n🤖 **AI Analysis Usage**\n   Today: ${aiUsage.calls} calls (${aiUsage.success} success, ${aiUsage.failed} failed)${modelBreakdown}\n   Est. cost: $${sonnetCost} (Sonnet only)`)
   }
+
+  // #827 Feature 1 — AI recovery-prediction accuracy (predicted vs actual, across the durable corpus)
+  const accuracyLine = formatAccuracyLine(data.accuracy)
+  if (accuracyLine) lines.push(accuracyLine)
 
   // Section 4: Uptime Best/Worst — only services that report an official uptime%. #713: services with
   // no official uptime now leave `uptime30d` null (no estimate), so the null check alone excludes them.
@@ -229,6 +237,29 @@ export function formatSubscriberDelta(newToday: number | null | undefined): stri
 export function formatPushLine(pushCount: number | null | undefined): string {
   if (!pushCount || pushCount <= 0) return ''
   return `\n📱 **Tier-1 Pushes Sent**: ${pushCount}`
+}
+
+/** #827 Feature 1 — AI recovery-prediction accuracy, rendered as a labeled multi-line block so an
+ *  operator can read it cold weeks later without decoding jargon. Three plain-language lines, all
+ *  anchored on the predicted recovery estimate (its upper bound):
+ *    - On-target % = share that recovered within the predicted time (accuracyOf 'accurate' band)
+ *    - Typical miss = median absolute distance from the estimate (how far off when wrong-ish)
+ *    - Bias        = whether the model leans optimistic (under) or cautious (over)
+ *  Empty until the corpus has ≥1 predicted+resolved incident → the whole block is omitted (no "0%"). */
+export function formatAccuracyLine(accuracy: AccuracyStats | null | undefined): string {
+  if (!accuracy || accuracy.total === 0) return ''
+  const pct = Math.round(accuracy.hitRate * 100)
+  const err = accuracy.medianAbsErrorHours
+  const errStr = err < 1 ? `${Math.round(err * 60)}m` : `${err.toFixed(1)}h`
+  const bias = accuracy.underPredicted > accuracy.overPredicted
+    ? 'under-estimates (incidents ran longer than predicted)'
+    : accuracy.overPredicted > accuracy.underPredicted
+      ? 'over-estimates (recovered faster than predicted)'
+      : 'balanced (no consistent over/under lean)'
+  return `\n🎯 **AI Recovery Prediction Accuracy** (${accuracy.total} forecast${accuracy.total === 1 ? '' : 's'} scored)`
+    + `\n   On-target: ${pct}% — actual recovery landed within the predicted time`
+    + `\n   Typical miss: ${errStr} off the estimate`
+    + `\n   Bias: ${bias}`
 }
 
 /**
