@@ -604,13 +604,14 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   //   post-send writes the flap key on the res alert to start the window for the NEXT flap.
   const suppressedIncIds = new Set<string>()
   const flapKeysToWrite = new Map<string, string>()
-  // #633 — first-seen confirmation gate. A flap-shaped NEW incident on a monitor-flap service is
-  // HELD for one cron cycle so a single-cycle BetterStack blip can't fire a phantom alert + AI
-  // analysis. heldNewIncIds is added to suppressedIncIds (buildIncidentAlerts skips both new + res)
-  // AND passed to refreshOrReanalyze (so the analysis is deferred too). pendingNewToWrite seeds the
-  // pending:new marker so the NEXT cycle confirms + fires.
+  // #633/#835 — first-seen confirmation gate. A flap-shaped/short NEW incident on a monitor-flap or
+  // short-incident-hold service is HELD until it has survived ~2 cron cycles (FLAP_HOLD_MS, #835 — was
+  // one cycle), so a sub-~10min blip fires NEITHER a phantom New nor a Resolved (the Modal "Storage
+  // degraded" 1m double-alert). heldNewIncIds → suppressedIncIds (buildIncidentAlerts skips both new +
+  // res) AND passed to refreshOrReanalyze (analysis deferred too). pendingNewToWrite stamps the
+  // pending:new marker with the first-seen ts so a LATER cycle confirms + fires once the window passes.
   const heldNewIncIds = new Set<string>()
-  const pendingNewToWrite = new Set<string>()
+  const pendingNewToWrite = new Map<string, number>()  // incId → first-seen epoch ms (#835, write-once)
   for (const svc of scored) {
     const config = SERVICES.find(c => c.id === svc.id)
     for (const inc of svc.incidents ?? []) {
@@ -633,21 +634,24 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       // above, so a re-fire of an already-sent incident is never held.
       if (config) {
         const alreadyAlerted = alertedNewMap.get(inc.id)?.has(svc.id) ?? false
-        // FAIL OPEN on a KV read error (return '1' → pendingExists=true → NOT held → the alert fires).
-        // Unlike the sibling pending:degraded debounce (which fails open — a missing marker means
-        // "alert now"), this gate's marker RELEASES the alert, so a missing-or-errored read fails
-        // CLOSED. Dropping a real alert is worse than letting one phantom through on a transient KV
-        // blip, so on a read *error* we deliberately do not hold. Only a legit absent marker (null) holds.
+        // #835 — the pending:new marker stores the FIRST-SEEN epoch ms (not a bare '1'); shouldHold
+        // confirms only once the incident has been first-seen ≥ FLAP_HOLD_MS (~2 cron cycles).
+        // On a KV read ERROR pass firstSeenMs=0 (age huge → NOT held → fire): dropping a real alert
+        // is worse than one phantom on a transient KV blip (preserves the prior fail-not-hold).
+        // A legacy '1' marker (pre-#835) parses to 1 → age huge → fires immediately — a safe one-time
+        // transition (no in-flight incident gets stuck held across the deploy).
+        const nowMs = Date.now()
         const pendingRaw = await env.STATUS_CACHE.get(pendingNewKey(inc.id)).catch((err) => {
-          console.warn('[cron] #633 pending:new read failed — failing open (will not hold):', inc.id, err instanceof Error ? err.message : err)
-          return '1'
+          console.warn('[cron] #835 pending:new read failed — failing open (will not hold):', inc.id, err instanceof Error ? err.message : err)
+          return '0'
         })
-        const pendingExists = pendingRaw !== null
-        if (shouldHoldNewIncident(svc.id, config, inc, { alreadyAlerted, pendingExists })) {
-          console.log('[cron] #633/#792 holding new incident one cycle (phantom-alert / short-blip gate):', svc.id, inc.id)
+        const firstSeenMs = pendingRaw === null ? null : (Number.parseInt(pendingRaw, 10) || 0)
+        if (shouldHoldNewIncident(svc.id, config, inc, { alreadyAlerted, firstSeenMs, nowMs })) {
+          console.log('[cron] #633/#792/#835 holding new incident until it survives ~2 cycles (flap / short-blip gate):', svc.id, inc.id)
           suppressedIncIds.add(inc.id)
           heldNewIncIds.add(inc.id)
-          pendingNewToWrite.add(inc.id)
+          // Stamp the first-seen time ONCE (get-or-set) so the window measures from the true first sight.
+          if (firstSeenMs === null) pendingNewToWrite.set(inc.id, nowMs)
         }
       }
     }
@@ -700,14 +704,15 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       await kvPut(env.STATUS_CACHE, `pending:degraded:${svc.id}`, '1', { expirationTtl: 600 })
     }
   }
-  // #633 — seed the first-seen markers for held new incidents so the NEXT cron cycle confirms +
-  // fires (or the marker expires if the blip recovered inside the window → no phantom alert).
+  // #633/#835 — stamp the first-seen ts (write-once) for held new incidents so a LATER cron cycle
+  // confirms + fires once the incident outlives FLAP_HOLD_MS (~2 cycles); a blip that recovers inside
+  // the window never gets here on a later cycle, so it never alerts (no phantom).
   // Log on failure (mirrors the alerted:new roster write below): a dropped marker means the incident
-  // is re-held next cycle and retried — self-heals on a transient blip, but a sustained KV-write
+  // re-stamps from scratch next cycle (self-heals on a transient blip), but a sustained KV-write
   // outage (which also breaks the roster writes) would delay the alert, so make it observable.
-  for (const incId of pendingNewToWrite) {
-    const ok = await kvPut(env.STATUS_CACHE, pendingNewKey(incId), '1', { expirationTtl: PENDING_NEW_TTL_S })
-    if (!ok) console.error('[cron] #633 pending:new write FAILED — held incident may stay held an extra cycle:', incId)
+  for (const [incId, firstSeenMs] of pendingNewToWrite) {
+    const ok = await kvPut(env.STATUS_CACHE, pendingNewKey(incId), String(firstSeenMs), { expirationTtl: PENDING_NEW_TTL_S })
+    if (!ok) console.error('[cron] #835 pending:new write FAILED — held incident may re-hold from scratch next cycle:', incId)
   }
 
   // Record detection timestamps for non-operational services (Detection Lead feature)

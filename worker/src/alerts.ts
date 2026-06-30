@@ -90,19 +90,22 @@ export function isFlapSuppressible(
 // FIRST one still fires a full new-incident Discord alert + AI analysis that then vanishes from
 // every surface (the Modal "Web endpoints is down" 05:49 phantom).
 //
-// This gate holds a flap-shaped NEW incident for one extra cycle (~5–10min): the caller alerts
-// only once the incident has survived a previous cron cycle (pendingExists). A blip that recovers
-// inside the window never alerts — and buildIncidentAlerts emits no "recovered" for it either,
-// since it was never added to alertedNewMap (see the `alertedNewMap.has` guard in the resolved
-// branch). Severity-tagged incidents and Tier-1 services are never held (isFlapSuppressible is
-// false for them) → immediate alert, no regression.
+// This gate holds a flap-shaped NEW incident until it has been first-seen for ≥ FLAP_HOLD_MS
+// (~2 */5 cycles, #835 — was one): the caller stamps the first-seen ts in the marker and alerts
+// only once the incident outlives the window. A blip that recovers inside the window never alerts —
+// and buildIncidentAlerts emits no "recovered" for it either, since it was never added to
+// alertedNewMap (see the `alertedNewMap.has` guard in the resolved branch). Severity-tagged
+// incidents and Tier-1 services are never held (isFlapSuppressible is false) → immediate alert.
 //
 // Returns true = HOLD this cycle (suppress the new alert + write pending:new). Mirrors the
 // existing `pending:degraded` debounce, but on the new-incident path.
 const PENDING_NEW_PREFIX = 'pending:new:'
 
-/** TTL for the first-seen pending marker — two 5-min cron cycles of tolerance (survives one skipped run). */
-export const PENDING_NEW_TTL_S = 600
+/** TTL for the first-seen pending marker. #835 — the marker stores the first-seen epoch ms and is
+ *  written ONCE (get-or-set), so its TTL must comfortably outlast the FLAP_HOLD_MS window (~9min)
+ *  plus a few skipped cron runs; 30min is generous (after confirm, alreadyAlerted guards re-hold so a
+ *  lingering marker is harmless). */
+export const PENDING_NEW_TTL_S = 1800
 
 /** KV key for the #633 first-seen pending marker, scoped to the incident id. */
 export function pendingNewKey(incId: string): string {
@@ -110,14 +113,14 @@ export function pendingNewKey(incId: string): string {
 }
 
 // #792 — generalized short-incident hold. Where isFlapSuppressible targets the BetterStack
-// "<model> — down/recovered" flap title shape, this holds ANY new non-major incident one cron cycle
-// on a `holdShortIncidents` service. Such services (e.g. Langfuse) fire frequent short `minor`
+// "<model> — down/recovered" flap title shape, this holds ANY new non-major incident on a
+// `holdShortIncidents` service. Such services (e.g. Langfuse) fire frequent short `minor`
 // ingestion/latency incidents AND backdate the resolution, so our */5 cron often first catches the
 // incident only as it's already resolving → a New+Resolved Discord double-alert for a blip the live
-// dashboard never reflected. Holding one cycle means a sub-cycle blip that self-resolves never alerts
-// (no New, and no Resolved via the alertedNewMap.has guard in buildIncidentAlerts' resolved branch);
-// a genuinely ongoing incident just alerts one cycle (~5min) later. `major`/`critical` (real broad
-// outage) and Tier-1 (claude/openai/gemini) always alert immediately. Pure — unit-tested.
+// dashboard never reflected. A sub-window blip that self-resolves never alerts (no New, and no
+// Resolved via the alertedNewMap.has guard in buildIncidentAlerts' resolved branch); a genuinely
+// ongoing incident alerts once it survives ~2 cycles (FLAP_HOLD_MS, #835). `major`/`critical` (real
+// broad outage) and Tier-1 (claude/openai/gemini) always alert immediately. Pure — unit-tested.
 // NOTE: unlike isFlapNotice (which excludes only `major` because the "— down/recovered" title regex
 // already screens out a real critical incident), this path has no title guard, so it must exclude
 // BOTH severe levels — a Langfuse statuspage incident maps `critical` through (parsers/statuspage.ts).
@@ -132,17 +135,29 @@ export function isShortIncidentHoldable(
   return true
 }
 
+// #835 — the hold window. Was ONE */5 cycle (~5min), which still let a flap that lingered just past
+// one cron boundary fire a New+Resolved double-alert (Modal "Storage degraded" 1m; fireworks 3-6min
+// model flaps). Extended to ~2 cycles: a hold-eligible incident must be first-seen for ≥ this long
+// before it confirms + alerts, so a sub-~10min flap fires NEITHER New nor Resolved (the resolved is
+// gated by the same alertedNewMap.has guard). 9min < 2×5min so it confirms on the cycle AFTER two
+// full cycles even with mild cron jitter; a skipped run just confirms a touch sooner (still ≥1 cycle).
+export const FLAP_HOLD_MS = 9 * 60 * 1000
+
 export function shouldHoldNewIncident(
   svcId: string,
   config: { flapSuppression?: boolean; holdShortIncidents?: boolean },
   inc: Incident,
-  state: { alreadyAlerted: boolean; pendingExists: boolean },
+  // firstSeenMs: epoch ms the incident was first held (from the pending:new marker), or null on first
+  // sight. nowMs: current time. A KV read error should pass firstSeenMs=0 (age huge → not held → fire),
+  // preserving the prior fail-not-hold behavior (dropping a real alert is worse than one phantom).
+  state: { alreadyAlerted: boolean; firstSeenMs: number | null; nowMs: number },
 ): boolean {
   if (state.alreadyAlerted) return false        // already fired in a prior cycle — never re-hold
-  if (state.pendingExists) return false         // survived a prior cycle — confirm + fire now
   if (inc.status === 'resolved') return false   // resolved path is gated separately (alertedNewMap)
   // flap-shaped on a flap service, OR any non-major new incident on a short-incident-hold service.
-  return isFlapSuppressible(svcId, config, inc) || isShortIncidentHoldable(svcId, config, inc)
+  if (!(isFlapSuppressible(svcId, config, inc) || isShortIncidentHoldable(svcId, config, inc))) return false
+  if (state.firstSeenMs == null) return true    // first sight → hold (caller stamps firstSeen = now)
+  return state.nowMs - state.firstSeenMs < FLAP_HOLD_MS  // still inside the window → hold; else confirm + fire
 }
 
 export interface AlertCandidate {
