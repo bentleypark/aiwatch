@@ -261,6 +261,24 @@ export function formatDurationMin(min: number): string {
   return `${h}h ${m}m`
 }
 
+/**
+ * One-line "predicted vs actual" recovery phrase for alert/feed surfaces (#827 F4) — the worker/EN
+ * mirror of the SPA `predictionAccuracy.js` wording. Leads with the ACTUAL recovery and folds the
+ * estimate + direction into one fragment (accuracyOf bands), e.g.:
+ *   accurate → "42m (within ~1h est.)"   under → "3h 10m (over ~1h est.)"   over → "20m (faster than ~3h est.)"
+ * Returns null when the record carries no prediction (nothing to compare against).
+ */
+export function predictedVsActualText(rec: { predictedRecoveryHours?: number; durationMin: number }): string | null {
+  if (rec.predictedRecoveryHours == null || rec.predictedRecoveryHours <= 0) return null
+  const predText = formatDurationMin(Math.round(rec.predictedRecoveryHours * 60))
+  const actualText = formatDurationMin(rec.durationMin)
+  const verdict = accuracyOf(rec)
+  const within = verdict === 'under-predicted' ? `over ~${predText} est.`
+    : verdict === 'over-predicted' ? `faster than ~${predText} est.`
+    : `within ~${predText} est.`
+  return `${actualText} (${within})`
+}
+
 /** Aggregate prediction-accuracy stats over a set of history records (#827
  *  Feature 1). Only records carrying a prediction count toward the rates. */
 export interface AccuracyStats {

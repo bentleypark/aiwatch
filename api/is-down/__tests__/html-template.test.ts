@@ -54,6 +54,32 @@ function mkService(overrides: Partial<ServiceData> = {}): ServiceData {
   }
 }
 
+describe('renderAIInsight — predicted vs actual (#827 F4)', () => {
+  const resolvedInsight = {
+    summary: 'Auth server overload caused login failures.',
+    estimatedRecovery: '30m–1h', estimatedRecoveryHours: 1, affectedScope: ['Login'],
+    analyzedAt: new Date(Date.now() - 30 * 60000).toISOString(),
+    startedAt: new Date(Date.now() - 164 * 60000).toISOString(), // 2h44m before resolution
+    resolvedAt: new Date().toISOString(),
+  }
+  it('shows "Predicted vs actual" on a resolved (operational) card, replacing the bare estimate', () => {
+    const html = renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [], resolvedInsight)
+    expect(html).toContain('Predicted vs actual:')
+    expect(html).toContain('2h 44m (over ~1h est.)') // actual exceeded the ~1h estimate
+    expect(html).not.toContain('Est. Recovery:') // superseded by the comparison once resolved
+  })
+  it('falls back to "Est. Recovery" when not resolved, or when no numeric estimate / startedAt', () => {
+    // active service → still the estimate
+    const active = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [], { ...resolvedInsight, resolvedAt: undefined })
+    expect(active).toContain('Est. Recovery:')
+    expect(active).not.toContain('Predicted vs actual:')
+    // resolved but missing the numeric estimate → estimate fallback
+    const noHours = renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [], { ...resolvedInsight, estimatedRecoveryHours: undefined })
+    expect(noHours).toContain('Est. Recovery:')
+    expect(noHours).not.toContain('Predicted vs actual:')
+  })
+})
+
 describe('buildMetaDescription', () => {
   it('operational + uptime + incidents: all clauses in canonical order', () => {
     const svc = mkService({

@@ -80,7 +80,7 @@ export default async function handler(req: Request) {
     // without paying the ~34-service live fan-out of /api/status on this high-traffic SEO surface.
     let serviceData = null
     let fallbacks: Array<{ id: string; name: string; score: number | null; status: string }> = []
-    let aiInsight: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string } | null = null
+    let aiInsight: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; startedAt?: string } | null = null
     // #574 — supply-chain note for THIS service (set if it's in the banner's affectedNow/mayBeAffected).
     let supplyChainNote: { regions: string; confirmed: boolean } | null = null
     // Track the precise reason for the fallback render so the Discord alert can
@@ -104,7 +104,7 @@ export default async function handler(req: Request) {
             partialCount?: number // #722 — BetterStack sub-threshold affected-resource count
             components?: Array<{ id: string; name: string; status: 'operational' | 'degraded' | 'down'; group?: string }>
           }>
-          aiAnalysis?: Record<string, { summary: string; estimatedRecovery: string; affectedScope: string[]; needsFallback?: boolean; analyzedAt: string; incidentId: string; resolvedAt?: string }>
+          aiAnalysis?: Record<string, { summary: string; estimatedRecovery: string; affectedScope: string[]; needsFallback?: boolean; analyzedAt: string; incidentId: string; resolvedAt?: string; estimatedRecoveryHours?: number }>
           // #574 — supply-chain banner: when this service is in affectedNow/mayBeAffected, render a note.
           supplyChainBanner?: {
             severity: 'degraded' | 'down'
@@ -244,7 +244,14 @@ export default async function handler(req: Request) {
         const analysis = Array.isArray(analyses) ? analyses[0] : analyses
         // Show AI insight if analysis exists (incident may be active even when status is operational)
         if (analysis) {
-          aiInsight = analysis
+          // #827 F4 — attach the matching incident's startedAt so a RESOLVED card can show
+          // "predicted vs actual" (actual = startedAt→resolvedAt); estimatedRecoveryHours rides on
+          // the analysis. Incidents live on the fetched SERVICE (`target`), NOT the slug-config
+          // `entry` (which has no `incidents`). `target` may be undefined on the `service_missing`
+          // config-drift path (which doesn't return) while `aiAnalysis` still has an entry — optional-
+          // chain so we never throw to the fallback render; absent → the card shows the bare estimate.
+          const inc = ((target?.incidents as Array<{ id?: string; startedAt?: string }> | undefined) ?? []).find(i => i.id === analysis.incidentId)
+          aiInsight = { ...analysis, ...(inc?.startedAt ? { startedAt: inc.startedAt } : {}) }
         }
 
         // #574 — supply-chain note: if this service is in the banner (confirmed-affected or estimated).
