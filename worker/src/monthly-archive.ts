@@ -11,7 +11,8 @@ import type { ServiceStatus, Incident } from './types'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
-import { SERVICE_ADDED_AT } from './services'
+import { SERVICE_ADDED_AT, SERVICES } from './services'
+import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type IncidentHistoryRecord } from './incident-history'
 import { kvPut } from './utils'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
@@ -90,6 +91,11 @@ export interface MonthlyArchive {
   // failed, or the archive predates this feature — aiwatch-reports generate-report.js
   // must handle absence (falls back to the hand-written placeholder).
   narrative?: MonthlyNarrativeDraft | null
+  // #827 Feature 3 — AI recovery-prediction accuracy for the month (predicted vs actual, aggregated
+  // from the durable incident:history corpus filtered to this period). null when no predicted+resolved
+  // incident fell in the month (or the archive predates this feature) — the report site
+  // (aiwatch-reports) renders the "AI Prediction Accuracy" section only when present.
+  predictionAccuracy?: AccuracyStats | null
 }
 
 // ── Monthly security summary ─────────────────────────────────────────
@@ -639,6 +645,36 @@ export interface ArchiveScoreInput {
 }
 
 /** Build monthly archive from daily KV data + accumulated incident data */
+/**
+ * #827 Feature 3 — aggregate AI recovery-prediction accuracy for a month. Reads each service's
+ * durable `incident:history` corpus, keeps records whose `resolvedAt` falls in `period` (YYYY-MM),
+ * and runs `summarizeAccuracy`. Returns null when no PREDICTED+resolved incident landed in the month
+ * (the caller sets `MonthlyArchive.predictionAccuracy` to null — the key is still present — and the
+ * report site shows nothing rather than "0%").
+ *
+ * Caveat: the corpus is a rolling per-service cap (HISTORY_CAP), not month-bucketed — a service with
+ * a very high incident volume could age old records out before its month is archived. Acceptable for
+ * v1 (the archive runs at month-end; the just-completed month's records are recent → present). The
+ * sharper case is an `/api/admin/rebuild-archive` of an OLD month: it recomputes from the CURRENT
+ * corpus, so a high-volume service's older records may already be gone → the rebuilt value can shrink
+ * or go null (same not-time-machine class as that handler's Score caveat).
+ */
+export async function buildMonthlyAccuracy(
+  kv: KVNamespace,
+  period: string,
+  svcIds: string[],
+): Promise<AccuracyStats | null> {
+  const all: IncidentHistoryRecord[] = []
+  await Promise.all(svcIds.map(async (id) => {
+    const recs = await readIncidentHistory(kv, id)
+    for (const r of recs) {
+      if (typeof r.resolvedAt === 'string' && r.resolvedAt.slice(0, 7) === period) all.push(r)
+    }
+  }))
+  const stats = summarizeAccuracy(all) // ignores prediction-less records in the denominator
+  return stats.total > 0 ? stats : null
+}
+
 export async function buildMonthlyArchive(
   kv: KVNamespace,
   year: number,
@@ -793,6 +829,11 @@ export async function buildMonthlyArchive(
     }
   }
 
+  // #827 F3 — AI recovery-prediction accuracy for this month, from the durable incident:history
+  // corpus filtered to `period`. Best-effort: a read hiccup must not fail the archive → null.
+  const predictionAccuracy = await buildMonthlyAccuracy(kv, period, SERVICES.map(s => s.id))
+    .catch((err) => { console.warn(`[monthly-archive] accuracy aggregate failed for ${period}:`, err instanceof Error ? err.message : err); return null })
+
   const archive: MonthlyArchive = {
     period,
     generatedAt: new Date().toISOString(),
@@ -800,6 +841,7 @@ export async function buildMonthlyArchive(
     services,
     security,
     degradation,
+    predictionAccuracy,
   }
 
   // AI retrospective narrative (#426). Best-effort — generateMonthlyNarrative

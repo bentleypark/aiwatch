@@ -23,13 +23,81 @@ import {
   addDegradationToMonthly,
   normalizeDegradationMonthly,
   summarizeDegradation,
+  buildMonthlyAccuracy,
 } from '../monthly-archive'
 import type { ServiceStatus, Incident } from '../types'
+import type { IncidentHistoryRecord } from '../incident-history'
 import type { MonthlySecurityEntry, MonthlySecuritySummary } from '../monthly-archive'
 import type { OsvTimeline } from '../security-monitor'
 import { SERVICE_ADDED_AT } from '../services'
 
 // ── parseDurationMin ─────────────────────────────────────────────────
+
+describe('buildMonthlyAccuracy (#827 F3 — monthly prediction accuracy)', () => {
+  const histKV = (byService: Record<string, IncidentHistoryRecord[]>) => ({
+    get: async (k: string) => {
+      const m = /^incident:history:(.+)$/.exec(k)
+      return m && byService[m[1]] ? JSON.stringify(byService[m[1]]) : null
+    },
+  } as unknown as KVNamespace)
+  const rec = (over: Partial<IncidentHistoryRecord> = {}): IncidentHistoryRecord => ({ svcId: 'claude', incId: 'x', title: 't', provider: 'A', category: 'api', impact: 'major', startedAt: '2026-06-01T00:00:00Z', resolvedAt: '2026-06-15T01:00:00Z', durationMin: 60, ...over })
+
+  it('aggregates only records whose resolvedAt falls in the period (across services)', async () => {
+    const kv = histKV({
+      claude: [
+        rec({ incId: 'a', resolvedAt: '2026-06-10T00:00:00Z', predictedRecoveryHours: 1, durationMin: 50 }),  // June, accurate
+        rec({ incId: 'b', resolvedAt: '2026-05-30T00:00:00Z', predictedRecoveryHours: 1, durationMin: 50 }),  // MAY → excluded
+      ],
+      openai: [
+        rec({ svcId: 'openai', incId: 'c', resolvedAt: '2026-06-20T00:00:00Z', predictedRecoveryHours: 1, durationMin: 200 }), // June, under
+        rec({ svcId: 'openai', incId: 'd', resolvedAt: '2026-06-21T00:00:00Z' }),                                              // June, NO prediction → not counted
+      ],
+    })
+    const stats = await buildMonthlyAccuracy(kv, '2026-06', ['claude', 'openai'])
+    expect(stats).not.toBeNull()
+    expect(stats!.total).toBe(2)        // 2 June records WITH a prediction (the May one + the prediction-less one excluded)
+    expect(stats!.accurate).toBe(1)
+    expect(stats!.underPredicted).toBe(1)
+  })
+
+  it('returns null when the month has no predicted+resolved incident', async () => {
+    const kv = histKV({ claude: [rec({ resolvedAt: '2026-05-01T00:00:00Z', predictedRecoveryHours: 1 })] }) // May only
+    expect(await buildMonthlyAccuracy(kv, '2026-06', ['claude'])).toBeNull()
+    // also null when records exist but none carry a prediction
+    const kv2 = histKV({ claude: [rec({ resolvedAt: '2026-06-10T00:00:00Z' })] })
+    expect(await buildMonthlyAccuracy(kv2, '2026-06', ['claude'])).toBeNull()
+  })
+
+  it('handles services with no history (missing key) without throwing', async () => {
+    const kv = histKV({})
+    expect(await buildMonthlyAccuracy(kv, '2026-06', ['claude', 'openai'])).toBeNull()
+  })
+
+  it('includes/excludes records exactly at the month boundary (UTC)', async () => {
+    const kv = histKV({ claude: [
+      rec({ incId: 'in', resolvedAt: '2026-06-30T23:59:59Z', predictedRecoveryHours: 1, durationMin: 50 }), // last instant of June → IN
+      rec({ incId: 'out', resolvedAt: '2026-07-01T00:00:00Z', predictedRecoveryHours: 1, durationMin: 50 }),// first of July → OUT
+    ] })
+    const stats = await buildMonthlyAccuracy(kv, '2026-06', ['claude'])
+    expect(stats!.total).toBe(1)
+  })
+
+  it('wiring: buildMonthlyArchive carries predictionAccuracy through to the archive (→ /api/report)', async () => {
+    const history: Record<string, IncidentHistoryRecord[]> = {
+      claude: [rec({ incId: 'a', resolvedAt: '2026-06-15T00:00:00Z', predictedRecoveryHours: 1, durationMin: 52 })],
+    }
+    const kv = {
+      get: async (k: string) => {
+        const m = /^incident:history:(.+)$/.exec(k)
+        return m && history[m[1]] ? JSON.stringify(history[m[1]]) : null // every other archive key → null (handled)
+      },
+    } as unknown as KVNamespace
+    const archive = await buildMonthlyArchive(kv, 2026, 6)
+    expect(archive.predictionAccuracy).not.toBeNull()
+    expect(archive.predictionAccuracy!.total).toBe(1)
+    expect(archive.predictionAccuracy!.accurate).toBe(1)
+  })
+})
 
 describe('parseDurationMin', () => {
   it('parses "2h 30m" to 150', () => {
