@@ -1,0 +1,108 @@
+:root {
+  --bg0: #0b0f17;
+  --bg1: #131a26;
+  --bg2: #1c2636;
+  --text0: #e8edf5;
+  --text1: #aab4c5;
+  --text2: #6b7688;
+  --border: #243044;
+  --green: #16a34a;
+  --amber: #f59e0b;
+  --red: #dc2626;
+  --grey: #6b7280;
+  --accent: #6aa9ff;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  width: 340px;
+  margin: 0;
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg0);
+  color: var(--text0);
+}
+
+.hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg1);
+}
+.hdr-title { font-weight: 600; letter-spacing: 0.2px; }
+.overall { font-size: 12px; font-weight: 600; }
+
+.surfaces { padding: 8px 12px; display: flex; flex-direction: column; gap: 8px; }
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg1);
+}
+.card-head { display: flex; align-items: center; gap: 8px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.dot.operational { background: var(--green); }
+.dot.degraded { background: var(--amber); }
+.dot.down { background: var(--red); }
+.dot.unknown { background: var(--grey); }
+.card-name { font-weight: 600; color: var(--text0); }
+a.card-name { text-decoration: none; }
+a.card-name:hover { text-decoration: underline; }
+.card-uptime { margin-left: auto; color: var(--text0); font-size: 12px; font-weight: 600; }
+.card-score-inline { color: var(--text2); }
+[title] { cursor: help; }
+a[title] { cursor: pointer; }
+
+.legend { margin: 0; padding: 0 12px 8px; font-size: 11px; line-height: 1.4; }
+
+.card-sub { margin-top: 4px; color: var(--text2); font-size: 12px; }
+.fallback { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text1); }
+.fallback b { color: var(--text0); font-weight: 600; }
+
+.incident {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--amber);
+  background: var(--bg2);
+  border-radius: 4px;
+}
+.incident.major, .incident.critical { border-left-color: var(--red); }
+.incident-title { font-weight: 600; font-size: 12px; }
+.incident-meta { color: var(--text2); font-size: 11px; text-transform: capitalize; }
+.incident-ai { margin-top: 3px; color: var(--text1); font-size: 12px; }
+
+.reports { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text1); }
+.reports-head { margin-bottom: 4px; font-weight: 600; color: var(--text0); }
+.report-item { padding: 3px 0; }
+.report-item + .report-item { border-top: 1px solid var(--bg2); }
+.report-meta { color: var(--text2); font-size: 11px; }
+.report-desc { display: block; color: var(--text1); font-size: 12px; overflow-wrap: anywhere; margin-top: 1px; }
+
+.report { padding: 10px 12px; border-top: 1px solid var(--border); background: var(--bg1); }
+.report-title { font-size: 12px; margin: 0 0 8px; color: var(--text1); font-weight: 600; }
+.row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.lbl { width: 56px; color: var(--text2); font-size: 12px; }
+select, input[type="text"] {
+  flex: 1; background: var(--bg2); color: var(--text0);
+  border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; font: inherit;
+}
+input[type="text"] { width: 100%; margin-bottom: 6px; }
+button {
+  width: 100%; padding: 7px; border: 0; border-radius: 6px; cursor: pointer;
+  background: var(--accent); color: #06101f; font-weight: 600; font: inherit;
+}
+button:disabled { opacity: 0.6; cursor: default; }
+.report-status { margin: 6px 0 0; font-size: 12px; min-height: 14px; }
+.report-status.ok { color: var(--green); }
+.report-status.err { color: var(--red); }
+
+.ftr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; border-top: 1px solid var(--border); font-size: 12px;
+}
+.ftr a { color: var(--accent); text-decoration: none; }
+.ftr a:hover { text-decoration: underline; }
+.muted { color: var(--text2); font-size: 11px; }
