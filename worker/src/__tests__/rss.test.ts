@@ -166,6 +166,25 @@ describe('buildRssFeed — active item pubDate = first-seen, not backdated start
   })
 })
 
+describe('buildRssFeed — resolved item "predicted vs actual" (#827 F4)', () => {
+  const resolvedInc = incident({
+    id: 'r1', title: 'Login Issues', status: 'resolved',
+    startedAt: '2026-05-10T12:00:00.000Z', resolvedAt: '2026-05-10T14:44:00.000Z', duration: '2h 44m',
+    timeline: [{ stage: 'resolved', text: 'Restored.', at: '2026-05-10T14:44:00.000Z' }],
+  })
+  it('renders the predicted-vs-actual line when the analysis carries a numeric estimate', () => {
+    const ai: RssAiAnalysisMap = { claude: [{ incidentId: 'r1', summary: 's', estimatedRecovery: '30m–1h', estimatedRecoveryHours: 1, affectedScope: [] }] }
+    const xml = buildRssFeed([service({ incidents: [resolvedInc] })], { scope: 'all' }, NOW, ai)
+    expect(xml).toContain('🎯 AI prediction: 2h 44m (over ~1h est.)') // actual 2h44m exceeded the ~1h estimate
+  })
+  it('omits the line when no analysis / no numeric estimate', () => {
+    const xml = buildRssFeed([service({ incidents: [resolvedInc] })], { scope: 'all' }, NOW)
+    expect(xml).not.toContain('AI prediction:')
+    const aiNoHours: RssAiAnalysisMap = { claude: [{ incidentId: 'r1', summary: 's', estimatedRecovery: 'N/A', affectedScope: [] }] }
+    expect(buildRssFeed([service({ incidents: [resolvedInc] })], { scope: 'all' }, NOW, aiNoHours)).not.toContain('AI prediction:')
+  })
+})
+
 describe('buildRssFeed — resolution notifications (#467)', () => {
   it('emits ONLY the resolved item (distinct guid, no contradictory active row) for a resolved incident', () => {
     const inc = incident({

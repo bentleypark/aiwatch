@@ -178,7 +178,7 @@ export function renderPage(
   service: ServiceData | null,
   seo: ServiceSEO,
   fallbacks: Fallback[],
-  aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string } | null,
+  aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; startedAt?: string } | null,
   // Region recommendation (refs #422 Phase 2). When the affected service has
   // region-specific incidents AND at least one healthy region, surface an
   // actionable "Try region: X" line right under the AI Insight block. Null
@@ -509,13 +509,36 @@ function renderFaqJsonLd(seo: ServiceSEO, fallbacks: Fallback[]): string {
   return `<script type="application/ld+json">${safeJsonLd(data)}</script>`
 }
 
-function renderAIInsight(insight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string } | null, serviceStatus?: string, fallbacks?: Fallback[]): string {
+// #827 F4 — English mirror of worker/src/incident-history.ts `predictedVsActualText` (+ `accuracyOf`
+// bands + `formatDurationMin`). Parity matters: the dashboard, Discord, RSS and this SEO card must
+// classify the same resolved incident identically ("within/over/faster than ~Xh est.").
+function fmtMinEn(min: number): string {
+  if (!Number.isFinite(min) || min <= 0) return '0m'
+  const h = Math.floor(min / 60), m = Math.round(min % 60)
+  return h === 0 ? `${m}m` : m === 0 ? `${h}h` : `${h}h ${m}m`
+}
+function predictedVsActualEn(predictedHours: number, actualMin: number): string | null {
+  if (!(predictedHours > 0) || !(actualMin >= 0)) return null
+  const pred = fmtMinEn(Math.round(predictedHours * 60))
+  const actualH = actualMin / 60
+  const within = actualH > predictedHours ? `over ~${pred} est.`
+    : actualH < predictedHours * 0.5 ? `faster than ~${pred} est.`
+    : `within ~${pred} est.`
+  return `${fmtMinEn(actualMin)} (${within})`
+}
+
+function renderAIInsight(insight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; startedAt?: string } | null, serviceStatus?: string, fallbacks?: Fallback[]): string {
   if (!insight) return ''
   const ago = Math.floor((Date.now() - new Date(insight.analyzedAt).getTime()) / 60000)
   const agoText = ago < 1 ? 'just now' : ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`
   const recovery = formatRecoveryDisplay(insight.estimatedRecovery)
   const isResolved = serviceStatus === 'operational'
   const isRecentlyRecovered = isResolved && !!insight.resolvedAt
+  // #827 F4 — once resolved, replace the bare estimate with "predicted vs actual" (actual = startedAt→
+  // resolvedAt). Null until resolved or when the numeric estimate / startedAt isn't available.
+  const outcome = isResolved && insight.estimatedRecoveryHours != null && insight.startedAt && insight.resolvedAt
+    ? predictedVsActualEn(insight.estimatedRecoveryHours, Math.round((new Date(insight.resolvedAt).getTime() - new Date(insight.startedAt).getTime()) / 60000))
+    : null
   const resolvedBadge = isResolved
     ? '<span class="mono" style="font-size:10px;color:#3fb950;background:rgba(63,185,80,0.15);padding:2px 8px;border-radius:4px">Resolved</span>'
     : ''
@@ -536,7 +559,9 @@ ${resolvedBadge}
 </div>
 <p style="font-size:13px;color:#c9d1d9;line-height:1.6;margin-bottom:8px">${esc(insight.summary)}</p>
 <div class="mono" style="font-size:11px;color:#8b949e;display:flex;flex-direction:column;gap:4px">
-<span>⏱ <strong style="color:#c9d1d9">Est. Recovery:</strong> ${esc(recovery)}</span>
+${outcome
+  ? `<span>🎯 <strong style="color:#c9d1d9">Predicted vs actual:</strong> ${esc(outcome)}</span>`
+  : `<span>⏱ <strong style="color:#c9d1d9">Est. Recovery:</strong> ${esc(recovery)}</span>`}
 ${insight.affectedScope.length > 0 ? `<span>📡 <strong style="color:#c9d1d9">Scope:</strong> ${esc(insight.affectedScope.join(' · '))}</span>` : ''}
 ${insight.resolvedAt ? `<span>✅ Recovered: ${(() => { const m = Math.floor((Date.now() - new Date(insight.resolvedAt).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : Math.floor(m / 60) + 'h ago' })()}</span>` : ''}
 <span>🕐 ${agoText}</span>

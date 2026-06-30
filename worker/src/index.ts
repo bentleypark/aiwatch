@@ -7,7 +7,7 @@ import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk } from './utils'
-import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, type IncidentHistoryRecord } from './incident-history'
+import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, type IncidentHistoryRecord } from './incident-history'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
@@ -867,6 +867,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       const svcId = alert.key.split(':').pop()!
       await kvDel(env.STATUS_CACHE, `alerted:recovered:${svcId}`)
     }
+    // #827 F4 — "predicted vs actual" line for the recovery alert (operator + per-user feed inherit it
+    // from the shared description). Declared out here so it's in scope at the parts-assembly below.
+    let recoverySection = ''
     // Mark recovery: write independent recovered:{svcId}:{incId} KV + update AI analysis if exists
     if (isRecoveryAlert) {
       const svcId = alert.key.replace('alerted:recovered:', '')
@@ -917,6 +920,15 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       // prediction-accuracy ledger (Feature 1) + RAG corpus (Feature 2). Best-effort.
       if (historyRecords.length > 0) {
         await appendIncidentHistoryBatch(env.STATUS_CACHE, svcId, historyRecords)
+      }
+      // #827 F4 — surface "how our estimate held up" on the recovery alert (and the per-user feed,
+      // which reuses this description). Built from the records we just joined; only those with a
+      // prediction render a line. Operator-safe (no tweet draft / internal data).
+      const predictedLines = historyRecords
+        .map(r => { const t = predictedVsActualText(r); return t ? `• ${r.title.slice(0, 80)} — ${t}` : null })
+        .filter((l): l is string => l != null)
+      if (predictedLines.length > 0) {
+        recoverySection = `\n${DIV}\n🎯 **AI RECOVERY PREDICTION**\n${predictedLines.slice(0, 3).join('\n')}`
       }
     }
 
@@ -987,9 +999,10 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       }
     }
 
-    // Build sectioned description: incident → AI analysis → fallback → link
+    // Build sectioned description: incident → AI analysis → (recovery prediction) → fallback → link
     const parts = [alert.description]
     if (analysisSection) parts.push(analysisSection)
+    if (recoverySection) parts.push(recoverySection) // #827 F4 — recovery alerts only
     if (alert.fallbackText && alert.fallbackText.startsWith('👉')) {
       const list = alert.fallbackText.replace('👉 Suggested fallback: ', '')
       parts.push(`${DIV}\n👉 **SUGGESTED FALLBACK**\n• ${list}`)
@@ -2886,7 +2899,9 @@ export default {
         const analysis: RssAiAnalysisMap = {}
         await Promise.all(cached.services.flatMap((svc) =>
           (svc.incidents ?? [])
-            .filter((i) => i.status !== 'resolved' && i.status !== 'monitoring')
+            // #827 F4 — also load RESOLVED analyses (still present for 2h post-resolution) so the
+            // resolved feed item can render "predicted vs actual". `monitoring` stays excluded (#724).
+            .filter((i) => i.status !== 'monitoring')
             .map(async (inc) => {
               const raw = await env.STATUS_CACHE!.get(analysisKey(svc.id, inc.id)).catch(() => null)
               if (!raw) return
@@ -2895,6 +2910,7 @@ export default {
                 ;(analysis[svc.id] ??= []).push({
                   incidentId: inc.id, summary: a.summary,
                   estimatedRecovery: a.estimatedRecovery, affectedScope: a.affectedScope ?? [],
+                  ...(a.estimatedRecoveryHours != null && { estimatedRecoveryHours: a.estimatedRecoveryHours }),
                 })
               } catch (err) { console.warn('[rss] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
             }),

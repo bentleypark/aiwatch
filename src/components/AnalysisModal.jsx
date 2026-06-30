@@ -1,6 +1,7 @@
 // AI Analysis Modal — shows incident analysis results from Claude
 import { useLang } from '../hooks/useLang'
 import { getGroupedFallbacks, shouldShowFallback } from '../utils/constants'
+import { computePredictionOutcome, verdictLabel } from '../utils/predictionAccuracy'
 
 function timeAgo(date, lang) {
   const diff = Date.now() - new Date(date).getTime()
@@ -168,6 +169,11 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                 {analyses.map((analysis, idx) => {
                   const inc = svcs.flatMap(s => s.incidents ?? []).find(i => i.id === analysis.incidentId)
                   const isRecovered = !!analysis.resolvedAt
+                  // #827 F4 — predicted vs actual once resolved (null until then or if not derivable)
+                  const outcome = computePredictionOutcome(analysis, inc)
+                  const outcomeVerdict = outcome && verdictLabel(outcome.verdict, lang)
+                  // #827 F4 — which model produced this analysis (Gemma primary / Sonnet fallback)
+                  const modelLabel = analysis.model === 'gemma' ? 'Gemma' : analysis.model === 'sonnet' ? 'Sonnet' : null
                   return (
                     <div key={analysis.incidentId ?? idx} style={analyses.length > 1 ? { borderTop: idx > 0 ? '1px solid var(--border)' : 'none', paddingTop: idx > 0 ? '8px' : '0', marginTop: idx > 0 ? '8px' : '0' } : {}}>
                       {/* Incident title — only when multiple incidents */}
@@ -180,17 +186,22 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                         {(analysis.summary ?? '').slice(0, 500)}
                       </p>
                       <div className="mono text-[10px] text-[var(--text2)]" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <span>⏱ <strong style={{ color: 'var(--text1)' }}>{lang === 'ko' ? '예상 복구' : 'Est. Recovery'}:</strong> {analysis.estimatedRecovery === 'No historical data for estimation'
-                          ? (lang === 'ko' ? '복구 신호 모니터링 중...' : 'Monitoring recovery signals...')
-                          : analysis.estimatedRecovery === 'N/A'
-                            ? (lang === 'ko' ? '일반 패턴 초과 — 예측 불가' : 'Exceeded typical pattern')
-                            : analysis.estimatedRecovery}
-                        </span>
+                        {outcome ? (
+                          // #827 F4 — resolved: show our estimate vs what actually happened (richer than the bare estimate)
+                          <span>🎯 <strong style={{ color: 'var(--text1)' }}>{lang === 'ko' ? '예측 대비 실제' : 'Predicted vs actual'}:</strong> {lang === 'ko' ? '예측' : 'est'} ~{outcome.predictedText} · {lang === 'ko' ? '실제' : 'actual'} {outcome.actualText}{outcomeVerdict ? ` (${outcomeVerdict})` : ''}</span>
+                        ) : (
+                          <span>⏱ <strong style={{ color: 'var(--text1)' }}>{lang === 'ko' ? '예상 복구' : 'Est. Recovery'}:</strong> {analysis.estimatedRecovery === 'No historical data for estimation'
+                            ? (lang === 'ko' ? '복구 신호 모니터링 중...' : 'Monitoring recovery signals...')
+                            : analysis.estimatedRecovery === 'N/A'
+                              ? (lang === 'ko' ? '일반 패턴 초과 — 예측 불가' : 'Exceeded typical pattern')
+                              : analysis.estimatedRecovery}
+                          </span>
+                        )}
                         {analysis.affectedScope?.length > 0 && (
                           <span>📡 <strong style={{ color: 'var(--text1)' }}>{lang === 'ko' ? '영향 범위' : 'Scope'}:</strong> {analysis.affectedScope.join(', ')}</span>
                         )}
                         {isRecovered && <span>✅ {t('analysis.recoveredAt')}: {timeAgo(analysis.resolvedAt, lang)}</span>}
-                        <span>🕐 {lang === 'ko' ? '분석 업데이트' : 'Analysis updated'} {timeAgo(analysis.analyzedAt, lang)}</span>
+                        <span>🕐 {lang === 'ko' ? '분석 업데이트' : 'Analysis updated'} {timeAgo(analysis.analyzedAt, lang)}{modelLabel ? ` · ${modelLabel}` : ''}</span>
                       </div>
                     </div>
                   )

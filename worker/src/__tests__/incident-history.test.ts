@@ -8,6 +8,7 @@ import {
   accuracyOf,
   findSimilarHistory,
   formatDurationMin,
+  predictedVsActualText,
   historyKey,
   HISTORY_CAP,
   type IncidentHistoryRecord,
@@ -340,6 +341,21 @@ describe('findSimilarHistory', () => {
       rec({ incId: 'otherCat', title: 'Streaming latency', category: 'app', resolvedAt: '2026-06-01T00:00:00Z' }),
     ]
     expect(findSimilarHistory({ title: 'Streaming latency', category: 'api' }, recs2, 1)[0].incId).toBe('sameCat')
+  })
+})
+
+describe('predictedVsActualText (alert/feed phrase, mirrors SPA wording)', () => {
+  it('accurate → "within", under → "over", over → "faster than"', () => {
+    expect(predictedVsActualText({ predictedRecoveryHours: 1, durationMin: 42 })).toBe('42m (within ~1h est.)')
+    expect(predictedVsActualText({ predictedRecoveryHours: 1, durationMin: 190 })).toBe('3h 10m (over ~1h est.)')
+    expect(predictedVsActualText({ predictedRecoveryHours: 3, durationMin: 20 })).toBe('20m (faster than ~3h est.)')
+  })
+  it('formats a fractional prediction compactly', () => {
+    expect(predictedVsActualText({ predictedRecoveryHours: 0.75, durationMin: 30 })).toBe('30m (within ~45m est.)')
+  })
+  it('returns null when no prediction to compare', () => {
+    expect(predictedVsActualText({ durationMin: 42 })).toBeNull()
+    expect(predictedVsActualText({ predictedRecoveryHours: 0, durationMin: 42 })).toBeNull()
   })
 })
 

@@ -8,6 +8,7 @@ import { getGroupedFallbacks } from './fallback'
 import { defuseAutolinkDomain } from './alerts'
 import { formatRecoveryDisplay } from './ai-analysis'
 import { appendStatusHint, appendUtm } from './utils'
+import { durationMinOf, predictedVsActualText } from './incident-history'
 
 const SITE = 'https://ai-watch.dev'
 
@@ -20,6 +21,9 @@ export interface RssAiAnalysis {
   summary: string
   estimatedRecovery: string
   affectedScope: string[]
+  // #827 F4 — the numeric upper-bound estimate, carried so a RESOLVED item can render the
+  // "predicted vs actual" comparison (actual = startedAt→resolution). Absent on older analyses.
+  estimatedRecoveryHours?: number
 }
 export type RssAiAnalysisMap = Record<string, RssAiAnalysis[]>
 
@@ -314,6 +318,17 @@ function descHtml(
 
   if (isResolved) {
     lines.push(`<p>🟢 <strong>Resolved</strong>${inc.duration ? ` · lasted ${escHtml(inc.duration)}` : ''}</p>`)
+    // #827 F4 — how our AI estimate held up (same wording as the Discord recovery alert). Only when an
+    // analysis with a numeric estimate is still in the 2h window; actual = startedAt→resolution.
+    // NOTE the "lasted ${inc.duration}" line above and this line's actual are computed from different
+    // sources (the provider duration string vs startedAt→resolvedAt). They agree in the normal case;
+    // a provider-backdated startedAt (BetterStack/#633 flap) could make them differ slightly — accepted
+    // (both are honest measures; the comparison line is the one anchored to our estimate).
+    const a = opts.analysis
+    if (a?.estimatedRecoveryHours != null) {
+      const pva = predictedVsActualText({ predictedRecoveryHours: a.estimatedRecoveryHours, durationMin: durationMinOf(inc.startedAt, resolvedAtOf(inc)) })
+      if (pva) lines.push(`<p>🎯 AI prediction: ${escHtml(pva)}</p>`)
+    }
   } else {
     // #768 — the active item's description is STATUS-INVARIANT: severity + impact label only. The
     // status word (investigating→identified→monitoring), the running duration, and the per-update
@@ -456,7 +471,9 @@ export function buildRssFeed(
         // would confuse subscribers (a recovery for an event they never saw). Fail-open when
         // servedActive is absent (direct callers / tests) → emit as before.
         if (servedActive && !servedActive.has(incident.id)) continue
-        items.push({ svc, incident, kind: 'resolved', pubDate: resolvedAtOf(incident) })
+        // #827 F4 — attach the analysis (if still in the 2h-TTL window) so the resolved item can show
+        // "predicted vs actual"; absent → the line is simply omitted.
+        items.push({ svc, incident, kind: 'resolved', pubDate: resolvedAtOf(incident), analysis: analysisFor(aiAnalysis, svc.id, incident.id) })
       } else {
         // #724 — no AI block for a `monitoring` incident (recovery already confirmed). Gating HERE
         // (not only in the /feed handler) keeps rss.ts self-consistent regardless of the map passed.

@@ -123,3 +123,53 @@ describe('is-down.ts cache-header divergence (#378)', () => {
     expect(cc).not.toContain('stale-while-revalidate')
   })
 })
+
+describe('is-down.ts — #827 F4 predicted-vs-actual on a resolved card', () => {
+  let fetchMock: ReturnType<typeof vi.spyOn>
+  beforeEach(() => { fetchMock = vi.spyOn(globalThis, 'fetch') })
+  afterEach(() => { fetchMock.mockRestore() })
+
+  function makeWorkerResolved(): Response {
+    const now = new Date().toISOString()
+    return new Response(JSON.stringify({
+      services: [{
+        id: 'claude', name: 'Claude API', category: 'api', status: 'operational',
+        latency: 145, uptime30d: 99.9, lastChecked: now, aiwatchScore: 92, scoreGrade: 'excellent', scoreConfidence: 'high',
+        incidents: [{ id: 'cl-3', title: 'Login Issues', status: 'resolved', impact: 'major', startedAt: new Date(Date.now() - 164 * 60000).toISOString(), resolvedAt: now, duration: '2h 44m', timeline: [] }],
+      }],
+      aiAnalysis: { claude: [{ summary: 'Auth overload caused login failures.', estimatedRecovery: '30m–1h', estimatedRecoveryHours: 1, affectedScope: ['Login'], needsFallback: false, analyzedAt: new Date(Date.now() - 30 * 60000).toISOString(), incidentId: 'cl-3', resolvedAt: now }] },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+
+  // Regression: the matching incident's startedAt must come from the fetched SERVICE (`target`),
+  // NOT the slug-config `entry` (which has no `incidents`) — the latter threw and dropped the whole
+  // page to the fallback render. Handler-level so the data-wiring (not just renderAIInsight) is covered.
+  it('renders the predicted-vs-actual line (does not throw to the fallback page)', async () => {
+    fetchMock.mockResolvedValueOnce(makeWorkerResolved())
+    const res = await handler(makeReq('claude'))
+    expect(res.status).toBe(200)
+    const html = await res.text()
+    expect(html).toContain('Predicted vs actual:')
+    expect(html).toContain('2h 44m (over ~1h est.)')
+  })
+
+  // Review finding #1 — `target` is undefined on the service_missing config-drift path, but
+  // `aiAnalysis` can still carry an entry for the slug. The startedAt lookup must optional-chain
+  // `target?.incidents`; the buggy `target.incidents` threw a TypeError that the JSON-parse catch
+  // swallowed + MISLABELED as `parse_error` (logged "JSON parse failed"). Asserting that log is
+  // absent distinguishes the fixed (clean service_missing) path from the buggy throw.
+  it('does NOT throw/mislabel when aiAnalysis has an entry but the service is absent (review #1)', async () => {
+    const now = new Date().toISOString()
+    const payload = new Response(JSON.stringify({
+      services: [{ id: 'openai', name: 'OpenAI', category: 'api', status: 'operational', latency: 1, uptime30d: 99, lastChecked: now, incidents: [], aiwatchScore: 90, scoreGrade: 'excellent', scoreConfidence: 'high' }],
+      aiAnalysis: { claude: [{ summary: 's', estimatedRecovery: '30m–1h', estimatedRecoveryHours: 1, affectedScope: [], needsFallback: false, analyzedAt: now, incidentId: 'cl-3', resolvedAt: now }] },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await handler(makeReq('claude')) // 'claude' service missing from `services`
+    const threwParseError = errSpy.mock.calls.some(c => String(c[0]).includes('JSON parse failed'))
+    errSpy.mockRestore()
+    expect(threwParseError).toBe(false)   // buggy version logs this; fixed version takes the clean path
+    expect(res.status).toBeGreaterThanOrEqual(200) // resolves cleanly (service_missing → 503)
+  })
+})
