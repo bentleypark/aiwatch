@@ -103,6 +103,7 @@ export default async function handler(req: Request) {
             scoreGrade?: string | null; scoreConfidence?: string; incidentSourceStale?: boolean
             partialCount?: number // #722 — BetterStack sub-threshold affected-resource count
             components?: Array<{ id: string; name: string; status: 'operational' | 'degraded' | 'down'; group?: string }>
+            componentGroupsInline?: boolean // array-order (groups interleaved) breakdown layout (replicate)
           }>
           aiAnalysis?: Record<string, { summary: string; estimatedRecovery: string; affectedScope: string[]; needsFallback?: boolean; analyzedAt: string; incidentId: string; resolvedAt?: string; estimatedRecoveryHours?: number }>
           // #574 — supply-chain banner: when this service is in affectedNow/mayBeAffected, render a note.

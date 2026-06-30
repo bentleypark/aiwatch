@@ -912,6 +912,47 @@ describe('renderComponents (#604)', () => {
     expect(summary).toContain('Down')
     expect(summary).not.toContain('Degraded Performance')
   })
+
+  // componentGroupsInline (replicate): sections render in component-ARRAY order — group blocks and
+  // surface-row runs interleaved where each first appears, NOT surfaces-first-then-groups.
+  it('componentGroupsInline interleaves groups + surface runs in array order (replicate layout)', () => {
+    const html = renderComponents(mkService({
+      componentGroupsInline: true,
+      components: [
+        { id: 'http', name: 'HTTP API', status: 'operational', group: 'API' },
+        { id: 'stream', name: 'Streaming API', status: 'operational', group: 'API' },
+        { id: 'h100', name: 'H100 Hardware', status: 'degraded', group: 'Inference and Training' },
+        { id: 'cpu', name: 'CPU Hardware', status: 'operational', group: 'Inference and Training' },
+        { id: 'play', name: 'Playground', status: 'operational', group: 'Website' },
+        { id: 'reg', name: 'Replicate Registry', status: 'operational' },        // surface run
+        { id: 'models', name: 'Official Models', status: 'operational' },          // surface run
+        { id: 'bill', name: 'Billing', status: 'operational', group: 'Support' },
+        { id: 'tix', name: 'Support Tickets', status: 'operational', group: 'Support' },
+      ],
+    }))
+    // DOM order: API group → I&T group → Website group → surface rows → Support group (LAST, after surfaces)
+    const pos = (s: string) => html.indexOf(s)
+    expect(pos('>API<')).toBeLessThan(pos('Inference and Training'))
+    expect(pos('Inference and Training')).toBeLessThan(pos('>Website<'))
+    expect(pos('>Website<')).toBeLessThan(pos('Replicate Registry'))
+    expect(pos('Replicate Registry')).toBeLessThan(pos('Official Models'))
+    // Support group renders AFTER the ungrouped surface rows (the key interleave property)
+    expect(pos('Official Models')).toBeLessThan(pos('>Support<'))
+    // each group is a <details>; the two surface rows are plain rows between Website and Support
+    expect(html).toContain('Billing')
+    expect(html).toContain('Support Tickets')
+  })
+
+  it('default (no componentGroupsInline) keeps surfaces-first-then-groups order', () => {
+    const html = renderComponents(mkService({
+      components: [
+        { id: 'h100', name: 'H100 Hardware', status: 'degraded', group: 'Inference and Training' },
+        { id: 'reg', name: 'Replicate Registry', status: 'operational' }, // surface
+      ],
+    }))
+    // surface row precedes the group block even though the group appears first in the array
+    expect(html.indexOf('Replicate Registry')).toBeLessThan(html.indexOf('Inference and Training'))
+  })
 })
 
 // ── renderShareButtons share GA4 (#482 — delegated [data-ga], no inline onclick) ──

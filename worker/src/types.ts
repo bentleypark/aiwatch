@@ -63,6 +63,13 @@ export interface ServiceStatus {
    *  worst-of'd into `status` above but retained here for the ServiceDetails / is-down
    *  breakdown. Present only when ≥2 components matched; absent otherwise. */
   components?: ServiceComponent[]
+  /** When true, the breakdown UI renders its sections (each componentGroups group as a collapsible
+   *  block; each consecutive run of ungrouped components as a surface grid) in COMPONENT-ARRAY order —
+   *  groups interleaved among surfaces exactly where the curated `displayComponentIds` array places
+   *  their first member — instead of the default "surfaces grid first, then all groups". Lets a curated
+   *  array fully control layout (replicate: API · Inference and Training · Website groups, then the
+   *  Registry/Official Models surface rows, then the Support group). Propagated from config via `base`. */
+  componentGroupsInline?: boolean
   // Per-day impact for the status calendar. Keys are either a bare UTC date `YYYY-MM-DD`
   // (statuspage/betterstack — already the source's daily bucket) OR a full ISO timestamp
   // (incident.io — so the client can bucket the real instant into the VIEWER's local day, fixing the
@@ -154,6 +161,20 @@ export interface ServiceConfig {
   // worst-of'ing every component into the badge would be too noisy (e.g. a Billing blip).
   // When both are set, the breakdown prefers displayComponentIds.
   displayComponentIds?: string[]
+  // Per-component-id → group label, mirroring the OFFICIAL status page's component groups
+  // (the v2 summary/components JSON does NOT expose group membership, so it must be curated
+  // here). Applied in the explicit-id breakdown path (displayComponentIds, or the statusComponentIds
+  // fallback): a matched component whose id is
+  // present is tagged `group: <label>` so the UI collapses same-label components under one
+  // header (worst-of status shown on the collapsed header), exactly like the dynamic
+  // `MODEL_GROUP` path. Ids absent from this map render as individual top-level surface rows.
+  // e.g. replicate: the 5 "Inference and Training" GPU/CPU hardware ids → 'Inference and Training'.
+  componentGroups?: Record<string, string>
+  // When true, the breakdown renders its sections (group blocks + surface-run grids) in component-ARRAY
+  // order (groups interleaved among surfaces where the displayComponentIds array places them), for
+  // services whose curated array defines the official-page layout (replicate). Default (absent) =
+  // surfaces-grid-first-then-groups, matching cohere/groq/bfl where surface rows lead + 'Models' trails.
+  componentGroupsInline?: boolean
   // #606 Category A (cohere/groq) — DYNAMIC breakdown for per-model statuspages with
   // many, frequently-changing components. Instead of a hardcoded id list (which goes
   // stale as models ship/retire), surface EVERY page component except `componentDenylist`

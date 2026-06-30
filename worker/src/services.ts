@@ -113,9 +113,16 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'deepgram', name: 'Deepgram', provider: 'Deepgram', category: 'api', statusUrl: 'https://status.deepgram.com', apiUrl: 'https://status.deepgram.com/api/v2/summary.json', statusComponentId: 'cv8l6gg3cb9d', displayComponentIds: ['m49xkwqkc4kh', 's6v5z4lsl658', '6854s60zwxgw', 'r2z04fcdhhzb', '7n3stjcbj4bx', 'jgfq9ffjsfqk', 'vm1x1v101qtn', 'cvbdk3fslx9v', 't80v4qz2jdsf'] },
   // Inference / Infrastructure
   { id: 'huggingface', name: 'Hugging Face', provider: 'Hugging Face', category: 'api', statusUrl: 'https://status.huggingface.co', apiUrl: null, rssFeedUrl: 'https://status.huggingface.co/feed', betterStackUrl: 'https://status.huggingface.co', flapSuppression: true, componentDenylist: ['Website'] },
-  // displayComponentIds (#606): curated API/product surfaces — HTTP API, Streaming API, Registry,
-  // Official Models, Playground (excludes Billing/Support/Home Page/Hardware×5). Display-only.
-  { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: '01JRJYHBWCXHFZ0NHMP1N7T2G3', displayComponentIds: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01J5NNACBNTG5GR693P6RH5Q6J'] },
+  // displayComponentIds (#606): mirrors the official replicatestatus.com component groups (the v2 JSON
+  // omits group membership, so it's curated here). Array order = DISPLAY order; with componentGroupsInline
+  // the breakdown renders each section where its first member sits in the array:
+  //   API = HTTP API, Streaming API
+  //   Inference and Training = H100/A100/L40S/T4/CPU Hardware (so a GPU-capacity degradation shows)
+  //   Website = Playground
+  //   (ungrouped surfaces) = Replicate Registry (r8.im), Official Models
+  //   Support = Billing, Support Tickets  (renders AFTER the surface rows, per the official page)
+  // Excludes Home Page. Display-only (decoupled from the worst-of badge).
+  { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: '01JRJYHBWCXHFZ0NHMP1N7T2G3', displayComponentIds: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JRG9WZ84ABEY9ZJBB72CJBS8', '01JRGA5ZQKJX2NMG45VCFP9Y9C', '01JRGA5ZQKF3SW674WMFD92PAC', '01JS0A88GKRF5DNW74REX185D3', '01JS0A88GKZAMP8BD3W9BCCBWX', '01J5NNACBNTG5GR693P6RH5Q6J', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01JS0AB43BH206N6Z4WNSB0Z0F', '01JS0AB43BNHTEGYYQBSWS3KDP'], componentGroups: { '01JRJYHBWCXHFZ0NHMP1N7T2G3': 'API', '01JRJYHBWC358ZXKRXZD0BENPD': 'API', '01JRG9WZ84ABEY9ZJBB72CJBS8': 'Inference and Training', '01JRGA5ZQKJX2NMG45VCFP9Y9C': 'Inference and Training', '01JRGA5ZQKF3SW674WMFD92PAC': 'Inference and Training', '01JS0A88GKRF5DNW74REX185D3': 'Inference and Training', '01JS0A88GKZAMP8BD3W9BCCBWX': 'Inference and Training', '01J5NNACBNTG5GR693P6RH5Q6J': 'Website', '01JS0AB43BH206N6Z4WNSB0Z0F': 'Support', '01JS0AB43BNHTEGYYQBSWS3KDP': 'Support' }, componentGroupsInline: true },
   // fal.ai (#758) — generative-media inference platform (image/video/audio/3D, 600+ models incl.
   // FLUX/Kling/Hailuo). Peer of Replicate/Hugging Face. Instatus (Next.js) page like Perplexity:
   // `statusComponent: 'API'` selects the Instatus "API" group component for the official uptime%
@@ -405,7 +412,7 @@ type StatusResolverSummary = {
   status?: { indicator?: string } | null
   components?: Array<{ id: string; name: string; status: string }>
 }
-type StatusResolverConfig = Pick<ServiceConfig, 'statusComponent' | 'statusComponentId' | 'statusComponentIds' | 'displayComponentIds' | 'displayAllComponents' | 'componentDenylist' | 'componentSurfaces'>
+type StatusResolverConfig = Pick<ServiceConfig, 'statusComponent' | 'statusComponentId' | 'statusComponentIds' | 'displayComponentIds' | 'displayAllComponents' | 'componentDenylist' | 'componentSurfaces' | 'componentGroups'>
 
 /**
  * Resolve a service's overall badge status from its config + status page summary.
@@ -501,12 +508,21 @@ export function resolveSvcComponents(
   }
 
   // 2. Explicit id allowlist (displayComponentIds) or reused badge ids (statusComponentIds).
+  // `componentGroups` (optional) tags a matched id with its official-status-page group label so
+  // the UI collapses same-label components under one header (worst-of on the collapsed header);
+  // ids absent from the map stay as individual top-level surface rows.
   const ids = config.displayComponentIds ?? config.statusComponentIds
   if (!ids || ids.length === 0) return []
+  const groups = config.componentGroups
   const matched = ids
     .map((id) => summaryData.components!.find((c) => c.id === id))
     .filter((c): c is NonNullable<typeof c> => c != null)
-    .map((c) => ({ id: c.id, name: c.name, status: normalizeStatus(c.status) }))
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      status: normalizeStatus(c.status),
+      ...(groups?.[c.id] ? { group: groups[c.id] } : {}),
+    }))
   // ≥2 only — a one-row breakdown adds nothing the badge doesn't already say.
   return matched.length >= 2 ? matched : []
 }
@@ -745,6 +761,8 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
     // #802 — coverage days from addedAt (absent when established), propagated like incidentSourceStale
     // so the ranking gate sees it on every return path. Computed once here at the service's lastChecked.
     ...(config.addedAt ? { coverageDays: coverageDaysFrom(config.addedAt, now) ?? undefined } : {}),
+    // Propagated like the flags above so the breakdown order is known on every return path.
+    ...(config.componentGroupsInline ? { componentGroupsInline: true } : {}),
   }
 
   try {

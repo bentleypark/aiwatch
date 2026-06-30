@@ -470,12 +470,38 @@ function ComponentGroup({ name, members, t }) {
 // dynamic displayAllComponents set). Ungrouped "surface" components render as individual
 // rows in a 4-col grid; grouped components (group:'Models') collapse under a group header
 // (matching the official status page's Endpoints/Models split).
-function ComponentBreakdown({ service, t }) {
+export function ComponentBreakdown({ service, t }) {
   const components = service.components ?? []
   if (components.length === 0) return null
   const surfaces = components.filter((c) => !c.group)
   const groupNames = [...new Set(components.filter((c) => c.group).map((c) => c.group))]
   const anyIssue = components.some((c) => c.status !== 'operational')
+  const surfaceGrid = (rows, key) => (
+    <div key={key} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4" style={{ columnGap: '20px', rowGap: '8px' }}>
+      {rows.map((c) => <ComponentRow key={c.id} c={c} t={t} />)}
+    </div>
+  )
+  const groupBlock = (g) => <ComponentGroup key={g} name={g} members={components.filter((c) => c.group === g)} t={t} />
+  // ordered = the breakdown sections. Default: one surfaces grid first, then all groups.
+  // componentGroupsInline (replicate): walk the component array, emitting each group block + each
+  // consecutive run of surface rows where it first appears — so the curated array order IS the layout.
+  let ordered
+  if (service.componentGroupsInline) {
+    ordered = []
+    const emitted = new Set()
+    let run = []
+    for (const c of components) {
+      if (c.group) {
+        if (run.length) { ordered.push(surfaceGrid(run, `s${ordered.length}`)); run = [] }
+        if (!emitted.has(c.group)) { emitted.add(c.group); ordered.push(groupBlock(c.group)) }
+      } else {
+        run.push(c)
+      }
+    }
+    if (run.length) ordered.push(surfaceGrid(run, `s${ordered.length}`))
+  } else {
+    ordered = [surfaces.length > 0 && surfaceGrid(surfaces, '__surfaces'), ...groupNames.map(groupBlock)]
+  }
   return (
     <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
       <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
@@ -486,16 +512,7 @@ function ComponentBreakdown({ service, t }) {
         </div>
       </div>
       <div className="flex flex-col" style={{ padding: '16px', gap: '10px' }}>
-        {/* surfaces: individual rows in a 4-col grid (fills the wide card) */}
-        {surfaces.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4" style={{ columnGap: '20px', rowGap: '8px' }}>
-            {surfaces.map((c) => <ComponentRow key={c.id} c={c} t={t} />)}
-          </div>
-        )}
-        {/* grouped: one collapsible header per group (Models …) */}
-        {groupNames.map((g) => (
-          <ComponentGroup key={g} name={g} members={components.filter((c) => c.group === g)} t={t} />
-        ))}
+        {ordered}
       </div>
     </section>
   )
