@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="popup.css" />
+  <title>AIWatch — Claude Status</title>
+</head>
+<body>
+  <header class="hdr">
+    <span class="hdr-title">AIWatch — Claude Status</span>
+    <span id="overall" class="overall" aria-live="polite"></span>
+  </header>
+
+  <main id="surfaces" class="surfaces" aria-busy="true">
+    <p class="muted" id="loading">Loading…</p>
+  </main>
+
+  <p class="legend muted">Uptime = official 30-day. Score = AIWatch reliability rating (0–100) — uptime, incidents, recovery &amp; speed. Higher is better.</p>
+
+  <section class="report">
+    <h2 class="report-title">Report an issue</h2>
+    <form id="report-form">
+      <div class="row">
+        <label class="lbl" for="report-svc">Surface</label>
+        <select id="report-svc" name="svcId">
+          <option value="claude">Claude API</option>
+          <option value="claudeai">claude.ai</option>
+          <option value="claudecode">Claude Code</option>
+        </select>
+      </div>
+      <div class="row">
+        <label class="lbl" for="report-cat">Problem</label>
+        <select id="report-cat" name="category">
+          <option value="outage">Outage (fully down)</option>
+          <option value="degraded">Degraded / slow</option>
+          <option value="errors">Errors</option>
+          <option value="login">Login / auth</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <input id="report-desc" name="description" type="text" maxlength="200" placeholder="Optional: what happened?" />
+      <button id="report-submit" type="submit">Send report</button>
+      <p id="report-status" class="report-status" aria-live="polite"></p>
+    </form>
+  </section>
+
+  <footer class="ftr">
+    <a id="dashboard-link" href="#" target="_blank" rel="noopener">Open the dashboard →</a>
+    <span id="updated" class="muted"></span>
+  </footer>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

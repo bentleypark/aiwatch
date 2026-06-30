@@ -69,6 +69,17 @@ describe('buildExtClaudePayload (#837)', () => {
     expect(claude).toMatchObject({ name: 'Claude API', status: 'down', score: 88, grade: 'good' })
   })
 
+  it('passes through uptime30d (null when absent)', () => {
+    const set = [
+      svc({ id: 'claude', category: 'api', status: 'operational', aiwatchScore: 90, scoreGrade: 'excellent', uptime30d: 99.87 }),
+      svc({ id: 'claudeai', category: 'app', status: 'operational', aiwatchScore: 70, scoreGrade: 'good' }), // no uptime30d → null
+      svc({ id: 'claudecode', category: 'agent', status: 'operational', aiwatchScore: 70, scoreGrade: 'good' }),
+    ]
+    const out = buildExtClaudePayload(set, 't')
+    expect(out.services.find((s) => s.id === 'claude')!.uptime30d).toBe(99.87)
+    expect(out.services.find((s) => s.id === 'claudeai')!.uptime30d).toBeNull()
+  })
+
   it('attaches a per-category fallback (api→api, app→app, agent→agent)', () => {
     const out = buildExtClaudePayload(scoredSet(), 't')
     const claude = out.services.find((s) => s.id === 'claude')!
@@ -117,13 +128,19 @@ describe('buildExtClaudePayload (#837)', () => {
     expect(claude.fallback).toEqual([{ name: 'Gemini API', score: 84 }]) // OpenAI (stale source) dropped
   })
 
-  it('payload is lite — each service carries only id/name/status/score/grade/fallback', () => {
+  it('payload is lite — each service carries only the projected keys', () => {
     const out = buildExtClaudePayload(scoredSet(), 't')
-    expect(Object.keys(out.services[0]).sort()).toEqual(['fallback', 'grade', 'id', 'name', 'score', 'status'])
+    expect(Object.keys(out.services[0]).sort()).toEqual(['fallback', 'grade', 'id', 'incidents', 'name', 'reports', 'score', 'status', 'uptime30d'])
     // heavy ServiceStatus fields must not leak
-    expect(out.services[0]).not.toHaveProperty('incidents')
     expect(out.services[0]).not.toHaveProperty('aiwatchScore')
     expect(out.services[0]).not.toHaveProperty('provider')
+    expect(out.services[0]).not.toHaveProperty('category')
+  })
+
+  it('with no context: incidents empty, reports zeroed', () => {
+    const claude = buildExtClaudePayload(scoredSet(), 't').services.find((s) => s.id === 'claude')!
+    expect(claude.incidents).toEqual([])
+    expect(claude.reports).toEqual({ count: 0, recent: [] })
   })
 
   it('null score/grade pass through as null (withheld Score)', () => {
@@ -143,6 +160,68 @@ describe('buildExtClaudePayload (#837)', () => {
     const set = scoredSet().filter((s) => s.id !== 'claudecode')
     const out = buildExtClaudePayload(set, 't')
     expect(out.services.map((s) => s.id)).toEqual(['claude', 'claudeai'])
+  })
+})
+
+describe('buildExtClaudePayload — incidents + gated reports (#837 PR2)', () => {
+  function inc(overrides: Record<string, unknown> = {}) {
+    return { id: 'inc1', title: 'Elevated API errors', status: 'investigating', impact: 'major', startedAt: '2026-06-30T00:00:00Z', duration: null, timeline: [], ...overrides } as never
+  }
+
+  it('maps ACTIVE incidents only (investigating + identified kept; resolved + monitoring excluded)', () => {
+    const set = [
+      svc({ id: 'claude', name: 'Claude API', category: 'api', status: 'down', aiwatchScore: 50, scoreGrade: 'degrading', incidents: [
+        inc({ id: 'i-inv', status: 'investigating', title: 'API errors', impact: 'major' }),
+        inc({ id: 'i-idf', status: 'identified', title: 'Root cause found', impact: 'minor' }),
+        inc({ id: 'i-mon', status: 'monitoring', title: 'Recovering' }),
+        inc({ id: 'i-res', status: 'resolved', title: 'Old one' }),
+      ] }),
+      svc({ id: 'claudeai', category: 'app', status: 'operational', aiwatchScore: 70, scoreGrade: 'good' }),
+      svc({ id: 'claudecode', category: 'agent', status: 'operational', aiwatchScore: 70, scoreGrade: 'good' }),
+    ]
+    const claude = buildExtClaudePayload(set, 't').services.find((s) => s.id === 'claude')!
+    // 'identified' is a real active phase — a denylist→allowlist refactor that dropped it would fail here.
+    expect(claude.incidents.map((i) => i.id)).toEqual(['i-inv', 'i-idf'])
+    expect(claude.incidents[0]).toMatchObject({ title: 'API errors', status: 'investigating', impact: 'major' })
+  })
+
+  it('attaches aiSummary to the matching active incident only', () => {
+    const set = [
+      svc({ id: 'claude', name: 'Claude API', category: 'api', status: 'down', aiwatchScore: 50, scoreGrade: 'degrading', incidents: [inc({ id: 'i-act' })] }),
+      svc({ id: 'claudeai', category: 'app', status: 'operational', aiwatchScore: 70, scoreGrade: 'good' }),
+      svc({ id: 'claudecode', category: 'agent', status: 'operational', aiwatchScore: 70, scoreGrade: 'good' }),
+    ]
+    const out = buildExtClaudePayload(set, 't', { aiSummaryMap: { 'claude:i-act': 'API returning 529s; mitigation underway.' } })
+    expect(out.services.find((s) => s.id === 'claude')!.incidents[0].aiSummary).toBe('API returning 529s; mitigation underway.')
+    // no summary key → field absent (not undefined-valued)
+    const noSummary = buildExtClaudePayload(set, 't').services.find((s) => s.id === 'claude')!
+    expect(noSummary.incidents[0]).not.toHaveProperty('aiSummary')
+  })
+
+  it('reports: gated map present → count + recent (cat/ts/desc, capped 5)', () => {
+    const feed = Array.from({ length: 7 }, (_, n) => ({ cat: 'outage', ts: 1000 + n, desc: `note ${n}` }))
+    const out = buildExtClaudePayload(scoredSet(), 't', { reportFeedMap: { claude: feed } })
+    const claude = out.services.find((s) => s.id === 'claude')!
+    expect(claude.reports.count).toBe(7)
+    expect(claude.reports.recent).toHaveLength(5)
+    expect(claude.reports.recent[0]).toEqual({ cat: 'outage', ts: 1000, desc: 'note 0' })
+  })
+
+  it('reports: desc is length-capped (140) to bound the projection', () => {
+    const long = 'x'.repeat(300)
+    const out = buildExtClaudePayload(scoredSet(), 't', { reportFeedMap: { claude: [{ cat: 'errors', ts: 1, desc: long }] } })
+    expect(out.services.find((s) => s.id === 'claude')!.reports.recent[0].desc).toHaveLength(140)
+  })
+
+  it('reports: missing desc → empty string (not undefined)', () => {
+    const out = buildExtClaudePayload(scoredSet(), 't', { reportFeedMap: { claude: [{ cat: 'errors', ts: 1 }] } })
+    expect(out.services.find((s) => s.id === 'claude')!.reports.recent[0].desc).toBe('')
+  })
+
+  it('reports: service absent from the gated map → count 0 (crowd cannot surface uncorroborated)', () => {
+    const out = buildExtClaudePayload(scoredSet(), 't', { reportFeedMap: { claudeai: [{ cat: 'errors', ts: 5 }] } })
+    expect(out.services.find((s) => s.id === 'claude')!.reports).toEqual({ count: 0, recent: [] })
+    expect(out.services.find((s) => s.id === 'claudeai')!.reports.count).toBe(1)
   })
 })
 

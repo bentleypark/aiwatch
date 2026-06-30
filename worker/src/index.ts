@@ -16,7 +16,7 @@ import { refreshStatusCacheOnChange } from './cache-refresh'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
 import { corsHeaders } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
-import { buildExtClaudePayload, isExtClaudeRequest } from './ext-claude'
+import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
 import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, countNewFeedItems } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
@@ -3201,7 +3201,32 @@ export default {
           const s = scoreFor(svc, summaries)
           return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
         })
-        const res = new Response(JSON.stringify(buildExtClaudePayload(scoredAll, cacheData?.cachedAt ?? null)), {
+        // #837 PR2 — enrich so the popup shows what's actually happening, not just a color:
+        // (1) the GATED crowd-report map (same #575 gate as the dashboard — only corroborated
+        //     services appear, so crowd alone can never contradict an operational badge), and
+        // (2) the AI summary of any ACTIVE Claude incident (bounded: 3 services, usually 0 active).
+        // .catch parity with the ai:analysis reads below — a report-feed KV failure degrades
+        // to "no crowd reports", never 500s the whole projection response.
+        const extReportFeed = await buildReportFeedMap(env.STATUS_CACHE, cacheData?.services ?? []).catch((err) => {
+          console.warn('[ext-claude] reportFeed map failed:', err instanceof Error ? err.message : err)
+          return {}
+        })
+        const extAiSummary: Record<string, string> = {}
+        await Promise.all(scoredAll
+          .filter((svc) => (EXT_CLAUDE_IDS as readonly string[]).includes(svc.id))
+          .flatMap((svc) => (svc.incidents ?? [])
+            .filter((i) => i.status !== 'resolved' && i.status !== 'monitoring')
+            .map(async (inc) => {
+              const raw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
+              if (!raw) return
+              try {
+                const a = JSON.parse(raw) as AIAnalysisResult
+                if (a.summary) extAiSummary[`${svc.id}:${inc.id}`] = a.summary
+              } catch (err) {
+                console.warn('[ext-claude] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err)
+              }
+            })))
+        const res = new Response(JSON.stringify(buildExtClaudePayload(scoredAll, cacheData?.cachedAt ?? null, { reportFeedMap: extReportFeed, aiSummaryMap: extAiSummary })), {
           headers: {
             'Content-Type': 'application/json',
             // Public, unauthenticated GET — extension fetches bypass CORS via MV3
