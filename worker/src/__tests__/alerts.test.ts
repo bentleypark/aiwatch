@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, shouldHoldNewIncident, FLAP_HOLD_MS, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
 
@@ -60,9 +60,10 @@ describe('pendingSourceDeadKey / PENDING_SOURCE_DEAD_TTL_S (#714)', () => {
   it('scopes the confirmation marker per service', () => {
     expect(pendingSourceDeadKey('characterai')).toBe('pending:source-dead:characterai')
   })
-  it('TTL spans two cron cycles (survives one skipped run), mirroring PENDING_NEW_TTL_S', () => {
+  it('TTL spans two cron cycles (survives one skipped run) — its own 1-cycle debounce window', () => {
+    // #835 — PENDING_NEW_TTL_S diverged from this (raised to 1800 for the ~2-cycle, write-once
+    // first-seen marker); the source-dead debounce is still a 1-cycle confirm gate, so it keeps 600.
     expect(PENDING_SOURCE_DEAD_TTL_S).toBe(600)
-    expect(PENDING_SOURCE_DEAD_TTL_S).toBe(PENDING_NEW_TTL_S)
   })
 })
 
@@ -1089,35 +1090,47 @@ describe('first-seen confirmation gate (#633)', () => {
     ...overrides,
   })
   const config = { flapSuppression: true }
-  const firstSight = { alreadyAlerted: false, pendingExists: false }
+  const NOW = 1_700_000_000_000
+  // first sight = no pending marker yet
+  const firstSight = { alreadyAlerted: false, firstSeenMs: null, nowMs: NOW }
 
   describe('pendingNewKey + TTL', () => {
     it('scopes the marker to the incident id', () => {
       expect(pendingNewKey('flashduty:abc123')).toBe('pending:new:flashduty:abc123')
     })
-    it('TTL spans 2 */5 cron cycles so a single skipped run still confirms', () => {
-      expect(PENDING_NEW_TTL_S).toBe(600)
+    it('TTL comfortably outlasts the ~2-cycle hold window (#835, write-once marker)', () => {
+      expect(PENDING_NEW_TTL_S).toBe(1800)
+      expect(PENDING_NEW_TTL_S * 1000).toBeGreaterThan(FLAP_HOLD_MS * 2)
     })
   })
 
-  describe('shouldHoldNewIncident', () => {
+  describe('shouldHoldNewIncident (#835 — ~2-cycle duration hold)', () => {
     it('HOLDS a flap-shaped new incident on its first sight (monitor-flap service)', () => {
       expect(shouldHoldNewIncident('modal', config, mkInc(), firstSight)).toBe(true)
     })
 
     it('HOLDS the real `minor`-impact phantom shape (Modal "Web endpoints — down", #633/#565)', () => {
-      // Regression: the live BetterStack incident carries impact 'minor' (#564), not null. Pre-fix the
-      // `impact != null` guard made this fire on first sight (the recurred Modal phantom); it must hold.
       const inc = mkInc({ status: 'investigating', impact: 'minor', title: 'Web endpoints — down' })
       expect(shouldHoldNewIncident('modal', config, inc, firstSight)).toBe(true)
     })
 
-    it('FIRES once the incident survived a prior cycle (pending marker present)', () => {
-      expect(shouldHoldNewIncident('modal', config, mkInc(), { alreadyAlerted: false, pendingExists: true })).toBe(false)
+    it('STILL HOLDS within the window — surviving ONE cycle is no longer enough (#835)', () => {
+      // first-seen ~5min ago (one */5 cycle) → still inside the ~9min window → keep holding.
+      const oneCycleAgo = { alreadyAlerted: false, firstSeenMs: NOW - 5 * 60 * 1000, nowMs: NOW }
+      expect(shouldHoldNewIncident('modal', config, mkInc(), oneCycleAgo)).toBe(true)
+    })
+
+    it('FIRES once first-seen ≥ FLAP_HOLD_MS (survived ~2 cycles)', () => {
+      const twoCyclesAgo = { alreadyAlerted: false, firstSeenMs: NOW - (FLAP_HOLD_MS + 1000), nowMs: NOW }
+      expect(shouldHoldNewIncident('modal', config, mkInc(), twoCyclesAgo)).toBe(false)
+    })
+
+    it('a KV read error (firstSeenMs=0) does NOT hold — fail-not-hold, a real alert beats a phantom', () => {
+      expect(shouldHoldNewIncident('modal', config, mkInc(), { alreadyAlerted: false, firstSeenMs: 0, nowMs: NOW })).toBe(false)
     })
 
     it('never re-holds an already-alerted incident (a later cron re-fire)', () => {
-      expect(shouldHoldNewIncident('modal', config, mkInc(), { alreadyAlerted: true, pendingExists: false })).toBe(false)
+      expect(shouldHoldNewIncident('modal', config, mkInc(), { alreadyAlerted: true, firstSeenMs: null, nowMs: NOW })).toBe(false)
     })
 
     it('does not hold resolved incidents (resolved path is gated by alertedNewMap)', () => {
@@ -1154,26 +1167,33 @@ describe('first-seen confirmation gate (#633)', () => {
       expect(alerts).toHaveLength(0)
     })
 
-    it('two-cycle hold→confirm: composes shouldHoldNewIncident → suppressedIncIds → buildIncidentAlerts like index.ts', () => {
-      // This drives the SAME two real functions the cron wires together, simulating the pending:new
-      // KV transition (absent on cycle 1 → present on cycle 2). It proves the cross-cycle contract
-      // end-to-end at the function-composition level (the cronAlertCheck glue is otherwise unexported).
+    it('~2-cycle hold→confirm: composes shouldHoldNewIncident → suppressedIncIds → buildIncidentAlerts like index.ts (#835)', () => {
+      // Drives the SAME two real functions the cron wires together, simulating the pending:new marker
+      // transition (firstSeen stamped on cycle 1, then time advancing across */5 cycles). Proves the
+      // cross-cycle contract: a flap must survive ~2 cycles, not one, before it fires.
       const inc: Incident = { id: 'flap-x', title: 'Web endpoints — down', status: 'investigating', impact: null, startedAt: recentDate, duration: null, timeline: [] }
       const svc = mockService({ id: 'modal', status: 'down', incidents: [inc] })
       const config = { flapSuppression: true }
+      const t0 = 1_700_000_000_000
 
-      // Cycle 1: no pending marker yet (pendingExists:false) → held → goes into suppressedIncIds.
-      const suppressed1 = new Set<string>()
-      if (shouldHoldNewIncident('modal', config, inc, { alreadyAlerted: false, pendingExists: false })) suppressed1.add(inc.id)
-      expect(suppressed1.has('flap-x')).toBe(true)
-      expect(buildIncidentAlerts([svc], alertedMap(), NOW, suppressed1)).toHaveLength(0) // silent cycle 1
+      // Cycle 1 (first sight, no marker) → held + stamp firstSeen=t0.
+      let firstSeenMs: number | null = null
+      const s1 = new Set<string>()
+      if (shouldHoldNewIncident('modal', config, inc, { alreadyAlerted: false, firstSeenMs, nowMs: t0 })) { s1.add(inc.id); if (firstSeenMs === null) firstSeenMs = t0 }
+      expect(s1.has('flap-x')).toBe(true)
+      expect(buildIncidentAlerts([svc], alertedMap(), t0, s1)).toHaveLength(0) // silent
 
-      // Cycle 2: marker written on cycle 1 (pendingExists:true) → NOT held → fires.
-      const suppressed2 = new Set<string>()
-      if (shouldHoldNewIncident('modal', config, inc, { alreadyAlerted: false, pendingExists: true })) suppressed2.add(inc.id)
-      expect(suppressed2.size).toBe(0)
-      const alerts = buildIncidentAlerts([svc], alertedMap(), NOW, suppressed2)
-      expect(alerts.map(a => a.key)).toEqual(['alerted:new:flap-x']) // fires cycle 2
+      // Cycle 2 (~5min later, marker=t0) → still inside the ~9min window → STILL held (the #835 change).
+      const s2 = new Set<string>()
+      if (shouldHoldNewIncident('modal', config, inc, { alreadyAlerted: false, firstSeenMs, nowMs: t0 + 5 * 60 * 1000 })) s2.add(inc.id)
+      expect(s2.has('flap-x')).toBe(true)
+      expect(buildIncidentAlerts([svc], alertedMap(), t0 + 5 * 60 * 1000, s2)).toHaveLength(0) // still silent
+
+      // Cycle 3 (~10min later) → age ≥ FLAP_HOLD_MS → NOT held → fires.
+      const s3 = new Set<string>()
+      if (shouldHoldNewIncident('modal', config, inc, { alreadyAlerted: false, firstSeenMs, nowMs: t0 + 10 * 60 * 1000 })) s3.add(inc.id)
+      expect(s3.size).toBe(0)
+      expect(buildIncidentAlerts([svc], alertedMap(), t0 + 10 * 60 * 1000, s3).map(a => a.key)).toEqual(['alerted:new:flap-x'])
     })
 
     it('incId stability: a churned id is treated as a fresh first-sight (re-held) — documents the gate dependency', () => {
@@ -1183,8 +1203,8 @@ describe('first-seen confirmation gate (#633)', () => {
       // this test pins the assumption so a future unstable-id source is caught by intent.
       const config = { flapSuppression: true }
       const churnedInc: Incident = { id: 'flap-y', title: 'Web endpoints — down', status: 'investigating', impact: null, startedAt: recentDate, duration: null, timeline: [] }
-      // pending:new was written for 'flap-x' on cycle 1; cycle 2 surfaces 'flap-y' → its marker is absent.
-      expect(shouldHoldNewIncident('modal', config, churnedInc, { alreadyAlerted: false, pendingExists: false })).toBe(true)
+      // pending:new was written for 'flap-x' on cycle 1; cycle 2 surfaces 'flap-y' → its marker is absent (firstSeenMs null → fresh hold).
+      expect(shouldHoldNewIncident('modal', config, churnedInc, { alreadyAlerted: false, firstSeenMs: null, nowMs: NOW })).toBe(true)
     })
   })
 })
@@ -1204,7 +1224,8 @@ describe('short-incident hold (#792)', () => {
     ...overrides,
   })
   const config = { holdShortIncidents: true }
-  const firstSight = { alreadyAlerted: false, pendingExists: false }
+  const firstSight = { alreadyAlerted: false, firstSeenMs: null, nowMs: NOW }
+  const confirmed = { alreadyAlerted: false, firstSeenMs: NOW - (FLAP_HOLD_MS + 1000), nowMs: NOW }  // survived ~2 cycles
 
   describe('isShortIncidentHoldable', () => {
     it('holds a NORMAL-titled minor incident on an opted-in service (no flap title needed)', () => {
@@ -1243,8 +1264,8 @@ describe('short-incident hold (#792)', () => {
       expect(shouldHoldNewIncident('langfuse', config, mkInc(), firstSight)).toBe(true)
     })
 
-    it('FIRES once the incident survived a prior cycle (pending marker present → genuinely ongoing)', () => {
-      expect(shouldHoldNewIncident('langfuse', config, mkInc(), { alreadyAlerted: false, pendingExists: true })).toBe(false)
+    it('FIRES once the incident survived ~2 cycles (first-seen ≥ FLAP_HOLD_MS → genuinely ongoing)', () => {
+      expect(shouldHoldNewIncident('langfuse', config, mkInc(), confirmed)).toBe(false)
     })
 
     it('does NOT hold `major` — alerts immediately even on a hold service', () => {
@@ -1256,7 +1277,7 @@ describe('short-incident hold (#792)', () => {
     })
 
     it('never re-holds an already-alerted incident', () => {
-      expect(shouldHoldNewIncident('langfuse', config, mkInc(), { alreadyAlerted: true, pendingExists: false })).toBe(false)
+      expect(shouldHoldNewIncident('langfuse', config, mkInc(), { alreadyAlerted: true, firstSeenMs: null, nowMs: NOW })).toBe(false)
     })
 
     it('does NOT hold a service carrying neither flap nor short-incident flag', () => {
@@ -1291,20 +1312,27 @@ describe('short-incident hold (#792)', () => {
       expect(alerts).toHaveLength(0)
     })
 
-    it('two-cycle hold→confirm: a genuinely ongoing Langfuse incident still alerts one cycle later', () => {
+    it('~2-cycle hold→confirm: a genuinely ongoing Langfuse incident alerts once it survives the window (#835)', () => {
       const ongoing: Incident = { id: 'lf-real', title: '[EU] Elevated ingestion times', status: 'investigating', impact: 'minor', startedAt: recentDate, duration: null, timeline: [] }
       const svc = mockService({ id: 'langfuse', status: 'degraded', incidents: [ongoing] })
+      const t0 = 1_700_000_000_000
 
-      // Cycle 1: no pending marker → held → silent.
-      const suppressed1 = new Set<string>()
-      if (shouldHoldNewIncident('langfuse', config, ongoing, { alreadyAlerted: false, pendingExists: false })) suppressed1.add(ongoing.id)
-      expect(suppressed1.has('lf-real')).toBe(true)
-      expect(buildIncidentAlerts([svc], alertedMap(), NOW, suppressed1)).toHaveLength(0)
+      // Cycle 1: first sight → held + stamp firstSeen=t0 → silent.
+      let firstSeenMs: number | null = null
+      const s1 = new Set<string>()
+      if (shouldHoldNewIncident('langfuse', config, ongoing, { alreadyAlerted: false, firstSeenMs, nowMs: t0 })) { s1.add(ongoing.id); if (firstSeenMs === null) firstSeenMs = t0 }
+      expect(s1.has('lf-real')).toBe(true)
+      expect(buildIncidentAlerts([svc], alertedMap(), t0, s1)).toHaveLength(0)
 
-      // Cycle 2: marker present → NOT held → fires.
-      const suppressed2 = new Set<string>()
-      if (shouldHoldNewIncident('langfuse', config, ongoing, { alreadyAlerted: false, pendingExists: true })) suppressed2.add(ongoing.id)
-      expect(buildIncidentAlerts([svc], alertedMap(), NOW, suppressed2).map(a => a.key)).toEqual(['alerted:new:lf-real'])
+      // Cycle 2 (~5min): still inside window → still held → silent.
+      const s2 = new Set<string>()
+      if (shouldHoldNewIncident('langfuse', config, ongoing, { alreadyAlerted: false, firstSeenMs, nowMs: t0 + 5 * 60 * 1000 })) s2.add(ongoing.id)
+      expect(buildIncidentAlerts([svc], alertedMap(), t0 + 5 * 60 * 1000, s2)).toHaveLength(0)
+
+      // Cycle 3 (~10min): age ≥ FLAP_HOLD_MS → NOT held → fires.
+      const s3 = new Set<string>()
+      if (shouldHoldNewIncident('langfuse', config, ongoing, { alreadyAlerted: false, firstSeenMs, nowMs: t0 + 10 * 60 * 1000 })) s3.add(ongoing.id)
+      expect(buildIncidentAlerts([svc], alertedMap(), t0 + 10 * 60 * 1000, s3).map(a => a.key)).toEqual(['alerted:new:lf-real'])
     })
   })
 })
