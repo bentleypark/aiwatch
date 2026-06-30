@@ -16,6 +16,7 @@ import { refreshStatusCacheOnChange } from './cache-refresh'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
 import { corsHeaders } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
+import { buildExtClaudePayload, isExtClaudeRequest } from './ext-claude'
 import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, countNewFeedItems } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
@@ -3164,6 +3165,54 @@ export default {
 
     // GET /api/status/cached — KV cache only (no live fetch), for Is X Down SSR pages
     if (request.method === 'GET' && url.pathname === '/api/status/cached') {
+      // Claude-only Chrome extension polls (#837, tagged ?src=ext-claude) need just
+      // the three Anthropic surfaces' status + Score + per-category fallback. Checked
+      // BEFORE the statusline branch (a distinct, narrower projection). Served from an
+      // in-worker edge cache (caches.default) so per-minute polls at scale collapse to
+      // ~1 KV/score recompute per PoP per s-maxage window — true zone-level request
+      // elimination is gated on a custom Worker subdomain (#439).
+      if (isExtClaudeRequest(url.searchParams)) {
+        // WAE tag (#494 pattern) — count EVERY ext-claude poll, BEFORE the cache-hit
+        // early-return below, so the #837 adoption metric reflects total poll volume
+        // (on workers.dev the Worker runs on every request regardless; caches.default
+        // only saves the KV read + score recompute, not the invocation). Otherwise it
+        // would record just the ~1/PoP/60s miss rate. Synchronous void; wrap so a WAE
+        // failure never aborts the response. Index entries cap at 32 bytes.
+        try {
+          env.ANALYTICS?.writeDataPoint({ blobs: ['ext-claude'], doubles: [1], indexes: ['ext-claude'] })
+        } catch (err) {
+          console.warn('[wae] ext-claude writeDataPoint failed:', err instanceof Error ? err.message : err)
+        }
+
+        // Canonical cache key — all ext-claude polls share ONE caches.default entry
+        // regardless of incidental query params (a versioned/cache-buster param would
+        // otherwise fork the cache and defeat the per-PoP collapse this branch exists for).
+        const cacheKey = new Request(`${url.origin}${url.pathname}?src=ext-claude`)
+        const cache = caches.default
+        const hit = await cache.match(cacheKey)
+        if (hit) return hit
+
+        const cacheData = await cacheRead(env.STATUS_CACHE)
+        const summaries = await readProbeSummaries(env.STATUS_CACHE, 'ext-claude')
+        // Score the FULL set — getFallbacks needs the candidate pool — but emit only
+        // the three Claude surfaces (buildExtClaudePayload narrows). Empty cache → 200
+        // with empty services (statusline-style fail-silent), not a 503.
+        const scoredAll = (cacheData?.services ?? []).map((svc) => {
+          const s = scoreFor(svc, summaries)
+          return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
+        })
+        const res = new Response(JSON.stringify(buildExtClaudePayload(scoredAll, cacheData?.cachedAt ?? null)), {
+          headers: {
+            'Content-Type': 'application/json',
+            // Public, unauthenticated GET — extension fetches bypass CORS via MV3
+            // host_permissions; `*` also lets curl/tests hit it (mirrors statusline).
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'public, max-age=30, s-maxage=60',
+          },
+        })
+        ctx.waitUntil(cache.put(cacheKey, res.clone()))
+        return res
+      }
       // Statusline polls (#438, tagged ?src=statusline-*) only need id/name/status.
       // Return the ~KB lite projection and skip the ~2 MB probe/latency/AI reads —
       // this path was the single largest Vercel Fast Data Transfer route. Freshly
