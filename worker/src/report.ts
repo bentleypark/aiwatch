@@ -32,6 +32,18 @@ export function reportSeenKey(svcId: string, ipHash: string, date: string): stri
   return `report:seen:${svcId}:${ipHash}:${date}`
 }
 
+/** #837 — KV key for the per-day count of reports submitted FROM the Chrome extension
+ *  (`source:'ext'`). A consent-free engagement signal surfaced in the daily summary. */
+export function extReportCountKey(date: string): string {
+  return `report:ext:${date}`
+}
+
+/** #837 — report sources the collect endpoint recognizes. Only 'ext' is tallied separately
+ *  (the extension); anything else (web/absent) counts only toward the normal per-service total. */
+export function isExtReportSource(source: unknown): boolean {
+  return source === 'ext'
+}
+
 /** Validate the reported service id against the known set (rejects unknown/garbage svcIds). */
 export function isReportableService(svcId: unknown, knownIds: Set<string>): svcId is string {
   return typeof svcId === 'string' && knownIds.has(svcId)

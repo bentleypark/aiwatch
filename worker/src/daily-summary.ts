@@ -58,6 +58,10 @@ export interface DailySummaryData {
   // `newItems` (#748) — incidents AIWatch first-detected in the 24h window (alert-worthy events),
   // distinct from the mostly-empty poll volume; absent when the KV read failed.
   feedTraffic?: { all: number; service: number; total: number; newItems?: number } | null
+  // #837 — Chrome-extension activity (consent-free engagement proxy): last-24h poll volume (WAE
+  // `ext-claude` tag; null when the SQL API isn't configured) + today's extension-sourced report
+  // count (KV). Absent when neither signal exists → section omitted.
+  extActivity?: { polls: number | null; reports: number } | null
   // #575 Phase A — crowd "Report an issue" counts today (svcId → count). Internal demand signal
   // only (coverage priority); never a public "N reporting" verdict. Empty/absent → section omitted.
   reportCounts?: Record<string, number>
@@ -219,6 +223,10 @@ export function buildDailySummary(data: DailySummaryData): string {
   const feedSection = formatFeedTrafficSection(data.feedTraffic)
   if (feedSection) lines.push(feedSection)
 
+  // Section: Chrome-extension activity (#837) — consent-free usage proxy (poll volume + ext reports).
+  const extSection = formatExtActivitySection(data.extActivity)
+  if (extSection) lines.push(extSection)
+
   // Section: crowd "Report an issue" counts (#575 Phase A) — internal demand signal only.
   if (data.reportCounts) {
     const nameOf = new Map(services.map((s) => [s.id, s.name]))
@@ -307,6 +315,24 @@ export function formatFeedTrafficSection(
     `\n📡 **Feed Polls (RSS/Slack)**\n` +
     `   Last 24h: ${feed.total} polls (all-feed ${feed.all} · per-service ~${feed.service})${newItems}`
   )
+}
+
+/**
+ * Format the Chrome-extension activity as a Discord section (#837). Empty string when unavailable
+ * so the caller skips it. Two consent-free signals: last-24h poll volume (WAE `ext-claude` tag — a
+ * WAE sampling estimate, shown with `~`; omitted from the line when the SQL API isn't configured, i.e.
+ * polls === null) and today's extension-sourced "Report an issue" count (KV). The real active-user
+ * trend lives in the Chrome Web Store dashboard (WAU); this is the in-product engagement proxy. Pure.
+ */
+export function formatExtActivitySection(
+  ext: DailySummaryData['extActivity'],
+): string {
+  if (!ext) return ''
+  const parts: string[] = []
+  if (ext.polls != null) parts.push(`~${ext.polls} status polls`)
+  if (ext.reports > 0) parts.push(`${ext.reports} issue report${ext.reports === 1 ? '' : 's'}`)
+  if (parts.length === 0) return ''
+  return `\n🧩 **Chrome Extension**\n   Last 24h: ${parts.join(' · ')}`
 }
 
 /**

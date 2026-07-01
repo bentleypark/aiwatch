@@ -65,12 +65,16 @@ test.describe('Incidents — 90d archive merge (#375)', () => {
 
   test('7d period fetches the current-month archive (#587 — short-window services need backfill)', async ({ page }) => {
     // The default period is 7, so the initial mount already fetched the current month — captured
-    // because the listener is attached before goto. 7d's window doesn't span a prior month, so it
-    // fetches ONLY the current month.
+    // because the listener is attached before goto.
     const reportUrls = await openIncidents(page)
 
     await expect.poll(() => reportUrls.length, { timeout: 5000 }).toBeGreaterThan(0)
-    expect(reportUrls.every((u) => u.includes(`month=${currentMonth()}`))).toBe(true)
+    // Assert the CURRENT month is fetched (the #587 backfill), not that it's the ONLY month: near the
+    // start of a month the 7d window (now−7d … now) spans the PRIOR month too, so the prior-month
+    // archive is legitimately fetched as well. The old `.every(current)` false-failed on the 1st–6th
+    // (e.g. Jul 1 → window includes late June). Matches the 90d/30d tests' `.has(currentMonth())`.
+    for (const url of reportUrls) expect(url).toMatch(/month=\d{4}-\d{2}/)
+    expect(monthsOf(reportUrls).has(currentMonth())).toBe(true)
   })
 
   test('30d period fetches archive months incl. the current month (#587 — a rolled-out incident within 30d must show)', async ({ page }) => {

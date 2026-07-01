@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatPushLine, formatAccuracyLine, formatReferralLine } from '../daily-summary'
 import type { ServiceStatus } from '../types'
 import type { AccuracyStats } from '../incident-history'
 
@@ -649,5 +649,33 @@ describe('formatAccuracyLine (#827 Feature 1 — prediction accuracy)', () => {
   it('appears in the full daily summary only when total > 0', () => {
     expect(buildDailySummary({ ...minimal, accuracy: stats() })).toContain('AI Recovery Prediction Accuracy')
     expect(buildDailySummary({ ...minimal, accuracy: stats({ total: 0 }) })).not.toContain('AI Recovery Prediction Accuracy')
+  })
+})
+
+describe('formatExtActivitySection (#837)', () => {
+  it('renders polls (~, WAE estimate) + reports when both present', () => {
+    const s = formatExtActivitySection({ polls: 4212, reports: 3 })
+    expect(s).toContain('Chrome Extension')
+    expect(s).toContain('~4212 status polls')
+    expect(s).toContain('3 issue reports')
+  })
+  it('omits polls when the SQL API is unconfigured (polls null), shows reports only', () => {
+    const s = formatExtActivitySection({ polls: null, reports: 2 })
+    expect(s).not.toContain('status polls')
+    expect(s).toContain('2 issue reports')
+  })
+  it('singular "report" for 1', () => {
+    expect(formatExtActivitySection({ polls: null, reports: 1 })).toContain('1 issue report\n'.trim())
+    expect(formatExtActivitySection({ polls: null, reports: 1 })).not.toContain('reports')
+  })
+  it('polls only when no reports', () => {
+    const s = formatExtActivitySection({ polls: 10, reports: 0 })
+    expect(s).toContain('~10 status polls')
+    expect(s).not.toContain('report')
+  })
+  it('empty string when absent or both signals empty', () => {
+    expect(formatExtActivitySection(null)).toBe('')
+    expect(formatExtActivitySection(undefined)).toBe('')
+    expect(formatExtActivitySection({ polls: null, reports: 0 })).toBe('')
   })
 })

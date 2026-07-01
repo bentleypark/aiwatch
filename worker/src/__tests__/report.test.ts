@@ -3,6 +3,8 @@ import {
   reportDateKey,
   reportCountKey,
   reportSeenKey,
+  extReportCountKey,
+  isExtReportSource,
   isReportableService,
   hashIp,
   nextCount,
@@ -251,5 +253,19 @@ describe('reportWindowFloor (#772) — anchor surfaced reports to the current in
     const mixed = surface([stale, fresh])
     expect(mixed.map((e) => e.desc)).toEqual(['current incident']) // only the in-window one
     expect(shouldSurfaceReports({ status: 'down', reportCount: mixed.length })).toBe(true)
+  })
+})
+
+describe('extReportCountKey + isExtReportSource (#837)', () => {
+  it('extReportCountKey is per-day, ext-scoped', () => {
+    expect(extReportCountKey('2026-07-01')).toBe('report:ext:2026-07-01')
+  })
+  it('isExtReportSource only matches the exact "ext" tag', () => {
+    expect(isExtReportSource('ext')).toBe(true)
+    expect(isExtReportSource('web')).toBe(false)
+    expect(isExtReportSource('EXT')).toBe(false)
+    expect(isExtReportSource(undefined)).toBe(false)
+    expect(isExtReportSource(null)).toBe(false)
+    expect(isExtReportSource(1)).toBe(false)
   })
 })

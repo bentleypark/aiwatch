@@ -17,11 +17,11 @@ import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters
 import { corsHeaders, matchOrigin } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
-import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, countNewFeedItems } from './api-traffic'
+import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, queryExtTraffic, countNewFeedItems } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
-import { isReportableService, hashIp, reportDateKey, reportCountKey, reportSeenKey, nextCount, REPORT_COUNT_TTL_SECONDS, REPORT_SEEN_TTL_SECONDS, REPORT_MAX_PER_HOUR, formatReportCountsSection, isValidCategory, sanitizeReportDescription, reportFeedKey, appendReportFeed, recentReportFeed, reportWindowFloor, REPORT_FEED_TTL_SECONDS, shouldSurfaceReports, type ReportFeedEntry } from './report'
+import { isReportableService, hashIp, reportDateKey, reportCountKey, reportSeenKey, extReportCountKey, isExtReportSource, nextCount, REPORT_COUNT_TTL_SECONDS, REPORT_SEEN_TTL_SECONDS, REPORT_MAX_PER_HOUR, formatReportCountsSection, isValidCategory, sanitizeReportDescription, reportFeedKey, appendReportFeed, recentReportFeed, reportWindowFloor, REPORT_FEED_TTL_SECONDS, shouldSurfaceReports, type ReportFeedEntry } from './report'
 
 interface Env {
   ALLOWED_ORIGIN: string
@@ -2456,6 +2456,24 @@ export default {
             if (newItems != null) feedTraffic = { ...feedTraffic, newItems }
           }
 
+          // #837 — Chrome-extension activity (consent-free): last-24h poll volume (WAE `ext-claude`
+          // tag) + today's extension-sourced report count (KV). Both best-effort/null-tolerant.
+          let extPolls: number | null = null
+          try {
+            extPolls = await queryExtTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+          } catch (err) {
+            console.warn('[daily-summary] ext traffic read failed:', err instanceof Error ? err.message : err)
+          }
+          let extReports = 0
+          try {
+            const v = await env.STATUS_CACHE.get(extReportCountKey(today)).catch(() => null)
+            const n = v ? parseInt(v, 10) : 0
+            if (Number.isFinite(n) && n > 0) extReports = n
+          } catch (err) {
+            console.warn('[daily-summary] ext report count read failed:', err instanceof Error ? err.message : err)
+          }
+          const extActivity = (extPolls != null || extReports > 0) ? { polls: extPolls, reports: extReports } : null
+
           // #575 — internal demand signal: today's per-service crowd "Report an issue" counts.
           // Bounded read (one GET per known service, no KV list); surfaced only inside the operator
           // summary, never as a public "N reporting" verdict (that gating is Phase B).
@@ -2502,6 +2520,7 @@ export default {
             degradationNoStatusCounts,
             v1Traffic,
             feedTraffic,
+            extActivity,
             reportCounts,
           })
 
@@ -2680,7 +2699,7 @@ export default {
           status: 429, headers: { ...cors, 'Content-Type': 'application/json' },
         })
       }
-      let body: { svcId?: unknown; category?: unknown; description?: unknown }
+      let body: { svcId?: unknown; category?: unknown; description?: unknown; source?: unknown }
       try { body = await request.json() as typeof body } catch { body = {} }
       const svcId = body.svcId
       if (!isReportableService(svcId, REPORTABLE_IDS)) {
@@ -2713,6 +2732,14 @@ export default {
         // dropping the report with no retry. The feed powers the GATED display (#575).
         if (counted) {
           await kvPut(env.STATUS_CACHE, seenKey, '1', { expirationTtl: REPORT_SEEN_TTL_SECONDS })
+          // #837 — tally reports that came FROM the Chrome extension (source:'ext') into a separate
+          // per-day counter, so the daily summary can show extension engagement. Best-effort; a failed
+          // write just under-counts this soft signal. Only after the main count persisted (same gate).
+          if (isExtReportSource(body.source)) {
+            const extKey = extReportCountKey(date)
+            const extCur = await env.STATUS_CACHE.get(extKey).catch(() => null)
+            await kvPut(env.STATUS_CACHE, extKey, String(nextCount(extCur)), { expirationTtl: REPORT_COUNT_TTL_SECONDS })
+          }
           const feedKey = reportFeedKey(svcId)
           let feed: ReportFeedEntry[] = []
           // Log on parse failure — here the empty fallback then OVERWRITES the stored feed (read-

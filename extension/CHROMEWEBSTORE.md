@@ -24,7 +24,7 @@ Hit a problem? One click sends an anonymous "Report an issue" that feeds AIWatch
 crowd-corroboration signal — it never overrides official status on its own.
 
 How it works (and what it does NOT do):
-- It polls the public AIWatch status API every few minutes. That is its ONLY data source.
+- It polls the public AIWatch status API approximately every 2 minutes (and on popup open). That is its ONLY data source.
 - It does **not** read, modify, or access the content of claude.ai or any web page.
 - It collects **no** personal data, no browsing history, no conversations.
 
@@ -40,13 +40,25 @@ Open-source: https://github.com/bentleypark/aiwatch · Full status: https://ai-w
 No `tabs`, no `<all_urls>`, no content scripts, no `scripting`, no remote code.
 
 ## Privacy / data use disclosure
-- **Does this item collect user data?** No.
-- The extension transmits only: (a) outbound GET polls to the AIWatch status API, and
-  (b) optional, user-initiated anonymous issue reports (`{surface, category, optional note}`)
-  — no identifiers, IP-rate-limited server-side, used only as an aggregate reliability signal.
-- It does not use cookies, analytics, or any tracking, and does not read page content.
-- **Privacy policy URL:** host `extension/PRIVACY.md` at a public URL (e.g.
-  `https://ai-watch.dev/extension-privacy`) and enter it in the dashboard before submitting.
+> **Accuracy note (matters for review):** do NOT declare a blanket "collects no data." The
+> extension DOES transmit a user-submitted report when the user clicks "Report an issue" — a
+> reviewer will see that POST, so the disclosure + privacy policy must acknowledge it. Declare the
+> **sensitive data categories as NOT collected** (true — see below) while disclosing the voluntary
+> report. The privacy policy at `/extension-privacy` states the same.
+
+- **Sensitive/personal data categories collected:** **NONE.** No PII, no health/financial/auth
+  data, no location, no web history, no user-activity monitoring, no website content (no page
+  reading). Check "does not collect" for every category in the data-use form.
+- **What IS transmitted** (declare honestly): (a) outbound GET status polls (no identifiers), and
+  (b) **user-initiated, anonymous issue reports** (`{surface, category, optional free-text note}`)
+  sent ONLY when the user clicks "Report an issue" — no account/identifier, IP-rate-limited
+  server-side, aggregated as a community reliability signal.
+- **Certifications:** not sold/transferred to third parties; not used for purposes unrelated to the
+  single purpose; not used for creditworthiness/lending — all **true** (check each).
+- No cookies, no analytics, no tracking, no remote code, no page content access.
+- **Privacy policy URL (LIVE):** `https://ai-watch.dev/extension-privacy` (served by
+  `api/extension-privacy.ts`; source copy in `extension/PRIVACY.md`). Enter this in the dashboard.
+- **Contact email:** `contact@ai-watch.dev`.
 
 ## Pre-publish checklist (manual)
 - [ ] At least one screenshot at 1280×800 (or 640×400) — capture the popup (operational +
