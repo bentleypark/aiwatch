@@ -335,7 +335,20 @@ function median(xs: number[]): number {
  * (a handful of resolved incidents/day), so this is meaningful only in aggregate.
  */
 export function summarizeAccuracy(records: IncidentHistoryRecord[]): AccuracyStats {
-  const withPred = records.filter(r => r.predictedRecoveryHours != null && r.predictedRecoveryHours > 0)
+  // #847 — a grouped incident (one incId shared across sibling surfaces, e.g. Anthropic's Claude API /
+  // claude.ai / Claude Code) writes one record PER affected service so each surface's RAG corpus is
+  // complete. That would multi-count the SAME prediction here, inflating the denominator + skewing the
+  // hit-rate. Collapse to one record per incId first (siblings share the deduped analysis, so any is
+  // representative) so accuracy is measured per INCIDENT, not per affected surface.
+  const byIncId = new Map<string, IncidentHistoryRecord>()
+  for (const r of records) {
+    const existing = byIncId.get(r.incId)
+    // Prefer a record that actually carries a prediction (defensive — siblings normally all do).
+    if (!existing || (existing.predictedRecoveryHours == null && r.predictedRecoveryHours != null)) {
+      byIncId.set(r.incId, r)
+    }
+  }
+  const withPred = [...byIncId.values()].filter(r => r.predictedRecoveryHours != null && r.predictedRecoveryHours > 0)
   let accurate = 0, underPredicted = 0, overPredicted = 0
   const absErrors: number[] = []
   for (const r of withPred) {

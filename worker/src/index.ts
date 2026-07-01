@@ -938,28 +938,56 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       }
     }
 
-    // #846 — the "Incident Resolved" embed (buildIncidentAlerts → alerted:res:) is the resolution
-    // path for ALL services, and previously carried NO prediction line — the 🎯 comparison landed
-    // ONLY on the rarely-firing Tier-1 status-edge alerted:recovered: path above, so it was effectively
-    // never shown on Discord while Slack /feed showed it for every resolved incident. Attach the SAME
-    // single-line wording as /feed (rss.ts descHtml), computed live from the still-warm ai:analysis
-    // estimate + the resolved incident's actual duration. Null (line omitted) when no numeric estimate
-    // existed — matching /feed, so the two surfaces stay identical. Best-effort: a KV/lookup failure
-    // must never abort the send, so it's guarded.
-    if (!recoverySection && alert.key.startsWith('alerted:res:')) {
-      try {
-        const incId = alert.key.slice('alerted:res:'.length)
-        const primaryId = alert.svcIds?.[0]
-        const svc = primaryId ? scored.find(s => s.id === primaryId) : undefined
-        const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : undefined
-        if (svc && inc) {
-          const raw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
-          const analysis = raw ? (JSON.parse(raw) as AIAnalysisResult) : null
-          const line = resolvedPredictionLine(analysis?.estimatedRecoveryHours, inc)
-          if (line) recoverySection = `\n${DIV}\n${line}`
+    // The "Incident Resolved" alert (buildIncidentAlerts → alerted:res:) is the resolution path for
+    // ALL services — the rarely-firing Tier-1 status-edge alerted:recovered: block above only fires in
+    // the incident-less gap. So this block does the two things that path did but for normal incidents:
+    //   #847 — write the durable #827 history record for EACH affected service. Previously the corpus
+    //     accrued ONLY in the alerted:recovered: block, so a normal incident resolution recorded
+    //     NOTHING → the prediction-accuracy ledger + RAG corpus stayed near-empty. Idempotent
+    //     (appendIncidentHistoryBatch dedups by incId), so a Tier-1 incident that somehow fired both
+    //     paths still records once. Grouped incidents (shared incId across surfaces) record once per
+    //     affected service so each surface's own RAG corpus grows; summarizeAccuracy dedups by incId
+    //     so that does NOT multi-count the shared prediction in the accuracy metric.
+    //   #846 — build the 🎯 prediction line for the embed from the PRIMARY service (one line/incident),
+    //     same single-line wording as Slack /feed. Null (omitted) when no numeric estimate — matching /feed.
+    // Best-effort per service (guarded) — a KV/lookup failure must never abort the operator send. The
+    // outer `for (const alert of sent)` loop is sequential, so per-svcId appendIncidentHistoryBatch RMWs
+    // across sibling alerts don't race (mirrors why the alerted:recovered: block batches).
+    if (alert.key.startsWith('alerted:res:')) {
+      const incId = alert.key.slice('alerted:res:'.length)
+      const now = new Date().toISOString()
+      const affectedIds = alert.svcIds ?? []
+      const primaryId = affectedIds[0]
+      for (const svcId of affectedIds) {
+        try {
+          const svc = scored.find(s => s.id === svcId)
+          const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : undefined
+          if (!svc || !inc) continue
+          const analysisK = analysisKey(svc.id, inc.id)
+          const raw = await env.STATUS_CACHE.get(analysisK).catch(() => null)
+          let analysis: AIAnalysisResult | null = null
+          if (raw) {
+            try {
+              analysis = JSON.parse(raw) as AIAnalysisResult
+            } catch (err) {
+              // Mirror the sibling alerted:recovered: block (a corrupt ai:analysis value is a
+              // data-integrity signal worth a trace, not a silent null) — log + drop the poisoned key.
+              console.warn('[kv] ai:analysis parse failed during resolved corpus write:', svc.id, inc.id, err instanceof Error ? err.message : err)
+              await kvDel(env.STATUS_CACHE, analysisK)
+              analysis = null
+            }
+          }
+          // #847 — durable corpus record joining prediction + actual outcome (best-effort, idempotent).
+          const rec = buildHistoryRecord(svc, inc, analysis, now)
+          if (rec) await appendIncidentHistoryBatch(env.STATUS_CACHE, svc.id, [rec])
+          // #846 — one prediction line for the embed, from the primary service only.
+          if (svcId === primaryId && !recoverySection) {
+            const line = resolvedPredictionLine(analysis?.estimatedRecoveryHours, inc)
+            if (line) recoverySection = `\n${DIV}\n${line}`
+          }
+        } catch (err) {
+          console.warn('[cron] #846/#847 resolved corpus/prediction failed (alert still sent):', svcId, incId, err instanceof Error ? err.message : err)
         }
-      } catch (err) {
-        console.warn('[cron] #846 resolved prediction line build failed (alert still sent):', alert.key, err instanceof Error ? err.message : err)
       }
     }
 

@@ -471,6 +471,33 @@ describe('summarizeAccuracy', () => {
     expect(summarizeAccuracy(recs).medianAbsErrorHours).toBe(0.5) // median of [0, 0.5, 2]
   })
 
+  it('#847 — collapses a grouped incident (same incId across surfaces) to ONE scored record', () => {
+    // Anthropic-style shared incident: 3 sibling surfaces each wrote a record with the SAME incId +
+    // deduped prediction. Without dedup this would count 3 accurate → total:3; with dedup it's per-incident.
+    const grouped = [
+      rec({ svcId: 'claude', incId: 'shared-1', predictedRecoveryHours: 1, durationMin: 50 }),
+      rec({ svcId: 'claudeai', incId: 'shared-1', predictedRecoveryHours: 1, durationMin: 50 }),
+      rec({ svcId: 'claudecode', incId: 'shared-1', predictedRecoveryHours: 1, durationMin: 50 }),
+      rec({ svcId: 'openai', incId: 'solo-1', predictedRecoveryHours: 1, durationMin: 200 }), // under
+    ]
+    const s = summarizeAccuracy(grouped)
+    expect(s.total).toBe(2)        // 1 grouped + 1 solo, NOT 4
+    expect(s.accurate).toBe(1)
+    expect(s.underPredicted).toBe(1)
+    expect(s.hitRate).toBe(0.5)
+  })
+
+  it('#847 — prefers the sibling record that carries a prediction when deduping an incId', () => {
+    // A prediction-less sibling must not shadow one that has the estimate.
+    const recs = [
+      rec({ svcId: 'claude', incId: 'shared-2', predictedRecoveryHours: undefined }),
+      rec({ svcId: 'claudeai', incId: 'shared-2', predictedRecoveryHours: 1, durationMin: 50 }),
+    ]
+    const s = summarizeAccuracy(recs)
+    expect(s.total).toBe(1)
+    expect(s.accurate).toBe(1)
+  })
+
   it('computes an EVEN-length median (averages the two middle errors)', () => {
     const recs = [
       rec({ incId: 'a', predictedRecoveryHours: 1, durationMin: 60 }),  // |1-1| = 0
