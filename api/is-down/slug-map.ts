@@ -124,3 +124,29 @@ export const RELATED_SLUGS: Record<string, string[]> = {
 export const SERVICE_ID_TO_SLUG: Record<string, string> = Object.fromEntries(
   Object.entries(SLUG_TO_SERVICE).map(([slug, entry]) => [entry.id, slug])
 )
+
+// #842 — outbound referral wedge. Product/homepage URL per service that can be RECOMMENDED as a
+// fallback on the is-down page, so an outage-moment visitor can ACT on the (Score-ranked, UNPAID)
+// recommendation — and AIWatch can measure "we sent N users to alternatives at the failover moment"
+// (the Rung-1 sponsor evidence, #637/#842). Curated high-confidence set; a missing id → no outbound
+// affordance (graceful). NOT an endorsement or paid placement — the link is disclosed + `rel="nofollow"`
+// (unpaid editorial; `sponsored` would falsely mark it paid) and rankings stay Score-only. The SPA
+// mirror (if/when added) lives in src/utils/constants.js.
+export const SERVICE_SITE_URL: Record<string, string> = {
+  // LLM APIs
+  claude: 'https://claude.com', openai: 'https://platform.openai.com', gemini: 'https://ai.google.dev',
+  mistral: 'https://mistral.ai', cohere: 'https://cohere.com', groq: 'https://groq.com',
+  together: 'https://together.ai', fireworks: 'https://fireworks.ai', cerebras: 'https://cerebras.ai',
+  deepseek: 'https://www.deepseek.com', xai: 'https://x.ai', perplexity: 'https://www.perplexity.ai',
+  openrouter: 'https://openrouter.ai',
+  // Apps
+  chatgpt: 'https://chatgpt.com', claudeai: 'https://claude.ai',
+}
+
+/** Disclosed outbound referral URL for a recommended alternative (appends a `ref` param so the
+ *  destination can attribute AIWatch). Returns null when no curated URL → caller omits the affordance. */
+export function outboundReferralUrl(id: string): string | null {
+  const base = SERVICE_SITE_URL[id]
+  if (!base) return null
+  return `${base}${base.includes('?') ? '&' : '?'}ref=ai-watch.dev`
+}

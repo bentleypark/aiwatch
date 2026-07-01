@@ -18,7 +18,8 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 | `select_service` | `service_id` | Overview (card click) | Service card click |
 | `view_service` | `service_id` | Sidebar (service list) | Sidebar service click |
 | `view_incident` | `incident_id` | Incidents page | Incident detail open |
-| `fallback_click` | `from_service`, `to_service`, `location` | ActionBanner, Is X Down | Fallback recommendation click |
+| `fallback_click` | `from_service`, `to_service`, `location` | ActionBanner, Is X Down | Fallback recommendation click (internal → the alternative's is-down/detail page) |
+| `outbound_fallback_click` | `from_service`, `to_service`, `location` (`is_down_page`) | Is X Down SSR (`renderFallbacks` "Open ↗" button) | #842 — disclosed OUTBOUND click to the recommended alternative's provider site (the Rung-1 referral evidence, #637). Fires from the delegated `[data-ga]` listener; the link is `rel="nofollow"` (unpaid editorial — `sponsored` is intentionally omitted so it doesn't contradict the "not paid" disclosure; add it only if a service becomes a paid sponsor), only rendered for services with a curated `SERVICE_SITE_URL`. GA is the consent-gated floor — a server-side consent-free counter is a follow-up slice of #842 |
 | `change_filter` | `filter` | Overview (filter tabs) | Status filter change |
 | `category_filter` | `category`, `location` | Sidebar (category) · Overview (category tabs) | Category filter change. `location` ∈ `sidebar` (omitted on the legacy sidebar call) / `overview` — the Overview surfaces the same category control as on-screen tabs (#646) |
 | `navigate_page` | `page` | Sidebar (nav) | Page navigation |

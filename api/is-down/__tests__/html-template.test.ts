@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderBadgeEmbed, renderPage, linkifyFaqAnswer, FOOTER_CATEGORY_ORDER, type ServiceData } from '../html-template'
 import type { ServiceSEO } from '../seo-content'
-import { SLUG_TO_SERVICE, RELATED_SLUGS } from '../slug-map'
+import { SLUG_TO_SERVICE, RELATED_SLUGS, outboundReferralUrl, SERVICE_SITE_URL } from '../slug-map'
 import type { RegionStatusResult } from '../region-status'
 
 // Incidents are filtered to a rolling 30-day window (the `Date.now() - 30 * 86_400_000`
@@ -53,6 +53,54 @@ function mkService(overrides: Partial<ServiceData> = {}): ServiceData {
     ...overrides,
   }
 }
+
+describe('outboundReferralUrl (#842)', () => {
+  it('returns the curated provider URL with a disclosed ref param', () => {
+    expect(outboundReferralUrl('gemini')).toBe('https://ai.google.dev?ref=ai-watch.dev')
+    expect(outboundReferralUrl('claude')).toBe('https://claude.com?ref=ai-watch.dev')
+  })
+  it('returns null for a service with no curated URL (graceful)', () => {
+    expect(outboundReferralUrl('bedrock')).toBeNull()
+    expect(outboundReferralUrl('zzz')).toBeNull()
+  })
+  it('every curated URL is https', () => {
+    for (const u of Object.values(SERVICE_SITE_URL)) expect(u.startsWith('https://')).toBe(true)
+  })
+})
+
+describe('renderFallbacks — outbound referral wedge (#842)', () => {
+  it('renders a prominent disclosed "Open" outbound button (new tab, rel=nofollow unpaid, GA event) per curated alternative', () => {
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [
+      { id: 'gemini', name: 'Gemini API', score: 95, status: 'operational' },
+    ])
+    expect(html).toContain('class="fallback-try"')
+    expect(html).toContain('href="https://ai.google.dev?ref=ai-watch.dev"')
+    expect(html).toContain('target="_blank"')
+    expect(html).toContain('rel="nofollow noopener noreferrer"') // unpaid editorial — NO `sponsored`
+    expect(html).not.toContain('sponsored')                      // must not contradict the "not paid" disclosure
+    expect(html).toContain('data-ga="outbound_fallback_click"')
+    expect(html).toContain('data-ga-to="gemini"')
+    expect(html).toContain('ranked by AIWatch Score, not paid') // disclosure
+  })
+  it('omits the button (and disclosure) when no alternative has a curated URL', () => {
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [
+      { id: 'bedrock', name: 'Amazon Bedrock', score: 90, status: 'operational' },
+    ])
+    expect(html).not.toContain('class="fallback-try"')
+    expect(html).not.toContain('outbound_fallback_click')
+    expect(html).not.toContain('ranked by AIWatch Score, not paid')
+  })
+  it('mixed list — exactly one outbound button for the curated alt, disclosure shown once', () => {
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [
+      { id: 'gemini', name: 'Gemini API', score: 95, status: 'operational' },      // curated → button
+      { id: 'bedrock', name: 'Amazon Bedrock', score: 90, status: 'operational' }, // no URL → no button
+    ])
+    expect((html.match(/class="fallback-try"/g) ?? []).length).toBe(1)
+    expect((html.match(/data-ga="outbound_fallback_click"/g) ?? []).length).toBe(1)
+    expect((html.match(/ranked by AIWatch Score, not paid/g) ?? []).length).toBe(1)
+    expect(html).toContain('href="https://ai.google.dev?ref=ai-watch.dev"') // the one button is Gemini's
+  })
+})
 
 describe('renderAIInsight — predicted vs actual (#827 F4)', () => {
   const resolvedInsight = {

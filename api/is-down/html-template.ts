@@ -1,7 +1,7 @@
 // SSR HTML template for "Is X Down?" pages
 
 import type { ServiceSEO } from './seo-content'
-import { SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE, RELATED_SLUGS } from './slug-map'
+import { SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE, RELATED_SLUGS, outboundReferralUrl } from './slug-map'
 import { groupIncidents, type GroupingIncident, type GroupRow, type SingleRow } from './incident-grouping'
 import { compareGroupedRows } from './incident-sort'
 // #482 — is-down uses HASH-based CSP (not nonce): it stays edge-cached (s-maxage=60), and the
@@ -331,9 +331,13 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 .faq-item{margin:16px 0}
 .faq-q{font-weight:600;font-size:15px;margin-bottom:6px}
 .faq-a{font-size:14px;color:#8b949e}
-.fallback-item{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:#161b22;border-radius:6px;margin:8px 0}
+.fallback-item{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;background:#161b22;border-radius:6px;margin:8px 0}
 .fallback-name{font-weight:500;font-size:14px}
 .fallback-score{font-size:12px;color:#8b949e}
+.fallback-right{display:flex;align-items:center;gap:12px;flex-shrink:0}
+.fallback-try{display:inline-block;padding:5px 11px;border:1px solid #2ea043;color:#3fb950;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}
+.fallback-try:hover{background:#2ea043;color:#fff}
+.fallback-disclosure{font-size:11px;color:#8b949e;opacity:0.85;margin:10px 2px 0}
 .footer{text-align:center;padding:32px 0;font-size:13px;color:#484f58;border-top:1px solid rgba(255,255,255,0.07);margin-top:40px}
 .btn{display:inline-block;padding:8px 20px;background:#161b22;border:1px solid rgba(255,255,255,0.14);border-radius:6px;color:#e6edf3;font-size:13px;font-weight:500;transition:background 0.2s}
 .btn:hover{background:#1c2230;text-decoration:none}
@@ -1060,6 +1064,7 @@ function renderFAQ(seo: ServiceSEO, fallbacks: Fallback[]): string {
 
 function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string): string {
   if (fallbacks.length === 0) return ''
+  let anyOutbound = false
   const items = fallbacks.map(f => {
     const scoreText = f.score != null ? `Score: ${f.score}` : ''
     const color = statusColor(f.status)
@@ -1067,15 +1072,26 @@ function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string
     const fbSlug = SERVICE_ID_TO_SLUG[f.id]
     const gaClick = fromId ? ` data-ga="fallback_click" data-ga-from="${esc(fromId)}" data-ga-to="${esc(f.id)}" data-ga-loc="is_down_page"` : ''
     const nameHtml = fbSlug ? `<a href="/is-${esc(fbSlug)}-down" style="color:#e6edf3"${gaClick}>${esc(f.name)}</a>` : esc(f.name)
+    // #842 — prominent, disclosed OUTBOUND "Open" button so a panic visitor can act on the
+    // (unpaid, Score-ranked) recommendation. `rel="nofollow"` = the accurate signal for an UNPAID
+    // editorial link (matches the "not paid" disclosure); `sponsored` is deliberately NOT used — it's
+    // Google's paid-placement marker and would contradict the disclosure. Add `sponsored` only if/when
+    // a service becomes an actual paid sponsor. GA via the delegated [data-ga] listener (CSP-clean).
+    const outUrl = outboundReferralUrl(f.id)
+    if (outUrl) anyOutbound = true
+    const tryBtn = outUrl
+      ? `<a class="fallback-try" href="${esc(outUrl)}" target="_blank" rel="nofollow noopener noreferrer" data-ga="outbound_fallback_click" data-ga-from="${esc(fromId ?? '')}" data-ga-to="${esc(f.id)}" data-ga-loc="is_down_page" aria-label="Open ${esc(f.name)} (opens provider site)">Open &#8599;</a>`
+      : ''
     return `<div class="fallback-item">
 <span class="fallback-name">${nameHtml}</span>
-<span class="fallback-score mono">${scoreText} &nbsp; <span style="color:${color}">${statusEmoji(f.status)} ${label}</span></span>
+<span class="fallback-right"><span class="fallback-score mono">${scoreText} &nbsp; <span style="color:${color}">${statusEmoji(f.status)} ${label}</span></span>${tryBtn}</span>
 </div>`
   }).join('\n')
 
   return `<h2>Alternatives When ${esc(seo.displayName)} is Down</h2>
 <div class="card">
 ${items}
+${anyOutbound ? `<p class="mono fallback-disclosure">Open &#8599; goes to the provider site &middot; ranked by AIWatch Score, not paid.</p>` : ''}
 <div class="links" style="margin-top:12px">
 <a href="https://ai-watch.dev/#ranking" data-ga="click_ranking" data-ga-loc="is_down_page" data-ga-source="alternatives">Reliability rankings &rarr;</a>
 <a href="/reports/" data-ga="click_reports" data-ga-loc="is_down_page" data-ga-source="alternatives">Monthly reports &rarr;</a>
