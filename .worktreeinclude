@@ -1,0 +1,7 @@
+# Gitignored local config copied into every new git worktree (Claude Code `--worktree`,
+# subagent `isolation: worktree`, desktop parallel sessions). Gitignore syntax; only files
+# that match AND are gitignored are copied, so tracked files are never duplicated.
+# See docs/reference/parallel-agents.md.
+.env
+.env.local
+.dev.vars

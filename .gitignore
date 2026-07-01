@@ -55,3 +55,6 @@ mempalace.yaml
 .claude/mcp.json
 .claude/scheduled_tasks.lock
 .claude/hook-audit.jsonl
+
+# Parallel-agent worktrees (Claude Code `--worktree`; see docs/reference/parallel-agents.md)
+.claude/worktrees/

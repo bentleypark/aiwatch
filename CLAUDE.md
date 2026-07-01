@@ -146,6 +146,17 @@ gh pr create --title "fix: description (#123)" --body "..."
 gh pr merge --squash --delete-branch
 ```
 
+### Parallel sessions (git worktrees)
+
+To run multiple AI-agent sessions on this repo at once without file/git/port collisions, use
+git worktrees — `claude --worktree <name>` (or `git worktree add`). **Launched from the VS Code
+extension button** (no `--worktree` flag)? Say **"work in a worktree"** right after the session
+starts — Claude relocates via the `EnterWorktree` tool (the Desktop app auto-creates one per
+session; the extension does not). `.worktreeinclude` copies `.env`/`.dev.vars` into each; run
+`npm install` per worktree; offset dev-server ports by `+100·N` per slot; **deployment stays
+sequential** (single prod Worker/KV). Full workflow + launch-method table + port table:
+**[docs/reference/parallel-agents.md](docs/reference/parallel-agents.md)**.
+
 ## Development Workflow
 
 > **IMPORTANT**: The full step-by-step runbook (each step's detail, the 4 non-negotiable gates, and
