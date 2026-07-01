@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatPushLine, formatAccuracyLine } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatPushLine, formatAccuracyLine, formatReferralLine } from '../daily-summary'
 import type { ServiceStatus } from '../types'
 import type { AccuracyStats } from '../incident-history'
 
@@ -580,6 +580,22 @@ describe('buildDailySummary — #548 webhook delta + feed section', () => {
     const out = buildDailySummary({ ...base, feedTraffic: { all: 10, service: 5, total: 15 } })
     expect(out).toContain('📡 **Feed Polls (RSS/Slack)**')
     expect(out).toContain('Last 24h: 15')
+  })
+})
+
+describe('formatReferralLine (#842 — outbound referral evidence)', () => {
+  const svcs = [makeSvc({ id: 'gemini', name: 'Gemini API' }), makeSvc({ id: 'openai', name: 'OpenAI API' })]
+  it('renders total + top-3 destination breakdown (by name, count-desc)', () => {
+    const line = formatReferralLine({ total: 5, byService: { gemini: 3, openai: 2 } }, svcs)
+    expect(line).toBe('\n🔗 **Outbound Referrals**: 5 (Gemini API 3 · OpenAI API 2)')
+  })
+  it('falls back to the id when the service name is unknown', () => {
+    expect(formatReferralLine({ total: 1, byService: { zzz: 1 } }, svcs)).toContain('zzz 1')
+  })
+  it('is empty until ≥1 click (null / 0 total)', () => {
+    expect(formatReferralLine(null, svcs)).toBe('')
+    expect(formatReferralLine(undefined, svcs)).toBe('')
+    expect(formatReferralLine({ total: 0, byService: {} }, svcs)).toBe('')
   })
 })
 

@@ -14,7 +14,7 @@ import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } f
 import { buildSupplyChainBanner } from './supply-chain'
 import { refreshStatusCacheOnChange } from './cache-refresh'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
-import { corsHeaders } from './cors'
+import { corsHeaders, matchOrigin } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
 import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, queryExtTraffic, countNewFeedItems } from './api-traffic'
@@ -1302,6 +1302,7 @@ import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './dai
 import { collectChangelogs, getStaleSources } from './changelog'
 import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
+import { parseReferralBody, recordReferral, type ReferralCounts } from './referral'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
 import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
@@ -2302,6 +2303,14 @@ export default {
           // #815 — Tier-1 ntfy push count (#778 observability)
           const pushCount = parseInt((await env.STATUS_CACHE.get(`push:count:${today}`).catch(() => null)) ?? '0', 10) || 0
 
+          // #842 — consent-free outbound-referral counts (is-down "Open ↗" beacon). null on absence/parse fail.
+          let referralCounts: ReferralCounts | null = null
+          try {
+            const rRaw = await env.STATUS_CACHE.get(`referral:out:${today}`).catch(() => null)
+            // Guard BOTH fields: a corrupt value with a non-object byService would throw in formatReferralLine's Object.entries.
+            if (rRaw) { const p = JSON.parse(rRaw); if (p && typeof p.total === 'number' && p.byService && typeof p.byService === 'object') referralCounts = p }
+          } catch (err) { console.warn('[daily-summary] referral read failed:', err instanceof Error ? err.message : err) }
+
           // Count active webhook subscriptions. Since #486 PR3 this is the number of confirmed
           // server-side subscriptions (webhook:sub:*) — the source of truth now that delivery is
           // server-side (replaced the legacy webhook:reg:* count removed with the browser relay).
@@ -2497,6 +2506,7 @@ export default {
             incidentCountToday: { newCount: result.newCount, resolvedCount: result.resolvedCount },
             alertCounts,
             pushCount,
+            referralCounts,
             accuracy,
             webhookCounts,
             deliveryCounts,
@@ -2559,6 +2569,35 @@ export default {
     const cors = corsHeaders(origin, env.ALLOWED_ORIGIN)
 
     // Vitals endpoint — uses main CORS (origin-restricted, not open to all)
+    // #842 — consent-free outbound-referral beacon (the is-down "Open ↗" wedge fetch-keepalive POSTs
+    // here on click). GA's outbound_fallback_click is the consent-gated floor; this is the honest
+    // count for the sponsor-evidence metric. Mirrors /api/vitals (CORS, best-effort waitUntil write).
+    if (url.pathname === '/api/referral') {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors })
+      if (request.method === 'POST') {
+        // #842 abuse guard (review #1): the endpoint is public + does a KV read-modify-write per
+        // request, so a flood could inflate the sponsor-evidence count AND burn the KV write budget.
+        // CORS headers alone don't stop a non-browser client, so REJECT before the write when the
+        // Origin isn't allowlisted (a real browser beacon always sends its Origin; curl/cross-origin
+        // embeds are dropped). Not bulletproof — a script can forge the header — but blocks casual abuse.
+        if (!matchOrigin(origin, env.ALLOWED_ORIGIN)) return new Response(null, { status: 403, headers: cors })
+        try {
+          const parsed = parseReferralBody(await request.json(), new Set(SERVICES.map(s => s.id)))
+          if (!parsed) return new Response(null, { status: 400, headers: cors })
+          if (!env.STATUS_CACHE) return new Response(null, { status: 503, headers: cors })
+          const today = new Date().toISOString().split('T')[0]
+          ctx.waitUntil(recordReferral(env.STATUS_CACHE, today, parsed.to).then((ok) => {
+            if (!ok) console.warn('[referral] KV write failed for', parsed.to)
+          }))
+          return new Response(null, { status: 204, headers: cors })
+        } catch (err) {
+          if (err instanceof SyntaxError) return new Response(null, { status: 400, headers: cors })
+          console.error('[referral] ingest error:', err instanceof Error ? err.message : err)
+          return new Response(null, { status: 500, headers: cors })
+        }
+      }
+    }
+
     if (url.pathname === '/api/vitals') {
       if (request.method === 'OPTIONS') {
         return new Response(null, { status: 204, headers: cors })
