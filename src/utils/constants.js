@@ -82,6 +82,59 @@ export function categoryRankOf(id) {
 // Keep in sync with worker/src/fallback.ts EXCLUDE_FALLBACK
 export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'pinecone', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform, like replicate/huggingface)
 
+// #842 — outbound referral wedge. Product/homepage URL per service that can be RECOMMENDED as a
+// fallback (Analyze modal / Overview ActionBanner), so an outage-moment visitor can ACT on the
+// (Score-ranked, UNPAID) recommendation — and AIWatch can measure the referral (the Rung-1 sponsor
+// evidence, #637/#842). NOT an endorsement or paid placement — disclosed + rel="nofollow", rankings
+// stay Score-only. Kept BYTE-IDENTICAL to the Edge mirror in api/is-down/slug-map.ts (pinned by
+// service-site-url-sync test). A missing id → no outbound affordance (graceful).
+export const SERVICE_SITE_URL = {
+  // LLM APIs
+  claude: 'https://claude.com', openai: 'https://platform.openai.com', gemini: 'https://ai.google.dev',
+  mistral: 'https://mistral.ai', cohere: 'https://cohere.com', groq: 'https://groq.com',
+  together: 'https://together.ai', fireworks: 'https://fireworks.ai', cerebras: 'https://cerebras.ai',
+  deepseek: 'https://www.deepseek.com', xai: 'https://x.ai', perplexity: 'https://www.perplexity.ai',
+  openrouter: 'https://openrouter.ai',
+  // Voice & speech
+  elevenlabs: 'https://elevenlabs.io', assemblyai: 'https://www.assemblyai.com', deepgram: 'https://deepgram.com',
+  // Image
+  stability: 'https://stability.ai', bfl: 'https://bfl.ai',
+  // Video
+  runway: 'https://runwayml.com', luma: 'https://lumalabs.ai/dream-machine',
+  // Observability
+  langsmith: 'https://www.langchain.com/langsmith', helicone: 'https://helicone.ai', langfuse: 'https://langfuse.com',
+  // Coding agents
+  cursor: 'https://cursor.com', copilot: 'https://github.com/features/copilot', windsurf: 'https://windsurf.com',
+  junie: 'https://junie.jetbrains.com', claudecode: 'https://claude.com/product/claude-code', codex: 'https://developers.openai.com/codex',
+  // Apps
+  chatgpt: 'https://chatgpt.com', claudeai: 'https://claude.ai', deepseekapp: 'https://chat.deepseek.com',
+}
+
+/** Disclosed outbound referral URL for a recommended alternative (appends `ref=ai-watch.dev`).
+ *  Returns null when no curated URL → caller omits the "Open ↗" affordance. Mirror of the Edge helper. */
+export function outboundReferralUrl(id) {
+  const base = SERVICE_SITE_URL[id]
+  if (!base) return null
+  return `${base}${base.includes('?') ? '&' : '?'}ref=ai-watch.dev`
+}
+
+// Worker base for the consent-free referral beacon (mirrors src/utils/vitals.js ENDPOINT derivation).
+const REFERRAL_WORKER_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8788').replace(/\/api\/status$/, '')
+
+/** #842 — fire a CONSENT-FREE beacon to the worker referral counter (the honest sponsor-evidence
+ *  number; GA's outbound_fallback_click is the consent-gated floor). Best-effort, fire-and-forget.
+ *  DEPLOY-ORDER DEPENDENCY: the `POST /api/referral` endpoint ships in #851 — until that worker is
+ *  deployed the beacon 404s (harmless, dropped), so merge/deploy #851's worker before this matters. */
+export function sendReferralBeacon(fromId, toId) {
+  if (!toId) return
+  try {
+    fetch(`${REFERRAL_WORKER_BASE}/api/referral`, {
+      method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: fromId || '', to: toId }),
+    }).catch(() => {})
+  } catch { /* fire-and-forget */ }
+}
+
 // Per-service incident RSS feed (#432). The feed URL uses the /is-{slug}-down
 // page slug, which differs from the worker service ID for the few services
 // whose slug carries a dash. Mirror of SERVICE_ID_TO_SLUG in
