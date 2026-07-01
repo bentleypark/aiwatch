@@ -119,7 +119,9 @@ export function outboundReferralUrl(id) {
 }
 
 // Worker base for the consent-free referral beacon (mirrors src/utils/vitals.js ENDPOINT derivation).
-const REFERRAL_WORKER_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8788').replace(/\/api\/status$/, '')
+// `import.meta.env &&` guards a non-Vite import of this module (e.g. a Node/SSR context where
+// `import.meta.env` is undefined) so the top-level read can't throw. constants.js is imported widely.
+const REFERRAL_WORKER_BASE = ((import.meta.env && import.meta.env.VITE_API_URL) || 'http://localhost:8788').replace(/\/api\/status$/, '')
 
 /** #842 — fire a CONSENT-FREE beacon to the worker referral counter (the honest sponsor-evidence
  *  number; GA's outbound_fallback_click is the consent-gated floor). Best-effort, fire-and-forget.

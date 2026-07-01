@@ -28,6 +28,9 @@ export interface DailySummaryData {
   alertCounts?: { incidents: number; resolved: number; down: number; degraded: number; recovered: number } | null
   // #815 — Tier-1 ntfy phone pushes delivered today (#778); makes the otherwise-unobservable push visible.
   pushCount?: number | null
+  // #842 — consent-free outbound-referral counts (is-down "Open ↗" beacon) — the sponsor-evidence
+  // metric ("we sent N users to alternatives at the failover moment"). null/absent until a click lands.
+  referralCounts?: { total: number; byService: Record<string, number> } | null
   // #827 Feature 1 — AI recovery-prediction accuracy aggregated across the durable incident:history
   // corpus (predicted vs actual). Absent/empty until the corpus accumulates resolved incidents.
   accuracy?: AccuracyStats | null
@@ -163,6 +166,9 @@ export function buildDailySummary(data: DailySummaryData): string {
   // operator can confirm it fires on a real incident (closes the #778 verify gap).
   const pushLine = formatPushLine(pushCount)
   if (pushLine) lines.push(pushLine)
+  // #842 — outbound-referral count (is-down "Open ↗" clicks, consent-free). The Rung-1 sponsor evidence.
+  const referralLine = formatReferralLine(data.referralCounts, data.services)
+  if (referralLine) lines.push(referralLine)
   if (deliveryCounts && (deliveryCounts.discord > 0 || deliveryCounts.failed > 0)) {
     const failText = deliveryCounts.failed > 0 ? ` (${deliveryCounts.failed} failed)` : ''
     lines.push(`📨 **User Webhook Delivery**: ${deliveryCounts.discord} Discord${failText}`)
@@ -237,6 +243,26 @@ export function formatSubscriberDelta(newToday: number | null | undefined): stri
 export function formatPushLine(pushCount: number | null | undefined): string {
   if (!pushCount || pushCount <= 0) return ''
   return `\n📱 **Tier-1 Pushes Sent**: ${pushCount}`
+}
+
+/** #842 — outbound-referral count line: total is-down "Open ↗" click-throughs (consent-free beacon),
+ *  with a top-3 destination breakdown. Empty until ≥1 click, so the summary stays clean. This is the
+ *  Rung-1 sponsor evidence ("we send outage-moment users to the alternative"). Pure + unit-tested. */
+export function formatReferralLine(
+  referralCounts: { total: number; byService: Record<string, number> } | null | undefined,
+  services: ServiceStatus[],
+): string {
+  if (!referralCounts || referralCounts.total <= 0) return ''
+  const nameOf = new Map(services.map((s) => [s.id, s.name]))
+  // Self-guard byService (defense-in-depth — the caller already validates, but this exported pure
+  // fn shouldn't throw if a future caller passes a malformed object).
+  const byService = referralCounts.byService && typeof referralCounts.byService === 'object' ? referralCounts.byService : {}
+  const top = Object.entries(byService)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([id, n]) => `${nameOf.get(id) ?? id} ${n}`)
+    .join(' · ')
+  return `\n🔗 **Outbound Referrals**: ${referralCounts.total}${top ? ` (${top})` : ''}`
 }
 
 /** #827 Feature 1 — AI recovery-prediction accuracy, rendered as a labeled multi-line block so an
