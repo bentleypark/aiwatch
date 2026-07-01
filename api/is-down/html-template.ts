@@ -396,7 +396,7 @@ textarea.report-input{min-height:72px;resize:vertical}
 .share-kakao{background:#FEE500;color:#191919;border-color:#FEE500}
 .share-copy{background:#161b22;color:#e6edf3;border-color:rgba(255,255,255,0.14)}
 .share-copy.copied{background:#1a3d22;border-color:#3fb950;color:#3fb950}
-@media(max-width:600px){h1{font-size:22px}.container{padding:16px 12px}.incident-group>summary{flex-direction:column;align-items:flex-start;gap:2px}.incident-group-title{flex:none}.incident-group-meta{white-space:normal}}
+@media(max-width:600px){h1{font-size:22px}.container{padding:16px 12px}.incident-group>summary{flex-direction:column;align-items:flex-start;gap:2px}.incident-group-title{flex:none}.incident-group-meta{white-space:normal}.fallback-item{flex-wrap:wrap;gap:6px}.fallback-right{width:100%;justify-content:space-between}}
 </style>
 </head>
 <body>
@@ -433,17 +433,26 @@ function renderDelegatedListeners(): string {
   return `<script>
 document.addEventListener('click', function (e) {
   var g = e.target.closest('[data-ga]');
-  if (g && typeof gtag === 'function') {
-    var d = g.dataset, p = {};
-    if (d.gaLoc) p.location = d.gaLoc;
-    if (d.gaSource) p.source = d.gaSource;
-    if (d.gaSvc) p.service_id = d.gaSvc;
-    if (d.gaRegion) p.recommended_region = d.gaRegion;
-    if (d.gaFrom) p.from_service = d.gaFrom;
-    if (d.gaTo) p.to_service = d.gaTo;
-    if (d.gaMethod) { p.method = d.gaMethod; p.content_type = 'is_x_down'; }
-    if (d.gaItem) p.item_id = d.gaItem;
-    gtag('event', d.ga, p);
+  if (g) {
+    var d = g.dataset;
+    // #842 — consent-free outbound-referral beacon. Fires regardless of GA consent (GA's
+    // outbound_fallback_click is the consent-gated floor; this is the honest count for the sponsor
+    // evidence). connect-src allows the worker origin; the link opens in a new tab so the page stays.
+    if (d.ga === 'outbound_fallback_click' && d.gaTo) {
+      try { fetch('https://aiwatch-worker.p2c2kbf.workers.dev/api/referral', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: d.gaFrom || '', to: d.gaTo }) }).catch(function () {}); } catch (e2) {}
+    }
+    if (typeof gtag === 'function') {
+      var p = {};
+      if (d.gaLoc) p.location = d.gaLoc;
+      if (d.gaSource) p.source = d.gaSource;
+      if (d.gaSvc) p.service_id = d.gaSvc;
+      if (d.gaRegion) p.recommended_region = d.gaRegion;
+      if (d.gaFrom) p.from_service = d.gaFrom;
+      if (d.gaTo) p.to_service = d.gaTo;
+      if (d.gaMethod) { p.method = d.gaMethod; p.content_type = 'is_x_down'; }
+      if (d.gaItem) p.item_id = d.gaItem;
+      gtag('event', d.ga, p);
+    }
   }
   var a = e.target.closest('[data-action]');
   if (!a) return;

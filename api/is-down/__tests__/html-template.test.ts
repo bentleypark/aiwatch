@@ -87,7 +87,7 @@ describe('renderFallbacks — outbound referral wedge (#842)', () => {
       { id: 'bedrock', name: 'Amazon Bedrock', score: 90, status: 'operational' },
     ])
     expect(html).not.toContain('class="fallback-try"')
-    expect(html).not.toContain('outbound_fallback_click')
+    expect(html).not.toContain('data-ga="outbound_fallback_click"') // the BUTTON attribute (the delegated listener script always contains the bare event name)
     expect(html).not.toContain('ranked by AIWatch Score, not paid')
   })
   it('mixed list — exactly one outbound button for the curated alt, disclosure shown once', () => {
