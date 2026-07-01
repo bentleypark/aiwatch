@@ -9,12 +9,15 @@ import {
   findSimilarHistory,
   formatDurationMin,
   predictedVsActualText,
+  resolvedAtOf,
+  resolvedPredictionLine,
   summarizeAccuracy,
   historyKey,
   HISTORY_CAP,
   type IncidentHistoryRecord,
 } from '../incident-history'
 import type { KVLike } from '../utils'
+import type { Incident } from '../types'
 
 function makeKV(initial?: Record<string, string>) {
   const store = new Map<string, string>(Object.entries(initial ?? {}))
@@ -357,6 +360,77 @@ describe('predictedVsActualText (alert/feed phrase, mirrors SPA wording)', () =>
   it('returns null when no prediction to compare', () => {
     expect(predictedVsActualText({ durationMin: 42 })).toBeNull()
     expect(predictedVsActualText({ predictedRecoveryHours: 0, durationMin: 42 })).toBeNull()
+  })
+})
+
+const inc = (over: Partial<Incident> = {}): Incident => ({
+  id: 'inc-1',
+  title: 'Elevated error rates',
+  status: 'resolved',
+  impact: 'major',
+  startedAt: '2026-07-01T00:00:00.000Z',
+  resolvedAt: '2026-07-01T00:45:00.000Z', // 45m actual
+  duration: '45m',
+  timeline: [],
+  ...over,
+})
+
+describe('resolvedAtOf (shared with rss.ts /feed)', () => {
+  it('prefers explicit resolvedAt', () => {
+    expect(resolvedAtOf(inc({ resolvedAt: '2026-07-01T00:45:00.000Z' }))).toBe('2026-07-01T00:45:00.000Z')
+  })
+  it('falls back to the last "resolved" timeline entry when resolvedAt absent', () => {
+    const i = inc({
+      resolvedAt: null,
+      timeline: [
+        { stage: 'investigating', text: null, at: '2026-07-01T00:05:00.000Z' },
+        { stage: 'resolved', text: null, at: '2026-07-01T00:40:00.000Z' },
+      ],
+    })
+    expect(resolvedAtOf(i)).toBe('2026-07-01T00:40:00.000Z')
+  })
+  it('prefers a "resolved" entry over a LATER non-resolved entry (the reverse-scan point)', () => {
+    // A postmortem/monitoring update appended AFTER resolution must not push the resolution time later.
+    const i = inc({
+      resolvedAt: null,
+      timeline: [
+        { stage: 'resolved', text: null, at: '2026-07-01T00:40:00.000Z' },
+        { stage: 'monitoring', text: null, at: '2026-07-01T00:50:00.000Z' },
+      ],
+    })
+    expect(resolvedAtOf(i)).toBe('2026-07-01T00:40:00.000Z')
+  })
+  it('falls back to the last timeline entry, then startedAt', () => {
+    expect(resolvedAtOf(inc({ resolvedAt: null, timeline: [{ stage: 'monitoring', text: null, at: '2026-07-01T00:30:00.000Z' }] }))).toBe('2026-07-01T00:30:00.000Z')
+    expect(resolvedAtOf(inc({ resolvedAt: null, timeline: [] }))).toBe('2026-07-01T00:00:00.000Z')
+  })
+})
+
+describe('resolvedPredictionLine (#846 — Discord Incident-Resolved, matches /feed wording)', () => {
+  it('builds the same single-line phrasing as Slack /feed', () => {
+    // 45m actual vs 0.75h (45m) estimate → within
+    expect(resolvedPredictionLine(0.75, inc())).toBe('🎯 AI prediction: 45m (within ~45m est.)')
+  })
+  it('reflects an under-prediction (actual exceeded estimate)', () => {
+    // 45m actual vs 0.25h (15m) estimate → over
+    expect(resolvedPredictionLine(0.25, inc())).toBe('🎯 AI prediction: 45m (over ~15m est.)')
+  })
+  it('reflects an over-prediction (actual well under estimate) through the wrapper', () => {
+    // 45m actual vs 2h estimate → faster than
+    expect(resolvedPredictionLine(2, inc())).toBe('🎯 AI prediction: 45m (faster than ~2h est.)')
+  })
+  it('derives actual duration from the timeline when resolvedAt is absent (no drift vs /feed)', () => {
+    const i = inc({ resolvedAt: null, timeline: [{ stage: 'resolved', text: null, at: '2026-07-01T00:45:00.000Z' }] })
+    expect(resolvedPredictionLine(0.75, i)).toBe('🎯 AI prediction: 45m (within ~45m est.)')
+  })
+  it('returns null when the analysis carried no numeric estimate (N/A → omit the line)', () => {
+    expect(resolvedPredictionLine(undefined, inc())).toBeNull()
+    expect(resolvedPredictionLine(null, inc())).toBeNull()
+  })
+  it('returns null for a non-positive estimate (predictedVsActualText fall-through, line omitted)', () => {
+    // Clears the `== null` guard but predictedVsActualText rejects <= 0 → still null.
+    expect(resolvedPredictionLine(0, inc())).toBeNull()
+    expect(resolvedPredictionLine(-1, inc())).toBeNull()
   })
 })
 

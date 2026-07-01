@@ -8,7 +8,7 @@ import { getGroupedFallbacks } from './fallback'
 import { defuseAutolinkDomain } from './alerts'
 import { formatRecoveryDisplay } from './ai-analysis'
 import { appendStatusHint, appendUtm } from './utils'
-import { durationMinOf, predictedVsActualText } from './incident-history'
+import { durationMinOf, predictedVsActualText, resolvedAtOf } from './incident-history'
 
 const SITE = 'https://ai-watch.dev'
 
@@ -257,15 +257,9 @@ function buildIncidentServiceMap(services: ServiceStatus[]): Map<string, string[
 // the distinct guid a status flip to resolved never re-notifies a subscriber.
 type ItemKind = 'active' | 'resolved'
 
-// Resolution timestamp: explicit resolvedAt, else the last 'resolved' timeline entry, else the
-// last timeline entry, else the start (so the resolved item never sorts before its own start).
-function resolvedAtOf(inc: Incident): string {
-  if (inc.resolvedAt) return inc.resolvedAt
-  for (let i = inc.timeline.length - 1; i >= 0; i--) {
-    if (inc.timeline[i].stage === 'resolved') return inc.timeline[i].at
-  }
-  return inc.timeline.length > 0 ? inc.timeline[inc.timeline.length - 1].at : inc.startedAt
-}
+// Resolution timestamp (explicit resolvedAt → last 'resolved' timeline entry → last entry → start)
+// is shared with the Discord Incident-Resolved embed via incident-history's resolvedAtOf (#846), so
+// both surfaces derive the same actual recovery time.
 
 // "Try instead" line for an active item when the service is impaired (#467). Reuses the same
 // tier-aware ranking as Discord/dashboard fallbacks. services:latest carries no aiwatchScore,
