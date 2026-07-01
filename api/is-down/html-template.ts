@@ -51,6 +51,9 @@ export interface ServiceData {
   /** #604/#606 — per-component snapshot. Curated subset or dynamic displayAllComponents set
    *  preserved by the worker; `group` (e.g. 'Models') marks components that collapse together. */
   components?: Array<{ id: string; name: string; status: 'operational' | 'degraded' | 'down'; group?: string }>
+  /** When true, the breakdown renders its sections in component-array order (groups interleaved among
+   *  surface rows), instead of surfaces-first-then-groups (replicate). */
+  componentGroupsInline?: boolean
 }
 
 interface Fallback {
@@ -699,7 +702,9 @@ function componentGroup(name: string, members: Comp[]): string {
 
 // #604/#606 — per-component breakdown. Reads service.components (curated subset or the dynamic
 // displayAllComponents set). Ungrouped "surface" components render as individual rows; grouped
-// components (group:'Models') collapse under a <details> header — the official Endpoints/Models split.
+// components (group: any official-page group label — 'Models' for cohere/groq, or replicate's
+// API / Inference and Training / Website / Support via componentGroups) collapse under a <details>
+// header. With componentGroupsInline the sections render in component-array order (see below).
 export function renderComponents(service: ServiceData | null): string {
   const components = service?.components as Comp[] | undefined
   if (!components || components.length === 0) return ''
@@ -708,10 +713,31 @@ export function renderComponents(service: ServiceData | null): string {
   const anyIssue = components.some((c) => c.status !== 'operational')
   const border = anyIssue ? '#e86235' : '#3fb950'
 
+  // Default: surface rows first, then all group blocks. componentGroupsInline (replicate): walk the
+  // component array, emitting each group block + each consecutive run of surface rows where it first
+  // appears — so the curated array order IS the layout (mirrors the dashboard ComponentBreakdown).
+  let body: string
+  if (service?.componentGroupsInline) {
+    const parts: string[] = []
+    const emitted = new Set<string>()
+    let run: Comp[] = []
+    for (const c of components) {
+      if (c.group) {
+        if (run.length) { parts.push(run.map(componentRow).join('')); run = [] }
+        if (!emitted.has(c.group)) { emitted.add(c.group); parts.push(componentGroup(c.group, components.filter((m) => m.group === c.group))) }
+      } else {
+        run.push(c)
+      }
+    }
+    if (run.length) parts.push(run.map(componentRow).join(''))
+    body = parts.join('')
+  } else {
+    body = surfaces.map(componentRow).join('') + groupNames.map((g) => componentGroup(g, components.filter((c) => c.group === g))).join('')
+  }
+
   return `<div class="card" style="border-left:3px solid ${border}">
 <div class="mono" style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#8b949e;margin-bottom:10px">Component Status</div>
-${surfaces.map(componentRow).join('')}
-${groupNames.map((g) => componentGroup(g, components.filter((c) => c.group === g))).join('')}
+${body}
 </div>`
 }
 

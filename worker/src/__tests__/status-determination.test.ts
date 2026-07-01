@@ -31,6 +31,7 @@ interface StatusConfig {
   displayAllComponents?: boolean
   componentDenylist?: string[]
   componentSurfaces?: string[]
+  componentGroups?: Record<string, string>
 }
 
 interface SummaryData {
@@ -435,12 +436,38 @@ describe('resolveSvcComponents — per-component snapshot (#604)', () => {
     }
     expect(resolveSvcComponents(both, summary).map((c) => c.id)).toEqual(['c', 'd'])
   })
+
+  it('tags displayComponentIds with componentGroups labels; unmapped ids stay ungrouped', () => {
+    const cfg: StatusConfig = {
+      displayComponentIds: ['http', 'stream', 'h100', 'registry'],
+      componentGroups: { http: 'API', stream: 'API', h100: 'Inference and Training' },
+    }
+    const summary: SummaryData = {
+      status: { indicator: 'minor' },
+      components: [
+        { id: 'http', name: 'HTTP API', status: 'operational' },
+        { id: 'stream', name: 'Streaming API', status: 'operational' },
+        { id: 'h100', name: 'H100 Hardware', status: 'degraded_performance' },
+        { id: 'registry', name: 'Registry', status: 'operational' },
+      ],
+    }
+    const out = resolveSvcComponents(cfg, summary)
+    expect(out.map((c) => [c.id, c.group])).toEqual([
+      ['http', 'API'],
+      ['stream', 'API'],
+      ['h100', 'Inference and Training'],
+      ['registry', undefined], // unmapped → top-level surface row
+    ])
+    expect(out.find((c) => c.id === 'h100')?.status).toBe('degraded')
+  })
 })
 
 describe('displayComponentIds config sanity (#606)', () => {
   // Exact curated counts — guards against a careless edit truncating the list
   // (the doc comments enumerate the excluded components, so the count is intentional).
-  const EXPECTED_COUNT: Record<string, number> = { elevenlabs: 7, replicate: 5 }
+  // replicate: API(HTTP/Streaming) + Inference and Training(5 hardware) + Website(Playground)
+  //            + 2 ungrouped surfaces (Registry/Official Models) + Support(Billing/Support Tickets) = 12
+  const EXPECTED_COUNT: Record<string, number> = { elevenlabs: 7, replicate: 12 }
 
   it('elevenlabs + replicate carry the exact curated displayComponentIds count and NO statusComponentIds (badge unchanged)', () => {
     for (const [id, count] of Object.entries(EXPECTED_COUNT)) {
@@ -452,6 +479,36 @@ describe('displayComponentIds config sanity (#606)', () => {
       // Display-only: must not feed the worst-of badge (#606 decoupling), so no statusComponentIds.
       expect(svc.statusComponentIds, id).toBeUndefined()
     }
+  })
+
+  it('every componentGroups key is a member of that service\'s displayComponentIds (no typo\'d/orphan ULID)', () => {
+    // A componentGroups key not present in displayComponentIds is dead config: it would silently fail
+    // to tag any rendered component (the component stays an ungrouped surface row), so a mistyped ULID
+    // would never group + never error. This pins the map to the curated id list.
+    for (const svc of SERVICES) {
+      if (!svc.componentGroups) continue
+      const ids = new Set(svc.displayComponentIds ?? svc.statusComponentIds ?? [])
+      for (const key of Object.keys(svc.componentGroups)) {
+        expect(ids.has(key), `${svc.id}: componentGroups key ${key} not in displayComponentIds`).toBe(true)
+      }
+    }
+  })
+
+  it('replicate componentGroups maps the official-page groups onto the right components', () => {
+    const replicate = SERVICES.find((s) => s.id === 'replicate')!
+    expect(replicate.componentGroupsInline, 'replicate uses array-order interleave').toBe(true)
+    // The 2 ungrouped surfaces (Registry, Official Models) are the only displayComponentIds entries
+    // absent from componentGroups; the other 10 carry an official group label.
+    const grouped = new Set(Object.keys(replicate.componentGroups!))
+    const ungrouped = replicate.displayComponentIds!.filter((id) => !grouped.has(id))
+    expect(ungrouped).toEqual(['01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2']) // Registry, Official Models
+    // The 5 hardware ids all carry the "Inference and Training" label.
+    const hardware = ['01JRG9WZ84ABEY9ZJBB72CJBS8', '01JRGA5ZQKJX2NMG45VCFP9Y9C', '01JRGA5ZQKF3SW674WMFD92PAC', '01JS0A88GKRF5DNW74REX185D3', '01JS0A88GKZAMP8BD3W9BCCBWX']
+    for (const id of hardware) expect(replicate.componentGroups![id]).toBe('Inference and Training')
+    // The official group SET matches the page (API / Inference and Training / Website / Support).
+    expect(new Set(Object.values(replicate.componentGroups!))).toEqual(
+      new Set(['API', 'Inference and Training', 'Website', 'Support']),
+    )
   })
 
   it('#685 — surfaces a degraded ElevenCreative in the elevenlabs breakdown (no more all-green-while-badge-degraded)', () => {
