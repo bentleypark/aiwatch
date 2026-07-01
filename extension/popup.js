@@ -176,6 +176,7 @@ async function submitReport(evt) {
     svcId: $('report-svc').value,
     category: $('report-cat').value,
     description: $('report-desc').value.trim(),
+    source: 'ext', // #837 — lets the worker tally extension-originated reports (daily summary)
   }
   try {
     const res = await fetch(REPORT_URL, {

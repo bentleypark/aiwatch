@@ -146,6 +146,54 @@ export async function queryFeedTraffic(
   }
 }
 
+// ── Chrome-extension poll volume (#837) ───────────────────────────────────
+// The extension polls /api/status/cached?src=ext-claude, tagged `ext-claude` in the SAME
+// aiwatch_statusline dataset (index1). Counting it gives a CONSENT-FREE active-usage proxy
+// (no in-extension analytics needed — see the extension's "zero data collection" privacy bar).
+// Single total (no blob split): every ext poll is one variant.
+const EXT_INDEX = 'ext-claude'
+
+export function buildExtTrafficSql(dataset = V1_DATASET): string {
+  return (
+    `SELECT SUM(_sample_interval) AS requests ` +
+    `FROM ${dataset} ` +
+    `WHERE index1 = '${EXT_INDEX}' AND timestamp > NOW() - INTERVAL '1' DAY ` +
+    `FORMAT JSON`
+  )
+}
+
+/** Parse the AE SQL ext-claude JSON into a single last-24h poll total. Tolerant of string/number. */
+export function parseExtTrafficResponse(json: unknown): number | null {
+  const data = (json as { data?: unknown })?.data
+  if (!Array.isArray(data) || data.length === 0) return null
+  const parsed = Number((data[0] as { requests?: unknown })?.requests)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+/** Query the last-24h extension poll count via the AE SQL API. Best-effort: null on missing creds /
+ *  HTTP failure / unparseable response. Never throws. */
+export async function queryExtTraffic(
+  accountId: string | undefined,
+  token: string | undefined,
+  fetchImpl: typeof fetch = fetch,
+): Promise<number | null> {
+  if (!accountId || !token) return null
+  try {
+    const res = await fetchImpl(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: buildExtTrafficSql() },
+    )
+    if (!res.ok) {
+      console.warn(`[wae] ext SQL query failed: HTTP ${res.status}`)
+      return null
+    }
+    return parseExtTrafficResponse(await res.json())
+  } catch (err) {
+    console.warn('[wae] ext SQL query error:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
 // ── New-feed-items count (#748) ───────────────────────────────────────────
 // The poll volume above is mostly EMPTY no-op fetches (Slack RSS polls ~every 15min regardless of
 // content). The figure that actually matters — how many alert-worthy items were published — is the

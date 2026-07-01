@@ -10,6 +10,9 @@ import {
   buildFeedTrafficSql,
   parseFeedTrafficResponse,
   queryFeedTraffic,
+  buildExtTrafficSql,
+  parseExtTrafficResponse,
+  queryExtTraffic,
   countFirstSeenWithin24h,
   countNewFeedItems,
 } from '../api-traffic'
@@ -270,5 +273,38 @@ describe('countNewFeedItems (#748)', () => {
   it('treats a failed per-key get as absent (not a throw)', async () => {
     const kv = kvOf({ 'feed:firstseen:a': '2026-06-22T23:00:00.000Z' }, { getThrows: true })
     expect(await countNewFeedItems(kv, NOW)).toBe(0)
+  })
+})
+
+describe('ext-claude traffic (#837)', () => {
+  it('buildExtTrafficSql filters index1=ext-claude, 24h window, single total', () => {
+    const sql = buildExtTrafficSql()
+    expect(sql).toContain("index1 = 'ext-claude'")
+    expect(sql).toContain('SUM(_sample_interval) AS requests')
+    expect(sql).toContain('FROM aiwatch_statusline')
+    expect(sql).toContain("INTERVAL '1' DAY")
+    expect(sql).not.toContain('GROUP BY') // single total, no variant split
+  })
+
+  it('parseExtTrafficResponse reads the single total (tolerant of string/number)', () => {
+    expect(parseExtTrafficResponse({ data: [{ requests: '4212' }] })).toBe(4212)
+    expect(parseExtTrafficResponse({ data: [{ requests: 7 }] })).toBe(7)
+    expect(parseExtTrafficResponse({ data: [{ requests: 'nope' }] })).toBe(0) // unparseable → 0
+    expect(parseExtTrafficResponse({ data: [] })).toBeNull() // no rows → null
+    expect(parseExtTrafficResponse({})).toBeNull()
+    expect(parseExtTrafficResponse(null)).toBeNull()
+  })
+
+  it('queryExtTraffic returns null without creds and never throws on failure', async () => {
+    expect(await queryExtTraffic(undefined, undefined)).toBeNull()
+    const boom = vi.fn().mockRejectedValue(new Error('network'))
+    expect(await queryExtTraffic('acc', 'tok', boom as unknown as typeof fetch)).toBeNull()
+    const notOk = vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    expect(await queryExtTraffic('acc', 'tok', notOk as unknown as typeof fetch)).toBeNull()
+  })
+
+  it('queryExtTraffic parses a successful response', async () => {
+    const ok = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [{ requests: 123 }] }) })
+    expect(await queryExtTraffic('acc', 'tok', ok as unknown as typeof fetch)).toBe(123)
   })
 })

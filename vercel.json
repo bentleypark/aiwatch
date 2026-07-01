@@ -3,7 +3,7 @@
   "ignoreCommand": "git diff --quiet HEAD^ HEAD -- src/ public/ index.html api/ vercel.json",
   "headers": [
     {
-      "source": "/((?!is-[^/]+-down(?:/|$)|(?:intro|badges|methodology|reports|confirm|api)(?:/|$)|feed(?:[./]|$)).*)",
+      "source": "/((?!is-[^/]+-down(?:/|$)|(?:intro|badges|methodology|extension-privacy|reports|confirm|api)(?:/|$)|feed(?:[./]|$)).*)",
       "headers": [
         {
           "key": "Content-Security-Policy",
@@ -59,6 +59,7 @@
     { "source": "/intro", "destination": "/api/intro" },
     { "source": "/methodology", "destination": "/api/methodology" },
     { "source": "/badges", "destination": "/api/badges" },
+    { "source": "/extension-privacy", "destination": "/api/extension-privacy" },
     { "source": "/confirm", "destination": "/api/confirm" },
     { "source": "/reports", "destination": "/api/reports" },
     { "source": "/reports/", "destination": "/api/reports" },
