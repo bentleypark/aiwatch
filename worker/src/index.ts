@@ -7,7 +7,7 @@ import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk } from './utils'
-import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
+import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
@@ -938,6 +938,31 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       }
     }
 
+    // #846 — the "Incident Resolved" embed (buildIncidentAlerts → alerted:res:) is the resolution
+    // path for ALL services, and previously carried NO prediction line — the 🎯 comparison landed
+    // ONLY on the rarely-firing Tier-1 status-edge alerted:recovered: path above, so it was effectively
+    // never shown on Discord while Slack /feed showed it for every resolved incident. Attach the SAME
+    // single-line wording as /feed (rss.ts descHtml), computed live from the still-warm ai:analysis
+    // estimate + the resolved incident's actual duration. Null (line omitted) when no numeric estimate
+    // existed — matching /feed, so the two surfaces stay identical. Best-effort: a KV/lookup failure
+    // must never abort the send, so it's guarded.
+    if (!recoverySection && alert.key.startsWith('alerted:res:')) {
+      try {
+        const incId = alert.key.slice('alerted:res:'.length)
+        const primaryId = alert.svcIds?.[0]
+        const svc = primaryId ? scored.find(s => s.id === primaryId) : undefined
+        const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : undefined
+        if (svc && inc) {
+          const raw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
+          const analysis = raw ? (JSON.parse(raw) as AIAnalysisResult) : null
+          const line = resolvedPredictionLine(analysis?.estimatedRecoveryHours, inc)
+          if (line) recoverySection = `\n${DIV}\n${line}`
+        }
+      } catch (err) {
+        console.warn('[cron] #846 resolved prediction line build failed (alert still sent):', alert.key, err instanceof Error ? err.message : err)
+      }
+    }
+
     // For new incidents: lookup service/incident once, then run AI analysis
     // Skip AI analysis for merged alerts (Together AI model-level grouping — individual model incidents don't need deep analysis)
     let analysisSection = ''
@@ -1008,7 +1033,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     // Build sectioned description: incident → AI analysis → (recovery prediction) → fallback → link
     const parts = [alert.description]
     if (analysisSection) parts.push(analysisSection)
-    if (recoverySection) parts.push(recoverySection) // #827 F4 — recovery alerts only
+    if (recoverySection) parts.push(recoverySection) // #827 F4 status-edge recovery + #846 alerted:res: prediction
     if (alert.fallbackText && alert.fallbackText.startsWith('👉')) {
       const list = alert.fallbackText.replace('👉 Suggested fallback: ', '')
       parts.push(`${DIV}\n👉 **SUGGESTED FALLBACK**\n• ${list}`)

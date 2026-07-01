@@ -19,6 +19,7 @@
 
 import type { KVLike } from './utils'
 import { kvPut } from './utils'
+import type { Incident } from './types'
 
 /** One durable resolved-incident record. `predicted*`/`affectedScope`/`model`
  *  are present only when an AI analysis existed at resolution time — a record is
@@ -277,6 +278,34 @@ export function predictedVsActualText(rec: { predictedRecoveryHours?: number; du
     : verdict === 'over-predicted' ? `faster than ~${predText} est.`
     : `within ~${predText} est.`
   return `${actualText} (${within})`
+}
+
+/** Resolution timestamp for an incident: explicit `resolvedAt`, else the last `resolved`
+ *  timeline entry, else the last timeline entry, else `startedAt` (so a duration derived from
+ *  it is never negative). Shared by the Slack `/feed` resolved item (rss.ts) and the Discord
+ *  Incident-Resolved embed (#846) so both surfaces measure the SAME actual recovery time. */
+export function resolvedAtOf(inc: Incident): string {
+  if (inc.resolvedAt) return inc.resolvedAt
+  for (let i = inc.timeline.length - 1; i >= 0; i--) {
+    if (inc.timeline[i].stage === 'resolved') return inc.timeline[i].at
+  }
+  return inc.timeline.length > 0 ? inc.timeline[inc.timeline.length - 1].at : inc.startedAt
+}
+
+/** #846 — plain-text "🎯 AI prediction: …" line for the Discord Incident-Resolved embed, matching
+ *  the Slack `/feed` line (rss.ts `descHtml`). Returns null when the analysis carried no numeric
+ *  estimate (model returned `N/A`/unparseable, or no analysis existed) — the line is omitted rather
+ *  than fabricating a comparison. `actual` = startedAt→resolvedAtOf, identical to the /feed side. */
+export function resolvedPredictionLine(
+  estimatedRecoveryHours: number | null | undefined,
+  inc: Incident,
+): string | null {
+  if (estimatedRecoveryHours == null) return null
+  const pva = predictedVsActualText({
+    predictedRecoveryHours: estimatedRecoveryHours,
+    durationMin: durationMinOf(inc.startedAt, resolvedAtOf(inc)),
+  })
+  return pva ? `🎯 AI prediction: ${pva}` : null
 }
 
 /** Aggregate prediction-accuracy stats over a set of history records (#827
