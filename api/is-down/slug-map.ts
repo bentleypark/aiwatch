@@ -130,8 +130,10 @@ export const SERVICE_ID_TO_SLUG: Record<string, string> = Object.fromEntries(
 // recommendation — and AIWatch can measure "we sent N users to alternatives at the failover moment"
 // (the Rung-1 sponsor evidence, #637/#842). Curated high-confidence set; a missing id → no outbound
 // affordance (graceful). NOT an endorsement or paid placement — the link is disclosed + `rel="nofollow"`
-// (unpaid editorial; `sponsored` would falsely mark it paid) and rankings stay Score-only. The SPA
-// mirror (if/when added) lives in src/utils/constants.js.
+// (unpaid editorial; `sponsored` would falsely mark it paid) and rankings stay Score-only. Kept
+// byte-identical to the SPA mirror in src/utils/constants.js (pinned by service-site-url-sync test).
+// EXCLUDE_FALLBACK services (replicate/huggingface/fal/pinecone/voyageai/modal/characterai/bedrock/
+// azureopenai) are intentionally absent — they never appear as a fallback candidate.
 export const SERVICE_SITE_URL: Record<string, string> = {
   // LLM APIs
   claude: 'https://claude.com', openai: 'https://platform.openai.com', gemini: 'https://ai.google.dev',
@@ -139,8 +141,19 @@ export const SERVICE_SITE_URL: Record<string, string> = {
   together: 'https://together.ai', fireworks: 'https://fireworks.ai', cerebras: 'https://cerebras.ai',
   deepseek: 'https://www.deepseek.com', xai: 'https://x.ai', perplexity: 'https://www.perplexity.ai',
   openrouter: 'https://openrouter.ai',
+  // Voice & speech (#842 category extension)
+  elevenlabs: 'https://elevenlabs.io', assemblyai: 'https://www.assemblyai.com', deepgram: 'https://deepgram.com',
+  // Image
+  stability: 'https://stability.ai', bfl: 'https://bfl.ai',
+  // Video
+  runway: 'https://runwayml.com', luma: 'https://lumalabs.ai/dream-machine',
+  // Observability
+  langsmith: 'https://www.langchain.com/langsmith', helicone: 'https://helicone.ai', langfuse: 'https://langfuse.com',
+  // Coding agents
+  cursor: 'https://cursor.com', copilot: 'https://github.com/features/copilot', windsurf: 'https://windsurf.com',
+  junie: 'https://junie.jetbrains.com', claudecode: 'https://claude.com/product/claude-code', codex: 'https://developers.openai.com/codex',
   // Apps
-  chatgpt: 'https://chatgpt.com', claudeai: 'https://claude.ai',
+  chatgpt: 'https://chatgpt.com', claudeai: 'https://claude.ai', deepseekapp: 'https://chat.deepseek.com',
 }
 
 /** Disclosed outbound referral URL for a recommended alternative (appends a `ref` param so the

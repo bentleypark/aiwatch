@@ -85,6 +85,8 @@ const ko = {
   'supplychain.region.degraded': '성능 저하',
   'supplychain.region.down': '주요 장애',
   'overview.banner.fallback': '대체 추천:',
+  'overview.banner.outboundNote': '↗ 제공사 사이트로 이동 · AIWatch Score 기준(광고 아님)',
+  'overview.banner.openAlt': '열기 ↗',
   'overview.banner.regionSwitch': '리전 전환:',
   'overview.banner.viewIssues': 'Issues 탭에서 확인',
   'overview.banner.viewIncidents': '인시던트 상세 확인',

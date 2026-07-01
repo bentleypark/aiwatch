@@ -3,7 +3,7 @@
 // because the worker can't import frontend code at runtime.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFallbacks, getGroupedFallbacksExcludingRegionSwitchable, hasRegionSwitch, shouldShowFallback, hasActiveIncident, SERVICE_CATEGORIES, ALL_SERVICE_IDS, categoryRankOf } from '../constants'
+import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFallbacks, getGroupedFallbacksExcludingRegionSwitchable, hasRegionSwitch, shouldShowFallback, hasActiveIncident, SERVICE_CATEGORIES, ALL_SERVICE_IDS, categoryRankOf, outboundReferralUrl, SERVICE_SITE_URL, EXCLUDE_FALLBACK } from '../constants'
 
 // #646 — the Overview renders one section per SERVICE_CATEGORIES bucket (llm/agents/voice/inference/
 // video/apps, #658). Its render has a defensive "other" catch-all for any service no bucket claims,
@@ -11,6 +11,21 @@ import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFa
 // the real failure mode (a new service added to ALL_SERVICE_IDS but forgotten in SERVICE_CATEGORIES →
 // it falls into "other") at the source, so it surfaces in unit tests rather than as a stray "Services"
 // section in the UI.
+describe('outboundReferralUrl (#842 SPA wedge)', () => {
+  it('appends a disclosed ref param to a curated URL', () => {
+    expect(outboundReferralUrl('gemini')).toBe('https://ai.google.dev?ref=ai-watch.dev')
+    expect(outboundReferralUrl('elevenlabs')).toBe('https://elevenlabs.io?ref=ai-watch.dev')
+  })
+  it('returns null for an uncurated / unknown id (graceful)', () => {
+    expect(outboundReferralUrl('bedrock')).toBeNull() // EXCLUDE_FALLBACK, intentionally absent
+    expect(outboundReferralUrl('zzz')).toBeNull()
+  })
+  it('every curated URL is https + no EXCLUDE_FALLBACK service has one', () => {
+    for (const u of Object.values(SERVICE_SITE_URL)) expect(u.startsWith('https://')).toBe(true)
+    for (const id of EXCLUDE_FALLBACK) expect(SERVICE_SITE_URL[id]).toBeUndefined()
+  })
+})
+
 describe('SERVICE_CATEGORIES partitions ALL_SERVICE_IDS (#646 Overview sections)', () => {
   const SECTION_KEYS = ['llm', 'agents', 'voice', 'inference', 'observability', 'video', 'image', 'apps'] // #658/#601/#756 — + voice + observability + video + image, dev-audience order
   const sectionIds = SECTION_KEYS.flatMap((k) => SERVICE_CATEGORIES[k].ids)

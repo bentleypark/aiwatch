@@ -13,7 +13,7 @@ import { trackEvent } from '../utils/analytics'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
 import { tagServiceForAlert } from '../utils/securityAlerts'
 import { computePredictionOutcome, withinEstimateText } from '../utils/predictionAccuracy'
-import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionSwitchable, ALL_SERVICES_FEED_URL } from '../utils/constants'
+import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionSwitchable, ALL_SERVICES_FEED_URL, outboundReferralUrl, sendReferralBeacon } from '../utils/constants'
 import RssCopyIcon from '../components/RssCopyIcon'
 import { regionStatusOf } from '../utils/regionStatus'
 import { buildCalendarFromIncidents } from '../utils/calendar'
@@ -601,25 +601,45 @@ function ActionBanner({ services, setPage, t }) {
         </div>
       )}
       {categoryGroups.length > 0 ? (
+        // #842 — inline fallback line (natural with the banner), but each alternative's name is
+        // followed by a compact "Open ↗" PILL button placed right after it (no wasted space-between
+        // gap, no heavy boxed area). Name → ServiceDetails (internal); pill → provider site (outbound).
         <div className="mono text-[11px] text-[var(--text2)]" style={{ marginTop: '4px' }}>
           <span>{t('overview.banner.fallback')}</span>
           {categoryGroups.map((grp, gi) => (
             <span key={`${grp.category}:${grp.label}`}>
               {gi > 0 && ' · '}
               {' '}<span className="text-[var(--text2)]">{grp.label} → </span>
-              {grp.items.map((f, fi) => (
-                <span key={f.id}>
-                  {fi > 0 && ', '}
-                  <span
-                    className="text-[var(--green)] hover:underline cursor-pointer"
-                    onClick={() => { trackEvent('fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); setPage({ name: 'service', serviceId: f.id }) }}
-                  >
-                    {f.name}{f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}
+              {grp.items.map((f, fi) => {
+                const outUrl = outboundReferralUrl(f.id)
+                return (
+                  <span key={f.id} style={{ whiteSpace: 'nowrap' }}>
+                    {fi > 0 && ', '}
+                    <span
+                      className="text-[var(--green)] hover:underline cursor-pointer"
+                      onClick={() => { trackEvent('fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); setPage({ name: 'service', serviceId: f.id }) }}
+                    >
+                      {f.name}{f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}
+                    </span>
+                    {outUrl && (
+                      <a
+                        href={outUrl} target="_blank" rel="nofollow noopener noreferrer"
+                        className="text-[9px] rounded-sm border border-[var(--green)] text-[var(--green)] hover:bg-[var(--green)] hover:text-[var(--bg0)] no-underline"
+                        style={{ marginLeft: '4px', padding: '0 4px', verticalAlign: 'middle', lineHeight: '1.4' }}
+                        onClick={() => { trackEvent('outbound_fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); sendReferralBeacon('', f.id) }}
+                        aria-label={`Open ${f.name} (opens provider site)`}
+                      >{t('overview.banner.openAlt')}</a>
+                    )}
                   </span>
-                </span>
-              ))}
+                )
+              })}
             </span>
           ))}
+          {categoryGroups.some(g => g.items.some(f => outboundReferralUrl(f.id))) && (
+            <div className="text-[10px] text-[var(--text2)]" style={{ marginTop: '3px', opacity: 0.8 }}>
+              {t('overview.banner.outboundNote')}
+            </div>
+          )}
         </div>
       ) : null}
       {/* #641 — when there's no fallback recommendation we render nothing here (no
