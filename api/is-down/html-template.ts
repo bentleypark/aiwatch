@@ -418,7 +418,7 @@ ${renderBadgeEmbed(slug, seo)}
 ${renderFooter(slug)}
 
 </div>
-${renderDelegatedListeners()}
+${renderDelegatedListeners(service?.id ?? slug, service?.status === 'down' || service?.status === 'degraded')}
 ${cookieBannerHtml()}
 </body>
 </html>`
@@ -429,8 +429,22 @@ ${cookieBannerHtml()}
 // -method / -item); the copy/share buttons fire from data-action, calling the global functions
 // defined in the renderCTA / renderShareButtons inline scripts (looked up at click time, so script
 // order doesn't matter). This <script> is hashed into the page CSP by the api/is-down.ts handler.
-function renderDelegatedListeners(): string {
+function renderDelegatedListeners(svcId: string, active: boolean): string {
   return `<script>
+// #842-B — consent-free outage-moment audience beacon. Fires once on load, OUTSIDE any GA/consent
+// guard (no cookie, no PII: the referrer is reduced to its HOSTNAME client-side). Body = { svc,
+// ref(host), utm(utm_source), active }; classifyReferrer folds ref+utm to a fixed source bucket
+// server-side. `active` is the SSR-time outage status — note is-down is edge-cached (s-maxage=60),
+// so within that ≤60s window a cached page can tag a view with a stale active/clear flag; the metric
+// is an approximate consent-free proxy (see the module docstring). → one WAE point → daily Outage Audience.
+(function () {
+  try {
+    var u = new URLSearchParams(location.search).get('utm_source') || '';
+    var r = '';
+    try { if (document.referrer) r = new URL(document.referrer).hostname; } catch (e0) {}
+    fetch('https://aiwatch-worker.p2c2kbf.workers.dev/api/pageview', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ svc: ${JSON.stringify(svcId)}, ref: r, utm: u, active: ${active ? 'true' : 'false'} }) }).catch(function () {});
+  } catch (e1) {}
+})();
 document.addEventListener('click', function (e) {
   var g = e.target.closest('[data-ga]');
   if (g) {

@@ -1303,6 +1303,7 @@ import { collectChangelogs, getStaleSources } from './changelog'
 import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { parseReferralBody, recordReferral, type ReferralCounts } from './referral'
+import { parsePageviewBody, recordOutageView, queryOutageAudience, type AudienceCounts } from './outage-audience'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
 import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
@@ -2456,6 +2457,16 @@ export default {
             if (newItems != null) feedTraffic = { ...feedTraffic, newItems }
           }
 
+          // #842-B — consent-free outage-moment audience (is-down page-load beacon → WAE). Last-24h
+          // views by source (x/search/feed/direct), split by active-outage window. null (section
+          // omitted) when the AE token/account is absent. The sponsor-evidence "outage-spike audience".
+          let audience: AudienceCounts | null = null
+          try {
+            audience = await queryOutageAudience(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+          } catch (err) {
+            console.warn('[daily-summary] outage audience read failed:', err instanceof Error ? err.message : err)
+          }
+
           // #837 — Chrome-extension activity (consent-free): last-24h poll volume (WAE `ext-claude`
           // tag) + today's extension-sourced report count (KV). Both best-effort/null-tolerant.
           let extPolls: number | null = null
@@ -2520,6 +2531,7 @@ export default {
             degradationNoStatusCounts,
             v1Traffic,
             feedTraffic,
+            audience,
             extActivity,
             reportCounts,
           })
@@ -2593,6 +2605,28 @@ export default {
         } catch (err) {
           if (err instanceof SyntaxError) return new Response(null, { status: 400, headers: cors })
           console.error('[referral] ingest error:', err instanceof Error ? err.message : err)
+          return new Response(null, { status: 500, headers: cors })
+        }
+      }
+    }
+
+    // #842-B — consent-free outage-moment audience beacon. The is-down page fires a page-load beacon
+    // here (outside any GA/consent guard) → one WAE data point per view, classified by inbound source
+    // and tagged with the active-outage flag → the daily "Outage Audience" line. No KV (WAE absorbs
+    // the viral-outage view spike; a per-view KV write would burn the budget). Origin-guarded like
+    // /api/referral so non-browser noise doesn't inflate the metric.
+    if (url.pathname === '/api/pageview') {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors })
+      if (request.method === 'POST') {
+        if (!matchOrigin(origin, env.ALLOWED_ORIGIN)) return new Response(null, { status: 403, headers: cors })
+        try {
+          const parsed = parsePageviewBody(await request.json(), new Set(SERVICES.map(s => s.id)))
+          if (!parsed) return new Response(null, { status: 400, headers: cors })
+          recordOutageView(env.ANALYTICS, parsed.source, parsed.active, parsed.svc)
+          return new Response(null, { status: 204, headers: cors })
+        } catch (err) {
+          if (err instanceof SyntaxError) return new Response(null, { status: 400, headers: cors })
+          console.error('[pageview] ingest error:', err instanceof Error ? err.message : err)
           return new Response(null, { status: 500, headers: cors })
         }
       }
