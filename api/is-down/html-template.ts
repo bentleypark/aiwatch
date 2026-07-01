@@ -4,6 +4,7 @@ import type { ServiceSEO } from './seo-content'
 import { SERVICE_ID_TO_SLUG, SLUG_TO_SERVICE, RELATED_SLUGS, outboundReferralUrl } from './slug-map'
 import { groupIncidents, type GroupingIncident, type GroupRow, type SingleRow } from './incident-grouping'
 import { compareGroupedRows } from './incident-sort'
+import { buildShareUrl } from './share-url'
 // #482 — is-down uses HASH-based CSP (not nonce): it stays edge-cached (s-maxage=60), and the
 // handler hashes the rendered inline scripts per-response (a content hash survives caching, unlike a
 // random nonce). So the no-nonce static script forms are used here; the inline handlers are still
@@ -1166,10 +1167,14 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
   // outage ones didn't, so a share posted DURING an incident (the highest-share moment) dropped the
   // attribution. A consistent branding tail keeps it on every status (and makes the branding e2e
   // deterministic instead of incident-state-dependent).
+  // #842-B (#547): tag the SHARED url per channel with UTM so outage-moment inflow via the X app
+  // (which strips the referrer) is attributable instead of collapsing to GA4 (direct). The page's
+  // <link rel=canonical> stays clean — only the copy/X/Threads share links carry the tag.
+  const copyShareUrl = buildShareUrl(canonical, rawStatus, 'copy')
   const copyText = rawStatus === 'down'
-    ? `${pick(downTexts)}${aiSuffix}\nTracked live on AIWatch:\n${canonical}`
+    ? `${pick(downTexts)}${aiSuffix}\nTracked live on AIWatch:\n${copyShareUrl}`
     : rawStatus === 'degraded'
-    ? `${pick(degradedTexts)}${aiSuffix}\nTracked live on AIWatch:\n${canonical}`
+    ? `${pick(degradedTexts)}${aiSuffix}\nTracked live on AIWatch:\n${copyShareUrl}`
     : pick(operationalTexts)
 
   // X hashtag from display name (e.g. "Claude" → "#Claude", "GitHub Copilot" → "#GitHubCopilot")
@@ -1205,8 +1210,10 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
     ? `${xBase}${aiSnippet}${xTag}`
     : xBase
   const encodedText = encodeURIComponent(xText)
-  const encodedUrl = rawStatus !== 'operational' ? encodeURIComponent(canonical) : ''
-  const xUrlParam = encodedUrl ? `&amp;url=${encodedUrl}` : ''
+  // Per-channel UTM-tagged share URLs (#842-B); untagged for operational (no URL shared then).
+  const xShareUrl = rawStatus !== 'operational' ? encodeURIComponent(buildShareUrl(canonical, rawStatus, 'x')) : ''
+  const threadsShareUrl = rawStatus !== 'operational' ? encodeURIComponent(buildShareUrl(canonical, rawStatus, 'threads')) : ''
+  const xUrlParam = xShareUrl ? `&amp;url=${xShareUrl}` : ''
 
   // Use JSON.stringify for safe JS string interpolation (prevents XSS via backslash/newline).
   // These are used inside `<script>` bodies (script content is CDATA-like, the inner `"` is correct).
@@ -1222,7 +1229,7 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
 Post
 </a>
-<a href="https://www.threads.net/intent/post?text=${encodedText}${encodedUrl ? '%20' + encodedUrl : ''}" target="_blank" rel="noopener" class="share-btn share-threads" data-ga="share" data-ga-method="threads" data-ga-item="${esc(seo.displayName)}">
+<a href="https://www.threads.net/intent/post?text=${encodedText}${threadsShareUrl ? '%20' + threadsShareUrl : ''}" target="_blank" rel="noopener" class="share-btn share-threads" data-ga="share" data-ga-method="threads" data-ga-item="${esc(seo.displayName)}">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12.186 24h-.007c-3.581-.024-6.334-1.205-8.184-3.509C2.35 18.44 1.5 15.586 1.472 12.01v-.017c.03-3.579.879-6.43 2.525-8.482C5.845 1.205 8.6.024 12.18 0h.014c2.746.02 5.043.725 6.826 2.098 1.677 1.29 2.858 3.13 3.509 5.467l-2.04.569c-1.104-3.96-3.898-5.984-8.304-6.015-2.91.022-5.11.936-6.54 2.717C4.307 6.504 3.616 8.914 3.59 12c.025 3.083.718 5.496 2.057 7.164 1.432 1.783 3.631 2.698 6.54 2.717 2.623-.02 4.358-.631 5.8-2.045 1.647-1.613 1.618-3.593 1.09-4.798-.346-.789-.96-1.42-1.757-1.846-.184 2.985-1.086 5.27-2.844 6.39-1.34.853-3.065 1.062-4.62.559-1.72-.557-3.09-1.843-3.37-3.583-.203-1.264.066-2.418.757-3.248.86-1.032 2.278-1.578 3.952-1.578 2.37 0 3.877 1.128 4.453 2.325.153-.915.177-1.937.073-3.065l2.023-.235c.203 2.153.015 4.027-.735 5.483a5.997 5.997 0 0 0 1.013.607c1.27.605 2.567.665 3.557-.12 1.258-1 1.554-2.79 1.168-4.34-.478-1.922-1.806-3.598-3.853-4.85C17.257 5.282 14.907 4.725 12.2 4.708h-.015c-3.34.024-5.886 1.348-7.357 3.832C3.622 10.52 3.088 12.947 3.088 12c0-.96.533-3.504 1.74-5.488 1.41-2.319 3.756-3.568 6.857-3.655h.02c2.467.02 4.57.527 6.25 1.508 1.735 1.012 3.032 2.488 3.558 4.282.65 2.214.23 4.685-1.496 6.055-1.497 1.187-3.366 1.065-4.868.348a7.89 7.89 0 0 1-.778-.42c-.66 1.345-1.68 2.276-3.063 2.788-.986.365-2.103.432-3.243.19-1.882-.401-3.466-1.576-4.156-3.216-.475-1.13-.53-2.394-.155-3.586.468-1.484 1.634-2.632 3.288-3.063 1.918-.5 3.728-.074 5.02 1.182.574.558 1.005 1.26 1.283 2.094.228-.76.382-1.581.455-2.46l-.005-.038z"/></svg>
 Share
 </a>
