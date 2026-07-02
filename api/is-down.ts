@@ -11,7 +11,7 @@ export const config = { runtime: 'edge' }
 
 const WORKER_API = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 // Keep in sync with worker/src/fallback.ts and src/utils/constants.js
-const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8)
+const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8)
 
 // #378: notify the Worker when this Edge Function falls back to a degraded
 // render so an operator Discord alert fires. Worker handles 5-min KV dedup, so

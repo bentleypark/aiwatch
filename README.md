@@ -13,7 +13,7 @@
 
 **English** | [한국어](README.ko.md)
 
-Real-time monitoring dashboard for **42 AI services** — track status, latency, uptime, and incidents across major AI providers.
+Real-time monitoring dashboard for **43 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[Dashboard](https://ai-watch.dev)** · **[Landing Page](https://ai-watch.dev/intro)**
 
@@ -33,7 +33,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 ## Features
 
-- **Real-time status** — Operational / Degraded / Down for 42 AI services
+- **Real-time status** — Operational / Degraded / Down for 43 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
 - **Latency monitoring** — Direct API endpoint response time (RTT) for 29 probe-capable services, status page timing as fallback
 - **24h latency trend** — Chart.js line chart with 5-min probe snapshots
@@ -64,7 +64,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 ## Monitored Services
 
-Grouped by the dashboard's category taxonomy (42 total — sidebar filters / Overview sections mirror these).
+Grouped by the dashboard's category taxonomy (43 total — sidebar filters / Overview sections mirror these).
 
 ### LLM APIs (15)
 
@@ -105,7 +105,7 @@ Grouped by the dashboard's category taxonomy (42 total — sidebar filters / Ove
 | AssemblyAI | AssemblyAI | Atlassian Statuspage |
 | Deepgram | Deepgram | Atlassian Statuspage |
 
-### Inference & Infra (7)
+### Inference & Infra (8)
 
 | Service | Provider | Status Source |
 |---------|----------|---------------|
@@ -116,6 +116,7 @@ Grouped by the dashboard's category taxonomy (42 total — sidebar filters / Ove
 | turbopuffer | turbopuffer | Atlassian Statuspage (no uptime, probe-based) |
 | Voyage AI | Voyage AI | Atlassian Statuspage |
 | Modal | Modal | Better Stack RSS + uptime API |
+| Twelve Labs | Twelve Labs | Atlassian Statuspage |
 
 ### Observability (3)
 
@@ -166,7 +167,7 @@ Grouped by the dashboard's category taxonomy (42 total — sidebar filters / Ove
 Browser (React SPA, 60s polling)
   ↓
 Cloudflare Worker
-  ├── GET /api/status    → parallel fetch (42 services) → normalize
+  ├── GET /api/status    → parallel fetch (43 services) → normalize
   ├── GET /api/uptime    → daily uptime history
   └── POST /api/alert   → Discord webhook proxy (SSRF protected)
   ↓

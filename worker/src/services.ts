@@ -160,6 +160,14 @@ export const SERVICES: ServiceConfig[] = [
   // displayComponentIds (#606): API + User Dashboard. Display-only.
   { id: 'voyageai', name: 'Voyage AI', provider: 'Voyage AI', category: 'api', statusUrl: 'https://voyageai-status.statuspage.io', apiUrl: 'https://voyageai-status.statuspage.io/api/v2/summary.json', statusComponentId: 'g74wmxgm0zxr', displayComponentIds: ['g74wmxgm0zxr', 'p4zzcfjd8p5q'] },
   { id: 'modal', name: 'Modal', provider: 'Modal', category: 'api', statusUrl: 'https://status.modal.com', apiUrl: null, rssFeedUrl: 'https://status.modal.com/feed', betterStackUrl: 'https://status.modal.com', flapSuppression: true, componentDenylist: ['Website'] },
+  // Twelve Labs (#839) — video understanding / multimodal AI platform (search, embed, analyze over
+  // video via Marengo & Pegasus foundation models). Atlassian Statuspage (page 5j9dmpdjtybc) →
+  // statuspage.ts covers it, no new parser. Single-owner page → no incidentKeywords needed.
+  // Category inference (not video-gen: Twelve Labs is search/embed/analyze, not generation).
+  // EXCLUDE_FALLBACK: no API_TIER; video understanding has no clean substitute.
+  // displayComponentIds (#606): all 10 individual API surfaces (Search/Embed/Analyze/Index/Video
+  // list) under the API group. Excludes Platform/Playground/Dashboard (non-API surfaces).
+  { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', '2k0gnkk2kjmz', 'j21c5rdfj8kf', '91lzwtn6071h'], addedAt: '2026-07-02' },
   // LangSmith (#561) — LangChain's hosted observability/eval platform. incident.io page exposes a
   // statuspage v2-compatible API so statuspage.ts covers it. Multi-component worst-of (#379): badge
   // tracks the three load-bearing surfaces (Run Ingestion + API + Application); the other components

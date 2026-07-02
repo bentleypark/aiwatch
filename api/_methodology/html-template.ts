@@ -25,7 +25,7 @@ export function renderMethodologyPage(nonce?: string): string {
 <title>How AIWatch Works — Methodology | AIWatch</title>
 ${CONSENT_INIT_COMMENT}
 ${consentInitScript(nonce)}
-<meta name="description" content="Transparent, independent measurement of AI service reliability. How AIWatch determines status, computes uptime and the AIWatch Score, and — explicitly — what we can't measure and why. 42 services, polled every 5 min, UTC.">
+<meta name="description" content="Transparent, independent measurement of AI service reliability. How AIWatch determines status, computes uptime and the AIWatch Score, and — explicitly — what we can't measure and why. 43 services, polled every 5 min, UTC.">
 <meta name="robots" content="index, follow">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://ai-watch.dev/methodology">
@@ -271,7 +271,7 @@ ${consentInitScript(nonce)}
 <section class="section" id="sources">
   <p class="section-label">// 01</p>
   <h2 data-i18n="s1.title">측정 대상</h2>
-  <p class="lead" data-i18n="s1.lead">AIWatch는 LLM API 15개, 코딩 에이전트 6개, 음성 3개, 추론·인프라 7개, 관측 3개, 영상 2개, 이미지 2개, AI 앱 4개 — 총 42개 AI 서비스를 최대 5분 간격으로 폴링합니다. 모든 시각은 UTC 기준입니다.</p>
+  <p class="lead" data-i18n="s1.lead">AIWatch는 LLM API 15개, 코딩 에이전트 6개, 음성 3개, 추론·인프라 8개, 관측 3개, 영상 2개, 이미지 2개, AI 앱 4개 — 총 43개 AI 서비스를 최대 5분 간격으로 폴링합니다. 모든 시각은 UTC 기준입니다.</p>
   <h3 data-i18n="s1.sourcesTitle">데이터 출처</h3>
   <p data-i18n="s1.sourcesDesc">상태·인시던트·uptime 데이터는 각 서비스의 공식 상태 페이지에서 수집됩니다. 제공사가 공개한 데이터가 1차 출처이며, 없는 값을 자체 추정으로 채우지 않습니다 — 공식 uptime이 없는 경우의 처리는 아래 <a href="#uptime">Uptime 섹션</a>에서 다룹니다.</p>
   <ul>
@@ -546,7 +546,7 @@ const i18n = {
     'hero.meta': '42개 서비스 · 5분 간격 폴링 · UTC 기준',
     'hero.principle': '<strong>측정할 수 있는 것은 공개하고, 측정할 수 없는 것은 분명히 밝힙니다.</strong>',
     's1.title': '측정 대상',
-    's1.lead': 'AIWatch는 LLM API 15개, 코딩 에이전트 6개, 음성 3개, 추론·인프라 7개, 관측 3개, 영상 2개, 이미지 2개, AI 앱 4개 — 총 42개 AI 서비스를 최대 5분 간격으로 폴링합니다. 모든 시각은 UTC 기준입니다.',
+    's1.lead': 'AIWatch는 LLM API 15개, 코딩 에이전트 6개, 음성 3개, 추론·인프라 8개, 관측 3개, 영상 2개, 이미지 2개, AI 앱 4개 — 총 43개 AI 서비스를 최대 5분 간격으로 폴링합니다. 모든 시각은 UTC 기준입니다.',
     's1.sourcesTitle': '데이터 출처',
     's1.sourcesDesc': '상태·인시던트·uptime 데이터는 각 서비스의 공식 상태 페이지에서 수집됩니다. 제공사가 공개한 데이터가 1차 출처이며, 없는 값을 자체 추정으로 채우지 않습니다 — 공식 uptime이 없는 경우의 처리는 아래 <a href="#uptime">Uptime 섹션</a>에서 다룹니다.',
     's1.src.atlassian': '— 다수의 주요 제공사', 's1.src.incidentio': '— 컴포넌트 단위 인시던트 + 영향도', 's1.src.gcloud': '— Gemini API (Google Cloud 상태 + AI Studio 컴포넌트 인시던트 병합)', 's1.src.others': '— 그 외 상태 페이지 플랫폼 (인시던트 RSS + 가동률 JSON)', 's1.src.flashduty': '— DeepSeek 상태 피드 정규화 (status.deepseek.com)', 's1.src.awshealth': '— Amazon Bedrock — 공개 이벤트 JSON API(인시던트 start/end), 가동률 API 없음', 's1.src.rss': '— Azure Status(Azure OpenAI) · xAI(status.x.ai) — 가동률 API 없이 인시던트 RSS만 수집', 's1.src.probe': '— 29개 AI 서비스의 API 엔드포인트 직접 측정',
@@ -625,10 +625,10 @@ const i18n = {
     'hero.badge': 'METHODOLOGY',
     'hero.title': 'How AIWatch <em>Works</em> — Methodology',
     'hero.tagline': 'Independent, transparent measurement of AI service reliability — no account, no PII.',
-    'hero.meta': '42 services · polled every 5 min · UTC',
+    'hero.meta': '43 services · polled every 5 min · UTC',
     'hero.principle': '<strong>We publish what we can measure — and are explicit about what we can\\\'t.</strong>',
     's1.title': 'What we measure',
-    's1.lead': 'AIWatch polls 42 AI services — 15 LLM APIs, 6 coding agents, 3 voice, 7 inference & infra, 3 observability, 2 video, 2 image, and 4 AI apps — up to every 5 minutes. All timestamps are in UTC.',
+    's1.lead': 'AIWatch polls 43 AI services — 15 LLM APIs, 6 coding agents, 3 voice, 8 inference & infra, 3 observability, 2 video, 2 image, and 4 AI apps — up to every 5 minutes. All timestamps are in UTC.',
     's1.sourcesTitle': 'Data sources',
     's1.sourcesDesc': 'Status, incident, and uptime data are all collected from each service\\\'s official status page. The provider\\\'s published data is the primary source, and we never fill a missing value with our own estimate — how a missing official uptime is handled is covered in the <a href="#uptime">Uptime section</a> below.',
     's1.src.atlassian': '— many major providers', 's1.src.incidentio': '— per-component incidents + impact', 's1.src.gcloud': '— Gemini API (Google Cloud status + AI Studio component incidents, merged)', 's1.src.others': '— additional status-page platforms (incident RSS + uptime JSON)', 's1.src.flashduty': '— normalized DeepSeek status feed (status.deepseek.com)', 's1.src.awshealth': '— Amazon Bedrock — public events JSON API (incident start/end), no uptime API', 's1.src.rss': '— Azure Status (Azure OpenAI) · xAI (status.x.ai) — incident RSS only, no uptime API', 's1.src.probe': '— direct measurement of 29 AI services\\\' API endpoints',

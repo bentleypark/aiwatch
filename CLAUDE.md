@@ -206,8 +206,8 @@ When adding a new monitored service, files across worker, frontend, docs, SEO me
 
 ## Architecture
 
-**AIWatch** is a React SPA that monitors 42 AI services in real time:
-- **32 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Fireworks, Cerebras, Perplexity, HuggingFace, Replicate, fal.ai, ElevenLabs, AssemblyAI, Deepgram, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, turbopuffer, Stability AI, Black Forest Labs (FLUX), Voyage AI, Modal, LangChain (LangSmith), Helicone, Langfuse, Runway, Luma (Dream Machine)
+**AIWatch** is a React SPA that monitors 43 AI services in real time:
+- **33 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Fireworks, Cerebras, Perplexity, HuggingFace, Replicate, fal.ai, ElevenLabs, AssemblyAI, Deepgram, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, turbopuffer, Stability AI, Black Forest Labs (FLUX), Voyage AI, Modal, Twelve Labs, LangChain (LangSmith), Helicone, Langfuse, Runway, Luma (Dream Machine)
 - **4 AI apps**: claude.ai, ChatGPT, Character.AI, DeepSeek App
 - **6 coding agents**: Claude Code, Codex, Cursor, GitHub Copilot, Windsurf, Junie
 

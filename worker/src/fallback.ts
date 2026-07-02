@@ -7,7 +7,7 @@ import { isNonReliabilityAdvisory } from './utils'
 // each other in Tier 7); bfl is fallback-eligible from the start (never added here).
 // #857 — pinecone un-excluded now that the vector category has ≥2 members (Pinecone + turbopuffer recommend
 // each other in Tier 8); turbopuffer is fallback-eligible from the start (never added here).
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs']
 
 // Tier-based priority — same-tier services sorted by Score, then adjacent tiers by distance.
 // API tiers (1-4) and agent tiers (11-13) use distinct number ranges so TIER_LABEL stays unambiguous

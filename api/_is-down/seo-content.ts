@@ -501,6 +501,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'Which Codex surface does the uptime percentage track?', a: 'The uptime shown on this page reflects the Codex API component specifically, which backs the CLI and VS Code extension. Codex Web frontend outages may not be counted in that percentage — check the Recent Incidents section for surface-specific events across all four Codex surfaces (Codex Web, Codex API, CLI, VS Code extension).' },
     ],
   },
+  twelvelabs: {
+    displayName: 'Twelve Labs',
+    description: 'Twelve Labs is a video understanding AI platform that provides search, embed, and analyze capabilities over video using the Marengo and Pegasus foundation models. It enables developers to build applications that can search within videos, generate embeddings, and analyze video content.',
+    insight: 'Twelve Labs is a video understanding API focused on search, embed, and analyze workflows — not video generation. It uses a custom Atlassian Statuspage (status.twelvelabs.io) with a well-structured component layout: the API group covers 10 individual model surfaces (Search, Embed, Analyze by Marengo 3.0 and Pegasus 1.5/1.2, Index, Video list), while Platform/Playground/Dashboard are non-API surfaces.',
+    whenDown: 'When Twelve Labs API is down, applications relying on video search, embedding, or analysis capabilities will be unable to process video content. Video indexing tasks and search queries will fail or timeout.',
+    faqs: [
+      { q: 'Is Twelve Labs API down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Twelve Labs every 5 minutes and shows real-time operational status, uptime percentage, and recent incidents.' },
+      { q: 'How do I check Twelve Labs status?', a: 'You can check Twelve Labs status on this page (updated every 5 minutes), on the official status page at status.twelvelabs.io, or on the AIWatch dashboard at ai-watch.dev.' },
+      { q: 'What should I do when Twelve Labs API is down?', a: 'If Twelve Labs is experiencing downtime, consider checking the official status page for updates. For video understanding workflows, you may need to wait for the service to recover or implement retry logic with exponential backoff.' },
+      { q: 'How often does Twelve Labs go down?', a: 'Twelve Labs uptime and incident history are tracked on this page. Check the recent incidents section and uptime percentage for current reliability data.' },
+    ],
+  },
 }
 
 export function getSEOContent(slug: string): ServiceSEO | null {
