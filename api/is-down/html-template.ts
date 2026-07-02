@@ -429,13 +429,13 @@ ${cookieBannerHtml()}
 // -method / -item); the copy/share buttons fire from data-action, calling the global functions
 // defined in the renderCTA / renderShareButtons inline scripts (looked up at click time, so script
 // order doesn't matter). This <script> is hashed into the page CSP by the api/is-down.ts handler.
-function renderDelegatedListeners(svcId: string, active: boolean): string {
+export function renderDelegatedListeners(svcId: string, active: boolean): string {
   return `<script>
 // #842-B — consent-free outage-moment audience beacon. Fires once on load, OUTSIDE any GA/consent
 // guard (no cookie, no PII: the referrer is reduced to its HOSTNAME client-side). Body = { svc,
 // ref(host), utm(utm_source), active }; classifyReferrer folds ref+utm to a fixed source bucket
-// server-side. `active` is the SSR-time outage status — note is-down is edge-cached (s-maxage=60),
-// so within that ≤60s window a cached page can tag a view with a stale active/clear flag; the metric
+// server-side. The active flag is the SSR-time outage status — note is-down is edge-cached
+// (s-maxage=60), so within that <=60s window a cached page can tag a view with a stale flag; the metric
 // is an approximate consent-free proxy (see the module docstring). → one WAE point → daily Outage Audience.
 (function () {
   try {
