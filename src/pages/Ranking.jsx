@@ -7,7 +7,7 @@ import { usePage } from '../utils/pageContext'
 import { useSettings } from '../hooks/useSettings'
 import { SCORE_BG_CLASS, SCORE_TEXT_CLASS } from '../utils/constants'
 import { formatTime } from '../utils/time'
-import { hasReliableScoreData, MIN_COVERAGE_DAYS } from '../utils/serviceReliability'
+import { hasReliableScoreData, isRecentlyAdded, MIN_COVERAGE_DAYS } from '../utils/serviceReliability'
 import { trackEvent } from '../utils/analytics'
 import SkeletonUI from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
@@ -31,13 +31,13 @@ export default function Ranking() {
         return { ...svc, rank, isTied }
       })
     const na = services.filter((s) => s.aiwatchScore == null || !hasReliableScoreData(s))
-    // #802 — split the not-ranked bucket by REASON so "recently added" isn't conflated with "not enough
-    // measurement signal". A service is "recently added" ONLY when coverage is its sole disqualifier
-    // (it has a score + a non-low confidence + a live feed, just <30d of history) — otherwise it's in
-    // the insufficient-measurement group (no uptime + no probe → low confidence, or a stale feed).
-    const recentlyAdded = na.filter((s) =>
-      s.aiwatchScore != null && !s.incidentSourceStale && s.scoreConfidence !== 'low'
-      && s.coverageDays != null && s.coverageDays < MIN_COVERAGE_DAYS)
+    // #802/#870 — split the not-ranked bucket by REASON so "recently added" isn't conflated with "not
+    // enough measurement signal". A service is "recently added" when coverage is its sole disqualifier
+    // (already scorable, just <30d) OR its only gap is a warming probe (new probe target, e.g.
+    // turbopuffer days 1-7 — no official uptime by design + a probe that reaches `available` at ~7d, so
+    // it WILL rank). Genuinely un-measurable (no probe target + no uptime → `unsupported`, or a stale
+    // feed) stays in the insufficient group. See serviceReliability.isRecentlyAdded.
+    const recentlyAdded = na.filter(isRecentlyAdded)
     const recentIds = new Set(recentlyAdded.map((s) => s.id))
     const insufficient = na.filter((s) => !recentIds.has(s.id))
     return { scored, recentlyAdded, insufficient }

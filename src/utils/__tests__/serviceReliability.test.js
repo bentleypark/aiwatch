@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { noOfficialUptime, isUnreliableUptime, hasReliableScoreData, hasSufficientCoverage } from '../serviceReliability'
+import { noOfficialUptime, isUnreliableUptime, hasReliableScoreData, hasSufficientCoverage, isProbeWarming, isRecentlyAdded } from '../serviceReliability'
 
 // #713 — AIWatch no longer invents a uptime % for services without an official figure (the old
 // `uptimeSource: 'estimate'` was removed). A no-official-uptime service carries `uptime30d: null` and
@@ -50,5 +50,57 @@ describe('serviceReliability predicates (#713)', () => {
     // be held out of the ranking until it accrues a full 30-day window.
     expect(hasReliableScoreData({ ...official, coverageDays: 10 })).toBe(false)
     expect(hasReliableScoreData({ ...official, coverageDays: 30 })).toBe(true) // rejoins at 30d
+  })
+})
+
+// #870 — a new probe-target service whose probe is still WARMING (<7d → responsivenessStatus
+// 'insufficient' → confidence low, score withheld) must show as "Recently Added" (it WILL rank), not
+// "Insufficient Data" (genuinely un-measurable). The signal is scoreBreakdown.responsivenessStatus.
+describe('isProbeWarming / isRecentlyAdded (#870)', () => {
+  // turbopuffer days 1-7: no uptime by design + a probe target still building history.
+  const warmingNew = { uptime30d: null, scoreConfidence: 'low', aiwatchScore: null, coverageDays: 1, scoreBreakdown: { responsivenessStatus: 'insufficient' } }
+  // Bedrock/Azure: no probe target ever + no uptime.
+  const unmeasurable = { uptime30d: null, scoreConfidence: 'low', aiwatchScore: null, coverageDays: null, scoreBreakdown: { responsivenessStatus: 'unsupported' } }
+  // A new service that's already scorable (probe available or uptime), just <30d.
+  const scorableNew = { uptime30d: 99.9, scoreConfidence: 'high', aiwatchScore: 88, coverageDays: 12, scoreBreakdown: { responsivenessStatus: 'unsupported' } }
+
+  it('isProbeWarming is true only for a probe target with <7d data (insufficient), not unsupported/available', () => {
+    expect(isProbeWarming(warmingNew)).toBe(true)
+    expect(isProbeWarming(unmeasurable)).toBe(false)          // no probe target
+    expect(isProbeWarming({ scoreBreakdown: { responsivenessStatus: 'available' } })).toBe(false)
+    // 'unavailable' = a transient global probe-KV read failure (all probed services at once), NOT a
+    // per-service warming state — a day-0 new probe target gets 'insufficient', not 'unavailable'. Pin
+    // the intent so a future `!== 'available'` refactor of isProbeWarming can't silently regress it.
+    expect(isProbeWarming({ scoreBreakdown: { responsivenessStatus: 'unavailable' } })).toBe(false)
+    expect(isProbeWarming({})).toBe(false)                    // no breakdown → false, no throw
+  })
+
+  it('a warming new probe-target service is Recently Added (not Insufficient Data)', () => {
+    expect(isRecentlyAdded(warmingNew)).toBe(true)
+  })
+
+  it('a genuinely un-measurable service (no probe, no uptime) is NOT Recently Added', () => {
+    expect(isRecentlyAdded(unmeasurable)).toBe(false)         // → stays in Insufficient Data (coverageDays null)
+    // The real risk boundary this fix creates: a RECENTLY-ADDED (<30d) but genuinely un-measurable
+    // service (a new app/agent with no probe target + no uptime → 'unsupported') must NOT be lumped into
+    // Recently Added just because it's new — it belongs in Insufficient Data.
+    expect(isRecentlyAdded({ ...unmeasurable, coverageDays: 5 })).toBe(false)
+  })
+
+  it('an already-scorable <30d service is Recently Added (the #802 coverage-only case)', () => {
+    expect(isRecentlyAdded(scorableNew)).toBe(true)
+  })
+
+  it('a STALE new service is NOT Recently Added even if probe-warming (stale feed dominates)', () => {
+    expect(isRecentlyAdded({ ...warmingNew, incidentSourceStale: true })).toBe(false)
+  })
+
+  it('an established service (coverageDays null) is never Recently Added', () => {
+    expect(isRecentlyAdded({ ...warmingNew, coverageDays: null })).toBe(false)
+    expect(isRecentlyAdded({ ...scorableNew, coverageDays: null })).toBe(false)
+  })
+
+  it('a warming service that has reached 30d coverage is no longer held out (not <30)', () => {
+    expect(isRecentlyAdded({ ...warmingNew, coverageDays: 30 })).toBe(false)
   })
 })
