@@ -95,6 +95,18 @@ function hasActiveIncident(s: FallbackCandidate): boolean {
   return (s.incidents ?? []).some(i => i.status !== 'resolved' && !isNonReliabilityAdvisory(i.title ?? ''))
 }
 
+// #859 — a specialized non-LLM API sub-tier only recommends its OWN tier. Cross-tier fill (fill top-2
+// by tier distance) is correct for the LLM tiers (1 Major LLM / 2 LLM / 3 Infra-router: any LLM API
+// substitutes another) but wrong for the specialized sub-tiers — Voice (4) / Video (5) / Observability
+// (6) / Image (7) / Vector (8) are NOT mutually substitutable, so a degraded vector DB must not be
+// offered an image model as its 2nd recommendation (the exact reason these were split into their own
+// tiers in #601/#602/#756/#857). Range 4–10 covers the current + near-future API sub-tiers; agents
+// (11–13) and apps (21) are separate CATEGORIES (filtered by `category` in getFallbacks) and keep
+// cross-tier fill within their category, so they're intentionally excluded.
+export function isSpecializedSubTier(tier: number): boolean {
+  return tier >= 4 && tier <= 10
+}
+
 export function getFallbacks(
   serviceId: string,
   category: string,
@@ -102,8 +114,11 @@ export function getFallbacks(
 ): Array<{ name: string; score: number | null }> {
   if (EXCLUDE_FALLBACK.includes(serviceId)) return []
   const sourceTier = tierFor(serviceId)
+  // #859 — for a specialized sub-tier source, restrict candidates to the SAME tier (no cross-tier bleed).
+  const sameTierOnly = isSpecializedSubTier(sourceTier)
   return services
-    .filter(s => s.category === category && s.id !== serviceId && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale && !EXCLUDE_FALLBACK.includes(s.id))
+    .filter(s => s.category === category && s.id !== serviceId && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale && !EXCLUDE_FALLBACK.includes(s.id)
+      && (!sameTierOnly || tierFor(s.id) === sourceTier))
     .sort((a, b) => {
       // Prefer same or adjacent tier to the affected service
       const tierA = tierFor(a.id)

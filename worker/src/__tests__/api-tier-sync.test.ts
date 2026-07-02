@@ -19,11 +19,11 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { API_TIER as workerTier, TIER_LABEL as workerLabel, EXCLUDE_FALLBACK as workerExclude } from '../fallback'
+import { API_TIER as workerTier, TIER_LABEL as workerLabel, EXCLUDE_FALLBACK as workerExclude, isSpecializedSubTier as workerIsSpecialized } from '../fallback'
 // Vitest resolves cross-package paths via the repo root; this works because frontend `src/` and
 // worker `src/` share a single repo with one node_modules. The import is data-only (no runtime
 // side effects from constants.js — no environment variables are read at module load).
-import { API_TIER as frontendTier, TIER_LABEL as frontendLabel, EXCLUDE_FALLBACK as frontendExclude } from '../../../src/utils/constants'
+import { API_TIER as frontendTier, TIER_LABEL as frontendLabel, EXCLUDE_FALLBACK as frontendExclude, isSpecializedSubTier as frontendIsSpecialized } from '../../../src/utils/constants'
 
 const REPO_ROOT = join(__dirname, '..', '..', '..')
 
@@ -144,5 +144,36 @@ describe('isNonReliabilityAdvisory cross-mirror sync (#811)', () => {
   it('the #811 + #707 advisory cases are TRUE; outage/empty are FALSE (sanity, both copies)', () => {
     expect(workerAdvisory("We've suspended access to Claude Mythos 5 and Claude Fable 5")).toBe(true)
     expect(frontendAdvisory('Access suspended due to elevated error rates')).toBe(false)
+  })
+})
+
+// #859 — pin the worker ↔ frontend ↔ is-down parity of isSpecializedSubTier (the 4th triplicated
+// piece of fallback logic, after API_TIER / TIER_LABEL / isNonReliabilityAdvisory). A drift here would
+// make the SEO is-down pages recommend a cross-tier service while the dashboard/Discord do not (or vice
+// versa) — the exact silent-divergence class this file exists to prevent.
+describe('isSpecializedSubTier cross-mirror sync (#859)', () => {
+  it('worker ≡ frontend across the full tier range + boundaries', () => {
+    for (let tier = 0; tier <= 25; tier++) {
+      expect(frontendIsSpecialized(tier), `tier ${tier} worker/frontend divergence`).toBe(workerIsSpecialized(tier))
+    }
+    // Explicit boundary pins so the intent (specialized API sub-tiers 4-10 only) is documented.
+    expect([3, 11, 21, 99].some(workerIsSpecialized)).toBe(false) // LLM-router / agents / apps / unknown
+    expect([4, 5, 6, 7, 8, 9, 10].every(workerIsSpecialized)).toBe(true) // Voice..Vector (+ headroom)
+  })
+
+  it('api/is-down.ts inline range literal matches the worker predicate bounds', () => {
+    const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
+    // Match the inline `sourceTier >= N && sourceTier <= M` (the #859 sameTierOnly gate).
+    const m = isDownSource.match(/sourceTier\s*>=\s*(\d+)\s*&&\s*sourceTier\s*<=\s*(\d+)/)
+    expect(m, 'is-down.ts #859 sameTierOnly range literal not found').not.toBeNull()
+    const [lo, hi] = [Number(m![1]), Number(m![2])]
+    // Derive the worker's true bounds by scanning, so a future range change only needs the two source
+    // edits — this test re-derives rather than hardcoding 4/10.
+    let workerLo = -1, workerHi = -1
+    for (let t = 0; t <= 30; t++) {
+      if (workerIsSpecialized(t)) { if (workerLo === -1) workerLo = t; workerHi = t }
+    }
+    expect(lo, 'is-down lower bound must match worker isSpecializedSubTier').toBe(workerLo)
+    expect(hi, 'is-down upper bound must match worker isSpecializedSubTier').toBe(workerHi)
   })
 })

@@ -215,6 +215,13 @@ export function tierFor(id) {
   return 99
 }
 
+// #859 — a specialized non-LLM API sub-tier (Voice 4 / Video 5 / Observability 6 / Image 7 / Vector 8)
+// only recommends its OWN tier; cross-tier fill stays for LLM tiers (1-3). Mirror of worker/src/fallback.ts
+// isSpecializedSubTier. Agents (11-13) + apps (21) are separate categories → excluded (range 4-10).
+export function isSpecializedSubTier(tier) {
+  return tier >= 4 && tier <= 10
+}
+
 const warnedLabelTiers = new Set()
 export function tierLabelFor(tier) {
   const l = TIER_LABEL[tier]
@@ -263,9 +270,12 @@ export function hasActiveIncident(s) {
 export function getFallbacks(service, allServices) {
   if (!service || !Array.isArray(allServices) || EXCLUDE_FALLBACK.includes(service.id)) return []
   const sourceTier = tierFor(service.id)
+  // #859 — specialized sub-tier source → same-tier candidates only (no cross-tier bleed)
+  const sameTierOnly = isSpecializedSubTier(sourceTier)
   return allServices
     // #616 — exclude stale-source services (#591): ranking-excluded → not a trusted fallback either
-    .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale && !EXCLUDE_FALLBACK.includes(s.id))
+    .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale && !EXCLUDE_FALLBACK.includes(s.id)
+      && (!sameTierOnly || tierFor(s.id) === sourceTier))
     .sort((a, b) => {
       const distA = Math.abs(tierFor(a.id) - sourceTier)
       const distB = Math.abs(tierFor(b.id) - sourceTier)

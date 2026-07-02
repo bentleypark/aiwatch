@@ -224,13 +224,18 @@ export default async function handler(req: Request) {
         }
         if (!EXCLUDE_FALLBACK.includes(entry.id)) {
           const sourceTier = tierFor(entry.id)
+          // #859 — a specialized non-LLM API sub-tier (Voice 4 / Video 5 / Observability 6 / Image 7 /
+          // Vector 8) recommends its OWN tier only (no cross-tier bleed); LLM tiers 1-3 keep cross-tier
+          // fill. Mirror of worker/src/fallback.ts isSpecializedSubTier (range 4-10). Inline here like tierFor.
+          const sameTierOnly = sourceTier >= 4 && sourceTier <= 10
           fallbacks = allServices
             // #550 — exclude candidates with an unresolved incident even if status is still 'operational'.
             // #616 — exclude stale-source services (#591): ranking-excluded → not a trusted fallback either.
             .filter(s => s.category === entry.category && s.id !== entry.id && s.status === 'operational'
               && !(s.incidents ?? []).some(i => (i as { status?: string }).status !== 'resolved')
               && !s.incidentSourceStale
-              && !EXCLUDE_FALLBACK.includes(s.id))
+              && !EXCLUDE_FALLBACK.includes(s.id)
+              && (!sameTierOnly || tierFor(s.id) === sourceTier))
             .sort((a, b) => {
               const distA = Math.abs(tierFor(a.id) - sourceTier)
               const distB = Math.abs(tierFor(b.id) - sourceTier)

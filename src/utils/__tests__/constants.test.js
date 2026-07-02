@@ -3,7 +3,7 @@
 // because the worker can't import frontend code at runtime.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFallbacks, getGroupedFallbacksExcludingRegionSwitchable, hasRegionSwitch, shouldShowFallback, hasActiveIncident, SERVICE_CATEGORIES, ALL_SERVICE_IDS, categoryRankOf, outboundReferralUrl, SERVICE_SITE_URL, EXCLUDE_FALLBACK } from '../constants'
+import { tierFor, tierLabelFor, API_TIER, TIER_LABEL, getFallbacks, getGroupedFallbacks, getGroupedFallbacksExcludingRegionSwitchable, hasRegionSwitch, shouldShowFallback, hasActiveIncident, SERVICE_CATEGORIES, ALL_SERVICE_IDS, categoryRankOf, outboundReferralUrl, SERVICE_SITE_URL, EXCLUDE_FALLBACK, isSpecializedSubTier } from '../constants'
 
 // #646 — the Overview renders one section per SERVICE_CATEGORIES bucket (llm/agents/voice/inference/
 // video/apps, #658). Its render has a defensive "other" catch-all for any service no bucket claims,
@@ -396,5 +396,37 @@ describe('region-switch fallback suppression (#641)', () => {
     it('returns [] for a non-array input', () => {
       expect(getGroupedFallbacksExcludingRegionSwitchable(null, [])).toEqual([])
     })
+  })
+})
+
+describe('#859 specialized sub-tier same-tier cap (SPA mirror of worker isSpecializedSubTier)', () => {
+  const svc = (id, name, status = 'operational', aiwatchScore = 90) =>
+    ({ id, name, category: 'api', status, aiwatchScore })
+
+  it('isSpecializedSubTier: 1-3 false, 4-8 true, agents/apps false', () => {
+    expect([1, 2, 3].some(isSpecializedSubTier)).toBe(false)
+    expect([4, 5, 6, 7, 8].every(isSpecializedSubTier)).toBe(true)
+    expect(isSpecializedSubTier(11)).toBe(false)
+    expect(isSpecializedSubTier(21)).toBe(false)
+  })
+
+  it('image (Stability) down → only its image sibling, not an observability service', () => {
+    const services = [
+      svc('stability', 'Stability AI', 'down'),
+      svc('bfl', 'Black Forest Labs (FLUX)', 'operational', 84),
+      svc('langfuse', 'Langfuse', 'operational', 99),
+    ]
+    const result = getFallbacks(services[0], services)
+    expect(result.map(r => r.name)).toEqual(['Black Forest Labs (FLUX)'])
+  })
+
+  it('LLM (T2) still gets cross-tier fill (unchanged)', () => {
+    const services = [
+      svc('together', 'Together AI', 'down'),
+      svc('claude', 'Claude API', 'operational', 95),
+      svc('openrouter', 'OpenRouter', 'operational', 80),
+    ]
+    const result = getFallbacks(services[0], services)
+    expect(result.map(r => r.name)).toEqual(['Claude API', 'OpenRouter'])
   })
 })
