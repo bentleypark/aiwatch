@@ -255,8 +255,8 @@ test.describe('Is X Down? SSR pages', () => {
   })
 
   // #787 — the "(tied)" coverage moved to DETERMINISTIC unit tests: the render branch in
-  // api/is-down/__tests__/html-template.test.ts ('renders "(tied)" iff rankTied is set') and the
-  // rank+tie DERIVATION in api/is-down/__tests__/ranking.test.ts (computeRankPosition). The old e2e
+  // api/_is-down/__tests__/html-template.test.ts ('renders "(tied)" iff rankTied is set') and the
+  // rank+tie DERIVATION in api/_is-down/__tests__/ranking.test.ts (computeRankPosition). The old e2e
   // here asserted a LIVE score tie existed among 6 services, which false-failed whenever scores
   // drifted apart (it blocked unrelated PR #786's Edge E2E). The SSR rank LINE stays covered by the
   // 'is ranked #N' e2e; both halves of the tie path now need no live data.

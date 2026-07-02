@@ -4,7 +4,7 @@
 // grab any service's badge (links to its crawlable /is-{slug}-down page). Self-contained SSR (no
 // data fetch) — mirrors api/methodology.ts.
 
-import { renderBadgesPage } from './badges/html-template'
+import { renderBadgesPage } from './_badges/html-template'
 import { generateNonce, buildCsp } from './_shared/csp-nonce'
 
 export const config = { runtime: 'edge' }

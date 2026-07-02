@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { renderDelegatedListeners, buildMetaDescription, exceededRecoveryTextEn } from '../is-down/html-template'
-import { getSEOContent } from '../is-down/seo-content'
+import { renderDelegatedListeners, buildMetaDescription, exceededRecoveryTextEn } from '../_is-down/html-template'
+import { getSEOContent } from '../_is-down/seo-content'
 
 // Guard for #842-B: the audience beacon + click delegation live inside ONE `<script>` template
 // literal. A stray backtick in a comment there once truncated the literal → the Edge SSR built a

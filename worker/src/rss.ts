@@ -143,7 +143,7 @@ const FEED_DIV = '<p>┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈</p>'
 
 // Service IDs whose ID differs from their /is-{slug}-down SEO page slug.
 // Most services use their ID verbatim; only these dropped a dash in the ID.
-// Canonical source: SERVICE_ID_TO_SLUG in api/is-down/slug-map.ts — this copy
+// Canonical source: SERVICE_ID_TO_SLUG in api/_is-down/slug-map.ts — this copy
 // is pinned to it by worker/src/__tests__/feed-slug-sync.test.ts.
 export const IS_DOWN_SLUG_OVERRIDE: Record<string, string> = {
   claudeai: 'claude-ai',

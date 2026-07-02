@@ -674,7 +674,7 @@ ${fallbackHtml}
 // billing — only the endpoint URL changes), so it deserves first-line
 // visibility. Returns '' when there's nothing actionable to show.
 //
-// Exported (alongside other render helpers) so api/is-down/__tests__/html-template.test.ts
+// Exported (alongside other render helpers) so api/_is-down/__tests__/html-template.test.ts
 // can pin both the happy-path HTML structure and the three skip conditions.
 export function renderRegionRecommendation(rec: RegionStatusResult | null, slug: string): string {
   if (!rec) return ''
@@ -1394,7 +1394,7 @@ export const FOOTER_CATEGORY_ORDER: ReadonlyArray<{ key: string; label: string }
   { key: 'apps', label: 'AI Apps' },
 ]
 
-// Exported for api/is-down/__tests__/html-template.test.ts — pins the
+// Exported for api/_is-down/__tests__/html-template.test.ts — pins the
 // category-grouped "Also check" structure (#424).
 // #805 (Problem B) — surface the embeddable status badge on the high-traffic is-down page itself
 // (not just the deep SPA detail route) so the right audience — developers checking if the service is

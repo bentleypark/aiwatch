@@ -1,6 +1,6 @@
 // Shared GA4 + Consent Mode v2 init payload for Edge SSR pages (#352).
 //
-// Both Vercel templates (api/intro/html-template.ts, api/is-down/html-template.ts) import
+// Both Vercel templates (api/_intro/html-template.ts, api/_is-down/html-template.ts) import
 // this so the consent contract is enforced from a single source. The Jekyll reports site
 // (aiwatch-reports/_includes/head.html) keeps a hand-synced copy with the same byte content
 // in the `<script>` body — see that file's comment for the sync rule.

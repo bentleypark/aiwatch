@@ -482,7 +482,7 @@ describe('isGenericTitle', () => {
 describe('GENERIC_TITLE_PATTERNS_SOURCES — cross-file parity (#387)', () => {
   // Canonical snapshot of the regex source strings (pattern + flags). The
   // same array MUST appear in `worker/src/ai-analysis.ts` and
-  // `api/is-down/incident-grouping.ts` — each test suite pins this same
+  // `api/_is-down/incident-grouping.ts` — each test suite pins this same
   // constant. Drift between files (a pattern added in one place but not
   // others) surfaces as a unit-test failure rather than asymmetric
   // production behavior — e.g. dashboard groups an incident as auto-noise

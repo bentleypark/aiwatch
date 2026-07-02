@@ -1,11 +1,11 @@
 // Vercel Edge Function — "Is X Down?" SSR pages
 
-import { SLUG_TO_SERVICE } from './is-down/slug-map'
-import { getSEOContent } from './is-down/seo-content'
-import { renderPage } from './is-down/html-template'
+import { SLUG_TO_SERVICE } from './_is-down/slug-map'
+import { getSEOContent } from './_is-down/seo-content'
+import { renderPage } from './_is-down/html-template'
 import { cspForHtml } from './_shared/csp-hash'
-import { computeRankPosition } from './is-down/ranking'
-import { regionStatusOf, type RegionStatusResult } from './is-down/region-status'
+import { computeRankPosition } from './_is-down/ranking'
+import { regionStatusOf, type RegionStatusResult } from './_is-down/region-status'
 
 export const config = { runtime: 'edge' }
 

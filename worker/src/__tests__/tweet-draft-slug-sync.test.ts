@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { TWEET_DRAFT_SERVICES } from '../alerts'
-import { SERVICE_ID_TO_SLUG } from '../../../api/is-down/slug-map'
+import { SERVICE_ID_TO_SLUG } from '../../../api/_is-down/slug-map'
 import { SERVICES } from '../services'
 
 describe('TWEET_DRAFT_SERVICES ↔ api/is-down slug-map sync', () => {

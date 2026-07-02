@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest'
 import { TWEET_SEARCH_TERMS, TWEET_DRAFT_SERVICES } from '../alerts'
 import { SERVICES } from '../services'
-import { SERVICE_ID_TO_SLUG } from '../../../api/is-down/slug-map'
+import { SERVICE_ID_TO_SLUG } from '../../../api/_is-down/slug-map'
 
 describe('TWEET_SEARCH_TERMS scope', () => {
   it('covers exactly the Claude/OpenAI family + Gemini (7 services)', () => {

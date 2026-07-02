@@ -744,7 +744,7 @@ function RssLink({ feedUrl, serviceId, t }) {
 // ── Main Component ───────────────────────────────────────────
 
 // Incident History rows shown before the "show more" toggle (#incident-history-collapse).
-// Mirrors the is-down Edge page (api/is-down/html-template.ts) so both surfaces match.
+// Mirrors the is-down Edge page (api/_is-down/html-template.ts) so both surfaces match.
 const INCIDENT_HISTORY_PREVIEW = 5
 // Security Alerts shown before the "show more" toggle (#785) — same convention as incidents.
 const SECURITY_PREVIEW = 5
