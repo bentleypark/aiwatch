@@ -30,6 +30,8 @@ All served by the Cloudflare Worker (`aiwatch-worker`, domain `aiwatch-worker.p2
 | `GET /feed/:slug` | Per-service incident RSS — slug matches `/is-{slug}-down`. KV-unavailable → 503, unknown slug → 404 (#54) |
 | `GET /feed.xsl` | Static client-side XSLT for feed rendering (#467) |
 
+**Conditional GET + caching (#860).** Both feed endpoints emit a weak `ETag` (FNV-1a over the body) and honor `If-None-Match` → **304 Not Modified** (empty body, validators re-sent on the 304 too), so RSS pollers (incl. Slack's native `/feed`) + the Vercel edge revalidate cheaply and a healthy revalidatable feed makes pollers back off less (the root cause of a multi-hour Slack `/feed` silence while Discord kept alerting). The body is byte-deterministic: `<lastBuildDate>` is the newest item's pubDate (via `buildFeedWithMeta`), and an **empty feed omits `<lastBuildDate>` entirely** so the dominant no-incident steady state has a stable ETag and 304s. `Cache-Control` is `max-age=60, s-maxage=60` (was 300) + a `<ttl>1</ttl>` hint. A `Last-Modified` header is emitted (newest incident time) but is **informational only** — 304 is gated ONLY on the byte-exact ETag, never `If-Modified-Since`, because the newest-pubDate is coarser than actual body change (a #759 AI block landing / #768 monitoring transition / a non-newest incident update mutates the body without advancing it) so an IMS check could return a false 304 and drop an update. Header contract lives in `feedHttpResponse` (rss.ts), the 304 decision in `isFeedNotModified`; the KV side-effects (#750 `feed:firstseen`, #793 `feed:active-emitted`) run before the response is built, so a 304 never skips them.
+
 ## Alerts / operator / internal
 
 | Endpoint | Auth | Notes |

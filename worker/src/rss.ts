@@ -423,13 +423,18 @@ export type FeedScope =
   | { scope: 'service'; service: ServiceStatus }
 
 /**
- * Build an RSS 2.0 feed of AI service incidents.
+ * Build an RSS 2.0 feed of AI service incidents, returning the XML plus the
+ * feed's content-derived `lastModified` (#860 — the newest emitted item's
+ * pubDate, or null when the feed is empty). `lastModified` drives the handler's
+ * `Last-Modified` header + conditional-GET (304) support and is also stamped
+ * into `<lastBuildDate>` so the body is byte-deterministic across identical
+ * polls (a `now`-stamped lastBuildDate would defeat any content validator).
  * `all` flattens incidents across every service; `service` scopes to one.
  * Items are sorted newest-incident-first and capped at MAX_ITEMS.
  * `services` is always the full list (used for the cross-service incident map)
  * even when the feed is scoped to a single service.
  */
-export function buildRssFeed(
+export function buildFeedWithMeta(
   services: ServiceStatus[],
   opts: FeedScope,
   now: Date = new Date(),
@@ -447,7 +452,7 @@ export function buildRssFeed(
   // item). Absent → fail-open (emit every resolved item, the pre-#793 behavior), so direct callers /
   // unit tests that don't thread it are unaffected.
   servedActive?: Set<string>,
-): string {
+): { xml: string; lastModified: Date | null } {
   const incidentServices = buildIncidentServiceMap(services)
   const sources = opts.scope === 'service' ? [opts.service] : services
   // One item per incident, keyed by its current state (#467): an active incident emits its
@@ -509,7 +514,24 @@ export function buildRssFeed(
     .map((e) => itemXml(e.svc, e.incident, incidentServices, { kind: e.kind, pubDate: e.pubDate, fallbackText: e.fallbackText, analysis: e.analysis }))
     .join('\n')
 
-  return `<?xml version="1.0" encoding="UTF-8"?>
+  // #860 — content-derived feed timestamp. `capped` is sorted pubDate-DESC, so
+  // capped[0] is the newest item — the value the handler emits as an
+  // (informational) Last-Modified. Guarded against a malformed pubDate (NaN →
+  // null) so a bad date never yields "Last-Modified: Invalid Date". `now` is
+  // intentionally NOT used as a fallback: an empty feed OMITS <lastBuildDate>
+  // entirely so its body is byte-stable across polls → its ETag is stable → the
+  // dominant no-incident steady state actually gets 304s (a `now`-stamped date
+  // would churn the ETag every second and defeat conditional GET). NOTE the
+  // 304 decision is ETag-only (byte-exact); this timestamp is the newest
+  // incident time, which is COARSER than actual body change (an in-place edit —
+  // #759 AI landing, #768 monitoring transition, a non-newest incident's
+  // update — changes the body without advancing it), so honoring If-Modified-
+  // Since would risk a false 304 that drops an update. Hence: emit for info, but
+  // never revalidate on it.
+  const newest = capped.length ? new Date(capped[0].pubDate) : null
+  const lastModified = newest && !Number.isNaN(newest.getTime()) ? newest : null
+
+  const xmlOut = `<?xml version="1.0" encoding="UTF-8"?>
 <?xml-stylesheet type="text/xsl" href="/feed.xsl?v=${FEED_XSL_VERSION}"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
@@ -517,10 +539,27 @@ export function buildRssFeed(
     <link>${SITE}</link>
     <description>${xml(description)}</description>
     <language>en</language>
-    <lastBuildDate>${now.toUTCString()}</lastBuildDate>
+    <ttl>1</ttl>${lastModified ? `\n    <lastBuildDate>${lastModified.toUTCString()}</lastBuildDate>` : ''}
     <atom:link href="${SITE}${xml(feedPath)}" rel="self" type="application/rss+xml"/>
 ${itemsXml}${itemsXml ? '\n' : ''}  </channel>
 </rss>`
+  return { xml: xmlOut, lastModified }
+}
+
+/**
+ * Back-compat string-only wrapper — many callers/tests consume `buildRssFeed`
+ * as a plain XML string. New code that needs the `lastModified` (conditional
+ * GET) uses buildFeedWithMeta directly.
+ */
+export function buildRssFeed(
+  services: ServiceStatus[],
+  opts: FeedScope,
+  now?: Date,
+  aiAnalysis?: RssAiAnalysisMap,
+  firstSeen?: Record<string, string>,
+  servedActive?: Set<string>,
+): string {
+  return buildFeedWithMeta(services, opts, now, aiAnalysis, firstSeen, servedActive).xml
 }
 
 // What a /feed route was asked for — the all-services feed, or one service
@@ -530,10 +569,12 @@ export type FeedRequest =
   | { scope: 'service'; segment: string }
 
 // Outcome of a feed request. `ok: true` is always HTTP 200 + an RSS body, so
-// the success variant carries no status. The failure variant enumerates
+// the success variant carries no status. `lastModified` (#860) is the newest
+// item's pubDate (null when empty) — the handler emits it as `Last-Modified`
+// and uses it for conditional-GET (304). The failure variant enumerates
 // exactly the codes buildFeedResponse emits (400/404/503).
 export type FeedResult =
-  | { ok: true; xml: string }
+  | { ok: true; xml: string; lastModified: Date | null }
   | { ok: false; status: 400 | 404 | 503; message: string }
 
 /**
@@ -558,11 +599,77 @@ export function buildFeedResponse(
     return { ok: false, status: 503, message: 'Status data is temporarily unavailable' }
   }
   if (req.scope === 'all') {
-    return { ok: true, xml: buildRssFeed(cached.services, { scope: 'all' }, now, aiAnalysis, firstSeen, servedActive) }
+    const { xml, lastModified } = buildFeedWithMeta(cached.services, { scope: 'all' }, now, aiAnalysis, firstSeen, servedActive)
+    return { ok: true, xml, lastModified }
   }
   const service = resolveFeedService(cached.services, req.segment)
   if (!service) {
     return { ok: false, status: 404, message: 'Service not found' }
   }
-  return { ok: true, xml: buildRssFeed(cached.services, { scope: 'service', service }, now, aiAnalysis, firstSeen, servedActive) }
+  const { xml, lastModified } = buildFeedWithMeta(cached.services, { scope: 'service', service }, now, aiAnalysis, firstSeen, servedActive)
+  return { ok: true, xml, lastModified }
+}
+
+/**
+ * #860 — a weak ETag validator for a feed body. A small, dependency-free FNV-1a
+ * 32-bit hash rendered base36; weak (`W/`) because a CDN may gzip/transform the
+ * body (which changes bytes but not semantics). Pure + deterministic so it is
+ * unit-testable and identical polls of an unchanged feed produce the same tag.
+ */
+export function weakFeedEtag(body: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < body.length; i++) {
+    h ^= body.charCodeAt(i)
+    // FNV prime 16777619, kept in 32-bit via Math.imul + >>> 0
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return `W/"${h.toString(36)}-${body.length.toString(36)}"`
+}
+
+/**
+ * #860 — conditional-GET decision, gated ONLY on the byte-exact `If-None-Match`
+ * ETag. `If-Modified-Since` is deliberately NOT honored: our `Last-Modified` is
+ * the newest incident's pubDate, which is coarser than actual body change (an
+ * in-place edit — a #759 AI block landing, a #768 monitoring transition, an
+ * update to a non-newest incident, a fallback flip — mutates the body without
+ * advancing it), so a `<=` IMS check could return a FALSE 304 and silently drop
+ * an update — the exact failure this feed feature exists to prevent. The ETag,
+ * recomputed over the full body, catches every such change. Returns true only
+ * when the client's INM proves it already holds the current representation.
+ */
+export function isFeedNotModified(ifNoneMatch: string | null, etag: string): boolean {
+  if (ifNoneMatch == null) return false
+  // A reader may send several comma-separated tags, or "*". Match loosely on the
+  // strong/weak-agnostic tag value so `W/"x"` and `"x"` both compare equal.
+  if (ifNoneMatch.trim() === '*') return true
+  const norm = (t: string) => t.trim().replace(/^W\//, '')
+  return ifNoneMatch.split(',').some((t) => norm(t) === norm(etag))
+}
+
+/**
+ * #860 — build the HTTP response for a successful feed result: a weak `ETag` over
+ * the (byte-deterministic) body + an informational `Last-Modified`, and a 304
+ * (empty body, validators re-sent) when `If-None-Match` matches. Extracted from
+ * the route handler so the header contract (ETag on BOTH 200 and 304, the
+ * 60s cache window, Last-Modified only when present) is unit-testable without a
+ * full request/KV mock. Content-Type is text/xml so browsers apply /feed.xsl
+ * (#467); RSS readers + Slack /feed accept it.
+ */
+export function feedHttpResponse(
+  result: { xml: string; lastModified: Date | null },
+  ifNoneMatch: string | null,
+): Response {
+  const etag = weakFeedEtag(result.xml)
+  const headers: Record<string, string> = {
+    'Content-Type': 'text/xml; charset=utf-8',
+    // #860 — 300→60s: shrinks the "poll hits a stale edge copy" window from 5min to 1min.
+    'Cache-Control': 'public, max-age=60, s-maxage=60',
+    'Access-Control-Allow-Origin': '*',
+    ETag: etag,
+    ...(result.lastModified ? { 'Last-Modified': result.lastModified.toUTCString() } : {}),
+  }
+  if (isFeedNotModified(ifNoneMatch, etag)) {
+    return new Response(null, { status: 304, headers })
+  }
+  return new Response(result.xml, { status: 200, headers })
 }

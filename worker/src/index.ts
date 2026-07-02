@@ -1293,7 +1293,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
 // corsHeaders moved to ./cors — also handles team-scoped suffix patterns for Vercel preview origins.
 
 import { generateBadgeSvg } from './badge'
-import { buildFeedResponse, resolveFeedFirstSeen, isActiveItemHeld, resolveFeedService, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
+import { buildFeedResponse, resolveFeedFirstSeen, isActiveItemHeld, resolveFeedService, feedHttpResponse, FEED_XSL, type FeedRequest, type RssAiAnalysisMap } from './rss'
 import { generateOgSvg } from './og'
 import { detectRedditPosts, formatRedditAlert, formatCompetitiveAlert, formatSecurityAlert as formatRedditSecurityAlert, isPromotable } from './reddit'
 import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, planOsvTimelineCycle } from './security-monitor'
@@ -3144,17 +3144,12 @@ export default {
         console.error(`[rss] ${url.pathname} — status cache unavailable, returning 503`)
       }
       if (result.ok) {
-        return new Response(result.xml, {
-          status: 200,
-          headers: {
-            // text/xml (not application/rss+xml) so browsers apply the /feed.xsl client-side XSLT
-            // and render a page instead of downloading raw XML (#467). RSS readers + Slack /feed
-            // accept text/xml; the <atom:link> self type stays application/rss+xml for discovery.
-            'Content-Type': 'text/xml; charset=utf-8',
-            'Cache-Control': 'public, max-age=300, s-maxage=300',
-            'Access-Control-Allow-Origin': '*',
-          },
-        })
+        // #860 — conditional GET (ETag over the byte-deterministic body → 304 on
+        // If-None-Match) lets RSS pollers (incl. Slack /feed) + the Vercel edge
+        // revalidate cheaply instead of re-pulling the full body, and signals a
+        // healthy revalidatable feed so pollers back off less (the 8:16→9:45 KST
+        // Slack-silence root cause). Header contract lives in feedHttpResponse.
+        return feedHttpResponse(result, request.headers.get('If-None-Match'))
       }
       return new Response(result.message, {
         status: result.status,
