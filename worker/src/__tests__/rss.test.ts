@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildRssFeed, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse, dedupeSharedIncidents, resolveFeedFirstSeen, isActiveItemHeld, type RssAiAnalysisMap } from '../rss'
+import { buildRssFeed, buildFeedWithMeta, weakFeedEtag, isFeedNotModified, feedHttpResponse, feedSlug, resolveFeedService, isValidFeedSegment, buildFeedResponse, dedupeSharedIncidents, resolveFeedFirstSeen, isActiveItemHeld, type RssAiAnalysisMap } from '../rss'
 import { getFallbacks } from '../fallback'
 import type { ServiceStatus, Incident } from '../types'
 
@@ -45,7 +45,9 @@ describe('buildRssFeed — all scope', () => {
     expect(xml).toContain('<channel>')
     expect(xml).toContain('<title>AIWatch — AI Service Incidents</title>')
     expect(xml).toContain('<atom:link href="https://ai-watch.dev/feed.xml" rel="self"')
-    expect(xml).toContain(`<lastBuildDate>${NOW.toUTCString()}</lastBuildDate>`)
+    // #860 — an empty feed OMITS <lastBuildDate> so its body is byte-stable across
+    // polls (stable ETag → the no-incident steady state actually 304s).
+    expect(xml).not.toContain('<lastBuildDate>')
     expect(xml.trimEnd().endsWith('</rss>')).toBe(true)
   })
 
@@ -994,5 +996,146 @@ describe('buildRssFeed — #781 grouped per-category "Try instead" (feed parity 
     expect(line).toContain('LLM → OpenAI API')
     expect(line).toContain('AI Apps → ChatGPT')
     expect(line).toContain('CLI Agent → Codex')
+  })
+})
+
+// #860 — conditional GET (ETag / Last-Modified + 304) + content-derived lastBuildDate.
+describe('buildFeedWithMeta — content-derived lastModified (#860)', () => {
+  const NEWER = '2026-05-18T00:00:00.000Z'
+  const OLDER = '2026-05-01T00:00:00.000Z'
+
+  it('lastModified = the newest emitted item pubDate', () => {
+    const { xml, lastModified } = buildFeedWithMeta(
+      [service({ incidents: [
+        incident({ id: 'old', title: 'Older', startedAt: OLDER }),
+        incident({ id: 'new', title: 'Newer', startedAt: NEWER }),
+      ] })],
+      { scope: 'all' }, NOW,
+    )
+    expect(lastModified?.toISOString()).toBe(NEWER)
+    // and it is stamped into <lastBuildDate> (NOT `now`) so the body is deterministic
+    expect(xml).toContain(`<lastBuildDate>${new Date(NEWER).toUTCString()}</lastBuildDate>`)
+    expect(xml).not.toContain(`<lastBuildDate>${NOW.toUTCString()}</lastBuildDate>`)
+  })
+
+  it('lastModified is null for an empty feed, which OMITS lastBuildDate (stable body)', () => {
+    const { xml, lastModified } = buildFeedWithMeta([service()], { scope: 'all' }, NOW)
+    expect(lastModified).toBeNull()
+    expect(xml).not.toContain('<lastBuildDate>')
+  })
+
+  it('an empty feed is byte-deterministic across polls (no now-stamped date → stable ETag)', () => {
+    const a = buildFeedWithMeta([service()], { scope: 'all' }, NOW).xml
+    const b = buildFeedWithMeta([service()], { scope: 'all' }, new Date('2027-01-01T00:00:00.000Z')).xml
+    expect(a).toBe(b)
+    expect(weakFeedEtag(a)).toBe(weakFeedEtag(b))
+  })
+
+  it('guards a malformed pubDate: lastModified is null (no "Invalid Date")', () => {
+    const { xml, lastModified } = buildFeedWithMeta(
+      [service({ incidents: [incident({ id: 'bad', status: 'resolved', resolvedAt: 'not-a-date' })] })],
+      { scope: 'all' }, NOW,
+    )
+    expect(lastModified).toBeNull()
+    expect(xml).not.toContain('Invalid Date')
+  })
+
+  it('emits a <ttl> hint aligned with the 60s cache window', () => {
+    const { xml } = buildFeedWithMeta([service()], { scope: 'all' }, NOW)
+    expect(xml).toContain('<ttl>1</ttl>')
+  })
+
+  it('is byte-deterministic across identical polls (the conditional-GET premise)', () => {
+    const svcs = [service({ incidents: [incident({ id: 'a', startedAt: NEWER })] })]
+    const a = buildFeedWithMeta(svcs, { scope: 'all' }, NOW).xml
+    const b = buildFeedWithMeta(svcs, { scope: 'all' }, new Date('2026-05-19T23:59:59.000Z')).xml
+    // different `now`, same incident set → identical body (lastBuildDate is content-derived)
+    expect(a).toBe(b)
+  })
+
+  it('buildFeedResponse surfaces lastModified for all AND service scope (null when empty)', () => {
+    const withInc = buildFeedResponse({ services: [service({ incidents: [incident({ id: 'a', startedAt: NEWER })] })] }, { scope: 'all' }, NOW)
+    expect(withInc.ok && withInc.lastModified?.toISOString()).toBe(NEWER)
+    const target = service({ id: 'claude', incidents: [incident({ id: 'a', startedAt: NEWER })] })
+    const svc = buildFeedResponse({ services: [target] }, { scope: 'service', segment: 'claude' }, NOW)
+    expect(svc.ok && svc.lastModified?.toISOString()).toBe(NEWER)
+    const empty = buildFeedResponse({ services: [service()] }, { scope: 'all' }, NOW)
+    expect(empty.ok && empty.lastModified).toBeNull()
+  })
+})
+
+describe('weakFeedEtag (#860)', () => {
+  it('is a weak validator, deterministic for the same body', () => {
+    const tag = weakFeedEtag('<rss>hello</rss>')
+    expect(tag.startsWith('W/"')).toBe(true)
+    expect(weakFeedEtag('<rss>hello</rss>')).toBe(tag)
+  })
+  it('differs when the body differs (same length → exercises the hash, not just length)', () => {
+    expect(weakFeedEtag('<rss>a</rss>')).not.toBe(weakFeedEtag('<rss>b</rss>'))
+  })
+})
+
+// #860 — 304 is gated ONLY on the byte-exact If-None-Match ETag. If-Modified-Since
+// is intentionally not honored (Last-Modified = newest pubDate is coarser than
+// actual body change → would risk a false 304 dropping an in-place update).
+describe('isFeedNotModified (#860 — ETag-only)', () => {
+  const etag = weakFeedEtag('<rss>body</rss>')
+
+  it('If-None-Match exact (weak) match → 304', () => {
+    expect(isFeedNotModified(etag, etag)).toBe(true)
+  })
+  it('If-None-Match strong form matches weak etag value → 304', () => {
+    expect(isFeedNotModified(etag.replace(/^W\//, ''), etag)).toBe(true)
+  })
+  it('If-None-Match list containing the etag → 304', () => {
+    expect(isFeedNotModified(`"other", ${etag}`, etag)).toBe(true)
+  })
+  it('If-None-Match "*" → 304', () => {
+    expect(isFeedNotModified('*', etag)).toBe(true)
+  })
+  it('If-None-Match mismatch → 200', () => {
+    expect(isFeedNotModified('W/"nope"', etag)).toBe(false)
+  })
+  it('empty If-None-Match → 200', () => {
+    expect(isFeedNotModified('', etag)).toBe(false)
+  })
+  it('no If-None-Match → 200', () => {
+    expect(isFeedNotModified(null, etag)).toBe(false)
+  })
+})
+
+// #860 — the handler's header contract, extracted so it is testable without a
+// full request/KV mock: ETag on BOTH 200 and 304, 60s cache, Last-Modified only
+// when present, 304 has an empty body.
+describe('feedHttpResponse (#860)', () => {
+  const LM = new Date('2026-05-18T00:00:00.000Z')
+
+  it('200 with ETag + Last-Modified + 60s cache when no validators sent', async () => {
+    const res = feedHttpResponse({ xml: '<rss>x</rss>', lastModified: LM }, null)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('ETag')).toBe(weakFeedEtag('<rss>x</rss>'))
+    expect(res.headers.get('Last-Modified')).toBe(LM.toUTCString())
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=60, s-maxage=60')
+    expect(res.headers.get('Content-Type')).toContain('text/xml')
+    expect(await res.text()).toBe('<rss>x</rss>')
+  })
+
+  it('304 (empty body) when If-None-Match matches, with the ETag re-sent', async () => {
+    const etag = weakFeedEtag('<rss>x</rss>')
+    const res = feedHttpResponse({ xml: '<rss>x</rss>', lastModified: LM }, etag)
+    expect(res.status).toBe(304)
+    expect(res.headers.get('ETag')).toBe(etag) // validator on the 304 too → next-poll revalidation
+    expect(res.headers.get('Last-Modified')).toBe(LM.toUTCString())
+    expect(await res.text()).toBe('')
+  })
+
+  it('200 when If-None-Match does not match', () => {
+    expect(feedHttpResponse({ xml: '<rss>x</rss>', lastModified: LM }, 'W/"stale"').status).toBe(200)
+  })
+
+  it('omits Last-Modified for an empty feed (null lastModified) but still sets ETag', () => {
+    const res = feedHttpResponse({ xml: '<rss></rss>', lastModified: null }, null)
+    expect(res.headers.get('Last-Modified')).toBeNull()
+    expect(res.headers.get('ETag')).toBe(weakFeedEtag('<rss></rss>'))
   })
 })
