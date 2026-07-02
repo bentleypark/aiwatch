@@ -98,7 +98,7 @@ export function shouldShowFallback(status) {
 }
 
 // Per-surface "Is X Down?" page path. Each Anthropic surface has its own SEO page
-// (verified against api/is-down/slug-map.ts + vercel.json), so a card deep-links to
+// (verified against api/_is-down/slug-map.ts + vercel.json), so a card deep-links to
 // the RIGHT one instead of everything pointing at /is-claude-down. Unknown id → null.
 const IS_DOWN_SLUG = { claude: 'claude', claudeai: 'claude-ai', claudecode: 'claude-code' }
 export function isDownPath(id) {

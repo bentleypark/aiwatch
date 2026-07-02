@@ -4,7 +4,7 @@
 // the AIWatch Score formulas, and an explicit "what we can't measure and why" coverage
 // table. Self-contained SSR (no external data fetch) — mirrors api/intro.ts.
 
-import { renderMethodologyPage } from './methodology/html-template'
+import { renderMethodologyPage } from './_methodology/html-template'
 import { generateNonce, buildCsp } from './_shared/csp-nonce'
 
 export const config = { runtime: 'edge' }

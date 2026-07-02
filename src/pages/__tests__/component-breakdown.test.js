@@ -3,7 +3,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 // SSR render of the dashboard ComponentBreakdown — the mirror of the is-down
-// renderComponents (api/is-down/html-template.ts). The two reimplement the SAME
+// renderComponents (api/_is-down/html-template.ts). The two reimplement the SAME
 // interleave algorithm by hand, so this pins the dashboard copy independently
 // (feedback_verify_both_dashboard_and_isdown: breakdown changes must hold on BOTH
 // surfaces). t is passed as a prop, so no context/provider is needed. Collapsed

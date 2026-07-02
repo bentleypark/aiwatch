@@ -20,8 +20,8 @@ const toolResult = () => ({ type: 'user', isMeta: false, message: { content: [{ 
 test('isUiEdgePath — dashboard + Edge SSR are UI; worker/docs/tests are not', () => {
   assert.equal(isUiEdgePath('src/pages/Overview.jsx'), true)
   assert.equal(isUiEdgePath('src/locales/ko.js'), true)
-  assert.equal(isUiEdgePath('api/is-down/html-template.ts'), true)
-  assert.equal(isUiEdgePath('api/intro/html-template.ts'), true)
+  assert.equal(isUiEdgePath('api/_is-down/html-template.ts'), true) // Edge helper dirs are `_`-prefixed (#862)
+  assert.equal(isUiEdgePath('api/_intro/html-template.ts'), true)
   assert.equal(isUiEdgePath('worker/src/services.ts'), false)
   assert.equal(isUiEdgePath('docs/reference/x.md'), false)
   assert.equal(isUiEdgePath('src/utils/__tests__/constants.test.js'), false) // test excluded
@@ -32,11 +32,11 @@ test('isUiEdgePath — absolute paths (Edit tool supplies absolute file_path, #6
   // The Edit/Write tools require an absolute file_path — the gate must classify these too, else
   // lastUiEditIndex never finds a UI edit and every UI commit fail-closes.
   assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/src/pages/ServiceDetails.jsx'), true)
-  assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/api/is-down/html-template.ts'), true)
+  assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/api/_is-down/html-template.ts'), true)
   assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/worker/src/services.ts'), false) // absolute worker/src excluded
   assert.equal(isUiEdgePath('/Users/x/dev/aiwatch/src/utils/__tests__/calendar.test.js'), false) // absolute test excluded
-  // worker/src/ guard runs before the api/src match → a worker path nesting api/is-down stays non-UI (ordering pin)
-  assert.equal(isUiEdgePath('worker/src/parsers/api/is-down/x.ts'), false)
+  // worker/src/ guard runs before the api/src match → a worker path nesting api/_is-down stays non-UI (ordering pin)
+  assert.equal(isUiEdgePath('worker/src/parsers/api/_is-down/x.ts'), false)
 })
 
 test('lastUiEditIndex — picks the last UI/Edge edit (Edit + Bash write); -1 when none', () => {

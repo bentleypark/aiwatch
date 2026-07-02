@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildBadgeLinkTarget, buildBadgeMarkdown } from '../badge'
-import { SERVICE_ID_TO_SLUG } from '../../../api/is-down/slug-map'
+import { SERVICE_ID_TO_SLUG } from '../../../api/_is-down/slug-map'
 
 describe('buildBadgeLinkTarget — #805 backlinks must hit the crawlable is-down page', () => {
   it('links to the is-down page when slug == id', () => {

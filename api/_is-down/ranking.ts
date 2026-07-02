@@ -3,7 +3,7 @@
 // e2e (tests/is-down.spec.js) asserted a LIVE score tie existed among 6 services, which false-failed
 // whenever scores drifted apart (it blocked unrelated PR #786's Edge E2E). This pure helper lets the
 // derivation be guarded deterministically; the render branch is guarded separately in
-// api/is-down/__tests__/html-template.test.ts.
+// api/_is-down/__tests__/html-template.test.ts.
 //
 // `scoredDesc` = the services that passed the rank filters (finite aiwatchScore + reliable data),
 // already sorted by score DESCENDING. `targetScore` = the target service's ROUNDED aiwatchScore.

@@ -1,10 +1,10 @@
 // Cross-mirror sync (#432). The per-service RSS feed URL in src/utils/constants.js
 // (feedUrlOf) hand-mirrors the service-ID ↔ is-down-slug mapping because the SPA
 // bundle does not import from api/. This pins that mirror to the canonical
-// source — api/is-down/slug-map.ts — the same way worker/src/__tests__/
+// source — api/_is-down/slug-map.ts — the same way worker/src/__tests__/
 // feed-slug-sync.test.ts pins the worker copy.
 import { describe, it, expect } from 'vitest'
-import { SERVICE_ID_TO_SLUG } from '../../../api/is-down/slug-map'
+import { SERVICE_ID_TO_SLUG } from '../../../api/_is-down/slug-map'
 import { feedUrlOf, NO_FEED_SERVICES, ALL_SERVICE_IDS } from '../constants'
 
 describe('feedUrlOf ↔ api/is-down slug-map sync (#432)', () => {

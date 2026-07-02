@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderBadgesPage, badgeMarkdownFor } from '../html-template'
-import { SLUG_TO_SERVICE } from '../../is-down/slug-map'
+import { SLUG_TO_SERVICE } from '../../_is-down/slug-map'
 
 describe('badgeMarkdownFor (#805) — links to the crawlable is-down page', () => {
   it('builds markdown with the worker service id image + is-down link (slug == id)', () => {

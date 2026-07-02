@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { buildShareUrl } from '../is-down/share-url'
-import { renderShareButtons, type ServiceData } from '../is-down/html-template'
-import type { ServiceSEO } from '../is-down/seo-content'
+import { buildShareUrl } from '../_is-down/share-url'
+import { renderShareButtons, type ServiceData } from '../_is-down/html-template'
+import type { ServiceSEO } from '../_is-down/seo-content'
 
 const CANON = 'https://ai-watch.dev/is-claude-down'
 

@@ -103,7 +103,7 @@ describe('isGenericIncident', () => {
 
 describe('GENERIC_TITLE_PATTERNS_SOURCES — cross-file parity (#387)', () => {
   // Worker is source-of-truth. SPA (`src/utils/__tests__/incidentGrouping.test.js`)
-  // and SSR (`api/is-down/__tests__/incident-grouping.test.ts`) pin this same
+  // and SSR (`api/_is-down/__tests__/incident-grouping.test.ts`) pin this same
   // snapshot. Any drift fails one test in each suite — no asymmetric prod
   // behavior survives merge.
   const EXPECTED_SOURCES = [

@@ -1,7 +1,7 @@
 // SSR HTML template for the /methodology page (#673).
 //
 // Public, indexable explainer of how AIWatch measures AI service reliability.
-// Mirrors api/intro/html-template.ts conventions: inline <style> in <head>, inline
+// Mirrors api/_intro/html-template.ts conventions: inline <style> in <head>, inline
 // KO/EN i18n + a client-side setLang() toggle, the shared Consent Mode v2 + cookie
 // banner, dark theme + design tokens, mono headings.
 //

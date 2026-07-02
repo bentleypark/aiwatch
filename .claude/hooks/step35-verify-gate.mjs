@@ -63,12 +63,14 @@ function audit(decision, note = '') {
 export function isUiEdgePath(p) {
   if (!p) return false
   if (/(?:^|\/)__tests__\/|\.test\.|\.spec\./.test(p)) return false
-  // Match a `src/` or `api/(is-down|intro)/` segment at any path boundary so this works for BOTH the
+  // Match a `src/` or `api/(_)?(is-down|intro)/` segment at any path boundary so this works for BOTH the
   // git-relative paths from the staged diff (`src/x`) AND the Edit/Write tool's absolute `file_path`
   // (`/repo/src/x`) — anchoring `^src/` broke the edit-event correlation in lastUiEditIndex (#664,
   // every UI commit fail-closed). Exclude the worker's own `worker/src/` (not frontend UI).
+  // The is-down/intro Edge helper dirs are `_`-prefixed (excluded from Vercel's Serverless-Function
+  // count, #862) — the optional `_?` keeps this gate matching them post-rename.
   if (/(?:^|\/)worker\/src\//.test(p)) return false
-  return /(?:^|\/)src\//.test(p) || /(?:^|\/)api\/(?:is-down|intro)\//.test(p)
+  return /(?:^|\/)src\//.test(p) || /(?:^|\/)api\/_?(?:is-down|intro)\//.test(p)
 }
 
 // Genuine in-browser verification confirmation (KO + EN). DELIBERATELY NARROW — bare "확인"
@@ -85,7 +87,7 @@ export const OVERRIDE_RE = /검증\s?생략|확인\s?생략|스킵하고\s?커�
 export const HOOK_WORK_RE = /#?657\b|step-?35|step-?3\.?5\s?gate|(?:hooks?|gate|훅|게이트)\s*(?:작업|수정|개선|편집|edit|fix|work)|(?:work\s?on|edit|fix|수정|작업|개선)[^.\n]{0,15}(?:gate|hook|훅|게이트)/i
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 // Bash write-redirect to a UI/Edge path (cat > / >> / tee). Heuristic — covers the heredoc edit path.
-const BASH_WRITE_RE = />>?\s*("?)(src\/[^\s"]+|api\/(?:is-down|intro)\/[^\s"]+)|tee\s+("?)(src\/|api\/(?:is-down|intro)\/)/
+const BASH_WRITE_RE = />>?\s*("?)(src\/[^\s"]+|api\/_?(?:is-down|intro)\/[^\s"]+)|tee\s+("?)(src\/|api\/_?(?:is-down|intro)\/)/
 
 /** Index of the last transcript entry that EDITED a UI/Edge file (Edit/Write tool_use or a Bash
  *  write-redirect). -1 if none seen in this transcript. */
