@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { predictedHoursFrom, predictedHoursText, accuracyVerdict, verdictLabel, withinEstimateText, computePredictionOutcome } from '../predictionAccuracy'
+import { predictedHoursFrom, predictedHoursText, accuracyVerdict, verdictLabel, withinEstimateText, computePredictionOutcome, estimateExceeded, exceededRecoveryText, approxElapsedText } from '../predictionAccuracy'
 
 describe('predictedHoursFrom', () => {
   it('prefers the numeric estimatedRecoveryHours', () => {
@@ -109,5 +109,79 @@ describe('computePredictionOutcome', () => {
       { estimatedRecoveryHours: 1, resolvedAt: started },
       { startedAt: resolved },
     )).toBeNull()
+  })
+})
+
+describe('estimateExceeded (Mistral 2–4h on a 2-day incident)', () => {
+  const now = new Date('2026-07-02T00:00:00.000Z').getTime()
+  it('true when an active incident has run past its estimated upper bound', () => {
+    // Started 2 days ago, estimate 4h → long exceeded.
+    expect(estimateExceeded(
+      { estimatedRecoveryHours: 4, estimatedRecovery: '2–4h' },
+      { startedAt: '2026-06-30T00:00:00.000Z' },
+      now,
+    )).toBe(true)
+  })
+  it('parses the display upper bound when no numeric field', () => {
+    expect(estimateExceeded(
+      { estimatedRecovery: '2–4h' },
+      { startedAt: '2026-06-30T00:00:00.000Z' },
+      now,
+    )).toBe(true)
+  })
+  it('false while still within the estimated window', () => {
+    expect(estimateExceeded(
+      { estimatedRecoveryHours: 4 },
+      { startedAt: '2026-07-01T22:00:00.000Z' }, // 2h ago < 4h
+      now,
+    )).toBe(false)
+  })
+  it('false once resolved (predicted-vs-actual takes over)', () => {
+    expect(estimateExceeded(
+      { estimatedRecoveryHours: 4, resolvedAt: '2026-07-01T00:00:00.000Z' },
+      { startedAt: '2026-06-30T00:00:00.000Z' },
+      now,
+    )).toBe(false)
+  })
+  it('false without a usable prediction or startedAt', () => {
+    expect(estimateExceeded({ estimatedRecovery: 'N/A' }, { startedAt: '2026-06-30T00:00:00.000Z' }, now)).toBe(false)
+    expect(estimateExceeded({ estimatedRecoveryHours: 4 }, {}, now)).toBe(false)
+    expect(estimateExceeded(null, { startedAt: '2026-06-30T00:00:00.000Z' }, now)).toBe(false)
+  })
+})
+
+describe('approxElapsedText', () => {
+  it('rounds to whole hours / minutes (KO + EN)', () => {
+    expect(approxElapsedText(708, 'ko')).toBe('12시간') // 11.8h → 12
+    expect(approxElapsedText(708, 'en')).toBe('12h')
+    expect(approxElapsedText(40, 'ko')).toBe('40분')
+    expect(approxElapsedText(40, 'en')).toBe('40m')
+  })
+})
+
+describe('exceededRecoveryText (elapsed vs estimate — the user-chosen wording)', () => {
+  const now = new Date('2026-07-02T03:24:57.000Z').getTime()
+  it('shows "약 12시간째 진행 · 예측(2–4h) 초과" for the Fine-Tuning incident (KO)', () => {
+    // startedAt 2026-07-01T15:38 → ~11.8h before `now` → rounds to 12
+    expect(exceededRecoveryText(
+      { estimatedRecovery: '2–4h', estimatedRecoveryHours: 4 },
+      { startedAt: '2026-07-01T15:38:30.837Z' }, 'ko', now,
+    )).toBe('약 12시간째 진행 · 예측(2–4h) 초과')
+  })
+  it('EN form: "Ongoing ~12h · exceeded ~2–4h est."', () => {
+    expect(exceededRecoveryText(
+      { estimatedRecovery: '2–4h', estimatedRecoveryHours: 4 },
+      { startedAt: '2026-07-01T15:38:30.837Z' }, 'en', now,
+    )).toBe('Ongoing ~12h · exceeded ~2–4h est.')
+  })
+  it('derives the range from the numeric bound when the display string is N/A', () => {
+    expect(exceededRecoveryText(
+      { estimatedRecovery: 'N/A', estimatedRecoveryHours: 4 },
+      { startedAt: '2026-07-01T15:38:30.837Z' }, 'en', now,
+    )).toBe('Ongoing ~12h · exceeded ~4h est.')
+  })
+  it('falls back to terse wording when startedAt is missing', () => {
+    expect(exceededRecoveryText({ estimatedRecovery: '2–4h' }, {}, 'ko', now)).toBe('일반 패턴 초과 — 예측 불가')
+    expect(exceededRecoveryText({ estimatedRecovery: '2–4h' }, {}, 'en', now)).toBe('Exceeded typical pattern')
   })
 })

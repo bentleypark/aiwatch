@@ -357,9 +357,15 @@ export function parseInstatusIncidents(html: string): Incident[] {
         }
         // duration = the `duration` field (active impact, what Mistral's badge shows + what the Score
         // MTTR / Recovery card read), NOT resolvedAt−startedAt. Fall back to the span only without it.
-        const durationStr = durationSec != null
-          ? formatDuration(new Date(createdAt), new Date(new Date(createdAt).getTime() + durationSec * 1000))
-          : (resolvedIso ? formatDuration(new Date(createdAt), new Date(resolvedIso)) : null)
+        // Only a RESOLVED incident has a final duration: Nuxt's `duration` field on an ACTIVE incident
+        // is 0 (not yet resolved) → formatDuration floors it to "1m", which the Overview would render
+        // as the recovery time on an ongoing incident. Leave null so the UI shows "Investigating"/
+        // ongoing (mirrors the Next.js Instatus path + statuspage, which gate duration on resolution).
+        const durationStr = status !== 'RESOLVED'
+          ? null
+          : durationSec != null
+            ? formatDuration(new Date(createdAt), new Date(new Date(createdAt).getTime() + durationSec * 1000))
+            : (resolvedIso ? formatDuration(new Date(createdAt), new Date(resolvedIso)) : null)
 
         return [{
           id: arr[inc.id] as string,

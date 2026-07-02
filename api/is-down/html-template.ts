@@ -20,6 +20,65 @@ function formatRecoveryDisplay(recovery: string): string {
   return recovery
 }
 
+/** Upper-bound recovery hours from an AI insight: the numeric `estimatedRecoveryHours` first, else
+ *  parse the display string ("2–4h" → 4, "30m–1h" → 1, "45m" → 0.75). Mirrors the frontend
+ *  `predictedHoursFrom` (src/utils/predictionAccuracy.js) so both surfaces derive the bound the same
+ *  way — the string-parse fallback matters for pre-deployment `ai:analysis` KV data without the
+ *  numeric field. Returns null for "N/A" / "No historical data…" / missing. */
+function recoveryUpperBoundHours(insight: { estimatedRecovery?: string; estimatedRecoveryHours?: number }): number | null {
+  if (typeof insight.estimatedRecoveryHours === 'number' && insight.estimatedRecoveryHours > 0) return insight.estimatedRecoveryHours
+  const s = insight.estimatedRecovery
+  if (!s || s === 'N/A' || s === 'No historical data for estimation') return null
+  const parts = String(s).split(/[–\-~]/).map((x) => x.trim()).filter(Boolean)
+  const upper = parts[parts.length - 1]
+  if (!upper) return null
+  const h = upper.match(/(\d+(?:\.\d+)?)\s*h/i)
+  const m = upper.match(/(\d+(?:\.\d+)?)\s*m/i)
+  let hours = 0
+  if (h) hours += parseFloat(h[1])
+  if (m) hours += parseFloat(m[1]) / 60
+  return hours > 0 ? hours : null
+}
+
+/** True when an ACTIVE incident has already run past its estimated recovery upper bound, so the stale
+ *  short range is no longer credible (a 2–4h estimate on an incident ongoing for days). Mirrors the
+ *  frontend `estimateExceeded` + the worker's `recoveryExceeded` gate. Gated on `resolvedAt` (a resolved
+ *  surface shows predicted-vs-actual instead), a usable bound, and a startedAt. */
+function recoveryEstimateExceeded(
+  insight: { estimatedRecovery?: string; estimatedRecoveryHours?: number; startedAt?: string; resolvedAt?: string } | null | undefined,
+): boolean {
+  if (!insight || insight.resolvedAt) return false
+  const bound = recoveryUpperBoundHours(insight)
+  if (bound == null || !insight.startedAt) return false
+  const elapsed = Date.now() - new Date(insight.startedAt).getTime()
+  return Number.isFinite(elapsed) && elapsed > 0 && elapsed > bound * 3_600_000
+}
+
+/** Whole-unit elapsed label ("12h" / "40m") — mirrors the frontend `approxElapsedText` (EN). */
+function approxElapsedEn(min: number): string {
+  if (min < 60) return `${Math.round(min)}m`
+  return `${Math.round(min / 60)}h`
+}
+
+/** Rich "still ongoing past the estimate" text for the AI card — "Ongoing ~12h · exceeded ~2–4h est."
+ *  Shows WHY the estimate is void (how long it's been running). Mirrors the frontend
+ *  `exceededRecoveryText`; falls back to the terse "Exceeded typical pattern" when elapsed/range are
+ *  unavailable. Caller gates on `recoveryEstimateExceeded`. Meta/share keep the terse wording. */
+export function exceededRecoveryTextEn(
+  insight: { estimatedRecovery?: string; estimatedRecoveryHours?: number; startedAt?: string },
+  nowMs: number = Date.now(),
+): string {
+  const started = insight.startedAt ? new Date(insight.startedAt).getTime() : NaN
+  const elapsedMin = Number.isFinite(started) ? (nowMs - started) / 60000 : NaN
+  const raw = insight.estimatedRecovery
+  const bound = recoveryUpperBoundHours(insight)
+  const range = raw && raw !== 'N/A' && raw !== 'No historical data for estimation'
+    ? raw
+    : (bound != null ? fmtMinEn(Math.round(bound * 60)) : null) // parity with JS predictedHoursText (fmtMin)
+  if (!Number.isFinite(elapsedMin) || elapsedMin <= 0 || !range) return 'Exceeded typical pattern'
+  return `Ongoing ~${approxElapsedEn(elapsedMin)} · exceeded ~${range} est.`
+}
+
 export interface ServiceData {
   id: string
   name: string
@@ -562,8 +621,12 @@ function renderAIInsight(insight?: { summary: string; estimatedRecovery: string;
   if (!insight) return ''
   const ago = Math.floor((Date.now() - new Date(insight.analyzedAt).getTime()) / 60000)
   const agoText = ago < 1 ? 'just now' : ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`
-  const recovery = formatRecoveryDisplay(insight.estimatedRecovery)
   const isResolved = serviceStatus === 'operational'
+  // An ACTIVE incident that has already run past its estimated recovery upper bound: the stale short
+  // range is no longer credible (a 2–4h estimate on an incident ongoing for days). Show how long it's
+  // been running vs the estimate ("Ongoing ~12h · exceeded ~2–4h est.") — same gate as the dashboard
+  // modal. Meta/share surfaces keep the terse "Exceeded typical pattern" (reads cleaner in-sentence).
+  const recovery = recoveryEstimateExceeded(insight) ? exceededRecoveryTextEn(insight) : formatRecoveryDisplay(insight.estimatedRecovery)
   const isRecentlyRecovered = isResolved && !!insight.resolvedAt
   // #827 F4 — once resolved, replace the bare estimate with "predicted vs actual" (actual = startedAt→
   // resolvedAt). Null until resolved or when the numeric estimate / startedAt isn't available.
@@ -969,11 +1032,12 @@ function renderIncidentGroup(g: GroupRow): string {
 export function buildMetaDescription(
   seo: ServiceSEO,
   service: ServiceData | null,
-  aiInsight: { summary: string; estimatedRecovery: string } | null,
+  aiInsight: { summary: string; estimatedRecovery: string; estimatedRecoveryHours?: number; startedAt?: string; resolvedAt?: string } | null,
 ): string {
   if (aiInsight && service && service.status !== 'operational') {
     const a = statusAnswer(service.status)
-    return `${a.yesno} — ${seo.displayName} ${a.phrase}. AI Analysis: ${aiInsight.summary.slice(0, 120)} Est. recovery: ${formatRecoveryDisplay(aiInsight.estimatedRecovery)}.`
+    const recovery = recoveryEstimateExceeded(aiInsight) ? 'Exceeded typical pattern' : formatRecoveryDisplay(aiInsight.estimatedRecovery)
+    return `${a.yesno} — ${seo.displayName} ${a.phrase}. AI Analysis: ${aiInsight.summary.slice(0, 120)} Est. recovery: ${recovery}.`
   }
   if (!service) {
     return `Check if ${seo.displayName} is down right now. Real-time status monitoring by AIWatch.`
@@ -1149,13 +1213,14 @@ ${anyOutbound ? `<p class="mono fallback-disclosure">Open &#8599; goes to the pr
 </div>`
 }
 
-export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canonical: string, ogImageUrl: string, aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[] } | null): string {
+export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canonical: string, ogImageUrl: string, aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; estimatedRecoveryHours?: number; startedAt?: string; resolvedAt?: string } | null): string {
   const status = service ? statusLabel(service.status) : 'Operational'
   const rawStatus = service?.status ?? 'operational'
 
   // Status-based share templates — randomly selected per render for variety
   // Include AI analysis when available
-  const aiSuffix = aiInsight ? `\nAI Analysis: ${aiInsight.summary.slice(0, 100)}. Est. recovery: ${formatRecoveryDisplay(aiInsight.estimatedRecovery)}.` : ''
+  const aiRecovery = aiInsight ? (recoveryEstimateExceeded(aiInsight) ? 'Exceeded typical pattern' : formatRecoveryDisplay(aiInsight.estimatedRecovery)) : ''
+  const aiSuffix = aiInsight ? `\nAI Analysis: ${aiInsight.summary.slice(0, 100)}. Est. recovery: ${aiRecovery}.` : ''
   const n = seo.displayName
   const downTexts = [
     `Is ${n} down? Current status: Down.`,

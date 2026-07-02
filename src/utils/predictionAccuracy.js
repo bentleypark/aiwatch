@@ -90,6 +90,55 @@ export function withinEstimateText(outcome, lang) {
 }
 
 /**
+ * True when an ACTIVE incident has already run past its estimated recovery upper bound, so the stale
+ * short "Est. Recovery" range is no longer credible (a 2–4h estimate on an incident ongoing for days).
+ * Mirrors the worker's `recoveryExceeded` gate (incidentAge > estHours). Callers should then render the
+ * "Exceeded typical pattern" wording instead of the outdated range. Returns false once resolved (the
+ * predicted-vs-actual outcome takes over), when there's no usable prediction, or without a startedAt.
+ */
+export function estimateExceeded(analysis, incident, nowMs = Date.now()) {
+  if (!analysis || analysis.resolvedAt) return false
+  const predictedHours = predictedHoursFrom(analysis)
+  if (predictedHours == null) return false
+  const startedAt = incident?.startedAt
+  if (!startedAt) return false
+  const elapsedMs = nowMs - new Date(startedAt).getTime()
+  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) return false
+  return elapsedMs > predictedHours * 3_600_000
+}
+
+/** Approximate elapsed-duration label for the "still ongoing" recovery text — rounded to whole
+ *  units so a live, ever-ticking value reads cleanly ("12시간" / "12h", "40분" / "40m"). */
+export function approxElapsedText(min, lang) {
+  if (!(min > 0)) return lang === 'ko' ? '방금' : 'just now'
+  if (min < 60) return lang === 'ko' ? `${Math.round(min)}분` : `${Math.round(min)}m`
+  const h = Math.round(min / 60)
+  return lang === 'ko' ? `${h}시간` : `${h}h`
+}
+
+/**
+ * Display text for an ACTIVE incident that has run past its recovery estimate (callers gate on
+ * `estimateExceeded`). Instead of a bare "Exceeded typical pattern", it shows WHY — how long it has
+ * been running vs the original estimate: "약 12시간째 진행 · 예측(2–4h) 초과" / "Ongoing ~12h · exceeded
+ * ~2–4h est." Falls back to the terse wording when elapsed or the estimate range can't be derived.
+ */
+export function exceededRecoveryText(analysis, incident, lang, nowMs = Date.now()) {
+  const startedAt = incident?.startedAt
+  const elapsedMin = startedAt ? (nowMs - new Date(startedAt).getTime()) / 60000 : NaN
+  const raw = analysis?.estimatedRecovery
+  const range = (raw && raw !== 'N/A' && raw !== 'No historical data for estimation')
+    ? raw
+    : (() => { const b = predictedHoursFrom(analysis); return b != null ? predictedHoursText(b) : null })()
+  if (!Number.isFinite(elapsedMin) || elapsedMin <= 0 || !range) {
+    return lang === 'ko' ? '일반 패턴 초과 — 예측 불가' : 'Exceeded typical pattern'
+  }
+  const approx = approxElapsedText(elapsedMin, lang)
+  return lang === 'ko'
+    ? `약 ${approx}째 진행 · 예측(${range}) 초과`
+    : `Ongoing ~${approx} · exceeded ~${range} est.`
+}
+
+/**
  * Predicted-vs-actual outcome for a RESOLVED incident, for modal display.
  * @returns {{ predictedHours:number, actualMin:number, actualText:string, verdict:string } | null}
  *          null when the incident isn't resolved, has no usable prediction, or the actual duration

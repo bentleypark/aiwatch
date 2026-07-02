@@ -1,7 +1,7 @@
 // AI Analysis Modal — shows incident analysis results from Claude
 import { useLang } from '../hooks/useLang'
 import { getGroupedFallbacks, shouldShowFallback } from '../utils/constants'
-import { computePredictionOutcome, verdictLabel } from '../utils/predictionAccuracy'
+import { computePredictionOutcome, verdictLabel, estimateExceeded, exceededRecoveryText } from '../utils/predictionAccuracy'
 
 function timeAgo(date, lang) {
   const diff = Date.now() - new Date(date).getTime()
@@ -192,9 +192,12 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                         ) : (
                           <span>⏱ <strong style={{ color: 'var(--text1)' }}>{lang === 'ko' ? '예상 복구' : 'Est. Recovery'}:</strong> {analysis.estimatedRecovery === 'No historical data for estimation'
                             ? (lang === 'ko' ? '복구 신호 모니터링 중...' : 'Monitoring recovery signals...')
-                            : analysis.estimatedRecovery === 'N/A'
-                              ? (lang === 'ko' ? '일반 패턴 초과 — 예측 불가' : 'Exceeded typical pattern')
-                              : analysis.estimatedRecovery}
+                            // incident already past its estimate → show elapsed vs estimate, not the stale range
+                            : estimateExceeded(analysis, inc)
+                              ? exceededRecoveryText(analysis, inc, lang)
+                              : analysis.estimatedRecovery === 'N/A'
+                                ? (lang === 'ko' ? '일반 패턴 초과 — 예측 불가' : 'Exceeded typical pattern')
+                                : analysis.estimatedRecovery}
                           </span>
                         )}
                         {analysis.affectedScope?.length > 0 && (

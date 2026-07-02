@@ -204,6 +204,43 @@ describe('parseInstatusIncidents — Nuxt resolution = createdAt + duration, not
   })
 })
 
+describe('parseInstatusIncidents — ongoing Nuxt incident has no duration (Mistral "1m" bug)', () => {
+  // An ACTIVE (INVESTIGATING) incident: Nuxt's `duration` field is 0 (not yet resolved), which
+  // formatDuration would floor to "1m" — the Overview then renders that as the recovery time on an
+  // ongoing incident. The parser must leave duration null so the UI shows "Investigating"/ongoing.
+  function ongoingNuxt(durationSec: number) {
+    const arr: unknown[] = [
+      'Completion API Degraded',     // 0 name
+      'INVESTIGATING',               // 1 lastUpdateStatus (ACTIVE)
+      '2026-06-30T09:30:00.000Z',    // 2 created_at
+      durationSec,                   // 3 duration (s)
+      'MEDIUM',                      // 4 severity
+      'inc-ongoing',                 // 5 id
+      [],                            // 6 services
+      [],                            // 7 incidentUpdates
+      { id: 5, name: 0, lastUpdateStatus: 1, created_at: 2, duration: 3, severity: 4, services: 6, incidentUpdates: 7 }, // 8 inc
+      [8],                           // 9 incIndices
+      { incidents: 9 },              // 10 incObj
+      { 'incidents-by-date-2026': 10 }, // 11 dataRefs
+    ]
+    return `<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`
+  }
+
+  it('leaves duration null for an active incident even when durationSec is 0 (would floor to "1m")', () => {
+    const [inc] = parseInstatusIncidents(ongoingNuxt(0))
+    expect(inc.status).toBe('investigating')
+    expect(inc.duration).toBeNull()
+    expect(inc.resolvedAt).toBeNull()
+  })
+
+  it('leaves duration null for an active incident with a nonzero elapsed durationSec too', () => {
+    // Even if Nuxt reports elapsed active-impact seconds, an unresolved incident has no FINAL duration.
+    const [inc] = parseInstatusIncidents(ongoingNuxt(3600))
+    expect(inc.status).toBe('investigating')
+    expect(inc.duration).toBeNull()
+  })
+})
+
 describe('parseInstatusUptime (#627)', () => {
   // Nuxt encodes each component's uptime as a flat-array index ref to a direct float %.
   function nuxtHtmlWithUptime() {
