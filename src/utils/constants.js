@@ -17,7 +17,7 @@ export const API_SERVICE_IDS = [
   'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq',
   'together', 'fireworks', 'cerebras', 'perplexity', 'huggingface', 'replicate', 'fal',
   'elevenlabs', 'xai', 'deepseek', 'openrouter', 'bedrock', 'azureopenai',
-  'pinecone', 'stability', 'bfl', 'voyageai', 'modal', 'langsmith', 'helicone', 'langfuse', 'runway', 'luma', 'assemblyai', 'deepgram',
+  'pinecone', 'turbopuffer', 'stability', 'bfl', 'voyageai', 'modal', 'langsmith', 'helicone', 'langfuse', 'runway', 'luma', 'assemblyai', 'deepgram',
 ]
 
 // AI web apps (no latency — web services, ordered before related API)
@@ -36,7 +36,7 @@ export const SERVICE_AND_APP_IDS = [
   // voice & speech AI
   'elevenlabs', 'assemblyai', 'deepgram',
   // inference / infrastructure
-  'huggingface', 'replicate', 'fal', 'pinecone', 'stability', 'bfl', 'voyageai', 'modal',
+  'huggingface', 'replicate', 'fal', 'pinecone', 'turbopuffer', 'stability', 'bfl', 'voyageai', 'modal',
   // LLM observability (#601)
   'langsmith', 'helicone', 'langfuse',
   // video-gen
@@ -58,7 +58,7 @@ export const SERVICE_CATEGORIES = {
   llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
   agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'] },
   voice:     { labelKey: 'filter.voice',     ids: ['elevenlabs', 'assemblyai', 'deepgram'] }, // #658 — STT/TTS
-  inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'fal', 'modal', 'voyageai', 'pinecone'] }, // catch-all for non-LLM API infra: model-hosting (hf/replicate/fal/modal) + embeddings (voyageai) + vector (pinecone). Observability (#601) and image (#756) split out to their own categories; remaining single-service sub-domains stay here until they gain siblings
+  inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'fal', 'modal', 'voyageai', 'pinecone', 'turbopuffer'] }, // catch-all for non-LLM API infra: model-hosting (hf/replicate/fal/modal) + embeddings (voyageai) + vector (pinecone/turbopuffer, #857). Observability (#601) and image (#756) split out to their own categories; vector stays here as a sidebar group (its ≥2-member split is a fallback tier only, #857) — remaining single-service sub-domains stay until they gain siblings
   observability: { labelKey: 'filter.observability', ids: ['langsmith', 'helicone', 'langfuse'] }, // #601 — LLM observability/eval split out (LangSmith + Helicone + Langfuse recommend each other, fallback tier 6)
   video:     { labelKey: 'filter.video',     ids: ['runway', 'luma'] }, // #658 — video-gen (align membership with #601 fallback sub-tier)
   image:     { labelKey: 'filter.image',     ids: ['stability', 'bfl'] }, // #756 — image-gen split out (Stability + FLUX recommend each other, fallback tier 7); mirrors the video/observability precedent
@@ -80,7 +80,7 @@ export function categoryRankOf(id) {
 
 // Services excluded from fallback recommendations (not interchangeable with LLM APIs)
 // Keep in sync with worker/src/fallback.ts EXCLUDE_FALLBACK
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'pinecone', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform, like replicate/huggingface)
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform, like replicate/huggingface); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8)
 
 // #842 — outbound referral wedge. Product/homepage URL per service that can be RECOMMENDED as a
 // fallback (Analyze modal / Overview ActionBanner), so an outage-moment visitor can ACT on the
@@ -97,6 +97,8 @@ export const SERVICE_SITE_URL = {
   openrouter: 'https://openrouter.ai',
   // Voice & speech
   elevenlabs: 'https://elevenlabs.io', assemblyai: 'https://www.assemblyai.com', deepgram: 'https://deepgram.com',
+  // Vector DB (#857) — pinecone + turbopuffer are now fallback candidates (Tier 8); keep in sync with api/is-down/slug-map.ts
+  pinecone: 'https://www.pinecone.io', turbopuffer: 'https://turbopuffer.com',
   // Image
   stability: 'https://stability.ai', bfl: 'https://bfl.ai',
   // Video
@@ -183,6 +185,8 @@ export const API_TIER = {
   langsmith: 6, helicone: 6, langfuse: 6,
   // Tier 7 = Image generation (#756) — Stability + FLUX; both un-excluded (≥2 members).
   stability: 7, bfl: 7,
+  // Tier 8 = Vector database (#857) — Pinecone + turbopuffer; pinecone un-excluded (≥2 members).
+  pinecone: 8, turbopuffer: 8,
   claudecode: 11, codex: 11,
   cursor: 12, windsurf: 12,
   copilot: 13, junie: 13,
@@ -192,7 +196,7 @@ export const API_TIER = {
 // Sync target for worker/src/fallback.ts TIER_LABEL. Pre-#403 this lived inline in Overview.jsx;
 // promoted here so the sync test can compare both copies via a single import without parsing JSX.
 export const TIER_LABEL = {
-  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image',
+  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector',
   11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
   21: 'AI Apps',
 }

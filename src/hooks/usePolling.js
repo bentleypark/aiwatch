@@ -385,6 +385,13 @@ export const MOCK_SERVICES = [
     incidents: [],
   },
   {
+    id: 'turbopuffer', category: 'api', name: 'turbopuffer', provider: 'turbopuffer', status: 'operational',
+    latency: 540, uptime30d: null, // #857 — no official uptime (region-only page); score is probe-based (medium)
+    history30d: hist(),
+    history3m: null,
+    incidents: [],
+  },
+  {
     id: 'stability', category: 'api', name: 'Stability AI', provider: 'Stability AI', status: 'operational',
     latency: 400, uptime30d: null,
     history30d: hist(),

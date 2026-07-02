@@ -44,6 +44,7 @@
     { "source": "/is-replicate-down", "destination": "/api/is-down?slug=replicate" },
     { "source": "/is-fal-down", "destination": "/api/is-down?slug=fal" },
     { "source": "/is-pinecone-down", "destination": "/api/is-down?slug=pinecone" },
+    { "source": "/is-turbopuffer-down", "destination": "/api/is-down?slug=turbopuffer" },
     { "source": "/is-stability-down", "destination": "/api/is-down?slug=stability" },
     { "source": "/is-flux-down", "destination": "/api/is-down?slug=flux" },
     { "source": "/is-voyageai-down", "destination": "/api/is-down?slug=voyageai" },

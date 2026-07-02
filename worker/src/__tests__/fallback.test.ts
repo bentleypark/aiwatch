@@ -420,6 +420,40 @@ describe('#756 image fallback sub-tier (Stability ↔ FLUX)', () => {
   })
 })
 
+describe('#857 vector fallback sub-tier (Pinecone ↔ turbopuffer)', () => {
+  const svc = (id: string, name: string, status = 'operational', aiwatchScore: number | null = 90) =>
+    ({ id, name, category: 'api', status, aiwatchScore })
+
+  it('#857 — pinecone is no longer in EXCLUDE_FALLBACK (vector sibling added)', () => {
+    expect(EXCLUDE_FALLBACK).not.toContain('pinecone')
+    expect(EXCLUDE_FALLBACK).not.toContain('turbopuffer')
+    expect(API_TIER.pinecone).toBe(8)
+    expect(API_TIER.turbopuffer).toBe(8)
+    expect(tierLabelFor(8)).toBe('Vector')
+  })
+
+  it('a down vector DB recommends its vector sibling over an LLM/voice service', () => {
+    const services = [
+      svc('pinecone', 'Pinecone', 'down'),
+      svc('turbopuffer', 'turbopuffer', 'operational', null), // no official uptime → score may be null; still recommended
+      svc('claude', 'Claude API', 'operational', 95),
+      svc('elevenlabs', 'ElevenLabs', 'operational', 92),
+    ]
+    const result = getFallbacks('pinecone', 'api', services)
+    expect(result[0].name).toBe('turbopuffer') // Tier 8 dist 0 beats any LLM/voice tier, even with a null score
+  })
+
+  it('is symmetric — a down turbopuffer recommends Pinecone', () => {
+    const services = [
+      svc('turbopuffer', 'turbopuffer', 'down', null),
+      svc('pinecone', 'Pinecone', 'operational', 80),
+      svc('claude', 'Claude API', 'operational', 95),
+    ]
+    const result = getFallbacks('turbopuffer', 'api', services)
+    expect(result[0].name).toBe('Pinecone')
+  })
+})
+
 // #403 — pin the warn-once behavior for the silent-fallback hardening helpers.
 // These tests use unique synthetic ids per test (not real service ids) so the module-scope
 // warned-set never collides between tests, even if vitest runs them in shared module scope.
