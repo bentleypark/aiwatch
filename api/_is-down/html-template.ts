@@ -336,9 +336,9 @@ h2{font-size:18px;font-weight:600;margin:32px 0 16px;color:#e6edf3}
 .faq-q{font-weight:600;font-size:15px;margin-bottom:6px}
 .faq-a{font-size:14px;color:#8b949e}
 .fallback-item{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;background:#161b22;border-radius:6px;margin:8px 0}
+.fallback-info{display:flex;flex-direction:column;gap:3px;min-width:0}
 .fallback-name{font-weight:500;font-size:14px}
 .fallback-score{font-size:12px;color:#8b949e}
-.fallback-right{display:flex;align-items:center;gap:12px;flex-shrink:0}
 .fallback-try{display:inline-block;padding:5px 11px;border:1px solid #2ea043;color:#3fb950;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}
 .fallback-try:hover{background:#2ea043;color:#fff}
 .fallback-disclosure{font-size:11px;color:#8b949e;opacity:0.85;margin:10px 2px 0}
@@ -397,7 +397,7 @@ textarea.report-input{min-height:72px;resize:vertical}
 .share-kakao{background:#FEE500;color:#191919;border-color:#FEE500}
 .share-copy{background:#161b22;color:#e6edf3;border-color:rgba(255,255,255,0.14)}
 .share-copy.copied{background:#1a3d22;border-color:#3fb950;color:#3fb950}
-@media(max-width:600px){h1{font-size:22px}.container{padding:16px 12px}.incident-group>summary{flex-direction:column;align-items:flex-start;gap:2px}.incident-group-title{flex:none}.incident-group-meta{white-space:normal}.fallback-item{flex-wrap:wrap;gap:6px}.fallback-right{width:100%;justify-content:space-between}}
+@media(max-width:600px){h1{font-size:22px}.container{padding:16px 12px}.incident-group>summary{flex-direction:column;align-items:flex-start;gap:2px}.incident-group-title{flex:none}.incident-group-meta{white-space:normal}.fallback-item{gap:10px}}
 </style>
 </head>
 <body>
@@ -1136,9 +1136,16 @@ function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string
     const tryBtn = outUrl
       ? `<a class="fallback-try" href="${esc(outUrl)}" target="_blank" rel="nofollow noopener noreferrer" data-ga="outbound_fallback_click" data-ga-from="${esc(fromId ?? '')}" data-ga-to="${esc(f.id)}" data-ga-loc="is_down_page" aria-label="Open ${esc(f.name)} (opens provider site)">Open &#8599;</a>`
       : ''
+    // #859-followup — name + score/status stacked in a left column; the Open button is a direct
+    // sibling on the right, vertically centered against the whole item via `.fallback-item`
+    // align-items:center (previously the button was grouped with the score inside `.fallback-right`,
+    // so on a wrapped/narrow row it rode the score line instead of centering against the 2-line block).
     return `<div class="fallback-item">
+<div class="fallback-info">
 <span class="fallback-name">${nameHtml}</span>
-<span class="fallback-right"><span class="fallback-score mono">${scoreText} &nbsp; <span style="color:${color}">${statusEmoji(f.status)} ${label}</span></span>${tryBtn}</span>
+<span class="fallback-score mono">${scoreText} &nbsp; <span style="color:${color}">${statusEmoji(f.status)} ${label}</span></span>
+</div>
+${tryBtn}
 </div>`
   }).join('\n')
 

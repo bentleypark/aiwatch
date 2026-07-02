@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { getFallbacks, buildFallbackText, buildGroupedFallbackText, getGroupedFallbacks, EXCLUDE_FALLBACK, tierFor, tierLabelFor, API_TIER } from '../fallback'
+import { getFallbacks, buildFallbackText, buildGroupedFallbackText, getGroupedFallbacks, EXCLUDE_FALLBACK, tierFor, tierLabelFor, API_TIER, isSpecializedSubTier } from '../fallback'
 
 const mockServices = [
   { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 85 },
@@ -451,6 +451,65 @@ describe('#857 vector fallback sub-tier (Pinecone ↔ turbopuffer)', () => {
     ]
     const result = getFallbacks('turbopuffer', 'api', services)
     expect(result[0].name).toBe('Pinecone')
+  })
+})
+
+describe('#859 specialized sub-tier does not bleed cross-tier for its 2nd recommendation', () => {
+  const svc = (id: string, name: string, tierNote: string, status = 'operational', aiwatchScore = 90) =>
+    ({ id, name, category: 'api', status, aiwatchScore, tierNote })
+
+  it('isSpecializedSubTier: LLM tiers 1-3 false, sub-tiers 4-8 true, agents/apps false', () => {
+    expect([1, 2, 3].every(t => !isSpecializedSubTier(t))).toBe(true)
+    expect([4, 5, 6, 7, 8].every(t => isSpecializedSubTier(t))).toBe(true)
+    expect(isSpecializedSubTier(11)).toBe(false) // CLI agent
+    expect(isSpecializedSubTier(21)).toBe(false) // app
+    expect(isSpecializedSubTier(99)).toBe(false) // unknown fallthrough
+  })
+
+  it('image (Stability, T7) down → only its image sibling, NOT an observability service', () => {
+    // Before #859: getFallbacks filled the 2nd slot with Langfuse (T6, distance 1) — an observability
+    // tool recommended as an image-gen alternative. Now the sub-tier is capped to same-tier.
+    const services = [
+      svc('stability', 'Stability AI', 'image', 'down'),
+      svc('bfl', 'Black Forest Labs (FLUX)', 'image', 'operational', 84),
+      svc('langfuse', 'Langfuse', 'observability', 'operational', 99), // highest score, adjacent tier
+      svc('helicone', 'Helicone', 'observability', 'operational', 97),
+    ]
+    const result = getFallbacks('stability', 'api', services)
+    expect(result.map(r => r.name)).toEqual(['Black Forest Labs (FLUX)']) // ONLY the image sibling
+  })
+
+  it('video (Runway, T5) down → only Luma, NOT a cross-tier service', () => {
+    const services = [
+      svc('runway', 'Runway', 'video', 'down'),
+      svc('luma', 'Luma (Dream Machine)', 'video', 'operational', 70),
+      svc('langfuse', 'Langfuse', 'observability', 'operational', 99),
+      svc('claude', 'Claude API', 'llm', 'operational', 95),
+    ]
+    const result = getFallbacks('runway', 'api', services)
+    expect(result.map(r => r.name)).toEqual(['Luma (Dream Machine)'])
+  })
+
+  it('observability (LangSmith, T6) down → its observability siblings only', () => {
+    const services = [
+      svc('langsmith', 'LangChain (LangSmith)', 'observability', 'down'),
+      svc('helicone', 'Helicone', 'observability', 'operational', 88),
+      svc('langfuse', 'Langfuse', 'observability', 'operational', 86),
+      svc('claude', 'Claude API', 'llm', 'operational', 99),
+    ]
+    const result = getFallbacks('langsmith', 'api', services)
+    expect(result.map(r => r.name).sort()).toEqual(['Helicone', 'Langfuse'])
+  })
+
+  it('REGRESSION: an LLM (T2) still gets cross-tier fill (behavior unchanged for tiers 1-3)', () => {
+    // together (T2) with no other T2 present still recommends across LLM tiers (claude T1, openrouter T3).
+    const services = [
+      svc('together', 'Together AI', 'llm', 'down'),
+      svc('claude', 'Claude API', 'llm', 'operational', 95),
+      svc('openrouter', 'OpenRouter', 'llm', 'operational', 80),
+    ]
+    const result = getFallbacks('together', 'api', services)
+    expect(result.map(r => r.name)).toEqual(['Claude API', 'OpenRouter']) // cross-tier fill intact
   })
 })
 
