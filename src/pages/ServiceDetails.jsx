@@ -69,6 +69,7 @@ const STATUS_URL = {
   openrouter:  'https://status.openrouter.ai',
   bedrock:     'https://health.aws.amazon.com/health/status',
   pinecone:    'https://status.pinecone.io',
+  turbopuffer: 'https://status.turbopuffer.com',
   stability:   'https://status.stability.ai',
   bfl:         'https://status.bfl.ml',
   voyageai:    'https://voyageai-status.statuspage.io',

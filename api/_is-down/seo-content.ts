@@ -336,6 +336,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How do I check Pinecone status?', a: 'You can check Pinecone status on this page, on the official Pinecone status page at status.pinecone.io, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
+  turbopuffer: {
+    displayName: 'turbopuffer',
+    description: 'turbopuffer is a serverless vector-search database built directly on object storage. It powers retrieval-augmented generation (RAG), semantic search, and AI agent memory, and is used as the retrieval backend for products like Cursor\'s codebase index.',
+    insight: 'turbopuffer is region-specific — its status page reports health per region (aws-us-east-1, gcp-us-central1, etc.) rather than a single global indicator, so an outage can affect one region without breaking the platform. turbopuffer does not publish an official uptime %, so AIWatch tracks it via incident history plus a direct response-time probe rather than a reported uptime figure.',
+    whenDown: 'When turbopuffer is down, applications relying on vector search for RAG, semantic search, or recommendations will fail. AI agents and code tools that depend on long-term memory or knowledge retrieval will lose context until service recovers.',
+    faqs: [
+      { q: 'Is turbopuffer down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors turbopuffer every 5 minutes and shows real-time operational status.' },
+      { q: 'Why is turbopuffer slow today?', a: 'turbopuffer latency can be affected by region-specific issues, namespace size, or query patterns. Check this page for active incidents.' },
+      { q: 'What are alternatives to turbopuffer?', a: 'For vector search, Pinecone is a fully-managed vector database, and self-hosted options like Qdrant, Weaviate, and pgvector are mature. AIWatch shows current availability.' },
+      { q: 'How do I check turbopuffer status?', a: 'You can check turbopuffer status on this page, on the official turbopuffer status page at status.turbopuffer.com, or on the AIWatch dashboard at ai-watch.dev.' },
+    ],
+  },
   stability: {
     displayName: 'Stability AI',
     description: 'Stability AI develops the Stable Diffusion family of image models and provides API access for image generation, editing, and upscaling. It is widely used in creative tools, design apps, and content generation pipelines.',

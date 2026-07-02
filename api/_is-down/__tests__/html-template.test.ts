@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderBadgeEmbed, renderPage, linkifyFaqAnswer, FOOTER_CATEGORY_ORDER, type ServiceData } from '../html-template'
 import type { ServiceSEO } from '../seo-content'
 import { SLUG_TO_SERVICE, RELATED_SLUGS, outboundReferralUrl, SERVICE_SITE_URL } from '../slug-map'
+import { getSEOContent } from '../seo-content'
 import type { RegionStatusResult } from '../region-status'
 
 // Incidents are filtered to a rolling 30-day window (the `Date.now() - 30 * 86_400_000`
@@ -1490,5 +1491,41 @@ describe('renderPage — CSP-clean + hash-covered (#482)', () => {
     // script-src is hash-locked (no 'unsafe-inline'); style-src keeps it (inline style="" is fine)
     const scriptSrc = value.split(';').map((d) => d.trim()).find((d) => d.startsWith('script-src'))!
     expect(scriptSrc).not.toContain("'unsafe-inline'")
+  })
+})
+
+// #857 — every SLUG_TO_SERVICE slug MUST have an SEO_CONTENT entry: the handler returns 404 when
+// getSEOContent(slug) is null (is-down.ts, `if (!seo) return 404`), so a slug added to the map + a
+// vercel.json rewrite but missing here 404s the whole page in production (the turbopuffer miss this
+// pins). A route existing with no content is a silent SEO/UX regression a build check wouldn't catch.
+// #857 — the header meta line's "Monthly Reports →" link must render even for an UNRANKED service
+// (score withheld during a new service's coverage/confidence ramp, e.g. turbopuffer). Previously the
+// whole <p> — rank clause AND reports link — was gated on `service.rank`, so an unranked page lost the
+// reports pointer entirely. Only the "is ranked #N of M by reliability score" clause is rank-gated now.
+describe('header reports link vs rank gating (#857)', () => {
+  it('unranked service renders a monthly-report lead-in + link (not a bare link, no rank clause)', () => {
+    const html = renderPage('turbopuffer', mkService({ id: 'turbopuffer', name: 'turbopuffer', status: 'operational', rank: undefined }), mkSeo({ displayName: 'turbopuffer' }), [])
+    expect(html).toContain('data-ga="click_reports"')
+    expect(html).toContain('Monthly Reports')
+    // #857 — not a bare link: a general monthly-report context sentence leads into it
+    expect(html).toContain('See how AI services rank on reliability, uptime, and incidents each month')
+    expect(html, 'unranked service must NOT claim a reliability rank').not.toContain('is ranked')
+  })
+
+  it('ranked service still renders both the rank clause and the reports link', () => {
+    const html = renderPage('claude', mkService({ status: 'down', rank: 5, totalRanked: 30 }), mkSeo(), [])
+    expect(html).toContain('is ranked <strong>#5</strong> of 30')
+    expect(html).toContain('data-ga="click_reports"')
+  })
+})
+
+describe('SEO_CONTENT coverage (#857)', () => {
+  it('every SLUG_TO_SERVICE slug resolves getSEOContent (else the is-down page 404s)', () => {
+    for (const slug of Object.keys(SLUG_TO_SERVICE)) {
+      const seo = getSEOContent(slug)
+      expect(seo, `SEO_CONTENT missing for slug "${slug}" — /is-${slug}-down would 404`).not.toBeNull()
+      expect(seo!.displayName, `SEO_CONTENT["${slug}"] has empty displayName`).toBeTruthy()
+      expect(seo!.faqs.length, `SEO_CONTENT["${slug}"] has no FAQs`).toBeGreaterThan(0)
+    }
   })
 })

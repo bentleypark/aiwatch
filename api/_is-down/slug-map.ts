@@ -38,6 +38,8 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   // fal.ai (#758) — generative-media inference platform (image/video/audio/3D). Slug == worker id ('fal').
   'fal':             { id: 'fal',        name: 'fal.ai',           provider: 'fal',         category: 'api', group: 'inference' },
   'pinecone':        { id: 'pinecone',   name: 'Pinecone',         provider: 'Pinecone',    category: 'api', group: 'inference' },
+  // turbopuffer (#857) — serverless vector-search DB; the Vector fallback sibling for Pinecone. Slug == worker id.
+  'turbopuffer':     { id: 'turbopuffer', name: 'turbopuffer',      provider: 'turbopuffer', category: 'api', group: 'inference' },
   'stability':       { id: 'stability',  name: 'Stability AI',     provider: 'Stability AI', category: 'api', group: 'image' }, // #756 — image category (split from inference)
   // Black Forest Labs / FLUX (#756) — slug is 'flux' (search volume) while the worker id is 'bfl';
   // the id≠slug mapping is mirrored in worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE and
@@ -105,7 +107,8 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'huggingface':    ['replicate', 'fal', 'modal', 'together'],
   'replicate':      ['huggingface', 'fal', 'stability', 'modal'],
   'fal':            ['replicate', 'huggingface', 'modal'], // #758 — generative-media inference siblings
-  'pinecone':       ['voyageai'],
+  'pinecone':       ['turbopuffer', 'voyageai'], // #857 — vector sibling first
+  'turbopuffer':    ['pinecone', 'voyageai'], // #857
   'stability':      ['flux', 'replicate', 'huggingface'], // #756 — image sibling first
   'flux':           ['stability', 'replicate', 'huggingface'], // #756
   'voyageai':       ['pinecone', 'cohere'],
@@ -143,6 +146,9 @@ export const SERVICE_SITE_URL: Record<string, string> = {
   openrouter: 'https://openrouter.ai',
   // Voice & speech (#842 category extension)
   elevenlabs: 'https://elevenlabs.io', assemblyai: 'https://www.assemblyai.com', deepgram: 'https://deepgram.com',
+  // Vector DB (#857) — pinecone + turbopuffer are now fallback candidates (Tier 8), so the "Open ↗"
+  // referral wedge needs their product URLs (without these the actual relevant vector sibling had no button).
+  pinecone: 'https://www.pinecone.io', turbopuffer: 'https://turbopuffer.com',
   // Image
   stability: 'https://stability.ai', bfl: 'https://bfl.ai',
   // Video

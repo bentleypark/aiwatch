@@ -5,7 +5,9 @@ import { isNonReliabilityAdvisory } from './utils'
 // Keep in sync with src/utils/constants.js EXCLUDE_FALLBACK
 // #756 — stability un-excluded now that the image category has ≥2 members (Stability + FLUX recommend
 // each other in Tier 7); bfl is fallback-eligible from the start (never added here).
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'pinecone', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
+// #857 — pinecone un-excluded now that the vector category has ≥2 members (Pinecone + turbopuffer recommend
+// each other in Tier 8); turbopuffer is fallback-eligible from the start (never added here).
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai']
 
 // Tier-based priority — same-tier services sorted by Score, then adjacent tiers by distance.
 // API tiers (1-4) and agent tiers (11-13) use distinct number ranges so TIER_LABEL stays unambiguous
@@ -30,6 +32,10 @@ export const API_TIER: Record<string, number> = {
   // un-excluded from EXCLUDE_FALLBACK now that the category has ≥2 members. A distinct tier so a
   // degraded image service recommends its image sibling (distance 0) over an LLM/voice/infra service.
   stability: 7, bfl: 7,
+  // Tier 8 = Vector database (#857 / #601 step B). Pinecone + turbopuffer recommend each other; pinecone
+  // un-excluded from EXCLUDE_FALLBACK now that the category has ≥2 members. A distinct tier so a degraded
+  // vector DB recommends its vector sibling (distance 0) over an LLM/voice/image/infra service.
+  pinecone: 8, turbopuffer: 8,
   claudecode: 11, codex: 11,
   cursor: 12, windsurf: 12,
   copilot: 13, junie: 13,
@@ -135,7 +141,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 // Exported for the cross-mirror sync test (#403). Mirrored as TIER_LABEL in src/utils/constants.js;
 // Overview.jsx imports from there so there is no third inline copy to drift against.
 export const TIER_LABEL: Record<number, string> = {
-  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image',
+  1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector',
   11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
   21: 'AI Apps', // matches CATEGORY_LABEL[app] so the existing buildGroupedFallbackText copy stays consistent
 }

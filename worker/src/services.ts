@@ -137,6 +137,16 @@ export const SERVICES: ServiceConfig[] = [
   // group headers, Index Management, Inference, Assistant). The 22 region components are excluded
   // — the Region card already covers per-region status. Display-only — badge stays on statusComponentId.
   { id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', statusUrl: 'https://status.pinecone.io', apiUrl: 'https://status.pinecone.io/api/v2/summary.json', statusComponentId: 'r7tngp2p3sjd', displayComponentIds: ['jhky1rj0ps27', 'g7400gqyfhh9', 'r7tngp2p3sjd', 'hrgtfbcqygpc', '34h37xk5ltv1', 'pxr1b208pdh1'] },
+  // turbopuffer (#857) — serverless vector-search DB; the Vector fallback sibling for Pinecone (un-blocks
+  // the vector sub-tier, #601 → both un-excluded from EXCLUDE_FALLBACK, API_TIER 8). Single-tenant Atlassian
+  // Statuspage (no incidentKeywords needed). No statusComponentId: the only components are per-region endpoints,
+  // so (a) parseUptimeData never runs (it's gated on statusComponentId) → uptime30d stays null [the page also
+  // publishes no showcase uptimeData, but the config is the code-level cause], and (b) the badge rides the
+  // overall page indicator (status-determination step 4). Score is therefore probe-based (api.turbopuffer.com →
+  // {"status":"🐡"}): confidence settles to `medium` once ≥7d of probe samples accrue — during the initial ramp
+  // it's `low` and the Score is withheld (null), and the #802 coverage gate holds it out of the ranking for 30d
+  // regardless. A region belongs on a Region card, not the badge/breakdown, so no displayComponentIds for v1.
+  { id: 'turbopuffer', name: 'turbopuffer', provider: 'turbopuffer', category: 'api', statusUrl: 'https://status.turbopuffer.com', apiUrl: 'https://status.turbopuffer.com/api/v2/summary.json', addedAt: '2026-07-01' }, // #802 / #857
   { id: 'stability', name: 'Stability AI', provider: 'Stability AI', category: 'api', statusUrl: 'https://status.stability.ai', apiUrl: 'https://status.stability.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.stability.ai/incidents', incidentIoComponentId: '01JW9J39X55NDFZTZT3K5NYR48' },
   // Black Forest Labs / FLUX (#756) — image-generation sibling for Stability AI (un-blocks the image
   // fallback sub-tier, #601). Single-tenant Atlassian Statuspage (no incidentKeywords needed). Badge

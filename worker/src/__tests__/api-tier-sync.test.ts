@@ -19,11 +19,11 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { API_TIER as workerTier, TIER_LABEL as workerLabel } from '../fallback'
+import { API_TIER as workerTier, TIER_LABEL as workerLabel, EXCLUDE_FALLBACK as workerExclude } from '../fallback'
 // Vitest resolves cross-package paths via the repo root; this works because frontend `src/` and
 // worker `src/` share a single repo with one node_modules. The import is data-only (no runtime
 // side effects from constants.js — no environment variables are read at module load).
-import { API_TIER as frontendTier, TIER_LABEL as frontendLabel } from '../../../src/utils/constants'
+import { API_TIER as frontendTier, TIER_LABEL as frontendLabel, EXCLUDE_FALLBACK as frontendExclude } from '../../../src/utils/constants'
 
 const REPO_ROOT = join(__dirname, '..', '..', '..')
 
@@ -86,6 +86,35 @@ describe('TIER_LABEL cross-mirror sync (#403)', () => {
     const tierValues = new Set(Object.values(workerTier))
     for (const tier of tierValues) {
       expect(workerLabel[tier], `tier ${tier} appears in API_TIER but has no TIER_LABEL entry`).toBeDefined()
+    }
+  })
+})
+
+// #857 — pin the cross-mirror sync of EXCLUDE_FALLBACK. Same three copies as API_TIER; before #857 this
+// list was synced only by a "keep in sync" comment. A forgotten drop of a member (e.g. un-excluding
+// pinecone on the dashboard but not on Is-X-Down / Discord) would make a service recommendable on some
+// surfaces but not others — the exact drift class #403 built the API_TIER guard for.
+describe('EXCLUDE_FALLBACK cross-mirror sync (#857)', () => {
+  it('worker/src/fallback.ts ≡ src/utils/constants.js (same set)', () => {
+    // Order is not load-bearing (membership test via .includes), so compare as sorted sets.
+    expect([...workerExclude].sort()).toEqual([...frontendExclude].sort())
+  })
+
+  it('api/is-down.ts inline copy contains every canonical member', () => {
+    const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
+    // The inline literal: const EXCLUDE_FALLBACK = ['replicate', 'huggingface', ...]
+    const blockMatch = isDownSource.match(/const EXCLUDE_FALLBACK\s*=\s*\[([\s\S]*?)\]/)
+    expect(blockMatch, 'EXCLUDE_FALLBACK literal not found in api/is-down.ts').not.toBeNull()
+    const block = blockMatch![1]
+    for (const id of workerExclude) {
+      const re = new RegExp(`['"]${id}['"]`)
+      expect(re.test(block), `api/is-down.ts EXCLUDE_FALLBACK missing canonical member "${id}"`).toBe(true)
+    }
+    // And the other direction for the un-exclusion that motivated this test: a member the worker
+    // dropped must not linger in the inline copy (pinecone was un-excluded in #857).
+    for (const dropped of ['pinecone', 'turbopuffer']) {
+      const re = new RegExp(`['"]${dropped}['"]`)
+      expect(re.test(block), `api/is-down.ts EXCLUDE_FALLBACK must not contain un-excluded "${dropped}"`).toBe(false)
     }
   })
 })

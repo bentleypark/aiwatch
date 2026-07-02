@@ -39,6 +39,10 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   // #601 — LLM observability siblings; both expose a public, no-auth health endpoint (verified 2026-06-23)
   { id: 'helicone', url: 'https://api.helicone.ai/healthcheck' },                   // public 200 {"status":"healthy :)"}
   { id: 'langfuse', url: 'https://cloud.langfuse.com/api/public/health' },          // public 200 {"status":"OK"}
+  // #857 — turbopuffer has no official uptime (no statusComponentId → parseUptimeData never runs; region-only
+  // page), so the probe is its sole substantial measured signal → confidence `medium` once ≥7d of samples accrue
+  // (`low`/null Score during the initial ramp). Public no-auth health endpoint, verified 2026-07-01.
+  { id: 'turbopuffer', url: 'https://api.turbopuffer.com' },                        // public 200 {"status":"🐡"}
   // Not probed (#678): bedrock (region-specific runtime endpoint, estimate-only — incident-derived
   // reliability is enough), azureopenai (tenant-specific {resource}.openai.azure.com — no generic
   // endpoint), modal (api.modal.com returns a catch-all 200 on every path — not a representative
