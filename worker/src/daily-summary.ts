@@ -7,6 +7,7 @@ import { formatVitalsSection } from './vitals'
 import { aggregateProbeDaily } from './probe-archival'
 import { formatReportCountsSection } from './report'
 import type { AccuracyStats } from './incident-history'
+import { AUDIENCE_SOURCES, type AudienceCounts, type AudienceSource } from './outage-audience'
 
 // #679 — the "detection lead" (faster-than-official) metric was removed (structurally null — status-page
 // polling is always later than the official publish; #464 already retired the framing). The RTT-degradation
@@ -58,6 +59,10 @@ export interface DailySummaryData {
   // `newItems` (#748) — incidents AIWatch first-detected in the 24h window (alert-worthy events),
   // distinct from the mostly-empty poll volume; absent when the KV read failed.
   feedTraffic?: { all: number; service: number; total: number; newItems?: number } | null
+  // #842-B — consent-free outage-moment audience (is-down page-load beacon → WAE): last-24h views by
+  // inbound source (x/search/feed/direct), split by whether the service was in an active outage. The
+  // sponsor-evidence "outage-spike audience" (#637/#803). Absent (null) when the AE SQL isn't configured.
+  audience?: AudienceCounts | null
   // #837 — Chrome-extension activity (consent-free engagement proxy): last-24h poll volume (WAE
   // `ext-claude` tag; null when the SQL API isn't configured) + today's extension-sourced report
   // count (KV). Absent when neither signal exists → section omitted.
@@ -173,6 +178,9 @@ export function buildDailySummary(data: DailySummaryData): string {
   // #842 — outbound-referral count (is-down "Open ↗" clicks, consent-free). The Rung-1 sponsor evidence.
   const referralLine = formatReferralLine(data.referralCounts, data.services)
   if (referralLine) lines.push(referralLine)
+  // #842-B — outage-moment audience by source (is-down views, consent-free). 근거 ① for the sponsor.
+  const audienceLine = formatAudienceLine(data.audience)
+  if (audienceLine) lines.push(audienceLine)
   if (deliveryCounts && (deliveryCounts.discord > 0 || deliveryCounts.failed > 0)) {
     const failText = deliveryCounts.failed > 0 ? ` (${deliveryCounts.failed} failed)` : ''
     lines.push(`📨 **User Webhook Delivery**: ${deliveryCounts.discord} Discord${failText}`)
@@ -271,6 +279,25 @@ export function formatReferralLine(
     .map(([id, n]) => `${nameOf.get(id) ?? id} ${n}`)
     .join(' · ')
   return `\n🔗 **Outbound Referrals**: ${referralCounts.total}${top ? ` (${top})` : ''}`
+}
+
+const AUDIENCE_LABEL: Record<AudienceSource, string> = { x: 'X', search: 'search', feed: 'feed', direct: 'direct' }
+
+/** #842-B — outage-moment audience line (consent-free is-down views by source). Leads with the
+ *  active-outage subset (the sponsor-evidence "outage-spike audience") when any outage was viewed,
+ *  else falls back to the general 24h is-down audience. Zero buckets are dropped so the line stays
+ *  readable. Empty (section omitted) when the WAE read was unconfigured/null or there were no views.
+ *  Pure + unit-tested. */
+export function formatAudienceLine(audience: AudienceCounts | null | undefined): string {
+  if (!audience || audience.total <= 0) return ''
+  const breakdown = (by: Record<AudienceSource, number>): string =>
+    AUDIENCE_SOURCES.filter((s) => by[s] > 0).map((s) => `${AUDIENCE_LABEL[s]} ${by[s]}`).join(' · ')
+  if (audience.activeTotal > 0) {
+    const detail = breakdown(audience.activeBySource)
+    return `\n👥 **Outage Audience** (is-down, 24h): ${audience.activeTotal} during outages${detail ? ` — ${detail}` : ''} · ${audience.total} total views`
+  }
+  const detail = breakdown(audience.bySource)
+  return `\n👥 **is-down Audience** (24h): ${audience.total} views${detail ? ` — ${detail}` : ''} (no active outages)`
 }
 
 /** #827 Feature 1 — AI recovery-prediction accuracy, rendered as a labeled multi-line block so an
