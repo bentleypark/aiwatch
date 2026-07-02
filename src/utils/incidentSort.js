@@ -221,7 +221,7 @@ export function compareIncidents(a, b) {
  * within tiers.
  *
  * Used by `Incidents.jsx` and `ServiceDetails.jsx` (refs #354/#355) and
- * mirrored on the SSR side at `api/is-down/incident-sort.ts` because
+ * mirrored on the SSR side at `api/_is-down/incident-sort.ts` because
  * `groupIncidents` re-sorts purely by date and would otherwise bury an active
  * incident under newer resolved rows.
  *

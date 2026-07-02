@@ -3,14 +3,14 @@
 // Two independent copies live in this repo:
 //   1. src/utils/regionStatus.js   — frontend (ServiceDetails RegionalAvailability card,
 //                                              Overview ActionBanner region line)
-//   2. api/is-down/region-status.ts — Edge SSR (Is X Down? region recommendation line,
+//   2. api/_is-down/region-status.ts — Edge SSR (Is X Down? region recommendation line,
 //                                                 separate compilation surface from `src/`)
 //
 // A Worker-side copy is planned but not in this PR — when it lands, extend this test to
 // triangulate all three (same pattern as worker/src/__tests__/api-tier-sync.test.ts for
 // API_TIER). For now, keep the SPA ↔ Edge pair locked.
 //
-// File 2 (api/is-down/region-status.ts) can't be imported here — Edge Functions are a
+// File 2 (api/_is-down/region-status.ts) can't be imported here — Edge Functions are a
 // different compilation surface (no @vercel/edge types in this Workers test runner).
 // Read it via fs and check structural parity. Catches forgotten additions; doesn't catch
 // label typos (acceptable — labels are user-visible, a typo would be caught on first render
@@ -24,20 +24,20 @@ import { join } from 'node:path'
 import { SERVICE_REGIONS as frontendRegions, REGION_DOCS_URL as frontendDocs } from '../../../src/utils/regionStatus'
 
 const REPO_ROOT = join(__dirname, '..', '..', '..')
-const EDGE_FILE = readFileSync(join(REPO_ROOT, 'api/is-down/region-status.ts'), 'utf-8')
+const EDGE_FILE = readFileSync(join(REPO_ROOT, 'api/_is-down/region-status.ts'), 'utf-8')
 
 describe('SERVICE_REGIONS cross-mirror sync (#422 Phase 2)', () => {
-  it('api/is-down/region-status.ts inline copy contains every canonical service id', () => {
+  it('api/_is-down/region-status.ts inline copy contains every canonical service id', () => {
     for (const id of Object.keys(frontendRegions)) {
       // Match `  id: [` line (TS object key, the Edge file uses `'id'` quoting for none of
       // these because all are valid identifiers). Anchor to start-of-line + 2-space indent
       // to avoid false matches in comments.
       const re = new RegExp(`^  ${id}: \\[`, 'm')
-      expect(re.test(EDGE_FILE), `api/is-down/region-status.ts is missing SERVICE_REGIONS["${id}"]`).toBe(true)
+      expect(re.test(EDGE_FILE), `api/_is-down/region-status.ts is missing SERVICE_REGIONS["${id}"]`).toBe(true)
     }
   })
 
-  it('api/is-down/region-status.ts inline copy contains every canonical region key', () => {
+  it('api/_is-down/region-status.ts inline copy contains every canonical region key', () => {
     // For each (svcId, regions) pair, every region.key must appear as a quoted string
     // literal somewhere inside the Edge file's SERVICE_REGIONS object. Single quotes
     // because TS prettier default; double would also be valid — check both.

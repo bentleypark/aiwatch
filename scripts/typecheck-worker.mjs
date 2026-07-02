@@ -26,7 +26,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // #533 Phase 4 (exit condition) — TWO passes, BOTH must be 0-error:
 //  1. production source — strict @cloudflare/workers-types ONLY (no @types/node), so a prod file
 //     referencing process/Buffer/node:fs FAILS (the worker has no nodejs_compat → that's a runtime
-//     crash, the #532 class). Plus the cross-boundary files it ships (api/is-down/region-status.ts).
+//     crash, the #532 class). Plus the cross-boundary files it ships (api/_is-down/region-status.ts).
 //  2. test files — WITH @types/node + allowJs (they run under vitest/Node, use node:fs/__dirname for
 //     source-sync invariants + import a few frontend .js helpers). Isolated to tests so the node
 //     relaxation can't hide a prod node-API misuse.

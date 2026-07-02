@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { renderExtensionPrivacyPage } from './extension-privacy'
+import { renderExtensionPrivacyPage } from '../extension-privacy'
 
 // #837 — the public /extension-privacy page (the Chrome Web Store privacy-policy URL for the
 // extension). Static (no per-request data), so these assertions guard: it renders, is indexable +
@@ -54,7 +54,7 @@ describe('renderExtensionPrivacyPage (#837)', () => {
   // The served page + extension/PRIVACY.md are two hand-kept copies. Pin the load-bearing facts so a
   // future edit to one can't silently drift from the other (Web Store links to the served page).
   it('agrees with extension/PRIVACY.md on the load-bearing facts', () => {
-    const md = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'extension', 'PRIVACY.md'), 'utf8')
+    const md = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'extension', 'PRIVACY.md'), 'utf8')
     for (const fact of ['contact@ai-watch.dev', 'every 2 minutes', 'separate from', 'no analytics']) {
       expect(html.toLowerCase(), `page missing: ${fact}`).toContain(fact.toLowerCase())
       expect(md.toLowerCase(), `PRIVACY.md missing: ${fact}`).toContain(fact.toLowerCase())

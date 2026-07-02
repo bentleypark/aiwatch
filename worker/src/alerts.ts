@@ -20,11 +20,11 @@ import { XAI_REGION_RE } from './xai-regions'
 // this is latent only. Preferred over a third SERVICE_REGIONS copy (drift > tsc
 // purity here). If a tsc typecheck is ever added for the worker, add this path to
 // the tsconfig `include` or relocate the shared port.
-import { regionStatusOf } from '../../api/is-down/region-status'
+import { regionStatusOf } from '../../api/_is-down/region-status'
 // #777 — is-down slug for the copyable reply draft's live-status link. SERVICE_ID_TO_SLUG is pure data
 // (no @vercel/edge deps, same module the tweet-draft-slug-sync test imports) and covers gemini, which
 // TWEET_DRAFT_SERVICES does not. Same cross-dir-import trade-off as regionStatusOf above (#422).
-import { SERVICE_ID_TO_SLUG } from '../../api/is-down/slug-map'
+import { SERVICE_ID_TO_SLUG } from '../../api/_is-down/slug-map'
 import type { ServiceStatus } from './services'
 import type { Incident } from './types'
 
@@ -630,7 +630,7 @@ export function buildServiceAlerts(
 // detection moment. This is OPERATOR-ONLY: the caller appends it after the per-user feed entry is
 // built, so it never reaches a visitor's relayed webhook (#475).
 //
-// id → is-down slug. Slugs MUST match api/is-down/slug-map.ts — pinned by tweet-draft-slug-sync.test.ts.
+// id → is-down slug. Slugs MUST match api/_is-down/slug-map.ts — pinned by tweet-draft-slug-sync.test.ts.
 export const TWEET_DRAFT_SERVICES: Record<string, string> = {
   claude: 'claude',
   openai: 'openai',

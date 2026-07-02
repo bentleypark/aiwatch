@@ -43,7 +43,7 @@ const BOILERPLATE_PATTERNS = [
  *
  * SOURCE OF TRUTH for the worker side. Mirrored verbatim in:
  *   - src/utils/incidentGrouping.js (SPA grouping override)
- *   - api/is-down/incident-grouping.ts (SSR grouping override)
+ *   - api/_is-down/incident-grouping.ts (SSR grouping override)
  *
  * `__assertGenericTitlePatternsAlignment` below + the same assertion in the
  * other two files lock the parity. Any drift fails the unit test in all three

@@ -46,7 +46,7 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 5. `src/utils/constants.js` — update ALL of:
    - `API_SERVICE_IDS` — add new service ID
    - `SERVICE_AND_APP_IDS` — add at correct display position (app → LLM → voice → inference → video → agent)
-   - `SERVICE_CATEGORIES` — add to correct category filter (`apps`/`llm`/`voice`/`inference`/`video`/`agents`, #658). This same 6-way taxonomy drives the Sidebar filter, the Overview per-category sections (`SECTION_KEYS` in `src/pages/Overview.jsx` — keep in sync), and the is-down footer grouping (mirrored as `group` in `api/is-down/slug-map.ts`, below)
+   - `SERVICE_CATEGORIES` — add to correct category filter (`apps`/`llm`/`voice`/`inference`/`video`/`agents`, #658). This same 6-way taxonomy drives the Sidebar filter, the Overview per-category sections (`SECTION_KEYS` in `src/pages/Overview.jsx` — keep in sync), and the is-down footer grouping (mirrored as `group` in `api/_is-down/slug-map.ts`, below)
    - `EXCLUDE_FALLBACK` — keep in sync with `worker/src/fallback.ts`
    - `API_TIER` — add tier number (keep in sync with `worker/src/fallback.ts`)
 6. `src/hooks/usePolling.js` — add mock entry to `MOCK_SERVICES` at correct position (determines display order via `mergeWithMock`)
@@ -54,10 +54,10 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 8. `src/pages/ServiceDetails.jsx` — add `STATUS_URL` entry for official status page link
 9. `src/pages/Overview.jsx` — verify `TIER_LABEL` (keep in sync with `worker/src/fallback.ts`; `API_TIER` + `getFallbacks` imported from `src/utils/constants.js`)
 10. `api/is-down.ts` — add to `API_TIER` + `EXCLUDE_FALLBACK` (keep in sync with `worker/src/fallback.ts`)
-10a. `api/is-down/slug-map.ts` — add a `SLUG_TO_SERVICE` entry with BOTH `category` (coarse `api`/`app`/`agent`, mirrors worker `ServiceStatus.category` — used by the is-down fallback filter) AND `group` (fine 6-way `apps`/`llm`/`voice`/`inference`/`video`/`agents`, mirrors `SERVICE_CATEGORIES` — drives the footer "Also check" grouping via `FOOTER_CATEGORY_ORDER`, #658). Also add `RELATED_SLUGS` cross-links. Coverage is pinned by `api/is-down/__tests__/html-template.test.ts`.
+10a. `api/_is-down/slug-map.ts` — add a `SLUG_TO_SERVICE` entry with BOTH `category` (coarse `api`/`app`/`agent`, mirrors worker `ServiceStatus.category` — used by the is-down fallback filter) AND `group` (fine 6-way `apps`/`llm`/`voice`/`inference`/`video`/`agents`, mirrors `SERVICE_CATEGORIES` — drives the footer "Also check" grouping via `FOOTER_CATEGORY_ORDER`, #658). Also add `RELATED_SLUGS` cross-links. Coverage is pinned by `api/_is-down/__tests__/html-template.test.ts`.
 10b. (region-aware services only) Region data lives in TWO cross-mirrored copies — both must update together. The sync is pinned by `worker/src/__tests__/region-status-sync.test.ts`:
    - `src/utils/regionStatus.js` — frontend (ServiceDetails RegionalAvailability card, Overview ActionBanner region line). Canonical source for the sync test.
-   - `api/is-down/region-status.ts` — Edge SSR (Is X Down? region recommendation line). Duplicated because Vercel Edge bundling cannot import from `src/`. Same shape, TS port.
+   - `api/_is-down/region-status.ts` — Edge SSR (Is X Down? region recommendation line). Duplicated because Vercel Edge bundling cannot import from `src/`. Same shape, TS port.
    
    For both: add `SERVICE_REGIONS` entries (one per region with `key` substring-matched against incident title / componentNames + display `label`) and a `REGION_DOCS_URL` pointer to the provider's region docs. Add `ALWAYS_SHOW_REGIONS` membership only if the service should render the per-region card even with zero ongoing incidents (Bedrock / Azure OpenAI pattern). Surfaces on ServiceDetails + Overview ActionBanner via `regionStatusOf` (#422 Phase 1) + on `/is-*-down` SSR via the Edge mirror (#422 Phase 2).
 
@@ -71,7 +71,7 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 15. `index.html` — `<meta name="description">`, `og:title`, `og:description`, `twitter:title`, `twitter:description`, JSON-LD (~6 occurrences)
 
 ## Landing page
-16. `api/intro/html-template.ts` — update ALL of:
+16. `api/_intro/html-template.ts` — update ALL of:
     - meta description
     - hero pill number ("N AI Services")
     - dashboard preview mock: services running count, "All N", "Operational N", "+ N more" (KO/EN)
@@ -79,15 +79,15 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 17. `docs/aiwatch-landing.html` — same as intro template (design draft)
 
 ## Methodology page (`/methodology`, #673)
-17a. `api/methodology/html-template.ts` — self-contained Edge SSR, **KO + EN i18n duplicated TWICE** (inline `data-i18n` defaults AND the `i18n` JS maps), so each count appears ~4×. Update ALL:
+17a. `api/_methodology/html-template.ts` — self-contained Edge SSR, **KO + EN i18n duplicated TWICE** (inline `data-i18n` defaults AND the `i18n` JS maps), so each count appears ~4×. Update ALL:
     - `hero.meta` service count ("N services · polled every 5 min") + the `<meta name="description">` count
     - **`s1.lead` category breakdown** — "N AI services — X LLM APIs, Y coding agents, Z voice, … inference & infra, … observability, … video, … AI apps" (KO `…개` + EN). The sub-counts MUST sum to the total; update the right bucket(s) for the new service's category.
-    - **probe count** (only if the new service is probed — search the page for the probe phrasings: "directly-probed" / "are probed" / `probe 세트(N개)` / "N AI services … health-check probes"; currently 26) — kept in **LOCKSTEP with `PROBE_TARGETS.length`** by `api/methodology/__tests__/html-template.test.ts` (#678); that test FAILS until the methodology count matches the new probe-target count.
+    - **probe count** (only if the new service is probed — search the page for the probe phrasings: "directly-probed" / "are probed" / `probe 세트(N개)` / "N AI services … health-check probes"; currently 26) — kept in **LOCKSTEP with `PROBE_TARGETS.length`** by `api/_methodology/__tests__/html-template.test.ts` (#678); that test FAILS until the methodology count matches the new probe-target count.
     - **GOTCHA — quote escaping**: the page is `return \`…\``; a literal apostrophe in an i18n string must be `\\'` (NOT `\'`, which the template literal collapses to `'` → breaks the served inline `<script>` → the lang toggle silently dies). A test asserts every inline `<script>` parses (`new Function`).
 
 ## Is X Down (if adding a dedicated page)
 18. `api/is-down.ts` — add service to `SERVICES` map
-19. `api/is-down/html-template.ts` — if needed
+19. `api/_is-down/html-template.ts` — if needed
 20. `vercel.json` — add rewrite rule `/is-{service}-down`
 21. `public/sitemap.xml` — add URL entry (`lastmod` is auto-bumped to build date by `scripts/bump-sitemap-lastmod.mjs` via `prebuild` hook — #337 — so any placeholder date works for the initial commit)
 

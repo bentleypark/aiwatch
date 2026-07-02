@@ -79,7 +79,7 @@ export function normalizeTitle(title) {
  * (#597, Together/Fireworks). The suffix is machine-emitted — human-curated incidents
  * don't title themselves "X — recovered" — and the ≥2 same-(day, normalized-title)
  * GROUP_THRESHOLD guards against folding a genuine one-off. Kept in lockstep with the
- * SSR port (`api/is-down/incident-grouping.ts`); the alert-side `FLAP_TITLE_RE` in
+ * SSR port (`api/_is-down/incident-grouping.ts`); the alert-side `FLAP_TITLE_RE` in
  * `worker/src/alerts.ts` matches the same suffix but is case-sensitive — this display
  * copy adds the `/i` flag as a deliberate (BetterStack emits lowercase) widening.
  * @param {string} title

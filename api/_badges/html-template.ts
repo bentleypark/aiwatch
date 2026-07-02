@@ -4,16 +4,16 @@
 // every monitored service's live badge + copy-paste markdown that links to the crawlable
 // /is-{slug}-down page (the SEO-backlink target, #805 Problem A). Self-contained SSR (no data
 // fetch) — the badge <img>s render live from the Worker /badge/:id endpoint. Mirrors
-// api/methodology/html-template.ts chrome (tokens, nav, footer).
+// api/_methodology/html-template.ts chrome (tokens, nav, footer).
 
-import { SLUG_TO_SERVICE } from '../is-down/slug-map'
+import { SLUG_TO_SERVICE } from '../_is-down/slug-map'
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { nonceAttr } from '../_shared/csp-nonce'
 
 const WORKER = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 
-// Display grouping/order for the gallery — mirrors FOOTER_CATEGORY_ORDER in api/is-down/html-template.ts
+// Display grouping/order for the gallery — mirrors FOOTER_CATEGORY_ORDER in api/_is-down/html-template.ts
 // (defined locally so this Edge page doesn't import the heavy is-down template; the `group` taxonomy
 // lives on each SLUG_TO_SERVICE entry). Pinned against the is-down order by the badges unit test.
 const GROUP_ORDER: ReadonlyArray<{ key: string; label: string }> = [

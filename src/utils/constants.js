@@ -86,7 +86,7 @@ export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'pinecone', 
 // fallback (Analyze modal / Overview ActionBanner), so an outage-moment visitor can ACT on the
 // (Score-ranked, UNPAID) recommendation — and AIWatch can measure the referral (the Rung-1 sponsor
 // evidence, #637/#842). NOT an endorsement or paid placement — disclosed + rel="nofollow", rankings
-// stay Score-only. Kept BYTE-IDENTICAL to the Edge mirror in api/is-down/slug-map.ts (pinned by
+// stay Score-only. Kept BYTE-IDENTICAL to the Edge mirror in api/_is-down/slug-map.ts (pinned by
 // service-site-url-sync test). A missing id → no outbound affordance (graceful).
 export const SERVICE_SITE_URL = {
   // LLM APIs
@@ -140,7 +140,7 @@ export function sendReferralBeacon(fromId, toId) {
 // Per-service incident RSS feed (#432). The feed URL uses the /is-{slug}-down
 // page slug, which differs from the worker service ID for the few services
 // whose slug carries a dash. Mirror of SERVICE_ID_TO_SLUG in
-// api/is-down/slug-map.ts (overrides only) — pinned by feed-slug.test.js.
+// api/_is-down/slug-map.ts (overrides only) — pinned by feed-slug.test.js.
 const FEED_SLUG_OVERRIDE = {
   claudecode:  'claude-code',
   copilot:     'github-copilot',

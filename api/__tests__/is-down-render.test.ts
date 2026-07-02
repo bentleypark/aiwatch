@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderDelegatedListeners } from '../is-down/html-template'
+import { renderDelegatedListeners } from '../_is-down/html-template'
 
 // Guard for #842-B: the audience beacon + click delegation live inside ONE `<script>` template
 // literal. A stray backtick in a comment there once truncated the literal → the Edge SSR built a

@@ -1,7 +1,7 @@
 // Vercel Edge Function — /intro landing page
 
-import { renderLandingPage } from './intro/html-template'
-import { resolveAnnouncement } from './intro/announcements'
+import { renderLandingPage } from './_intro/html-template'
+import { resolveAnnouncement } from './_intro/announcements'
 import { generateNonce, buildCsp } from './_shared/csp-nonce'
 
 export const config = { runtime: 'edge' }

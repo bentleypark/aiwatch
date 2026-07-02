@@ -7,7 +7,7 @@
 //
 // Services without an is-down page (bedrock / azureopenai — excluded from SLUG_TO_SERVICE per #263)
 // have no crawlable target, so they fall back to the dashboard detail hash route.
-import { SERVICE_ID_TO_SLUG } from '../../api/is-down/slug-map'
+import { SERVICE_ID_TO_SLUG } from '../../api/_is-down/slug-map'
 
 const BADGE_BASE = 'https://aiwatch-worker.p2c2kbf.workers.dev'
 
