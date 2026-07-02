@@ -106,11 +106,18 @@ export interface UptimeDataResult {
 
 export function parseUptimeData(html: string, componentId: string): UptimeDataResult {
   const result: UptimeDataResult = { dailyImpact: {}, uptimePercent: null }
-  // Find "var uptimeData = " then extract JSON by brace counting (50KB+ object)
-  const prefix = 'var uptimeData = '
-  const startIdx = html.indexOf(prefix)
-  if (startIdx === -1) return result
-  const jsonStart = startIdx + prefix.length
+  // Locate the uptimeData JSON object, then extract it by brace counting (50KB+ object).
+  // #868 — Atlassian Statuspage now embeds it as `window.uptimeData = {…}` with a
+  // `var uptimeData = window.uptimeData;` ALIAS line. The old `html.indexOf('var uptimeData = ')`
+  // matched the alias, so JSON.parse got `window.uptimeData;…` → "Unexpected token 'w'" → uptime null
+  // (claude.ai, Cursor, Windsurf, Junie, Voyage AI all dropped from the ranking). Match the assignment
+  // whose RHS is the JSON object — `\s*=\s*\{` requires `{` (modulo whitespace) right after `=`, so the
+  // alias (RHS `window…`, not `{`) never matches, and legacy `var uptimeData = {…}` still does. The
+  // whitespace-tolerant identifier match also survives a minified `window.uptimeData={…}` — hardening
+  // against the next embed-shape change, which is exactly the bug class that caused #868.
+  const assign = /(?:window\.|var\s+)uptimeData\s*=\s*\{/.exec(html)
+  if (!assign) return result
+  const jsonStart = assign.index + assign[0].length - 1  // index of the opening `{`
   let depth = 0
   let jsonEnd = -1
   for (let i = jsonStart; i < html.length; i++) {
