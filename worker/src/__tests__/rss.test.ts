@@ -398,6 +398,38 @@ describe('buildRssFeed — item link', () => {
     const xml = buildRssFeed([service({ id: 'bedrock', name: 'Bedrock', incidents: [incident()] })], { scope: 'all' }, NOW)
     expect(xml).toContain('<link>https://ai-watch.dev/#bedrock</link>')
   })
+
+  // #874 — the NO_IS_DOWN_PAGE early-return sits ABOVE the new severity-hint logic, so a hash-route
+  // service gets a bare `#id` with NO `?e=` hint even when it's down (there's no is-down OG page to pin).
+  it('never appends a status hint to the hash-route fallback, even when down', () => {
+    const xml = buildRssFeed([service({ id: 'bedrock', name: 'Bedrock', status: 'down', incidents: [incident()] })], { scope: 'all' }, NOW)
+    expect(xml).toContain('<link>https://ai-watch.dev/#bedrock</link>')
+    expect(xml).not.toContain('#bedrock?e=')
+  })
+
+  // #874 — an ACTIVE item pins the OG hint to the REAL severity, not the coarse `active` kind, so the
+  // Slack unfurl of a genuine outage no longer mis-renders a green Operational card (HINT_TO_OG_STATUS
+  // maps `active → operational`). operational (monitoring / green badge) still ships `active`.
+  it('pins the ?e= hint to the live severity for an active outage item', () => {
+    const degraded = buildRssFeed([service({ id: 'openai', status: 'degraded', incidents: [incident()] })], { scope: 'all' }, NOW)
+    expect(degraded).toContain('<link>https://ai-watch.dev/is-openai-down?e=degraded&amp;utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>')
+
+    const down = buildRssFeed([service({ id: 'openai', status: 'down', incidents: [incident()] })], { scope: 'all' }, NOW)
+    expect(down).toContain('<link>https://ai-watch.dev/is-openai-down?e=down&amp;utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>')
+
+    // operational service (e.g. an incident in `monitoring`, badge already green) keeps `?e=active`.
+    const operational = buildRssFeed([service({ id: 'openai', status: 'operational', incidents: [incident({ status: 'monitoring' })] })], { scope: 'all' }, NOW)
+    expect(operational).toContain('is-openai-down?e=active&amp;')
+  })
+
+  it('keeps ?e=resolved on a resolved item regardless of live status (#539 cache-bust)', () => {
+    const xml = buildRssFeed(
+      [service({ id: 'openai', status: 'down', incidents: [incident({ status: 'resolved', resolvedAt: '2026-05-10T13:00:00.000Z', duration: '1h' })] })],
+      { scope: 'all' },
+      NOW,
+    )
+    expect(xml).toContain('<link>https://ai-watch.dev/is-openai-down?e=resolved&amp;utm_source=rss&amp;utm_medium=feed&amp;utm_campaign=outage</link>')
+  })
 })
 
 describe('buildRssFeed — item fields', () => {
