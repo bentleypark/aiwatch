@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import {
   parseAssertionLine, parseLiteral, parseSelector, evalSelector, compare,
   evaluateAssertion, isAllowedUrl, resolveSource, pairVerifyAssertions, tickBox, runAssertion,
-  truncate, DEFAULT_ASSERT_BASE,
+  truncate, countOpenBoxes, countOpenVerifyAfter, planIssueAutoVerify, DEFAULT_ASSERT_BASE,
 } from './verify-assertions.mjs'
 
 test('parseAssertionLine — valid GET + selector + quoted expected', () => {
@@ -154,6 +154,63 @@ test('tickBox — flips [ ]→[x] on the target line only', () => {
   assert.match(out.split('\n')[0], /- \[x\] verify-after/)
   assert.equal(out.split('\n')[1], '      assert: /api/status | a.b exists') // untouched
   assert.equal(tickBox(body, 99), body) // out-of-range → unchanged
+  // anchored: a prose line with a stray literal `[ ]` (not a task marker) is NOT ticked
+  const prose = 'verify-after 2026-07-09 — check the [ ] state'
+  assert.equal(tickBox(prose, 0), prose)
+})
+
+test('countOpenBoxes / countOpenVerifyAfter', () => {
+  const body = [
+    '- [ ] verify-after 2026-07-09 — a',
+    '- [x] verify-after 2026-06-01 — done',
+    '- [ ] some other acceptance item (not a verify)',
+    'plain line',
+  ].join('\n')
+  assert.equal(countOpenBoxes(body), 2)          // two `- [ ]`
+  assert.equal(countOpenVerifyAfter(body), 1)    // only the open verify-after line
+  assert.equal(countOpenBoxes(''), 0)
+  assert.equal(countOpenVerifyAfter(''), 0)
+})
+
+test('planIssueAutoVerify — ticks passers; dropLabel when no open verify-after; close when no open box', () => {
+  // One verify-after (assert passes) + one non-verify acceptance box still open → drop label, DON'T close.
+  const body1 = '- [ ] verify-after 2026-07-09 — probe\n      assert: /api/status | a.b == "x"\n- [ ] ship the code'
+  const p1 = planIssueAutoVerify(body1, [{ lineIndex: 0, status: 'pass' }])
+  assert.equal(p1.passCount, 1)
+  assert.match(p1.newBody.split('\n')[0], /- \[x\] verify-after/)
+  assert.equal(p1.dropLabel, true)   // no open verify-after remains
+  assert.equal(p1.close, false)      // the acceptance box is still open
+
+  // Sole verify-after passes, nothing else open → drop label AND close.
+  const body2 = '- [ ] verify-after 2026-07-09 — probe\n      assert: /api/status | a.b == "x"'
+  const p2 = planIssueAutoVerify(body2, [{ lineIndex: 0, status: 'pass' }])
+  assert.equal(p2.dropLabel, true)
+  assert.equal(p2.close, true)
+
+  // Two verify-after lines, one passes one fails → tick the passer, KEEP label (one still open).
+  const body3 = '- [ ] verify-after 2026-07-09 — a\n      assert: /api/status | a == 1\n- [ ] verify-after 2026-08-01 — b\n      assert: /api/status | b == 2'
+  const p3 = planIssueAutoVerify(body3, [{ lineIndex: 0, status: 'pass' }, { lineIndex: 2, status: 'fail' }])
+  assert.equal(p3.passCount, 1)
+  assert.equal(p3.dropLabel, false)  // line 2 verify-after still open
+  assert.equal(p3.close, false)
+  assert.match(p3.newBody.split('\n')[0], /- \[x\]/)
+  assert.match(p3.newBody.split('\n')[2], /- \[ \]/) // failer untouched
+
+  // No passers → no mutation.
+  const p4 = planIssueAutoVerify(body2, [{ lineIndex: 0, status: 'skip' }])
+  assert.equal(p4.passCount, 0)
+  assert.equal(p4.dropLabel, false)
+  assert.equal(p4.close, false)
+  assert.equal(p4.newBody, body2)
+
+  // #873 review #1 — a PROSE verify-after line (no `- [ ]` box) is a no-op tick → NOT counted as
+  // ticked, so it can't drive a repeating comment/label/close on every daily run.
+  const prose = 'verify-after 2026-07-09 — prose, no checkbox\n      assert: /api/status | a.b == "x"'
+  const p5 = planIssueAutoVerify(prose, [{ lineIndex: 0, status: 'pass' }])
+  assert.equal(p5.passCount, 0)
+  assert.equal(p5.dropLabel, false)
+  assert.equal(p5.close, false)
+  assert.equal(p5.newBody, prose) // unchanged
 })
 
 test('truncate — caps long display strings', () => {

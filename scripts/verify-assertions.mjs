@@ -182,12 +182,55 @@ export function pairVerifyAssertions(body) {
   return out
 }
 
-/** Flip the checkbox on the verify-after line at lineIndex from `[ ]` → `[x]`. Returns the new body. */
+/**
+ * Flip the checkbox on the verify-after line at lineIndex from `[ ]` → `[x]`. Returns the new body.
+ * The match is ANCHORED to a real task marker at line start (mirrors OPEN_BOX_RE), so a prose line
+ * with a stray literal `[ ]` substring is NOT mutated — keeping tickBox's no-op set exactly equal to
+ * the countOpenBoxes set that the auto-verify guard relies on (#873 review, hardening the prose edge).
+ */
 export function tickBox(body, lineIndex) {
   const lines = body.split('\n')
   if (lineIndex < 0 || lineIndex >= lines.length) return body
-  lines[lineIndex] = lines[lineIndex].replace(/(\[)\s(\])/, '$1x$2')
+  lines[lineIndex] = lines[lineIndex].replace(/^(\s*[-*+]\s+\[)\s(\])/, '$1x$2')
   return lines.join('\n')
+}
+
+const OPEN_BOX_RE = /^\s*[-*+]\s+\[ \]/
+
+/** Count UNCHECKED markdown task boxes (`- [ ]`) in a body — 0 means the issue is fully checked. */
+export function countOpenBoxes(body) {
+  if (!body) return 0
+  return body.split('\n').filter((l) => OPEN_BOX_RE.test(l)).length
+}
+
+/** Count UNCHECKED `verify-after` lines specifically (an open box whose line carries a verify-after). */
+export function countOpenVerifyAfter(body) {
+  if (!body) return 0
+  return body.split('\n').filter((l) => OPEN_BOX_RE.test(l) && VERIFY_RE.test(l)).length
+}
+
+/**
+ * Decide the auto-verify mutation for ONE issue from its evaluated verify-after items.
+ * evaluated: [{lineIndex, status}] (status: 'pass'|'fail'|'skip'). Pure — no I/O.
+ * Returns {newBody, ticked:[lineIndex], passCount, dropLabel, close}:
+ *   - ticks every PASSing line's box,
+ *   - dropLabel: drop `verify-blocked` once NO unchecked verify-after line remains (dated verifies done),
+ *   - close: only when NO unchecked box of ANY kind remains (the whole issue is complete) — conservative.
+ */
+export function planIssueAutoVerify(body, evaluated) {
+  let newBody = body
+  const ticked = []
+  for (const e of evaluated) {
+    if (e.status !== 'pass') continue
+    // Only record a REAL tick: tickBox is a no-op on a prose (non-`[ ]`) verify-after line, and a
+    // no-op tick must not drive a comment/label/close — else the daily job re-posts every run since
+    // the body never changes (#873 review #1). Compare before/after so prose lines are skipped.
+    const after = tickBox(newBody, e.lineIndex)
+    if (after !== newBody) { newBody = after; ticked.push(e.lineIndex) }
+  }
+  const dropLabel = ticked.length > 0 && countOpenVerifyAfter(newBody) === 0
+  const close = ticked.length > 0 && countOpenBoxes(newBody) === 0
+  return { newBody, ticked, passCount: ticked.length, dropLabel, close }
 }
 
 /**
@@ -277,9 +320,15 @@ async function main() {
   // Tick the passing box(es) always; only DROP verify-blocked when EVERY item is resolved (a mixed
   // pass/fail/skip issue is still blocked on the unresolved item — dropping the label would hide it).
   const editArgs = ['issue', 'edit', number, '--body', newBody]
-  if (allResolved) editArgs.push('--remove-label', 'verify-blocked')
   if (repo) editArgs.push('--repo', repo)
   gh(editArgs)
+  // Label removal is a SEPARATE best-effort call (#873 review #3): a `--remove-label` on a label that
+  // isn't present fails the whole `edit`, which would drop the body tick too. Keep them independent.
+  if (allResolved) {
+    const labelArgs = ['issue', 'edit', number, '--remove-label', 'verify-blocked']
+    if (repo) labelArgs.push('--repo', repo)
+    try { gh(labelArgs) } catch { /* label absent / already removed — the tick already landed */ }
+  }
   const note = allResolved
     ? 'Ticked the box(es) + dropped `verify-blocked`.'
     : 'Ticked the passing box(es); kept `verify-blocked` — other item(s) not yet verified.'
