@@ -115,7 +115,7 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'flux':           ['stability', 'replicate', 'huggingface'], // #756
   'voyageai':       ['pinecone', 'cohere'],
   'modal':          ['replicate', 'huggingface'],
-  'twelvelabs':     ['runway', 'luma', 'replicate', 'huggingface'],
+  'twelvelabs':     ['replicate', 'huggingface', 'runway', 'luma'],
   'langchain':      ['helicone', 'langfuse'],
   'helicone':       ['langchain', 'langfuse'],
   'langfuse':       ['langchain', 'helicone'],
