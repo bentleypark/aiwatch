@@ -38,10 +38,11 @@ Shared workflow — especially:
 
 ```bash
 npm test             # Playwright E2E tests
-npm run test:worker  # Vitest unit tests
+npm run test:src     # Frontend unit tests (vitest — incl. the CSP hash drift pin, #877 CI-gated)
+npm run test:worker  # Worker unit tests (vitest)
 ```
 
-All 92 tests must pass before submitting a PR.
+All tests must pass before submitting a PR — CI gates `test:src`, `test:worker`, and the E2E suite.
 
 ## Pull Request Guidelines
 

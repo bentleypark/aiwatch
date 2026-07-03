@@ -11,8 +11,9 @@
 
 ## Checklist
 - [ ] `npm run build` passes
-- [ ] `npm test` passes (27 Playwright E2E specs)
-- [ ] `npm run test:worker` passes (65 Vitest unit specs)
+- [ ] `npm test` passes (Playwright E2E)
+- [ ] `npm run test:src` passes (frontend vitest — incl. CSP hash pin, #877 CI-gated)
+- [ ] `npm run test:worker` passes (Worker vitest)
 - [ ] Code review completed (`/pr-review-toolkit:review-pr`)
 - [ ] Critical and Important review issues fixed
 - [ ] No hardcoded hex colors (use CSS design tokens)

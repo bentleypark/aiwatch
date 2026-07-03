@@ -248,6 +248,7 @@ npm run dev:all      # Both simultaneously
 npm run build        # Production build → dist/
 npm run lint         # ESLint
 npm test             # Playwright E2E tests
+npm run test:src     # Frontend unit tests (vitest — incl. CSP hash pin)
 npm run test:worker  # Worker unit tests (vitest)
 
 # Worker deployment
@@ -426,7 +427,7 @@ rules.
 2. Create a feature branch (`git checkout -b feature/my-feature`)
 3. Follow the shared workflow in [AGENTS.md](AGENTS.md); Claude Code contributors should also
    follow [CLAUDE.md](CLAUDE.md)
-4. Build + test: `npm run build && npm test && npm run test:worker`
+4. Build + test: `npm run build && npm test && npm run test:src && npm run test:worker`
 5. Submit a pull request using the [PR template](.github/pull_request_template.md)
 
 ### Issues
@@ -437,7 +438,7 @@ rules.
 ### Pull Requests
 
 - One feature or fix per PR
-- All tests must pass (`npm test` + `npm run test:worker`)
+- All tests must pass (`npm test` + `npm run test:src` + `npm run test:worker`)
 - Include `closes #N` in commit messages
 - Fill out the PR checklist
 
