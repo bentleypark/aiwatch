@@ -181,6 +181,17 @@ export function analysisKey(svcId: string, incId: string): string {
 }
 
 /**
+ * #882 — render the Discord embed's 🤖 AI ANALYSIS section for one incident analysis. Pure so the two
+ * cron paths that build it — the inline-success path and the KV-preferred path (an analysis backfilled
+ * by a prior cycle's refreshOrReanalyze, used when releasing a held alert) — emit a byte-identical
+ * section. `div` is the embed section divider. Both the operator embed and the per-user relay carry it.
+ */
+export function formatAnalysisEmbedSection(analysis: AIAnalysisResult, div: string): string {
+  const scope = analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''
+  return `\n${div}\n🤖 **AI ANALYSIS** [Beta]\n${analysis.summary}\n⏱ Est. recovery: ${formatRecoveryDisplay(analysis.estimatedRecovery)}${scope}`
+}
+
+/**
  * Find similar past incidents by keyword overlap with current incident title.
  * Returns up to 5 most relevant recent incidents.
  */

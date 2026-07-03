@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, shouldHoldNewIncident, FLAP_HOLD_MS, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, shouldHoldNewIncident, shouldHoldForAiAnalysis, AI_HOLD_MS, pendingAiKey, FLAP_HOLD_MS, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
 
@@ -1334,5 +1334,62 @@ describe('short-incident hold (#792)', () => {
       if (shouldHoldNewIncident('langfuse', config, ongoing, { alreadyAlerted: false, firstSeenMs, nowMs: t0 + 10 * 60 * 1000 })) s3.add(ongoing.id)
       expect(buildIncidentAlerts([svc], alertedMap(), t0 + 10 * 60 * 1000, s3).map(a => a.key)).toEqual(['alerted:new:lf-real'])
     })
+  })
+})
+
+describe('shouldHoldForAiAnalysis (#882 — Discord AI-hold on the push path)', () => {
+  const NOW = 1_700_000_000_000
+  // Base: a non-Tier-1 service (mistral), AI not ready, not skipped, first sight.
+  const base = { svcId: 'mistral', aiReady: false, analysisSkipped: false, firstSeenMs: null as number | null, nowMs: NOW }
+
+  it('HOLDS a non-Tier-1 new incident on first sight when AI is not ready', () => {
+    expect(shouldHoldForAiAnalysis({ ...base })).toBe(true)
+  })
+
+  it('HOLDS while still inside the window (one */5 cycle after first-seen)', () => {
+    expect(shouldHoldForAiAnalysis({ ...base, firstSeenMs: NOW - 5 * 60 * 1000 })).toBe(true)
+  })
+
+  it('RELEASES (fail-open) once first-seen ≥ AI_HOLD_MS — sends AI-less rather than lose the alert', () => {
+    expect(shouldHoldForAiAnalysis({ ...base, firstSeenMs: NOW - (AI_HOLD_MS + 1000) })).toBe(false)
+  })
+
+  it('RELEASES exactly at the AI_HOLD_MS boundary (strict `<` window is exclusive)', () => {
+    expect(shouldHoldForAiAnalysis({ ...base, firstSeenMs: NOW - AI_HOLD_MS })).toBe(false)
+  })
+
+  it('RELEASES the moment AI is ready (KV backfilled or inline succeeded)', () => {
+    expect(shouldHoldForAiAnalysis({ ...base, aiReady: true })).toBe(false)
+  })
+
+  it('NEVER holds when analysis was skipped (merged / no-model / generic) — AI will never come', () => {
+    expect(shouldHoldForAiAnalysis({ ...base, analysisSkipped: true })).toBe(false)
+  })
+
+  it('NEVER holds Tier-1 (claude/openai/gemini) — operator alert + phone push stay immediate', () => {
+    for (const svcId of ['claude', 'openai', 'gemini']) {
+      expect(shouldHoldForAiAnalysis({ ...base, svcId })).toBe(false)
+    }
+  })
+
+  it('HOLDS non-Tier-1 apps + agents too (chatgpt / claudecode) — "non-Tier-1" = not {claude,openai,gemini}', () => {
+    expect(shouldHoldForAiAnalysis({ ...base, svcId: 'chatgpt' })).toBe(true)
+    expect(shouldHoldForAiAnalysis({ ...base, svcId: 'claudecode' })).toBe(true)
+  })
+
+  it('a KV read error (firstSeenMs=0) does NOT hold — fail-open, mirrors shouldHoldNewIncident', () => {
+    expect(shouldHoldForAiAnalysis({ ...base, firstSeenMs: 0 })).toBe(false)
+  })
+
+  it('the fail-open window is ~2 */5 cron cycles (one retry before shipping AI-less)', () => {
+    expect(AI_HOLD_MS).toBe(10 * 60 * 1000)
+    expect(AI_HOLD_MS).toBeGreaterThan(5 * 60 * 1000) // survives at least one full cron cycle
+  })
+})
+
+describe('pendingAiKey (#882)', () => {
+  it('scopes the AI-hold marker to the incident id, distinct from pending:new', () => {
+    expect(pendingAiKey('mistral-ocr-123')).toBe('pending:ai:mistral-ocr-123')
+    expect(pendingAiKey('x')).not.toBe(pendingNewKey('x'))
   })
 })

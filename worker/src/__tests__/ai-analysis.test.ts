@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, buildHistorySection, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, parseAnalysisResponse, type KVLike } from '../ai-analysis'
+import { findSimilarIncidents, buildAnalysisPrompt, buildHistorySection, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, type AIAnalysisResult, type KVLike } from '../ai-analysis'
 import type { IncidentHistoryRecord } from '../incident-history'
 import type { Incident, ServiceStatus } from '../types'
 
@@ -1598,5 +1598,43 @@ describe('refreshOrReanalyze — sticky analyses (#299)', () => {
     // The corrupt JSON should trigger re-analysis (not early-return).
     expect(analyzeFn).toHaveBeenCalledOnce()
     warnSpy.mockRestore()
+  })
+})
+
+describe('formatAnalysisEmbedSection (#882)', () => {
+  const DIV = '┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈'
+  const base: AIAnalysisResult = {
+    summary: 'OCR API degraded — new failure type.',
+    estimatedRecovery: '5–15m',
+    affectedScope: ['OCR API', 'Document Processing'],
+    needsFallback: true,
+    analyzedAt: new Date(1_700_000_000_000).toISOString(),
+    incidentId: 'inc-1',
+    model: 'gemma',
+  }
+
+  it('renders the 🤖 AI ANALYSIS section with summary, recovery, and scope', () => {
+    const out = formatAnalysisEmbedSection(base, DIV)
+    expect(out).toContain('🤖 **AI ANALYSIS** [Beta]')
+    expect(out).toContain('OCR API degraded — new failure type.')
+    expect(out).toContain('⏱ Est. recovery: 5–15m')
+    expect(out).toContain('📡 Scope: OCR API, Document Processing')
+    expect(out.startsWith(`\n${DIV}\n`)).toBe(true)
+  })
+
+  it('omits the Scope line when affectedScope is empty', () => {
+    const out = formatAnalysisEmbedSection({ ...base, affectedScope: [] }, DIV)
+    expect(out).not.toContain('📡 Scope:')
+  })
+
+  it('maps N/A recovery to the friendly phrase (shared formatRecoveryDisplay)', () => {
+    const out = formatAnalysisEmbedSection({ ...base, estimatedRecovery: 'N/A' }, DIV)
+    expect(out).toContain('⏱ Est. recovery: Exceeded typical pattern')
+  })
+
+  it('is byte-identical to the legacy inline template (KV path == inline-success path)', () => {
+    const a = base
+    const legacy = `\n${DIV}\n🤖 **AI ANALYSIS** [Beta]\n${a.summary}\n⏱ Est. recovery: ${formatRecoveryDisplay(a.estimatedRecovery)}${a.affectedScope.length > 0 ? `\n📡 Scope: ${a.affectedScope.join(', ')}` : ''}`
+    expect(formatAnalysisEmbedSection(a, DIV)).toBe(legacy)
   })
 })
