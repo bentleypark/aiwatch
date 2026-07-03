@@ -46,6 +46,7 @@ const SERVICE_COLOR = {
   elevenlabs:  '#6be5e2',
   xai:         '#e0e0e0',
   deepseek:    '#ff6b6b',
+  twelvelabs:  '#79c0ff',
 }
 
 // Official status page URLs for each monitored service
@@ -74,6 +75,7 @@ const STATUS_URL = {
   bfl:         'https://status.bfl.ml',
   voyageai:    'https://voyageai-status.statuspage.io',
   modal:       'https://status.modal.com',
+  twelvelabs:  'https://status.twelvelabs.io',
   langsmith:   'https://status.smith.langchain.com',
   helicone:    'https://status.helicone.ai',
   langfuse:    'https://status.langfuse.com',

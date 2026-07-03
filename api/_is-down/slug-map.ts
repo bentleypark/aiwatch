@@ -47,6 +47,8 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'flux':            { id: 'bfl',        name: 'Black Forest Labs (FLUX)', provider: 'Black Forest Labs', category: 'api', group: 'image' },
   'voyageai':        { id: 'voyageai',   name: 'Voyage AI',        provider: 'Voyage AI',   category: 'api', group: 'inference' },
   'modal':           { id: 'modal',      name: 'Modal',            provider: 'Modal',       category: 'api', group: 'inference' },
+  // Twelve Labs (#839) — video-understanding API (search/embed/analyze), not video generation. Slug == worker id.
+  'twelvelabs':      { id: 'twelvelabs', name: 'Twelve Labs',      provider: 'Twelve Labs', category: 'api', group: 'inference' },
   // LangChain (LangSmith) (#561) — slug is 'langchain' (search volume) while the worker id is
   // 'langsmith'; the id≠slug mapping is mirrored in worker/src/rss.ts IS_DOWN_SLUG_OVERRIDE and
   // src/utils/constants.js FEED_SLUG_OVERRIDE, pinned by feed-slug-sync.test.ts / feed-slug.test.js.
@@ -113,6 +115,7 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'flux':           ['stability', 'replicate', 'huggingface'], // #756
   'voyageai':       ['pinecone', 'cohere'],
   'modal':          ['replicate', 'huggingface'],
+  'twelvelabs':     ['replicate', 'huggingface', 'runway', 'luma'],
   'langchain':      ['helicone', 'langfuse'],
   'helicone':       ['langchain', 'langfuse'],
   'langfuse':       ['langchain', 'helicone'],

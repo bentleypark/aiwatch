@@ -17,7 +17,7 @@ export const API_SERVICE_IDS = [
   'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq',
   'together', 'fireworks', 'cerebras', 'perplexity', 'huggingface', 'replicate', 'fal',
   'elevenlabs', 'xai', 'deepseek', 'openrouter', 'bedrock', 'azureopenai',
-  'pinecone', 'turbopuffer', 'stability', 'bfl', 'voyageai', 'modal', 'langsmith', 'helicone', 'langfuse', 'runway', 'luma', 'assemblyai', 'deepgram',
+  'pinecone', 'turbopuffer', 'stability', 'bfl', 'voyageai', 'modal', 'twelvelabs', 'langsmith', 'helicone', 'langfuse', 'runway', 'luma', 'assemblyai', 'deepgram',
 ]
 
 // AI web apps (no latency — web services, ordered before related API)
@@ -36,7 +36,7 @@ export const SERVICE_AND_APP_IDS = [
   // voice & speech AI
   'elevenlabs', 'assemblyai', 'deepgram',
   // inference / infrastructure
-  'huggingface', 'replicate', 'fal', 'pinecone', 'turbopuffer', 'stability', 'bfl', 'voyageai', 'modal',
+  'huggingface', 'replicate', 'fal', 'pinecone', 'turbopuffer', 'stability', 'bfl', 'voyageai', 'modal', 'twelvelabs',
   // LLM observability (#601)
   'langsmith', 'helicone', 'langfuse',
   // video-gen
@@ -58,7 +58,7 @@ export const SERVICE_CATEGORIES = {
   llm:       { labelKey: 'filter.llm',       ids: ['claude', 'openai', 'gemini', 'bedrock', 'azureopenai', 'mistral', 'cohere', 'groq', 'together', 'fireworks', 'cerebras', 'perplexity', 'xai', 'deepseek', 'openrouter'] },
   agents:    { labelKey: 'filter.agents',    ids: ['claudecode', 'codex', 'cursor', 'copilot', 'windsurf', 'junie'] },
   voice:     { labelKey: 'filter.voice',     ids: ['elevenlabs', 'assemblyai', 'deepgram'] }, // #658 — STT/TTS
-  inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'fal', 'modal', 'voyageai', 'pinecone', 'turbopuffer'] }, // catch-all for non-LLM API infra: model-hosting (hf/replicate/fal/modal) + embeddings (voyageai) + vector (pinecone/turbopuffer, #857). Observability (#601) and image (#756) split out to their own categories; vector stays here as a sidebar group (its ≥2-member split is a fallback tier only, #857) — remaining single-service sub-domains stay until they gain siblings
+  inference: { labelKey: 'filter.inference', ids: ['huggingface', 'replicate', 'fal', 'modal', 'voyageai', 'pinecone', 'turbopuffer', 'twelvelabs'] }, // catch-all for non-LLM API infra: model-hosting (hf/replicate/fal/modal) + embeddings (voyageai) + vector (pinecone/turbopuffer, #857). Observability (#601) and image (#756) split out to their own categories; vector stays here as a sidebar group (its ≥2-member split is a fallback tier only, #857) — remaining single-service sub-domains stay until they gain siblings
   observability: { labelKey: 'filter.observability', ids: ['langsmith', 'helicone', 'langfuse'] }, // #601 — LLM observability/eval split out (LangSmith + Helicone + Langfuse recommend each other, fallback tier 6)
   video:     { labelKey: 'filter.video',     ids: ['runway', 'luma'] }, // #658 — video-gen (align membership with #601 fallback sub-tier)
   image:     { labelKey: 'filter.image',     ids: ['stability', 'bfl'] }, // #756 — image-gen split out (Stability + FLUX recommend each other, fallback tier 7); mirrors the video/observability precedent
@@ -80,7 +80,7 @@ export function categoryRankOf(id) {
 
 // Services excluded from fallback recommendations (not interchangeable with LLM APIs)
 // Keep in sync with worker/src/fallback.ts EXCLUDE_FALLBACK
-export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform, like replicate/huggingface); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8)
+export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs'] // #756 — stability un-excluded (image sibling FLUX added); #758 — fal excluded (self-serve inference platform, like replicate/huggingface); #857 — pinecone un-excluded (vector sibling turbopuffer added, tier 8)
 
 // #842 — outbound referral wedge. Product/homepage URL per service that can be RECOMMENDED as a
 // fallback (Analyze modal / Overview ActionBanner), so an outage-moment visitor can ACT on the

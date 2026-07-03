@@ -70,13 +70,13 @@ describe('PROBE_TARGETS', () => {
   const EXPECTED_IDS = [
     'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq', 'together',
     'fireworks', 'cerebras', 'perplexity', 'huggingface', 'replicate', 'fal', 'elevenlabs', 'xai', 'deepseek',
-    'openrouter', 'stability', 'bfl', 'assemblyai', 'deepgram', 'voyageai',
+    'openrouter', 'stability', 'bfl', 'assemblyai', 'deepgram', 'voyageai', 'twelvelabs',
     'pinecone', 'langsmith', 'runway', 'luma', // #678 — added (stable representative API path)
     'turbopuffer', // #857 — no official uptime, probe is the sole measured signal
   ]
 
-  it('has all 29 API service probe targets', () => {
-    expect(PROBE_TARGETS).toHaveLength(29)
+  it('has all 30 API service probe targets', () => {
+    expect(PROBE_TARGETS).toHaveLength(30)
     const ids = PROBE_TARGETS.map((t) => t.id)
     for (const expected of EXPECTED_IDS) {
       expect(ids).toContain(expected)

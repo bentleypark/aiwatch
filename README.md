@@ -13,7 +13,7 @@
 
 **English** | [한국어](README.ko.md)
 
-Real-time monitoring dashboard for **42 AI services** — track status, latency, uptime, and incidents across major AI providers.
+Real-time monitoring dashboard for **43 AI services** — track status, latency, uptime, and incidents across major AI providers.
 
 **[Dashboard](https://ai-watch.dev)** · **[Landing Page](https://ai-watch.dev/intro)**
 
@@ -33,9 +33,9 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 ## Features
 
-- **Real-time status** — Operational / Degraded / Down for 42 AI services
+- **Real-time status** — Operational / Degraded / Down for 43 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
-- **Latency monitoring** — Direct API endpoint response time (RTT) for 29 probe-capable services, status page timing as fallback
+- **Latency monitoring** — Direct API endpoint response time (RTT) for 30 probe-capable services, status page timing as fallback
 - **24h latency trend** — Chart.js line chart with 5-min probe snapshots
 - **Incident history** — Timeline with details from multiple status page formats
 - **Official uptime** — Per-component uptime from Statuspage, incident.io, Better Stack
@@ -53,7 +53,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
 - **Is X Down SEO pages** — 40 services (all monitored services except Bedrock / Azure OpenAI) with dynamic OG images (PNG), share buttons, AIWatch rank (matches dashboard with tied-rank display), and fallback recommendations
-- **Health check probing** — Direct RTT measurement to API endpoints (29 API services) with early outage detection via consecutive spike alerts and RTT degradation tracking
+- **Health check probing** — Direct RTT measurement to API endpoints (30 API services) with early outage detection via consecutive spike alerts and RTT degradation tracking
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 - **AI Analysis (Beta)** — Hybrid AI auto-analysis on incidents (Gemma 4 primary + Sonnet fallback): cause estimation, recovery time, affected scope, contextual fallback recommendations. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 - **Landing page** — Landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, optional `?banner=` campaign slot, and GA4 tracking
@@ -64,7 +64,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 ## Monitored Services
 
-Grouped by the dashboard's category taxonomy (42 total — sidebar filters / Overview sections mirror these).
+Grouped by the dashboard's category taxonomy (43 total — sidebar filters / Overview sections mirror these).
 
 ### LLM APIs (15)
 
@@ -105,7 +105,7 @@ Grouped by the dashboard's category taxonomy (42 total — sidebar filters / Ove
 | AssemblyAI | AssemblyAI | Atlassian Statuspage |
 | Deepgram | Deepgram | Atlassian Statuspage |
 
-### Inference & Infra (7)
+### Inference & Infra (8)
 
 | Service | Provider | Status Source |
 |---------|----------|---------------|
@@ -116,6 +116,7 @@ Grouped by the dashboard's category taxonomy (42 total — sidebar filters / Ove
 | turbopuffer | turbopuffer | Atlassian Statuspage (no uptime, probe-based) |
 | Voyage AI | Voyage AI | Atlassian Statuspage |
 | Modal | Modal | Better Stack RSS + uptime API |
+| Twelve Labs | Twelve Labs | Atlassian Statuspage |
 
 ### Observability (3)
 
@@ -166,7 +167,7 @@ Grouped by the dashboard's category taxonomy (42 total — sidebar filters / Ove
 Browser (React SPA, 60s polling)
   ↓
 Cloudflare Worker
-  ├── GET /api/status    → parallel fetch (42 services) → normalize
+  ├── GET /api/status    → parallel fetch (43 services) → normalize
   ├── GET /api/uptime    → daily uptime history
   └── POST /api/alert   → Discord webhook proxy (SSRF protected)
   ↓
@@ -185,7 +186,7 @@ Cloudflare KV
   ├── daily:YYYY-MM-DD     (uptime counters, TTL 2d)
   ├── history:YYYY-MM-DD   (archived counters, TTL 90d)
   ├── latency:24h          (30-min snapshots, max 48, TTL 25h)
-  ├── probe:24h            (health check probes, max 2016, TTL 7d, 29 API services)
+  ├── probe:24h            (health check probes, max 2016, TTL 7d, 30 API services)
   ├── ai:analysis:{svcId}:{incId}  (AI per-incident analysis, TTL 1h, refreshed while active)
   ├── ai:reanalysis-skip:* (re-analysis failure cooldown, TTL 30min)
   ├── ai:usage:{date}      (daily AI usage counter, TTL 2d)
