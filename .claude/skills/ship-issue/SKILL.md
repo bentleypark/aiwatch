@@ -72,6 +72,14 @@ is the *procedure* — follow it top to bottom.
      `- [ ] **verify-after YYYY-MM-DD** — what to check + where` (pick a realistic date). The daily
      `verify-reminders` GitHub Action pings the operator Discord when due (and weekly while open);
      closing the issue / removing the line cancels it. This replaces "remember to check the board".
+   - **If the check is machine-checkable, add a Tier-A `assert:` line (#873)** so the daily job
+     **auto-verifies** it (ticks the box + drops `verify-blocked` + closes) instead of pinging you.
+     Indent it directly under the verify-after line:
+     `      assert: GET /api/status/cached | services[id=turbopuffer].scoreConfidence == "medium"`.
+     Assertable = a predicate over an AIWatch JSON endpoint (a `/api/status` field, a count/threshold,
+     `exists`); NOT GA4/GSC-CTR/consent-gated or behavioral checks — leave those as a plain human ping.
+     Validate it before it ships: `node scripts/verify-assertions.mjs --issue N --dry-run`. Grammar +
+     allowlist + fail-open semantics: **[docs/reference/verify-assertions.md](../../../docs/reference/verify-assertions.md)**.
    - **Cross-issue reconciliation** — also scan OTHER open issues this change touches:
      fully implements another → add `closes #M`; partially advances → `refs #M` + comment;
      **supersedes/invalidates** another (a newer finding/feature makes it moot) → comment the why + close it.

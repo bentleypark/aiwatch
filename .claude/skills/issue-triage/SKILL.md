@@ -95,6 +95,10 @@ Before recommending ANY issue as do-next, verify it the **same way** you'd verif
 3. **Label the gate so the next sweep sees it without re-deriving**: add `verify-blocked` to a
    verify-gated issue (create the label once if missing). A `verify-blocked`/`verify-overdue` issue is
    skipped from do-next by **label alone** next time — closing the gap that lets it leak back in.
+   **If the remaining check is machine-checkable** (a predicate over an AIWatch JSON endpoint), also add
+   a Tier-A `assert:` line under its `verify-after` (#873, [docs/reference/verify-assertions.md](../../../docs/reference/verify-assertions.md))
+   so the daily job **auto-drains** it — the fastest way to shrink the verify-blocked pile. GA4/GSC-CTR
+   /behavioral checks aren't assertable; leave those as a human ping.
 
 Only issues that survive this gate (real remaining code work) are eligible for the recommended pick.
 

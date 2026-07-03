@@ -109,3 +109,16 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 32. `npx wrangler deploy --config worker/wrangler.toml --dry-run` — build check
 33. `npm run deploy:worker` — deploy after user approval
 34. `git push origin main` — Vercel auto-deploy for frontend
+
+## Post-deploy verification (probe-warm / coverage gate)
+35. A newly-added service has two **machine-checkable** production-gated checks — add them as
+    `verify-after` lines **with Tier-A `assert:` clauses** (#873) so the daily `verify-reminders` job
+    auto-verifies them instead of pinging (grammar: **[verify-assertions.md](verify-assertions.md)**):
+    ```
+    - [ ] verify-after <+7d> — probe warmed → medium confidence + a real score
+          assert: GET /api/status/cached | services[id=<id>].scoreConfidence == "medium"
+    - [ ] verify-after <+30d> — #802 coverage gate lifts → rejoins the ranking
+          assert: GET /api/status/cached | services[id=<id>].coverageDays >= 30
+    ```
+    (Only if the service is a probe target for the first line. Validate before shipping:
+    `node scripts/verify-assertions.mjs --issue N --dry-run`.)

@@ -12,6 +12,9 @@
 // scripts/verify-reminders.test.mjs. `--dry-run` (or DRY_RUN=1) prints actions without side effects.
 
 import { execFileSync } from 'node:child_process'
+// #873 — Tier-A auto-verify: evaluate a machine-checkable `assert:` clause on a verify-after line and
+// close the loop (tick + comment + drop verify-blocked) instead of only pinging. See verify-assertions.mjs.
+import { pairVerifyAssertions, runAssertion, planIssueAutoVerify, truncate } from './verify-assertions.mjs'
 
 // Matches a `verify-after 2026-09-01` token anywhere on a line; captures the date + the rest of the
 // line as a free-form note. Case-insensitive; `after` may be followed by space, `:` or `-`.
@@ -178,9 +181,33 @@ async function main() {
   const trusted = parseTrustedAuthors(process.env, repos)
   const considered = trusted.size > 0 ? issues.filter((i) => trusted.has(i.author?.login)) : issues
 
+  // ── #873 Tier-A auto-verify pass ──────────────────────────────────────────────
+  // Independent of the due/weekly ping cadence: evaluate every OPEN verify-after line that carries a
+  // machine-checkable `assert:` clause, and on PASS close the loop (tick + comment + drop verify-blocked
+  // / close). Runs on every daily invocation so an issue drains the moment its production signal is met,
+  // not only after its date. The trusted-author filter above already gates which issues reach here.
+  const autoVerified = []
+  for (const iss of considered) {
+    const withAssert = pairVerifyAssertions(iss.body).filter((it) => it.assertion)
+    if (withAssert.length === 0) continue
+    const evaluated = []
+    for (const it of withAssert) {
+      const r = await runAssertion(it.assertion, { timeoutMs: 20_000 }) // daily job — latency-tolerant
+      evaluated.push({ lineIndex: it.lineIndex, status: r.status, selector: it.assertion.selector, actual: r.actual })
+    }
+    const plan = planIssueAutoVerify(iss.body, evaluated)
+    if (plan.passCount > 0) {
+      autoVerified.push({ number: iss.number, repo: iss.repo, ref: displayRef(iss.repo, iss.number), title: iss.title, plan, evaluated })
+    }
+  }
+  // Lines auto-verified this run must NOT also ping (they're being ticked below).
+  const tickedKeys = new Set(autoVerified.flatMap((a) => a.plan.ticked.map((li) => `${a.repo || ''}#${a.number}#${li}`)))
+
   const due = []
   for (const iss of considered) {
-    for (const { date, note } of parseVerifyAfter(iss.body)) {
+    for (const { date, note, lineIndex } of pairVerifyAssertions(iss.body)) {
+      if (!isValidIsoDate(date)) continue // #873 review #2: pairVerifyAssertions doesn't reject 2026-02-30 (Date rolls it over); keep the #541 guard
+      if (tickedKeys.has(`${iss.repo || ''}#${iss.number}#${lineIndex}`)) continue
       if (shouldFire(date, today)) {
         due.push({
           number: iss.number,
@@ -195,14 +222,56 @@ async function main() {
     }
   }
 
-  if (due.length === 0) {
-    console.log(`[verify-reminders] ${today}: nothing due.`)
+  if (autoVerified.length === 0 && due.length === 0) {
+    console.log(`[verify-reminders] ${today}: nothing to auto-verify or ping.`)
     return
   }
-  console.log(`[verify-reminders] ${today}: ${due.length} due → ${due.map((d) => d.ref).join(', ')}`)
+  if (autoVerified.length) console.log(`[verify-reminders] ${today}: ${autoVerified.length} auto-verifiable → ${autoVerified.map((a) => a.ref).join(', ')}`)
+  if (due.length) console.log(`[verify-reminders] ${today}: ${due.length} due to ping → ${due.map((d) => d.ref).join(', ')}`)
 
   if (dryRun) {
-    console.log('[verify-reminders] --dry-run: would post:\n' + JSON.stringify(due, null, 2))
+    if (autoVerified.length) {
+      console.log('[verify-reminders] --dry-run: would AUTO-VERIFY:\n' + JSON.stringify(
+        autoVerified.map((a) => ({ ref: a.ref, pass: a.plan.passCount, dropLabel: a.plan.dropLabel, close: a.plan.close, ticked: a.plan.ticked })), null, 2))
+    }
+    if (due.length) console.log('[verify-reminders] --dry-run: would PING:\n' + JSON.stringify(due, null, 2))
+    return
+  }
+
+  // Apply auto-verify FIRST (each issue best-effort; a failure must not abort the run).
+  for (const a of autoVerified) {
+    try {
+      const editArgs = ['issue', 'edit', String(a.number), '--body', a.plan.newBody]
+      if (a.repo) editArgs.push('--repo', a.repo)
+      gh(editArgs)
+      // Label removal is a SEPARATE best-effort call (#873 review #3): bundling `--remove-label` into
+      // the body edit means a missing label (e.g. a sibling-repo issue that never carried it) fails the
+      // whole edit and drops the tick. Keep them independent so the tick + comment always land.
+      if (a.plan.dropLabel) {
+        const labelArgs = ['issue', 'edit', String(a.number), '--remove-label', 'verify-blocked']
+        if (a.repo) labelArgs.push('--repo', a.repo)
+        try { gh(labelArgs) } catch (e) { console.warn(`[verify-reminders] could not drop verify-blocked on ${a.ref}: ${e.message.split('\n')[0]}`) }
+      }
+      const evidence = a.evaluated.filter((e) => e.status === 'pass')
+        .map((e) => `\`${e.selector}\` = ${truncate(JSON.stringify(e.actual), 60)}`).join('; ')
+      const note = a.plan.dropLabel ? ' + dropped `verify-blocked`' : ''
+      const commentArgs = ['issue', 'comment', String(a.number), '--body',
+        `✅ Auto-verified ${today} — production signal satisfied: ${evidence}. Ticked ${a.plan.passCount} verify-after box(es)${note}. (#873 Tier-A)`]
+      if (a.repo) commentArgs.push('--repo', a.repo)
+      gh(commentArgs)
+      if (a.plan.close) {
+        const closeArgs = ['issue', 'close', String(a.number)]
+        if (a.repo) closeArgs.push('--repo', a.repo)
+        gh(closeArgs)
+      }
+      console.log(`[verify-reminders] auto-verified ${a.ref} (${a.plan.passCount} pass${a.plan.close ? ', closed' : a.plan.dropLabel ? ', label dropped' : ''})`)
+    } catch (e) {
+      console.warn(`[verify-reminders] auto-verify failed for ${a.ref}: ${e.message.split('\n')[0]}`)
+    }
+  }
+
+  if (due.length === 0) {
+    console.log('[verify-reminders] no reminders to ping (auto-verify only).')
     return
   }
 
