@@ -1,0 +1,191 @@
+// #873 — unit tests for the Tier-A assertion evaluator (pure, no network, no eval).
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  parseAssertionLine, parseLiteral, parseSelector, evalSelector, compare,
+  evaluateAssertion, isAllowedUrl, resolveSource, pairVerifyAssertions, tickBox, runAssertion,
+  truncate, DEFAULT_ASSERT_BASE,
+} from './verify-assertions.mjs'
+
+test('parseAssertionLine — valid GET + selector + quoted expected', () => {
+  const a = parseAssertionLine('      assert: GET /api/status | services[id=turbopuffer].scoreConfidence == "medium"')
+  assert.deepEqual(a, { source: '/api/status', selector: 'services[id=turbopuffer].scoreConfidence', op: '==', expected: '"medium"' })
+})
+
+test('parseAssertionLine — GET optional, absolute url, numeric op', () => {
+  const a = parseAssertionLine('assert: https://ai-watch.dev/api/report | predictionAccuracy.sampleCount >= 1')
+  assert.deepEqual(a, { source: 'https://ai-watch.dev/api/report', selector: 'predictionAccuracy.sampleCount', op: '>=', expected: '1' })
+})
+
+test('parseAssertionLine — exists takes no operand', () => {
+  const a = parseAssertionLine('assert: /api/status | supplyChainBanner exists')
+  assert.deepEqual(a, { source: '/api/status', selector: 'supplyChainBanner', op: 'exists', expected: null })
+})
+
+test('parseAssertionLine — malformed → null', () => {
+  assert.equal(parseAssertionLine('assert: /api/status services.foo == 1'), null) // no pipe
+  assert.equal(parseAssertionLine('assert: /api/status | services.foo === 1'), null) // bad op
+  assert.equal(parseAssertionLine('assert: /api/status | services.foo exists yes'), null) // exists + operand
+  assert.equal(parseAssertionLine('assert: /api/status | services.foo =='), null) // value op, no operand
+  assert.equal(parseAssertionLine('assert: /api/status | services[bad.foo == 1'), null) // bad selector
+  assert.equal(parseAssertionLine('- [ ] verify-after 2026-07-09 — note'), null) // not an assert line
+})
+
+test('parseLiteral — string/quoted/bool/number/raw', () => {
+  assert.equal(parseLiteral('"medium"'), 'medium')
+  assert.equal(parseLiteral("'x'"), 'x')
+  assert.equal(parseLiteral('true'), true)
+  assert.equal(parseLiteral('false'), false)
+  assert.equal(parseLiteral('42'), 42)
+  assert.equal(parseLiteral('99.5'), 99.5)
+  assert.equal(parseLiteral('operational'), 'operational')
+  assert.equal(parseLiteral(null), null)
+})
+
+test('parseSelector — plain, filter, quoted filter, malformed', () => {
+  assert.deepEqual(parseSelector('a.b.c'), [{ key: 'a', filter: null }, { key: 'b', filter: null }, { key: 'c', filter: null }])
+  assert.deepEqual(parseSelector('services[id=turbopuffer].x'), [
+    { key: 'services', filter: { key: 'id', value: 'turbopuffer' } }, { key: 'x', filter: null },
+  ])
+  assert.deepEqual(parseSelector('a[k="v w"]')[0].filter, { key: 'k', value: 'v w' })
+  assert.equal(parseSelector('a..b'), null)
+  assert.equal(parseSelector('a[bad'), null)
+  assert.equal(parseSelector(''), null)
+})
+
+test('evalSelector — dot path + array filter', () => {
+  const json = { services: [{ id: 'a', v: 1 }, { id: 'turbopuffer', scoreConfidence: 'medium' }], n: { deep: 5 } }
+  assert.deepEqual(evalSelector(json, 'services[id=turbopuffer].scoreConfidence'), { found: true, value: 'medium' })
+  assert.deepEqual(evalSelector(json, 'n.deep'), { found: true, value: 5 })
+  assert.deepEqual(evalSelector(json, 'services[id=missing].x'), { found: false, value: undefined })
+  assert.deepEqual(evalSelector(json, 'n.nope'), { found: false, value: undefined })
+  assert.deepEqual(evalSelector(json, 'n[id=x].y'), { found: false, value: undefined }) // filter on non-array
+})
+
+test('evalSelector — filter matches by string coercion (numeric id)', () => {
+  const json = { items: [{ id: 1, ok: true }, { id: 2, ok: false }] }
+  assert.deepEqual(evalSelector(json, 'items[id=2].ok'), { found: true, value: false })
+})
+
+test('compare — every operator', () => {
+  assert.equal(compare('medium', '==', '"medium"'), true)
+  assert.equal(compare('medium', '==', '"high"'), false)
+  assert.equal(compare('medium', '!=', '"high"'), true)
+  assert.equal(compare(5, '>=', '1'), true)
+  assert.equal(compare(0, '>=', '1'), false)
+  assert.equal(compare(3, '<=', '3'), true)
+  assert.equal(compare(['a', 'b'], 'contains', '"a"'), true)
+  assert.equal(compare(['a', 'b'], 'contains', '"z"'), false)
+  assert.equal(compare('claude down', 'contains', '"down"'), true)
+  assert.equal(compare('x', 'exists', null), true)
+  assert.equal(compare(undefined, 'exists', null), false)
+  assert.equal(compare(null, 'exists', null), false)
+})
+
+test('evaluateAssertion — pass / fail / selector-miss', () => {
+  const json = { services: [{ id: 'turbopuffer', scoreConfidence: 'medium', uptime30d: 99.9 }] }
+  assert.deepEqual(evaluateAssertion({ selector: 'services[id=turbopuffer].scoreConfidence', op: '==', expected: '"medium"' }, json),
+    { pass: true, found: true, actual: 'medium' })
+  assert.deepEqual(evaluateAssertion({ selector: 'services[id=turbopuffer].uptime30d', op: '>=', expected: '99' }, json),
+    { pass: true, found: true, actual: 99.9 })
+  assert.deepEqual(evaluateAssertion({ selector: 'services[id=turbopuffer].scoreConfidence', op: '==', expected: '"high"' }, json),
+    { pass: false, found: true, actual: 'medium' })
+  // selector-miss (value op) ⇒ pass:false, not a throw
+  assert.deepEqual(evaluateAssertion({ selector: 'services[id=nope].x', op: '==', expected: '"y"' }, json),
+    { pass: false, found: false, actual: undefined })
+})
+
+test('isAllowedUrl — allow exact (incl. pinned prod worker) + env extra; reject http/other', () => {
+  assert.equal(isAllowedUrl('https://ai-watch.dev/api/status'), true)
+  assert.equal(isAllowedUrl('https://api.ai-watch.dev/api/status'), true)
+  assert.equal(isAllowedUrl('https://aiwatch-worker.p2c2kbf.workers.dev/api/status'), true) // pinned prod host
+  assert.equal(isAllowedUrl('http://ai-watch.dev/api/status'), false) // not https
+  assert.equal(isAllowedUrl('https://evil.com/api/status'), false)
+  assert.equal(isAllowedUrl('not a url'), false)
+  assert.equal(isAllowedUrl('https://localhost:8788/api/status', { VERIFY_ASSERT_ALLOW: 'localhost' }), true)
+})
+
+test('isAllowedUrl — SSRF bypass vectors are rejected (#873 review #2/#4)', () => {
+  // userinfo trick: hostname resolves to evil.com, not the worker
+  assert.equal(isAllowedUrl('https://aiwatch-worker.p2c2kbf.workers.dev@evil.com/x'), false)
+  // suffix trick: the allowed label is a prefix of a longer attacker host
+  assert.equal(isAllowedUrl('https://aiwatch-worker.p2c2kbf.workers.dev.evil.com/x'), false)
+  assert.equal(isAllowedUrl('https://ai-watch.dev.evil.com/x'), false)
+  // wildcard is GONE — a DIFFERENT worker subdomain (attacker's own CF account) must be rejected
+  assert.equal(isAllowedUrl('https://aiwatch-worker.attacker.workers.dev/x'), false)
+  assert.equal(isAllowedUrl('https://aiwatch-worker.workers.dev/x'), false)
+  // uppercase host normalizes (new URL lowercases) → still allowed, not a bypass
+  assert.equal(isAllowedUrl('https://AI-WATCH.DEV/api/status'), true)
+})
+
+test('resolveSource — relative→base, absolute allowlisted, non-allowlisted→null', () => {
+  assert.equal(resolveSource('/api/status'), `${DEFAULT_ASSERT_BASE}/api/status`)
+  assert.equal(resolveSource('https://ai-watch.dev/api/report'), 'https://ai-watch.dev/api/report')
+  assert.equal(resolveSource('https://evil.com/x'), null)
+  assert.equal(resolveSource('/api/status', { VERIFY_ASSERT_BASE: 'https://ai-watch.dev' }), 'https://ai-watch.dev/api/status')
+})
+
+test('pairVerifyAssertions — pairs verify-after with following assert, skips checked', () => {
+  const body = [
+    '- [ ] verify-after 2026-07-09 — turbopuffer probe warmed',
+    '      assert: GET /api/status | services[id=turbopuffer].scoreConfidence == "medium"',
+    '- [x] verify-after 2026-06-01 — already done',
+    '      assert: /api/status | services[id=x].y == "z"',
+    '- [ ] verify-after 2026-08-05 — no assertion here',
+  ].join('\n')
+  const items = pairVerifyAssertions(body)
+  assert.equal(items.length, 2) // checked line skipped
+  assert.equal(items[0].date, '2026-07-09')
+  assert.equal(items[0].assertion.selector, 'services[id=turbopuffer].scoreConfidence')
+  assert.equal(items[0].lineIndex, 0)
+  assert.equal(items[1].date, '2026-08-05')
+  assert.equal(items[1].assertion, null) // no following assert line
+})
+
+test('pairVerifyAssertions — tolerates a blank line before the assert', () => {
+  const body = '- [ ] verify-after 2026-07-09 — x\n\n      assert: /api/status | a.b exists'
+  const items = pairVerifyAssertions(body)
+  assert.equal(items[0].assertion.op, 'exists')
+})
+
+test('tickBox — flips [ ]→[x] on the target line only', () => {
+  const body = '- [ ] verify-after 2026-07-09 — x\n      assert: /api/status | a.b exists'
+  const out = tickBox(body, 0)
+  assert.match(out.split('\n')[0], /- \[x\] verify-after/)
+  assert.equal(out.split('\n')[1], '      assert: /api/status | a.b exists') // untouched
+  assert.equal(tickBox(body, 99), body) // out-of-range → unchanged
+})
+
+test('truncate — caps long display strings', () => {
+  assert.equal(truncate('short'), 'short')
+  const long = 'x'.repeat(200)
+  assert.match(truncate(long), /^x{120}… \(200 chars\)$/)
+})
+
+test('runAssertion — pass / fail / skip via injected fetch', async () => {
+  const a = { source: '/api/status', selector: 'services[id=turbopuffer].scoreConfidence', op: '==', expected: '"medium"' }
+  const okFetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ services: [{ id: 'turbopuffer', scoreConfidence: 'medium' }] }) })
+  assert.deepEqual((await runAssertion(a, { fetchImpl: okFetch })).status, 'pass')
+
+  const failFetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ services: [{ id: 'turbopuffer', scoreConfidence: 'low' }] }) })
+  assert.deepEqual((await runAssertion(a, { fetchImpl: failFetch })).status, 'fail')
+
+  // HTTP error → skip (fail-open, keep reminder)
+  const httpErr = () => Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({}) })
+  assert.equal((await runAssertion(a, { fetchImpl: httpErr })).status, 'skip')
+
+  // fetch throws → skip
+  const throws = () => Promise.reject(new Error('network'))
+  assert.equal((await runAssertion(a, { fetchImpl: throws })).status, 'skip')
+
+  // bad JSON (res.json() throws) → skip (fail-open, never a false pass)
+  const badJson = () => Promise.resolve({ ok: true, json: () => Promise.reject(new Error('invalid json')) })
+  assert.equal((await runAssertion(a, { fetchImpl: badJson })).status, 'skip')
+
+  // non-allowlisted source → skip without fetching
+  let called = false
+  const spy = () => { called = true; return Promise.resolve({ ok: true, json: () => ({}) }) }
+  const r = await runAssertion({ ...a, source: 'https://evil.com/x' }, { fetchImpl: spy })
+  assert.equal(r.status, 'skip')
+  assert.equal(called, false)
+})
