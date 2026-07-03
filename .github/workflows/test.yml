@@ -53,6 +53,22 @@ jobs:
       # #541: node:test unit tests for scripts/*.mjs (verify-reminders parse/fire logic)
       - run: npm run test:scripts
 
+  src-unit:
+    name: Frontend Unit Tests
+    runs-on: ubuntu-latest
+    # #877: gate the frontend vitest suite (~750 tests incl. the CSP drift pin
+    # api/__tests__/csp-headers.test.ts, which caught PR #871's vercel.json script-src
+    # hash drift). ALWAYS-ON, no path gate: the CSP pin can break from vercel.json /
+    # index.html / api/ / src/ — the e2e+build frontend detector regex matches none of
+    # vercel.json or api/, so any path gate would re-open the blind spot. Suite runs ~4s.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run test:src
+
   e2e:
     name: E2E Tests
     runs-on: ubuntu-latest
