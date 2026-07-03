@@ -29,6 +29,7 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   { id: 'assemblyai', url: 'https://api.assemblyai.com/v2/transcript' },
   { id: 'deepgram', url: 'https://api.deepgram.com/v1/models' },
   { id: 'voyageai', url: 'https://api.voyageai.com/v1/embeddings' },
+  { id: 'twelvelabs', url: 'https://api.twelvelabs.io/v1.3/indexes' },             // control-plane, 401
   // #678 — added after a live cross-check showed these have a stable, representative API path that
   // returns a fast status without auth (the probe measures RTT and treats ANY HTTP response as
   // "server alive", so the old "requires auth" exclusions were invalid):

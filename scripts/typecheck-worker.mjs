@@ -16,12 +16,15 @@
 // remaining #533 exit-condition item, tracked separately.
 
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
 // tsc prints diagnostic paths relative to cwd; pin cwd to the repo root so the
 // path filter below is correct regardless of where the script is invoked from.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const require = createRequire(import.meta.url)
+const tscBin = require.resolve('typescript/bin/tsc')
 
 // #533 Phase 4 (exit condition) — TWO passes, BOTH must be 0-error:
 //  1. production source — strict @cloudflare/workers-types ONLY (no @types/node), so a prod file
@@ -43,7 +46,7 @@ const PASSES = [
 const FATAL_INVOCATION = /error TS(5\d{3}|18003)\b/
 
 function runPass({ config, label }) {
-  const res = spawnSync('npx', ['tsc', '--noEmit', '--pretty', 'false', '-p', config], {
+  const res = spawnSync(process.execPath, [tscBin, '--noEmit', '--pretty', 'false', '-p', config], {
     encoding: 'utf8',
     cwd: repoRoot,
   })

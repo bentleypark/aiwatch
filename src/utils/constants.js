@@ -155,7 +155,7 @@ const FEED_SLUG_OVERRIDE = {
 
 // Services with no /is-{slug}-down page and therefore no RSS feed — estimate-only
 // sources excluded per #263. Matches worker/src/rss.ts NO_IS_DOWN_PAGE.
-export const NO_FEED_SERVICES = ['bedrock', 'azureopenai', 'twelvelabs']
+export const NO_FEED_SERVICES = ['bedrock', 'azureopenai']
 
 // Per-service incident RSS feed URL, or null when the service has no feed.
 export function feedUrlOf(serviceId) {

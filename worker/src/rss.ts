@@ -158,7 +158,7 @@ export const IS_DOWN_SLUG_OVERRIDE: Record<string, string> = {
 // Services with no /is-{slug}-down page — estimate-only, excluded per #263.
 // Their feed items fall back to the dashboard hash route. Pinned to the
 // slug-map.ts omissions by feed-slug-sync.test.ts.
-export const NO_IS_DOWN_PAGE = new Set(['bedrock', 'azureopenai', 'twelvelabs'])
+export const NO_IS_DOWN_PAGE = new Set(['bedrock', 'azureopenai'])
 
 // Canonical slug for a service — matches the /is-{slug}-down page so the
 // per-service feed URL is /feed/{slug} (e.g. /feed/claude-code), predictable
