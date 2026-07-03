@@ -160,6 +160,47 @@ export function shouldHoldNewIncident(
   return state.nowMs - state.firstSeenMs < FLAP_HOLD_MS  // still inside the window → hold; else confirm + fire
 }
 
+// #882 — the Discord new-incident AI-hold window. Orthogonal to the #633/#835 flap hold above (that
+// holds a SHORT/FLAP incident to suppress a phantom alert; this holds a REAL incident briefly so its
+// alert ships WITH the AI section instead of AI-less). A non-Tier-1 new incident whose 8s inline
+// analysis overran is held until ai:analysis lands (the next cron's refreshOrReanalyze backfills it,
+// with no 8s cap) OR this window elapses — then fail-open, send AI-less so an alert is never lost.
+// ~2 */5 cron cycles: the held incident gets one retry cycle for the analysis before the alert ships
+// without it, matching the accepted ~5min-typical / ~10min-worst delay (#882). Slack /feed already
+// does the analogous hold via rss.ts AI_HOLD_MS (#759); this is its Discord-push counterpart.
+export const AI_HOLD_MS = 10 * 60 * 1000
+
+/** KV marker: first-seen epoch ms for the #882 AI-hold window, scoped to the incident id (write-once,
+ *  get-or-set). Distinct from pendingNewKey so the two holds never clobber each other's window. */
+export function pendingAiKey(incId: string): string {
+  return `pending:ai:${incId}`
+}
+
+/**
+ * #882 — should the cron HOLD a fresh new-incident Discord alert because its AI analysis isn't ready
+ * yet? Holds ONLY a non-Tier-1 incident whose analysis is genuinely pending, and only within the
+ * bounded window (fail-open past it). Holds NEITHER surface when:
+ *   - aiReady: an AI section is already available (from KV or a successful inline call) → send now
+ *   - analysisSkipped: AI will never come for this incident (merged / no-model / generic) → send now
+ *   - Tier-1 (claude/openai/gemini): never held so the operator alert + phone push stay immediate (#767/#778)
+ * A KV-read error should reach here as firstSeenMs=0 (age huge → past window → NOT held → fire),
+ * mirroring shouldHoldNewIncident's fail-not-hold convention (dropping a real alert is worse than a
+ * few-minute-early AI-less one). Pure — unit-tested.
+ */
+export function shouldHoldForAiAnalysis(state: {
+  svcId: string
+  aiReady: boolean
+  analysisSkipped: boolean
+  firstSeenMs: number | null
+  nowMs: number
+}): boolean {
+  if (state.aiReady) return false            // AI present → nothing to wait for
+  if (state.analysisSkipped) return false     // AI intentionally not produced → don't wait for it
+  if (TIER1_IDS.has(state.svcId)) return false  // Tier-1 never held (speed: #767/#778)
+  const firstSeen = state.firstSeenMs ?? state.nowMs  // first sight → window starts now
+  return state.nowMs - firstSeen < AI_HOLD_MS          // within window → hold; past it → fail-open send
+}
+
 export interface AlertCandidate {
   key: string
   title: string

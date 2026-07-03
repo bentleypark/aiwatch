@@ -4,8 +4,8 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { calculateAIWatchScore, classifyProbe } from './score'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
-import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatRecoveryDisplay, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
+import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk } from './utils'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { checkPersistentFetchFailures } from './persistent-failure'
@@ -814,6 +814,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // truth; kills the browser/operator divergence that #473/#474 chased).
   const feedEntries: AlertFeedEntry[] = []
   let pushesSent = 0 // #815 — count delivered Tier-1 ntfy pushes for the daily-summary observability line
+  // #882 — new-incident alert keys HELD this cycle (non-Tier-1, AI not yet ready). They're in `sent`
+  // but were `continue`d before the roster write / send, so exclude them from the daily alert count.
+  const heldNewAlertKeys = new Set<string>()
   for (const alert of sent) {
     const isStatusAlert = alert.key.startsWith('alerted:down:') || alert.key.startsWith('alerted:degraded:')
     const isRecoveryAlert = alert.key.startsWith('alerted:recovered:')
@@ -821,6 +824,130 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     const kvValue = isStatusAlert ? new Date().toISOString() : '1'
     // Write dedup keys for all merged alerts (Together AI grouping)
     const keysToWrite = alert._mergedKeys ?? [alert.key]
+    // #882 — resolve the new-incident AI analysis BEFORE the alerted:new roster write / send, so a
+    // non-Tier-1 alert whose 8s inline analysis overran can be HELD (not shipped AI-less) until a
+    // later cron cycle backfills ai:analysis, then released WITH the section. Prefer an EXISTING KV
+    // analysis (backfilled by a prior cycle's refreshOrReanalyze — no 8s cap) over re-running the
+    // inline 8s call, so the release is deterministic and no duplicate AI call fires. Tier-1
+    // (claude/openai/gemini) is never held (shouldHoldForAiAnalysis) so its alert + phone push stay
+    // immediate. The operator embed AND the per-user relay share this single analysisSection.
+    let analysisSection = ''
+    let aiReady = false          // an AI section is available (KV or a successful inline call)
+    let analysisSkipped = false  // AI will never come for this incident (merged / no-model / generic)
+    if (alert.key.startsWith('alerted:new:')) {
+      const incId = alert.key.replace('alerted:new:', '')
+      // #545: scope AI analysis to the service this alert actually represents (alert.svcIds[0]) — for a
+      // late joiner that's the newly-affected service (e.g. ChatGPT), not the incident's first service.
+      const primaryId = alert.svcIds?.[0]
+      const svc = (primaryId && scored.find(s => s.id === primaryId))
+        || scored.find(s => (s.incidents ?? []).some(i => i.id === incId))
+      const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : null
+      const nowMs = Date.now()
+      // #882 — read the AI-hold marker FIRST: a genuine KV miss (null, no throw) = first sighting; a
+      // read error (.catch → '0') = fail-open (age huge → past window → not held). Knowing first-sight
+      // BEFORE the analysis lets the expensive inline 8s call fire only on the FIRST cycle — a held
+      // incident on a later cycle relies on the KV-first read below (backfilled by refreshOrReanalyze),
+      // so it doesn't burn a second Gemma/Sonnet call every cycle (silent-failure-hunter #882).
+      const pendingAiRaw = await env.STATUS_CACHE.get(pendingAiKey(incId)).catch(() => '0')
+      const firstSeenMs = pendingAiRaw === null ? null : (Number.parseInt(pendingAiRaw, 10) || 0)
+      const firstSight = firstSeenMs === null
+      if (svc && inc) {
+        // Prefer an existing (non-empty) KV analysis over a fresh 8s inline call (#882). This is the
+        // release path: a held incident's analysis, backfilled by the previous cycle's
+        // refreshOrReanalyze, is read here so the alert deterministically ships WITH the AI section.
+        let existing: AIAnalysisResult | null = null
+        const existingRaw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
+        if (existingRaw) {
+          try {
+            const p = JSON.parse(existingRaw) as AIAnalysisResult
+            if (p && typeof p.summary === 'string' && p.summary.length > 0) existing = p
+          } catch { existing = null }
+        }
+        if (existing) {
+          analysisSection = formatAnalysisEmbedSection(existing, DIV)
+        } else if (firstSight) {
+          // Only run the inline 8s call on the incident's FIRST sighting; on later held cycles the
+          // KV-first read above + refreshOrReanalyze's backfill supply the section (no duplicate spend).
+          // AI analysis (8s timeout) — Gemma primary + Sonnet fallback. shouldSkipInitialAnalysis
+          // centralizes the three skip reasons (merged / no-model / generic) so they can't drift
+          // between here and the re-analysis path; log the reason so an empty section is explainable.
+          const skipReason = shouldSkipInitialAnalysis(alert, inc, !!(env.AI || env.ANTHROPIC_API_KEY))
+          if (skipReason) {
+            analysisSkipped = true
+            console.log(`[cron] skipping initial AI analysis for ${svc.id}:${inc.id}: ${skipReason}`)
+          } else {
+            try {
+              const today = new Date().toISOString().split('T')[0]
+              const usageKey = `ai:usage:${today}`
+              const usageRaw = await env.STATUS_CACHE.get(usageKey).catch(() => null)
+              const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0, gemma: 0, sonnet: 0 }
+              usage.calls++
+              const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))
+              // #827 Feature 2 — RAG grounding from this service's durable incident history.
+              const svcHistory = await readIncidentHistory(env.STATUS_CACHE, svc.id)
+              const analysis = await Promise.race([
+                analyzeIncident(env.ANTHROPIC_API_KEY ?? '', svc.name, { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline }, svc.incidents ?? [], undefined, env.AI, svcHistory),
+                timeout,
+              ])
+              if (analysis) {
+                usage.success++
+                if (analysis.model === 'gemma') usage.gemma = (usage.gemma ?? 0) + 1
+                else if (analysis.model === 'sonnet') usage.sonnet = (usage.sonnet ?? 0) + 1
+                // #299: preserve sticky operator overrides written between cycles.
+                const stickyRaw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
+                const skipWrite = isStickyExistingAnalysis(stickyRaw)
+                if (skipWrite) console.log(`[cron] Preserving sticky analysis for ${svc.id}:${inc.id}; not overwriting`)
+                const kvOk = skipWrite
+                  ? true
+                  : await kvPut(env.STATUS_CACHE, analysisKey(svc.id, inc.id), JSON.stringify(analysis), { expirationTtl: 3600 })
+                if (kvOk) analysisSection = formatAnalysisEmbedSection(analysis, DIV)
+              } else {
+                usage.failed++
+              }
+              await kvPut(env.STATUS_CACHE, usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
+            } catch (err) {
+              console.error('[cron] AI analysis failed:', err instanceof Error ? err.message : err)
+            }
+          }
+        }
+        aiReady = analysisSection !== ''
+      }
+      // #882 — AI-hold gate: non-Tier-1 + AI not ready + not skipped + within window → HOLD this cycle
+      // (`continue` skips the roster write / feed append / send / push below). The next cron cycle's
+      // refreshOrReanalyze backfills ai:analysis; a later cycle finds it via the KV-first read above
+      // and releases WITH the section. Bounded + fail-open: past AI_HOLD_MS the gate returns false so
+      // the alert ships AI-less and is never lost. Tier-1 is never held (immediate).
+      const holdSvcId = svc?.id ?? primaryId ?? ''
+      // If the service/incident couldn't be resolved there's nothing to analyze → never hold (treat as
+      // skipped so a fail-open path can't wedge an un-analyzable alert). buildIncidentAlerts sources
+      // from `scored`, so this is a defensive belt, not an expected case.
+      const analysisUnavailable = analysisSkipped || !svc || !inc
+      if (shouldHoldForAiAnalysis({ svcId: holdSvcId, aiReady, analysisSkipped: analysisUnavailable, firstSeenMs, nowMs })) {
+        // The fail-open window can only elapse if the first-seen marker PERSISTS across cycles. On first
+        // sight, stamp it; if that write FAILS we can't bound the hold (next cycle re-sees first-sight →
+        // re-stamps → window never advances), so an unbounded hold could wedge the alert if AI also
+        // never lands. Fail-open NOW (fall through to send AI-less) rather than hold unboundedly — one
+        // early AI-less alert beats a lost one. On a later cycle the marker already exists (write-once),
+        // so we just hold within the window as normal (silent-failure-hunter #882).
+        if (firstSight) {
+          const ok = await kvPut(env.STATUS_CACHE, pendingAiKey(incId), String(nowMs), { expirationTtl: PENDING_NEW_TTL_S })
+          if (!ok) {
+            console.error('[cron] #882 pending:ai write failed — sending AI-less now (cannot bound the hold):', incId)
+          } else {
+            heldNewAlertKeys.add(alert.key)
+            console.log('[cron] #882 holding non-Tier-1 new-incident alert until AI lands (or fail-open window):', holdSvcId, incId)
+            continue
+          }
+        } else {
+          heldNewAlertKeys.add(alert.key)
+          console.log('[cron] #882 holding non-Tier-1 new-incident alert until AI lands (or fail-open window):', holdSvcId, incId)
+          continue
+        }
+      }
+      // Released (AI ready / Tier-1 / skipped / past window / unbounded-hold fail-open) — clear the
+      // marker best-effort so a stale window value can't linger (harmless on failure; TTL bounds it).
+      if (firstSeenMs) await kvDel(env.STATUS_CACHE, pendingAiKey(incId)).catch(() => {})
+    }
     if (alert.key.startsWith('alerted:new:')) {
       // #545: store the per-incident roster (svcIds), merging this alert's services into whatever
       // was already alerted for the incident (in-memory alertedNewMap, read this cycle — no re-read).
@@ -991,72 +1118,11 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       }
     }
 
-    // For new incidents: lookup service/incident once, then run AI analysis
-    // Skip AI analysis for merged alerts (Together AI model-level grouping — individual model incidents don't need deep analysis)
-    let analysisSection = ''
-    if (alert.key.startsWith('alerted:new:')) {
-      const incId = alert.key.replace('alerted:new:', '')
-      // #545: scope AI analysis to the service this alert actually represents
-      // (alert.svcIds[0]) — for a late joiner that's the newly-affected service (e.g. ChatGPT), not
-      // the incident's first service (Codex). Falls back to first-incident-match for older shapes.
-      const primaryId = alert.svcIds?.[0]
-      const svc = (primaryId && scored.find(s => s.id === primaryId))
-        || scored.find(s => (s.incidents ?? []).some(i => i.id === incId))
-      const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : null
-      if (svc && inc) {
-        // AI analysis (8s timeout) — Gemma primary + Sonnet fallback.
-        // shouldSkipInitialAnalysis centralizes the three skip reasons so they
-        // can't drift between this call site and the re-analysis path. Log the
-        // specific reason so empty AI-analysis sections in Discord embeds are
-        // post-hoc explainable (merged / no-model / generic / upstream-fail).
-        const skipReason = shouldSkipInitialAnalysis(alert, inc, !!(env.AI || env.ANTHROPIC_API_KEY))
-        if (skipReason) {
-          console.log(`[cron] skipping initial AI analysis for ${svc.id}:${inc.id}: ${skipReason}`)
-        } else {
-          try {
-            const today = new Date().toISOString().split('T')[0]
-            const usageKey = `ai:usage:${today}`
-            const usageRaw = await env.STATUS_CACHE.get(usageKey).catch(() => null)
-            const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0, gemma: 0, sonnet: 0 }
-            usage.calls++
-            const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))
-            // #827 Feature 2 — RAG grounding from this service's durable incident history.
-            const svcHistory = await readIncidentHistory(env.STATUS_CACHE, svc.id)
-            const analysis = await Promise.race([
-              analyzeIncident(env.ANTHROPIC_API_KEY ?? '', svc.name, { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline }, svc.incidents ?? [], undefined, env.AI, svcHistory),
-              timeout,
-            ])
-            if (analysis) {
-              usage.success++
-              if (analysis.model === 'gemma') usage.gemma = (usage.gemma ?? 0) + 1
-              else if (analysis.model === 'sonnet') usage.sonnet = (usage.sonnet ?? 0) + 1
-              // #299: preserve sticky operator overrides — if an admin already wrote
-              // this key via /api/admin/analyze between two cron cycles, don't
-              // clobber it here. Symmetric with refreshOrReanalyze's guard.
-              const existingRaw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
-              const skipWrite = isStickyExistingAnalysis(existingRaw)
-              if (skipWrite) console.log(`[cron] Preserving sticky analysis for ${svc.id}:${inc.id}; not overwriting`)
-              const kvOk = skipWrite
-                ? true
-                : await kvPut(env.STATUS_CACHE, analysisKey(svc.id, inc.id), JSON.stringify(analysis), { expirationTtl: 3600 })
-              if (kvOk) {
-                analysisSection = `\n${DIV}\n🤖 **AI ANALYSIS** [Beta]\n${analysis.summary}\n⏱ Est. recovery: ${formatRecoveryDisplay(analysis.estimatedRecovery)}${analysis.affectedScope.length > 0 ? `\n📡 Scope: ${analysis.affectedScope.join(', ')}` : ''}`
-              }
-            } else {
-              usage.failed++
-            }
-            await kvPut(env.STATUS_CACHE, usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
-          } catch (err) {
-            console.error('[cron] AI analysis failed:', err instanceof Error ? err.message : err)
-          }
-        }
-        // #679 — the "detection lead" (faster-than-official) per-incident signal + its audit log/diag
-        // were removed: status-page polling is structurally LATER than the official publish, so the
-        // lead was always negative (never displayed). `detected:{svcId}` itself is still written above
-        // (kept for #677's AWS duration anchor + the MTTD framing); only the lead-vs-official surfacing
-        // is gone. RTT-degradation early-warning is a separate, kept signal.
-      }
-    }
+    // #882 — the new-incident AI analysis + AI-hold gate ran ABOVE (before the roster write), so
+    // `analysisSection` is already resolved here (from KV or the inline 8s call) and a held alert has
+    // already `continue`d. The #679 detection-lead per-incident signal was removed (status-page
+    // polling is structurally later than the official publish, so the lead was always negative);
+    // `detected:{svcId}` is still written earlier for #677's AWS duration anchor.
 
     // Build sectioned description: incident → AI analysis → (recovery prediction) → fallback → link
     const parts = [alert.description]
@@ -1201,6 +1267,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       const countRaw = await env.STATUS_CACHE.get(countKey).catch(() => null)
       const counts = countRaw ? JSON.parse(countRaw) : { incidents: 0, resolved: 0, down: 0, degraded: 0, recovered: 0 }
       for (const a of sent) {
+        if (heldNewAlertKeys.has(a.key)) continue // #882 — held this cycle, not actually sent
         const n = a._mergedKeys?.length ?? 1
         if (a.key.startsWith('alerted:new:')) counts.incidents += n
         else if (a.key.startsWith('alerted:res:')) counts.resolved += n
@@ -1283,7 +1350,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     operational,
     issues: scored.length - operational,
     sent: sent.length,
-    newCount: sent.filter(a => a.key.startsWith('alerted:new:')).reduce((sum, a) => sum + (a._mergedKeys?.length ?? 1), 0),
+    // #882 — exclude alerts HELD this cycle (they weren't sent); matches the alert:count KV tally so
+    // the daily-summary `incidentCountToday` doesn't over-count a held incident that lands next cycle.
+    newCount: sent.filter(a => a.key.startsWith('alerted:new:') && !heldNewAlertKeys.has(a.key)).reduce((sum, a) => sum + (a._mergedKeys?.length ?? 1), 0),
     resolvedCount: sent.filter(a => a.key.startsWith('alerted:res:')).reduce((sum, a) => sum + (a._mergedKeys?.length ?? 1), 0),
     downCount: sent.filter(a => a.key.startsWith('alerted:down:')).length,
     recoveredCount: sent.filter(a => a.key.startsWith('alerted:recovered:')).length,
