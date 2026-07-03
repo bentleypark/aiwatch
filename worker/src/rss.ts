@@ -207,11 +207,19 @@ export function isDownUrl(serviceId: string): string {
 // active item, so Slack /feed and other unfurlers fetch a fresh OG card on recovery instead of
 // reusing the cached outage card. The hash fallback (estimate-only services) gets no hint — it has
 // no is-down OG page to unfurl.
-function serviceLink(serviceId: string, kind: ItemKind): string {
+// #874: for an ACTIVE item, pin the OG card to the REAL severity (`down`/`degraded`), not the coarse
+// ItemKind `active`. The `?e=` hint is overloaded: alerts.ts emits `active` ONLY for an operational
+// service (`svc.status === 'operational'`), so HINT_TO_OG_STATUS maps `active → operational`. The feed
+// used to ship `?e=active` for ANY ongoing incident regardless of severity, so a genuine outage
+// mis-pinned the Slack unfurl to a green Operational card. Mirror the alerts.ts derivation: operational
+// (monitoring / green badge) → `active`, otherwise the live status → `degraded`/`down`. `resolved` is
+// unchanged (recovery cache-bust, #539).
+function serviceLink(serviceId: string, kind: ItemKind, status: ServiceStatus['status']): string {
   // NO_IS_DOWN_PAGE services fall back to the dashboard hash (no OG page) → no hint and no utm.
   if (NO_IS_DOWN_PAGE.has(serviceId)) return isDownUrl(serviceId)
+  const hint = kind === 'resolved' ? 'resolved' : status === 'operational' ? 'active' : status
   // #548 — utm_source=rss so GA4 attributes feed-reader/Slack clicks to the RSS channel (consent-free).
-  return appendUtm(appendStatusHint(isDownUrl(serviceId), kind), 'rss')
+  return appendUtm(appendStatusHint(isDownUrl(serviceId), hint), 'rss')
 }
 
 // XML 1.0 forbids most C0 control characters. escapeXml handles & < > " but
@@ -385,7 +393,7 @@ function itemXml(
 
   return `    <item>
       <title>${xml(title)}</title>
-      <link>${xml(serviceLink(service.id, opts.kind))}</link>
+      <link>${xml(serviceLink(service.id, opts.kind, service.status))}</link>
       <guid isPermaLink="false">${xml(guid)}</guid>
       <pubDate>${rfc822(opts.pubDate)}</pubDate>${inc.impact ? `\n      <category>${xml(inc.impact)}</category>` : ''}
       <description><![CDATA[${descHtml(service, inc, opts)}]]></description>
