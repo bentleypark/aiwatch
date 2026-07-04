@@ -18,6 +18,7 @@ import { compareGroupedRows, dominantGroupStatus } from '../utils/incidentSort'
 import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
 import { computeRecoveryStats, formatRecoveryMin } from '../utils/recovery'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
+import { latencyCardState } from '../utils/latencyCard'
 import { filterSecurityAlertsForService } from '../utils/securityAlerts'
 import { regionStatusOf, SERVICE_REGIONS } from '../utils/regionStatus'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
@@ -798,6 +799,12 @@ export default function ServiceDetails({ serviceId }) {
   // Per-service incident RSS feed (#432) — null for estimate-only services
   // (bedrock / azureopenai) that have no /is-*-down page or feed.
   const feedUrl = feedUrlOf(service.id)
+
+  // #883 — latency card is one of three states (direct probe / inherited-from-parent / status-page).
+  // See src/utils/latencyCard.js for the rationale. Inherited services (Claude Code/Codex) show their
+  // parent API's current RTT, labeled, instead of a contradictory "Not provided".
+  const latestProbe = probe24h.length > 0 ? (probe24h[probe24h.length - 1].data ?? {}) : {}
+  const latencyCard = latencyCardState(service, probeServiceIds, latestProbe, services)
   const cutoff7d = Date.now() - 7 * 86_400_000
   const recentIncidents = (service.incidents ?? []).filter(
     (inc) => inc.status !== 'resolved' || new Date(inc.startedAt).getTime() >= cutoff7d
@@ -901,12 +908,16 @@ export default function ServiceDetails({ serviceId }) {
       {/* ── Metric Cards ── */}
       <div className="grid grid-cols-2 md:grid-cols-4" style={{ gap: '10px' }}>
         <MetricCard
-          label={probeServiceIds.includes(service.id) ? t('svc.latency') : t('svc.latency.statusPage')}
-          value={service.latency != null ? `${service.latency} ms` : '—'}
-          sub={probeServiceIds.includes(service.id)
-            ? (service.latency != null ? t('svc.latency.sub') : t('uptime.collecting'))
-            : (service.latency != null ? t('svc.latency.statusPage.sub') : t('uptime.unavailable'))}
-          colorClass={probeServiceIds.includes(service.id) ? 'text-[var(--blue)]' : 'text-[var(--text2)]'}
+          label={latencyCard.kind === 'probe' ? t('svc.latency')
+            : latencyCard.kind === 'inherited' ? t('svc.latency.inherited').replace('{p}', latencyCard.parentName)
+            : t('svc.latency.statusPage')}
+          value={latencyCard.rtt != null ? `${latencyCard.rtt} ms` : '—'}
+          sub={latencyCard.kind === 'probe'
+            ? (latencyCard.rtt != null ? t('svc.latency.sub') : t('uptime.collecting'))
+            : latencyCard.kind === 'inherited'
+              ? (latencyCard.rtt != null ? t('svc.latency.inherited.sub').replace('{p}', latencyCard.parentName) : t('uptime.collecting'))
+              : (latencyCard.rtt != null ? t('svc.latency.statusPage.sub') : t('uptime.unavailable'))}
+          colorClass={latencyCard.kind === 'probe' ? 'text-[var(--blue)]' : latencyCard.kind === 'inherited' ? 'text-[var(--teal)]' : 'text-[var(--text2)]'}
         />
         <MetricCard
           label={isUnreliableData
