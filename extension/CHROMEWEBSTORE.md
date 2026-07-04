@@ -10,25 +10,38 @@
 - **Primary purpose:** Show the live operational status of Anthropic's Claude surfaces
   (Claude API, claude.ai, Claude Code) in the toolbar, with a one-click issue report.
 
-## Short description (≤132 chars)
-Live Claude status in your toolbar — uptime, incidents, AIWatch Score, and a one-click issue report. No page access.
+## Short description (≤132 chars — this IS the manifest `description`, pinned by lib/manifest.test.js)
+Live Claude API, claude.ai & Claude Code status in your toolbar — uptime, incidents, AIWatch Score & one-click issue report.
 
-## Detailed description
-AIWatch — Claude Status puts the real-time health of Anthropic's Claude services in your
-browser toolbar. A colored dot shows the current worst-case status across **Claude API,
-claude.ai, and Claude Code**; open the popup for each surface's status, AIWatch Score,
-active incidents (with an AI summary), community report counts, and a recommended
-fallback when something is down.
+## Detailed description (PLAIN TEXT — the Chrome Web Store does NOT render Markdown; keep zero `**`)
+Is Claude down? AIWatch — Claude Status shows the real-time status of Anthropic's Claude services right in your browser toolbar — Claude API, claude.ai, and Claude Code.
 
-Hit a problem? One click sends an anonymous "Report an issue" that feeds AIWatch's
-crowd-corroboration signal — it never overrides official status on its own.
+A colored dot (green / amber / red) shows the current worst-case status at a glance. Open the popup for each surface:
+• Live status + 30-day uptime + the AIWatch reliability Score
+• Active incidents, with an AI-written summary of what's happening
+• A recommended fallback to switch to when a service is down
+• Community reports + one-click "Report an issue"
 
-How it works (and what it does NOT do):
-- It polls the public AIWatch status API approximately every 2 minutes (and on popup open). That is its ONLY data source.
-- It does **not** read, modify, or access the content of claude.ai or any web page.
-- It collects **no** personal data, no browsing history, no conversations.
+Hit a problem? One click sends an anonymous report that feeds AIWatch's crowd-corroboration signal — it never overrides official status on its own.
 
-Open-source: https://github.com/bentleypark/aiwatch · Full status: https://ai-watch.dev
+Privacy — how it works (and what it does NOT do):
+• Polls the public AIWatch status API about every 2 minutes (and when you open the popup). That is its ONLY data source.
+• Does NOT read, modify, or access claude.ai or any web page.
+• Collects NO personal data — no browsing history, no conversations, no analytics, no cookies.
+
+Permissions are minimal: alarms + storage + access to the AIWatch API only — no access to the sites you visit.
+
+Open source (AGPL): https://github.com/bentleypark/aiwatch
+Full dashboard: https://ai-watch.dev
+Privacy policy: https://ai-watch.dev/extension-privacy
+
+## Listing fields (dashboard)
+- **Category:** Developer Tools (fallback: Productivity)
+- **Default language:** English (United States)
+- **Homepage / Official URL:** https://ai-watch.dev
+- **Support URL:** https://github.com/bentleypark/aiwatch/issues
+- **Privacy policy URL:** https://ai-watch.dev/extension-privacy
+- **Contact email:** contact@ai-watch.dev
 
 ## Permissions justification (review team reads this — be specific)
 | Permission | Why it is needed |
