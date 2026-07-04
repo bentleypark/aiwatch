@@ -4,7 +4,7 @@
 > Dashboard at publish time. **Last updated:** 2026-06-30.
 
 ## Identity
-- **Name:** AIWatch — Claude Status
+- **Name (store + `manifest.name`):** AIWatch — Claude Status & Down Detector  — keyword-rich for CWS search ("claude down detector" / "is claude down"). The in-app title stays clean: `action.default_title` (toolbar tooltip) + the popup header are "AIWatch — Claude Status", not the long store name.
 - **Version:** 1.0.0 (`extension/manifest.json`)
 - **Category:** Developer Tools
 - **Primary purpose:** Show the live operational status of Anthropic's Claude surfaces

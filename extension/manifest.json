@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "AIWatch — Claude Status",
+  "name": "AIWatch — Claude Status & Down Detector",
   "version": "1.0.0",
   "description": "Live Claude API, claude.ai & Claude Code status in your toolbar — uptime, incidents, AIWatch Score & one-click issue report.",
   "icons": {
