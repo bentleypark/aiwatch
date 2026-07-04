@@ -11,6 +11,7 @@ import { buildShareUrl } from './share-url'
 // refactored to delegated listeners (CSP can't admit inline on*= via hashes cleanly).
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
+import { EXTENSION_STORE_URL, renderExtInstallCta, isClaudeSurface } from '../_shared/extension-cta'
 import type { RegionStatusResult } from './region-status'
 
 /** Format recovery display — shared with worker/src/ai-analysis.ts */
@@ -413,6 +414,11 @@ button.btn{cursor:pointer;font-family:inherit;line-height:inherit}
 .cta-help{font-size:11.5px;margin-top:8px;color:#8b949e;line-height:1.5}
 .cta-alt{font-size:12px;margin-top:10px;color:#8b949e}
 .cta-alt a{color:#8b949e;text-decoration:underline}
+/* #888 — quiet standalone install strip below the answer/alert block (NOT a loud promo banner; muted card tone to avoid banner-blindness). */
+.ext-strip{max-width:560px;margin:12px auto 0;padding:9px 14px;border:1px solid #21262d;border-radius:8px;background:#0d1117;text-align:center;font-size:13px;line-height:1.45}
+.ext-strip a{color:#8b949e;text-decoration:none}
+.ext-strip a:hover{color:#c9d1d9}
+.ext-strip strong{color:#58a6ff;font-weight:600}
 /* #575/#744 — floating "Report an issue" entry (mirrors the dashboard Overview FAB): always visible,
    decoupled from the alert CTA. Bottom-right, clears the share bar / mobile footer by scroll. */
 .report-fab{position:fixed;bottom:20px;right:20px;z-index:40;display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:999px;font-size:13px;font-weight:500;font-family:inherit;background:#161b22;color:#e6edf3;border:1px solid rgba(255,255,255,0.18);box-shadow:0 4px 12px rgba(0,0,0,0.4);cursor:pointer}
@@ -464,6 +470,7 @@ textarea.report-input{min-height:72px;resize:vertical}
 
 ${renderStatusHeader(service, seo)}
 ${renderCTA(seo, service?.status ?? 'operational', slug, service?.id ?? slug)}
+${isClaudeSurface(service?.id ?? slug) ? renderExtInstallCta(EXTENSION_STORE_URL, { loc: 'is_down_page', variant: 'is-down' }) : ''}
 ${renderAIInsight(aiInsight, service?.status, fallbacks)}
 ${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS infrastructure issue (${esc(supplyChainNote.regions)}) &mdash; ${supplyChainNote.confirmed ? `${esc(seo.displayName)} is degraded and attributes it to an AWS/upstream issue` : `${esc(seo.displayName)} runs on AWS and may be affected`}</p>` : ''}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
