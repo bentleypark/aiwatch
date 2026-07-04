@@ -10,9 +10,10 @@ import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, 
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
-import { appendAlertFeed, readAlertFeed, buildFeedEntry, type AlertFeedEntry } from './alert-feed'
+import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForAlert, type AlertFeedEntry } from './alert-feed'
 import { buildSupplyChainBanner } from './supply-chain'
 import { refreshStatusCacheOnChange } from './cache-refresh'
+import { pingIndexNow } from './indexnow'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
 import { corsHeaders, matchOrigin } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
@@ -1322,6 +1323,22 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // the sibling cacheWrite uses for KV failures.
   if (refreshed) lastKvWrite = Date.now()
   else if (sent.length > 0) console.error('[cron] status-change cache refresh failed — OG/SEO previews may show pre-incident state until the next /api/status write')
+
+  // #887 — IndexNow: on a status-change edge, push the affected is-down URLs to Bing/Yandex/Naver so
+  // status queries recrawl fast (QDF). Google ignores IndexNow — this covers the rest (Naver = KR).
+  // Best-effort + isolated: pingIndexNow never throws, and the extra guard means a ping can never
+  // affect the alert path even if the fetch layer changes.
+  if (sent.length > 0) {
+    // Resolve each alert's services the canonical way (mirrors buildFeedEntry): incident alerts carry
+    // `svcIds`; status-edge alerts (down/degraded/recovered) don't — their svcId is the key tail, so
+    // `svcIdsForAlert` recovers it. Using `a.svcIds ?? []` alone would silently drop a Tier-1 status
+    // flip in the incident-less gap — exactly the highest-value is-down page to recrawl.
+    const changedSvcIds = [...new Set(sent.flatMap((a) => {
+      const kind = kindFromKey(a.key)
+      return kind ? (a.svcIds ?? svcIdsForAlert(a._mergedKeys ?? [a.key], kind, scored)) : []
+    }))]
+    try { await pingIndexNow(changedSvcIds) } catch { /* isolated — never affects the cron */ }
+  }
 
   // #500 — persistent (1h+) status-page block alert. Independent of the status-alert path above:
   // sweeps the fetch-fail:since markers and warns the operator once per blocked service per 24h.
