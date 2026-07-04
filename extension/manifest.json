@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "AIWatch — Claude Status",
   "version": "1.0.0",
-  "description": "Live Claude (API, claude.ai, Claude Code) status in your toolbar — uptime, incidents, AIWatch Score, and a one-click issue report. No page access.",
+  "description": "Live Claude API, claude.ai & Claude Code status in your toolbar — uptime, incidents, AIWatch Score & one-click issue report.",
   "icons": {
     "16": "icons/icon-16.png",
     "48": "icons/icon-48.png",
