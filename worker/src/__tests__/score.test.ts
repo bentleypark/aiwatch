@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { calculateAIWatchScore, classifyProbe, MIN_VALID_DAYS, type ProbeContext } from '../score'
+import { PROBE_TARGETS, resolveProbeId } from '../probe'
+import { scoreFor } from '../index'
 import type { ProbeSummary, ServiceStatus } from '../types'
 
 function makeSvc(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
@@ -441,5 +443,65 @@ describe('classifyProbe', () => {
     // Defensive: even if a probe-less service somehow has a summary entry, classifier ignores it
     const ctx = classifyProbe('chatgpt', false, new Map([['chatgpt', validSummary]]))
     expect(ctx).toEqual({ kind: 'unsupported' })
+  })
+})
+
+// #883 — reproduces the scoreFor() resolution (resolveProbeId → classifyProbe) so the inheritance
+// wiring is unit-covered without booting the worker. An inheriting agent must be classified against
+// its PARENT's probe, giving it a real Responsiveness component instead of the probe-less rescale.
+describe('parent-probe inheritance in scoring (#883)', () => {
+  const PROBED = new Set(PROBE_TARGETS.map((t) => t.id))
+  // Mirror of scoreFor(): resolve the probe id, then classify + score against it.
+  const scoreWithInheritance = (svc: ServiceStatus, summaries: Map<string, ProbeSummary>) => {
+    const pid = resolveProbeId(svc.id)
+    return calculateAIWatchScore(svc, 30, classifyProbe(pid, PROBED.has(pid), summaries))
+  }
+
+  it('Claude Code inherits claude probe → available, real Responsiveness (not rescaled)', () => {
+    const summaries = new Map([['claude', makeProbeSummary({ p50: 150, cvCombined: 0.2 })]])
+    const svc = makeSvc({ id: 'claudecode', category: 'agent', uptime30d: 99.9 })
+    const result = scoreWithInheritance(svc, summaries)
+    expect(result.breakdown.responsiveness).not.toBeNull()
+    expect(result.breakdown.responsivenessStatus).toBe('available')
+  })
+
+  it('Codex inherits openai probe', () => {
+    const summaries = new Map([['openai', makeProbeSummary()]])
+    const svc = makeSvc({ id: 'codex', category: 'agent', uptime30d: 99.9 })
+    const result = scoreWithInheritance(svc, summaries)
+    expect(result.breakdown.responsivenessStatus).toBe('available')
+  })
+
+  it('inheritance changes the score vs the probe-less rescale (the whole point)', () => {
+    // Same service inputs, only the probe treatment differs: inherited (4-component) vs unsupported
+    // (3-component rescale). A fast/stable parent probe must move the number.
+    const svc = makeSvc({ id: 'claudecode', category: 'agent', uptime30d: 99.0 })
+    const inherited = scoreWithInheritance(svc, new Map([['claude', makeProbeSummary({ p50: 120, cvCombined: 0.1 })]]))
+    const rescaled = calculateAIWatchScore(svc, 30, probeUnsupported)
+    expect(inherited.breakdown.responsivenessStatus).toBe('available')
+    expect(rescaled.breakdown.responsivenessStatus).toBe('unsupported')
+    expect(inherited.score).not.toBe(rescaled.score)
+  })
+
+  it('an inheriting agent with NO parent summary yet falls back to insufficient (not unsupported)', () => {
+    // Parent is a real probe target, so before 7d of data the child is insufficient (5% penalty),
+    // exactly like any freshly-added probed service — never silently unsupported.
+    const svc = makeSvc({ id: 'claudecode', category: 'agent' })
+    const result = scoreWithInheritance(svc, new Map())
+    expect(result.breakdown.responsivenessStatus).toBe('insufficient')
+  })
+
+  // Direct coverage of the REAL wiring (index.ts scoreFor), not the mirror — a regression on that
+  // single resolveProbeId→classifyProbe line is caught here even though the mirror above would pass.
+  it('the actual scoreFor() applies inheritance (Claude Code gets claude probe)', () => {
+    const summaries = new Map([['claude', makeProbeSummary()]])
+    const svc = makeSvc({ id: 'claudecode', category: 'agent', uptime30d: 99.9 })
+    expect(scoreFor(svc, summaries).breakdown.responsivenessStatus).toBe('available')
+  })
+
+  it('the actual scoreFor() leaves a non-inheriting probe-less service unsupported', () => {
+    // chatgpt is neither probed nor an inheritor → must stay unsupported through the real path.
+    const svc = makeSvc({ id: 'chatgpt', category: 'app', uptime30d: 99.9 })
+    expect(scoreFor(svc, new Map()).breakdown.responsivenessStatus).toBe('unsupported')
   })
 })

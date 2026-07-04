@@ -121,7 +121,7 @@ const en = {
   'latency.slowest': 'Slowest',
   'latency.trend': '24h Trend',
   'latency.top8': 'Top 8 by Score',
-  'latency.excludeNote': '* AI Apps (claude.ai, ChatGPT, etc.) and Coding Agents are excluded — no public API endpoint to measure.',
+  'latency.excludeNote': '* AI Apps (claude.ai, ChatGPT, etc.) are excluded — no public API endpoint to measure. Coding agents are probed only where they expose their own API (e.g. Cursor).',
   'latency.dummy': 'Collecting data (switches to real data after 24h)',
   'latency.avg.services': 'services',
 
@@ -178,6 +178,8 @@ const en = {
   'svc.latency': 'API Response Time',
   'svc.latency.statusPage': 'Status Page Latency',
   'svc.latency.statusPage.sub': 'Status page response time',
+  'svc.latency.inherited': 'API Response Time · via {p}',
+  'svc.latency.inherited.sub': 'Shared endpoint with {p}',
   'svc.uptime30d': 'Uptime',
   'uptime.label.official': 'Official Uptime',
   'uptime.sub.official': 'Official status page',

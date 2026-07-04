@@ -44,11 +44,33 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   // page), so the probe is its sole substantial measured signal → confidence `medium` once ≥7d of samples accrue
   // (`low`/null Score during the initial ramp). Public no-auth health endpoint, verified 2026-07-01.
   { id: 'turbopuffer', url: 'https://api.turbopuffer.com' },                        // public 200 {"status":"🐡"}
+  // #883 — cursor (coding agent) runs on its OWN API infra, independent of any other probed target.
+  // Live cross-check 2026-07-03: api2.cursor.sh routes real paths (200, body "Welcome to Cursor. From
+  // <build>…") but 404s garbage → representative gateway, NOT a CDN catch-all (unlike windsurf.com).
+  { id: 'cursor', url: 'https://api2.cursor.sh/' },                                 // 200, real API gateway
   // Not probed (#678): bedrock (region-specific runtime endpoint, estimate-only — incident-derived
   // reliability is enough), azureopenai (tenant-specific {resource}.openai.azure.com — no generic
   // endpoint), modal (api.modal.com returns a catch-all 200 on every path — not a representative
   // API-path RTT)
 ]
+
+// #883 — Parent-probe inheritance for the Score's Responsiveness component. Some ranked services run
+// on an endpoint another service ALREADY probes: Claude Code uses api.anthropic.com (probed as
+// `claude`), Codex uses api.openai.com (probed as `openai`). Adding a separate PROBE_TARGETS entry
+// would fire a redundant network probe to the identical host, so instead these inherit the parent's
+// ProbeSummary at scoring time (score-only — they get NO Latency-page probe entry of their own). Keep
+// this to true endpoint-sharing pairs; a service with its own infra (e.g. cursor) is probed directly.
+export const PROBE_INHERIT: Record<string, string> = {
+  claudecode: 'claude',
+  codex: 'openai',
+}
+
+/** Resolve the probe id whose RTT represents a service — itself, unless it inherits a parent's
+ *  probe (#883). Used by the score's probe classification so an inheriting service is measured on
+ *  the parent's endpoint instead of falling through to the probe-less rescale. */
+export function resolveProbeId(serviceId: string): string {
+  return PROBE_INHERIT[serviceId] ?? serviceId
+}
 
 /** Compute 5-minute aligned slot string from a Date */
 export function computeProbeSlot(date: Date): string {

@@ -267,7 +267,7 @@ async function writeLatencySnapshot(kv: KVNamespace, services: ServiceStatus[]):
 }
 
 // ── Health Check Probing (Phase 2 PoC) ──
-import { type ProbeResult, type ProbeSnapshot, type ProbeSpike, PROBE_TARGETS, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, detectConsecutiveSpikes } from './probe'
+import { type ProbeResult, type ProbeSnapshot, type ProbeSpike, PROBE_TARGETS, PROBE_INHERIT, resolveProbeId, computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, detectConsecutiveSpikes } from './probe'
 
 const PROBED_SERVICE_IDS = new Set(PROBE_TARGETS.map((t) => t.id))
 
@@ -275,8 +275,15 @@ const PROBED_SERVICE_IDS = new Set(PROBE_TARGETS.map((t) => t.id))
 // or `undefined` (signalling KV-degraded → 'unavailable'). Forgotten args would silently classify
 // every probed service as 'unavailable' (no responsiveness scoring) — same footgun the union was
 // meant to prevent. Callers: 4 fetch handlers + 1 cron, each constructs its own summaries via readProbeSummaries.
-function scoreFor(svc: ServiceStatus, summaries: Map<string, ProbeSummary> | undefined) {
-  return calculateAIWatchScore(svc, 30, classifyProbe(svc.id, PROBED_SERVICE_IDS.has(svc.id), summaries))
+// Exported for direct testing of the #883 inheritance wiring (the resolveProbeId → classifyProbe line
+// below is the feature's single point of failure; a mirror test in score.test.ts wouldn't catch a
+// regression HERE). Same rationale as the exported readProbeSummaries.
+export function scoreFor(svc: ServiceStatus, summaries: Map<string, ProbeSummary> | undefined) {
+  // #883 — an inheriting service (Claude Code/Codex) is classified against its parent's probe id, so
+  // its Responsiveness comes from the parent's already-measured endpoint instead of the probe-less
+  // rescale. resolveProbeId is identity for everyone else (incl. the directly-probed cursor).
+  const probeId = resolveProbeId(svc.id)
+  return calculateAIWatchScore(svc, 30, classifyProbe(probeId, PROBED_SERVICE_IDS.has(probeId), summaries))
 }
 
 // Read probe summaries from KV with logging — distinguishes infra failure from genuine missing data.
@@ -3356,6 +3363,7 @@ export default {
             scoreConfidence: scoreData.confidence,
             scoreBreakdown: scoreData.breakdown,
             scoreMetrics: scoreData.metrics,
+            ...(PROBE_INHERIT[svc.id] ? { probeInheritedFrom: PROBE_INHERIT[svc.id] } : {}),
           },
           cachedAt: cached.cachedAt,
         }), { status: 200, headers: publicHeaders })
@@ -3570,7 +3578,7 @@ export default {
         const cachedProbeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'status-cached')
         const scoredCached = cached.services.map((svc) => {
           const s = scoreFor(svc, cachedProbeSummaries)
-          return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics }
+          return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics, ...(PROBE_INHERIT[svc.id] ? { probeInheritedFrom: PROBE_INHERIT[svc.id] } : {}) }
         })
 
         // #574 — supply-chain banner (AWS region degraded + dependent AI service also degraded).
@@ -3746,7 +3754,9 @@ export default {
       const servicesWithScore = enriched.map((svc) => {
         const s = scoreFor(svc, liveProbeSummaries)
         const detectedAt = detectionMap.get(svc.id) ?? null
-        return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics, ...(detectedAt ? { detectedAt } : {}) }
+        // #883 — expose the parent whose probe feeds this service's inherited Responsiveness, so the
+        // detail UI shows a labeled "via <parent>" latency instead of a contradictory "Not provided".
+        return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade, scoreConfidence: s.confidence, scoreBreakdown: s.breakdown, scoreMetrics: s.metrics, ...(PROBE_INHERIT[svc.id] ? { probeInheritedFrom: PROBE_INHERIT[svc.id] } : {}), ...(detectedAt ? { detectedAt } : {}) }
       })
 
       // Read AI analysis from KV — per-incident keys, active incidents + recently resolved

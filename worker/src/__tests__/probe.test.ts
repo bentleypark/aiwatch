@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, PROBE_TARGETS, computeMedianRtt, detectConsecutiveSpikes, isProbeHealthy } from '../probe'
+import { computeProbeSlot, slotToTimestamp, trimSnapshots, hasSlot, failedProbe, PROBE_TARGETS, PROBE_INHERIT, resolveProbeId, computeMedianRtt, detectConsecutiveSpikes, isProbeHealthy } from '../probe'
 import type { ProbeSnapshot } from '../probe'
 
 describe('computeProbeSlot', () => {
@@ -73,10 +73,11 @@ describe('PROBE_TARGETS', () => {
     'openrouter', 'stability', 'bfl', 'assemblyai', 'deepgram', 'voyageai', 'twelvelabs',
     'pinecone', 'langsmith', 'runway', 'luma', // #678 — added (stable representative API path)
     'turbopuffer', // #857 — no official uptime, probe is the sole measured signal
+    'cursor', // #883 — coding agent with its own API infra (api2.cursor.sh), independent signal
   ]
 
-  it('has all 30 API service probe targets', () => {
-    expect(PROBE_TARGETS).toHaveLength(30)
+  it('has all 31 probe targets', () => {
+    expect(PROBE_TARGETS).toHaveLength(31)
     const ids = PROBE_TARGETS.map((t) => t.id)
     for (const expected of EXPECTED_IDS) {
       expect(ids).toContain(expected)
@@ -98,6 +99,39 @@ describe('PROBE_TARGETS', () => {
   it('has no duplicate URLs', () => {
     const urls = PROBE_TARGETS.map((t) => t.url)
     expect(new Set(urls).size).toBe(urls.length)
+  })
+
+  it('probes cursor directly (own infra, not inherited)', () => {
+    const cursor = PROBE_TARGETS.find((t) => t.id === 'cursor')
+    expect(cursor?.url).toBe('https://api2.cursor.sh/')
+    expect(PROBE_INHERIT.cursor).toBeUndefined() // #883 — cursor is directly probed, never inherits
+  })
+})
+
+describe('resolveProbeId (#883 parent-probe inheritance)', () => {
+  it('maps Claude Code → claude and Codex → openai (endpoint-sharing pairs)', () => {
+    expect(resolveProbeId('claudecode')).toBe('claude')
+    expect(resolveProbeId('codex')).toBe('openai')
+  })
+
+  it('is identity for directly-probed and non-inheriting services', () => {
+    for (const id of ['claude', 'openai', 'cursor', 'gemini', 'bedrock', 'chatgpt']) {
+      expect(resolveProbeId(id)).toBe(id)
+    }
+  })
+
+  it('every inherited parent is itself an actual probe target (no dangling inheritance)', () => {
+    const probedIds = new Set(PROBE_TARGETS.map((t) => t.id))
+    for (const parent of Object.values(PROBE_INHERIT)) {
+      expect(probedIds.has(parent)).toBe(true)
+    }
+  })
+
+  it('no service both inherits AND is directly probed (would be a redundant probe)', () => {
+    const probedIds = new Set(PROBE_TARGETS.map((t) => t.id))
+    for (const child of Object.keys(PROBE_INHERIT)) {
+      expect(probedIds.has(child)).toBe(false)
+    }
   })
 })
 
