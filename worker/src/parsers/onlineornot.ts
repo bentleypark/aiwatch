@@ -35,12 +35,50 @@ function extractData(html: string): unknown[] | null {
 }
 
 /**
+ * Collect the object references that belong to the `scheduledMaintenance` collection.
+ *
+ * OnlineOrNot's SSR loader data separates real incidents (`incidents`/`activeIncidents`)
+ * from planned maintenance (`scheduledMaintenance`), but a maintenance entry reuses the
+ * SAME `title`/`started` key-name indices as an incident (and carries no `impact`), so the
+ * flat-scan in {@link parseOnlineOrNotIncidents} would otherwise sweep it in as an active
+ * `investigating` incident (#894 — OpenRouter "Scheduled Database Maintenance" showed as an
+ * incident while `activeIncidents` was empty). We trust the source's own grouping — the
+ * authoritative signal — rather than a title regex, so custom-titled maintenance is caught
+ * and real incidents are never dropped.
+ */
+function collectMaintenanceRefs(data: unknown[]): Set<unknown> {
+  const excluded = new Set<unknown>()
+  const smIdx = data.indexOf('scheduledMaintenance')
+  if (smIdx < 0) return excluded
+  const smKey = `_${smIdx}`
+
+  for (const item of data) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) continue
+    const ref = (item as Record<string, unknown>)[smKey]
+    if (typeof ref !== 'number') continue
+    const arr = data[ref]
+    if (!Array.isArray(arr)) continue
+    for (const mIdx of arr) {
+      if (typeof mIdx !== 'number' || mIdx < 0 || mIdx >= data.length) continue
+      const mObj = data[mIdx]
+      if (typeof mObj === 'object' && mObj !== null && !Array.isArray(mObj)) {
+        excluded.add(mObj)
+      }
+    }
+  }
+  return excluded
+}
+
+/**
  * Parse OnlineOrNot status page HTML (React Router SSR format).
  * Object keys use _N refs where N = index of the key name string in the array.
  */
 export function parseOnlineOrNotIncidents(html: string): Incident[] {
   const data = extractData(html)
   if (!data) return []
+
+  // #894 — exclude planned-maintenance entries (they reuse incident key indices).
+  const maintenanceRefs = collectMaintenanceRefs(data)
 
   // Build key index map: find indices of known key name strings
   const keyMap: Record<string, number> = {}
@@ -66,6 +104,7 @@ export function parseOnlineOrNotIncidents(html: string): Incident[] {
 
   for (const item of data) {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) continue
+    if (maintenanceRefs.has(item)) continue  // #894 — skip scheduled-maintenance entries
     const obj = item as Record<string, number>
     if (!(titleKey in obj) || !(startedKey in obj)) continue
 
