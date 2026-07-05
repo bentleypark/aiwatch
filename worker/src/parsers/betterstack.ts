@@ -43,7 +43,10 @@ export function mapBetterStackImpact(text: string): Incident['impact'] {
 //   3. index.json report_type === 'maintenance' — used in services.ts after index.json parse.
 //      Handles custom-titled events like "Authorization System Restart" (#503) where no title
 //      keyword is present.
-const MAINTENANCE_TITLE = /scheduled\s+(?:\w+\s+)?maintenance|maintenance[^a-z]{0,20}scheduled|\bmaintenance\s*$/i
+// Exported for reuse by the OnlineOrNot parser (#896) as a title backstop — a completed
+// maintenance is relocated out of OnlineOrNot's `scheduledMaintenance` group, so the #894
+// structural filter can't catch it, but this title shape still does.
+export const MAINTENANCE_TITLE = /scheduled\s+(?:\w+\s+)?maintenance|maintenance[^a-z]{0,20}scheduled|\bmaintenance\s*$/i
 const FUTURE_PUBDATE_BUFFER_MS = 60_000  // clock-skew tolerance
 // #602 — an unresolved Better Stack incident with no RSS activity for this long is treated as a
 // stale monitor post. Better Stack feeds with human-written titles (Luma's "Ray3 service degraded")

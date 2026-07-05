@@ -160,6 +160,25 @@ describe('parseOnlineOrNotIncidents', () => {
     expect(incidents.some(i => /maintenance/i.test(i.title))).toBe(false)
   })
 
+  // #896 — a COMPLETED maintenance is relocated out of `scheduledMaintenance`, so it arrives
+  // as a normal resolved entry; the title backstop must still exclude it.
+  it('excludes a completed maintenance that leaked out of the scheduledMaintenance group (#896)', () => {
+    const html = makeHtml([
+      { id: 'm-done', title: 'Scheduled Database Maintenance', started: '2026-07-05T06:00:39.333Z', ended: '2026-07-05T06:30:32.830Z', impact: '' },
+    ])
+    expect(parseOnlineOrNotIncidents(html)).toEqual([])
+  })
+
+  it('keeps a real resolved incident whose title merely mentions maintenance mode (#896)', () => {
+    // MAINTENANCE_TITLE deliberately does NOT match "Stuck in maintenance mode".
+    const html = makeHtml([
+      { id: 'real-inc', title: 'Stuck in maintenance mode', started: '2026-07-05T06:00:00.000Z', ended: '2026-07-05T07:00:00.000Z', impact: 'MAJOR_OUTAGE' },
+    ])
+    const incidents = parseOnlineOrNotIncidents(html)
+    expect(incidents).toHaveLength(1)
+    expect(incidents[0].id).toBe('real-inc')
+  })
+
   it('sorts by startedAt descending', () => {
     const html = makeHtml([
       { id: 'old', title: 'Old', started: '2026-01-01T00:00:00.000Z', ended: '2026-01-01T01:00:00.000Z', impact: 'MAJOR_OUTAGE' },

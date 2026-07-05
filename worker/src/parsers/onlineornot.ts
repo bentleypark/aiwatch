@@ -2,6 +2,7 @@
 
 import type { Incident, TimelineEntry } from '../types'
 import { formatDuration } from '../utils'
+import { MAINTENANCE_TITLE } from './betterstack'
 
 /**
  * Extract the flat data array from OnlineOrNot's React Router SSR HTML.
@@ -111,6 +112,10 @@ export function parseOnlineOrNotIncidents(html: string): Incident[] {
     const title = data[obj[titleKey]]
     const started = data[obj[startedKey]]
     if (typeof title !== 'string' || typeof started !== 'string' || !started.includes('T')) continue
+
+    // #896 — title backstop: a COMPLETED maintenance is relocated out of the `scheduledMaintenance`
+    // group (so the #894 structural filter misses it) but still carries a maintenance-shaped title.
+    if (MAINTENANCE_TITLE.test(title)) continue
 
     const endedRaw = endedKey && obj[endedKey] != null ? data[obj[endedKey]] : null
     const ended = typeof endedRaw === 'string' ? endedRaw : null
