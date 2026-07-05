@@ -2,7 +2,13 @@ import { describe, it, expect } from 'vitest'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from '../onlineornot'
 
 // Minimal OnlineOrNot HTML with embedded React Router SSR data
-function makeHtml(incidents: Array<{ id: string; title: string; started: string; ended: string | null; impact: string }>, uptimeComponent?: { name: string; uptime: string }) {
+function makeHtml(
+  incidents: Array<{ id: string; title: string; started: string; ended: string | null; impact: string }>,
+  uptimeComponent?: { name: string; uptime: string },
+  // #894 — planned-maintenance entries live under `scheduledMaintenance` and reuse the SAME
+  // title/started/ended key indices as incidents (but carry no impact), mirroring the real payload.
+  maintenance?: Array<{ title: string; started: string; ended: string | null }>,
+) {
   // Build flat array mimicking OnlineOrNot's React Router SSR format
   // Key name strings at fixed positions, objects reference them via _N keys
   const arr: unknown[] = [
@@ -23,6 +29,12 @@ function makeHtml(incidents: Array<{ id: string; title: string; started: string;
     arr.push('name')
   }
 
+  // #894 — `scheduledMaintenance` grouping key
+  if (maintenance) {
+    keyIndices.scheduledMaintenance = arr.length
+    arr.push('scheduledMaintenance')
+  }
+
   // Add incidents
   for (const inc of incidents) {
     const idIdx = arr.length; arr.push(inc.id)
@@ -38,6 +50,28 @@ function makeHtml(incidents: Array<{ id: string; title: string; started: string;
     obj[`_${keyIndices.ended}`] = endedIdx
     obj[`_${keyIndices.impact}`] = impactIdx
     arr.push(obj)
+  }
+
+  // #894 — add maintenance entries + a container object that references them via the
+  // `scheduledMaintenance` key, exactly as OnlineOrNot's loader data does.
+  if (maintenance) {
+    const maintenanceIdxs: number[] = []
+    for (const m of maintenance) {
+      const titleIdx = arr.length; arr.push(m.title)
+      const startedIdx = arr.length; arr.push(m.started)
+      const endedIdx = arr.length; arr.push(m.ended)
+
+      const obj: Record<string, number> = {}
+      obj[`_${keyIndices.title}`] = titleIdx      // reuses the incident title key index
+      obj[`_${keyIndices.started}`] = startedIdx  // reuses the incident started key index
+      obj[`_${keyIndices.ended}`] = endedIdx
+      maintenanceIdxs.push(arr.length)
+      arr.push(obj)
+    }
+    const arrRef = arr.length; arr.push(maintenanceIdxs)
+    const container: Record<string, number> = {}
+    container[`_${keyIndices.scheduledMaintenance}`] = arrRef
+    arr.push(container)
   }
 
   // Add uptime component data
@@ -101,6 +135,29 @@ describe('parseOnlineOrNotIncidents', () => {
   it('returns empty array for invalid HTML', () => {
     expect(parseOnlineOrNotIncidents('<html>no data</html>')).toEqual([])
     expect(parseOnlineOrNotIncidents('')).toEqual([])
+  })
+
+  // #894 — planned maintenance must NOT be parsed as an incident.
+  it('excludes scheduled-maintenance entries (#894)', () => {
+    const html = makeHtml(
+      [],
+      undefined,
+      [{ title: 'Scheduled Database Maintenance', started: '2026-07-05T06:00:39.333Z', ended: null }],
+    )
+    expect(parseOnlineOrNotIncidents(html)).toEqual([])
+  })
+
+  it('keeps real incidents while excluding maintenance (#894)', () => {
+    const html = makeHtml(
+      [{ id: 'real1', title: '[Automated] Generation was inaccessible', started: '2026-04-14T17:02:56.209Z', ended: '2026-04-14T18:07:52.805Z', impact: 'MAJOR_OUTAGE' }],
+      undefined,
+      [{ title: 'Scheduled Database Maintenance', started: '2026-07-05T06:00:39.333Z', ended: null }],
+    )
+    const incidents = parseOnlineOrNotIncidents(html)
+    expect(incidents).toHaveLength(1)
+    expect(incidents[0].id).toBe('real1')
+    expect(incidents[0].impact).toBe('major')
+    expect(incidents.some(i => /maintenance/i.test(i.title))).toBe(false)
   })
 
   it('sorts by startedAt descending', () => {
