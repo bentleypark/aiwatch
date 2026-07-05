@@ -1,3 +1,10 @@
+---
+type: reference
+title: "Fallback Tier Priority — Full Reference"
+description: "Full fallback tier membership + candidate eligibility — same-tier-first, adjacent-tier fill, specialized sub-tier caps, and the tierFor/tierLabelFor rationale."
+tags: [worker, fallback, tiers]
+---
+
 # Fallback Tier Priority — Full Reference
 
 > Extracted from CLAUDE.md to keep the auto-loaded project file lean. CLAUDE.md links here; this is the canonical reference.

@@ -1,3 +1,10 @@
+---
+type: runbook
+title: "Adding a New Service — Full Checklist"
+description: "Full checklist for adding a monitored service — the worker/frontend/docs/SEO/methodology/reports files that must update in lockstep, starting with the Step-0 data-richness audit."
+tags: [worker, checklist, service, sync-invariant]
+---
+
 # Adding a New Service — Full Checklist
 
 > Extracted from CLAUDE.md to keep the auto-loaded project file lean. CLAUDE.md links here; this is the canonical reference.

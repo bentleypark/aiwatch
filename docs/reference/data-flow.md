@@ -1,3 +1,10 @@
+---
+type: architecture
+title: "Status Data Flow"
+description: "Annotated status data flow — browser polling to /api/status fetch/normalize/KV to React, plus the */5 cron and Web Vitals pipeline."
+tags: [worker, cron, data-flow]
+---
+
 # Status Data Flow
 
 ```

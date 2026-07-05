@@ -1,3 +1,10 @@
+---
+type: reference
+title: "GA4 Analytics & Consent Flow"
+description: "Cross-surface GA4 consent flow + the full event catalog (parameters, location, purpose) including reports-site events."
+tags: [frontend, analytics, ga4, consent]
+---
+
 # GA4 Analytics & Consent Flow
 
 > Extracted from CLAUDE.md to keep the auto-loaded project file lean. CLAUDE.md links here; this is the canonical reference.

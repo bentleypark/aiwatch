@@ -1,3 +1,10 @@
+---
+type: reference
+title: "Tier-A `verify-after` assertions (#873)"
+description: "The Tier-A verify-after assert: clause grammar — machine-checkable JSON-endpoint assertions the daily verify job auto-verifies."
+tags: [workflow, ci, verify-after]
+---
+
 # Tier-A `verify-after` assertions (#873)
 
 Machine-checkable assertions that let the daily `verify-reminders` job (#541) **close the

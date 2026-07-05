@@ -1,3 +1,10 @@
+---
+type: reference
+title: "KV Key Schema (STATUS_CACHE namespace)"
+description: "Full KV key reference for the STATUS_CACHE namespace — pattern, value, TTL, writes/day, purpose — plus the monthly write budget."
+tags: [worker, kv, schema]
+---
+
 # KV Key Schema (STATUS_CACHE namespace)
 
 > Extracted from CLAUDE.md to keep the auto-loaded project file lean. CLAUDE.md links here; this is the canonical reference.

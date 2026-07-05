@@ -22,7 +22,7 @@ Persistent memory is a **file-based LLM Wiki** (Karpathy's pattern, formalized b
 Don't store what the repo already records (code structure, past fixes, git history, CLAUDE.md).
 
 ### OKF frontmatter convention
-Each page carries YAML frontmatter: `name`, `description`, `type` (+ optional `title`/`tags`). **Caveat: the harness normalizes memory frontmatter on write** (relocates `type`/`title`/`tags` under `metadata:`) — don't fight it; the fields survive under `metadata`. **Gotcha: quote any `description`/`title` containing a bare `#`** (e.g. `#N`) — unquoted YAML treats `#` as a comment and truncates the value (hit in #891 Phase 1). True OKF top-level conformance (for the Google graph visualizer) belongs in an in-repo bundle (`docs/reference/*`, deferred), not the harness memory dir.
+Each page carries YAML frontmatter: `name`, `description`, `type` (+ optional `title`/`tags`). **Caveat: the harness normalizes memory frontmatter on write** (relocates `type`/`title`/`tags` under `metadata:`) — don't fight it; the fields survive under `metadata`. **Gotcha: quote any `description`/`title` containing a bare `#`** (e.g. `#N`) — unquoted YAML treats `#` as a comment and truncates the value (hit in #891 Phase 1). True OKF top-level conformance (for the Google graph visualizer) lives in the in-repo bundle **`docs/reference/*`** — an OKF bundle with `type`/`title`/`description`/`tags` frontmatter + `index.md` catalog + `log.md` (#891 Phase 4) — not the harness memory dir.
 
 ## API Docs via Context Hub (chub)
 

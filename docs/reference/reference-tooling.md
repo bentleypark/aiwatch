@@ -1,3 +1,10 @@
+---
+type: reference
+title: "Reference Tooling — chub + modern-web-guidance + the decision-moment backstop"
+description: "Which of chub vs modern-web-guidance to run by file path, and the tooling-trigger.sh PreToolUse backstop."
+tags: [workflow, tooling, chub]
+---
+
 # Reference Tooling — chub + modern-web-guidance + the decision-moment backstop
 
 AIWatch wires two external "reference" tools that ground code in current sources instead of
