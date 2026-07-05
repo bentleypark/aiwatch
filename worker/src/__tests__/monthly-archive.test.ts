@@ -957,6 +957,30 @@ describe('buildMonthlyArchive', () => {
     expect(archive.services.claude.incidents).toBe(5)
   })
 
+  it('#892: the PUBLIC monthly security summary excludes unverified HN chatter', async () => {
+    // The archive feeds /api/report → the public reports site, so it must gate to verified
+    // findings (OSV, or HN with a CVE id) — never surface raw HN chatter as a top finding or count.
+    const secKV = {
+      get: async (key: string) => key === 'security:monthly:2026-03' ? JSON.stringify([
+        { title: 'anthropic SDK advisory', url: 'O1', source: 'osv', severity: 'high', service: 'Anthropic (Claude)', detectedAt: '2026-03-05T00:00:00.000Z' },
+        { title: 'Copilot RCE (CVE-2025-53773)', url: 'H1', source: 'hackernews', severity: 'high', service: 'GitHub Copilot', detectedAt: '2026-03-10T00:00:00.000Z' },
+        { title: 'Possible evidence of prompt injection by Anthropic', url: 'H2', source: 'hackernews', service: 'Anthropic (Claude)', detectedAt: '2026-03-12T00:00:00.000Z' },
+      ]) : null,
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(secKV, 2026, 3)
+    expect(archive.security).not.toBeNull()
+    expect(archive.security!.totalAlerts).toBe(2)                       // chatter excluded from the count
+    expect(archive.security!.bySource).toEqual({ osv: 1, hackernews: 1 })
+    const titles = archive.security!.topFindings.map(f => f.title)
+    expect(titles).toContain('anthropic SDK advisory')
+    expect(titles).toContain('Copilot RCE (CVE-2025-53773)')
+    expect(titles).not.toContain('Possible evidence of prompt injection by Anthropic')
+  })
+
   // ── #426: AI retrospective narrative bake-in ──
   it('omits narrative entirely when no narrativeOpts are passed', async () => {
     const archive = await buildMonthlyArchive(mockKV, 2026, 3)
@@ -1130,7 +1154,9 @@ describe('buildMonthlyArchive', () => {
   it('snapshots security summary from security:monthly:{period} (#290)', async () => {
     const secEntries: MonthlySecurityEntry[] = [
       { title: 'RCE in openai', url: 'u1', source: 'osv', severity: 'critical', service: 'OpenAI', detectedAt: '2026-03-10T00:00:00Z' },
-      { title: 'HN breach story', url: 'u2', source: 'hackernews', detectedAt: '2026-03-15T00:00:00Z' },
+      // #892 — HN entries reach the PUBLIC archive only with a CVE id; give this one a CVE so it
+      // still exercises the hackernews-counting path under the verified-only gate.
+      { title: 'HN breach story (CVE-2025-9999)', url: 'u2', source: 'hackernews', detectedAt: '2026-03-15T00:00:00Z' },
       { title: 'Path traversal', url: 'u3', source: 'osv', severity: 'high', service: 'Anthropic (Claude)', detectedAt: '2026-03-20T00:00:00Z' },
     ]
     const kvWithSecurity = {

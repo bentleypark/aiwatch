@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { mapOSVSeverity, detectSecurityAlerts, fetchOSVAlerts, fetchEPSS, enrichAlertsWithEPSS, formatEpssTag, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, EPSS_ACTIVE, EPSS_ELEVATED, OSV_PACKAGES, shouldAppendTimeline, appendTimelineEntry, osvTimelineKey, planOsvTimelineCycle, buildHNQuery, titleMatchesAiSecurity, isShowOrLaunchHN, fetchHNSecurityPosts } from '../security-monitor'
+import { mapOSVSeverity, detectSecurityAlerts, fetchOSVAlerts, fetchEPSS, enrichAlertsWithEPSS, formatEpssTag, formatSecurityDigest, securityDetectedKey, incrementSecurityCount, readRecentSecurityAlerts, EPSS_ACTIVE, EPSS_ELEVATED, OSV_PACKAGES, shouldAppendTimeline, appendTimelineEntry, osvTimelineKey, planOsvTimelineCycle, buildHNQuery, titleMatchesAiSecurity, hasSecuritySignal, isShowOrLaunchHN, isPubliclyVerifiedAlert, CVE_ID_RE, fetchHNSecurityPosts } from '../security-monitor'
 import type { SecurityAlert, SecurityAlertMeta, OsvTimeline } from '../security-monitor'
 
 // #325: OSV_PACKAGES drives both querybatch input and the post-fetch enrichment
@@ -115,6 +115,61 @@ describe('titleMatchesAiSecurity (#720)', () => {
   it('matches multi-word keywords ("hugging face", "data exposure", "security incident")', () => {
     expect(titleMatchesAiSecurity('Hugging Face data exposure affects model repos')).toBe(true)
     expect(titleMatchesAiSecurity('OpenAI hit by major security incident')).toBe(true)
+  })
+})
+
+describe('titleMatchesAiSecurity precision (#892)', () => {
+  // Cases below are drawn from a real 6-year HN corpus audit — titles the raw
+  // (AI keyword AND security keyword) filter kept but that are NOT security events.
+
+  it('gates WEAK signals (leak/unauthorized) on a data/access context', () => {
+    // Kept: bare "leak"/"unauthorized" WITH a data/access context word.
+    expect(titleMatchesAiSecurity('Anthropic API credential leak exposes user data')).toBe(true)
+    expect(titleMatchesAiSecurity('Unauthorized access to Hugging Face model hosting')).toBe(true)
+    // Dropped: leak/unauthorized as the SOLE signal, no data/access context.
+    expect(titleMatchesAiSecurity('The Claude Code Leak')).toBe(false)
+    expect(titleMatchesAiSecurity("Mistral CEO confirms 'leak' of a new open source model")).toBe(false)
+    expect(titleMatchesAiSecurity('Facing bankruptcy after unauthorized Gemini API usage of $128k')).toBe(false)
+    expect(titleMatchesAiSecurity("'Unauthorized' change to Grok made it blather on")).toBe(false)
+  })
+
+  it('vetoes legal / speculative framings even when a STRONG keyword is present', () => {
+    // "breach" is STRONG, but "lawsuit"/"sues"/"alleges" veto the legal framing.
+    expect(titleMatchesAiSecurity('Elon Musk Hits OpenAI with Breach of Contract Lawsuit')).toBe(false)
+    expect(titleMatchesAiSecurity('Reddit Sues Anthropic, Alleges Unauthorized Use of Data')).toBe(false)
+    // Other veto concepts: reportedly / antitrust / copyright.
+    expect(titleMatchesAiSecurity('OpenAI reportedly suffered a data breach')).toBe(false)
+    expect(titleMatchesAiSecurity('Anthropic antitrust probe over training-data breach')).toBe(false)
+    // Speculation hedges — verified findings carry a CVE or firmer language.
+    expect(titleMatchesAiSecurity('Possible evidence of literal prompt injection by Anthropic')).toBe(false)
+    expect(titleMatchesAiSecurity('Miqu 70B – possible leak of the mistral-medium LLM')).toBe(false)
+  })
+
+  it('vetoes non-AI name collisions (crypto-EXCHANGE "Gemini", mouse "cursor")', () => {
+    expect(titleMatchesAiSecurity('Twitter accounts of Coinbase, Gemini and Binance hacked')).toBe(false)
+    expect(titleMatchesAiSecurity('Cryptocurrency exchange Gemini API hacked, funds stolen')).toBe(false)
+    expect(titleMatchesAiSecurity('Safari bug involving cursor position leak between windows')).toBe(false)
+    expect(titleMatchesAiSecurity('Safari Address Bar Spoof via Cursor Overlap Vulnerability')).toBe(false)
+  })
+
+  it('does NOT veto bare "crypto" — cryptography is a real security topic (not the exchange)', () => {
+    // The narrowed collision regex must not swallow a genuine cryptography weakness.
+    expect(titleMatchesAiSecurity('Weak crypto enables data exfiltration in Claude Code')).toBe(true)
+  })
+
+  it('keeps genuine findings whose only AI mention is an ambiguous name (no positive-context regression)', () => {
+    // The negative-collision approach must NOT drop these real Gemini/Cursor/Grok/Copilot findings.
+    expect(titleMatchesAiSecurity("We hacked Gemini's Python sandbox and leaked its source code")).toBe(true)
+    expect(titleMatchesAiSecurity('Grok 3 is highly vulnerable to indirect prompt injection')).toBe(true)
+    expect(titleMatchesAiSecurity('Cursor IDE: Arbitrary Data Exfiltration via Mermaid (CVE-2025-54132)')).toBe(true)
+    expect(titleMatchesAiSecurity('EchoLeak – 0-Click AI Vulnerability Enabling Data Exfiltration from 365 Copilot')).toBe(true)
+  })
+
+  it('hasSecuritySignal: STRONG alone qualifies; WEAK needs context', () => {
+    expect(hasSecuritySignal('a vulnerability disclosed')).toBe(true)   // STRONG
+    expect(hasSecuritySignal('data leaked')).toBe(false)               // \bleak\b fails on "leaked" (#720)
+    expect(hasSecuritySignal('credentials leak')).toBe(true)          // WEAK + context
+    expect(hasSecuritySignal('unauthorized use')).toBe(false)        // WEAK, no data/access context
   })
 })
 
@@ -632,6 +687,33 @@ function makeFakeKV(entries: Record<string, string>): KVNamespace {
   return api as unknown as KVNamespace
 }
 
+describe('isPubliclyVerifiedAlert (#892)', () => {
+  it('always shows OSV (CVE-backed vuln DB)', () => {
+    expect(isPubliclyVerifiedAlert({ source: 'osv', title: 'anything at all' })).toBe(true)
+  })
+  it('shows HN only when the title carries an explicit CVE id', () => {
+    expect(isPubliclyVerifiedAlert({ source: 'hackernews', title: 'Copilot RCE (CVE-2025-53773)' })).toBe(true)
+    expect(isPubliclyVerifiedAlert({ source: 'hackernews', title: 'Claude Code CVE-2026-39861: sandbox escape' })).toBe(true)
+    expect(isPubliclyVerifiedAlert({ source: 'hackernews', title: 'Possible evidence of prompt injection by Anthropic' })).toBe(false)
+    expect(isPubliclyVerifiedAlert({ source: 'hackernews', title: 'EchoLeak 0-click Copilot data exfiltration' })).toBe(false)
+  })
+  it('withholds unknown sources (fail-closed for exposure)', () => {
+    expect(isPubliclyVerifiedAlert({ source: 'hn', title: 'x CVE-2025-1' })).toBe(false)
+    expect(isPubliclyVerifiedAlert({ source: 'reddit', title: 'x' })).toBe(false)
+  })
+  it('CVE_ID_RE requires the CVE-YYYY-NNNN shape', () => {
+    expect(CVE_ID_RE.test('foo CVE-2025-53773 bar')).toBe(true)
+    expect(CVE_ID_RE.test('cve-2025-1234 lowercase')).toBe(true)
+    expect(CVE_ID_RE.test('mentions CVE but no id')).toBe(false)
+    expect(CVE_ID_RE.test('CVE-25-1')).toBe(false)
+  })
+  it('CVE_ID_RE serial number is 4+ digits, no upper bound', () => {
+    expect(CVE_ID_RE.test('CVE-2025-123')).toBe(false)        // 3-digit serial rejected
+    expect(CVE_ID_RE.test('CVE-1999-0067')).toBe(true)        // 4-digit serial accepted
+    expect(CVE_ID_RE.test('CVE-2024-12345678')).toBe(true)    // 8-digit serial accepted (was rejected by \d{4,7})
+  })
+})
+
 describe('readRecentSecurityAlerts', () => {
   it('returns empty array when KV is null', async () => {
     // Defensive: env.STATUS_CACHE is typed as nullable in the Worker bindings.
@@ -681,6 +763,53 @@ describe('readRecentSecurityAlerts', () => {
     expect(result[0].title).toBe('Good')
   })
 
+  it('withholds unverified HN chatter from the public read, keeps OSV + HN-with-CVE (#892)', async () => {
+    const kv = makeFakeKV({
+      // OSV → always public
+      'security:seen:osv:GHSA-1': JSON.stringify({ title: 'openai SDK CVE', url: 'U1', source: 'osv' }),
+      // HN with an explicit CVE → public
+      'security:seen:hn:cve': JSON.stringify({ title: 'Copilot RCE via Prompt Injection (CVE-2025-53773)', url: 'U2', source: 'hackernews' }),
+      // HN chatter, no CVE → withheld (this is the currently-exposed trigger item)
+      'security:seen:hn:chatter': JSON.stringify({ title: 'Possible evidence of literal prompt injection by Anthropic', url: 'U3', source: 'hackernews' }),
+      // legacy/unknown source → withheld (fail-closed guard at the reader path)
+      'security:seen:hn:legacy': JSON.stringify({ title: 'x CVE-2025-1', url: 'U4', source: 'hn' }),
+    })
+    const result = await readRecentSecurityAlerts(kv)
+    const titles = result.map(a => a.title)
+    expect(titles).toContain('openai SDK CVE')
+    expect(titles).toContain('Copilot RCE via Prompt Injection (CVE-2025-53773)')
+    expect(titles).not.toContain('Possible evidence of literal prompt injection by Anthropic')
+    expect(titles).not.toContain('x CVE-2025-1')  // unknown source withheld even with a CVE id
+    expect(result).toHaveLength(2)
+  })
+
+  it('does not let unverified HN keys (lexicographically first) displace verified OSV out of the cap (#892)', async () => {
+    // KV list is lexicographic: `security:seen:hn:*` sorts before `security:seen:osv:*`.
+    // A pre-filter 20-key window would return 20 HN chatter keys, filter them all out, and
+    // hide the OSV CVEs entirely. The reader must list wide, filter, THEN cap.
+    const entries: Record<string, string> = {}
+    for (let i = 0; i < 30; i++) {
+      entries[`security:seen:hn:chatter${String(i).padStart(2, '0')}`] =
+        JSON.stringify({ title: `chatter ${i} data breach`, url: `H${i}`, source: 'hackernews' }) // no CVE → unverified
+    }
+    for (let i = 0; i < 3; i++) {
+      entries[`security:seen:osv:GHSA-${i}`] = JSON.stringify({ title: `osv ${i}`, url: `O${i}`, source: 'osv' })
+    }
+    const result = await readRecentSecurityAlerts(makeFakeKV(entries))
+    expect(result).toHaveLength(3)                                   // the 3 OSV survive
+    expect(result.every(a => a.source === 'osv')).toBe(true)
+  })
+
+  it('caps the public read at 20 verified alerts', async () => {
+    const entries: Record<string, string> = {}
+    for (let i = 0; i < 30; i++) {
+      entries[`security:seen:osv:GHSA-${String(i).padStart(2, '0')}`] =
+        JSON.stringify({ title: `osv ${i}`, url: `O${i}`, source: 'osv' })
+    }
+    const result = await readRecentSecurityAlerts(makeFakeKV(entries))
+    expect(result).toHaveLength(20)
+  })
+
   it('swallows KV list errors — security data is optional', async () => {
     // If KV is temporarily unavailable, the status endpoint must still succeed.
     const brokenKv = {
@@ -721,9 +850,11 @@ describe('readRecentSecurityAlerts', () => {
       // both endpoints' shapes from the same readRecentSecurityAlerts output and
       // asserts deep equality — a future contributor dropping the spread on one
       // side would fail this immediately.
+      // Both entries must be publicly-verified (#892) — OSV, or HN with a CVE id in
+      // the title — else the reader withholds them and the parity length drifts.
       const kv = makeFakeKV({
         'security:seen:osv:GHSA-1': JSON.stringify({ title: 'A', url: 'U1', source: 'osv' }),
-        'security:seen:hn:2': JSON.stringify({ title: 'B', url: 'U2', source: 'hn' }),
+        'security:seen:hn:2': JSON.stringify({ title: 'B (CVE-2025-53773)', url: 'U2', source: 'hackernews' }),
       })
       const fullShape = buildEndpointResponse(await readRecentSecurityAlerts(kv))
       const cachedShape = buildEndpointResponse(await readRecentSecurityAlerts(kv))
