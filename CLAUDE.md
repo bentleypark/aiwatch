@@ -2,37 +2,27 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Persistent Memory (MemPalace MCP)
+## Persistent Memory (LLM Wiki / OKF)
 
-This project uses MemPalace MCP server for persistent memory that survives context compaction and session boundaries.
+Persistent memory is a **file-based LLM Wiki** (Karpathy's pattern, formalized by Google's Open Knowledge Format) in the harness memory dir `~/.claude/projects/-Users-bentley-Desktop-bentely-aiwatch-aiwatch/memory/` — markdown concept files + a `MEMORY.md` index + a `log.md` history + `[[wikilinks]]`. No vector DB: read the index, load the relevant pages. **MemPalace MCP is retired (#891)** — it was ~98.7% raw code-dump noise, dual-wrote the file memory, and its semantic search returned noise. Retirement is completed by a paired **local cutover** (remove the `mempalace` MCP server from `.claude/mcp.json` and global `~/.claude.json`, rewire the `SessionStart`/`PreCompact` hooks in `.claude/settings.local.json` off the mempalace tools, delete `.mempalace/`) — those are gitignored local/data files, not part of this PR. Single system.
 
-### Session Start
-- `SessionStart` hook auto-injects a reminder to call `mempalace_status` — call it on first turn
-- Call `mempalace_search` before answering questions about past decisions, architecture history, or debugging context
+### Three operations
+- **query** — before answering about past decisions / architecture history / debugging context (or when the user references past work: "지난번에", "이전에", "아까"), read `MEMORY.md` and load the relevant pages. Session-start memory auto-load is native; a `SessionStart` hook in `settings.local.json` may also nudge it.
+- **ingest** — run the `memory-ingest` skill (manually, or on the `PreCompact` hook if wired in `settings.local.json`) to distill decisions / debugging findings / user feedback into pages before context is lost; dedup against existing pages; append a `log.md` line. Skip ephemeral task state.
+- **lint** — run the `memory-lint` skill periodically to check for contradictions, stale claims, orphan pages, broken `[[wikilinks]]`, index drift; record findings in `log.md`.
 
-### When to Store
-Each drawer save specifies **wing + room + hall**. Hall is the memory type (fixed 5). Room is the topic (project-defined).
+### When to store (page `type`)
+| Store Type | `type` |
+|---|---|
+| User corrections / confirmed approaches (+ **Why** + **How to apply**) | `feedback` |
+| Root-cause findings, non-obvious fixes | `debugging` |
+| Ongoing work / goals / constraints not derivable from code | `project` |
+| Pointers to external resources (URLs, dashboards) | `reference` |
 
-| Store Type | Room | Hall | Tool |
-|---|---|---|---|
-| Architecture choice, trade-off reasoning | `decisions` | `events` | `mempalace_add_drawer` |
-| Root cause findings, non-obvious fixes | `debugging` | `discoveries` | `mempalace_add_drawer` |
-| User corrections, confirmed approaches | `feedback` | `preferences` or `advice` | `mempalace_add_drawer` |
-| Stable facts (API schema, service count) | `architecture` | `facts` | `mempalace_add_drawer` |
-| PR merges, deploys, major completions | `deployments` | `events` | `mempalace_diary_write` |
+Don't store what the repo already records (code structure, past fixes, git history, CLAUDE.md).
 
-### When to Search
-- Before proposing changes to areas with prior decisions
-- When user references past work ("지난번에", "이전에", "아까")
-- When context was compacted and details were lost
-
-### PreCompact Hook
-`PreCompact` hook auto-injects a reminder to save important decisions/debugging/feedback to MemPalace before context is lost. Scan the conversation and save what matches the table above — skip ephemeral task state.
-
-### Palace Structure
-- **Wing**: `aiwatch` (this project)
-- **Rooms** (topics): `architecture`, `debugging`, `feedback`, `decisions`, `deployments`
-- **Halls** (memory types, fixed): `facts`, `events`, `discoveries`, `preferences`, `advice`
+### OKF frontmatter convention
+Each page carries YAML frontmatter: `name`, `description`, `type` (+ optional `title`/`tags`). **Caveat: the harness normalizes memory frontmatter on write** (relocates `type`/`title`/`tags` under `metadata:`) — don't fight it; the fields survive under `metadata`. **Gotcha: quote any `description`/`title` containing a bare `#`** (e.g. `#N`) — unquoted YAML treats `#` as a comment and truncates the value (hit in #891 Phase 1). True OKF top-level conformance (for the Google graph visualizer) belongs in an in-repo bundle (`docs/reference/*`, deferred), not the harness memory dir.
 
 ## API Docs via Context Hub (chub)
 
@@ -70,7 +60,7 @@ the Workers AI doc shows only `res.response`, but `ai-analysis.ts` must also han
 OpenAI-compatible `res.choices[0].message.content` / `.reasoning` shape (model-dependent) plus
 `chat_template_kwargs:{enable_thinking:false}` for Gemma. Save such findings with `chub annotate`.
 
-**chub vs MemPalace**: chub = external API ground-truth (public, shared); MemPalace = this project's
+**chub vs LLM Wiki memory**: chub = external API ground-truth (public, shared); the file-based LLM Wiki (`memory/`) = this project's
 decisions/debugging/feedback (private, project-scoped). Complementary, different layers.
 
 ### modern-web-guidance + when-to-use-which
