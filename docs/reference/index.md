@@ -30,6 +30,8 @@ Read this index first, then load only the pages you need.
 - [Reference Tooling](reference-tooling.md) — chub vs modern-web-guidance trigger map + the PreToolUse backstop.
 - [Tier-A `verify-after` assertions (#873)](verify-assertions.md) — machine-checkable assert-clause grammar.
 
-> Health of this bundle (frontmatter integrity, broken cross-links, stale claims) can be checked with
-> the `memory-lint` skill; findings are recorded in [log.md](log.md). (A scheduled routine to run it
-> automatically is a possible follow-up — not yet wired.)
+> **Structural health** (frontmatter integrity, unquoted-`#` truncation, dangling cross-links, index
+> drift) is enforced in CI on every PR by `scripts/lint-okf-bundle.mjs` (`npm run lint:okf`; the
+> `REAL docs/reference bundle` assertion in its test runs under `npm run test:scripts`). **Judgement
+> health** (contradictions, stale claims, whether cross-linking is *sufficient*) is a manual pass via
+> the `memory-lint` skill; findings are recorded in [log.md](log.md).
