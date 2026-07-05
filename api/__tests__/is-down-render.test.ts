@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { renderDelegatedListeners, buildMetaDescription, exceededRecoveryTextEn } from '../_is-down/html-template'
+import { renderDelegatedListeners, buildMetaDescription, exceededRecoveryTextEn, FAR_EXCEEDED_FACTOR as EDGE_FAR_EXCEEDED_FACTOR } from '../_is-down/html-template'
+import { FAR_EXCEEDED_FACTOR as FRONTEND_FAR_EXCEEDED_FACTOR } from '../../src/utils/predictionAccuracy'
 import { getSEOContent } from '../_is-down/seo-content'
 
 // Guard for #842-B: the audience beacon + click delegation live inside ONE `<script>` template
@@ -88,5 +89,26 @@ describe('exceededRecoveryTextEn (is-down AI card — elapsed vs estimate)', () 
   })
   it('falls back to terse wording when startedAt is missing', () => {
     expect(exceededRecoveryTextEn({ estimatedRecovery: '2–4h' }, now)).toBe('Exceeded typical pattern')
+  })
+  // #900 — parity with the frontend: drop the stale range once FAR past the estimate
+  it('drops the stale range when > 3× over (69h vs 4–8h → "far exceeded est.")', () => {
+    const started = new Date(now - 69 * 3_600_000).toISOString()
+    expect(exceededRecoveryTextEn(
+      { estimatedRecovery: '4–8h', estimatedRecoveryHours: 8, startedAt: started }, now,
+    )).toBe('Ongoing ~69h · far exceeded est.')
+  })
+  it('keeps the range at exactly 3×, drops it just past (boundary — catches an Edge-side factor bump)', () => {
+    const at3x = new Date(now - 12 * 3_600_000).toISOString() // 12h = 3× the 4h upper bound
+    expect(exceededRecoveryTextEn(
+      { estimatedRecovery: '2–4h', estimatedRecoveryHours: 4, startedAt: at3x }, now,
+    )).toBe('Ongoing ~12h · exceeded ~2–4h est.')
+    const justPast = new Date(now - 13 * 3_600_000).toISOString() // 13h > 12h (3×) → far
+    expect(exceededRecoveryTextEn(
+      { estimatedRecovery: '2–4h', estimatedRecoveryHours: 4, startedAt: justPast }, now,
+    )).toBe('Ongoing ~13h · far exceeded est.')
+  })
+  // #900 — the two mirrored constants must stay equal (repo parity convention; direct pin, not just a comment)
+  it('FAR_EXCEEDED_FACTOR is identical across the frontend + Edge mirrors', () => {
+    expect(EDGE_FAR_EXCEEDED_FACTOR).toBe(FRONTEND_FAR_EXCEEDED_FACTOR)
   })
 })

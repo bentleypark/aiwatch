@@ -301,7 +301,7 @@ export function buildAnalysisPrompt(
   }
 
   const prevPredictionText = prevPrediction
-    ? `\nPrevious Prediction: Estimated recovery in ${prevPrediction.estimatedRecoveryHours}h, but ${Math.round(prevPrediction.elapsedHours)}h have elapsed and the incident remains unresolved. The previous prediction was incorrect — re-evaluate with updated context.\n`
+    ? `\nPrevious Prediction: Estimated recovery in ${prevPrediction.estimatedRecoveryHours}h, but ${Math.round(prevPrediction.elapsedHours)}h have elapsed and the incident remains unresolved. The previous prediction was incorrect — re-evaluate with updated context. IMPORTANT: this incident has ALREADY been ongoing ${Math.round(prevPrediction.elapsedHours)}h, so a short estimate is impossible — do NOT output an "estimatedRecovery" whose upper bound is less than ${Math.round(prevPrediction.elapsedHours)}h. Give a realistic range anchored to the elapsed duration, or if it has clearly exceeded any predictable pattern, return "N/A".\n`
     : ''
 
   return `<incident_data>

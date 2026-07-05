@@ -116,23 +116,36 @@ export function approxElapsedText(min, lang) {
   return lang === 'ko' ? `${h}시간` : `${h}h`
 }
 
+/** Overshoot multiple past which the specific estimate range is dropped as noise (see #900). Elapsed
+ *  beyond `upperBoundHours × FAR_EXCEEDED_FACTOR` → "far exceeded" wording instead of "exceeded ~Xh est.".
+ *  Mirrored in `api/_is-down/html-template.ts` — keep the two in sync. */
+export const FAR_EXCEEDED_FACTOR = 3
+
 /**
  * Display text for an ACTIVE incident that has run past its recovery estimate (callers gate on
  * `estimateExceeded`). Instead of a bare "Exceeded typical pattern", it shows WHY — how long it has
  * been running vs the original estimate: "약 12시간째 진행 · 예측(2–4h) 초과" / "Ongoing ~12h · exceeded
- * ~2–4h est." Falls back to the terse wording when elapsed or the estimate range can't be derived.
+ * ~2–4h est." Once FAR past the estimate (> FAR_EXCEEDED_FACTOR×) the stale range is dropped for a
+ * "far exceeded" signal (#900). Falls back to the terse wording when elapsed or the range is unavailable.
  */
 export function exceededRecoveryText(analysis, incident, lang, nowMs = Date.now()) {
   const startedAt = incident?.startedAt
   const elapsedMin = startedAt ? (nowMs - new Date(startedAt).getTime()) / 60000 : NaN
   const raw = analysis?.estimatedRecovery
+  const bound = predictedHoursFrom(analysis)
   const range = (raw && raw !== 'N/A' && raw !== 'No historical data for estimation')
     ? raw
-    : (() => { const b = predictedHoursFrom(analysis); return b != null ? predictedHoursText(b) : null })()
+    : (bound != null ? predictedHoursText(bound) : null)
   if (!Number.isFinite(elapsedMin) || elapsedMin <= 0 || !range) {
     return lang === 'ko' ? '일반 패턴 초과 — 예측 불가' : 'Exceeded typical pattern'
   }
   const approx = approxElapsedText(elapsedMin, lang)
+  // Once the incident has run FAR past the estimate (> FAR_EXCEEDED_FACTOR× the upper bound), the
+  // specific short range is noise (a 4–8h estimate on a 69h incident) that just repeats every refresh
+  // — drop it and signal the large overshoot instead. Mild overshoot keeps the range (still credible).
+  if (bound != null && elapsedMin > bound * 60 * FAR_EXCEEDED_FACTOR) {
+    return lang === 'ko' ? `약 ${approx}째 진행 · 예측 대폭 초과` : `Ongoing ~${approx} · far exceeded est.`
+  }
   return lang === 'ko'
     ? `약 ${approx}째 진행 · 예측(${range}) 초과`
     : `Ongoing ~${approx} · exceeded ~${range} est.`

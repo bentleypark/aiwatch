@@ -61,10 +61,16 @@ function approxElapsedEn(min: number): string {
   return `${Math.round(min / 60)}h`
 }
 
+/** Overshoot multiple past which the specific estimate range is dropped as noise (#900). Mirrors
+ *  `FAR_EXCEEDED_FACTOR` in `src/utils/predictionAccuracy.js` — keep the two in sync. */
+export const FAR_EXCEEDED_FACTOR = 3
+
 /** Rich "still ongoing past the estimate" text for the AI card — "Ongoing ~12h · exceeded ~2–4h est."
- *  Shows WHY the estimate is void (how long it's been running). Mirrors the frontend
- *  `exceededRecoveryText`; falls back to the terse "Exceeded typical pattern" when elapsed/range are
- *  unavailable. Caller gates on `recoveryEstimateExceeded`. Meta/share keep the terse wording. */
+ *  Shows WHY the estimate is void (how long it's been running). Once FAR past the estimate
+ *  (> FAR_EXCEEDED_FACTOR×) the stale short range is dropped for "far exceeded est." (#900 — else a
+ *  4–8h estimate keeps repeating on a 69h incident). Mirrors the frontend `exceededRecoveryText`;
+ *  falls back to the terse "Exceeded typical pattern" when elapsed/range are unavailable. Caller
+ *  gates on `recoveryEstimateExceeded`. Meta/share keep the terse wording. */
 export function exceededRecoveryTextEn(
   insight: { estimatedRecovery?: string; estimatedRecoveryHours?: number; startedAt?: string },
   nowMs: number = Date.now(),
@@ -77,6 +83,9 @@ export function exceededRecoveryTextEn(
     ? raw
     : (bound != null ? fmtMinEn(Math.round(bound * 60)) : null) // parity with JS predictedHoursText (fmtMin)
   if (!Number.isFinite(elapsedMin) || elapsedMin <= 0 || !range) return 'Exceeded typical pattern'
+  if (bound != null && elapsedMin > bound * 60 * FAR_EXCEEDED_FACTOR) {
+    return `Ongoing ~${approxElapsedEn(elapsedMin)} · far exceeded est.`
+  }
   return `Ongoing ~${approxElapsedEn(elapsedMin)} · exceeded ~${range} est.`
 }
 

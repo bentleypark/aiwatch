@@ -384,6 +384,18 @@ describe('buildAnalysisPrompt', () => {
     expect(prompt).toContain('incorrect')
   })
 
+  // #900 Layer 2 — on re-analysis of a long-running incident, forbid a shorter-than-elapsed estimate
+  it('anchors the estimate to elapsed time on re-analysis (do-not-output-shorter + N/A escape hatch)', () => {
+    const prompt = buildAnalysisPrompt(
+      'Mistral', { title: 'Completion API Degraded', status: 'identified', startedAt: '2026-06-27T00:00:00Z', impact: 'minor' },
+      [], { estimatedRecoveryHours: 8, elapsedHours: 69 },
+    )
+    expect(prompt).toContain('ALREADY been ongoing 69h')
+    expect(prompt).toContain('do NOT output')
+    expect(prompt).toContain('less than 69h')
+    expect(prompt).toContain('"N/A"')
+  })
+
   it('omits previous prediction context when prevPrediction is not provided', () => {
     const prompt = buildAnalysisPrompt(
       'Deepgram', { title: 'Voice API Error', status: 'investigating', startedAt: '2026-03-27T03:00:00Z', impact: 'major' }, [],
