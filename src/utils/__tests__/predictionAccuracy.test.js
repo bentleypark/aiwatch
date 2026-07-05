@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { predictedHoursFrom, predictedHoursText, accuracyVerdict, verdictLabel, withinEstimateText, computePredictionOutcome, estimateExceeded, exceededRecoveryText, approxElapsedText } from '../predictionAccuracy'
+import { predictedHoursFrom, predictedHoursText, accuracyVerdict, verdictLabel, withinEstimateText, computePredictionOutcome, estimateExceeded, exceededRecoveryText, approxElapsedText, FAR_EXCEEDED_FACTOR } from '../predictionAccuracy'
 
 describe('predictedHoursFrom', () => {
   it('prefers the numeric estimatedRecoveryHours', () => {
@@ -183,5 +183,20 @@ describe('exceededRecoveryText (elapsed vs estimate — the user-chosen wording)
   it('falls back to terse wording when startedAt is missing', () => {
     expect(exceededRecoveryText({ estimatedRecovery: '2–4h' }, {}, 'ko', now)).toBe('일반 패턴 초과 — 예측 불가')
     expect(exceededRecoveryText({ estimatedRecovery: '2–4h' }, {}, 'en', now)).toBe('Exceeded typical pattern')
+  })
+
+  // #900 — once FAR past the estimate the stale short range is dropped (else "~4–8h est." repeats on a 69h incident)
+  it('drops the stale range when > FAR_EXCEEDED_FACTOR× over (the Mistral 69h vs 4–8h case)', () => {
+    const started = new Date(now - 69 * 3_600_000).toISOString() // 69h / 8h upper = 8.6× → far
+    const a = { estimatedRecovery: '4–8h', estimatedRecoveryHours: 8 }
+    expect(exceededRecoveryText(a, { startedAt: started }, 'ko', now)).toBe('약 69시간째 진행 · 예측 대폭 초과')
+    expect(exceededRecoveryText(a, { startedAt: started }, 'en', now)).toBe('Ongoing ~69h · far exceeded est.')
+  })
+  it('keeps the range at exactly FAR_EXCEEDED_FACTOR× (boundary — still credible), drops just past it', () => {
+    const a = { estimatedRecovery: '2–4h', estimatedRecoveryHours: 4 }
+    const atThreshold = new Date(now - 4 * FAR_EXCEEDED_FACTOR * 3_600_000).toISOString() // exactly 12h = 3×
+    expect(exceededRecoveryText(a, { startedAt: atThreshold }, 'en', now)).toBe('Ongoing ~12h · exceeded ~2–4h est.')
+    const justPast = new Date(now - (4 * FAR_EXCEEDED_FACTOR + 1) * 3_600_000).toISOString() // 13h > 12h → far
+    expect(exceededRecoveryText(a, { startedAt: justPast }, 'en', now)).toBe('Ongoing ~13h · far exceeded est.')
   })
 })
