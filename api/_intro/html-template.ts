@@ -3,6 +3,7 @@
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { nonceAttr } from '../_shared/csp-nonce'
+import { EXTENSION_STORE_URL, renderExtInstallCta } from '../_shared/extension-cta'
 import type { Announcement } from './announcements'
 
 interface LandingOptions {
@@ -1093,6 +1094,7 @@ ${announcementHtml}
     <div class="cta-btns">
       <a href="https://ai-watch.dev" class="btn-primary" style="font-size:16px;padding:14px 32px;" data-i18n="cta.btn1" data-ga="click_dashboard" data-ga-loc="landing_cta">대시보드 열기 →</a>
       <a href="https://ai-watch.dev/#settings?focus=alerts" class="btn-secondary" style="font-size:14px;padding:12px 24px;" data-i18n="cta.btn2" data-ga="click_cta_alerts" data-ga-loc="landing_cta">알림 설정하기</a>
+      ${renderExtInstallCta(EXTENSION_STORE_URL, { loc: 'landing_cta', variant: 'landing' })}
     </div>
     <div class="cta-rss">
       <button type="button" data-action="copy-rss" title="Copy RSS feed URL">
