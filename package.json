@@ -22,7 +22,8 @@
     "test:src": "npx vitest run --config vitest.config.js",
     "test:ext": "npx vitest run --config vitest.config.js extension",
     "test:scripts": "node --test scripts/*.test.mjs",
-    "hook-audit": "node scripts/hook-audit-summary.mjs"
+    "hook-audit": "node scripts/hook-audit-summary.mjs",
+    "lint:okf": "node scripts/lint-okf-bundle.mjs"
   },
   "dependencies": {
     "chart.js": "^4.4.7",

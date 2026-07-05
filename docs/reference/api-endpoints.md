@@ -1,3 +1,10 @@
+---
+type: reference
+title: "Worker HTTP Endpoints"
+description: "Per-endpoint reference for the Worker HTTP API — auth, projections, dedup, and #-rationale for status/badge/feed/alert/admin routes."
+tags: [worker, api, endpoints]
+---
+
 # Worker HTTP Endpoints
 
 > Extracted from CLAUDE.md to keep the auto-loaded project file lean (#525). CLAUDE.md links here; this is the canonical per-endpoint reference for `worker/src/index.ts` routing.

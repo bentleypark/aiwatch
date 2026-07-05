@@ -1,3 +1,10 @@
+---
+type: reference
+title: "Content-Security-Policy (CSP) — #482"
+description: "The #482 Content-Security-Policy — per-surface enforcement split (nonce vs content-hash), the SPA vercel.json policy, and the negative-lookahead source scoping."
+tags: [security, csp, edge]
+---
+
 # Content-Security-Policy (CSP) — #482
 
 AIWatch ships a CSP across the Vercel-served surfaces (SPA + Edge SSR). Rolled out **phased**:

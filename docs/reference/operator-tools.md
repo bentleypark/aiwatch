@@ -1,3 +1,10 @@
+---
+type: runbook
+title: "Operator Tools — `POST /api/admin/analyze` (#299)"
+description: "Operator runbook for POST /api/admin/analyze — force a Sonnet re-analysis on an active incident; secret setup, flags, request/response, failure codes, security posture."
+tags: [worker, operator, admin]
+---
+
 # Operator Tools — `POST /api/admin/analyze` (#299)
 
 Force a Sonnet analysis on a specific active incident when the cron's default (Gemma-first) produced low-signal output. Motivated by the 2026-04-20 ChatGPT outage where Gemma called a systemic infra failure a "service availability issue". Before this endpoint the override required hand-editing a local Node script + `wrangler kv key put --remote`.

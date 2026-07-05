@@ -1,3 +1,10 @@
+---
+type: runbook
+title: "Parallel AI-agent sessions (git worktrees)"
+description: "Running multiple AI-agent sessions via git worktrees without file/git/port collisions — workflow, launch-method table, port offsets, sequential-deploy rule."
+tags: [workflow, worktree, git]
+---
+
 # Parallel AI-agent sessions (git worktrees)
 
 Running multiple AI coding-agent sessions (Claude Code / Cursor / …) at once on this single

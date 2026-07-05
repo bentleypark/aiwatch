@@ -1,3 +1,10 @@
+---
+type: architecture
+title: "Service Status Determination"
+description: "The ordered per-service status resolution chain in services.ts (multi-component worst-of to component match to overall fallback to incidentExclude to component-status filter to fetch-failure cross-validation) with #-rationale."
+tags: [worker, status, parsers]
+---
+
 # Service Status Determination
 
 Per-service status is resolved in `worker/src/services.ts` with this priority:

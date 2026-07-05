@@ -1,3 +1,10 @@
+---
+type: architecture
+title: "Discord Alert Delivery Paths"
+description: "How operator + per-user Discord alerts are delivered server-side by the cron — single-source alert feed, per-user filters, channel-control opt-in, tweet-draft exception."
+tags: [worker, alerts, discord]
+---
+
 # Discord Alert Delivery Paths
 
 > Extracted from CLAUDE.md to keep the auto-loaded project file lean. CLAUDE.md links here; this is the canonical reference for how Discord alerts reach the operator and per-user webhooks.
