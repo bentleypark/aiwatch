@@ -340,6 +340,7 @@ ${consentInitScript()}
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 
 ${renderJsonLd(slug, seo, service)}
+${renderBreadcrumbJsonLd(slug, seo)}
 ${renderFaqJsonLd(seo, fallbacks)}
 
 <style>
@@ -553,6 +554,21 @@ function renderJsonLd(slug: string, seo: ServiceSEO, service: ServiceData | null
   }
   if (service) {
     data['dateModified'] = service.lastChecked
+  }
+  return `<script type="application/ld+json">${safeJsonLd(data)}</script>`
+}
+
+// #887 — BreadcrumbList (AIWatch → is-{service}-down). Still a valid, rendered rich result in 2026
+// (unlike FAQPage, whose SERP feature Google ended 2026-05-07 — that schema is kept for AI parsing
+// only). Gives the page a clean breadcrumb trail + entity context for both Google and AI answer engines.
+function renderBreadcrumbJsonLd(slug: string, seo: ServiceSEO): string {
+  const data = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    'itemListElement': [
+      { '@type': 'ListItem', 'position': 1, 'name': 'AIWatch', 'item': 'https://ai-watch.dev/' },
+      { '@type': 'ListItem', 'position': 2, 'name': `Is ${seo.displayName} Down?`, 'item': `https://ai-watch.dev/is-${slug}-down` },
+    ],
   }
   return `<script type="application/ld+json">${safeJsonLd(data)}</script>`
 }

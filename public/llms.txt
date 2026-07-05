@@ -1,0 +1,18 @@
+# AIWatch — real-time AI service status monitoring
+
+> AIWatch monitors the live status, uptime, and incidents of 43 AI services (LLM APIs, AI apps, and coding agents) — Claude, ChatGPT, Gemini, Cursor, Codex, and more. Status refreshes every 5 minutes. A machine-readable JSON status API and an incident RSS feed are available below.
+
+## Live data (machine-readable)
+- [Status API — all services](https://ai-watch.dev/api/v1/status): JSON — per-service live status, 30-day uptime, AIWatch reliability score, and active incidents.
+- [Incident feed (RSS 2.0)](https://ai-watch.dev/feed.xml): active + resolved incidents across all monitored services.
+
+## Key pages
+- [Dashboard](https://ai-watch.dev/): live status of all 43 monitored services.
+- [Methodology](https://ai-watch.dev/methodology): how AIWatch measures status, uptime, recovery, and the composite reliability score.
+- [Status badges](https://ai-watch.dev/badges): embeddable live-status badges for each service.
+- [Monthly reliability reports](https://ai-watch.dev/reports/): monthly uptime and incident retrospectives with a reliability ranking.
+
+## "Is X down?" pages (one per service)
+Answer-first pages stating whether a given service is currently down, with live status, 30-day uptime, incident history, and recommended alternatives.
+- Pattern: `https://ai-watch.dev/is-{service}-down`
+- Examples: [/is-claude-down](https://ai-watch.dev/is-claude-down), [/is-chatgpt-down](https://ai-watch.dev/is-chatgpt-down), [/is-gemini-down](https://ai-watch.dev/is-gemini-down), [/is-cursor-down](https://ai-watch.dev/is-cursor-down), [/is-pinecone-down](https://ai-watch.dev/is-pinecone-down)
