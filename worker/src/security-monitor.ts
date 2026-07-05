@@ -35,10 +35,26 @@ const HN_AI_KEYWORDS = [
   'elevenlabs', 'cursor', 'copilot', 'windsurf', 'xai', 'grok',
 ]
 
-const HN_SECURITY_KEYWORDS = [
-  'breach', 'leak', 'hacked', 'vulnerability', 'CVE', 'exploit',
-  'unauthorized', 'security incident', 'data exposure', 'compromised',
-  'RCE', 'injection', 'exfiltration',
+// Security concepts split by confidence (#892). STRONG signals are self-sufficient
+// — a match is a security event on its own. WEAK signals ("leak", "unauthorized")
+// are high-collision: "leak" trips on model/product leaks ("Mistral model leak",
+// "The Claude Code Leak") and "unauthorized" on billing / behavior ("unauthorized
+// API usage", "unauthorized change to Grok"), so they only count when a data/access
+// context word co-occurs (HN_DATA_ACCESS_CONTEXT below). (Lawsuit framings like
+// "unauthorized use of DATA" carry a context word and are handled by HN_TITLE_VETO,
+// not this gate.)
+const HN_SECURITY_STRONG = [
+  'breach', 'hacked', 'vulnerability', 'CVE', 'exploit', 'security incident',
+  'data exposure', 'compromised', 'RCE', 'injection', 'exfiltration',
+]
+const HN_SECURITY_WEAK = ['leak', 'unauthorized']
+// Upgrades a WEAK signal to a genuine security match. (Keep exact word forms — the
+// matcher is word-boundary'd; "expose"→"exposed" needs the concrete variant.)
+const HN_DATA_ACCESS_CONTEXT = [
+  'data', 'credential', 'credentials', 'token', 'tokens', 'access', 'secret',
+  'secrets', 'password', 'passwords', 'private', 'exposed', 'exposure',
+  'exfiltration', 'exfiltrated', 'stolen', 'steal', 'dump', 'dumped', 'database',
+  'records', 'PII', 'key', 'keys', 'source code',
 ]
 
 // HN Algolia treats `query` as plain keyword text with all-words-AND semantics —
@@ -65,13 +81,51 @@ function buildKeywordMatcher(keywords: string[]): RegExp {
 }
 
 const AI_KEYWORD_RE = buildKeywordMatcher(HN_AI_KEYWORDS)
-const SECURITY_KEYWORD_RE = buildKeywordMatcher(HN_SECURITY_KEYWORDS)
+const SEC_STRONG_RE = buildKeywordMatcher(HN_SECURITY_STRONG)
+const SEC_WEAK_RE = buildKeywordMatcher(HN_SECURITY_WEAK)
+const DATA_ACCESS_RE = buildKeywordMatcher(HN_DATA_ACCESS_CONTEXT)
 
-// A story qualifies only if its title mentions BOTH an AI service AND a security
-// concept (word-boundary). This is the AND-of-groups the Algolia query string
-// cannot express — see buildHNQuery.
+// Non-security framings that trip the (AI + security-keyword) match yet are not a
+// security event (#892): legal disputes and pure speculation. A 6-year HN corpus
+// audit showed these dominate the false positives — "Reddit SUES Anthropic, ALLEGES
+// unauthorized use of DATA" (passes weak-context via "data"), "Elon Musk Hits OpenAI
+// with Breach of Contract LAWSUIT", "POSSIBLE Mistral model leak". Verified findings
+// usually carry a CVE or firmer, un-hedged language, so vetoing the hedges costs
+// little recall on the operator feed (and a hedged title with a CVE is still withheld
+// from the PUBLIC surface anyway — the CVE gate is a separate reader-side check).
+const HN_TITLE_VETO = [
+  'sue', 'sues', 'sued', 'suing', 'lawsuit', 'lawsuits', 'antitrust', 'copyright',
+  'alleges', 'alleged', 'allegedly', 'allegation', 'allegations',
+  'rumor', 'rumors', 'rumour', 'rumours', 'reportedly', 'possible', 'possibly',
+]
+const TITLE_VETO_RE = buildKeywordMatcher(HN_TITLE_VETO)
+
+// A handful of AI service NAMES collide with unrelated non-AI subjects that also
+// attract security keywords (#892). Requiring a positive AI-context token instead
+// was rejected — it drops real findings whose only AI mention is the ambiguous name
+// ("We hacked Gemini's Python sandbox", "Grok can leak your data", "M365 Copilot
+// Data Exfiltration"). We instead veto the SPECIFIC non-AI collision contexts:
+//   - "Gemini" the crypto EXCHANGE → a co-mentioned peer exchange (coinbase/binance)
+//     or an explicit "crypto/cryptocurrency exchange|wallet|trading" phrase. NOT a bare
+//     "crypto" — that also means cryptOGRAPHY, a core security topic (a real "weak crypto
+//     in the Claude SDK" finding must still reach the operator).
+//   - "cursor" the mouse pointer   → "cursor position/overlap/blink/movement"
+const HN_NAME_COLLISION_RE = /\b(?:coinbase|binance)\b|\bcrypto(?:currency)?\s+(?:exchange|wallet|trading)\b|\bcursor\s+(?:position|overlap|blink|movement)\b|\bmouse\s+cursor\b/i
+
+// True when a title carries a real security signal: a STRONG keyword, or a WEAK
+// keyword ("leak"/"unauthorized") paired with a data/access context word.
+export function hasSecuritySignal(title: string): boolean {
+  if (SEC_STRONG_RE.test(title)) return true
+  return SEC_WEAK_RE.test(title) && DATA_ACCESS_RE.test(title)
+}
+
+// A story qualifies only if its title mentions an AI service AND a real security
+// signal, and is not vetoed as legal/speculative or a name-collision. This is the
+// AND-of-groups the Algolia query string cannot express — see buildHNQuery. The
+// veto/collision guards (#892) lift precision from ~50% on the raw keyword AND.
 export function titleMatchesAiSecurity(title: string): boolean {
-  return AI_KEYWORD_RE.test(title) && SECURITY_KEYWORD_RE.test(title)
+  if (TITLE_VETO_RE.test(title) || HN_NAME_COLLISION_RE.test(title)) return false
+  return AI_KEYWORD_RE.test(title) && hasSecuritySignal(title)
 }
 
 // "Show HN" / "Launch HN" posts are, by HN convention, "here's a thing I built"
@@ -658,25 +712,62 @@ export interface SecurityAlertMeta {
   epssPercentage?: number
 }
 
+// Explicit CVE identifier in a title — a concrete, externally-checkable claim. The
+// sequence number is "4 or more digits" with no upper bound, so `\d{4,}` (not a capped
+// `\d{4,7}`, which would silently reject an 8+ digit id via the trailing \b).
+export const CVE_ID_RE = /\bCVE-\d{4}-\d{4,}\b/i
+
+/**
+ * Whether a stored finding is verified enough for the PUBLIC surfaces (Overview
+ * banner + ServiceDetails card, via /api/status[/cached] `securityAlerts`) — #892.
+ *
+ * OSV entries are CVE-backed vuln-DB records → always public. HN entries are
+ * unverified community chatter matched by title keywords → public ONLY when the
+ * title carries an explicit CVE id. The operator Discord digest is unaffected: it
+ * sends `detectSecurityAlerts` output directly and never passes through this reader,
+ * so operators keep full visibility of every DETECTED HN finding (i.e. this CVE gate
+ * adds no restriction to the operator path beyond the existing `titleMatchesAiSecurity`
+ * / `isShowOrLaunchHN` filters). Unknown source → withheld (fail-closed for exposure).
+ */
+export function isPubliclyVerifiedAlert(meta: Pick<SecurityAlertMeta, 'source' | 'title'>): boolean {
+  if (meta.source === 'osv') return true
+  if (meta.source === 'hackernews') return CVE_ID_RE.test(meta.title ?? '')
+  return false
+}
+
 /**
  * Invariant: `/api/status` and `/api/status/cached` must emit the same `securityAlerts`
  * shape. Asymmetric responses would flap the dashboard banner on 60s silent polls (#304).
  *
- * Returns at most 20 alerts; malformed entries and legacy `"1"` marker values are skipped.
- * Swallows KV list/get errors — security data is optional display, not a hard dependency.
+ * Returns at most `MAX_PUBLIC_SECURITY_ALERTS` alerts; malformed entries and legacy `"1"`
+ * marker values are skipped. #892 — also drops unverified HN chatter (`isPubliclyVerifiedAlert`)
+ * so the public surfaces show only CVE-backed findings; the operator Discord digest is
+ * unaffected. NOTE the filter runs BEFORE the display cap: KV `list` returns keys in
+ * lexicographic order, so `security:seen:hn:*` sorts ahead of `security:seen:osv:*` — a
+ * pre-filter 20-key window let unverified HN keys displace always-verified OSV keys out of
+ * the result. We therefore list a wide window (`SECURITY_LIST_LIMIT`) and cap only AFTER
+ * filtering. Swallows KV list/get errors — security data is optional display, not a hard dependency.
  */
+const MAX_PUBLIC_SECURITY_ALERTS = 20
+const SECURITY_LIST_LIMIT = 100  // wide enough that verified OSV keys are never displaced by HN chatter
+
 export async function readRecentSecurityAlerts(kv: KVNamespace | null): Promise<SecurityAlertMeta[]> {
   if (!kv) return []
   const alerts: SecurityAlertMeta[] = []
   try {
-    const secKeys = await kv.list({ prefix: 'security:seen:', limit: 20 })
+    const secKeys = await kv.list({ prefix: 'security:seen:', limit: SECURITY_LIST_LIMIT })
     if (secKeys.keys.length === 0) return alerts
     const results = await Promise.allSettled(
       secKeys.keys.map(k => kv.get(k.name)),
     )
     for (const r of results) {
       if (r.status !== 'fulfilled' || !r.value || r.value === '1') continue
-      try { alerts.push(JSON.parse(r.value)) } catch { /* skip malformed */ }
+      try {
+        const meta = JSON.parse(r.value) as SecurityAlertMeta
+        if (!isPubliclyVerifiedAlert(meta)) continue  // #892 — unverified HN chatter stays operator-only
+        alerts.push(meta)
+        if (alerts.length >= MAX_PUBLIC_SECURITY_ALERTS) break
+      } catch { /* skip malformed */ }
     }
   } catch { /* security data is optional — don't fail the response */ }
   return alerts

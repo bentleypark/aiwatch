@@ -9,7 +9,7 @@
 import type { ProbeDailyData } from './probe-archival'
 import type { ServiceStatus, Incident } from './types'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
-import { osvTimelineKey } from './security-monitor'
+import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
 import { SERVICE_ADDED_AT, SERVICES } from './services'
 import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type IncidentHistoryRecord } from './incident-history'
@@ -740,8 +740,13 @@ export async function buildMonthlyArchive(
   if (secRaw) {
     try {
       const parsed = JSON.parse(secRaw) as MonthlySecurityEntry[]
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        security = summarizeSecurityAlerts(parsed)
+      // #892 — the monthly archive is PUBLIC (/api/report → reports site), so gate it to
+      // verified findings (OSV, or HN with a CVE id) exactly like the dashboard read;
+      // unverified HN chatter must not surface (as a top finding OR in the counts) in the
+      // public report either. Filtering the entries flows through to every derived figure.
+      const verified = Array.isArray(parsed) ? parsed.filter(isPubliclyVerifiedAlert) : []
+      if (verified.length > 0) {
+        security = summarizeSecurityAlerts(verified)
         // Attach permanent per-alert timelines to OSV top findings (#291).
         security = await enrichTopFindingsWithTimelines(kv, security)
       }
