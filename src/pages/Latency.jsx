@@ -109,7 +109,7 @@ function LatencyTrendSection({ services, t, hourlyData }) {
     const rangeLabels = needsDownsample ? chartData.map((s) => s._rangeLabel) : null
 
     let apiServices = probeServiceIds
-      ? services.filter((s) => probeServiceIds.includes(s.id))
+      ? services.filter((s) => probeServiceIds.includes(s.id) && s.category !== 'app') // #921 — apps (Character.AI) are probed for the detail card but excluded from the latency ranking/chart
       : services.filter((s) => s.category === 'api' && s.latency != null)
     if (isMobile) apiServices = [...apiServices].sort((a, b) => (b.aiwatchScore ?? 0) - (a.aiwatchScore ?? 0)).slice(0, 8)
     const styles = getComputedStyle(document.documentElement)
@@ -259,7 +259,7 @@ export default function Latency() {
   // When no probe data (mock/dev mode), show all services in ranked list
   const hasProbeData = probeServiceIds.length > 0
   const withLatency = services.filter((s) => s.latency != null)
-  const probeServices = hasProbeData ? withLatency.filter((s) => probeServiceIds.includes(s.id)) : withLatency
+  const probeServices = hasProbeData ? withLatency.filter((s) => probeServiceIds.includes(s.id) && s.category !== 'app') : withLatency // #921 — app-category probes (Character.AI) show on their detail card only, not in this ranking
   const statusPageOnly = hasProbeData ? withLatency.filter((s) => !probeServiceIds.includes(s.id)) : []
   const sorted = [...probeServices].sort((a, b) => a.latency - b.latency)
   const fastest = sorted[0]
