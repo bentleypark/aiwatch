@@ -89,6 +89,16 @@ is the *procedure* — follow it top to bottom.
     - Deploy: Vercel auto-deploys on main merge; **Worker is manual** — `npm run deploy:worker` (confirm
       output says `Uploaded aiwatch-worker`), once, after user approval. If several worker PRs are open,
       merge + resolve all THEN deploy once (no half-deploys).
+    - **Sync the issue body NOW — do NOT defer to close.** When the PR used `refs #N` (the issue stays
+      open for a `verify-after`), immediately reconcile the body: **tick every shipped `- [ ]` box**, add
+      a dated `> **Status (YYYY-MM-DD):**` line summarizing what shipped + what remains, and apply the
+      **`verify-blocked`** label. Why here and not step 11: step 11's checklist-sync fires at CLOSE, but a
+      verify-blocked issue never reaches close for weeks — so its body silently drifts (shipped code still
+      showing `- [ ]`) until a triage sweep finds it. This is the single most-missed sync (it's a late,
+      no-gate step in GitHub, a different system than the git diff the hooks watch). The daily
+      `verify-reminders` **body-drift guard** backstops it — it labels any `verify-blocked` (non-`tracking`)
+      issue whose body still has unchecked NON-`verify-after` boxes — but the guard is the safety net;
+      syncing at merge is the fix. (`tracking` umbrellas are exempt: they legitimately keep open sub-items.)
 11. **Verify checklist** — `gh issue view N`; confirm **every** `- [ ]` item is actually implemented in
     code before closing. Re-run step-11-style verification on `U3-someday`/`tracking` issues periodically —
     later/incremental work may have completed one without any PR claiming `closes`.

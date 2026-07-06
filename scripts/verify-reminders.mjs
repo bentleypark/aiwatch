@@ -29,6 +29,52 @@ const VERIFY_RE = /verify-after[\s:-]+(\d{4}-\d{2}-\d{2})([^\n]*)/gi
 // over-suppress a genuinely-open reminder).
 const CHECKED_BOX_RE = /^\s*[-*+]\s+\[[xX]\]/
 
+// An UNCHECKED markdown task-list marker at the start of a line (`- [ ]` / `* [ ]` / `+ [ ]`, leading
+// indent ok). Used by the body-drift guard below. The marker→`[` space is REQUIRED (`\s+`), mirroring
+// CHECKED_BOX_RE, so `-[ ]` (GFM literal text, not a task) is not treated as a checkbox.
+const UNCHECKED_BOX_RE = /^\s*[-*+]\s+\[ \]/
+// A verify-after line is legitimately unchecked until its production signal lands, so it is NOT drift.
+const VERIFY_AFTER_LINE_RE = /verify-after[\s:-]+\d{4}-\d{2}-\d{2}/i
+
+/**
+ * Body-drift guard (issue-body-sync backstop). A `verify-blocked` issue means "code shipped; only a
+ * dated production verify-after remains", so EVERY implementation checkbox should already be ticked —
+ * the only lines still `- [ ]` should be the verify-after line(s). Any OTHER unchecked box means the
+ * body was never synced at merge (the late/no-gate/other-system step) or the label is wrong. This
+ * returns the count + a few samples of those stray unchecked boxes so the caller can flag the issue.
+ * Pure + unit-tested. verify-after lines and checked boxes are excluded; an empty body → no drift.
+ * Known limitation (accepted): the scan is line-based and NOT fence-aware, so a `- [ ]` inside a
+ * ```fenced``` checklist template/example counts too — tolerable here (label-only, self-heals, and the
+ * verify-blocked bucket rarely embeds template checklists).
+ */
+export function findBodyDrift(body) {
+  if (!body) return { count: 0, samples: [] }
+  const items = []
+  for (const line of body.split('\n')) {
+    if (!UNCHECKED_BOX_RE.test(line)) continue
+    if (VERIFY_AFTER_LINE_RE.test(line)) continue // open-until-verified, not drift
+    items.push(line.replace(UNCHECKED_BOX_RE, '').replace(/\*+/g, '').trim())
+  }
+  return { count: items.length, samples: items.slice(0, 5) }
+}
+
+/**
+ * True when an issue is a body-drift candidate: labeled `verify-blocked` (code shipped, verify-gated)
+ * AND NOT `tracking`. A `tracking` umbrella legitimately keeps many open sub-item checkboxes (future
+ * work, not drift), so it is exempt — this scopes the guard to exactly the single-deliverable
+ * verify-blocked bucket where checkbox drift actually concentrates. `labels` = the gh `--json labels`
+ * array (`{name}` objects) or a plain string array.
+ */
+export function isDriftCandidate(labels) {
+  const set = new Set((labels || []).map((l) => (typeof l === 'string' ? l : l?.name)).filter(Boolean))
+  return set.has('verify-blocked') && !set.has('tracking')
+}
+
+/** True when the issue currently carries the `body-drift` label (so the guard can self-heal / clear it). */
+export function hasBodyDriftLabel(labels) {
+  return (labels || []).some((l) => (typeof l === 'string' ? l : l?.name) === 'body-drift')
+}
+
 /** True only for a real calendar date (rejects 2026-02-30, which Date would silently roll over). */
 export function isValidIsoDate(s) {
   const d = new Date(`${s}T00:00:00Z`)
@@ -156,7 +202,7 @@ async function postDiscord(webhook, items) {
 // failure (e.g. the cross-repo PAT is missing so a sibling repo 403/404s) warns + returns [] so the
 // primary reminder still runs. Each issue is tagged with its `repo` for later ref/label targeting.
 function fetchRepoIssues(repo) {
-  const args = ['issue', 'list', '--state', 'open', '--limit', '200', '--json', 'number,title,body,author']
+  const args = ['issue', 'list', '--state', 'open', '--limit', '200', '--json', 'number,title,body,author,labels']
   if (repo) args.push('--repo', repo)
   try {
     const issues = JSON.parse(gh(args))
@@ -180,6 +226,38 @@ async function main() {
   // Empty set only for pure-local (`repos: [null]`) → no filter, so the maintainer can test own board.
   const trusted = parseTrustedAuthors(process.env, repos)
   const considered = trusted.size > 0 ? issues.filter((i) => trusted.has(i.author?.login)) : issues
+
+  // ── Body-drift guard (issue-body-sync backstop) ───────────────────────────────
+  // Catch the drift where a verify-blocked (non-tracking) issue shipped its code but its body still
+  // lists unchecked NON-verify-after checkboxes — the boxes weren't synced at merge (the late, no-gate
+  // step in a different system than git) or the label is wrong. Mechanically backstops the ship-issue
+  // merge-time sync. LABEL-ONLY, no Discord: the `body-drift` label is the signal issue-triage consumes,
+  // and label ops don't spam the operator channel daily. Self-healing — the label is removed once the
+  // body is synced (0 stray boxes). Best-effort: a label failure must never abort the reminder run.
+  const driftScanned = considered
+    .filter((i) => isDriftCandidate(i.labels))
+    .map((i) => ({ iss: i, drift: findBodyDrift(i.body) })) // compute once per candidate (reused below)
+  const toFlagDrift = driftScanned.filter((x) => x.drift.count > 0)
+  const toClearDrift = driftScanned
+    .filter((x) => x.drift.count === 0 && hasBodyDriftLabel(x.iss.labels))
+    .map((x) => x.iss)
+  if (toFlagDrift.length) console.log(`[verify-reminders] ${today}: ${toFlagDrift.length} body-drift → ${toFlagDrift.map((x) => `${displayRef(x.iss.repo, x.iss.number)}(${x.drift.count})`).join(', ')}`)
+  if (dryRun) {
+    if (toFlagDrift.length) console.log('[verify-reminders] --dry-run: would LABEL body-drift:\n' + JSON.stringify(
+      toFlagDrift.map((x) => ({ ref: displayRef(x.iss.repo, x.iss.number), strayBoxes: x.drift.count, samples: x.drift.samples })), null, 2))
+    if (toClearDrift.length) console.log('[verify-reminders] --dry-run: would CLEAR body-drift on: ' + toClearDrift.map((i) => displayRef(i.repo, i.number)).join(', '))
+  } else {
+    for (const { iss } of toFlagDrift) {
+      const a = ['issue', 'edit', String(iss.number), '--add-label', 'body-drift']
+      if (iss.repo) a.push('--repo', iss.repo)
+      try { gh(a) } catch (e) { console.warn(`[verify-reminders] could not add body-drift on ${displayRef(iss.repo, iss.number)}: ${e.message.split('\n')[0]}`) }
+    }
+    for (const iss of toClearDrift) {
+      const a = ['issue', 'edit', String(iss.number), '--remove-label', 'body-drift']
+      if (iss.repo) a.push('--repo', iss.repo)
+      try { gh(a) } catch (e) { console.warn(`[verify-reminders] could not clear body-drift on ${displayRef(iss.repo, iss.number)}: ${e.message.split('\n')[0]}`) }
+    }
+  }
 
   // ── #873 Tier-A auto-verify pass ──────────────────────────────────────────────
   // Independent of the due/weekly ping cadence: evaluate every OPEN verify-after line that carries a
