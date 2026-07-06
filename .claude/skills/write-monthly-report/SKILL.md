@@ -81,6 +81,12 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      timeless principle a regular reader has already seen in prior reports. **Read the last 2–3 months' Key
      Insight pattern titles before writing** — if a title paraphrases a prior month's, reframe. (The per-model-
      count caveat in the bullet above is the sharpest case; here the concern is the broader analytical *framing*.)
+   - **Notation conventions — keep uniform report-wide.** Score `N/100` in the **Summary + Recommendations**
+     only (the two standalone-score sections); **bare `N`** in Key Insight / Notable Incidents / Observations
+     prose, and a Score change is bare both ends (`86 → 79`, never `86/100 → 79/100`). When a grade rides with
+     a score write it **score-first — `81 (Good)`, never `Good (81)`**; a grade word alone is fine as a tier
+     reference (`reached Excellent`, `the only Degrading grade`). Keep one unit form per kind of quantity —
+     durations, latencies (`45h 33m`, `2030 ms p75`). Same value → identical notation in EN and the KO mirror.
 
 3. **Heed the RECURRENCE CHECK block (#54).** If the generator injected a `⚠️ RECURRENCE CHECK` block
    above `## Summary`, a subject (e.g. Together AI) led the same slot in ≥2 recent months. **Do not restate
