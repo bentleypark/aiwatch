@@ -24,7 +24,9 @@ import {
   normalizeDegradationMonthly,
   summarizeDegradation,
   buildMonthlyAccuracy,
+  filterSuppressedFromMonthly,
 } from '../monthly-archive'
+import type { SuppressionEntry } from '../suppression'
 import type { ServiceStatus, Incident } from '../types'
 import type { IncidentHistoryRecord } from '../incident-history'
 import type { MonthlySecurityEntry, MonthlySecuritySummary } from '../monthly-archive'
@@ -353,6 +355,69 @@ describe('isInMonthlyArchiveWindow', () => {
 
   it('returns false on 1st at UTC 02:00', () => {
     expect(isInMonthlyArchiveWindow(1, 2, 0)).toEqual({ inWindow: false, isCatchUp: false })
+  })
+})
+
+// ── filterSuppressedFromMonthly (#904) ───────────────────────────────
+
+describe('filterSuppressedFromMonthly', () => {
+  // Build a realistic stored accumulator via the real accumulator, mirroring the OpenAI June case:
+  // one 264h56m FedRAMP incident + one 40m real incident.
+  const svcWith = (incs: Array<{ id: string; title: string; duration: string }>): ServiceStatus => ({
+    id: 'openai', name: 'openai', provider: '', category: 'api', status: 'operational',
+    latency: null, uptime30d: 99.99, lastChecked: '', incidents: incs.map(i => ({
+      id: i.id, title: i.title, status: 'resolved' as const, impact: 'minor' as const,
+      startedAt: '2026-06-15T22:00:00Z', duration: i.duration, timeline: [],
+    })),
+  })
+  const built = () => accumulateMonthlyIncidents(null, [svcWith([
+    { id: 'fr-1', title: 'FedRAMP workspaces and API orgs have degraded performance', duration: '264h 56m' },
+    { id: 'real-1', title: 'Image API requests failing with 401s', duration: '40m' },
+  ])], '2026-06')
+
+  it('drops a service-pattern-suppressed incident + recomputes aggregates', () => {
+    const before = built()
+    expect(before.services.openai.count).toBe(2)
+    expect(before.services.openai.totalMinutes).toBe(15936) // 264h56m + 40m
+    expect(before.services.openai.longestMinutes).toBe(15896)
+
+    const list: SuppressionEntry[] = [{ scope: 'service-pattern', svcId: 'openai', match: 'fedramp' }]
+    const after = filterSuppressedFromMonthly(before, list)
+    expect(after.services.openai.count).toBe(1)
+    expect(after.services.openai.totalMinutes).toBe(40)
+    expect(after.services.openai.longestMinutes).toBe(40)
+    expect(after.services.openai.incidentIds).toEqual(['real-1'])
+    expect(after.services.openai.incidents?.map(i => i.id)).toEqual(['real-1'])
+    expect(after.services.openai.durations).toEqual({ 'real-1': 40 })
+  })
+
+  it('drops an incident-scope-suppressed incident by id', () => {
+    const after = filterSuppressedFromMonthly(built(), [{ scope: 'incident', incId: 'fr-1' }])
+    expect(after.services.openai.count).toBe(1)
+    expect(after.services.openai.incidentIds).toEqual(['real-1'])
+  })
+
+  it('returns input by identity when nothing matches (or empty list)', () => {
+    const before = built()
+    expect(filterSuppressedFromMonthly(before, [])).toBe(before)
+    const noMatch = filterSuppressedFromMonthly(before, [{ scope: 'service-pattern', svcId: 'claude', match: 'fedramp' }])
+    expect(noMatch.services.openai).toBe(before.services.openai) // untouched service kept by reference
+  })
+
+  it('returns identity on a structurally-corrupt accumulator (no .services) even with a suppression', () => {
+    const list: SuppressionEntry[] = [{ scope: 'service-pattern', svcId: 'openai', match: 'fedramp' }]
+    const corrupt = { lastUpdated: 'x' } as unknown as Parameters<typeof filterSuppressedFromMonthly>[0]
+    expect(() => filterSuppressedFromMonthly(corrupt, list)).not.toThrow()
+    expect(filterSuppressedFromMonthly(corrupt, list)).toBe(corrupt)
+  })
+
+  it('does not cross-attribute a pattern to another service', () => {
+    // same title under a different svcId key must NOT be dropped by an openai pattern
+    const data = accumulateMonthlyIncidents(null, [{
+      ...svcWith([{ id: 'fr-x', title: 'FedRAMP degraded', duration: '1h' }]), id: 'chatgpt', name: 'chatgpt',
+    }], '2026-06')
+    const after = filterSuppressedFromMonthly(data, [{ scope: 'service-pattern', svcId: 'openai', match: 'fedramp' }])
+    expect(after.services.chatgpt.count).toBe(1)
   })
 })
 

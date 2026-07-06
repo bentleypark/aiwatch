@@ -4,6 +4,7 @@ import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImp
 export type { ServiceStatus } from './types'
 import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, kvPut } from './utils'
 import { isProbeHealthy, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
+import { readSuppressions, applySuppressions } from './suppression'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
@@ -1592,5 +1593,14 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     }
   }
 
-  return { raw, enriched }
+  // #904 — operator suppression layer: drop policy-hidden incidents from every downstream consumer
+  // (live /api/status list, scoreFor, the go-forward monthly accumulator, and the services:latest
+  // cache) in one place. Applied AFTER attribution/status determination so the badge (already scoped
+  // by e.g. #741) is unaffected — this only removes the incident from the LIST + Score inputs. Empty
+  // list is identity (no churn); a KV read failure falls back to "nothing suppressed".
+  const suppressions = await readSuppressions(kv)
+  return {
+    raw: applySuppressions(raw, suppressions),
+    enriched: applySuppressions(enriched, suppressions),
+  }
 }
