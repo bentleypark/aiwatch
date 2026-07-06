@@ -1,0 +1,12 @@
+{
+  "name": "aiwatch",
+  "description": "Live AI service reliability from AIWatch — get notified the moment an upstream provider (Claude, OpenAI, Gemini, and more) goes down, plus an /aiwatch status command. Answers \"is it me or them?\" without leaving your terminal.",
+  "version": "0.1.0",
+  "author": { "name": "AIWatch" },
+  "homepage": "https://ai-watch.dev",
+  "repository": "https://github.com/bentleypark/aiwatch",
+  "license": "AGPL-3.0",
+  "experimental": {
+    "monitors": "./monitors/monitors.json"
+  }
+}

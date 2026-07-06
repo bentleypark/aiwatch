@@ -1,3 +1,7 @@
 # The Chrome extension (#837) is a standalone static bundle that consumes the Worker
 # API only — it is not part of the Vercel (SPA + Edge Functions) deployment.
 extension/
+
+# The Claude Code plugin (#920) is a standalone bundle consuming the Worker API only —
+# not part of the Vercel (SPA + Edge Functions) deployment.
+plugin/

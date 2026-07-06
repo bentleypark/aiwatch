@@ -16,6 +16,13 @@
       ]
     }
   ],
+  "redirects": [
+    {
+      "source": "/p/:slug",
+      "destination": "/is-:slug-down?utm_source=claude-code&utm_medium=plugin&utm_campaign=outage",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     { "source": "/is-claude-down", "destination": "/api/is-down?slug=claude" },
     { "source": "/is-chatgpt-down", "destination": "/api/is-down?slug=chatgpt" },

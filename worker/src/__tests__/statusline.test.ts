@@ -5,7 +5,10 @@ import {
   renderStatuslinePreset,
   isStatuslinePreset,
   STATUSLINE_PRESETS,
+  renderStatuslineBrief,
+  renderStatuslineDownList,
   type StatuslineService,
+  type BriefService,
 } from '../statusline'
 import type { ServiceStatus } from '../types'
 
@@ -212,6 +215,76 @@ describe('renderStatuslinePreset (#918)', () => {
 
   it('unknown preset renders empty (caller 404s first)', () => {
     expect(renderStatuslinePreset('bogus', FIVE_DOWN)).toBe('')
+  })
+})
+
+// #920 — the parseable down-list behind the plugin monitor's poll-over-poll diff.
+describe('renderStatuslineDownList (#920)', () => {
+  const svc = (id: string, name: string, status: StatuslineService['status']): StatuslineService => ({ id, name, status })
+
+  it('emits one `status<TAB>name` line per non-operational service, in order', () => {
+    const out = renderStatuslineDownList([
+      svc('claude', 'Claude API', 'down'),
+      svc('openai', 'OpenAI', 'operational'),
+      svc('mistral', 'Mistral API', 'degraded'),
+    ])
+    expect(out).toBe('down\tClaude API\ndegraded\tMistral API')
+  })
+
+  it('is empty when everything is operational', () => {
+    expect(renderStatuslineDownList([svc('openai', 'OpenAI', 'operational')])).toBe('')
+    expect(renderStatuslineDownList([])).toBe('')
+  })
+
+  it('is uncapped (unlike the 3-cap presets) — all affected services listed', () => {
+    const many = Array.from({ length: 6 }, (_, i) => svc(`s${i}`, `Service ${i}`, 'down'))
+    expect(renderStatuslineDownList(many).split('\n')).toHaveLength(6)
+  })
+})
+
+// #920 — the compact incident briefing behind the plugin's /aiwatch command.
+describe('renderStatuslineBrief (#920)', () => {
+  const brief = (over: Partial<BriefService> & Record<string, unknown> = {}): BriefService => ({
+    id: 'x', name: 'X', provider: 'P', category: 'api', status: 'operational',
+    incidents: [], aiwatchScore: 90, scoreGrade: 'good', ...over,
+  } as BriefService)
+
+  it('all operational → a single all-clear line', () => {
+    const out = renderStatuslineBrief([brief({ id: 'openai', name: 'OpenAI' }), brief({ id: 'gemini', name: 'Gemini' })])
+    expect(out).toBe('AIWatch: all monitored AI services operational ✅')
+  })
+
+  it('down service → incident (title + impact) + AI summary + a fallback line', () => {
+    const pool = [
+      brief({ id: 'claude', name: 'Claude API', status: 'down', incidents: [{ id: 'inc1', title: 'Elevated errors', status: 'investigating', impact: 'major' }] as unknown as BriefService['incidents'] }),
+      brief({ id: 'openai', name: 'OpenAI' }),
+      brief({ id: 'gemini', name: 'Gemini' }),
+    ]
+    const out = renderStatuslineBrief(pool, { 'claude:inc1': 'Capacity issue, ~30m to recovery.' })
+    expect(out).toContain('AIWatch — active AI service issues:')
+    expect(out).toContain('🔴 Claude API (down) — "Elevated errors" · major impact')
+    expect(out).toContain('AI: Capacity issue, ~30m to recovery.')
+    expect(out).toContain('Try instead:')
+    // per-service SHORT landing link → vercel.json /p/:slug redirect adds UTM + 307s to is-down
+    expect(out).toContain('↳ https://ai-watch.dev/p/claude')
+    expect(out).not.toContain('utm_') // UTM lives in the vercel redirect, not the (model-relayed) link
+    expect(out).toContain('More: https://ai-watch.dev')
+  })
+
+  it('degraded service with no published incident → says so, no AI line', () => {
+    const out = renderStatuslineBrief([brief({ id: 'mistral', name: 'Mistral API', status: 'degraded', incidents: [] })])
+    expect(out).toContain('🟠 Mistral API (degraded) — no published incident')
+    expect(out).not.toContain('AI:')
+  })
+
+  it('truncates a very long AI summary', () => {
+    const long = 'x'.repeat(500)
+    const out = renderStatuslineBrief(
+      [brief({ id: 'claude', name: 'Claude API', status: 'down', incidents: [{ id: 'i', title: 'T', status: 'identified', impact: 'minor' }] as unknown as BriefService['incidents'] })],
+      { 'claude:i': long },
+    )
+    expect(out).toContain('…')
+    expect(out).not.toContain('x'.repeat(300))
   })
 })
 
