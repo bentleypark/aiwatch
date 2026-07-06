@@ -74,10 +74,11 @@ describe('PROBE_TARGETS', () => {
     'pinecone', 'langsmith', 'runway', 'luma', // #678 — added (stable representative API path)
     'turbopuffer', // #857 — no official uptime, probe is the sole measured signal
     'cursor', // #883 — coding agent with its own API infra (api2.cursor.sh), independent signal
+    'characterai', // #921 — app whose Statuspage died (#689/#800); neo.character.ai/health backend probe
   ]
 
-  it('has all 31 probe targets', () => {
-    expect(PROBE_TARGETS).toHaveLength(31)
+  it('has all 32 probe targets', () => {
+    expect(PROBE_TARGETS).toHaveLength(32)
     const ids = PROBE_TARGETS.map((t) => t.id)
     for (const expected of EXPECTED_IDS) {
       expect(ids).toContain(expected)
@@ -105,6 +106,12 @@ describe('PROBE_TARGETS', () => {
     const cursor = PROBE_TARGETS.find((t) => t.id === 'cursor')
     expect(cursor?.url).toBe('https://api2.cursor.sh/')
     expect(PROBE_INHERIT.cursor).toBeUndefined() // #883 — cursor is directly probed, never inherits
+  })
+
+  it('probes characterai on its backend health endpoint (#921 — Statuspage dead)', () => {
+    const ca = PROBE_TARGETS.find((t) => t.id === 'characterai')
+    expect(ca?.url).toBe('https://neo.character.ai/health')
+    expect(PROBE_INHERIT.characterai).toBeUndefined() // directly probed, own infra
   })
 })
 
