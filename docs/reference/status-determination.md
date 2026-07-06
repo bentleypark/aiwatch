@@ -26,6 +26,25 @@ Per-service status is resolved in `worker/src/services.ts` with this priority:
    - **#689 — dead-source 4xx** (`classifyStatusPageFailure`, in the statuspage fetch path itself, BEFORE the above): a `4xx` on the status-page API means the page is **deactivated/gone** (the SOURCE is dead, not the service — e.g. Character.AI's Statuspage → 401 "page inactive"), so it returns `operational` + `sourceDead` + `incidentSourceStale` (excluded from rankings) instead of `degraded`. `apiUrl` is kept, so it **auto-recovers** to live status when the page returns `200`. The cross-validation above can't rescue this case (it needs probe data, which apps lack, or a platform-wide quorum). The cron sends a distinct **"status source inactive"** operator alert (not a misleading "degraded"), deduped via `alerted:source-dead:{svcId}`. A `5xx`/network error stays transient → the normal `trackFetchFailure → degraded` path.
      - **#714 — 3-state source liveness (flap fix)**: the operator alert decision no longer keys on the boolean `sourceDead`. A boolean conflated "fetch succeeded (alive)" with "fetch threw / 5xx (indeterminate)" as one `false`, so a single transient hiccup mid-dead-source (the cross-host `302→4xx` redirect-follow throwing from CF egress) flipped the alert to a **false "Recovered"** → next-cycle "Inactive" → a repeating pair every cron (the Character.AI symptom). Now `services.ts` also sets **`sourceUnknown`** on the throw (outer catch) + 5xx return paths, and `sourceLivenessOf(svc)` derives `dead` (4xx, incl. 429) / `alive` (clean fetch — the ONLY recovery signal) / `unknown` (throw / 5xx). `decideSourceDeadAction(liveness, {alreadyAlerted, pendingExists})` (alerts.ts, pure + unit-tested) maps it: `unknown` while alerted → **hold** (keep the marker, send nothing); `recovered` fires only on a genuine `alive`. The rising **alert** edge is debounced by a #633-style 1-cycle confirmation marker (`pending:source-dead:{svcId}`, `PENDING_SOURCE_DEAD_TTL_S=600`) so a single-cycle 4xx blip never alerts
 
+## Operator incident suppression — orthogonal to `incidentExclude` (#904)
+
+`incidentExclude`/`incidentComponents` above are **source attribution** — "this incident belongs to a
+DIFFERENT service, don't attribute it here" (splitting a shared status page). Separately, an incident can
+be **correctly attributed** to a service yet need to be **un-exposed for a policy/operational reason** —
+e.g. OpenAI's FedRAMP "degraded performance" (gov-compliance-scoped, not general-API availability). That
+is NOT an attribution problem, so it does **not** belong in `incidentExclude`.
+
+The **suppression layer** (`worker/src/suppression.ts`, operated via `GET/POST /api/admin/suppress` —
+see [operator-tools.md](operator-tools.md)) handles it as a **separate step AFTER `filterIncidents`**, so
+attribution logic (and e.g. the #693 "openai KEEPS FedRAMP" `filter-incidents.test.ts` assertion) is
+**unchanged**. A single `incident:suppressions` KV list carries entries of scope `incident` (hide one id)
+or `service-pattern` (hide any title-matching incident on a service — a runtime-editable `incidentExclude`,
+e.g. `{svcId:'openai', match:'fedramp'}`). Applied at two points: `fetchAllServices` return (live list +
+`scoreFor` + go-forward accumulator + `services:latest` cache) and `buildMonthlyArchive` build-time
+(rebuild-safe drop from a stored past-month accumulator, aggregates recomputed). The **badge is
+unaffected** — suppression runs after status determination, removing the incident only from the LIST +
+Score inputs. Removing a suppression restores the incident with zero code change.
+
 ## Per-component snapshot — `resolveSvcComponents` (#604)
 
 `resolveSvcStatus` collapses the `statusComponentIds` subset into one worst-of badge and **discards** the per-component statuses. `resolveSvcComponents(config, summaryData)` is the **display counterpart**: it preserves the same matched subset as `ServiceComponent[]` (`{ id, name, status }`, normalized, in configured order) on `ServiceStatus.components`, so the ServiceDetails + "Is X Down" surfaces can render a per-component breakdown card (parity with StatusGator / IsDown).

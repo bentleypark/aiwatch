@@ -3,6 +3,7 @@
 // Uses KV cache to serve last-known-good data on fetch failures
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
+import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, type SuppressionEntry } from './suppression'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
@@ -1399,7 +1400,7 @@ import { parseReferralBody, recordReferral, type ReferralCounts } from './referr
 import { parsePageviewBody, recordOutageView, queryOutageAudience, type AudienceCounts } from './outage-audience'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
+import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -1799,6 +1800,67 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
   })
 }
 
+// ── #904: GET/POST /api/admin/suppress ───────────────────────────
+// Operator-managed incident-suppression list (see suppression.ts). GET returns the current list;
+// POST { action:'add'|'remove', scope:'incident'|'service-pattern', incId? | (svcId?+match?), reason? }
+// mutates it. Auth via X-Admin-Key (same ADMIN_API_KEY as /api/admin/analyze). The pure add/remove
+// logic lives in mutateSuppressions; this wraps it with auth + KV read/write + cache invalidation.
+interface AdminSuppressRequest {
+  action?: unknown
+  scope?: unknown
+  incId?: unknown
+  svcId?: unknown
+  match?: unknown
+  reason?: unknown
+}
+
+async function handleAdminSuppress(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+
+  if (!env.ADMIN_API_KEY) return json(401, { ok: false, error: 'unauthorized' })
+  const provided = request.headers.get('X-Admin-Key') ?? ''
+  if (!constantTimeEqual(provided, env.ADMIN_API_KEY)) return json(401, { ok: false, error: 'unauthorized' })
+  if (!env.STATUS_CACHE) return json(503, { ok: false, error: 'Service unavailable' })
+
+  let current: SuppressionEntry[]
+  try {
+    const raw = await env.STATUS_CACHE.get(SUPPRESSIONS_KEY)
+    current = raw ? normalizeSuppressions(JSON.parse(raw)) : []
+  } catch (err) {
+    console.error('[admin/suppress] KV read failed:', err instanceof Error ? err.message : err)
+    return json(502, { ok: false, error: 'failed to read suppression list' })
+  }
+
+  if (request.method === 'GET') return json(200, { ok: true, suppressions: current })
+
+  let body: AdminSuppressRequest
+  try { body = await request.json() } catch { return json(400, { ok: false, error: 'invalid JSON body' }) }
+
+  const result = mutateSuppressions(current, {
+    action: body.action === 'remove' ? 'remove' : body.action === 'add' ? 'add' : ('' as 'add'),
+    scope: body.scope === 'incident' ? 'incident' : body.scope === 'service-pattern' ? 'service-pattern' : ('' as 'incident'),
+    incId: typeof body.incId === 'string' ? body.incId : undefined,
+    svcId: typeof body.svcId === 'string' ? body.svcId : undefined,
+    match: typeof body.match === 'string' ? body.match : undefined,
+    reason: typeof body.reason === 'string' ? body.reason : undefined,
+    by: 'admin',
+    createdAt: new Date().toISOString(),
+  })
+  if (!result.ok) return json(400, { ok: false, error: result.error })
+
+  if (result.changed) {
+    try {
+      await env.STATUS_CACHE.put(SUPPRESSIONS_KEY, JSON.stringify(result.list))
+    } catch (err) {
+      console.error('[admin/suppress] KV write failed:', err instanceof Error ? err.message : err)
+      return json(502, { ok: false, error: 'failed to write suppression list' })
+    }
+    invalidateSuppressionCache() // this isolate reflects the change immediately; others within ≤60s
+  }
+  return json(200, { ok: true, changed: result.changed, suppressions: result.list })
+}
+
 export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     // Use the scheduled trigger time (not wall-clock) so time-of-day checks like
@@ -2135,11 +2197,16 @@ export default {
           const currMonthKey = `incidents:monthly:${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
           const prevMonth = new Date(now); prevMonth.setUTCMonth(prevMonth.getUTCMonth() - 1)
           const prevMonthKey = `incidents:monthly:${prevMonth.getUTCFullYear()}-${String(prevMonth.getUTCMonth() + 1).padStart(2, '0')}`
+          // #904 — filter operator-suppressed incidents out of the raw accumulator before summarizing,
+          // else a suppressed incident (e.g. FedRAMP) resurfaces in the weekly Discord incident summary.
+          const weeklySuppressions = await readSuppressionsFresh(env.STATUS_CACHE)
           for (const mk of [currMonthKey, prevMonthKey]) {
             const mRaw = await env.STATUS_CACHE.get(mk).catch(() => null)
             if (!mRaw) continue
             try {
-              allMonthlyIncidents.push(...parseMonthlyIncidents(JSON.parse(mRaw), serviceNameMap))
+              const parsed = JSON.parse(mRaw) as MonthlyIncidents
+              const filtered = weeklySuppressions.length ? filterSuppressedFromMonthly(parsed, weeklySuppressions) : parsed
+              allMonthlyIncidents.push(...parseMonthlyIncidents(filtered, serviceNameMap))
             } catch (err) { console.warn(`[cron] ${mk} parse failed:`, err instanceof Error ? err.message : String(err)) }
           }
           const incidents = buildIncidentSummary(allMonthlyIncidents, weekStart, weekEnd)
@@ -2928,6 +2995,13 @@ export default {
       return handleAdminRebuildArchive(request, env, cors)
     }
 
+    // #904 — GET/POST /api/admin/suppress — operator incident-suppression list. POST adds/removes a
+    // suppression (per-incident id, or per-service title pattern); GET lists. Applied across the live
+    // list, Score, monthly accumulator, and rebuilt archives so un-exposing an incident needs no deploy.
+    if ((request.method === 'POST' || request.method === 'GET') && url.pathname === '/api/admin/suppress') {
+      return handleAdminSuppress(request, env, cors)
+    }
+
     // #486 — server-side per-user Discord subscription endpoints. The browser POSTs the raw URL +
     // filters here; the worker stores the AES-GCM-encrypted URL and (PR3) the cron fan-out delivers
     // directly, so alerts fire tab-independently. Ownership is proven by a confirm code sent THROUGH
@@ -3691,6 +3765,14 @@ export default {
                 status: 502, headers: { ...cors, 'Content-Type': 'application/json' },
               })
             }
+          }
+          // #904 — the current-month partial reads the raw accumulator, which still holds any incident
+          // accumulated BEFORE it was suppressed (go-forward suppression in fetchAllServices only stops
+          // future accumulation). Filter it here too, else a suppressed incident reappears in the
+          // dashboard's 90-day incident view (mergeArchiveIntoMap) until next month's real archive.
+          if (incidentData) {
+            const suppressions = await readSuppressionsFresh(env.STATUS_CACHE)
+            if (suppressions.length) incidentData = filterSuppressedFromMonthly(incidentData, suppressions)
           }
           const partial = buildPartialIncidentArchive(month, incidentData)
           return new Response(JSON.stringify(partial), {

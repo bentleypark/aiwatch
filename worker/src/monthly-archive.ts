@@ -13,6 +13,7 @@ import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
 import { SERVICE_ADDED_AT, SERVICES } from './services'
 import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type IncidentHistoryRecord } from './incident-history'
+import { readSuppressionsFresh, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
 import { kvPut } from './utils'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
@@ -675,6 +676,47 @@ export async function buildMonthlyAccuracy(
   return stats.total > 0 ? stats : null
 }
 
+/** #904 — pure: drop operator-suppressed incidents from a stored monthly accumulator and recompute
+ *  each affected service's aggregates (count / totalMinutes / longestMinutes) from the survivors.
+ *  `durations` is the complete per-id map (uncapped), so totalMinutes = Σ durations and
+ *  longestMinutes = max(durations) recompute exactly; a service with nothing suppressed is returned
+ *  by identity. Titles for service-pattern matching come from the (capped) `incidents` detail array;
+ *  incident-scope entries match by id even when a detail row is absent. */
+export function filterSuppressedFromMonthly(
+  data: MonthlyIncidents,
+  list: SuppressionEntry[],
+): MonthlyIncidents {
+  // Identity for a no-op list OR a structurally-corrupt accumulator (parses but lacks `.services`) —
+  // so a caller outside a try/catch (the /api/report partial) can't throw on `Object.entries(undefined)`.
+  if (!list.length || !data?.services || typeof data.services !== 'object') return data
+  const services: Record<string, MonthlyIncidentServiceData> = {}
+  for (const [svcId, svc] of Object.entries(data.services)) {
+    const details = svc.incidents ?? []
+    const titleById = new Map(details.map((d) => [d.id, d.title]))
+    const suppressed = new Set<string>()
+    for (const id of svc.incidentIds) {
+      if (isSuppressedByIdTitle(id, titleById.get(id) ?? '', svcId, list)) suppressed.add(id)
+    }
+    if (suppressed.size === 0) { services[svcId] = svc; continue }
+    const incidentIds = svc.incidentIds.filter((id) => !suppressed.has(id))
+    const durations: Record<string, number> = {}
+    for (const [id, dur] of Object.entries(svc.durations ?? {})) {
+      if (!suppressed.has(id)) durations[id] = dur
+    }
+    const durationVals = Object.values(durations)
+    services[svcId] = {
+      ...svc,
+      count: incidentIds.length,
+      totalMinutes: durationVals.reduce((a, b) => a + b, 0),
+      longestMinutes: durationVals.reduce((m, d) => Math.max(m, d), 0),
+      incidentIds,
+      durations,
+      incidents: details.filter((d) => !suppressed.has(d.id)),
+    }
+  }
+  return { ...data, services }
+}
+
 export async function buildMonthlyArchive(
   kv: KVNamespace,
   year: number,
@@ -731,6 +773,17 @@ export async function buildMonthlyArchive(
     try { incidentData = JSON.parse(incRaw) } catch (err) {
       console.warn(`[monthly-archive] corrupt incident accumulation for ${period}:`, err instanceof Error ? err.message : err)
     }
+  }
+
+  // #904 — build-time suppression filter. The already-stored accumulator may contain incidents an
+  // operator has since suppressed (e.g. OpenAI FedRAMP), so a rebuild-archive of a past month drops
+  // them + recomputes count/downtime/longest from the survivors — WITHOUT deleting the accumulator KV
+  // (rebuild-safe). The live path is already suppressed upstream in fetchAllServices.
+  if (incidentData) {
+    // Fresh read (bypass the isolate cache used on the hot /api/status path) — a rebuild is a rare,
+    // manual, correctness-critical one-shot, so it must see a just-added suppression immediately.
+    const suppressions = await readSuppressionsFresh(kv)
+    if (suppressions.length) incidentData = filterSuppressedFromMonthly(incidentData, suppressions)
   }
 
   // Snapshot accumulated security alerts before their 60d TTL lapses (#290). Missing
