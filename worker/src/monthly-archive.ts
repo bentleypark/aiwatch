@@ -7,7 +7,7 @@
 // incident counts, unlike services:latest which is a point-in-time snapshot.
 
 import type { ProbeDailyData } from './probe-archival'
-import type { ServiceStatus, Incident } from './types'
+import type { ServiceStatus, Incident, ServiceConfig } from './types'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
@@ -478,6 +478,35 @@ export function computeMonthlyComponentUptime(
   return result
 }
 
+/** #605 Phase 3 — curate the aggregated per-component uptime down to the service's DISPLAY set,
+ *  applying the SAME selection `resolveSvcComponents` uses live (services.ts): `displayAllComponents`
+ *  → all minus `componentDenylist` (by name); else the `displayComponentIds` / `statusComponentIds`
+ *  allowlist. So the report shows only reliability-relevant surfaces, NOT billing/compliance noise
+ *  (e.g. OpenAI's FedRAMP component at 42% would otherwise read as "OpenAI 42% uptime"). Returns
+ *  `undefined` (→ the `components` field is omitted) when there's no display config or <2 survive —
+ *  a one-row breakdown adds nothing. Pure + unit-tested; keeps the least-reliable-first order. */
+// Pick (not a hand-written struct) so a rename of any of these fields on ServiceConfig breaks
+// the build here instead of silently diverging the report's curation from the dashboard's
+// (mirrors StatusResolverConfig in services.ts). #605 Phase 3.
+type ComponentDisplayConfig = Pick<ServiceConfig, 'displayComponentIds' | 'statusComponentIds' | 'displayAllComponents' | 'componentDenylist'>
+export function curateComponentUptime(
+  components: Array<{ id: string; name: string; uptime: number }> | undefined,
+  config: ComponentDisplayConfig | undefined,
+): Array<{ id: string; name: string; uptime: number }> | undefined {
+  if (!components || components.length === 0 || !config) return undefined
+  let kept: typeof components
+  if (config.displayAllComponents) {
+    const deny = new Set((config.componentDenylist ?? []).map((n: string) => n.toLowerCase()))
+    kept = components.filter((c) => !deny.has(c.name.toLowerCase()))
+  } else {
+    const ids = config.displayComponentIds ?? config.statusComponentIds
+    if (!ids || ids.length === 0) return undefined
+    const idSet = new Set(ids)
+    kept = components.filter((c) => idSet.has(c.id))
+  }
+  return kept.length >= 2 ? kept : undefined
+}
+
 /** Compute per-service average probe RTT (p75) from daily probe summaries */
 export function computeMonthlyLatency(
   probeData: Record<string, ProbeDailyData>,
@@ -925,7 +954,10 @@ export async function buildMonthlyArchive(
       latencySpikes: latencyStats[id]?.spikes ?? null,
       ...(incidentList ? { incidentList } : {}),
       ...(scoreSvc?.incidentSourceStale ? { incidentSourceStale: true } : {}),
-      ...(componentUptimeMap[id] ? { components: componentUptimeMap[id] } : {}), // #605 Phase 2
+      ...(() => { // #605 Phase 2 aggregate + Phase 3 curate to the display set (drops billing/compliance noise)
+        const curated = curateComponentUptime(componentUptimeMap[id], SERVICES.find((s) => s.id === id))
+        return curated ? { components: curated } : {}
+      })(),
       ...(SERVICE_ADDED_AT[id] ? { addedAt: SERVICE_ADDED_AT[id] } : {}), // #809 — report-side coverage gate
     }
   }
