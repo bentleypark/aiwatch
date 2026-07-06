@@ -71,17 +71,18 @@ export const SERVICES: ServiceConfig[] = [
   // service; statusComponentId (Developer Console) is the primary for uptime parsing / calendar /
   // component-miss alerting. Single-tenant page → no incidentKeywords needed.
   { id: 'cerebras', name: 'Cerebras Inference', provider: 'Cerebras', category: 'api', statusUrl: 'https://status.cerebras.ai', apiUrl: 'https://status.cerebras.ai/api/v2/summary.json', statusComponentId: '83h1cchw4vs4', statusComponentIds: ['83h1cchw4vs4', '7xvps6c9lqwc', 'bhqw2gr7r710', 'hgfykfsb36gn', '8ygyx5vydlm2'] },
-  // #623 — status.perplexity.com (Instatus, Next.js) has 2 components: "API" (Sonar) + "Website"
-  // (the consumer perplexity.ai). The Next.js parser now resolves each incident's affected components
+  // #623 — status.perplexity.com (Instatus, Next.js) has 3 components: "API" (Sonar) + "Website"
+  // (the consumer perplexity.ai) + "Computer" (agentic/computer-use surface, added #911).
+  // The Next.js parser now resolves each incident's affected components
   // → componentNames (#623), so `incidentKeywords: ['api']` (matched against componentNames) scopes
   // the badge/Score to the API: a Website-only incident is dropped, a Website+API incident kept (it
   // affects the API). Allowlist is correct here — the API component is literally named "API", and
   // unlike a title-denylist it keeps a multi-component "Website and API" incident.
   // #635 — statusComponent 'API' selects the Instatus "API" component for the official uptime% (the
   // Next.js payload carries componentsUptime[id].uptime, ~90d) instead of "Not provided".
-  // displayComponentIds (#761): top-level Instatus components API (Sonar) + Website. Display-only —
-  // badge stays on statusComponent 'API'. Next.js Instatus exposes per-component status.
-  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com', incidentKeywords: ['api'], statusComponent: 'API', displayComponentIds: ['clyiakn7i60113hvojwho6za6j', 'clyi6jhgg31469ihojbwbsmeeg'] },
+  // displayComponentIds (#761): top-level Instatus components API (Sonar) + Website + Computer (#911).
+  // Display-only — badge stays on statusComponent 'API'. Next.js Instatus exposes per-component status.
+  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com', incidentKeywords: ['api'], statusComponent: 'API', displayComponentIds: ['clyiakn7i60113hvojwho6za6j', 'clyi6jhgg31469ihojbwbsmeeg', 'cmr18ih7201l20rqmap66bx4l'] },
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
   // status.deepseek.com (Flashduty, #507) blocks NON-BROWSER TLS fingerprints — a Worker fetch()
   // is reset at the TLS layer regardless of egress IP (verified 2026-06-12: a real Chromium from
