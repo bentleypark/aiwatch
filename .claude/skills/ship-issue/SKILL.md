@@ -80,6 +80,18 @@ is the *procedure* — follow it top to bottom.
      `exists`); NOT GA4/GSC-CTR/consent-gated or behavioral checks — leave those as a plain human ping.
      Validate it before it ships: `node scripts/verify-assertions.mjs --issue N --dry-run`. Grammar +
      allowlist + fail-open semantics: **[docs/reference/verify-assertions.md](../../../docs/reference/verify-assertions.md)**.
+   - **Placement (canonical, #921 format):** collect EVERY `verify-after` line — each with its indented
+     `assert:` sub-line, if any — under ONE dedicated heading at the **bottom of the body**:
+     ```
+     ## Production-gated verification
+     - [ ] **verify-after YYYY-MM-DD** — what to check + where. PR #N.
+           assert: GET /api/status/cached | services[id=X].field == "value"
+     ```
+     One consistent home — NOT inline in a part's checklist, NOT a top `> Status:` callout — so the
+     reminder lines are always in the same place and the body-drift guard reads cleanly. A multi-part
+     issue lists one `verify-after` line per part under the same heading (keep each line's note so it's
+     clear which part it verifies). The `verify-reminders` scanner is whole-body, so placement is
+     cosmetic for the automation — this convention is purely for human consistency across issues.
    - **Cross-issue reconciliation** — also scan OTHER open issues this change touches:
      fully implements another → add `closes #M`; partially advances → `refs #M` + comment;
      **supersedes/invalidates** another (a newer finding/feature makes it moot) → comment the why + close it.
