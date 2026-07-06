@@ -34,12 +34,28 @@ export function mapInstatusImpact(raw: string | null | undefined): Incident['imp
 // each notice's `components: [{id}]` can be resolved to names (set on Incident.componentNames). That
 // lets a service like Perplexity scope its API badge with `incidentKeywords: ['api']` (matched
 // against componentNames): a Website-only incident is dropped, a Website+API incident kept.
-// Component entries serialize as `"id":"…","name":{"default":"Website"}` (name has ONLY a `default`
-// key); incident notices use `"name":{"en":…,"default":…}` (an `en` key first), so the
-// `"name":{"default":` anchor matches component definitions but not notice names.
+//
+// #911 — three object shapes coexist in the payload and must be told apart to map ONLY top-level
+// component id→name:
+//   - top-level component: `"id":…,"name":{…"default":"X"},"nameHtml":…,"group":<null|…>,"children":[…]`
+//   - CHILD sub-component (e.g. fal's "Model API" under the "API" parent): SAME shape but NO `"group"`
+//   - incident notice: `"name":{"en":…,"default":…}` immediately followed by `"started"` (no `"nameHtml"`)
+// The old `"name":{"default":` anchor worked only by ACCIDENT — top-level names were `default`-only
+// while notices AND (in the observed payloads) children carried an `"en"` locale key first. Perplexity
+// adding a *top-level* component with an `"en"` key ("Computer", #911) broke that, so the locale key is
+// NOT a reliable discriminator. Instead: (1) tolerate any locale keys before `default` (`[^}]*?`),
+// (2) require the trailing `,"nameHtml"` — excludes notices, and (3) require a `"group"` field reached
+// without crossing into the next object (`(?:(?!"id":")…)*?` tempered scan) — top-level components
+// carry `"group"` before their `"children"`; children have none, so they never match. This preserves
+// fal's intended top-level granularity while picking up Perplexity's Computer.
+// LOAD-BEARING ASSUMPTIONS on the current Instatus serialization (not guaranteed by the format): a
+// top-level component (a) emits `"nameHtml"` right after its name AND (b) emits its `"group"` field
+// BEFORE its `"children"` array. If either changes upstream, that component is silently dropped — so
+// `parseInstatusComponents` warns-once on an all-dropped payload (#911) to make the drift diagnosable
+// rather than mistaken for a code bug.
 function buildInstatusComponentMap(html: string): Map<string, string> {
   const map = new Map<string, string>()
-  const re = /\\"id\\":\\"([a-z0-9]+)\\",\\"name\\":\{\\"default\\":\\"([^\\"]+)\\"\}/g
+  const re = /\\"id\\":\\"([a-z0-9]+)\\",\\"name\\":\{[^}]*?\\"default\\":\\"([^\\"]+)\\"\},\\"nameHtml\\"(?:(?!\\"id\\":\\")[\s\S])*?\\"group\\":/g
   let m: RegExpExecArray | null
   while ((m = re.exec(html)) !== null) map.set(m[1], m[2])
   return map
@@ -63,10 +79,10 @@ function instatusComponentStatusToStatuspage(raw: string): string {
 // Instatus SSR exposes a per-component `status` field; the Nuxt payload carries name/uptime/days but
 // NO component status, so Nuxt services (e.g. Mistral) return [] here (status snapshot deferred for
 // them). Reuses `buildInstatusComponentMap` — which isolates the TOP-LEVEL components (their children,
-// e.g. fal's "Model API"/"Serverless API" under the "API" group, serialize differently and aren't
-// matched), giving a uniform top-level granularity across services — then reads each component's
-// `status` from the unescaped payload. Returns the Atlassian-shaped {id,name,status} so it feeds
-// `resolveSvcComponents()` (with the service's `displayComponentIds`) exactly like a summary.json
+// e.g. fal's "Model API"/"Serverless API" under the "API" group, are excluded via the `"group"`-field
+// discriminator, #911), giving a uniform top-level granularity across services — then reads each
+// component's `status` from the unescaped payload. Returns the Atlassian-shaped {id,name,status} so it
+// feeds `resolveSvcComponents()` (with the service's `displayComponentIds`) exactly like a summary.json
 // component list.
 export function parseInstatusComponents(html: string): Array<{ id: string; name: string; status: string }> {
   if (!html.includes('__next_f') || html.includes('__NUXT_DATA__')) return []
@@ -75,7 +91,9 @@ export function parseInstatusComponents(html: string): Array<{ id: string; name:
   const u = html.replace(/\\"/g, '"')
   const out: Array<{ id: string; name: string; status: string }> = []
   for (const [id, name] of buildInstatusComponentMap(html)) {
-    const anchor = `"id":"${id}","name":{"default":`
+    // Locale-agnostic anchor (#911) — the name object may be `{"default":…}` or `{"en":…,"default":…}`,
+    // so anchor at the name-object open brace, not at `"default":`.
+    const anchor = `"id":"${id}","name":{`
     const at = u.indexOf(anchor)
     if (at < 0) continue
     // The component's own `status` is the first one after the anchor (it precedes any `children`
@@ -83,7 +101,22 @@ export function parseInstatusComponents(html: string): Array<{ id: string; name:
     const m = u.slice(at, at + 600).match(/"status":"([A-Z_]+)"/)
     out.push({ id, name, status: instatusComponentStatusToStatuspage(m ? m[1] : 'OPERATIONAL') })
   }
+  // #911 diagnostic — the top-level discriminator (`group`-gated) is load-bearing: a real top-level
+  // component that ever ships WITHOUT a `group` field (or without `nameHtml`) is silently dropped, the
+  // exact silent-miss class #911 fixed. If the payload clearly HAS component-shaped objects (a permissive
+  // `nameHtml`-anchored match) yet the strict top-level pass matched none, warn once so an upstream shape
+  // change surfaces as a diagnosable signal instead of an empty breakdown mistaken for a code bug.
+  if (out.length === 0 && /\\"id\\":\\"[a-z0-9]+\\",\\"name\\":\{[^}]*?\\"default\\":\\"[^\\"]+\\"\},\\"nameHtml\\"/.test(html)) {
+    warnEmptyInstatusComponents()
+  }
   return out
+}
+
+let warnedEmptyInstatusComponents = false
+function warnEmptyInstatusComponents(): void {
+  if (warnedEmptyInstatusComponents) return
+  warnedEmptyInstatusComponents = true
+  console.warn('[parseInstatusComponents] payload has component-shaped objects but none matched the top-level (`group`-gated) discriminator — Instatus Next.js shape may have changed (#911)')
 }
 
 function parseInstatusNextIncidents(html: string): Incident[] {

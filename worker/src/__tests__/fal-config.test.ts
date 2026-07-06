@@ -32,11 +32,11 @@ describe('#758 fal.ai inference service config', () => {
     expect(s.displayComponentIds).toEqual(['clzmj6mnv0283gwmwtdqtt9u3', 'clzmj6mni0276gwmw95xftvtd', 'clzu5ivf0385762icocgwepue4u'])
   })
 
-  it('perplexity has the #761 per-component snapshot config (API + Website)', () => {
+  it('perplexity has the #761 per-component snapshot config (API + Website + Computer #911)', () => {
     // Pinned because resolveSvcComponents is ≥2-gated: a single stale/typo'd id would silently drop
-    // the breakdown to [] with no other failing test.
+    // the breakdown to [] with no other failing test. Computer (cmr18ih7201l20rqmap66bx4l) added #911.
     const s = SERVICES.find((x) => x.id === 'perplexity')!
-    expect(s!.displayComponentIds).toEqual(['clyiakn7i60113hvojwho6za6j', 'clyi6jhgg31469ihojbwbsmeeg'])
+    expect(s!.displayComponentIds).toEqual(['clyiakn7i60113hvojwho6za6j', 'clyi6jhgg31469ihojbwbsmeeg', 'cmr18ih7201l20rqmap66bx4l'])
   })
 
   it('fal is excluded from fallback (self-serve inference platform, like Replicate/Hugging Face)', () => {

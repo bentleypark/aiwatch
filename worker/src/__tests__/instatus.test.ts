@@ -272,10 +272,13 @@ describe('parseInstatusUptime (#627)', () => {
 describe('parseInstatusUptime — Next.js componentsUptime (#635, Perplexity)', () => {
   // Mirrors status.perplexity.com: escaped component defs (id→name) + a `componentsUptime` object
   // keyed by component id, each entry nesting an `outages` array and an aggregate `"uptime"` string.
+  // A TOP-LEVEL component def carries `nameHtml` + a `group` field (#911) — the resolver requires both.
+  const compDef = (id: string, name: string) =>
+    `\\"id\\":\\"${id}\\",\\"name\\":{\\"default\\":\\"${name}\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003e${name}\\u003c/p\\u003e\\"},\\"group\\":null,\\"children\\":[],`
   function nextHtmlWithUptime() {
     const escaped =
-      '\\"id\\":\\"clyi6jhgg31469ihojbwbsmeeg\\",\\"name\\":{\\"default\\":\\"Website\\"}' +
-      '\\"id\\":\\"clyiakn7i60113hvojwho6za6j\\",\\"name\\":{\\"default\\":\\"API\\"}' +
+      compDef('clyi6jhgg31469ihojbwbsmeeg', 'Website') +
+      compDef('clyiakn7i60113hvojwho6za6j', 'API') +
       '\\"componentsUptime\\":{' +
         '\\"clyi6jhgg31469ihojbwbsmeeg\\":{\\"5\\":\\"99.47\\",' +
           '\\"outages\\":[{\\"from\\":\\"2026-06-05T01:00:00.000Z\\",\\"to\\":\\"2026-06-05T01:40:38.000Z\\",\\"status\\":\\"MAJOROUTAGE\\"}],' +
@@ -299,7 +302,7 @@ describe('parseInstatusUptime — Next.js componentsUptime (#635, Perplexity)', 
     // A nested outage carries `{`/`}` INSIDE string values — the quote-aware matcher must not
     // miscount them, else the slice truncates and JSON.parse fails → wrong null.
     const escaped =
-      '\\"id\\":\\"abc123\\",\\"name\\":{\\"default\\":\\"API\\"}' +
+      compDef('abc123', 'API') +
       '\\"componentsUptime\\":{\\"abc123\\":{' +
         '\\"outages\\":[{\\"status\\":\\"DEGRADED}{\\",\\"noticeId\\":\\"x}y\\"}],' +
         '\\"uptime\\":\\"97.5\\"}}'
@@ -309,7 +312,7 @@ describe('parseInstatusUptime — Next.js componentsUptime (#635, Perplexity)', 
 
   it('returns null for an uptime value outside [0,100]', () => {
     const escaped =
-      '\\"id\\":\\"abc123\\",\\"name\\":{\\"default\\":\\"API\\"}' +
+      compDef('abc123', 'API') +
       '\\"componentsUptime\\":{\\"abc123\\":{\\"uptime\\":\\"150.0\\"}}'
     const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
     expect(parseInstatusUptime(html, 'API')).toBeNull()
@@ -317,7 +320,7 @@ describe('parseInstatusUptime — Next.js componentsUptime (#635, Perplexity)', 
 
   it('returns null when the component resolves but has no componentsUptime entry', () => {
     const escaped =
-      '\\"id\\":\\"abc123\\",\\"name\\":{\\"default\\":\\"API\\"}' +
+      compDef('abc123', 'API') +
       '\\"componentsUptime\\":{\\"other999\\":{\\"uptime\\":\\"99.0\\"}}'
     const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
     expect(parseInstatusUptime(html, 'API')).toBeNull()
@@ -325,24 +328,25 @@ describe('parseInstatusUptime — Next.js componentsUptime (#635, Perplexity)', 
 
   it('returns null (warn-once shape path) when the component resolves but the componentsUptime block is absent', () => {
     // Resolvable component map but no `componentsUptime` key → the structural-breakage warn path.
-    const escaped = '\\"id\\":\\"abc123\\",\\"name\\":{\\"default\\":\\"API\\"}\\"notices\\":{}'
+    const escaped = compDef('abc123', 'API') + '\\"notices\\":{}'
     const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
     expect(parseInstatusUptime(html, 'API')).toBeNull()
   })
 })
 
 describe('parseInstatusIncidents — Next.js component capture (#623, Perplexity)', () => {
-  // Mirrors the real status.perplexity.com payload: a `components` array (id→name: Website, API,
-  // name has ONLY a `default` key) + notices that reference component ids and carry `name:{en,default}`.
+  // Mirrors the real status.perplexity.com payload: a `components` array (id→name: Website, API) —
+  // each TOP-LEVEL component carries `nameHtml` + a `group` field (#911) — plus notices that reference
+  // component ids and carry `name:{en,default}` (no nameHtml).
   function nextHtmlWithComponents() {
     // Real Instatus ids are cuid-style (e.g. clyi6jhgg31469ihojbwbsmeeg) — use that shape so the test
     // exercises the regex's id charset/length faithfully.
     const WEB = 'clyi6jhgg31469ihojbwbsmeeg'
     const API = 'clyiakn7i60113hvojwho6za6j'
+    const comp = (id: string, name: string) =>
+      `{\\"id\\":\\"${id}\\",\\"name\\":{\\"default\\":\\"${name}\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003e${name}\\u003c/p\\u003e\\"},\\"status\\":\\"OPERATIONAL\\",\\"group\\":null,\\"children\\":[]}`
     const components =
-      '\\"components\\":[' +
-      `{\\"id\\":\\"${WEB}\\",\\"name\\":{\\"default\\":\\"Website\\"},\\"status\\":\\"OPERATIONAL\\"},` +
-      `{\\"id\\":\\"${API}\\",\\"name\\":{\\"default\\":\\"API\\"},\\"status\\":\\"OPERATIONAL\\"}]`
+      '\\"components\\":[' + comp(WEB, 'Website') + ',' + comp(API, 'API') + ']'
     const n1 =
       '\\"n1\\":{\\"id\\":\\"n1\\",\\"name\\":{\\"en\\":\\"Website and API incident\\",\\"default\\":\\"Website and API incident\\"},' +
       '\\"impact\\":\\"DEGRADEDPERFORMANCE\\",\\"started\\":\\"2026-05-08T00:20:00.000Z\\",\\"resolved\\":\\"2026-05-08T04:19:00.000Z\\",' +
@@ -378,9 +382,11 @@ describe('parseInstatusComponents (#761) — per-component snapshot', () => {
   // definitions carry `"id":"…","name":{"default":"…"},…,"status":"<STATE>"`. Children (e.g. fal's
   // "Model API" under the "API" group) serialize differently and are intentionally NOT matched, so
   // the snapshot stays at a uniform top-level granularity.
+  // A TOP-LEVEL component carries a `"group"` field before `"children"` (#911 discriminator). The real
+  // Instatus payload includes it; the fixture must too, or the `"group"`-gated regex won't match.
   function nextHtmlWithComponents(states: Record<string, string>) {
     const comp = (id: string, name: string, status: string) =>
-      `\\"id\\":\\"${id}\\",\\"name\\":{\\"default\\":\\"${name}\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003e${name}\\u003c/p\\u003e\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"${status}\\",\\"isParent\\":false,\\"children\\":[]`
+      `\\"id\\":\\"${id}\\",\\"name\\":{\\"default\\":\\"${name}\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003e${name}\\u003c/p\\u003e\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"${status}\\",\\"isParent\\":false,\\"group\\":null,\\"children\\":[]`
     const escaped =
       comp('clzmj6mni0276gwmw95xftvtd', 'Website', states.web ?? 'OPERATIONAL') + ',' +
       comp('clzmj6mnv0283gwmwtdqtt9u3', 'API', states.api ?? 'OPERATIONAL') + ',' +
@@ -424,5 +430,89 @@ describe('parseInstatusComponents (#761) — per-component snapshot', () => {
 
   it('returns [] for a non-Instatus / empty payload', () => {
     expect(parseInstatusComponents('<html></html>')).toEqual([])
+  })
+
+  // #911 — Perplexity added a TOP-LEVEL "Computer" component whose name object carries an `"en"`
+  // locale key BEFORE `"default"` (`{"en":"Computer","default":"Computer"}`), unlike the older
+  // `default`-only "API"/"Website". The old `"name":{"default":` anchor silently dropped it.
+  it('extracts a top-level component whose name has an `en` locale key before `default` (Perplexity Computer)', () => {
+    const withEn = (id: string, name: string, status: string, en: boolean, group: boolean) => {
+      const nameObj = en ? `{\\"en\\":\\"${name}\\",\\"default\\":\\"${name}\\"}` : `{\\"default\\":\\"${name}\\"}`
+      const groupField = group ? `\\"group\\":null,` : ''
+      return `\\"id\\":\\"${id}\\",\\"name\\":${nameObj},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003e${name}\\u003c/p\\u003e\\"},\\"isCollapsed\\":true,\\"order\\":3,\\"showUptime\\":true,\\"status\\":\\"${status}\\",\\"isParent\\":false,${groupField}\\"children\\":[]`
+    }
+    const escaped =
+      withEn('clyiakn7i60113hvojwho6za6j', 'API', 'OPERATIONAL', false, true) + ',' +
+      withEn('clyi6jhgg31469ihojbwbsmeeg', 'Website', 'OPERATIONAL', false, true) + ',' +
+      withEn('cmr18ih7201l20rqmap66bx4l', 'Computer', 'DEGRADEDPERFORMANCE', true, true)
+    const comps = parseInstatusComponents(`<script>self.__next_f.push([1,"x:${escaped}"])</script>`)
+    const byName = Object.fromEntries(comps.map((c) => [c.name, c.status]))
+    expect(byName['Computer']).toBe('degraded_performance') // en-key top-level now matched + status read
+    expect(byName['API']).toBe('operational')
+    expect(byName['Website']).toBe('operational')
+    expect(comps.map((c) => c.id)).toContain('cmr18ih7201l20rqmap66bx4l')
+  })
+
+  // #911 — a CHILD sub-component (e.g. fal's "Model API" under the "API" parent) ALSO carries the
+  // `{"en":…,"default":…}` shape, so the `en` key can't discriminate top-level from child. Children
+  // have NO `"group"` field — the `"group"`-gated regex excludes them, preserving top-level granularity.
+  it('excludes a child sub-component that shares the `en` name shape but has no `group` field (fal Model API)', () => {
+    // Parent "API" (has group + a nested child), then the child "Model API" (en shape, NO group).
+    const parent =
+      `\\"id\\":\\"clzmj6mnv0283gwmwtdqtt9u3\\",\\"name\\":{\\"default\\":\\"API\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003eAPI\\u003c/p\\u003e\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"OPERATIONAL\\",\\"isParent\\":true,\\"group\\":null,\\"children\\":[` +
+        `{\\"id\\":\\"cmp1437hn01j2bv9drf8hek1u\\",\\"name\\":{\\"en\\":\\"Model API\\",\\"default\\":\\"Model API\\"},\\"nameHtml\\":{\\"en\\":\\"\\u003cp\\u003eModel API\\u003c/p\\u003e\\",\\"default\\":\\"\\u003cp\\u003eModel API\\u003c/p\\u003e\\"},\\"isCollapsed\\":true,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"MAJOROUTAGE\\",\\"isParent\\":false,\\"children\\":[]}` +
+      `]`
+    const comps = parseInstatusComponents(`<script>self.__next_f.push([1,"x:${parent}"])</script>`)
+    expect(comps.map((c) => c.name)).toEqual(['API'])                 // parent only
+    expect(comps.map((c) => c.id)).not.toContain('cmp1437hn01j2bv9drf8hek1u') // child dropped
+    // The bounded first-`"status"` scan must read the PARENT's status (OPERATIONAL), NOT the nested
+    // child's (MAJOROUTAGE) — a regression in the anchor/window would read the child's and go unnoticed.
+    expect(comps.find((c) => c.name === 'API')!.status).toBe('operational')
+  })
+
+  // #911 — an incident notice also serializes `{"en":…,"default":…}` but is followed by `"started"`,
+  // not `"nameHtml"`. Anchoring on the trailing `,"nameHtml"` keeps notices out of the component map.
+  it('excludes an incident notice (en name shape, no nameHtml)', () => {
+    const comp =
+      `\\"id\\":\\"clzmj6mnv0283gwmwtdqtt9u3\\",\\"name\\":{\\"default\\":\\"API\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003eAPI\\u003c/p\\u003e\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"OPERATIONAL\\",\\"isParent\\":false,\\"group\\":null,\\"children\\":[]`
+    const notice =
+      `\\"id\\":\\"cmr3uqd3801w80kqfk6xdj08m\\",\\"name\\":{\\"en\\":\\"Computer Sandbox Issue\\",\\"default\\":\\"Computer Sandbox Issue\\"},\\"started\\":\\"2026-07-02T18:30:00.000Z\\",\\"resolved\\":null,\\"status\\":\\"INVESTIGATING\\",\\"impact\\":\\"PARTIALOUTAGE\\"`
+    const comps = parseInstatusComponents(`<script>self.__next_f.push([1,"x:${comp},${notice}"])</script>`)
+    expect(comps.map((c) => c.name)).toEqual(['API'])                    // notice excluded
+    expect(comps.map((c) => c.name)).not.toContain('Computer Sandbox Issue')
+  })
+
+  // #911 — verbatim real-payload regression. The hand-built fixtures above are authored to the regex,
+  // so they're self-consistent; this one uses bytes captured from the LIVE status.perplexity.com Next.js
+  // payload (2026-07-06, full field set + real order) so an upstream serialization change is caught, not
+  // assumed. API/Website are `default`-only; Computer carries the `{"en":…,"default":…}` shape.
+  it('extracts all three components from a verbatim real status.perplexity.com payload', () => {
+    // Verbatim escaped component bytes captured from a real status.perplexity.com Next.js
+    // payload (2026-07-06) — defeats fixture circularity: if Instatus ever reorders/renames a
+    // field the regex depends on, this real-bytes test catches it (#911).
+    const REAL_API = '\\"id\\":\\"clyiakn7i60113hvojwho6za6j\\",\\"name\\":{\\"default\\":\\"API\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003eAPI\\u003c/p\\u003e\\"},\\"description\\":{\\"default\\":\\"\\"},\\"descriptionHtml\\":{\\"default\\":\\"\\"},\\"isCollapsed\\":false,\\"order\\":2,\\"showUptime\\":true,\\"status\\":\\"OPERATIONAL\\",\\"archivedAt\\":null,\\"isThirdParty\\":false,\\"isParent\\":false,\\"thirdPartyComponentService\\":null,\\"startDate\\":null,\\"metrics\\":[],\\"group\\":null,\\"children\\":[]}'
+    const REAL_WEB = '\\"id\\":\\"clyi6jhgg31469ihojbwbsmeeg\\",\\"name\\":{\\"default\\":\\"Website\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003eWebsite\\u003c/p\\u003e\\"},\\"description\\":{\\"default\\":\\"\\"},\\"descriptionHtml\\":{\\"default\\":\\"\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"OPERATIONAL\\",\\"archivedAt\\":null,\\"isThirdParty\\":false,\\"isParent\\":false,\\"thirdPartyComponentService\\":null,\\"startDate\\":null,\\"metrics\\":[],\\"group\\":null,\\"children\\":[]}'
+    const REAL_COMP = '\\"id\\":\\"cmr18ih7201l20rqmap66bx4l\\",\\"name\\":{\\"en\\":\\"Computer\\",\\"default\\":\\"Computer\\"},\\"nameHtml\\":{\\"en\\":\\"\\u003cp\\u003eComputer\\u003c/p\\u003e\\",\\"default\\":\\"\\u003cp\\u003eComputer\\u003c/p\\u003e\\"},\\"description\\":{\\"default\\":\\"\\"},\\"descriptionHtml\\":{\\"default\\":\\"\\"},\\"isCollapsed\\":true,\\"order\\":3,\\"showUptime\\":true,\\"status\\":\\"OPERATIONAL\\",\\"archivedAt\\":null,\\"isThirdParty\\":false,\\"isParent\\":false,\\"thirdPartyComponentService\\":null,\\"startDate\\":null,\\"metrics\\":[],\\"group\\":null,\\"children\\":[]}'
+    const html = `<script>self.__next_f.push([1,"x:\\"components\\":[${REAL_API},${REAL_WEB},${REAL_COMP}]"])</script>`
+    const comps = parseInstatusComponents(html)
+    expect(comps.map((c) => c.name).sort()).toEqual(['API', 'Computer', 'Website'])
+    expect(comps.map((c) => c.id)).toContain('cmr18ih7201l20rqmap66bx4l')
+    expect(comps.every((c) => c.status === 'operational')).toBe(true)
+  })
+
+  // #911 — a top-level component that ships WITHOUT a `group` field is (by design) silently dropped:
+  // the `group`-gated regex can't tell it from a child. This documents that known fragility AND asserts
+  // the diagnostic warn-once fires so the silent miss is observable (mirrors warnNextUptimeShape).
+  it('drops a groupless top-level component but warns once (shape-drift diagnostic)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const noGroup =
+        `\\"id\\":\\"nogroupid001\\",\\"name\\":{\\"default\\":\\"API\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003eAPI\\u003c/p\\u003e\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"OPERATIONAL\\",\\"isParent\\":false,\\"children\\":[]`
+      const comps = parseInstatusComponents(`<script>self.__next_f.push([1,"x:${noGroup}"])</script>`)
+      expect(comps).toEqual([]) // dropped — the documented `group`-presence fragility
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('top-level (`group`-gated) discriminator'))
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
