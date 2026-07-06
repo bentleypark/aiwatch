@@ -583,6 +583,20 @@ export function coverageDaysFrom(addedAt: string | undefined, nowIso: string): n
   return Math.max(0, Math.floor(ms / 86_400_000))
 }
 
+/** #909 — did a service exist during the archive month? A service added AFTER the month never
+ *  existed in it; a post-month archive REBUILD (which reads the current services:latest roster)
+ *  would otherwise inject it with null month data, leaking into a historical report's monitored
+ *  count / "zero incidents" line / uptime+latency tables. Compares the static `addedAt` DATE to the
+ *  month's last day (both `YYYY-MM-DD`, lexicographic — slice guards an ISO datetime `addedAt`).
+ *  Absent `addedAt` (established service) and genuine mid-month adds (`addedAt ≤ month-end`) are KEPT;
+ *  only post-month additions are dropped. Fail-open: a malformed `addedAt` is kept. Pure — unit-tested. */
+export function existedInMonth(addedAt: string | undefined, monthEndDate: string): boolean {
+  if (!addedAt) return true
+  const date = addedAt.slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return true // malformed → fail-open (keep, never silently drop a real service)
+  return date <= monthEndDate
+}
+
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
   const { incidentKeywords, incidentExclude, incidentComponents } = config
   return incidents.filter((inc) => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { normalizeStatus } from '../parsers/statuspage'
-import { filterIncidents, SERVICES, worstStatus, resolveSvcStatus, resolveSvcComponents, pickBreakdownComponents, classifyStatusPageFailure, coverageDaysFrom, MIN_COVERAGE_DAYS } from '../services'
+import { filterIncidents, SERVICES, worstStatus, resolveSvcStatus, resolveSvcComponents, pickBreakdownComponents, classifyStatusPageFailure, coverageDaysFrom, MIN_COVERAGE_DAYS, existedInMonth } from '../services'
 import type { Incident, ServiceConfig } from '../types'
 import { type KVLike } from '../utils'
 
@@ -613,6 +613,31 @@ describe('displayComponentIds config sanity (#606)', () => {
     })
     it('MIN_COVERAGE_DAYS is 30', () => {
       expect(MIN_COVERAGE_DAYS).toBe(30)
+    })
+  })
+
+  describe('existedInMonth (#909 — post-month roster leak)', () => {
+    const JUNE_END = '2026-06-30'
+    it('keeps an established service (no addedAt)', () => {
+      expect(existedInMonth(undefined, JUNE_END)).toBe(true)
+    })
+    it('drops a service added AFTER the month (turbopuffer / Twelve Labs case)', () => {
+      expect(existedInMonth('2026-07-01', JUNE_END)).toBe(false)
+      expect(existedInMonth('2026-07-02', JUNE_END)).toBe(false)
+    })
+    it('keeps a genuine mid-month add (partial coverage — ranking gate handles it)', () => {
+      expect(existedInMonth('2026-06-15', JUNE_END)).toBe(true)
+    })
+    it('keeps a service added on the month-end day (boundary inclusive)', () => {
+      expect(existedInMonth('2026-06-30', JUNE_END)).toBe(true)
+    })
+    it('tolerates an ISO datetime addedAt (compares the date prefix)', () => {
+      expect(existedInMonth('2026-07-01T12:00:00.000Z', JUNE_END)).toBe(false)
+      expect(existedInMonth('2026-06-30T23:59:00.000Z', JUNE_END)).toBe(true)
+    })
+    it('fails OPEN on a malformed addedAt (keeps — never silently drops a real service)', () => {
+      expect(existedInMonth('garbage', JUNE_END)).toBe(true)
+      expect(existedInMonth('2026-6-1', JUNE_END)).toBe(true) // non-zero-padded → not ISO shape → kept
     })
   })
 
