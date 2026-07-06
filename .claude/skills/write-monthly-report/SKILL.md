@@ -54,8 +54,10 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      aloud; if it sounds translated, rewrite it. Common calques to avoid: *decompose/decomposition* → **not**
      「분해」 (use 「지표별 변화 / 내역」); *N-month window* → **not** 「N개월 창」 (use 「최근 N개월간」);
      *read X as Y* → 「Y로 **해석하다**」 not 「Y로 읽다」; *binary up/down status page* → 「단순 가동/중단만
-     표시하는」 not 「이진(up/down)」; loanwords like 「스택」 → prefer the established 「제품군」. Match the
-     voice of prior months' KO `<details>` blocks rather than inventing your own.
+     표시하는」 not 「이진(up/down)」; an *unnecessary* loanword where an established Korean term exists —
+     e.g. 「스택」 **when it means a product family** (not a genuine tech-stack reference) → 「제품군」. Do NOT
+     nativize deliberate technical terms (MTTR, p75, granularity) — those stay. Match the register/tone of
+     prior months' KO `<details>` blocks — but the calque-avoidance above wins if a prior month itself reads translated.
 
 3. **Heed the RECURRENCE CHECK block (#54).** If the generator injected a `⚠️ RECURRENCE CHECK` block
    above `## Summary`, a subject (e.g. Together AI) led the same slot in ≥2 recent months. **Do not restate
