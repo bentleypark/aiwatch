@@ -11,7 +11,7 @@ import type { ServiceStatus, Incident } from './types'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
-import { SERVICE_ADDED_AT, SERVICES } from './services'
+import { SERVICE_ADDED_AT, SERVICES, existedInMonth } from './services'
 import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type IncidentHistoryRecord } from './incident-history'
 import { readSuppressionsFresh, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
 import { kvPut } from './utils'
@@ -845,7 +845,14 @@ export async function buildMonthlyArchive(
     for (const id of Object.keys(incidentData.services)) allIds.add(id)
   }
 
+  // #909 — a REBUILD reads the current services:latest roster (scoreData), so a service added AFTER
+  // this month would otherwise get a null-data entry that leaks into the report's monitored count /
+  // "zero incidents" line / uptime+latency tables. Drop services added after the month's last day;
+  // established + genuine mid-month adds are kept (the #802 ranking gate still handles partial coverage).
+  const monthEnd = dates[dates.length - 1] // 'YYYY-MM-DD'
+
   for (const id of allIds) {
+    if (!existedInMonth(SERVICE_ADDED_AT[id], monthEnd)) continue
     const scoreSvc = scoreData?.find(s => s.id === id)
     const incSvc = incidentData?.services[id]
 

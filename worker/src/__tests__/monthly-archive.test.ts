@@ -969,15 +969,31 @@ describe('buildMonthlyArchive', () => {
     expect(archive.services.claude.incidentSourceStale).toBeUndefined()
   })
 
-  it('#809 threads static addedAt into the archive (present for configured, absent for established)', async () => {
+  it('#809 threads static addedAt into the archive for a month the service existed in', async () => {
     const recentId = Object.keys(SERVICE_ADDED_AT)[0] // a service that carries an addedAt date
     expect(recentId).toBeDefined()
-    const archive = await buildMonthlyArchive(mockKV, 2026, 3, [
+    const addedAt = SERVICE_ADDED_AT[recentId]
+    const y = Number(addedAt.slice(0, 4)); const m = Number(addedAt.slice(5, 7)) // the month it was added
+    const archive = await buildMonthlyArchive(mockKV, y, m, [
       { id: recentId, aiwatchScore: 80, scoreGrade: 'good' as const },
       { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const },
     ])
-    expect(archive.services[recentId].addedAt).toBe(SERVICE_ADDED_AT[recentId]) // static config date, for the report-side gate
+    expect(archive.services[recentId].addedAt).toBe(addedAt) // static config date, for the report-side gate
     expect(archive.services.claude.addedAt).toBeUndefined() // established service → absent = full coverage
+  })
+
+  it('#909 excludes a service from a month that ended before it was added (post-month roster leak)', async () => {
+    const recentId = Object.keys(SERVICE_ADDED_AT)[0]
+    const addedAt = SERVICE_ADDED_AT[recentId]
+    const y = Number(addedAt.slice(0, 4)); const m = Number(addedAt.slice(5, 7))
+    const prev = m === 1 ? { y: y - 1, m: 12 } : { y, m: m - 1 } // the month BEFORE it was added
+    // scoreData carries recentId (a REBUILD reads the current roster) — it must still be dropped.
+    const archive = await buildMonthlyArchive(mockKV, prev.y, prev.m, [
+      { id: recentId, aiwatchScore: 80, scoreGrade: 'good' as const },
+      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const },
+    ])
+    expect(archive.services[recentId]).toBeUndefined() // added after this month → not monitored → excluded
+    expect(archive.services.claude).toBeDefined()      // established service is unaffected
   })
 
   it('#586 daily snapshot WINS over the build-time scoreData fallback', async () => {
