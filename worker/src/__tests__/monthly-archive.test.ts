@@ -25,6 +25,7 @@ import {
   summarizeDegradation,
   buildMonthlyAccuracy,
   filterSuppressedFromMonthly,
+  aggregateIncidentDurations,
 } from '../monthly-archive'
 import type { SuppressionEntry } from '../suppression'
 import type { ServiceStatus, Incident } from '../types'
@@ -890,6 +891,36 @@ describe('accumulateIncidentsOnlyIfChanged (#587)', () => {
 
 // ── buildMonthlyArchive ──────────────────────────────────────────────
 
+describe('aggregateIncidentDurations (#915 — long-open inflation)', () => {
+  const entry = (durationMin: number) => ({ id: String(durationMin), title: 't', startedAt: '2026-06-01', resolvedAt: null, durationMin, finalStatus: 'resolved' as const, impact: null })
+
+  it('sums/maxes the per-incident FINAL durations (the Deepgram case — ignores the inflated accumulator)', () => {
+    // 6 incidents summing to 2733m / max 1620m; accumulator monotonically inflated to 10602/8470.
+    const incidents = [1620, 601, 1, 137, 373, 1].map(entry)
+    const r = aggregateIncidentDurations(incidents, 6, 10602, 8470)
+    expect(r.totalMin).toBe(2733)
+    expect(r.longestMin).toBe(1620)
+  })
+
+  it('falls back to the accumulator when the list is TRUNCATED (< count)', () => {
+    // Only 2 of 250 incidents survived the per-service cap → the list is not the full population.
+    const incidents = [30, 20].map(entry)
+    const r = aggregateIncidentDurations(incidents, 250, 9999, 500)
+    expect(r.totalMin).toBe(9999)
+    expect(r.longestMin).toBe(500)
+  })
+
+  it('returns null/null when there are no incidents', () => {
+    expect(aggregateIncidentDurations([], 0, 0, 0)).toEqual({ totalMin: null, longestMin: null })
+    expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, longestMin: null })
+  })
+
+  it('treats a full list of zero-duration incidents as null (no downtime)', () => {
+    const r = aggregateIncidentDurations([entry(0), entry(0)], 2, 0, 0)
+    expect(r).toEqual({ totalMin: null, longestMin: null })
+  })
+})
+
 describe('buildMonthlyArchive', () => {
   const mockKV = {
     get: async (key: string) => {
@@ -1176,6 +1207,35 @@ describe('buildMonthlyArchive', () => {
     // Mutate the archive copy and verify the source array is untouched.
     archive.services.claude.incidentList![0].title = 'mutated'
     expect(sharedDetail[0].title).toBe('incident')
+  })
+
+  it('#915 — downtime aggregate derives from the incident list, NOT the inflated monotonic accumulator', async () => {
+    // Deepgram June shape: accumulator locked at 176h42m/141h10m (a long-open incident's peak) while
+    // the per-incident detail carries the corrected final durations summing to 2733m (45h33m) / max 1620m.
+    const detail = [1620, 601, 1, 137, 373, 1].map((d, i) => ({
+      id: `d${i}`, title: `t${i}`, startedAt: '2026-03-10', resolvedAt: '2026-03-11',
+      durationMin: d, finalStatus: 'resolved' as const, impact: null,
+    }))
+    const kv = {
+      get: async (key: string) => key === 'incidents:monthly:2026-03'
+        ? JSON.stringify({
+            lastUpdated: '2026-03-31T09:00:00Z',
+            services: {
+              deepgram: {
+                count: 6, totalMinutes: 10602, longestMinutes: 8470, // inflated accumulator
+                dates: [], incidentIds: detail.map(e => e.id),
+                durations: Object.fromEntries(detail.map(e => [e.id, e.durationMin])),
+                incidents: detail, // corrected per-incident detail (source of truth)
+              },
+            },
+          })
+        : null,
+      put: async () => {}, delete: async () => {}, list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+    const archive = await buildMonthlyArchive(kv, 2026, 3)
+    expect(archive.services.deepgram.totalDowntimeMin).toBe(2733)   // 45h 33m — not the accumulator's 10602
+    expect(archive.services.deepgram.longestIncidentMin).toBe(1620) // 27h — not 8470
+    expect(archive.services.deepgram.avgResolutionMin).toBe(Math.round(2733 / 6)) // 456m, from the real total
   })
 
   it('handles empty KV (no data)', async () => {
