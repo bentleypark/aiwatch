@@ -58,6 +58,15 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      e.g. 「스택」 **when it means a product family** (not a genuine tech-stack reference) → 「제품군」. Do NOT
      nativize deliberate technical terms (MTTR, p75, granularity) — those stay. Match the register/tone of
      prior months' KO `<details>` blocks — but the calque-avoidance above wins if a prior month itself reads translated.
+   - **Claims discipline — hedge, and don't re-teach a standing caveat every month.** (1) *Don't overclaim
+     causation.* A reporting artifact doesn't disprove a real problem — say a high per-model count
+     **overstates the disruption**, NOT that it is *"not instability" / "not availability loss"* (correlation
+     ≠ causation; the data rarely establishes the negative). Hedge any bare "not X" the tables can't prove.
+     (2) *A STANDING methodological caveat* — Anthropic's per-model incident counts, no-official-uptime
+     (Bedrock/Azure), probe-RTT-≠-inference-latency — lives in the **About / methodology** section and has already
+     appeared in prior months; do NOT re-explain it in full in the narrative every cycle (a regular reader has
+     seen it). State it once in methodology; in the narrative mention it only where it's load-bearing for THIS
+     month's specific point (e.g. the Notable Incident it directly explains), and briefly.
 
 3. **Heed the RECURRENCE CHECK block (#54).** If the generator injected a `⚠️ RECURRENCE CHECK` block
    above `## Summary`, a subject (e.g. Together AI) led the same slot in ≥2 recent months. **Do not restate
