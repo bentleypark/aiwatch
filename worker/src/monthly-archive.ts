@@ -717,6 +717,37 @@ export function filterSuppressedFromMonthly(
   return { ...data, services }
 }
 
+/** #915 — the per-service monthly downtime aggregates. Sums/maxes the per-incident FINAL durations
+ *  (`incidents[].durationMin`) rather than the accumulator's `totalMinutes`/`longestMinutes`, which
+ *  grow MONOTONICALLY (`accumulateMonthlyIncidents`: `if (dur > oldDur)`) and so lock in a long-open
+ *  incident's inflated open-window duration — never corrected down when it resolves shorter (Deepgram
+ *  June: 176h42m/141h10m aggregate vs the real 45h33m/27h from the incident list). The per-incident
+ *  detail IS updated to the final duration, so it's the source of truth. Falls back to the accumulator
+ *  ONLY when the list was TRUNCATED to the per-service cap (`incidents.length < count`), where it is
+ *  no longer the full population. Returns both null when there are no incidents. Pure — unit-tested. */
+export function aggregateIncidentDurations(
+  incidents: MonthlyIncidentEntry[] | undefined,
+  count: number,
+  accumulatorTotal: number,
+  accumulatorLongest: number,
+): { totalMin: number | null; longestMin: number | null } {
+  if (!incidents || incidents.length === 0 || incidents.length < count) {
+    // Truncated (>MAX cap) or no detail — the accumulator is the only full-population source.
+    return {
+      totalMin: accumulatorTotal > 0 ? accumulatorTotal : null,
+      longestMin: accumulatorLongest > 0 ? accumulatorLongest : null,
+    }
+  }
+  let total = 0
+  let longest = 0
+  for (const e of incidents) {
+    const d = typeof e.durationMin === 'number' && e.durationMin > 0 ? e.durationMin : 0
+    total += d
+    if (d > longest) longest = d
+  }
+  return { totalMin: total > 0 ? total : null, longestMin: longest > 0 ? longest : null }
+}
+
 export async function buildMonthlyArchive(
   kv: KVNamespace,
   year: number,
@@ -856,22 +887,27 @@ export async function buildMonthlyArchive(
     const scoreSvc = scoreData?.find(s => s.id === id)
     const incSvc = incidentData?.services[id]
 
-    let avgResolutionMin: number | null = null
-    if (incSvc && incSvc.count > 0 && incSvc.totalMinutes > 0) {
-      avgResolutionMin = Math.round(incSvc.totalMinutes / incSvc.count)
-    }
-    // totalMinutes / longestMinutes are already tracked per-service by accumulateMonthlyIncidents
-    // — surface them in the permanent archive so monthly reports can render full Incident Summary
-    // columns (Downtime, Longest) without losing data after the 60d incidents:monthly:* TTL lapses.
-    const totalDowntimeMin = incSvc && incSvc.totalMinutes > 0 ? incSvc.totalMinutes : null
-    const longestIncidentMin = incSvc && incSvc.longestMinutes > 0 ? incSvc.longestMinutes : null
-
     // Snapshot per-incident detail (#375) so the dashboard's 90-day filter can read it
     // post-archive. accumulateMonthlyIncidents already enforces the per-service cap and
     // dedup, so we just defensively-clone the array (avoids accidental mutation downstream).
     const incidentList = incSvc?.incidents && incSvc.incidents.length > 0
       ? incSvc.incidents.map(e => ({ ...e }))
       : undefined
+
+    // #915 — derive the downtime aggregates from the per-incident FINAL durations (incidentList),
+    // NOT the accumulator's `totalMinutes`/`longestMinutes`, which grow monotonically and lock in a
+    // long-open incident's inflated open-window duration (never corrected down when it resolves
+    // shorter — Deepgram June read 176h42m/141h10m vs the real 45h33m/27h). The per-incident
+    // durationMin is updated to the final value, so it's the source of truth; the accumulator is the
+    // fallback only when the list was truncated (>MAX cap, no longer full-population).
+    const { totalMin, longestMin } = aggregateIncidentDurations(
+      incidentList, incSvc?.count ?? 0, incSvc?.totalMinutes ?? 0, incSvc?.longestMinutes ?? 0,
+    )
+    const totalDowntimeMin = totalMin
+    const longestIncidentMin = longestMin
+    const avgResolutionMin = incSvc && incSvc.count > 0 && totalMin != null && totalMin > 0
+      ? Math.round(totalMin / incSvc.count)
+      : null
 
     services[id] = {
       uptime: uptimeMap[id] ?? null,
