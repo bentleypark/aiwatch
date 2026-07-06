@@ -62,6 +62,11 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      causation.* A reporting artifact doesn't disprove a real problem — say a high per-model count
      **overstates the disruption**, NOT that it is *"not instability" / "not availability loss"* (correlation
      ≠ causation; the data rarely establishes the negative). Hedge any bare "not X" the tables can't prove.
+     Before attributing a trend to a **mean** (MTTR / avg recovery), check the **count and the longest** — a
+     mean is skewed by one outlier, so a downtime/MTTR drop dominated by a single freak incident clearing
+     (e.g. Gemini's count stayed 3→3 while its total 351h→35h collapsed onto one 242h outage not recurring —
+     *shorter incidents*, not "closing incidents faster") is not a systematic improvement; report what the
+     count and longest actually show.
      (2) *A STANDING methodological caveat* — Anthropic's per-model incident counts, no-official-uptime
      (Bedrock/Azure), probe-RTT-≠-inference-latency — lives in the **About / methodology** section and has already
      appeared in prior months; do NOT re-explain it in full in the narrative every cycle (a regular reader has
