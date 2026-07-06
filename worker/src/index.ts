@@ -17,9 +17,9 @@ import { refreshStatusCacheOnChange } from './cache-refresh'
 import { pingIndexNow } from './indexnow'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
 import { corsHeaders, matchOrigin } from './cors'
-import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
+import { buildStatuslinePayload, isStatuslineRequest, renderStatuslinePreset, isStatuslinePreset } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
-import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, queryExtTraffic, countNewFeedItems } from './api-traffic'
+import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, queryExtTraffic, queryStatuslineTraffic, countNewFeedItems } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
@@ -2645,6 +2645,16 @@ export default {
           }
           const extActivity = (extPolls != null || extReports > 0) ? { polls: extPolls, reports: extReports } : null
 
+          // #918 — Claude Code statusline poll volume (consent-free adoption proxy, #400 Phase 1).
+          // Last-24h per-preset counts from WAE (`statusline-*` tags). Best-effort/null-tolerant like
+          // the ext/feed reads; null (section omitted) when the AE token/account is absent.
+          let statuslineTraffic = null
+          try {
+            statuslineTraffic = await queryStatuslineTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+          } catch (err) {
+            console.warn('[daily-summary] statusline traffic read failed:', err instanceof Error ? err.message : err)
+          }
+
           // #575 — internal demand signal: today's per-service crowd "Report an issue" counts.
           // Bounded read (one GET per known service, no KV list); surfaced only inside the operator
           // summary, never as a public "N reporting" verdict (that gating is Phase B).
@@ -2693,6 +2703,7 @@ export default {
             feedTraffic,
             audience,
             extActivity,
+            statuslineTraffic,
             reportCounts,
           })
 
@@ -3477,6 +3488,42 @@ export default {
         }),
         cachedAt: cached.cachedAt,
       }), { status: 200, headers: publicHeaders })
+    }
+
+    // GET /api/statusline/:preset — server-rendered Claude Code statusline string (#918).
+    // Returns text/plain (the exact OSC-8 string the statusline shows), so the settings.json
+    // snippet is a thin `curl … || true` with NO jq. The old model shipped the display logic
+    // as a client-side jq program frozen in the user's config — a display change (e.g. the +N
+    // overflow) could never reach an installed statusline. Rendering server-side means every
+    // future display change ships to all users via a worker deploy, and drops the jq dependency.
+    if (request.method === 'GET' && url.pathname.startsWith('/api/statusline/')) {
+      const preset = url.pathname.slice('/api/statusline/'.length)
+      // Unknown preset → 404 (curl -sf drops it → clean empty statusline). Allowlist-guarded.
+      if (!isStatuslinePreset(preset)) {
+        return new Response('', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } })
+      }
+      // WAE: tag with the SAME `statusline-<preset>` index as the legacy ?src poll (#494) so the
+      // #918 daily read-back (queryStatuslineTraffic) counts old + new polls uniformly. Best-effort:
+      // writeDataPoint can throw on payload/binding errors — never let that abort the response.
+      if (env.ANALYTICS) {
+        try {
+          const tag = `statusline-${preset}`.slice(0, 32)
+          env.ANALYTICS.writeDataPoint({ blobs: [tag], doubles: [1], indexes: [tag] })
+        } catch (err) {
+          console.warn('[wae] statusline writeDataPoint failed:', err instanceof Error ? err.message : err)
+        }
+      }
+      const liteCache = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+      const { services } = buildStatuslinePayload(liteCache)
+      // Empty body on cache miss (renderStatuslinePreset over []): degraded presets show nothing,
+      // branded shows "AIWatch 🟢" — same fail-silent contract as the legacy lite endpoint.
+      return new Response(renderStatuslinePreset(preset, services), {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=30',
+        },
+      })
     }
 
     // GET /api/status/cached — KV cache only (no live fetch), for Is X Down SSR pages

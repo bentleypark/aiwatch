@@ -6,24 +6,25 @@ import { useState } from 'react'
 import { useLang } from '../hooks/useLang'
 import { trackEvent } from '../utils/analytics'
 
+// #918 — server-side rendering. The Worker returns the FINAL statusline string
+// (`GET /api/statusline/<preset>` → text/plain, the exact OSC-8 output the bar
+// shows), so each snippet is a thin `curl … || true` with NO jq. The old model
+// shipped a jq program the user pasted into their config, which FROZE the display
+// logic on their machine — a formatting change (e.g. the `+N` overflow marker)
+// could never reach an installed statusline. Rendering server-side means every
+// future display change ships to all users via a Worker deploy, and drops the jq
+// dependency entirely. See worker/src/statusline.ts `renderStatuslinePreset`.
+//
 // Point snippets at the Worker domain directly, NOT ai-watch.dev (#438): the
-// ai-watch.dev/api/status/cached path is a Vercel rewrite that *proxies* to the
-// Worker, so per-prompt statusline polls counted as Vercel Fast Data Transfer
-// (the #1 bandwidth route, ~17.8 GB/cycle). Hitting the Worker keeps it on
-// Cloudflare. The Worker returns a ~KB id/name/status-only payload for the
-// `?src=statusline-*` tag (buildStatuslinePayload) instead of the ~2 MB full
-// response — see worker/src/statusline.ts.
-const API_URL = 'https://aiwatch-worker.p2c2kbf.workers.dev/api/status/cached'
+// ai-watch.dev path is a Vercel rewrite that *proxies* to the Worker, so
+// per-prompt polls counted as Vercel Fast Data Transfer (the #1 bandwidth route).
+// Hitting the Worker keeps it on Cloudflare.
+const STATUSLINE_API = 'https://aiwatch-worker.p2c2kbf.workers.dev/api/statusline'
 
-// Tag each preset's URL so Cloudflare request analytics can separate
-// statusline-driven traffic by preset (and trigger the lite payload above).
-// The Worker matches the lite branch on the `?src=statusline-*` tag and the
-// route on `url.pathname` (`/api/status/cached`), reading fixed KV keys
-// (`services:latest`) — so the query string drives the projection but not cache
-// keys. Carries no user identifier; the preset slug is the only payload.
-// Measurement framework + baseline-derived distribution gating thresholds
-// (Reddit launch, Anthropic Claude Code docs PR) live on issue #400.
-const taggedUrl = (src) => `${API_URL}?src=statusline-${src}`
+// Per-preset endpoint URL. The preset lives in the PATH (`/api/statusline/<slug>`),
+// which the Worker both routes on AND tags in WAE (`statusline-<slug>`) for the #400
+// adoption measurement — no query string, no user identifier.
+const presetUrl = (slug) => `${STATUSLINE_API}/${slug}`
 
 // Slug constants are the join key between (a) the URL `?src=statusline-<slug>`
 // query tag in Cloudflare request logs and (b) the GA4 `copy_statusline_snippet`
@@ -104,7 +105,10 @@ function Snippet({ code, eventLabel }) {
 
 function Section({ title, children }) {
   return (
-    <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+    // min-w-0: as a flex child of the page column, the default min-width:auto would let a long
+    // one-line snippet stretch the section past the column cap instead of letting the inner
+    // <pre overflow-x:auto> scroll. min-width:0 restores the scroll containment.
+    <section className="min-w-0 bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
       <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
         <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
           <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: 'var(--teal)' }} />
@@ -118,72 +122,40 @@ function Section({ title, children }) {
   )
 }
 
-const PRESET_DEGRADED_ONLY = `{
+// #918 — every preset is now a thin curl at its server-rendered endpoint (no jq).
+// The Worker owns ALL formatting (names, +N overflow, OSC-8 links, severity), so
+// these snippets never change again even as the display evolves. Built via a shared
+// helper so the shape (2s timeout + fail-silent) can't drift between presets.
+const presetSnippet = (slug) => `{
   "statusLine": {
     "type": "command",
-    "command": "( curl -sf --max-time 2 ${taggedUrl(SLUG_DEGRADED_ONLY)} | jq -r '[.services[] | select(.status != \\"operational\\") | \\"🔴 \\" + .name] | .[0:3] | join(\\" \\")' ) 2>/dev/null || true"
+    "command": "( curl -sf --max-time 2 ${presetUrl(slug)} ) 2>/dev/null || true"
   }
 }`
 
-const PRESET_COMPACT_BADGE = `{
-  "statusLine": {
-    "type": "command",
-    "command": "( curl -sf --max-time 2 ${taggedUrl(SLUG_COMPACT_BADGE)} | jq -r '([.services[] | select(.status != \\"operational\\")] | length) as $n | if $n == 0 then empty else \\"🔴 \\" + ($n|tostring) + \\" AI services\\" end' ) 2>/dev/null || true"
-  }
-}`
-
-const PRESET_FULL_LIST = `{
-  "statusLine": {
-    "type": "command",
-    "command": "( curl -sf --max-time 2 ${taggedUrl(SLUG_FULL_LIST)} | jq -r '[.services[] | select(.status != \\"operational\\") | \\"\\(if .status == \\"down\\" then \\"X\\" else \\"!\\" end)\\\\u00b7\\(.name)\\"] | join(\\" | \\")' ) 2>/dev/null || true"
-  }
-}`
-
-const PRESET_SCOPED = `{
-  "statusLine": {
-    "type": "command",
-    "command": "( curl -sf --max-time 2 ${taggedUrl(SLUG_SCOPED)} | jq -r '[.services[] | select(.id == \\"claude\\" or .id == \\"openai\\" or .id == \\"gemini\\") | select(.status != \\"operational\\") | \\"🔴 \\" + .name] | join(\\" \\")' ) 2>/dev/null || true"
-  }
-}`
-
-// PRESET_CLICKABLE wraps each service name in an OSC 8 hyperlink so cmd+click
-// (macOS) / ctrl+click (Linux) opens the AIWatch service detail page in the
-// browser. The escape sequence is "ESC]8;;URL ESC\ TEXT ESC]8;; ESC\". Manual
-// JS-string-with-backslash escaping for this is a nightmare to read, so we
-// build the object and let JSON.stringify handle the JSON-level encoding for
-// us. The inner template literal still has to escape jq-level backslashes
-// (\\u001b for ESC, \\\\ for a literal "\" that jq's raw-output then emits).
-const PRESET_CLICKABLE = JSON.stringify({
-  statusLine: {
-    type: 'command',
-    command: `( curl -sf --max-time 2 ${taggedUrl(SLUG_CLICKABLE)} | jq -r '[.services[] | select(.status != "operational") | "\\u001b]8;;https://ai-watch.dev/#\\(.id)\\u001b\\\\🔴 \\(.name)\\u001b]8;;\\u001b\\\\"] | .[0:3] | join(" ")' ) 2>/dev/null || true`,
-  },
-}, null, 2)
-
-// PRESET_BRANDED keeps an always-on, clickable "AIWatch" label (OSC 8 → dashboard
-// home) so the brand is present even when every service is healthy — unlike the
-// other presets, which are empty when healthy. Healthy → `AIWatch 🟢`; degraded →
-// `AIWatch 🔴 <name>` (≤3) where EACH red service name is itself an OSC 8 link to
-// its detail page (https://ai-watch.dev/#<id>), like PRESET_CLICKABLE. Same OSC 8
-// escaping (\\u001b = ESC, \\\\ = a literal "\" that jq emits, forming the
-// ESC]8;;URL ESC\ … ESC]8;; ESC\ hyperlink). Terminals without OSC 8 → plain text.
-export const PRESET_BRANDED = JSON.stringify({
-  statusLine: {
-    type: 'command',
-    command: `( curl -sf --max-time 2 ${taggedUrl(SLUG_BRANDED)} | jq -r '([.services[] | select(.status != "operational")]) as $d | "\\u001b]8;;https://ai-watch.dev\\u001b\\\\AIWatch\\u001b]8;;\\u001b\\\\ " + (if ($d | length) == 0 then "🟢" else ([$d[] | "\\u001b]8;;https://ai-watch.dev/#\\(.id)\\u001b\\\\🔴 \\(.name)\\u001b]8;;\\u001b\\\\"] | .[0:3] | join(" ")) end)' ) 2>/dev/null || true`,
-  },
-}, null, 2)
+const PRESET_DEGRADED_ONLY = presetSnippet(SLUG_DEGRADED_ONLY)
+const PRESET_COMPACT_BADGE = presetSnippet(SLUG_COMPACT_BADGE)
+const PRESET_FULL_LIST = presetSnippet(SLUG_FULL_LIST)
+const PRESET_SCOPED = presetSnippet(SLUG_SCOPED)
+const PRESET_CLICKABLE = presetSnippet(SLUG_CLICKABLE)
+// PRESET_BRANDED — the recommended preset. Always-on "AIWatch" label (OSC-8 → dashboard),
+// 🟢 when healthy, up to 3 red service names (each an OSC-8 link to its detail page) + a
+// `+N` overflow marker when more are down. All rendered server-side (renderStatuslinePreset).
+export const PRESET_BRANDED = presetSnippet(SLUG_BRANDED)
 
 export default function Statusline() {
   const { lang } = useLang()
   return (
-    <div className="space-y-4">
+    // Doc-style reading column: cap the width on desktop so the prose/snippet lines don't
+    // stretch edge-to-edge (unreadable measure on wide screens). flex-col so the KO notice's
+    // extra marginBottom is additive (block-flow margin collapse would otherwise swallow it).
+    <div className="flex flex-col gap-4" style={{ maxWidth: '860px' }}>
       {lang === 'ko' && (
         <div
           className="border border-[var(--border)] rounded-md text-[var(--text2)]"
-          style={{ padding: '10px 14px', fontSize: '11px', lineHeight: '1.6', background: 'var(--bg2)' }}
+          style={{ padding: '12px 16px', marginBottom: '8px', fontSize: '11px', lineHeight: '1.6', background: 'var(--bg2)' }}
         >
-          이 페이지는 영문으로만 제공됩니다 — 본문이 jq · curl 명령 위주라 영어로 유지했습니다. 명령어 자체는 한국어 환경에서도 동일하게 동작합니다.
+          이 페이지는 영문으로만 제공됩니다 — 본문이 curl 명령 위주라 영어로 유지했습니다. 명령어 자체는 한국어 환경에서도 동일하게 동작합니다.
         </div>
       )}
       <div>
@@ -191,7 +163,7 @@ export default function Statusline() {
           AIWatch in your Claude Code statusline
         </h1>
         <p className="text-[var(--text2)] text-[13px]" style={{ lineHeight: '1.6' }}>
-          Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and 29 more — directly in your{' '}
+          Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and more — directly in your{' '}
           <a
             href="https://docs.claude.com/en/docs/claude-code/statusline"
             target="_blank"
@@ -201,13 +173,22 @@ export default function Statusline() {
           >
             Claude Code statusline
           </a>
-          . The recommended preset keeps an always-on, clickable <code className="mono text-[var(--text0)]">AIWatch</code> label — <code className="mono text-[var(--text0)]">AIWatch 🟢</code> while all healthy, <code className="mono text-[var(--text0)]">AIWatch 🔴 Claude API</code> (up to 3) when something breaks — so a click opens the dashboard at any time. Prefer zero footprint when healthy? The minimalist preset under <em>Other presets</em> stays empty until a service degrades.
+          . The recommended preset keeps an always-on, clickable <code className="mono text-[var(--text0)]">AIWatch</code> label — <code className="mono text-[var(--text0)]">AIWatch 🟢</code> while all healthy, <code className="mono text-[var(--text0)]">AIWatch 🔴 Claude API</code> when something breaks (up to 3 names, then a <code className="mono text-[var(--text0)]">+N</code> overflow marker for any beyond — click through for the full list) — so a click opens the dashboard at any time. Prefer zero footprint when healthy? The minimalist preset under <em>Other presets</em> stays empty until a service degrades.
         </p>
+      </div>
+
+      <div
+        className="border rounded-md text-[var(--text2)]"
+        style={{ padding: '10px 14px', fontSize: '12px', lineHeight: '1.6', borderColor: 'var(--border-hi)', background: 'var(--bg2)' }}
+      >
+        <strong className="text-[var(--text0)]">Already added an earlier snippet?</strong> These presets now let the server do the
+        formatting (no more <code className="mono text-[var(--text0)]">jq</code>), so future improvements reach you automatically.
+        Copy the recommended preset once more to switch over — after that you never re-paste again.
       </div>
 
       <Section title="Quick start (recommended preset)">
         <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.6', marginBottom: '12px' }}>
-          Add to <code className="mono text-[var(--text0)]">~/.claude/settings.json</code>. Always-on, clickable <code className="mono text-[var(--text0)]">AIWatch</code> label: <code className="mono text-[var(--text0)]">AIWatch 🟢</code> when all healthy, <code className="mono text-[var(--text0)]">AIWatch 🔴 Claude API</code> (up to 3) when something breaks — <code className="mono text-[var(--text0)]">cmd+click</code> (macOS) / <code className="mono text-[var(--text0)]">ctrl+click</code> (Linux) the <code className="mono text-[var(--text0)]">AIWatch</code> label to open the dashboard, or a red service name to jump to its detail page. Needs an OSC 8-compatible terminal (iTerm2, Warp, kitty, WezTerm, VS Code integrated terminal, Terminal.app on macOS 12+); others show it as plain text — no harm.
+          Add to <code className="mono text-[var(--text0)]">~/.claude/settings.json</code>. Always-on, clickable <code className="mono text-[var(--text0)]">AIWatch</code> label: <code className="mono text-[var(--text0)]">AIWatch 🟢</code> when all healthy, <code className="mono text-[var(--text0)]">AIWatch 🔴 Claude API</code> when something breaks (up to 3 names, then <code className="mono text-[var(--text0)]">+N</code> for any beyond — click the label for the full list) — <code className="mono text-[var(--text0)]">cmd+click</code> (macOS) / <code className="mono text-[var(--text0)]">ctrl+click</code> (Linux) the <code className="mono text-[var(--text0)]">AIWatch</code> label to open the dashboard, or a red service name to jump to its detail page. Needs an OSC 8-compatible terminal (iTerm2, Warp, kitty, WezTerm, VS Code integrated terminal, Terminal.app on macOS 12+); others show it as plain text — no harm.
         </p>
         <Snippet code={PRESET_BRANDED} eventLabel={SLUG_BRANDED} />
       </Section>
@@ -231,18 +212,9 @@ export default function Statusline() {
           </div>
 
           <div>
-            <h3 className="text-[var(--text0)] text-[13px] font-medium" style={{ marginBottom: '6px' }}>Scope to specific services</h3>
+            <h3 className="text-[var(--text0)] text-[13px] font-medium" style={{ marginBottom: '6px' }}>Core LLMs only</h3>
             <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.6', marginBottom: '8px' }}>
-              Filter to the providers you actually use. Edit the <code className="mono text-[var(--text0)]">.id == "claude"</code> list to match the services that matter for your workflow — see the{' '}
-              <a
-                href="https://github.com/bentleypark/aiwatch#available-service-ids"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline"
-                style={{ color: 'var(--blue)' }}
-              >
-                full service ID table
-              </a>{' '}on GitHub.
+              Narrows to the three flagship LLMs — <code className="mono text-[var(--text0)]">Claude</code>, <code className="mono text-[var(--text0)]">OpenAI</code>, <code className="mono text-[var(--text0)]">Gemini</code> — and stays quiet about everything else. Best if those are the only providers you care about.
             </p>
             <Snippet code={PRESET_SCOPED} eventLabel={SLUG_SCOPED} />
           </div>
@@ -258,7 +230,7 @@ export default function Statusline() {
           <div>
             <h3 className="text-[var(--text0)] text-[13px] font-medium" style={{ marginBottom: '6px' }}>Minimalist (empty when healthy)</h3>
             <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.6', marginBottom: '8px' }}>
-              No brand label — output stays completely empty while every service is operational, preserving statusline space; up to 3 degraded/down service names appear with a red dot only when something breaks. Choose this if you want zero footprint when all is well.
+              No brand label — output stays completely empty while every service is operational, preserving statusline space; the top 3 degraded/down service names appear with a red dot only when something breaks, plus a <code className="mono text-[var(--text0)]">+N</code> marker if more than 3 are down. Choose this if you want zero footprint when all is well.
             </p>
             <Snippet code={PRESET_DEGRADED_ONLY} eventLabel={SLUG_DEGRADED_ONLY} />
           </div>
@@ -267,10 +239,10 @@ export default function Statusline() {
 
       <Section title="How it works">
         <ul className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.7', listStyle: 'disc', paddingLeft: '20px' }}>
-          <li>Single GET to <code className="mono text-[var(--text0)]">{API_URL}</code> per statusline render. CORS-enabled, no authentication, no client identifier collected.</li>
-          <li>The endpoint serves a 5-minute KV-cached payload from Cloudflare's edge network — typical response time is under 100 ms from most regions.</li>
+          <li>Single GET to <code className="mono text-[var(--text0)]">{STATUSLINE_API}/&lt;preset&gt;</code> per statusline render. The Worker renders the final line server-side and returns it as plain text — <strong className="text-[var(--text0)]">no <code className="mono">jq</code>, no client-side formatting</strong>. CORS-enabled, no authentication, no client identifier collected.</li>
+          <li>The endpoint serves a 5-minute KV-cached status from Cloudflare's edge network — typical response time is under 100 ms from most regions.</li>
           <li>The shell command sets a 2-second timeout (<code className="mono text-[var(--text0)]">--max-time 2</code>) and fails silent (<code className="mono text-[var(--text0)]">2{'>'}/dev/null || true</code>) so a network hiccup never breaks your statusline.</li>
-          <li>Each snippet appends a <code className="mono text-[var(--text0)]">?src=statusline-&lt;preset&gt;</code> query tag so we can split statusline-driven requests from the rest of the cached-endpoint traffic when deciding which presets to keep maintaining. The Worker matches on path only, so the tag has no effect on caching, freshness, or your response — and the only payload is the preset slug, never a user identifier.</li>
+          <li>Because all formatting lives in the Worker, <strong className="text-[var(--text0)]">display improvements reach you automatically</strong> — you never re-paste to get a new feature. The preset lives in the URL path (<code className="mono text-[var(--text0)]">/api/statusline/&lt;preset&gt;</code>), which is also how we count adoption per preset — no query string, no user identifier.</li>
           <li>No requests to the Anthropic API. AIWatch operates its own status feed independently.</li>
         </ul>
       </Section>
@@ -302,7 +274,7 @@ export default function Statusline() {
       <Section title="Honest caveats">
         <ul className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.7', listStyle: 'disc', paddingLeft: '20px' }}>
           <li><strong className="text-[var(--text0)]">5-minute cache lag</strong> — incidents can take up to 5 minutes to appear in the statusline after AIWatch detects them.</li>
-          <li><strong className="text-[var(--text0)]">jq + curl required</strong> — pre-installed on macOS &amp; most Linux distros. Windows users: install via WSL or use <code className="mono text-[var(--text0)]">winget install jqlang.jq</code> with curl from Windows 10+.</li>
+          <li><strong className="text-[var(--text0)]">curl required</strong> — pre-installed on macOS &amp; most Linux distros (Windows 10+ ships it too). No <code className="mono text-[var(--text0)]">jq</code> needed anymore — the Worker renders the line for you.</li>
           <li><strong className="text-[var(--text0)]">Claude Code is Claude-only</strong> — this surface is informational, not a fallback router. When Claude API is down you'll know immediately, but you can't switch providers mid-session.</li>
         </ul>
       </Section>

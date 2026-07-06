@@ -1,11 +1,10 @@
 // #400 Phase 0 — /statusline guide page (Claude Code statusline integration).
-// Pins: hash route works, all 5 presets render with copy buttons, sidebar nav
-// entry exists, and each preset URL carries its own ?src=statusline-<preset>
-// traffic-split tag (so statusline traffic is distinguishable from regular
-// `/api/status/cached` curl hits in Cloudflare request logs — the baseline the
-// issue #400 distribution gates compare against). A regression in any of these
-// would re-block Phase 1's "snippet documented somewhere reachable from
-// ai-watch.dev" criterion or silently invalidate the traction baseline.
+// Pins: hash route works, all 6 presets render with copy buttons, sidebar nav
+// entry exists, and each preset is a thin curl at its per-preset path
+// `/api/statusline/<preset>` (#918 — the Worker renders the final string
+// server-side; the path is both the route and the WAE adoption tag). A regression
+// in any of these would re-block Phase 1's "snippet documented somewhere reachable
+// from ai-watch.dev" criterion or silently invalidate the traction baseline.
 
 import { test, expect } from '@playwright/test'
 import { waitForDataLoad } from './helpers.js'
@@ -17,20 +16,20 @@ test.describe('Statusline guide page (#400 Phase 0)', () => {
     await expect(page.locator('h1').filter({ hasText: /statusline/i })).toBeVisible()
   })
 
-  test('renders the recommended preset snippet', async ({ page }) => {
+  test('renders the recommended preset snippet (thin curl, no jq — #918)', async ({ page }) => {
     await page.goto('/#statusline')
     await waitForDataLoad(page)
-    // Pin the canonical curl + jq one-liner pieces: the Worker host (#438 — polls
-    // hit the Worker directly, not the Vercel-proxied ai-watch.dev path), jq's
-    // status filter, fail-silent fallback, 2s timeout. Substrings chosen to
-    // avoid quoting/escaping ambiguity (the JSON-in-JSON produces \" in DOM).
+    // Pin the canonical thin-curl pieces: the Worker host + per-preset path (#438 —
+    // polls hit the Worker directly, not the Vercel-proxied ai-watch.dev path),
+    // 2s timeout, fail-silent fallback. The display logic is server-side now (#918),
+    // so there is NO jq in the snippet.
     const code = page.locator('pre').first()
     await expect(code).toBeVisible()
     const text = (await code.textContent()) || ''
-    expect(text).toContain('aiwatch-worker.p2c2kbf.workers.dev/api/status/cached')
-    expect(text).not.toContain('ai-watch.dev/api/status/cached') // must not poll the Vercel-proxied path
+    expect(text).toContain('aiwatch-worker.p2c2kbf.workers.dev/api/statusline/branded')
+    expect(text).not.toContain('ai-watch.dev/api/') // must not poll the Vercel-proxied path
+    expect(text).not.toContain('jq')                // formatting moved server-side
     expect(text).toContain('--max-time 2')
-    expect(text).toContain('select(.status')
     expect(text).toContain('|| true')
   })
 
@@ -99,69 +98,14 @@ test.describe('Statusline guide page (#400 Phase 0)', () => {
     expect(labelIdx).toBeGreaterThan(copyIdx)
   })
 
-  test('"full service list" link points to the GitHub README anchor (not intra-SPA)', async ({ page }) => {
-    // Reviewer feedback (#400 follow-up f426ccd): the link was an intra-SPA
-    // setPage to /#ranking, but the Ranking page renders display names not
-    // service IDs — the snippet's jq filter needs the IDs. Pin the external
-    // GitHub README target so a future "let's keep navigation in-app" refactor
-    // doesn't silently break the documentation contract.
-    await page.goto('/#statusline')
-    await waitForDataLoad(page)
-    const link = page.locator('a').filter({ hasText: /service ID table/i }).first()
-    await expect(link).toBeVisible()
-    await expect(link).toHaveAttribute('href', /github\.com\/bentleypark\/aiwatch.*available-service-ids/)
-    await expect(link).toHaveAttribute('target', '_blank')
-    await expect(link).toHaveAttribute('rel', /noopener/)
-  })
-
-  test('Clickable preset contains OSC 8 hyperlink escape sequence', async ({ page }) => {
-    // The clickable preset wraps each service name in OSC 8 (ESC]8;;URL ESC\)
-    // so terminal emulators render it as a hyperlink. The literal escape
-    // sequence in the user-visible JSON string must contain `]8;;` and
-    // the `]8;;` closing pair — if a future cleanup "simplifies" by dropping
-    // the OSC 8 wrapper, this preset silently degrades to plain text and the
-    // hyperlink claim in the prose becomes false.
-    await page.goto('/#statusline')
-    await waitForDataLoad(page)
-    const heading = page.locator('h3').filter({ hasText: /Clickable.*OSC 8/i })
-    await expect(heading).toBeVisible()
-    // Scope to the heading's parent subtree instead of nth(4) — survives a
-    // future reorder of preset blocks without spuriously passing on the wrong
-    // snippet.
-    const clickableSnippet = heading.locator('xpath=ancestor::div[1]').locator('pre')
-    const code = (await clickableSnippet.textContent()) || ''
-    // JSON.stringify double-encodes the embedded escape so the on-screen text
-    // is literal `\\u001b` (7 chars: \, \, u, 0, 0, 1, b) — that's what users
-    // copy. Substring checks below are escape-safe (no quoting ambiguity).
-    expect(code).toContain(']8;;')                       // OSC 8 opener
-    expect(code).toContain('https://ai-watch.dev/#')     // hyperlinked URL pointing to dashboard hash route
-    // The OSC 8 closer (ESC]8;;) appears at least twice — once after URL, once at the very end.
-    const matches = code.match(/\]8;;/g) || []
-    expect(matches.length).toBeGreaterThanOrEqual(2)
-  })
-
-  test('Clickable preset documents terminal compatibility caveat', async ({ page }) => {
-    // The OSC 8 escape isn't universal — tmux and some older shells render it
-    // as raw text. Documenting this in the page prose is what keeps users from
-    // copying the snippet into an unsupported terminal and concluding AIWatch
-    // is broken. Pin the caveat presence so a future docs trim doesn't drop it.
-    await page.goto('/#statusline')
-    await waitForDataLoad(page)
-    await expect(page.locator('body')).toContainText(/OSC 8/i)
-    // At least one of the supported terminal names should be mentioned to
-    // give the user a quick "do I have one?" check.
-    await expect(page.locator('body')).toContainText(/iTerm2|Warp|kitty|WezTerm/i)
-  })
-
-  test('each preset URL is tagged with ?src=statusline-<preset> for traffic split', async ({ page }) => {
-    // The traffic-split tag is what makes the Phase-1 → Reddit/Anthropic gating
-    // measurable (issue #400). Without it, statusline-driven requests are
-    // indistinguishable from regular `/api/status/cached` curl traffic and the
-    // baseline measurement collapses. A future copy-paste refactor that drops
-    // the tag would silently re-block that gate, so pin each preset's slug to
-    // its snippet's <pre> contents. Preset order matches Statusline.jsx render
-    // order: Quick start (branded) then Other presets (compact_badge,
-    // full_list, scoped, clickable, degraded_only [minimalist]).
+  test('every preset is a thin curl at its own /api/statusline/<preset> path (#918)', async ({ page }) => {
+    // The per-preset path is BOTH the route and the WAE adoption tag (#400/#918):
+    // it makes statusline traffic distinguishable per preset AND (since #918) is
+    // the single place the display logic is selected — the snippet itself is a
+    // dumb curl. A refactor that collapses the paths or reintroduces client jq
+    // would re-block the gate or re-freeze the formatting on users' machines.
+    // Preset order matches Statusline.jsx render order: Quick start (branded) then
+    // Other presets (compact_badge, full_list, scoped, clickable, degraded_only).
     await page.goto('/#statusline')
     await waitForDataLoad(page)
     const presetOrder = ['branded', 'compact_badge', 'full_list', 'scoped', 'clickable', 'degraded_only']
@@ -169,42 +113,42 @@ test.describe('Statusline guide page (#400 Phase 0)', () => {
     await expect(preBlocks).toHaveCount(presetOrder.length)
     for (let i = 0; i < presetOrder.length; i++) {
       const text = (await preBlocks.nth(i).textContent()) || ''
-      // `?src=statusline-<preset>` must be present in this preset's snippet AND
-      // must not be replaced by the slug of a different preset (catches "all
-      // snippets share one tag" regressions where the helper was inlined wrong).
-      expect(text, `preset #${i} (${presetOrder[i]}) snippet`).toContain(`?src=statusline-${presetOrder[i]}`)
+      // This preset's path must be present AND not replaced by another preset's
+      // path (catches "all snippets share one path" inline-helper regressions).
+      expect(text, `preset #${i} (${presetOrder[i]}) snippet`).toContain(`/api/statusline/${presetOrder[i]}`)
+      expect(text, `preset #${i} (${presetOrder[i]}) must have no jq`).not.toContain('jq')
       for (const other of presetOrder) {
         if (other === presetOrder[i]) continue
-        expect(text, `preset #${i} (${presetOrder[i]}) must not carry tag for ${other}`).not.toContain(`?src=statusline-${other}`)
+        expect(text, `preset #${i} (${presetOrder[i]}) must not carry path for ${other}`).not.toContain(`/api/statusline/${other}`)
       }
     }
   })
 
-  test('"How it works" section documents the ?src= traffic tag', async ({ page }) => {
-    // User-facing transparency contract: the snippet sends a query parameter,
-    // and the page's "How it works" section explains what it is. The snippet
-    // half is already pinned by 'each preset URL is tagged...' above; this
-    // test pins the prose half. Both assertions are scoped to the "How it
-    // works" <section> subtree so that the literal `?src=statusline-*` inside
-    // the snippet <pre> blocks elsewhere on the page does not satisfy the
-    // first match and silently mask a deleted prose bullet — that drop without
-    // a matching telemetry removal would be the exact "silent telemetry add"
-    // surprise pattern the page's "no client identifier collected" line
-    // promises not to do.
+  test('"How it works" documents server-side rendering + the no-identifier guarantee (#918)', async ({ page }) => {
+    // Transparency contract: the section explains the request carries the preset in
+    // its PATH (not a query tag / identifier) and that formatting is server-side
+    // (the "improvements reach you automatically" property that motivated #918).
+    // Scoped to the "How it works" <section> so a snippet <pre> elsewhere can't mask
+    // a deleted prose bullet.
     await page.goto('/#statusline')
     await waitForDataLoad(page)
-    // `section` element containing "How it works" — emitted by the Section
-    // helper in src/pages/Statusline.jsx. Two scoped assertions: the tag
-    // pattern is documented AND the no-identifier guarantee is restated.
-    // Either half disappearing should fail this test independently.
     const howItWorks = page.locator('section').filter({ hasText: /How it works/i })
     await expect(howItWorks).toHaveCount(1)
-    await expect(howItWorks).toContainText(/\?src=statusline/)
-    // Negation context is what makes this a transparency contract — the bullet
-    // must explicitly state the URL carries no identifier. Anchor the regex on
-    // a negation token (no | never) so "the page accidentally describes the
-    // user identifier we now collect" can't satisfy this assertion.
+    await expect(howItWorks).toContainText(/\/api\/statusline\//)
+    // The no-identifier guarantee must remain explicit (negation-anchored so prose
+    // that accidentally describes collecting an identifier can't satisfy it).
     await expect(howItWorks).toContainText(/(?:no|never).{0,40}user identifier/i)
+  })
+
+  test('Clickable preset documents terminal compatibility caveat', async ({ page }) => {
+    // The Worker emits OSC 8 hyperlinks for the branded/clickable presets, but the
+    // escape isn't universal — tmux and some older shells render it as raw text.
+    // Documenting this in the prose keeps users from copying the snippet into an
+    // unsupported terminal and concluding AIWatch is broken.
+    await page.goto('/#statusline')
+    await waitForDataLoad(page)
+    await expect(page.locator('body')).toContainText(/OSC 8/i)
+    await expect(page.locator('body')).toContainText(/iTerm2|Warp|kitty|WezTerm/i)
   })
 
   test('"Compatible with" section lists ccstatusline with a link', async ({ page }) => {
