@@ -194,6 +194,77 @@ export async function queryExtTraffic(
   }
 }
 
+// ── Statusline poll volume (#918, feeds #400 Phase 1 measurement) ─────────
+// The Claude Code statusline snippets (#400) poll /api/status/cached?src=statusline-<preset>,
+// each tagged with its FULL preset slug in the SAME aiwatch_statusline dataset (index.ts writes
+// index1 = the `statusline-*` src, #494). Counting them is the consent-free adoption proxy that
+// #400 Phase 1's distribution/measurement gate needs — collected since #494 but never read back
+// (unlike ext-claude / feed). Unlike ext-claude's single 'ext-claude' index, statusline's index1
+// is MULTI-VALUED (one per preset: statusline-branded / -clickable / -degraded_only / -compact_badge
+// / -full_list / -scoped), so filter with LIKE + GROUP BY index1 (feed's per-variant shape).
+// NOTE: poll volume ≈ active-usage proxy, NOT user count — Claude Code re-renders the statusline
+// per prompt, so a single active user generates many polls; the day-over-day step-up is the signal.
+const STATUSLINE_INDEX_PREFIX = 'statusline-'
+
+export interface StatuslineTrafficCounts {
+  byPreset: Record<string, number>  // preset slug (WITHOUT the 'statusline-' prefix) → last-24h polls
+  total: number                     // sum across presets
+}
+
+/** AE SQL summing the last-24h statusline poll count per preset (sampling-corrected via SUM(_sample_interval)). */
+export function buildStatuslineTrafficSql(dataset = V1_DATASET): string {
+  return (
+    `SELECT index1 AS preset, SUM(_sample_interval) AS requests ` +
+    `FROM ${dataset} ` +
+    `WHERE index1 LIKE '${STATUSLINE_INDEX_PREFIX}%' AND timestamp > NOW() - INTERVAL '1' DAY ` +
+    `GROUP BY index1 ` +
+    `FORMAT JSON`
+  )
+}
+
+/** Parse the AE SQL statusline JSON into per-preset counts (+ total). Strips the 'statusline-' prefix
+ *  from the preset key for readability. Tolerant of string/number requests + a missing/invalid preset. */
+export function parseStatuslineTrafficResponse(json: unknown): StatuslineTrafficCounts | null {
+  const data = (json as { data?: unknown })?.data
+  if (!Array.isArray(data)) return null
+  const byPreset: Record<string, number> = {}
+  let total = 0
+  for (const row of data) {
+    const r = row as { preset?: unknown; requests?: unknown }
+    if (typeof r.preset !== 'string' || !r.preset.startsWith(STATUSLINE_INDEX_PREFIX)) continue
+    const parsed = Number(r.requests)
+    const n = Number.isFinite(parsed) ? parsed : 0
+    const key = r.preset.slice(STATUSLINE_INDEX_PREFIX.length) || r.preset
+    byPreset[key] = (byPreset[key] ?? 0) + n
+    total += n
+  }
+  return { byPreset, total }
+}
+
+/** Query the last-24h statusline poll count via the AE SQL API. Best-effort: null on missing creds /
+ *  HTTP failure / unparseable response. Never throws. Mirrors queryFeedTraffic / queryExtTraffic. */
+export async function queryStatuslineTraffic(
+  accountId: string | undefined,
+  token: string | undefined,
+  fetchImpl: typeof fetch = fetch,
+): Promise<StatuslineTrafficCounts | null> {
+  if (!accountId || !token) return null
+  try {
+    const res = await fetchImpl(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: buildStatuslineTrafficSql() },
+    )
+    if (!res.ok) {
+      console.warn(`[wae] statusline SQL query failed: HTTP ${res.status}`)
+      return null
+    }
+    return parseStatuslineTrafficResponse(await res.json())
+  } catch (err) {
+    console.warn('[wae] statusline SQL query error:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
 // ── New-feed-items count (#748) ───────────────────────────────────────────
 // The poll volume above is mostly EMPTY no-op fetches (Slack RSS polls ~every 15min regardless of
 // content). The figure that actually matters — how many alert-worthy items were published — is the

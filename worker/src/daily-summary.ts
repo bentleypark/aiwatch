@@ -67,6 +67,10 @@ export interface DailySummaryData {
   // `ext-claude` tag; null when the SQL API isn't configured) + today's extension-sourced report
   // count (KV). Absent when neither signal exists → section omitted.
   extActivity?: { polls: number | null; reports: number } | null
+  // #918 — Claude Code statusline poll volume (last-24h, WAE `statusline-*` tags): the consent-free
+  // adoption proxy #400 Phase 1 needs. Per-preset breakdown + total. Absent (null) when the SQL API
+  // isn't configured; a poll ≈ active-usage proxy (Claude Code re-renders per prompt), not a user count.
+  statuslineTraffic?: { byPreset: Record<string, number>; total: number } | null
   // #575 Phase A — crowd "Report an issue" counts today (svcId → count). Internal demand signal
   // only (coverage priority); never a public "N reporting" verdict. Empty/absent → section omitted.
   reportCounts?: Record<string, number>
@@ -235,6 +239,11 @@ export function buildDailySummary(data: DailySummaryData): string {
   const extSection = formatExtActivitySection(data.extActivity)
   if (extSection) lines.push(extSection)
 
+  // Section: statusline poll volume (#918) — consent-free adoption proxy for the Claude Code
+  // statusline snippets (#400 Phase 1 measurement gate).
+  const statuslineSection = formatStatuslineTrafficSection(data.statuslineTraffic)
+  if (statuslineSection) lines.push(statuslineSection)
+
   // Section: crowd "Report an issue" counts (#575 Phase A) — internal demand signal only.
   if (data.reportCounts) {
     const nameOf = new Map(services.map((s) => [s.id, s.name]))
@@ -360,6 +369,30 @@ export function formatExtActivitySection(
   if (ext.reports > 0) parts.push(`${ext.reports} issue report${ext.reports === 1 ? '' : 's'}`)
   if (parts.length === 0) return ''
   return `\n🧩 **Chrome Extension**\n   Last 24h: ${parts.join(' · ')}`
+}
+
+/**
+ * Format the Claude Code statusline poll volume as a Discord section (#918). Empty string when
+ * unavailable (SQL API not configured) OR the 24h total is 0, so the caller skips it — the section
+ * stays absent until the statusline snippets (#400) see real adoption. Shows the last-24h total plus
+ * a per-preset breakdown (branded / degraded_only / …, highest-first). Counts are WAE sampling
+ * estimates (SUM(_sample_interval)), shown with `~`; the day-over-day step-up is the signal, not the
+ * absolute precision. A poll ≈ active-usage proxy (Claude Code re-renders the statusline per prompt),
+ * NOT a user count. Pure.
+ */
+export function formatStatuslineTrafficSection(
+  statusline: DailySummaryData['statuslineTraffic'],
+): string {
+  if (!statusline || statusline.total <= 0) return ''
+  const breakdown = Object.entries(statusline.byPreset)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([preset, n]) => `${preset} ${n}`)
+    .join(' · ')
+  return (
+    `\n📟 **Statusline Polls (Claude Code)**\n` +
+    `   Last 24h: ~${statusline.total} polls${breakdown ? ` (${breakdown})` : ''}`
+  )
 }
 
 /**

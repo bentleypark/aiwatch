@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine } from '../daily-summary'
 import type { ServiceStatus } from '../types'
 import type { AccuracyStats } from '../incident-history'
 import type { AudienceCounts } from '../outage-audience'
@@ -581,6 +581,30 @@ describe('buildDailySummary — #548 webhook delta + feed section', () => {
     const out = buildDailySummary({ ...base, feedTraffic: { all: 10, service: 5, total: 15 } })
     expect(out).toContain('📡 **Feed Polls (RSS/Slack)**')
     expect(out).toContain('Last 24h: 15')
+  })
+  it('renders the statusline-poll section when statuslineTraffic is present (#918)', () => {
+    const out = buildDailySummary({ ...base, statuslineTraffic: { byPreset: { branded: 88, scoped: 12 }, total: 100 } })
+    expect(out).toContain('📟 **Statusline Polls (Claude Code)**')
+    expect(out).toContain('Last 24h: ~100 polls')
+  })
+})
+
+describe('formatStatuslineTrafficSection (#918)', () => {
+  it('renders total + per-preset breakdown, highest-first', () => {
+    const out = formatStatuslineTrafficSection({ byPreset: { degraded_only: 20, branded: 88, scoped: 12 }, total: 120 })
+    expect(out).toContain('📟 **Statusline Polls (Claude Code)**')
+    expect(out).toContain('~120 polls')
+    expect(out).toContain('branded 88 · degraded_only 20 · scoped 12') // count-desc
+  })
+  it('omits zero-count presets from the breakdown', () => {
+    const out = formatStatuslineTrafficSection({ byPreset: { branded: 5, clickable: 0 }, total: 5 })
+    expect(out).toContain('branded 5')
+    expect(out).not.toContain('clickable')
+  })
+  it('is empty when null/undefined or total is 0 (section skipped until adoption)', () => {
+    expect(formatStatuslineTrafficSection(null)).toBe('')
+    expect(formatStatuslineTrafficSection(undefined)).toBe('')
+    expect(formatStatuslineTrafficSection({ byPreset: {}, total: 0 })).toBe('')
   })
 })
 

@@ -13,6 +13,9 @@ import {
   buildExtTrafficSql,
   parseExtTrafficResponse,
   queryExtTraffic,
+  buildStatuslineTrafficSql,
+  parseStatuslineTrafficResponse,
+  queryStatuslineTraffic,
   countFirstSeenWithin24h,
   countNewFeedItems,
 } from '../api-traffic'
@@ -306,5 +309,62 @@ describe('ext-claude traffic (#837)', () => {
   it('queryExtTraffic parses a successful response', async () => {
     const ok = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [{ requests: 123 }] }) })
     expect(await queryExtTraffic('acc', 'tok', ok as unknown as typeof fetch)).toBe(123)
+  })
+})
+
+describe('statusline traffic (#918)', () => {
+  it('buildStatuslineTrafficSql filters index1 LIKE statusline-%, 24h window, per-preset group', () => {
+    const sql = buildStatuslineTrafficSql()
+    expect(sql).toContain("index1 LIKE 'statusline-%'")
+    expect(sql).toContain('index1 AS preset')
+    expect(sql).toContain('SUM(_sample_interval) AS requests')
+    expect(sql).toContain('FROM aiwatch_statusline')
+    expect(sql).toContain("INTERVAL '1' DAY")
+    expect(sql).toContain('GROUP BY index1') // per-preset (index1 is multi-valued, unlike ext-claude)
+  })
+
+  it('parseStatuslineTrafficResponse strips the prefix, sums per-preset + total (string/number tolerant)', () => {
+    const json = { data: [
+      { preset: 'statusline-branded', requests: '120' },
+      { preset: 'statusline-degraded_only', requests: 45 },
+      { preset: 'statusline-clickable', requests: 'nope' }, // unparseable → 0
+    ] }
+    expect(parseStatuslineTrafficResponse(json)).toEqual({
+      byPreset: { branded: 120, degraded_only: 45, clickable: 0 },
+      total: 165,
+    })
+  })
+
+  it('parseStatuslineTrafficResponse ignores rows whose index1 is not a statusline- tag', () => {
+    const json = { data: [
+      { preset: 'statusline-branded', requests: 10 },
+      { preset: 'ext-claude', requests: 999 },   // wrong tag (LIKE guard belt-and-suspenders) → skipped
+      { preset: null, requests: 5 },             // invalid → skipped
+    ] }
+    expect(parseStatuslineTrafficResponse(json)).toEqual({ byPreset: { branded: 10 }, total: 10 })
+  })
+
+  it('parseStatuslineTrafficResponse returns null on malformed shape, empty on no rows', () => {
+    expect(parseStatuslineTrafficResponse({})).toBeNull()
+    expect(parseStatuslineTrafficResponse(null)).toBeNull()
+    expect(parseStatuslineTrafficResponse({ data: [] })).toEqual({ byPreset: {}, total: 0 })
+  })
+
+  it('queryStatuslineTraffic returns null without creds and never throws on failure', async () => {
+    expect(await queryStatuslineTraffic(undefined, undefined)).toBeNull()
+    const boom = vi.fn().mockRejectedValue(new Error('network'))
+    expect(await queryStatuslineTraffic('acc', 'tok', boom as unknown as typeof fetch)).toBeNull()
+    const notOk = vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    expect(await queryStatuslineTraffic('acc', 'tok', notOk as unknown as typeof fetch)).toBeNull()
+  })
+
+  it('queryStatuslineTraffic parses a successful response', async () => {
+    const ok = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [
+      { preset: 'statusline-branded', requests: 88 },
+      { preset: 'statusline-scoped', requests: 12 },
+    ] }) })
+    expect(await queryStatuslineTraffic('acc', 'tok', ok as unknown as typeof fetch)).toEqual({
+      byPreset: { branded: 88, scoped: 12 }, total: 100,
+    })
   })
 })

@@ -1,6 +1,15 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildStatuslinePayload, isStatuslineRequest } from '../statusline'
+import {
+  buildStatuslinePayload,
+  isStatuslineRequest,
+  renderStatuslinePreset,
+  isStatuslinePreset,
+  STATUSLINE_PRESETS,
+  type StatuslineService,
+} from '../statusline'
 import type { ServiceStatus } from '../types'
+
+const ESC = ''
 
 function svc(overrides: Partial<ServiceStatus> & Record<string, unknown> = {}): ServiceStatus {
   return {
@@ -138,5 +147,82 @@ describe('isStatuslineRequest (#438)', () => {
     expect(isStatuslineRequest(new URLSearchParams(''))).toBe(false)
     expect(isStatuslineRequest(new URLSearchParams('src=dashboard'))).toBe(false)
     expect(isStatuslineRequest(new URLSearchParams('foo=statusline-x'))).toBe(false)
+  })
+})
+
+// #918 — server-side rendering: the display logic (incl. the +N overflow) now lives in
+// the worker as testable TS, not a frozen client-side jq string. These pin each preset's
+// output so a future change is caught, and so the +N overflow can't silently regress.
+describe('renderStatuslinePreset (#918)', () => {
+  const link = (url: string, text: string) => `${ESC}]8;;${url}${ESC}\\${text}${ESC}]8;;${ESC}\\`
+  const lite = (...svcs: Array<[string, string, StatuslineService['status']]>): StatuslineService[] =>
+    svcs.map(([id, name, status]) => ({ id, name, status }))
+
+  // 5 non-operational (order preserved) + 2 operational (filtered out)
+  const FIVE_DOWN = lite(
+    ['claude', 'Claude API', 'down'],
+    ['openai', 'OpenAI', 'degraded'],
+    ['gemini', 'Gemini', 'down'],
+    ['groq', 'Groq', 'degraded'],
+    ['xai', 'xAI', 'down'],
+    ['cohere', 'Cohere', 'operational'],
+    ['mistral', 'Mistral', 'operational'],
+  )
+  const TWO_DOWN = lite(['claude', 'Claude API', 'down'], ['openai', 'OpenAI', 'degraded'])
+  const ALL_OK = lite(['claude', 'Claude API', 'operational'])
+
+  it('degraded_only: top 3 names + `+N` overflow, empty when healthy', () => {
+    expect(renderStatuslinePreset('degraded_only', FIVE_DOWN)).toBe('🔴 Claude API 🔴 OpenAI 🔴 Gemini +2')
+    expect(renderStatuslinePreset('degraded_only', TWO_DOWN)).toBe('🔴 Claude API 🔴 OpenAI')
+    expect(renderStatuslinePreset('degraded_only', ALL_OK)).toBe('')
+  })
+
+  it('branded: always-on AIWatch label, 🟢 healthy, OSC-8 links + `+N` when down', () => {
+    const label = link('https://ai-watch.dev', 'AIWatch')
+    expect(renderStatuslinePreset('branded', ALL_OK)).toBe(`${label} 🟢`)
+    const out = renderStatuslinePreset('branded', FIVE_DOWN)
+    expect(out.startsWith(`${label} `)).toBe(true)
+    expect(out).toContain(link('https://ai-watch.dev/#claude', '🔴 Claude API'))
+    expect(out.endsWith(' +2')).toBe(true)
+  })
+
+  it('clickable: OSC-8 links + `+N`, empty when healthy', () => {
+    const out = renderStatuslinePreset('clickable', FIVE_DOWN)
+    expect(out).toContain(link('https://ai-watch.dev/#openai', '🔴 OpenAI'))
+    expect(out.endsWith(' +2')).toBe(true)
+    expect(renderStatuslinePreset('clickable', ALL_OK)).toBe('')
+  })
+
+  it('compact_badge: count only, empty when healthy', () => {
+    expect(renderStatuslinePreset('compact_badge', FIVE_DOWN)).toBe('🔴 5 AI services')
+    expect(renderStatuslinePreset('compact_badge', ALL_OK)).toBe('')
+  })
+
+  it('full_list: all services, X· for down / !· for degraded, no cap', () => {
+    expect(renderStatuslinePreset('full_list', FIVE_DOWN)).toBe(
+      'X·Claude API | !·OpenAI | X·Gemini | !·Groq | X·xAI',
+    )
+    expect(renderStatuslinePreset('full_list', ALL_OK)).toBe('')
+  })
+
+  it('scoped: only claude/openai/gemini, no `+N`', () => {
+    expect(renderStatuslinePreset('scoped', FIVE_DOWN)).toBe('🔴 Claude API 🔴 OpenAI 🔴 Gemini')
+    expect(renderStatuslinePreset('scoped', TWO_DOWN)).toBe('🔴 Claude API 🔴 OpenAI')
+  })
+
+  it('unknown preset renders empty (caller 404s first)', () => {
+    expect(renderStatuslinePreset('bogus', FIVE_DOWN)).toBe('')
+  })
+})
+
+describe('isStatuslinePreset / STATUSLINE_PRESETS (#918)', () => {
+  it('accepts exactly the six shipped presets', () => {
+    expect([...STATUSLINE_PRESETS]).toEqual(['branded', 'clickable', 'degraded_only', 'compact_badge', 'full_list', 'scoped'])
+    for (const p of STATUSLINE_PRESETS) expect(isStatuslinePreset(p)).toBe(true)
+  })
+  it('rejects unknown / injection-y values', () => {
+    expect(isStatuslinePreset('bogus')).toBe(false)
+    expect(isStatuslinePreset('branded; rm -rf')).toBe(false)
+    expect(isStatuslinePreset('')).toBe(false)
   })
 })
