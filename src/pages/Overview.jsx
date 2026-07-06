@@ -1,7 +1,7 @@
 // Overview — summary stats, service grid, recent incidents, latency rankings, AI panel.
 // Design mockup: svc-card with left border, provider, 3-col metrics, variable-height history bars.
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, Fragment } from 'react'
 import IncidentTimeline from '../components/IncidentTimeline'
 import ReportModal from '../components/ReportModal'
 import RecentUserReports from '../components/RecentUserReports'
@@ -476,7 +476,7 @@ function SupplyChainBanner({ banner, setPage, t }) {
   )
 }
 
-function ActionBanner({ services, setPage, t }) {
+export function ActionBanner({ services, setPage, t }) {
   const affected = services.filter(s => s.status === 'down' || s.status === 'degraded')
   const withActiveIncidents = services.filter(s => s.status === 'operational' && (s.incidents ?? []).some(i => i.status !== 'resolved'))
   const monitoring = withActiveIncidents.filter(s => (s.incidents ?? []).some(i => i.status === 'monitoring') && !(s.incidents ?? []).some(i => i.status === 'investigating' || i.status === 'identified'))
@@ -613,24 +613,30 @@ function ActionBanner({ services, setPage, t }) {
               {grp.items.map((f, fi) => {
                 const outUrl = outboundReferralUrl(f.id)
                 return (
-                  <span key={f.id} style={{ whiteSpace: 'nowrap' }}>
+                  // #903 — the ', ' separator lives OUTSIDE the nowrap item span so a line
+                  // break can occur BETWEEN alternatives (else two glued items overflow the
+                  // banner on mobile, clipping the trailing "Open ↗" pill). Intra-item nowrap
+                  // still keeps each name+pill together.
+                  <Fragment key={f.id}>
                     {fi > 0 && ', '}
-                    <span
-                      className="text-[var(--green)] hover:underline cursor-pointer"
-                      onClick={() => { trackEvent('fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); setPage({ name: 'service', serviceId: f.id }) }}
-                    >
-                      {f.name}{f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}
+                    <span style={{ whiteSpace: 'nowrap' }}>
+                      <span
+                        className="text-[var(--green)] hover:underline cursor-pointer"
+                        onClick={() => { trackEvent('fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); setPage({ name: 'service', serviceId: f.id }) }}
+                      >
+                        {f.name}{f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}
+                      </span>
+                      {outUrl && (
+                        <a
+                          href={outUrl} target="_blank" rel="nofollow noopener noreferrer"
+                          className="text-[9px] rounded-sm border border-[var(--green)] text-[var(--green)] hover:bg-[var(--green)] hover:text-[var(--bg0)] no-underline"
+                          style={{ marginLeft: '4px', padding: '0 4px', verticalAlign: 'middle', lineHeight: '1.4' }}
+                          onClick={() => { trackEvent('outbound_fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); sendReferralBeacon('', f.id) }}
+                          aria-label={`Open ${f.name} (opens provider site)`}
+                        >{t('overview.banner.openAlt')}</a>
+                      )}
                     </span>
-                    {outUrl && (
-                      <a
-                        href={outUrl} target="_blank" rel="nofollow noopener noreferrer"
-                        className="text-[9px] rounded-sm border border-[var(--green)] text-[var(--green)] hover:bg-[var(--green)] hover:text-[var(--bg0)] no-underline"
-                        style={{ marginLeft: '4px', padding: '0 4px', verticalAlign: 'middle', lineHeight: '1.4' }}
-                        onClick={() => { trackEvent('outbound_fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); sendReferralBeacon('', f.id) }}
-                        aria-label={`Open ${f.name} (opens provider site)`}
-                      >{t('overview.banner.openAlt')}</a>
-                    )}
-                  </span>
+                  </Fragment>
                 )
               })}
             </span>
