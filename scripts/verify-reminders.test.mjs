@@ -3,7 +3,7 @@
 // script, not src/worker code.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors, parseScanRepos, displayRef } from './verify-reminders.mjs'
+import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors, parseScanRepos, displayRef, findBodyDrift, isDriftCandidate, hasBodyDriftLabel } from './verify-reminders.mjs'
 
 test('parseVerifyAfter — extracts date + note from a checklist line', () => {
   const body = '- [ ] **verify-after 2026-09-01** — check p95 after 3 months (#511)\nother text'
@@ -104,6 +104,47 @@ test('displayRef — bare #N for main/local, qualified for a sibling', () => {
   assert.equal(displayRef('bentleypark/aiwatch', 41, env), '#41')            // main repo → bare
   assert.equal(displayRef('bentleypark/aiwatch-reports', 41, env), 'aiwatch-reports#41') // sibling → qualified
   assert.equal(displayRef(null, 41, env), '#41')                            // local/current → bare
+})
+
+test('findBodyDrift — counts unchecked NON-verify-after boxes; excludes verify-after + checked + empty', () => {
+  // A synced verify-blocked body: impl boxes ticked, only the verify-after line open → NO drift.
+  const synced = '- [x] shipped the fix\n- [x] docs\n- [ ] **verify-after 2026-07-14** — check prod'
+  assert.equal(findBodyDrift(synced).count, 0)
+  // Drifted body: shipped code but impl boxes still unchecked → drift on the non-verify-after boxes.
+  const drifted = '- [x] one\n- [ ] Layer 1 graduated text\n- [ ] Layer 2 clamp\n- [ ] **verify-after 2026-07-08** — behavioral'
+  const d = findBodyDrift(drifted)
+  assert.equal(d.count, 2)
+  assert.deepEqual(d.samples, ['Layer 1 graduated text', 'Layer 2 clamp'])
+  // Empty / null / no boxes → no drift.
+  assert.equal(findBodyDrift('').count, 0)
+  assert.equal(findBodyDrift(null).count, 0)
+  assert.equal(findBodyDrift('just prose, no checkboxes').count, 0)
+  // `-[ ]` (no space, GFM literal text) is not a checkbox → not counted.
+  assert.equal(findBodyDrift('-[ ] not a real checkbox').count, 0)
+  // A verify-after with a `:`/`-` separator is still excluded.
+  assert.equal(findBodyDrift('- [ ] verify-after: 2026-08-01 rejoin ranking').count, 0)
+  // samples cap at 5.
+  const many = Array.from({ length: 8 }, (_, i) => `- [ ] item ${i}`).join('\n')
+  assert.equal(findBodyDrift(many).count, 8)
+  assert.equal(findBodyDrift(many).samples.length, 5)
+})
+
+test('isDriftCandidate — verify-blocked AND NOT tracking; accepts {name} or string labels', () => {
+  assert.equal(isDriftCandidate([{ name: 'verify-blocked' }, { name: 'bug' }]), true)
+  assert.equal(isDriftCandidate(['verify-blocked']), true)
+  // tracking umbrella is exempt (legitimately keeps open sub-items)
+  assert.equal(isDriftCandidate([{ name: 'verify-blocked' }, { name: 'tracking' }]), false)
+  // not verify-blocked → not a candidate
+  assert.equal(isDriftCandidate([{ name: 'bug' }]), false)
+  assert.equal(isDriftCandidate([]), false)
+  assert.equal(isDriftCandidate(null), false)
+})
+
+test('hasBodyDriftLabel — detects the self-heal label', () => {
+  assert.equal(hasBodyDriftLabel([{ name: 'body-drift' }, { name: 'verify-blocked' }]), true)
+  assert.equal(hasBodyDriftLabel(['body-drift']), true)
+  assert.equal(hasBodyDriftLabel([{ name: 'verify-blocked' }]), false)
+  assert.equal(hasBodyDriftLabel(null), false)
 })
 
 test('importing the module runs no side effects (main is guarded)', () => {
