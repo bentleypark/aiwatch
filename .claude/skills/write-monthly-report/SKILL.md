@@ -67,6 +67,20 @@ Heed both; they exist precisely because a prose rule gets only probabilistic com
      appeared in prior months; do NOT re-explain it in full in the narrative every cycle (a regular reader has
      seen it). State it once in methodology; in the narrative mention it only where it's load-bearing for THIS
      month's specific point (e.g. the Notable Incident it directly explains), and briefly.
+   - **No redundancy — two overlaps the #54/#55 gate CANNOT see (both recurring critiques).** The mechanical
+     **#54** gate flags a repeated SERVICE in a slot; it is blind to a repeated STORY or FRAMING.
+     (1) *Cross-section, within this report.* Each section has a distinct job (Summary = terse headline,
+     Key Insight = deeper patterns, Notable Incidents = specific events, Observations = what to *do*) — don't
+     tell the same service + numbers + Notable-Movers reference in two of them (e.g. a Summary "Biggest
+     improvement" bullet and a Key Insight "improvements" pattern carrying the identical Copilot/Gemini
+     figures). Avoid doubling two Key Insight patterns on one theme (two long-incident patterns) — unless the
+     month genuinely has one dominant story.
+     (2) *Cross-month framing.* Stock analytical lessons recur as pattern titles — "a few long outages hurt
+     more than many short ones", "upstream dependencies inherit their provider's reliability risk". Lead each
+     Key Insight pattern with what is SPECIFIC to THIS month (the actual movers/events), not a re-headline of a
+     timeless principle a regular reader has already seen in prior reports. **Read the last 2–3 months' Key
+     Insight pattern titles before writing** — if a title paraphrases a prior month's, reframe. (The per-model-
+     count caveat in the bullet above is the sharpest case; here the concern is the broader analytical *framing*.)
 
 3. **Heed the RECURRENCE CHECK block (#54).** If the generator injected a `⚠️ RECURRENCE CHECK` block
    above `## Summary`, a subject (e.g. Together AI) led the same slot in ≥2 recent months. **Do not restate
