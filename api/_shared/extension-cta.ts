@@ -1,13 +1,14 @@
 // "Install the Chrome extension" CTA — single source of the AIWatch extension's Web Store URL (#888/#837).
 //
-// EMPTY until the extension is approved + published. While empty, renderExtInstallCta returns '' so
-// EVERY install CTA is invisible — this ships safely before approval. On approval: set EXTENSION_STORE_URL
-// to the Chrome Web Store listing URL once → all surfaces (is-down + landing) go live at the same time.
+// Set once the extension cleared Chrome Web Store review (#837, approved 2026-07-07). While empty
+// (pre-approval) renderExtInstallCta returns '' so EVERY install CTA stays invisible; filling this
+// one value turns on all surfaces (is-down + landing) at the same time. Tracking params
+// (?hl=…&authuser=…) are stripped — the canonical public listing URL is the id-bearing /detail path.
 //
 // CSP-clean: renders a plain <a> with a data-ga hook only — no inline handler; the delegated `[data-ga]`
 // click listener already present on each Edge page (is-down + intro) fires the GA4 `install_extension`
 // event automatically. Pure + unit-tested.
-export const EXTENSION_STORE_URL = ''
+export const EXTENSION_STORE_URL = 'https://chromewebstore.google.com/detail/aiwatch-%E2%80%94-claude-status-d/mmngmhijlancegmfgcbegiackjkalocc'
 
 const escAttr = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

@@ -56,6 +56,7 @@
 - **페이지별 스켈레톤** — 각 페이지 레이아웃에 맞는 로딩 placeholder
 - **AI 분석 (Beta)** — 장애 발생 시 하이브리드 AI 자동 분석 (Gemma 4 primary + Sonnet fallback): 원인 추정, 예상 복구 시간, 영향 범위, 대체 서비스 추천. 인시던트 Discord 알림에 통합(단일 embed), Topbar Analyze 모달, Is X Down AI Insight 카드
 - **랜딩 페이지** — 랜딩 페이지(`/intro`), 대시보드 프리뷰 mock, KO/EN 이중 언어, Flow 애니메이션, `?banner=` 캠페인 슬롯(선택), GA4 트래킹
+- **Chrome 확장 프로그램** — Claude 전용 툴바 배지 + 팝업으로 Claude API / claude.ai / Claude Code 실시간 상태, AIWatch Score, 진행 중 인시던트(AI 요약 포함), gated 커뮤니티 리포트, 원클릭 이슈 리포트 제공. lite `?src=ext-claude` API만 폴링하며 페이지 내용은 읽지 않음(데이터 수집 없음) — [Chrome 웹 스토어에서 설치](https://chromewebstore.google.com/detail/aiwatch-%E2%80%94-claude-status-d/mmngmhijlancegmfgcbegiackjkalocc)
 - **Web Vitals 모니터링** — 실사용자 LCP, FCP, TTFB, CLS, INP 수집, p75 집계 및 Discord Daily Report 임계값 알림
 - **주간 브리핑** — 매주 일요일 Discord 다이제스트: AI 서비스 변경 감지(OpenAI, Google, Anthropic), 인시던트 요약, 안정성 트렌드
 - **보안 모니터링** — Hacker News, Reddit(r/netsec, r/cybersecurity), OSV.dev를 통한 AI 서비스 보안 사고 감지 및 24개 AI SDK 패키지(PyPI + npm, Langchain 에코시스템 어댑터 포함) 취약점 스캔, 대시보드 알림 + Discord 다이제스트
