@@ -81,6 +81,11 @@ export default async function handler(req: Request) {
     let serviceData = null
     let fallbacks: Array<{ id: string; name: string; score: number | null; status: string }> = []
     let aiInsight: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; startedAt?: string } | null = null
+    // #926 — the worker returns ONE analysis per active incident (aiAnalysis: Record<svcId, AIAnalysisResult[]>).
+    // Keep the FULL array for the visible AI Analysis card (parity with the dashboard AnalysisModal, which
+    // renders every incident); `aiInsight` above stays the primary [0] used by the meta/share/OG surfaces,
+    // which can only carry a single summary.
+    let aiInsights: Array<{ summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }> = []
     // #574 — supply-chain note for THIS service (set if it's in the banner's affectedNow/mayBeAffected).
     let supplyChainNote: { regions: string; confirmed: boolean } | null = null
     // Track the precise reason for the fallback render so the Discord alert can
@@ -105,7 +110,10 @@ export default async function handler(req: Request) {
             components?: Array<{ id: string; name: string; status: 'operational' | 'degraded' | 'down'; group?: string }>
             componentGroupsInline?: boolean // array-order (groups interleaved) breakdown layout (replicate)
           }>
-          aiAnalysis?: Record<string, { summary: string; estimatedRecovery: string; affectedScope: string[]; needsFallback?: boolean; analyzedAt: string; incidentId: string; resolvedAt?: string; estimatedRecoveryHours?: number }>
+          // #926 — the worker returns an ARRAY per service (one entry per active incident). The prior
+          // non-array annotation was wrong (a runtime array was silently collapsed to [0]); the Array.isArray
+          // guard below still tolerates a stray single object defensively.
+          aiAnalysis?: Record<string, Array<{ summary: string; estimatedRecovery: string; affectedScope: string[]; needsFallback?: boolean; analyzedAt: string; incidentId: string; resolvedAt?: string; estimatedRecoveryHours?: number }>>
           // #574 — supply-chain banner: when this service is in affectedNow/mayBeAffected, render a note.
           supplyChainBanner?: {
             severity: 'degraded' | 'down'
@@ -246,19 +254,32 @@ export default async function handler(req: Request) {
             .map(s => ({ id: s.id, name: s.name, score: (s as any).aiwatchScore ?? null, status: s.status }))
         }
 
-        // Extract AI analysis for this service (first active analysis from array)
+        // Extract AI analysis for this service. #926 — take the WHOLE array (one entry per active
+        // incident), not just [0], so a multi-incident service renders every AI card (dashboard parity).
         const analyses = data.aiAnalysis?.[entry.id]
-        const analysis = Array.isArray(analyses) ? analyses[0] : analyses
+        const analysisList = Array.isArray(analyses) ? analyses : analyses ? [analyses] : []
         // Show AI insight if analysis exists (incident may be active even when status is operational)
-        if (analysis) {
-          // #827 F4 — attach the matching incident's startedAt so a RESOLVED card can show
+        if (analysisList.length > 0) {
+          // #827 F4 — attach each matching incident's startedAt so a RESOLVED card can show
           // "predicted vs actual" (actual = startedAt→resolvedAt); estimatedRecoveryHours rides on
           // the analysis. Incidents live on the fetched SERVICE (`target`), NOT the slug-config
           // `entry` (which has no `incidents`). `target` may be undefined on the `service_missing`
           // config-drift path (which doesn't return) while `aiAnalysis` still has an entry — optional-
           // chain so we never throw to the fallback render; absent → the card shows the bare estimate.
-          const inc = ((target?.incidents as Array<{ id?: string; startedAt?: string }> | undefined) ?? []).find(i => i.id === analysis.incidentId)
-          aiInsight = { ...analysis, ...(inc?.startedAt ? { startedAt: inc.startedAt } : {}) }
+          const incidents = (target?.incidents as Array<{ id?: string; startedAt?: string; title?: string }> | undefined) ?? []
+          aiInsights = analysisList
+            .map(a => {
+              const inc = incidents.find(i => i.id === a.incidentId)
+              // #926 — carry the incident title too so a multi-incident card can label each sub-block
+              // (the dashboard modal does the same, keyed on incidentId).
+              return { ...a, ...(inc?.startedAt ? { startedAt: inc.startedAt } : {}), ...(inc?.title ? { incidentTitle: inc.title } : {}) }
+            })
+            // #926 — order newest-incident-first so the AI card lines up with the "Recent Incidents"
+            // section on the same page. That section sorts status-tier-then-recency (active before
+            // resolved), so this pure startedAt-desc order matches it in the dominant all-active case;
+            // a mixed active+recently-resolved set can differ, which is acceptable. startedAt-less last.
+            .sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''))
+          aiInsight = aiInsights[0] // primary (freshest incident) — meta/share/OG carry a single summary
         }
 
         // #574 — supply-chain note: if this service is in the banner (confirmed-affected or estimated).
@@ -318,7 +339,7 @@ export default async function handler(req: Request) {
       }
     }
 
-    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken)
+    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights)
 
     // #378: when the upstream Worker fetch failed and we're rendering the
     // "Status data is temporarily unavailable" fallback, the response must NOT
