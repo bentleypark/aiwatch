@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   computeMonthlyUptime,
   computeMonthlyComponentUptime,
+  curateComponentUptime,
   computeMonthlyOfficialUptime,
   computeMonthlyLatency,
   computeMonthlyLatencyStats,
@@ -32,7 +33,7 @@ import type { ServiceStatus, Incident } from '../types'
 import type { IncidentHistoryRecord } from '../incident-history'
 import type { MonthlySecurityEntry, MonthlySecuritySummary } from '../monthly-archive'
 import type { OsvTimeline } from '../security-monitor'
-import { SERVICE_ADDED_AT } from '../services'
+import { SERVICE_ADDED_AT, resolveSvcComponents } from '../services'
 
 // ── parseDurationMin ─────────────────────────────────────────────────
 
@@ -233,6 +234,73 @@ describe('computeMonthlyComponentUptime (#605)', () => {
 
   it('returns {} for empty data', () => {
     expect(computeMonthlyComponentUptime({})).toEqual({})
+  })
+})
+
+// ── curateComponentUptime (#605 Phase 3 — display-set curation) ──────
+describe('curateComponentUptime (#605 Phase 3)', () => {
+  const comps = [
+    { id: 'fedramp', name: 'FedRAMP', uptime: 42.27 },      // noise
+    { id: 'chat', name: 'Chat Completions', uptime: 99.98 },
+    { id: 'emb', name: 'Embeddings', uptime: 99.99 },
+    { id: 'login', name: 'Login', uptime: 99.66 },          // noise
+  ]
+
+  it('displayComponentIds allowlist keeps only the listed ids (drops FedRAMP/Login noise), preserving order', () => {
+    const out = curateComponentUptime(comps, { displayComponentIds: ['chat', 'emb'] })
+    expect(out).toEqual([
+      { id: 'chat', name: 'Chat Completions', uptime: 99.98 },
+      { id: 'emb', name: 'Embeddings', uptime: 99.99 },
+    ])
+  })
+
+  it('displayAllComponents keeps all EXCEPT componentDenylist (by name, case-insensitive)', () => {
+    const out = curateComponentUptime(comps, { displayAllComponents: true, componentDenylist: ['FedRAMP', 'login'] })
+    expect(out!.map(c => c.id)).toEqual(['chat', 'emb'])
+  })
+
+  it('falls back to statusComponentIds when displayComponentIds absent', () => {
+    const out = curateComponentUptime(comps, { statusComponentIds: ['chat', 'login'] })
+    expect(out!.map(c => c.id)).toEqual(['chat', 'login'])
+  })
+
+  it('returns undefined when no display config (component table omitted)', () => {
+    expect(curateComponentUptime(comps, {})).toBeUndefined()
+  })
+
+  it('returns undefined when <2 survive (a one-row breakdown adds nothing)', () => {
+    expect(curateComponentUptime(comps, { displayComponentIds: ['chat'] })).toBeUndefined()
+  })
+
+  it('returns undefined for empty/absent components or config', () => {
+    expect(curateComponentUptime([], { displayComponentIds: ['chat'] })).toBeUndefined()
+    expect(curateComponentUptime(undefined, { displayComponentIds: ['chat'] })).toBeUndefined()
+    expect(curateComponentUptime(comps, undefined)).toBeUndefined()
+  })
+
+  // Parity guard: the report's curation and the dashboard's live curation are maintained in
+  // parallel (curateComponentUptime here vs resolveSvcComponents in services.ts). Feeding the
+  // SAME config + component set to both must yield the SAME membership (id set) — otherwise the
+  // report highlights different components than the dashboard, the exact bug this whole feature
+  // exists to prevent. (Order can differ — report is least-reliable-first — so compare Sets.)
+  it('membership matches resolveSvcComponents (report == dashboard)', () => {
+    const raw = [
+      { id: 'fedramp', name: 'FedRAMP' },
+      { id: 'chat', name: 'Chat Completions' },
+      { id: 'emb', name: 'Embeddings' },
+      { id: 'login', name: 'Login' },
+    ]
+    const cases = [
+      { displayComponentIds: ['chat', 'emb', 'login'] },
+      { displayAllComponents: true, componentDenylist: ['FedRAMP', 'Login'] },
+      { statusComponentIds: ['chat', 'emb'] },
+      {}, // no config → both empty
+    ]
+    for (const config of cases) {
+      const live = resolveSvcComponents(config, { components: raw.map(c => ({ ...c, status: 'operational' })) })
+      const report = curateComponentUptime(raw.map(c => ({ ...c, uptime: 99 })), config) ?? []
+      expect(new Set(report.map(c => c.id))).toEqual(new Set(live.map(c => c.id)))
+    }
   })
 })
 
