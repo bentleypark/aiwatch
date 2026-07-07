@@ -28,7 +28,7 @@ The background monitor requires Claude Code v2.1.105 or later and an interactive
 
 ## Usage
 
-- The **monitor** starts automatically when the plugin is enabled — no action needed. When a provider goes down you'll see a notification like `⚠️ AI service outage (AIWatch): 🔴 Claude API +1`, and on recovery `✅ AI services recovered (AIWatch)`.
+- The **monitor** starts automatically when the plugin is enabled — no action needed. When a provider goes down you'll see `🔴 Claude API is down (AIWatch)`, and on recovery `✅ Claude API has recovered (AIWatch)` — one line per service, only on a real state change (never on an unchanged poll).
 - Run **`/aiwatch`** any time for the current status.
 
 ## Configuration

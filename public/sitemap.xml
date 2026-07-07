@@ -116,6 +116,14 @@
     <priority>0.7</priority>
   </url>
 
+  <!-- Claude Code plugin landing (Edge SSR, #920) -->
+  <url>
+    <loc>https://ai-watch.dev/plugin</loc>
+    <lastmod>2026-07-06</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+
   <!-- Monthly Reports (proxied via Edge Function to reports.ai-watch.dev, #264) -->
   <url>
     <loc>https://ai-watch.dev/reports/</loc>

@@ -175,6 +175,10 @@ export default function Statusline() {
           </a>
           . The recommended preset keeps an always-on, clickable <code className="mono text-[var(--text0)]">AIWatch</code> label — <code className="mono text-[var(--text0)]">AIWatch 🟢</code> while all healthy, <code className="mono text-[var(--text0)]">AIWatch 🔴 Claude API</code> when something breaks (up to 3 names, then a <code className="mono text-[var(--text0)]">+N</code> overflow marker for any beyond — click through for the full list) — so a click opens the dashboard at any time. Prefer zero footprint when healthy? The minimalist preset under <em>Other presets</em> stays empty until a service degrades.
         </p>
+        <p className="text-[var(--text2)] text-[12px]" style={{ lineHeight: '1.6', marginTop: '10px' }}>
+          Want proactive alerts + an <code className="mono text-[var(--text0)]">/aiwatch</code> command instead of a status bar? See the{' '}
+          <a href="/plugin" className="underline" style={{ color: 'var(--blue)' }}>AIWatch Claude Code plugin</a>.
+        </p>
       </div>
 
       <div

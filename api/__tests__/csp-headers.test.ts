@@ -63,7 +63,7 @@ describe('vercel.json CSP — SPA ENFORCING (#482 complete; Edge SSR enforces vi
   it('the SPA header source EXCLUDES the Edge SSR + proxy routes (so their own/external policies are not double-gated)', () => {
     const src = spaCspBlock().source
     expect(src).toContain('?!') // negative lookahead, not the bare /(.*)
-    for (const r of ['is-', 'intro', 'badges', 'methodology', 'extension-privacy', 'reports', 'confirm', 'feed', 'api']) {
+    for (const r of ['is-', 'intro', 'badges', 'methodology', 'plugin', 'extension-privacy', 'reports', 'confirm', 'feed', 'api']) {
       expect(src, `source lookahead must exclude ${r}`).toContain(r)
     }
     // The lookahead must admit SPA routes (incl. fallback paths that merely START with an excluded
