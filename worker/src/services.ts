@@ -58,7 +58,13 @@ export const SERVICES: ServiceConfig[] = [
   // Le Chat first would be dropped despite affecting the API. Low-probability; revisit if observed.
   // #627 — statusComponent 'API' selects the Instatus "API" group component for the official uptime%
   // (status.mistral.ai groups all API endpoints under it; → ~99.6% instead of "Not provided").
-  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1', incidentExclude: ['le chat', 'le console', 'documentation', 'website'], statusComponent: 'API' },
+  // #929 — holdShortIncidents: the Instatus auto-monitor posts frequent very short-lived
+  // "○○ API Degraded" MEDIUM (→ minor) incidents that self-resolve in seconds/minutes and are then
+  // pruned from the page, so the */5 cron fired a phantom "New Incident" alert on each (e.g. the
+  // 2026-07-03 AI Registry Prompts/Skills flaps). Same knob Langfuse uses (#792): a non-major NEW
+  // incident is held ~2 cron cycles before alerting, so a self-resolving flap never fires while a
+  // genuine longer incident (e.g. the 120h Fine Tuning degradation) still alerts.
+  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1', incidentExclude: ['le chat', 'le console', 'documentation', 'website'], statusComponent: 'API', holdShortIncidents: true },
   // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
   // (dynamic, so new/retired models need no config edit). componentSurfaces stay as individual rows;
   // the rest fold into a collapsible "Models" group (matches the official Endpoints/Models split).

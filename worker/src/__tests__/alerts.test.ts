@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, shouldHoldNewIncident, shouldHoldForAiAnalysis, AI_HOLD_MS, pendingAiKey, FLAP_HOLD_MS, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
+import { SERVICES } from '../services'
 
 describe('sourceLivenessOf (#714)', () => {
   it('dead when sourceDead (confirmed 4xx)', () => {
@@ -1333,6 +1334,42 @@ describe('short-incident hold (#792)', () => {
       const s3 = new Set<string>()
       if (shouldHoldNewIncident('langfuse', config, ongoing, { alreadyAlerted: false, firstSeenMs, nowMs: t0 + 10 * 60 * 1000 })) s3.add(ongoing.id)
       expect(buildIncidentAlerts([svc], alertedMap(), t0 + 10 * 60 * 1000, s3).map(a => a.key)).toEqual(['alerted:new:lf-real'])
+    })
+  })
+
+  describe('Mistral opt-in (#929)', () => {
+    // status.mistral.ai (Instatus, Nuxt) auto-posts frequent short "○○ API Degraded" MEDIUM (→ minor)
+    // flaps that self-resolve in seconds/minutes and get pruned, so each fired a phantom "New Incident"
+    // alert (the 2026-07-03 AI Registry Prompts/Skills case). Mistral now opts into the #792 hold.
+    const mistralFlap = (overrides: Partial<Incident> = {}): Incident => inc({
+      id: 'mistral-reg-1',
+      title: 'AI Registry Prompts API Degraded',
+      status: 'investigating',
+      impact: 'minor', // Nuxt severity MEDIUM → mapInstatusImpact → 'minor'
+      startedAt: new Date(NOW - 60_000).toISOString(),
+      timeline: [],
+      ...overrides,
+    })
+
+    it('the real SERVICES config opts Mistral into holdShortIncidents', () => {
+      const s = SERVICES.find((x) => x.id === 'mistral')
+      expect(s, 'mistral missing from SERVICES').toBeDefined()
+      expect(s!.holdShortIncidents, 'mistral must opt into the #792/#929 short-incident hold').toBe(true)
+    })
+
+    it('holds a Registry-shaped minor flap on first sight, using the real config', () => {
+      const cfg = SERVICES.find((x) => x.id === 'mistral')!
+      expect(shouldHoldNewIncident('mistral', cfg, mistralFlap(), firstSight)).toBe(true)
+    })
+
+    it('fires once the flap survives ~2 cycles (a genuine longer incident, e.g. the 120h Fine Tuning)', () => {
+      const cfg = SERVICES.find((x) => x.id === 'mistral')!
+      expect(shouldHoldNewIncident('mistral', cfg, mistralFlap(), confirmed)).toBe(false)
+    })
+
+    it('does NOT hold a `major` Mistral incident — a real broad outage alerts immediately', () => {
+      const cfg = SERVICES.find((x) => x.id === 'mistral')!
+      expect(shouldHoldNewIncident('mistral', cfg, mistralFlap({ impact: 'major' }), firstSight)).toBe(false)
     })
   })
 })
