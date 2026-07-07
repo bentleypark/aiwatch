@@ -54,8 +54,12 @@ describe('renderExtInstallCta (#888)', () => {
     expect(isClaudeSurface('')).toBe(false)
   })
 
-  it('ships with an EMPTY EXTENSION_STORE_URL (guard: do not commit a live URL before approval)', () => {
-    // Flip this to the real CWS listing URL only AFTER the extension is published (see #888 verify-after).
-    expect(EXTENSION_STORE_URL).toBe('')
+  it('ships the live CWS listing URL (extension approved 2026-07-07, #837) — CTA now on everywhere', () => {
+    // Was empty pre-approval; flipped once the extension cleared Chrome Web Store review. Must stay the
+    // canonical /detail/{slug}/{id} URL — id as the terminal segment, no tracking params (?hl/?authuser)
+    // and no extra path tail — so every share is clean. One regex pins slug-then-id + no query/hash.
+    expect(EXTENSION_STORE_URL).toMatch(
+      /^https:\/\/chromewebstore\.google\.com\/detail\/[^/?#]+\/mmngmhijlancegmfgcbegiackjkalocc$/,
+    )
   })
 })

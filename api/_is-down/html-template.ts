@@ -425,7 +425,7 @@ button.btn{cursor:pointer;font-family:inherit;line-height:inherit}
 .cta-alt{font-size:12px;margin-top:10px;color:#8b949e}
 .cta-alt a{color:#8b949e;text-decoration:underline}
 /* #888 — quiet standalone install strip below the answer/alert block (NOT a loud promo banner; muted card tone to avoid banner-blindness). */
-.ext-strip{max-width:560px;margin:12px auto 0;padding:9px 14px;border:1px solid #21262d;border-radius:8px;background:#0d1117;text-align:center;font-size:13px;line-height:1.45}
+.ext-strip{margin:12px 0 0;padding:9px 14px;border:1px solid #21262d;border-radius:8px;background:#0d1117;text-align:center;font-size:13px;line-height:1.45}
 .ext-strip a{color:#8b949e;text-decoration:none}
 .ext-strip a:hover{color:#c9d1d9}
 .ext-strip strong{color:#58a6ff;font-weight:600}
