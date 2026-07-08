@@ -7,7 +7,7 @@ import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidate
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
-import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk } from './utils'
+import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
@@ -428,6 +428,30 @@ async function sendDiscordAlert(webhookUrl: string, embed: { title: string; desc
     return true
   } catch (err) {
     console.error('[discord] webhook failed:', err instanceof Error ? err.message : err)
+    return false
+  }
+}
+
+// #936 — send a PLAIN-TEXT operator message (no embed). Used for the mobile-copyable tweet-reply
+// draft: a ``` code block inside an embed only gets Discord's one-click Copy button on DESKTOP, and
+// mobile long-press copies the whole embed (useless). A standalone plain message lets mobile "Copy
+// Text" grab exactly the reply, clean for pasting into a tweet. `flags: 4` = SUPPRESS_EMBEDS so the
+// is-down link in the reply doesn't unfurl a card under the copyable text. Operator channel only.
+async function sendDiscordMessage(webhookUrl: string, content: string): Promise<boolean> {
+  try {
+    const resp = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, flags: 4 }),
+    })
+    if (!resp.ok) {
+      console.error(`[discord] reply message returned ${resp.status}: ${await resp.text().catch(() => '')}`)
+      return false
+    }
+    resp.body?.cancel()
+    return true
+  } catch (err) {
+    console.error('[discord] reply message failed:', err instanceof Error ? err.message : err)
     return false
   }
 }
@@ -1146,7 +1170,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     // #422 — region-switch hint below the cross-service fallback. Cheaper first-line
     // action (same SDK/IAM) when the outage is region-specific with healthy regions left.
     if (alert.regionText) parts.push(`${DIV}\n${alert.regionText}`)
-    parts.push(`${DIV}\n[View on AIWatch](${alert.url})`)
+    // #936 — tag the primary CTA so alert clicks attribute to `discord/notification` instead of
+    // collapsing to (direct). The per-user relay rewrites this to a tagged is-down link (toPerUserEntry).
+    parts.push(`${DIV}\n[View on AIWatch](${appendUtm(alert.url, 'discord')})`)
     const description = parts.join('\n')
     // #475 invariant: the per-user relay feed must use the CLEAN description — build it before the
     // operator-only tweet draft is appended, so the draft (an operator action) never reaches a
@@ -1189,6 +1215,17 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       description: operatorDescription,
       color: alert.color,
     })
+    // #936 — send the tweet-reply draft as its OWN plain-text operator message right below the embed so
+    // it's one-tap copyable on Discord MOBILE (the embed code block only copies cleanly on desktop; the
+    // embed now just points here). Operator channel ONLY (never the per-user relay). Fully isolated: a
+    // failure here must never affect the alert already sent above. `reply` is already defused (#539).
+    if (reply) {
+      try {
+        await sendDiscordMessage(env.DISCORD_WEBHOOK_URL, reply.text)
+      } catch (err) {
+        console.error('[cron] reply copy message failed (operator alert sent):', alert.key, err instanceof Error ? err.message : err)
+      }
+    }
     // #778 — operator phone push for a Tier-1-family NEW down/degraded incident, so the short (~1–2h)
     // reply window isn't missed when the Discord channel is buried. Gated + scoped by pushTargetFor;
     // the Click target is the same #777 Top-search URL (push → tap → viral tweets). Fires AFTER the

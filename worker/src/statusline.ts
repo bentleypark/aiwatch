@@ -1,4 +1,5 @@
 import type { ServiceStatus } from './types'
+import { appendUtm } from './utils'
 
 // Minimal status-only projection for terminal statusline integrations (#438).
 //
@@ -62,9 +63,13 @@ const AIWATCH_HOME = 'https://ai-watch.dev'
 function osc8(url: string, text: string): string {
   return `${ESC}]8;;${url}${ESC}\\${text}${ESC}]8;;${ESC}\\`
 }
+// #936 — tag OSC-8 targets with utm_source=statusline so terminal-click inflow attributes to the
+// statusline instead of collapsing to (direct). Only the (invisible) link TARGET grows — the visible
+// statusline text is unchanged, so the one-line space budget is unaffected.
 function detailUrl(id: string): string {
-  return `${AIWATCH_HOME}/#${id}`
+  return appendUtm(`${AIWATCH_HOME}/#${id}`, 'statusline')
 }
+const HOME_URL = appendUtm(AIWATCH_HOME, 'statusline')
 
 // The name-list presets cap at this many names, then append a `+N` overflow marker
 // (statusline space is a one-line budget; #400 Display policy). SCOPED is ≤3 by
@@ -104,7 +109,7 @@ export function renderStatuslinePreset(preset: string, services: StatuslineServi
   const down = services.filter((s) => s.status !== 'operational')
   switch (preset) {
     case 'branded': {
-      const label = osc8(AIWATCH_HOME, 'AIWatch')
+      const label = osc8(HOME_URL, 'AIWatch')
       if (down.length === 0) return `${label} 🟢`
       return `${label} ${capWithOverflow(down, (s) => osc8(detailUrl(s.id), `🔴 ${s.name}`))}`
     }

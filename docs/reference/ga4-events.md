@@ -60,6 +60,22 @@ All events use `trackEvent()` from `src/utils/analytics.js`. GA4 is only active 
 
 Is X Down pages (Edge SSR) and Landing page use inline `gtag()` calls directly since they don't use React.
 
+### Outbound-link UTM taxonomy (attribution, not a GA4 event)
+
+Every clickable inbound link **we** emit is UTM-tagged so GA4 (and the `#842-B` outage-audience classifier) attribute the channel instead of collapsing to `(direct)` (the X app strips the HTTP referrer). Sources:
+
+| `utm_source` | `utm_medium` | `utm_campaign` | Emitted by | `classifyReferrer` bucket |
+|---|---|---|---|---|
+| `x` | `social` | `outage` | tweet/reply drafts (`X_UTM`/`X_REPLY_UTM`, alerts.ts), is-down X share | `x` |
+| `threads` / `copy-link` | `share` | `outage` | is-down share buttons (`buildShareUrl`) | `direct` (not bucketed separately) |
+| `rss` | `feed` | `outage` | RSS feed items (`appendUtm`, rss.ts) | `feed` |
+| `reddit` | `social` | `outage` | Reddit promote links (`appendUtm`, reddit.ts) | `feed`-adjacent → `direct` |
+| **`discord`** | **`notification`** | **`outage`** | **#936 — Discord alert "View on AIWatch" (operator dashboard + per-user is-down, `appendUtm`)** | `feed` |
+| **`extension`** | **`referral`** | — | **#936 — Chrome extension deep links + dashboard (`withExtUtm`, extension/config.js)** | `owned` |
+| **`statusline`** | **`referral`** | — | **#936 — statusline OSC-8 links (`appendUtm`, statusline.ts)** | `owned` |
+
+`appendUtm` (worker `utils.ts`) inserts the query **before** the `#` on a hash-routed dashboard link (`ai-watch.dev/?utm…#claude`) so GA4's `location.search` sees it. The extension can't import worker code, so it carries its own `withExtUtm`. `owned` = our always-on client surfaces (existing users returning), distinct from new inbound (`x`/`search`/`feed`).
+
 **Reports site** (served at `ai-watch.dev/reports/` via the `api/reports.ts` proxy; #264) uses the same GA4 ID (`G-D4ZWVHQ7JK`) with event delegation in `_includes/footer.html`:
 
 | Event | Parameters | Trigger | Purpose |

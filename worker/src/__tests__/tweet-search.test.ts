@@ -104,7 +104,7 @@ describe('buildReplyDraft', () => {
     expect(reply).not.toBeNull()
     expect(reply!.serviceId).toBe('claude')
     expect(reply!.text).toBe(
-      'yes — Claude API is down right now. live status, affected components & recovery ETA → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&utm_content=reply&i=inc1',
+      '🔴 yes — Claude API is down right now. live status, affected components & recovery ETA → https://ai-watch.dev/is-claude-down?e=down&utm_source=x&utm_medium=social&utm_campaign=outage&utm_content=reply&i=inc1',
     )
   })
 
@@ -117,6 +117,7 @@ describe('buildReplyDraft', () => {
   it('uses degraded phrasing for a degraded service', () => {
     const a = alert({ key: 'alerted:degraded:chatgpt', title: '🟠 ChatGPT — Degraded', svcIds: ['chatgpt'] })
     const reply = buildReplyDraft(a, [mockService({ id: 'chatgpt', name: 'ChatGPT', status: 'degraded' })])
+    expect(reply!.text).toMatch(/^🟠 yes — ChatGPT is having issues \(degraded\)/) // #936 status circle
     expect(reply!.text).toContain('having issues (degraded)')
     expect(reply!.text).toContain('https://ai-watch.dev/is-chatgpt-down?e=degraded')
   })
@@ -131,7 +132,7 @@ describe('buildReplyDraft', () => {
   it('uses recovery phrasing for a resolved alert', () => {
     const a = alert({ key: 'alerted:res:inc1', title: '🟢 Claude API — Resolved', svcIds: ['claude'] })
     const reply = buildReplyDraft(a, [mockService({ status: 'operational' })])
-    expect(reply!.text).toMatch(/^update — Claude API is back up\./)
+    expect(reply!.text).toMatch(/^🟢 update — Claude API is back up\./)
     expect(reply!.text).toContain('?e=resolved')
   })
 
@@ -166,14 +167,15 @@ describe('appendTweetSearchSection', () => {
     expect(appendTweetSearchSection('base', [], null, DIV)).toBe('base')
   })
 
-  it('appends a single Top-tweets link + the copyable reply code block', () => {
+  it('appends a single Top-tweets link + a pointer to the separate reply message (#936)', () => {
     const a = alert()
     const svcs = [mockService()]
     const out = appendTweetSearchSection('base', buildTweetSearches(a, svcs), replyFor(a, svcs), DIV)
     expect(out).toContain('🔎 **FIND TWEETS TO REPLY TO**')
     expect(out).toContain('[🔥 Top tweets](')
-    expect(out).toContain('💬 Copy this reply')
-    expect(out).toContain('```\nyes — Claude API is down right now.') // fenced code block = one-click copy
+    expect(out).toContain('💬 **REPLY DRAFT** in the message below ↓') // pointer, not a code block
+    expect(out).not.toContain('```') // #936 — reply moved to a separate plain message (mobile-copyable)
+    expect(out).not.toContain('yes — Claude API is down right now.') // reply text is no longer in the embed
     expect(out).not.toContain('Latest') // Top-only (#777)
   })
 
@@ -187,8 +189,8 @@ describe('appendTweetSearchSection', () => {
     expect(out).toContain('pick a service')
     expect(out).toContain('[🔥 Claude API](')
     expect(out).toContain('[🔥 OpenAI API](')
-    // one reply only (primary = Claude API), not one per service
-    expect(out.match(/💬 Copy this reply/g)).toHaveLength(1)
+    // one reply pointer only (primary = Claude API), not one per service
+    expect(out.match(/💬 \*\*REPLY DRAFT\*\*/g)).toHaveLength(1)
   })
 
   const five = () => {
@@ -219,30 +221,39 @@ describe('appendTweetSearchSection', () => {
     expect(out).toMatch(/\+\d+ more/)
   })
 
-  it('drops the reply block first when the section is tight but a link still fits', () => {
-    // sized so the link fits but not the link + reply code block → reply dropped, search kept
-    const base = 'x'.repeat(3900)
+  it('drops the reply pointer first when the section is tight but a link still fits', () => {
     const a = alert()
     const svcs = [mockService()]
-    const out = appendTweetSearchSection(base, buildTweetSearches(a, svcs), replyFor(a, svcs), DIV)
+    const searches = buildTweetSearches(a, svcs)
+    // Size base so the lean section (header + link, no pointer) fits exactly and the pointer overflows.
+    const CAP = DISCORD_EMBED_DESC_MAX - 16 // matches the SAFETY headroom inside appendTweetSearchSection
+    const leanLen = appendTweetSearchSection('', searches, null, DIV).length
+    const base = 'x'.repeat(CAP - leanLen)
+    const out = appendTweetSearchSection(base, searches, replyFor(a, svcs), DIV)
     expect(out.length).toBeLessThanOrEqual(DISCORD_EMBED_DESC_MAX)
     expect(out).toContain('[🔥 Top tweets](') // the essential link survived
-    expect(out).not.toContain('💬 Copy this reply') // the reply was dropped first
+    expect(out).not.toContain('💬 **REPLY DRAFT**') // the reply pointer was dropped first
   })
 
-  it('multi-service: drops the reply block but keeps a service link when tight', () => {
-    // sized so a picker link fits but link + reply does not → build(true) fails, build(false) succeeds
-    const base = 'x'.repeat(3900)
+  it('multi-service: drops the reply pointer but keeps a service link when tight', () => {
     const a = alert({ svcIds: ['claude', 'openai'] })
     const svcs = [
       mockService({ id: 'claude', name: 'Claude API' }),
       mockService({ id: 'openai', name: 'OpenAI API' }),
     ]
-    const out = appendTweetSearchSection(base, buildTweetSearches(a, svcs), replyFor(a, svcs), DIV)
+    const searches = buildTweetSearches(a, svcs)
+    // Size base so exactly ONE picker link fits WITHOUT the reply pointer, but WITH it none fit →
+    // build(true) returns null (0 links), build(false) succeeds. Mirrors the impl's prefix strings.
+    const CAP = DISCORD_EMBED_DESC_MAX - 16
+    const header = `\n${DIV}\n🔎 **FIND TWEETS TO REPLY TO**`
+    const pick = `\n→ pick a service:\n`
+    const link0 = `[🔥 Claude API](${searches[0].url})`
+    const base = 'x'.repeat(CAP - (header + pick).length - link0.length)
+    const out = appendTweetSearchSection(base, searches, replyFor(a, svcs), DIV)
     expect(out.length).toBeLessThanOrEqual(DISCORD_EMBED_DESC_MAX)
     expect(out).toContain('pick a service')
     expect(out).toContain('[🔥 Claude API](')
-    expect(out).not.toContain('💬 Copy this reply') // reply dropped before the links
+    expect(out).not.toContain('💬 **REPLY DRAFT**') // reply pointer dropped before the links
   })
 
   it('single over-limit returns the description unchanged (length guard)', () => {
@@ -276,13 +287,13 @@ describe('operator-only boundary (#475/#777)', () => {
     )
     expect(operatorDescription).toContain('🔎 **FIND TWEETS TO REPLY TO**')
     expect(operatorDescription).toContain('🐦 **TWEET DRAFT**')
-    expect(operatorDescription).toContain('💬 Copy this reply')
+    expect(operatorDescription).toContain('💬 **REPLY DRAFT**')
 
     // per-user relay entry is built from the CLEAN description → must carry none of the operator sections
     const feedEntry = buildFeedEntry(a, cleanDescription, services, 0)
     expect(feedEntry).not.toBeNull()
     expect(feedEntry!.embed.description).not.toContain('🔎 **FIND TWEETS TO REPLY TO**')
     expect(feedEntry!.embed.description).not.toContain('🐦 **TWEET DRAFT**')
-    expect(feedEntry!.embed.description).not.toContain('💬 Copy this reply')
+    expect(feedEntry!.embed.description).not.toContain('💬 **REPLY DRAFT**')
   })
 })

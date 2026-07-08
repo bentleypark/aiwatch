@@ -995,11 +995,14 @@ export function buildReplyDraft(alert: AlertCandidate, services: ScoredService[]
   const token = incidentTokenForAlert(alert)
   const url = `${appendStatusHint(`https://ai-watch.dev/is-${slug}-down`, hint)}&${X_REPLY_UTM}${token ? `&i=${encodeURIComponent(token)}` : ''}`
   const name = defuseAutolinkDomain(svc.name)
+  // #936 — lead with a status circle (🔴 down / 🟠 degraded / 🟢 recovered) so the pasted tweet reply
+  // shows severity at a glance in the thread. Mirrors the dashboard/feed dot convention.
+  const circle = isRecovery ? '🟢' : svc.status === 'degraded' ? '🟠' : '🔴'
   const text = isRecovery
-    ? `update — ${name} is back up. live status → ${url}`
+    ? `${circle} update — ${name} is back up. live status → ${url}`
     : svc.status === 'degraded'
-      ? `yes — ${name} is having issues (degraded) right now. live status & details → ${url}`
-      : `yes — ${name} is down right now. live status, affected components & recovery ETA → ${url}`
+      ? `${circle} yes — ${name} is having issues (degraded) right now. live status & details → ${url}`
+      : `${circle} yes — ${name} is down right now. live status, affected components & recovery ETA → ${url}`
   return { serviceId: id, serviceName: svc.name, text }
 }
 
@@ -1020,8 +1023,10 @@ export function appendTweetSearchSection(
   const SAFETY = 16 // headroom for the "+N more" suffix / multibyte rounding
   const cap = DISCORD_EMBED_DESC_MAX - SAFETY
   const header = `\n${div}\n🔎 **FIND TWEETS TO REPLY TO**`
-  // Reply text lives in a ``` code block so Discord shows a one-click Copy button on desktop.
-  const replyBlock = reply ? `\n💬 Copy this reply, then open a tweet:\n\`\`\`\n${reply.text}\n\`\`\`` : ''
+  // #936 — the copy-paste reply is now sent as a separate PLAIN message right below this embed, so it's
+  // one-tap copyable on Discord MOBILE (long-press → Copy Text). The old in-embed ``` code block only
+  // copied cleanly on desktop. Keep a one-line pointer here so the operator knows to grab it below.
+  const replyBlock = reply ? `\n💬 **REPLY DRAFT** in the message below ↓ (long-press → Copy Text on mobile)` : ''
 
   if (searches.length === 1) {
     const links = `\n→ [🔥 Top tweets](${searches[0].url})`

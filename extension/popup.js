@@ -3,7 +3,7 @@
 // fetch and re-renders. All DOM is built with createElement + textContent (never
 // innerHTML) — CSP-clean and injection-safe even though the data is our own API.
 
-import { REPORT_URL, SITE_BASE } from './config.js'
+import { REPORT_URL, SITE_BASE, withExtUtm } from './config.js'
 import {
   worstStatus,
   statusLabel,
@@ -74,7 +74,7 @@ function cardNode(svc, now) {
   const path = isDownPath(svc.id)
   if (path) {
     const link = el('a', 'card-name', svc.name)
-    link.href = `${SITE_BASE}${path}`
+    link.href = withExtUtm(`${SITE_BASE}${path}`)
     link.target = '_blank'
     link.rel = 'noopener'
     head.appendChild(link)
@@ -220,7 +220,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 document.addEventListener('DOMContentLoaded', () => {
   // Footer → the AIWatch dashboard, reusing the landing page's CTA copy ("Open the
   // dashboard →"). Per-surface cards already deep-link to their own is-down pages.
-  $('dashboard-link').href = SITE_BASE
+  $('dashboard-link').href = withExtUtm(SITE_BASE)
   $('report-form').addEventListener('submit', submitReport)
   loadAndRefresh()
 })
