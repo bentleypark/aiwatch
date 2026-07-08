@@ -21,6 +21,10 @@ is the *procedure* — follow it top to bottom.
 1. **Local verify (step 3.5)** — before committing, start the right dev server AND get the USER's
    explicit **in-browser confirmation**. Your own curl/Playwright/test runs do **not** satisfy this.
    "Tests pass" ≠ "feature verified". After requesting verification, **STOP and wait** for the user.
+   - Dashboard data source: DEFAULT to the **local worker with real data** (`npm run dev:worker` +
+     `ALLOWED_ORIGIN=*` in `worker/.dev.vars`) — the SPA's `MOCK_SERVICES` fixture is stale/fabricated
+     and misrepresents real states, and the prod `workers.dev` worker is CORS-blocked from localhost
+     (Origin allowlist). See CLAUDE.md "Local verification by page type" Note.
    - Reachability gate: if the change only manifests under a specific state (active incident,
      `down`/`degraded`, AI analysis, error/empty, a flag), that state is usually absent in live data
      — set up the trigger yourself (mock `usePolling`, seed local KV, craft a fixture), confirm it
@@ -44,8 +48,12 @@ is the *procedure* — follow it top to bottom.
    never commit to main. Before committing, `git status` must show **only** the intended files
    (branch switches can drag a prior PR's staged/untracked files along).
    - First check `gh pr list` for an existing open PR on the same issue (avoid dupes).
-   - **Worktree (parallel sessions):** if another agent session is already active on this repo, do
-     this work in a git worktree (`claude --worktree <name>` / `git worktree add`). Launched via the
+   - **Worktree (parallel sessions):** run `git worktree list` FIRST, before branching. A worktree or a
+     main-repo branch you didn't create means a concurrent session is active (already being in your OWN
+     worktree satisfies this); in that case do this work in a git worktree
+     (`claude --worktree <name>` / `git worktree add`), NOT an in-place branch on the shared main repo
+     (a concurrent session can `git checkout` it out from under you, dragging its uncommitted WIP into
+     your diff — the failure this rule exists to prevent). Launched via the
      VS Code extension? It does **not** auto-create a worktree (the Desktop app does) — say "work in a
      worktree" right after the session starts to relocate via the `EnterWorktree` tool. See CLAUDE.md
      "Parallel sessions (git worktrees)". Once in a worktree, edit / `cd` / test **only** via the
