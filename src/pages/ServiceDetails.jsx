@@ -523,18 +523,27 @@ export function ComponentBreakdown({ service, t }) {
 }
 
 function RegionalAvailability({ service, t }) {
+  // #932 — only the derived-state computation can throw synchronously (malformed region data);
+  // guard THAT, not the JSX. react-hooks/error-boundaries flags JSX-in-try/catch because a
+  // try/catch can't catch a child component's render error anyway — the right guard scope is the
+  // data prep, and a genuine render fault should surface (to an error boundary), not be swallowed.
+  let state
   try {
-    const state = regionStatusOf(service)
-    if (!state) return null
+    state = regionStatusOf(service)
+  } catch (err) {
+    console.error('[RegionalAvailability] regionStatusOf failed:', err)
+    return null
+  }
+  if (!state) return null
 
-    const { regions, okRegions, allDown, recommendedRegion, docsUrl, ongoingCount } = state
-    // recommendText interpolates the FIRST OK region's label — the recommendation
-    // policy itself (array-order, same-cloud-first by SERVICE_REGIONS layout)
-    // lives in regionStatus.js.
-    const recommendText = (t('svc.region.recommend') || '').replace('{region}', recommendedRegion?.label ?? '')
+  const { regions, okRegions, allDown, recommendedRegion, docsUrl, ongoingCount } = state
+  // recommendText interpolates the FIRST OK region's label — the recommendation
+  // policy itself (array-order, same-cloud-first by SERVICE_REGIONS layout)
+  // lives in regionStatus.js.
+  const recommendText = (t('svc.region.recommend') || '').replace('{region}', recommendedRegion?.label ?? '')
 
-    return (
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+  return (
+    <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
         <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
           <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
             <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: ongoingCount > 0 ? 'var(--amber)' : 'var(--green)' }} />
@@ -599,11 +608,7 @@ function RegionalAvailability({ service, t }) {
           )}
         </div>
       </section>
-    )
-  } catch (err) {
-    console.error('[RegionalAvailability] render failed:', err)
-    return null
-  }
+  )
 }
 
 
