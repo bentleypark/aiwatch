@@ -13,8 +13,8 @@ test('parseAssertionLine — valid GET + selector + quoted expected', () => {
 })
 
 test('parseAssertionLine — GET optional, absolute url, numeric op', () => {
-  const a = parseAssertionLine('assert: https://ai-watch.dev/api/report | predictionAccuracy.sampleCount >= 1')
-  assert.deepEqual(a, { source: 'https://ai-watch.dev/api/report', selector: 'predictionAccuracy.sampleCount', op: '>=', expected: '1' })
+  const a = parseAssertionLine('assert: https://ai-watch.dev/api/report | predictionAccuracy.total >= 1')
+  assert.deepEqual(a, { source: 'https://ai-watch.dev/api/report', selector: 'predictionAccuracy.total', op: '>=', expected: '1' })
 })
 
 test('parseAssertionLine — exists takes no operand', () => {

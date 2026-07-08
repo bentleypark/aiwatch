@@ -40,7 +40,7 @@ An indented `assert:` line **directly under** a `verify-after` checkbox (the nex
 | part | rule |
 |---|---|
 | **source** | `GET` optional. A leading-`/` path resolves against the prod worker (`VERIFY_ASSERT_BASE`, default `aiwatch-worker.p2c2kbf.workers.dev`), or an absolute `https://` URL. **Must be an allowlisted AIWatch host** (SSRF guard) — the ai-watch.dev set + the pinned prod worker host; extras via `VERIFY_ASSERT_ALLOW`. Response must be JSON. Prefer the fast KV-backed `/api/status/cached` over the live `/api/status` fan-out. |
-| **selector** | dot-path with an optional `[key=value]` array filter, e.g. `services[id=turbopuffer].scoreConfidence`, `supplyChainBanner.active`, `predictionAccuracy.sampleCount`. The `[key=value]` picks the first array element whose `key` string-equals `value`. |
+| **selector** | dot-path with an optional `[key=value]` array filter, e.g. `services[id=turbopuffer].scoreConfidence`, `supplyChainBanner.active`, `predictionAccuracy.total`. The `[key=value]` picks the first array element whose `key` string-equals `value`. |
 | **operator** | `==` · `!=` · `>=` · `<=` · `contains` (substring, or array membership) · `exists` (no operand) |
 | **expected** | a literal: quoted string `"medium"` / `'x'`, number `30`, boolean `true`/`false`. Omitted for `exists`. |
 
@@ -73,7 +73,7 @@ Add one when the acceptance can be expressed as a predicate over an AIWatch JSON
 | a `/api/status` field | ✅ | `services[id=turbopuffer].scoreConfidence == "medium"` |
 | a `/api/status` count/threshold | ✅ | `services[id=turbopuffer].coverageDays >= 30` |
 | presence of a structure | ✅ | `supplyChainBanner exists` |
-| a `/api/report` aggregate | ✅ (verify the field is exposed) | `predictionAccuracy.sampleCount >= 1` |
+| a `/api/report` aggregate | ✅ (verify the field is exposed) | `predictionAccuracy.total >= 1` |
 | GA4 / GSC-CTR / consent-gated | ❌ | leave as a human ping (no `assert:`) |
 | behavioral ("no alert fired", a flap) | ❌ | no static signal — human ping |
 | is-down `<title>` HTML text | ❌ (v1) | JSON-only today; HTML/text-body mode is a follow-up |
