@@ -25,7 +25,10 @@ import { parseAwsRssIncidents, parseAwsHealthEvents, parseAwsRegionHealth, decod
 
 export const SERVICES: ServiceConfig[] = [
   // AI API Services
-  { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp' },
+  // #934 — scopeResolvedToComponent: claude is EXCLUDE-only (no positive incidentKeywords) on the shared
+  // status.claude.com page, so a resolved Claude-Code-only incident cross-attributed to Claude API. See
+  // filterByComponentStatus. claudeai/claudecode are keyword-scoped and do NOT set this.
+  { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp', scopeResolvedToComponent: true },
   // displayComponentIds (#606 Cat B): the official "APIs" group (12) + "Platform" group (FedRAMP,
   // Ads Manager) on the shared status.openai.com page (incident.io). Display-only allowlist (badge
   // unchanged — no statusComponentId); disjoint from chatgpt/codex (pinned by the shared-page no-leak
@@ -58,7 +61,13 @@ export const SERVICES: ServiceConfig[] = [
   // Le Chat first would be dropped despite affecting the API. Low-probability; revisit if observed.
   // #627 — statusComponent 'API' selects the Instatus "API" group component for the official uptime%
   // (status.mistral.ai groups all API endpoints under it; → ~99.6% instead of "Not provided").
-  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1', incidentExclude: ['le chat', 'le console', 'documentation', 'website'], statusComponent: 'API' },
+  // #929 — holdShortIncidents: the Instatus auto-monitor posts frequent very short-lived
+  // "○○ API Degraded" MEDIUM (→ minor) incidents that self-resolve in seconds/minutes and are then
+  // pruned from the page, so the */5 cron fired a phantom "New Incident" alert on each (e.g. the
+  // 2026-07-03 AI Registry Prompts/Skills flaps). Same knob Langfuse uses (#792): a non-major NEW
+  // incident is held ~2 cron cycles before alerting, so a self-resolving flap never fires while a
+  // genuine longer incident (e.g. the 120h Fine Tuning degradation) still alerts.
+  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1', incidentExclude: ['le chat', 'le console', 'documentation', 'website'], statusComponent: 'API', holdShortIncidents: true },
   // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
   // (dynamic, so new/retired models need no config edit). componentSurfaces stay as individual rows;
   // the rest fold into a collapsible "Models" group (matches the official Endpoints/Models split).
@@ -646,11 +655,32 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
  * Filter out active incidents when the service's component is operational (#228).
  * Providers like Anthropic bulk-link incidents to all components even when only one is affected.
  * If this service's component is operational, remove unresolved incidents to prevent cross-contamination.
+ *
+ * #934 — the operational branch retained ALL resolved/monitoring incidents, which cross-attributed a
+ * sibling-component-only incident to this service ONCE IT RESOLVED. `claude` (Claude API) has no positive
+ * `incidentKeywords` — it relies on title-based `incidentExclude` + this component-status guard — so a
+ * Claude-Code-only incident whose title names no exclude keyword (the 2026-07-06 "Claude Tag seeing
+ * elevated GitHub operation failures", componentNames: ['Claude Code']) stayed in claude's candidate set.
+ * While active it was hidden here (Claude API component operational → drop unresolved); the moment it
+ * RESOLVED this guard kept it → it surfaced under Claude API + fired a Claude-API-included recovery alert.
+ * The fix is gated behind the opt-in `scopeResolvedToComponent` flag (set on `claude` only, see types.ts):
+ * when set, a resolved/monitoring incident is retained only if it plausibly involved THIS service's own
+ * component — its `componentNames` prefix-match our `statusComponent` (same convention as the #359
+ * exclude-bypass), OR it is untagged (no componentNames → ambiguous → keep, fail-open). Default-off so
+ * single-tenant services (mistral/perplexity/fal, whose broad `statusComponent: 'API'` would wrongly drop
+ * a specific-component incident) and keyword-scoped siblings (claudeai/claudecode) are byte-unchanged.
  */
 export function filterByComponentStatus(incidents: Incident[], componentStatus: string, config: ServiceConfig): Incident[] {
   if (componentStatus !== 'operational') return incidents
   if (!config.statusComponentId && !config.statusComponent) return incidents
-  return incidents.filter(i => i.status === 'resolved' || i.status === 'monitoring')
+  const ownComponent = config.statusComponent?.toLowerCase()
+  return incidents.filter(i => {
+    if (i.status !== 'resolved' && i.status !== 'monitoring') return false
+    if (!config.scopeResolvedToComponent || !ownComponent) return true
+    const names = (i.componentNames ?? []).map(n => n.toLowerCase())
+    if (names.length === 0) return true
+    return names.some(n => n.startsWith(ownComponent))
+  })
 }
 
 /**

@@ -180,18 +180,23 @@ describe('renderStatuslinePreset (#918)', () => {
     expect(renderStatuslinePreset('degraded_only', ALL_OK)).toBe('')
   })
 
+  // #936 — OSC-8 link targets carry utm_source=statusline (query before the '#' for hash links); the
+  // VISIBLE statusline text is unchanged (the URL lives inside the invisible OSC-8 escape).
+  const HOME = 'https://ai-watch.dev?utm_source=statusline&utm_medium=referral'
+  const detail = (id: string) => `https://ai-watch.dev/?utm_source=statusline&utm_medium=referral#${id}`
+
   it('branded: always-on AIWatch label, 🟢 healthy, OSC-8 links + `+N` when down', () => {
-    const label = link('https://ai-watch.dev', 'AIWatch')
+    const label = link(HOME, 'AIWatch')
     expect(renderStatuslinePreset('branded', ALL_OK)).toBe(`${label} 🟢`)
     const out = renderStatuslinePreset('branded', FIVE_DOWN)
     expect(out.startsWith(`${label} `)).toBe(true)
-    expect(out).toContain(link('https://ai-watch.dev/#claude', '🔴 Claude API'))
+    expect(out).toContain(link(detail('claude'), '🔴 Claude API'))
     expect(out.endsWith(' +2')).toBe(true)
   })
 
   it('clickable: OSC-8 links + `+N`, empty when healthy', () => {
     const out = renderStatuslinePreset('clickable', FIVE_DOWN)
-    expect(out).toContain(link('https://ai-watch.dev/#openai', '🔴 OpenAI'))
+    expect(out).toContain(link(detail('openai'), '🔴 OpenAI'))
     expect(out.endsWith(' +2')).toBe(true)
     expect(renderStatuslinePreset('clickable', ALL_OK)).toBe('')
   })

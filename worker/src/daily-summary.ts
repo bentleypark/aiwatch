@@ -298,7 +298,7 @@ export function formatReferralLine(
   return `\n🔗 **Outbound Referrals**: ${referralCounts.total}${top ? ` (${top})` : ''}`
 }
 
-const AUDIENCE_LABEL: Record<AudienceSource, string> = { x: 'X', search: 'search', feed: 'feed', direct: 'direct', plugin: 'plugin' }
+const AUDIENCE_LABEL: Record<AudienceSource, string> = { x: 'X', search: 'search', feed: 'feed', owned: 'owned', direct: 'direct', plugin: 'plugin' }
 
 /** #842-B — outage-moment audience line (consent-free is-down views by source). Leads with the
  *  active-outage subset (the sponsor-evidence "outage-spike audience") when any outage was viewed,

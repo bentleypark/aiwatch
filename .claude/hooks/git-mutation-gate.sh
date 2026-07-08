@@ -14,6 +14,11 @@
 #     constants.js, or adds a new worker module) but touches no docs/reference/* or
 #     CLAUDE.md, surface the change→doc map. Docs is the recurring miss because it's
 #     the late, no-feedback, no-gate step (memory: feedback_docs_update_not_skipped).
+#   • Methodology drift (git commit only, #937) — when the staged diff changes
+#     docs/reference/status-determination.md but NOT api/_methodology/html-template.ts,
+#     nudge to sync the public /methodology §2 cards that mirror those rules. The
+#     docs_reminder above goes silent once ANY docs file is touched, so this specific
+#     rules-doc↔mirror-page coupling needs its own check (the #934 drift).
 #
 # The step-3.5 reminder fires on EVERY matched git mutation — it is NOT silenced
 # by a running dev server. Rationale (#415, 2026-05-19 gap): a port probe cannot
@@ -74,6 +79,12 @@ esac
 # (or a new worker module added) but no docs/reference/* / CLAUDE.md edit in the same commit.
 # Soft nudge with the change→doc map. Robust: any git/parse failure leaves docs_reminder=0 (no fire).
 docs_reminder=0
+# #937 — status-determination ↔ /methodology page coupling. The docs_reminder above is silenced by
+# ANY docs/ or CLAUDE.md edit, so editing docs/reference/status-determination.md alone (the canonical
+# rules) does NOT flag the public /methodology §2 cards (api/_methodology/html-template.ts) that mirror
+# those rules — the recurring drift surfaced in #934. This high-precision reminder fires when the
+# rules doc is staged but the mirror page is not.
+methodology_reminder=0
 if [ "$op" = "git-commit" ]; then
   HCWD="$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)"
   [ -n "$HCWD" ] && cd "$HCWD" 2>/dev/null || true
@@ -90,6 +101,14 @@ if [ "$op" = "git-commit" ]; then
     printf '%s\n' "$names" | grep -qE '^docs/|^CLAUDE\.md$|README' && docs_changed=1
     if { [ "$code_changed" = 1 ] || [ "$new_module" = 1 ]; } && [ "$docs_changed" = 0 ]; then
       docs_reminder=1
+    fi
+    # #937 coupling: rules doc staged, mirror page NOT staged → nudge to sync the §2 cards.
+    statusdet_changed=0
+    printf '%s\n' "$names" | grep -qE '^docs/reference/status-determination\.md$' && statusdet_changed=1
+    methodology_changed=0
+    printf '%s\n' "$names" | grep -qE '^api/_methodology/html-template\.ts$' && methodology_changed=1
+    if [ "$statusdet_changed" = 1 ] && [ "$methodology_changed" = 0 ]; then
+      methodology_reminder=1
     fi
   fi
 fi
@@ -111,10 +130,13 @@ fi
 if [ "$docs_reminder" -eq 1 ]; then
   warnings+=("📝 ${op}: doc-load-bearing code changed but no docs/reference/* or CLAUDE.md in this commit. Change→doc map: KV key → kv-schema.md · feed/cron/data-flow → data-flow.md · new endpoint → api-endpoints.md · new file/service-count/architecture → CLAUDE.md · fallback/tier → fallback-tiers.md · status determination → status-determination.md. Update docs in THIS commit, not \"later\".")
 fi
+if [ "$methodology_reminder" -eq 1 ]; then
+  warnings+=("🔗 ${op}: docs/reference/status-determination.md changed but api/_methodology/html-template.ts is NOT in this commit. The public /methodology §2 \"STATUS DETERMINATION\" cards mirror these rules and are a recurring sync miss (#934/#937). Verify the §2 cards still match — update them in THIS commit if the rule changed user-visibly.")
+fi
 
 # Soft warning: surface a systemMessage, allow the tool to proceed.
 msg="$(printf '%s\n' "${warnings[@]}")"
-note="${op}; dev_server=$([ "$dev_running" -eq 1 ] && echo up || echo down); no_verify=${noverify}; docs_reminder=${docs_reminder}"
+note="${op}; dev_server=$([ "$dev_running" -eq 1 ] && echo up || echo down); no_verify=${noverify}; docs_reminder=${docs_reminder}; methodology_reminder=${methodology_reminder}"
 audit "warn" "$note"
 # jq -Rs . turns raw stdin into a properly-escaped JSON string literal.
 esc="$(printf '%s' "$msg" | jq -Rs . 2>/dev/null)"

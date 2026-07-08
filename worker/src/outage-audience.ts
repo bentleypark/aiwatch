@@ -12,7 +12,7 @@
 // counts and is read back once/day via AE SQL for the operator report. Mirrors the #518/#548
 // api-traffic.ts pattern on the SAME dataset, distinguished by a separate index ('isdown-view').
 //   index1  = 'isdown-view'                         → total is-down views via one index filter
-//   blob1   = source bucket ('x'|'search'|'feed'|'direct')
+//   blob1   = source bucket ('x'|'search'|'feed'|'owned'|'direct')
 //   blob2   = 'active' | 'clear'                    → viewed during an outage window vs not
 //   blob3   = service id                            → stored for a future per-service split; NOT
 //                                                     queried yet (buildOutageAudienceSql groups on
@@ -23,8 +23,12 @@ import { V1_DATASET } from './api-traffic'
 
 // AnalyticsEngineDataset is a global ambient type from @cloudflare/workers-types.
 
-export type AudienceSource = 'x' | 'search' | 'feed' | 'direct' | 'plugin'
-export const AUDIENCE_SOURCES: AudienceSource[] = ['x', 'search', 'feed', 'direct', 'plugin']
+// #936 — `owned` = our own always-on client surfaces (Chrome extension, statusline): existing users
+// returning during an outage, distinct from new inbound (x/search/feed). The Discord alert folds into
+// `feed` (it's a subscription notification, like the RSS feed). #920 — `plugin` = the Claude Code
+// plugin's is-down links (utm_source=claude-code).
+export type AudienceSource = 'x' | 'search' | 'feed' | 'owned' | 'direct' | 'plugin'
+export const AUDIENCE_SOURCES: AudienceSource[] = ['x', 'search', 'feed', 'owned', 'direct', 'plugin']
 
 const ISDOWN_INDEX = 'isdown-view'
 
@@ -46,8 +50,9 @@ export function classifyReferrer(utmSource: string | undefined, refHost: string 
   const utm = (utmSource || '').toLowerCase()
   const host = (refHost || '').toLowerCase()
   if (utm === 'x' || utm === 'twitter' || X_HOSTS.test(host)) return 'x'
-  if (utm === 'rss' || utm === 'feed') return 'feed'
-  if (utm === 'claude-code') return 'plugin'  // #920 Claude Code plugin is-down links
+  if (utm === 'rss' || utm === 'feed' || utm === 'discord') return 'feed' // #936 — Discord alert = our notification feed
+  if (utm === 'extension' || utm === 'statusline') return 'owned' // #936 — our own client surfaces
+  if (utm === 'claude-code') return 'plugin' // #920 — Claude Code plugin is-down links
   if (SEARCH_HOSTS.test(host)) return 'search'
   return 'direct'
 }
@@ -102,7 +107,7 @@ export interface AudienceCounts {
   activeBySource: Record<AudienceSource, number> // active-outage views by source
 }
 
-const zeroBySource = (): Record<AudienceSource, number> => ({ x: 0, search: 0, feed: 0, direct: 0, plugin: 0 })
+const zeroBySource = (): Record<AudienceSource, number> => ({ x: 0, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 })
 
 /** AE SQL summing the last-24h is-down view count per (source, active/clear) — sampling-corrected
  *  via SUM(_sample_interval), NOT COUNT(*) which undercounts at high volume (WAE samples). */

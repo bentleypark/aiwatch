@@ -727,38 +727,39 @@ describe('formatExtActivitySection (#837)', () => {
 describe('formatAudienceLine (#842-B)', () => {
   const counts = (o: Partial<AudienceCounts>): AudienceCounts => ({
     total: 0, activeTotal: 0,
-    bySource: { x: 0, search: 0, feed: 0, direct: 0, plugin: 0 },
-    activeBySource: { x: 0, search: 0, feed: 0, direct: 0, plugin: 0 },
+    bySource: { x: 0, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
+    activeBySource: { x: 0, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
     ...o,
   })
 
   it('leads with the active-outage subset by source + total when an outage was viewed', () => {
     const line = formatAudienceLine(counts({
       total: 320, activeTotal: 240,
-      bySource: { x: 210, search: 60, feed: 30, direct: 20, plugin: 0 },
-      activeBySource: { x: 180, search: 40, feed: 15, direct: 5, plugin: 0 },
+      bySource: { x: 210, search: 60, feed: 30, owned: 12, direct: 20, plugin: 0 },
+      activeBySource: { x: 180, search: 40, feed: 15, owned: 8, direct: 5, plugin: 0 },
     }))
     expect(line).toContain('Outage Audience')
     expect(line).toContain('240 during outages')
-    expect(line).toContain('X 180 · search 40 · feed 15 · direct 5')
+    expect(line).toContain('X 180 · search 40 · feed 15 · owned 8 · direct 5') // #936 owned bucket rendered
     expect(line).toContain('320 total views')
   })
 
   it('drops zero buckets from the breakdown', () => {
     const line = formatAudienceLine(counts({
       total: 100, activeTotal: 100,
-      bySource: { x: 100, search: 0, feed: 0, direct: 0, plugin: 0 },
-      activeBySource: { x: 100, search: 0, feed: 0, direct: 0, plugin: 0 },
+      bySource: { x: 100, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
+      activeBySource: { x: 100, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
     }))
     expect(line).toContain('X 100')
     expect(line).not.toContain('search 0')
     expect(line).not.toContain('feed 0')
+    expect(line).not.toContain('owned 0')
   })
 
   it('falls back to the general is-down audience when no active outage was viewed', () => {
     const line = formatAudienceLine(counts({
       total: 50, activeTotal: 0,
-      bySource: { x: 10, search: 35, feed: 5, direct: 0, plugin: 0 },
+      bySource: { x: 10, search: 35, feed: 5, owned: 0, direct: 0, plugin: 0 },
     }))
     expect(line).toContain('is-down Audience')
     expect(line).toContain('50 views')

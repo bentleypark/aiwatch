@@ -105,4 +105,5 @@ button:disabled { opacity: 0.6; cursor: default; }
 }
 .ftr a { color: var(--accent); text-decoration: none; }
 .ftr a:hover { text-decoration: underline; }
+.ftr-meta { display: flex; align-items: center; gap: 8px; }
 .muted { color: var(--text2); font-size: 11px; }

@@ -48,6 +48,15 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   // Live cross-check 2026-07-03: api2.cursor.sh routes real paths (200, body "Welcome to Cursor. From
   // <build>…") but 404s garbage → representative gateway, NOT a CDN catch-all (unlike windsurf.com).
   { id: 'cursor', url: 'https://api2.cursor.sh/' },                                 // 200, real API gateway
+  // #921 — Character.AI's official Statuspage was deactivated (401 "page inactive") since ~2026-06-18
+  // (#689/#800, statusSourceDeactivated) with no first-party replacement, leaving the card a dead
+  // surface. neo.character.ai (its backend API host) exposes a plain-fetch, non-bot-walled health
+  // endpoint — verified 2026-07-06: 200 {"redis":"UP"}, x-envoy-upstream-service-time header (real
+  // backend, not a CDN edge), RTT ~0.2s, no browser UA needed (the main character.ai root is CF-403
+  // bot-walled). This is a `probeConfirmed` case (services.ts): a healthy probe keeps the badge
+  // operational (probe-backed) despite the dead source. CAVEAT: it's a BACKEND health proxy — the
+  // user-facing app could be down while /health is UP; it does NOT restore incidents/uptime.
+  { id: 'characterai', url: 'https://neo.character.ai/health' },                    // 200 {"redis":"UP"}, app-category detail-card only (not Latency-ranked)
   // Not probed (#678): bedrock (region-specific runtime endpoint, estimate-only — incident-derived
   // reliability is enough), azureopenai (tenant-specific {resource}.openai.azure.com — no generic
   // endpoint), modal (api.modal.com returns a catch-all 200 on every path — not a representative

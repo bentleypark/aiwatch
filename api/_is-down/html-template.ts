@@ -277,6 +277,11 @@ export function renderPage(
   // the stale card. canonical / <title> / JSON-LD stay clean (SEO indexes those, not og:url). The caller
   // (api/is-down.ts) has already sanitized it to id-safe chars.
   ogIncidentToken?: string | null,
+  // #926 — the FULL per-incident AI analysis list for the visible AI Analysis card, so a service with
+  // multiple active incidents renders one card each (parity with the dashboard AnalysisModal). The scalar
+  // `aiInsight` above remains the primary [0] for meta/share/OG. Omitted/empty → fall back to the single
+  // `aiInsight` (older callers / single-incident path) so the card still renders.
+  aiInsights?: Array<{ summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }> | null,
 ): string {
   // #566: lead the SERP title with the live status answer (falls back to "Live Status"
   // when status data is unavailable) so the result answers the query before the click.
@@ -425,7 +430,7 @@ button.btn{cursor:pointer;font-family:inherit;line-height:inherit}
 .cta-alt{font-size:12px;margin-top:10px;color:#8b949e}
 .cta-alt a{color:#8b949e;text-decoration:underline}
 /* #888 — quiet standalone install strip below the answer/alert block (NOT a loud promo banner; muted card tone to avoid banner-blindness). */
-.ext-strip{max-width:560px;margin:12px auto 0;padding:9px 14px;border:1px solid #21262d;border-radius:8px;background:#0d1117;text-align:center;font-size:13px;line-height:1.45}
+.ext-strip{margin:12px 0 0;padding:9px 14px;border:1px solid #21262d;border-radius:8px;background:#0d1117;text-align:center;font-size:13px;line-height:1.45}
 .ext-strip a{color:#8b949e;text-decoration:none}
 .ext-strip a:hover{color:#c9d1d9}
 .ext-strip strong{color:#58a6ff;font-weight:600}
@@ -481,7 +486,7 @@ textarea.report-input{min-height:72px;resize:vertical}
 ${renderStatusHeader(service, seo)}
 ${renderCTA(seo, service?.status ?? 'operational', slug, service?.id ?? slug)}
 ${isClaudeSurface(service?.id ?? slug) ? renderExtInstallCta(EXTENSION_STORE_URL, { loc: 'is_down_page', variant: 'is-down' }) : ''}
-${renderAIInsight(aiInsight, service?.status, fallbacks)}
+${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service?.status, fallbacks)}
 ${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS infrastructure issue (${esc(supplyChainNote.regions)}) &mdash; ${supplyChainNote.confirmed ? `${esc(seo.displayName)} is degraded and attributes it to an AWS/upstream issue` : `${esc(seo.displayName)} runs on AWS and may be affected`}</p>` : ''}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
 ${renderComponents(service)}
@@ -649,33 +654,35 @@ function predictedVsActualEn(predictedHours: number, actualMin: number): string 
   return `${fmtMinEn(actualMin)} (${within})`
 }
 
-function renderAIInsight(insight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; startedAt?: string } | null, serviceStatus?: string, fallbacks?: Fallback[]): string {
+type AIInsight = { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }
+
+// #926 — accepts a SINGLE insight or the full per-incident LIST and renders ONE card for the service,
+// mirroring the dashboard AnalysisModal (which groups a service's incidents into a single card, NOT one
+// card per incident): a single "🤖 AI Analysis" header, one 🔄 Alternatives block, and one disclaimer,
+// with each active incident as a sub-block inside. A per-incident title labels each sub-block only when
+// the card holds more than one incident. The single-incident render is visually unchanged (each body is
+// wrapped in a transparent <div>; the Alternatives block + disclaimer moved up to the card level).
+function renderAIInsight(insight?: AIInsight | AIInsight[] | null, serviceStatus?: string, fallbacks?: Fallback[]): string {
   if (!insight) return ''
-  const ago = Math.floor((Date.now() - new Date(insight.analyzedAt).getTime()) / 60000)
-  const agoText = ago < 1 ? 'just now' : ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`
+  const list = Array.isArray(insight) ? insight : [insight]
+  if (list.length === 0) return ''
   const isResolved = serviceStatus === 'operational'
-  // An ACTIVE incident that has already run past its estimated recovery upper bound: the stale short
-  // range is no longer credible (a 2–4h estimate on an incident ongoing for days). Show how long it's
-  // been running vs the estimate ("Ongoing ~12h · exceeded ~2–4h est.") — same gate as the dashboard
-  // modal. Meta/share surfaces keep the terse "Exceeded typical pattern" (reads cleaner in-sentence).
-  const recovery = recoveryEstimateExceeded(insight) ? exceededRecoveryTextEn(insight) : formatRecoveryDisplay(insight.estimatedRecovery)
-  const isRecentlyRecovered = isResolved && !!insight.resolvedAt
-  // #827 F4 — once resolved, replace the bare estimate with "predicted vs actual" (actual = startedAt→
-  // resolvedAt). Null until resolved or when the numeric estimate / startedAt isn't available.
-  const outcome = isResolved && insight.estimatedRecoveryHours != null && insight.startedAt && insight.resolvedAt
-    ? predictedVsActualEn(insight.estimatedRecoveryHours, Math.round((new Date(insight.resolvedAt).getTime() - new Date(insight.startedAt).getTime()) / 60000))
-    : null
+  const multi = list.length > 1
+  const isRecentlyRecovered = isResolved && list.some(i => !!i.resolvedAt)
   const resolvedBadge = isResolved
     ? '<span class="mono" style="font-size:10px;color:#3fb950;background:rgba(63,185,80,0.15);padding:2px 8px;border-radius:4px">Resolved</span>'
     : ''
-  // #641 — only render the Alternatives block when we actually have a recommendation; we don't
-  // assert "No operational alternatives" (a subjective claim from our own incomplete coverage).
-  const fallbackHtml = insight.needsFallback && !isResolved && fallbacks && fallbacks.length > 0
+  // #641 — only render the Alternatives block when we actually have a recommendation; we don't assert
+  // "No operational alternatives" (a subjective claim from our own incomplete coverage). Rendered ONCE
+  // per card (gated on ANY active incident wanting a fallback), like the modal.
+  const anyNeedsFallback = list.some(i => i.needsFallback)
+  const fallbackHtml = anyNeedsFallback && !isResolved && fallbacks && fallbacks.length > 0
     ? `<div style="margin-top:8px;padding:8px 10px;background:#0d1117;border-radius:6px;border-left:3px solid #d29922">
 <span class="mono" style="font-size:11px;color:#c9d1d9;font-weight:600">🔄 Alternatives</span>
 ${fallbacks.map(f => `<div class="mono" style="font-size:11px;color:#c9d1d9;margin-top:3px">• ${esc(f.name)}${f.score != null ? ` (Score: ${f.score})` : ''}</div>`).join('')}
 </div>`
     : ''
+  const bodies = list.map((ins, idx) => renderInsightBody(ins, isResolved, multi, idx)).join('')
   return `<div class="card" style="border-left:3px solid ${isResolved ? '#3fb950' : '#7C3AED'};margin:16px 0${isResolved && !isRecentlyRecovered ? ';opacity:0.75' : ''}">
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
 <span style="font-size:16px">🤖</span>
@@ -683,7 +690,33 @@ ${fallbacks.map(f => `<div class="mono" style="font-size:11px;color:#c9d1d9;marg
 <span class="mono" style="font-size:10px;color:#7C3AED;background:rgba(124,58,237,0.15);padding:2px 8px;border-radius:4px">Beta</span>
 ${resolvedBadge}
 </div>
-<p style="font-size:13px;color:#c9d1d9;line-height:1.6;margin-bottom:8px">${esc(insight.summary)}</p>
+${bodies}
+${fallbackHtml}
+<p class="mono" style="font-size:9px;color:#484f58;margin-top:8px;opacity:0.7">⚠️ AI-generated estimation based on historical data. Actual time may vary.</p>
+</div>`
+}
+
+// One incident's analysis block inside the shared card. `multi`/`idx` control the separator + the
+// incident-title line (shown only when the card holds more than one incident, like the modal).
+function renderInsightBody(insight: AIInsight, isResolved: boolean, multi: boolean, idx: number): string {
+  const ago = Math.floor((Date.now() - new Date(insight.analyzedAt).getTime()) / 60000)
+  const agoText = ago < 1 ? 'just now' : ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`
+  // An ACTIVE incident that has already run past its estimated recovery upper bound: the stale short
+  // range is no longer credible (a 2–4h estimate on an incident ongoing for days). Show how long it's
+  // been running vs the estimate ("Ongoing ~12h · exceeded ~2–4h est.") — same gate as the dashboard
+  // modal. Meta/share surfaces keep the terse "Exceeded typical pattern" (reads cleaner in-sentence).
+  const recovery = recoveryEstimateExceeded(insight) ? exceededRecoveryTextEn(insight) : formatRecoveryDisplay(insight.estimatedRecovery)
+  // #827 F4 — once resolved, replace the bare estimate with "predicted vs actual" (actual = startedAt→
+  // resolvedAt). Null until resolved or when the numeric estimate / startedAt isn't available.
+  const outcome = isResolved && insight.estimatedRecoveryHours != null && insight.startedAt && insight.resolvedAt
+    ? predictedVsActualEn(insight.estimatedRecoveryHours, Math.round((new Date(insight.resolvedAt).getTime() - new Date(insight.startedAt).getTime()) / 60000))
+    : null
+  const sep = multi && idx > 0 ? 'border-top:1px solid #21262d;margin-top:10px;padding-top:10px' : ''
+  const titleLine = multi && insight.incidentTitle
+    ? `<div class="mono" style="font-size:10px;color:#8b949e;font-weight:600;margin-bottom:4px">${insight.resolvedAt ? '✅' : '🔸'} ${esc(insight.incidentTitle)}</div>`
+    : ''
+  return `<div${sep ? ` style="${sep}"` : ''}>
+${titleLine}<p style="font-size:13px;color:#c9d1d9;line-height:1.6;margin-bottom:8px">${esc(insight.summary)}</p>
 <div class="mono" style="font-size:11px;color:#8b949e;display:flex;flex-direction:column;gap:4px">
 ${outcome
   ? `<span>🎯 <strong style="color:#c9d1d9">Predicted vs actual:</strong> ${esc(outcome)}</span>`
@@ -692,8 +725,6 @@ ${insight.affectedScope.length > 0 ? `<span>📡 <strong style="color:#c9d1d9">S
 ${insight.resolvedAt ? `<span>✅ Recovered: ${(() => { const m = Math.floor((Date.now() - new Date(insight.resolvedAt).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : Math.floor(m / 60) + 'h ago' })()}</span>` : ''}
 <span>🕐 ${agoText}</span>
 </div>
-${fallbackHtml}
-<p class="mono" style="font-size:9px;color:#484f58;margin-top:8px;opacity:0.7">⚠️ AI-generated estimation based on historical data. Actual time may vary.</p>
 </div>`
 }
 

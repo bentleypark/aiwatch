@@ -16,7 +16,7 @@
 // fan-out (deliverToSubscribers) is wired into the scheduled handler as of #486 PR3, which also
 // removed the old browser relay in the same release so the two paths never double-send.
 
-import { kvPut, kvDel, isAllowedAlertWebhook } from './utils'
+import { kvPut, kvDel, isAllowedAlertWebhook, appendUtm } from './utils'
 import { isDownUrl } from './rss'
 import type { AlertFeedEntry, AlertKind } from './alert-feed'
 
@@ -416,11 +416,15 @@ export function classifyDelivery(status: number | null): DeliveryOutcome {
 // direct cron post (not via deliverToSubscribers), so the operator link is never touched.
 // The link format is pinned by a test (toPerUserEntry rewrites the exact `[View on AIWatch](url)`
 // markup index.ts emits) so a host/format drift breaks the build, not silently per-user delivery.
-const DASHBOARD_HASH_LINK_RE = /https:\/\/ai-watch\.dev\/#([a-z0-9]+)/g
+// #936 — the operator View link is now UTM-tagged with the query BEFORE the fragment
+// (`ai-watch.dev/?utm_source=discord…#claude`), so the pattern tolerates an optional query segment.
+const DASHBOARD_HASH_LINK_RE = /https:\/\/ai-watch\.dev\/(?:\?[^#\s)]*)?#([a-z0-9]+)/g
 export function toPerUserEntry(entry: AlertFeedEntry): AlertFeedEntry {
   const desc = entry.embed.description
   if (!desc) return entry
-  const rewritten = desc.replace(DASHBOARD_HASH_LINK_RE, (_m, id) => isDownUrl(id))
+  // Rewrite to the is-down page AND re-tag it (discord/notification) so per-user clicks attribute the
+  // same as the operator's — isDownUrl() drops the operator's query, appendUtm re-adds ours.
+  const rewritten = desc.replace(DASHBOARD_HASH_LINK_RE, (_m, id) => appendUtm(isDownUrl(id), 'discord'))
   return rewritten === desc ? entry : { ...entry, embed: { ...entry.embed, description: rewritten } }
 }
 

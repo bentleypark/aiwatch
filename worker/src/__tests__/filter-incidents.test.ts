@@ -408,6 +408,72 @@ describe('filterByComponentStatus (#228)', () => {
     const claudeApiResult = filterByComponentStatus([adminApiIncident, oldResolved], 'degraded', claudeApiConfig)
     expect(claudeApiResult).toHaveLength(2)
   })
+
+  // #934 — a RESOLVED sibling-component-only incident must not cross-attribute to a service whose
+  // own component stayed operational. Reproduces the production case: "Claude Tag seeing elevated
+  // GitHub operation failures" (componentNames: ['Claude Code']) surfaced under Claude API on resolution.
+  describe('#934 resolved sibling-component cross-attribution', () => {
+    // The real SERVICES config carries statusComponent NAMES, so the fix engages.
+    const claudeApi = SERVICES.find(s => s.id === 'claude')!
+    const claudeCode = SERVICES.find(s => s.id === 'claudecode')!
+    const githubIncident = (status: Incident['status']) => mockIncident({
+      id: 'gh-1',
+      title: 'Claude Tag seeing elevated GitHub operation failures',
+      status,
+      componentNames: ['Claude Code'],
+      resolvedAt: status === 'resolved' ? '2026-07-07T15:52:01Z' : null,
+    })
+
+    it('drops the resolved Claude-Code-only incident from Claude API (operational)', () => {
+      const result = filterByComponentStatus([githubIncident('resolved')], 'operational', claudeApi)
+      expect(result).toHaveLength(0)
+    })
+
+    it('drops the monitoring Claude-Code-only incident from Claude API (operational)', () => {
+      const result = filterByComponentStatus([githubIncident('monitoring')], 'operational', claudeApi)
+      expect(result).toHaveLength(0)
+    })
+
+    it('keeps the resolved incident on Claude Code (keyword-scoped, no flag)', () => {
+      // claudecode does NOT set scopeResolvedToComponent (keyword-scoped upstream), so it is unaffected
+      // by #934 and retains its own resolved incident — surfaces normally on resolution.
+      expect(claudeCode.scopeResolvedToComponent).toBeUndefined()
+      const result = filterByComponentStatus([githubIncident('resolved')], 'operational', claudeCode)
+      expect(result.map(i => i.id)).toEqual(['gh-1'])
+    })
+
+    it('keeps a genuine combined incident that names Claude API', () => {
+      const combined = mockIncident({
+        id: 'combo-1',
+        title: 'Elevated errors across surfaces',
+        status: 'resolved',
+        componentNames: ['Claude API', 'Claude Code'],
+        resolvedAt: '2026-07-07T00:00:00Z',
+      })
+      const result = filterByComponentStatus([combined], 'operational', claudeApi)
+      expect(result.map(i => i.id)).toEqual(['combo-1'])
+    })
+
+    it('keeps an untagged resolved incident on Claude API (fail-open)', () => {
+      const untagged = mockIncident({ id: 'ut-1', status: 'resolved', resolvedAt: '2026-07-07T00:00:00Z' })
+      const result = filterByComponentStatus([untagged], 'operational', claudeApi)
+      expect(result.map(i => i.id)).toEqual(['ut-1'])
+    })
+
+    it('does NOT scope a single-tenant broad-"API" service (perplexity) — no regression', () => {
+      // perplexity has statusComponent 'API' but does NOT opt in. A resolved incident whose component
+      // does not literally prefix 'API' (e.g. 'Sonar API') must still be kept — the #934 name-scoping
+      // would wrongly drop it, so the flag guards single-tenant services from that.
+      const perplexity = SERVICES.find(s => s.id === 'perplexity')!
+      expect(perplexity.scopeResolvedToComponent).toBeUndefined()
+      const sonar = mockIncident({
+        id: 'px-1', title: 'Elevated latency on Sonar API', status: 'resolved',
+        componentNames: ['Sonar API'], resolvedAt: '2026-07-07T00:00:00Z',
+      })
+      const result = filterByComponentStatus([sonar], 'operational', perplexity)
+      expect(result.map(i => i.id)).toEqual(['px-1'])
+    })
+  })
 })
 
 // Reproduces the call-site decision flow inside fetchService for shared

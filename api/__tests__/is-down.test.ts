@@ -172,4 +172,43 @@ describe('is-down.ts — #827 F4 predicted-vs-actual on a resolved card', () => 
     expect(threwParseError).toBe(false)   // buggy version logs this; fixed version takes the clean path
     expect(res.status).toBeGreaterThanOrEqual(200) // resolves cleanly (service_missing → 503)
   })
+
+  // #926 — a service with multiple active incidents shows EVERY analysis (not just [0]), ordered
+  // newest-incident-first so the AI card matches the "Recent Incidents" list on the same page. The
+  // worker delivers aiAnalysis in push order (here OLDEST first) to prove the handler re-sorts.
+  it('renders all incidents newest-first, matching the Recent Incidents order', async () => {
+    const now = Date.now()
+    const iso = (msAgo: number) => new Date(now - msAgo).toISOString()
+    const payload = new Response(JSON.stringify({
+      services: [
+        {
+          id: 'claude', name: 'Claude API', category: 'api', status: 'down',
+          latency: null, uptime30d: 99.09, lastChecked: iso(0), aiwatchScore: 62, scoreGrade: 'fair', scoreConfidence: 'high',
+          incidents: [
+            { id: 'old-auth', title: 'Auth failures', status: 'investigating', impact: 'major', startedAt: iso(45 * 60000), duration: null, timeline: [] },
+            { id: 'new-stream', title: 'Streaming timeouts', status: 'identified', impact: 'minor', startedAt: iso(20 * 60000), duration: null, timeline: [] },
+          ],
+        },
+        // an operational alternative so the 🔄 Alternatives block resolves
+        { id: 'gemini', name: 'Gemini API', category: 'api', status: 'operational', latency: 210, uptime30d: 99.9, lastChecked: iso(0), incidents: [], aiwatchScore: 95, scoreGrade: 'excellent', scoreConfidence: 'high' },
+      ],
+      // Delivered oldest-first on purpose — the handler must re-sort newest-first.
+      aiAnalysis: { claude: [
+        { summary: 'OLDER — auth overload.', estimatedRecovery: '30m–1h', affectedScope: ['Login'], needsFallback: true, analyzedAt: iso(9 * 60000), incidentId: 'old-auth' },
+        { summary: 'NEWER — streaming stalls.', estimatedRecovery: '1–2h', affectedScope: ['Streaming'], needsFallback: true, analyzedAt: iso(4 * 60000), incidentId: 'new-stream' },
+      ] },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    fetchMock.mockResolvedValueOnce(payload)
+    const res = await handler(makeReq('claude'))
+    expect(res.status).toBe(200)
+    const html = await res.text()
+    // Both summaries present (the whole array is rendered, not just [0])…
+    expect(html).toContain('OLDER — auth overload.')
+    expect(html).toContain('NEWER — streaming stalls.')
+    // …and the NEWER incident's card sub-block appears BEFORE the older one.
+    expect(html.indexOf('NEWER — streaming stalls.')).toBeLessThan(html.indexOf('OLDER — auth overload.'))
+    // Single shared card — one header + one Alternatives block.
+    expect((html.match(/AI Analysis</g) ?? []).length).toBe(1)
+    expect((html.match(/🔄 Alternatives/g) ?? []).length).toBe(1)
+  })
 })

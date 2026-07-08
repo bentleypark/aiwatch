@@ -123,7 +123,7 @@ const en = {
   'latency.slowest': 'Slowest',
   'latency.trend': '24h Trend',
   'latency.top8': 'Top 8 by Score',
-  'latency.excludeNote': '* AI Apps (claude.ai, ChatGPT, etc.) are excluded — no public API endpoint to measure. Coding agents are probed only where they expose their own API (e.g. Cursor).',
+  'latency.excludeNote': '* Ranking covers API services and coding agents with their own API (e.g. Cursor). AI apps are not ranked — most have no measurable endpoint; Character.AI is probed on its backend health endpoint and shown on its detail page only.',
   'latency.dummy': 'Collecting data (switches to real data after 24h)',
   'latency.avg.services': 'services',
 
