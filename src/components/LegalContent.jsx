@@ -58,6 +58,7 @@ export function PrivacyContent() {
       <h3 style={headingStyle}>10. Contact</h3>
       <p>For privacy inquiries, please contact <a href="mailto:contact@ai-watch.dev" style={linkStyle}>contact@ai-watch.dev</a>.</p>
       <p style={{ ...paraStyle, marginTop: 8 }}>Using the AIWatch <strong>Chrome extension</strong>? It has its own, separate privacy policy (it uses no analytics or cookies) — see <a href="/extension-privacy" style={linkStyle}>the extension privacy policy</a>.</p>
+      <p style={{ ...paraStyle, marginTop: 8 }}>Using the AIWatch <strong>Claude Code plugin</strong>? It also has its own, separate privacy policy (no cookies, no analytics, reads no code) — see <a href="/plugin-privacy" style={linkStyle}>the plugin privacy policy</a>.</p>
     </div>
   )
 
@@ -108,6 +109,7 @@ export function PrivacyContent() {
       <h3 style={headingStyle}>10. 문의</h3>
       <p>개인정보 처리에 관한 문의는 <a href="mailto:contact@ai-watch.dev" style={linkStyle}>contact@ai-watch.dev</a>로 연락해 주세요.</p>
       <p style={{ ...paraStyle, marginTop: 8 }}>AIWatch <strong>Chrome 확장 프로그램</strong>을 사용 중이신가요? 확장 프로그램은 분석·쿠키를 사용하지 않는 별도의 개인정보처리방침을 따릅니다 — <a href="/extension-privacy" style={linkStyle}>확장 프로그램 개인정보처리방침</a> 참고.</p>
+      <p style={{ ...paraStyle, marginTop: 8 }}>AIWatch <strong>Claude Code 플러그인</strong>을 사용 중이신가요? 플러그인도 쿠키·분석 없이 코드를 읽지 않는 별도의 개인정보처리방침을 따릅니다 — <a href="/plugin-privacy" style={linkStyle}>플러그인 개인정보처리방침</a> 참고.</p>
     </div>
   )
 }
