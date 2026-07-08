@@ -266,14 +266,30 @@ export function appendStatusHint(url: string, hint: string): string {
   return `${url}${sep}e=${encodeURIComponent(hint)}`
 }
 
-// #548 — UTM tags for outage-share links so GA4 cleanly attributes consent-free, channel-specific
-// inflow (the X tweet path already carries its own `X_UTM` in alerts.ts; this covers the RSS feed
-// item links + Reddit promote links). campaign=outage matches the X constant so all share channels
-// roll up under one campaign. `source` is the channel (rss/reddit); medium groups feed vs social.
-const UTM_MEDIUM: Record<'rss' | 'reddit', string> = { rss: 'feed', reddit: 'social' }
-export function appendUtm(url: string, source: 'rss' | 'reddit'): string {
-  const sep = url.includes('?') ? '&' : '?'
-  return `${url}${sep}utm_source=${source}&utm_medium=${UTM_MEDIUM[source]}&utm_campaign=outage`
+// #548/#936 — UTM tags for the links WE emit, so GA4 (and the #842-B outage-audience classifier)
+// attribute consent-free, channel-specific inflow instead of collapsing it to (direct). The X tweet
+// path carries its own `X_UTM` in alerts.ts; this covers RSS feed items + Reddit (#548) AND the three
+// #936 leaks: the Discord alert "View on AIWatch" link, and statusline OSC-8 links. `campaign=outage`
+// groups the outage-driven share/alert channels under one campaign; the always-on statusline nav link
+// carries no outage campaign (it's not incident-scoped). The Chrome extension tags its own links in
+// plain JS (extension/config.js) — it can't import worker code.
+type UtmSource = 'rss' | 'reddit' | 'discord' | 'statusline'
+const UTM_CONFIG: Record<UtmSource, { medium: string; campaign?: string }> = {
+  rss: { medium: 'feed', campaign: 'outage' },
+  reddit: { medium: 'social', campaign: 'outage' },
+  discord: { medium: 'notification', campaign: 'outage' },
+  statusline: { medium: 'referral' },
+}
+export function appendUtm(url: string, source: UtmSource): string {
+  const { medium, campaign } = UTM_CONFIG[source]
+  const params = `utm_source=${source}&utm_medium=${medium}${campaign ? `&utm_campaign=${campaign}` : ''}`
+  // A hash-routed dashboard link (ai-watch.dev/#claude) needs the query BEFORE the '#' or GA4 — which
+  // reads location.search — never sees it. Insert ahead of the fragment; is-down/root links have none.
+  const hashIdx = url.indexOf('#')
+  const base = hashIdx === -1 ? url : url.slice(0, hashIdx)
+  const frag = hashIdx === -1 ? '' : url.slice(hashIdx)
+  const sep = base.includes('?') ? '&' : '?'
+  return `${base}${sep}${params}${frag}`
 }
 
 // #707/#811 — classify an incident's TEXT as a NON-reliability advisory (compliance / export-control /

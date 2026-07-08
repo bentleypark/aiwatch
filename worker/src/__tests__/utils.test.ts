@@ -23,6 +23,26 @@ describe('appendUtm (#548)', () => {
     expect(appendUtm(appendStatusHint('https://ai-watch.dev/is-openai-down', 'down'), 'rss'))
       .toBe('https://ai-watch.dev/is-openai-down?e=down&utm_source=rss&utm_medium=feed&utm_campaign=outage')
   })
+
+  // #936 — discord (notification) keeps campaign=outage; statusline (always-on nav) drops the campaign.
+  it('tags the discord alert channel with medium=notification & campaign=outage', () => {
+    expect(appendUtm('https://ai-watch.dev/is-claude-down', 'discord'))
+      .toBe('https://ai-watch.dev/is-claude-down?utm_source=discord&utm_medium=notification&utm_campaign=outage')
+  })
+
+  it('tags statusline with medium=referral and NO outage campaign', () => {
+    expect(appendUtm('https://ai-watch.dev', 'statusline'))
+      .toBe('https://ai-watch.dev?utm_source=statusline&utm_medium=referral')
+  })
+
+  // #936 — a hash-routed dashboard link (ai-watch.dev/#claude) needs the query BEFORE the '#' so GA4
+  // (which reads location.search) sees it. The fragment must stay last.
+  it('inserts the query before the fragment on a hash-routed dashboard link', () => {
+    expect(appendUtm('https://ai-watch.dev/#claude', 'discord'))
+      .toBe('https://ai-watch.dev/?utm_source=discord&utm_medium=notification&utm_campaign=outage#claude')
+    expect(appendUtm('https://ai-watch.dev/#openai', 'statusline'))
+      .toBe('https://ai-watch.dev/?utm_source=statusline&utm_medium=referral#openai')
+  })
 })
 
 function mockKV(store: Record<string, string> = {}): KVLike {

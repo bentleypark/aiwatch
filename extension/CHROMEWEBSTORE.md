@@ -5,7 +5,7 @@
 
 ## Identity
 - **Name (store + `manifest.name`):** AIWatch — Claude Status & Down Detector  — keyword-rich for CWS search ("claude down detector" / "is claude down"). The in-app title stays clean: `action.default_title` (toolbar tooltip) + the popup header are "AIWatch — Claude Status", not the long store name.
-- **Version:** 1.0.0 (`extension/manifest.json`)
+- **Version:** 1.0.1 (`extension/manifest.json`)
 - **Category:** Developer Tools
 - **Primary purpose:** Show the live operational status of Anthropic's Claude surfaces
   (Claude API, claude.ai, Claude Code) in the toolbar, with a one-click issue report.
@@ -83,6 +83,8 @@ No `tabs`, no `<all_urls>`, no content scripts, no `scripting`, no remote code.
 - [ ] `manifest.json` version bumped if re-submitting.
 
 ## Version history
+- **1.0.1** (2026-07-08, #936) — Deep links now carry `utm_source=extension` (click attribution);
+  footer shows the installed version. No permission / data-handling change.
 - **1.0.0** (2026-06-30) — Initial release. Badge + popup for Claude API / claude.ai /
   Claude Code (status, Score, active incidents, gated community reports, fallback) +
   one-click issue report. Polls the AIWatch `?src=ext-claude` projection; no page access.

@@ -286,25 +286,34 @@ describe('updateFilters / unsubscribe', () => {
   })
 })
 
-describe('toPerUserEntry — per-user is-down link rewrite (#726)', () => {
+describe('toPerUserEntry — per-user is-down link rewrite (#726, #936 UTM)', () => {
   const desc = (link: string) => `🔴 Down\n[View on AIWatch](${link})`
+  // #936 — the operator View link is now UTM-tagged (query BEFORE the '#'); the per-user rewrite
+  // re-tags the is-down link so per-user clicks attribute the same (discord/notification).
+  const UTM = 'utm_source=discord&utm_medium=notification&utm_campaign=outage'
+  const opLink = (id: string) => `https://ai-watch.dev/?${UTM}#${id}` // matches appendUtm(alert.url,'discord')
 
-  it('rewrites the operator dashboard link to the is-down page', () => {
-    const out = toPerUserEntry(feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc('https://ai-watch.dev/#claude'), color: 1 } }))
-    expect(out.embed.description).toContain('[View on AIWatch](https://ai-watch.dev/is-claude-down)')
-    expect(out.embed.description).not.toContain('ai-watch.dev/#claude')
+  it('rewrites the operator dashboard link to the tagged is-down page', () => {
+    const out = toPerUserEntry(feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc(opLink('claude')), color: 1 } }))
+    expect(out.embed.description).toContain(`[View on AIWatch](https://ai-watch.dev/is-claude-down?${UTM})`)
+    expect(out.embed.description).not.toContain('ai-watch.dev/?' + UTM + '#claude')
   })
 
   it('uses the is-down slug for dash-dropped ids (claudecode → claude-code)', () => {
-    const out = toPerUserEntry(feedEntry({ embed: { title: 't', description: desc('https://ai-watch.dev/#claudecode'), color: 1 } }))
-    expect(out.embed.description).toContain('https://ai-watch.dev/is-claude-code-down')
+    const out = toPerUserEntry(feedEntry({ embed: { title: 't', description: desc(opLink('claudecode')), color: 1 } }))
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-code-down?${UTM}`)
   })
 
-  it('keeps the dashboard hash for a no-is-down-page service (azureopenai) — no-op, same entry ref', () => {
-    const entry = feedEntry({ embed: { title: 't', description: desc('https://ai-watch.dev/#azureopenai'), color: 1 } })
+  it('also tolerates a BARE (untagged) dashboard link — regex robustness', () => {
+    const out = toPerUserEntry(feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc('https://ai-watch.dev/#claude'), color: 1 } }))
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-down?${UTM}`)
+  })
+
+  it('keeps a tagged DASHBOARD link for a no-is-down-page service (azureopenai) — no-op, same entry ref', () => {
+    const entry = feedEntry({ embed: { title: 't', description: desc(opLink('azureopenai')), color: 1 } })
     const out = toPerUserEntry(entry)
-    expect(out).toBe(entry) // unchanged → same reference (azureopenai has no is-down page)
-    expect(out.embed.description).toContain('ai-watch.dev/#azureopenai')
+    expect(out).toBe(entry) // unchanged → same reference (azureopenai has no is-down page; already tagged)
+    expect(out.embed.description).toContain(`https://ai-watch.dev/?${UTM}#azureopenai`)
   })
 
   it('preserves title/color and returns the same entry when there is no dashboard link', () => {
@@ -315,43 +324,44 @@ describe('toPerUserEntry — per-user is-down link rewrite (#726)', () => {
     expect(out.embed.color).toBe(42)
   })
 
-  // Pins the cross-file invariant: the rewrite must match the EXACT `[View on AIWatch](${alert.url})`
-  // markup index.ts emits (alert.url = `${SITE}/#${id}`). If the host/format ever drifts there, this
-  // breaks the build rather than silently shipping the operator link to every general subscriber.
-  it('rewrites the exact "[View on AIWatch](…)" markup the operator embed emits (format pin)', () => {
-    const operatorLink = '[View on AIWatch](https://ai-watch.dev/#openai)'
+  // Pins the cross-file invariant: the rewrite must match the EXACT `[View on AIWatch](${appendUtm(alert.url,'discord')})`
+  // markup index.ts emits. If the host/format ever drifts there, this breaks the build rather than
+  // silently shipping the operator link to every general subscriber.
+  it('rewrites the exact tagged "[View on AIWatch](…)" markup the operator embed emits (format pin)', () => {
+    const operatorLink = `[View on AIWatch](${opLink('openai')})`
     const out = toPerUserEntry(feedEntry({ svcIds: ['openai'], embed: { title: 't', description: `🔴 Down\n${operatorLink}`, color: 1 } }))
-    expect(out.embed.description).toContain('[View on AIWatch](https://ai-watch.dev/is-openai-down)')
+    expect(out.embed.description).toContain(`[View on AIWatch](https://ai-watch.dev/is-openai-down?${UTM})`)
     expect(out.embed.description).not.toContain(operatorLink)
   })
 
   // The `/g` flag is load-bearing: a future description section could add a second dashboard link.
-  it('rewrites EVERY dashboard link (global), each to its own is-down page', () => {
-    const out = toPerUserEntry(feedEntry({ svcIds: ['claude', 'openai'], embed: { title: 't', description: `${desc('https://ai-watch.dev/#claude')}\nalso [b](https://ai-watch.dev/#openai)`, color: 1 } }))
-    expect(out.embed.description).toContain('https://ai-watch.dev/is-claude-down')
-    expect(out.embed.description).toContain('https://ai-watch.dev/is-openai-down')
-    expect(out.embed.description).not.toContain('ai-watch.dev/#')
+  it('rewrites EVERY dashboard link (global), each to its own tagged is-down page', () => {
+    const out = toPerUserEntry(feedEntry({ svcIds: ['claude', 'openai'], embed: { title: 't', description: `${desc(opLink('claude'))}\nalso [b](${opLink('openai')})`, color: 1 } }))
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-down?${UTM}`)
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-openai-down?${UTM}`)
+    expect(out.embed.description).not.toContain('#claude')
+    expect(out.embed.description).not.toContain('#openai')
   })
 
   // Mixed eligibility in one description: the per-link isDownUrl branch diverges within a single pass.
-  it('rewrites an is-down-eligible service but leaves a no-page service hash in the same description', () => {
-    const out = toPerUserEntry(feedEntry({ svcIds: ['claude', 'bedrock'], embed: { title: 't', description: `${desc('https://ai-watch.dev/#claude')}\nalso [b](https://ai-watch.dev/#bedrock)`, color: 1 } }))
-    expect(out.embed.description).toContain('https://ai-watch.dev/is-claude-down')
-    expect(out.embed.description).toContain('https://ai-watch.dev/#bedrock') // no is-down page → hash kept
-    expect(out.embed.description).not.toContain('ai-watch.dev/#claude')
+  it('rewrites an is-down-eligible service but leaves a tagged dashboard link for a no-page service', () => {
+    const out = toPerUserEntry(feedEntry({ svcIds: ['claude', 'bedrock'], embed: { title: 't', description: `${desc(opLink('claude'))}\nalso [b](${opLink('bedrock')})`, color: 1 } }))
+    expect(out.embed.description).toContain(`https://ai-watch.dev/is-claude-down?${UTM}`)
+    expect(out.embed.description).toContain(`https://ai-watch.dev/?${UTM}#bedrock`) // no is-down page → tagged dashboard hash kept
+    expect(out.embed.description).not.toContain('#claude')
   })
 
   it('is idempotent — a second pass over an already-rewritten entry is a no-op (same ref)', () => {
-    const once = toPerUserEntry(feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc('https://ai-watch.dev/#claude'), color: 1 } }))
+    const once = toPerUserEntry(feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc(opLink('claude')), color: 1 } }))
     const twice = toPerUserEntry(once)
     expect(twice).toBe(once)
-    expect(twice.embed.description).toContain('https://ai-watch.dev/is-claude-down')
+    expect(twice.embed.description).toContain(`https://ai-watch.dev/is-claude-down?${UTM}`)
   })
 
   it('does not mutate the input entry (returns a copy)', () => {
-    const entry = feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc('https://ai-watch.dev/#claude'), color: 1 } })
+    const entry = feedEntry({ svcIds: ['claude'], embed: { title: 't', description: desc(opLink('claude')), color: 1 } })
     toPerUserEntry(entry)
-    expect(entry.embed.description).toContain('ai-watch.dev/#claude') // original untouched
+    expect(entry.embed.description).toContain(`?${UTM}#claude`) // original untouched
   })
 })
 
