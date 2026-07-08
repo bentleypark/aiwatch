@@ -221,6 +221,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Footer → the AIWatch dashboard, reusing the landing page's CTA copy ("Open the
   // dashboard →"). Per-surface cards already deep-link to their own is-down pages.
   $('dashboard-link').href = withExtUtm(SITE_BASE)
+  // #936 — surface the extension version in the footer (from the manifest, single source of truth) so
+  // users/reviewers can tell which build is installed. textContent = injection-safe.
+  $('ext-version').textContent = `v${chrome.runtime.getManifest().version}`
   $('report-form').addEventListener('submit', submitReport)
   loadAndRefresh()
 })
