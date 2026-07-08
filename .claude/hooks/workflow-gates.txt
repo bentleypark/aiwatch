@@ -1,4 +1,5 @@
 ⚙️ AIWatch non-negotiable workflow gates (#415) — re-check at the decision moment, not just at session start:
+0. Start-of-work: the FIRST action on any new issue OR free-form code change is to invoke the `ship-issue` skill (loads the full runbook) — do this BEFORE investigating, branching, or coding, once per task. Skip only for pure Q&A / no-code-change turns.
 1. Local verify (CLAUDE.md step 3.5): before committing, start the right dev server AND get the USER's explicit in-browser confirmation. Your own curl / Playwright checks do NOT satisfy this. "Tests pass" ≠ "feature verified" — STOP and wait for the user after requesting verification.
 2. PR review (/pr-review-toolkit:review-pr) + Build/Test before every commit; auto-loop until a round is 0 Critical/Important.
 3. Commit / push / PR / merge only after the user asks or confirms — a ready/MERGEABLE PR is not a cue to auto-merge.

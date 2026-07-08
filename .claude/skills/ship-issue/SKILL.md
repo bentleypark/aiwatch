@@ -44,6 +44,13 @@ is the *procedure* — follow it top to bottom.
    never commit to main. Before committing, `git status` must show **only** the intended files
    (branch switches can drag a prior PR's staged/untracked files along).
    - First check `gh pr list` for an existing open PR on the same issue (avoid dupes).
+   - **Worktree (parallel sessions):** if another agent session is already active on this repo, do
+     this work in a git worktree (`claude --worktree <name>` / `git worktree add`). Launched via the
+     VS Code extension? It does **not** auto-create a worktree (the Desktop app does) — say "work in a
+     worktree" right after the session starts to relocate via the `EnterWorktree` tool. See CLAUDE.md
+     "Parallel sessions (git worktrees)". Once in a worktree, edit / `cd` / test **only** via the
+     worktree path: an absolute or main-root path silently leaks edits into the main repo (memory
+     `feedback_worktree_edit_path`). `ls` early to confirm you're in the worktree.
 2. **Design check** (UI only) — compare against `docs/AIWatch_화면디자인_초안_v2.html`; list every
    spacing/color/font/layout/text difference before coding.
 3. **Code** the change.
