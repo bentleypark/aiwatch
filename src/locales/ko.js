@@ -76,6 +76,7 @@ const ko = {
   'overview.panel.latency.sub': '현재 기준 ms',
   'overview.stats.uptime.sub': '전체 평균',
   'overview.incidents.monitoring': '모니터링 중',
+  'overview.incidents.total': '총 {d}',
   'overview.banner.degraded': '성능 저하',
   'overview.banner.down': '서비스 중단',
   'overview.banner.affected': '{n}개 서비스 장애',

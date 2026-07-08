@@ -17,7 +17,7 @@ import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionS
 import RssCopyIcon from '../components/RssCopyIcon'
 import { regionStatusOf } from '../utils/regionStatus'
 import { buildCalendarFromIncidents } from '../utils/calendar'
-import { compareIncidents, compareGroupedRows, getContextualTime, dominantGroupStatus } from '../utils/incidentSort'
+import { compareIncidents, compareGroupedRows, getContextualTime, dominantGroupStatus, sumGroupDuration, formatDurationMs } from '../utils/incidentSort'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
@@ -278,7 +278,7 @@ function CategoryTabs({ categoryFilter, setCategoryFilter, t }) {
 }
 
 // Grouped flap incidents (same title, same day) — compact expandable row (#496)
-function GroupIncidentItem({ group, lang, t }) {
+export function GroupIncidentItem({ group, lang, t }) {
   const [expanded, setExpanded] = useState(false)
   // Use canonical dominantGroupStatus (handles 'ongoing' alias + uniformStatus fast-path)
   const dominantStatus = dominantGroupStatus(group)
@@ -287,6 +287,16 @@ function GroupIncidentItem({ group, lang, t }) {
   const representative = group.entries[0]
   const serviceName = representative.serviceName ?? representative.affectedNames?.[0] ?? ''
   const dateStr = formatDate(group.rangeEnd, lang).split(' ').slice(0, 2).join(' ')
+  // Show the SUM of all grouped flips' downtime (labeled "총"/"total"), not just
+  // the newest entry's duration — a "×N" group's impact is every flip combined.
+  // Reuses the canonical sumGroupDuration/formatDurationMs shared with Incidents.jsx;
+  // null when nothing has resolved yet → falls back to the monitoring/ongoing label.
+  const summed = sumGroupDuration(group)
+  const totalDuration = summed.resolvedCount === 0
+    ? null
+    : summed.hasOngoing
+      ? `${t('overview.incidents.total').replace('{d}', formatDurationMs(summed.totalMs))} + ${t('incidents.duration.ongoing')}`
+      : t('overview.incidents.total').replace('{d}', formatDurationMs(summed.totalMs))
   return (
     <div style={{ marginBottom: '8px' }}>
       <div
@@ -322,7 +332,8 @@ function GroupIncidentItem({ group, lang, t }) {
             </span>
           </div>
           <div className="mono text-[10px] text-[var(--text2)]">
-            {representative.duration ?? (dominantStatus === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}
+            {totalDuration
+              ?? (dominantStatus === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}
           </div>
         </div>
       </div>
