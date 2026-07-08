@@ -138,6 +138,15 @@ export interface ServiceConfig {
   incidentIoBaseUrl?: string
   statusComponent?: string
   statusComponentId?: string
+  // #934 — opt-in: on a SHARED status page, an EXCLUDE-ONLY service (no positive incidentKeywords/
+  // incidentComponents) keeps a resolved/monitoring incident in filterByComponentStatus only if the
+  // incident named THIS service's own `statusComponent`. Prevents a sibling-component-only incident
+  // (e.g. a Claude-Code-only "GitHub failures" incident, componentNames: ['Claude Code']) from
+  // cross-attributing to Claude API on resolution. Set on `claude` ONLY — single-tenant services
+  // (mistral/perplexity/fal) have no sibling to leak from and a broad statusComponent ('API') would
+  // wrongly drop a specific-component incident; keyword-scoped siblings (claudeai/claudecode) already
+  // scope upstream and could drop 'across surfaces' incidents. Off by default.
+  scopeResolvedToComponent?: boolean
   // Optional: multiple components to track for the badge (worst-status wins).
   // When set, the dashboard status is `down` if any component is `major_outage`,
   // `degraded` if any is `partial_outage`/`degraded_performance`, else `operational`.
