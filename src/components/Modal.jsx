@@ -18,9 +18,12 @@ export default function Modal({ isOpen, onClose, title, children }) {
   const titleId = useId()
   const dialogRef = useRef(null)
 
-  // onCloseRef avoids re-running the effect when the parent re-renders with a new onClose
+  // onCloseRef avoids re-running the open effect when the parent re-renders with a new onClose.
+  // #932 — write the ref in a passive effect (not during render; react-hooks/refs) so it stays
+  // concurrent-safe. The ref is only READ inside the dialog's close/click listeners, which fire on
+  // user interaction (always after commit), so the post-commit update is soon enough.
   const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
+  useEffect(() => { onCloseRef.current = onClose })
 
   // On open: showModal() (top-layer, native focus-trap + inert + ESC), lock body scroll, and wire
   // the close paths. EVERY close routes through the native dialog.close() — it runs the focus-restore

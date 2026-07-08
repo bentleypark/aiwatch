@@ -24,12 +24,20 @@ export default [
       'react-refresh': reactRefresh,
     },
     rules: {
-      // #932 — pin the two classic hook rules explicitly. In react-hooks v7 the
-      // `recommended` preset expanded to ~17 rules (the React-Compiler set: static-components,
-      // immutability, purity, set-state-in-render, …); adopting those is an app-wide triage
-      // deferred to its own task, so this tooling bump keeps the pre-upgrade rule surface.
-      'react-hooks/rules-of-hooks': 'error',
-      'react-hooks/exhaustive-deps': 'warn',
+      // #932 — full react-hooks v7 rule set (the React-Compiler lint suite: purity,
+      // set-state-in-effect, error-boundaries, immutability, refs, …). The plugin's
+      // `recommended-latest` preset ships `plugins` as an array, which ESLint 10 flat config
+      // rejects, so the rule map is applied here against our own object-form plugin registration.
+      ...reactHooks.configs['recommended-latest'].rules,
+      // #932 — keep these two at `warn`, not the preset's `error`. In this polling dashboard they
+      // flag intentional, correct patterns: `purity` fires on deliberate render-time `Date.now()`
+      // (re-render == 60s poll refresh, so a fresh read each render is desired), and
+      // `set-state-in-effect` fires on legitimate external-sync effects (network polling, archive
+      // fetch, store→form sync) plus benign reset-on-navigation. Enforcing `error` would require
+      // ~13 justified `eslint-disable`s on correct code; `warn` keeps them visible as guidance for
+      // NEW code without that noise. The other 15 rules stay at their preset severity (error).
+      'react-hooks/purity': 'warn',
+      'react-hooks/set-state-in-effect': 'warn',
       'react-refresh/only-export-components': [
         'warn',
         { allowConstantExport: true },
