@@ -123,6 +123,7 @@ ul.caveats{list-style:disc;padding-left:20px;color:var(--text2);font-size:13px;l
       <li>No page or code content is read — the plugin only sends a <code>GET</code> to AIWatch's public, unauthenticated status endpoint.</li>
       <li>No identifier is collected. AIWatch measures only anonymous, aggregate poll volume.</li>
     </ul>
+    <p style="font-size:13px;margin-top:8px"><a href="/plugin-privacy">Full privacy policy →</a></p>
   </section>
 
   <div class="footer">

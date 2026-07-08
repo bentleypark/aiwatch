@@ -63,7 +63,7 @@ describe('vercel.json CSP — SPA ENFORCING (#482 complete; Edge SSR enforces vi
   it('the SPA header source EXCLUDES the Edge SSR + proxy routes (so their own/external policies are not double-gated)', () => {
     const src = spaCspBlock().source
     expect(src).toContain('?!') // negative lookahead, not the bare /(.*)
-    for (const r of ['is-', 'intro', 'badges', 'methodology', 'plugin', 'extension-privacy', 'reports', 'confirm', 'feed', 'api']) {
+    for (const r of ['is-', 'intro', 'badges', 'methodology', 'plugin', 'plugin-privacy', 'extension-privacy', 'reports', 'confirm', 'feed', 'api']) {
       expect(src, `source lookahead must exclude ${r}`).toContain(r)
     }
     // The lookahead must admit SPA routes (incl. fallback paths that merely START with an excluded
@@ -72,7 +72,7 @@ describe('vercel.json CSP — SPA ENFORCING (#482 complete; Edge SSR enforces vi
     for (const p of ['/', '/dashboard', '/introspect', '/feedback', '/feeds', '/reports-archive', '/api-docs']) {
       expect(re.test(p), `SPA path ${p} must KEEP the CSP header`).toBe(true)
     }
-    for (const p of ['/is-claude-down', '/intro', '/badges', '/methodology', '/extension-privacy', '/reports', '/reports/', '/reports/2026-03', '/confirm', '/feed.xml', '/feed.xsl', '/feed/claude', '/api/csp-report']) {
+    for (const p of ['/is-claude-down', '/intro', '/badges', '/methodology', '/plugin-privacy', '/extension-privacy', '/reports', '/reports/', '/reports/2026-03', '/confirm', '/feed.xml', '/feed.xsl', '/feed/claude', '/api/csp-report']) {
       expect(re.test(p), `Edge/proxy route ${p} must be excluded from the SPA header`).toBe(false)
     }
   })
