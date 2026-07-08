@@ -16,6 +16,8 @@ import {
   buildStatuslineTrafficSql,
   parseStatuslineTrafficResponse,
   queryStatuslineTraffic,
+  serializeStatuslineSnapshot,
+  computeStatuslineDelta,
   buildPluginTrafficSql,
   parsePluginTrafficResponse,
   queryPluginTraffic,
@@ -334,7 +336,23 @@ describe('statusline traffic (#918)', () => {
     ] }
     expect(parseStatuslineTrafficResponse(json)).toEqual({
       byPreset: { branded: 120, degraded_only: 45, clickable: 0 },
+      serverRenderTotal: 165,
+      legacyProxy: 0,
       total: 165,
+    })
+  })
+
+  it('parseStatuslineTrafficResponse routes the legacy `proxy` catch-all into legacyProxy, not byPreset (#944)', () => {
+    const json = { data: [
+      { preset: 'statusline-proxy', requests: 9888 },        // legacy jq cohort → legacyProxy, NOT a preset
+      { preset: 'statusline-branded', requests: 2693 },
+      { preset: 'statusline-degraded_only', requests: 91 },
+    ] }
+    expect(parseStatuslineTrafficResponse(json)).toEqual({
+      byPreset: { branded: 2693, degraded_only: 91 },
+      serverRenderTotal: 2784,   // proxy excluded from the adoption signal
+      legacyProxy: 9888,
+      total: 12672,              // grand total still spans both cohorts
     })
   })
 
@@ -344,13 +362,35 @@ describe('statusline traffic (#918)', () => {
       { preset: 'ext-claude', requests: 999 },   // wrong tag (LIKE guard belt-and-suspenders) → skipped
       { preset: null, requests: 5 },             // invalid → skipped
     ] }
-    expect(parseStatuslineTrafficResponse(json)).toEqual({ byPreset: { branded: 10 }, total: 10 })
+    expect(parseStatuslineTrafficResponse(json)).toEqual({
+      byPreset: { branded: 10 }, serverRenderTotal: 10, legacyProxy: 0, total: 10,
+    })
   })
 
   it('parseStatuslineTrafficResponse returns null on malformed shape, empty on no rows', () => {
     expect(parseStatuslineTrafficResponse({})).toBeNull()
     expect(parseStatuslineTrafficResponse(null)).toBeNull()
-    expect(parseStatuslineTrafficResponse({ data: [] })).toEqual({ byPreset: {}, total: 0 })
+    expect(parseStatuslineTrafficResponse({ data: [] })).toEqual({
+      byPreset: {}, serverRenderTotal: 0, legacyProxy: 0, total: 0,
+    })
+  })
+
+  it('serializeStatuslineSnapshot emits compact {sr,lp} for the day-over-day snapshot (#944)', () => {
+    expect(serializeStatuslineSnapshot({ byPreset: { branded: 2693 }, serverRenderTotal: 2784, legacyProxy: 9888, total: 12672 }))
+      .toBe('{"sr":2784,"lp":9888}')
+  })
+
+  it('computeStatuslineDelta diffs each cohort vs yesterday; null per cohort on no/corrupt baseline (#944)', () => {
+    const today = { byPreset: { branded: 2693 }, serverRenderTotal: 2784, legacyProxy: 9888, total: 12672 }
+    // fresh baseline → per-cohort signed delta
+    expect(computeStatuslineDelta(today, '{"sr":2472,"lp":10428}')).toEqual({ serverRender: 312, legacyProxy: -540 })
+    // no baseline (first day / empty) → null per cohort, NOT a bogus full-count jump
+    expect(computeStatuslineDelta(today, null)).toEqual({ serverRender: null, legacyProxy: null })
+    expect(computeStatuslineDelta(today, '   ')).toEqual({ serverRender: null, legacyProxy: null })
+    // corrupt (non-JSON) baseline → null per cohort
+    expect(computeStatuslineDelta(today, 'not-json')).toEqual({ serverRender: null, legacyProxy: null })
+    // partially-present baseline → only the parseable cohort deltas
+    expect(computeStatuslineDelta(today, '{"sr":2000}')).toEqual({ serverRender: 784, legacyProxy: null })
   })
 
   it('queryStatuslineTraffic returns null without creds and never throws on failure', async () => {
@@ -367,7 +407,7 @@ describe('statusline traffic (#918)', () => {
       { preset: 'statusline-scoped', requests: 12 },
     ] }) })
     expect(await queryStatuslineTraffic('acc', 'tok', ok as unknown as typeof fetch)).toEqual({
-      byPreset: { branded: 88, scoped: 12 }, total: 100,
+      byPreset: { branded: 88, scoped: 12 }, serverRenderTotal: 100, legacyProxy: 0, total: 100,
     })
   })
 })
