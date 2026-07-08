@@ -22,6 +22,7 @@ import { parseInstatusIncidents, parseInstatusUptime, parseInstatusComponents } 
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
 import { parseAwsRssIncidents, parseAwsHealthEvents, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
+import { mergeXaiRegionalIncidents } from './xai-regions'
 
 export const SERVICES: ServiceConfig[] = [
   // AI API Services
@@ -1220,7 +1221,11 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           if (config.rssFeedUrl) {
             const rssText = await scrapeRes.text()
             incidents = config.rssFeedUrl.includes('status.x.ai')
-              ? parseXaiRssIncidents(rssText)
+              // #940 — collapse xAI per-region incidents (same event across us-east-1/eu-west-1/…) to
+              // ONE canonical incident at the source, so the dashboard list, Analyze modal, RSS/Slack
+              // feed, and Discord new+resolved alerts all see a single incident (the older per-surface
+              // merges were cycle-local and leaked duplicates across cron cycles).
+              ? mergeXaiRegionalIncidents(parseXaiRssIncidents(rssText))
               : parseRssIncidents(rssText)
           } else if (config.gcloudProduct) {
             const data: GCloudIncident[] = await scrapeRes.json()
