@@ -76,6 +76,7 @@ const en = {
   'overview.panel.latency.sub': 'Current · ms',
   'overview.stats.uptime.sub': 'Overall average',
   'overview.incidents.monitoring': 'Monitoring',
+  'overview.incidents.total': '{d} total',
   'overview.banner.degraded': 'Partially Degraded',
   'overview.banner.down': 'Down',
   'overview.banner.affected': '{n} services affected',
