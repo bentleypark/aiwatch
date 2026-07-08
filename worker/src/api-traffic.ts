@@ -265,6 +265,73 @@ export async function queryStatuslineTraffic(
   }
 }
 
+// ── Claude Code plugin usage (#920) ───────────────────────────────────────
+// The plugin (#920) tags two DISTINCT indexes in the same dataset — deliberately NOT
+// `statusline-*`, so continuous monitor polling doesn't pollute the #918 preset metric:
+//   'aiwatch-monitor' — every 60s background-monitor poll of /api/statusline/down
+//   'aiwatch-brief'   — every on-demand /aiwatch briefing (/api/statusline/brief)
+// Collected since #920 but, like the pre-#918 statusline tags, needs a read-back to be
+// usable. This is the consent-free plugin-adoption proxy (monitor volume ≈ installs × up-time;
+// brief volume ≈ active engagement). Same NOT-a-user-count caveat as statusline.
+const PLUGIN_MONITOR_INDEX = 'aiwatch-monitor'
+const PLUGIN_BRIEF_INDEX = 'aiwatch-brief'
+
+export interface PluginTrafficCounts {
+  monitor: number  // last-24h background-monitor polls
+  brief: number    // last-24h /aiwatch briefings
+}
+
+/** AE SQL summing the last-24h plugin poll counts per index (sampling-corrected). */
+export function buildPluginTrafficSql(dataset = V1_DATASET): string {
+  return (
+    `SELECT index1 AS tag, SUM(_sample_interval) AS requests ` +
+    `FROM ${dataset} ` +
+    `WHERE index1 IN ('${PLUGIN_MONITOR_INDEX}', '${PLUGIN_BRIEF_INDEX}') AND timestamp > NOW() - INTERVAL '1' DAY ` +
+    `GROUP BY index1 ` +
+    `FORMAT JSON`
+  )
+}
+
+/** Parse the AE SQL plugin JSON into monitor/brief counts. Tolerant of string/number + missing rows. */
+export function parsePluginTrafficResponse(json: unknown): PluginTrafficCounts | null {
+  const data = (json as { data?: unknown })?.data
+  if (!Array.isArray(data)) return null
+  let monitor = 0
+  let brief = 0
+  for (const row of data) {
+    const r = row as { tag?: unknown; requests?: unknown }
+    const parsed = Number(r.requests)
+    const n = Number.isFinite(parsed) ? parsed : 0
+    if (r.tag === PLUGIN_MONITOR_INDEX) monitor += n
+    else if (r.tag === PLUGIN_BRIEF_INDEX) brief += n
+  }
+  return { monitor, brief }
+}
+
+/** Query the last-24h Claude Code plugin usage via the AE SQL API. Best-effort: null on missing
+ *  creds / HTTP failure / unparseable response. Never throws. Mirrors queryStatuslineTraffic. */
+export async function queryPluginTraffic(
+  accountId: string | undefined,
+  token: string | undefined,
+  fetchImpl: typeof fetch = fetch,
+): Promise<PluginTrafficCounts | null> {
+  if (!accountId || !token) return null
+  try {
+    const res = await fetchImpl(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: buildPluginTrafficSql() },
+    )
+    if (!res.ok) {
+      console.warn(`[wae] plugin SQL query failed: HTTP ${res.status}`)
+      return null
+    }
+    return parsePluginTrafficResponse(await res.json())
+  } catch (err) {
+    console.warn('[wae] plugin SQL query error:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
 // ── New-feed-items count (#748) ───────────────────────────────────────────
 // The poll volume above is mostly EMPTY no-op fetches (Slack RSS polls ~every 15min regardless of
 // content). The figure that actually matters — how many alert-worthy items were published — is the

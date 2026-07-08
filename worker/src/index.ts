@@ -17,9 +17,9 @@ import { refreshStatusCacheOnChange } from './cache-refresh'
 import { pingIndexNow } from './indexnow'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
 import { corsHeaders, matchOrigin } from './cors'
-import { buildStatuslinePayload, isStatuslineRequest, renderStatuslinePreset, isStatuslinePreset } from './statusline'
+import { buildStatuslinePayload, isStatuslineRequest, renderStatuslinePreset, isStatuslinePreset, renderStatuslineBrief, renderStatuslineDownList } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
-import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, queryExtTraffic, queryStatuslineTraffic, countNewFeedItems } from './api-traffic'
+import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
@@ -2692,6 +2692,14 @@ export default {
             console.warn('[daily-summary] statusline traffic read failed:', err instanceof Error ? err.message : err)
           }
 
+          // #920 — Claude Code plugin usage (monitor polls + /aiwatch briefings). Best-effort like above.
+          let pluginTraffic = null
+          try {
+            pluginTraffic = await queryPluginTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+          } catch (err) {
+            console.warn('[daily-summary] plugin traffic read failed:', err instanceof Error ? err.message : err)
+          }
+
           // #575 — internal demand signal: today's per-service crowd "Report an issue" counts.
           // Bounded read (one GET per known service, no KV list); surfaced only inside the operator
           // summary, never as a public "N reporting" verdict (that gating is Phase B).
@@ -2741,6 +2749,7 @@ export default {
             audience,
             extActivity,
             statuslineTraffic,
+            pluginTraffic,
             reportCounts,
           })
 
@@ -3525,6 +3534,82 @@ export default {
         }),
         cachedAt: cached.cachedAt,
       }), { status: 200, headers: publicHeaders })
+    }
+
+    // GET /api/statusline/down — parseable UNCAPPED down-list (#920) for the plugin monitor's
+    // poll-over-poll diff (`status<TAB>name` per non-operational service, empty when all clear).
+    // Distinct from the capped emoji presets; consumed only by bin/aiwatch-monitor.sh. Must precede
+    // the generic /api/statusline/:preset route ('down' is not a preset). WAE-tagged 'aiwatch-monitor'
+    // (NOT statusline-*, so continuous monitor polling doesn't pollute the #918 preset-adoption metric).
+    if (request.method === 'GET' && url.pathname === '/api/statusline/down') {
+      if (env.ANALYTICS) {
+        try {
+          env.ANALYTICS.writeDataPoint({ blobs: ['aiwatch-monitor'], doubles: [1], indexes: ['aiwatch-monitor'] })
+        } catch (err) {
+          console.warn('[wae] aiwatch-monitor writeDataPoint failed:', err instanceof Error ? err.message : err)
+        }
+      }
+      const liteCache = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+      const { services } = buildStatuslinePayload(liteCache)
+      return new Response(renderStatuslineDownList(services), {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=30',
+        },
+      })
+    }
+
+    // GET /api/statusline/brief — server-rendered compact INCIDENT briefing (#920) for the
+    // Claude Code plugin's /aiwatch command. text/plain, multi-line: each non-operational service
+    // with its active incident (title + impact), the AI summary of that incident when present, and
+    // a per-category fallback — the "what's actually happening" the names-only presets can't give.
+    // A generalization of the ext-claude projection (#837) to text; keeps the plugin a thin curl
+    // (no jq). Must precede the generic /api/statusline/:preset route ('brief' isn't a preset).
+    if (request.method === 'GET' && url.pathname === '/api/statusline/brief') {
+      if (env.ANALYTICS) {
+        // Tag as 'aiwatch-brief', NOT 'statusline-<preset>': the #918 read-back
+        // (queryStatuslineTraffic) selects `index1 LIKE 'statusline-%'`, so a statusline-
+        // prefix here would misattribute on-demand /aiwatch briefing traffic as statusline
+        // PRESET adoption (a distinct feature). Distinct index → measurable separately later.
+        try {
+          env.ANALYTICS.writeDataPoint({ blobs: ['aiwatch-brief'], doubles: [1], indexes: ['aiwatch-brief'] })
+        } catch (err) {
+          console.warn('[wae] aiwatch-brief writeDataPoint failed:', err instanceof Error ? err.message : err)
+        }
+      }
+      const cacheData = await cacheRead(env.STATUS_CACHE)
+      const summaries = await readProbeSummaries(env.STATUS_CACHE, 'statusline-brief')
+      // Score the FULL set — getFallbacks needs the candidate pool — then narrow in the renderer.
+      const scoredAll = (cacheData?.services ?? []).map((svc) => {
+        const s = scoreFor(svc, summaries)
+        return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
+      })
+      // AI summary of each ACTIVE incident on a non-operational service (bounded: only down/degraded
+      // services, usually few). Best-effort per key: a missing/unparseable ai:analysis → no summary,
+      // never a 500 (mirrors the ext-claude reads).
+      const briefAiSummary: Record<string, string> = {}
+      await Promise.all(scoredAll
+        .filter((svc) => svc.status !== 'operational')
+        .flatMap((svc) => (svc.incidents ?? [])
+          .filter((i) => i.status !== 'resolved' && i.status !== 'monitoring')
+          .map(async (inc) => {
+            const raw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
+            if (!raw) return
+            try {
+              const a = JSON.parse(raw) as AIAnalysisResult
+              if (a.summary) briefAiSummary[`${svc.id}:${inc.id}`] = a.summary
+            } catch (err) {
+              console.warn('[statusline-brief] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err)
+            }
+          })))
+      return new Response(renderStatuslineBrief(scoredAll, briefAiSummary), {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=30',
+        },
+      })
     }
 
     // GET /api/statusline/:preset — server-rendered Claude Code statusline string (#918).

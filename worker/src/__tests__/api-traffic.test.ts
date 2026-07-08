@@ -16,6 +16,9 @@ import {
   buildStatuslineTrafficSql,
   parseStatuslineTrafficResponse,
   queryStatuslineTraffic,
+  buildPluginTrafficSql,
+  parsePluginTrafficResponse,
+  queryPluginTraffic,
   countFirstSeenWithin24h,
   countNewFeedItems,
 } from '../api-traffic'
@@ -366,5 +369,48 @@ describe('statusline traffic (#918)', () => {
     expect(await queryStatuslineTraffic('acc', 'tok', ok as unknown as typeof fetch)).toEqual({
       byPreset: { branded: 88, scoped: 12 }, total: 100,
     })
+  })
+})
+
+describe('plugin traffic (#920)', () => {
+  it('buildPluginTrafficSql filters index1 IN (aiwatch-monitor, aiwatch-brief), 24h, per-tag', () => {
+    const sql = buildPluginTrafficSql()
+    expect(sql).toContain("index1 IN ('aiwatch-monitor', 'aiwatch-brief')")
+    expect(sql).toContain('SUM(_sample_interval) AS requests')
+    expect(sql).toContain('FROM aiwatch_statusline')
+    expect(sql).toContain("INTERVAL '1' DAY")
+    expect(sql).toContain('GROUP BY index1')
+    expect(sql).not.toContain("LIKE 'statusline-%'") // must NOT pull the statusline preset metric
+  })
+
+  it('parsePluginTrafficResponse splits monitor vs brief (string/number tolerant)', () => {
+    const json = { data: [
+      { tag: 'aiwatch-monitor', requests: '1440' },
+      { tag: 'aiwatch-brief', requests: 12 },
+      { tag: 'statusline-branded', requests: 999 }, // wrong tag → ignored
+    ] }
+    expect(parsePluginTrafficResponse(json)).toEqual({ monitor: 1440, brief: 12 })
+  })
+
+  it('parsePluginTrafficResponse null on malformed, zeros on no rows', () => {
+    expect(parsePluginTrafficResponse({})).toBeNull()
+    expect(parsePluginTrafficResponse(null)).toBeNull()
+    expect(parsePluginTrafficResponse({ data: [] })).toEqual({ monitor: 0, brief: 0 })
+  })
+
+  it('queryPluginTraffic returns null without creds and never throws on failure', async () => {
+    expect(await queryPluginTraffic(undefined, undefined)).toBeNull()
+    const boom = vi.fn().mockRejectedValue(new Error('network'))
+    expect(await queryPluginTraffic('acc', 'tok', boom as unknown as typeof fetch)).toBeNull()
+    const notOk = vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    expect(await queryPluginTraffic('acc', 'tok', notOk as unknown as typeof fetch)).toBeNull()
+  })
+
+  it('queryPluginTraffic parses a successful response', async () => {
+    const ok = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [
+      { tag: 'aiwatch-monitor', requests: 720 },
+      { tag: 'aiwatch-brief', requests: 5 },
+    ] }) })
+    expect(await queryPluginTraffic('acc', 'tok', ok as unknown as typeof fetch)).toEqual({ monitor: 720, brief: 5 })
   })
 })

@@ -38,6 +38,10 @@ describe('classifyReferrer (#842-B)', () => {
     expect(classifyReferrer('copy-link', '')).toBe('direct')
     expect(classifyReferrer('', 'some-blog.example')).toBe('direct')
   })
+  it('buckets the Claude Code plugin is-down links (utm_source=claude-code) as plugin (#920)', () => {
+    expect(classifyReferrer('claude-code', '')).toBe('plugin')
+    expect(classifyReferrer('Claude-Code', '')).toBe('plugin') // case-insensitive
+  })
   it('utm takes priority and is case-insensitive', () => {
     expect(classifyReferrer('X', 'google.com')).toBe('x')
   })
@@ -82,8 +86,8 @@ describe('parseOutageAudienceResponse (#842-B)', () => {
     const r = parseOutageAudienceResponse(json)!
     expect(r.total).toBe(265)
     expect(r.activeTotal).toBe(205)
-    expect(r.bySource).toEqual({ x: 200, search: 40, feed: 15, owned: 10, direct: 0 })
-    expect(r.activeBySource).toEqual({ x: 180, search: 0, feed: 15, owned: 10, direct: 0 })
+    expect(r.bySource).toEqual({ x: 200, search: 40, feed: 15, owned: 10, direct: 0, plugin: 0 })
+    expect(r.activeBySource).toEqual({ x: 180, search: 0, feed: 15, owned: 10, direct: 0, plugin: 0 })
   })
   it('skips unknown source buckets and tolerates bad views', () => {
     const r = parseOutageAudienceResponse({ data: [

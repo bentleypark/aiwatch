@@ -9,6 +9,8 @@ const en = {
   'nav.uptime': 'Uptime Status',
   'nav.ranking': 'Reliability Ranking',
   'nav.statusline': 'Statusline',
+  'nav.plugin': 'Plugin',
+  'nav.claudeCode': 'Claude Code',
   'nav.settings': 'Settings',
   'nav.dashboard': 'Dashboard',
   'nav.reports': 'Reports',

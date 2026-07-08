@@ -19,7 +19,10 @@ import { dirname, join } from 'node:path'
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
 const vercelConfig = JSON.parse(
   readFileSync(join(repoRoot, 'vercel.json'), 'utf8'),
-) as { rewrites: Array<{ source: string; destination: string }> }
+) as {
+  rewrites: Array<{ source: string; destination: string }>
+  redirects?: Array<{ source: string; destination: string; permanent?: boolean }>
+}
 
 describe('vercel.json /api/status/cached rewrite (#452)', () => {
   it('forces the statusline lite projection so the proxied path never serves the full payload', () => {
@@ -32,5 +35,17 @@ describe('vercel.json /api/status/cached rewrite (#452)', () => {
     expect(rule!.destination).toContain('aiwatch-worker.p2c2kbf.workers.dev')
     expect(rule!.destination).toContain('/api/status/cached')
     expect(rule!.destination).toMatch(/[?&]src=statusline-/)
+  })
+})
+
+describe('vercel.json /p/:slug plugin redirect (#920)', () => {
+  it('redirects the short plugin link to the is-down page WITH the plugin UTM (zero Serverless Functions)', () => {
+    // The /aiwatch briefing links `ai-watch.dev/p/<slug>` (short, no query — survives the model
+    // relay + terminal); a config REDIRECT (not a function → no 12-fn cap cost) adds the UTM and
+    // 307s to the real is-down page, so GA4 + the #842-B beacon attribute the plugin inflow.
+    const rule = (vercelConfig.redirects ?? []).find((r) => r.source === '/p/:slug')
+    expect(rule, '/p/:slug redirect must exist').toBeDefined()
+    expect(rule!.destination).toBe('/is-:slug-down?utm_source=claude-code&utm_medium=plugin&utm_campaign=outage')
+    expect(rule!.permanent).toBe(false) // 307 — a service can toggle status; not a permanent move
   })
 })

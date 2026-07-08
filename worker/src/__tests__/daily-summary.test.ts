@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine } from '../daily-summary'
 import type { ServiceStatus } from '../types'
 import type { AccuracyStats } from '../incident-history'
 import type { AudienceCounts } from '../outage-audience'
@@ -589,6 +589,25 @@ describe('buildDailySummary — #548 webhook delta + feed section', () => {
   })
 })
 
+describe('formatPluginTrafficSection (#920)', () => {
+  it('renders monitor polls + /aiwatch briefings', () => {
+    const out = formatPluginTrafficSection({ monitor: 1440, brief: 12 })
+    expect(out).toContain('🧩 **Plugin (Claude Code)**')
+    expect(out).toContain('~1440 monitor polls')
+    expect(out).toContain('~12 /aiwatch briefings')
+  })
+  it('omits a zero-count part', () => {
+    const out = formatPluginTrafficSection({ monitor: 60, brief: 0 })
+    expect(out).toContain('~60 monitor polls')
+    expect(out).not.toContain('briefings')
+  })
+  it('is empty when null/undefined or both are 0', () => {
+    expect(formatPluginTrafficSection(null)).toBe('')
+    expect(formatPluginTrafficSection(undefined)).toBe('')
+    expect(formatPluginTrafficSection({ monitor: 0, brief: 0 })).toBe('')
+  })
+})
+
 describe('formatStatuslineTrafficSection (#918)', () => {
   it('renders total + per-preset breakdown, highest-first', () => {
     const out = formatStatuslineTrafficSection({ byPreset: { degraded_only: 20, branded: 88, scoped: 12 }, total: 120 })
@@ -708,16 +727,16 @@ describe('formatExtActivitySection (#837)', () => {
 describe('formatAudienceLine (#842-B)', () => {
   const counts = (o: Partial<AudienceCounts>): AudienceCounts => ({
     total: 0, activeTotal: 0,
-    bySource: { x: 0, search: 0, feed: 0, owned: 0, direct: 0 },
-    activeBySource: { x: 0, search: 0, feed: 0, owned: 0, direct: 0 },
+    bySource: { x: 0, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
+    activeBySource: { x: 0, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
     ...o,
   })
 
   it('leads with the active-outage subset by source + total when an outage was viewed', () => {
     const line = formatAudienceLine(counts({
       total: 320, activeTotal: 240,
-      bySource: { x: 210, search: 60, feed: 30, owned: 12, direct: 20 },
-      activeBySource: { x: 180, search: 40, feed: 15, owned: 8, direct: 5 },
+      bySource: { x: 210, search: 60, feed: 30, owned: 12, direct: 20, plugin: 0 },
+      activeBySource: { x: 180, search: 40, feed: 15, owned: 8, direct: 5, plugin: 0 },
     }))
     expect(line).toContain('Outage Audience')
     expect(line).toContain('240 during outages')
@@ -728,8 +747,8 @@ describe('formatAudienceLine (#842-B)', () => {
   it('drops zero buckets from the breakdown', () => {
     const line = formatAudienceLine(counts({
       total: 100, activeTotal: 100,
-      bySource: { x: 100, search: 0, feed: 0, owned: 0, direct: 0 },
-      activeBySource: { x: 100, search: 0, feed: 0, owned: 0, direct: 0 },
+      bySource: { x: 100, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
+      activeBySource: { x: 100, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
     }))
     expect(line).toContain('X 100')
     expect(line).not.toContain('search 0')
@@ -740,7 +759,7 @@ describe('formatAudienceLine (#842-B)', () => {
   it('falls back to the general is-down audience when no active outage was viewed', () => {
     const line = formatAudienceLine(counts({
       total: 50, activeTotal: 0,
-      bySource: { x: 10, search: 35, feed: 5, owned: 0, direct: 0 },
+      bySource: { x: 10, search: 35, feed: 5, owned: 0, direct: 0, plugin: 0 },
     }))
     expect(line).toContain('is-down Audience')
     expect(line).toContain('50 views')

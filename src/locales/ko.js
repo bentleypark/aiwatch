@@ -9,6 +9,8 @@ const ko = {
   'nav.uptime': '업타임 현황',
   'nav.ranking': '신뢰도 랭킹',
   'nav.statusline': '스테이터스라인',
+  'nav.plugin': '플러그인',
+  'nav.claudeCode': 'Claude Code',
   'nav.settings': '설정',
   'nav.dashboard': '대시보드',
   'nav.reports': '월간 리포트',

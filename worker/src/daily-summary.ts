@@ -71,6 +71,10 @@ export interface DailySummaryData {
   // adoption proxy #400 Phase 1 needs. Per-preset breakdown + total. Absent (null) when the SQL API
   // isn't configured; a poll ≈ active-usage proxy (Claude Code re-renders per prompt), not a user count.
   statuslineTraffic?: { byPreset: Record<string, number>; total: number } | null
+  // #920 — Claude Code PLUGIN usage (last-24h, WAE `aiwatch-monitor` + `aiwatch-brief` tags): the
+  // consent-free plugin-adoption proxy (monitor polls ≈ installs × up-time; briefings ≈ engagement).
+  // Absent (null) when the SQL API isn't configured. Same not-a-user-count caveat as statusline.
+  pluginTraffic?: { monitor: number; brief: number } | null
   // #575 Phase A — crowd "Report an issue" counts today (svcId → count). Internal demand signal
   // only (coverage priority); never a public "N reporting" verdict. Empty/absent → section omitted.
   reportCounts?: Record<string, number>
@@ -244,6 +248,10 @@ export function buildDailySummary(data: DailySummaryData): string {
   const statuslineSection = formatStatuslineTrafficSection(data.statuslineTraffic)
   if (statuslineSection) lines.push(statuslineSection)
 
+  // Section: Claude Code plugin usage (#920) — monitor polls + /aiwatch briefings.
+  const pluginSection = formatPluginTrafficSection(data.pluginTraffic)
+  if (pluginSection) lines.push(pluginSection)
+
   // Section: crowd "Report an issue" counts (#575 Phase A) — internal demand signal only.
   if (data.reportCounts) {
     const nameOf = new Map(services.map((s) => [s.id, s.name]))
@@ -290,7 +298,7 @@ export function formatReferralLine(
   return `\n🔗 **Outbound Referrals**: ${referralCounts.total}${top ? ` (${top})` : ''}`
 }
 
-const AUDIENCE_LABEL: Record<AudienceSource, string> = { x: 'X', search: 'search', feed: 'feed', owned: 'owned', direct: 'direct' }
+const AUDIENCE_LABEL: Record<AudienceSource, string> = { x: 'X', search: 'search', feed: 'feed', owned: 'owned', direct: 'direct', plugin: 'plugin' }
 
 /** #842-B — outage-moment audience line (consent-free is-down views by source). Leads with the
  *  active-outage subset (the sponsor-evidence "outage-spike audience") when any outage was viewed,
@@ -393,6 +401,23 @@ export function formatStatuslineTrafficSection(
     `\n📟 **Statusline Polls (Claude Code)**\n` +
     `   Last 24h: ~${statusline.total} polls${breakdown ? ` (${breakdown})` : ''}`
   )
+}
+
+/**
+ * Format the Claude Code PLUGIN usage as a Discord section (#920). Empty string when unavailable
+ * (SQL API not configured) OR both counts are 0, so the caller skips it until the plugin sees
+ * adoption. Shows the last-24h background-monitor poll volume + on-demand /aiwatch briefings.
+ * WAE sampling estimates (shown with `~`); the day-over-day step-up is the signal. A poll ≈
+ * active-usage proxy (the monitor polls every 60s while a session is open), NOT a user count. Pure.
+ */
+export function formatPluginTrafficSection(
+  plugin: DailySummaryData['pluginTraffic'],
+): string {
+  if (!plugin || (plugin.monitor <= 0 && plugin.brief <= 0)) return ''
+  const parts: string[] = []
+  if (plugin.monitor > 0) parts.push(`~${plugin.monitor} monitor polls`)
+  if (plugin.brief > 0) parts.push(`~${plugin.brief} /aiwatch briefings`)
+  return `\n🧩 **Plugin (Claude Code)**\n   Last 24h: ${parts.join(' · ')}`
 }
 
 /**

@@ -25,9 +25,10 @@ import { V1_DATASET } from './api-traffic'
 
 // #936 — `owned` = our own always-on client surfaces (Chrome extension, statusline): existing users
 // returning during an outage, distinct from new inbound (x/search/feed). The Discord alert folds into
-// `feed` (it's a subscription notification, like the RSS feed).
-export type AudienceSource = 'x' | 'search' | 'feed' | 'owned' | 'direct'
-export const AUDIENCE_SOURCES: AudienceSource[] = ['x', 'search', 'feed', 'owned', 'direct']
+// `feed` (it's a subscription notification, like the RSS feed). #920 — `plugin` = the Claude Code
+// plugin's is-down links (utm_source=claude-code).
+export type AudienceSource = 'x' | 'search' | 'feed' | 'owned' | 'direct' | 'plugin'
+export const AUDIENCE_SOURCES: AudienceSource[] = ['x', 'search', 'feed', 'owned', 'direct', 'plugin']
 
 const ISDOWN_INDEX = 'isdown-view'
 
@@ -40,9 +41,10 @@ const SEARCH_HOSTS = /(^|\.)(google|bing|duckduckgo|yahoo|ecosia|brave|baidu|nav
  * Classify an is-down visit's inbound source from the (already-tagged) utm_source and the referrer
  * hostname. Pure. The X app strips the referrer, so utm_source — added to our outage shares by
  * #842-B slice 1 + the operator X_UTM (alerts.ts) — is the primary X signal; our RSS feed links
- * carry utm_source=rss → 'feed'; organic search is caught by host. Everything else → 'direct'
- * (unattributed): no referrer, unknown, or a share channel we don't bucket separately — including
- * threads/copy-link AND Reddit (utm_source=reddit, deliberately not folded into 'feed').
+ * carry utm_source=rss → 'feed'; the Claude Code plugin's is-down links carry utm_source=claude-code
+ * (#920) → 'plugin'; organic search is caught by host. Everything else → 'direct' (unattributed):
+ * no referrer, unknown, or a share channel we don't bucket separately — including threads/copy-link
+ * AND Reddit (utm_source=reddit, deliberately not folded into 'feed').
  */
 export function classifyReferrer(utmSource: string | undefined, refHost: string | undefined): AudienceSource {
   const utm = (utmSource || '').toLowerCase()
@@ -50,6 +52,7 @@ export function classifyReferrer(utmSource: string | undefined, refHost: string 
   if (utm === 'x' || utm === 'twitter' || X_HOSTS.test(host)) return 'x'
   if (utm === 'rss' || utm === 'feed' || utm === 'discord') return 'feed' // #936 — Discord alert = our notification feed
   if (utm === 'extension' || utm === 'statusline') return 'owned' // #936 — our own client surfaces
+  if (utm === 'claude-code') return 'plugin' // #920 — Claude Code plugin is-down links
   if (SEARCH_HOSTS.test(host)) return 'search'
   return 'direct'
 }
@@ -104,7 +107,7 @@ export interface AudienceCounts {
   activeBySource: Record<AudienceSource, number> // active-outage views by source
 }
 
-const zeroBySource = (): Record<AudienceSource, number> => ({ x: 0, search: 0, feed: 0, owned: 0, direct: 0 })
+const zeroBySource = (): Record<AudienceSource, number> => ({ x: 0, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 })
 
 /** AE SQL summing the last-24h is-down view count per (source, active/clear) — sampling-corrected
  *  via SUM(_sample_interval), NOT COUNT(*) which undercounts at high volume (WAE samples). */
