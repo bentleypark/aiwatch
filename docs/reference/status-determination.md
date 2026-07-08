@@ -7,6 +7,8 @@ tags: [worker, status, parsers]
 
 # Service Status Determination
 
+> **Public mirror — keep in sync (#937):** the user-facing `/methodology` page §2 "STATUS DETERMINATION" cards (`api/_methodology/html-template.ts`, KO+EN i18n) restate these rules for visitors. When a rule below changes *user-visibly*, update those cards in the SAME commit. The `git-mutation-gate.sh` hook nudges when this file is staged without the page (the #934 drift this backstops).
+
 Per-service status is resolved in `worker/src/services.ts` with this priority:
 
 1. **Multi-component worst-of** (`statusComponentIds`, #379): when configured, look up each id in the page's `components`, normalize each, and pick the worst (`down` > `degraded` > `operational`). Used for coding agents whose user-facing surface spans multiple components — e.g. Cursor IDE primary + Cloud Agents + Automations + CLI; Claude Code component + Claude API dependency. `statusComponentId` (singular) remains the *primary* component for uptime parsing, calendar days, and component-miss alerting; `statusComponentIds` is purely for badge resolution. Convention: list the primary as the first entry of `statusComponentIds`. If none of the ids resolve in the components list, falls through to step 2.

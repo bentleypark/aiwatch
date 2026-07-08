@@ -293,6 +293,9 @@ ${consentInitScript(nonce)}
 </section>
 
 <!-- §2 STATUS DETERMINATION -->
+<!-- #937 — these cards MIRROR docs/reference/status-determination.md (the canonical rules). When a
+     status-determination rule changes user-visibly, update these cards in the SAME commit. The
+     git-mutation-gate.sh hook nudges when the rules doc is staged without this file (the #934 drift). -->
 <section class="section" id="status">
   <p class="section-label">// 02</p>
   <h2 data-i18n="s2.title">상태 결정</h2>
