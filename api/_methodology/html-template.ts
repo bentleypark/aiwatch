@@ -321,7 +321,7 @@ ${consentInitScript(nonce)}
     <div class="chain-step">
       <div class="cs-num">5 · <span data-i18n="s2.5.tag">component-status filter</span></div>
       <div class="cs-title" data-i18n="s2.5.title">컴포넌트 상태 인시던트 필터</div>
-      <div class="cs-body" data-i18n="s2.5.body">컴포넌트는 정상인데 제공사가 모든 컴포넌트에 인시던트를 일괄로 연결한 경우, 미해결 인시던트를 제거합니다(해결됨·모니터링은 유지). 이렇게 하면 무관한 인시던트가 정상 컴포넌트에 잘못 표시되지 않습니다.</div>
+      <div class="cs-body" data-i18n="s2.5.body">컴포넌트는 정상인데 제공사가 모든 컴포넌트에 인시던트를 일괄로 연결한 경우, 미해결 인시던트를 제거합니다. 해결됨·모니터링 인시던트는 그 컴포넌트에 실제로 해당할 때만 이력으로 유지합니다. 이렇게 하면 무관한 인시던트가 정상 컴포넌트에 잘못 표시되지 않습니다.</div>
     </div>
     <div class="chain-step">
       <div class="cs-num">6 · <span data-i18n="s2.6.tag">fetch-failure cross-validation</span></div>
@@ -559,7 +559,7 @@ const i18n = {
     's2.2.tag': 'component match', 's2.2.title': '컴포넌트 매칭', 's2.2.body': '해당 서비스의 주요 컴포넌트가 지정되어 있으면 그 컴포넌트의 상태를 사용합니다.',
     's2.3.tag': 'overall indicator', 's2.3.title': '전체 인디케이터 폴백', 's2.3.body': '컴포넌트를 찾지 못하면 상태 페이지의 전체 인디케이터로 폴백합니다. 단, 필터링 후 관련된 미해결 인시던트가 없으면 정상으로 간주해, 공유 상태 페이지에서 다른 서비스의 인시던트가 섞이는 것을 막습니다(예: ChatGPT 인시던트가 OpenAI API 상태에 영향을 주지 않도록).',
     's2.4.tag': 'incidentExclude bypass', 's2.4.title': 'incidentExclude 컴포넌트 우회', 's2.4.body': '제목 기반 제외 패턴에 걸리더라도, 인시던트의 컴포넌트 태그가 해당 서비스의 주요 컴포넌트로 시작하면 포함합니다. 제목 문자열 매칭보다 컴포넌트 태그를 더 우선하기 때문입니다.',
-    's2.5.tag': 'component-status filter', 's2.5.title': '컴포넌트 상태 인시던트 필터', 's2.5.body': '컴포넌트는 정상인데 제공사가 모든 컴포넌트에 인시던트를 일괄로 연결한 경우, 미해결 인시던트를 제거합니다(해결됨·모니터링은 유지). 이렇게 하면 무관한 인시던트가 정상 컴포넌트에 잘못 표시되지 않습니다.',
+    's2.5.tag': 'component-status filter', 's2.5.title': '컴포넌트 상태 인시던트 필터', 's2.5.body': '컴포넌트는 정상인데 제공사가 모든 컴포넌트에 인시던트를 일괄로 연결한 경우, 미해결 인시던트를 제거합니다. 해결됨·모니터링 인시던트는 그 컴포넌트에 실제로 해당할 때만 이력으로 유지합니다. 이렇게 하면 무관한 인시던트가 정상 컴포넌트에 잘못 표시되지 않습니다.',
     's2.6.tag': 'fetch-failure cross-validation', 's2.6.title': '수집 실패 보정', 's2.6.body': '상태 페이지를 못 읽어 저하로 잡혔더라도 probe RTT가 정상이면 다시 정상으로 되돌립니다. 같은 플랫폼의 70% 이상이 동시에 실패하면 플랫폼 자체 장애로 판단해 모두 정상으로 처리합니다. 확실한 근거가 있을 때만 보수적으로 덮어씁니다.',
     's2.partial': '<strong>Partial</strong>은 다중 컴포넌트 서비스(Better Stack 기반 — Together · Fireworks · HuggingFace · Modal · Luma)에서 전체 서비스는 정상이지만 일부 컴포넌트(예: 특정 모델)만 영향받은 중간 상태입니다. 서비스 전체를 \\'degraded\\'로 격상시키지는 않되, 영향받은 컴포넌트의 실제 장애는 uptime · 인시던트 집계를 통해 AIWatch Score · 랭킹에 그대로 반영됩니다.',
     's2.note': '규칙의 전체 순서와 각 규칙의 근거는 오픈소스 저장소의 <a href="https://github.com/bentleypark/aiwatch/blob/main/docs/reference/status-determination.md" target="_blank" rel="noopener">status-determination 문서</a>에 공개되어 있습니다.',
@@ -641,7 +641,7 @@ const i18n = {
     's2.2.tag': 'component match', 's2.2.title': 'Component match', 's2.2.body': 'If the service has a designated primary component, use that component\\\'s status.',
     's2.3.tag': 'overall indicator', 's2.3.title': 'Overall-indicator fallback', 's2.3.body': 'If no component is found, fall back to the page\\\'s overall indicator — but if no relevant unresolved incidents remain after filtering, treat as operational. This prevents cross-contamination on shared status pages (e.g. a ChatGPT incident shouldn\\\'t affect OpenAI API status).',
     's2.4.tag': 'incidentExclude bypass', 's2.4.title': 'incidentExclude component bypass', 's2.4.body': 'Even when a title-based exclude pattern matches, the incident is kept if its component tag starts with the service\\\'s primary component. Component tagging is more authoritative than title substring matching.',
-    's2.5.tag': 'component-status filter', 's2.5.title': 'Component-status incident filter', 's2.5.body': 'If a component is operational but the provider bulk-linked an incident to all components, unresolved incidents are removed (resolved/monitoring kept). This prevents an unrelated incident from showing on a healthy component.',
+    's2.5.tag': 'component-status filter', 's2.5.title': 'Component-status incident filter', 's2.5.body': 'If a component is operational but the provider bulk-linked an incident to all components, unresolved incidents are removed; resolved/monitoring incidents are kept as history only when they actually involve that component. This prevents an unrelated incident from showing on a healthy component.',
     's2.6.tag': 'fetch-failure cross-validation', 's2.6.title': 'Fetch-failure cross-validation', 's2.6.body': 'If a degraded status came from a fetch failure but probe RTT is normal, revert to operational. If 70%+ of services on the same platform fail at once, treat it as a platform outage and revert all to operational. We only override when the evidence is strong.',
     's2.partial': '<strong>Partial</strong> is an intermediate state for multi-component services (Better Stack — Together · Fireworks · HuggingFace · Modal · Luma) where the overall service is operational but some components (e.g. a specific model) report issues. It does not escalate the whole service to \\'degraded\\', but the affected component\\'s real outage is still reflected in the AIWatch Score &amp; ranking through the uptime &amp; incident aggregation.',
     's2.note': 'The full ordered rules and the rationale for each are published in the open-source <a href="https://github.com/bentleypark/aiwatch/blob/main/docs/reference/status-determination.md" target="_blank" rel="noopener">status-determination reference</a>.',
