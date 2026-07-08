@@ -205,10 +205,25 @@ export async function queryExtTraffic(
 // NOTE: poll volume ≈ active-usage proxy, NOT user count — Claude Code re-renders the statusline
 // per prompt, so a single active user generates many polls; the day-over-day step-up is the signal.
 const STATUSLINE_INDEX_PREFIX = 'statusline-'
+// The legacy Vercel-rewrite catch-all tag (#452/#453): every hit on ai-watch.dev/api/status/cached
+// is rewritten to the worker with ?src=statusline-proxy. NOT a display preset — it's the pre-#918
+// jq-snippet cohort (preset-unknown) plus any other apex-cached traffic. Tracked SEPARATELY from the
+// path-tagged server-render presets (#918) because the two cohorts move in opposite target
+// directions: legacy should SHRINK as users re-copy, server-render should GROW. Blending them into
+// one total cancels the adoption signal (#944).
+const STATUSLINE_PROXY_KEY = 'proxy'
 
 export interface StatuslineTrafficCounts {
-  byPreset: Record<string, number>  // preset slug (WITHOUT the 'statusline-' prefix) → last-24h polls
-  total: number                     // sum across presets
+  byPreset: Record<string, number>  // path-tagged server-render presets ONLY (proxy excluded) → last-24h polls
+  serverRenderTotal: number         // sum across path-tagged presets — the #918 adoption signal (want ↑)
+  legacyProxy: number               // the legacy jq-snippet cohort (statusline-proxy tag; want ↓)
+  total: number                     // serverRenderTotal + legacyProxy (grand total across all statusline-* polls)
+}
+
+/** Per-cohort day-over-day delta (today − yesterday); null per cohort when no usable baseline. */
+export interface StatuslineTrafficDelta {
+  serverRender: number | null
+  legacyProxy: number | null
 }
 
 /** AE SQL summing the last-24h statusline poll count per preset (sampling-corrected via SUM(_sample_interval)). */
@@ -222,23 +237,61 @@ export function buildStatuslineTrafficSql(dataset = V1_DATASET): string {
   )
 }
 
-/** Parse the AE SQL statusline JSON into per-preset counts (+ total). Strips the 'statusline-' prefix
- *  from the preset key for readability. Tolerant of string/number requests + a missing/invalid preset. */
+/** Parse the AE SQL statusline JSON into per-cohort counts. Strips the 'statusline-' prefix from the
+ *  key for readability, and routes the legacy `proxy` catch-all (#452/#453) into its OWN `legacyProxy`
+ *  field so it's never blended into the server-render preset adoption signal (#944). Tolerant of
+ *  string/number requests + a missing/invalid preset. */
 export function parseStatuslineTrafficResponse(json: unknown): StatuslineTrafficCounts | null {
   const data = (json as { data?: unknown })?.data
   if (!Array.isArray(data)) return null
   const byPreset: Record<string, number> = {}
-  let total = 0
+  let serverRenderTotal = 0
+  let legacyProxy = 0
   for (const row of data) {
     const r = row as { preset?: unknown; requests?: unknown }
     if (typeof r.preset !== 'string' || !r.preset.startsWith(STATUSLINE_INDEX_PREFIX)) continue
     const parsed = Number(r.requests)
     const n = Number.isFinite(parsed) ? parsed : 0
     const key = r.preset.slice(STATUSLINE_INDEX_PREFIX.length) || r.preset
-    byPreset[key] = (byPreset[key] ?? 0) + n
-    total += n
+    if (key === STATUSLINE_PROXY_KEY) {
+      legacyProxy += n
+    } else {
+      byPreset[key] = (byPreset[key] ?? 0) + n
+      serverRenderTotal += n
+    }
   }
-  return { byPreset, total }
+  return { byPreset, serverRenderTotal, legacyProxy, total: serverRenderTotal + legacyProxy }
+}
+
+/** Serialize today's cohort totals for the day-over-day snapshot KV (read tomorrow by
+ *  computeStatuslineDelta). Compact JSON `{sr,lp}` — mirrors the #548 subscriber-count snapshot. */
+export function serializeStatuslineSnapshot(counts: StatuslineTrafficCounts): string {
+  return JSON.stringify({ sr: counts.serverRenderTotal, lp: counts.legacyProxy })
+}
+
+/** Diff today's cohort totals against yesterday's persisted snapshot. Returns null PER COHORT when
+ *  there's no usable baseline (absent / empty / non-JSON / non-numeric field) — same empty-string
+ *  footgun guard as computeSubscriberDelta (#548), so a corrupt snapshot reads as "no delta" rather
+ *  than a bogus full-count jump. Pure. */
+export function computeStatuslineDelta(
+  counts: StatuslineTrafficCounts,
+  prevSnapshotRaw: string | null,
+): StatuslineTrafficDelta {
+  const none: StatuslineTrafficDelta = { serverRender: null, legacyProxy: null }
+  if (prevSnapshotRaw == null || prevSnapshotRaw.trim() === '') return none
+  let prev: unknown
+  try {
+    prev = JSON.parse(prevSnapshotRaw)
+  } catch {
+    return none
+  }
+  const p = prev as { sr?: unknown; lp?: unknown }
+  const prevSr = Number(p?.sr)
+  const prevLp = Number(p?.lp)
+  return {
+    serverRender: Number.isFinite(prevSr) ? counts.serverRenderTotal - prevSr : null,
+    legacyProxy: Number.isFinite(prevLp) ? counts.legacyProxy - prevLp : null,
+  }
 }
 
 /** Query the last-24h statusline poll count via the AE SQL API. Best-effort: null on missing creds /

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine } from '../daily-summary'
 import type { ServiceStatus } from '../types'
 import type { AccuracyStats } from '../incident-history'
 import type { AudienceCounts } from '../outage-audience'
@@ -583,9 +583,9 @@ describe('buildDailySummary — #548 webhook delta + feed section', () => {
     expect(out).toContain('Last 24h: 15')
   })
   it('renders the statusline-poll section when statuslineTraffic is present (#918)', () => {
-    const out = buildDailySummary({ ...base, statuslineTraffic: { byPreset: { branded: 88, scoped: 12 }, total: 100 } })
+    const out = buildDailySummary({ ...base, statuslineTraffic: { byPreset: { branded: 88, scoped: 12 }, serverRenderTotal: 100, legacyProxy: 0, total: 100 } })
     expect(out).toContain('📟 **Statusline Polls (Claude Code)**')
-    expect(out).toContain('Last 24h: ~100 polls')
+    expect(out).toContain('Server-render (#918): ~100')
   })
 })
 
@@ -608,22 +608,54 @@ describe('formatPluginTrafficSection (#920)', () => {
   })
 })
 
-describe('formatStatuslineTrafficSection (#918)', () => {
-  it('renders total + per-preset breakdown, highest-first', () => {
-    const out = formatStatuslineTrafficSection({ byPreset: { degraded_only: 20, branded: 88, scoped: 12 }, total: 120 })
+describe('formatStatuslineTrafficSection (#918; #944 cohort-split + delta)', () => {
+  it('splits server-render vs legacy proxy on separate lines; server-render carries the breakdown', () => {
+    const out = formatStatuslineTrafficSection({
+      byPreset: { degraded_only: 91, branded: 2693, full_list: 2 }, serverRenderTotal: 2786, legacyProxy: 9888, total: 12674,
+    })
     expect(out).toContain('📟 **Statusline Polls (Claude Code)**')
-    expect(out).toContain('~120 polls')
-    expect(out).toContain('branded 88 · degraded_only 20 · scoped 12') // count-desc
+    expect(out).toContain('Server-render (#918): ~2786')
+    expect(out).toContain('branded 2693 · degraded_only 91 · full_list 2') // count-desc, proxy absent
+    expect(out).toContain('Legacy/untagged (apex proxy): ~9888')
+    expect(out).not.toContain('migrating')                  // neutral label, no trend claim (#944)
+    expect(out).not.toContain('proxy 9888')                 // proxy never shown as a preset
   })
-  it('omits zero-count presets from the breakdown', () => {
-    const out = formatStatuslineTrafficSection({ byPreset: { branded: 5, clickable: 0 }, total: 5 })
+  it('appends a day-over-day ▲/▼ delta per cohort when a baseline exists', () => {
+    const out = formatStatuslineTrafficSection({
+      byPreset: { branded: 2693 }, serverRenderTotal: 2786, legacyProxy: 9888, total: 12674,
+      delta: { serverRender: 312, legacyProxy: -540 },
+    })
+    expect(out).toContain('Server-render (#918): ~2786 (▲+312 vs yesterday)')
+    expect(out).toContain('Legacy/untagged (apex proxy): ~9888 (▼-540 vs yesterday)')
+  })
+  it('omits the delta suffix when the cohort delta is null (first day / corrupt snapshot)', () => {
+    const out = formatStatuslineTrafficSection({
+      byPreset: { branded: 5 }, serverRenderTotal: 5, legacyProxy: 0, total: 5,
+      delta: { serverRender: null, legacyProxy: null },
+    })
+    expect(out).toContain('Server-render (#918): ~5')
+    expect(out).not.toContain('vs yesterday')
+  })
+  it('omits the legacy line entirely when there is no proxy traffic', () => {
+    const out = formatStatuslineTrafficSection({ byPreset: { branded: 5, clickable: 0 }, serverRenderTotal: 5, legacyProxy: 0, total: 5 })
     expect(out).toContain('branded 5')
     expect(out).not.toContain('clickable')
+    expect(out).not.toContain('apex proxy')
   })
-  it('is empty when null/undefined or total is 0 (section skipped until adoption)', () => {
+  it('is empty when null/undefined or grand total is 0 (section skipped until adoption)', () => {
     expect(formatStatuslineTrafficSection(null)).toBe('')
     expect(formatStatuslineTrafficSection(undefined)).toBe('')
-    expect(formatStatuslineTrafficSection({ byPreset: {}, total: 0 })).toBe('')
+    expect(formatStatuslineTrafficSection({ byPreset: {}, serverRenderTotal: 0, legacyProxy: 0, total: 0 })).toBe('')
+  })
+})
+
+describe('formatStatuslineDeltaSuffix (#944)', () => {
+  it('▲ for positive, ▼ for negative (sign carried), ±0 for zero, empty for null', () => {
+    expect(formatStatuslineDeltaSuffix(312)).toBe(' (▲+312 vs yesterday)')
+    expect(formatStatuslineDeltaSuffix(-540)).toBe(' (▼-540 vs yesterday)')
+    expect(formatStatuslineDeltaSuffix(0)).toBe(' (±0 vs yesterday)')
+    expect(formatStatuslineDeltaSuffix(null)).toBe('')
+    expect(formatStatuslineDeltaSuffix(undefined)).toBe('')
   })
 })
 

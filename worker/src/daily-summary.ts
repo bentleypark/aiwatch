@@ -8,6 +8,7 @@ import { aggregateProbeDaily } from './probe-archival'
 import { formatReportCountsSection } from './report'
 import type { AccuracyStats } from './incident-history'
 import { AUDIENCE_SOURCES, type AudienceCounts, type AudienceSource } from './outage-audience'
+import type { StatuslineTrafficCounts, StatuslineTrafficDelta } from './api-traffic'
 
 // #679 — the "detection lead" (faster-than-official) metric was removed (structurally null — status-page
 // polling is always later than the official publish; #464 already retired the framing). The RTT-degradation
@@ -68,9 +69,10 @@ export interface DailySummaryData {
   // count (KV). Absent when neither signal exists → section omitted.
   extActivity?: { polls: number | null; reports: number } | null
   // #918 — Claude Code statusline poll volume (last-24h, WAE `statusline-*` tags): the consent-free
-  // adoption proxy #400 Phase 1 needs. Per-preset breakdown + total. Absent (null) when the SQL API
-  // isn't configured; a poll ≈ active-usage proxy (Claude Code re-renders per prompt), not a user count.
-  statuslineTraffic?: { byPreset: Record<string, number>; total: number } | null
+  // adoption proxy #400 Phase 1 needs. #944 splits it into two cohorts (server-render presets vs the
+  // legacy `proxy` catch-all) + a day-over-day delta. Absent (null) when the SQL API isn't configured;
+  // a poll ≈ active-usage proxy (Claude Code re-renders per prompt), not a user count.
+  statuslineTraffic?: (StatuslineTrafficCounts & { delta?: StatuslineTrafficDelta | null }) | null
   // #920 — Claude Code PLUGIN usage (last-24h, WAE `aiwatch-monitor` + `aiwatch-brief` tags): the
   // consent-free plugin-adoption proxy (monitor polls ≈ installs × up-time; briefings ≈ engagement).
   // Absent (null) when the SQL API isn't configured. Same not-a-user-count caveat as statusline.
@@ -379,28 +381,47 @@ export function formatExtActivitySection(
   return `\n🧩 **Chrome Extension**\n   Last 24h: ${parts.join(' · ')}`
 }
 
+/** ` (▲+312 vs yesterday)` / ` (▼-540 vs yesterday)` / ` (±0 vs yesterday)`; '' when no baseline
+ *  (null delta — first day or corrupt snapshot). A negative delta already carries its own `-` sign. */
+export function formatStatuslineDeltaSuffix(delta: number | null | undefined): string {
+  if (delta == null) return ''
+  if (delta > 0) return ` (▲+${delta} vs yesterday)`
+  if (delta < 0) return ` (▼${delta} vs yesterday)`
+  return ` (±0 vs yesterday)`
+}
+
 /**
- * Format the Claude Code statusline poll volume as a Discord section (#918). Empty string when
- * unavailable (SQL API not configured) OR the 24h total is 0, so the caller skips it — the section
- * stays absent until the statusline snippets (#400) see real adoption. Shows the last-24h total plus
- * a per-preset breakdown (branded / degraded_only / …, highest-first). Counts are WAE sampling
- * estimates (SUM(_sample_interval)), shown with `~`; the day-over-day step-up is the signal, not the
- * absolute precision. A poll ≈ active-usage proxy (Claude Code re-renders the statusline per prompt),
- * NOT a user count. Pure.
+ * Format the Claude Code statusline poll volume as a Discord section (#918; #944 cohort-split).
+ * Empty string when unavailable (SQL API not configured) OR the 24h grand total is 0, so the caller
+ * skips it. Renders TWO cohorts on separate lines instead of one blended total (#944):
+ *   • Server-render (#918) — path-tagged presets, the adoption signal we want to GROW (+ per-preset
+ *     breakdown, highest-first).
+ *   • Legacy/untagged (apex proxy) — the `?src=statusline-proxy` catch-all: pre-#918 jq installs PLUS
+ *     any other apex /api/status/cached traffic. NOT a pure adoption signal (it never fully migrates
+ *     to zero while the apex rewrite exists), so labelled neutrally — no "migrating" trend claim.
+ * Each carries a day-over-day delta (▲/▼ vs yesterday) when a baseline exists. Counts are WAE
+ * sampling estimates (SUM(_sample_interval)), shown with `~`; the day-over-day step-up is the signal,
+ * not absolute precision. A poll ≈ active-usage proxy (re-renders per prompt), NOT a user count. Pure.
  */
 export function formatStatuslineTrafficSection(
   statusline: DailySummaryData['statuslineTraffic'],
 ): string {
   if (!statusline || statusline.total <= 0) return ''
+  const delta = statusline.delta
   const breakdown = Object.entries(statusline.byPreset)
     .filter(([, n]) => n > 0)
     .sort((a, b) => b[1] - a[1])
     .map(([preset, n]) => `${preset} ${n}`)
     .join(' · ')
-  return (
-    `\n📟 **Statusline Polls (Claude Code)**\n` +
-    `   Last 24h: ~${statusline.total} polls${breakdown ? ` (${breakdown})` : ''}`
-  )
+  const lines = [
+    `\n📟 **Statusline Polls (Claude Code)**`,
+    `   Server-render (#918): ~${statusline.serverRenderTotal}${formatStatuslineDeltaSuffix(delta?.serverRender)}`,
+  ]
+  if (breakdown) lines.push(`     ${breakdown}`)
+  if (statusline.legacyProxy > 0) {
+    lines.push(`   Legacy/untagged (apex proxy): ~${statusline.legacyProxy}${formatStatuslineDeltaSuffix(delta?.legacyProxy)}`)
+  }
+  return lines.join('\n')
 }
 
 /**

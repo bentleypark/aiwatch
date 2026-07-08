@@ -19,7 +19,7 @@ import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters
 import { corsHeaders, matchOrigin } from './cors'
 import { buildStatuslinePayload, isStatuslineRequest, renderStatuslinePreset, isStatuslinePreset, renderStatuslineBrief, renderStatuslineDownList } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
-import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems } from './api-traffic'
+import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems, computeStatuslineDelta, serializeStatuslineSnapshot } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
@@ -2683,11 +2683,26 @@ export default {
           const extActivity = (extPolls != null || extReports > 0) ? { polls: extPolls, reports: extReports } : null
 
           // #918 — Claude Code statusline poll volume (consent-free adoption proxy, #400 Phase 1).
-          // Last-24h per-preset counts from WAE (`statusline-*` tags). Best-effort/null-tolerant like
-          // the ext/feed reads; null (section omitted) when the AE token/account is absent.
+          // Last-24h counts from WAE (`statusline-*` tags). #944: split into cohorts (server-render
+          // vs legacy proxy) + a day-over-day delta vs yesterday's snapshot, then persist today's for
+          // tomorrow's diff (7d TTL, mirrors the #548 subscriber-count snapshot). Best-effort/
+          // null-tolerant like the ext/feed reads; null (section omitted) when the AE token is absent.
           let statuslineTraffic = null
           try {
-            statuslineTraffic = await queryStatuslineTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+            const counts = await queryStatuslineTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+            if (counts) {
+              const yesterday = new Date(now.getTime() - 86_400_000).toISOString().split('T')[0]
+              const prevRaw = await env.STATUS_CACHE.get(`statusline:cohort:${yesterday}`).catch(() => null)
+              const delta = computeStatuslineDelta(counts, prevRaw)
+              // A CORRUPT baseline (present but unparseable) collapses both cohorts to null like a
+              // clean first-day — log that case only (mirrors the #548 subscriber-snapshot visibility).
+              if (prevRaw != null && prevRaw.trim() !== '' && delta.serverRender === null && delta.legacyProxy === null) {
+                console.warn(`[daily-summary] statusline snapshot corrupt for ${yesterday}: ${JSON.stringify(prevRaw)}`)
+              }
+              await env.STATUS_CACHE.put(`statusline:cohort:${today}`, serializeStatuslineSnapshot(counts), { expirationTtl: 7 * 86400 })
+                .catch((err) => console.warn('[daily-summary] statusline snapshot write failed:', err instanceof Error ? err.message : err))
+              statuslineTraffic = { ...counts, delta }
+            }
           } catch (err) {
             console.warn('[daily-summary] statusline traffic read failed:', err instanceof Error ? err.message : err)
           }
