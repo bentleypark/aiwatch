@@ -102,7 +102,9 @@ npm run lint:okf   # docs/reference OKF-bundle structural lint (frontmatter/#-tr
 | **Worker API** | `npx wrangler dev --config worker/wrangler.toml --port 8788` | `http://localhost:8788/api/status` |
 | **Monthly Reports** (Jekyll) | `cd ~/Desktop/bentely/aiwatch/aiwatch-reports && PATH="/opt/homebrew/opt/ruby/bin:$PATH" GEM_HOME="$HOME/.gem/ruby/4.0.0" bundle exec jekyll serve --port 4000` | `http://localhost:4000/2026-03/` |
 
-> **Note**: Dashboard reads Worker API from `VITE_API_URL` in `.env` (default: `localhost:8788`). Run Worker alongside dashboard for live data. Landing page and Is X Down pages are Vercel Edge Functions — use `vercel dev`, not Vite. Monthly Reports require Homebrew Ruby + `bundle install` in the aiwatch-reports repo (one-time setup).
+> **Note**: Dashboard reads Worker API from `VITE_API_URL` in `.env` (default: `localhost:8788`). Landing page and Is X Down pages are Vercel Edge Functions — use `vercel dev`, not Vite. Monthly Reports require Homebrew Ruby + `bundle install` in the aiwatch-reports repo (one-time setup).
+>
+> **Data source for dashboard local-verify — local worker (real data) is the DEFAULT, mock is the exception.** Run the **local worker** alongside the dashboard: `npm run dev:worker` (needs `ALLOWED_ORIGIN=*` in `worker/.dev.vars` so the `localhost:5173` dashboard passes CORS) — it live-fetches the REAL production status sources, so incidents / flap groups / edge states render faithfully. Do **NOT** rely on the SPA's `MOCK_SERVICES` fallback (`usePolling.js`): it's a static fixture with a fixed `REF` date and fabricated ongoing incidents, so it misrepresents real behavior (e.g. it has no real ×N flap group, and its stale-dated resolved incidents get filtered out). The **prod `workers.dev` worker cannot be reached from `localhost`** — it uses an `ALLOWED_ORIGIN` allowlist (`ai-watch.dev` + Vercel preview only, see `worker/src/cors.ts`), so a localhost browser fetch is CORS-blocked and silently falls back to mock. Use the mock fixture ONLY to force a **deterministic rare state** the live data won't reliably show (a specific `down`/error/edge combo) — craft it as a fixture and **revert it before commit** (step-3.5 reachability gate).
 
 ## Branch Strategy (GitHub Flow)
 
@@ -141,7 +143,10 @@ gh pr merge --squash --delete-branch
 ### Parallel sessions (git worktrees)
 
 To run multiple AI-agent sessions on this repo at once without file/git/port collisions, use
-git worktrees — `claude --worktree <name>` (or `git worktree add`). **Launched from the VS Code
+git worktrees — `claude --worktree <name>` (or `git worktree add`). **Before starting issue work,
+run `git worktree list`**: a worktree or main-repo branch you didn't create means a concurrent
+session is active → branch in a NEW worktree, never in-place on the shared main repo (a concurrent
+session can `git checkout` it out from under you, dragging its uncommitted WIP into your diff). **Launched from the VS Code
 extension button** (no `--worktree` flag)? Say **"work in a worktree"** right after the session
 starts — Claude relocates via the `EnterWorktree` tool (the Desktop app auto-creates one per
 session; the extension does not). `.worktreeinclude` copies `.env`/`.dev.vars` into each; run
