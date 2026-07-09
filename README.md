@@ -219,11 +219,12 @@ npm run dev        # localhost:5173
 ### Worker (Backend)
 
 ```bash
-cd worker
-npm install
+cd worker && npm install && cd ..
 # Create .dev.vars for local dev:
-echo "ALLOWED_ORIGIN=*" > .dev.vars
-npm run dev        # localhost:8787
+echo "ALLOWED_ORIGIN=*" > worker/.dev.vars
+# Run from the repo root — starts the worker on localhost:8788,
+# which matches the dashboard's default / VITE_API_URL below.
+npm run dev:worker   # localhost:8788
 ```
 
 ### Environment Variables
