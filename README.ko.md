@@ -218,11 +218,12 @@ npm run dev        # localhost:5173
 ### Worker (백엔드)
 
 ```bash
-cd worker
-npm install
+cd worker && npm install && cd ..
 # 로컬 개발용 .dev.vars 생성:
-echo "ALLOWED_ORIGIN=*" > .dev.vars
-npm run dev        # localhost:8787
+echo "ALLOWED_ORIGIN=*" > worker/.dev.vars
+# 레포 루트에서 실행 — 워커를 localhost:8788에 띄웁니다.
+# 아래 프론트엔드 기본값 / VITE_API_URL과 일치합니다.
+npm run dev:worker   # localhost:8788
 ```
 
 ### 환경 변수
