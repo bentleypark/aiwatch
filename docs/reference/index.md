@@ -31,6 +31,7 @@ Read this index first, then load only the pages you need.
 - [Tier-A `verify-after` assertions (#873)](verify-assertions.md) — machine-checkable assert-clause grammar.
 - [Directory map](directory-map.md) — every module's purpose + the #-issue history behind it (CLAUDE.md keeps only the map).
 - [Product constraints](product-constraints.md) — AI analysis, fallback gating, deploy/cron rules, CSP, PWA, Edge SSR surfaces.
+- [Decision Graph — ontology-lite (#917)](decision-graph.md) — the entity + relation vocabulary the strategy-review skill traverses to fuse progress × priority × decision-context.
 
 > **Structural health** (frontmatter integrity, unquoted-`#` truncation, dangling cross-links, index
 > drift) is enforced in CI on every PR by `scripts/lint-okf-bundle.mjs` — on a **docs** PR by the
