@@ -1,0 +1,69 @@
+name: Docs Lint
+
+# #961 — the OKF structural lint that guards `docs/reference/` was never gated on a docs change.
+#
+# `test.yml` sets `paths-ignore` for `docs/**` / `*.md` on BOTH its triggers, and `paths-ignore` is
+# evaluated at the WORKFLOW level — so a docs-only PR started no jobs at all. The lint
+# (`scripts/lint-okf-bundle.mjs`) only ever ran inside that workflow's `unit` job via
+# `npm run test:scripts`, i.e. on every PR that does NOT touch docs, and never on the ones that do.
+# Same shape as #877, where a conditional job let PR #871's CSP-hash drift ship green.
+#
+# Dropping `paths-ignore` from `test.yml` is the wrong fix: it would run the worker unit tests, tsc,
+# Playwright E2E and the bundle build on every one-line doc edit. That filter is doing its job. This
+# workflow instead fires on exactly the paths `test.yml` ignores, so a mixed code+docs PR triggers
+# both and every PR is gated by exactly the checks its diff needs.
+#
+# `lint-okf-bundle.mjs` imports only `node:fs` / `node:path` / `node:url`, so there is no `npm ci`
+# step — the job is a few seconds of runner time.
+#
+# ⚠️ DO NOT make `Docs Lint` a REQUIRED status check on `main`.
+# A workflow-level `paths:` filter means the workflow does not RUN on a code-only PR, so its check
+# context is never reported — and a required check that never reports blocks the merge forever.
+# (A job-level `if:` skip is different: it reports `skipped`, which satisfies a required check.)
+# `test.yml` carries the same shape via its `paths-ignore`, so this applies to its four jobs too.
+# As of 2026-07-09 `main` has NO required status checks, so the trap is latent, not live.
+# If you ever want these required, first move the path decision from the workflow trigger into the
+# job (always run the workflow; skip the lint step when no docs changed) — note that doing so
+# removes the `paths:` list that `scripts/workflow-paths-sync.test.mjs` asserts against, so that
+# guard would need rewriting too.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '*.md'
+      - 'CLAUDE.md'
+      - 'docs/**'
+      - '.github/**/*.md'
+      - 'scripts/lint-okf-bundle.mjs'      # the guard guards itself
+      - '.github/workflows/docs-lint.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '*.md'
+      - 'CLAUDE.md'
+      - 'docs/**'
+      - '.github/**/*.md'
+      - 'scripts/lint-okf-bundle.mjs'
+      - '.github/workflows/docs-lint.yml'
+
+permissions:
+  contents: read
+
+# Mirrors test.yml: a new push on the same head_ref cancels the previous run instead of stacking.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  okf-lint:
+    name: OKF Bundle Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Zero-dependency script (node: builtins only) — deliberately no `npm ci`.
+      # Checks: frontmatter integrity, unquoted-`#` truncation, dangling cross-links, index.md drift.
+      - run: node scripts/lint-okf-bundle.mjs

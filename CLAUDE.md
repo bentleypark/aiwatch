@@ -87,8 +87,8 @@ npm test           # Run Playwright E2E tests
 npm run test:src   # Run frontend unit tests (vitest, src/**/*.test.js + api/__tests__/*.test.ts incl. the CSP drift pin) — CI-gated via the always-on `Frontend Unit Tests` job (#877; the gap that let PR #871's vercel.json CSP-hash drift ship green)
 npm run test:worker # Run Worker unit tests (vitest)
 npm run typecheck:worker # tsc gate — full `tsc --noEmit`, fails on ANY type error across worker source incl tests (#533 Phase 4; two-pass: prod strict workers-types-only + tests with @types/node)
-npm run test:scripts # node:test unit tests for scripts/*.mjs (e.g. verify-reminders #541; lint-okf-bundle #891 — the docs/reference OKF structural lint, real-bundle assertion CI-gated)
-npm run lint:okf   # docs/reference OKF-bundle structural lint (frontmatter/#-truncation/dangling-link/index-drift) — same checks CI runs
+npm run test:scripts # node:test unit tests for scripts/*.mjs (e.g. verify-reminders #541; lint-okf-bundle #891 — incl. its real-bundle assertion). Runs in the `Test` workflow, which `paths-ignore`s docs — so it gates CODE PRs
+npm run lint:okf   # docs/reference OKF-bundle structural lint (frontmatter/#-truncation/dangling-link/index-drift) — gated on DOCS PRs by the separate `Docs Lint` workflow (#961; `test.yml`'s paths-ignore means a docs-only PR starts none of its jobs)
 
 ```
 
