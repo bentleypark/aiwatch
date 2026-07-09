@@ -40,9 +40,9 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   // #601 — LLM observability siblings; both expose a public, no-auth health endpoint (verified 2026-06-23)
   { id: 'helicone', url: 'https://api.helicone.ai/healthcheck' },                   // public 200 {"status":"healthy :)"}
   { id: 'langfuse', url: 'https://cloud.langfuse.com/api/public/health' },          // public 200 {"status":"OK"}
-  // #857 — turbopuffer has no official uptime (no statusComponentId → parseUptimeData never runs; region-only
-  // page), so the probe is its sole substantial measured signal → confidence `medium` once ≥7d of samples accrue
-  // (`low`/null Score during the initial ramp). Public no-auth health endpoint, verified 2026-07-01.
+  // #857 — turbopuffer's probe supplies the Responsiveness component. (It is NOT the sole measured signal:
+  // the page publishes official uptime via incident.io `component_uptimes`, read as a worst-of over the region
+  // roster — see the turbopuffer config in services.ts — so confidence is `high`.) Verified 2026-07-01.
   { id: 'turbopuffer', url: 'https://api.turbopuffer.com' },                        // public 200 {"status":"🐡"}
   // #883 — cursor (coding agent) runs on its OWN API infra, independent of any other probed target.
   // Live cross-check 2026-07-03: api2.cursor.sh routes real paths (200, body "Welcome to Cursor. From

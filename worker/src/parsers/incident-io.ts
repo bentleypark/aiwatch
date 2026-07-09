@@ -3,8 +3,35 @@
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import { fetchWithTimeout } from '../utils'
 
-export function parseIncidentIoUptime(html: string, componentId: string, groupId?: string): number | null {
+// componentId accepts a single id OR a list. A list is a WORST-OF (min) across the matched
+// components — used by a service whose only components are per-region endpoints and which
+// publishes no group aggregate (turbopuffer, #857): the badge convention for a multi-component
+// service is worst-of (statusComponentIds, #379), so its official uptime follows the same rule
+// rather than picking one arbitrary region. A component the page publishes no value for
+// ("$undefined" — incident.io emits this when a page runs display_uptime_mode: 'chart_only',
+// as Stability/ElevenLabs/Replicate did when this was written) is SKIPPED, never read as 0.
+//
+// `worst` accumulates across ALL chunks rather than returning from the first chunk that matched
+// an id: a list leans on completeness, so a `component_uptimes` array split across two RSC pushes
+// must not silently drop the regions in the later chunk. A matched-but-valueless component still
+// yields null, and an id absent everywhere still leaves `worst` null — the pre-#857 single-id
+// results are unchanged.
+//
+// Silent-drop guard: incident.io ULIDs are not guaranteed stable, and a rotated id simply stops
+// matching on a 200-OK page — no fetch error, no component-miss alert (that machinery is gated on
+// `statusComponentId`, which a list-configured service does not set). Without a signal, a partial
+// rotation would quietly shrink the worst-of to whichever regions survived and could report a
+// healthy 100% while a vanished region is down. So warn when a configured id resolves to nothing.
+export function parseIncidentIoUptime(html: string, componentId: string | string[], groupId?: string): number | null {
+  const ids = Array.isArray(componentId) ? componentId : [componentId]
   const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
+  // `matched` = the id appears in a component_uptimes array at all (drives the rotation warn).
+  // `valued` = it also yielded a usable number (drives the re-scan skip). Two sets, because a
+  // component seen once WITHOUT a value must not stop a later chunk from supplying one — today
+  // incident.io lists each component exactly once, so this only matters if that shape changes.
+  const matched = new Set<string>()
+  const valued = new Set<string>()
+  let worst: number | null = null
   for (const chunk of chunks) {
     if (!chunk.includes('component_uptimes')) continue
     // Search only within the component_uptimes section to avoid matching the same
@@ -26,22 +53,39 @@ export function parseIncidentIoUptime(html: string, componentId: string, groupId
       }
     }
 
-    // 2. Fall back to individual component uptime
-    const re = new RegExp(
-      `\\\\"component_id\\\\":\\\\"${componentId}\\\\"[\\s\\S]*?\\\\"uptime\\\\":\\\\"([^\\\\"]*)\\\\"`
-    )
-    const match = uptimesSection.match(re)
-    if (!match) continue
-    const raw = match[1]
-    if (raw === '$undefined' || raw === '') return null
-    const pct = parseFloat(raw)
-    if (isNaN(pct) || pct < 0 || pct > 100) {
-      console.warn(`[parseIncidentIoUptime] unexpected uptime value "${raw}" for ${componentId}`)
-      return null
+    // 2. Fall back to individual component uptime (worst-of when several ids are given).
+    for (const id of ids) {
+      if (valued.has(id)) continue
+      const re = new RegExp(
+        `\\\\"component_id\\\\":\\\\"${id}\\\\"[\\s\\S]*?\\\\"uptime\\\\":\\\\"([^\\\\"]*)\\\\"`
+      )
+      const match = uptimesSection.match(re)
+      if (!match) continue
+      matched.add(id)
+      const raw = match[1]
+      if (raw === '$undefined' || raw === '') continue
+      const pct = parseFloat(raw)
+      if (isNaN(pct) || pct < 0 || pct > 100) {
+        console.warn(`[parseIncidentIoUptime] unexpected uptime value "${raw}" for ${id}`)
+        continue
+      }
+      valued.add(id)
+      if (worst === null || pct < worst) worst = pct
     }
-    return pct
   }
-  return null
+  // A single configured id that never matches is the ordinary "this page has no such component"
+  // case (callers treat null as "no official uptime"); only a LIST implies a roster we expect to
+  // find whole, so only a list warns. Caveat: if incident.io ever paginated one component_uptimes
+  // array across two RSC pushes, the tail chunk would lack the marker above and its ids would read
+  // as absent — a spurious warn (and a too-optimistic worst-of), not a crash. A warn with no
+  // upstream id change is the tell.
+  if (ids.length > 1 && matched.size < ids.length) {
+    console.warn(
+      `[parseIncidentIoUptime] ${ids.length - matched.size}/${ids.length} configured components absent ` +
+      `from component_uptimes (upstream id rotation?) — uptime is a worst-of over the ${matched.size} that matched`,
+    )
+  }
+  return worst
 }
 
 // componentId accepts a single id OR a list (the service's statusComponentIds group): the per-day
