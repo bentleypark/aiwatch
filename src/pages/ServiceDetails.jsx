@@ -585,7 +585,13 @@ function RegionalAvailability({ service, t }) {
                  awkwardly low on mobile.
               `gap-2` replaces `ml-2` so the gap survives any future wrap /
               RTL layout change. */}
-          {!allDown && okRegions.length > 0 && ongoingCount > 0 && (
+          {/* `recommendedRegion` is null for a region-AWARE but non-switchable service (#973,
+              REGION_SWITCHABLE) — the per-region status list above still renders, but there is no
+              region to recommend. Without this guard the callout would render with an empty region
+              name (recommendText interpolates `?? ''`). It cannot crash on the anchor's
+              `recommendedRegion.key`: that anchor needs `docsUrl`, and every REGION_DOCS_URL
+              service is switchable (pinned by both mirrors' tests). */}
+          {recommendedRegion && !allDown && okRegions.length > 0 && ongoingCount > 0 && (
             <div className="mono text-[10px] text-[var(--blue)] flex items-start justify-between gap-2" style={{ marginTop: '20px', padding: '12px 14px', background: 'var(--bg2)', borderRadius: '4px' }}>
               <span>{recommendText}</span>
               {docsUrl && (

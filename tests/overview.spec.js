@@ -454,6 +454,48 @@ test.describe('ActionBanner region recommendation', () => {
     await expect(page.locator('main').getByText(/Switch region|리전 전환/)).not.toBeVisible()
   })
 
+  test('region-AWARE but non-switchable service shows fallback, not a region line (#973)', async ({ page }) => {
+    // The regression #973 fixed. OpenAI HAS a SERVICE_REGIONS map and this incident names
+    // `us-east-1`, so hasRegionSpecific=true and two regions stay OK — every pre-#973 gate
+    // passed and the banner printed "Switch region: OpenAI API → US West (us-west-2)", an
+    // endpoint OpenAI does not let a caller select, while suppressing the Claude fallback.
+    // REGION_SWITCHABLE now nulls recommendedRegion, so the line is gone and the fallback returns.
+    //
+    // NOTE this must be a REGION-SPECIFIC incident: the sibling "global outage" test above is
+    // suppressed by the older !allDown gate and would pass against the un-fixed code too.
+    const inc = {
+      id: 'openai-region-973',
+      title: 'Elevated error rates in us-east-1',
+      status: 'investigating',
+      impact: 'major',
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+      componentNames: [],
+      timeline: [],
+    }
+    const mockData = { json: {
+      services: [
+        { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI',
+          status: 'degraded', latency: 250, uptime30d: 99.7, calendarDays: 30, incidents: [inc] },
+        { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic',
+          status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [], aiwatchScore: 95 },
+        operationalize('xai', 'xAI (Grok)'),
+        operationalize('huggingface', 'Hugging Face'),
+        operationalize('elevenlabs', 'ElevenLabs'),
+      ],
+      lastUpdated: new Date().toISOString(),
+    } }
+    await page.route('**/api/status**', async (route) => { await route.fulfill(mockData) })
+    await page.route('**/api/status/cached', async (route) => { await route.fulfill(mockData) })
+    await page.goto('/')
+    await page.locator('main button').first().waitFor({ state: 'visible', timeout: 20000 })
+
+    // No unactionable region-switch instruction …
+    await expect(page.locator('main').getByText(/Switch region|리전 전환/)).not.toBeVisible()
+    await expect(page.locator('main').getByText(/US West \(us-west-2\)/)).not.toBeVisible()
+    // … and the cross-service fallback the reader CAN act on is no longer suppressed.
+    await expect(page.locator('main').getByText(/Suggested fallback|대체 서비스/)).toBeVisible({ timeout: 10000 })
+  })
+
   test('affected service without region data does not show region line', async ({ page }) => {
     // Mistral has no SERVICE_REGIONS entry → regionStatusOf returns null →
     // banner skips the region line entirely. The fallback line still renders.

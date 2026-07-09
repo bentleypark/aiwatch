@@ -397,6 +397,14 @@ describe('region-switch hint (#422)', () => {
     expect(buildRegionHint(mistral)).toBeUndefined()
   })
 
+  it('buildRegionHint returns undefined for a region-AWARE but non-switchable service (#973)', () => {
+    // openai names regions in incident text but exposes no selectable region endpoint, so the
+    // Discord hint must stay silent — "📍 Try region: US West" was an unactionable instruction.
+    const openai = mockService({ id: 'openai', name: 'OpenAI API', status: 'degraded',
+      incidents: [inc({ id: 'o1', title: 'Elevated errors in us-east-1', status: 'investigating', startedAt: recentDate, impact: 'major' })] })
+    expect(buildRegionHint(openai)).toBeUndefined()
+  })
+
   it('buildRegionHint returns undefined for a global (non-region-specific) incident', () => {
     // No region in title/components → every region marked down via fallback → allDown → no recommendation
     const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', status: 'down',
@@ -446,17 +454,43 @@ describe('region-switch hint (#422)', () => {
   })
 
   it('#641 suppresses the cross-service fallback when a region switch IS offered', () => {
-    // OpenAI is region-aware (SERVICE_REGIONS) AND fallback-eligible (not EXCLUDE_FALLBACK). A
+    // Pinecone is region-SWITCHABLE (#973) AND fallback-eligible (un-excluded in #857). A
     // region-specific outage is solved by the cheaper same-provider region switch, so the
-    // cross-service fallback (Claude) must be suppressed to avoid redundant noise.
+    // cross-service fallback (turbopuffer) must be suppressed to avoid redundant noise.
+    const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', status: 'degraded', incidents: [
+      inc({ id: 'pc-r', title: 'Elevated errors', status: 'investigating', startedAt: recentDate, impact: 'major', componentNames: ['AWS us-east-1'] }),
+    ] })
+    const turbopuffer = mockService({ id: 'turbopuffer', name: 'turbopuffer', provider: 'turbopuffer', category: 'api', status: 'operational', aiwatchScore: 95 })
+    const alert = buildIncidentAlerts([pinecone, turbopuffer], alertedMap(), NOW).find(a => a.key === 'alerted:new:pc-r')
+    expect(alert).toBeDefined()
+    expect(alert!.regionText).toBe('📍 Try region: AWS US West')
+    expect(alert!.fallbackText).toBe('') // suppressed despite turbopuffer being an operational same-tier fallback
+
+    // Contrast — proves the assertion above tests SUPPRESSION, not the absence of any fallback for
+    // pinecone. Same two services, but a GLOBAL incident (no region key) → no region switch to
+    // offer → turbopuffer must surface. Without this, a future change that de-pairs turbopuffer
+    // from pinecone would leave the `fallbackText === ''` assertion passing vacuously.
+    const globalPinecone = mockService({ id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', status: 'degraded', incidents: [
+      inc({ id: 'pc-g', title: 'API authentication broken', status: 'investigating', startedAt: recentDate, impact: 'major' }),
+    ] })
+    const globalAlert = buildIncidentAlerts([globalPinecone, turbopuffer], alertedMap(), NOW).find(a => a.key === 'alerted:new:pc-g')
+    expect(globalAlert!.regionText).toBeUndefined()
+    expect(globalAlert!.fallbackText).toContain('turbopuffer')
+  })
+
+  it('#973 keeps the cross-service fallback for a region-AWARE but non-switchable service', () => {
+    // The inverse of the case above, and the regression #973 fixed. OpenAI names us-east-1 in the
+    // incident, so the pre-#973 code offered "📍 Try region: US West (us-west-2)" — an endpoint the
+    // caller cannot select — AND suppressed the Claude fallback, which they CAN act on. Now the
+    // region hint is silent and the fallback survives.
     const openai = mockService({ id: 'openai', name: 'OpenAI API', status: 'degraded', incidents: [
       inc({ id: 'oai-r', title: 'Elevated errors', status: 'investigating', startedAt: recentDate, impact: 'major', componentNames: ['us-east-1'] }),
     ] })
     const claude = mockService({ id: 'claude', name: 'Claude API', provider: 'Anthropic', status: 'operational', aiwatchScore: 95 })
     const alert = buildIncidentAlerts([openai, claude], alertedMap(), NOW).find(a => a.key === 'alerted:new:oai-r')
     expect(alert).toBeDefined()
-    expect(alert!.regionText).toBe('📍 Try region: US West (us-west-2)')
-    expect(alert!.fallbackText).toBe('') // suppressed despite Claude being an operational same-tier fallback
+    expect(alert!.regionText).toBeUndefined()
+    expect(alert!.fallbackText).toContain('Claude API')
   })
 
   it('#641 still shows the cross-service fallback for a GLOBAL (non-region) incident', () => {

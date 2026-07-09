@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest'
-import { regionStatusOf, classifyIncident, SERVICE_REGIONS } from '../regionStatus'
+import { regionStatusOf, classifyIncident, SERVICE_REGIONS, REGION_DOCS_URL, REGION_SWITCHABLE } from '../regionStatus'
+import { hasRegionSwitch } from '../constants'
 
 describe('classifyIncident', () => {
   test('returns "down" on outage/down/unavailable keywords', () => {
@@ -209,6 +210,55 @@ describe('regionStatusOf — global-incident fallback', () => {
   })
 })
 
+describe('regionStatusOf — region-aware but not region-switchable (#973)', () => {
+  test('openai: per-region status still resolves, but no region is recommended', () => {
+    // OpenAI names regions in incident text yet exposes no selectable region endpoint. Showing
+    // "which region is down" is useful; telling the reader to switch to another is not actionable.
+    const result = regionStatusOf({
+      id: 'openai',
+      status: 'degraded',
+      incidents: [{ id: 'r1', status: 'investigating', title: 'Elevated errors in us-east-1' }],
+    })
+    expect(result).not.toBeNull()
+    expect(result.hasRegionSpecific).toBe(true)
+    expect(result.regions.find((r) => r.key === 'us-east-1').status).toBe('incident')
+    expect(result.okRegions.map((r) => r.key)).toEqual(['us-west-2', 'eu-central-1'])
+    // The recommendation — and with it every surface that guards on it — goes quiet.
+    expect(result.recommendedRegion).toBeNull()
+    expect(result.docsUrl).toBeUndefined()
+  })
+
+  test('openai is excluded from region-switch recommendations, so it keeps its cross-service fallback', () => {
+    // hasRegionSwitch drives getGroupedFallbacksExcludingRegionSwitchable (#641): a service with
+    // no executable region switch must NOT be filtered out of the cross-service fallback list.
+    const openai = {
+      id: 'openai',
+      status: 'degraded',
+      incidents: [{ id: 'r1', status: 'investigating', title: 'Elevated errors in us-east-1' }],
+    }
+    expect(hasRegionSwitch(openai)).toBe(false)
+  })
+
+  test('pinecone (switchable) still recommends the next healthy region', () => {
+    // Guards the gate from over-reaching: switchable services keep the recommendation.
+    const pinecone = {
+      id: 'pinecone',
+      incidents: [{ id: 'p1', status: 'investigating', title: 'AWS us-east-1 degraded' }],
+    }
+    expect(regionStatusOf(pinecone).recommendedRegion.key).toBe('AWS us-west-2')
+    expect(hasRegionSwitch(pinecone)).toBe(true)
+  })
+
+  test('every service with a docs link is switchable (no unreachable links)', () => {
+    // chatgpt used to hold a REGION_DOCS_URL entry with no SERVICE_REGIONS map, so regionStatusOf
+    // returned null before ever reading it — the url never rendered anywhere (#973).
+    for (const id of Object.keys(REGION_DOCS_URL)) {
+      expect(REGION_SWITCHABLE.has(id), `${id} has a docs link but is not switchable`).toBe(true)
+      expect(SERVICE_REGIONS[id], `${id} has a docs link but no region map`).toBeDefined()
+    }
+  })
+})
+
 describe('regionStatusOf — FedRAMP excluded from region computation (#693)', () => {
   test('openai with ONLY a FedRAMP incident → null (no card, not all-regions-down)', () => {
     // The region-less FedRAMP title would otherwise trip the global fallback and paint
@@ -359,7 +409,11 @@ describe('regionStatusOf — docsUrl pass-through', () => {
       id: 'pinecone',
       incidents: [{ id: 'p1', status: 'investigating', title: 'AWS us-east-1 issue' }],
     })
-    expect(result.docsUrl).toMatch(/pinecone\.io/)
+    // #973 — asserting only the HOST let a rotted path through: the old
+    // `troubleshooting/available-cloud-regions` 301'd to the top of an unrelated guide while
+    // still matching /pinecone\.io/ (and still returning 200). Pin the path + the section
+    // anchor, which is what actually lands the reader on the region list.
+    expect(result.docsUrl).toBe('https://docs.pinecone.io/guides/index-data/create-an-index#cloud-regions')
   })
 
   test('docsUrl is undefined for services without a mapping', () => {

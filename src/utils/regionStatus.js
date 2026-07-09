@@ -26,6 +26,7 @@ export const SERVICE_REGIONS = {
     { key: 'europe-west1', label: 'Europe West (europe-west1)' },
     { key: 'asia-northeast1', label: 'Asia Northeast (asia-northeast1)' },
   ],
+  // openai is region-AWARE but not region-SWITCHABLE — see REGION_SWITCHABLE below (#973).
   openai: [
     { key: 'us-east-1', label: 'US East (us-east-1)' },
     { key: 'us-west-2', label: 'US West (us-west-2)' },
@@ -56,17 +57,43 @@ export const SERVICE_REGIONS = {
   ],
 }
 
+// Services whose regions the CALLER can actually choose. Being in SERVICE_REGIONS only means we can
+// tell which region an incident hit (region-aware); it does not mean the reader can move off it.
+//
+// openai is the counterexample that motivated this split (#973): its region keys were copied from
+// services.ts `incidentKeywords` — tokens that match region names OpenAI names in incident TEXT —
+// but the OpenAI API exposes no region endpoint (project-level data residency only). We rendered
+// "Switch region: OpenAI API → US West (us-west-2)" on three surfaces — advice nobody could act on —
+// and on a fourth path it silently suppressed the cross-service fallback the reader COULD act on.
+// xai is the mirror image: no doc page survives (#560) yet the switch is real (us-east-1.api.x.ai).
+// So switchability tracks neither SERVICE_REGIONS membership nor REGION_DOCS_URL membership.
+//
+// Enforced in ONE place — `recommendedRegion` below is null for a non-switchable service. Every
+// recommendation surface already guards on `!recommendedRegion` (Overview.jsx ActionBanner,
+// api/_is-down/html-template.ts, worker/src/alerts.ts buildRegionHint, constants.js hasRegionSwitch),
+// so they all fall silent and `getGroupedFallbacksExcludingRegionSwitchable` serves the
+// cross-service fallback instead — an action the reader CAN take. The per-region status list keeps
+// rendering: "us-east-1 is the one that's down" is useful even when you can't leave it.
+export const REGION_SWITCHABLE = new Set(['xai', 'gemini', 'azureopenai', 'bedrock', 'pinecone'])
+
+// Every entry must land the reader ON the region list for that service — not merely resolve.
+// A retired doc path that 301s to an unrelated guide still returns 200, so reachability proves
+// nothing (#973: pinecone's `troubleshooting/available-cloud-regions` redirected to the top of
+// "Create an index"). Verify the landing page in a real browser before adding or changing a URL;
+// no verified region doc → no entry, and the card/banner simply omits the link.
+//
+// xai has NO entry (#560): xAI removed its regional-endpoints doc page (docs.x.ai/docs/regions
+// → 404, no live replacement in the current docs nav).
+// openai has NO entry (#973): "Production best practices" was never a region doc, and no
+// executable region switch exists — see the SERVICE_REGIONS comment above.
+// chatgpt had an entry but never a SERVICE_REGIONS map, so regionStatusOf returned null before
+// reading it — the URL never rendered anywhere. Removed (#973).
+// (api/_is-down/region-status.ts mirrors all of this; region-status-sync.test.ts pins the pair.)
 export const REGION_DOCS_URL = {
-  // xai intentionally has NO entry (#560): xAI removed its regional-endpoints doc page
-  // (docs.x.ai/docs/regions → 404, no live replacement in the current docs nav). The region
-  // card omits the "learn more" link when a service has no docsUrl — do NOT re-add a guessed
-  // URL here without verifying it resolves in a real browser. (region-status.ts mirrors this.)
   gemini: 'https://cloud.google.com/vertex-ai/docs/general/locations',
-  openai: 'https://platform.openai.com/docs/guides/production-best-practices',
-  chatgpt: 'https://status.openai.com',
-  azureopenai: 'https://learn.microsoft.com/azure/ai-services/openai/concepts/models',
-  bedrock: 'https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-regions.html',
-  pinecone: 'https://docs.pinecone.io/troubleshooting/available-cloud-regions',
+  azureopenai: 'https://learn.microsoft.com/en-us/azure/ai-foundry/reference/region-support',
+  bedrock: 'https://docs.aws.amazon.com/bedrock/latest/userguide/models-regions.html',
+  pinecone: 'https://docs.pinecone.io/guides/index-data/create-an-index#cloud-regions',
 }
 
 // Services whose region card is shown unconditionally — even when no ongoing
@@ -108,8 +135,9 @@ export function classifyIncident(title) {
 //                          !hasRegionSpecific: both a region-specific AND a
 //                          global incident can be ongoing at once (#422)
 //   allDown              — every defined region is in incident state
-//   recommendedRegion    — first OK region by SERVICE_REGIONS array order,
-//                          or null when allDown
+//   recommendedRegion    — first OK region by SERVICE_REGIONS array order; null
+//                          when allDown OR when the service is region-aware but
+//                          not region-switchable (see REGION_SWITCHABLE, #973)
 //   docsUrl              — REGION_DOCS_URL[service.id] or undefined
 //   ongoingCount         — number of ongoing incidents considered
 
@@ -219,7 +247,7 @@ export function regionStatusOf(service, opts = {}) {
     hasRegionSpecific,
     hasGlobalIncident,
     allDown,
-    recommendedRegion: okRegions[0] ?? null,
+    recommendedRegion: REGION_SWITCHABLE.has(service.id) ? (okRegions[0] ?? null) : null,
     docsUrl: REGION_DOCS_URL[service.id],
     ongoingCount: ongoing.length,
   }

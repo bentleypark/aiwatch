@@ -61,6 +61,7 @@ export const SERVICE_REGIONS: Record<string, RegionDef[]> = {
     { key: 'europe-west1', label: 'Europe West (europe-west1)' },
     { key: 'asia-northeast1', label: 'Asia Northeast (asia-northeast1)' },
   ],
+  // openai is region-AWARE but not region-SWITCHABLE — see REGION_SWITCHABLE below (#973).
   openai: [
     { key: 'us-east-1', label: 'US East (us-east-1)' },
     { key: 'us-west-2', label: 'US West (us-west-2)' },
@@ -91,16 +92,23 @@ export const SERVICE_REGIONS: Record<string, RegionDef[]> = {
   ],
 }
 
+// Services whose regions the CALLER can actually choose. Region-AWARE (a SERVICE_REGIONS entry)
+// does not imply region-SWITCHABLE: openai names regions in incident text but exposes no region
+// endpoint, while xai has no doc page (#560) yet a real hostname switch. Enforced once, in
+// `recommendedRegion` below — every recommendation surface already guards on `!recommendedRegion`.
+// Mirrors src/utils/regionStatus.js (#973).
+export const REGION_SWITCHABLE = new Set(['xai', 'gemini', 'azureopenai', 'bedrock', 'pinecone'])
+
+// Every entry must land the reader ON the region list for that service — not merely resolve; a
+// retired path that 301s to an unrelated guide still returns 200 (#973). The Edge omits the docs
+// anchor when docsUrl is undefined. Mirrors src/utils/regionStatus.js (pinned by
+// worker/src/__tests__/region-status-sync.test.ts) — see there for why xai/openai/chatgpt have
+// no entry. Do NOT re-add a guessed URL.
 export const REGION_DOCS_URL: Record<string, string> = {
-  // xai intentionally has NO entry (#560): xAI removed its regional-endpoints doc page
-  // (docs.x.ai/docs/regions → 404, no live replacement). Mirrors src/utils/regionStatus.js —
-  // the Edge omits the docs anchor when docsUrl is undefined. Do NOT re-add a guessed URL.
   gemini: 'https://cloud.google.com/vertex-ai/docs/general/locations',
-  openai: 'https://platform.openai.com/docs/guides/production-best-practices',
-  chatgpt: 'https://status.openai.com',
-  azureopenai: 'https://learn.microsoft.com/azure/ai-services/openai/concepts/models',
-  bedrock: 'https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-regions.html',
-  pinecone: 'https://docs.pinecone.io/troubleshooting/available-cloud-regions',
+  azureopenai: 'https://learn.microsoft.com/en-us/azure/ai-foundry/reference/region-support',
+  bedrock: 'https://docs.aws.amazon.com/bedrock/latest/userguide/models-regions.html',
+  pinecone: 'https://docs.pinecone.io/guides/index-data/create-an-index#cloud-regions',
 }
 
 const ALWAYS_SHOW_REGIONS = new Set(['bedrock', 'azureopenai'])
@@ -205,7 +213,7 @@ export function regionStatusOf(service: ServiceLike | null | undefined): RegionS
     hasRegionSpecific,
     hasGlobalIncident,
     allDown,
-    recommendedRegion: okRegions[0] ?? null,
+    recommendedRegion: service.id && REGION_SWITCHABLE.has(service.id) ? (okRegions[0] ?? null) : null,
     docsUrl: service.id ? REGION_DOCS_URL[service.id] : undefined,
     ongoingCount: ongoing.length,
   }
