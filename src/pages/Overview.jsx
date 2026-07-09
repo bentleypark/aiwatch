@@ -11,7 +11,6 @@ import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
-import { tagServiceForAlert } from '../utils/securityAlerts'
 import { computePredictionOutcome, withinEstimateText } from '../utils/predictionAccuracy'
 import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionSwitchable, ALL_SERVICES_FEED_URL, outboundReferralUrl, sendReferralBeacon } from '../utils/constants'
 import RssCopyIcon from '../components/RssCopyIcon'
@@ -671,7 +670,7 @@ export function ActionBanner({ services, setPage, t }) {
 export default function Overview() {
   const { t, lang } = useLang()
   const { setPage, categoryFilter, setCategoryFilter } = usePage()
-  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis, securityAlerts, probeServiceIds, reportFeed, supplyChainBanner } = usePolling()
+  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis, probeServiceIds, reportFeed, supplyChainBanner } = usePolling()
   const { settings } = useSettings()
   const services = allServices.filter((s) => settings.enabledServices.includes(s.id))
   const [filter, setFilter] = useState('all')
@@ -853,57 +852,9 @@ export default function Overview() {
         </div>
       )}
 
-      {/* ── Security Alerts Banner (24h only) ── */}
-      {(() => {
-        const cutoff = Date.now() - 24 * 3600_000
-        const recent = (securityAlerts ?? []).filter(a => a.detectedAt && new Date(a.detectedAt).getTime() > cutoff)
-        if (recent.length === 0) return null
-        return (
-          <div className="rounded-lg border border-[var(--purple)]" style={{ background: 'color-mix(in srgb, var(--purple) 8%, transparent)', padding: '8px 12px' }}>
-            <div className="flex flex-col gap-0.5 text-[12px] min-w-0">
-              <span className="text-[var(--text0)] font-medium mono text-[11px]">
-                🔒 {t('overview.security.title')} ({recent.length})
-              </span>
-              {recent.slice(0, 3).map((a, i) => {
-                const safeUrl = a.url?.startsWith('https://') ? a.url : '#'
-                // Derive service tag: use service field (OSV) or detect from title (HN).
-                // #821 — provider-only HN matches resolve to the provider's primary service
-                // (shared helper, mirrors the detail-page matcher). Logic in src/utils/securityAlerts.js.
-                let tag = a.service || ''
-                if (!tag) {
-                  // Use the FULL service list (not the enabled-filtered `services`) so the
-                  // provider-primary resolution matches the detail page, which sees all services.
-                  const match = tagServiceForAlert(a, allServices)
-                  if (match) tag = match.name
-                }
-                // #326: EPSS prefix mirroring ServiceDetails. Thresholds duplicated
-                // here because the frontend bundle cannot import from worker — keep
-                // in sync with EPSS_ACTIVE (0.8) / EPSS_ELEVATED (0.5) in
-                // worker/src/security-monitor.ts.
-                const epss = a.epssPercentile
-                let epssTag = null
-                if (typeof epss === 'number') {
-                  if (epss >= 0.8) epssTag = { icon: '🔥', color: 'var(--red)' }
-                  else if (epss >= 0.5) epssTag = { icon: '⚠️', color: 'var(--amber)' }
-                }
-                return (
-                  <a key={i} href={safeUrl} target="_blank" rel="noopener noreferrer"
-                    className="text-[var(--text1)] hover:text-[var(--purple)] truncate text-[11px]"
-                  >
-                    {a.severity === 'critical' ? '🔴' : a.severity === 'high' ? '🟠' : '🟡'}
-                    {epssTag && (
-                      <span style={{ color: epssTag.color, marginLeft: '4px' }}
-                        title={`EPSS ${Math.round(epss * 100)}th percentile — ${epss >= 0.8 ? 'actively exploited' : 'elevated exploit risk'}`}
-                      >{epssTag.icon}</span>
-                    )}
-                    {' '}{tag ? `[${tag}] ` : ''}{a.title}
-                  </a>
-                )
-              })}
-            </div>
-          </div>
-        )
-      })()}
+      {/* Security findings surface removed from Overview (#950) — the ServiceDetails
+          per-service security card remains the contextual surface. Re-surfacing (Overview
+          vs a dedicated screen) is deferred pending the #949 NVD first-party data. */}
 
       {/* #574 — supply-chain banner: directly ABOVE the "Operational · N services running" summary cards. */}
       <SupplyChainBanner banner={supplyChainBanner} setPage={setPage} t={t} />
