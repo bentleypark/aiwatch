@@ -31,8 +31,8 @@ Consequence: user alerts fire at **cron cadence (≤~5min, same time as the oper
 
 - **Service-status edge alerts are a Tier-1-only safety net (#767)** — `buildServiceAlerts` (🔴 Service Down / 🟠 Partially Degraded / 🟢 Service Recovered, which fire only in the incident-less gap `!hasOngoingIncident`) is emitted **only for claude/openai/gemini** (`API_TIER[id]===1`). Non-Tier-1 services rely on the canonical incident alerts (`buildIncidentAlerts`) alone — the status-edge alert otherwise produced a redundant second message when the provider flipped its status indicator one cron cycle before publishing the incident object (the #759 AssemblyAI "Service Down" 6:18 → "New Incident" 6:23 double). Tier-1 keeps it so a Tier-1 hard-down with NO parseable incident still pages.
 
-- **New-incident AI-hold — non-Tier-1 only (#882)** — the cron runs a new incident's AI analysis **inline with an 8s timeout** so it can merge into the embed. When that call overruns, the alert historically shipped **AI-less on BOTH surfaces** (operator embed + per-user relay are built from the same `description`), and since the send is fire-and-forget (no message ID captured) neither could be patched once the end-of-cron `refreshOrReanalyze` backfilled `ai:analysis` — so the alert permanently disagreed with the dashboard modal (which reads the backfilled KV). #882 applies the **#759 publish-before-analysis hold to the Discord push path**: on a fresh `alerted:new:` whose AI isn't ready, a **non-Tier-1** incident is **HELD** (the send loop `continue`s before the roster write / feed append / send / push, stamping a write-once `pending:ai:{incId}` first-seen marker) instead of shipping AI-less. The next cron cycle's `refreshOrReanalyze` backfills the analysis; a later cycle's **KV-first read** (`ai:analysis` preferred over a fresh inline call — `formatAnalysisEmbedSection` renders both identically) then releases the alert WITH the AI section. Decision is the pure `shouldHoldForAiAnalysis` (`alerts.ts`): holds only when AI is genuinely pending (not `merged`/`no-model`/`generic` — those never get AI) and only within the bounded window (`AI_HOLD_MS = 10min ≈ 2 cron cycles); **past the window it fail-opens** (ships AI-less so an alert is never lost), and a KV-read error (`firstSeenMs=0`) also fail-opens. **Tier-1 (claude/openai/gemini) is NEVER held** — the operator alert + #778 phone push stay immediate; apps/agents (chatgpt/claudeai/claudecode/codex) are non-Tier-1 and hold-eligible. Held keys are excluded from the `alert:count:{date}` daily tally (they weren't sent). Net delay: **~5min typical** (only on a cycle where the 8s inline actually overran — no hold when Gemma answers in time), **~10min worst-case then AI-less**; the dashboard/modal show the incident live throughout, so only the Discord alert is delayed. Distinct from the #633/#835 flap hold (`pending:new:`, which suppresses a *phantom* short/flap alert) — this holds a *real* alert briefly for completeness; the two markers never clobber (`pending:ai:` vs `pending:new:`). Slack `/feed`'s counterpart is the #759 `AI_HOLD_MS=6min` hold in `rss.ts`.
-  - **Efficiency/safety details**: the inline 8s AI call fires **only on the incident's first sighting** — a held incident on a later cycle relies on the KV-first `ai:analysis` read + `refreshOrReanalyze`'s backfill, so a hold doesn't burn a second Gemma/Sonnet call every cycle. And because the fail-open window can only elapse if the `pending:ai` marker persists, a **failed first-sight marker write fail-opens immediately** (ships AI-less) rather than risk an unbounded hold (a re-stamped first-sight window would never advance if the write kept failing AND AI never landed).
+- **New-incident AI-hold — non-Tier-1 only (#882)** — the cron runs a new incident's AI analysis **inline with a cancellable 15s budget** (`INLINE_ANALYSIS_BUDGET_MS`; an uncancellable 8s `Promise.race` until #955) so it can merge into the embed. When that call overruns, the alert historically shipped **AI-less on BOTH surfaces** (operator embed + per-user relay are built from the same `description`), and since the send is fire-and-forget (no message ID captured) neither could be patched once the end-of-cron `refreshOrReanalyze` backfilled `ai:analysis` — so the alert permanently disagreed with the dashboard modal (which reads the backfilled KV). #882 applies the **#759 publish-before-analysis hold to the Discord push path**: on a fresh `alerted:new:` whose AI isn't ready, a **non-Tier-1** incident is **HELD** (the send loop `continue`s before the roster write / feed append / send / push, stamping a write-once `pending:ai:{incId}` first-seen marker) instead of shipping AI-less. The next cron cycle's `refreshOrReanalyze` backfills the analysis; a later cycle's **KV-first read** (`ai:analysis` preferred over a fresh inline call — `formatAnalysisEmbedSection` renders both identically) then releases the alert WITH the AI section. Decision is the pure `shouldHoldForAiAnalysis` (`alerts.ts`): holds only when AI is genuinely pending (not `merged`/`no-model`/`generic` — those never get AI) and only within the bounded window (`AI_HOLD_MS = 10min ≈ 2 cron cycles); **past the window it fail-opens** (ships AI-less so an alert is never lost), and a KV-read error (`firstSeenMs=0`) also fail-opens. **Tier-1 (claude/openai/gemini) is NEVER held** — the operator alert + #778 phone push stay immediate; apps/agents (chatgpt/claudeai/claudecode/codex) are non-Tier-1 and hold-eligible. Held keys are excluded from the `alert:count:{date}` daily tally (they weren't sent). Net delay: **~5min typical** (only on a cycle where the inline budget actually overran — no hold when Gemma answers in time), **~10min worst-case then AI-less**; the dashboard/modal show the incident live throughout, so only the Discord alert is delayed. Distinct from the #633/#835 flap hold (`pending:new:`, which suppresses a *phantom* short/flap alert) — this holds a *real* alert briefly for completeness; the two markers never clobber (`pending:ai:` vs `pending:new:`). Slack `/feed`'s counterpart is the #759 `AI_HOLD_MS=6min` hold in `rss.ts`.
+  - **Efficiency/safety details**: the inline AI call fires **only on the incident's first sighting** — a held incident on a later cycle relies on the KV-first `ai:analysis` read + `refreshOrReanalyze`'s backfill, so a hold doesn't burn a second Gemma/Sonnet call every cycle. And because the fail-open window can only elapse if the `pending:ai` marker persists, a **failed first-sight marker write fail-opens immediately** (ships AI-less) rather than risk an unbounded hold (a re-stamped first-sight window would never advance if the write kept failing AND AI never landed).
   - **Accepted tradeoff — a sub-cycle flash incident held then resolved emits nothing on Discord/feed** (code-review #882): a held incident whose roster (`alerted:new:`) was never written, if it **resolves within the hold window** (~one cron cycle, before `refreshOrReanalyze` backfills AI), fires **neither New nor Resolved** (the resolved branch is `alertedNewMap.has`-gated, which cleanly avoids a #793-style orphan "Resolved" but means the incident is silent on the alert surfaces). This is **symmetric with the already-accepted #835/#792 flap-hold** behavior (a held blip that self-recovers emits neither), now extended to any non-Tier-1 service. It requires BOTH an 8s AI overrun AND a sub-~5min resolution, the dashboard shows the incident live throughout, and such a brief outage is typically over before an alert would be read — so it's accepted, not fixed. (Tier-1 is never held, so a Tier-1 flash incident still alerts immediately.)
 
 - **🎯 recovery-prediction line — two placements (#827 F4 + #846)** — the "how our AI estimate held up" line (`🎯 AI prediction: 45m (within ~45m est.)`, from `predictedVsActualText`) appears on BOTH resolution surfaces, but was built in different places. Slack `/feed` renders it for **every** resolved incident carrying a numeric estimate (`rss.ts` `descHtml`, tier-agnostic). Discord originally attached it (`recoverySection`) **only** to the Tier-1 status-edge `alerted:recovered:` path (#827 F4) — which fires rarely (incident-less gap only) — so the canonical **`alerted:res:` "Incident Resolved" embed** (the resolution path for ALL services) showed no prediction, and Discord effectively never displayed it while Slack did. **#846** attaches the SAME single-line wording to the `alerted:res:` embed, computed live from the still-warm `ai:analysis:{svcId}:{incId}` estimate + the resolved incident's actual duration. The two surfaces now share `resolvedAtOf` + the `estimatedRecoveryHours == null → omit` gate (both in `incident-history.ts`) so wording and actual-duration derivation are identical; a missing/`N/A` estimate omits the line on both. The Discord block is best-effort (a KV/parse failure logs + omits, never aborts the send) and `!recoverySection`-guarded so it never double-emits alongside the Tier-1 path.
@@ -52,3 +52,98 @@ The per-user webhook is registered via a **channel-control double opt-in**: the 
 ### Removed in the PR3 cutover
 - `src/utils/webhookAlerts.js` (browser relay) + `src/utils/webhookRegistration.js` (legacy `webhook:reg:` ping) and their tests.
 - The worker `POST/DELETE /api/webhook/ping` endpoint and the `webhook:reg:` count.
+
+## #955 — why the AI section went missing (silent analysis failures)
+
+The #882 hold assumes `refreshOrReanalyze` will backfill `ai:analysis` on a later cron cycle. Four
+independent defects broke that assumption, and each was invisible on its own. Symptom: `ai:usage`
+showed 7 of 16 calls `failed` on 2026-07-08 with **zero Sonnet successes on any day**, while
+`ANTHROPIC_API_KEY` was set and correctly threaded to `refreshOrReanalyze`.
+
+| # | Defect | Effect |
+|---|--------|--------|
+| 1 | `claude-sonnet-4-20250514` hardcoded in `ai-analysis.ts` **and** `monthly-narrative.ts` (pinned #21, 2026-03-26) reached its **2026-06-15 retirement** | Every Sonnet call 404'd. `analyzeWithSonnet` swallowed it (`if (!res.ok) return null`), so the fallback was dead for weeks |
+| 2 | The cron's inline analysis was `Promise.race([analyzeIncident, 8s])`, but `analyzeWithSonnet` carried its own 10s `AbortSignal.timeout` | Sonnet only ever got the budget Gemma hadn't already spent, and the race **cancelled nothing** — a response landing at 9s was paid for, discarded, and booked as `failed` |
+| 3 | No retry anywhere in the AI path. `analyzeWithSonnet` returned `null` on *any* `!res.ok` | A 429/500/529 (exactly the retryable classes) was treated identically to a permanent 404 |
+| 4 | On failure, `refreshOrReanalyze` wrote `ai:reanalysis-skip:{svcId}:{incId}` with a flat **1800s** TTL | The five-minute cron skipped the next six cycles. The lock is per-INCIDENT, so one transient Gemma parse failure froze the incident for 30min. It outlived `AI_HOLD_MS` (~10min), so the held alert was *guaranteed* to ship AI-less |
+
+Observed timeline before the fix — a non-Tier-1 incident could never get its AI section:
+
+| t | what happened |
+|---|---|
+| 0 | first sight → inline 8s race → Gemma fails → Sonnet cannot finish → `null` → `failed++`, #882 hold starts |
+| 5m | `firstSight=false` → no inline call (#882 avoids double-spend) → `refreshOrReanalyze` tries → Sonnet 404 → `null` → **30min lock written** |
+| 10m | `AI_HOLD_MS` expires → alert ships **AI-less** (fail-open) |
+| 10–40m | lock active → `result.skipped`; nothing runs |
+| 40m | retry → same 404 |
+
+Fixes, in the same order: the model id + request shape moved into `anthropic.ts` (one place, pinned by
+test — Sonnet 5 also gets an explicit `thinking:{type:'disabled'}`, since omitting it selects adaptive
+thinking whose tokens come out of `max_tokens`; a determinism guard, not a fix for an observed
+truncation — see the verification note below); the inline race became a real `AbortController` budget (`INLINE_ANALYSIS_BUDGET_MS`
+= 15s) propagated into the fetch; `callAnthropicMessages` classifies each HTTP status and retries the
+transient ones once, honouring `retry-after`; and `reanalysisLockTtlSec` scales the cooldown by failure
+kind — **only `permanent` earns 30min**, `transient`/`aborted` write no lock at all so the very next cron
+cycle retries *inside* the hold window.
+
+Two supporting changes make the next regression visible instead of silent. `wrangler.toml` gained an
+`[observability]` block — `console.error` was previously emitted and immediately lost, which is why a
+404 loop left no trace. And `ai:usage` now records **attempts** per model, not just successes: a
+fallback that is always reached and never succeeds reads `Sonnet: 0/7` and raises a `⚠️ Sonnet fallback:
+7 attempts, 0 successes` line in the daily summary, whereas the old counters printed a bare `Sonnet: 0`
+whether the fallback was broken or simply never needed. `calls` is also booked from the returned
+attempt on *every* path now, including the throw path: the old `usage.calls++` sat after the `await`
+inside the `try`, so a thrown error incremented neither `calls` nor `failed` and vanished from the
+ledger entirely.
+
+### Verification (2026-07-09, pre-merge)
+
+Root cause was **confirmed against the production Cloudflare AI Gateway route with a real Anthropic
+key** before the fix shipped, rather than inferred from the counters:
+
+| Probe | Result |
+|---|---|
+| `claude-sonnet-4-20250514` (what production had been sending since #21) | `HTTP 404 not_found_error — model: claude-sonnet-4-20250514` |
+| `claude-sonnet-5` + `thinking:{type:'disabled'}` (what this PR ships) | `HTTP 200` |
+| `analyzeWithSonnetDetailed` end-to-end on a realistic incident prompt | `outcome.kind === 'ok'`, parseable `AIAnalysisResult` (`estimatedRecovery: "1–3h"`, 134 output tokens of a 600 budget) |
+
+One expectation did **not** hold and is recorded here so it isn't re-asserted: omitting `thinking`
+did **not** truncate. On the same prompt at `max_tokens: 600`, Sonnet 5 emitted no thinking block in
+either configuration (134 vs 149 output tokens, both parsed). Adaptive thinking is the model's own
+per-request choice, so `thinking:{type:'disabled'}` remains the right call — it makes the output
+budget deterministic on a harder incident — but it is a **guard, not a repair**.
+
+### Two things the verification disproved
+
+Both were plausible, both were wrong, and both are recorded so nobody re-asserts them.
+
+**1. `thinking: {type:'disabled'}` does not fix an observed truncation.** On the same incident prompt
+at `max_tokens: 600`, Sonnet 5 emitted no thinking block whether or not `thinking` was sent (134 vs
+149 output tokens, both parsed). Adaptive thinking is the model's own per-request choice. Disabling
+it makes the output budget deterministic on a harder incident — a guard, not a repair.
+
+**2. Wrapping `ai.run()` does not hang it.** An intermediate revision of this fix raced the Gemma
+leg's I/O promise inside a hand-rolled `new Promise(...)`, saw every inline analysis abort at the
+full budget, and concluded the wrapper broke the Workers-AI subrequest. It did not. Measured against
+the real binding through `wrangler dev --remote`, `env.AI.run()` latency is simply enormous and
+wildly variable:
+
+| | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| awaited directly | 110.7s | 61.2s | >115s (timeout) |
+| wrapped in `new Promise` + `.then()` | 0.76s | 0.32s | 60.5s |
+
+The wrapped calls were *faster*. The 15s aborts were Gemma being slow, not the wrapper hanging. The
+wrapper was still removed — it only bounded how long we wait, which `analyzeIncidentWithBudget`
+already does one level up by racing an ordinary promise, and it left an orphaned `ai.run()` whose
+eventual rejection had no handler. **Race the analysis's ordinary promise; await the Workers-AI
+subrequest plainly.**
+
+The consequence for tuning: `INLINE_ANALYSIS_BUDGET_MS` cannot be set from first principles, because
+Gemma sometimes takes minutes. Some inline calls will always overrun. That is now cheap — an overrun
+books `timedOut` (not `failed`), writes no re-analysis lock, and the next cron cycle retries inside
+the #882 hold window. The `timedOut` counter in the daily summary is the only legitimate input to
+changing that number.
+
+Note the measurements above come from `wrangler dev --remote`, which proxies each subrequest through
+a preview tunnel; production latency may be lower. That is precisely why the counter exists.

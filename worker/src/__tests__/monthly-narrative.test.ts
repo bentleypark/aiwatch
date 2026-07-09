@@ -1,6 +1,7 @@
 // Tests for the monthly retrospective narrative generator (#426 / aiwatch-reports#4 Phase 3).
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+import { ANTHROPIC_MODEL } from '../anthropic'
 import {
   formatDurationLabel,
   selectIncidentCandidates,
@@ -307,6 +308,26 @@ describe('generateMonthlyNarrative', () => {
       const out = await generateMonthlyNarrative(archive, { ai, apiKey: 'k', serviceNames: { gemini: 'Gemini API' } })
       expect(out).not.toBeNull()
       expect(out!.model).toBe('sonnet')
+    } finally {
+      globalThis.fetch = origFetch
+    }
+  })
+
+  // #955 — this module used to hardcode `claude-sonnet-4-20250514` independently of ai-analysis.ts,
+  // so when that id retired BOTH fallbacks died and neither could see the other's breakage. The id
+  // now comes from the shared `anthropic.ts`; this pins that it actually reaches the wire.
+  it('sends the shared non-retired model id and disabled thinking', async () => {
+    const ai = { run: async () => { throw new Error('Workers AI unavailable') } }
+    const origFetch = globalThis.fetch
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ content: [{ type: 'text', text: goodJson }] })))
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    try {
+      await generateMonthlyNarrative(archive, { ai, apiKey: 'k', serviceNames: { gemini: 'Gemini API' } })
+      const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)
+      expect(body.model).toBe(ANTHROPIC_MODEL)
+      expect(body.model).not.toMatch(/^claude-sonnet-4/)
+      expect(body.thinking).toEqual({ type: 'disabled' })
+      expect(body.max_tokens).toBe(1800) // headroom for Sonnet 5's new tokenizer (was 1400)
     } finally {
       globalThis.fetch = origFetch
     }
