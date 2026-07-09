@@ -204,12 +204,19 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
     , 0)
   }, [services])
 
+  // h-full only from md up. Pinning the height at every breakpoint made the content exactly fill the
+  // mobile drawer, so the drawer's own overflow-y-auto never engaged (#978). Below md the content
+  // sizes itself and the drawer scrolls. (Don't reach for `min-h-full` here to bottom-pin the footer
+  // on a sparse list: the footer's `mt-auto` is inert — the unlayered `* { margin: 0 }` reset kills
+  // it — so that only adds dead space below the footer. Desktop pins it via the flex-1 list.)
   return (
-    <div className="flex flex-col h-full" style={{ padding: '16px 0' }}>
+    <div className="flex flex-col md:h-full" style={{ padding: '16px 0' }}>
 
       {/* ── Dashboard section ── */}
-      {/* NOTE: inline styles used because Tailwind v4 fails to apply certain utilities
-           (py-[7px], px-[8px], gap-[8px]) on button elements due to base layer reset. */}
+      {/* NOTE: inline styles used because index.css's unlayered `* { margin: 0; padding: 0 }` reset
+           outranks Tailwind v4's *layered* utilities, so py-[7px]/px-[8px] compute to 0 — on every
+           element, not just buttons. It is what silently nullified the mobile drawer's `pt-[48px]`
+           too (#978). gap-[8px] is kept inline alongside them for consistency. */}
       <nav style={{ padding: '0 12px', marginBottom: '8px' }} aria-label="Dashboard">
         <div style={sectionTitleStyle}>{t('nav.dashboard')}</div>
         {DASHBOARD_ITEMS.map((item) => {
@@ -346,10 +353,15 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
       </div>
 
       {/* ── Filtered service list — single flat list in #658 category order (#676).
-           flex-1 min-h-0 so the list takes the remaining height and scrolls WITHIN itself
-           (not the whole sidebar), keeping the footer pinned + always-visible regardless of
-           how many services are listed (#601 — broke at 39 services without this). ── */}
-      <nav className="flex-1 min-h-0 overflow-y-auto" style={{ padding: '0 12px' }} aria-label={t('nav.services')}>
+           From md up, flex-1 so the list takes the remaining height and scrolls WITHIN itself
+           (not the whole sidebar), keeping the footer pinned regardless of how many services are
+           listed (#601 — broke at 39 services without this).
+           Being the only flexible child, it also absorbed the ENTIRE height shortfall on a short
+           viewport and collapsed to 0px, hiding every service (#978). The 160px floor (~5 rows)
+           replaces the old `min-h-0` so it can no longer vanish: once the sidebar can't fit, the
+           overflow moves out to the sidebar's own scroll container. Below md there is no floor to
+           enforce — the mobile drawer scrolls as a whole. ── */}
+      <nav className="md:flex-1 md:min-h-[160px] md:overflow-y-auto" style={{ padding: '0 12px' }} aria-label={t('nav.services')}>
         {orderedServices.map((svc) => (
           <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} onNavigate={onNavigate} />
         ))}
