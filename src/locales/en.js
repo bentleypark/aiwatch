@@ -103,7 +103,6 @@ const en = {
   'overview.recovered': 'Recently Resolved',
   'overview.recentlyResolved': 'Recently Resolved',
   'overview.seeAnalysis': 'See details in Analyze',
-  'overview.security.title': 'Recent security findings',
   'analysis.recoveredAt': 'Recovered',
   // Empty States
   'empty.issues.title': 'No Issues',
