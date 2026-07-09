@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   computeMonthlyUptime,
   computeMonthlyComponentUptime,
@@ -27,6 +27,7 @@ import {
   buildMonthlyAccuracy,
   filterSuppressedFromMonthly,
   aggregateIncidentDurations,
+  resolveArchiveOfficialUptime,
 } from '../monthly-archive'
 import type { SuppressionEntry } from '../suppression'
 import type { ServiceStatus, Incident } from '../types'
@@ -307,13 +308,18 @@ describe('curateComponentUptime (#605 Phase 3)', () => {
 // ── computeMonthlyOfficialUptime (#586 daily snapshot) ───────────────
 describe('computeMonthlyOfficialUptime (#586)', () => {
   it('returns the most-recent day\'s officialUptime per service', () => {
+    // #951 — the fixture is dense enough that the 1st falls OUTSIDE the tail window, so this now
+    // guards the cutoff too: the later day wins for chatgpt, and openai's early-only value is residue
+    // (it published nothing for the rest of the month) rather than a month-end figure to be "carried".
     const daily = {
       '2026-06-01': { chatgpt: { ok: 200, total: 288, officialUptime: 98.5 }, openai: { ok: 288, total: 288, officialUptime: 99.9 } },
-      '2026-06-30': { chatgpt: { ok: 210, total: 288, officialUptime: 99.83 } }, // later day wins for chatgpt
+      '2026-06-28': { chatgpt: { ok: 210, total: 288, officialUptime: 99.7 } },
+      '2026-06-29': { chatgpt: { ok: 210, total: 288, officialUptime: 99.8 } },
+      '2026-06-30': { chatgpt: { ok: 210, total: 288, officialUptime: 99.83 } },
     }
     const r = computeMonthlyOfficialUptime(daily)
-    expect(r.chatgpt).toBe(99.83)  // month-end value, not the earlier 98.5
-    expect(r.openai).toBe(99.9)    // only present on the 1st → carried
+    expect(r.chatgpt).toBe(99.83)   // month-end value, not the earlier 98.5
+    expect(r.openai).toBeUndefined() // last seen on the 1st → not month-end data (pre-#951 carried it)
   })
   it('omits services with no officialUptime on any day (→ caller falls back to null)', () => {
     const daily = { '2026-06-01': { cohere: { ok: 288, total: 288 } } } // no officialUptime field
@@ -325,6 +331,89 @@ describe('computeMonthlyOfficialUptime (#586)', () => {
       '2026-06-15': { gemini: { ok: 288, total: 288, officialUptime: null } }, // null does not clobber
     }
     expect(computeMonthlyOfficialUptime(daily).gemini).toBe(97.0)
+  })
+
+  // #951 — "as of the LATEST day" now means it. A sticky last-non-null let a value observed mid-month
+  // stand in for month end, which is how the pre-#713 estimate and Character.AI's dead source survived.
+  it('#951 ignores a value that stopped being published before the month\'s final days', () => {
+    const daily: Record<string, Record<string, { ok: number; total: number; officialUptime?: number | null }>> = {}
+    for (let d = 13; d <= 30; d++) {
+      const day = `2026-06-${String(d).padStart(2, '0')}`
+      daily[day] = {
+        stability: { ok: 288, total: 288, officialUptime: d <= 17 ? 100 : null }, // estimate until #713 (06-19)
+        groq: { ok: 288, total: 288, officialUptime: 100 },                       // a real source, all month
+      }
+    }
+    const r = computeMonthlyOfficialUptime(daily)
+    expect(r.stability).toBeUndefined() // last seen 06-17, thirteen days before month end → residue
+    expect(r.groq).toBe(100)
+  })
+
+  it('#951 tolerates a transient null on the final day (the snapshot is that day\'s last cron cycle)', () => {
+    const daily = {
+      '2026-06-28': { groq: { ok: 288, total: 288, officialUptime: 100 } },
+      '2026-06-29': { groq: { ok: 288, total: 288, officialUptime: 99.98 } },
+      '2026-06-30': { groq: { ok: 288, total: 288, officialUptime: null } }, // one bad fetch
+    }
+    expect(computeMonthlyOfficialUptime(daily).groq).toBe(99.98)
+  })
+
+  it('#951 drops a source that has been silent for the whole tail window', () => {
+    const daily = {
+      '2026-06-28': { characterai: { ok: 288, total: 288, officialUptime: null } },
+      '2026-06-29': { characterai: { ok: 288, total: 288, officialUptime: null } },
+      '2026-06-30': { characterai: { ok: 288, total: 288, officialUptime: null } },
+    }
+    expect(computeMonthlyOfficialUptime(daily).characterai).toBeUndefined()
+  })
+})
+
+// ── resolveArchiveOfficialUptime (#951 — display must agree with the Score) ──
+// The archive showed "Official · 100.00% uptime" beside a Score that was rescaled over /60 as if no
+// uptime existed. Two independent ways the two drifted apart, both reproduced below.
+describe('resolveArchiveOfficialUptime (#951)', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('emits the month-end value for a service the Score actually scored on uptime', () => {
+    expect(resolveArchiveOfficialUptime(100, { id: 'groq', scoreConfidence: 'high', officialUptime: 100 })).toBe(100)
+  })
+
+  it('prefers the month-end daily snapshot over the build-time value (#586 month accuracy kept)', () => {
+    expect(resolveArchiveOfficialUptime(99.83, { id: 'chatgpt', scoreConfidence: 'high', officialUptime: 99.7 })).toBe(99.83)
+  })
+
+  it('falls back to the build-time value when no day carried one', () => {
+    expect(resolveArchiveOfficialUptime(undefined, { id: 'groq', scoreConfidence: 'high', officialUptime: 100 })).toBe(100)
+  })
+
+  it('withholds a month-end value the Score did not consume (would print "Official" beside a /60 score)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(resolveArchiveOfficialUptime(100, { id: 'groq', scoreConfidence: 'medium', officialUptime: null })).toBeNull()
+    // Discarding a month-observed figure is exactly the silent drop this issue is about — it must warn.
+    // (Reachable when a status-page fetch fails on the single build-day read of services:latest.)
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn.mock.calls[0][0]).toContain('withholding month-end official uptime 100')
+  })
+
+  it('does NOT warn when there was no month-end value to discard (openrouter never publishes one)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(resolveArchiveOfficialUptime(undefined, { id: 'openrouter', scoreConfidence: 'medium', officialUptime: null })).toBeNull()
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('keeps the month-end value when services:latest was unreadable (no score to contradict)', () => {
+    // index.ts console.errors the parse failure and passes scoreData=[]. Nulling everything would let
+    // ONE parse failure erase every service's official uptime from an archive the cron never rebuilds.
+    expect(resolveArchiveOfficialUptime(99.83, undefined)).toBe(99.83)
+    expect(resolveArchiveOfficialUptime(undefined, undefined)).toBeNull()
+  })
+
+  it('warns, then falls back to the pre-#951 gate, for a caller that omits scoreConfidence', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(resolveArchiveOfficialUptime(99.5, { id: 'legacy', officialUptime: 99.4 })).toBe(99.5)
+    expect(resolveArchiveOfficialUptime(99.5, { id: 'legacy', officialUptime: null })).toBeNull()
+    expect(warn).toHaveBeenCalledTimes(2)
+    expect(warn.mock.calls[0][0]).toContain('omits scoreConfidence')
   })
 })
 
@@ -1056,6 +1145,48 @@ describe('buildMonthlyArchive', () => {
       { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const },
     ])
     expect(archive.services.claude.officialUptime).toBeNull()
+  })
+
+  // #951 — the June 2026 contamination, reproduced through the full builder. The daily counter stores
+  // `uptime30d` WITHOUT its `uptimeSource`, so the incident-derived estimate that #713 removed on
+  // 2026-06-19 is indistinguishable from an official % in the snapshot. `computeMonthlyOfficialUptime`
+  // is a sticky last-non-null, so one pre-#713 day stamped "Official · 100.00%" on Stability's whole
+  // month — beside a Score the build (2026-07-01) had already rescaled over /60 as if no uptime existed.
+  it('#951 does not surface a month-end uptime the Score never consumed', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {}) // the withheld-value warning
+    const juneKV = {
+      get: async (key: string) => ({
+        // 06-17: pre-#713 — stability's estimate and groq's real official uptime look identical here.
+        'history:2026-06-17': JSON.stringify({
+          stability: { ok: 288, total: 288, officialUptime: 100 },
+          groq: { ok: 288, total: 288, officialUptime: 100 },
+        }),
+        // 06-29: post-#713 — stability's value is gone; groq's real one persists.
+        'history:2026-06-29': JSON.stringify({
+          stability: { ok: 288, total: 288, officialUptime: null },
+          groq: { ok: 288, total: 288, officialUptime: 100 },
+        }),
+      } as Record<string, string>)[key] ?? null,
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(juneKV, 2026, 6, [
+      // Scored at build time (post-#713): no uptime component → medium confidence, /60 rescale.
+      { id: 'stability', aiwatchScore: 76, scoreGrade: 'good' as const, scoreConfidence: 'medium' as const, officialUptime: null },
+      { id: 'groq', aiwatchScore: 85, scoreGrade: 'good' as const, scoreConfidence: 'high' as const, officialUptime: 100 },
+    ])
+
+    // The sticky 100 from 06-17 must NOT resurface as Stability's "Official Uptime".
+    expect(archive.services.stability.officialUptime).toBeNull()
+    expect(archive.services.stability.uptime).toBe(100)   // AIWatch-measured — untouched, still honest
+    expect(archive.services.stability.score).toBe(76)     // the /60 score the display now agrees with
+    expect(archive.services.stability.scoreConfidence).toBe('medium')
+
+    // A service that really does publish uptime keeps it, month-end value and all.
+    expect(archive.services.groq.officialUptime).toBe(100)
+    expect(archive.services.groq.scoreConfidence).toBe('high')
   })
 
   it('#591 threads incidentSourceStale into the archive (only when set)', async () => {

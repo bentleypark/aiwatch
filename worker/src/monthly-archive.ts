@@ -17,6 +17,9 @@ import { readSuppressionsFresh, isSuppressedByIdTitle, type SuppressionEntry } f
 import { kvPut } from './utils'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
+// #951 — mirrors AIWatchScore.confidence. 'high' ⟺ the service had an official uptime% at score
+// time, i.e. the Score included the 40-pt uptime component (`score.ts` `hasUptime`).
+export type ScoreConfidence = 'high' | 'medium' | 'low'
 
 /** Per-incident snapshot kept in the permanent monthly archive (#375).
  *  Sourced from accumulated incidents:monthly:{period} at archive build time, before its
@@ -41,9 +44,10 @@ export interface MonthlyIncidentEntry {
 
 export interface MonthlyServiceData {
   uptime: number | null          // AIWatch-measured uptime% from daily ok/total counters — feeds the Score (null if no data)
-  officialUptime: number | null  // #586 — status-page rolling-30d uptime (month-end daily snapshot, build-time fallback) for the "Official Uptime" DISPLAY table; separate from the daily-counter `uptime` that feeds the Score. null if the service publishes no metric
+  officialUptime: number | null  // #586 — status-page rolling-30d uptime (month-end daily snapshot, build-time fallback) for the "Official Uptime" DISPLAY table; separate from the daily-counter `uptime` that feeds the Score. #951 — emitted ONLY when the Score actually consumed an official uptime (scoreConfidence 'high'); null otherwise
   score: number | null           // AIWatch Score at archive time (null if unavailable)
   grade: ScoreGrade | null       // Score grade (null if score unavailable)
+  scoreConfidence?: ScoreConfidence | null // #951 — 'high' = the Score included the 40-pt uptime component; the report labels the uptime source from this instead of a hardcoded service list
   incidents: number              // incident count for the month (from accumulated data)
   avgResolutionMin: number | null // average resolution time in minutes (null if no resolved incidents)
   totalDowntimeMin: number | null // sum of all incident durations for the month (null if no resolved incidents — unresolved durations are tracked as 0 upstream)
@@ -409,21 +413,88 @@ type DailyCounters = Record<string, {
   components?: Record<string, { ok: number; total: number; name: string }>
 }>
 
+/** How many of the month's FINAL days may supply the "as of month end" official uptime. A value last
+ *  observed earlier than this is not month-end data — it is residue (#951). Three days tolerates a
+ *  transient status-page fetch failure on the last day (the snapshot is the day's last cron cycle)
+ *  without tolerating a source that went away mid-month. */
+export const OFFICIAL_UPTIME_TAIL_DAYS = 3
+
 /** #586 — per-service "Official Uptime" for the month: the status-page rolling-30d value as of the
  *  LATEST day in the window (≈ the month, since uptime30d trails 30 days). Reads the per-cycle daily
  *  snapshots (DailyCounters.officialUptime) rather than a one-shot build-time snapshot, so it stays
  *  month-accurate and survives a later rebuild. Omits a service when no day carried a value (months
- *  before this shipped, or a service that publishes no metric) → the caller falls back to null. */
+ *  before this shipped, or a service that publishes no metric) → the caller falls back to null.
+ *
+ *  #951 — "as of the LATEST day" is now what the code actually does. It used to scan every day and keep
+ *  the last NON-NULL value, so a figure last seen on the 17th was still reported as the month's official
+ *  uptime even though the source published nothing for the final two weeks. That is how the pre-#713
+ *  incident-derived ESTIMATE (removed 2026-06-19; the daily counter stores `uptime30d` without its
+ *  `uptimeSource`, so an estimate is indistinguishable from an official %) stamped a fabricated
+ *  "Official · 100.00%" on Stability/ElevenLabs/Replicate for all of June 2026 — and how Character.AI
+ *  kept a real-but-dead 99.58% after its status page was deactivated (#689/#800). Only the final
+ *  OFFICIAL_UPTIME_TAIL_DAYS days with data can supply the value now. */
 export function computeMonthlyOfficialUptime(
   dailyData: Record<string, DailyCounters>,
 ): Record<string, number> {
   const result: Record<string, number> = {}
-  for (const date of Object.keys(dailyData).sort()) { // ascending → later dates overwrite (most-recent wins)
+  const dates = Object.keys(dailyData).sort()
+  const tail = dates.slice(-OFFICIAL_UPTIME_TAIL_DAYS)
+  for (const date of tail) { // ascending → later dates overwrite (most-recent wins)
     for (const [id, c] of Object.entries(dailyData[date])) {
       if (c.officialUptime !== null && c.officialUptime !== undefined) result[id] = c.officialUptime
     }
   }
   return result
+}
+
+/** #951 — SECOND line of defence, after `computeMonthlyOfficialUptime` narrowed the value to the
+ *  month's final days. The archive's "Official Uptime" DISPLAY must agree with what the Score actually
+ *  consumed, or the report prints "Official · 100.00%" beside a score rescaled over /60 as if no
+ *  uptime existed. `scoreConfidence === 'high'` ⟺ `score.ts` `hasUptime` ⟺ the 40-pt uptime component
+ *  was included.
+ *
+ *  The two signals can legitimately disagree, and the disagreement is worth surfacing rather than
+ *  silently resolving. The month-end value comes from the daily snapshots; `scoreConfidence` comes from
+ *  ONE read of `services:latest` on build day. If a status-page fetch happened to fail on that read,
+ *  a service that published uptime all month reads `medium` and loses its figure. That is a real way to
+ *  discard correct data, so we warn — the same class of silent drop this whole issue is about. We still
+ *  withhold the number (a displayed uptime beside a `/60` score is the contradiction #951 exists to
+ *  remove), but the operator can see it happened; the archived `score` is wrong in that case too.
+ *
+ *  `scoreSvc === undefined` means `services:latest` was unreadable (index.ts logs the parse failure and
+ *  passes an empty scoreData). Do NOT null everything then: the month-end daily snapshots stand on their
+ *  own, and there is no score to contradict. This is what the pre-#951 code did — tying officialUptime
+ *  to scoreData would let one parse failure erase every service's uptime from an archive the cron never
+ *  rebuilds (it only builds when the entry is absent).
+ *
+ *  Historical archives written before this shipped still carry the contaminated values and are corrected
+ *  out-of-band — do NOT reach for `/api/admin/rebuild-archive`. It is not idempotent (it re-snapshots
+ *  `score` from the CURRENT `services:latest`), and because this gate reads that same current confidence,
+ *  rebuilding a month whose service has since LOST its source (Character.AI, #689/#800) also withholds the
+ *  uptime it genuinely published back then. Patch the `archive:{period}` KV entry directly instead. */
+export function resolveArchiveOfficialUptime(
+  monthEndValue: number | undefined,
+  scoreSvc: ArchiveScoreInput | undefined,
+): number | null {
+  if (!scoreSvc) return monthEndValue ?? null
+  if (scoreSvc.scoreConfidence == null) {
+    // Both production callers pass it; this only guards an external caller. `officialUptime != null` is a
+    // weaker proxy for "the Score consumed an uptime" — it happens to be equivalent for the two callers
+    // (both derive it from the same `s.uptime30d`) but nothing enforces that, so make the omission audible.
+    console.warn(`[monthly-archive] ${scoreSvc.id}: scoreData omits scoreConfidence — gating on the weaker officialUptime presence check`)
+    return scoreSvc.officialUptime != null ? (monthEndValue ?? scoreSvc.officialUptime) : null
+  }
+  if (scoreSvc.scoreConfidence !== 'high') {
+    if (monthEndValue != null) {
+      console.warn(
+        `[monthly-archive] ${scoreSvc.id}: withholding month-end official uptime ${monthEndValue} — ` +
+        `build-time scoreConfidence=${scoreSvc.scoreConfidence} (uptime30d was null when the Score was ` +
+        `snapshotted, so the archived score is a /60 rescale). Transient status-page failure on build day?`,
+      )
+    }
+    return null
+  }
+  return monthEndValue ?? scoreSvc.officialUptime ?? null
 }
 
 /** Compute per-service uptime% from daily counters */
@@ -664,6 +735,9 @@ export interface ArchiveScoreInput {
   id: string
   aiwatchScore?: number | null
   scoreGrade?: ScoreGrade | null
+  // #951 — the confidence the Score was computed at. 'high' ⟺ an official uptime% was available and
+  // the 40-pt uptime component was included. This is what gates `officialUptime` below.
+  scoreConfidence?: ScoreConfidence | null
   // #586 hybrid — FALLBACK source for officialUptime: the live status-page rolling-30d uptime
   // (ServiceStatus.uptime30d) snapshotted from services:latest at archive-build time. The PRIMARY
   // source is computeMonthlyOfficialUptime (the month-end daily snapshot), which is month-accurate
@@ -942,9 +1016,11 @@ export async function buildMonthlyArchive(
       uptime: uptimeMap[id] ?? null,
       // #586 — prefer the daily-snapshot month-end value (month-accurate, rebuild-safe); fall back
       // to the build-time services:latest snapshot (scoreData) for months with no daily snapshots.
-      officialUptime: officialUptimeMap[id] ?? scoreSvc?.officialUptime ?? null,
+      // #951 — but only when the Score itself consumed an official uptime, so display ≡ score.
+      officialUptime: resolveArchiveOfficialUptime(officialUptimeMap[id], scoreSvc),
       score: scoreSvc?.aiwatchScore ?? null,
       grade: scoreSvc?.scoreGrade ?? null,
+      ...(scoreSvc?.scoreConfidence ? { scoreConfidence: scoreSvc.scoreConfidence } : {}),
       incidents: incSvc?.count ?? 0,
       avgResolutionMin,
       totalDowntimeMin,
