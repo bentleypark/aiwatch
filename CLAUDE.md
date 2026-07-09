@@ -45,7 +45,7 @@ chub annotate <id> "<gotcha>"        # save discovered gaps — persists across 
 `esbuild/esbuild` (transitive via Vite — no direct config to tune)
 
 **Anthropic** is a special case: AIWatch calls the **Messages REST API via the Cloudflare AI Gateway
-with raw `fetch()`** (no `@anthropic-ai/sdk` dependency — see `worker/src/ai-analysis.ts`), so reach
+with raw `fetch()`** (no `@anthropic-ai/sdk` dependency — see `worker/src/anthropic.ts`), so reach
 for the Anthropic Messages **REST API** doc shape, not an SDK-client doc.
 
 ### Cloudflare doc selection (footgun)
@@ -251,6 +251,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   score.ts           # AIWatch Score (Uptime 40 / Incidents 25 / Recovery 15 / Responsiveness 20)
   alerts.ts          # Incident + status-edge alert detection, holds, merges, tweet/reply drafts
   ai-analysis.ts     # Hybrid incident analysis — Gemma 4 26B primary, Claude Sonnet fallback
+  anthropic.ts       # Anthropic Messages REST call — model id, request body, retry + status classification (#955)
   incident-history.ts # Durable resolved-incident corpus → prediction accuracy + RAG (#827)
   rss.ts             # Incident RSS feeds (/feed.xml, /feed/:slug) + Slack-poller behaviours
   fallback.ts        # Fallback recommendation (tiered, Score-ranked)
@@ -309,7 +310,7 @@ No React Router. Hash-based routing in `App.jsx` — `#claude` for service detai
 - **Contextual + grouped fallback** — the modal/Overview gate on service status, the is-down card + Discord gate on `needsFallback` (#454). Tier priority + `EXCLUDE_FALLBACK` membership: [docs/reference/fallback-tiers.md](docs/reference/fallback-tiers.md).
 - **No-official-uptime services** (`bedrock`, `azureopenai`) — AIWatch invents **no** uptime value (#713); Score rescales onto available components, `low` confidence withholds the score entirely. Coverage gate (#802) holds a <30-day service out of rankings.
 - **Worker deploy rules** — dev via `npx wrangler dev --config worker/wrangler.toml --port 8788`; dry-run before deploy; **deploy once**, only via `npm run deploy:worker` (never bare `wrangler deploy` — it deploys the SPA). Verify the output says `Uploaded aiwatch-worker`.
-- **Cron `*/5`** — incident detection + Discord alerts (KV ID dedup), AI analysis inline (8s), holds, cache refresh on a status edge (#488). Alert paths: [docs/reference/discord-alert-paths.md](docs/reference/discord-alert-paths.md).
+- **Cron `*/5`** — incident detection + Discord alerts (KV ID dedup), AI analysis inline (cancellable 15s budget), holds, cache refresh on a status edge (#488). Alert paths: [docs/reference/discord-alert-paths.md](docs/reference/discord-alert-paths.md).
 - **Frontend deployment** — Vercel, `ai-watch.dev`; `git push origin main` auto-deploys. `npm run build` is local only. `api/` files count against the Hobby **12-Serverless-Function cap** unless edge-runtime or `_`-prefixed (#862/#867; CI guard `check-vercel-function-count`).
 - **CSP (#482)** — enforced on the SPA (`vercel.json`, hash-locked) and per-response on every Edge SSR page (nonce for no-store surfaces, content-hash for cached is-down). Policy + rationale: [docs/reference/reference-csp.md](docs/reference/reference-csp.md).
 - **PWA** — `public/manifest.json` + `public/sw.js` (stale-while-revalidate); bump `CACHE_NAME` when static assets change; registered in production only (#432).

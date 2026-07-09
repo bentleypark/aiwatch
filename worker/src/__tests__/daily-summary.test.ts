@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine, formatAiUsageSection } from '../daily-summary'
 import type { ServiceStatus } from '../types'
 import type { AccuracyStats } from '../incident-history'
 import type { AudienceCounts } from '../outage-audience'
@@ -78,7 +78,7 @@ describe('buildDailySummary', () => {
     expect(result).toContain('AI Analysis Usage')
     expect(result).toContain('5 calls (4 success, 1 failed)')
     expect(result).toContain('Gemma: 3, Sonnet: 1')
-    expect(result).toContain('$0.006')
+    expect(result).toContain('$0.009')
     expect(result).toContain('Sonnet only')
   })
 
@@ -803,5 +803,44 @@ describe('formatAudienceLine (#842-B)', () => {
     expect(formatAudienceLine(null)).toBe('')
     expect(formatAudienceLine(undefined)).toBe('')
     expect(formatAudienceLine(counts({ total: 0 }))).toBe('')
+  })
+})
+
+// ── #955: AI usage section ──
+
+describe('formatAiUsageSection', () => {
+  it('returns empty string when nothing ran', () => {
+    expect(formatAiUsageSection(null)).toBe('')
+    expect(formatAiUsageSection({ calls: 0, success: 0, failed: 0 })).toBe('')
+  })
+
+  it('renders succeeded/attempted per model', () => {
+    const out = formatAiUsageSection({ calls: 10, success: 8, failed: 2, gemma: 7, sonnet: 1, gemmaAttempts: 10, sonnetAttempts: 3 })
+    expect(out).toContain('10 calls (8 success, 2 failed)')
+    expect(out).toContain('(Gemma: 7/10, Sonnet: 1/3)')
+    expect(out).toContain('$0.009')
+  })
+
+  it('surfaces timeouts as their own outcome', () => {
+    const out = formatAiUsageSection({ calls: 5, success: 3, failed: 1, timedOut: 1, gemma: 3, gemmaAttempts: 5 })
+    expect(out).toContain('3 success, 1 failed, 1 timed out')
+  })
+
+  // The whole point of the attempt counters: a fallback that is always reached and never
+  // succeeds is broken, not unlucky. `Sonnet: 0` alone could never say that.
+  it('warns when Sonnet is attempted but never succeeds', () => {
+    const out = formatAiUsageSection({ calls: 16, success: 9, failed: 7, gemma: 9, sonnet: 0, gemmaAttempts: 16, sonnetAttempts: 7 })
+    expect(out).toContain('⚠️ Sonnet fallback: 7 attempts, 0 successes')
+  })
+
+  it('stays quiet when Sonnet was never reached', () => {
+    const out = formatAiUsageSection({ calls: 9, success: 9, failed: 0, gemma: 9, gemmaAttempts: 9 })
+    expect(out).not.toContain('⚠️')
+  })
+
+  it('renders a pre-#955 counter payload without attempt counts', () => {
+    const out = formatAiUsageSection({ calls: 5, success: 4, failed: 1, gemma: 3, sonnet: 1 })
+    expect(out).toContain('(Gemma: 3, Sonnet: 1)')
+    expect(out).not.toContain('/')
   })
 })

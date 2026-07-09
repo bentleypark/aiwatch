@@ -21,5 +21,13 @@ binding = "AI"
 binding = "ANALYTICS"
 dataset = "aiwatch_statusline" # #494: statusline per-preset traffic counts (queried via CF GraphQL)
 
+# #955 — without this, `console.error`/`console.warn` are emitted and immediately lost, so a
+# silently-failing AI path (a retired model id 404ing for weeks) is undiagnosable after the
+# fact: the only evidence was a `failed` tally in the daily summary with no reason attached.
+# Sampling stays at 100% — worker log volume is a handful of lines per 5-minute cron.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [triggers]
 crons = ["*/5 * * * *"]

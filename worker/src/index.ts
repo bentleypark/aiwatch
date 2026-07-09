@@ -6,7 +6,8 @@ import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type Serv
 import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, type SuppressionEntry } from './suppression'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
-import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
+import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, shouldSkipInitialAnalysis, recordUsage, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
+import type { AnthropicOutcome } from './anthropic'
 import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { checkPersistentFetchFailures } from './persistent-failure'
@@ -910,22 +911,16 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
             console.log(`[cron] skipping initial AI analysis for ${svc.id}:${inc.id}: ${skipReason}`)
           } else {
             try {
-              const today = new Date().toISOString().split('T')[0]
-              const usageKey = `ai:usage:${today}`
-              const usageRaw = await env.STATUS_CACHE.get(usageKey).catch(() => null)
-              const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0, gemma: 0, sonnet: 0 }
-              usage.calls++
-              const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))
               // #827 Feature 2 — RAG grounding from this service's durable incident history.
               const svcHistory = await readIncidentHistory(env.STATUS_CACHE, svc.id)
-              const analysis = await Promise.race([
-                analyzeIncident(env.ANTHROPIC_API_KEY ?? '', svc.name, { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline }, svc.incidents ?? [], undefined, env.AI, svcHistory),
-                timeout,
-              ])
-              if (analysis) {
-                usage.success++
-                if (analysis.model === 'gemma') usage.gemma = (usage.gemma ?? 0) + 1
-                else if (analysis.model === 'sonnet') usage.sonnet = (usage.sonnet ?? 0) + 1
+              // #955 Part 2 — a REAL, cancellable budget (see `analyzeIncidentWithBudget`).
+              const attempt = await analyzeIncidentWithBudget(
+                env.STATUS_CACHE, env.ANTHROPIC_API_KEY, env.AI, svc.name,
+                { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline },
+                svc.incidents ?? [], svcHistory,
+              )
+              if (attempt.result) {
+                const analysis = attempt.result
                 // #299: preserve sticky operator overrides written between cycles.
                 const stickyRaw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
                 const skipWrite = isStickyExistingAnalysis(stickyRaw)
@@ -935,11 +930,13 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
                   : await kvPut(env.STATUS_CACHE, analysisKey(svc.id, inc.id), JSON.stringify(analysis), { expirationTtl: 3600 })
                 if (kvOk) analysisSection = formatAnalysisEmbedSection(analysis, DIV)
               } else {
-                usage.failed++
+                console.warn(`[cron] inline AI analysis produced nothing (${attempt.failure}) for ${svc.id}:${inc.id}`)
               }
-              await kvPut(env.STATUS_CACHE, usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
             } catch (err) {
+              // Only `readIncidentHistory` / the sticky KV read can reach here — the analysis
+              // itself never throws and books its own usage.
               console.error('[cron] AI analysis failed:', err instanceof Error ? err.message : err)
+              await recordUsage(env.STATUS_CACHE, Date.now(), { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } })
             }
           }
         }
@@ -1389,7 +1386,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   const activeServices = scored.filter(s =>
     (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring')
   )
-  await refreshOrReanalyze(activeServices, env.STATUS_CACHE, env.ANTHROPIC_API_KEY, analyzeIncident, 2, Date.now(), env.AI, heldNewIncIds)
+  await refreshOrReanalyze(activeServices, env.STATUS_CACHE, env.ANTHROPIC_API_KEY, analyzeIncidentDetailed, 2, Date.now(), env.AI, heldNewIncIds)
 
   // Component ID mismatch detection (#135) — alert when statusComponentId is not found
   const mismatches = await detectComponentMismatches(COMPONENT_ID_SERVICES, env.STATUS_CACHE)
@@ -1582,29 +1579,61 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
   }, similar)
   const timelineAt = incident.timeline?.at(-1)?.at ?? ''
 
-  let analysis: AIAnalysisResult | null
+  // #955 — the operator reaches for this endpoint precisely WHEN the automated path is broken,
+  // so it must not repeat the bug it exists to work around: report the upstream status + detail
+  // rather than a bare "returned null", and book the failure into ai:usage like every other path.
+  let attempt: AnalysisAttempt
+  // Extra diagnostics for the sonnet path — `outcome` carries the upstream status + body.
+  let sonnetOutcome: AnthropicOutcome | null = null
   try {
     if (model === 'sonnet') {
-      analysis = await analyzeWithSonnet(env.ANTHROPIC_API_KEY, prompt, incident.id, timelineAt)
+      const { result, outcome } = await analyzeWithSonnetDetailed(env.ANTHROPIC_API_KEY ?? '', prompt, incident.id, timelineAt)
+      sonnetOutcome = outcome
+      const failure: AnalysisFailureKind | null = result
+        ? null
+        : outcome.kind === 'transient' ? 'transient' : outcome.kind === 'aborted' ? 'aborted' : 'permanent'
+      attempt = { result, failure, attempts: { gemma: 0, sonnet: 1 } }
     } else {
-      // Gemma path: go via analyzeIncident (tries Gemma first, falls back to Sonnet).
+      // Gemma path: go via analyzeIncidentDetailed (tries Gemma first, falls back to Sonnet).
       // The operator picked 'gemma' explicitly, but if Workers AI returns null we'd
       // rather ship a Sonnet result than error out.
-      analysis = await analyzeIncident(env.ANTHROPIC_API_KEY, service.name, {
+      attempt = await analyzeIncidentDetailed(env.ANTHROPIC_API_KEY, service.name, {
         id: incident.id, title: incident.title, status: incident.status,
         startedAt: incident.startedAt, impact: incident.impact, timeline: incident.timeline,
       }, service.incidents ?? [], undefined, env.AI, await readIncidentHistory(env.STATUS_CACHE, service.id))
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'analysis failed'
+    await recordUsage(env.STATUS_CACHE, Date.now(), { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } })
     return json(502, { ok: false, error: 'analysis failed', detail: message })
   }
 
+  const analysis = attempt.result
   if (!analysis) {
-    return json(502, { ok: false, error: 'analysis returned null — upstream model error or unparseable response' })
+    // Book the failure like every other path, then tell the operator WHY — a bare
+    // "returned null" is what made the retired model id so hard to find in the first place.
+    await recordUsage(env.STATUS_CACHE, Date.now(), attempt)
+    const upstream = sonnetOutcome && (sonnetOutcome.kind === 'permanent' || sonnetOutcome.kind === 'transient')
+      ? { status: sonnetOutcome.status, detail: sonnetOutcome.detail }
+      : {}
+    return json(502, {
+      ok: false,
+      error: 'analysis returned null — upstream model error or unparseable response',
+      kind: attempt.failure,
+      ...upstream,
+    })
   }
 
   if (sticky) analysis.sticky = true
+
+  // Bump ai:usage:{date} so the Daily Summary attributes the manual call. Routed through the
+  // shared `recordUsage`/`applyAttempt` (#955) so the manual path books attempt counts too and
+  // cannot drift from the cron's ledger. Bookkeeping — never fails the request.
+  //
+  // Booked BEFORE the KV persist: the model call already happened and already cost money, so a
+  // failed persist must not erase it from the ledger. "A call happened but the ledger doesn't
+  // show it" is the exact class of blindness #955 exists to remove.
+  await recordUsage(env.STATUS_CACHE, Date.now(), attempt)
 
   const key = analysisKey(svcId, incidentId)
   const ttl = 3600
@@ -1612,24 +1641,6 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
     await env.STATUS_CACHE.put(key, JSON.stringify(analysis), { expirationTtl: ttl })
   } catch (err) {
     return json(502, { ok: false, error: 'KV write failed', detail: err instanceof Error ? err.message : String(err) })
-  }
-
-  // Bump ai:usage:{date} counter so the Daily Summary attributes the manual call.
-  // Match the shape used elsewhere: { calls, success, failed, gemma?, sonnet? }.
-  try {
-    const today = new Date().toISOString().slice(0, 10)
-    const usageKey = `ai:usage:${today}`
-    const raw = await env.STATUS_CACHE.get(usageKey).catch(() => null)
-    const usage: { calls: number; success: number; failed: number; gemma?: number; sonnet?: number } =
-      raw ? JSON.parse(raw) : { calls: 0, success: 0, failed: 0 }
-    usage.calls++
-    usage.success++
-    if (analysis.model === 'gemma') usage.gemma = (usage.gemma ?? 0) + 1
-    else if (analysis.model === 'sonnet') usage.sonnet = (usage.sonnet ?? 0) + 1
-    await env.STATUS_CACHE.put(usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
-  } catch (err) {
-    // Counter is bookkeeping — don't fail the request over it.
-    console.warn('[admin/analyze] ai:usage counter bump failed:', err instanceof Error ? err.message : err)
   }
 
   return json(200, { ok: true, wrote: key, ttl, analysis })

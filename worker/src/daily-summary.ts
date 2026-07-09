@@ -7,6 +7,7 @@ import { formatVitalsSection } from './vitals'
 import { aggregateProbeDaily } from './probe-archival'
 import { formatReportCountsSection } from './report'
 import type { AccuracyStats } from './incident-history'
+import type { AiUsageCounters } from './ai-analysis'
 import { AUDIENCE_SOURCES, type AudienceCounts, type AudienceSource } from './outage-audience'
 import type { StatuslineTrafficCounts, StatuslineTrafficDelta } from './api-traffic'
 
@@ -22,9 +23,58 @@ export function classifyDegradation(svcStatusOperational: boolean): DegradationO
   return svcStatusOperational ? 'degradation_nostatus' : 'degradation'
 }
 
+/**
+ * Rough per-successful-Sonnet-call cost, USD.
+ *
+ * #955: was 0.006, sized for Sonnet 4 at `max_tokens: 300`. Sonnet 5 keeps the $3/$15-per-MTok
+ * sticker but our prompt now carries the RAG history block and the ceiling is 600 output tokens
+ * — roughly 1.5k in + 300 out ≈ $0.0045 + $0.0045. Only SUCCESSES are billed here: a 404 or a
+ * pre-response abort costs nothing, which is why the line counts `sonnet`, not `sonnetAttempts`.
+ */
+export const SONNET_COST_PER_CALL_USD = 0.009
+
+/**
+ * Render the 🤖 AI Analysis Usage section, or '' when nothing ran today.
+ *
+ * Surfaces ATTEMPTS alongside successes (#955). The old line showed `Sonnet: 0` whether the
+ * fallback was never reached or reached and 404ing on every single call — which is precisely
+ * how a retired model id went unnoticed for weeks.
+ */
+export function formatAiUsageSection(aiUsage: AiUsageCounters | null): string {
+  if (!aiUsage || aiUsage.calls <= 0) return ''
+  const gemma = aiUsage.gemma ?? 0
+  const sonnet = aiUsage.sonnet ?? 0
+  const gemmaAttempts = aiUsage.gemmaAttempts ?? 0
+  const sonnetAttempts = aiUsage.sonnetAttempts ?? 0
+  const timedOut = aiUsage.timedOut ?? 0
+
+  const cost = (sonnet * SONNET_COST_PER_CALL_USD).toFixed(3)
+  const outcomes = [`${aiUsage.success} success`, `${aiUsage.failed} failed`]
+  if (timedOut > 0) outcomes.push(`${timedOut} timed out`)
+
+  // "3/7" reads as succeeded/attempted. Attempt counts are absent on pre-#955 days, so fall
+  // back to the bare success count rather than printing a misleading "0 attempts".
+  const gemmaCell = gemmaAttempts > 0 ? `${gemma}/${gemmaAttempts}` : `${gemma}`
+  const sonnetCell = sonnetAttempts > 0 ? `${sonnet}/${sonnetAttempts}` : `${sonnet}`
+  const breakdown = gemmaAttempts || sonnetAttempts || gemma || sonnet
+    ? ` (Gemma: ${gemmaCell}, Sonnet: ${sonnetCell})`
+    : ''
+
+  const lines = [
+    '\n🤖 **AI Analysis Usage**',
+    `   Today: ${aiUsage.calls} calls (${outcomes.join(', ')})${breakdown}`,
+    `   Est. cost: $${cost} (Sonnet only)`,
+  ]
+  // A fallback that is always reached and never succeeds is a broken fallback, not bad luck.
+  if (sonnetAttempts > 0 && sonnet === 0) {
+    lines.push(`   ⚠️ Sonnet fallback: ${sonnetAttempts} attempts, 0 successes — check the model id / API key`)
+  }
+  return lines.join('\n')
+}
+
 export interface DailySummaryData {
   services: ServiceStatus[]
-  aiUsage: { calls: number; success: number; failed: number; gemma?: number; sonnet?: number } | null
+  aiUsage: AiUsageCounters | null
   latencySnapshots: Array<{ t: string; data: Record<string, number> }>
   incidentCountToday: { newCount: number; resolvedCount: number }
   alertCounts?: { incidents: number; resolved: number; down: number; degraded: number; recovered: number } | null
@@ -110,13 +160,8 @@ export function buildDailySummary(data: DailySummaryData): string {
   }
 
   // Section 3: AI Analysis usage
-  if (aiUsage && aiUsage.calls > 0) {
-    const gemma = aiUsage.gemma ?? 0
-    const sonnet = aiUsage.sonnet ?? 0
-    const sonnetCost = (sonnet * 0.006).toFixed(3)
-    const modelBreakdown = gemma || sonnet ? ` (Gemma: ${gemma}, Sonnet: ${sonnet})` : ''
-    lines.push(`\n🤖 **AI Analysis Usage**\n   Today: ${aiUsage.calls} calls (${aiUsage.success} success, ${aiUsage.failed} failed)${modelBreakdown}\n   Est. cost: $${sonnetCost} (Sonnet only)`)
-  }
+  const aiUsageLine = formatAiUsageSection(aiUsage)
+  if (aiUsageLine) lines.push(aiUsageLine)
 
   // #827 Feature 1 — AI recovery-prediction accuracy (predicted vs actual, across the durable corpus)
   const accuracyLine = formatAccuracyLine(data.accuracy)

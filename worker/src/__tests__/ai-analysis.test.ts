@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, buildHistorySection, analyzeIncident, refreshOrReanalyze, analysisKey, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, type AIAnalysisResult, type KVLike } from '../ai-analysis'
+import { findSimilarIncidents, buildAnalysisPrompt, buildHistorySection, analyzeIncidentDetailed, refreshOrReanalyze, analysisKey, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, reanalysisLockTtlSec, applyAttempt, parseUsage, emptyUsage, analyzeIncidentWithBudget, INLINE_ANALYSIS_BUDGET_MS, SONNET_MAX_TOKENS, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind, type KVLike } from '../ai-analysis'
 import type { IncidentHistoryRecord } from '../incident-history'
+import { ANTHROPIC_TIMEOUT_MS } from '../anthropic'
 import type { Incident, ServiceStatus } from '../types'
 
 const mockIncident = (overrides: Partial<Incident> = {}): Incident => ({
@@ -426,7 +427,7 @@ describe('buildHistorySection (#827)', () => {
   })
 })
 
-describe('analyzeIncident', () => {
+describe('analyzeIncidentDetailed', () => {
   const mockInc = { id: 'inc1', title: 'API Error', status: 'investigating' as const, startedAt: '2026-03-26T10:00:00Z', impact: 'major' as const }
   const mockIncidents = [mockIncident({ title: 'Past Error', duration: '45m' })]
 
@@ -439,7 +440,7 @@ describe('analyzeIncident', () => {
       json: () => Promise.resolve(mockResponse),
     }))
 
-    const result = await analyzeIncident('fake-key', 'Claude API', mockInc, mockIncidents)
+    const { result } = await analyzeIncidentDetailed('fake-key', 'Claude API', mockInc, mockIncidents)
     expect(result).not.toBeNull()
     expect(result!.summary).toBe('Test analysis')
     expect(result!.estimatedRecovery).toBe('30-60 min')
@@ -459,7 +460,7 @@ describe('analyzeIncident', () => {
       json: () => Promise.resolve(mockResponse),
     }))
 
-    const result = await analyzeIncident('fake-key', 'Test', mockInc, [])
+    const { result } = await analyzeIncidentDetailed('fake-key', 'Test', mockInc, [])
     expect(result).not.toBeNull()
     expect(result!.needsFallback).toBe(false)
 
@@ -475,7 +476,7 @@ describe('analyzeIncident', () => {
       json: () => Promise.resolve(mockResponse),
     }))
 
-    const result = await analyzeIncident('fake-key', 'Test', mockInc, [])
+    const { result } = await analyzeIncidentDetailed('fake-key', 'Test', mockInc, [])
     expect(result).not.toBeNull()
     expect(result!.needsFallback).toBe(false)
 
@@ -491,7 +492,7 @@ describe('analyzeIncident', () => {
       json: () => Promise.resolve(mockResponse),
     }))
 
-    const result = await analyzeIncident('fake-key', 'Test', mockInc, [])
+    const { result } = await analyzeIncidentDetailed('fake-key', 'Test', mockInc, [])
     expect(result).not.toBeNull()
     expect(result!.needsFallback).toBe(true)
 
@@ -507,7 +508,7 @@ describe('analyzeIncident', () => {
       json: () => Promise.resolve(mockResponse),
     }))
 
-    const result = await analyzeIncident('fake-key', 'Test', mockInc, [])
+    const { result } = await analyzeIncidentDetailed('fake-key', 'Test', mockInc, [])
     expect(result).not.toBeNull()
     expect(result!.needsFallback).toBe(false)
 
@@ -523,7 +524,7 @@ describe('analyzeIncident', () => {
       json: () => Promise.resolve(mockResponse),
     }))
 
-    const result = await analyzeIncident('fake-key', 'Test', mockInc, [])
+    const { result } = await analyzeIncidentDetailed('fake-key', 'Test', mockInc, [])
     expect(result).not.toBeNull()
     expect(result!.summary).toBe('wrapped')
 
@@ -537,7 +538,7 @@ describe('analyzeIncident', () => {
       text: () => Promise.resolve('Bad request'),
     }))
 
-    const result = await analyzeIncident('fake-key', 'Test', mockInc, [])
+    const { result } = await analyzeIncidentDetailed('fake-key', 'Test', mockInc, [])
     expect(result).toBeNull()
 
     vi.unstubAllGlobals()
@@ -549,7 +550,7 @@ describe('analyzeIncident', () => {
       json: () => Promise.resolve({ content: [{ type: 'text', text: 'not json at all' }] }),
     }))
 
-    const result = await analyzeIncident('fake-key', 'Test', mockInc, [])
+    const { result } = await analyzeIncidentDetailed('fake-key', 'Test', mockInc, [])
     expect(result).toBeNull()
 
     vi.unstubAllGlobals()
@@ -571,7 +572,7 @@ describe('analyzeIncident', () => {
         { stage: 'identified' as const, text: 'Found root cause', at: '2026-03-26T11:30:00Z' },
       ],
     }
-    const result = await analyzeIncident('fake-key', 'Test', incWithTimeline, [])
+    const { result } = await analyzeIncidentDetailed('fake-key', 'Test', incWithTimeline, [])
     expect(result).not.toBeNull()
     expect(result!.timelineHash).toBe('2026-03-26T11:30:00Z')
 
@@ -581,19 +582,179 @@ describe('analyzeIncident', () => {
   it('returns null on network timeout', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('timeout')))
 
-    const result = await analyzeIncident('fake-key', 'Test', mockInc, [])
+    const { result } = await analyzeIncidentDetailed('fake-key', 'Test', mockInc, [])
     expect(result).toBeNull()
 
     vi.unstubAllGlobals()
   })
 })
 
+// ── #955: failure classification, lock TTL, usage counters ──
+
+describe('reanalysisLockTtlSec', () => {
+  // Only a permanent failure earns the long lock. A transient one used to get the same flat
+  // 30min ban, skipping six cron cycles and outliving the #882 AI-hold window.
+  it('locks 30min for permanent failures only', () => {
+    expect(reanalysisLockTtlSec('permanent')).toBe(1800)
+  })
+
+  it('does not lock for transient or aborted failures', () => {
+    expect(reanalysisLockTtlSec('transient')).toBe(0)
+    expect(reanalysisLockTtlSec('aborted')).toBe(0)
+  })
+
+  it('backs off one cron cycle on an unexpected throw', () => {
+    expect(reanalysisLockTtlSec('unknown')).toBe(300)
+  })
+
+  // The lock must never outlive the #882 AI_HOLD_MS (~10min) window for a retryable failure,
+  // or the alert is guaranteed to ship AI-less.
+  it('keeps every retryable lock inside the #882 AI-hold window', () => {
+    const AI_HOLD_SEC = 600
+    for (const failure of ['transient', 'aborted', 'unknown'] as const) {
+      expect(reanalysisLockTtlSec(failure)).toBeLessThanOrEqual(AI_HOLD_SEC)
+    }
+  })
+})
+
+describe('applyAttempt / parseUsage', () => {
+  const gemmaResult = { ...({} as AIAnalysisResult), model: 'gemma' as const }
+  const sonnetResult = { ...({} as AIAnalysisResult), model: 'sonnet' as const }
+
+  it('counts a Gemma success', () => {
+    const usage = applyAttempt(emptyUsage(), { result: gemmaResult, failure: null, attempts: { gemma: 1, sonnet: 0 } })
+    expect(usage).toMatchObject({ calls: 1, success: 1, failed: 0, gemma: 1, gemmaAttempts: 1 })
+    expect(usage.sonnetAttempts).toBeUndefined()
+  })
+
+  // The dead-fallback signal: Sonnet was ATTEMPTED but never succeeded. The old counters
+  // only tracked successes, so this was indistinguishable from "never reached".
+  it('counts a Sonnet attempt even when it fails', () => {
+    const usage = applyAttempt(emptyUsage(), { result: null, failure: 'permanent', attempts: { gemma: 1, sonnet: 1 } })
+    expect(usage).toMatchObject({ calls: 1, success: 0, failed: 1, gemmaAttempts: 1, sonnetAttempts: 1 })
+    expect(usage.sonnet).toBeUndefined()
+  })
+
+  it('books an abort as timedOut, not failed', () => {
+    const usage = applyAttempt(emptyUsage(), { result: null, failure: 'aborted', attempts: { gemma: 1, sonnet: 0 } })
+    expect(usage).toMatchObject({ calls: 1, success: 0, failed: 0, timedOut: 1 })
+  })
+
+  it('accumulates across attempts', () => {
+    let usage = applyAttempt(emptyUsage(), { result: sonnetResult, failure: null, attempts: { gemma: 1, sonnet: 1 } })
+    usage = applyAttempt(usage, { result: null, failure: 'transient', attempts: { gemma: 1, sonnet: 1 } })
+    expect(usage).toMatchObject({ calls: 2, success: 1, failed: 1, sonnet: 1, sonnetAttempts: 2, gemmaAttempts: 2 })
+  })
+
+  it('reads the pre-#955 counter shape without losing counts', () => {
+    expect(parseUsage('{"calls":16,"success":9,"failed":7,"gemma":9,"sonnet":0}'))
+      .toMatchObject({ calls: 16, success: 9, failed: 7, gemma: 9, sonnet: 0 })
+  })
+
+  it('falls back to zeroes on absent or corrupt KV values', () => {
+    expect(parseUsage(null)).toEqual({ calls: 0, success: 0, failed: 0 })
+    expect(parseUsage('not json')).toEqual({ calls: 0, success: 0, failed: 0 })
+  })
+})
+
+// ── #955 Part 2: the cron's inline budget (analyzeIncidentWithBudget) ──
+
+describe('analyzeIncidentWithBudget', () => {
+  const inc = { id: 'inc-1', title: 'Elevated errors', status: 'investigating', startedAt: '2026-07-09T06:00:00Z', impact: 'major' }
+  const NOW = Date.UTC(2026, 6, 9)
+
+  it('passes a live AbortSignal down to the analysis', async () => {
+    const store: Record<string, string> = {}
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt(mockAnalysis))
+    await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, 'Claude API', inc, [], [], 15_000, NOW, analyzeFn)
+    const signal = analyzeFn.mock.calls[0][7]
+    expect(signal).toBeInstanceOf(AbortSignal)
+    expect(signal.aborted).toBe(false)
+  })
+
+  // The pre-#955 `Promise.race` resolved null on timeout but left the Sonnet fetch running: a
+  // response arriving after the deadline was paid for, discarded, and booked as `failed`. The
+  // budget must now (a) abort the signal, (b) stop awaiting, (c) book `timedOut`, not `failed`.
+  it('aborts the signal and gives up when the budget elapses, even if the analysis never settles', async () => {
+    const store: Record<string, string> = {}
+    let seen: AbortSignal | undefined
+    // Never resolves — stands in for a Workers-AI call that outlives the budget.
+    const analyzeFn = vi.fn(async (...args: unknown[]) => {
+      seen = args[7] as AbortSignal
+      const counter = args[8] as { gemma: number; sonnet: number }
+      counter.gemma++
+      return new Promise<AnalysisAttempt>(() => {})
+    })
+    const attempt = await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, 'Claude API', inc, [], [], 5, NOW, analyzeFn as never)
+    expect(seen!.aborted).toBe(true)
+    expect(attempt.failure).toBe('aborted')
+    // The counter is mutated by the still-running analysis — the only honest source of attempts.
+    expect(attempt.attempts).toEqual({ gemma: 1, sonnet: 0 })
+    const usage = JSON.parse(store['ai:usage:2026-07-09'])
+    expect(usage).toMatchObject({ calls: 1, failed: 0, timedOut: 1, gemmaAttempts: 1 })
+  })
+
+  it('resolves as soon as the analysis does — the budget does not delay a fast success', async () => {
+    const store: Record<string, string> = {}
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt(mockAnalysis))
+    const t0 = Date.now()
+    const attempt = await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, 'Claude API', inc, [], [], 60_000, NOW, analyzeFn)
+    expect(Date.now() - t0).toBeLessThan(1_000)
+    expect(attempt.result).toBeTruthy()
+  })
+
+  it('clears the budget timer as soon as the analysis resolves', async () => {
+    vi.useFakeTimers()
+    try {
+      const analyzeFn = vi.fn().mockResolvedValue(okAttempt(mockAnalysis))
+      await analyzeIncidentWithBudget(mockKV(), 'key', undefined, 'Claude API', inc, [], [], 15_000, NOW, analyzeFn)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('books a successful inline analysis into ai:usage', async () => {
+    const store: Record<string, string> = {}
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({ ...mockAnalysis, model: 'sonnet' }))
+    const attempt = await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, 'Claude API', inc, [], [], 15_000, NOW, analyzeFn)
+    expect(attempt.result).toBeTruthy()
+    expect(JSON.parse(store['ai:usage:2026-07-09'])).toMatchObject({ calls: 1, success: 1, sonnet: 1 })
+  })
+
+  it('never throws — a throwing analysis is booked as unknown', async () => {
+    const store: Record<string, string> = {}
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const analyzeFn = vi.fn().mockRejectedValue(new Error('boom'))
+    const attempt = await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, 'Claude API', inc, [], [], 15_000, NOW, analyzeFn)
+    expect(attempt).toEqual({ result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } })
+    expect(JSON.parse(store['ai:usage:2026-07-09'])).toMatchObject({ calls: 1, failed: 1 })
+    spy.mockRestore()
+  })
+
+  // The budget must be long enough for Gemma-fails → Sonnet-succeeds to complete inline: Tier-1
+  // services are never held by #882, so the inline call is their only chance at an AI section.
+  it('gives the Sonnet fallback (10s cap) room to finish after a Gemma failure', () => {
+    expect(INLINE_ANALYSIS_BUDGET_MS).toBeGreaterThan(ANTHROPIC_TIMEOUT_MS)
+  })
+})
+
 // ── refreshOrReanalyze tests ──
 
-function mockKV(store: Record<string, string> = {}): KVLike {
+// #955 — `analyzeFn` is now `analyzeIncidentDetailed`: it reports WHY it produced nothing so
+// refreshOrReanalyze can scale the re-analysis lock (see `reanalysisLockTtlSec`).
+const okAttempt = (result: AIAnalysisResult): AnalysisAttempt =>
+  ({ result, failure: null, attempts: { gemma: 1, sonnet: 0 } })
+const failAttempt = (failure: AnalysisFailureKind): AnalysisAttempt =>
+  ({ result: null, failure, attempts: { gemma: 1, sonnet: 1 } })
+
+function mockKV(store: Record<string, string> = {}, ttls: Record<string, number | undefined> = {}): KVLike {
   return {
     get: vi.fn(async (key: string) => store[key] ?? null),
-    put: vi.fn(async (key: string, value: string) => { store[key] = value }),
+    put: vi.fn(async (key: string, value: string, opts?: { expirationTtl?: number }) => {
+      store[key] = value
+      ttls[key] = opts?.expirationTtl
+    }),
     delete: vi.fn(async (key: string) => { delete store[key] }),
   }
 }
@@ -621,10 +782,13 @@ function mockService(id: string, incidents: Partial<Incident>[] = []): ServiceSt
   }
 }
 
-const mockAnalysis = {
+// Typed (not inferred) so the tsc gate catches a drifted AIAnalysisResult here rather than
+// letting `vi.fn()`'s `any` swallow it — which is how `needsFallback` went missing for so long.
+const mockAnalysis: AIAnalysisResult = {
   summary: 'Test analysis',
   estimatedRecovery: '30-60min',
   affectedScope: ['API'],
+  needsFallback: false,
   analyzedAt: '2026-03-27T06:10:00Z',
   incidentId: 'inc-1',
 }
@@ -665,7 +829,7 @@ describe('refreshOrReanalyze', () => {
   it('re-analyzes when analysis is missing', async () => {
     const kv = mockKV()
     const svc = mockService('chatgpt', [{ id: 'inc-2', status: 'investigating' }])
-    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'inc-2' })
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({ ...mockAnalysis, incidentId: 'inc-2' }))
 
     const result = await refreshOrReanalyze([svc], kv, 'api-key', analyzeFn, 2)
 
@@ -683,7 +847,7 @@ describe('refreshOrReanalyze', () => {
     // and must NOT be analyzed this cycle — it would burn a Gemma/Sonnet call on a phantom.
     const kv = mockKV()
     const svc = mockService('modal', [{ id: 'flap-held', status: 'investigating' }])
-    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'flap-held' })
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({ ...mockAnalysis, incidentId: 'flap-held' }))
 
     const result = await refreshOrReanalyze([svc], kv, 'api-key', analyzeFn, 2, Date.now(), undefined, new Set(['flap-held']))
 
@@ -698,7 +862,7 @@ describe('refreshOrReanalyze', () => {
       { id: 'flap-held', status: 'investigating' },
       { id: 'real-inc', status: 'investigating' },
     ])
-    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'real-inc' })
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({ ...mockAnalysis, incidentId: 'real-inc' }))
 
     const result = await refreshOrReanalyze([svc], kv, 'api-key', analyzeFn, 2, Date.now(), undefined, new Set(['flap-held']))
 
@@ -713,7 +877,7 @@ describe('refreshOrReanalyze', () => {
       mockService('svc2', [{ id: 'i2', status: 'investigating' }]),
       mockService('svc3', [{ id: 'i3', status: 'investigating' }]),
     ]
-    const analyzeFn = vi.fn().mockResolvedValue(mockAnalysis)
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt(mockAnalysis))
 
     const result = await refreshOrReanalyze(services, kv, 'key', analyzeFn, 2)
 
@@ -733,21 +897,44 @@ describe('refreshOrReanalyze', () => {
     expect(result.skipped).toEqual(['claude'])
   })
 
-  it('sets cooldown key when analysis returns null', async () => {
+  it('sets a 30min cooldown key on a PERMANENT failure', async () => {
     const store: Record<string, string> = {}
-    const kv = mockKV(store)
+    const ttls: Record<string, number | undefined> = {}
+    const kv = mockKV(store, ttls)
     const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
-    const analyzeFn = vi.fn().mockResolvedValue(null)
+    const analyzeFn = vi.fn().mockResolvedValue(failAttempt('permanent'))
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2)
 
     expect(result.skipped).toEqual(['claude'])
     expect(store['ai:reanalysis-skip:claude:inc-1']).toBe('1')
+    expect(ttls['ai:reanalysis-skip:claude:inc-1']).toBe(1800)
+    spy.mockRestore()
   })
 
-  it('sets cooldown key when analysis throws', async () => {
+  // #955 Part 4 — the regression this issue exists for. A transient upstream failure used to
+  // write the SAME flat 30min lock as a retired model id, so the next six cron cycles skipped
+  // the incident entirely. That lock outlived the #882 AI_HOLD_MS (~10min) window, which
+  // guaranteed the Discord alert shipped without its AI section.
+  it.each(['transient', 'aborted'] as const)('writes NO cooldown key on a %s failure', async (failure) => {
     const store: Record<string, string> = {}
     const kv = mockKV(store)
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn().mockResolvedValue(failAttempt(failure))
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2)
+
+    expect(result.skipped).toEqual(['claude'])
+    expect(store['ai:reanalysis-skip:claude:inc-1']).toBeUndefined()
+    spy.mockRestore()
+  })
+
+  it('sets a one-cycle cooldown key when analysis throws', async () => {
+    const store: Record<string, string> = {}
+    const ttls: Record<string, number | undefined> = {}
+    const kv = mockKV(store, ttls)
     const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
     const analyzeFn = vi.fn().mockRejectedValue(new Error('API error'))
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -756,6 +943,41 @@ describe('refreshOrReanalyze', () => {
 
     expect(result.skipped).toEqual(['claude'])
     expect(store['ai:reanalysis-skip:claude:inc-1']).toBe('1')
+    expect(ttls['ai:reanalysis-skip:claude:inc-1']).toBe(300)
+    spy.mockRestore()
+  })
+
+  // A throw used to increment NEITHER `calls` NOR `failed` — `usage.calls++` sat after the
+  // `await analyzeFn(...)` inside the try block, so thrown failures vanished from the ledger.
+  it('books a thrown analysis into the ai:usage counters', async () => {
+    const store: Record<string, string> = {}
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn().mockRejectedValue(new Error('API error'))
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, Date.UTC(2026, 6, 9))
+
+    const usage = JSON.parse(store['ai:usage:2026-07-09'])
+    expect(usage.calls).toBe(1)
+    expect(usage.failed).toBe(1)
+    spy.mockRestore()
+  })
+
+  it('books an aborted analysis as timedOut, not failed', async () => {
+    const store: Record<string, string> = {}
+    const kv = mockKV(store)
+    const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
+    const analyzeFn = vi.fn().mockResolvedValue(failAttempt('aborted'))
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, Date.UTC(2026, 6, 9))
+
+    const usage = JSON.parse(store['ai:usage:2026-07-09'])
+    expect(usage.calls).toBe(1)
+    expect(usage.failed).toBe(0)
+    expect(usage.timedOut).toBe(1)
+    expect(usage.sonnetAttempts).toBe(1)
     spy.mockRestore()
   })
 
@@ -774,7 +996,7 @@ describe('refreshOrReanalyze', () => {
     const store: Record<string, string> = {}
     const kv = mockKV(store)
     const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
-    const analyzeFn = vi.fn().mockResolvedValue(mockAnalysis)
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt(mockAnalysis))
 
     await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2)
 
@@ -797,7 +1019,7 @@ describe('refreshOrReanalyze', () => {
       { id: 'inc-new', status: 'investigating' },
     ])
     const newAnalysis = { ...mockAnalysis, incidentId: 'inc-new' }
-    const analyzeFn = vi.fn().mockResolvedValue(newAnalysis)
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt(newAnalysis))
 
     const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2)
 
@@ -830,7 +1052,7 @@ describe('refreshOrReanalyze', () => {
     const kv = mockKV(store)
     const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
     const updatedAnalysis = { ...mockAnalysis, incidentId: 'inc-1', summary: 'Updated analysis' }
-    const analyzeFn = vi.fn().mockResolvedValue(updatedAnalysis)
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt(updatedAnalysis))
 
     const now = new Date('2026-03-27T05:30:00Z').getTime() // 2.5h elapsed
     const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
@@ -846,7 +1068,8 @@ describe('refreshOrReanalyze', () => {
     const store: Record<string, string> = { [analysisKey('claude', 'inc-1')]: JSON.stringify(oldAnalysis) }
     const kv = mockKV(store)
     const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
-    const analyzeFn = vi.fn().mockResolvedValue(null) // re-analysis fails
+    const analyzeFn = vi.fn().mockResolvedValue(failAttempt('transient')) // re-analysis fails
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     const now = new Date('2026-03-27T05:30:00Z').getTime()
     const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
@@ -856,6 +1079,7 @@ describe('refreshOrReanalyze', () => {
     const stored = JSON.parse(store[analysisKey('claude', 'inc-1')])
     expect(stored.summary).toBe('Old analysis')
     expect(result.refreshed).toEqual(['claude'])
+    spy.mockRestore()
   })
 
   it('keeps old analysis when 2h+ re-analysis throws', async () => {
@@ -901,7 +1125,7 @@ describe('refreshOrReanalyze', () => {
       mockService('openai', [{ id: 'inc-2', status: 'investigating' }]),
       mockService('gemini', [{ id: 'inc-3', status: 'investigating' }]),
     ]
-    const analyzeFn = vi.fn().mockResolvedValue(mockAnalysis)
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt(mockAnalysis))
 
     const now = new Date('2026-03-27T05:30:00Z').getTime() // 2.5h elapsed
     const result = await refreshOrReanalyze(svcs, kv, 'key', analyzeFn, 2, now)
@@ -976,7 +1200,7 @@ describe('refreshOrReanalyze', () => {
       ],
     }])
     const updatedAnalysis = { ...mockAnalysis, incidentId: 'inc-1', summary: 'Updated with new timeline' }
-    const analyzeFn = vi.fn().mockResolvedValue(updatedAnalysis)
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt(updatedAnalysis))
 
     const now = new Date('2026-03-27T05:30:00Z').getTime()
     const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
@@ -1031,7 +1255,7 @@ describe('refreshOrReanalyze', () => {
         { stage: 'identified', text: 'AWS Bedrock errors affecting Claude Sonnet models in us-east-1', at: '2026-03-27T04:00:00Z' },
       ],
     }])
-    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'inc-1' })
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({ ...mockAnalysis, incidentId: 'inc-1' }))
 
     const now = new Date('2026-03-27T05:30:00Z').getTime()
     const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
@@ -1054,7 +1278,7 @@ describe('refreshOrReanalyze', () => {
       status: 'investigating',
       timeline: [{ stage: 'investigating', text: 'Looking into it', at: '2026-03-27T03:00:00Z' }],
     }])
-    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'inc-1' })
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({ ...mockAnalysis, incidentId: 'inc-1' }))
 
     const now = new Date('2026-03-27T05:30:00Z').getTime()
     const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
@@ -1074,7 +1298,7 @@ describe('refreshOrReanalyze', () => {
       mockService('claudeai', [{ id: 'inc-shared', status: 'investigating' }]),
       mockService('together', [{ id: 'inc-other', status: 'investigating' }]),
     ]
-    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'inc-other' })
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({ ...mockAnalysis, incidentId: 'inc-other' }))
 
     const now = new Date('2026-03-27T06:00:00Z').getTime()
     const result = await refreshOrReanalyze(services, kv, 'key', analyzeFn, 1, now)
@@ -1093,8 +1317,8 @@ describe('refreshOrReanalyze', () => {
       { id: 'el-inc-2', status: 'investigating', title: 'Voice Cloning Error' },
     ])
     const analyzeFn = vi.fn()
-      .mockResolvedValueOnce({ ...mockAnalysis, incidentId: 'el-inc-1', summary: 'TTS analysis' })
-      .mockResolvedValueOnce({ ...mockAnalysis, incidentId: 'el-inc-2', summary: 'Voice analysis' })
+      .mockResolvedValueOnce(okAttempt({ ...mockAnalysis, incidentId: 'el-inc-1', summary: 'TTS analysis' }))
+      .mockResolvedValueOnce(okAttempt({ ...mockAnalysis, incidentId: 'el-inc-2', summary: 'Voice analysis' }))
 
     const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 5)
 
@@ -1114,7 +1338,7 @@ describe('refreshOrReanalyze', () => {
       { id: 'el-active', status: 'investigating', title: 'Active Issue' },
       { id: 'el-resolved', status: 'resolved', title: 'Old Issue' },
     ])
-    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'el-active' })
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({ ...mockAnalysis, incidentId: 'el-active' }))
 
     const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 5)
 
@@ -1166,7 +1390,7 @@ describe('refreshOrReanalyze', () => {
       { id: 'el-1', status: 'investigating' },
       { id: 'el-2', status: 'investigating' },
     ])
-    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'el-2' })
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({ ...mockAnalysis, incidentId: 'el-2' }))
 
     const result = await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 5)
 
@@ -1184,7 +1408,7 @@ describe('refreshOrReanalyze', () => {
       ]),
       mockService('openai', [{ id: 'oi-1', status: 'investigating' }]),
     ]
-    const analyzeFn = vi.fn().mockResolvedValue(mockAnalysis)
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt(mockAnalysis))
 
     const result = await refreshOrReanalyze(svcs, kv, 'key', analyzeFn, 2)
 
@@ -1235,7 +1459,7 @@ describe('refreshOrReanalyze', () => {
       timeline: [{ stage: 'investigating', text: 'Looking into it', at: '2026-03-27T03:00:00Z' }],
     }])
     const updatedAnalysis = { ...mockAnalysis, incidentId: 'inc-1', summary: 'Recovery exceeded re-analysis' }
-    const analyzeFn = vi.fn().mockResolvedValue(updatedAnalysis)
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt(updatedAnalysis))
 
     // 15h since incident start — well beyond 6h estimate
     const now = new Date('2026-03-27T17:00:00Z').getTime()
@@ -1289,7 +1513,7 @@ describe('refreshOrReanalyze', () => {
       startedAt: '2026-03-27T02:00:00Z', // incident started 1h before analysis
       timeline: [{ stage: 'investigating', text: 'Looking into it', at: '2026-03-27T03:00:00Z' }],
     }])
-    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'inc-1' })
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({ ...mockAnalysis, incidentId: 'inc-1' }))
 
     // 11h since incident start — 2.75× the 4h estimate
     const now = new Date('2026-03-27T13:00:00Z').getTime()
@@ -1323,7 +1547,7 @@ describe('refreshOrReanalyze', () => {
         { stage: 'monitoring', text: 'We are continuing to monitor', at: '2026-03-27T04:00:00Z' },
       ],
     }])
-    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, incidentId: 'inc-1' })
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({ ...mockAnalysis, incidentId: 'inc-1' }))
 
     // 9h since incident start — 4.5× the 2h estimate
     const now = new Date('2026-03-27T11:00:00Z').getTime()
@@ -1455,7 +1679,7 @@ describe('analyzeIncident — hybrid fallback', () => {
         response: JSON.stringify({ summary: 'Gemma result.', estimatedRecovery: '1–2h', affectedScope: ['API'], needsFallback: true }),
       }),
     }
-    const result = await analyzeIncident('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
+    const { result } = await analyzeIncidentDetailed('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
     expect(result!.model).toBe('gemma')
     expect(mockAi.run).toHaveBeenCalledOnce()
   })
@@ -1468,7 +1692,7 @@ describe('analyzeIncident — hybrid fallback', () => {
       json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify({ summary: 'Sonnet fallback.', estimatedRecovery: '30m', affectedScope: [], needsFallback: false }) }] }),
     }) as unknown as typeof fetch
     try {
-      const result = await analyzeIncident('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
+      const { result } = await analyzeIncidentDetailed('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
       expect(result!.model).toBe('sonnet')
     } finally { globalThis.fetch = originalFetch }
   })
@@ -1481,7 +1705,7 @@ describe('analyzeIncident — hybrid fallback', () => {
       json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify({ summary: 'Sonnet.', estimatedRecovery: '2h', affectedScope: [], needsFallback: true }) }] }),
     }) as unknown as typeof fetch
     try {
-      const result = await analyzeIncident('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
+      const { result } = await analyzeIncidentDetailed('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
       expect(result!.model).toBe('sonnet')
     } finally { globalThis.fetch = originalFetch }
   })
@@ -1493,23 +1717,85 @@ describe('analyzeIncident — hybrid fallback', () => {
       json: () => Promise.resolve({ content: [{ type: 'text', text: JSON.stringify({ summary: 'Sonnet only.', estimatedRecovery: '1h', affectedScope: [], needsFallback: false }) }] }),
     }) as unknown as typeof fetch
     try {
-      const result = await analyzeIncident('key', 'Claude API', incident, [])
+      const { result } = await analyzeIncidentDetailed('key', 'Claude API', incident, [])
       expect(result!.model).toBe('sonnet')
     } finally { globalThis.fetch = originalFetch }
   })
 
-  it('returns null when both Gemma and Sonnet fail', async () => {
+  it('reports transient when Gemma fails and Sonnet 500s', async () => {
     const mockAi = { run: vi.fn().mockRejectedValue(new Error('err')) }
     const originalFetch = globalThis.fetch
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500, text: () => Promise.resolve('') }) as unknown as typeof fetch
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500, headers: { get: () => null }, text: () => Promise.resolve('') }) as unknown as typeof fetch
     try {
-      expect(await analyzeIncident('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)).toBeNull()
+      const { result, failure, attempts } = await analyzeIncidentDetailed('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
+      expect(result).toBeNull()
+      // A 5xx must NOT earn the 30min lock — the next cron cycle should retry.
+      expect(failure).toBe('transient')
+      expect(attempts).toEqual({ gemma: 1, sonnet: 1 })
     } finally { globalThis.fetch = originalFetch }
+  })
+
+  // Guards the Sonnet-5 request shape all the way to the wire, not just at `anthropicRequestBody`:
+  // 300 max_tokens (the pre-#955 value) risks truncating the JSON under Sonnet 5's new tokenizer,
+  // and omitting `thinking` would spend that budget on adaptive thinking instead.
+  it('sends SONNET_MAX_TOKENS and disabled thinking on the wire', async () => {
+    const mockAi = { run: vi.fn().mockRejectedValue(new Error('err')) }
+    const originalFetch = globalThis.fetch
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, headers: { get: () => null }, json: () => Promise.resolve({ content: [{ type: 'text', text: '{"summary":"s","estimatedRecovery":"1h","affectedScope":[],"needsFallback":false}' }] }) })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    try {
+      await analyzeIncidentDetailed('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+      expect(SONNET_MAX_TOKENS).toBe(600)
+      expect(body.max_tokens).toBe(SONNET_MAX_TOKENS)
+      expect(body.thinking).toEqual({ type: 'disabled' })
+      expect(body.model).not.toMatch(/^claude-sonnet-4/)
+    } finally { globalThis.fetch = originalFetch }
+  })
+
+  // #955 — a retired model id is permanent: retrying it burns the cron budget forever.
+  it('reports permanent when Sonnet returns 404 (retired model id)', async () => {
+    const mockAi = { run: vi.fn().mockRejectedValue(new Error('err')) }
+    const originalFetch = globalThis.fetch
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 404, headers: { get: () => null }, text: () => Promise.resolve('not_found_error') })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    try {
+      const { result, failure } = await analyzeIncidentDetailed('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
+      expect(result).toBeNull()
+      expect(failure).toBe('permanent')
+      expect(fetchMock).toHaveBeenCalledOnce() // no retry
+    } finally { globalThis.fetch = originalFetch }
+  })
+
+  // A Gemma-only deployment must not be frozen for 30min by a transient Gemma glitch.
+  it('reports transient (not permanent) when Gemma fails and there is no API key', async () => {
+    const mockAi = { run: vi.fn().mockRejectedValue(new Error('err')) }
+    const { result, failure } = await analyzeIncidentDetailed(undefined, 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
+    expect(result).toBeNull()
+    expect(failure).toBe('transient')
+  })
+
+  it('reports permanent when neither model is configured', async () => {
+    const { result, failure } = await analyzeIncidentDetailed(undefined, 'Claude API', incident, [])
+    expect(result).toBeNull()
+    expect(failure).toBe('permanent')
+  })
+
+  // #955 — the caller's budget must short-circuit before a Gemma call is even issued.
+  it('reports aborted without calling Gemma when the signal is pre-aborted', async () => {
+    const mockAi = { run: vi.fn() }
+    const ctrl = new AbortController()
+    ctrl.abort()
+    const { result, failure, attempts } = await analyzeIncidentDetailed('key', 'Claude API', incident, [], undefined, mockAi as unknown as Ai, [], ctrl.signal)
+    expect(result).toBeNull()
+    expect(failure).toBe('aborted')
+    expect(attempts).toEqual({ gemma: 0, sonnet: 0 })
+    expect(mockAi.run).not.toHaveBeenCalled()
   })
 
   it('skips Sonnet fallback when apiKey is empty', async () => {
     const mockAi = { run: vi.fn().mockRejectedValue(new Error('err')) }
-    const result = await analyzeIncident('', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
+    const { result } = await analyzeIncidentDetailed('', 'Claude API', incident, [], undefined, mockAi as unknown as Ai)
     expect(result).toBeNull()
   })
 })
@@ -1584,7 +1870,7 @@ describe('refreshOrReanalyze — sticky analyses (#299)', () => {
       id: 'inc-1', status: 'investigating',
       timeline: [{ stage: 'identified', text: 'Root cause identified', at: '2026-03-27T05:30:00Z' }],
     }])
-    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, model: 'gemma' })
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({ ...mockAnalysis, model: 'gemma' }))
 
     const now = new Date('2026-03-27T06:00:00Z').getTime()
     await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2, now)
@@ -1602,7 +1888,7 @@ describe('refreshOrReanalyze — sticky analyses (#299)', () => {
     }
     const kv = mockKV(store)
     const svc = mockService('claude', [{ id: 'inc-1', status: 'investigating' }])
-    const analyzeFn = vi.fn().mockResolvedValue({ ...mockAnalysis, model: 'gemma' })
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({ ...mockAnalysis, model: 'gemma' }))
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     await refreshOrReanalyze([svc], kv, 'key', analyzeFn, 2)
