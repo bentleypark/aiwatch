@@ -29,6 +29,8 @@ Read this index first, then load only the pages you need.
 - [Content-Security-Policy (CSP) — #482](reference-csp.md) — per-surface enforcement (nonce vs content-hash) + SPA policy.
 - [Reference Tooling](reference-tooling.md) — chub vs modern-web-guidance trigger map + the PreToolUse backstop.
 - [Tier-A `verify-after` assertions (#873)](verify-assertions.md) — machine-checkable assert-clause grammar.
+- [Directory map](directory-map.md) — every module's purpose + the #-issue history behind it (CLAUDE.md keeps only the map).
+- [Product constraints](product-constraints.md) — AI analysis, fallback gating, deploy/cron rules, CSP, PWA, Edge SSR surfaces.
 
 > **Structural health** (frontmatter integrity, unquoted-`#` truncation, dangling cross-links, index
 > drift) is enforced in CI on every PR by `scripts/lint-okf-bundle.mjs` (`npm run lint:okf`; the
