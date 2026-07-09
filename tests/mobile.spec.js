@@ -167,6 +167,56 @@ test.describe('Mobile viewport', () => {
     await expect(mobileSidebar).toHaveCount(0)
   })
 
+  // #978 — the Dashboard nav grew (methodology #673, badges #805, Claude Code section #920) until
+  // nav + filter + footer alone exceeded a short mobile viewport. The drawer could not scroll (its
+  // child was pinned to `h-full`), so the only flexible child — the service list — absorbed the whole
+  // shortfall and collapsed to 0px, leaving all 43 services unreachable. Assert the drawer scrolls as
+  // a whole and the list keeps its height. A 600px-tall viewport is what a 844px phone actually shows
+  // once browser chrome is subtracted.
+  test('#978 — mobile sidebar scrolls as a whole; the service list never collapses', async ({ page }) => {
+    // Pin the service list so the assertion measures the layout, not whatever prod data returns.
+    const mock = { json: { services: [
+      { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 300, uptime30d: 99.99, incidents: [] },
+      { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'operational', latency: 250, uptime30d: 99.95, incidents: [] },
+      { id: 'chatgpt', category: 'apps', name: 'ChatGPT', provider: 'OpenAI', status: 'operational', latency: null, uptime30d: 99.9, incidents: [] },
+    ], lastUpdated: new Date().toISOString() } }
+    // usePolling hits /api/status/cached first, then /api/status — both need the fixture.
+    await page.route('**/api/status**', (route) => route.fulfill(mock))
+    await page.route('**/api/status/cached', (route) => route.fulfill(mock))
+    await page.setViewportSize({ width: 375, height: 600 })
+    await page.goto('/')
+    await waitForDataLoad(page)
+
+    await page.locator('header button').first().click()
+    const sidebar = page.locator('aside.md\\:hidden')
+    await expect(sidebar).toBeVisible()
+
+    // The drawer sits below the 48px topbar. `pt-[48px]` silently computed to 0 because the
+    // unlayered `* { padding: 0 }` reset in index.css outranks Tailwind's layered utilities.
+    expect((await sidebar.boundingBox()).y).toBeCloseTo(48, 0)
+
+    const list = sidebar.getByRole('navigation', { name: /Services|서비스/ })
+    // The collapse this test guards: the list used to be exactly 0px tall here.
+    expect((await list.boundingBox()).height).toBeGreaterThan(0)
+
+    // Content taller than the drawer → the drawer itself scrolls (it used to be pinned to h-full).
+    const scrollable = await sidebar.evaluate((el) => el.scrollHeight > el.clientHeight)
+    expect(scrollable).toBe(true)
+
+    // Both the bottom-most filter chip and the last service are reachable by scrolling.
+    const lastChip = sidebar.getByRole('button', { name: /AI Apps|AI 앱/ })
+    await lastChip.scrollIntoViewIfNeeded()
+    await expect(lastChip).toBeInViewport()
+
+    // usePolling's mergeWithMock overlays the fetched payload onto the full fixture service set, so
+    // the row count is stable at 43 regardless of what the fetch returned.
+    const rows = list.locator('button')
+    expect(await rows.count()).toBeGreaterThan(10)
+    const lastService = rows.last()
+    await lastService.scrollIntoViewIfNeeded()
+    await expect(lastService).toBeInViewport()
+  })
+
   // #817 — the score-card header's coverage notice (a recently-added <30d service shows
   // "Building data (<30 days) — not yet ranked") used to overrun into the large score
   // number on narrow widths because the left label group could not wrap/shrink and the
