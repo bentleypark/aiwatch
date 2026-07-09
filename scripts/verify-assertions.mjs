@@ -151,14 +151,62 @@ export function evaluateAssertion(assertion, json) {
   return { pass, found, actual: value }
 }
 
-// A CHECKED task marker (mirrors verify-reminders CHECKED_BOX_RE) — a done item is skipped.
+// A CHECKED task marker — a done item is skipped.
 const CHECKED_BOX_RE = /^\s*[-*+]\s+\[[xX]\]/
+
+// A markdown BLOCKQUOTE line (`> …`, leading indent ok).
+const BLOCKQUOTE_RE = /^\s*>/
+
 const VERIFY_RE = /verify-after[\s:-]+(\d{4}-\d{2}-\d{2})([^\n]*)/i
+
+/**
+ * True when a line must NOT be scanned for a `verify-after` reminder — a done item (`- [x]`) or a
+ * blockquote. Single source of truth for BOTH scanners (`pairVerifyAssertions` here, the exported
+ * `parseVerifyAfter` in verify-reminders.mjs): they previously kept private copies of the checked-box
+ * regex, which is precisely how one grew the blockquote guard and the other would not have (#966).
+ *
+ * Blockquotes are suppressed because they are retrospective narrative: ship-issue step 10 has the
+ * operator write a dated `> **Status (…):**` note, and such notes routinely QUOTE the literal
+ * `verify-after <date>` token. A quoted mention carries no checkbox, so it can never be ticked, and the
+ * #873 auto-verify's `tickedKeys` suppression is keyed by the *checkbox* lineIndex — it cannot reach a
+ * prose line. So it re-fired daily until the issue closed. Full history: docs/reference/verify-assertions.md.
+ *
+ * Non-quoted prose still fires — a `verify-after` written outside a checkbox is a legitimate reminder.
+ */
+export function isSuppressedReminderLine(line) {
+  return CHECKED_BOX_RE.test(line) || BLOCKQUOTE_RE.test(line)
+}
+
+// Strips one or more leading `>` quote markers so the quoted line's own markdown can be inspected.
+const QUOTE_STRIP_RE = /^(\s*>)+\s?/
+const OPEN_BOX_ANCHORED_RE = /^\s*[-*+]\s+\[ \]/
+
+/**
+ * The ONE dangerous shape the blockquote rule suppresses: an UNCHECKED `verify-after` checkbox nested
+ * inside a blockquote (`> - [ ] verify-after 2026-09-01 …`). That reads as a live reminder but will
+ * never fire. Quoted *prose* is deliberate and expected (ship-issue status notes quote the token all
+ * the time), so it is NOT reported — logging it would drown the signal in the very noise #966 removed.
+ *
+ * Returns [{lineIndex, text}] so the daily job can warn instead of dropping the line in silence: the
+ * whole point of this system is that a verification is never forgotten, so its one false-negative must
+ * be observable. Pure — no I/O.
+ */
+export function findQuotedVerifyAfterBoxes(body) {
+  if (!body) return []
+  const out = []
+  body.split('\n').forEach((line, lineIndex) => {
+    if (!BLOCKQUOTE_RE.test(line) || !VERIFY_RE.test(line)) return
+    if (OPEN_BOX_ANCHORED_RE.test(line.replace(QUOTE_STRIP_RE, ''))) out.push({ lineIndex, text: line.trim() })
+  })
+  return out
+}
 
 /**
  * Pair each OPEN `verify-after` line in a body with a following indented `assert:` line (the next
  * non-blank line, if it parses as an assertion). Returns [{date, note, lineIndex, assertion|null}].
- * Checked (`- [x]`) verify-after lines are skipped — consistent with the #541 reminder suppression.
+ * Checked (`- [x]`) and blockquoted (`>`) verify-after lines are skipped — see
+ * isSuppressedReminderLine. This is the scanner `main()` actually drives (#541 reminders + #873
+ * auto-verify); `parseVerifyAfter` is the exported/unit-tested twin.
  */
 export function pairVerifyAssertions(body) {
   const out = []
@@ -166,7 +214,7 @@ export function pairVerifyAssertions(body) {
   const lines = body.split('\n')
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    if (CHECKED_BOX_RE.test(line)) continue
+    if (isSuppressedReminderLine(line)) continue
     const v = VERIFY_RE.exec(line)
     if (!v) continue
     const note = v[2].replace(/^[\s—–:*_)·-]+/, '').replace(/\*+$/, '').trim()

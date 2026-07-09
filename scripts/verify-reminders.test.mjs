@@ -3,7 +3,7 @@
 // script, not src/worker code.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors, parseScanRepos, displayRef, findBodyDrift, isDriftCandidate, hasBodyDriftLabel } from './verify-reminders.mjs'
+import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors, parseScanRepos, displayRef, findBodyDrift, isDriftCandidate, hasBodyDriftLabel, hasLabel, findStaleOverdueLabels, findInvalidVerifyAfterDates } from './verify-reminders.mjs'
 
 test('parseVerifyAfter — extracts date + note from a checklist line', () => {
   const body = '- [ ] **verify-after 2026-09-01** — check p95 after 3 months (#511)\nother text'
@@ -138,6 +138,144 @@ test('isDriftCandidate — verify-blocked AND NOT tracking; accepts {name} or st
   assert.equal(isDriftCandidate([{ name: 'bug' }]), false)
   assert.equal(isDriftCandidate([]), false)
   assert.equal(isDriftCandidate(null), false)
+})
+
+// ── #966: blockquoted `verify-after` mentions must not fire ──────────────────────────────────────
+test('parseVerifyAfter — skips a BLOCKQUOTE line; a real box on the same date still fires (#966)', () => {
+  assert.deepEqual(parseVerifyAfter('> the `verify-after 2026-07-09` assert should auto-pass'), [])
+  assert.deepEqual(parseVerifyAfter('  > indented quote: verify-after 2026-07-09 blah'), [])
+  assert.deepEqual(parseVerifyAfter('> - [ ] verify-after 2026-07-09 quoted checklist'), [])
+  // Non-quoted prose is still a legitimate reminder — do NOT over-suppress (#541 behaviour retained).
+  assert.equal(parseVerifyAfter('Open: verify-after 2026-07-02 (prose ref)')[0].date, '2026-07-02')
+})
+
+test('parseVerifyAfter — the real #857 body shape yields ZERO hits once its box is ticked (#966)', () => {
+  // Both of #857's pings came from these two blockquoted status notes, in the same run that
+  // auto-verified + closed the issue. Its actual checkbox was already `- [x]`.
+  const body = [
+    '> **Status (2026-07-06):** Expected flip ~2026-07-08, so the `verify-after 2026-07-09`',
+    '> `aiwatchScore >= 1` assert should **auto-pass** via the daily job.',
+    '',
+    '> ⚠️ The `verify-after 2026-07-09` assert was changed from `scoreConfidence == "medium"`.',
+    '',
+    '- [x] **verify-after 2026-07-09** — turbopuffer is actually scored',
+  ].join('\n')
+  assert.deepEqual(parseVerifyAfter(body), [])
+})
+
+test('parseVerifyAfter — the real aiwatch-reports#41 shape yields exactly ONE hit, the box (#966)', () => {
+  const body = [
+    '> **Status (2026-06-15):** The `verify-after 2026-07-02` reminder is now automated cross-repo.',
+    '',
+    '- [ ] **verify-after 2026-07-02** — the 2026-06 report auto-renders the trend section',
+  ].join('\n')
+  const hits = parseVerifyAfter(body)
+  assert.equal(hits.length, 1)
+  assert.equal(hits[0].date, '2026-07-02')
+  assert.match(hits[0].note, /2026-06 report/)
+})
+
+// ── #966: `verify-overdue` is a current-state label, so it must self-heal ─────────────────────────
+test('hasLabel — object and string label shapes', () => {
+  assert.equal(hasLabel([{ name: 'verify-overdue' }], 'verify-overdue'), true)
+  assert.equal(hasLabel(['verify-overdue'], 'verify-overdue'), true)
+  assert.equal(hasLabel([{ name: 'bug' }], 'verify-overdue'), false)
+  assert.equal(hasLabel(null, 'verify-overdue'), false)
+})
+
+const OVERDUE = [{ name: 'verify-overdue' }]
+const openBox = (d) => `- [ ] **verify-after ${d}** — check something`
+
+test('findStaleOverdueLabels — clears when every verify-after line is ticked (#966)', () => {
+  const considered = [
+    { number: 857, repo: null, labels: OVERDUE, body: '- [x] **verify-after 2026-07-09** — done' },
+    { number: 41, repo: null, labels: OVERDUE, body: openBox('2026-07-02') }, // still overdue → keep
+    { number: 900, repo: null, labels: [{ name: 'bug' }], body: openBox('2026-01-01') }, // unlabeled
+  ]
+  assert.deepEqual(findStaleOverdueLabels(considered, '2026-07-09').map((i) => i.number), [857])
+})
+
+// The bug the first draft shipped: `due` is throttled by shouldFire's `d % 7 === 0`, so an overdue
+// issue is absent from `due` on 6 of every 7 days. Keying the clear off `due` flapped the label.
+test('findStaleOverdueLabels — KEEPS the label on a non-cadence day (weekly-throttle trap, #966)', () => {
+  const considered = [{ number: 41, repo: null, labels: OVERDUE, body: openBox('2026-07-02') }]
+  // 2026-07-09 is d=7 → shouldFire true (a ping day). 2026-07-10 is d=8 → NOT a ping day.
+  assert.equal(shouldFire('2026-07-02', '2026-07-09'), true)
+  assert.equal(shouldFire('2026-07-02', '2026-07-10'), false)
+  // Still overdue on BOTH days, so the label must survive the non-firing day.
+  assert.deepEqual(findStaleOverdueLabels(considered, '2026-07-09'), [])
+  assert.deepEqual(findStaleOverdueLabels(considered, '2026-07-10'), [])
+  // …and every other day in the gap.
+  for (const day of ['2026-07-11', '2026-07-12', '2026-07-15']) {
+    assert.deepEqual(findStaleOverdueLabels(considered, day), [], `flapped on ${day}`)
+  }
+})
+
+test('findStaleOverdueLabels — a line ticked THIS run no longer counts as overdue (#966)', () => {
+  // The fetched body still shows `- [ ]`; the auto-verify pass ticked it moments ago. This is #857's
+  // exact path: auto-verified + closed + unlabeled in a single run.
+  const considered = [{ number: 857, repo: null, labels: OVERDUE, body: openBox('2026-07-09') }]
+  assert.deepEqual(findStaleOverdueLabels(considered, '2026-07-09'), []) // no tickedKeys → keep
+  const ticked = new Set(['#857#0'])
+  assert.deepEqual(findStaleOverdueLabels(considered, '2026-07-09', ticked).map((i) => i.number), [857])
+})
+
+// Fail-safe, not fail-open: the ping loop already skips an invalid date, so clearing the label too
+// would take the issue completely dark (no ping, no label, no warning).
+test('findStaleOverdueLabels — an INVALID date KEEPS the label (fail-safe) (#966)', () => {
+  const considered = [{ number: 8, repo: null, labels: OVERDUE, body: '- [ ] verify-after 2026-13-45 typo' }]
+  assert.deepEqual(findStaleOverdueLabels(considered, '2026-07-09'), [])
+  // Even alongside a resolved line, the bad date holds the label open.
+  const mixed = [{ number: 9, repo: null, labels: OVERDUE, body: ['- [x] verify-after 2026-01-01 done', '- [ ] verify-after 2026-02-30 typo'].join('\n') }]
+  assert.deepEqual(findStaleOverdueLabels(mixed, '2026-07-09'), [])
+})
+
+test('findInvalidVerifyAfterDates — surfaces typos, ignores valid + quoted lines (#966)', () => {
+  const body = [
+    '- [ ] verify-after 2026-02-30 rolls over',
+    '- [ ] verify-after 2026-13-01 bad month',
+    '- [ ] verify-after 2026-02-28 fine',
+    '> quoted verify-after 2026-13-01 narrative', // suppressed upstream → not our problem
+  ].join('\n')
+  assert.deepEqual(findInvalidVerifyAfterDates(body).map((i) => i.date), ['2026-02-30', '2026-13-01'])
+  assert.deepEqual(findInvalidVerifyAfterDates(''), [])
+})
+
+test('findStaleOverdueLabels — a not-yet-due date clears (label was never warranted) (#966)', () => {
+  const considered = [{ number: 5, repo: null, labels: OVERDUE, body: openBox('2027-01-01') }]
+  assert.deepEqual(findStaleOverdueLabels(considered, '2026-07-09').map((i) => i.number), [5])
+})
+
+test('findStaleOverdueLabels — a blockquoted date does not hold the label open (#966)', () => {
+  const considered = [{ number: 6, repo: null, labels: OVERDUE, body: '> quoted verify-after 2026-01-01 note' }]
+  assert.deepEqual(findStaleOverdueLabels(considered, '2026-07-09').map((i) => i.number), [6])
+})
+
+test('findStaleOverdueLabels — same number in different repos does not collide (#966)', () => {
+  const considered = [
+    { number: 41, repo: null, labels: OVERDUE, body: openBox('2026-07-02') }, // overdue → keep
+    { number: 41, repo: 'o/aiwatch-reports', labels: OVERDUE, body: '- [x] verify-after 2026-07-02' }, // clear
+  ]
+  const stale = findStaleOverdueLabels(considered, '2026-07-09')
+  assert.equal(stale.length, 1)
+  assert.equal(stale[0].repo, 'o/aiwatch-reports')
+  // tickedKeys must also be repo-scoped: ticking the sibling's line must not clear the main repo's.
+  const ticked = new Set(['o/aiwatch-reports#41#0'])
+  assert.deepEqual(findStaleOverdueLabels(considered, '2026-07-09', ticked).map((i) => i.repo),
+    ['o/aiwatch-reports'])
+})
+
+test('findStaleOverdueLabels — multiple lines: one still overdue keeps the label', () => {
+  const body = [openBox('2026-01-01'), openBox('2027-01-01')].join('\n')
+  const considered = [{ number: 7, repo: null, labels: OVERDUE, body }]
+  assert.deepEqual(findStaleOverdueLabels(considered, '2026-07-09'), []) // 2026-01-01 still overdue
+})
+
+test('findStaleOverdueLabels — empty / bodyless inputs are safe', () => {
+  assert.deepEqual(findStaleOverdueLabels([], '2026-07-09'), [])
+  assert.deepEqual(findStaleOverdueLabels(null, '2026-07-09'), [])
+  assert.deepEqual(findStaleOverdueLabels([{ number: 1, repo: null, labels: OVERDUE, body: '' }], '2026-07-09')
+    .map((i) => i.number), [1]) // no verify-after line at all → nothing holds it open
 })
 
 test('hasBodyDriftLabel — detects the self-heal label', () => {

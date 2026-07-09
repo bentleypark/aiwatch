@@ -64,6 +64,62 @@ existing **trusted-author** filter (public-repo abuse gate, #541) gates the muta
 `--apply` is trusted-author-gated too. A prose (non-`- [ ]`) `verify-after` line is a no-op tick and
 is never auto-verified (idempotent).
 
+### Which lines are scanned (#966)
+
+`isSuppressedReminderLine` (exported from `verify-assertions.mjs`) is the single source of truth for
+both scanners — the live `pairVerifyAssertions` and its exported twin `parseVerifyAfter` in
+`verify-reminders.mjs`. A line is **skipped** when it is:
+
+| Line shape | Skipped? | Why |
+|---|---|---|
+| `- [x] verify-after 2026-01-01` | ✅ | done item; ticking the box is the SSOT "verified" action (#586) |
+| `> … verify-after 2026-01-01 …` | ✅ | **blockquote = retrospective narrative, never a live action item** (#966) |
+| `- [ ] verify-after 2026-01-01` | ❌ fires | the canonical open reminder |
+| `Open: verify-after 2026-01-01` | ❌ fires | non-quoted prose is a legitimate reminder (#541) |
+| `-[x] verify-after 2026-01-01` | ❌ fires | GFM renders this as literal text, not a task |
+
+The blockquote rule exists because `ship-issue` step 10 has the operator write a dated
+`> **Status (YYYY-MM-DD):**` note, and such notes naturally **quote the token** while explaining what
+the assert checks. A quoted mention has no checkbox, so it can never be ticked, and the auto-verify
+`tickedKeys` suppression is keyed by the *checkbox* `lineIndex` — it cannot reach a prose line. Before
+#966 those mentions re-fired **every day** until the issue closed: 3 of the 4 items in the 2026-07-09
+ping were quoted prose, and #857 pinged from prose in the same run that auto-verified and closed it.
+
+**Consequence for authors:** write status notes freely — quoting `verify-after <date>` inside a `>`
+block is safe. Only a real unchecked checkbox (or bare, non-quoted prose) creates a reminder.
+
+Two deliberate edges, both pinned by tests:
+
+- **A `- [ ] verify-after …` box nested INSIDE a blockquote never fires.** The blockquote rule wins
+  over the checkbox. This is the one false-negative the guard introduces; it is safe only because the
+  convention (ship-issue step 12) writes verify-after boxes at top level, never quoted. If you ever
+  need a live reminder, do not quote it.
+- **The guard is blockquote-*line*-only.** A `verify-after <date>` token inside a fenced code block or
+  a markdown table row still fires, since neither line starts with `>`. Left as-is: real issue bodies
+  don't do this, and over-broadening the guard risks swallowing genuine reminders.
+
+### Label lifecycle
+
+| Label | Added by | Removed by |
+|---|---|---|
+| `verify-blocked` | operator at merge (ship-issue step 10) | auto-verify, once no unchecked `verify-after` line remains |
+| `body-drift` | daily guard, when stray unchecked boxes exist | daily guard, once the body is synced (self-healing) |
+| `verify-overdue` | daily job, on every ping | daily job, once the issue is no longer due (self-healing since #966) |
+
+`verify-overdue` was **add-only** before #966 — nothing removed it, not the auto-verify (which drops
+only `verify-blocked`) and not `gh issue close`. A verified-and-closed issue kept the label
+indefinitely, so any triage query filtering on it read a permanent scar rather than current state.
+
+Two properties of the self-heal worth knowing:
+
+- **The clear is derived from the verify-after dates, not from "did we ping today".** The ping is
+  weekly (`shouldFire`: due date, then every 7th day), so an issue is genuinely overdue on days it is
+  not pinged. Clearing on "not pinged today" would flap the label on and off six days a week.
+- **It only reaches OPEN issues** (plus an issue closed by the auto-verify pass earlier in the same
+  run — it was still open when fetched). `fetchRepoIssues` lists `--state open`, so a `verify-overdue`
+  scar left on an issue closed by an *earlier* run is never revisited. This PR fixes forward; #857's
+  pre-existing scar was removed by hand.
+
 ## When to add an `assert:` (and when not)
 
 Add one when the acceptance can be expressed as a predicate over an AIWatch JSON endpoint:
