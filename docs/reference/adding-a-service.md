@@ -17,10 +17,12 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 
 | Signal | How to check | Rich | Thin (avoid) |
 |---|---|---|---|
-| **Official uptime %** | Atlassian `…/api/v2/summary.json` / Better Stack `…/index.json` (`availability`) / incident.io | present | **absent** (gcloud `incidents.json` gives incidents only) |
+| **Official uptime %** | **Never in `summary.json`** — fetch the status page HTML. Atlassian → `window.uptimeData` (needs `statusComponentId`). incident.io → `component_uptimes` in the `self.__next_f` payload (needs `incidentIoComponentId`). Better Stack → `…/index.json` (`availability`) | a real number | **absent** (gcloud `incidents.json` gives incidents only), or incident.io `"uptime":"$undefined"` |
 | **Incident history** | `…/api/v2/incidents.json` count + date span, or the feed's records | populated, recent | **0 / sparse** (gcloud feed is ~3 entries; e.g. Veo/Imagen have 0 ever) |
 | **Probeable endpoint** | a public, no-auth GET that returns fast (any HTTP status = alive) | yes → adds latency + Responsiveness score | no (auth-gated) → score relies on uptime only |
 
+- **Identify the platform from the page, not the API (#857).** A Statuspage-compatible `/api/v2/summary.json` does **not** mean Atlassian — incident.io serves one too. Atlassian uses 12-char component ids (`r7tngp2p3sjd`) + `window.uptimeData`; incident.io uses ULIDs (`01K0Q5QSJV…`) + `component_uptimes`. Getting this wrong sets neither `statusComponentId` nor `incidentIoComponentId`, so `needsHtml` never fetches the page and a **published uptime is silently dropped** — the service then scores on the `/60` no-uptime rescale and looks like it publishes nothing (turbopuffer shipped this way and lost 11 score points for a month).
+- **For an incident.io page, check `display_uptime_mode` before concluding "no uptime".** `'chart_and_percentage'` publishes a number; `'chart_only'` emits `"uptime":"$undefined"` and genuinely has none (Stability/ElevenLabs/Replicate).
 - **Thin sources → the service renders like Bedrock/Azure** (operational, "No official uptime", `score` withheld at low confidence, ~never an incident) — a near-empty card that lowers dashboard quality. **gcloud-`incidents.json`-only services are thin** (Veo/Imagen/STT/Vertex Vector — #680 held for this reason). Gemini looks rich only because it ALSO merges the AI Studio source (`aistudioStatus`).
 - **Prefer candidates that are BOTH data-rich AND fill a single-service category gap** (#601). If a thin category (video/image/vector/observability/embeddings) needs a sibling, pick a Better Stack / Atlassian / incident.io competitor over a gcloud product.
 - Record the audit verdict (and the source URLs you checked) in the issue before implementing.

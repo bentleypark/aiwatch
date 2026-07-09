@@ -206,7 +206,14 @@ export interface ServiceConfig {
   // FedRAMP, Chat Completions, the separate API Login). Status/incidents/uptime still come from
   // summary.json; only resolveSvcComponents reads this. Falls back to summary.json on fetch error.
   componentsUrl?: string
-  incidentIoComponentId?: string
+  // A list is a worst-of (min) across the components — for a page whose only components are
+  // per-region endpoints and which publishes no group aggregate (turbopuffer, #857). Unlike
+  // `statusComponentId`/`statusComponentIds` (two fields because they carry two DIFFERENT roles —
+  // calendar/miss anchor vs badge group), this field has a single role (which components to read
+  // uptime from), so the list form generalizes it rather than needing a sibling field.
+  // The tuple forbids `[]`, which would be silently truthy: it passes the `needsHtml` gate, runs the
+  // parser over zero ids, and yields null — reinstating the exact silent uptime drop #857 fixed.
+  incidentIoComponentId?: string | [string, ...string[]]
   incidentIoGroupId?: string       // incident.io group uptime (e.g. "APIs" aggregate)
   betterStackUrl?: string
   onlineOrNotUrl?: string
