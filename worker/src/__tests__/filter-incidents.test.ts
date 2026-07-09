@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
-import { filterIncidents, includeUntaggedIncidents, filterByComponentStatus, SERVICES } from '../services'
+import { describe, it, expect, vi } from 'vitest'
+import { filterIncidents, includeUntaggedIncidents, filterByComponentStatus, badgeGroupNames, SERVICES } from '../services'
+import { buildIncidentAlerts } from '../alerts'
 import { normalizeStatus } from '../parsers/statuspage'
 import type { Incident, ServiceConfig } from '../types'
 
@@ -335,6 +336,24 @@ describe('includeUntaggedIncidents', () => {
   })
 })
 
+// Real component lists, copied from the live `api/v2/summary.json` of each page. The #970 guard maps
+// `statusComponentIds` (ids) → the `componentNames` an Incident carries, so faithful ids matter.
+const RUNWAY_COMPONENTS = [
+  { id: '2fr8tksxj5ns', name: 'App' },
+  { id: 'hl94rh0mg6xt', name: 'Backend' },
+  { id: 'pxc5jjl6wty0', name: 'Billing' },
+  { id: 'f8yl6htsys9v', name: 'Support' },
+  { id: 'w3jcq3dwljp4', name: 'Public API' },
+]
+const CLAUDE_COMPONENTS = [
+  { id: 'rwppv331jlwc', name: 'claude.ai' },
+  { id: '0qbwn08sd68x', name: 'Claude Console (platform.claude.com)' },
+  { id: 'k8w3r06qmzrp', name: 'Claude API (api.anthropic.com)' },
+  { id: 'yyzkbfz2thpt', name: 'Claude Code' },
+  { id: 'bpp5gb3hpjcl', name: 'Claude Cowork' },
+  { id: '0scnb50nvy53', name: 'Claude for Government' },
+]
+
 describe('filterByComponentStatus (#228)', () => {
   it('removes active incidents when component is operational', () => {
     const incidents = [
@@ -343,7 +362,7 @@ describe('filterByComponentStatus (#228)', () => {
       mockIncident({ id: 'monitoring-1', status: 'monitoring' }),
     ]
     const config = mockConfig({ statusComponentId: 'k8w3r06qmzrp' })
-    const result = filterByComponentStatus(incidents, 'operational', config)
+    const result = filterByComponentStatus(incidents, 'operational', config, [])
     expect(result).toHaveLength(2)
     expect(result.map(i => i.id)).toEqual(['resolved-1', 'monitoring-1'])
   })
@@ -354,7 +373,7 @@ describe('filterByComponentStatus (#228)', () => {
       mockIncident({ id: 'resolved-1', status: 'resolved' }),
     ]
     const config = mockConfig({ statusComponentId: 'k8w3r06qmzrp' })
-    const result = filterByComponentStatus(incidents, 'degraded', config)
+    const result = filterByComponentStatus(incidents, 'degraded', config, [])
     expect(result).toHaveLength(2)
   })
 
@@ -363,7 +382,7 @@ describe('filterByComponentStatus (#228)', () => {
       mockIncident({ id: 'active-1', status: 'investigating' }),
     ]
     const config = mockConfig({ statusComponentId: 'abc123' })
-    const result = filterByComponentStatus(incidents, 'down', config)
+    const result = filterByComponentStatus(incidents, 'down', config, [])
     expect(result).toHaveLength(1)
   })
 
@@ -372,7 +391,7 @@ describe('filterByComponentStatus (#228)', () => {
       mockIncident({ id: 'active-1', status: 'investigating' }),
     ]
     const config = mockConfig({}) // no component config
-    const result = filterByComponentStatus(incidents, 'operational', config)
+    const result = filterByComponentStatus(incidents, 'operational', config, [])
     expect(result).toHaveLength(1)
   })
 
@@ -382,7 +401,7 @@ describe('filterByComponentStatus (#228)', () => {
       mockIncident({ id: 'resolved-1', status: 'resolved' }),
     ]
     const config = mockConfig({ statusComponent: 'claude.ai' })
-    const result = filterByComponentStatus(incidents, 'operational', config)
+    const result = filterByComponentStatus(incidents, 'operational', config, [])
     expect(result).toHaveLength(1)
     expect(result[0].id).toBe('resolved-1')
   })
@@ -399,13 +418,13 @@ describe('filterByComponentStatus (#228)', () => {
 
     // claude.ai component is operational — should filter out active incident
     const claudeAiConfig = mockConfig({ id: 'claudeai', statusComponentId: 'rwppv331jlwc', incidentKeywords: ['claude.ai'] })
-    const claudeAiResult = filterByComponentStatus([adminApiIncident, oldResolved], 'operational', claudeAiConfig)
+    const claudeAiResult = filterByComponentStatus([adminApiIncident, oldResolved], 'operational', claudeAiConfig, CLAUDE_COMPONENTS)
     expect(claudeAiResult).toHaveLength(1)
     expect(claudeAiResult[0].id).toBe('old-1')
 
     // Claude API component is degraded — should keep all incidents
     const claudeApiConfig = mockConfig({ id: 'claude', statusComponentId: 'k8w3r06qmzrp' })
-    const claudeApiResult = filterByComponentStatus([adminApiIncident, oldResolved], 'degraded', claudeApiConfig)
+    const claudeApiResult = filterByComponentStatus([adminApiIncident, oldResolved], 'degraded', claudeApiConfig, CLAUDE_COMPONENTS)
     expect(claudeApiResult).toHaveLength(2)
   })
 
@@ -425,12 +444,12 @@ describe('filterByComponentStatus (#228)', () => {
     })
 
     it('drops the resolved Claude-Code-only incident from Claude API (operational)', () => {
-      const result = filterByComponentStatus([githubIncident('resolved')], 'operational', claudeApi)
+      const result = filterByComponentStatus([githubIncident('resolved')], 'operational', claudeApi, CLAUDE_COMPONENTS)
       expect(result).toHaveLength(0)
     })
 
     it('drops the monitoring Claude-Code-only incident from Claude API (operational)', () => {
-      const result = filterByComponentStatus([githubIncident('monitoring')], 'operational', claudeApi)
+      const result = filterByComponentStatus([githubIncident('monitoring')], 'operational', claudeApi, CLAUDE_COMPONENTS)
       expect(result).toHaveLength(0)
     })
 
@@ -438,7 +457,7 @@ describe('filterByComponentStatus (#228)', () => {
       // claudecode does NOT set scopeResolvedToComponent (keyword-scoped upstream), so it is unaffected
       // by #934 and retains its own resolved incident — surfaces normally on resolution.
       expect(claudeCode.scopeResolvedToComponent).toBeUndefined()
-      const result = filterByComponentStatus([githubIncident('resolved')], 'operational', claudeCode)
+      const result = filterByComponentStatus([githubIncident('resolved')], 'operational', claudeCode, CLAUDE_COMPONENTS)
       expect(result.map(i => i.id)).toEqual(['gh-1'])
     })
 
@@ -450,14 +469,22 @@ describe('filterByComponentStatus (#228)', () => {
         componentNames: ['Claude API', 'Claude Code'],
         resolvedAt: '2026-07-07T00:00:00Z',
       })
-      const result = filterByComponentStatus([combined], 'operational', claudeApi)
+      const result = filterByComponentStatus([combined], 'operational', claudeApi, CLAUDE_COMPONENTS)
       expect(result.map(i => i.id)).toEqual(['combo-1'])
     })
 
     it('keeps an untagged resolved incident on Claude API (fail-open)', () => {
       const untagged = mockIncident({ id: 'ut-1', status: 'resolved', resolvedAt: '2026-07-07T00:00:00Z' })
-      const result = filterByComponentStatus([untagged], 'operational', claudeApi)
+      const result = filterByComponentStatus([untagged], 'operational', claudeApi, CLAUDE_COMPONENTS)
       expect(result.map(i => i.id)).toEqual(['ut-1'])
+    })
+
+    it.each([
+      ['resolved' as const],
+      ['monitoring' as const],
+    ])('#970 does not disturb the %s branch when components are passed', (status) => {
+      const result = filterByComponentStatus([githubIncident(status)], 'operational', claudeApi, CLAUDE_COMPONENTS)
+      expect(result).toHaveLength(0)
     })
 
     it('does NOT scope a single-tenant broad-"API" service (perplexity) — no regression', () => {
@@ -470,9 +497,147 @@ describe('filterByComponentStatus (#228)', () => {
         id: 'px-1', title: 'Elevated latency on Sonar API', status: 'resolved',
         componentNames: ['Sonar API'], resolvedAt: '2026-07-07T00:00:00Z',
       })
-      const result = filterByComponentStatus([sonar], 'operational', perplexity)
+      const result = filterByComponentStatus([sonar], 'operational', perplexity, [])
       expect(result.map(i => i.id)).toEqual(['px-1'])
     })
+  })
+
+  // #970 — an `impact: none` incident degrades no component, so "our component is operational" proves
+  // nothing and the active-drop silently ate the incident. Pinned to the two REAL payloads that decide
+  // the rule: Runway's Aleph 2.0 (must be kept) and Anthropic's bulk-link (must stay dropped, #228).
+  describe('#970 impact:none active incidents', () => {
+    const runway = SERVICES.find(s => s.id === 'runway')!
+    const claudeApi = SERVICES.find(s => s.id === 'claude')!
+
+    // status.runwayml.com incident nprnqn29h7y9, as parsed at 20:45Z (7 min in, still investigating).
+    const aleph = (status: Incident['status'] = 'investigating') => mockIncident({
+      id: 'nprnqn29h7y9',
+      title: 'Aleph 2.0 delayed generations',
+      status,
+      impact: null,
+      componentNames: ['App', 'Backend', 'Public API'],
+      startedAt: '2026-07-08T20:39:56.000Z',
+      resolvedAt: status === 'resolved' ? '2026-07-08T21:02:49.380Z' : null,
+    })
+
+    it('keeps the ACTIVE Runway incident even though every component is operational', () => {
+      const result = filterByComponentStatus([aleph()], 'operational', runway, RUNWAY_COMPONENTS)
+      expect(result.map(i => i.id)).toEqual(['nprnqn29h7y9'])
+    })
+
+    it('drops a Billing-only impact:none incident (outside the badge group)', () => {
+      const billing = mockIncident({
+        id: 'billing-1', title: 'Invoice delays', status: 'investigating',
+        impact: null, componentNames: ['Billing'],
+      })
+      expect(filterByComponentStatus([billing], 'operational', runway, RUNWAY_COMPONENTS)).toEqual([])
+    })
+
+    it('drops an UNTAGGED impact:none incident (would leak onto every sibling of a shared page) — but warns', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const untagged = mockIncident({ id: 'ut-1', status: 'investigating', impact: null })
+      expect(filterByComponentStatus([untagged], 'operational', runway, RUNWAY_COMPONENTS)).toEqual([])
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('UNTAGGED impact:none incident ut-1'))
+      warn.mockRestore()
+    })
+
+    it('#228 intact: Anthropic bulk-link (impact minor, names Claude API) is still dropped', () => {
+      // 4 of 6 components — a strict subset that DOES intersect the Claude API badge group. Only the
+      // `impact` condition separates it from Runway's case, which is why both conditions are required.
+      const bulkLink = mockIncident({
+        id: 'bulk-1', title: 'Elevated errors on Claude Sonnet 5', status: 'investigating', impact: 'minor',
+        componentNames: ['claude.ai', 'Claude API (api.anthropic.com)', 'Claude Code', 'Claude Cowork'],
+      })
+      expect(filterByComponentStatus([bulkLink], 'operational', claudeApi, CLAUDE_COMPONENTS)).toEqual([])
+    })
+
+    // Isolates the PREFIX branch: with no component list the ids resolve to nothing, so only
+    // `statusComponent` ('Claude API') can match the page's full name — exactly that fallback path.
+    it('matches statusComponent by PREFIX ("Claude API" → "Claude API (api.anthropic.com)")', () => {
+      const noneImpact = mockIncident({
+        id: 'none-1', title: 'Informational', status: 'investigating', impact: null,
+        componentNames: ['Claude API (api.anthropic.com)'],
+      })
+      expect(badgeGroupNames(claudeApi, [])).toEqual(new Set(['claude api']))
+      expect(filterByComponentStatus([noneImpact], 'operational', claudeApi, [])).toHaveLength(1)
+      expect(filterByComponentStatus([noneImpact], 'operational', claudeApi, CLAUDE_COMPONENTS)).toHaveLength(1)
+    })
+
+    // The active branch is `status !== 'resolved' && status !== 'monitoring'`, so `identified` takes it too.
+    it.each(['investigating' as const, 'identified' as const])('retains an %s impact:none incident', (status) => {
+      const result = filterByComponentStatus([aleph(status)], 'operational', runway, RUNWAY_COMPONENTS)
+      expect(result.map(i => i.id)).toEqual(['nprnqn29h7y9'])
+    })
+
+    // A drop must never be silent. When NO configured id resolves we cannot judge membership at all,
+    // so fail OPEN (keep + warn) — dropping a real alert is worse than a phantom, and a silent drop
+    // here is bug #970 itself. Distinct from "resolved fine, just didn't match" (Billing-only above).
+    it('fails OPEN with a warning when the badge group is unresolvable', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const stale = mockConfig({ id: 'x', statusComponentId: 'gone-from-page' })
+      const inc = mockIncident({ id: 'i-1', status: 'investigating', impact: null, componentNames: ['App'] })
+      expect(filterByComponentStatus([inc], 'operational', stale, RUNWAY_COMPONENTS).map(i => i.id)).toEqual(['i-1'])
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('badge group unresolvable'))
+      warn.mockRestore()
+    })
+
+    it('fails OPEN with a warning when the component list is empty (broken/absent summary.json)', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      expect(filterByComponentStatus([aleph()], 'operational', runway, []).map(i => i.id)).toEqual(['nprnqn29h7y9'])
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('badge group unresolvable'))
+      warn.mockRestore()
+    })
+
+    it('a PARTIALLY resolved badge group is judgeable — Billing-only is still dropped', () => {
+      const partial = RUNWAY_COMPONENTS.filter(c => c.id === 'w3jcq3dwljp4') // only Public API resolves
+      const billing = mockIncident({
+        id: 'billing-2', status: 'investigating', impact: null, componentNames: ['Billing'],
+      })
+      expect(filterByComponentStatus([billing], 'operational', runway, partial)).toEqual([])
+    })
+
+    // The bug's actual OUTCOME was a missing Discord/Slack alert, not a filter verdict — so drive the
+    // real pipeline (filter → buildIncidentAlerts) rather than asserting on the filter alone.
+    it('=> the New alert now fires for the Runway incident', () => {
+      const kept = filterByComponentStatus([aleph()], 'operational', runway, RUNWAY_COMPONENTS)
+      const svc = { ...runway, status: 'operational', incidents: kept } as never
+      const alerts = buildIncidentAlerts([svc], new Map(), Date.parse('2026-07-08T20:45:00Z'))
+      expect(alerts.map(a => a.key)).toEqual(['alerted:new:nprnqn29h7y9'])
+      // status is operational, so no fallback recommendation is attached (an impact:none incident
+      // gives no reason to switch providers).
+      expect(alerts[0].fallbackText).toBe('')
+    })
+
+    it('=> and the Resolved alert follows, because a New alert preceded it', () => {
+      const kept = filterByComponentStatus([aleph('resolved')], 'operational', runway, RUNWAY_COMPONENTS)
+      const svc = { ...runway, status: 'operational', incidents: kept } as never
+      const alerted = new Map([['nprnqn29h7y9', new Set(['runway'])]])
+      const alerts = buildIncidentAlerts([svc], alerted, Date.parse('2026-07-08T21:05:00Z'))
+      expect(alerts.map(a => a.key)).toEqual(['alerted:res:nprnqn29h7y9'])
+    })
+
+    it('regression: without a preceding New alert, the Resolved path stays silent (the old bug)', () => {
+      const kept = filterByComponentStatus([aleph('resolved')], 'operational', runway, RUNWAY_COMPONENTS)
+      const svc = { ...runway, status: 'operational', incidents: kept } as never
+      expect(buildIncidentAlerts([svc], new Map(), Date.parse('2026-07-08T21:05:00Z'))).toEqual([])
+    })
+  })
+})
+
+describe('badgeGroupNames (#970)', () => {
+  it('resolves statusComponentIds through the page component list', () => {
+    const runway = SERVICES.find(s => s.id === 'runway')!
+    expect([...badgeGroupNames(runway, RUNWAY_COMPONENTS)].sort()).toEqual(['app', 'backend', 'public api'])
+  })
+
+  it('falls back to the single statusComponentId when no group is set', () => {
+    const config = mockConfig({ statusComponentId: 'w3jcq3dwljp4' })
+    expect([...badgeGroupNames(config, RUNWAY_COMPONENTS)]).toEqual(['public api'])
+  })
+
+  it('includes statusComponent (already a name) and tolerates an empty component list', () => {
+    const config = mockConfig({ statusComponent: 'API' })
+    expect([...badgeGroupNames(config, [])]).toEqual(['api'])
   })
 })
 
@@ -507,7 +672,10 @@ function applyFetchServiceFlow(
   if (svcStatus !== 'operational') {
     filtered = includeUntaggedIncidents(filtered, incidents, config, summaryComponents, overallIndicator)
   }
-  filtered = filterByComponentStatus(filtered, svcStatus, config)
+  // #970 — the real call site passes `breakdownComponents` here (services.ts). Mirror it, so a future
+  // refactor that drops the argument fails the `#970 through the real call-site flow` test below rather
+  // than silently re-breaking the badge-group resolution in production.
+  filtered = filterByComponentStatus(filtered, svcStatus, config, summaryComponents)
   return { filtered, svcStatus }
 }
 
@@ -731,4 +899,65 @@ describe('filterIncidents — GitHub Copilot scoping (#397)', () => {
     })
     expect(filterIncidents([inc], copilotConfig)).toHaveLength(0)
   })
+})
+
+// #970 — drives the REAL call-site ordering (filterIncidents → svcStatus → includeUntaggedIncidents →
+// filterByComponentStatus-with-components), not the helper in isolation. Guards the "tested twin" gap:
+// if services.ts stops passing `breakdownComponents`, the badge group resolves empty and Runway's
+// impact:none incident is silently dropped again — this test fails, the unit tests would not.
+describe('#970 through the real call-site flow', () => {
+  const runway = SERVICES.find(s => s.id === 'runway')!
+  // Every component operational — exactly the state during the 2026-07-08 Aleph incident.
+  const components = RUNWAY_COMPONENTS.map(c => ({ ...c, status: 'operational' }))
+  const aleph = mockIncident({
+    id: 'nprnqn29h7y9', title: 'Aleph 2.0 delayed generations', status: 'investigating',
+    impact: null, componentNames: ['App', 'Backend', 'Public API'],
+    startedAt: '2026-07-08T20:39:56.000Z', // within buildIncidentAlerts' 24h freshness window
+  })
+
+  it('keeps the active impact:none incident and leaves the badge operational', () => {
+    const { filtered, svcStatus } = applyFetchServiceFlow([aleph], runway, components, 'none')
+    expect(svcStatus).toBe('operational')
+    expect(filtered.map(i => i.id)).toEqual(['nprnqn29h7y9'])
+  })
+
+  it('and the New alert fires from that flow', () => {
+    const { filtered } = applyFetchServiceFlow([aleph], runway, components, 'none')
+    const svc = { ...runway, status: 'operational', incidents: filtered } as never
+    const alerts = buildIncidentAlerts([svc], new Map(), Date.parse('2026-07-08T20:45:00Z'))
+    expect(alerts.map(a => a.key)).toEqual(['alerted:new:nprnqn29h7y9'])
+  })
+})
+
+// #970 — the fail-open path is leak-safe only because of a config property that is true today by
+// inspection: every service that can REACH it (statuspage `apiUrl` + ids-only, so `badgeGroupNames`
+// can resolve to nothing) is either alone on its status page, or already scoped by
+// incidentKeywords/incidentComponents before the guard runs. A future Runway-shaped service added to a
+// SHARED page with neither would let a momentary id-resolution failure leak a sibling's impact:none
+// incident onto it. Lock the invariant in so that config can't ship silently.
+describe('#970 fail-open leak-safety invariant over SERVICES', () => {
+  const hostOf = (s: typeof SERVICES[number]) => new URL(s.statusUrl).host
+  const serviceCountByHost = new Map<string, number>()
+  for (const s of SERVICES) serviceCountByHost.set(hostOf(s), (serviceCountByHost.get(hostOf(s)) ?? 0) + 1)
+
+  const failOpenCapable = SERVICES.filter(s =>
+    s.apiUrl                                          // reaches filterByComponentStatus at all
+    && (s.statusComponentId || s.statusComponentIds)  // has ids to resolve
+    && !s.statusComponent,                            // ...and no name fallback → badge group can be empty
+  )
+
+  it('is a non-empty set (guards against the check silently matching nothing)', () => {
+    expect(failOpenCapable.length).toBeGreaterThan(0)
+    expect(failOpenCapable.map(s => s.id)).toContain('runway')
+  })
+
+  it.each(failOpenCapable.map(s => [s.id] as const))(
+    '%s: alone on its status page, or keyword/component-scoped before the guard',
+    (id) => {
+      const svc = SERVICES.find(s => s.id === id)!
+      const aloneOnPage = serviceCountByHost.get(hostOf(svc)) === 1
+      const preScoped = (svc.incidentKeywords?.length ?? 0) > 0 || (svc.incidentComponents?.length ?? 0) > 0
+      expect(aloneOnPage || preScoped).toBe(true)
+    },
+  )
 })

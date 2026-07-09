@@ -683,19 +683,109 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
  * component — its `componentNames` prefix-match our `statusComponent` (same convention as the #359
  * exclude-bypass), OR it is untagged (no componentNames → ambiguous → keep, fail-open). Default-off so
  * single-tenant services (mistral/perplexity/fal, whose broad `statusComponent: 'API'` would wrongly drop
- * a specific-component incident) and keyword-scoped siblings (claudeai/claudecode) are byte-unchanged.
+ * a specific-component incident) and keyword-scoped siblings (claudeai/claudecode) are byte-unchanged
+ * IN THIS RESOLVED/MONITORING BRANCH. (#970 below is NOT flag-gated, so it does change the ACTIVE branch
+ * for claudeai/claudecode — they set `apiUrl` + `statusComponentId` and so reach this guard.)
+ *
+ * #970 — the active-drop rests on the premise "our component is operational ⇒ this incident is not
+ * about us". That premise only holds when the incident degraded SOME component, i.e. `impact >= minor`
+ * (Statuspage derives `impact` from the worst status of the components linked to the incident — unless
+ * the provider sets an `impact_override`, the one case where `none` does not imply "nothing degraded").
+ * For an `impact: none` incident there is no degraded sibling to contrast against, so "our component is
+ * operational" carries zero information and the guard
+ * discarded a genuine incident on every cron cycle — invisibly, because `buildIncidentAlerts` then saw
+ * an empty list (no New alert) and the resolved path requires a prior New alert to fire. Runway's
+ * 2026-07-08 "Aleph 2.0 delayed generations" (impact none, 23min) reached NEITHER Discord nor Slack,
+ * yet surfaced on the dashboard once resolved (resolved incidents pass this guard). Every
+ * component-scoped Statuspage service was exposed (18 of them at the time).
+ *
+ * So an ACTIVE incident survives an operational component only when BOTH hold:
+ *   1. `impact == null` (Statuspage `none`) — the provider itself claims no availability impact, and
+ *   2. its `componentNames` name a component in THIS service's badge group.
+ * Both are required. Anthropic's bulk-link — the #228 target — attaches 4 of 6 components, a strict
+ * subset that DOES intersect the Claude API badge group, so (2) alone would regress #228; its impact is
+ * always `minor`/`major`, so (1) is what separates the two. (2) then keeps a Billing/Support-only
+ * `impact: none` incident (outside the badge group) from alerting. An UNTAGGED `impact: none` incident
+ * is dropped rather than fail-open: on a shared page it would otherwise leak onto every sibling service.
+ *
+ * The `impact === null` ⇒ Statuspage `none` reading only holds for STATUSPAGE-sourced incidents (see
+ * `parsers/statuspage.ts`, which maps anything outside {critical,major,minor} to null). Other parsers
+ * (instatus/betterstack) also null out an UNMAPPED severity, where null means "unknown", not "none".
+ * The sole call site is inside the statuspage `apiUrl` branch, so the invariant holds — keep it that way.
+ *
+ * Every drop here is a *silent* one (no alert, no dashboard row until it resolves) — that silence IS
+ * bug #970. So the two cases where we cannot actually judge are made observable rather than quiet:
+ *   - badge group unresolvable (`components` empty / every configured id missing from the page) → we
+ *     have nothing to match against, so FAIL OPEN (keep + warn). Dropping a real alert is worse than a
+ *     phantom, the same trade `shouldHoldNewIncident` makes. A partially-resolved group is already
+ *     surfaced by the #135 miss-check below (primary id → Discord; secondary ids → warn).
+ *   - untagged `impact: none` → still dropped (shared-page leak), but warn so it is never invisible.
  */
-export function filterByComponentStatus(incidents: Incident[], componentStatus: string, config: ServiceConfig): Incident[] {
+export function filterByComponentStatus(
+  incidents: Incident[],
+  componentStatus: NormalizedStatus,
+  config: ServiceConfig,
+  components: Array<{ id: string; name: string }>,
+): Incident[] {
   if (componentStatus !== 'operational') return incidents
   if (!config.statusComponentId && !config.statusComponent) return incidents
   const ownComponent = config.statusComponent?.toLowerCase()
+  const ids = badgeGroupIds(config)
+  const badgeGroup = badgeGroupNames(config, components)
+  // Ids were configured but NONE resolved (and no `statusComponent` name to fall back on) → the badge
+  // group is empty for a reason we cannot distinguish from "matches nothing". Never silently drop on it.
+  const unjudgeable = badgeGroup.size === 0 && ids.length > 0
   return incidents.filter(i => {
-    if (i.status !== 'resolved' && i.status !== 'monitoring') return false
-    if (!config.scopeResolvedToComponent || !ownComponent) return true
     const names = (i.componentNames ?? []).map(n => n.toLowerCase())
+    // #970 — active incident: retained only when the provider degraded nothing AND it names one of
+    // our badge-group components. Id-resolved names match exactly (same page, same strings);
+    // `statusComponent` is a PREFIX by the #359 convention ('Claude API' must match the page's
+    // 'Claude API (api.anthropic.com)').
+    if (i.status !== 'resolved' && i.status !== 'monitoring') {
+      if (i.impact !== null) return false
+      if (unjudgeable) {
+        console.warn(`[filterByComponentStatus] #970 ${config.id}: badge group unresolvable (${ids.join(',')}) — keeping impact:none incident ${i.id} rather than dropping it silently`)
+        return true
+      }
+      // `names` empty ⇒ `some()` is false ⇒ untagged. Warn: we cannot attribute it, so the drop is a
+      // guess, not a verdict. A TAGGED non-match (e.g. Billing-only) is a confident drop — no warn.
+      if (names.length === 0) {
+        console.warn(`[filterByComponentStatus] #970 ${config.id}: dropping UNTAGGED impact:none incident ${i.id} (no componentNames to attribute it by)`)
+        return false
+      }
+      return names.some(n => badgeGroup.has(n) || (ownComponent !== undefined && n.startsWith(ownComponent)))
+    }
+    if (!config.scopeResolvedToComponent || !ownComponent) return true
     if (names.length === 0) return true
     return names.some(n => n.startsWith(ownComponent))
   })
+}
+
+/** The component ids this service's badge is scoped to (#970 helper) — `statusComponentIds` when set,
+ *  else the single `statusComponentId`, else none (a `statusComponent`-name-only service). */
+function badgeGroupIds(config: ServiceConfig): string[] {
+  return config.statusComponentIds ?? (config.statusComponentId ? [config.statusComponentId] : [])
+}
+
+/**
+ * The lowercased component NAMES that make up this service's badge group (#970 helper).
+ * `statusComponentIds`/`statusComponentId` are page component IDs, while an `Incident` carries
+ * component NAMES — so resolve ids → names through the page's component list. `statusComponent` is
+ * already a name (a prefix by the #359 convention), so it joins the set directly. An id we cannot
+ * resolve (component renamed/removed) contributes nothing; the caller distinguishes "resolved to
+ * nothing" (unjudgeable → fail open) from "matched nothing" (a real non-membership verdict).
+ */
+export function badgeGroupNames(
+  config: ServiceConfig,
+  components: Array<{ id: string; name: string }>,
+): Set<string> {
+  const names = new Set<string>()
+  for (const id of badgeGroupIds(config)) {
+    const match = components.find(c => c.id === id)
+    if (match) names.add(match.name.toLowerCase())
+  }
+  if (config.statusComponent) names.add(config.statusComponent.toLowerCase())
+  return names
 }
 
 /**
@@ -1008,8 +1098,12 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
       }
       // (a bare incidentIoComponentId with no uptime HTML also leaves uptime null — same #713 rule.)
 
-      // Filter out active incidents when component is operational (#228)
-      filtered = filterByComponentStatus(filtered, svcStatus, config)
+      // Filter out active incidents when component is operational (#228).
+      // #970 — pass the resolved component list (the SAME superset the badge resolves from) so the
+      // guard can map `statusComponentIds` → component NAMES and keep an `impact: none` incident that
+      // genuinely names one of our badge-group components. `?? []` mirrors includeUntaggedIncidents
+      // above; an empty list makes the guard fail OPEN + warn rather than silently drop (see its doc).
+      filtered = filterByComponentStatus(filtered, svcStatus, config, breakdownComponents ?? [])
 
       // Track component ID misses for migration detection (#135).
       // Primary statusComponentId drives the alerted-on tracker. Additional ids
