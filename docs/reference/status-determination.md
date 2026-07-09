@@ -133,6 +133,33 @@ Two different reasons an incident.io service can end up with `uptime30d = null`,
 
 **Rotation guard.** A list is a roster we expect to find whole, but incident.io ULIDs are not guaranteed stable — a rotated id simply stops matching on a **200-OK page**, so neither the source-liveness check (keyed on 4xx/5xx) nor the #135 component-miss alert (keyed on `statusComponentId`, which a list-configured service does not set) fires. A partial rotation would quietly shrink the worst-of to the surviving regions and could report a healthy 100% while a vanished region is down. `parseIncidentIoUptime` therefore **warns** when a configured id resolves to nothing (list configs only — a single unmatched id is the ordinary "no such component" case). That warn only reaches Workers logs; routing it to the operator, and detecting the broader `uptime30d` non-null → null transition across all services, are tracked in **#957**.
 
+### The monthly archive's `officialUptime` must agree with the Score (#951)
+
+The archive carries three uptime-ish fields and they answer different questions, which is how the report came to print **"Official · 100.00% uptime"** beside a Score that had been rescaled over `/60` as if no uptime existed:
+
+| field | source | window |
+|---|---|---|
+| `uptime` | AIWatch's own daily `ok/total` counters | the month |
+| `officialUptime` | `computeMonthlyOfficialUptime` — a daily snapshot of `ServiceStatus.uptime30d` | *was* **any** day in the month; now the final days |
+| `score` | snapshot of the **live** 30-day Score at build time (the 1st of the next month) | build day |
+
+Two ways the display and the score drifted apart, both real:
+
+1. **Pre-#713 estimate residue.** The daily counter stores `uptime30d` **without its `uptimeSource`**, so the incident-derived estimate that #713 removed (merged 2026-06-19) is indistinguishable from an official % in the snapshot. `computeMonthlyOfficialUptime` kept the **last non-null** value over the whole month — despite its docstring saying "as of the LATEST day" — so one pre-#713 day stamped a fabricated "official" figure on all of June 2026: Stability 100%, Replicate 99.34%, ElevenLabs 99.18%. The build-time Score, computed after #713, had already dropped uptime.
+2. **A source that dies mid-window.** Character.AI's Statuspage was deactivated (#689/#800), leaving a real-but-dead 99.58% behind the same way.
+
+The fix is two layers, because they answer different questions:
+
+- **`computeMonthlyOfficialUptime` now means what it said** — only the final `OFFICIAL_UPTIME_TAIL_DAYS` (3) days with data may supply the value. A figure last seen on the 17th is residue, not month-end data. Three days tolerates a transient status-page failure on the last day (the snapshot is that day's last cron cycle) without tolerating a source that went away mid-month. This removes both contaminations at their origin.
+- **`resolveArchiveOfficialUptime` then requires the Score to have consumed it** (`scoreConfidence === 'high'` ⟺ `score.ts` `hasUptime`), so display and score cannot contradict each other. The archive also persists `scoreConfidence`, so the report labels the uptime source from data rather than a hand-maintained service list.
+
+Two deliberate non-obvious behaviours in that gate:
+
+- Withholding a month-end value the Score didn't consume **warns**. It is reachable without any contamination: `scoreConfidence` comes from ONE read of `services:latest` on build day, so a status-page fetch that fails on that read makes a service which published uptime all month read `medium` and lose its figure. The number is still withheld (a displayed uptime beside a `/60` score is the contradiction this issue exists to remove — and that archived score is wrong too), but discarding a month-observed figure silently would be the very defect being fixed.
+- **No score data at all → keep the month-end value.** `scoreSvc === undefined` means `services:latest` was unreadable; the daily snapshots stand on their own and there is no score to contradict. Tying `officialUptime` to `scoreData` would let one parse failure erase every service's uptime from an archive the cron never rebuilds (it only builds when the entry is absent).
+
+**Archives written before this shipped keep the contaminated values and are corrected out-of-band — do not reach for `/api/admin/rebuild-archive`.** It is not idempotent: it rebuilds `scoreData` from the **current** `services:latest`, so a historical month's scores are overwritten with today's. And because the gate above reads that same current `scoreConfidence`, rebuilding a month whose service has *since* lost its source (Character.AI) also withholds the uptime it genuinely published back then. Patch the `archive:{period}` KV entry directly instead.
+
 Concretely:
 - **Worker** (`services.ts`): when no official uptime is found, leave `uptime30d` null and set no `uptimeSource`. The card incident COUNT + Incident History stay the live `filtered` set.
 - **Score** (`score.ts`): computed on the **AVAILABLE components only, rescaled to 100** — `(uptime? 40) + incidents 25 + recovery 15 + (probe? 20)` over the available max. A no-official-uptime service drops the 40-pt uptime component (no assumed value) and is scored on incidents + recovery (+ probe if any); `confidence` = `hasUptime ? 'high' : probe ? 'medium' : 'low'`. Backward-compatible (uptime+probe → /100 unchanged; no-probe → /80 = ×1.25 unchanged).
