@@ -1,7 +1,21 @@
 # Gitignored local config copied into every new git worktree (Claude Code `--worktree`,
 # subagent `isolation: worktree`, desktop parallel sessions). Gitignore syntax; only files
 # that match AND are gitignored are copied, so tracked files are never duplicated.
+# Read from the MAIN checkout's copy of this file, so an edit here only takes effect once
+# it is merged and pulled into main.
 # See docs/reference/parallel-agents.md.
 .env
 .env.local
 .dev.vars
+
+# Vercel project link. Without it `vercel dev` (required to verify /intro, /is-*-down and the
+# other Edge SSR pages locally) sees no link, and `--yes` silently CREATES a new Vercel project
+# named after the worktree directory. Eight such throwaway projects had accumulated, one per
+# worktree that ever ran the Edge dev server. Copying the link points every worktree at the same
+# project the main checkout uses. Only `project.json` — never the `.vercel` build cache.
+#
+# `aiwatch-dev` is the PRODUCTION project despite its name (main merges auto-deploy to it), so a
+# linked worktree could `vercel deploy --prod` straight to prod. That is not a new hazard — the
+# main checkout is linked to the same project and already carries it — and this repo never ships
+# the frontend via the CLI (`git push origin main` does). Worktrees just reach parity with main.
+.vercel/project.json
