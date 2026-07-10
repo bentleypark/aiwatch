@@ -149,11 +149,11 @@ session is active → branch in a NEW worktree, never in-place on the shared mai
 session can `git checkout` it out from under you, dragging its uncommitted WIP into your diff). **Launched from the VS Code
 extension button** (no `--worktree` flag)? Say **"work in a worktree"** right after the session
 starts — Claude relocates via the `EnterWorktree` tool (the Desktop app auto-creates one per
-session; the extension does not). `.worktreeinclude` copies `.env`/`.dev.vars`/`.vercel/project.json`
-into a `--worktree`/`EnterWorktree` worktree (a **subagent** worktree gets only the top-level entries
-— no `worker/.dev.vars`, no Vercel link); it is read from the MAIN checkout, so an edit to it only
-takes effect once merged. Without the Vercel link `vercel dev --yes` silently creates a throwaway
-project per worktree. Run
+session; the extension does not). `.worktreeinclude` copies `.env`/`.env.local`/`.dev.vars`/`.vercel/project.json`
+into every Claude-Code-created worktree (`--worktree`/`EnterWorktree` **and** subagent
+`isolation: worktree`), matching at any depth (`.dev.vars` → `worker/.dev.vars`) and creating missing
+dirs; it is read from the MAIN checkout, so an edit to it only takes effect once merged. Without the
+Vercel link `vercel dev --yes` silently creates a throwaway project per worktree. Run
 `npm install` per worktree; offset dev-server ports by `+100·N` per slot; **deployment stays
 sequential** (single prod Worker/KV). Full workflow + launch-method table + port table:
 **[docs/reference/parallel-agents.md](docs/reference/parallel-agents.md)**.
