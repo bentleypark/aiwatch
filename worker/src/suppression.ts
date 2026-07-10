@@ -196,6 +196,21 @@ export async function readSuppressionsFresh(kv?: KVNamespace): Promise<Suppressi
   }
 }
 
+/** #975 — like `readSuppressionsFresh`, but distinguishes "nothing is suppressed" (`[]`) from "the
+ *  list could not be read" (`null`). The sibling collapses both to `[]`, which is right for a caller
+ *  that merely HIDES incidents (fail-open shows one too many) and dangerous for one that DELETES them:
+ *  the phantom prune must never mistake a KV blip for "no incident is hidden" and erase a suppressed
+ *  entry. Callers that destroy data fail CLOSED on `null`. */
+export async function readSuppressionsFreshOrNull(kv?: KVNamespace): Promise<SuppressionEntry[] | null> {
+  if (!kv) return null
+  try {
+    const raw = await kv.get(SUPPRESSIONS_KEY)
+    return raw ? normalizeSuppressions(JSON.parse(raw)) : []
+  } catch {
+    return null
+  }
+}
+
 /** Read + parse the suppression list from KV (best-effort, isolate-cached). Returns [] when kv is
  *  absent (tests / callers without KV) or on any read/parse error, so suppression can never break the
  *  status path — a failed read simply falls back to "nothing suppressed" (or the last good cache). */

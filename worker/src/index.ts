@@ -2796,7 +2796,9 @@ export default {
             try {
               const currentMonth = today.slice(0, 7) // YYYY-MM
               const res = await accumulateIncidentsOnlyIfChanged(env.STATUS_CACHE, dailyServices, currentMonth)
-              if (res === 'failed') console.error(`[daily-summary] incident accumulation KV write failed for ${currentMonth}`)
+              // #975 — 'failed' now covers a KV READ error too (which aborts before writing), not only
+              // a failed write. Either way the cycle is a no-op and the next one retries.
+              if (res === 'failed') console.error(`[daily-summary] incident accumulation KV read/write failed for ${currentMonth}`)
             } catch (err) {
               console.error('[daily-summary] incident accumulation failed:', err instanceof Error ? err.message : err)
             }
