@@ -73,24 +73,26 @@ A worktree is a **fresh checkout**, so it starts without dependencies or gitigno
 config.
 
 1. **Local env** — handled automatically. [`.worktreeinclude`](../../.worktreeinclude) lists the
-   gitignored local config to copy into a new worktree: `.env`, `.env.local`, `.dev.vars`, and
-   `.vercel/project.json` (gitignore syntax; only gitignored matches are copied). **Which of those
-   you actually get depends on the copier** — see below; a `--worktree` / `EnterWorktree` worktree
-   gets all four, a subagent worktree gets only the top-level two. Manual `git worktree add` copies
-   **nothing** — do it yourself.
+   gitignored local config copied into every Claude-Code-created worktree: `.env`, `.env.local`,
+   `.dev.vars`, and `.vercel/project.json` (gitignore syntax; only gitignored matches are copied).
+   Both copiers — `--worktree` / `EnterWorktree` **and** subagent `isolation: worktree` — copy all
+   four. Manual `git worktree add` copies **nothing**; do it yourself.
 
-   There are **two copiers** and they do not behave the same. All of this was established by probe,
-   not assumed:
-   - Common to both: **the list and the source files are read from the MAIN checkout**, not from the
-     worktree you happen to be sitting in. So an edit to `.worktreeinclude` only takes effect once it
-     is merged and pulled into main — you cannot test a new entry from inside a worktree.
-   - **`--worktree` / `EnterWorktree`** — patterns match at **any depth** and the copier **creates
-     missing directories**: `.dev.vars` picks up `worker/.dev.vars`, and `.vercel/project.json` lands
-     even though a fresh worktree has no `.vercel/`.
-   - **Subagent (`isolation: worktree`)** — **top-level matches only**. It gets `.env` and
-     `.env.local` but *neither* nested entry, so no `worker/.dev.vars` and no `.vercel/project.json`.
-     A subagent worktree can therefore run neither the local Worker nor `vercel dev`, and the
-     Vercel-link fix below does not reach it.
+   Two behaviours, common to both copiers, each established by probe rather than assumed:
+   - **The list and the source files are read from the MAIN checkout**, not from the worktree you
+     happen to be sitting in. So an edit to `.worktreeinclude` only takes effect once it is merged
+     and pulled into main — you cannot test a new entry from inside a worktree.
+   - Patterns match at **any depth** and the copier **creates missing directories**: `.dev.vars`
+     picks up `worker/.dev.vars`, and `.vercel/project.json` lands even though a fresh worktree has
+     no `.vercel/`.
+
+   > **Correction (2026-07-10).** PR #977 claimed a subagent worktree receives only the top-level
+   > entries. That was wrong, and it is worth recording *why*: the probe `stat`ed the subagent's
+   > worktree **after the subagent finished**, and the harness auto-removes an unchanged worktree —
+   > so "file not found" was reading a deleted directory, not an uncopied file. Re-probed twice from
+   > inside a live subagent: `worker/.dev.vars` and `.vercel/project.json` are both present. When
+   > probing a worktree's contents, run the check **inside** the worktree's own session; a
+   > post-mortem `ls` from outside proves nothing.
 2. **Dependencies** — **not** shared. Run `npm install` in each new worktree (`node_modules`
    and Python venvs are per-directory).
 
