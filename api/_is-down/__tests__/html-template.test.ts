@@ -759,7 +759,7 @@ function mkRegionRec(overrides: Partial<RegionStatusResult> = {}): RegionStatusR
     hasRegionSpecific: true,
     allDown: false,
     recommendedRegion: usWest,
-    docsUrl: 'https://docs.pinecone.io/troubleshooting/available-cloud-regions',
+    docsUrl: 'https://docs.pinecone.io/guides/index-data/create-an-index#cloud-regions',
     ongoingCount: 1,
     ...overrides,
   }

@@ -357,24 +357,34 @@ describe('shouldShowFallback (#454 status-based modal gate)', () => {
 })
 
 describe('region-switch fallback suppression (#641)', () => {
-  const regionInc = { id: 'oai-r', title: 'errors', status: 'investigating', componentNames: ['us-east-1'] }
+  // #973 — these cases used openai as the "region-switchable" vehicle, which was the bug: openai
+  // is region-AWARE (we can see which region broke) but not region-SWITCHABLE (the caller cannot
+  // pick a region). Pinecone is genuinely switchable, so it now carries the positive cases, and
+  // openai carries the new negative one.
+  const regionInc = { id: 'pc-r', title: 'errors', status: 'investigating', componentNames: ['AWS us-east-1'] }
 
   describe('hasRegionSwitch', () => {
-    it('is true for a region-specific outage on a region-aware service', () => {
-      expect(hasRegionSwitch({ id: 'openai', incidents: [regionInc] })).toBe(true)
+    it('is true for a region-specific outage on a region-switchable service', () => {
+      expect(hasRegionSwitch({ id: 'pinecone', incidents: [regionInc] })).toBe(true)
     })
     it('is false for a non-region-aware service (no SERVICE_REGIONS entry)', () => {
       expect(hasRegionSwitch({ id: 'mistral', incidents: [{ id: 'm', title: 'errors', status: 'investigating' }] })).toBe(false)
     })
-    it('is false when there is no ongoing incident (openai is not always-show)', () => {
-      expect(hasRegionSwitch({ id: 'openai', incidents: [] })).toBe(false)
+    it('is false for a region-AWARE but non-switchable service (#973)', () => {
+      // openai has a SERVICE_REGIONS map but is absent from REGION_SWITCHABLE → recommendedRegion
+      // is null → no region link, and the cross-service fallback is NOT suppressed.
+      const oaiInc = { id: 'oai-r', title: 'errors', status: 'investigating', componentNames: ['us-east-1'] }
+      expect(hasRegionSwitch({ id: 'openai', incidents: [oaiInc] })).toBe(false)
+    })
+    it('is false when there is no ongoing incident (pinecone is not always-show)', () => {
+      expect(hasRegionSwitch({ id: 'pinecone', incidents: [] })).toBe(false)
     })
     it('stays true when a global incident coexists (web predicate intentionally omits hasGlobalIncident)', () => {
       // Documents the intentional asymmetry vs the Worker's buildRegionHint (which additionally
       // guards hasGlobalIncident). The web surfaces render the region link + suppress the fallback
       // here; the Worker keeps the fallback. Pinning so the decision doesn't silently drift.
-      const globalInc = { id: 'oai-g', title: 'Major outage', status: 'investigating' }
-      expect(hasRegionSwitch({ id: 'openai', incidents: [regionInc, globalInc] })).toBe(true)
+      const globalInc = { id: 'pc-g', title: 'Major outage', status: 'investigating' }
+      expect(hasRegionSwitch({ id: 'pinecone', incidents: [regionInc, globalInc] })).toBe(true)
     })
   })
 
@@ -382,15 +392,28 @@ describe('region-switch fallback suppression (#641)', () => {
     const op = (id, category, provider, aiwatchScore) => ({ id, category, provider, aiwatchScore, status: 'operational', incidents: [] })
 
     it('excludes a region-switchable service but KEEPS a non-region service\'s fallback (per-service)', () => {
-      const openai = { id: 'openai', category: 'api', provider: 'OpenAI', status: 'degraded', incidents: [regionInc] }
+      const pinecone = { id: 'pinecone', category: 'api', provider: 'Pinecone', status: 'degraded', incidents: [regionInc] }
       const cursor = { id: 'cursor', category: 'agent', provider: 'Cursor', status: 'degraded', incidents: [] }
-      const services = [openai, cursor, op('claude', 'api', 'Anthropic', 95), op('codex', 'agent', 'OpenAI', 88), op('windsurf', 'agent', 'Windsurf', 85)]
+      // turbopuffer is pinecone's Tier-8 sibling (#857) — without it pinecone has no api fallback
+      // at all, and the contrast assertion below could not tell suppression from absence.
+      const services = [pinecone, cursor, op('turbopuffer', 'api', 'turbopuffer', 92), op('claude', 'api', 'Anthropic', 95), op('codex', 'agent', 'OpenAI', 88), op('windsurf', 'agent', 'Windsurf', 85)]
 
-      const cats = getGroupedFallbacksExcludingRegionSwitchable([openai, cursor], services).map(g => g.category)
+      const cats = getGroupedFallbacksExcludingRegionSwitchable([pinecone, cursor], services).map(g => g.category)
       expect(cats).toContain('agent')     // cursor (no region map) keeps its fallback
-      expect(cats).not.toContain('api')   // openai (region-switchable) excluded → no api group
+      expect(cats).not.toContain('api')   // pinecone (region-switchable) excluded → no api group
       // Contrast: without the exclusion the api group WOULD appear (proves it's the suppression, not absence)
-      expect(getGroupedFallbacks([openai, cursor], services).map(g => g.category)).toContain('api')
+      expect(getGroupedFallbacks([pinecone, cursor], services).map(g => g.category)).toContain('api')
+    })
+
+    it('KEEPS the fallback for a region-aware but non-switchable service (#973)', () => {
+      // The regression this issue fixed: openai's unusable region link suppressed the one action
+      // the reader could actually take. With no region switch, the api fallback group must appear.
+      const oaiInc = { id: 'oai-r', title: 'errors', status: 'investigating', componentNames: ['us-east-1'] }
+      const openai = { id: 'openai', category: 'api', provider: 'OpenAI', status: 'degraded', incidents: [oaiInc] }
+      const services = [openai, op('claude', 'api', 'Anthropic', 95), op('gemini', 'api', 'Google', 90)]
+
+      const cats = getGroupedFallbacksExcludingRegionSwitchable([openai], services).map(g => g.category)
+      expect(cats).toContain('api')
     })
 
     it('returns [] for a non-array input', () => {
