@@ -650,6 +650,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   for (const svc of scored) {
     const config = SERVICES.find(c => c.id === svc.id)
     for (const inc of svc.incidents ?? []) {
+      // One clock per incident: the flap-escape (#983) and the first-seen hold window (#835) must
+      // agree on "now", and re-reading Date.now() between them would let them disagree by ms.
+      const nowMs = Date.now()
       const wasAlerted = await env.STATUS_CACHE.get(`alerted:new:${inc.id}`).catch(() => null)
       if (wasAlerted) {
         let set = alertedNewMap.get(inc.id)
@@ -658,10 +661,17 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
         if (corrupt) console.warn('[cron] #545 corrupt alerted:new roster, treating as legacy:', inc.id, wasAlerted.slice(0, 80))
         for (const id of ids) set.add(id)
       }
-      if (config && isFlapSuppressible(svc.id, config, inc)) {
+      if (config && isFlapSuppressible(svc.id, config, inc, nowMs)) {
         const flapKey = flapSuppressionKey(svc.id, inc)
         const flapActive = await env.STATUS_CACHE.get(flapKey).catch(() => null)
-        if (flapActive) suppressedIncIds.add(inc.id)
+        if (flapActive) {
+          // #983 — leave a forensic trail. Suppression drops BOTH the New and the Resolved alert, so
+          // without this line a post-incident triage cannot tell "AIWatch suppressed it" from
+          // "AIWatch never saw it" (the #970 silent-drop forensics gap). Tagged auto-monitor incidents
+          // are the ones whose `major` impact no longer protects them, so name the tag explicitly.
+          console.log('[cron] #283/#983 flap-suppressed (same-title window active):', svc.id, inc.id, `autoMonitor=${inc.autoMonitor === true}`, JSON.stringify(inc.title.slice(0, 60)))
+          suppressedIncIds.add(inc.id)
+        }
         else flapKeysToWrite.set(inc.id, flapKey)
       }
       // #633 — hold a flap-shaped new incident on its first sight (no pending marker from a prior
@@ -675,7 +685,6 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
         // is worse than one phantom on a transient KV blip (preserves the prior fail-not-hold).
         // A legacy '1' marker (pre-#835) parses to 1 → age huge → fires immediately — a safe one-time
         // transition (no in-flight incident gets stuck held across the deploy).
-        const nowMs = Date.now()
         const pendingRaw = await env.STATUS_CACHE.get(pendingNewKey(inc.id)).catch((err) => {
           console.warn('[cron] #835 pending:new read failed — failing open (will not hold):', inc.id, err instanceof Error ? err.message : err)
           return '0'

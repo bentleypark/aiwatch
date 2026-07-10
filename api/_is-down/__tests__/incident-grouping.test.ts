@@ -416,3 +416,41 @@ describe('isAutoMonitorTitle (#599)', () => {
     expect(isAutoMonitorTitle('Completion API Degraded -mistral')).toBe(false)
   })
 })
+
+describe('worker-tagged autoMonitor incidents (#983)', () => {
+  // Lockstep with src/utils/__tests__/incidentGrouping.test.js — the is-down SSR page reads the same
+  // `autoMonitor` field off /api/status/cached, so a divergence here means one surface groups the
+  // Twelve Labs burst and the other does not.
+  const TZ = { timeZone: 'America/Los_Angeles' }
+  const mk = (id: string, impact: string, startedAt: string, resolvedAt: string, duration: string) => ({
+    id, title: 'Some API features are experiencing issues', status: 'resolved',
+    impact, startedAt, resolvedAt, duration, autoMonitor: true,
+  })
+  const burst = [
+    mk('kqk7gdf0h84l', 'minor', '2026-07-09T08:24:41.241-07:00', '2026-07-09T08:29:42.993-07:00', '6m'),
+    mk('qyc0cyhlqctg', 'major', '2026-07-09T11:13:26.312-07:00', '2026-07-09T11:27:20.411-07:00', '14m'),
+    mk('qkkqnhkfs69j', 'major', '2026-07-09T14:07:01.069-07:00', '2026-07-09T14:22:55.005-07:00', '16m'),
+    mk('7wk40blkybtq', 'major', '2026-07-09T15:04:18.959-07:00', '2026-07-09T15:15:19.428-07:00', '11m'),
+  ]
+
+  it('folds the burst into a single ×4 group row', () => {
+    const rows = groupIncidents(burst, TZ)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].kind).toBe('group')
+    if (rows[0].kind !== 'group') throw new Error('unreachable')
+    expect(rows[0].count).toBe(4)
+    expect(rows[0].dayKey).toBe('2026-07-09')
+  })
+
+  it('without the tag the same four incidents stay four rows', () => {
+    const untagged = burst.map(({ autoMonitor, ...rest }) => rest)
+    expect(groupIncidents(untagged, TZ)).toHaveLength(4)
+  })
+
+  it('leaves the provider human-written incidents ungrouped', () => {
+    const real = { id: 'real-1', title: 'Search API failure', status: 'resolved', impact: 'major', startedAt: '2026-07-09T12:00:00.000-07:00', resolvedAt: '2026-07-09T12:40:00.000-07:00', duration: '40m' }
+    const rows = groupIncidents([...burst, real], TZ)
+    expect(rows).toHaveLength(2)
+    expect(rows.filter((r) => r.kind === 'group')).toHaveLength(1)
+  })
+})

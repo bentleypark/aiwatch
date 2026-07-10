@@ -172,15 +172,25 @@ export function groupIncidents(incidents, options = {}) {
 
   // Bucket by (dayKey, normalizedTitle). Skip non-null impact — those represent
   // real human-curated incidents — EXCEPT (a) generic auto-monitoring titles
-  // (Statuspage assigns a default impact even to noise — #387, Character.AI) and
+  // (Statuspage assigns a default impact even to noise — #387, Character.AI),
   // (b) machine-emitted `minor` auto-monitor noise: BetterStack flap markers
   // "<model> — recovered/down" (#597, Together/Fireworks) + Instatus "<X> Degraded"
-  // blips (#599, Mistral). All still cluster.
+  // blips (#599, Mistral), and (c) incidents the WORKER tagged `autoMonitor` (#983).
+  // All still cluster.
+  //
+  // (c) is the source-tagged case and needs no title heuristic here: the worker matched the
+  // provider's machine-emitted title against an anchored per-service allowlist and serialized the
+  // verdict on /api/status. The other two must sniff titles because they predate the tag. It also
+  // ignores `impact` entirely — a Twelve Labs auto-monitor blip carries `impact: 'major'` only
+  // because one sub-component read `major_outage`, which is exactly the inference (a) and (b) get
+  // wrong. Incidents supplemented from a MONTHLY ARCHIVE written before the tag shipped carry no
+  // `autoMonitor` field and so still render individually; the archive accumulator is additive and
+  // does not self-heal (see #934/#975).
   const buckets = new Map()
   const ungroupable = []
   incidents.forEach((inc, idx) => {
     const isMinorAutoNoise = inc.impact === 'minor' && (isFlapTitle(inc.title) || isAutoMonitorTitle(inc.title))
-    if (inc.impact != null && !isGenericTitle(inc.title) && !isMinorAutoNoise) {
+    if (inc.impact != null && !inc.autoMonitor && !isGenericTitle(inc.title) && !isMinorAutoNoise) {
       ungroupable.push({ idx, inc })
       return
     }
