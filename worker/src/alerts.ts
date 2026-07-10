@@ -53,8 +53,17 @@ const FLAP_TITLE_RE = /\s*—\s*(down|recovered)\s*$/
 // post-#565 — disabling both the #283 flap-dedup AND the #633 first-seen hold for exactly the
 // flapSuppression services they target (the Modal "Web endpoints — down" phantom recurred for this
 // reason). A flap is now: '— down'/'— recovered' shape AND impact is not 'major' (null or 'minor').
+// #983 — an `autoMonitor`-tagged incident (services.ts stamps it from the provider's machine-emitted
+// title allowlist) is a flap by construction, with NO "— down/recovered" suffix and often
+// `impact: 'major'` — Statuspage derives impact from component status, so a 6-minute single-component
+// blip reads `major`. Tagging is opt-in per service and the patterns are anchored, so this cannot
+// reach a human-written incident. `critical` is still never treated as a flap on ANY path: it is the
+// one level a status page never assigns by auto-monitor alone, so it stays the escape hatch that
+// guarantees a genuine broad outage alerts immediately.
 export function isFlapNotice(inc: Incident): boolean {
-  if (inc.impact === 'major') return false  // explicit broad outage → never a flap (alert immediately)
+  if (inc.impact === 'critical') return false  // real broad outage → never a flap (alert immediately)
+  if (inc.autoMonitor) return true             // #983 — machine-emitted; impact is component-derived
+  if (inc.impact === 'major') return false     // explicit broad outage → never a flap (alert immediately)
   return FLAP_TITLE_RE.test(inc.title)
 }
 
@@ -67,19 +76,63 @@ export function flapSuppressionKey(svcId: string, inc: Incident): string {
   return `alerted:flap:${svcId}:${normalizeFlapTitle(inc.title)}`
 }
 
+// #983 — a flap is SHORT by definition. Flap suppression silences BOTH halves (new + res) of any
+// same-titled incident inside a 60-min window, which is right for a blip and wrong for a real
+// sustained outage that happens to reuse the title. Before #983 the `impact !== 'major'` screen in
+// isFlapNotice was the de-facto guard; an `autoMonitor` incident bypasses that screen (its `major` is
+// component-derived), so a genuine Twelve Labs outage opened minutes after a blip could have been
+// suppressed for up to an hour. This is the replacement guard, and it generalizes: once an incident
+// has RUN longer than every auto-monitor blip we've observed (5–16m across BetterStack + Statuspage),
+// it is not a flap on any service — so it escapes suppression and alerts, tagged or not.
+export const FLAP_SUPPRESSION_ESCAPE_MS = 30 * 60 * 1000
+
+/** How long the incident has RUN: to `resolvedAt` when resolved, else to `nowMs`.
+ *
+ *  This feeds a SUPPRESSION guard, so an undecidable input must **fail open** — return a run length
+ *  that escapes the window, so the alert SHIPS. Dropping a real alert is worse than one phantom
+ *  (the #835 rule; #970's "판단 불가는 fail-open + warn"). An unparseable `startedAt` therefore yields
+ *  `Infinity` + a warn, NOT 0: returning 0 would pin the incident below the escape threshold on every
+ *  cron cycle, silently muting a real outage for the whole 60-min flap window. An unparseable
+ *  `resolvedAt` degrades to measuring against `nowMs` (the best available clock) rather than
+ *  discarding the incident's age. A `startedAt` in the future (upstream clock skew) clamps to 0 and
+ *  stays suppressible — it self-corrects within cycles as `nowMs` advances past it. Pure — unit-tested. */
+export function incidentRunMs(inc: Incident, nowMs: number): number {
+  const started = Date.parse(inc.startedAt)
+  if (Number.isNaN(started)) {
+    console.warn('[alerts] #983 unparseable startedAt — failing open (no flap suppression):', inc.id, inc.startedAt)
+    return Number.POSITIVE_INFINITY
+  }
+  let ended = nowMs
+  if (inc.resolvedAt) {
+    const resolved = Date.parse(inc.resolvedAt)
+    if (Number.isNaN(resolved)) console.warn('[alerts] #983 unparseable resolvedAt — measuring run length to now:', inc.id, inc.resolvedAt)
+    else ended = resolved
+  }
+  return Math.max(0, ended - started)
+}
+
 /**
  * Whether this incident should be considered for flap suppression.
  * Returning true means: caller should check the KV key; if the key exists, skip the
  * Discord alert; if not, send the alert AND write the key to start the window.
+ *
+ * `nowMs` is REQUIRED, not optional: an optional clock would let a call site silently keep the old
+ * always-suppressible behavior and quietly reproduce the very silent-drop this guard exists to
+ * prevent (the #970 lesson). Making it required means the type-checker names every call site.
  */
 export function isFlapSuppressible(
   svcId: string,
   config: { flapSuppression?: boolean },
   inc: Incident,
+  nowMs: number,
 ): boolean {
   if (TIER1_IDS.has(svcId)) return false
   if (!config.flapSuppression) return false
-  return isFlapNotice(inc)
+  if (!isFlapNotice(inc)) return false
+  // Escapes the window symmetrically for the ongoing and the resolved half, so an escaped incident
+  // that alerted New can never lose its Resolved (which would strand an "ongoing" card forever).
+  if (incidentRunMs(inc, nowMs) >= FLAP_SUPPRESSION_ESCAPE_MS) return false
+  return true
 }
 
 // #633 — first-seen confirmation gate (phantom-alert suppression).
@@ -124,14 +177,20 @@ export function pendingNewKey(incId: string): string {
 // NOTE: unlike isFlapNotice (which excludes only `major` because the "— down/recovered" title regex
 // already screens out a real critical incident), this path has no title guard, so it must exclude
 // BOTH severe levels — a Langfuse statuspage incident maps `critical` through (parsers/statuspage.ts).
+// #983 — `autoMonitor` is a SECOND opt-in into this hold, independent of `holdShortIncidents`: the tag
+// itself declares the incident machine-emitted, so the `major` guard below (which reads impact as a
+// human severity judgement) does not apply to it. `critical` is checked FIRST so it out-ranks the tag
+// on every path — a tagged `critical` incident still alerts immediately.
 export function isShortIncidentHoldable(
   svcId: string,
   config: { holdShortIncidents?: boolean },
   inc: Incident,
 ): boolean {
   if (TIER1_IDS.has(svcId)) return false
+  if (inc.impact === 'critical') return false
+  if (inc.autoMonitor) return true
   if (!config.holdShortIncidents) return false
-  if (inc.impact === 'major' || inc.impact === 'critical') return false
+  if (inc.impact === 'major') return false
   return true
 }
 
@@ -155,7 +214,11 @@ export function shouldHoldNewIncident(
   if (state.alreadyAlerted) return false        // already fired in a prior cycle — never re-hold
   if (inc.status === 'resolved') return false   // resolved path is gated separately (alertedNewMap)
   // flap-shaped on a flap service, OR any non-major new incident on a short-incident-hold service.
-  if (!(isFlapSuppressible(svcId, config, inc) || isShortIncidentHoldable(svcId, config, inc))) return false
+  // #983 — the same clock the hold window uses, so an incident that has run past
+  // FLAP_SUPPRESSION_ESCAPE_MS stops being hold-eligible via the flap branch too. It can still be held
+  // by isShortIncidentHoldable (the tag / holdShortIncidents), which is bounded by FLAP_HOLD_MS (9min)
+  // and therefore cannot delay a long real outage: by the time the escape matters the hold has lapsed.
+  if (!(isFlapSuppressible(svcId, config, inc, state.nowMs) || isShortIncidentHoldable(svcId, config, inc))) return false
   if (state.firstSeenMs == null) return true    // first sight → hold (caller stamps firstSeen = now)
   return state.nowMs - state.firstSeenMs < FLAP_HOLD_MS  // still inside the window → hold; else confirm + fire
 }

@@ -743,3 +743,82 @@ describe('Overview recentIncidents grouping regression (#496)', () => {
     expect(rows[0].incident.affectedNames).toContain('Claude Code')
   })
 })
+
+describe('worker-tagged autoMonitor incidents (#983)', () => {
+  // The real 2026-07-09 Twelve Labs burst: one auto-monitor title, four incidents, 6–16m each.
+  // Three carry `impact: 'major'` — not a human severity call, just one sub-component reading
+  // `major_outage`. Before #983 they were `ungroupable` (prose title, non-null impact) and rendered
+  // as four rows. Pinned to America/Los_Angeles so the day-bucket is deterministic in CI.
+  const TZ = { timeZone: 'America/Los_Angeles' }
+  const burst = [
+    { id: 'kqk7gdf0h84l', title: 'Some API features are experiencing issues', status: 'resolved', impact: 'minor', startedAt: '2026-07-09T08:24:41.241-07:00', resolvedAt: '2026-07-09T08:29:42.993-07:00', duration: '6m', timeline: [], autoMonitor: true },
+    { id: 'qyc0cyhlqctg', title: 'Some API features are experiencing issues', status: 'resolved', impact: 'major', startedAt: '2026-07-09T11:13:26.312-07:00', resolvedAt: '2026-07-09T11:27:20.411-07:00', duration: '14m', timeline: [], autoMonitor: true },
+    { id: 'qkkqnhkfs69j', title: 'Some API features are experiencing issues', status: 'resolved', impact: 'major', startedAt: '2026-07-09T14:07:01.069-07:00', resolvedAt: '2026-07-09T14:22:55.005-07:00', duration: '16m', timeline: [], autoMonitor: true },
+    { id: '7wk40blkybtq', title: 'Some API features are experiencing issues', status: 'resolved', impact: 'major', startedAt: '2026-07-09T15:04:18.959-07:00', resolvedAt: '2026-07-09T15:15:19.428-07:00', duration: '11m', timeline: [], autoMonitor: true },
+  ]
+
+  it('folds the whole burst into a single ×4 group row', () => {
+    const rows = groupIncidents(burst, TZ)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].kind).toBe('group')
+    expect(rows[0].count).toBe(4)
+    expect(rows[0].normalizedTitle).toBe('Some API features are experiencing issues')
+    expect(rows[0].dayKey).toBe('2026-07-09')
+    expect(rows[0].rangeStart).toBe('2026-07-09T08:24:41.241-07:00')
+    expect(rows[0].rangeEnd).toBe('2026-07-09T15:04:18.959-07:00')
+  })
+
+  it('groups across mixed impact levels — the tag out-ranks impact entirely', () => {
+    const rows = groupIncidents(burst, TZ)
+    expect(rows[0].entries.map((e) => e.impact).sort()).toEqual(['major', 'major', 'major', 'minor'])
+  })
+
+  it('without the tag the same four incidents stay four rows (the pre-#983 behavior this fixes)', () => {
+    const untagged = burst.map(({ autoMonitor, ...rest }) => rest)
+    const rows = groupIncidents(untagged, TZ)
+    expect(rows).toHaveLength(4)
+    expect(rows.every((r) => r.kind === 'single')).toBe(true)
+  })
+
+  it('a tagged incident still needs a same-day twin — a lone one renders as a single row', () => {
+    const rows = groupIncidents([burst[0]], TZ)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].kind).toBe('single')
+  })
+
+  it('does not swallow the provider real incidents sharing the day', () => {
+    const real = { id: 'real-1', title: 'Search API failure', status: 'resolved', impact: 'major', startedAt: '2026-07-09T12:00:00.000-07:00', resolvedAt: '2026-07-09T12:40:00.000-07:00', duration: '40m', timeline: [] }
+    const rows = groupIncidents([...burst, real], TZ)
+    expect(rows).toHaveLength(2)
+    expect(rows.filter((r) => r.kind === 'group')).toHaveLength(1)
+    const single = rows.find((r) => r.kind === 'single')
+    expect(single.incident.id).toBe('real-1')
+  })
+
+  it('a tagged `critical` incident still GROUPS — grouping is display-only, unlike the alert path', () => {
+    // Deliberate asymmetry, pinned so it reads as intent: alerts never hold/suppress a `critical`
+    // (isShortIncidentHoldable / isFlapNotice bail on it first), but the incident history has no
+    // reason to keep four identical rows just because the auto-monitor escalated one of them.
+    const withCritical = [burst[0], { ...burst[1], impact: 'critical' }]
+    const rows = groupIncidents(withCritical, TZ)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].kind).toBe('group')
+    expect(rows[0].count).toBe(2)
+  })
+
+  it('archive-supplemented incidents (written before the tag shipped) stay individual — known gap', () => {
+    // The monthly accumulator is additive and does not self-heal (#934/#975), so rows backfilled from
+    // an archive carry no `autoMonitor`. Pinned so a future reader sees this is known, not a bug.
+    const archived = burst.map(({ autoMonitor, ...rest }) => rest)
+    const rows = groupIncidents([...archived], TZ)
+    expect(rows).toHaveLength(4)
+    expect(rows.every((r) => r.kind === 'single')).toBe(true)
+  })
+
+  it('splits the burst across local-day boundaries like any other group', () => {
+    const rows = groupIncidents(burst, { timeZone: 'Asia/Seoul' })
+    // 08:24 PDT is 2026-07-10 00:24 KST; the other three are also 07-10 KST → still one group.
+    expect(rows).toHaveLength(1)
+    expect(rows[0].dayKey).toBe('2026-07-10')
+  })
+})

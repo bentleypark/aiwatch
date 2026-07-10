@@ -193,7 +193,15 @@ export const SERVICES: ServiceConfig[] = [
   // EXCLUDE_FALLBACK: no API_TIER; video understanding has no clean substitute.
   // displayComponentIds (#606): all 10 individual API surfaces (Search/Embed/Analyze/Index/Video
   // list) under the API group. Excludes Platform/Playground/Dashboard (non-API surfaces).
-  { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', '2k0gnkk2kjmz', 'j21c5rdfj8kf', '91lzwtn6071h'], addedAt: '2026-07-02' },
+  // #983 — Twelve Labs' Statuspage auto-monitor opens a BRAND-NEW incident per component blip, all
+  // under one fixed title, and Statuspage stamps `impact: 'major'` on it whenever the affected
+  // sub-component reads `major_outage`. On 2026-07-09 that produced four 5–16m incidents with
+  // identical titles + identical machine-emitted timeline text. `autoMonitorTitles` tags them so the
+  // alert path may hold/dedup them (impact is component-derived, not editorial) and the UI groups
+  // them into one ×N row; `flapSuppression` then dedups a repeat within the 60-min window (#283).
+  // The provider's REAL, human-written incidents use distinct titles ("Search API failure", "API
+  // server failure") and never match this anchored pattern.
+  { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', '2k0gnkk2kjmz', 'j21c5rdfj8kf', '91lzwtn6071h'], autoMonitorTitles: [/^Some API features are experiencing issues\.?$/i], flapSuppression: true, addedAt: '2026-07-02' },
   // LangSmith (#561) — LangChain's hosted observability/eval platform. incident.io page exposes a
   // statuspage v2-compatible API so statuspage.ts covers it. Multi-component worst-of (#379): badge
   // tracks the three load-bearing surfaces (Run Ingestion + API + Application); the other components
@@ -622,6 +630,33 @@ export function existedInMonth(addedAt: string | undefined, monthEndDate: string
   return date <= monthEndDate
 }
 
+/** #983 — does this incident's title match one of the provider's machine-emitted auto-monitor titles?
+ *  Pure. Exact (anchored) patterns only — see `ServiceConfig.autoMonitorTitles`. A service with no
+ *  patterns can never tag, so this is opt-in per service. Unit-tested. */
+export function isAutoMonitorIncident(inc: Incident, config: ServiceConfig): boolean {
+  const patterns = config.autoMonitorTitles
+  if (!patterns || patterns.length === 0) return false
+  const title = inc.title.trim()
+  return patterns.some((re) => re.test(title))
+}
+
+/** #983 — stamp `autoMonitor` on every machine-emitted incident. Applied ONCE, to the ServiceStatus
+ *  `fetchService` returns, so it survives every parse branch, `filterIncidents`, `includeUntaggedIncidents`
+ *  (which re-adds from the RAW parsed array and would bypass a tag stamped inside filterIncidents) and
+ *  the aistudio/xAI source merges. It never touches `title` — the #940 review Critical: a title rewrite
+ *  before `filterIncidents` drops the incident wholesale when an `incidentKeywords` token lives in the
+ *  title. Returns the SAME array reference when nothing matched, so untagged services allocate nothing. */
+export function tagAutoMonitorIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
+  if (!config.autoMonitorTitles?.length || incidents.length === 0) return incidents
+  let tagged = false
+  const out = incidents.map((inc) => {
+    if (!isAutoMonitorIncident(inc, config)) return inc
+    tagged = true
+    return { ...inc, autoMonitor: true }
+  })
+  return tagged ? out : incidents
+}
+
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
   const { incidentKeywords, incidentExclude, incidentComponents } = config
   return incidents.filter((inc) => {
@@ -911,7 +946,21 @@ export function classifyStatusPageFailure(httpStatus: number): 'dead-source' | '
   return httpStatus >= 400 && httpStatus < 500 ? 'dead-source' : 'transient'
 }
 
-async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
+/** #983 — the single tagging choke point. `fetchServiceUntagged` has ~10 return paths (flashduty feed,
+ *  summary.json, AWS health, Azure RSS, BetterStack/Instatus/xAI/aistudio, plus the early operational
+ *  and error bases); stamping `autoMonitor` on its result covers all of them, and is safe AFTER
+ *  filtering because the tag is additive (no `title` mutation → `filterIncidents` is unaffected). */
+// Exported ONLY so a test can drive the REAL production call path end-to-end (parse → filterIncidents
+// → includeUntaggedIncidents → tag). Unit-testing `tagAutoMonitorIncidents` alone would leave this
+// wrapper unguarded: drop the call here, or move it before `filterIncidents`, and every pure test
+// stays green while the tag never reaches /api/status (the #966 / #940 "tested twin" failure).
+export async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
+  const svc = await fetchServiceUntagged(config, prefetched, kv)
+  const incidents = tagAutoMonitorIncidents(svc.incidents, config)
+  return incidents === svc.incidents ? svc : { ...svc, incidents }
+}
+
+async function fetchServiceUntagged(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
   const now = new Date().toISOString()
   let parseErrors = 0 // Track internal parse/fetch failures — prevents resetFetchFailure from masking repeated errors
   const base: ServiceStatus = {

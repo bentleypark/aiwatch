@@ -67,6 +67,10 @@ export interface GroupingIncident {
   impact: string | null
   duration?: string | null
   resolvedAt?: string | null
+  // #983 — worker-stamped: the provider's auto-monitor opened this incident, so `impact` is
+  // component-derived rather than a human severity call. Optional because only opted-in services
+  // (ServiceConfig.autoMonitorTitles) emit it.
+  autoMonitor?: boolean
 }
 
 export interface GroupRow {
@@ -135,12 +139,15 @@ export function groupIncidents(
 
   incidents.forEach((inc, idx) => {
     // Real human-curated incidents (impact != null) skip clustering — EXCEPT
-    // (a) Statuspage auto-monitoring placeholders (Character.AI, #387) and
+    // (a) Statuspage auto-monitoring placeholders (Character.AI, #387),
     // (b) machine-emitted `minor` auto-monitor noise: BetterStack flap markers
     // "<model> — recovered/down" (#597, Together/Fireworks) + Instatus "<X> Degraded"
-    // blips (#599, Mistral). All cluster because the impact is boilerplate, not curation.
+    // blips (#599, Mistral), and (c) worker-tagged `autoMonitor` incidents (#983, Twelve Labs),
+    // whose `impact` may be 'major' purely because one sub-component read `major_outage`.
+    // All cluster because the impact is boilerplate, not curation.
+    // Lockstep with src/utils/incidentGrouping.js.
     const isMinorAutoNoise = inc.impact === 'minor' && (isFlapTitle(inc.title) || isAutoMonitorTitle(inc.title))
-    if (inc.impact != null && !isGenericTitle(inc.title) && !isMinorAutoNoise) {
+    if (inc.impact != null && !inc.autoMonitor && !isGenericTitle(inc.title) && !isMinorAutoNoise) {
       ungroupable.push({ idx, inc })
       return
     }

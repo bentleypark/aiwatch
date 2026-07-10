@@ -16,6 +16,14 @@ export interface Incident {
   resolvedAt?: string | null
   duration: string | null
   timeline: TimelineEntry[]
+  // #983 — this incident was opened by the provider's AUTO-MONITOR, not written by a human.
+  // Stamped in services.ts from `ServiceConfig.autoMonitorTitles`; serialized on /api/status so the
+  // SPA + is-down SSR grouping read the same tag the alert path does (the #940 "tag at the source"
+  // precedent). Everything downstream previously inferred "a human wrote this" from `impact != null`
+  // / `impact !== 'major'`, which is false for an Atlassian page: Statuspage DERIVES `impact` from
+  // component status, so one sub-component at `major_outage` yields `impact: 'major'` on a 6-minute
+  // machine-emitted blip. Absent (undefined) on every untagged service — never assume `false`.
+  autoMonitor?: boolean
 }
 
 /** A single status-page component preserved for the per-component breakdown (#604).
@@ -234,6 +242,16 @@ export interface ServiceConfig {
   // Distinct from flapSuppression (which only holds the BetterStack "— down/recovered" title shape).
   // See isShortIncidentHoldable() in alerts.ts. `major` + Tier-1 always alert immediately.
   holdShortIncidents?: boolean
+  // #983 — EXACT-match patterns for this provider's machine-emitted incident titles. A matching
+  // incident gets `Incident.autoMonitor = true` (see tagAutoMonitorIncidents in services.ts), which
+  // makes it hold-eligible + flap-suppressible REGARDLESS of `impact`, and groupable in the UI.
+  // Needed for a page whose auto-monitor opens a brand-new incident per blip under one fixed title
+  // (Twelve Labs: "Some API features are experiencing issues" ×4 on 2026-07-09, 5–16m each, 3 of
+  // them `impact: 'major'` purely because one sub-component read `major_outage`).
+  // Anchor every pattern (`^…$`): a substring match would swallow the provider's real, human-written
+  // incidents, which use distinct titles ("Search API failure", "API server failure"). `critical` is
+  // never held/suppressed even when tagged, so a genuine broad outage always alerts immediately.
+  autoMonitorTitles?: RegExp[]
   // #591 — mark a service whose status page migrated to a server-side-unreachable platform, so
   // the feed AIWatch reads is FROZEN (e.g. DeepSeek → Flashduty, #507). Propagated to
   // ServiceStatus.incidentSourceStale → all ranking surfaces exclude it (a frozen empty 30-day
