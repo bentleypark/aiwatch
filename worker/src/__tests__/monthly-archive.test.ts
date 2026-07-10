@@ -10,6 +10,8 @@ import {
   isInMonthlyArchiveWindow,
   buildMonthlyArchive,
   accumulateMonthlyIncidents,
+  prunePhantomIncidents,
+  PHANTOM_PRUNE_AFTER_MISSED_RUNS,
   accumulateIncidentsOnlyIfChanged,
   buildPartialIncidentArchive,
   parseDurationMin,
@@ -26,13 +28,14 @@ import {
   summarizeDegradation,
   buildMonthlyAccuracy,
   filterSuppressedFromMonthly,
+  stripInternalFields,
   aggregateIncidentDurations,
   resolveArchiveOfficialUptime,
 } from '../monthly-archive'
 import type { SuppressionEntry } from '../suppression'
 import type { ServiceStatus, Incident } from '../types'
 import type { IncidentHistoryRecord } from '../incident-history'
-import type { MonthlySecurityEntry, MonthlySecuritySummary } from '../monthly-archive'
+import type { MonthlySecurityEntry, MonthlySecuritySummary, MonthlyIncidents, MonthlyIncidentEntry } from '../monthly-archive'
 import type { OsvTimeline } from '../security-monitor'
 import { SERVICE_ADDED_AT, resolveSvcComponents } from '../services'
 
@@ -531,7 +534,7 @@ describe('filterSuppressedFromMonthly', () => {
   const built = () => accumulateMonthlyIncidents(null, [svcWith([
     { id: 'fr-1', title: 'FedRAMP workspaces and API orgs have degraded performance', duration: '264h 56m' },
     { id: 'real-1', title: 'Image API requests failing with 401s', duration: '40m' },
-  ])], '2026-06')
+  ])], '2026-06', [])
 
   it('drops a service-pattern-suppressed incident + recomputes aggregates', () => {
     const before = built()
@@ -573,7 +576,7 @@ describe('filterSuppressedFromMonthly', () => {
     // same title under a different svcId key must NOT be dropped by an openai pattern
     const data = accumulateMonthlyIncidents(null, [{
       ...svcWith([{ id: 'fr-x', title: 'FedRAMP degraded', duration: '1h' }]), id: 'chatgpt', name: 'chatgpt',
-    }], '2026-06')
+    }], '2026-06', [])
     const after = filterSuppressedFromMonthly(data, [{ scope: 'service-pattern', svcId: 'openai', match: 'fedramp' }])
     expect(after.services.chatgpt.count).toBe(1)
   })
@@ -601,7 +604,7 @@ describe('accumulateMonthlyIncidents', () => {
       ]),
     ]
 
-    const result = accumulateMonthlyIncidents(null, services, '2026-04')
+    const result = accumulateMonthlyIncidents(null, services, '2026-04', [])
     expect(result.services.claude.count).toBe(2)
     expect(result.services.claude.totalMinutes).toBe(210) // 150+60
     expect(result.services.claude.longestMinutes).toBe(150)
@@ -618,11 +621,11 @@ describe('accumulateMonthlyIncidents', () => {
       ]),
     ]
 
-    const first = accumulateMonthlyIncidents(null, services, '2026-04')
+    const first = accumulateMonthlyIncidents(null, services, '2026-04', [])
     expect(first.services.claude.count).toBe(1)
 
     // Run again with same incident — should not double-count
-    const second = accumulateMonthlyIncidents(first, services, '2026-04')
+    const second = accumulateMonthlyIncidents(first, services, '2026-04', [])
     expect(second.services.claude.count).toBe(1)
     expect(second.services.claude.incidentIds).toEqual(['inc-1'])
   })
@@ -632,14 +635,14 @@ describe('accumulateMonthlyIncidents', () => {
       makeService('claude', [
         { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '1h' },
       ]),
-    ], '2026-04')
+    ], '2026-04', [])
 
     const second = accumulateMonthlyIncidents(first, [
       makeService('claude', [
         { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '1h' },
         { id: 'inc-2', startedAt: '2026-04-03T10:00:00Z', status: 'resolved', duration: '30m' },
       ]),
-    ], '2026-04')
+    ], '2026-04', [])
 
     expect(second.services.claude.count).toBe(2)
     expect(second.services.claude.totalMinutes).toBe(90) // 60+30
@@ -653,14 +656,14 @@ describe('accumulateMonthlyIncidents', () => {
       ]),
     ]
 
-    const result = accumulateMonthlyIncidents(null, services, '2026-04')
+    const result = accumulateMonthlyIncidents(null, services, '2026-04', [])
     expect(result.services.claude.count).toBe(1)
     expect(result.services.claude.incidentIds).toEqual(['inc-2'])
   })
 
   it('handles services with no incidents', () => {
     const services = [makeService('claude', [])]
-    const result = accumulateMonthlyIncidents(null, services, '2026-04')
+    const result = accumulateMonthlyIncidents(null, services, '2026-04', [])
     expect(result.services.claude).toBeUndefined()
   })
 
@@ -670,7 +673,7 @@ describe('accumulateMonthlyIncidents', () => {
       makeService('claude', [
         { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'investigating', duration: null },
       ]),
-    ], '2026-04')
+    ], '2026-04', [])
     expect(first.services.claude.longestMinutes).toBe(0)
     expect(first.services.claude.totalMinutes).toBe(0)
 
@@ -679,7 +682,7 @@ describe('accumulateMonthlyIncidents', () => {
       makeService('claude', [
         { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '3h' },
       ]),
-    ], '2026-04')
+    ], '2026-04', [])
     expect(second.services.claude.longestMinutes).toBe(180)
     expect(second.services.claude.totalMinutes).toBe(180) // delta: 180-0 = 180
     expect(second.services.claude.count).toBe(1) // count unchanged
@@ -691,11 +694,11 @@ describe('accumulateMonthlyIncidents', () => {
         { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '2h' },
       ]),
     ]
-    const first = accumulateMonthlyIncidents(null, services, '2026-04')
+    const first = accumulateMonthlyIncidents(null, services, '2026-04', [])
     expect(first.services.claude.totalMinutes).toBe(120)
 
     // Same resolved incident accumulated again — should not add duration
-    const second = accumulateMonthlyIncidents(first, services, '2026-04')
+    const second = accumulateMonthlyIncidents(first, services, '2026-04', [])
     expect(second.services.claude.totalMinutes).toBe(120) // unchanged
   })
 
@@ -711,7 +714,7 @@ describe('accumulateMonthlyIncidents', () => {
     // Ensure makeService sets resolvedAt on resolved incidents (verify shape).
     services[0].incidents[0].resolvedAt = '2026-04-01T12:00:00Z'
 
-    const result = accumulateMonthlyIncidents(null, services, '2026-04')
+    const result = accumulateMonthlyIncidents(null, services, '2026-04', [])
     const detail = result.services.claude.incidents
     expect(detail).toBeDefined()
     expect(detail!.length).toBe(2)
@@ -730,7 +733,7 @@ describe('accumulateMonthlyIncidents', () => {
       { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '1h' },
     ])
     svc.incidents[0].impact = 'major' // override the makeService null default
-    const result = accumulateMonthlyIncidents(null, [svc], '2026-04')
+    const result = accumulateMonthlyIncidents(null, [svc], '2026-04', [])
     expect(result.services.bedrock.incidents![0].impact).toBe('major')
 
     // A later run refreshes impact if it changed (e.g. upgraded from null to major after escalation).
@@ -738,7 +741,7 @@ describe('accumulateMonthlyIncidents', () => {
       { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '2h' },
     ])
     svc2.incidents[0].impact = 'critical'
-    const second = accumulateMonthlyIncidents(result, [svc2], '2026-04')
+    const second = accumulateMonthlyIncidents(result, [svc2], '2026-04', [])
     expect(second.services.bedrock.incidents![0].impact).toBe('critical')
   })
 
@@ -748,7 +751,7 @@ describe('accumulateMonthlyIncidents', () => {
       makeService('claude', [
         { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'investigating', duration: null },
       ]),
-    ], '2026-04')
+    ], '2026-04', [])
     expect(first.services.claude.incidents![0].finalStatus).toBe('investigating')
 
     // Second pass: now resolved with a duration + resolvedAt.
@@ -756,7 +759,7 @@ describe('accumulateMonthlyIncidents', () => {
       { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '90m' },
     ])
     resolvedSvc.incidents[0].resolvedAt = '2026-04-01T11:30:00Z'
-    const second = accumulateMonthlyIncidents(first, [resolvedSvc], '2026-04')
+    const second = accumulateMonthlyIncidents(first, [resolvedSvc], '2026-04', [])
     const updated = second.services.claude.incidents![0]
     expect(updated.finalStatus).toBe('resolved')
     expect(updated.durationMin).toBe(90)
@@ -782,7 +785,7 @@ describe('accumulateMonthlyIncidents', () => {
       const j = next() % (i + 1)
       ;[incs[i], incs[j]] = [incs[j], incs[i]]
     }
-    const result = accumulateMonthlyIncidents(null, [makeService('mistral', incs)], '2026-04')
+    const result = accumulateMonthlyIncidents(null, [makeService('mistral', incs)], '2026-04', [])
     const data = result.services.mistral
     // Aggregate counts include every incident (the cap binds detail only).
     expect(data.count).toBe(overflow)
@@ -808,7 +811,7 @@ describe('accumulateMonthlyIncidents', () => {
         { id: 'new-1', startedAt: '2026-04-02T10:00:00Z', status: 'resolved', duration: '30m' },
       ]),
     ]
-    const result = accumulateMonthlyIncidents(legacy, services, '2026-04')
+    const result = accumulateMonthlyIncidents(legacy, services, '2026-04', [])
     expect(result.services.claude.count).toBe(2)
     expect(result.services.claude.incidents).toBeDefined()
     // Legacy entry has no detail; only the new incident is in the detail array.
@@ -1044,6 +1047,37 @@ describe('accumulateIncidentsOnlyIfChanged (#587)', () => {
     expect(writes()).toBe(2)
     expect(JSON.parse(store['incidents:monthly:2026-06']).services.chatgpt.count).toBe(1) // still one incident
   })
+  // #975 — a THROWN kv.get was collapsed to `null`, which made the accumulator rebuild the month from
+  // this cycle alone and WRITE it: one transient read blip erased the whole month's history.
+  it('a KV read ERROR aborts the cycle and never overwrites the accumulator', async () => {
+    const seeded = JSON.stringify({
+      lastUpdated: '2026-07-01T00:00:00Z',
+      services: { pinecone: { count: 5, totalMinutes: 500, longestMinutes: 200, dates: ['2026-07-01'], incidentIds: ['a','b','c','d','e'], durations: { a:100,b:100,c:100,d:100,e:100 }, incidents: [] } },
+    })
+    let writes = 0
+    const kv = {
+      get: async (k: string) => { if (k.startsWith('incidents:monthly:')) throw new Error('KV unavailable'); return null },
+      put: async () => { writes++ },
+    } as unknown as KVNamespace
+
+    const res = await accumulateIncidentsOnlyIfChanged(kv, [svc('pinecone', [
+      { id: 'new-one', startedAt: '2026-07-09T00:00:00Z', status: 'investigating', duration: null },
+    ])], '2026-07')
+
+    expect(res).toBe('failed')
+    expect(writes).toBe(0) // the seeded month survives untouched
+    expect(JSON.parse(seeded).services.pinecone.count).toBe(5)
+  })
+
+  it('a genuinely ABSENT key still starts the month from scratch', async () => {
+    const { kv, store } = makeKV()
+    const res = await accumulateIncidentsOnlyIfChanged(kv, [svc('pinecone', [
+      { id: 'first', startedAt: '2026-07-09T00:00:00Z', status: 'resolved', duration: '1h' },
+    ])], '2026-07')
+    expect(res).toBe('written')
+    expect(JSON.parse(store['incidents:monthly:2026-07']).services.pinecone.count).toBe(1)
+  })
+
 })
 
 // ── buildMonthlyArchive ──────────────────────────────────────────────
@@ -1860,5 +1894,330 @@ describe('buildPartialIncidentArchive (#587)', () => {
     const out = buildPartialIncidentArchive('2026-06', acc)
     expect(out.services.bedrock.incidentList[0]).not.toBe(entry)
     expect(out.services.bedrock.incidentList[0]).toEqual(entry)
+  })
+})
+
+// ── #975 phantom prune (upstream delete + re-publish) ────────────────
+
+describe('prunePhantomIncidents (#975)', () => {
+  // A stored accumulator entry, defaulting to the shape a live-observed unresolved incident leaves.
+  const entry = (o: Partial<MonthlyIncidentEntry> & { id: string }): MonthlyIncidentEntry => ({
+    title: `Incident ${o.id}`, startedAt: '2026-07-09T13:34:38.481Z', resolvedAt: null,
+    durationMin: 0, finalStatus: 'monitoring', impact: 'major', ...o,
+  })
+
+  const stored = (entries: MonthlyIncidentEntry[]): MonthlyIncidents => ({
+    lastUpdated: '2026-07-09T14:00:00.000Z',
+    services: {
+      pinecone: {
+        count: entries.length,
+        totalMinutes: entries.reduce((a: number, e: MonthlyIncidentEntry) => a + e.durationMin, 0),
+        longestMinutes: entries.reduce((m: number, e: MonthlyIncidentEntry) => Math.max(m, e.durationMin), 0),
+        dates: ['2026-07-09'],
+        incidentIds: entries.map((e: MonthlyIncidentEntry) => e.id),
+        durations: Object.fromEntries(entries.map((e: MonthlyIncidentEntry) => [e.id, e.durationMin])),
+        incidents: entries,
+      },
+    },
+  })
+
+  const liveSvc = (incidents: Array<{ id: string; startedAt: string; status?: string }>): ServiceStatus => ({
+    id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', status: 'degraded',
+    latency: null, uptime30d: null, lastChecked: '', incidents: incidents.map(i => ({
+      id: i.id, title: `Incident ${i.id}`, status: (i.status ?? 'resolved') as any, impact: null,
+      startedAt: i.startedAt, duration: null, timeline: [],
+    })),
+  })
+
+  // The real event: Pinecone published `xqp5fkvlyg6t` (started 13:34), then deleted it and
+  // re-published the same outage as `m3wrr6csl9jm` (backdated to 09:50, title reworded).
+  const PHANTOM = entry({ id: 'xqp5fkvlyg6t', startedAt: '2026-07-09T13:34:38.481Z' })
+  const REPLACEMENT = { id: 'm3wrr6csl9jm', startedAt: '2026-07-09T09:50:14.000Z' }
+
+  const runs = (data: MonthlyIncidents, svc: ServiceStatus, n: number): MonthlyIncidents => {
+    let out = data
+    for (let i = 0; i < n; i++) out = prunePhantomIncidents(out, [svc], [])
+    return out
+  }
+
+  it('prunes the phantom only after PHANTOM_PRUNE_AFTER_MISSED_RUNS consecutive misses', () => {
+    const live = liveSvc([REPLACEMENT])
+    let data = stored([PHANTOM])
+
+    for (let i = 1; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS; i++) {
+      data = prunePhantomIncidents(data, [live], [])
+      expect(data.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+      expect(data.services.pinecone.incidents![0].missedRuns).toBe(i)
+    }
+    data = prunePhantomIncidents(data, [live], [])
+    expect(data.services.pinecone.incidents).toEqual([])
+    expect(data.services.pinecone.incidentIds).toEqual([])
+    expect(data.services.pinecone.count).toBe(0)
+  })
+
+  it('a transient single-cycle miss never prunes — the counter resets on reappearance', () => {
+    const gone = liveSvc([REPLACEMENT])
+    const back = liveSvc([REPLACEMENT, { id: 'xqp5fkvlyg6t', startedAt: PHANTOM.startedAt, status: 'monitoring' }])
+
+    let data = prunePhantomIncidents(stored([PHANTOM]), [gone], [])
+    expect(data.services.pinecone.incidents![0].missedRuns).toBe(1)
+
+    data = prunePhantomIncidents(data, [back], [])
+    expect(data.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+
+    // Two more misses would have pruned had the counter not reset.
+    data = runs(data, gone, PHANTOM_PRUNE_AFTER_MISSED_RUNS - 1)
+    expect(data.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+  })
+
+  it('never prunes a RESOLVED entry, however long it is absent', () => {
+    const resolved = entry({ id: 'old-resolved', finalStatus: 'resolved', resolvedAt: '2026-07-02T00:00:00Z', durationMin: 30, startedAt: '2026-07-01T00:00:00Z' })
+    // Live feed has only a NEWER incident, so `oldestLiveStart` is after the resolved entry —
+    // guard 3 would hold it anyway; guard 1 must hold it regardless.
+    const live = liveSvc([{ id: 'other', startedAt: '2026-07-08T00:00:00Z' }])
+    const out = runs(stored([resolved]), live, PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2)
+    expect(out.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['old-resolved'])
+    expect(out.services.pinecone.count).toBe(1)
+  })
+
+  it('an empty live list (failed fetch) never prunes', () => {
+    const empty = liveSvc([])
+    const out = runs(stored([PHANTOM]), empty, PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2)
+    expect(out.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+    expect(out.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+  })
+
+  it('a service missing from this cycle entirely never prunes', () => {
+    const out = runs(stored([PHANTOM]), liveSvc([REPLACEMENT]), 0)
+    expect(prunePhantomIncidents(out, [], []).services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+  })
+
+  it('guard 3: an entry OLDER than everything in the live feed is held, not pruned (feed truncation)', () => {
+    // The phantom started before the oldest live incident → we cannot distinguish "deleted" from
+    // "fell off the end of the feed window", so it must survive indefinitely.
+    const oldPhantom = entry({ id: 'ancient', startedAt: '2026-07-01T00:00:00Z' })
+    const live = liveSvc([{ id: 'newer', startedAt: '2026-07-05T00:00:00Z' }])
+    const out = runs(stored([oldPhantom]), live, PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2)
+    expect(out.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['ancient'])
+    expect(out.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+  })
+
+  it('recomputes count / totalMinutes / longestMinutes from the survivors', () => {
+    const a = entry({ id: 'a', startedAt: '2026-07-09T02:00:00Z', finalStatus: 'resolved', durationMin: 30 })
+    const b = entry({ id: 'b', startedAt: '2026-07-09T03:00:00Z', finalStatus: 'resolved', durationMin: 90 })
+    const live = liveSvc([
+      { id: 'a', startedAt: '2026-07-09T02:00:00Z' },
+      { id: 'b', startedAt: '2026-07-09T03:00:00Z' },
+    ])
+    const out = runs(stored([a, b, PHANTOM]), live, PHANTOM_PRUNE_AFTER_MISSED_RUNS)
+    const svc = out.services.pinecone
+    expect(svc.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['a', 'b'])
+    expect(svc.count).toBe(2)
+    expect(svc.totalMinutes).toBe(120)
+    expect(svc.longestMinutes).toBe(90)
+    expect(svc.durations).toEqual({ a: 30, b: 90 })
+    // `dates` is intentionally untouched (no consumer; recomputing would drop truncated entries' dates).
+    expect(svc.dates).toEqual(['2026-07-09'])
+  })
+
+  it('a truncated-but-counted incident (id present, no detail row) is never mistaken for a phantom', () => {
+    const data = stored([PHANTOM])
+    data.services.pinecone.incidentIds.unshift('truncated-old')
+    data.services.pinecone.durations['truncated-old'] = 45
+    data.services.pinecone.count = 2
+    data.services.pinecone.totalMinutes = 45
+
+    const out = runs(data, liveSvc([REPLACEMENT]), PHANTOM_PRUNE_AFTER_MISSED_RUNS)
+    // Phantom gone; the truncated entry survives in incidentIds/durations and still counts.
+    expect(out.services.pinecone.incidents).toEqual([])
+    expect(out.services.pinecone.incidentIds).toEqual(['truncated-old'])
+    expect(out.services.pinecone.count).toBe(1)
+    expect(out.services.pinecone.totalMinutes).toBe(45)
+  })
+
+  // #975 — the highest-consequence guard. `fetchAllServices` applies `applySuppressions` BEFORE the
+  // accumulator sees the list (services.ts), so an operator-hidden incident is missing from the live
+  // feed by POLICY. Pruning it would erase durable data that `filterSuppressedFromMonthly` is only
+  // supposed to hide, and un-suppressing would restore nothing.
+  it('never prunes an operator-SUPPRESSED unresolved incident (id scope)', () => {
+    const suppressions = [{ scope: 'incident' as const, incId: 'xqp5fkvlyg6t' }]
+    const out = (() => {
+      let d = stored([PHANTOM])
+      for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2; i++) d = prunePhantomIncidents(d, [liveSvc([REPLACEMENT])], suppressions)
+      return d
+    })()
+    expect(out.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+    expect(out.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+    expect(out.services.pinecone.count).toBe(1)
+  })
+
+  it('never prunes an operator-SUPPRESSED unresolved incident (service-pattern scope)', () => {
+    const suppressions = [{ scope: 'service-pattern' as const, svcId: 'pinecone', match: '5xx errors' }]
+    const phantom = entry({ id: 'xqp5fkvlyg6t', title: '[Serverless][Azure][eastus2] 5xx errors for some requests' })
+    let d = stored([phantom])
+    for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2; i++) d = prunePhantomIncidents(d, [liveSvc([REPLACEMENT])], suppressions)
+    expect(d.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+  })
+
+  // Fail-CLOSED: an unreadable suppression list must not read as "nothing is hidden".
+  it('null suppressions (unreadable list) disables pruning entirely', () => {
+    let d = stored([PHANTOM])
+    for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2; i++) d = prunePhantomIncidents(d, [liveSvc([REPLACEMENT])], null)
+    expect(d.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+    expect(d.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+    expect(prunePhantomIncidents(d, [liveSvc([REPLACEMENT])], null)).toBe(d) // identity, no work done
+  })
+
+  // Review finding (#975): a hold is NOT a confident miss. Without the reset, a phantom whose older
+  // live sibling ages out of the feed freezes at missedRuns=2 forever — never pruned, never cleared,
+  // and the internal counter then leaks into the permanent archive at month rollover.
+  it('guard-3 hold RESETS the counter, so the N runs are strictly consecutive', () => {
+    const withOlder = liveSvc([REPLACEMENT]) // older sibling present → guard 3 passes
+    const noOlder = liveSvc([{ id: 'newer', startedAt: '2026-07-09T20:00:00Z' }]) // nothing older → hold
+
+    let d = prunePhantomIncidents(stored([PHANTOM]), [withOlder], [])
+    d = prunePhantomIncidents(d, [withOlder], [])
+    expect(d.services.pinecone.incidents![0].missedRuns).toBe(2)
+
+    d = prunePhantomIncidents(d, [noOlder], []) // hold → reset
+    expect(d.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+
+    // One more confident miss must NOT prune (would have, if the counter had frozen at 2).
+    d = prunePhantomIncidents(d, [withOlder], [])
+    expect(d.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+    expect(d.services.pinecone.incidents![0].missedRuns).toBe(1)
+  })
+
+  it('a malformed stored startedAt is held, never pruned (lexicographic trap)', () => {
+    // 'pending' sorts AFTER any '2xxx-…' ISO string, so an unvalidated compare would pass guard 3.
+    const bad = entry({ id: 'bad-start', startedAt: 'pending' })
+    let d = stored([bad])
+    for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2; i++) d = prunePhantomIncidents(d, [liveSvc([REPLACEMENT])], [])
+    expect(d.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['bad-start'])
+    expect(d.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+  })
+
+  it('an id that is present but non-string on the live side still counts as SEEN', () => {
+    // A parser regression emitting numeric ids must not make a present incident look deleted.
+    const svc = liveSvc([REPLACEMENT])
+    ;(svc.incidents[0] as unknown as { id: unknown }).id = 12345
+    const stored1 = stored([entry({ id: '12345', startedAt: '2026-07-09T13:34:38.481Z' })])
+    let d = stored1
+    for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2; i++) d = prunePhantomIncidents(d, [svc], [])
+    expect(d.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['12345'])
+  })
+
+  it('is pure — the input accumulator is not mutated', () => {
+    const data = stored([PHANTOM])
+    const before = structuredClone(data)
+    prunePhantomIncidents(data, [liveSvc([REPLACEMENT])], [])
+    expect(data).toEqual(before)
+  })
+
+  it('returns the input by identity when nothing changed', () => {
+    const data = stored([entry({ id: 'x', finalStatus: 'resolved', durationMin: 10 })])
+    expect(prunePhantomIncidents(data, [liveSvc([{ id: 'x', startedAt: '2026-07-09T13:34:38.481Z' }])], [])).toBe(data)
+  })
+
+  it('tolerates a structurally-corrupt accumulator', () => {
+    expect(prunePhantomIncidents({ lastUpdated: '', services: undefined as any }, [], [])).toEqual({ lastUpdated: '', services: undefined })
+  })
+})
+
+// ── #975 end-to-end through accumulateMonthlyIncidents ───────────────
+
+describe('accumulateMonthlyIncidents — phantom self-heal (#975)', () => {
+  const svc = (incidents: Array<{ id: string; startedAt: string; status: string; duration: string | null }>): ServiceStatus => ({
+    id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', status: 'degraded',
+    latency: null, uptime30d: null, lastChecked: '', incidents: incidents.map(i => ({
+      id: i.id, title: `Incident ${i.id}`, status: i.status as any, impact: 'major',
+      startedAt: i.startedAt, duration: i.duration, timeline: [],
+    })),
+  })
+
+  it('reproduces the reported bug: id A observed live, upstream replaces it with id B → A is gone and count === 1', () => {
+    // Cycle 1 — Pinecone is showing `xqp5fkvlyg6t`, unresolved.
+    let acc = accumulateMonthlyIncidents(null, [svc([
+      { id: 'xqp5fkvlyg6t', startedAt: '2026-07-09T13:34:38.481Z', status: 'monitoring', duration: null },
+    ])], '2026-07', [])
+    expect(acc.services.pinecone.count).toBe(1)
+
+    // Upstream deletes it and re-publishes the same outage under a new id, backdated + reworded.
+    const replaced = svc([
+      { id: 'm3wrr6csl9jm', startedAt: '2026-07-09T09:50:14.000Z', status: 'resolved', duration: '4h 48m' },
+    ])
+
+    // Both are present for the first few cycles (count 2 — the bug, as observed in production).
+    acc = accumulateMonthlyIncidents(acc, [replaced], '2026-07', [])
+    expect(acc.services.pinecone.count).toBe(2)
+    expect(acc.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id).sort()).toEqual(['m3wrr6csl9jm', 'xqp5fkvlyg6t'])
+
+    // …then the phantom is reconciled away.
+    for (let i = 1; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS; i++) acc = accumulateMonthlyIncidents(acc, [replaced], '2026-07', [])
+
+    expect(acc.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['m3wrr6csl9jm'])
+    expect(acc.services.pinecone.count).toBe(1)
+    expect(acc.services.pinecone.totalMinutes).toBe(288)
+    expect(acc.services.pinecone.longestMinutes).toBe(288)
+    expect(acc.services.pinecone.incidents![0].finalStatus).toBe('resolved')
+  })
+
+  it('self-heals even on a cycle where the service reports no incident for THIS period', () => {
+    // The replacement resolved and aged out of the feed; only a previous-month incident remains.
+    // The period filter would `continue` past this service, so the prune must run before it.
+    let acc = accumulateMonthlyIncidents(null, [svc([
+      { id: 'phantom', startedAt: '2026-07-09T13:34:38.481Z', status: 'monitoring', duration: null },
+    ])], '2026-07', [])
+
+    const onlyLastMonth = svc([{ id: 'june', startedAt: '2026-06-20T00:00:00Z', status: 'resolved', duration: '1h' }])
+    for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS; i++) acc = accumulateMonthlyIncidents(acc, [onlyLastMonth], '2026-07', [])
+
+    expect(acc.services.pinecone.incidents).toEqual([])
+    expect(acc.services.pinecone.count).toBe(0)
+  })
+})
+
+// ── #975 internal bookkeeping must not leak to public payloads ───────
+
+describe('stripInternalFields (#975)', () => {
+  const withCounter: MonthlyIncidentEntry = {
+    id: 'p1', title: 'x', startedAt: '2026-07-09T13:34:38.481Z', resolvedAt: null,
+    durationMin: 0, finalStatus: 'monitoring', impact: 'major', missedRuns: 2,
+  }
+
+  it('drops missedRuns and preserves everything else', () => {
+    const out = stripInternalFields(withCounter)
+    expect(out).not.toHaveProperty('missedRuns')
+    expect(out).toEqual({
+      id: 'p1', title: 'x', startedAt: '2026-07-09T13:34:38.481Z', resolvedAt: null,
+      durationMin: 0, finalStatus: 'monitoring', impact: 'major',
+    })
+  })
+
+  // Guards the whole class, not just today's one field: `stripInternalFields` hard-codes the fields it
+  // drops, so a future internal-only addition to MonthlyIncidentEntry would leak silently. This pins
+  // the PUBLIC key set of the emitted payload — add a field here only if the reports site may see it.
+  it('the emitted public entry exposes ONLY the allowlisted keys', () => {
+    const PUBLIC_KEYS = ['id', 'title', 'startedAt', 'resolvedAt', 'durationMin', 'finalStatus', 'impact']
+    const acc: MonthlyIncidents = {
+      lastUpdated: '', services: { pinecone: {
+        count: 1, totalMinutes: 0, longestMinutes: 0, dates: [], incidentIds: ['p1'],
+        durations: { p1: 0 }, incidents: [withCounter],
+      } },
+    }
+    const emitted = buildPartialIncidentArchive('2026-07', acc).services.pinecone.incidentList[0]
+    expect(Object.keys(emitted).sort()).toEqual([...PUBLIC_KEYS].sort())
+  })
+
+  it('buildPartialIncidentArchive (/api/report, current month) never emits missedRuns', () => {
+    const acc: MonthlyIncidents = {
+      lastUpdated: '', services: { pinecone: {
+        count: 1, totalMinutes: 0, longestMinutes: 0, dates: [], incidentIds: ['p1'],
+        durations: { p1: 0 }, incidents: [withCounter],
+      } },
+    }
+    const out = buildPartialIncidentArchive('2026-07', acc)
+    expect(out.services.pinecone.incidentList[0]).not.toHaveProperty('missedRuns')
+    expect(JSON.stringify(out)).not.toContain('missedRuns')
   })
 })

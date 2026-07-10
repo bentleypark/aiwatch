@@ -13,7 +13,7 @@ import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
 import { SERVICE_ADDED_AT, SERVICES, existedInMonth } from './services'
 import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type IncidentHistoryRecord } from './incident-history'
-import { readSuppressionsFresh, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
+import { readSuppressionsFresh, readSuppressionsFreshOrNull, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
 import { kvPut } from './utils'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
@@ -40,6 +40,17 @@ export interface MonthlyIncidentEntry {
   // written before #653 → consumers treat missing as null (informational), i.e. conservatively
   // contributes no downtime (won't fabricate an outage from pre-#653 data).
   impact?: 'minor' | 'major' | 'critical' | null
+  // #975 — consecutive accumulation runs this UNRESOLVED entry has been confidently missing from the
+  // upstream feed (see `prunePhantomIncidents`). Absent means zero: the field exists only while an
+  // entry is in the missing state, so a resolved or currently-present entry serializes exactly as
+  // before and the every-5-min write-skip guard in `accumulateIncidentsOnlyIfChanged` still
+  // short-circuits. Deleted the moment the entry reappears, and gone with the entry once pruned.
+  //
+  // One state DOES add writes: an unresolved incident that flaps in and out of the feed each cycle
+  // (the Instatus/Nuxt publish→delete pattern, #929) toggles the field, so each transition persists.
+  // Bounded and self-limiting — it stops once the incident resolves or reaches the prune threshold —
+  // and only on services that are already the noisy ones. Accepted, not overlooked.
+  missedRuns?: number
 }
 
 export interface MonthlyServiceData {
@@ -244,15 +255,214 @@ export interface MonthlyIncidents {
   services: Record<string, MonthlyIncidentServiceData>
 }
 
-/** Accumulate current service incidents into monthly totals. Deduplicates by incident ID. */
+/** #975 — consecutive runs an unresolved entry must be *confidently* missing before it is pruned.
+ *  The accumulator runs on the every-5-minute cron, so 3 runs is about 15 minutes: long enough that a
+ *  single malformed upstream response can't delete real data, short enough that a phantom doesn't sit
+ *  in the dashboard's 30/90-day list for hours. Raising it only delays cleanup; lowering it to 1 would
+ *  make one bad parse destructive. */
+export const PHANTOM_PRUNE_AFTER_MISSED_RUNS = 3
+
+/** #975 — copy an accumulator entry for PUBLIC emission, dropping bookkeeping that exists only to
+ *  drive the phantom prune. Both emit sites are trust boundaries: `buildPartialIncidentArchive` feeds
+ *  `/api/report` for the current month, and `buildMonthlyArchive` bakes the PERMANENT
+ *  `archive:monthly:{YYYY-MM}` the reports site reads. A phantom sitting at `missedRuns: 2` at month
+ *  rollover would otherwise freeze an internal counter into an immutable public snapshot forever. */
+export function stripInternalFields(e: MonthlyIncidentEntry): MonthlyIncidentEntry {
+  const { missedRuns: _missedRuns, ...rest } = e
+  return rest
+}
+
+/** Is this a value we may order lexicographically as an ISO instant? Guards the #975 watermark
+ *  comparison: `'2026-01-01T00:00:00Z' < 'pending'` is `true`, so an unvalidated non-ISO string would
+ *  satisfy guard 3 and enable a prune. Anything that isn't a 4-digit-year ISO prefix is untrusted. */
+function isIsoish(v: unknown): v is string {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)
+}
+
+/**
+ * #975 — remove entries stranded by an upstream **delete + re-publish**, and recompute the affected
+ * service's aggregates. Pure; the input is not mutated.
+ *
+ * The accumulator is additive and keyed on the upstream incident id: it only ever *updates* a stored
+ * entry while that same id is still in the live feed. When a provider retires an id — Pinecone
+ * deleted `xqp5fkvlyg6t` and re-published the same outage as `m3wrr6csl9jm` with a reworded title and
+ * a backdated start — the old entry is never resolved and never removed. It sits in the dashboard's
+ * 30/90-day list forever as `finalStatus: 'monitoring'`, `resolvedAt: null`, `durationMin: 0`, i.e.
+ * an eternal "Ongoing" row, and its `count++` inflates the month's incident total. Live-wins-on-id
+ * dedup can't help: the ids differ, so the phantom and its replacement never collide.
+ *
+ * An entry is pruned only when ALL of these hold, re-checked every run:
+ *   1. it is UNRESOLVED — a resolved entry is never touched. Resolved incidents legitimately age out
+ *      of the upstream feed window, so their absence tells us nothing.
+ *   2. its id is absent from the service's live incident list.
+ *   3. the live list still contains an incident that started STRICTLY EARLIER. This is the load-bearing
+ *      guard, and it is stronger than "the service reported at least one incident this cycle": it
+ *      proves the feed window has not truncated *past* our entry, so absence means deletion rather
+ *      than truncation. It is also vacuously false when the live list is empty, so a failed fetch —
+ *      which yields no incidents — can never prune anything.
+ *   4. 1-3 have held for `PHANTOM_PRUNE_AFTER_MISSED_RUNS` consecutive runs (`missedRuns`), so one
+ *      transient hiccup cannot delete real data. The counter resets the moment the entry reappears.
+ *
+ * Entries that were TRUNCATED to `MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE` have no detail row, and this
+ * only walks detail rows — so a counted-but-truncated incident is never mistaken for a phantom.
+ * (Truncation drops the OLDEST entries; a phantom is by definition recent.)
+ *
+ * **Suppressed incidents are never pruned.** `fetchAllServices` returns lists that already had
+ * `applySuppressions` applied (#904), so an operator-suppressed incident is missing from the live list
+ * *by policy*, not because upstream deleted it. Without this carve-out an unresolved suppressed
+ * incident (e.g. OpenAI's FedRAMP one) would be erased from the accumulator ~15 minutes after the
+ * suppression is added, and removing the suppression would restore nothing — destroying the
+ * reversibility that is the whole point of the suppression layer. `suppressions` is REQUIRED rather
+ * than optional so the type-checker forces every call site to decide (an optional param would let a
+ * future caller silently reintroduce this).
+ *
+ * `suppressions === null` means "the list could not be read" and **disables pruning entirely for this
+ * run** — fail-closed. Collapsing an unreadable list to `[]` would be fail-open in the destructive
+ * direction: three consecutive KV blips would be enough to erase a suppressed incident.
+ *
+ * Aggregate rollback mirrors `filterSuppressedFromMonthly` exactly — `durations` is the complete,
+ * uncapped per-id map, so `count`/`totalMinutes`/`longestMinutes` recompute from it precisely.
+ * `dates` is deliberately left alone, as it is there too: it has no consumer, and recomputing it from
+ * the capped detail rows would silently drop the dates of truncated incidents.
+ *
+ * Scope: `accumulateMonthlyIncidents` only ever runs for the CURRENT month, so this self-heals the
+ * current month's accumulator. A phantom already stranded in a past month stays until an operator
+ * suppression drops it at archive-build time (#904).
+ *
+ * Known residual false-positive path, accepted: a still-open incident that keeps its upstream id but
+ * gets its TITLE reworded such that `filterIncidents` keyword attribution (services.ts) stops
+ * matching it would disappear from the live list exactly like a phantom, and could be pruned. It
+ * needs a keyword-attributed service, a concurrent older live incident, and the mismatch to persist
+ * past the miss threshold — and while it holds, the incident is already invisible on every live
+ * surface, so the accumulator row is the lesser loss. The prune logs every deletion so this is
+ * reconstructible rather than silent.
+ */
+export function prunePhantomIncidents(
+  data: MonthlyIncidents,
+  services: ServiceStatus[],
+  suppressions: SuppressionEntry[] | null,
+): MonthlyIncidents {
+  // Unreadable suppression list → we cannot tell "hidden by policy" from "deleted upstream". Hold.
+  // Logged: otherwise the self-heal silently does nothing and no operator can tell it was skipped.
+  if (suppressions === null) {
+    console.warn('[monthly-archive] #975 phantom prune skipped — suppression list unreadable (fail-closed)')
+    return data
+  }
+  if (!data?.services || typeof data.services !== 'object') return data
+
+  const liveBySvc = new Map<string, Incident[]>()
+  for (const svc of services) liveBySvc.set(svc.id, svc.incidents ?? [])
+
+  let touched = false
+  const nextServices: Record<string, MonthlyIncidentServiceData> = {}
+
+  for (const [svcId, svc] of Object.entries(data.services)) {
+    const details = svc.incidents
+    const live = liveBySvc.get(svcId)
+    // A service absent from this cycle's list (removed, or a whole-fetch failure) is never pruned.
+    if (!details?.length || !live?.length) { nextServices[svcId] = svc; continue }
+
+    // `String(...)` on both sides: a strict-equality miss would read a PRESENT incident as absent and
+    // eventually delete it, so the id comparison must not depend on a parser emitting the declared
+    // `string` type. Falsy ids are dropped here and skipped below, never matched by accident.
+    const liveIds = new Set(live.map((i) => i?.id).filter(Boolean).map(String))
+    // Earliest start among live incidents — the truncation watermark for guard 3. Compared as ISO
+    // strings, which sort lexicographically. Non-ISO values are ignored, which can only move the
+    // watermark LATER, making guard 3 harder to satisfy — i.e. it fails toward not pruning.
+    let oldestLiveStart: string | null = null
+    for (const i of live) {
+      const s = i?.startedAt
+      if (isIsoish(s) && (oldestLiveStart === null || s < oldestLiveStart)) oldestLiveStart = s
+    }
+
+    const pruned = new Set<string>()
+    const nextDetails: MonthlyIncidentEntry[] = []
+    let svcTouched = false
+
+    for (const entry of details) {
+      const e = { ...entry }
+      const seen = !e.id || liveIds.has(String(e.id))
+      // Absent because an operator hid it, not because upstream deleted it — see the doc comment.
+      const hidden = suppressions.length > 0 && isSuppressedByIdTitle(e.id, e.title, svcId, suppressions)
+      // A malformed stored `startedAt` can't be ordered against the watermark. Holding here makes
+      // "malformed → never pruned" TOTAL: without it, a value like `'pending'` sorts after any
+      // `'2xxx-…'` ISO string, so guard 3 would pass and a real entry could be deleted.
+      const orderable = isIsoish(e.startedAt)
+
+      if (e.finalStatus === 'resolved' || seen || hidden || !orderable) {
+        if (e.missedRuns !== undefined) { delete e.missedRuns; svcTouched = true }
+        nextDetails.push(e)
+        continue
+      }
+      // Guard 3 — can't tell "deleted upstream" from "fell off the end of the feed window", so hold.
+      // Reset the counter too: the threshold means N runs of CONFIDENT absence, and a hold is not
+      // one. Without the reset a phantom whose older live sibling ages out freezes mid-count forever.
+      if (oldestLiveStart === null || !(oldestLiveStart < e.startedAt)) {
+        if (e.missedRuns !== undefined) { delete e.missedRuns; svcTouched = true }
+        nextDetails.push(e)
+        continue
+      }
+
+      const misses = (e.missedRuns ?? 0) + 1
+      if (misses >= PHANTOM_PRUNE_AFTER_MISSED_RUNS) {
+        // This DELETES durable data — the one operation in this module that does. Log it, so a
+        // false positive is reconstructible later instead of appearing as a row that silently
+        // vanished from the 30/90-day list.
+        console.log(`[monthly-archive] #975 pruning phantom ${svcId}/${e.id} after ${misses} confident misses — "${e.title}" (started ${e.startedAt}, oldest live ${oldestLiveStart})`)
+        pruned.add(e.id)
+        svcTouched = true
+        continue // dropped — do not carry into nextDetails
+      }
+      console.log(`[monthly-archive] #975 phantom candidate ${svcId}/${e.id} missing ${misses}/${PHANTOM_PRUNE_AFTER_MISSED_RUNS} runs`)
+      e.missedRuns = misses
+      svcTouched = true
+      nextDetails.push(e)
+    }
+
+    if (!svcTouched) { nextServices[svcId] = svc; continue }
+    touched = true
+
+    if (pruned.size === 0) { nextServices[svcId] = { ...svc, incidents: nextDetails }; continue }
+
+    const incidentIds = svc.incidentIds.filter((id) => !pruned.has(id))
+    const durations: Record<string, number> = {}
+    for (const [id, dur] of Object.entries(svc.durations ?? {})) {
+      if (!pruned.has(id)) durations[id] = dur
+    }
+    const durationVals = Object.values(durations)
+    nextServices[svcId] = {
+      ...svc,
+      count: incidentIds.length,
+      totalMinutes: durationVals.reduce((a, b) => a + b, 0),
+      longestMinutes: durationVals.reduce((m, d) => Math.max(m, d), 0),
+      incidentIds,
+      durations,
+      incidents: nextDetails,
+    }
+  }
+
+  return touched ? { ...data, services: nextServices } : data
+}
+
+/** Accumulate current service incidents into monthly totals. Deduplicates by incident ID.
+ *  `suppressions` is only consumed by the #975 phantom prune (an operator-hidden incident must never
+ *  be pruned); accumulation itself needs no filtering, since `services` arrives already suppressed.
+ *  `null` = the list could not be read → the prune is skipped for this run (fail-closed). */
 export function accumulateMonthlyIncidents(
   existing: MonthlyIncidents | null,
   services: ServiceStatus[],
   period: string, // YYYY-MM
+  suppressions: SuppressionEntry[] | null,
 ): MonthlyIncidents {
-  const result: MonthlyIncidents = existing
+  const base: MonthlyIncidents = existing
     ? { lastUpdated: new Date().toISOString(), services: structuredClone(existing.services) }
     : { lastUpdated: new Date().toISOString(), services: {} }
+
+  // #975 — reconcile BEFORE accumulating, and outside the per-service `continue` below: a phantom must
+  // still be prunable on a cycle where the service reports no incident *for this period* (its only
+  // remaining live incidents may be from an earlier month). The prune reads the service's FULL live
+  // list, not the period-filtered one, because feed truncation is global rather than per-month.
+  const result = prunePhantomIncidents(base, services, suppressions)
 
   for (const svc of services) {
     const incidents = (svc.incidents ?? []).filter(
@@ -346,12 +556,30 @@ export async function accumulateIncidentsOnlyIfChanged(
   month: string, // YYYY-MM
 ): Promise<'unchanged' | 'written' | 'failed'> {
   const incKey = `incidents:monthly:${month}`
-  const existingRaw = await kv.get(incKey).catch(() => null)
+  // #975 — a THROWN KV get must not be collapsed into "no accumulator yet". `existing = null` makes
+  // `accumulateMonthlyIncidents` rebuild the month from this cycle alone, and since the JSON compare
+  // then differs, that stripped object is WRITTEN — silently destroying the month's history on a
+  // single transient read blip. Only a genuinely absent key (null, first write of the month) may
+  // legitimately start from scratch; a read error aborts the cycle and retries in 5 minutes.
+  let existingRaw: string | null
+  try {
+    existingRaw = await kv.get(incKey)
+  } catch (err) {
+    console.error(`[monthly-archive] ${incKey} read failed — skipping accumulation this cycle:`, err instanceof Error ? err.message : String(err))
+    return 'failed'
+  }
   let existing: MonthlyIncidents | null = null
   if (existingRaw) {
     try { existing = JSON.parse(existingRaw) } catch { existing = null /* corrupt → rebuild from current */ }
   }
-  const updated = accumulateMonthlyIncidents(existing, services, month)
+  // #975 — a suppressed-but-unresolved incident is absent from `services` by policy (fetchAllServices
+  // applies suppressions), and the prune must not mistake that for an upstream deletion and erase it.
+  // `…OrNull` rather than `readSuppressions`/`readSuppressionsFresh` NOT for freshness — the prune
+  // needs 3 runs (~15 min) to act, so a 60s-cached list is current enough — but because both siblings
+  // collapse a KV read/parse failure to `[]` (or a stale cache), i.e. to "nothing is hidden". A
+  // destructive caller must be able to tell that apart, and `null` disables the prune for this run.
+  const suppressions = await readSuppressionsFreshOrNull(kv)
+  const updated = accumulateMonthlyIncidents(existing, services, month, suppressions)
   // Compare incident payload only — `lastUpdated` is bumped every call, so a whole-object compare
   // would always differ. No service-payload change → nothing to persist → skip the write.
   const existingServices = existing ? JSON.stringify(existing.services) : null
@@ -376,7 +604,7 @@ export function buildPartialIncidentArchive(
   const services: Record<string, { incidentList: MonthlyIncidentEntry[] }> = {}
   for (const [id, svc] of Object.entries(incidentData?.services ?? {})) {
     if (svc?.incidents && svc.incidents.length > 0) {
-      services[id] = { incidentList: svc.incidents.map(e => ({ ...e })) }
+      services[id] = { incidentList: svc.incidents.map(stripInternalFields) }
     }
   }
   return { period, partial: true, services }
@@ -994,7 +1222,7 @@ export async function buildMonthlyArchive(
     // post-archive. accumulateMonthlyIncidents already enforces the per-service cap and
     // dedup, so we just defensively-clone the array (avoids accidental mutation downstream).
     const incidentList = incSvc?.incidents && incSvc.incidents.length > 0
-      ? incSvc.incidents.map(e => ({ ...e }))
+      ? incSvc.incidents.map(stripInternalFields)
       : undefined
 
     // #915 — derive the downtime aggregates from the per-incident FINAL durations (incidentList),
