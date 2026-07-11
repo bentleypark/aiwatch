@@ -856,12 +856,13 @@ describe('ChatGPT without statusComponentId (#292)', () => {
     // cross-contamination protection (no statusComponentId → overall-indicator path + the "no relevant
     // incident → operational" guard) with a STRONGER one: the badge follows chatgpt's OWN components,
     // so an OpenAI-API page-level state (e.g. FedRAMP degraded) can't flip it — the API components
-    // aren't in chatgpt's set. incidentExclude stays absent so incidentKeywords remains the sole filter.
+    // aren't in chatgpt's set. incidentKeywords is the positive filter; incidentExclude carries ONLY
+    // the #990 environment-scope veto ('fedramp'), which runs before the keyword match.
     expect(chatgptConfig).toBeDefined()
     expect(chatgptConfig.statusComponentId).toBe('01JMXBNJXGV1T5GT2M9XA83XNG') // Conversations (primary)
     expect(chatgptConfig.statusComponentIds).toBeDefined()
     expect(chatgptConfig.statusComponent).toBeUndefined()
-    expect(chatgptConfig.incidentExclude).toBeUndefined()
+    expect(chatgptConfig.incidentExclude).toEqual(['fedramp']) // #990 environment-scope veto only
     expect(chatgptConfig.incidentKeywords).toContain('chatgpt')
     expect(chatgptConfig.incidentKeywords).toContain('conversation')
   })
@@ -960,11 +961,12 @@ describe('OpenAI Codex without statusComponentId (#294)', () => {
     expect(codexConfig.provider).toBe('OpenAI')
     // #693 follow-up: codex now scopes its badge to its own surfaces (Codex API/CLI/VS Code/Web/App)
     // via a worst-of statusComponentIds, replacing the old overall-indicator + cross-contamination
-    // guard (#294) with direct component-scoping. incidentExclude stays absent (incidentKeywords only).
+    // guard (#294) with direct component-scoping. incidentKeywords is the positive filter;
+    // incidentExclude carries ONLY the #990 environment-scope veto ('fedramp').
     expect(codexConfig.statusComponentId).toBe('01KMP3KP5MGE23B80K1EK4S8PV') // Codex API (primary)
     expect(codexConfig.statusComponentIds).toBeDefined()
     expect(codexConfig.statusComponent).toBeUndefined()
-    expect(codexConfig.incidentExclude).toBeUndefined()
+    expect(codexConfig.incidentExclude).toEqual(['fedramp']) // #990 environment-scope veto only
     // incidentIoComponentId = Codex API (#301) — kept as fallback if the group
     // lookup ever fails. incidentIoGroupId = Codex group (#367) — primary uptime
     // source, matching what OpenAI publishes on status.openai.com (Codex

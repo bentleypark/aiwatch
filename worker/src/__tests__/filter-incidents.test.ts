@@ -792,7 +792,7 @@ describe('filterIncidents — OpenAI FedRAMP / workspaces exclude (#693)', () =>
     expect(filterIncidents([fedramp], cfg('openai')).map((i) => i.id)).toContain('fedramp-api-1')
   })
 
-  it('chatgpt + codex: do NOT pick up the FedRAMP incident (leak guard — title misses their keywords)', () => {
+  it('chatgpt + codex: do NOT pick up the FedRAMP incident (title misses their keywords AND, since #990, matches the fedramp exclude)', () => {
     expect(filterIncidents([fedramp], cfg('chatgpt'))).toHaveLength(0)
     expect(filterIncidents([fedramp], cfg('codex'))).toHaveLength(0)
   })
@@ -958,6 +958,68 @@ describe('#970 fail-open leak-safety invariant over SERVICES', () => {
       const aloneOnPage = serviceCountByHost.get(hostOf(svc)) === 1
       const preScoped = (svc.incidentKeywords?.length ?? 0) > 0 || (svc.incidentComponents?.length ?? 0) > 0
       expect(aloneOnPage || preScoped).toBe(true)
+    },
+  )
+})
+
+// #990 — the 2026-07 kitchen-sink FedRAMP advisory (impact:minor, componentNames:[]) whose title
+// enumerates many product names was substring-attributed to ChatGPT + Codex, firing false
+// New+Resolved alerts. ENVIRONMENT_SCOPE_EXCLUDE ('fedramp') is spread into chatgpt + codex only:
+// openai already drops it via its existing tokens AND must KEEP a genuine FedRAMP API degradation
+// (#693), so it deliberately does NOT carry the token. Exercise the REAL SERVICES configs so this
+// guards the wiring, not just filterIncidents' logic.
+describe('#990 FedRAMP environment-scope exclude (chatgpt / codex)', () => {
+  const FEDRAMP_TITLE =
+    'Codex, workspace analytics, conversation search, searching for custom GPTs, ChatGPT user invites, ' +
+    'and Compliance Log Platform download endpoint not working in FedRAMP workspaces'
+
+  const openai = SERVICES.find(s => s.id === 'openai')!
+  const chatgpt = SERVICES.find(s => s.id === 'chatgpt')!
+  const codex = SERVICES.find(s => s.id === 'codex')!
+
+  it.each([['chatgpt', () => chatgpt], ['codex', () => codex]] as const)(
+    '%s drops the kitchen-sink FedRAMP advisory (untagged, impact minor)',
+    (_id, get) => {
+      const inc = mockIncident({ id: 'fedramp', title: FEDRAMP_TITLE, impact: 'minor', componentNames: [] })
+      expect(filterIncidents([inc], get())).toHaveLength(0)
+    },
+  )
+
+  it('openai also drops it — but via its existing tokens, NOT a fedramp exclude (#693 must keep FedRAMP API incidents)', () => {
+    const inc = mockIncident({ id: 'fedramp', title: FEDRAMP_TITLE, impact: 'minor', componentNames: [] })
+    expect(filterIncidents([inc], openai)).toHaveLength(0)
+    expect(openai.incidentExclude).not.toContain('fedramp')
+  })
+
+  it('chatgpt + codex carry the fedramp exclude token (wiring guard)', () => {
+    expect(chatgpt.incidentExclude).toContain('fedramp')
+    expect(codex.incidentExclude).toContain('fedramp')
+  })
+
+  it('a genuine Codex outage title is still kept by codex (no over-exclusion)', () => {
+    const real = mockIncident({ id: 'real', title: 'Codex Usage Limits Depleting Faster Than Expected' })
+    expect(filterIncidents([real], codex).map(i => i.id)).toEqual(['real'])
+  })
+
+  it('a genuine ChatGPT outage title is still kept by chatgpt', () => {
+    const real = mockIncident({ id: 'real', title: 'chatgpt.com access issues' })
+    expect(filterIncidents([real], chatgpt).map(i => i.id)).toEqual(['real'])
+  })
+
+  // The advisory is untagged (componentNames:[]), and chatgpt/codex both carry incidentKeywords, so
+  // they reach includeUntaggedIncidents — a SECOND re-attribution path that re-adds untagged active
+  // incidents from the RAW array when the service's own component is concurrently non-operational,
+  // gated only by a re-check of incidentExclude. Guard the token there too, else a concurrent
+  // unrelated degradation would re-acquire the FedRAMP advisory and every filterIncidents test above
+  // would still pass green.
+  it.each([['chatgpt', () => chatgpt, '01JMXBNJXGV1T5GT2M9XA83XNG'], ['codex', () => codex, '01KMP3KP5MGE23B80K1EK4S8PV']] as const)(
+    '%s: includeUntaggedIncidents does NOT re-add the untagged FedRAMP advisory even when the component is degraded',
+    (_id, get, primaryComponentId) => {
+      const active = mockIncident({ id: 'fedramp', title: FEDRAMP_TITLE, status: 'investigating', impact: 'minor', componentNames: [] })
+      const components = [{ id: primaryComponentId, name: 'primary', status: 'major_outage' }]
+      // filtered is empty (filterIncidents dropped it) → the untagged fallback would fire since the
+      // component is non-operational; the incidentExclude re-check must still veto it.
+      expect(includeUntaggedIncidents([], [active], get(), components, 'major')).toEqual([])
     },
   )
 })
