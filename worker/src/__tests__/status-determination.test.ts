@@ -244,6 +244,96 @@ describe('svcStatus determination', () => {
       expect(determineSvcStatus(cfg, summary, [])).toBe('operational')
     })
   })
+
+  describe('with displayAllComponents dynamic worst-of (#992) — Cerebras shape', () => {
+    // Cerebras: displayAllComponents + statusComponentId (uptime primary), NO statusComponentIds.
+    const config: StatusConfig = { displayAllComponents: true, statusComponentId: 'dev' }
+
+    it('worst-ofs EVERY shown component, so a brand-new/untracked model degrades the badge', () => {
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'dev', name: 'Developer Console', status: 'operational' },
+          { id: 'm1', name: 'GPT-OSS-120B', status: 'operational' },
+          { id: 'newmodel', name: 'Gemma4-31B-Multimodal', status: 'partial_outage' }, // in no allowlist
+        ],
+      }
+      expect(determineSvcStatus(config, summary, [])).toBe('degraded')
+    })
+
+    it('down wins across components', () => {
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'dev', name: 'Developer Console', status: 'operational' },
+          { id: 'm1', name: 'GPT-OSS-120B', status: 'major_outage' },
+        ],
+      }
+      expect(determineSvcStatus(config, summary, [])).toBe('down')
+    })
+
+    it('all operational → operational', () => {
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'dev', name: 'Developer Console', status: 'operational' },
+          { id: 'm1', name: 'GPT-OSS-120B', status: 'operational' },
+        ],
+      }
+      expect(determineSvcStatus(config, summary, [])).toBe('operational')
+    })
+
+    it('does NOT pin the badge to the single statusComponentId component (the branch-3 hazard)', () => {
+      // Developer Console (the uptime primary) is operational, but a model is down. If the single-
+      // component branch ran, the badge would read operational — the exact regression #992 avoids.
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'dev', name: 'Developer Console', status: 'operational' },
+          { id: 'm1', name: 'GPT-OSS-120B', status: 'major_outage' },
+        ],
+      }
+      expect(determineSvcStatus(config, summary, [])).toBe('down')
+    })
+
+    it('componentDenylist components cannot degrade the badge', () => {
+      const cfg: StatusConfig = { displayAllComponents: true, componentDenylist: ['Docs'] }
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'a', name: 'API', status: 'operational' },
+          { id: 'docs', name: 'Docs', status: 'major_outage' },
+        ],
+      }
+      expect(determineSvcStatus(cfg, summary, [])).toBe('operational')
+    })
+
+    it('BFL keeps its curated statusComponentIds worst-of even WITH displayAllComponents (branch order: #379 before #992)', () => {
+      // BFL has both flags: the badge must stay scoped to statusComponentIds, so an untracked
+      // component (e.g. Image Generation Services) cannot flip it — the dynamic branch must NOT win.
+      const cfg: StatusConfig = { displayAllComponents: true, statusComponentIds: ['a'], componentDenylist: [] }
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'a', name: 'API', status: 'operational' },
+          { id: 'b', name: 'Untracked', status: 'major_outage' },
+        ],
+      }
+      expect(determineSvcStatus(cfg, summary, [])).toBe('operational')
+    })
+
+    it('a no-id displayAllComponents service (cohere/groq) stays on the OVERALL indicator, not the dynamic worst-of (branch-1 precedence — a Playground blip must not flip the API badge)', () => {
+      const cfg: StatusConfig = { displayAllComponents: true, componentDenylist: ['Docs', 'Website'] }
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'a', name: 'API', status: 'operational' },
+          { id: 'b', name: 'Playground', status: 'major_outage' }, // would degrade IF worst-of applied
+        ],
+      }
+      expect(determineSvcStatus(cfg, summary, [])).toBe('operational') // overall 'none' wins
+    })
+  })
 })
 
 describe('worstStatus helper (#379)', () => {
@@ -759,20 +849,16 @@ describe('SERVICES multi-component config sanity (#379)', () => {
     expect(ws.statusComponentIds).toEqual(['r5wf1ykd7y1m', '8q19cygxvshj'])
   })
 
-  it('cerebras tracks all 5 model/console components, Developer Console primary (#391)', () => {
-    // First `category: 'api'` service to use worst-of multi-component (#379). The
-    // per-model components mean a single model degrading marks Cerebras degraded —
-    // "simplifying" this back to single-component would silently re-introduce the
-    // model-specific-outage under-reporting the seo-content insight/FAQ promise users.
+  it('cerebras runs DYNAMIC (displayAllComponents), not a stale allowlist — churny per-model page (#992)', () => {
+    // Was a 5-id statusComponentIds allowlist (#391/#379); the lineup churned (2 ids went dead + a new
+    // Gemma4-31B-Multimodal appeared untracked), so it's now displayAllComponents like cohere/groq: the
+    // breakdown lists every live component and the #992 dynamic worst-of drives the badge, so a model
+    // added/retired needs no config edit. statusComponentId stays the uptime/calendar/miss primary.
     const cb = SERVICES.find((s) => s.id === 'cerebras')!
     expect(cb.statusComponentId).toBe('83h1cchw4vs4') // Developer Console — primary for uptime parsing
-    expect(cb.statusComponentIds).toEqual([
-      '83h1cchw4vs4', // Developer Console
-      '7xvps6c9lqwc', // Llama3.1-8B
-      'bhqw2gr7r710', // Qwen-3-235B-Instruct-2507
-      'hgfykfsb36gn', // GPT-OSS-120B
-      '8ygyx5vydlm2', // ZAI-GLM-4.7
-    ])
+    expect(cb.displayAllComponents).toBe(true)
+    expect(cb.componentSurfaces).toContain('Developer Console')
+    expect(cb.statusComponentIds).toBeUndefined() // allowlist dropped
   })
 
   it('primary statusComponentId always appears as the first entry of statusComponentIds', () => {
