@@ -94,11 +94,16 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['API'] },
   { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed', betterStackUrl: 'https://status.together.ai', flapSuppression: true, componentDenylist: ['Website'] },
   { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: null, rssFeedUrl: 'https://status.fireworks.ai/feed', betterStackUrl: 'https://status.fireworks.ai', flapSuppression: true, componentDenylist: ['Website'] },
-  // Cerebras Inference (#391) — Atlassian Statuspage, 5 components: 4 model surfaces + Developer Console.
-  // Multi-component worst-of (#379): statusComponentIds lists all 5 so any degraded model degrades the
-  // service; statusComponentId (Developer Console) is the primary for uptime parsing / calendar /
-  // component-miss alerting. Single-tenant page → no incidentKeywords needed.
-  { id: 'cerebras', name: 'Cerebras Inference', provider: 'Cerebras', category: 'api', statusUrl: 'https://status.cerebras.ai', apiUrl: 'https://status.cerebras.ai/api/v2/summary.json', statusComponentId: '83h1cchw4vs4', statusComponentIds: ['83h1cchw4vs4', '7xvps6c9lqwc', 'bhqw2gr7r710', 'hgfykfsb36gn', '8ygyx5vydlm2'] },
+  // Cerebras Inference (#391, #992) — Atlassian Statuspage, single-tenant, per-model. Its model lineup
+  // churns (models added/retired), so instead of a hardcoded statusComponentIds allowlist (which went
+  // stale — 2 dead ids + a missing new Gemma4-31B-Multimodal, #992) it runs DYNAMIC (displayAllComponents,
+  // like cohere/groq): the breakdown lists every live component and the badge worst-ofs them (the #992
+  // resolveSvcStatus dynamic branch), so a new/retired model needs no config edit. statusComponentId
+  // (Developer Console) stays the primary for uptime parsing / calendar / component-miss alerting;
+  // Developer Console is a componentSurfaces row (models fold into the collapsible "Models" group).
+  // componentDenylist mirrors the cohere/groq convention — a future non-availability component
+  // (Website/Docs) must not enter the dynamic worst-of badge or the breakdown.
+  { id: 'cerebras', name: 'Cerebras Inference', provider: 'Cerebras', category: 'api', statusUrl: 'https://status.cerebras.ai', apiUrl: 'https://status.cerebras.ai/api/v2/summary.json', statusComponentId: '83h1cchw4vs4', displayAllComponents: true, componentSurfaces: ['Developer Console'], componentDenylist: ['Website', 'Docs'] },
   // #623 — status.perplexity.com (Instatus, Next.js) has 3 components: "API" (Sonar) + "Website"
   // (the consumer perplexity.ai) + "Computer" (agentic/computer-use surface, added #911).
   // The Next.js parser now resolves each incident's affected components
@@ -502,6 +507,10 @@ type StatusResolverConfig = Pick<ServiceConfig, 'statusComponent' | 'statusCompo
  *      configured ids resolve in the page's components (drift), fall back to
  *      the overall indicator; the separate component-miss alert path picks
  *      the drift up so operators can reconcile.
+ *   2.5. **`displayAllComponents` dynamic worst-of (#992)** — worst-of every
+ *      shown component (all page components minus `componentDenylist`), so a
+ *      churny per-model page (Cerebras) tracks new/retired models with no config
+ *      edit. After #379 (BFL keeps its curated worst-of), before single-component.
  *   3. **Single-component** (`statusComponent` name-prefix match OR
  *      `statusComponentId` exact match) — use that component's status; fall
  *      back to overall if neither matches.
@@ -524,6 +533,21 @@ export function resolveSvcStatus(
       .filter((c): c is NonNullable<typeof c> => c != null)
     if (matched.length > 0) {
       return worstStatus(matched.map((c) => normalizeStatus(c.status)))
+    }
+    return overall
+  }
+  // 2.5. Dynamic mode (#992) — displayAllComponents services badge = worst-of every shown component
+  //   (all page components minus componentDenylist names), mirroring the resolveSvcComponents dynamic
+  //   breakdown so a new/churned model degrades the badge with NO config edit. Positioned AFTER the
+  //   statusComponentIds branch (BFL has BOTH and keeps its curated worst-of) and BEFORE the single-
+  //   component branch (so a dynamic service's uptime-primary statusComponentId — e.g. Cerebras'
+  //   Developer Console — does not pin the badge to that one component). cohere/groq/together have no
+  //   statusComponent* so they returned at branch 1 (overall indicator) already; they never reach here.
+  if (config.displayAllComponents && summaryData.components) {
+    const deny = new Set((config.componentDenylist ?? []).map((n) => n.toLowerCase()))
+    const shown = summaryData.components.filter((c) => !deny.has(c.name.toLowerCase()))
+    if (shown.length > 0) {
+      return worstStatus(shown.map((c) => normalizeStatus(c.status)))
     }
     return overall
   }
@@ -832,6 +856,23 @@ export function badgeGroupNames(
   config: ServiceConfig,
   components: Array<{ id: string; name: string }>,
 ): Set<string> {
+  // #992 — a DYNAMIC (displayAllComponents) service's badge group is EVERY shown component (all page
+  // components minus componentDenylist), matching its #992 dynamic worst-of badge. Without this the
+  // group would collapse to the single statusComponentId (Cerebras' Developer Console) and #970 would
+  // silently drop an active impact:none incident naming any OTHER Cerebras model. The guard MIRRORS
+  // resolveSvcStatus branch precedence exactly: a service with BOTH flags (BFL) resolves its BADGE via
+  // the statusComponentIds worst-of (branch 2, NOT the 2.5 dynamic branch), so its keep-group must stay
+  // the curated ids too — else the group would broaden past the badge and #970 would KEEP an impact:none
+  // incident the curated badge doesn't cover. So dynamic-group ONLY when there's no statusComponentIds.
+  if (config.displayAllComponents && !(config.statusComponentIds && config.statusComponentIds.length > 0)) {
+    const deny = new Set((config.componentDenylist ?? []).map((n) => n.toLowerCase()))
+    const names = new Set<string>()
+    for (const c of components) {
+      const lower = c.name.toLowerCase()
+      if (!deny.has(lower)) names.add(lower)
+    }
+    return names
+  }
   const names = new Set<string>()
   for (const id of badgeGroupIds(config)) {
     const match = components.find(c => c.id === id)
@@ -1623,7 +1664,7 @@ export async function recordProbeSuppression(kv: KVNamespace, svcId: string, dat
   await kvPut(kv, supKey, String(prev + 1), { expirationTtl: 172800 })
 }
 
-export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeSnapshot[]): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[] }> {
+export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeSnapshot[]): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[]; pageComponents: Record<string, Array<{ id: string; name: string }>> }> {
   // Pre-fetch unique Atlassian status API endpoints once.
   // Services sharing a status page (claude+claudeai+claudecode, openai+chatgpt) would each fetch
   // the same URLs independently. Deduplicating saves 6 subrequests, freeing budget for enrichment.
@@ -1673,6 +1714,17 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       console.warn(`[prefetch] ${isJsonErr ? 'JSON parse' : 'network'} failure for ${baseUrl}:`, err instanceof Error ? err.message : err)
     }
   }))
+
+  // #992 — per-page raw component list (apiUrl → {id,name}[]) harvested from the prefetch, for the
+  // cron's new-component change detector. Only successfully-prefetched Statuspage/incident.io pages
+  // carry a components array; a page that failed prefetch this cycle is simply checked next cycle.
+  const pageComponents: Record<string, Array<{ id: string; name: string }>> = {}
+  for (const [apiUrl, data] of prefetchMap) {
+    const comps = data.summary?.components
+    if (Array.isArray(comps) && comps.length > 0) {
+      pageComponents[apiUrl] = comps.map((c) => ({ id: c.id, name: c.name }))
+    }
+  }
 
   // Batch services to avoid exceeding Cloudflare Workers concurrent connection limit.
   // BetterStack services use 3 connections each (statusUrl + RSS + index.json);
@@ -1827,5 +1879,6 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   return {
     raw: applySuppressions(raw, suppressions),
     enriched: applySuppressions(enriched, suppressions),
+    pageComponents,
   }
 }

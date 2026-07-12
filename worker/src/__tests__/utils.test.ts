@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike } from '../utils'
+import { formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, diffPageComponents, formatNewComponentAlert, isAllowedAlertWebhook, shouldAlertPersistentFailure, formatPersistentFailureAlert, appendStatusHint, appendUtm, worstUnresolvedImpact, countsAsUptimeOk, isNonReliabilityAdvisory, PERSISTENT_FAILURE_THRESHOLD_MS, type KVLike } from '../utils'
 import type { Incident } from '../types'
 
 describe('appendStatusHint (#539)', () => {
@@ -443,5 +443,74 @@ describe('isNonReliabilityAdvisory (#707/#811)', () => {
   it('FALSE for empty/ordinary text', () => {
     expect(isNonReliabilityAdvisory('')).toBe(false)
     expect(isNonReliabilityAdvisory('Elevated 5xx on the Messages API')).toBe(false)
+  })
+})
+
+describe('diffPageComponents (#992 — new-component change detection)', () => {
+  const c = (id: string, name = id) => ({ id, name })
+
+  it('bootstraps silently on first sight (seen=null): records ids, flags NOTHING new', () => {
+    const r = diffPageComponents([c('a'), c('b')], null)
+    expect(r.bootstrap).toBe(true)
+    expect(r.newComponents).toEqual([])
+    expect(r.nextSeen.sort()).toEqual(['a', 'b'])
+  })
+
+  it('flags a component whose id was never seen', () => {
+    const r = diffPageComponents([c('a'), c('gemma', 'Gemma4-31B-Multimodal')], ['a'])
+    expect(r.bootstrap).toBe(false)
+    expect(r.newComponents).toEqual([{ id: 'gemma', name: 'Gemma4-31B-Multimodal' }])
+    expect(r.nextSeen.sort()).toEqual(['a', 'gemma'])
+  })
+
+  it('flags nothing when every current id is already seen (no re-alert, snapshot unchanged)', () => {
+    const r = diffPageComponents([c('a'), c('b')], ['a', 'b'])
+    expect(r.newComponents).toEqual([])
+    expect(r.nextSeen.sort()).toEqual(['a', 'b'])
+  })
+
+  it('seen UNIONS current ids (never shrinks) — a removed-then-readded component does not re-alert', () => {
+    // 'b' was seen before but is absent now; it must remain in nextSeen so its later return is silent.
+    const r = diffPageComponents([c('a')], ['a', 'b'])
+    expect(r.newComponents).toEqual([])
+    expect(r.nextSeen.sort()).toEqual(['a', 'b'])
+    // ...and when 'b' comes back, still no alert:
+    const r2 = diffPageComponents([c('a'), c('b')], r.nextSeen)
+    expect(r2.newComponents).toEqual([])
+  })
+
+  it('reports multiple new components at once', () => {
+    const r = diffPageComponents([c('a'), c('x'), c('y')], ['a'])
+    expect(r.newComponents.map((n) => n.id).sort()).toEqual(['x', 'y'])
+  })
+
+  it('empty current + prior seen → nothing new, seen preserved', () => {
+    const r = diffPageComponents([], ['a', 'b'])
+    expect(r.newComponents).toEqual([])
+    expect(r.nextSeen.sort()).toEqual(['a', 'b'])
+  })
+})
+
+describe('formatNewComponentAlert (#992)', () => {
+  it('curated page → actionable "add the id" guidance', () => {
+    const body = formatNewComponentAlert(['OpenAI API', 'Codex'], [{ id: 'z1', name: 'New Model' }], false)
+    expect(body).toContain('OpenAI API, Codex')
+    expect(body).toContain('`New Model`')
+    expect(body).toContain('`z1`')
+    expect(body).toContain('statusComponentIds')
+    expect(body).not.toContain('already auto-tracked')
+  })
+
+  it('dynamic page → heads-up only, no action', () => {
+    const body = formatNewComponentAlert(['Cerebras Inference'], [{ id: 'g', name: 'Gemma4-31B-Multimodal' }], true)
+    expect(body).toContain('already auto-tracked')
+    expect(body).toContain('1 new component')
+  })
+
+  it('pluralizes correctly', () => {
+    const one = formatNewComponentAlert(['X'], [{ id: 'a', name: 'A' }], false)
+    const two = formatNewComponentAlert(['X'], [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], false)
+    expect(one).toContain('1 new component:')
+    expect(two).toContain('2 new components:')
   })
 })

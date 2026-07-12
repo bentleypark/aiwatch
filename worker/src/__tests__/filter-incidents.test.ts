@@ -639,6 +639,44 @@ describe('badgeGroupNames (#970)', () => {
     const config = mockConfig({ statusComponent: 'API' })
     expect([...badgeGroupNames(config, [])]).toEqual(['api'])
   })
+
+  it('#992 — a displayAllComponents (Cerebras) service groups EVERY shown component, not just its statusComponentId', () => {
+    // Regression: after Cerebras dropped statusComponentIds, badgeGroupIds → [statusComponentId] would
+    // collapse the #970 keep-group to Developer Console alone, silently dropping an impact:none incident
+    // naming any OTHER model. Dynamic mode must group all shown components (minus denylist).
+    const config = mockConfig({ displayAllComponents: true, statusComponentId: 'dev', componentDenylist: ['Website'] })
+    const comps = [
+      { id: 'dev', name: 'Developer Console' },
+      { id: 'm1', name: 'GPT-OSS-120B' },
+      { id: 'gemma', name: 'Gemma4-31B-Multimodal' },
+      { id: 'w', name: 'Website' }, // denylisted → excluded
+    ]
+    expect([...badgeGroupNames(config, comps)].sort()).toEqual(['developer console', 'gemma4-31b-multimodal', 'gpt-oss-120b'])
+  })
+
+  it('#992 — a service with BOTH displayAllComponents AND statusComponentIds (BFL) keeps the CURATED group, not the dynamic all-names group', () => {
+    // BFL's badge resolves via the statusComponentIds worst-of (branch 2), NOT the 2.5 dynamic branch,
+    // so its #970 keep-group must mirror that — the curated ids only. Broadening it to every shown
+    // component would KEEP an impact:none incident the curated badge doesn't cover (the inverse leak).
+    const config = mockConfig({ displayAllComponents: true, statusComponentId: 'a', statusComponentIds: ['a', 'b'], componentDenylist: [] })
+    const comps = [
+      { id: 'a', name: 'API' },
+      { id: 'b', name: 'Finetuning' },
+      { id: 'c', name: 'Some Model' }, // shown in breakdown but NOT in the curated badge group
+    ]
+    expect([...badgeGroupNames(config, comps)].sort()).toEqual(['api', 'finetuning'])
+  })
+
+  it('#992 — filterByComponentStatus KEEPS an active impact:none incident naming a non-primary Cerebras model (the #970 drop the dynamic keep-group prevents)', () => {
+    const config = mockConfig({ displayAllComponents: true, statusComponentId: 'dev', componentDenylist: ['Website'] })
+    const comps = [
+      { id: 'dev', name: 'Developer Console' },
+      { id: 'gemma', name: 'Gemma4-31B-Multimodal' },
+    ]
+    const inc = { id: 'x', status: 'investigating', impact: null, componentNames: ['Gemma4-31B-Multimodal'] } as unknown as Parameters<typeof filterByComponentStatus>[0][number]
+    // Badge operational (all components fine) so the #970 guard runs; the model-named incident must survive.
+    expect(filterByComponentStatus([inc], 'operational', config, comps).map(i => i.id)).toEqual(['x'])
+  })
 })
 
 // Reproduces the call-site decision flow inside fetchService for shared
