@@ -6,7 +6,7 @@
 // in any of these would re-block Phase 1's "snippet documented somewhere reachable
 // from ai-watch.dev" criterion or silently invalidate the traction baseline.
 
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { waitForDataLoad } from './helpers.js'
 
 test.describe('Statusline guide page (#400 Phase 0)', () => {

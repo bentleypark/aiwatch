@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { waitForDataLoad } from './helpers.js'
 
 // Navigation tests only on desktop (sidebar visible)

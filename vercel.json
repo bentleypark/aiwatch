@@ -1,6 +1,6 @@
 {
   "framework": "vite",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- src/ public/ index.html api/ vercel.json",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- src/ public/ index.html api/ vercel.json tests/",
   "headers": [
     {
       "source": "/((?!is-[^/]+-down(?:/|$)|(?:intro|badges|methodology|plugin|plugin-privacy|extension-privacy|reports|confirm|api)(?:/|$)|feed(?:[./]|$)).*)",

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { waitForDataLoad } from './helpers.js'
 
 test.describe('Offline / API failure (dev mode)', () => {

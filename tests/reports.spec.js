@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Edge Function /api/reports proxies ai-watch.dev/reports/* to the aiwatch-reports
 // Jekyll origin (#264). A regression here — falling through to the SPA — is exactly

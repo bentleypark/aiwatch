@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { waitForDataLoad, navigateToSettings } from './helpers.js'
 
 test.describe('Settings', () => {
