@@ -564,8 +564,11 @@ export async function analyzeIncidentDetailed(
 
 // ── ai:usage daily counters ──
 
+/** #995 — retention for `ai:usage:{date}`. 30d (was 2d) so a rolling trend outlives the day. */
+export const AI_USAGE_TTL_S = 30 * 86400
+
 /**
- * Daily AI-analysis counters (`ai:usage:{date}` KV, 2d TTL).
+ * Daily AI-analysis counters (`ai:usage:{date}` KV, 30d TTL — #995).
  *
  * `gemma` / `sonnet` count SUCCESSES; `gemmaAttempts` / `sonnetAttempts` count calls actually
  * issued (#955). Before the attempt counters existed a dead fallback was invisible: Sonnet
@@ -627,6 +630,64 @@ export function applyAttempt(usage: AiUsageCounters, attempt: AnalysisAttempt): 
     next.failed++
   }
   return next
+}
+
+/** #995 — a multi-day roll-up of AiUsageCounters for the trend surfaces. */
+export interface AiUsageTrend {
+  days: number
+  calls: number
+  gemma: number
+  gemmaAttempts: number
+  sonnet: number
+  sonnetAttempts: number
+  timedOut: number
+  failed: number
+  /** gemma / gemmaAttempts — null when Gemma was never attempted (no denominator). */
+  gemmaSuccessRate: number | null
+  /** timedOut / calls — null when there were no calls. */
+  timedOutRate: number | null
+}
+
+/**
+ * #995 — sum a window of daily `AiUsageCounters` into one trend. Pure; the caller supplies whichever
+ * days it read from `ai:usage:{date}`. Rates are null (not 0) when their denominator is 0, so the
+ * formatter can omit a meaningless "0%" and a division never yields NaN.
+ */
+export function summarizeAiUsageTrend(entries: AiUsageCounters[]): AiUsageTrend {
+  const s = entries.reduce(
+    (a, u) => ({
+      calls: a.calls + (u.calls ?? 0),
+      gemma: a.gemma + (u.gemma ?? 0),
+      gemmaAttempts: a.gemmaAttempts + (u.gemmaAttempts ?? 0),
+      sonnet: a.sonnet + (u.sonnet ?? 0),
+      sonnetAttempts: a.sonnetAttempts + (u.sonnetAttempts ?? 0),
+      timedOut: a.timedOut + (u.timedOut ?? 0),
+      failed: a.failed + (u.failed ?? 0),
+    }),
+    { calls: 0, gemma: 0, gemmaAttempts: 0, sonnet: 0, sonnetAttempts: 0, timedOut: 0, failed: 0 },
+  )
+  return {
+    days: entries.length,
+    ...s,
+    gemmaSuccessRate: s.gemmaAttempts > 0 ? s.gemma / s.gemmaAttempts : null,
+    timedOutRate: s.calls > 0 ? s.timedOut / s.calls : null,
+  }
+}
+
+/**
+ * #995 — one-line Discord render of the trend (weekly briefing). Empty string when there were no
+ * calls in the window (nothing to report — caller omits the line). `failed` is ALWAYS shown (the
+ * real health signal), `timedOut` only when non-zero (a benign, by-design budget-overrun path — see
+ * INLINE_ANALYSIS_BUDGET_MS), so a rising `failed` is never hidden behind a noisy timeout count.
+ */
+export function formatAiUsageTrendLine(trend: AiUsageTrend): string {
+  if (trend.calls === 0) return ''
+  const pct = trend.gemmaSuccessRate != null ? ` (${Math.round(trend.gemmaSuccessRate * 100)}%)` : ''
+  const parts = [`${trend.calls} calls`, `Gemma ${trend.gemma}/${trend.gemmaAttempts}${pct}`]
+  if (trend.sonnet > 0) parts.push(`Sonnet ${trend.sonnet} fallback`)
+  if (trend.timedOut > 0) parts.push(`${trend.timedOut} timed out`)
+  parts.push(`${trend.failed} failed`)
+  return `🤖 **AI Analysis** (${trend.days}d): ${parts.join(' · ')}`
 }
 
 /**
@@ -699,7 +760,10 @@ export async function recordUsage(kv: KVLike, now: number, attempt: AnalysisAtte
   try {
     const usageKey = `ai:usage:${new Date(now).toISOString().split('T')[0]}`
     const usage = applyAttempt(parseUsage(await kv.get(usageKey).catch(() => null)), attempt)
-    await kvPut(kv, usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
+    // #995 — 30d TTL (was 2d) so the Gemma-success / timedOut / failed trend survives long enough to
+    // answer "is the timeout/fallback rate rising?" (the weekly briefing reads these; #995). One
+    // write/day per date key already; only the retention window changes.
+    await kvPut(kv, usageKey, JSON.stringify(usage), { expirationTtl: AI_USAGE_TTL_S })
   } catch (err) {
     console.warn('[ai] ai:usage counter bump failed:', err instanceof Error ? err.message : err)
   }

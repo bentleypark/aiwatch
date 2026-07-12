@@ -4,6 +4,8 @@
 import type { ChangelogEntry, StaleSourceInfo } from './changelog'
 import { formatChangelogSection, formatStaleSourcesWarning } from './changelog'
 import type { MonthlyIncidentEntry } from './monthly-archive'
+import type { AiUsageTrend } from './ai-analysis'
+import { formatAiUsageTrendLine } from './ai-analysis'
 
 export interface WeeklyIncidentSummary {
   serviceId: string
@@ -38,6 +40,9 @@ export interface WeeklyBriefingData {
   security?: WeeklySecuritySummary
   /** Per-source last-fetch staleness — surfaces silent collection gaps (#274) */
   staleSources?: StaleSourceInfo[]
+  /** #995 — 7-day AI-analysis usage roll-up (Gemma/Sonnet/timedOut/failed), from the retained
+   *  `ai:usage:{date}` keys. Absent/null → the section is omitted (no analyses that week). */
+  aiUsageTrend?: AiUsageTrend | null
 }
 
 /**
@@ -106,6 +111,20 @@ export function getWeekRange(date: Date): { start: string; end: string } {
     start: mon.toISOString().split('T')[0],
     end: sun.toISOString().split('T')[0],
   }
+}
+
+/**
+ * #995 — enumerate every `YYYY-MM-DD` from `weekStart`..`weekEnd` INCLUSIVE (used to read the week's
+ * `ai:usage:{date}` keys for the trend line). Pure + UTC-only (no DST/local drift). Returns `[]` when
+ * the range is inverted, so a bad range yields an empty (omitted) trend rather than a hang.
+ */
+export function weekDateStrings(weekStart: string, weekEnd: string): string[] {
+  const dates: string[] = []
+  const end = new Date(`${weekEnd}T00:00:00Z`)
+  for (let d = new Date(`${weekStart}T00:00:00Z`); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+    dates.push(d.toISOString().split('T')[0])
+  }
+  return dates
 }
 
 function formatDateRange(start: string, end: string): string {
@@ -243,6 +262,12 @@ export function buildWeeklyBriefing(data: WeeklyBriefingData): string {
       const list = declined.slice(0, 3).map((c) => `${c.serviceName} (${c.prevUptime.toFixed(1)}% → ${c.currUptime.toFixed(1)}%)`).join(', ')
       lines.push(`Declined: ${list}`)
     }
+  }
+
+  // Section 3.5: AI Analysis usage trend (#995) — only when there were analyses this week.
+  if (data.aiUsageTrend) {
+    const aiLine = formatAiUsageTrendLine(data.aiUsageTrend)
+    if (aiLine) lines.push(`\n${aiLine}`)
   }
 
   // Section 4: Security

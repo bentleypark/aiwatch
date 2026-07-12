@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, buildHistorySection, analyzeIncidentDetailed, refreshOrReanalyze, analysisKey, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, reanalysisLockTtlSec, applyAttempt, parseUsage, emptyUsage, analyzeIncidentWithBudget, INLINE_ANALYSIS_BUDGET_MS, SONNET_MAX_TOKENS, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind, type KVLike } from '../ai-analysis'
+import { findSimilarIncidents, buildAnalysisPrompt, buildHistorySection, analyzeIncidentDetailed, refreshOrReanalyze, analysisKey, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, reanalysisLockTtlSec, applyAttempt, parseUsage, emptyUsage, summarizeAiUsageTrend, formatAiUsageTrendLine, AI_USAGE_TTL_S, analyzeIncidentWithBudget, INLINE_ANALYSIS_BUDGET_MS, SONNET_MAX_TOKENS, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind, type KVLike } from '../ai-analysis'
 import type { IncidentHistoryRecord } from '../incident-history'
 import { ANTHROPIC_TIMEOUT_MS } from '../anthropic'
 import type { Incident, ServiceStatus } from '../types'
@@ -654,6 +654,60 @@ describe('applyAttempt / parseUsage', () => {
   it('falls back to zeroes on absent or corrupt KV values', () => {
     expect(parseUsage(null)).toEqual({ calls: 0, success: 0, failed: 0 })
     expect(parseUsage('not json')).toEqual({ calls: 0, success: 0, failed: 0 })
+  })
+})
+
+describe('summarizeAiUsageTrend / formatAiUsageTrendLine (#995)', () => {
+  it('sums a multi-day window and computes rates', () => {
+    const t = summarizeAiUsageTrend([
+      { calls: 5, success: 4, failed: 0, gemma: 4, gemmaAttempts: 5, timedOut: 1 },
+      { calls: 3, success: 2, failed: 0, gemma: 2, gemmaAttempts: 3, timedOut: 1 },
+      { calls: 2, success: 1, failed: 0, gemma: 0, gemmaAttempts: 2, sonnet: 1, sonnetAttempts: 1, timedOut: 1 },
+    ])
+    expect(t).toMatchObject({ days: 3, calls: 10, gemma: 6, gemmaAttempts: 10, sonnet: 1, timedOut: 3, failed: 0 })
+    expect(t.gemmaSuccessRate).toBeCloseTo(0.6)
+    expect(t.timedOutRate).toBeCloseTo(0.3)
+  })
+
+  it('rates are null (not NaN/0) when the denominator is zero', () => {
+    const t = summarizeAiUsageTrend([{ calls: 0, success: 0, failed: 0 }])
+    expect(t.gemmaSuccessRate).toBeNull()
+    expect(t.timedOutRate).toBeNull()
+  })
+
+  it('empty window → zeros, both rates null', () => {
+    const t = summarizeAiUsageTrend([])
+    expect(t).toMatchObject({ days: 0, calls: 0, gemma: 0, failed: 0 })
+    expect(t.gemmaSuccessRate).toBeNull()
+  })
+
+  it('formats a line: failed ALWAYS shown, timedOut only when non-zero, Sonnet only when used', () => {
+    const line = formatAiUsageTrendLine(summarizeAiUsageTrend([
+      { calls: 10, success: 8, failed: 0, gemma: 8, gemmaAttempts: 9, sonnet: 0, timedOut: 1 },
+    ]))
+    expect(line).toContain('Gemma 8/9 (89%)')
+    expect(line).toContain('1 timed out')
+    expect(line).toContain('0 failed')
+    expect(line).not.toContain('Sonnet')
+    expect(line).toContain('(1d)')
+  })
+
+  it('omits the timedOut clause when zero, and shows Sonnet when it was a fallback', () => {
+    const line = formatAiUsageTrendLine(summarizeAiUsageTrend([
+      { calls: 4, success: 4, failed: 0, gemma: 3, gemmaAttempts: 3, sonnet: 1, sonnetAttempts: 1 },
+    ]))
+    expect(line).toContain('Sonnet 1 fallback')
+    expect(line).not.toContain('timed out')
+    expect(line).toContain('0 failed')
+  })
+
+  it('returns empty string when there were no calls (nothing to report)', () => {
+    expect(formatAiUsageTrendLine(summarizeAiUsageTrend([]))).toBe('')
+    expect(formatAiUsageTrendLine(summarizeAiUsageTrend([{ calls: 0, success: 0, failed: 0 }]))).toBe('')
+  })
+
+  it('retains ai:usage for 30 days so a weekly trend has data (was 2d — #995)', () => {
+    expect(AI_USAGE_TTL_S).toBe(30 * 86400)
   })
 })
 
