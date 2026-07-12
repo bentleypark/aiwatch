@@ -7,7 +7,10 @@
 // incident counts, unlike services:latest which is a point-in-time snapshot.
 
 import type { ProbeDailyData } from './probe-archival'
-import type { ServiceStatus, Incident, ServiceConfig } from './types'
+import { summariesFromDailyData } from './probe-archival'
+import type { ServiceStatus, Incident, ServiceConfig, ProbeSummary } from './types'
+import { calculateAIWatchScore, classifyProbe } from './score'
+import { resolveProbeId, PROBE_TARGETS } from './probe'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
@@ -58,6 +61,17 @@ export interface MonthlyServiceData {
   officialUptime: number | null  // #586 — status-page rolling-30d uptime (month-end daily snapshot, build-time fallback) for the "Official Uptime" DISPLAY table; separate from the daily-counter `uptime` that feeds the Score. #951 — emitted ONLY when the Score actually consumed an official uptime (scoreConfidence 'high'); null otherwise
   score: number | null           // AIWatch Score at archive time (null if unavailable)
   grade: ScoreGrade | null       // Score grade (null if score unavailable)
+  // #993 — Score computed over THIS CALENDAR MONTH (score.ts run on the month's incidents + monthly
+  // probe summary), as opposed to `score` which is a build-day snapshot of the rolling live Score.
+  // The report's trend chart + Notable Movers read this so the Score delta shares the month window
+  // with the MTTR/downtime deltas. CAVEAT: only the Incidents (25) and Recovery (15) components are
+  // truly calendar-windowed; the 40-pt Uptime component still uses the month-END rolling-30d
+  // official-uptime snapshot (status pages expose no calendar-month uptime), and Responsiveness uses
+  // the month's probe summary. Still a strict improvement over the build-day `score`. Absent on
+  // archives built before #993 → consumers fall back to `score`.
+  monthlyScore?: number | null
+  monthlyGrade?: ScoreGrade | null
+  monthlyScoreConfidence?: ScoreConfidence | null
   scoreConfidence?: ScoreConfidence | null // #951 — 'high' = the Score included the 40-pt uptime component; the report labels the uptime source from this instead of a hardcoded service list
   incidents: number              // incident count for the month (from accumulated data)
   avgResolutionMin: number | null // average resolution time in minutes (null if no resolved incidents)
@@ -806,6 +820,61 @@ export function curateComponentUptime(
   return kept.length >= 2 ? kept : undefined
 }
 
+const PROBED_IDS = new Set(PROBE_TARGETS.map((t) => t.id))
+
+/** Format integer minutes back to the "Xh Ym" string score.ts's MTTR parser expects (lossless). */
+function minutesToDurationString(mins: number): string {
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`
+}
+
+/**
+ * A calendar-month AIWatch Score (#993). PURE. Runs the SAME `calculateAIWatchScore` the live path
+ * uses, but over an explicit month window: the month's incidents (adapted from the archived
+ * per-incident entries), the month's official uptime, and a month-scoped probe summary. This makes
+ * the archived Score share the calendar-month window with the MTTR/downtime aggregates beside it, so
+ * the report's Notable Movers stops juxtaposing two different windows. Reuses score.ts as the single
+ * source of the formula — no reimplementation. (Uptime input is the month-END rolling official
+ * uptime, not a calendar-month figure — status pages expose none; incidents + recovery are the
+ * calendar-windowed parts.) Returns null when there is nothing to score.
+ */
+export function computeMonthlyScore(
+  id: string,
+  monthIncidents: MonthlyIncidentEntry[] | undefined,
+  officialUptime: number | null,
+  monthlySummaries: Map<string, ProbeSummary>,
+  window: { startISO: string; endISO: string },
+  svcConfig: ServiceConfig | undefined,
+): { score: number | null; grade: ScoreGrade | null; confidence: ScoreConfidence } {
+  // Adapt the archived incident entries to the minimal Incident shape calculateAIWatchScore reads
+  // (startedAt, impact, status, duration). finalStatus → status; durationMin → the "Xh Ym" string
+  // its MTTR parser expects (lossless for integer minutes); missing impact → null (informational).
+  const incidents: Incident[] = (monthIncidents ?? []).map((e) => ({
+    id: e.id,
+    title: e.title,
+    status: e.finalStatus,
+    impact: e.impact ?? null,
+    startedAt: e.startedAt,
+    resolvedAt: e.resolvedAt,
+    duration: e.finalStatus === 'resolved' ? minutesToDurationString(e.durationMin) : null,
+    timeline: [],
+  }))
+  const service: ServiceStatus = {
+    id,
+    name: svcConfig?.name ?? id,
+    provider: svcConfig?.provider ?? '',
+    category: svcConfig?.category ?? 'api',
+    status: 'operational', // unread by calculateAIWatchScore; the window + incidents drive the score
+    latency: null,
+    uptime30d: officialUptime, // month official uptime — null drops the Uptime component (as live)
+    lastChecked: window.endISO,
+    incidents,
+  }
+  const probeId = resolveProbeId(id) // #883 — inheriting services score against the parent's probe
+  const probe = classifyProbe(probeId, PROBED_IDS.has(probeId), monthlySummaries)
+  const r = calculateAIWatchScore(service, 30 /* unused when window is set */, probe, window)
+  return { score: r.score, grade: r.grade, confidence: r.confidence }
+}
+
 /** Compute per-service average probe RTT (p75) from daily probe summaries */
 export function computeMonthlyLatency(
   probeData: Record<string, ProbeDailyData>,
@@ -1213,6 +1282,19 @@ export async function buildMonthlyArchive(
   // established + genuine mid-month adds are kept (the #802 ranking gate still handles partial coverage).
   const monthEnd = dates[dates.length - 1] // 'YYYY-MM-DD'
 
+  // #993 — a month-scoped probe summary (same cvCombined logic as the live 7-day path) and the
+  // calendar-month window, computed ONCE for the monthly-Score pass below. The window uses CLEAN DAY
+  // boundaries ([month-01 00:00, next-month-01 00:00)) rather than `...T23:59:59.999Z`: incident
+  // `startedAt` values are compared as STRINGS, and a mixed-precision compare ('…59Z' vs '…59.999Z')
+  // wrongly excludes a last-second incident because 'Z' > '.' lexically. A next-day midnight bound
+  // is precision-agnostic.
+  const monthlySummaries = summariesFromDailyData(Object.values(probeData))
+  const nextMonth = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 }
+  const monthWindow = {
+    startISO: `${period}-01T00:00:00.000Z`,
+    endISO: `${nextMonth.y}-${String(nextMonth.m).padStart(2, '0')}-01T00:00:00.000Z`,
+  }
+
   for (const id of allIds) {
     if (!existedInMonth(SERVICE_ADDED_AT[id], monthEnd)) continue
     const scoreSvc = scoreData?.find(s => s.id === id)
@@ -1249,6 +1331,10 @@ export async function buildMonthlyArchive(
       score: scoreSvc?.aiwatchScore ?? null,
       grade: scoreSvc?.scoreGrade ?? null,
       ...(scoreSvc?.scoreConfidence ? { scoreConfidence: scoreSvc.scoreConfidence } : {}),
+      ...(() => { // #993 — calendar-month Score (window-aligned with the MTTR/downtime aggregates)
+        const m = computeMonthlyScore(id, incSvc?.incidents, officialUptimeMap[id] ?? null, monthlySummaries, monthWindow, SERVICES.find((s) => s.id === id))
+        return { monthlyScore: m.score, monthlyGrade: m.grade, ...(m.confidence ? { monthlyScoreConfidence: m.confidence } : {}) }
+      })(),
       incidents: incSvc?.count ?? 0,
       avgResolutionMin,
       totalDowntimeMin,
