@@ -6,7 +6,7 @@ import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type Serv
 import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, type SuppressionEntry } from './suppression'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
-import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, shouldSkipInitialAnalysis, recordUsage, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
+import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, shouldSkipInitialAnalysis, recordUsage, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
 import { kvPut, kvDel, detectComponentMismatches, diffPageComponents, formatNewComponentAlert, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
@@ -1482,7 +1482,7 @@ import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDet
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
 import { collectChangelogs, getStaleSources } from './changelog'
-import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek } from './weekly-briefing'
+import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { parseReferralBody, recordReferral, type ReferralCounts } from './referral'
 import { parsePageviewBody, recordOutageView, queryOutageAudience, type AudienceCounts } from './outage-audience'
@@ -2376,7 +2376,20 @@ export default {
 
           // Per-source last-fetch staleness check — surfaces silent collection gaps (#274)
           const staleSources = await getStaleSources(env.STATUS_CACHE).catch(() => [])
-          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, stabilityDataAvailable, security, staleSources })
+
+          // #995 — AI-analysis usage trend from the retained ai:usage:{date} keys across the week.
+          // parseUsage(null) → zeros, so missing days contribute nothing but keep the window at 7d.
+          let aiUsageTrend = null
+          try {
+            const entries = await Promise.all(
+              weekDateStrings(weekStart, weekEnd).map((dt) => env.STATUS_CACHE.get(`ai:usage:${dt}`).catch(() => null).then(parseUsage)),
+            )
+            aiUsageTrend = summarizeAiUsageTrend(entries)
+          } catch (err) {
+            console.warn('[cron] weekly ai:usage trend read failed:', err instanceof Error ? err.message : err)
+          }
+
+          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, stabilityDataAvailable, security, staleSources, aiUsageTrend })
           await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
             title: `📋 Weekly Briefing (${weekStart} ~ ${weekEnd})`,
             description: briefing,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, type WeeklyBriefingData } from '../weekly-briefing'
+import { getWeekRange, weekDateStrings, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, type WeeklyBriefingData } from '../weekly-briefing'
 
 describe('getWeekRange', () => {
   it('returns Mon–Sun for a Wednesday', () => {
@@ -18,6 +18,28 @@ describe('getWeekRange', () => {
     const { start, end } = getWeekRange(new Date('2026-04-12T23:59:00Z')) // Sunday
     expect(start).toBe('2026-04-06')
     expect(end).toBe('2026-04-12')
+  })
+})
+
+describe('weekDateStrings (#995)', () => {
+  it('enumerates all 7 dates INCLUSIVE of both ends', () => {
+    expect(weekDateStrings('2026-07-06', '2026-07-12')).toEqual([
+      '2026-07-06', '2026-07-07', '2026-07-08', '2026-07-09', '2026-07-10', '2026-07-11', '2026-07-12',
+    ])
+  })
+
+  it('crosses a month boundary correctly (UTC, no drift)', () => {
+    expect(weekDateStrings('2026-06-29', '2026-07-05')).toEqual([
+      '2026-06-29', '2026-06-30', '2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04', '2026-07-05',
+    ])
+  })
+
+  it('single-day range returns that one day', () => {
+    expect(weekDateStrings('2026-07-06', '2026-07-06')).toEqual(['2026-07-06'])
+  })
+
+  it('inverted range returns [] (no hang, trend omitted)', () => {
+    expect(weekDateStrings('2026-07-12', '2026-07-06')).toEqual([])
   })
 })
 
@@ -127,6 +149,27 @@ describe('buildWeeklyBriefing', () => {
     expect(result).toContain('No service changes detected')
     expect(result).toContain('No incidents this week')
     expect(result).toContain('No significant changes')
+  })
+
+  it('#995 — renders the AI-analysis trend line when aiUsageTrend has calls', () => {
+    const data: WeeklyBriefingData = {
+      weekStart: '2026-04-06',
+      weekEnd: '2026-04-12',
+      changelog: [],
+      incidents: [],
+      stabilityChanges: [],
+      aiUsageTrend: { days: 7, calls: 12, gemma: 9, gemmaAttempts: 11, sonnet: 2, sonnetAttempts: 3, timedOut: 2, failed: 0, gemmaSuccessRate: 9 / 11, timedOutRate: 2 / 12 },
+    }
+    const result = buildWeeklyBriefing(data)
+    expect(result).toContain('AI Analysis')
+    expect(result).toContain('Gemma 9/11')
+    expect(result).toContain('0 failed')
+  })
+
+  it('#995 — omits the AI-analysis line when aiUsageTrend is absent or had no calls', () => {
+    const base = { weekStart: '2026-04-06', weekEnd: '2026-04-12', changelog: [], incidents: [], stabilityChanges: [] }
+    expect(buildWeeklyBriefing(base)).not.toContain('AI Analysis')
+    expect(buildWeeklyBriefing({ ...base, aiUsageTrend: { days: 7, calls: 0, gemma: 0, gemmaAttempts: 0, sonnet: 0, sonnetAttempts: 0, timedOut: 0, failed: 0, gemmaSuccessRate: null, timedOutRate: null } })).not.toContain('AI Analysis')
   })
 
   it('renders "data unavailable" (not "No significant changes") when stabilityDataAvailable is false (#733)', () => {
