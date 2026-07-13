@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 test.describe('Landing page (/intro)', () => {
   test('renders with correct title and meta', async ({ page }) => {
