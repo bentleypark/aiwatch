@@ -82,7 +82,8 @@ const ko = {
   'overview.banner.affected': '{n}개 서비스 장애',
   // #574 — 공급망 상관 배너 (AWS 리전 저하 + 의존 AI 서비스 저하)
   'supplychain.title': 'AWS 인프라 이슈',
-  // 서비스 자신이 확인: 저하 + 자체 상태페이지가 원인을 AWS/upstream으로 명시(StatusGator식 크로스체크) — 단순 시간 우연 아님.
+  // 서비스 자신이 확인: 저하 + 자체 상태페이지가 AWS가 실제로 degraded로 보고하는 리전을 지목(#1000 리전 대조) — 단순 시간 우연 아님.
+  // 리전 없는 'upstream provider' 언급만으로는 더 이상 귀속되지 않는다 (리전 일치가 핵심).
   'supplychain.affectingNow': '저하 · AWS 귀속 확인:',
   'supplychain.mayAffect': 'AWS 의존 · 영향 가능:',
   'supplychain.region.degraded': '성능 저하',

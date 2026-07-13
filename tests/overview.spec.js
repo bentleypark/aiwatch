@@ -683,7 +683,7 @@ test.describe('Overview — supply-chain banner (#574)', () => {
     supplyChainBanner: {
       cloud: 'aws', severity: 'degraded',
       regions: [{ region: 'us-east-1', level: 'degraded', summary: 'Increased error rates in us-east-1' }],
-      affectedNow: [{ id: 'claude', name: 'Claude API' }],
+      affectedNow: [{ id: 'claude', name: 'Claude API', regions: ['us-east-1'] }], // #1000 — real payload carries per-service regions
       mayBeAffected: [{ id: 'bedrock', name: 'Amazon Bedrock', confidence: 'certain' }, { id: 'together', name: 'Together AI', confidence: 'medium' }],
     },
     lastUpdated: new Date().toISOString(),

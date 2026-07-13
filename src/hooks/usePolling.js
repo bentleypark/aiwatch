@@ -693,7 +693,7 @@ function usePollingInternal() {
     recentlyRecovered: {},
     securityAlerts: [],
     reportFeed: {},
-    supplyChainBanner: null, // #574 — AWS region degraded + dependent AI service degraded; null otherwise
+    supplyChainBanner: null, // #574/#1000 — AWS region degraded + a dependent degraded that NAMES that region; null otherwise
   })
   const cancelledRef = useRef(false)
   const controllerRef = useRef(null)

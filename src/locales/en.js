@@ -82,8 +82,9 @@ const en = {
   'overview.banner.affected': '{n} services affected',
   // #574 — supply-chain correlation banner (AWS region degraded + dependent AI service degraded)
   'supplychain.title': 'AWS infrastructure issue',
-  // Confirmed by the service ITSELF: these are degraded AND their own status page attributes the
-  // issue to AWS / an upstream provider (StatusGator-style cross-check) — not a mere timing coincidence.
+  // Confirmed by the service ITSELF: these are degraded AND their own status page names an AWS region
+  // that AWS reports degraded (#1000 region-aware cross-check) — not a mere timing coincidence. A
+  // region-less "upstream provider" mention no longer qualifies; the region match is the whole point.
   'supplychain.affectingNow': 'Degraded · AWS-attributed:',
   'supplychain.mayAffect': 'Other AWS-dependent · may be affected:',
   'supplychain.region.degraded': 'degraded',
