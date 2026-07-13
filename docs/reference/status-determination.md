@@ -204,9 +204,9 @@ The `uptime30d` field holds figures over **different windows by source**: `offic
 ## Supply-chain correlation banner (#574, Phase 1: AWS)
 
 A LIVE banner correlating a cloud-region issue with dependent AI services — surfaced ONLY when an
-**AWS infrastructure region is degraded AND ≥1 AWS-dependent AI service is degraded AND attributes the
-issue to AWS in its own incident text**. Differentiator vs AIDown.io's *static* dependency map (always
-shown, no live correlation) and vs a naive timing correlation (over-alarmist).
+**AWS infrastructure region is degraded AND ≥1 AWS-dependent AI service is degraded AND names THAT SAME
+degraded region in its own incident** (#1000). Differentiator vs AIDown.io's *static* dependency map
+(always shown, no live correlation) and vs a naive timing correlation (over-alarmist).
 
 - **AWS region health** (`parseAwsRegionHealth`, `parsers/aws.ts`): derived from the SAME AWS Health
   public-events JSON the Bedrock fetch already pulls (`health.aws.amazon.com/public/events`, all AWS
@@ -219,16 +219,54 @@ shown, no live correlation) and vs a naive timing correlation (over-alarmist).
   services + confidence — bedrock (certain), Anthropic claude/claudeai/claudecode (high — public $100B+
   AWS Trainium/Bedrock commitment), huggingface + pinecone (medium). **Together was removed** (runs its
   own AI-native GPU cloud, not AWS — AIDown's 60% was wrong). Worker-side only (no client sync).
-- **Attribution cross-check** (`buildSupplyChainBanner`, StatusGator-style): a degraded dependent is
-  **`affectedNow` only if its OWN active incident title/timeline text names AWS / a region / an
-  upstream-provider** (`AWS_ATTRIBUTION_RE`: aws, us-east-1…, ec2/ebs, "upstream/cloud/infrastructure/
-  third-party provider"). Bedrock is auto-attributed (AWS-native). A degraded-but-unattributed service
-  is OMITTED (no causation claim — the regular outage banner covers it). Verified empirically: Pinecone
+- **Attribution cross-check** (`buildSupplyChainBanner`, StatusGator-style) — **region-aware since
+  #1000**: a degraded dependent is **`affectedNow` only if its OWN active incident (title +
+  `componentNames` + timeline) names an AWS region that AWS ITSELF currently reports as degraded**
+  (`awsRegionsNamedByService` ∩ the `awsRegionHealth` keys — a plain set intersection, no key is
+  special-cased). Region tokens are matched by shape (`AWS_REGION_RE`: `<area>-<direction>-<n>`, with the `<direction>`
+  vocabulary enumerated), not by a hand-kept list of full region names — the token is AWS-specific by
+  construction (GCP writes `us-east1`, Azure `eastus`), so naming one IS the attribution. Incidents
+  with `impact: null` are skipped (the provider itself claims no availability impact → it cannot be
+  the cause), mirroring the AWS side where `awsHealthImpact` drops #707 advisories. An AZ suffix
+  (`us-east-1a`) folds to its region. Verified empirically at #574 design time (2026-06): Pinecone
   tags `[AWS][us-east-1]` in 29/50 incidents (region-matchable), Anthropic 0/50 (so Claude only ever
   appears under `mayBeAffected`, never confirmed — correct). Healthy map members → `mayBeAffected`
-  ("AWS-dependent · may be affected", hedged). **Gate**: ≥1 region degraded AND ≥1 `affectedNow`, else null.
+  ("AWS-dependent · may be affected", hedged). **Gate**: ≥1 `affectedNow`, else null.
+  - **Why region-aware** (#1000): the original gate only asked *"does the incident mention AWS at
+    all?"*, which let the banner's two halves disagree. On 2026-07-13 prod rendered "AWS infrastructure
+    issue — me-central-1, me-south-1 · AWS-attributed: Pinecone" while Pinecone's only incident was
+    `[Serverless][AWS][us-east-1] …` and us-east-1 had **no** AWS event — the regex matched on the
+    bare word `aws`. That is exactly the "both degraded at once" coincidence the cross-check exists to
+    eliminate. Its region list had also gone stale (no `me-`/`ca-`/`sa-`/`af-`/`il-`/`cn-`/`mx-`/
+    `us-gov-`/`ap-east-`/`eu-north-`/`eu-south-`), though that alone was mostly harmless — the bare
+    `aws` alternative caught those incidents anyway. Shape-matching just removes the upkeep.
+  - **Bedrock has no special case** (removed in #1000). It is AWS-native and its incidents come from
+    the AWS Health feed with `componentNames: [region]`, so its regions parse out like anyone else's.
+    The old `id === 'bedrock' → always attributed` shortcut would have preserved this very bug for
+    Bedrock (an outage in one region rendering under an unrelated region's infra event).
+  - **Region-less attribution is fail-closed**: an incident that blames AWS with no region ("our
+    upstream provider is having issues") is NOT attributed. The banner's headline is region-scoped, so
+    listing a service under regions its own status page never mentions would re-create the claim this
+    gate removes. We under-claim rather than assert an unverifiable cause.
+  - **`global` events deliberately do NOT correlate.** AWS files its region-less services (Route 53 /
+    IAM / CloudFront / STS) under `region: "global"`, which `parseAwsRegionHealth` passes through as a
+    key — but `awsRegionsNamedByService` only emits `<area>-<direction>-<n>` tokens, so `global` can
+    never enter the intersection whatever an incident says: a global-only event never joins and the
+    banner stays silent. Treating it as a wildcard ("degraded everywhere → it cannot contradict
+    anyone") was implemented and **reverted**: non-contradiction is not corroboration. It let an active
+    CloudFront advisory attribute Pinecone's routine `[AWS][us-east-1]` freshness lag — #1000's
+    headline again with `global` in place of `me-central-1`. The AWS outages that actually move
+    dependents are filed per-region, so the regional path covers them; we under-claim instead.
+  - `regions` is **narrowed to the correlated regions only** — a degraded AWS region that no affected
+    service named is not part of the story, does not appear in the headline, and does not feed
+    `severity` (an uncorrelated `down` region must not inflate a `degraded` banner to red).
+  - The `<direction>` vocabulary in the regex is enumerated, so a bare `[a-z]+` cannot pull a cert id
+    or DNS record (`ca-cert-1`, `mx-record-1`) in as a "region". The `∩ awsRegionHealth` join already
+    makes such a token inert — this is defence in depth, and it costs nothing since every real AWS
+    region reuses the same vocabulary.
 - **Surfaces**: `/api/status`(+cached) `supplyChainBanner` field → dashboard `<SupplyChainBanner>`
   (Overview, above the summary cards) + an is-down per-service note (`affectedNow` → "attributes it to
   an AWS/upstream issue"; `mayBeAffected` → "runs on AWS and may be affected"). is-down SEO title/verdict unchanged.
-- **Verify**: rare-but-accurate by design (fires only on a real AWS event where dependents self-attribute);
-  `verify-after` during the next real AWS regional incident; tune `AWS_ATTRIBUTION_RE` against observed phrasings.
+- **Verify**: rare-but-accurate by design (fires only on a real AWS event where a dependent
+  self-attributes **in that region**). The #574 signal first fired 2026-07-13 and was a false positive
+  — hence #1000. Tune `AWS_REGION_RE` against observed phrasings if a real region token is ever missed.
