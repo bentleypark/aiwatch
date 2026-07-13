@@ -238,6 +238,53 @@ export async function detectComponentMismatches(
   return results
 }
 
+/**
+ * #992 — new-status-page-component change detection (the inverse of the #135 component-MISS alert:
+ * that fires when a CONFIGURED id disappears; this fires when an UNSEEN id appears). Pure so it is
+ * fully unit-testable; the cron does the KV read/write + Discord around it.
+ *
+ * Given a page's CURRENT components and `seen` (every component id ever recorded for this page; `null`
+ * = first-ever sight), return the components that are genuinely NEW (id never seen) plus the next
+ * `seen` set to persist. Semantics:
+ *   - **bootstrap** (`seen === null`): record the current ids but flag NOTHING new — we only alert on
+ *     components that appear AFTER we start watching a page, never on the initial snapshot (which would
+ *     otherwise dump every existing component of a rich shared page like status.openai.com as "new").
+ *   - `seen` UNIONS current ids (never shrinks), so a component removed then re-added does not re-alert,
+ *     and a component we already alerted on stays suppressed forever (one alert per component, ever).
+ * Provider component renames keep the Atlassian UUID → no false alert; a genuine id swap reads as new.
+ */
+export function diffPageComponents(
+  current: Array<{ id: string; name: string }>,
+  seen: string[] | null,
+): { newComponents: Array<{ id: string; name: string }>; nextSeen: string[]; bootstrap: boolean } {
+  const currentIds = current.map((c) => c.id)
+  if (seen === null) {
+    return { newComponents: [], nextSeen: [...new Set(currentIds)], bootstrap: true }
+  }
+  const seenSet = new Set(seen)
+  const newComponents = current.filter((c) => !seenSet.has(c.id))
+  const nextSeen = [...new Set([...seen, ...currentIds])]
+  return { newComponents, nextSeen, bootstrap: false }
+}
+
+/**
+ * #992 — operator Discord body for a page that gained ≥1 new component. `pageServices` are the AIWatch
+ * service names monitoring the page (context: which service's config to update); `dynamic` flags a
+ * displayAllComponents page where the component is ALREADY auto-tracked (informational, no action).
+ */
+export function formatNewComponentAlert(
+  pageServices: string[],
+  newComponents: Array<{ id: string; name: string }>,
+  dynamic: boolean,
+): string {
+  const list = newComponents.map((c) => `• \`${c.name}\` (\`${c.id}\`)`).join('\n')
+  const who = pageServices.length > 0 ? pageServices.join(', ') : '(no AIWatch service)'
+  const action = dynamic
+    ? '**Action**: none — this page runs `displayAllComponents`, so the component is already auto-tracked. Heads-up only.'
+    : `**Action**: decide whether to track it. To include, add the id to \`statusComponentIds\`/\`displayComponentIds\` for the relevant service in \`worker/src/services.ts\`; otherwise ignore (this fires once per component, ever).`
+  return `Status page for **${who}** added ${newComponents.length} new component${newComponents.length === 1 ? '' : 's'}:\n${list}\n\n${action}`
+}
+
 /** Check if cached data is stale (strictly older than threshold, or missing cachedAt). */
 export function isCacheStale(raw: string | null, thresholdMs: number, now = Date.now()): { stale: boolean; services: unknown[] } {
   if (!raw) return { stale: true, services: [] }

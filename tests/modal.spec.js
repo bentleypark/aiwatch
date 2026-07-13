@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { waitForDataLoad, navigateVia } from './helpers.js'
 
 test.describe('Modal / Detail Panel', () => {

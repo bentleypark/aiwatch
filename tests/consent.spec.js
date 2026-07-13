@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // #352: GDPR consent gate for Edge SSR + Jekyll surfaces.
 //
@@ -82,6 +82,30 @@ for (const surface of SURFACES) {
       const cookies = await getGaCookies(page)
       const gaCookie = cookies.find((c) => c.name === '_ga')
       expect(gaCookie, 'expected _ga cookie to be set when consent is granted').toBeDefined()
+    })
+
+    // #998 — the consent tests above deliberately grant consent, so GA4 genuinely tries to report.
+    // The `blockGaHits` fixture must stop those hits from reaching the production property.
+    //
+    // The invariant is ZERO COMPLETIONS, not "aborted count == issued count": a hit that reaches
+    // GA4 is by definition a request that got a response, and counting two async event streams at
+    // one instant would flake on a collect issued late in the wait window (its `requestfailed`
+    // could land after the assertion). `issued > 0` keeps the test from passing vacuously if GA4
+    // ever stops attempting a hit here — at which point this no longer exercises the block.
+    test('#998 — no collect request completes, so no hit reaches the production property', async ({ page }) => {
+      const issued = recordCollect(page)
+      const completed = []
+      page.on('response', (res) => {
+        if (COLLECT_RE.test(res.url())) completed.push(res.url())
+      })
+      await page.addInitScript(() => {
+        try { localStorage.setItem('aiwatch-cookie-consent', 'granted') } catch {}
+      })
+      await page.goto(surface.path, { waitUntil: 'networkidle' })
+      await page.waitForTimeout(2000)
+
+      expect(issued.length, 'GA4 did not even attempt a hit — the test no longer exercises the block').toBeGreaterThan(0)
+      expect(completed, 'a GA4 collect request completed — the fixture is not blocking hits').toEqual([])
     })
   })
 }

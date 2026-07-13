@@ -6,9 +6,9 @@ import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type Serv
 import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, type SuppressionEntry } from './suppression'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
-import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, shouldSkipInitialAnalysis, recordUsage, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
+import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, shouldSkipInitialAnalysis, recordUsage, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
-import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
+import { kvPut, kvDel, detectComponentMismatches, diffPageComponents, formatNewComponentAlert, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
@@ -560,6 +560,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // Does NOT write to KV — cache writes are handled exclusively by /api/status handler's cacheWrite()
   // so the 10-min KV write throttle keeps us well inside the Workers Paid 1M writes/month inclusion.
   let cronProbes: ProbeSnapshot[] = []
+  // #992 — per-page raw components from the live fetch, for the new-component detector below. Only
+  // populated on a stale-triggered live fetch (a fresh-cache cycle skips detection — it runs next cycle).
+  let cronPageComponents: Record<string, Array<{ id: string; name: string }>> = {}
   if (stale) {
     try {
       // Read probe data for cross-validation of status page failures
@@ -567,10 +570,11 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       if (probeRaw) {
         try { cronProbes = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[cron] probe24h parse failed:', err instanceof Error ? err.message : err) }
       }
-      const { raw: freshServices } = await fetchAllServices(env.STATUS_CACHE, cronProbes)
+      const { raw: freshServices, pageComponents } = await fetchAllServices(env.STATUS_CACHE, cronProbes)
       if (freshServices.length > 0) {
         services = freshServices
       }
+      cronPageComponents = pageComponents
     } catch (err) {
       console.error('[cron] live fetch failed, using stale cache:', err instanceof Error ? err.message : err)
       // Fall through with whatever we have (stale data better than nothing for alerts)
@@ -1412,6 +1416,47 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     }
   }
 
+  // New status-page component detection (#992) — the inverse of the #135 miss alert: fires once, ever,
+  // when a provider ADDS a component AIWatch has never seen for that page. Bootstraps silently on first
+  // sight (per page), so it never dumps a rich shared page's existing components. Data comes free from
+  // the cron's live prefetch (cronPageComponents); a fresh-cache cycle leaves it empty and just skips.
+  for (const [apiUrl, components] of Object.entries(cronPageComponents)) {
+    try {
+      // Fail-CLOSED on a KV read error: a transient get() fault must NOT be read as "first sight"
+      // (which bootstraps silently + overwrites the durable snapshot, permanently dropping the
+      // one-shot alert). Distinguish a genuinely-absent key (→ bootstrap) from a read that threw
+      // (→ skip this page this cycle, retry next cron with the real snapshot).
+      let readFailed = false
+      const seenRaw = await env.STATUS_CACHE.get(`component-seen:${apiUrl}`).catch(() => { readFailed = true; return null })
+      if (readFailed) continue
+      let seen: string[] | null = null
+      if (seenRaw !== null) {
+        // corrupt snapshot → treat as empty (re-alerts current components, never bootstraps a page we
+        // already watched); warn so the rare event is observable rather than silent.
+        try { seen = JSON.parse(seenRaw) } catch { console.warn(`[cron] corrupt component-seen snapshot for ${apiUrl} — re-alerting current components`); seen = [] }
+      }
+      const { newComponents, nextSeen, bootstrap } = diffPageComponents(components, seen)
+      if (bootstrap) {
+        await kvPut(env.STATUS_CACHE, `component-seen:${apiUrl}`, JSON.stringify(nextSeen)) // no TTL — a page's component identity is durable
+        continue
+      }
+      if (newComponents.length === 0) continue // nextSeen == seen → no write (KV budget)
+      const pageSvcs = SERVICES.filter(s => s.apiUrl === apiUrl)
+      const dynamic = pageSvcs.some(s => s.displayAllComponents)
+      const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+        title: `🆕 New status-page component${newComponents.length === 1 ? '' : 's'}: ${pageSvcs.map(s => s.name).join(', ') || apiUrl}`,
+        description: formatNewComponentAlert(pageSvcs.map(s => s.name), newComponents, dynamic),
+        color: 0x3B82F6,
+      })
+      // Persist ONLY after a CONFIRMED send — sendDiscordAlert returns false (does NOT throw) on a
+      // webhook failure, so gating the write on `sent` makes a Discord hiccup retry next cron instead
+      // of silently marking the component seen and dropping the one-shot alert.
+      if (sent) await kvPut(env.STATUS_CACHE, `component-seen:${apiUrl}`, JSON.stringify(nextSeen))
+    } catch (err) {
+      console.error(`[cron] new-component detection failed for ${apiUrl}:`, err instanceof Error ? err.message : err)
+    }
+  }
+
   const operational = scored.filter(s => s.status === 'operational').length
   return {
     total: scored.length,
@@ -1437,7 +1482,7 @@ import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDet
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
 import { collectChangelogs, getStaleSources } from './changelog'
-import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek } from './weekly-briefing'
+import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { parseReferralBody, recordReferral, type ReferralCounts } from './referral'
 import { buildGrowthDailyRow, recordGrowthDaily } from './growth-series'
@@ -2332,7 +2377,20 @@ export default {
 
           // Per-source last-fetch staleness check — surfaces silent collection gaps (#274)
           const staleSources = await getStaleSources(env.STATUS_CACHE).catch(() => [])
-          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, stabilityDataAvailable, security, staleSources })
+
+          // #995 — AI-analysis usage trend from the retained ai:usage:{date} keys across the week.
+          // parseUsage(null) → zeros, so missing days contribute nothing but keep the window at 7d.
+          let aiUsageTrend = null
+          try {
+            const entries = await Promise.all(
+              weekDateStrings(weekStart, weekEnd).map((dt) => env.STATUS_CACHE.get(`ai:usage:${dt}`).catch(() => null).then(parseUsage)),
+            )
+            aiUsageTrend = summarizeAiUsageTrend(entries)
+          } catch (err) {
+            console.warn('[cron] weekly ai:usage trend read failed:', err instanceof Error ? err.message : err)
+          }
+
+          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, stabilityDataAvailable, security, staleSources, aiUsageTrend })
           await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
             title: `📋 Weekly Briefing (${weekStart} ~ ${weekEnd})`,
             description: briefing,

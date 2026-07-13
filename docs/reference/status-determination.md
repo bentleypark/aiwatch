@@ -12,11 +12,13 @@ tags: [worker, status, parsers]
 Per-service status is resolved in `worker/src/services.ts` with this priority:
 
 1. **Multi-component worst-of** (`statusComponentIds`, #379): when configured, look up each id in the page's `components`, normalize each, and pick the worst (`down` > `degraded` > `operational`). Used for coding agents whose user-facing surface spans multiple components — e.g. Cursor IDE primary + Cloud Agents + Automations + CLI; Claude Code component + Claude API dependency. `statusComponentId` (singular) remains the *primary* component for uptime parsing, calendar days, and component-miss alerting; `statusComponentIds` is purely for badge resolution. Convention: list the primary as the first entry of `statusComponentIds`. If none of the ids resolve in the components list, falls through to step 2.
+1.5. **`displayAllComponents` dynamic worst-of** (#992): when `displayAllComponents` is set (and step 1 did **not** fire — a service with BOTH, e.g. BFL, keeps its curated `statusComponentIds` badge), the badge is the worst-of **every** page component minus `componentDenylist` names — mirroring the dynamic breakdown, so a new/churned model degrades the badge with NO config edit. Positioned AFTER step 1 and BEFORE step 2, so a dynamic service's uptime-primary `statusComponentId` (cerebras' Developer Console) does not pin the badge to that one component. cohere/groq have no `statusComponent*` → they return at step 4 (overall indicator) before reaching here. Falls back to overall if no component survives the denylist.
 2. **Component match** (`statusComponentId` or `statusComponent`): use that component's status
 3. **Component not found**: fall back to overall page indicator
 4. **No component configured**: use overall indicator, BUT if no relevant unresolved incidents matched after `incidentExclude`/`incidentKeywords` filtering, treat as `operational` (prevents cross-contamination from unrelated incidents on shared status pages, e.g., ChatGPT incident should not affect OpenAI API status)
 5. **`incidentExclude` component bypass** (#359): when an `incidentExclude` pattern matches the incident title, check if the incident's `componentNames` starts with `config.statusComponent` — if it does, include the incident anyway. Prevents "claude.ai and API unavailable" from being dropped from Claude API just because the title contains "claude.ai". Component tagging is more authoritative than title substring matching.
    - **OpenAI FedRAMP narrowing** (#693): the openai `incidentExclude` uses `'chatgpt workspaces'`, NOT a bare `'workspaces'`. FedRAMP is a curated openai display surface (componentsUrl above), so an API-affecting `"FedRAMP workspaces and API orgs …"` incident must surface under openai (it then matches the `api`/region `incidentKeywords`); a bare `'workspaces'` dropped it. ChatGPT consumer/Team Workspaces incidents stay excluded via `'chatgpt'`/`'login'`/`'conversation'` + the narrowed term. The incident still SURFACES in openai's incident LIST (unchanged — `filterIncidents` keeps it via the `api` keyword; pinned by the real-config `#693` test in `filter-incidents.test.ts`).
+     - **#990 — `ENVIRONMENT_SCOPE_EXCLUDE` on codex + chatgpt (NOT openai):** a distinct FedRAMP incident, the kitchen-sink advisory `"Codex, workspace analytics, … not working in FedRAMP workspaces"` (impact:minor, `componentNames:[]`, ~238h), was substring-attributed to **codex** (`'codex'`) and **chatgpt** (`'chatgpt'`/`'conversation'`/`'download'`) and fired false New+Resolved alerts. `ENVIRONMENT_SCOPE_EXCLUDE = ['fedramp']` is spread into codex + chatgpt `incidentExclude` (vetoed before `incidentKeywords`; neither sets `statusComponent`, so the #359 bypass can't re-admit it). Deliberately **NOT** on openai: openai already drops this title via its existing consumer tokens, and adding `'fedramp'` there would drop the #693 API incident above. See the suppression section for why this is a static-config attribution fix, not a #904 runtime suppression.
    - **#693 follow-up — badge scoped to the official "APIs" group (supersedes the old coupling caveat):** openai/chatgpt/codex previously had **no** `statusComponentId`, so a surfaced FedRAMP incident flipped the openai badge to the page's overall indicator (step 4) — over-reporting `degraded` for all API users on a FedRAMP-only event, plus a 14-day calendar. Now each of the three sets a **worst-of `statusComponentIds`** = its official status-page group (openai = the 12 "APIs" components, primary `statusComponentId` = Chat Completions; chatgpt = its 11 consumer components, primary = Conversations; codex = its 5 surfaces, primary = Codex API). The badge resolves via step 1 (worst-of the curated group), so a **non-API component (FedRAMP / Ads Manager / Compliance API — now orphaned from all three services' breakdowns) can no longer flip openai**, and the primary `statusComponentId` yields a **30-day calendar**. The calendar's `dailyImpact` is now **aggregated worst-of across the whole `statusComponentIds` group** (`parseIncidentIoComponentImpacts` accepts a list) so it matches the official group calendar — and is **keyed by each impact's real ISO timestamp** (not a bare UTC date) so `buildCalendarFromIncidents` buckets it to the **viewer's local day**, fixing a UTC-vs-local off-by-one (a UTC-evening impact is the next local day east of UTC). Two regressions surfaced + fixed along the way: setting `statusComponentId` activated `parseUptimeData` on the incident.io HTML, whose **empty** result was clobbering the real incident.io impacts (now only used when non-empty); and FedRAMP no longer smears the calendar (not in the API group). This **replaces** the #292/#294 cross-contamination guard (which keyed on *no* `statusComponentId`) with stronger direct component-scoping. Pinned by the badge-scoping tests in `status-determination.test.ts`, the parser tests in `incident-io-impacts.test.ts`, and the local-day bucketing test in `src/utils/calendar.test.js`.
      - **Badge + miss-check resolve against `components.json`, not `summary.json` (follow-up #2):** OpenAI's `summary.json` (the status source) OMITS its core API components — **Chat Completions / Embeddings / Moderations** live only in `components.json` (the superset `componentsUrl` already fetches for the breakdown). So `fetchService` now computes `breakdownComponents` (the `componentsUrl` superset, falling back to `summary.json` on fetch failure / no `componentsUrl`) BEFORE `resolveSvcStatus` and feeds it to the **badge worst-of, the `includeUntaggedIncidents` guard, AND the #135 component-miss check** alike. Without this, (a) the badge couldn't see a Chat Completions outage (worst-of a summary.json subset that excludes it), and (b) the `statusComponentId` = Chat Completions miss-check false-fired the migration alert every cron cycle (paging the operator). **#783**: OpenAI later dropped **"Codex API"** (codex's PRIMARY `statusComponentId` `01KMP3KP5MGE23B80K1EK4S8PV`) from `summary.json` too — present only in `components.json` — so **`codex` now ALSO sets `componentsUrl`** (the same false-fire paged the operator for Codex). So `openai` + `codex` set `componentsUrl`; `chatgpt` stays summary.json-complete (its primary "Conversations" is present there) and every other service is byte-unchanged (still `summary.json`). Status/uptime/incidents still come from `summaryData` — only the component LIST is the superset.
    - **`incidentComponents` exact-name scoping** (#683): for a SHARED status page where this is the only AIWatch service but siblings' component incidents leak (Junie on `status.jetbrains.ai`, shared with AI Assistant / Grazie / AI Platform / AI Platform China). When set, `filterIncidents` keeps an incident only if its `componentNames` contains an **EXACT (case-insensitive)** match to the allowlist — NOT substring (so `'AI Platform'` can't keep the sibling `'AI Platform China'`). An untagged incident (no `componentNames`) matches nothing → dropped. Takes precedence over `incidentKeywords` (a service sets one or the other); `incidentExclude` still runs first. Junie uses `incidentComponents: ['Junie']`, matching its `statusComponentId` (Junie-only) badge scope — a Grazie-only incident (the 2026-06-17 false positive) no longer attributes to Junie. Pinned by the real-config `#683` test in `filter-incidents.test.ts`.
@@ -43,6 +45,18 @@ be **correctly attributed** to a service yet need to be **un-exposed for a polic
 e.g. OpenAI's FedRAMP "degraded performance" (gov-compliance-scoped, not general-API availability). That
 is NOT an attribution problem, so it does **not** belong in `incidentExclude`.
 
+- **The two FedRAMP cases are NOT the same — mind which layer (#990 vs #904).** #693's FedRAMP incident
+  (`"FedRAMP workspaces and API orgs have degraded performance"`) is a genuine **API** degradation
+  *correctly attributed* to openai — so openai KEEPS it (via the `api` keyword), and hiding it for policy
+  would be a **runtime suppression** (#904), never an `incidentExclude` token. #990's incident
+  (`"Codex, workspace analytics, … not working in FedRAMP workspaces"`) is a **kitchen-sink advisory**
+  whose enumerated title merely *name-drops* Codex/ChatGPT; it is **mis-attributed** to codex/chatgpt by
+  substring match, and is a **permanent structural scope** decision (this class is never a GA
+  codex/chatgpt outage). That IS an attribution problem, so it correctly lives in a static
+  `incidentExclude` token (`ENVIRONMENT_SCOPE_EXCLUDE = ['fedramp']`, spread into codex + chatgpt only —
+  NOT openai, which would regress #693). Rule of thumb: **permanent, class-wide, reviewed → static
+  `incidentExclude`; one-off, correctly-attributed, transient policy → runtime suppression.**
+
 The **suppression layer** (`worker/src/suppression.ts`, operated via `GET/POST /api/admin/suppress` —
 see [operator-tools.md](operator-tools.md)) handles it as a **separate step AFTER `filterIncidents`**, so
 attribution logic (and e.g. the #693 "openai KEEPS FedRAMP" `filter-incidents.test.ts` assertion) is
@@ -58,8 +72,8 @@ Score inputs. Removing a suppression restores the incident with zero code change
 
 `resolveSvcStatus` collapses the `statusComponentIds` subset into one worst-of badge and **discards** the per-component statuses. `resolveSvcComponents(config, summaryData)` is the **display counterpart**: it preserves the same matched subset as `ServiceComponent[]` (`{ id, name, status }`, normalized, in configured order) on `ServiceStatus.components`, so the ServiceDetails + "Is X Down" surfaces can render a per-component breakdown card (parity with StatusGator / IsDown).
 
-- **Component source** (precedence): **`displayAllComponents`** → **`displayComponentIds`** → **`statusComponentIds`**. `resolveSvcStatus` (the badge) reads **only** `statusComponentIds`, so every display-only mode is decoupled — services keep their overall-indicator (or single-component) badge while still rendering a card.
-  1. **`displayAllComponents` (#606, cohere/groq)** — DYNAMIC: every page component except `componentDenylist` names (e.g. `Docs`/`Website`), so new/retired models need no config edit. Each component NOT in `componentSurfaces` is tagged `group: 'Models'` → the UI collapses them under one header (the official Endpoints/Models split); `componentSurfaces` (groq `['API']`; cohere `['Coral','Infrastructure','Playground','embeddings']`) stay as individual rows.
+- **Component source** (precedence): **`displayAllComponents`** → **`displayComponentIds`** → **`statusComponentIds`**. For the **badge**, `resolveSvcStatus` reads `statusComponentIds` (step 1) and — **#992** — a `displayAllComponents` **dynamic worst-of** branch (see step 1.5 above); `displayComponentIds` is display-only and never touches the badge, so a `displayComponentIds`-only service keeps its overall-indicator (or single-component) badge while still rendering a card.
+  1. **`displayAllComponents` (#606 cohere/groq; #992 cerebras)** — DYNAMIC: every page component except `componentDenylist` names (e.g. `Docs`/`Website`), so new/retired models need no config edit. Each component NOT in `componentSurfaces` is tagged `group: 'Models'` → the UI collapses them under one header (the official Endpoints/Models split); `componentSurfaces` (groq `['API']`; cohere `['Coral','Infrastructure','Playground','embeddings']`; cerebras `['Developer Console']`) stay as individual rows. **#992** — this mode now ALSO drives the badge (the step-1.5 dynamic worst-of): cerebras, a single-tenant per-model page whose lineup churns, dropped its stale `statusComponentIds` allowlist for `displayAllComponents` so a model added/retired needs no edit; it keeps `statusComponentId` (Developer Console) as the uptime/calendar/miss primary. cohere/groq are unaffected — they have no `statusComponent*`, so their badge still resolves at step 4 (overall indicator), NOT the dynamic worst-of.
   2. **`displayComponentIds` (#606)** — explicit curated allowlist of surface ids (display-only). Single-owner pages: elevenlabs, replicate, assemblyai, deepgram, characterai, junie, voyageai, pinecone (functional surfaces only; its region components stay on the Region card). Plus the **Cat B shared-page split**: openai/chatgpt/codex on `status.openai.com` are split by the official **APIs / ChatGPT / Codex** groups, **disjoint + leak-guarded** so no component leaks onto a sibling service.
   3. **`statusComponentIds` (#604/#379)** — the multi-component badge ids reused for the breakdown.
 - **`componentsUrl` (#606 Cat B)** — sources the breakdown component LIST from a `components.json` instead of the `apiUrl` summary.json, for shared pages that expose more there (status.openai.com `components.json` (31) vs `summary.json` (25): Chat Completions, Embeddings, Moderations, the **API Login** — a distinct id from the ChatGPT Login — and FedRAMP / Ads Manager). `pickBreakdownComponents` uses the components.json list when present (non-empty array), else falls back to summary.json; the breakdown drift-warn checks that same resolved source so componentsUrl-backed ids aren't false-flagged.
@@ -190,9 +204,9 @@ The `uptime30d` field holds figures over **different windows by source**: `offic
 ## Supply-chain correlation banner (#574, Phase 1: AWS)
 
 A LIVE banner correlating a cloud-region issue with dependent AI services — surfaced ONLY when an
-**AWS infrastructure region is degraded AND ≥1 AWS-dependent AI service is degraded AND attributes the
-issue to AWS in its own incident text**. Differentiator vs AIDown.io's *static* dependency map (always
-shown, no live correlation) and vs a naive timing correlation (over-alarmist).
+**AWS infrastructure region is degraded AND ≥1 AWS-dependent AI service is degraded AND names THAT SAME
+degraded region in its own incident** (#1000). Differentiator vs AIDown.io's *static* dependency map
+(always shown, no live correlation) and vs a naive timing correlation (over-alarmist).
 
 - **AWS region health** (`parseAwsRegionHealth`, `parsers/aws.ts`): derived from the SAME AWS Health
   public-events JSON the Bedrock fetch already pulls (`health.aws.amazon.com/public/events`, all AWS
@@ -205,16 +219,61 @@ shown, no live correlation) and vs a naive timing correlation (over-alarmist).
   services + confidence — bedrock (certain), Anthropic claude/claudeai/claudecode (high — public $100B+
   AWS Trainium/Bedrock commitment), huggingface + pinecone (medium). **Together was removed** (runs its
   own AI-native GPU cloud, not AWS — AIDown's 60% was wrong). Worker-side only (no client sync).
-- **Attribution cross-check** (`buildSupplyChainBanner`, StatusGator-style): a degraded dependent is
-  **`affectedNow` only if its OWN active incident title/timeline text names AWS / a region / an
-  upstream-provider** (`AWS_ATTRIBUTION_RE`: aws, us-east-1…, ec2/ebs, "upstream/cloud/infrastructure/
-  third-party provider"). Bedrock is auto-attributed (AWS-native). A degraded-but-unattributed service
-  is OMITTED (no causation claim — the regular outage banner covers it). Verified empirically: Pinecone
+- **Attribution cross-check** (`buildSupplyChainBanner`, StatusGator-style) — **region-aware since
+  #1000**: a degraded dependent is **`affectedNow` only if its OWN active incident (title +
+  `componentNames` + timeline) names an AWS region that AWS ITSELF currently reports as degraded**
+  (`awsRegionsNamedByService` ∩ the `awsRegionHealth` keys — a plain set intersection, no key is
+  special-cased). Region tokens are matched by shape (`AWS_REGION_RE`: `<area>-<direction>-<n>`, with the `<direction>`
+  vocabulary enumerated), not by a hand-kept list of full region names — the token is AWS-specific by
+  construction (GCP writes `us-east1`, Azure `eastus`), so naming one IS the attribution. Incidents
+  with `impact: null` are skipped (the provider itself claims no availability impact → it cannot be
+  the cause), mirroring the AWS side where `awsHealthImpact` drops #707 advisories. An AZ suffix
+  (`us-east-1a`) folds to its region. Verified empirically at #574 design time (2026-06): Pinecone
   tags `[AWS][us-east-1]` in 29/50 incidents (region-matchable), Anthropic 0/50 (so Claude only ever
   appears under `mayBeAffected`, never confirmed — correct). Healthy map members → `mayBeAffected`
-  ("AWS-dependent · may be affected", hedged). **Gate**: ≥1 region degraded AND ≥1 `affectedNow`, else null.
+  ("AWS-dependent · may be affected", hedged). **Gate**: ≥1 `affectedNow`, else null.
+  - **Extraction reads the incident BODY, not just the title** — load-bearing, verified 2026-07-13.
+    Hugging Face titles a real incident `Elevated error rate – AWS CDN (Singapore)` — a human place
+    name, no token — and names the region only in the update body ("…in the Asia-Pacific (Singapore /
+    `ap-southeast-1`) region"). Title-only extraction would leave HF permanently unattributable even
+    though it explicitly blames AWS. Pinecone is the opposite, front-loading `[AWS][us-east-1]` into
+    the title. Both shapes are covered because the extractor reads title + `componentNames` + timeline;
+    the HF incident is pinned as a test fixture.
+  - **Why region-aware** (#1000): the original gate only asked *"does the incident mention AWS at
+    all?"*, which let the banner's two halves disagree. On 2026-07-13 prod rendered "AWS infrastructure
+    issue — me-central-1, me-south-1 · AWS-attributed: Pinecone" while Pinecone's only incident was
+    `[Serverless][AWS][us-east-1] …` and us-east-1 had **no** AWS event — the regex matched on the
+    bare word `aws`. That is exactly the "both degraded at once" coincidence the cross-check exists to
+    eliminate. Its region list had also gone stale (no `me-`/`ca-`/`sa-`/`af-`/`il-`/`cn-`/`mx-`/
+    `us-gov-`/`ap-east-`/`eu-north-`/`eu-south-`), though that alone was mostly harmless — the bare
+    `aws` alternative caught those incidents anyway. Shape-matching just removes the upkeep.
+  - **Bedrock has no special case** (removed in #1000). It is AWS-native and its incidents come from
+    the AWS Health feed with `componentNames: [region]`, so its regions parse out like anyone else's.
+    The old `id === 'bedrock' → always attributed` shortcut would have preserved this very bug for
+    Bedrock (an outage in one region rendering under an unrelated region's infra event).
+  - **Region-less attribution is fail-closed**: an incident that blames AWS with no region ("our
+    upstream provider is having issues") is NOT attributed. The banner's headline is region-scoped, so
+    listing a service under regions its own status page never mentions would re-create the claim this
+    gate removes. We under-claim rather than assert an unverifiable cause.
+  - **`global` events deliberately do NOT correlate.** AWS files its region-less services (Route 53 /
+    IAM / CloudFront / STS) under `region: "global"`, which `parseAwsRegionHealth` passes through as a
+    key — but `awsRegionsNamedByService` only emits `<area>-<direction>-<n>` tokens, so `global` can
+    never enter the intersection whatever an incident says: a global-only event never joins and the
+    banner stays silent. Treating it as a wildcard ("degraded everywhere → it cannot contradict
+    anyone") was implemented and **reverted**: non-contradiction is not corroboration. It let an active
+    CloudFront advisory attribute Pinecone's routine `[AWS][us-east-1]` freshness lag — #1000's
+    headline again with `global` in place of `me-central-1`. The AWS outages that actually move
+    dependents are filed per-region, so the regional path covers them; we under-claim instead.
+  - `regions` is **narrowed to the correlated regions only** — a degraded AWS region that no affected
+    service named is not part of the story, does not appear in the headline, and does not feed
+    `severity` (an uncorrelated `down` region must not inflate a `degraded` banner to red).
+  - The `<direction>` vocabulary in the regex is enumerated, so a bare `[a-z]+` cannot pull a cert id
+    or DNS record (`ca-cert-1`, `mx-record-1`) in as a "region". The `∩ awsRegionHealth` join already
+    makes such a token inert — this is defence in depth, and it costs nothing since every real AWS
+    region reuses the same vocabulary.
 - **Surfaces**: `/api/status`(+cached) `supplyChainBanner` field → dashboard `<SupplyChainBanner>`
   (Overview, above the summary cards) + an is-down per-service note (`affectedNow` → "attributes it to
   an AWS/upstream issue"; `mayBeAffected` → "runs on AWS and may be affected"). is-down SEO title/verdict unchanged.
-- **Verify**: rare-but-accurate by design (fires only on a real AWS event where dependents self-attribute);
-  `verify-after` during the next real AWS regional incident; tune `AWS_ATTRIBUTION_RE` against observed phrasings.
+- **Verify**: rare-but-accurate by design (fires only on a real AWS event where a dependent
+  self-attributes **in that region**). The #574 signal first fired 2026-07-13 and was a false positive
+  — hence #1000. Tune `AWS_REGION_RE` against observed phrasings if a real region token is ever missed.

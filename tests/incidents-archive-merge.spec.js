@@ -14,7 +14,7 @@
 //      CI failure, deterministic local pass).
 //   3. Bounded `expect.poll` on the captured requests instead of fixed `waitForTimeout` sleeps.
 
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { waitForDataLoad, navigateVia } from './helpers.js'
 
 const REPORT_PATH_RE = /\/api\/report\?month=\d{4}-\d{2}/

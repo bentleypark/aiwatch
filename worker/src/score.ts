@@ -1,6 +1,6 @@
 // AIWatch Score — service reliability composite score (0-100)
 
-import type { ProbeSummary, ServiceStatus } from './types'
+import type { Incident, ProbeSummary, ServiceStatus } from './types'
 import { INCIDENT_IO_IMPACT_WEIGHTS } from './parsers/impact-weights'
 
 export interface AIWatchScore {
@@ -110,17 +110,28 @@ export function calculateAIWatchScore(
   service: ServiceStatus,
   cutoffDays: number,
   probe: ProbeContext,
+  window?: { startISO: string; endISO: string },
 ): AIWatchScore {
-  const cutoff = new Date(Date.now() - cutoffDays * 86_400_000).toISOString()
-  const incidents30d = (service.incidents ?? []).filter((i) => i.startedAt >= cutoff)
-  const incidentCount = incidents30d.length
+  // #993 — incident selection is the only place this function derives a time window internally.
+  // Default: the trailing `cutoffDays` from now (the live 30-day Score). An explicit
+  // {startISO, endISO} scores a FIXED past window (a calendar month) so the monthly archive can
+  // persist a month-aligned Score instead of a build-day snapshot of the rolling one. `uptime30d`
+  // and the probe summary are already scoped by the caller, so only this filter changes.
+  const inWindow: (i: Incident) => boolean = window
+    ? (i) => i.startedAt >= window.startISO && i.startedAt < window.endISO
+    : (() => {
+        const cutoff = new Date(Date.now() - cutoffDays * 86_400_000).toISOString()
+        return (i: Incident) => i.startedAt >= cutoff
+      })()
+  const windowIncidents = (service.incidents ?? []).filter(inWindow)
+  const incidentCount = windowIncidents.length
 
   // Affected days — only count incidents with measurable impact (#261).
   // null-impact entries are informational (component renames, post-mortems) — including
   // them in affected_days inflates services like cohere/groq whose feeds mix info posts
   // with real incidents, producing scores ~10pts lower than reality.
   const impactfulDays = new Set(
-    incidents30d.filter((i) => i.impact != null).map((i) => i.startedAt.slice(0, 10)),
+    windowIncidents.filter((i) => i.impact != null).map((i) => i.startedAt.slice(0, 10)),
   )
   const affectedDays = impactfulDays.size
 
@@ -132,7 +143,7 @@ export function calculateAIWatchScore(
   // so this is the catch-all log for new Atlassian impact levels reaching score calc.
   const dailyMaxWeight = new Map<string, number>()
   const unknownImpacts = new Set<string>()
-  for (const inc of incidents30d) {
+  for (const inc of windowIncidents) {
     if (inc.impact == null) continue
     const weight = INCIDENT_IO_IMPACT_WEIGHTS[inc.impact]
     if (weight === undefined) {
@@ -153,8 +164,8 @@ export function calculateAIWatchScore(
   // revocation, deprecation) has a duration but is NOT a reliability recovery, so counting it would
   // zero the Recovery score on a service that never actually went down (symmetric with the #261
   // null-impact exclusion from affectedDays / the uptime estimate).
-  const impactfulIncidents30d = incidents30d.filter((i) => i.impact != null)
-  const durations = impactfulIncidents30d
+  const impactfulWindowIncidents = windowIncidents.filter((i) => i.impact != null)
+  const durations = impactfulWindowIncidents
     .filter((i) => i.status === 'resolved' && i.duration)
     .map((i) => parseDurationMin(i.duration!))
     .filter((m) => m > 0)
@@ -182,7 +193,7 @@ export function calculateAIWatchScore(
   // null-impact advisories has no reliability recovery to penalize → full 15, not 0.
   const recoveryScore = mttrHours != null
     ? 15 * Math.exp(-mttrHours / 4)
-    : impactfulIncidents30d.length > 0 ? 0 : 15
+    : impactfulWindowIncidents.length > 0 ? 0 : 15
 
   // Responsiveness (probe) — compute first so the rescale below knows whether it's an available
   // component. Exhaustive switch — adding a new ProbeContext kind is a compile error until handled.

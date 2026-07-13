@@ -448,9 +448,11 @@ function Panel({ title, dotColor, subtitle, children }) {
 
 // ── Action Banner — shows fallback recommendations during outages ──
 
-// #574 — Supply-chain correlation banner: an AWS region is degraded AND ≥1 AWS-dependent AI service
-// is also degraded (the worker's correlation gate; `banner` is null otherwise). Rendered as a sibling
-// ABOVE ActionBanner. AIWatch's differentiator vs AIDown's static dependency map = this LIVE gate.
+// #574 — Supply-chain correlation banner. Rendered as a sibling ABOVE ActionBanner; `banner` is null
+// unless the worker's region-aware gate fires (worker/src/supply-chain.ts — deliberately NOT restated
+// here: the rule has already moved twice and a mirrored copy rots every time it does). AIWatch's
+// differentiator vs AIDown's static dependency map = that LIVE gate. `banner.regions` carries only the
+// regions an affected service actually named, so joining them into the headline is safe (#1000).
 function SupplyChainBanner({ banner, setPage, t }) {
   if (!banner) return null
   const isDown = banner.severity === 'down'

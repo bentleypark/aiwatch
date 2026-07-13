@@ -5,6 +5,7 @@ import {
   curateComponentUptime,
   computeMonthlyOfficialUptime,
   computeMonthlyLatency,
+  computeMonthlyScore,
   computeMonthlyLatencyStats,
   getMonthDates,
   isInMonthlyArchiveWindow,
@@ -2219,5 +2220,57 @@ describe('stripInternalFields (#975)', () => {
     const out = buildPartialIncidentArchive('2026-07', acc)
     expect(out.services.pinecone.incidentList[0]).not.toHaveProperty('missedRuns')
     expect(JSON.stringify(out)).not.toContain('missedRuns')
+  })
+})
+
+describe('computeMonthlyScore (#993)', () => {
+  const WINDOW = { startISO: '2026-06-01T00:00:00.000Z', endISO: '2026-07-01T00:00:00.000Z' }
+  const noProbe = new Map() // empty summaries → unsupported/insufficient, matching a no-probe month
+
+  const inc = (startedAt: string, durationMin: number, impact: 'minor' | 'major' | 'critical' = 'major') => ({
+    id: startedAt, title: 't', startedAt, resolvedAt: startedAt, durationMin,
+    finalStatus: 'resolved' as const, impact,
+  })
+
+  it('scores over the calendar month, not a build-day snapshot — fewer/shorter incidents ⇒ higher Score', () => {
+    // The Deepgram paradox this fixes: month-aggregate incidents improved yet the snapshot Score fell.
+    // With a month-windowed score, a genuinely better month must score at least as well.
+    const bad = computeMonthlyScore('x', [inc('2026-06-05T00:00:00Z', 600), inc('2026-06-12T00:00:00Z', 600), inc('2026-06-20T00:00:00Z', 600)], 99, noProbe, WINDOW, undefined)
+    const good = computeMonthlyScore('x', [inc('2026-06-10T00:00:00Z', 60)], 99, noProbe, WINDOW, undefined)
+    expect(good.score).not.toBeNull()
+    expect(bad.score).not.toBeNull()
+    expect(good.score!).toBeGreaterThan(bad.score!)
+  })
+
+
+  it('includes a last-second incident regardless of sub-second precision (#993 boundary)', () => {
+    // A next-day-midnight end bound is precision-agnostic; a `…T23:59:59.999Z` bound would exclude a
+    // `…T23:59:59Z` (no ms) incident because 'Z' > '.' in a string compare.
+    const lastSecNoMs = computeMonthlyScore('x', [inc('2026-06-30T23:59:59Z', 600)], 99, noProbe, WINDOW, undefined)
+    const lastSecMs = computeMonthlyScore('x', [inc('2026-06-30T23:59:59.000Z', 600)], 99, noProbe, WINDOW, undefined)
+    const empty = computeMonthlyScore('x', [], 99, noProbe, WINDOW, undefined)
+    // Both last-second incidents must be counted → a worse score than the incident-free month.
+    expect(lastSecNoMs.score!).toBeLessThan(empty.score!)
+    expect(lastSecNoMs.score).toBe(lastSecMs.score)
+  })
+
+  it('only counts incidents INSIDE the window', () => {
+    // An incident in May (before the window) must not drag June's score down.
+    const withMay = computeMonthlyScore('x', [inc('2026-05-15T00:00:00Z', 600), inc('2026-06-10T00:00:00Z', 60)], 99, noProbe, WINDOW, undefined)
+    const juneOnly = computeMonthlyScore('x', [inc('2026-06-10T00:00:00Z', 60)], 99, noProbe, WINDOW, undefined)
+    expect(withMay.score).toBe(juneOnly.score)
+  })
+
+  it('no official uptime ⇒ Uptime component dropped ⇒ low confidence (mirrors the live #713 rule)', () => {
+    // Deepgram's real shape: no official uptime, no probe → score computed on incidents+recovery only.
+    const r = computeMonthlyScore('x', [inc('2026-06-10T00:00:00Z', 60)], null, noProbe, WINDOW, undefined)
+    expect(r.confidence).toBe('low')
+    expect(r.score).toBeNull() // #713 withholds a low-confidence score
+  })
+
+  it('a clean month with official uptime and no incidents scores high', () => {
+    const r = computeMonthlyScore('x', [], 100, noProbe, WINDOW, undefined)
+    expect(r.confidence).toBe('high')
+    expect(r.score).toBeGreaterThan(80)
   })
 })
