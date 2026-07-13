@@ -149,6 +149,25 @@ describe('region-aware attribution (#1000 — the banner must not cross regions)
     expect(buildSupplyChainBanner([bedrockWith(ME_REGIONS), svc('pinecone', 'degraded', [advisory])])).toBeNull()
   })
 
+  it('reads the incident BODY, not just the title — the real Hugging Face AWS incident', () => {
+    // Text verbatim from status.huggingface.co (2026-07-13); the real incident was already RESOLVED at
+    // capture, so the fixture makes it active (only an active incident can be a cause —
+    // awsRegionsNamedByService skips resolved). The title carries a human place name and NO region
+    // token; only the update body names ap-southeast-1. Title-only extraction would leave HF
+    // permanently unattributable even though it explicitly blames AWS.
+    const hfAwsCdn = inc(
+      'Elevated error rate – AWS CDN (Singapore)',
+      'Between 07:58 and 08:05 UTC, the AWS CDN returned an elevated rate of HTTP 500 errors for a portion of requests in the Asia-Pacific (Singapore / ap-southeast-1) region.',
+    )
+    expect([...awsRegionsNamedByService(svc('huggingface', 'degraded', [hfAwsCdn]))]).toEqual(['ap-southeast-1'])
+
+    const banner = buildSupplyChainBanner([
+      bedrockWith({ 'ap-southeast-1': { level: 'degraded' as const, summary: 'Increased error rates' } }),
+      svc('huggingface', 'degraded', [hfAwsCdn]),
+    ])
+    expect(banner!.affectedNow).toEqual([{ id: 'huggingface', name: 'huggingface', regions: ['ap-southeast-1'] }])
+  })
+
   it('folds an AZ-suffixed token (us-east-1a) to its region', () => {
     expect([...awsRegionsNamedByService(svc('pinecone', 'degraded', [inc('Errors in us-east-1a')]))]).toEqual(['us-east-1'])
   })
@@ -182,6 +201,21 @@ describe('region-aware attribution (#1000 — the banner must not cross regions)
     expect(banner!.affectedNow.map((s) => s.id).sort()).toEqual(['bedrock', 'pinecone'])
     expect(banner!.regions.map((r) => r.region).sort()).toEqual(['eu-west-1', 'us-east-1']) // NOT the me-* pair
     expect(banner!.severity).toBe('down') // from eu-west-1, a CORRELATED region
+
+    // #1000 — each affected service carries ONLY the regions IT named. The is-down page renders a
+    // per-service causal claim from this; the banner-wide union would tell Pinecone's readers that its
+    // outage is attributed to eu-west-1, which Pinecone never mentioned.
+    const byId = Object.fromEntries(banner!.affectedNow.map((s) => [s.id, s.regions]))
+    expect(byId.pinecone).toEqual(['us-east-1'])
+    expect(byId.bedrock).toEqual(['eu-west-1'])
+  })
+
+  it('affectedNow.regions keeps AWS\'s original region casing (what the page prints)', () => {
+    const banner = buildSupplyChainBanner([
+      bedrockWith({ 'US-East-1': { level: 'degraded' as const } }),
+      svc('pinecone', 'degraded', [inc('[AWS][us-east-1] Elevated errors')]),
+    ])
+    expect(banner!.affectedNow[0].regions).toEqual(['US-East-1'])
   })
 })
 

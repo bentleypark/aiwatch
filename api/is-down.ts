@@ -6,6 +6,7 @@ import { renderPage } from './_is-down/html-template'
 import { cspForHtml } from './_shared/csp-hash'
 import { computeRankPosition } from './_is-down/ranking'
 import { regionStatusOf, type RegionStatusResult } from './_is-down/region-status'
+import { buildSupplyChainNote, type SupplyChainBannerLike, type SupplyChainNote } from './_is-down/supply-chain-note'
 
 export const config = { runtime: 'edge' }
 
@@ -87,7 +88,7 @@ export default async function handler(req: Request) {
     // which can only carry a single summary.
     let aiInsights: Array<{ summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }> = []
     // #574 — supply-chain note for THIS service (set if it's in the banner's affectedNow/mayBeAffected).
-    let supplyChainNote: { regions: string; confirmed: boolean } | null = null
+    let supplyChainNote: SupplyChainNote | null = null
     // Track the precise reason for the fallback render so the Discord alert can
     // distinguish operational classes (timeout vs HTTP failure vs missing service
     // vs JSON parse error). Defaults to a generic label that should never ship —
@@ -115,12 +116,8 @@ export default async function handler(req: Request) {
           // guard below still tolerates a stray single object defensively.
           aiAnalysis?: Record<string, Array<{ summary: string; estimatedRecovery: string; affectedScope: string[]; needsFallback?: boolean; analyzedAt: string; incidentId: string; resolvedAt?: string; estimatedRecoveryHours?: number }>>
           // #574 — supply-chain banner: when this service is in affectedNow/mayBeAffected, render a note.
-          supplyChainBanner?: {
-            severity: 'degraded' | 'down'
-            regions: Array<{ region: string; level: string; summary?: string }>
-            affectedNow: Array<{ id: string; name: string }>
-            mayBeAffected: Array<{ id: string; name: string; confidence: string }>
-          }
+          // Shape declared once, next to the logic that reads it — two copies of one wire contract drift.
+          supplyChainBanner?: SupplyChainBannerLike
         }
         const allServices = data.services ?? []
 
@@ -282,13 +279,8 @@ export default async function handler(req: Request) {
           aiInsight = aiInsights[0] // primary (freshest incident) — meta/share/OG carry a single summary
         }
 
-        // #574 — supply-chain note: if this service is in the banner (confirmed-affected or estimated).
-        const scb = data.supplyChainBanner
-        if (scb) {
-          const confirmed = scb.affectedNow.some(s => s.id === entry.id)
-          const listed = confirmed || scb.mayBeAffected.some(s => s.id === entry.id)
-          if (listed) supplyChainNote = { regions: scb.regions.map(r => r.region).join(', '), confirmed }
-        }
+        // #574/#1000 — supply-chain note (region choice is load-bearing; see supply-chain-note.ts).
+        supplyChainNote = buildSupplyChainNote(data.supplyChainBanner, entry.id)
       } catch (parseErr) {
         fallbackReason = 'parse_error'
         console.error(`[is-down/${slug}] JSON parse failed:`, parseErr instanceof Error ? parseErr.message : parseErr)

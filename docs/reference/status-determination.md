@@ -232,6 +232,13 @@ degraded region in its own incident** (#1000). Differentiator vs AIDown.io's *st
   tags `[AWS][us-east-1]` in 29/50 incidents (region-matchable), Anthropic 0/50 (so Claude only ever
   appears under `mayBeAffected`, never confirmed — correct). Healthy map members → `mayBeAffected`
   ("AWS-dependent · may be affected", hedged). **Gate**: ≥1 `affectedNow`, else null.
+  - **Extraction reads the incident BODY, not just the title** — load-bearing, verified 2026-07-13.
+    Hugging Face titles a real incident `Elevated error rate – AWS CDN (Singapore)` — a human place
+    name, no token — and names the region only in the update body ("…in the Asia-Pacific (Singapore /
+    `ap-southeast-1`) region"). Title-only extraction would leave HF permanently unattributable even
+    though it explicitly blames AWS. Pinecone is the opposite, front-loading `[AWS][us-east-1]` into
+    the title. Both shapes are covered because the extractor reads title + `componentNames` + timeline;
+    the HF incident is pinned as a test fixture.
   - **Why region-aware** (#1000): the original gate only asked *"does the incident mention AWS at
     all?"*, which let the banner's two halves disagree. On 2026-07-13 prod rendered "AWS infrastructure
     issue — me-central-1, me-south-1 · AWS-attributed: Pinecone" while Pinecone's only incident was

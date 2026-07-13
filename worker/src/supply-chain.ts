@@ -39,8 +39,12 @@ export interface SupplyChainBanner {
    *  Both clients render this as the user-facing headline ("AWS infrastructure issue — <regions>"), so
    *  a region nobody correlated with must not appear here. Never empty when the banner is non-null. */
   regions: Array<{ region: string; level: 'degraded' | 'down'; summary?: string }>
-  /** dependent services that are CURRENTLY degraded/down (the correlation — confirmed). */
-  affectedNow: Array<{ id: string; name: string }>
+  /** Dependent services that are CURRENTLY degraded/down (the correlation — confirmed). `regions` is
+   *  the subset of the degraded AWS regions THIS service named in its own incident — carried per
+   *  service because the is-down page makes a per-service causal claim ("<svc> … attributes it to an
+   *  AWS/upstream issue (<regions>)"). Joining the banner-wide union there would bind a region the
+   *  service never named to its outage — #1000's defect on a second surface, just smaller. */
+  affectedNow: Array<{ id: string; name: string; regions: string[] }>
   /** other AWS-dependent services NOT currently degraded (estimated — may be affected), confidence-tagged. */
   mayBeAffected: Array<{ id: string; name: string; confidence: DepConfidence }>
 }
@@ -78,6 +82,13 @@ const AWS_REGION_RE = /\b(?:us|eu|ap|sa|ca|me|af|il|cn|mx)-(?:gov-)?(?:east|west
 
 /**
  * The AWS regions this service's OWN active incidents name (title + componentNames + timeline).
+ *
+ * Reading the TIMELINE, not just the title, is load-bearing — verified against real data (2026-07-13):
+ * Hugging Face titles an incident `Elevated error rate – AWS CDN (Singapore)` (a human place name, no
+ * token) and only names the region in the update body: "…in the Asia-Pacific (Singapore /
+ * ap-southeast-1) region". Title-only extraction would leave HF permanently unattributable despite it
+ * explicitly blaming AWS. Pinecone is the opposite — it front-loads `[AWS][us-east-1]` into the title.
+ *
  * Empty when the service blames nothing region-specific — including the "our upstream provider is
  * having issues" phrasing that carries no region. That case is deliberately NOT attributed: the
  * banner's headline is region-scoped, so listing a service under regions its own status page never
@@ -146,7 +157,8 @@ export function buildSupplyChainBanner(services: ServiceStatus[]): SupplyChainBa
       // degraded: include ONLY where the service's own incident names a region AWS reports as degraded.
       const overlap = [...awsRegionsNamedByService(svc)].filter((r) => degraded.has(r))
       if (overlap.length > 0) {
-        affectedNow.push({ id: svc.id, name: svc.name })
+        // carry THIS service's regions (AWS's original casing), not the banner-wide union.
+        affectedNow.push({ id: svc.id, name: svc.name, regions: overlap.map((r) => degraded.get(r)!.region) })
         for (const r of overlap) correlated.add(r)
       }
       // else: degraded for a cause AWS does not corroborate → omit (no supply-chain claim).
