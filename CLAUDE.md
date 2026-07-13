@@ -265,6 +265,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   probe.ts probe-archival.ts   # Direct RTT probing (32 targets) + daily archival
   daily-summary.ts weekly-briefing.ts monthly-archive.ts monthly-narrative.ts  # Discord reports + archives
   api-traffic.ts outage-audience.ts referral.ts vitals.ts   # WAE/KV instrumentation
+  growth-series.ts   # Durable daily series of the consent-free growth counters (#986) — the dataset #547's lift measurement reads
   reddit.ts security-monitor.ts changelog.ts platform-monitor.ts  # External monitoring
   alert-feed.ts ext-claude.ts indexnow.ts badge.ts og.ts og-render.ts  # Feeds, projections, SEO, images
   parsers/           # statuspage, incident-io, gcloud, aistudio, instatus, betterstack, aws, flashduty

@@ -1485,6 +1485,7 @@ import { collectChangelogs, getStaleSources } from './changelog'
 import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { parseReferralBody, recordReferral, type ReferralCounts } from './referral'
+import { buildGrowthDailyRow, recordGrowthDaily } from './growth-series'
 import { parsePageviewBody, recordOutageView, queryOutageAudience, type AudienceCounts } from './outage-audience'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
@@ -2581,19 +2582,32 @@ export default {
 
           // #842 — consent-free outbound-referral counts (is-down "Open ↗" beacon). null on absence/parse fail.
           let referralCounts: ReferralCounts | null = null
+          // #986 — the growth series must tell "nobody clicked" (absent key → 0) apart from "we could
+          // not read it" (throw / malformed → null). A broken day recorded as a quiet day would corrupt
+          // the very lift comparison the series exists for.
+          let referralReadFailed = false
           try {
-            const rRaw = await env.STATUS_CACHE.get(`referral:out:${today}`).catch(() => null)
+            const rRaw = await env.STATUS_CACHE.get(`referral:out:${today}`)
             // Guard BOTH fields: a corrupt value with a non-object byService would throw in formatReferralLine's Object.entries.
-            if (rRaw) { const p = JSON.parse(rRaw); if (p && typeof p.total === 'number' && p.byService && typeof p.byService === 'object') referralCounts = p }
-          } catch (err) { console.warn('[daily-summary] referral read failed:', err instanceof Error ? err.message : err) }
+            if (rRaw) {
+              const p = JSON.parse(rRaw)
+              if (p && typeof p.total === 'number' && p.byService && typeof p.byService === 'object') referralCounts = p
+              else referralReadFailed = true // present but malformed
+            }
+          } catch (err) { referralReadFailed = true; console.warn('[daily-summary] referral read failed:', err instanceof Error ? err.message : err) }
 
           // Count active webhook subscriptions. Since #486 PR3 this is the number of confirmed
           // server-side subscriptions (webhook:sub:*) — the source of truth now that delivery is
           // server-side (replaced the legacy webhook:reg:* count removed with the browser relay).
           let webhookCounts: { discord: number; newToday: number | null } = { discord: 0, newToday: null }
+          // #986 — `webhookCounts.discord` stays 0 when the listing throws, which the Discord report can
+          // live with but the growth series cannot: 0 subscribers and "we could not count" are different
+          // days. Capture the snapshot separately so a failed read stays null in the series.
+          let subscribersSnapshot: number | null = null
           try {
             const hashes = await listConfirmedHashes(env.STATUS_CACHE)
             webhookCounts.discord = hashes.length
+            subscribersSnapshot = hashes.length
             // #548 — new-today delta: diff against yesterday's snapshot, then persist today's for
             // tomorrow's diff (7d TTL so a missed day still leaves a baseline). Consent-free signal.
             const yesterday = new Date(now.getTime() - 86_400_000).toISOString().split('T')[0]
@@ -2845,6 +2859,29 @@ export default {
             pluginTraffic,
             reportCounts,
           })
+
+          // #986 — mirror today's consent-free growth counters into the permanent monthly series.
+          // The values above are about to expire (referral:out 2d, webhook:sub:count 7d) and nothing
+          // else accrues them, so the #547·16 lift measurement had no dataset to read. Zero extra
+          // reads; one KV write/day. Isolated: a failure here must never abort the Discord report,
+          // and re-running the same date overwrites its row rather than duplicating it.
+          //
+          // The outage-day axis is `alertCounts` (the `alert:count:{date}` DAILY accumulator), NOT
+          // `result.newCount` — the latter counts only the alerts sent by THIS 5-minute cron cycle, and
+          // the daily report runs in a single 09:00-09:04 UTC window, so an 04:00 outage would have
+          // been recorded as a quiet day. That is the one classification this dataset exists to make.
+          try {
+            await recordGrowthDaily(env.STATUS_CACHE, buildGrowthDailyRow({
+              date: today,
+              alertCounts,
+              referralTotal: referralReadFailed ? null : (referralCounts?.total ?? 0),
+              subscribers: subscribersSnapshot,
+              subscriberNewToday: webhookCounts.newToday,
+              audience,
+            }))
+          } catch (err) {
+            console.warn('[growth-series] append failed:', err instanceof Error ? err.message : err)
+          }
 
           if (isCatchUp) console.log(`[daily-summary] catch-up run for ${today}`)
           await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
