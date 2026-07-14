@@ -259,6 +259,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   ai-analysis.ts     # Hybrid incident analysis — Gemma 4 26B primary, Claude Sonnet fallback
   anthropic.ts       # Anthropic Messages REST call — model id, request body, retry + status classification (#955)
   incident-history.ts # Durable resolved-incident corpus → prediction accuracy + RAG (#827)
+  recovery-mark.ts   # The shared "incident resolved" step both cron paths call — recovered: marker + analysis resolvedAt stamp (#1003)
   rss.ts             # Incident RSS feeds (/feed.xml, /feed/:slug) + Slack-poller behaviours
   fallback.ts        # Fallback recommendation (tiered, Score-ranked)
   suppression.ts     # Operator incident-suppression layer (#904)

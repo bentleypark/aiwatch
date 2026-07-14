@@ -41,6 +41,24 @@ function recoveryUpperBoundHours(insight: { estimatedRecovery?: string; estimate
   return hours > 0 ? hours : null
 }
 
+/** #1003 — the bound a RESOLVED incident is SCORED against: the first, hindsight-free estimate.
+ *  Mirrors the worker `scoringBaselineHours` (incident-history.ts) exactly — NUMERIC fields only, no
+ *  display-string parse, so this SEO card and the Discord/`/feed`/corpus verdicts can never disagree
+ *  about the same incident (and a resolved card with no numeric estimate keeps falling back to the
+ *  bare "Est. Recovery", as before).
+ *
+ *  `estimatedRecoveryHours` is the CURRENT estimate, which the worker's re-analysis ratchets upward
+ *  once an incident outruns its own prediction — scoring against it turns the model's misses into wins.
+ *  Falls back to it only for analyses written before #1003. The LIVE helpers below deliberately keep
+ *  using `recoveryUpperBoundHours` (current estimate + string parse): an ongoing incident needs the
+ *  current ETA, not the superseded original. */
+function scoringBaselineEn(insight: { estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number }): number | null {
+  const first = insight.firstEstimatedRecoveryHours
+  if (typeof first === 'number' && first > 0) return first
+  const current = insight.estimatedRecoveryHours
+  return typeof current === 'number' && current > 0 ? current : null
+}
+
 /** True when an ACTIVE incident has already run past its estimated recovery upper bound, so the stale
  *  short range is no longer credible (a 2–4h estimate on an incident ongoing for days). Mirrors the
  *  frontend `estimateExceeded` + the worker's `recoveryExceeded` gate. Gated on `resolvedAt` (a resolved
@@ -251,7 +269,7 @@ export function renderPage(
   service: ServiceData | null,
   seo: ServiceSEO,
   fallbacks: Fallback[],
-  aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; startedAt?: string } | null,
+  aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string } | null,
   // Region recommendation (refs #422 Phase 2). When the affected service has
   // region-specific incidents AND at least one healthy region, surface an
   // actionable "Try region: X" line right under the AI Insight block. Null
@@ -281,7 +299,7 @@ export function renderPage(
   // multiple active incidents renders one card each (parity with the dashboard AnalysisModal). The scalar
   // `aiInsight` above remains the primary [0] for meta/share/OG. Omitted/empty → fall back to the single
   // `aiInsight` (older callers / single-incident path) so the card still renders.
-  aiInsights?: Array<{ summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }> | null,
+  aiInsights?: Array<{ summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }> | null,
 ): string {
   // #566: lead the SERP title with the live status answer (falls back to "Live Status"
   // when status data is unavailable) so the result answers the query before the click.
@@ -654,7 +672,7 @@ function predictedVsActualEn(predictedHours: number, actualMin: number): string 
   return `${fmtMinEn(actualMin)} (${within})`
 }
 
-type AIInsight = { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }
+type AIInsight = { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }
 
 // #926 — accepts a SINGLE insight or the full per-incident LIST and renders ONE card for the service,
 // mirroring the dashboard AnalysisModal (which groups a service's incidents into a single card, NOT one
@@ -707,9 +725,12 @@ function renderInsightBody(insight: AIInsight, isResolved: boolean, multi: boole
   // modal. Meta/share surfaces keep the terse "Exceeded typical pattern" (reads cleaner in-sentence).
   const recovery = recoveryEstimateExceeded(insight) ? exceededRecoveryTextEn(insight) : formatRecoveryDisplay(insight.estimatedRecovery)
   // #827 F4 — once resolved, replace the bare estimate with "predicted vs actual" (actual = startedAt→
-  // resolvedAt). Null until resolved or when the numeric estimate / startedAt isn't available.
-  const outcome = isResolved && insight.estimatedRecoveryHours != null && insight.startedAt && insight.resolvedAt
-    ? predictedVsActualEn(insight.estimatedRecoveryHours, Math.round((new Date(insight.resolvedAt).getTime() - new Date(insight.startedAt).getTime()) / 60000))
+  // resolvedAt). Null until resolved or when no usable estimate / startedAt is available.
+  // #1003 — scored against the FIRST estimate (scoringBaselineEn), NOT the re-analysis-inflated current
+  // one, so this public SEO card agrees with the Discord embed, /feed, the corpus and the dashboard modal.
+  const baseline = scoringBaselineEn(insight)
+  const outcome = isResolved && baseline != null && insight.startedAt && insight.resolvedAt
+    ? predictedVsActualEn(baseline, Math.round((new Date(insight.resolvedAt).getTime() - new Date(insight.startedAt).getTime()) / 60000))
     : null
   const sep = multi && idx > 0 ? 'border-top:1px solid #21262d;margin-top:10px;padding-top:10px' : ''
   const titleLine = multi && insight.incidentTitle

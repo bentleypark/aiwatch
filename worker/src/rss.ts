@@ -8,7 +8,7 @@ import { getGroupedFallbacks } from './fallback'
 import { defuseAutolinkDomain } from './alerts'
 import { formatRecoveryDisplay } from './ai-analysis'
 import { appendStatusHint, appendUtm } from './utils'
-import { durationMinOf, predictedVsActualText, resolvedAtOf } from './incident-history'
+import { durationMinOf, predictedVsActualText, resolvedAtOf, scoringBaselineHours } from './incident-history'
 
 const SITE = 'https://ai-watch.dev'
 
@@ -24,6 +24,9 @@ export interface RssAiAnalysis {
   // #827 F4 — the numeric upper-bound estimate, carried so a RESOLVED item can render the
   // "predicted vs actual" comparison (actual = startedAt→resolution). Absent on older analyses.
   estimatedRecoveryHours?: number
+  // #1003 — the first, hindsight-free estimate; what the resolved comparison is actually scored
+  // against (re-analysis ratchets `estimatedRecoveryHours` up once an incident outruns it).
+  firstEstimatedRecoveryHours?: number
 }
 export type RssAiAnalysisMap = Record<string, RssAiAnalysis[]>
 
@@ -326,9 +329,11 @@ function descHtml(
     // sources (the provider duration string vs startedAt→resolvedAt). They agree in the normal case;
     // a provider-backdated startedAt (BetterStack/#633 flap) could make them differ slightly — accepted
     // (both are honest measures; the comparison line is the one anchored to our estimate).
-    const a = opts.analysis
-    if (a?.estimatedRecoveryHours != null) {
-      const pva = predictedVsActualText({ predictedRecoveryHours: a.estimatedRecoveryHours, durationMin: durationMinOf(inc.startedAt, resolvedAtOf(inc)) })
+    // #1003 — scored against the FIRST estimate (scoringBaselineHours), not the re-analysis-inflated
+    // current one, so this line matches the Discord recovery embed and the durable corpus.
+    const predicted = scoringBaselineHours(opts.analysis)
+    if (predicted != null) {
+      const pva = predictedVsActualText({ predictedRecoveryHours: predicted, durationMin: durationMinOf(inc.startedAt, resolvedAtOf(inc)) })
       if (pva) lines.push(`<p>🎯 AI prediction: ${escHtml(pva)}</p>`)
     }
   } else {

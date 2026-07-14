@@ -155,6 +155,14 @@ export interface AIAnalysisResult {
   summary: string
   estimatedRecovery: string
   estimatedRecoveryHours?: number  // upper bound parsed from estimatedRecovery (e.g., "4–6h" → 6)
+  // #1003 — the FIRST estimate ever made for this incident, stamped on every write by `putAnalysis`
+  // (which pins it in the durable `ai:first-est:` key). Re-analysis only fires once an incident has
+  // outrun its own estimate, and its prompt forces the new upper bound to be >= elapsed hours —
+  // so `estimatedRecoveryHours` can only ratchet UP with hindsight. Grading recovery against that
+  // value turned every miss into a win ("4h 55m — faster than ~15h est." on an incident first
+  // estimated at 1–4h). Live surfaces show `estimatedRecoveryHours` (a user needs the CURRENT
+  // ETA); anything that SCORES the prediction reads this instead (`scoringBaselineHours`).
+  firstEstimatedRecoveryHours?: number
   affectedScope: string[]
   needsFallback: boolean  // AI-assessed: true if incident warrants switching to alternative service
   analyzedAt: string
@@ -204,6 +212,144 @@ export function formatRecoveryDisplay(recovery: string): string {
 /** Centralized KV key for per-incident analysis */
 export function analysisKey(svcId: string, incId: string): string {
   return `ai:analysis:${svcId}:${incId}`
+}
+
+/** A prior analysis as seen by `firstEstimateOf` — structural, so any KV write path can pass
+ *  whatever it already parsed. */
+interface PriorEstimate {
+  estimatedRecoveryHours?: number
+  firstEstimatedRecoveryHours?: number
+}
+
+function positiveHours(v: number | undefined | null): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
+}
+
+/**
+ * #1003 — the scoring baseline gets its OWN durable key, not a field that lives or dies with the
+ * 1h-TTL analysis value.
+ *
+ * `ai:analysis:*` is deliberately allowed to LAPSE mid-incident: once an analysis is 2h+ old and the
+ * per-cron re-analysis cap is exhausted, `refreshOrReanalyze` stops refreshing its TTL so a later
+ * cycle re-analyzes from scratch. A broad outage can starve one long incident for the ~12 cycles that
+ * takes — and the fresh analysis replacing it would install ITS estimate (made hours in, with the full
+ * timeline in the prompt) as "the first" one. That re-runs this very bug on exactly the long incidents
+ * where scoring matters most. Write-once here, outliving any realistic incident, so the baseline
+ * survives an analysis-key lapse.
+ */
+export function firstEstimateKey(svcId: string, incId: string): string {
+  return `ai:first-est:${svcId}:${incId}`
+}
+
+/** 30d — outlives both the analysis key (1h active / 2h resolved) and the longest incidents we see
+ *  (Mistral's ~120h flaps), while staying bounded. Written at most once per incident. */
+export const FIRST_ESTIMATE_TTL_S = 30 * 86400
+
+/**
+ * Pure baseline resolution, in precedence order:
+ *   1. `stored` — the durable key. Already pinned; nothing may move it (so N re-analyses are idempotent)
+ *   2. the prior analysis's own first estimate (same cycle, or the durable write failed)
+ *   3. the prior analysis's CURRENT estimate — a pre-#1003 value IS the earlier prediction, so an
+ *      incident already in flight at deploy time still scores against its original bound
+ *   4. this fresh estimate — there is no prior, so it IS the first
+ * Null when nothing usable exists ("N/A"): `scoringBaselineHours` then has nothing to grade and the
+ * comparison line is omitted rather than fabricated.
+ */
+export function firstEstimateOf(
+  next: AIAnalysisResult,
+  prior: PriorEstimate | null,
+  stored: number | null,
+): number | null {
+  return positiveHours(stored)
+    ?? positiveHours(prior?.firstEstimatedRecoveryHours)
+    ?? positiveHours(prior?.estimatedRecoveryHours)
+    ?? positiveHours(next.estimatedRecoveryHours)
+}
+
+/**
+ * #1003 — stamp the scoring baseline onto a fresh analysis, pinning it durably on first sight.
+ *
+ * EVERY write of a fresh `AIAnalysisResult` to `ai:analysis:{svcId}:{incId}` MUST route through this
+ * (CI-enforced by `first-estimate-write-paths.test.ts`, which scans the worker source): re-analysis
+ * fires only once an incident has outrun its own estimate, and its prompt forbids a bound below the
+ * elapsed hours — so `estimatedRecoveryHours` ratchets UP with hindsight and must never be the value
+ * a resolution is graded against.
+ *
+ * Best-effort on the KV side: a read or write failure degrades to the in-value carry (the prior
+ * analysis), never to dropping the estimate or aborting the caller's write.
+ */
+export async function pinFirstEstimate(
+  kv: KVLike,
+  svcId: string,
+  incId: string,
+  next: AIAnalysisResult,
+  prior: PriorEstimate | null,
+): Promise<AIAnalysisResult> {
+  const key = firstEstimateKey(svcId, incId)
+  const raw = await kv.get(key).catch(() => null)
+  const stored = positiveHours(raw != null ? Number(raw) : null)
+  const first = firstEstimateOf(next, prior, stored)
+  if (first == null) return next
+  // Get-or-set — only the first sighting writes, so no later re-analysis can move the baseline.
+  if (stored == null) await kvPut(kv, key, String(first), { expirationTtl: FIRST_ESTIMATE_TTL_S })
+  return { ...next, firstEstimatedRecoveryHours: first }
+}
+
+export interface PutAnalysisResult {
+  /** The analysis with its scoring baseline stamped. Valid even when `ok` is false: `pinFirstEstimate`
+   *  has already resolved (and durably pinned) the baseline by then, so a caller that SCORES off this
+   *  value still scores correctly when only the persist failed. */
+  pinned: AIAnalysisResult
+  /** False when the KV write failed — the caller decides whether that is fatal. */
+  ok: boolean
+  /** Failure detail, surfaced by `/api/admin/analyze` (an operator endpoint whose whole point is
+   *  telling you WHY the automated path is broken — a bare "failed" there is the blindness #955 removed). */
+  error?: string
+}
+
+/**
+ * #1003 — the SINGLE chokepoint for writing `ai:analysis:{svcId}:{incId}`.
+ *
+ * Every write goes through here so the scoring baseline cannot be lost by construction: an analysis-key
+ * write anywhere else fails CI (`first-estimate-write-paths.test.ts`). That matters because the bug was
+ * never in a helper — it was in ONE of the (then) nine write paths, and a tenth added later would
+ * silently reintroduce it. Routing the TTL-refresh writes through here too costs one KV read each, but
+ * means the durable pin also self-heals for analyses that predate #1003.
+ *
+ * `prior` is whatever that key already held (`null` when it held nothing) — pass the same object being
+ * re-serialized on a refresh. Writes via a raw `kv.put` rather than the `kvPut` helper only so the
+ * failure message survives for `/api/admin/analyze`'s 502 detail; it never throws.
+ */
+export async function putAnalysis(
+  kv: KVLike,
+  svcId: string,
+  incId: string,
+  analysis: AIAnalysisResult,
+  prior: PriorEstimate | null,
+  ttlSec: number,
+): Promise<PutAnalysisResult> {
+  const pinned = await pinFirstEstimate(kv, svcId, incId, analysis, prior)
+  try {
+    await kv.put(analysisKey(svcId, incId), JSON.stringify(pinned), { expirationTtl: ttlSec })
+    return { pinned, ok: true }
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
+    console.warn('[kv] ai:analysis write failed:', svcId, incId, error)
+    return { pinned, ok: false, error }
+  }
+}
+
+/** Parse a raw `ai:analysis:*` KV value, returning null on absent/corrupt/non-object rather than
+ *  throwing — the write paths need the prior analysis only to carry its first estimate forward, and
+ *  a corrupt prior must not abort the write. (An array parses as an `object` in JS — reject it too.) */
+export function parseAnalysis(raw: string | null): AIAnalysisResult | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as AIAnalysisResult
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -849,7 +995,7 @@ export async function refreshOrReanalyze(
           // incident resolution (resolvedAt write overwrites this key with 2h TTL).
           if (parsed.sticky === true) {
             parsed._lastRefresh = new Date(now).toISOString()
-            await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+            await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
             analyzedIncidents.set(inc.id, key)
             result.refreshed.push(svc.id)
             continue
@@ -873,7 +1019,7 @@ export async function refreshOrReanalyze(
             if (parsed.timelineHash && hashTime === latestTime && !recoveryExceeded) {
               // No new timeline updates — just refresh TTL, skip API call
               parsed._lastRefresh = new Date(now).toISOString()
-              await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+              await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
               analyzedIncidents.set(inc.id, key)
               result.refreshed.push(svc.id)
               continue
@@ -886,7 +1032,7 @@ export async function refreshOrReanalyze(
                 // Update timelineHash to avoid rechecking, but skip API call
                 parsed.timelineHash = latestTimelineAt
                 parsed._lastRefresh = new Date(now).toISOString()
-                await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+                await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
                 analyzedIncidents.set(inc.id, key)
                 result.refreshed.push(svc.id)
                 continue
@@ -911,7 +1057,11 @@ export async function refreshOrReanalyze(
               )
               await recordUsage(kv, now, attempt)
               if (attempt.result) {
-                await kvPut(kv, key, JSON.stringify(attempt.result), { expirationTtl: 3600 })
+                // #1003 — this overwrite is exactly where the original prediction used to die. The
+                // re-analysis above was handed `prevPrediction`, whose prompt forbids an upper bound
+                // below the elapsed hours, so `attempt.result` is hindsight-inflated by construction;
+                // carry the pre-inflation estimate forward so resolution still grades against it.
+                await putAnalysis(kv, svc.id, inc.id, attempt.result, parsed, 3600)
                 analyzedIncidents.set(inc.id, key)
                 result.reanalyzed.push(svc.id)
               } else {
@@ -919,7 +1069,7 @@ export async function refreshOrReanalyze(
                 // usable analysis, so retrying every cycle costs nothing extra.
                 console.warn(`[ai] time-based re-analysis produced nothing (${attempt.failure}) for ${svc.id}:${inc.id}, keeping old`)
                 parsed._lastRefresh = new Date(now).toISOString()
-                await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+                await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
                 result.refreshed.push(svc.id)
               }
             } catch (err) {
@@ -928,7 +1078,7 @@ export async function refreshOrReanalyze(
               await recordUsage(kv, now, { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } })
               // Keep old analysis on failure
               parsed._lastRefresh = new Date(now).toISOString()
-              await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+              await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
               result.refreshed.push(svc.id)
             }
             continue
@@ -944,7 +1094,7 @@ export async function refreshOrReanalyze(
           const elapsed = now - new Date(lastRefresh).getTime()
           if (elapsed >= 1_800_000) {
             parsed._lastRefresh = new Date(now).toISOString()
-            await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+            await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
             result.refreshed.push(svc.id)
           }
           continue
@@ -957,9 +1107,15 @@ export async function refreshOrReanalyze(
       // Dedup: check if another service already has analysis for the same incidentId
       const siblingKey = analyzedIncidents.get(inc.id)
       if (siblingKey) {
-        const siblingRaw = await kv.get(siblingKey).catch(() => null)
-        if (siblingRaw) {
-          await kvPut(kv, key, siblingRaw, { expirationTtl: 3600 })
+        const sibling = parseAnalysis(await kv.get(siblingKey).catch(() => null))
+        if (sibling) {
+          // #1003 — copy through `putAnalysis` rather than byte-for-byte, so THIS service also gets its
+          // own durable `ai:first-est:` pin. Copying the raw value carried the baseline inside the
+          // value but pinned nothing: if this service's analysis key later lapsed (cap exhaustion) while
+          // the pinned sibling's didn't, its next fresh analysis would adopt a hindsight-inflated
+          // estimate as "the first" — the same bug, one service over. `prior = sibling` so the sibling's
+          // FIRST estimate wins over its (possibly re-analyzed, inflated) current one.
+          await putAnalysis(kv, svc.id, inc.id, sibling, sibling, 3600)
           analyzedIncidents.set(inc.id, key)
           result.reanalyzed.push(svc.id)
           continue
@@ -1002,7 +1158,11 @@ export async function refreshOrReanalyze(
         await recordUsage(kv, now, attempt)
 
         if (attempt.result) {
-          await kvPut(kv, key, JSON.stringify(attempt.result), { expirationTtl: 3600 })
+          // No prior analysis on this KEY (the `if (raw)` branch above `continue`d otherwise) — but the
+          // key may have LAPSED mid-incident (cap exhaustion; see `firstEstimateKey`), in which case
+          // this estimate was made hours in and is NOT a hindsight-free baseline. `pinFirstEstimate`
+          // reads the durable key, so the original bound still wins when one was ever pinned.
+          await putAnalysis(kv, svc.id, inc.id, attempt.result, null, 3600)
           analyzedIncidents.set(inc.id, key)
           result.reanalyzed.push(svc.id)
         } else {
