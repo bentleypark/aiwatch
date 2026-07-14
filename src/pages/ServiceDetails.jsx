@@ -24,6 +24,8 @@ import { regionStatusOf, SERVICE_REGIONS } from '../utils/regionStatus'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import StatusPill from '../components/StatusPill'
+import { sourceFlagsOf } from '../utils/statusDisplay'
+import { STATUS_URL } from '../utils/statusPageUrls'
 import { ensureChart } from '../utils/chartLoader'
 import { filterLast24h } from '../utils/time'
 
@@ -50,52 +52,6 @@ const SERVICE_COLOR = {
   twelvelabs:  '#79c0ff',
 }
 
-// Official status page URLs for each monitored service
-const STATUS_URL = {
-  claude:      'https://status.claude.com',
-  openai:      'https://status.openai.com',
-  gemini:      'https://aistudio.google.com/status',
-  mistral:     'https://status.mistral.ai',
-  cohere:      'https://status.cohere.ai',
-  groq:        'https://status.groq.com',
-  together:    'https://status.together.ai',
-  fireworks:   'https://status.fireworks.ai',
-  cerebras:    'https://status.cerebras.ai',
-  perplexity:  'https://status.perplexity.ai',
-  huggingface: 'https://status.huggingface.co',
-  replicate:   'https://www.replicatestatus.com',
-  fal:         'https://status.fal.ai',
-  elevenlabs:  'https://status.elevenlabs.io',
-  xai:         'https://status.x.ai',
-  deepseek:    'https://status.deepseek.com',
-  openrouter:  'https://status.openrouter.ai',
-  bedrock:     'https://health.aws.amazon.com/health/status',
-  pinecone:    'https://status.pinecone.io',
-  turbopuffer: 'https://status.turbopuffer.com',
-  stability:   'https://status.stability.ai',
-  bfl:         'https://status.bfl.ml',
-  voyageai:    'https://voyageai-status.statuspage.io',
-  modal:       'https://status.modal.com',
-  twelvelabs:  'https://status.twelvelabs.io',
-  langsmith:   'https://status.smith.langchain.com',
-  helicone:    'https://status.helicone.ai',
-  langfuse:    'https://status.langfuse.com',
-  runway:      'https://status.runwayml.com',
-  luma:        'https://status.lumalabs.ai',
-  assemblyai:  'https://status.assemblyai.com',
-  deepgram:    'https://status.deepgram.com',
-  azureopenai: 'https://azure.status.microsoft/en-us/status',
-  characterai: 'https://status.character.ai',
-  claudeai:    'https://status.claude.com',
-  chatgpt:     'https://status.openai.com',
-  deepseekapp: 'https://status.deepseek.com',
-  claudecode:  'https://status.claude.com',
-  copilot:     'https://githubstatus.com',
-  cursor:      'https://status.cursor.com',
-  windsurf:    'https://status.windsurf.com',
-  junie:       'https://status.jetbrains.ai',
-  codex:       'https://status.openai.com',
-}
 
 // #717 — services whose status is sourced from MORE THAN ONE upstream status page. The worker
 // already merges both feeds (e.g. Gemini = AI Studio + Google Cloud / Vertex); this surfaces both
@@ -836,6 +792,9 @@ export default function ServiceDetails({ serviceId }) {
   // uptime / incidents / MTTR / score cards + the status calendar (showing a frozen 30-day window as
   // current would mislead). Latency stays — it's probe-measured + current.
   const isUnreliableData = isUnreliableUptime(service)
+  // #1004 — the same source-flag derivation the Overview cards + banner use, so this page can't
+  // disagree with them about whether the status source is readable.
+  const [sourceDead, sourceUnknown] = sourceFlagsOf(service)
   // #713 — distinguish "no official uptime source" (honest: "No official uptime — incident-tracked")
   // from the frozen-stale case ("Not provided"). No invented uptime % for these services.
   const noOfficialUptimeFlag = noOfficialUptime(service)
@@ -901,7 +860,7 @@ export default function ServiceDetails({ serviceId }) {
           >
             ⚠ {t('report.button')}
           </button>
-          <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={service.sourceDead && !service.probeConfirmed} />
+          <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={sourceDead} sourceUnknown={sourceUnknown} />
         </div>
       </div>
       <ReportModal isOpen={reportOpen} onClose={() => setReportOpen(false)} services={services} presetServiceId={service.id} />
@@ -913,6 +872,17 @@ export default function ServiceDetails({ serviceId }) {
         <div className="rounded-lg border" style={{ borderColor: 'var(--amber)', background: 'var(--bg2)', padding: '12px 16px' }}>
           <div className="text-[13px] font-medium" style={{ color: 'var(--amber)' }}>⚠ {t('svc.sourceDead.title')}</div>
           <div className="mono text-[11px] text-[var(--text1)]" style={{ marginTop: '5px', lineHeight: 1.5 }}>{t(service.probeConfirmed ? 'svc.sourceDead.bodyProbe' : 'svc.sourceDead.body')}</div>
+        </div>
+      )}
+
+      {/* #1004 — AIWatch could not READ the status source (throw / 5xx, #714 — a moved page, a timeout,
+          an upstream error). The worker's fallback then marks the service degraded after 3 consecutive
+          failures, which a reader cannot tell apart from a real outage. Say plainly that this is OUR
+          read failing, not the provider's service. `sourceDead` (a 4xx) wins if somehow both are set. */}
+      {sourceUnknown && !service.sourceDead && service.status === 'degraded' && (
+        <div className="rounded-lg border" style={{ borderColor: 'var(--border-hi)', background: 'var(--bg2)', padding: '12px 16px' }}>
+          <div className="text-[13px] font-medium text-[var(--text0)]">{t('svc.sourceUnknown.title')}</div>
+          <div className="mono text-[11px] text-[var(--text1)]" style={{ marginTop: '5px', lineHeight: 1.5 }}>{t('svc.sourceUnknown.body')}</div>
         </div>
       )}
 

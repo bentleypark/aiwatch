@@ -3,12 +3,12 @@
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, kvPut } from './utils'
-import { isProbeHealthy, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
+import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
-import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, enrichIncidentIoText } from './parsers/incident-io'
+import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
   AISTUDIO_ENDPOINT,
@@ -323,16 +323,23 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2', statusComponentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82'], incidentKeywords: ['copilot'] },
   // windsurf badge reflects worst-of: Cascade primary + Windsurf Tab (autocomplete agent surface) (#379).
   { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m', statusComponentIds: ['r5wf1ykd7y1m', '8q19cygxvshj'] },
-  // displayComponentIds (#606): Junie + its AI Platform dependency only. status.jetbrains.ai is a
-  // shared JetBrains page, but junie is the only AIWatch service on it, so excluding the sibling
-  // products (AI Assistant, Grazie, AI Platform China) keeps the breakdown Junie-relevant. Display-only.
-  // #683 — incidentComponents scopes incidents to Junie's OWN component on the shared
-  // status.jetbrains.ai page (Junie / AI Assistant / Grazie / AI Platform / AI Platform China).
-  // Without it, sibling-only incidents (e.g. a Grazie-only "Raised error rates from NLP services")
-  // leaked onto Junie. Exact-name match to Junie's badge scope (statusComponentId = Junie); AI
-  // Platform is a display dependency (displayComponentIds) but intentionally NOT an incident source,
-  // so the incident scope stays consistent with the Junie-only badge.
-  { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.ai', apiUrl: 'https://status.jetbrains.ai/api/v2/summary.json', statusComponentId: '9vbyyqkkjxl4', displayComponentIds: ['9vbyyqkkjxl4', 'x4pcb5vz7jj2'], incidentComponents: ['Junie'] },
+  // #1004 — JetBrains migrated this page from Atlassian Statuspage (status.jetbrains.ai) to
+  // incident.io (status.jetbrains.cloud, "JetBrains Cloud Platform") on 2026-07-09, then 301'd the old
+  // host to the NEW SITE ROOT (path dropped). So the old apiUrl resolved to a 200 text/html page,
+  // `summaryRes.json()` threw, and junie sat on the fetch-failure fallback (degraded + sourceUnknown)
+  // while JetBrains reported all-operational. Ids below are the new incident.io ULIDs; the Atlassian
+  // hashes (9vbyyqkkjxl4 / x4pcb5vz7jj2) no longer exist anywhere.
+  // incidentIoComponentId is what routes uptime + the impact calendar through the incident.io parsers
+  // (component_uptimes lives in the page HTML's __next_f, not in summary.json).
+  // displayComponentIds (#606): Junie + its AI Platform dependency only. The new page still hosts the
+  // sibling products (AI Assistant, Grazie, Console, Central CLI, per-vendor components), so excluding
+  // them keeps the breakdown Junie-relevant. Display-only.
+  // #683 — incidentComponents scopes incidents to Junie's OWN component on the shared page. Without
+  // it, sibling-only incidents (e.g. a Grazie-only "Raised error rates from NLP services") leaked onto
+  // Junie. Exact-name match to Junie's badge scope (statusComponentId = Junie); AI Platform is a
+  // display dependency but intentionally NOT an incident source, so the incident scope stays
+  // consistent with the Junie-only badge.
+  { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.cloud', apiUrl: 'https://status.jetbrains.cloud/api/v2/summary.json', statusComponentId: '01KX3EN5353NA7819G7ND9Q3KA', incidentIoBaseUrl: 'https://status.jetbrains.cloud/incidents', incidentIoComponentId: '01KX3EN5353NA7819G7ND9Q3KA', displayComponentIds: ['01KX3EN5353NA7819G7ND9Q3KA', '01KX3EN535A0SKSZK3S84949V1'], incidentComponents: ['Junie'] },
 ]
 
 /**
@@ -722,7 +729,7 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
     // processing outage"). See #310.
     if (inc.id.startsWith('aistudio:')) return true
     // #683 — exact-component-name scoping for a SHARED status page where this is the only AIWatch
-    // service but siblings' incidents leak (Junie on status.jetbrains.ai: a Grazie-only incident
+    // service but siblings' incidents leak (Junie on the shared JetBrains page: a Grazie-only incident
     // must NOT attribute to Junie). EXACT (case-insensitive) match, NOT substring, so 'AI Platform'
     // can't collide with the sibling 'AI Platform China'. An untagged incident (no componentNames)
     // matches nothing → dropped (real Junie incidents always list 'Junie'). Takes precedence over
@@ -1119,6 +1126,45 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         }
       }
 
+      // #1004 — incident.io's Statuspage-compat API returns `components: []` on every incident (verified
+      // on all four incident.io pages we monitor), so a service scoped by `incidentComponents` would have
+      // EVERY incident dropped by the filter below — silently and forever, because the
+      // `includeUntaggedIncidents` valve is gated on `incidentKeywords`, which such a service doesn't set.
+      // The tags are rebuilt from the page HTML's `component_impacts`, which makes that HTML LOAD-BEARING
+      // for correctness, not just for uptime. The prefetch may not have it (its own fetch 5s-timed out,
+      // or the whole prefetch entry is missing because summary.json failed that cycle and fetchService
+      // re-fetched it above) — so fetch it here rather than silently dropping every incident.
+      let uptimeHtml = prefetched?.uptimeHtml
+      const tagsNeedHtml = !!(config.incidentComponents && config.incidentIoComponentId)
+      if (!uptimeHtml && tagsNeedHtml) {
+        try {
+          // 3s, not the prefetch's 5s: the prefetch already waited on this same host this cycle, so a
+          // serial 5+5s would eat the batch's budget on exactly the page that's already slow.
+          const htmlRes = await fetchWithTimeout(config.statusUrl, 3000)
+          if (htmlRes.ok) uptimeHtml = await htmlRes.text()
+          else htmlRes.body?.cancel()
+        } catch (err) {
+          console.warn(`[fetchService] ${config.id} status-page HTML fetch failed:`, err instanceof Error ? err.message : err)
+        }
+      }
+      if (tagsNeedHtml) {
+        // Must precede filterIncidents: a transform after the filter can't resurrect what it dropped (#940).
+        const tagged = uptimeHtml
+          ? attachIncidentIoComponentNames(incidents, uptimeHtml, summaryData.components ?? [])
+          : incidents
+        // Fail LOUD, not silent — and OUTSIDE the html guard, so the "no HTML at all" case (the one that
+        // drops every incident) is the loudest, not the quietest. Covers both: HTML missing, and HTML
+        // present but its shape changed upstream.
+        if (incidents.length > 0 && !tagged.some((i) => (i.componentNames ?? []).length > 0)) {
+          console.warn(
+            `[fetchService] ${config.id}: incidentComponents is set but NO incident could be tagged from ` +
+            `component_impacts (uptimeHtml ${uptimeHtml ? 'present — upstream shape change?' : 'MISSING'}) — ` +
+            'every incident will be filtered out this cycle',
+          )
+        }
+        incidents = tagged
+      }
+
       let filtered = filterIncidents(incidents, config)
 
       // #606 Cat B / #693 follow-up — source the component list from componentsUrl (components.json, a
@@ -1168,16 +1214,16 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
 
       // Compute daily impact for calendar from uptimeData HTML (Statuspage services only).
       // Daily impact for calendar: Statuspage uptimeData OR incident.io component_impacts
-      const uptimeResult = (prefetched?.uptimeHtml && config.statusComponentId)
-        ? parseUptimeData(prefetched.uptimeHtml, config.statusComponentId)
+      const uptimeResult = (uptimeHtml && config.statusComponentId)
+        ? parseUptimeData(uptimeHtml, config.statusComponentId)
         : null
       // Aggregate the impact calendar over the whole badge group (statusComponentIds) when set, so a
       // multi-component service's calendar matches its badge scope + the official group calendar
       // (#693 follow-up); else the single primary component. incident.io HTML carries impacts for ALL
       // components (incl. ones absent from summary.json), so the group calendar can be more complete
       // than the summary.json-sourced badge.
-      const ioDailyImpact = (prefetched?.uptimeHtml && config.incidentIoComponentId)
-        ? parseIncidentIoComponentImpacts(prefetched.uptimeHtml, config.statusComponentIds ?? config.incidentIoComponentId)
+      const ioDailyImpact = (uptimeHtml && config.incidentIoComponentId)
+        ? parseIncidentIoComponentImpacts(uptimeHtml, config.statusComponentIds ?? config.incidentIoComponentId)
         : null
       // Statuspage uptimeData is the preferred per-day source — but ONLY when it actually produced
       // days. For an incident.io service, parseUptimeData(incident.io HTML) returns an EMPTY map, which
@@ -1194,8 +1240,8 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       if (uptimeResult?.uptimePercent != null) {
         uptimeValue = uptimeResult.uptimePercent
         uptimeSrc = 'official'
-      } else if (prefetched?.uptimeHtml && config.incidentIoComponentId) {
-        const ioUptime = parseIncidentIoUptime(prefetched.uptimeHtml, config.incidentIoComponentId, config.incidentIoGroupId)
+      } else if (uptimeHtml && config.incidentIoComponentId) {
+        const ioUptime = parseIncidentIoUptime(uptimeHtml, config.incidentIoComponentId, config.incidentIoGroupId)
         if (ioUptime != null) {
           uptimeValue = ioUptime
           uptimeSrc = 'official'
@@ -1817,11 +1863,19 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     if (probeSnapshots && probeSnapshots.length > 0) {
       const date = new Date().toISOString().split('T')[0]
       for (const svc of degradedFromFetch) {
-        if (svc.status === 'degraded' && isProbeHealthy(probeSnapshots, svc.id)) {
+        if (svc.status !== 'degraded') continue
+        if (isProbeHealthy(probeSnapshots, svc.id)) {
           console.log(`[cross-validation] ${svc.id}: status page down but probe RTT normal — holding operational`)
           svc.status = 'operational'
           // Daily suppression counter — see recordProbeSuppression() docstring.
           if (kv) await recordProbeSuppression(kv, svc.id, date)
+        } else if (isProbeFailing(probeSnapshots, svc.id)) {
+          // #1004 — the probe INDEPENDENTLY corroborates the outage: the status page is unreadable AND
+          // our direct call to the service is failing. The UI neutralises a fetch-failure `degraded` into
+          // an "unknown" badge ("we can't read the source"), which would be a false reassurance here —
+          // this `degraded` is backed by evidence. Mark it so the display keeps it amber. A service with
+          // no probe (junie) or with too few samples to judge stays neutral, which is the honest default.
+          svc.probeContradicted = true
         }
       }
     }

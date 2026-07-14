@@ -108,6 +108,11 @@ export default async function handler(req: Request) {
             lastChecked: string; incidents: unknown[]; aiwatchScore?: number | null
             scoreGrade?: string | null; scoreConfidence?: string; incidentSourceStale?: boolean
             partialCount?: number // #722 — BetterStack sub-threshold affected-resource count
+            // #1004 — source liveness. The template renders an honest "Unknown" instead of a Yes/No
+            // answer when AIWatch could not READ the provider's page (a `degraded` from the 3-strike
+            // fetch-failure fallback is a statement about our fetch, not about the service).
+            sourceDead?: boolean; sourceUnknown?: boolean
+            probeConfirmed?: boolean; probeContradicted?: boolean
             components?: Array<{ id: string; name: string; status: 'operational' | 'degraded' | 'down'; group?: string }>
             componentGroupsInline?: boolean // array-order (groups interleaved) breakdown layout (replicate)
           }>
