@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, buildHistorySection, analyzeIncidentDetailed, refreshOrReanalyze, analysisKey, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, reanalysisLockTtlSec, applyAttempt, parseUsage, emptyUsage, summarizeAiUsageTrend, formatAiUsageTrendLine, AI_USAGE_TTL_S, analyzeIncidentWithBudget, INLINE_ANALYSIS_BUDGET_MS, SONNET_MAX_TOKENS, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind, type KVLike } from '../ai-analysis'
+import { findSimilarIncidents, buildAnalysisPrompt, buildHistorySection, analyzeIncidentDetailed, refreshOrReanalyze, analysisKey, firstEstimateKey, firstEstimateOf, pinFirstEstimate, FIRST_ESTIMATE_TTL_S, parseAnalysis, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, reanalysisLockTtlSec, applyAttempt, parseUsage, emptyUsage, summarizeAiUsageTrend, formatAiUsageTrendLine, AI_USAGE_TTL_S, analyzeIncidentWithBudget, INLINE_ANALYSIS_BUDGET_MS, SONNET_MAX_TOKENS, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind, type KVLike } from '../ai-analysis'
 import type { IncidentHistoryRecord } from '../incident-history'
 import { ANTHROPIC_TIMEOUT_MS } from '../anthropic'
 import type { Incident, ServiceStatus } from '../types'
@@ -847,6 +847,104 @@ const mockAnalysis: AIAnalysisResult = {
   incidentId: 'inc-1',
 }
 
+describe('firstEstimateOf / pinFirstEstimate (#1003 — pin the scoring baseline to the first estimate)', () => {
+  const next = (h?: number): AIAnalysisResult => ({
+    ...mockAnalysis,
+    estimatedRecovery: h ? `${h}h` : 'N/A',
+    ...(h != null && { estimatedRecoveryHours: h }),
+  })
+
+  it('adopts the fresh estimate as the first when there is no prior and nothing stored', () => {
+    expect(firstEstimateOf(next(4), null, null)).toBe(4)
+  })
+
+  it('the durable baseline outranks everything (an analysis-key lapse cannot move it)', () => {
+    // The analysis key expired mid-incident → the fresh 15h analysis arrives with NO prior, but the
+    // durable key still holds the original 4h. Without this precedence the bug simply re-runs.
+    expect(firstEstimateOf(next(15), null, 4)).toBe(4)
+  })
+
+  it('keeps the prior first estimate across a re-analysis (the inflated value must not win)', () => {
+    expect(firstEstimateOf(next(15), { estimatedRecoveryHours: 4, firstEstimatedRecoveryHours: 4 }, null)).toBe(4)
+  })
+
+  it('adopts a pre-#1003 prior\'s current estimate as the baseline (in-flight at deploy time)', () => {
+    // The analysis already in KV when this ships carries no `firstEstimatedRecoveryHours`, but its
+    // `estimatedRecoveryHours` IS the earlier prediction — so an incident mid-flight still scores honestly.
+    expect(firstEstimateOf(next(15), { estimatedRecoveryHours: 4 }, null)).toBe(4)
+  })
+
+  it('returns null when nothing usable exists (N/A → no fabricated comparison)', () => {
+    expect(firstEstimateOf(next(undefined), null, null)).toBeNull()
+    expect(firstEstimateOf(next(undefined), { estimatedRecoveryHours: 0 }, null)).toBeNull()
+  })
+
+  it('backfills from the fresh estimate when the prior had none (N/A first, numeric later)', () => {
+    expect(firstEstimateOf(next(6), { estimatedRecoveryHours: undefined }, null)).toBe(6)
+  })
+
+  it('pins the baseline durably on first sight (write-once, 30d)', async () => {
+    const store: Record<string, string> = {}
+    const ttls: Record<string, number | undefined> = {}
+    const kv = mockKV(store, ttls)
+
+    const first = await pinFirstEstimate(kv, 'pinecone', 'inc-1', next(4), null)
+    expect(first.firstEstimatedRecoveryHours).toBe(4)
+    expect(store[firstEstimateKey('pinecone', 'inc-1')]).toBe('4')
+    expect(ttls[firstEstimateKey('pinecone', 'inc-1')]).toBe(FIRST_ESTIMATE_TTL_S)
+  })
+
+  it('never re-writes the durable key on a later re-analysis (get-or-set)', async () => {
+    const store: Record<string, string> = { [firstEstimateKey('pinecone', 'inc-1')]: '4' }
+    const kv = mockKV(store)
+
+    const merged = await pinFirstEstimate(kv, 'pinecone', 'inc-1', next(15), { estimatedRecoveryHours: 4, firstEstimatedRecoveryHours: 4 })
+
+    expect(merged.firstEstimatedRecoveryHours).toBe(4)  // scored against this
+    expect(merged.estimatedRecoveryHours).toBe(15)      // live surfaces still show this
+    expect(kv.put).not.toHaveBeenCalled()
+    expect(store[firstEstimateKey('pinecone', 'inc-1')]).toBe('4')
+  })
+
+  it('is idempotent across repeated re-analyses (the estimate ratchets, the baseline does not)', async () => {
+    const store: Record<string, string> = {}
+    const kv = mockKV(store)
+    let cur = await pinFirstEstimate(kv, 'pinecone', 'inc-1', next(4), null)
+    for (const h of [15, 30, 48]) cur = await pinFirstEstimate(kv, 'pinecone', 'inc-1', next(h), cur)
+    expect(cur.firstEstimatedRecoveryHours).toBe(4)
+    expect(cur.estimatedRecoveryHours).toBe(48)
+  })
+
+  it('degrades to the in-value carry when the durable KV read throws (never drops the estimate)', async () => {
+    const kv: KVLike = {
+      get: vi.fn(async () => { throw new Error('kv down') }),
+      put: vi.fn(async () => {}),
+      delete: vi.fn(async () => {}),
+    }
+    const merged = await pinFirstEstimate(kv, 'pinecone', 'inc-1', next(15), { firstEstimatedRecoveryHours: 4 })
+    expect(merged.firstEstimatedRecoveryHours).toBe(4)
+  })
+
+  it('ignores a corrupt durable value rather than scoring against NaN', async () => {
+    const kv = mockKV({ [firstEstimateKey('pinecone', 'inc-1')]: 'not-a-number' })
+    const merged = await pinFirstEstimate(kv, 'pinecone', 'inc-1', next(15), { firstEstimatedRecoveryHours: 4 })
+    expect(merged.firstEstimatedRecoveryHours).toBe(4)
+  })
+})
+
+describe('parseAnalysis (#1003 — a corrupt prior must not abort a write)', () => {
+  it('parses a valid analysis object', () => {
+    expect(parseAnalysis(JSON.stringify(mockAnalysis))?.incidentId).toBe('inc-1')
+  })
+  it('returns null for absent / corrupt / non-object values', () => {
+    expect(parseAnalysis(null)).toBeNull()
+    expect(parseAnalysis('')).toBeNull()
+    expect(parseAnalysis('{ broken')).toBeNull()
+    expect(parseAnalysis('"a string"')).toBeNull()
+    expect(parseAnalysis('[1,2]')).toBeNull()  // an array is `typeof === "object"` in JS
+  })
+})
+
 describe('refreshOrReanalyze', () => {
   it('refreshes TTL when analysis exists and is 30-59min old', async () => {
     const oldAnalysis = { ...mockAnalysis, analyzedAt: '2026-03-27T05:10:00Z' }
@@ -878,6 +976,96 @@ describe('refreshOrReanalyze', () => {
 
     expect(result.refreshed).toEqual([])
     expect(kv.put).not.toHaveBeenCalled()
+  })
+
+  it('#1003 — a time-based re-analysis preserves the first estimate in KV (the Pinecone flow)', async () => {
+    // First analysis: "1–4h" (bound 4), written 10 min into the incident — seeded in the PRE-#1003
+    // shape (no `firstEstimatedRecoveryHours`, no durable key), i.e. an incident already in flight at
+    // deploy time. At the 4h mark it has outrun the estimate → recoveryExceeded → re-analysis, whose
+    // prompt forces a bound >= elapsed, so the model returns ~15h. That overwrite is where the
+    // original prediction used to die.
+    const store: Record<string, string> = {
+      [analysisKey('pinecone', 'inc-1')]: JSON.stringify({
+        ...mockAnalysis,
+        analyzedAt: '2026-07-13T03:47:00Z',
+        estimatedRecovery: '1–4h',
+        estimatedRecoveryHours: 4,
+      }),
+    }
+    const kv = mockKV(store)
+    const svc = mockService('pinecone', [{ id: 'inc-1', status: 'investigating', startedAt: '2026-07-13T03:37:00Z' }])
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({
+      ...mockAnalysis, estimatedRecovery: '8–15h', estimatedRecoveryHours: 15,
+    }))
+
+    const now = new Date('2026-07-13T08:07:00Z').getTime() // 4h30m elapsed > the 4h bound
+    const result = await refreshOrReanalyze([svc], kv, 'api-key', analyzeFn, 2, now)
+
+    expect(result.reanalyzed).toEqual(['pinecone'])
+    // The re-analysis DID get the previous-prediction context (that's what inflates the estimate)…
+    expect(analyzeFn).toHaveBeenCalledWith(
+      'api-key', 'Pinecone', expect.anything(), expect.anything(),
+      expect.objectContaining({ estimatedRecoveryHours: 4 }), undefined, expect.anything(),
+    )
+    // …and the written value carries the inflated CURRENT estimate for live surfaces while keeping
+    // the hindsight-free baseline that resolution will be scored against — now pinned durably, so a
+    // later analysis-key lapse can't move it either.
+    const written = parseAnalysis(store[analysisKey('pinecone', 'inc-1')])
+    expect(written?.estimatedRecoveryHours).toBe(15)
+    expect(written?.firstEstimatedRecoveryHours).toBe(4)
+    expect(store[firstEstimateKey('pinecone', 'inc-1')]).toBe('4')
+  })
+
+  it('#1003 — a first analysis on an empty key records its own estimate as the baseline', async () => {
+    const store: Record<string, string> = {}
+    const kv = mockKV(store)
+    const svc = mockService('chatgpt', [{ id: 'inc-9', status: 'investigating' }])
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({
+      ...mockAnalysis, incidentId: 'inc-9', estimatedRecovery: '2–3h', estimatedRecoveryHours: 3,
+    }))
+
+    await refreshOrReanalyze([svc], kv, 'api-key', analyzeFn, 2)
+
+    expect(parseAnalysis(store[analysisKey('chatgpt', 'inc-9')])?.firstEstimatedRecoveryHours).toBe(3)
+    expect(store[firstEstimateKey('chatgpt', 'inc-9')]).toBe('3')
+  })
+
+  it('#1003 — an analysis-key LAPSE (cap exhaustion) cannot move the baseline', async () => {
+    // The 2h+ old analysis stopped being TTL-refreshed while the cap was exhausted, so its key expired.
+    // The replacement analysis is made 6h into the incident — NOT a hindsight-free estimate. The durable
+    // key is the only thing standing between that and a silently re-inflated baseline.
+    const store: Record<string, string> = { [firstEstimateKey('pinecone', 'inc-1')]: '4' }
+    const kv = mockKV(store)
+    const svc = mockService('pinecone', [{ id: 'inc-1', status: 'investigating', startedAt: '2026-07-13T03:37:00Z' }])
+    const analyzeFn = vi.fn().mockResolvedValue(okAttempt({
+      ...mockAnalysis, estimatedRecovery: '8–15h', estimatedRecoveryHours: 15,
+    }))
+
+    await refreshOrReanalyze([svc], kv, 'api-key', analyzeFn, 2, new Date('2026-07-13T09:37:00Z').getTime())
+
+    const written = parseAnalysis(store[analysisKey('pinecone', 'inc-1')])
+    expect(written?.estimatedRecoveryHours).toBe(15)
+    expect(written?.firstEstimatedRecoveryHours).toBe(4)
+  })
+
+  it('#1003 — the sibling-copy dedup path carries the baseline to the sibling service', async () => {
+    // claude/claudeai share one incidentId: the second service copies the first's analysis verbatim.
+    // A refactor that rebuilt the object field-by-field would silently drop the baseline for every
+    // grouped incident, so pin it here.
+    const analysis = { ...mockAnalysis, estimatedRecoveryHours: 15, firstEstimatedRecoveryHours: 4 }
+    const store: Record<string, string> = { [analysisKey('claude', 'inc-1')]: JSON.stringify(analysis) }
+    const kv = mockKV(store)
+    const svcs = [
+      mockService('claude', [{ id: 'inc-1', status: 'investigating' }]),
+      mockService('claudeai', [{ id: 'inc-1', status: 'investigating' }]),
+    ]
+    const analyzeFn = vi.fn()
+
+    // 40min after the analysis → TTL-refresh for claude, sibling-copy for claudeai (no model call).
+    await refreshOrReanalyze(svcs, kv, 'api-key', analyzeFn, 2, new Date('2026-03-27T06:50:00Z').getTime())
+
+    expect(analyzeFn).not.toHaveBeenCalled()
+    expect(parseAnalysis(store[analysisKey('claudeai', 'inc-1')])?.firstEstimatedRecoveryHours).toBe(4)
   })
 
   it('re-analyzes when analysis is missing', async () => {

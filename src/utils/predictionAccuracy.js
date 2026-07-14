@@ -49,6 +49,26 @@ export function predictedHoursFrom(analysis) {
 }
 
 /**
+ * #1003 — the estimate a RESOLVED incident is SCORED against: the first, hindsight-free prediction.
+ * Mirrors the worker's `scoringBaselineHours` (incident-history.ts).
+ *
+ * `estimatedRecoveryHours` is the CURRENT estimate, which the worker's re-analysis ratchets upward
+ * once an incident outruns its own prediction — so scoring against it flatters exactly the incidents
+ * the model got wrong. Falls back to the current estimate when no first estimate was recorded
+ * (analyses written before #1003 shipped).
+ *
+ * Live surfaces (`estimateExceeded`, `exceededRecoveryText`) intentionally do NOT use this — a user
+ * looking at an ongoing incident needs the current ETA, not the superseded original.
+ */
+export function baselineHoursFrom(analysis) {
+  if (!analysis) return null
+  if (typeof analysis.firstEstimatedRecoveryHours === 'number' && analysis.firstEstimatedRecoveryHours > 0) {
+    return analysis.firstEstimatedRecoveryHours
+  }
+  return predictedHoursFrom(analysis)
+}
+
+/**
  * Accuracy verdict, mirroring worker `accuracyOf`: actual within [0.5×, 1×] of the predicted upper
  * bound is 'accurate'; longer than the bound is 'under' (the model was too optimistic); far below it
  * (<0.5×) is 'over' (too cautious). 'unknown' for missing inputs.
@@ -159,7 +179,8 @@ export function exceededRecoveryText(analysis, incident, lang, nowMs = Date.now(
  */
 export function computePredictionOutcome(analysis, incident) {
   if (!analysis?.resolvedAt) return null
-  const predictedHours = predictedHoursFrom(analysis)
+  // #1003 — scored against the first estimate, not the re-analysis-inflated current one.
+  const predictedHours = baselineHoursFrom(analysis)
   if (predictedHours == null) return null
   const startedAt = incident?.startedAt
   if (!startedAt) return null

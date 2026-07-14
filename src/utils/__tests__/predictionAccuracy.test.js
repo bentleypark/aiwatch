@@ -1,5 +1,38 @@
 import { describe, it, expect } from 'vitest'
-import { predictedHoursFrom, predictedHoursText, accuracyVerdict, verdictLabel, withinEstimateText, computePredictionOutcome, estimateExceeded, exceededRecoveryText, approxElapsedText, FAR_EXCEEDED_FACTOR } from '../predictionAccuracy'
+import { predictedHoursFrom, baselineHoursFrom, predictedHoursText, accuracyVerdict, verdictLabel, withinEstimateText, computePredictionOutcome, estimateExceeded, exceededRecoveryText, approxElapsedText, FAR_EXCEEDED_FACTOR } from '../predictionAccuracy'
+
+describe('#1003 — the modal scores against the FIRST estimate, live text against the current one', () => {
+  // Pinecone: first estimate 1–4h, re-analysis inflated it to ~15h at the 4h mark, actual 4h 55m.
+  const reanalyzed = {
+    estimatedRecovery: '8–15h',
+    estimatedRecoveryHours: 15,
+    firstEstimatedRecoveryHours: 4,
+    resolvedAt: '2026-07-13T08:32:00.000Z',
+  }
+  const incident = { startedAt: '2026-07-13T03:37:00.000Z' }
+
+  it('baselineHoursFrom prefers the first estimate', () => {
+    expect(baselineHoursFrom(reanalyzed)).toBe(4)
+  })
+  it('falls back to the current estimate for pre-#1003 analyses', () => {
+    expect(baselineHoursFrom({ estimatedRecoveryHours: 15 })).toBe(15)
+    expect(baselineHoursFrom({ estimatedRecovery: '1–3h' })).toBe(3)
+    expect(baselineHoursFrom(null)).toBeNull()
+  })
+  it('the resolved verdict is the honest near-miss, not "faster than ~15h"', () => {
+    const outcome = computePredictionOutcome(reanalyzed, incident)
+    expect(outcome.predictedHours).toBe(4)
+    expect(outcome.actualText).toBe('4h 55m')
+    expect(outcome.verdict).toBe('under') // ran past the original 4h bound
+    expect(withinEstimateText(outcome, 'en')).toBe('over ~4h est.')
+  })
+  it('the ONGOING "exceeded" text still uses the current estimate (a user needs the live ETA)', () => {
+    const active = { estimatedRecovery: '8–15h', estimatedRecoveryHours: 15, firstEstimatedRecoveryHours: 4 }
+    const now = new Date('2026-07-13T09:37:00.000Z').getTime() // 6h in: past the first 4h, within 15h
+    expect(estimateExceeded(active, incident, now)).toBe(false)
+    // Had it scored on the stale 4h baseline, this would already claim "exceeded".
+  })
+})
 
 describe('predictedHoursFrom', () => {
   it('prefers the numeric estimatedRecoveryHours', () => {
