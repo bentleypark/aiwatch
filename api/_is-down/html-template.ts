@@ -132,6 +132,13 @@ export interface ServiceData {
   rankTied?: boolean
   totalRanked?: number
   incidentSourceStale?: boolean
+  // #1004 — the source-liveness flags. `sourceDead` (status page 4xx/deactivated, #689) and
+  // `sourceUnknown` (fetch threw / 5xx, #714) both mean AIWatch could NOT read the provider's page —
+  // so any "Yes/No" answer here would be a claim we cannot back. See `isStatusUnknown`.
+  sourceDead?: boolean
+  sourceUnknown?: boolean
+  probeConfirmed?: boolean
+  probeContradicted?: boolean
   /** #722 — BetterStack sub-threshold affected-resource count (degraded+downtime). When the
    *  service reads operational but this is >0, the provider page shows "Some services are down";
    *  surfaced as a yellow "partial" note. SEO answer stays "operational" — the service IS up overall. */
@@ -168,12 +175,33 @@ function statusEmoji(status: string): string {
   if (status === 'operational') return '&#x1F7E2;'
   if (status === 'partial') return '&#x1F7E1;'   // #722/#744 — yellow (visible header only)
   if (status === 'degraded') return '&#x1F7E1;'
+  if (status === 'unknown') return '&#x26AA;'    // #1004 — white circle: source unreadable, no verdict
   return '&#x1F534;'
+}
+
+// #1004 — AIWatch could not READ the provider's status page, so it has no verdict to publish. This is
+// the highest-reach surface AIWatch has (the SERP answer), and it was answering "Issues — X is having
+// problems right now" off a `degraded` that only ever meant "our fetch failed 3 times" — which is what
+// JetBrains' status-page migration did to Junie. `sourceDead` (4xx) already had this hole too.
+// A healthy probe (`probeConfirmed`, #689) or a failing one (`probeContradicted`, #1004) means we DO
+// have independent evidence — then the raw status stands.
+function isStatusUnknown(service: ServiceData): boolean {
+  if (service.sourceDead && !service.probeConfirmed) return true
+  if (service.sourceUnknown && !service.probeContradicted && service.status === 'degraded') return true
+  return false
+}
+
+/** The status the page may honestly ASSERT — 'unknown' when the source is unreadable. Unlike the
+ *  #744 `partial` state (visible header only, since the service IS up overall), this one MUST also
+ *  drive the <title>/meta: "No — operational" and "Issues" are both false when we can't see. */
+function assertableStatus(service: ServiceData): string {
+  return isStatusUnknown(service) ? 'unknown' : service.status
 }
 
 function statusLabel(status: string): string {
   if (status === 'operational') return 'Operational'
   if (status === 'degraded') return 'Degraded Performance'
+  if (status === 'unknown') return 'Unknown'
   return 'Down'
 }
 
@@ -187,6 +215,7 @@ function statusLabel(status: string): string {
 function statusTitleLabel(status: string): string {
   if (status === 'operational') return 'Operational'
   if (status === 'degraded') return 'Having Issues'
+  if (status === 'unknown') return 'Status Unknown'  // #1004 — we can't read the source; don't guess
   return 'Down Right Now'
 }
 
@@ -195,6 +224,9 @@ function statusTitleLabel(status: string): string {
 function statusAnswer(status: string): { yesno: string; phrase: string } {
   if (status === 'operational') return { yesno: 'No', phrase: 'is operational' }
   if (status === 'degraded') return { yesno: 'Issues', phrase: 'is having problems right now' }
+  // #1004 — an honest non-answer beats a confident wrong one. Say WHY, so a panicking visitor can tell
+  // "AIWatch is blind" apart from "the service is broken".
+  if (status === 'unknown') return { yesno: 'Unknown', phrase: "status can't be confirmed — AIWatch can't read the provider's status page right now" }
   return { yesno: 'Yes', phrase: 'is down right now' }
 }
 
@@ -226,6 +258,7 @@ function statusColor(status: string): string {
   if (status === 'operational') return '#3fb950'
   if (status === 'partial') return '#d29922'   // #722/#744 — yellow (visible header only)
   if (status === 'degraded') return '#e86235'
+  if (status === 'unknown') return '#8b949e'   // #1004 — neutral grey: no verdict
   return '#f85149'
 }
 
@@ -304,7 +337,7 @@ export function renderPage(
   // #566: lead the SERP title with the live status answer (falls back to "Live Status"
   // when status data is unavailable) so the result answers the query before the click.
   const title = service
-    ? `Is ${seo.displayName} Down? ${statusTitleLabel(service.status)} | AIWatch`
+    ? `Is ${seo.displayName} Down? ${statusTitleLabel(assertableStatus(service))} | AIWatch`
     : `Is ${seo.displayName} Down? Live Status | AIWatch`
   const desc = buildMetaDescription(seo, service, aiInsight ?? null)
   const canonical = `https://ai-watch.dev/is-${slug}-down`
@@ -314,7 +347,11 @@ export function renderPage(
   // not the live status that may have drifted by unfurl time). HINT_TO_OG_STATUS (module scope) maps
   // the `?e=` hint → an og status the generator knows; 'reddit'/unknown/absent falls through to live.
   const pinnedHint = ogStatusHint && HINT_TO_OG_STATUS[ogStatusHint] ? ogStatusHint : null
-  const ogStatus = (pinnedHint && HINT_TO_OG_STATUS[pinnedHint]) || service?.status || 'operational'
+  // #1004 — the ASSERTABLE status: the og:image + og:title are what actually get unfurled in Slack/X/
+  // Discord, so an unreadable source must not publish "Having Issues" there while the page title says
+  // "Status Unknown". (og.ts carries a matching `unknown` style — without it the card falls back to a
+  // green "Operational".) The explicit `?e=` pinned hint still wins, as before.
+  const ogStatus = (pinnedHint && HINT_TO_OG_STATUS[pinnedHint]) || (service ? assertableStatus(service) : 'operational')
   const ogParams = new URLSearchParams({ service: seo.displayName, status: ogStatus })
   if (service?.aiwatchScore != null && Number.isFinite(service.aiwatchScore)) ogParams.set('score', String(service.aiwatchScore))
   if (typeof service?.uptime30d === 'number' && !Number.isNaN(service.uptime30d)) ogParams.set('uptime', service.uptime30d.toFixed(2))
@@ -502,9 +539,9 @@ textarea.report-input{min-height:72px;resize:vertical}
 <div class="container">
 
 ${renderStatusHeader(service, seo)}
-${renderCTA(seo, service?.status ?? 'operational', slug, service?.id ?? slug)}
+${renderCTA(seo, service ? assertableStatus(service) : 'operational', slug, service?.id ?? slug)}
 ${isClaudeSurface(service?.id ?? slug) ? renderExtInstallCta(EXTENSION_STORE_URL, { loc: 'is_down_page', variant: 'is-down' }) : ''}
-${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service?.status, fallbacks)}
+${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks)}
 ${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS infrastructure issue (${esc(supplyChainNote.regions)}) &mdash; ${supplyChainNote.confirmed ? `${esc(seo.displayName)} is degraded and attributes it to an AWS/upstream issue` : `${esc(seo.displayName)} runs on AWS and may be affected`}</p>` : ''}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
 ${renderComponents(service)}
@@ -518,7 +555,7 @@ ${renderBadgeEmbed(slug, seo)}
 ${renderFooter(slug)}
 
 </div>
-${renderDelegatedListeners(service?.id ?? slug, service?.status === 'down' || service?.status === 'degraded')}
+${renderDelegatedListeners(service?.id ?? slug, service ? ['down', 'degraded'].includes(assertableStatus(service)) : false)}
 ${cookieBannerHtml()}
 </body>
 </html>`
@@ -807,12 +844,15 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
   // since the service IS up overall — only specific components are affected (no SERP-snippet flip).
   const partialCount = typeof service.partialCount === 'number' ? service.partialCount : 0
   const isPartial = service.status === 'operational' && partialCount > 0
-  const displayStatus = isPartial ? 'partial' : service.status // VISIBLE header only — never the title/meta
+  // #1004 — 'unknown' outranks both: when the source is unreadable there is no verdict to render, and
+  // (unlike `partial`) it propagates to the title/meta too — see assertableStatus.
+  const asserted = assertableStatus(service)
+  const displayStatus = asserted === 'unknown' ? 'unknown' : isPartial ? 'partial' : service.status
   const color = statusColor(displayStatus)
   const compStr = `${partialCount} component${partialCount > 1 ? 's' : ''}`
-  const answer = isPartial
+  const answer = displayStatus === 'partial'
     ? { yesno: 'Partial', phrase: `has ${compStr} affected (operational overall)` }
-    : statusAnswer(service.status) // #566 — on-page direct answer (feeds Google's auto-snippet)
+    : statusAnswer(displayStatus) // #566 — on-page direct answer (feeds Google's auto-snippet)
   const hasUptime = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d)
   const gradeStr = service.scoreGrade ? ` (${service.scoreGrade.charAt(0).toUpperCase() + service.scoreGrade.slice(1)})` : ''
   // #591 — a stale-source service carries a frozen uptime30d + an inflated score; omit both here
@@ -971,7 +1011,12 @@ function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string)
   const stateLead = status === 'down'
     ? `${seo.displayName} is down right now.`
     : `${seo.displayName} is having issues right now.`
-  const message = isDown
+  // #1004 — 'unknown' must NOT fall through to the outage lead: the CTA sits directly under the status
+  // header (#297), so a header saying "we can't read the source" above a line saying "X is having issues
+  // right now" asserts and denies the outage in adjacent paragraphs. It gets its own copy.
+  const message = status === 'unknown'
+    ? `AIWatch can't read ${seo.displayName}'s status page right now — get notified when it's readable again.`
+    : isDown
     ? `${stateLead} Stop refreshing — we'll ping you when it's back.`
     : `Get notified the next time ${seo.displayName} goes down.`
   // #547/#696: the outage-day funnel leaked — 9 is-down sessions on the 6/11 Claude outage → 0
@@ -1122,7 +1167,7 @@ export function buildMetaDescription(
   service: ServiceData | null,
   aiInsight: { summary: string; estimatedRecovery: string; estimatedRecoveryHours?: number; startedAt?: string; resolvedAt?: string } | null,
 ): string {
-  if (aiInsight && service && service.status !== 'operational') {
+  if (aiInsight && service && service.status !== 'operational' && !isStatusUnknown(service)) {
     const a = statusAnswer(service.status)
     const recovery = recoveryEstimateExceeded(aiInsight) ? 'Exceeded typical pattern' : formatRecoveryDisplay(aiInsight.estimatedRecovery)
     return `${a.yesno} — ${seo.displayName} ${a.phrase}. AI Analysis: ${aiInsight.summary.slice(0, 120)} Est. recovery: ${recovery}.`
@@ -1141,7 +1186,7 @@ export function buildMetaDescription(
   const incidentClause = thirtyDayIncidentCount > 0 ? ` ${thirtyDayIncidentCount} incidents tracked (30d).` : ''
   // #566: answer-first ("No — X is operational" / "Yes — X is down right now") so the
   // SERP snippet leads with the answer; freshness hint stays to frame it as a live tracker.
-  const a = statusAnswer(service.status)
+  const a = statusAnswer(assertableStatus(service))
   return `${a.yesno} — ${seo.displayName} ${a.phrase}.${uptimeClause}${incidentClause} Live status, updated every 5 minutes.`
 }
 
@@ -1309,8 +1354,11 @@ ${anyOutbound ? `<p class="mono fallback-disclosure">Open &#8599; goes to the pr
 }
 
 export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canonical: string, ogImageUrl: string, aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; estimatedRecoveryHours?: number; startedAt?: string; resolvedAt?: string } | null): string {
-  const status = service ? statusLabel(service.status) : 'Operational'
-  const rawStatus = service?.status ?? 'operational'
+  // #1004 — the ASSERTABLE status, not the raw one: an unreadable source shipped "Degraded Performance"
+  // (and would have shipped "Operational" for a dead source) into the share/copy payload — the Web Share
+  // description, the copy text, and the X post.
+  const rawStatus = service ? assertableStatus(service) : 'operational'
+  const status = statusLabel(rawStatus)
 
   // Status-based share templates — randomly selected per render for variety
   // Include AI analysis when available
@@ -1336,6 +1384,11 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
     `All clear — ${n} is fully operational right now via AIWatch.`,
     `${n} status: operational. No issues detected — tracked on AIWatch.`,
   ]
+  // #1004 — no verdict to share: say so rather than picking one of the two verdicts we don't have.
+  const unknownTexts = [
+    `${n} status is unconfirmed — its status page isn't readable right now. Tracked on AIWatch.`,
+    `AIWatch can't currently read ${n}'s status page, so its status is unknown.`,
+  ]
   const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
   // Brand the down/degraded copy text too — the operational templates carry "AIWatch" inline but the
   // outage ones didn't, so a share posted DURING an incident (the highest-share moment) dropped the
@@ -1349,6 +1402,8 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
     ? `${pick(downTexts)}${aiSuffix}\nTracked live on AIWatch:\n${copyShareUrl}`
     : rawStatus === 'degraded'
     ? `${pick(degradedTexts)}${aiSuffix}\nTracked live on AIWatch:\n${copyShareUrl}`
+    : rawStatus === 'unknown'
+    ? `${pick(unknownTexts)}\n${copyShareUrl}`
     : pick(operationalTexts)
 
   // X hashtag from display name (e.g. "Claude" → "#Claude", "GitHub Copilot" → "#GitHubCopilot")
@@ -1371,13 +1426,16 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
     `All clear — ${n} is fully operational \u2705 via AIWatch`,
     `${n} status: all systems go \u2705 — tracked on AIWatch`,
   ]
+  const xUnknownTexts = [`${n} status is unconfirmed — AIWatch can't read its status page right now.`]
   const xBase = rawStatus === 'down'
     ? pick(xDownTexts)
     : rawStatus === 'degraded'
     ? pick(xDegradedTexts)
+    : rawStatus === 'unknown'
+    ? pick(xUnknownTexts)
     : pick(xOperationalTexts)
   const aiSnippet = aiSuffix ? ' AI: ' + aiInsight!.summary.slice(0, 60) : ''
-  const xTag = rawStatus !== 'operational' ? ` ${tag} #AIWatch` : ''
+  const xTag = rawStatus !== 'operational' && rawStatus !== 'unknown' ? ` ${tag} #AIWatch` : ''
   const xText = rawStatus === 'down'
     ? `${xBase}${aiSnippet}${xTag}`
     : rawStatus === 'degraded'

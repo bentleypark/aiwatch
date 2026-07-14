@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderDelegatedListeners, buildMetaDescription, exceededRecoveryTextEn, FAR_EXCEEDED_FACTOR as EDGE_FAR_EXCEEDED_FACTOR } from '../_is-down/html-template'
+import { renderDelegatedListeners, buildMetaDescription, renderPage, exceededRecoveryTextEn, FAR_EXCEEDED_FACTOR as EDGE_FAR_EXCEEDED_FACTOR } from '../_is-down/html-template'
 import { FAR_EXCEEDED_FACTOR as FRONTEND_FAR_EXCEEDED_FACTOR } from '../../src/utils/predictionAccuracy'
 import { getSEOContent } from '../_is-down/seo-content'
 
@@ -110,5 +110,99 @@ describe('exceededRecoveryTextEn (is-down AI card — elapsed vs estimate)', () 
   // #900 — the two mirrored constants must stay equal (repo parity convention; direct pin, not just a comment)
   it('FAR_EXCEEDED_FACTOR is identical across the frontend + Edge mirrors', () => {
     expect(EDGE_FAR_EXCEEDED_FACTOR).toBe(FRONTEND_FAR_EXCEEDED_FACTOR)
+  })
+})
+
+// #1004 — the is-down page is the widest-reach surface AIWatch has: its <title> and meta description
+// ARE the Google answer to "is X down". Both were driven by the raw `status`, so a `degraded` that only
+// ever meant "our fetch failed 3 times" got published as "Issues — X is having problems right now".
+// That is exactly what JetBrains' status-page migration did to Junie. When AIWatch cannot READ the
+// source it must not answer Yes or No.
+describe('is-down publishes no verdict when the status source is unreadable (#1004)', () => {
+  const seo = getSEOContent('junie')!
+  const base = {
+    id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent',
+    latency: null, uptime30d: null, lastChecked: new Date().toISOString(),
+    incidents: [], aiwatchScore: null, scoreGrade: null,
+  }
+
+  it('a fetch-failure degraded (sourceUnknown) answers "Unknown", not "Issues"', () => {
+    const desc = buildMetaDescription(seo, { ...base, status: 'degraded', sourceUnknown: true } as never, null)
+    expect(desc).toContain('Unknown')
+    expect(desc).toContain("can't read the provider's status page")
+    expect(desc).not.toContain('is having problems right now')
+  })
+
+  it('a dead source (4xx, #689) is equally unanswerable — it never reached is-down before', () => {
+    const desc = buildMetaDescription(seo, { ...base, status: 'operational', sourceDead: true } as never, null)
+    expect(desc).toContain('Unknown')
+    expect(desc).not.toContain('is operational')
+  })
+
+  it('but a probe-CORROBORATED degraded still answers "Issues" — the outage is real', () => {
+    const desc = buildMetaDescription(
+      seo, { ...base, status: 'degraded', sourceUnknown: true, probeContradicted: true } as never, null,
+    )
+    expect(desc).toContain('is having problems right now')
+    expect(desc).not.toContain('Unknown')
+  })
+
+  it('and a probe-CONFIRMED dead source still answers "No" (#689 — the API answers our probe)', () => {
+    const desc = buildMetaDescription(
+      seo, { ...base, status: 'operational', sourceDead: true, probeConfirmed: true } as never, null,
+    )
+    expect(desc).toContain('is operational')
+  })
+
+  it('an ordinary operational service is untouched', () => {
+    const desc = buildMetaDescription(seo, { ...base, status: 'operational' } as never, null)
+    expect(desc).toContain('No —')
+    expect(desc).toContain('is operational')
+  })
+})
+
+// The whole PAGE, not just the meta description: the title, the CTA that sits directly under the status
+// header (#297), the share/copy payload and the og:image all derived the verdict from the RAW status
+// independently. Fixing them one at a time left the page asserting and denying the outage in adjacent
+// paragraphs. One render, one set of assertions — revert any single call site and this fails.
+describe('the whole is-down page agrees when the source is unreadable (#1004)', () => {
+  const seo = getSEOContent('junie')!
+  const base = {
+    id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent',
+    latency: null, uptime30d: null, lastChecked: new Date().toISOString(),
+    incidents: [], aiwatchScore: null, scoreGrade: null,
+  }
+  const render = (svc: object) => renderPage('junie', svc as never, seo, [], null)
+
+  it('an unreadable source publishes NO verdict anywhere on the page', () => {
+    const html = render({ ...base, status: 'degraded', sourceUnknown: true })
+    expect(html).toContain('Status Unknown')                        // <title>
+    expect(html).toContain('status page right now')                  // CTA (apostrophes are entity-escaped)
+    expect(html).not.toContain('is having problems right now')       // header answer
+    expect(html).not.toContain('is having issues right now')         // CTA (the #297 contradiction)
+    expect(html).not.toContain('Degraded Performance')               // share payload
+    expect(html).toContain('status=unknown')                         // og:image params
+    expect(html).not.toContain('status=degraded')
+  })
+
+  it('a probe-corroborated outage still publishes the outage everywhere', () => {
+    const html = render({ ...base, status: 'degraded', sourceUnknown: true, probeContradicted: true })
+    expect(html).toContain('Having Issues')                          // <title>
+    expect(html).toContain('is having issues right now')             // CTA
+    expect(html).toContain('status=degraded')                        // og:image
+    expect(html).not.toContain('Status Unknown')
+  })
+
+  it('an ordinary operational page is untouched', () => {
+    const html = render({ ...base, status: 'operational', uptime30d: 99.9 })
+    expect(html).toContain('Operational')
+    expect(html).toContain('Get notified the next time Junie goes down.')
+    expect(html).not.toContain('Status Unknown')
+  })
+
+  it('#744 partial is NOT swept up: the title/SEO answer still says operational', () => {
+    const html = render({ ...base, status: 'operational', partialCount: 2 })
+    expect(html).toContain('Is Junie Down? Operational')
+    expect(html).not.toContain('Status Unknown')
   })
 })

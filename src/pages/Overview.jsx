@@ -21,7 +21,7 @@ import { groupIncidents } from '../utils/incidentGrouping'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
 import StatusPill from '../components/StatusPill'
-import { resolveStatusDisplay } from '../utils/statusDisplay'
+import { resolveStatusDisplay, sourceFlagsOf, displayStatusOf, isDisplayAffected, isDisplayOperational } from '../utils/statusDisplay'
 import EmptyState from '../components/EmptyState'
 
 // ── Status color maps ────────────────────────────────────────
@@ -111,6 +111,10 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
     : 'text-[var(--red)]'
   const uptimeStr = hasUptime ? `${service.uptime30d.toFixed(2)}%` : t('uptime.unavailable.short')
   const scoreStr = service.aiwatchScore != null ? `${service.aiwatchScore} ${service.scoreGrade}` : null
+  // #1004 — one derivation of the source flags, shared by the pill, the stripe, and the banner/stats
+  // filters, so those surfaces can never disagree about whether this service is affected.
+  const [sourceDead, sourceUnknown] = sourceFlagsOf(service)
+  const statusDisplay = resolveStatusDisplay(service.status, service.partialCount, sourceDead, sourceUnknown)
 
   return (
     <button
@@ -120,10 +124,13 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
       style={{
         animationDelay: `${index * 80}ms`,
         // #744 — match the StatusPill badge: partial (operational + partialCount) → yellow, not green.
+        // #1004 — drive the border from the SAME resolved display state as the pill, so an
+        // unreadable-source card can't pair a neutral "Unknown" pill with an alarming amber border.
         borderLeft: `3px solid ${
-          service.status === 'down' ? 'var(--red)'
-          : service.status === 'degraded' ? 'var(--amber)'
-          : resolveStatusDisplay(service.status, service.partialCount, service.sourceDead && !service.probeConfirmed) === 'partial' ? 'var(--yellow)'
+          statusDisplay === 'down' ? 'var(--red)'
+          : statusDisplay === 'degraded' ? 'var(--amber)'
+          : statusDisplay === 'partial' ? 'var(--yellow)'
+          : statusDisplay === 'unknown' ? 'var(--border-hi)'
           : 'var(--green)'}`,
       }}
     >
@@ -133,7 +140,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
           <span className="text-[13px] font-medium text-[var(--text0)] truncate min-w-0">{service.name}</span>
           <div className="flex items-center gap-1.5">
             {isRecovered && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
-            <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={service.sourceDead && !service.probeConfirmed} />
+            <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={sourceDead} sourceUnknown={sourceUnknown} />
           </div>
         </div>
         <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
@@ -155,7 +162,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
           </div>
           <div className="flex items-center gap-1.5">
             {isRecovered && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
-            <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={service.sourceDead && !service.probeConfirmed} />
+            <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={sourceDead} sourceUnknown={sourceUnknown} />
           </div>
         </div>
 
@@ -201,10 +208,14 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
 // Score color maps from constants
 
 // Filter: pill-style segment control per design mockup
-function FilterTabs({ filter, setFilter, total, issueCount, downCount, t }) {
+// #1004 — `operationalCount` is PASSED IN, not derived as `total - issueCount`. Deriving it assumed the
+// two buckets partition the roster, which they don't: a `partial` service (#722 — up overall, some
+// components affected) and an `unknown` one (source unreadable) are in neither. The derived badge then
+// counted them while the list didn't render them.
+function FilterTabs({ filter, setFilter, total, operationalCount, issueCount, downCount, t }) {
   const tabs = [
     { key: 'all',         labelKey: 'overview.filter.all',        count: total },
-    { key: 'operational', labelKey: 'overview.filter.operational', count: total - issueCount },
+    { key: 'operational', labelKey: 'overview.filter.operational', count: operationalCount },
     { key: 'issues',      labelKey: 'overview.filter.issues',      count: issueCount },
   ]
   return (
@@ -489,14 +500,17 @@ function SupplyChainBanner({ banner, setPage, t }) {
 }
 
 export function ActionBanner({ services, setPage, t }) {
-  const affected = services.filter(s => s.status === 'down' || s.status === 'degraded')
+  // #1004 — filter on the DISPLAY state, not the raw status: an unreadable-source service renders a
+  // neutral "Unknown" pill, so it must not also appear here as "Degraded — try X instead" (AIWatch
+  // recommending users abandon a service it just admitted it cannot read).
+  const affected = services.filter(isDisplayAffected)
   const withActiveIncidents = services.filter(s => s.status === 'operational' && (s.incidents ?? []).some(i => i.status !== 'resolved'))
   const monitoring = withActiveIncidents.filter(s => (s.incidents ?? []).some(i => i.status === 'monitoring') && !(s.incidents ?? []).some(i => i.status === 'investigating' || i.status === 'identified'))
   const investigating = withActiveIncidents.filter(s => !monitoring.includes(s))
   if (affected.length === 0 && withActiveIncidents.length === 0) return null
 
-  const downList = affected.filter(s => s.status === 'down')
-  const degradedList = affected.filter(s => s.status === 'degraded')
+  const downList = affected.filter(s => displayStatusOf(s) === 'down')
+  const degradedList = affected.filter(s => displayStatusOf(s) === 'degraded')
   const hasDown = downList.length > 0
   const borderColor = hasDown ? 'var(--red)' : affected.length > 0 ? 'var(--amber)' : 'var(--blue)'
 
@@ -711,20 +725,29 @@ export default function Overview() {
   }
 
   // Stats are based on category-filtered services
-  const operationalCount = catServices.filter((s) => s.status === 'operational').length
-  const degradedCount    = catServices.filter((s) => s.status === 'degraded').length
-  const downCount        = catServices.filter((s) => s.status === 'down').length
+  // #1004 — display state, so an unreadable source counts as neither operational nor degraded. A
+  // `partial` service, though, IS up overall (#722/#744 — that's why its is-down SEO answer stays "No"),
+  // so it belongs in the operational bucket. isDisplayOperational is the single predicate behind the
+  // stat card, the tab badge AND the tab's list — they drifted apart when only some of them moved.
+  const operationalCount = catServices.filter(isDisplayOperational).length
+  const degradedCount    = catServices.filter((s) => displayStatusOf(s) === 'degraded').length
+  const downCount        = catServices.filter((s) => displayStatusOf(s) === 'down').length
   const issueCount       = degradedCount + downCount
   const uptimeServices = catServices.filter((s) => s.uptime30d != null && !isUnreliableUptime(s))
   const avgUptime = uptimeServices.length
     ? (uptimeServices.reduce((sum, s) => sum + s.uptime30d, 0) / uptimeServices.length).toFixed(1)
     : '—'
 
-  const statusPriority = { down: 0, degraded: 1, operational: 2 }
-  const issueSort = (a, b) => (statusPriority[a.status] - statusPriority[b.status]) || ((a.aiwatchScore ?? 0) - (b.aiwatchScore ?? 0))
+  // #1004 — the tab COUNTS (above) resolve the display state, so the LISTS must too. Keying the counts
+  // on the display state while the filter still keyed on the raw status made the Issues badge read 0
+  // while the tab rendered 1 card. An unreadable-source service ('unknown') belongs to neither tab — it
+  // is neither confirmed-healthy nor confirmed-affected — matching the stat cards.
+  const statusPriority = { down: 0, degraded: 1, partial: 2, operational: 3, unknown: 4 }
+  const issueSort = (a, b) =>
+    (statusPriority[displayStatusOf(a)] - statusPriority[displayStatusOf(b)]) || ((a.aiwatchScore ?? 0) - (b.aiwatchScore ?? 0))
   const applyStatusFilter = (list) =>
-    filter === 'operational' ? list.filter((s) => s.status === 'operational')
-    : filter === 'issues'    ? [...list.filter((s) => s.status !== 'operational')].sort(issueSort)
+    filter === 'operational' ? list.filter(isDisplayOperational)
+    : filter === 'issues'    ? [...list.filter(isDisplayAffected)].sort(issueSort)
     : list
 
   // Build per-category sections mirroring the sidebar taxonomy (#646), replacing the old
@@ -876,7 +899,7 @@ export default function Overview() {
           shrinks to its content width instead of stretching full-width); centered single row on desktop. */}
       <div className="flex flex-col items-start gap-3 md:flex-row md:items-center md:justify-between">
         <CategoryTabs categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} t={t} />
-        <FilterTabs filter={filter} setFilter={setFilter} total={catServices.length} issueCount={issueCount} downCount={downCount} t={t} />
+        <FilterTabs filter={filter} setFilter={setFilter} total={catServices.length} operationalCount={operationalCount} issueCount={issueCount} downCount={downCount} t={t} />
       </div>
 
       {/* ── Per-category service sections (#646) ──

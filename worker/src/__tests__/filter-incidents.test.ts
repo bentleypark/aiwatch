@@ -170,7 +170,8 @@ describe('filterIncidents', () => {
   })
 })
 
-// #683 — exact-component-name incident scoping (Junie on the shared status.jetbrains.ai page).
+// #683 — exact-component-name incident scoping (Junie on the shared JetBrains status page; the page
+// moved to status.jetbrains.cloud in #1004, still shared with the sibling products).
 // Uses the REAL junie config from SERVICES so a regression that drops `incidentComponents` fails here.
 describe('filterIncidents — incidentComponents exact-name scoping (#683)', () => {
   const junie = (): ServiceConfig => {
