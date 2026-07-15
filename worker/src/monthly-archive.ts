@@ -58,7 +58,7 @@ export interface MonthlyIncidentEntry {
 
 export interface MonthlyServiceData {
   uptime: number | null          // AIWatch-measured uptime% from daily ok/total counters — feeds the Score (null if no data)
-  officialUptime: number | null  // #586 — the rolling-30d official uptime (month-end daily snapshot, build-time fallback) for the "Official Uptime" DISPLAY table; separate from the daily-counter `uptime` that feeds the Score. #951 — emitted ONLY when the Score actually consumed an official uptime (scoreConfidence 'high'); null otherwise. #1006 — this is AIWatch's OWN computation over the provider's published records (one window + one formula for every service), NOT a copy of the % on the provider's page; the report's table caption must say so, and the old "the window varies by page — 30 or 90 days" caveat is now false
+  officialUptime: number | null  // #586 — the rolling-30d official uptime (month-end daily snapshot) for the "Official Uptime" DISPLAY table; separate from the daily-counter `uptime` that feeds the Score. #951 — emitted ONLY when the Score actually consumed an official uptime (scoreConfidence 'high'); null otherwise. #1006 — this is AIWatch's OWN computation over the provider's published records (one window + one formula for every service), NOT a copy of the % on the provider's page; the report's table caption must say so, and the old "the window varies by page — 30 or 90 days" caveat is now false
   /** #1006 — WHERE the records `officialUptime` was computed from came from: 'official' = the provider's
    *  own incident/outage records; 'platform_avg' = the status-page platform's own monitors (Better
    *  Stack), which is a measurement rather than the provider declaring an incident. Both are AIWatch's
@@ -726,12 +726,15 @@ export function resolveArchiveOfficialUptime(
   scoreSvc: ArchiveScoreInput | undefined,
 ): number | null {
   if (!scoreSvc) return monthEndValue ?? null
+  // #1016 — emit the MONTH-END daily snapshot ONLY; never fall back to a live `services:latest` value.
+  // The rebuild path re-snapshots today's `uptime30d` into a frozen month, so a null month-end value used
+  // to fall back to today's LIVE figure — "Official · 100%" beside a monthlyScore that had dropped the
+  // uptime component (openrouter, June 2026). A month with no snapshot now correctly reads null.
   if (scoreSvc.scoreConfidence == null) {
-    // Both production callers pass it; this only guards an external caller. `officialUptime != null` is a
-    // weaker proxy for "the Score consumed an uptime" — it happens to be equivalent for the two callers
-    // (both derive it from the same `s.uptime30d`) but nothing enforces that, so make the omission audible.
-    console.warn(`[monthly-archive] ${scoreSvc.id}: scoreData omits scoreConfidence — gating on the weaker officialUptime presence check`)
-    return scoreSvc.officialUptime != null ? (monthEndValue ?? scoreSvc.officialUptime) : null
+    // Both production callers pass it; this only guards an external caller. Confidence unknown → we can't
+    // confirm the Score consumed an uptime, so surface the month-end snapshot at most (never a live value).
+    console.warn(`[monthly-archive] ${scoreSvc.id}: scoreData omits scoreConfidence — emitting the month-end snapshot only`)
+    return monthEndValue ?? null
   }
   if (scoreSvc.scoreConfidence !== 'high') {
     if (monthEndValue != null) {
@@ -743,7 +746,7 @@ export function resolveArchiveOfficialUptime(
     }
     return null
   }
-  return monthEndValue ?? scoreSvc.officialUptime ?? null
+  return monthEndValue ?? null
 }
 
 /** Compute per-service uptime% from daily counters */
@@ -1040,17 +1043,12 @@ export interface ArchiveScoreInput {
   aiwatchScore?: number | null
   scoreGrade?: ScoreGrade | null
   // #951 — the confidence the Score was computed at. 'high' ⟺ an official uptime% was available and
-  // the 40-pt uptime component was included. This is what gates `officialUptime` below.
+  // the 40-pt uptime component was included. This is what gates the archived `officialUptime` display.
   scoreConfidence?: ScoreConfidence | null
   // #1006 — provenance of the uptime figure ('official' = the provider's own records; 'platform_avg' =
   // the status-page platform's monitors). Carried into the archive so the report labels the source from
   // the data rather than a hand-maintained list.
   uptimeSource?: 'official' | 'platform_avg'
-  // #586 hybrid — FALLBACK source for officialUptime: the live status-page rolling-30d uptime
-  // (ServiceStatus.uptime30d) snapshotted from services:latest at archive-build time. The PRIMARY
-  // source is computeMonthlyOfficialUptime (the month-end daily snapshot), which is month-accurate
-  // and rebuild-safe; this build-time value only applies to months with no daily snapshots.
-  officialUptime?: number | null
   // #591 — the service's incident source is known-stale (frozen feed). Threaded into the archive so
   // the report generator can exclude it from the Score ranking, parity with the live dashboard.
   incidentSourceStale?: boolean
@@ -1335,9 +1333,9 @@ export async function buildMonthlyArchive(
 
     services[id] = {
       uptime: uptimeMap[id] ?? null,
-      // #586 — prefer the daily-snapshot month-end value (month-accurate, rebuild-safe); fall back
-      // to the build-time services:latest snapshot (scoreData) for months with no daily snapshots.
-      // #951 — but only when the Score itself consumed an official uptime, so display ≡ score.
+      // #586 — the daily-snapshot month-end value (month-accurate, rebuild-safe); a month with no daily
+      // snapshot reads null (#1016 — no live/scoreData fallback; that leaked today's uptime into a frozen
+      // month on rebuild). #951 — and only when the Score itself consumed an official uptime, so display ≡ score.
       officialUptime: resolveArchiveOfficialUptime(officialUptimeMap[id], scoreSvc),
       // #1006 — carry the provenance so the report can label Official vs Platform from the DATA rather
       // than from a hand-maintained list. Only meaningful when a figure was actually archived.

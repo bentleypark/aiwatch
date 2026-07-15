@@ -375,24 +375,24 @@ describe('computeMonthlyOfficialUptime (#586)', () => {
 // ── resolveArchiveOfficialUptime (#951 — display must agree with the Score) ──
 // The archive showed "Official · 100.00% uptime" beside a Score that was rescaled over /60 as if no
 // uptime existed. Two independent ways the two drifted apart, both reproduced below.
-describe('resolveArchiveOfficialUptime (#951)', () => {
+describe('resolveArchiveOfficialUptime (#951 + #1016)', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('emits the month-end value for a service the Score actually scored on uptime', () => {
-    expect(resolveArchiveOfficialUptime(100, { id: 'groq', scoreConfidence: 'high', officialUptime: 100 })).toBe(100)
+  it('emits the month-end daily snapshot for a service the Score scored on uptime', () => {
+    expect(resolveArchiveOfficialUptime(100, { id: 'groq', scoreConfidence: 'high' })).toBe(100)
+    expect(resolveArchiveOfficialUptime(99.83, { id: 'chatgpt', scoreConfidence: 'high' })).toBe(99.83)
   })
 
-  it('prefers the month-end daily snapshot over the build-time value (#586 month accuracy kept)', () => {
-    expect(resolveArchiveOfficialUptime(99.83, { id: 'chatgpt', scoreConfidence: 'high', officialUptime: 99.7 })).toBe(99.83)
-  })
-
-  it('falls back to the build-time value when no day carried one', () => {
-    expect(resolveArchiveOfficialUptime(undefined, { id: 'groq', scoreConfidence: 'high', officialUptime: 100 })).toBe(100)
+  it('#1016 — returns null when there is NO daily snapshot, never a live services:latest fallback', () => {
+    // The rebuild path used to fall back to today's live `uptime30d` here, surfacing "Official · 100%"
+    // on a frozen month whose monthlyScore had dropped uptime (openrouter, June). A high LIVE confidence
+    // must not conjure a value the month never recorded.
+    expect(resolveArchiveOfficialUptime(undefined, { id: 'openrouter', scoreConfidence: 'high' })).toBeNull()
   })
 
   it('withholds a month-end value the Score did not consume (would print "Official" beside a /60 score)', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(resolveArchiveOfficialUptime(100, { id: 'groq', scoreConfidence: 'medium', officialUptime: null })).toBeNull()
+    expect(resolveArchiveOfficialUptime(100, { id: 'groq', scoreConfidence: 'medium' })).toBeNull()
     // Discarding a month-observed figure is exactly the silent drop this issue is about — it must warn.
     // (Reachable when a status-page fetch fails on the single build-day read of services:latest.)
     expect(warn).toHaveBeenCalledOnce()
@@ -401,7 +401,7 @@ describe('resolveArchiveOfficialUptime (#951)', () => {
 
   it('does NOT warn when there was no month-end value to discard (openrouter never publishes one)', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(resolveArchiveOfficialUptime(undefined, { id: 'openrouter', scoreConfidence: 'medium', officialUptime: null })).toBeNull()
+    expect(resolveArchiveOfficialUptime(undefined, { id: 'openrouter', scoreConfidence: 'medium' })).toBeNull()
     expect(warn).not.toHaveBeenCalled()
   })
 
@@ -412,10 +412,10 @@ describe('resolveArchiveOfficialUptime (#951)', () => {
     expect(resolveArchiveOfficialUptime(undefined, undefined)).toBeNull()
   })
 
-  it('warns, then falls back to the pre-#951 gate, for a caller that omits scoreConfidence', () => {
+  it('emits the month-end snapshot only (never a live value) for a caller that omits scoreConfidence', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(resolveArchiveOfficialUptime(99.5, { id: 'legacy', officialUptime: 99.4 })).toBe(99.5)
-    expect(resolveArchiveOfficialUptime(99.5, { id: 'legacy', officialUptime: null })).toBeNull()
+    expect(resolveArchiveOfficialUptime(99.5, { id: 'legacy' })).toBe(99.5)
+    expect(resolveArchiveOfficialUptime(undefined, { id: 'legacy' })).toBeNull()
     expect(warn).toHaveBeenCalledTimes(2)
     expect(warn.mock.calls[0][0]).toContain('omits scoreConfidence')
   })
@@ -1160,19 +1160,17 @@ describe('buildMonthlyArchive', () => {
     expect(archive.services.openai.avgLatencyMs).toBeNull()
   })
 
-  it('#586 hybrid: threads officialUptime (status-page) separately from the daily-counter uptime', async () => {
-    // claude's daily counters give ~98.61% (AIWatch-measured) — see test above. The status-page
-    // officialUptime (from services:latest's uptime30d) is passed through scoreData and must NOT
-    // overwrite or equal the daily-counter uptime; estimate services (null uptime30d) → null.
-    const scoreData = [
-      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const, officialUptime: 99.83 },
-      { id: 'openai', aiwatchScore: 92, scoreGrade: 'excellent' as const, officialUptime: null },
-    ]
-    const archive = await buildMonthlyArchive(mockKV, 2026, 3, scoreData)
-    expect(archive.services.claude.officialUptime).toBe(99.83)        // status-page value, for display
-    expect(archive.services.claude.uptime).toBeCloseTo(98.61, 0)      // daily-counter value, for the Score — unchanged
-    expect(archive.services.claude.officialUptime).not.toBe(archive.services.claude.uptime)
-    expect(archive.services.openai.officialUptime).toBeNull()         // no published metric → null
+  it('#1016 — a live high-confidence Score with NO daily snapshot yields null officialUptime (no live leak into a frozen month)', async () => {
+    // The bug: the rebuild path re-snapshotted today's live `uptime30d` into a frozen month, so a service
+    // that gained an uptime source AFTER the month (openrouter post-#1006) showed "Official · 100%" beside
+    // a monthlyScore that dropped the uptime component. mockKV carries claude's daily COUNTERS but no
+    // daily officialUptime snapshot — the archived display must be null, and `scoreConfidence: 'high'`
+    // (standing in for today's live read) must not conjure one.
+    const archive = await buildMonthlyArchive(mockKV, 2026, 3, [
+      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const, scoreConfidence: 'high' as const },
+    ])
+    expect(archive.services.claude.officialUptime).toBeNull()      // no snapshot → null, not a live leak
+    expect(archive.services.claude.uptime).toBeCloseTo(98.61, 0)   // daily-counter value, unchanged
   })
 
   it('officialUptime defaults to null when scoreData omits it (forward/back compat)', async () => {
@@ -1209,8 +1207,8 @@ describe('buildMonthlyArchive', () => {
 
     const archive = await buildMonthlyArchive(juneKV, 2026, 6, [
       // Scored at build time (post-#713): no uptime component → medium confidence, /60 rescale.
-      { id: 'stability', aiwatchScore: 76, scoreGrade: 'good' as const, scoreConfidence: 'medium' as const, officialUptime: null },
-      { id: 'groq', aiwatchScore: 85, scoreGrade: 'good' as const, scoreConfidence: 'high' as const, officialUptime: 100 },
+      { id: 'stability', aiwatchScore: 76, scoreGrade: 'good' as const, scoreConfidence: 'medium' as const },
+      { id: 'groq', aiwatchScore: 85, scoreGrade: 'good' as const, scoreConfidence: 'high' as const },
     ])
 
     // The sticky 100 from 06-17 must NOT resurface as Stability's "Official Uptime".
@@ -1261,9 +1259,9 @@ describe('buildMonthlyArchive', () => {
     expect(archive.services.claude).toBeDefined()      // established service is unaffected
   })
 
-  it('#586 daily snapshot WINS over the build-time scoreData fallback', async () => {
-    // History days carry officialUptime; the month-end (2026-03-02) value must be used over the
-    // scoreData snapshot (which is the build-time fallback for months that lack daily snapshots).
+  it('#586/#1006 officialUptime comes from the month-end daily snapshot (no scoreData/live source)', async () => {
+    // History days carry officialUptime; the archived display value is the month-end (2026-03-02) daily
+    // snapshot — the same value the monthly Score consumed. There is no scoreData/live fallback.
     const dailyKV = {
       get: async (key: string) => ({
         'history:2026-03-01': JSON.stringify({ claude: { ok: 280, total: 288, officialUptime: 98.0 } }),
@@ -1271,9 +1269,9 @@ describe('buildMonthlyArchive', () => {
       } as Record<string, string>)[key] ?? null,
     } as unknown as KVNamespace
     const archive = await buildMonthlyArchive(dailyKV, 2026, 3, [
-      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const, officialUptime: 50 }, // stale fallback — must be ignored
+      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const, scoreConfidence: 'high' as const },
     ])
-    expect(archive.services.claude.officialUptime).toBe(99.83) // month-end daily value, not 50
+    expect(archive.services.claude.officialUptime).toBe(99.83) // month-end daily snapshot
     expect(archive.services.claude.uptime).toBeCloseTo(98.61, 0) // daily-counter uptime unchanged
   })
 
