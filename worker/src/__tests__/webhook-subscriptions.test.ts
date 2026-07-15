@@ -10,6 +10,7 @@ import {
   classifyDelivery,
   reserveConfirmBudget,
   listConfirmedHashes,
+  isSubscriberHash,
   subscribe,
   confirm,
   updateFilters,
@@ -166,12 +167,39 @@ describe('reserveConfirmBudget', () => {
 })
 
 describe('listConfirmedHashes (cursor pagination)', () => {
+  const hex = (i: number) => i.toString(16).padStart(64, '0') // a 64-char hex subscriber hash
+
   it('returns every hash across pages', async () => {
     const kv = makeKV()
-    for (let i = 0; i < 5; i++) kv._store.set(`${SUB_PREFIX}hash${i}`, '{}')
+    for (let i = 0; i < 5; i++) kv._store.set(`${SUB_PREFIX}${hex(i)}`, '{}')
     kv._store.set('webhook:pending:other', '{}') // must be ignored (wrong prefix)
     const hashes = await listConfirmedHashes(kv)
-    expect(hashes.sort()).toEqual(['hash0', 'hash1', 'hash2', 'hash3', 'hash4'])
+    expect(hashes.sort()).toEqual([hex(0), hex(1), hex(2), hex(3), hex(4)])
+  })
+
+  it('#1011 — excludes webhook:sub:count:{date} snapshot keys that share the prefix', async () => {
+    const kv = makeKV()
+    // 2 real subscribers + 7 daily count snapshots, exactly the prod-KV shape (real=2, listed=9).
+    kv._store.set(`${SUB_PREFIX}${hex(1)}`, '{}')
+    kv._store.set(`${SUB_PREFIX}${hex(2)}`, '{}')
+    for (let d = 8; d <= 14; d++) kv._store.set(`${SUB_PREFIX}count:2026-07-${d}`, '3')
+    const hashes = await listConfirmedHashes(kv)
+    expect(hashes.sort()).toEqual([hex(1), hex(2)]) // only the real hashes — count keys dropped
+    expect(hashes).toHaveLength(2) // not 9
+  })
+})
+
+describe('isSubscriberHash (#1011)', () => {
+  it('accepts a 64-char lowercase-hex hash', () => {
+    expect(isSubscriberHash('a'.repeat(64))).toBe(true)
+    expect(isSubscriberHash('0123456789abcdef'.repeat(4))).toBe(true)
+  })
+  it('rejects the count-snapshot suffix and any non-hash shape', () => {
+    expect(isSubscriberHash('count:2026-07-08')).toBe(false)
+    expect(isSubscriberHash('A'.repeat(64))).toBe(false) // uppercase not emitted by sha256Hex
+    expect(isSubscriberHash('a'.repeat(63))).toBe(false) // too short
+    expect(isSubscriberHash('a'.repeat(65))).toBe(false) // too long
+    expect(isSubscriberHash('')).toBe(false)
   })
 })
 
@@ -404,6 +432,20 @@ describe('deliverToSubscribers', () => {
     const stats = await deliverToSubscribers(kv, KEY, feed, post, 1)
     expect(stats.delivered).toBe(0)
     expect(post).not.toHaveBeenCalled()
+  })
+  it('#1011 — never delivers to or prunes webhook:sub:count:{date} snapshot keys', async () => {
+    // Pre-fix these count keys leaked out of listConfirmedHashes into delivery, where readConfirmed
+    // returned the bare count value → decrypt failed → deleteConfirmed PRUNED the snapshot (a
+    // destructive side effect on the second consumer, not just a miscount).
+    const kv = makeKV()
+    await seedSub(kv, URL_OK, FILTERS_ALL) // 1 real subscriber
+    for (let d = 8; d <= 14; d++) kv._store.set(`${SUB_PREFIX}count:2026-07-${d}`, '3')
+    const post = vi.fn(async () => 204)
+    const stats = await deliverToSubscribers(kv, KEY, [feedEntry({})], post, 1)
+    expect(stats.delivered).toBe(1) // only the real sub
+    expect(stats.pruned).toBe(0)    // count keys were never handed to delivery, so never pruned
+    expect(post).toHaveBeenCalledTimes(1)
+    for (let d = 8; d <= 14; d++) expect(kv._store.has(`${SUB_PREFIX}count:2026-07-${d}`)).toBe(true)
   })
   it('prunes immediately on 410', async () => {
     const kv = makeKV()
