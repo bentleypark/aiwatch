@@ -816,6 +816,9 @@ describe('displayComponentIds config sanity (#606)', () => {
 
   // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing
   // single statusComponentId badge (so the badge is unchanged; statusComponentIds plural absent).
+  // junie: 2 — #1004 follow-on. Single statusComponentId badge (Central Console, the AI gateway) + a
+  // curated 2-row breakdown [Central Console, JetBrains AI]; no worst-of statusComponentIds (that would
+  // pin uptime to JetBrains AI's ~6d window).
   const SINGLE_OWNER_COUNT: Record<string, number> = { assemblyai: 6, deepgram: 9, characterai: 5, junie: 2, voyageai: 2, pinecone: 6, twelvelabs: 10 }
 
   it('single-owner services carry the curated displayComponentIds count, keep their badge statusComponentId, and have no worst-of statusComponentIds', () => {

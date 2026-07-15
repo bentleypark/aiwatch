@@ -120,7 +120,7 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
   junie: {
     displayName: 'Junie',
     description: 'Junie is JetBrains\' AI coding agent, integrated across IntelliJ IDEA, PyCharm, WebStorm, GoLand, and other JetBrains IDEs. It autonomously plans and edits code through chat, leveraging the JetBrains AI platform that wraps Anthropic, OpenAI, and Google models.',
-    insight: 'Junie shares the JetBrains Cloud Platform status page with sibling AI products (Grazie, AI Assistant, AI Platform). AIWatch scopes the Junie badge to that one component so unrelated incidents on Grazie or the platform don\'t flip Junie to degraded. JetBrains has historically reported upstream-model degradation transparently — when Junie is degraded, the upstream provider often is too.',
+    insight: 'Junie shares the JetBrains Cloud Platform status page with sibling products (Grazie, Mellum, JetBrains Context) and the upstream model providers. AIWatch scopes Junie\'s badge to JetBrains\' AI gateway — the component that carries the LLM-API, auth, and quota incidents Junie depends on — so an unrelated Grazie or single-model incident doesn\'t flip Junie to degraded. When that gateway degrades, the upstream provider (Anthropic, OpenAI, Gemini) is often affected too; AIWatch tracks each of those on its own page.',
     whenDown: 'When Junie is down, JetBrains IDE users lose autonomous code edits, chat-driven planning, and multi-step refactors. The IDE itself keeps working for normal editing — only the AI agent surface is affected.',
     faqs: [
       { q: 'Is Junie down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors Junie every 5 minutes via the JetBrains Cloud Platform status feed and shows real-time operational status.' },

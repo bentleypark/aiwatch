@@ -32,7 +32,7 @@ export interface IncidentIoUptime {
   /** Uptime % over the window below, floor-rounded to 2dp (never overstate). */
   pct: number
   /** Days the computation actually covers — `windowDays` unless the component is younger than that.
-   *  A status-page migration creates a NEW component, so this drops to a handful of days (#1004/junie):
+   *  A status-page migration creates a NEW component, so this can drop to a handful of days (#1004):
    *  the figure is then honest for the days it has, and the UI says which. */
   days: number
 }
