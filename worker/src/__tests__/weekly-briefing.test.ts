@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getWeekRange, weekDateStrings, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, type WeeklyBriefingData } from '../weekly-briefing'
+import { getWeekRange, weekDateStrings, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, parseStrategyBrief, isStrategyBriefStale, STRATEGY_STALE_DAYS, STRATEGY_FIELD_MAX, type WeeklyBriefingData } from '../weekly-briefing'
 
 describe('getWeekRange', () => {
   it('returns Mon–Sun for a Wednesday', () => {
@@ -213,6 +213,115 @@ describe('buildWeeklyBriefing', () => {
     }
     const result = buildWeeklyBriefing(data)
     expect(result).not.toContain('Security')
+  })
+
+  it('#917 — renders the Strategy section from a fresh brief, no stale nudge', () => {
+    const data: WeeklyBriefingData = {
+      weekStart: '2026-07-13',
+      weekEnd: '2026-07-19',
+      changelog: [],
+      incidents: [],
+      stabilityChanges: [],
+      strategyBrief: { status: 'Channel validated; bottleneck moved to scale.', nextAction: 'Fix #1011 (subscriber count-key).', updatedAt: '2026-07-15' },
+    }
+    const result = buildWeeklyBriefing(data)
+    expect(result).toContain('📈 **Strategy**')
+    expect(result).toContain('Channel validated; bottleneck moved to scale.')
+    expect(result).toContain('**Next:** Fix #1011 (subscriber count-key).')
+    expect(result).not.toContain('refresh') // fresh → no nudge
+  })
+
+  it('#917 — renders the Strategy section WITH a stale nudge when the brief is >30d old', () => {
+    const data: WeeklyBriefingData = {
+      weekStart: '2026-07-13',
+      weekEnd: '2026-07-19',
+      changelog: [],
+      incidents: [],
+      stabilityChanges: [],
+      strategyBrief: { status: 'Old status.', nextAction: 'Old action.', updatedAt: '2026-05-01' },
+    }
+    const result = buildWeeklyBriefing(data)
+    expect(result).toContain('📈 **Strategy**')
+    expect(result).toContain('Brief last updated 2026-05-01')
+    expect(result).toContain('refresh the `strategy:brief` KV key')
+    expect(result).toContain('Old status.') // stale content is still shown (informative, not hidden)
+  })
+
+  it('#917 — omits the Strategy section when strategyBrief is absent or null', () => {
+    const base = { weekStart: '2026-07-13', weekEnd: '2026-07-19', changelog: [], incidents: [], stabilityChanges: [] }
+    expect(buildWeeklyBriefing(base)).not.toContain('Strategy')
+    expect(buildWeeklyBriefing({ ...base, strategyBrief: null })).not.toContain('Strategy')
+  })
+
+  it('#917 — surfaces a fix nudge when the brief was set but malformed (not a silent omission)', () => {
+    const base = { weekStart: '2026-07-13', weekEnd: '2026-07-19', changelog: [], incidents: [], stabilityChanges: [] }
+    const result = buildWeeklyBriefing({ ...base, strategyBrief: null, strategyBriefMalformed: true })
+    expect(result).toContain('📈 **Strategy**')
+    expect(result).toContain('`strategy:brief` is set but malformed')
+  })
+
+  it('#917 — a valid brief wins over the malformed flag (flag is ignored when the brief parsed)', () => {
+    const base = { weekStart: '2026-07-13', weekEnd: '2026-07-19', changelog: [], incidents: [], stabilityChanges: [] }
+    const result = buildWeeklyBriefing({ ...base, strategyBrief: { status: 'ok', nextAction: 'go', updatedAt: '2026-07-15' }, strategyBriefMalformed: true })
+    expect(result).toContain('ok')
+    expect(result).not.toContain('malformed')
+  })
+
+  it('#917 — caps over-long operator fields so one brief cannot blow the Discord embed limit', () => {
+    const base = { weekStart: '2026-07-13', weekEnd: '2026-07-19', changelog: [], incidents: [], stabilityChanges: [] }
+    const long = 'x'.repeat(5000)
+    const result = buildWeeklyBriefing({ ...base, strategyBrief: { status: long, nextAction: long, updatedAt: '2026-07-15' } })
+    expect(result).toContain('…')
+    expect(result).not.toContain('x'.repeat(STRATEGY_FIELD_MAX + 1)) // truncated below the cap
+    expect(result.length).toBeLessThan(2 * STRATEGY_FIELD_MAX + 200) // whole section stays bounded
+  })
+})
+
+describe('parseStrategyBrief (#917)', () => {
+  it('parses a well-formed brief and trims fields', () => {
+    const raw = JSON.stringify({ status: '  scale is the bottleneck  ', nextAction: ' fix #1011 ', updatedAt: '2026-07-15' })
+    expect(parseStrategyBrief(raw)).toEqual({ status: 'scale is the bottleneck', nextAction: 'fix #1011', updatedAt: '2026-07-15' })
+  })
+
+  it('ignores extra fields', () => {
+    const raw = JSON.stringify({ status: 's', nextAction: 'n', updatedAt: '2026-07-15', extra: 42 })
+    expect(parseStrategyBrief(raw)).toEqual({ status: 's', nextAction: 'n', updatedAt: '2026-07-15' })
+  })
+
+  it('returns null on invalid JSON', () => {
+    expect(parseStrategyBrief('{not json')).toBeNull()
+  })
+
+  it('returns null when a required field is missing, empty, or non-string', () => {
+    expect(parseStrategyBrief(JSON.stringify({ status: 's', nextAction: 'n' }))).toBeNull() // no updatedAt
+    expect(parseStrategyBrief(JSON.stringify({ status: '', nextAction: 'n', updatedAt: '2026-07-15' }))).toBeNull() // empty
+    expect(parseStrategyBrief(JSON.stringify({ status: 's', nextAction: 3, updatedAt: '2026-07-15' }))).toBeNull() // non-string
+    expect(parseStrategyBrief(JSON.stringify(['array']))).toBeNull()
+    expect(parseStrategyBrief('null')).toBeNull()
+  })
+})
+
+describe('isStrategyBriefStale (#917)', () => {
+  it('is false when the brief is newer than the horizon', () => {
+    expect(isStrategyBriefStale('2026-07-15', '2026-07-19')).toBe(false) // 4d
+  })
+
+  it('is false exactly at the horizon boundary (>30, not >=)', () => {
+    expect(isStrategyBriefStale('2026-06-19', '2026-07-19')).toBe(false) // exactly 30d
+  })
+
+  it('is true when the brief is older than the horizon', () => {
+    expect(isStrategyBriefStale('2026-06-18', '2026-07-19')).toBe(true) // 31d
+  })
+
+  it('treats an unparseable date as stale (fail-safe surface of the nudge)', () => {
+    expect(isStrategyBriefStale('not-a-date', '2026-07-19')).toBe(true)
+    expect(isStrategyBriefStale('2026-07-15', 'garbage')).toBe(true)
+  })
+
+  it('honors a custom horizon', () => {
+    expect(isStrategyBriefStale('2026-07-12', '2026-07-19', 5)).toBe(true) // 7d > 5
+    expect(STRATEGY_STALE_DAYS).toBe(30)
   })
 })
 

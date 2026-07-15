@@ -1484,7 +1484,7 @@ import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDet
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
 import { collectChangelogs, getStaleSources } from './changelog'
-import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings } from './weekly-briefing'
+import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings, parseStrategyBrief } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { parseReferralBody, recordReferral, type ReferralCounts } from './referral'
 import { buildGrowthDailyRow, recordGrowthDaily } from './growth-series'
@@ -2392,7 +2392,25 @@ export default {
             console.warn('[cron] weekly ai:usage trend read failed:', err instanceof Error ? err.message : err)
           }
 
-          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, stabilityDataAvailable, security, staleSources, aiUsageTrend })
+          // #917 — operator-authored strategy status (initiative page Status + Next action). Absent
+          // key → section omitted; present-but-malformed → surface a fix nudge (not a silent drop),
+          // since a broken write is operator error worth showing.
+          let strategyBrief = null
+          let strategyBriefMalformed = false
+          try {
+            const raw = await env.STATUS_CACHE.get('strategy:brief')
+            if (raw) {
+              strategyBrief = parseStrategyBrief(raw)
+              if (!strategyBrief) {
+                strategyBriefMalformed = true
+                console.warn('[cron] weekly strategy:brief present but malformed — briefing shows a fix nudge')
+              }
+            }
+          } catch (err) {
+            console.warn('[cron] weekly strategy:brief read failed:', err instanceof Error ? err.message : err)
+          }
+
+          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, stabilityDataAvailable, security, staleSources, aiUsageTrend, strategyBrief, strategyBriefMalformed })
           await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
             title: `📋 Weekly Briefing (${weekStart} ~ ${weekEnd})`,
             description: briefing,
