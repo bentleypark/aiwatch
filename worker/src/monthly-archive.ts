@@ -17,6 +17,7 @@ import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiO
 import { SERVICE_ADDED_AT, SERVICES, existedInMonth } from './services'
 import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type IncidentHistoryRecord } from './incident-history'
 import { readSuppressionsFresh, readSuppressionsFreshOrNull, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
+import { readOverridesFresh, applyDurationOverrides } from './overrides'
 import { kvPut } from './utils'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
@@ -1224,6 +1225,10 @@ export async function buildMonthlyArchive(
     // manual, correctness-critical one-shot, so it must see a just-added suppression immediately.
     const suppressions = await readSuppressionsFresh(kv)
     if (suppressions.length) incidentData = filterSuppressedFromMonthly(incidentData, suppressions)
+    // #1019 — build-time duration overrides: pin a paperwork-inflated incident's duration to the
+    // operator value, recomputing downtime/longest from the survivors (rebuild-safe, no KV surgery).
+    const overrides = await readOverridesFresh(kv)
+    if (overrides.length) incidentData = applyDurationOverrides(incidentData, overrides)
   }
 
   // Snapshot accumulated security alerts before their 60d TTL lapses (#290). Missing

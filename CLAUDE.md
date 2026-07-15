@@ -269,6 +269,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   rss.ts             # Incident RSS feeds (/feed.xml, /feed/:slug) + Slack-poller behaviours
   fallback.ts        # Fallback recommendation (tiered, Score-ranked)
   suppression.ts     # Operator incident-suppression layer (#904)
+  overrides.ts       # Operator incident duration-override layer (#1019) — pins a paperwork-inflated duration, keeps the incident
   probe.ts probe-archival.ts   # Direct RTT probing (32 targets) + daily archival
   daily-summary.ts weekly-briefing.ts monthly-archive.ts monthly-narrative.ts  # Discord reports + archives
   api-traffic.ts outage-audience.ts referral.ts vitals.ts   # WAE/KV instrumentation

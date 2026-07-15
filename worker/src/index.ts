@@ -4,6 +4,7 @@
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
 import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, type SuppressionEntry } from './suppression'
+import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
@@ -1966,6 +1967,62 @@ async function handleAdminSuppress(request: Request, env: Env, cors: Record<stri
   return json(200, { ok: true, changed: result.changed, suppressions: result.list })
 }
 
+// ── #1019: GET/POST /api/admin/duration-override ──────────────────
+// Operator-managed incident duration-override list (see overrides.ts). GET returns the current list;
+// POST { action:'add'|'remove', id, durationMin?, reason? } mutates it. Auth via X-Admin-Key (same
+// ADMIN_API_KEY). Pure add/remove logic lives in mutateOverrides; no cache to invalidate (the apply
+// sites read fresh). Corrects a paperwork-inflated duration WITHOUT hiding the incident.
+interface AdminOverrideRequest {
+  action?: unknown
+  id?: unknown
+  durationMin?: unknown
+  reason?: unknown
+}
+
+async function handleAdminOverride(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+
+  if (!env.ADMIN_API_KEY) return json(401, { ok: false, error: 'unauthorized' })
+  const provided = request.headers.get('X-Admin-Key') ?? ''
+  if (!constantTimeEqual(provided, env.ADMIN_API_KEY)) return json(401, { ok: false, error: 'unauthorized' })
+  if (!env.STATUS_CACHE) return json(503, { ok: false, error: 'Service unavailable' })
+
+  let current: DurationOverride[]
+  try {
+    const raw = await env.STATUS_CACHE.get(OVERRIDES_KEY)
+    current = raw ? normalizeOverrides(JSON.parse(raw)) : []
+  } catch (err) {
+    console.error('[admin/duration-override] KV read failed:', err instanceof Error ? err.message : err)
+    return json(502, { ok: false, error: 'failed to read override list' })
+  }
+
+  if (request.method === 'GET') return json(200, { ok: true, overrides: current })
+
+  let body: AdminOverrideRequest
+  try { body = await request.json() } catch { return json(400, { ok: false, error: 'invalid JSON body' }) }
+
+  const result = mutateOverrides(current, {
+    action: body.action === 'remove' ? 'remove' : body.action === 'add' ? 'add' : ('' as 'add'),
+    id: typeof body.id === 'string' ? body.id : undefined,
+    durationMin: typeof body.durationMin === 'number' ? body.durationMin : undefined,
+    reason: typeof body.reason === 'string' ? body.reason : undefined,
+    by: 'admin',
+    createdAt: new Date().toISOString(),
+  })
+  if (!result.ok) return json(400, { ok: false, error: result.error })
+
+  if (result.changed) {
+    try {
+      await env.STATUS_CACHE.put(OVERRIDES_KEY, JSON.stringify(result.list))
+    } catch (err) {
+      console.error('[admin/duration-override] KV write failed:', err instanceof Error ? err.message : err)
+      return json(502, { ok: false, error: 'failed to write override list' })
+    }
+  }
+  return json(200, { ok: true, changed: result.changed, overrides: result.list })
+}
+
 export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     // Use the scheduled trigger time (not wall-clock) so time-of-day checks like
@@ -2305,12 +2362,14 @@ export default {
           // #904 — filter operator-suppressed incidents out of the raw accumulator before summarizing,
           // else a suppressed incident (e.g. FedRAMP) resurfaces in the weekly Discord incident summary.
           const weeklySuppressions = await readSuppressionsFresh(env.STATUS_CACHE)
+          const weeklyOverrides = await readOverridesFresh(env.STATUS_CACHE) // #1019
           for (const mk of [currMonthKey, prevMonthKey]) {
             const mRaw = await env.STATUS_CACHE.get(mk).catch(() => null)
             if (!mRaw) continue
             try {
               const parsed = JSON.parse(mRaw) as MonthlyIncidents
-              const filtered = weeklySuppressions.length ? filterSuppressedFromMonthly(parsed, weeklySuppressions) : parsed
+              const suppressed = weeklySuppressions.length ? filterSuppressedFromMonthly(parsed, weeklySuppressions) : parsed
+              const filtered = weeklyOverrides.length ? applyDurationOverrides(suppressed, weeklyOverrides) : suppressed
               allMonthlyIncidents.push(...parseMonthlyIncidents(filtered, serviceNameMap))
             } catch (err) { console.warn(`[cron] ${mk} parse failed:`, err instanceof Error ? err.message : String(err)) }
           }
@@ -3211,6 +3270,14 @@ export default {
       return handleAdminSuppress(request, env, cors)
     }
 
+    // #1019 — GET/POST /api/admin/duration-override — operator incident duration-override list. POST
+    // adds/removes { id, durationMin }; GET lists. Pins a paperwork-inflated incident's duration to the
+    // real value across the monthly archive, the report partial, and the weekly briefing (keeps the
+    // incident; only corrects its duration — unlike suppression, which hides it).
+    if ((request.method === 'POST' || request.method === 'GET') && url.pathname === '/api/admin/duration-override') {
+      return handleAdminOverride(request, env, cors)
+    }
+
     // #486 — server-side per-user Discord subscription endpoints. The browser POSTs the raw URL +
     // filters here; the worker stores the AES-GCM-encrypted URL and (PR3) the cron fan-out delivers
     // directly, so alerts fire tab-independently. Ownership is proven by a confirm code sent THROUGH
@@ -4096,6 +4163,10 @@ export default {
           if (incidentData) {
             const suppressions = await readSuppressionsFresh(env.STATUS_CACHE)
             if (suppressions.length) incidentData = filterSuppressedFromMonthly(incidentData, suppressions)
+            // #1019 — pin any operator-overridden incident duration so the dashboard 30/90-day list
+            // shows the corrected value, not the provider's paperwork-inflated open→close span.
+            const overrides = await readOverridesFresh(env.STATUS_CACHE)
+            if (overrides.length) incidentData = applyDurationOverrides(incidentData, overrides)
           }
           const partial = buildPartialIncidentArchive(month, incidentData)
           return new Response(JSON.stringify(partial), {
