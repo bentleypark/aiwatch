@@ -244,6 +244,158 @@ describe('svcStatus determination', () => {
       expect(determineSvcStatus(cfg, summary, [])).toBe('operational')
     })
   })
+
+  describe('"Codex in ChatGPT Desktop" is a ChatGPT component, not a Codex one (#1008)', () => {
+    // 01KMKFAMWKQ81YWSE1Z18R6VHR "Codex in ChatGPT Desktop" is officially in the ChatGPT group
+    // (Codex surfaced inside the ChatGPT desktop app). It was mis-attributed to codex, so a
+    // ChatGPT-only incident flipped it to partial_outage and dragged the Codex badge to degraded.
+    const CODEX_IN_CHATGPT_DESKTOP = '01KMKFAMWKQ81YWSE1Z18R6VHR'
+    const codex = SERVICES.find((s) => s.id === 'codex')!
+    const chatgpt = SERVICES.find((s) => s.id === 'chatgpt')!
+
+    it('is absent from BOTH of codex\'s component arrays', () => {
+      expect(codex.statusComponentIds).not.toContain(CODEX_IN_CHATGPT_DESKTOP)
+      expect(codex.displayComponentIds).not.toContain(CODEX_IN_CHATGPT_DESKTOP)
+      // Only the four real Codex-product surfaces remain, badge scope == displayed group.
+      expect(codex.statusComponentIds).toEqual([
+        '01KMP3KP5MGE23B80K1EK4S8PV', // Codex API
+        '01KMKFAMWKNQ84Z1766MV08ZDE', // CLI
+        '01KMP3KP5M8X0EBTVW6KN327EE', // VS Code extension
+        '01JVCV8YSWZFRSM1G5CVP253SK', // Codex Web
+      ])
+      expect(new Set(codex.displayComponentIds)).toEqual(new Set(codex.statusComponentIds))
+    })
+
+    it('is present in BOTH of chatgpt\'s component arrays (correct attribution)', () => {
+      expect(chatgpt.statusComponentIds).toContain(CODEX_IN_CHATGPT_DESKTOP)
+      expect(chatgpt.displayComponentIds).toContain(CODEX_IN_CHATGPT_DESKTOP)
+    })
+
+    it('codex stays operational when only "Codex in ChatGPT Desktop" is partial (its ids are unaffected)', () => {
+      // Live 2026-07-15 shape: "Elevated errors affecting ChatGPT" partial-outages the ChatGPT-side
+      // components incl. Codex-in-ChatGPT-Desktop, while the Codex product surfaces are operational.
+      // indicator:'none' is deliberate — so chatgpt's degraded can ONLY come from the moved
+      // component matching in its worst-of, not the overall-indicator fallback (step 4). If the id
+      // were still (wrongly) absent from chatgpt, its worst-of would match nothing here and fall
+      // back to the 'none' indicator → operational, failing the assertion.
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: '01KMP3KP5MGE23B80K1EK4S8PV', name: 'Codex API', status: 'operational' },
+          { id: '01KMKFAMWKNQ84Z1766MV08ZDE', name: 'CLI', status: 'operational' },
+          { id: '01KMP3KP5M8X0EBTVW6KN327EE', name: 'VS Code extension', status: 'operational' },
+          { id: '01JVCV8YSWZFRSM1G5CVP253SK', name: 'Codex Web', status: 'operational' },
+          { id: CODEX_IN_CHATGPT_DESKTOP, name: 'Codex in ChatGPT Desktop', status: 'partial_outage' },
+        ],
+      }
+      expect(determineSvcStatus(codex as unknown as StatusConfig, summary, [])).toBe('operational')
+      // ChatGPT, which now owns the component, correctly reflects the same partial as degraded.
+      expect(determineSvcStatus(chatgpt as unknown as StatusConfig, summary, [])).toBe('degraded')
+    })
+
+    it('codex still degrades when a genuine Codex-product surface is impaired', () => {
+      const summary: SummaryData = {
+        status: { indicator: 'minor' },
+        components: [
+          { id: '01KMP3KP5MGE23B80K1EK4S8PV', name: 'Codex API', status: 'partial_outage' },
+          { id: '01KMKFAMWKNQ84Z1766MV08ZDE', name: 'CLI', status: 'operational' },
+          { id: '01KMP3KP5M8X0EBTVW6KN327EE', name: 'VS Code extension', status: 'operational' },
+          { id: '01JVCV8YSWZFRSM1G5CVP253SK', name: 'Codex Web', status: 'operational' },
+        ],
+      }
+      expect(determineSvcStatus(codex as unknown as StatusConfig, summary, [])).toBe('degraded')
+    })
+  })
+
+  describe('with displayAllComponents dynamic worst-of (#992) — Cerebras shape', () => {
+    // Cerebras: displayAllComponents + statusComponentId (uptime primary), NO statusComponentIds.
+    const config: StatusConfig = { displayAllComponents: true, statusComponentId: 'dev' }
+
+    it('worst-ofs EVERY shown component, so a brand-new/untracked model degrades the badge', () => {
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'dev', name: 'Developer Console', status: 'operational' },
+          { id: 'm1', name: 'GPT-OSS-120B', status: 'operational' },
+          { id: 'newmodel', name: 'Gemma4-31B-Multimodal', status: 'partial_outage' }, // in no allowlist
+        ],
+      }
+      expect(determineSvcStatus(config, summary, [])).toBe('degraded')
+    })
+
+    it('down wins across components', () => {
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'dev', name: 'Developer Console', status: 'operational' },
+          { id: 'm1', name: 'GPT-OSS-120B', status: 'major_outage' },
+        ],
+      }
+      expect(determineSvcStatus(config, summary, [])).toBe('down')
+    })
+
+    it('all operational → operational', () => {
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'dev', name: 'Developer Console', status: 'operational' },
+          { id: 'm1', name: 'GPT-OSS-120B', status: 'operational' },
+        ],
+      }
+      expect(determineSvcStatus(config, summary, [])).toBe('operational')
+    })
+
+    it('does NOT pin the badge to the single statusComponentId component (the branch-3 hazard)', () => {
+      // Developer Console (the uptime primary) is operational, but a model is down. If the single-
+      // component branch ran, the badge would read operational — the exact regression #992 avoids.
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'dev', name: 'Developer Console', status: 'operational' },
+          { id: 'm1', name: 'GPT-OSS-120B', status: 'major_outage' },
+        ],
+      }
+      expect(determineSvcStatus(config, summary, [])).toBe('down')
+    })
+
+    it('componentDenylist components cannot degrade the badge', () => {
+      const cfg: StatusConfig = { displayAllComponents: true, componentDenylist: ['Docs'] }
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'a', name: 'API', status: 'operational' },
+          { id: 'docs', name: 'Docs', status: 'major_outage' },
+        ],
+      }
+      expect(determineSvcStatus(cfg, summary, [])).toBe('operational')
+    })
+
+    it('BFL keeps its curated statusComponentIds worst-of even WITH displayAllComponents (branch order: #379 before #992)', () => {
+      // BFL has both flags: the badge must stay scoped to statusComponentIds, so an untracked
+      // component (e.g. Image Generation Services) cannot flip it — the dynamic branch must NOT win.
+      const cfg: StatusConfig = { displayAllComponents: true, statusComponentIds: ['a'], componentDenylist: [] }
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'a', name: 'API', status: 'operational' },
+          { id: 'b', name: 'Untracked', status: 'major_outage' },
+        ],
+      }
+      expect(determineSvcStatus(cfg, summary, [])).toBe('operational')
+    })
+
+    it('a no-id displayAllComponents service (cohere/groq) stays on the OVERALL indicator, not the dynamic worst-of (branch-1 precedence — a Playground blip must not flip the API badge)', () => {
+      const cfg: StatusConfig = { displayAllComponents: true, componentDenylist: ['Docs', 'Website'] }
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: 'a', name: 'API', status: 'operational' },
+          { id: 'b', name: 'Playground', status: 'major_outage' }, // would degrade IF worst-of applied
+        ],
+      }
+      expect(determineSvcStatus(cfg, summary, [])).toBe('operational') // overall 'none' wins
+    })
+  })
 })
 
 describe('worstStatus helper (#379)', () => {
@@ -550,7 +702,8 @@ describe('displayComponentIds config sanity (#606)', () => {
   })
 
   // #606 Category B — shared status.openai.com page split across 3 services by the official groups.
-  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 12, chatgpt: 11, codex: 5 }
+  // #1008: "Codex in ChatGPT Desktop" moved from codex (5→4) to its official ChatGPT group (11→12).
+  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 12, chatgpt: 12, codex: 4 }
 
   // #693 follow-up — openai/chatgpt/codex now SCOPE the badge to their official-group components
   // via a worst-of statusComponentIds (was: no statusComponentIds → overall page indicator). This
@@ -658,7 +811,7 @@ describe('displayComponentIds config sanity (#606)', () => {
     const all = lists.flat()
     // Every id assigned to exactly one service → flat length === unique count.
     expect(new Set(all).size).toBe(all.length)
-    expect(all.length).toBe(12 + 11 + 5)
+    expect(all.length).toBe(12 + 12 + 4) // #1008: moved "Codex in ChatGPT Desktop" codex(5→4) → chatgpt(11→12)
   })
 
   // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing
@@ -698,8 +851,10 @@ describe('displayComponentIds config sanity (#606)', () => {
     expect(has('openai', '01KKAD7C71MCCH3FTREMJH4AAS'), 'FedRAMP NOT in openai').toBe(false)
     expect(has('openai', '01KTQBYVARFJ5KMCSECM06VKCF'), 'Ads Manager NOT in openai').toBe(false)
     expect(has('chatgpt', '01JNKS9D9S72PMP1938PVFFQN4'), 'Compliance API NOT in chatgpt').toBe(false)
-    // App is Codex.
-    expect(has('codex', '01KMKFAMWKQ81YWSE1Z18R6VHR'), 'App → codex').toBe(true)
+    // #1008 — "Codex in ChatGPT Desktop" is a ChatGPT-group surface (Codex inside the ChatGPT
+    // desktop app), NOT a Codex-product component. It was mis-attributed to codex; now under chatgpt.
+    expect(has('chatgpt', '01KMKFAMWKQ81YWSE1Z18R6VHR'), 'Codex in ChatGPT Desktop → chatgpt').toBe(true)
+    expect(has('codex', '01KMKFAMWKQ81YWSE1Z18R6VHR'), 'Codex in ChatGPT Desktop NOT in codex').toBe(false)
     // The two Logins are distinct ids (ChatGPT login vs API login) — both present, no collision.
     expect(has('chatgpt', '01JMXBNJXG1S2D9V65P1ZZTD94'), 'ChatGPT Login → chatgpt').toBe(true)
   })
@@ -759,20 +914,16 @@ describe('SERVICES multi-component config sanity (#379)', () => {
     expect(ws.statusComponentIds).toEqual(['r5wf1ykd7y1m', '8q19cygxvshj'])
   })
 
-  it('cerebras tracks all 5 model/console components, Developer Console primary (#391)', () => {
-    // First `category: 'api'` service to use worst-of multi-component (#379). The
-    // per-model components mean a single model degrading marks Cerebras degraded —
-    // "simplifying" this back to single-component would silently re-introduce the
-    // model-specific-outage under-reporting the seo-content insight/FAQ promise users.
+  it('cerebras runs DYNAMIC (displayAllComponents), not a stale allowlist — churny per-model page (#992)', () => {
+    // Was a 5-id statusComponentIds allowlist (#391/#379); the lineup churned (2 ids went dead + a new
+    // Gemma4-31B-Multimodal appeared untracked), so it's now displayAllComponents like cohere/groq: the
+    // breakdown lists every live component and the #992 dynamic worst-of drives the badge, so a model
+    // added/retired needs no config edit. statusComponentId stays the uptime/calendar/miss primary.
     const cb = SERVICES.find((s) => s.id === 'cerebras')!
     expect(cb.statusComponentId).toBe('83h1cchw4vs4') // Developer Console — primary for uptime parsing
-    expect(cb.statusComponentIds).toEqual([
-      '83h1cchw4vs4', // Developer Console
-      '7xvps6c9lqwc', // Llama3.1-8B
-      'bhqw2gr7r710', // Qwen-3-235B-Instruct-2507
-      'hgfykfsb36gn', // GPT-OSS-120B
-      '8ygyx5vydlm2', // ZAI-GLM-4.7
-    ])
+    expect(cb.displayAllComponents).toBe(true)
+    expect(cb.componentSurfaces).toContain('Developer Console')
+    expect(cb.statusComponentIds).toBeUndefined() // allowlist dropped
   })
 
   it('primary statusComponentId always appears as the first entry of statusComponentIds', () => {
@@ -856,12 +1007,13 @@ describe('ChatGPT without statusComponentId (#292)', () => {
     // cross-contamination protection (no statusComponentId → overall-indicator path + the "no relevant
     // incident → operational" guard) with a STRONGER one: the badge follows chatgpt's OWN components,
     // so an OpenAI-API page-level state (e.g. FedRAMP degraded) can't flip it — the API components
-    // aren't in chatgpt's set. incidentExclude stays absent so incidentKeywords remains the sole filter.
+    // aren't in chatgpt's set. incidentKeywords is the positive filter; incidentExclude carries ONLY
+    // the #990 environment-scope veto ('fedramp'), which runs before the keyword match.
     expect(chatgptConfig).toBeDefined()
     expect(chatgptConfig.statusComponentId).toBe('01JMXBNJXGV1T5GT2M9XA83XNG') // Conversations (primary)
     expect(chatgptConfig.statusComponentIds).toBeDefined()
     expect(chatgptConfig.statusComponent).toBeUndefined()
-    expect(chatgptConfig.incidentExclude).toBeUndefined()
+    expect(chatgptConfig.incidentExclude).toEqual(['fedramp']) // #990 environment-scope veto only
     expect(chatgptConfig.incidentKeywords).toContain('chatgpt')
     expect(chatgptConfig.incidentKeywords).toContain('conversation')
   })
@@ -960,11 +1112,12 @@ describe('OpenAI Codex without statusComponentId (#294)', () => {
     expect(codexConfig.provider).toBe('OpenAI')
     // #693 follow-up: codex now scopes its badge to its own surfaces (Codex API/CLI/VS Code/Web/App)
     // via a worst-of statusComponentIds, replacing the old overall-indicator + cross-contamination
-    // guard (#294) with direct component-scoping. incidentExclude stays absent (incidentKeywords only).
+    // guard (#294) with direct component-scoping. incidentKeywords is the positive filter;
+    // incidentExclude carries ONLY the #990 environment-scope veto ('fedramp').
     expect(codexConfig.statusComponentId).toBe('01KMP3KP5MGE23B80K1EK4S8PV') // Codex API (primary)
     expect(codexConfig.statusComponentIds).toBeDefined()
     expect(codexConfig.statusComponent).toBeUndefined()
-    expect(codexConfig.incidentExclude).toBeUndefined()
+    expect(codexConfig.incidentExclude).toEqual(['fedramp']) // #990 environment-scope veto only
     // incidentIoComponentId = Codex API (#301) — kept as fallback if the group
     // lookup ever fails. incidentIoGroupId = Codex group (#367) — primary uptime
     // source, matching what OpenAI publishes on status.openai.com (Codex

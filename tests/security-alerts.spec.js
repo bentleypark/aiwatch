@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 const RECENT_ALERT = {
   title: 'xAI API key leaked on GitHub',

@@ -82,8 +82,9 @@ const en = {
   'overview.banner.affected': '{n} services affected',
   // #574 — supply-chain correlation banner (AWS region degraded + dependent AI service degraded)
   'supplychain.title': 'AWS infrastructure issue',
-  // Confirmed by the service ITSELF: these are degraded AND their own status page attributes the
-  // issue to AWS / an upstream provider (StatusGator-style cross-check) — not a mere timing coincidence.
+  // Confirmed by the service ITSELF: these are degraded AND their own status page names an AWS region
+  // that AWS reports degraded (#1000 region-aware cross-check) — not a mere timing coincidence. A
+  // region-less "upstream provider" mention no longer qualifies; the region match is the whole point.
   'supplychain.affectingNow': 'Degraded · AWS-attributed:',
   'supplychain.mayAffect': 'Other AWS-dependent · may be affected:',
   'supplychain.region.degraded': 'degraded',
@@ -260,6 +261,10 @@ const en = {
   'svc.sourceDead.title': 'Status source unavailable',
   'svc.sourceDead.body': "This provider's status page is inactive, so its operational status can't currently be confirmed. Live status, uptime, and incidents resume automatically when the source recovers.",
   'svc.sourceDead.bodyProbe': "This provider's status page is inactive, but its API still responds to AIWatch's direct probe — so the service is shown as operational. Uptime and incidents resume when the source recovers.",
+  // #1004 — make clear this is OUR read failing, not the provider's service being impaired. sourceUnknown
+  // covers timeouts and 5xx as well as unparseable bodies, so don't claim we "parsed and failed".
+  'svc.sourceUnknown.title': 'Status source unreadable',
+  'svc.sourceUnknown.body': "AIWatch can't read this provider's status page — it may have moved, or be erroring or timing out. It does NOT mean the service is impaired: it means AIWatch can't currently confirm its status. Live status resumes automatically when the source is readable again.",
   'svc.components.title': 'Component Status',
   'svc.components.sub': 'Per-component breakdown from the official status page',
   'svc.components.groupCount': '{n} components',

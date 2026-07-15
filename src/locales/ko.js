@@ -82,7 +82,8 @@ const ko = {
   'overview.banner.affected': '{n}개 서비스 장애',
   // #574 — 공급망 상관 배너 (AWS 리전 저하 + 의존 AI 서비스 저하)
   'supplychain.title': 'AWS 인프라 이슈',
-  // 서비스 자신이 확인: 저하 + 자체 상태페이지가 원인을 AWS/upstream으로 명시(StatusGator식 크로스체크) — 단순 시간 우연 아님.
+  // 서비스 자신이 확인: 저하 + 자체 상태페이지가 AWS가 실제로 degraded로 보고하는 리전을 지목(#1000 리전 대조) — 단순 시간 우연 아님.
+  // 리전 없는 'upstream provider' 언급만으로는 더 이상 귀속되지 않는다 (리전 일치가 핵심).
   'supplychain.affectingNow': '저하 · AWS 귀속 확인:',
   'supplychain.mayAffect': 'AWS 의존 · 영향 가능:',
   'supplychain.region.degraded': '성능 저하',
@@ -259,6 +260,10 @@ const ko = {
   'svc.sourceDead.title': '상태 출처 비활성화',
   'svc.sourceDead.body': '이 서비스의 공식 상태 페이지가 비활성화되어 현재 운영 상태를 확인할 수 없습니다. 실시간 상태·업타임·인시던트는 출처가 복구되면 자동으로 갱신됩니다.',
   'svc.sourceDead.bodyProbe': '이 서비스의 공식 상태 페이지는 비활성화됐지만, AIWatch가 API 엔드포인트를 직접 확인한 결과 정상 응답하고 있어 운영 중으로 표시합니다. 업타임·인시던트는 출처가 복구되면 다시 제공됩니다.',
+  // #1004 — 우리 읽기가 실패한 것이지 서비스가 장애인 게 아니라는 점을 분명히. sourceUnknown은 파싱 실패뿐
+  // 아니라 타임아웃·5xx도 포함하므로("해석하지 못했습니다"로 단정하면 거짓), 원인을 열어둔 문구를 쓴다.
+  'svc.sourceUnknown.title': '상태 출처를 읽을 수 없음',
+  'svc.sourceUnknown.body': 'AIWatch가 이 서비스의 공식 상태 페이지를 읽지 못하고 있습니다 — 페이지가 이전됐거나, 오류·응답 지연일 수 있습니다. 서비스에 장애가 있다는 뜻이 아니라, AIWatch가 현재 상태를 확인할 수 없다는 뜻입니다. 출처가 복구되면 자동으로 갱신됩니다.',
   'svc.components.title': '구성요소 상태',
   'svc.components.sub': '공식 상태 페이지의 구성요소별 상태',
   'svc.components.groupCount': '구성요소 {n}개',

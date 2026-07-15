@@ -179,6 +179,17 @@ describe('buildRssFeed — resolved item "predicted vs actual" (#827 F4)', () =>
     const xml = buildRssFeed([service({ incidents: [resolvedInc] })], { scope: 'all' }, NOW, ai)
     expect(xml).toContain('🎯 AI prediction: 2h 44m (over ~1h est.)') // actual 2h44m exceeded the ~1h estimate
   })
+  it('#1003 — scores against the FIRST estimate, not the re-analysis-inflated current one', () => {
+    // The Pinecone shape: first estimated 1h, re-estimated 15h once it outran that, actual 2h 44m.
+    // Scoring against the current 15h would ship "faster than ~15h est." — a fabricated win.
+    const ai: RssAiAnalysisMap = { claude: [{
+      incidentId: 'r1', summary: 's', estimatedRecovery: '8–15h',
+      estimatedRecoveryHours: 15, firstEstimatedRecoveryHours: 1, affectedScope: [],
+    }] }
+    const xml = buildRssFeed([service({ incidents: [resolvedInc] })], { scope: 'all' }, NOW, ai)
+    expect(xml).toContain('🎯 AI prediction: 2h 44m (over ~1h est.)')
+    expect(xml).not.toContain('faster than ~15h est.')
+  })
   it('omits the line when no analysis / no numeric estimate', () => {
     const xml = buildRssFeed([service({ incidents: [resolvedInc] })], { scope: 'all' }, NOW)
     expect(xml).not.toContain('AI prediction:')

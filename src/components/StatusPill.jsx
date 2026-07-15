@@ -15,7 +15,7 @@ const PILL_CLASS = {
   unknown:     'bg-[var(--bg3)] text-[var(--text2)]', // #689 — status source inactive: can't confirm
 }
 
-export default function StatusPill({ status = 'operational', partialCount = 0, sourceDead = false }) {
+export default function StatusPill({ status = 'operational', partialCount = 0, sourceDead = false, sourceUnknown = false }) {
   const { t } = useLang()
   // #689 — when the status source is inactive (4xx / deactivated page) AIWatch cannot confirm the
   // service's status, so show a NEUTRAL "Unknown" pill rather than a misleading green "Operational"
@@ -28,8 +28,11 @@ export default function StatusPill({ status = 'operational', partialCount = 0, s
   // service to degraded or fire a degraded alert (those key off `status`). It does NOT shield the
   // Score/ranking from the real outage: that already flows in via uptime/incidents (server-side,
   // intended). resolveStatusDisplay also maps sourceDead → 'unknown' (#689) so a dead-source pill
-  // never reads partial (component counts aren't trustworthy then).
-  const effective = resolveStatusDisplay(status, partialCount, sourceDead)
+  // never reads partial (component counts aren't trustworthy then), and #1004 maps an INDETERMINATE
+  // source read (sourceUnknown + the worker's fetch-failure `degraded`) to the same neutral pill —
+  // "we can't read the source" is not "the service is impaired". Junie shipped a false amber `degraded`
+  // badge on exactly that confusion, while JetBrains reported all-green.
+  const effective = resolveStatusDisplay(status, partialCount, sourceDead, sourceUnknown)
   const isPartial = effective === 'partial'
   const cls = PILL_CLASS[effective] ?? PILL_CLASS.operational
 

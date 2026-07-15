@@ -8,6 +8,7 @@ import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
 import { SERVICE_CATEGORIES, ALL_SERVICES_FEED_URL, categoryRankOf } from '../utils/constants'
 import { isUnreliableUptime } from '../utils/serviceReliability'
+import { displayStatusOf, isDisplayAffected } from '../utils/statusDisplay'
 import RssCopyIcon from './RssCopyIcon'
 
 const EMPTY = []
@@ -124,8 +125,10 @@ const DASHBOARD_ITEMS = [
 
 const STATUS_DOT_CLASS = {
   operational: 'bg-[var(--green)]',
+  partial: 'bg-[var(--yellow)]',
   degraded: 'bg-[var(--amber)]',
   down: 'bg-[var(--red)]',
+  unknown: 'bg-[var(--bg3)]', // #1004 — status source unreadable: neutral, not amber
 }
 
 function uptimeBadgeCls(uptime) {
@@ -143,11 +146,14 @@ const uptimeBadgeStyle = { ...badgeStyle, whiteSpace: 'nowrap', minWidth: '46px'
 
 function ServiceNavItem({ svc, page, setPage, onNavigate }) {
   const active = page.name === 'service' && page.serviceId === svc.id
-  const dotClass = STATUS_DOT_CLASS[svc.status] ?? STATUS_DOT_CLASS.operational
+  // #1004 — the DISPLAY state, so a service whose status source we can't read shows a neutral dot
+  // instead of the amber "degraded" one the card next to it has already stopped showing.
+  const display = displayStatusOf(svc)
+  const dotClass = STATUS_DOT_CLASS[display] ?? STATUS_DOT_CLASS.operational
   const hasUptime = svc.uptime30d != null && !isUnreliableUptime(svc) // #591 — hide frozen stale uptime too
   const badgeCls = hasUptime ? uptimeBadgeCls(svc.uptime30d) : 'bg-[var(--bg3)] text-[var(--text2)]'
-  const statusTextCls = svc.status === 'degraded' ? 'text-[var(--amber)]'
-    : svc.status === 'down' ? 'text-[var(--red)]' : null
+  const statusTextCls = display === 'degraded' ? 'text-[var(--amber)]'
+    : display === 'down' ? 'text-[var(--red)]' : null
 
   return (
     <button
@@ -191,7 +197,7 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
   // raw worker order (api → apps → agents). Stable sort keeps the worker order WITHIN each bucket.
   const orderedServices = [...categoryServices].sort((a, b) => categoryRankOf(a.id) - categoryRankOf(b.id))
 
-  const issueCount = useMemo(() => services.filter((s) => s.status !== 'operational').length, [services])
+  const issueCount = useMemo(() => services.filter(isDisplayAffected).length, [services])
   // Count only unresolved incidents (investigating/identified/monitoring), deduplicated
   const incidentCount = useMemo(() => {
     const seen = new Set()

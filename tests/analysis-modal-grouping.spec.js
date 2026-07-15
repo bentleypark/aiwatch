@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 // Same service, two distinct incidents — exercises the per-svcId merge path in AnalysisModal.
 // Regression guard for #315 (duplicate service name + duplicate fallback list).

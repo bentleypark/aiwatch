@@ -160,6 +160,75 @@ export function parseIncidentIoComponentImpacts(html: string, componentId: strin
   return result
 }
 
+// #1004 — incident.io's Statuspage-compatible API returns `components: []` on EVERY incident. Verified
+// across every incident.io page we monitor: status.jetbrains.cloud 0/14, status.smith.langchain.com
+// 0/25, status.langfuse.com 0/25, status.openai.com 0/25. So `parseIncidents` yields no
+// `componentNames`, and a service scoped by `incidentComponents` (an exact component-NAME allowlist,
+// #683) drops EVERY incident — permanently and silently, since the `includeUntaggedIncidents` valve is
+// gated on `incidentKeywords`, which such a service does not set. Junie hit exactly this when JetBrains
+// moved to incident.io: it would have traded a false `degraded` for a service that could never report
+// an incident again (no dashboard list, no Discord alert, no RSS, and a spotless Score).
+//
+// The mapping is not lost, just not in the JSON: the page HTML's `component_impacts` carries
+// `status_page_incident_id` → `component_id`, and that incident id is the SAME id the v2 API returns
+// (verified: 13/14 of the JetBrains incidents join). So rebuild the tags from the HTML.
+//
+// Returns incidentId → component ids (deduped). Empty when the page has no impacts array — callers
+// must treat that as "no information", never as "no components".
+export function parseIncidentIoIncidentComponentIds(html: string): Record<string, string[]> {
+  const result: Record<string, string[]> = {}
+  const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
+  for (const chunk of chunks) {
+    if (!chunk.includes('component_impacts')) continue
+    const idx1 = chunk.indexOf('component_impacts')
+    const idx2 = chunk.indexOf('component_uptimes')
+    if (idx1 === -1 || idx2 === -1 || idx2 <= idx1) continue
+    const segment = chunk.substring(idx1, idx2)
+    const arrStart = segment.indexOf('[')
+    const arrEnd = segment.lastIndexOf(']')
+    if (arrStart === -1 || arrEnd === -1) continue
+    const raw = segment.substring(arrStart, arrEnd + 1).replace(/\\"/g, '"').replace(/"\$undefined"/g, 'null')
+    try {
+      const impacts = JSON.parse(raw) as Array<{ component_id?: string; status_page_incident_id?: string }>
+      for (const impact of impacts) {
+        const incId = impact.status_page_incident_id
+        const compId = impact.component_id
+        if (!incId || !compId) continue
+        const ids = (result[incId] ??= [])
+        if (!ids.includes(compId)) ids.push(compId)
+      }
+    } catch (err) {
+      // `continue`, not `break`: a malformed first chunk must not hide a well-formed later one. (The
+      // sibling parsers break here; this one carries incident SCOPING, where a silent empty result
+      // drops every incident — so it keeps scanning.)
+      console.warn('[parseIncidentIoIncidentComponentIds] parse failed:', err instanceof Error ? err.message : err)
+      continue
+    }
+    break
+  }
+  return result
+}
+
+/** #1004 — restore the `componentNames` that incident.io's JSON API drops, from the page HTML (see
+ *  `parseIncidentIoIncidentComponentIds`). Only fills incidents that have NO names — an API that starts
+ *  populating them again wins. Unknown component ids are skipped rather than emitted raw, so a name
+ *  allowlist can never match a ULID. Pure; must run BEFORE `filterIncidents` (#940 — a transform after
+ *  the filter is a no-op on already-dropped incidents). */
+export function attachIncidentIoComponentNames(
+  incidents: Incident[],
+  html: string,
+  components: ReadonlyArray<{ id: string; name: string }>,
+): Incident[] {
+  const idsByIncident = parseIncidentIoIncidentComponentIds(html)
+  if (Object.keys(idsByIncident).length === 0) return incidents
+  const nameById = new Map(components.map((c) => [c.id, c.name]))
+  return incidents.map((inc) => {
+    if ((inc.componentNames ?? []).length > 0) return inc
+    const names = (idsByIncident[inc.id] ?? []).map((id) => nameById.get(id)).filter((n): n is string => !!n)
+    return names.length > 0 ? { ...inc, componentNames: names } : inc
+  })
+}
+
 interface IncidentIoUpdate {
   stage: TimelineEntry['stage']
   text: string

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 
 const SHARED_INCIDENT = {
   id: 'shared-inc-123',

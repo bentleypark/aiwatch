@@ -129,6 +129,41 @@ describe('renderAIInsight — predicted vs actual (#827 F4)', () => {
   })
 })
 
+describe('renderAIInsight — scored against the FIRST estimate (#1003)', () => {
+  // This public SEO card renders the same verdict as the Discord recovery embed, /feed and the
+  // dashboard modal, so it must grade on the same baseline. Pinecone: first estimated 1–4h, re-estimated
+  // ~15h once it outran that, actually recovered in 4h 55m. Grading against the CURRENT (re-analysis-
+  // inflated) estimate turned that miss into "faster than ~15h est." — a fabricated win.
+  const pinecone = {
+    summary: 'Freshness lag in some serverless namespaces.',
+    estimatedRecovery: '8–15h', estimatedRecoveryHours: 15, firstEstimatedRecoveryHours: 4,
+    affectedScope: ['Pinecone Serverless'],
+    analyzedAt: new Date(Date.now() - 30 * 60000).toISOString(),
+    startedAt: new Date(Date.now() - 295 * 60000).toISOString(), // 4h 55m before resolution
+    resolvedAt: new Date().toISOString(),
+  }
+
+  it('renders the honest near-miss, not the inflated win', () => {
+    const html = renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [], pinecone)
+    expect(html).toContain('4h 55m (over ~4h est.)')
+    expect(html).not.toContain('faster than ~15h est.')
+  })
+
+  it('falls back to the current estimate for a pre-#1003 analysis (no first field)', () => {
+    const { firstEstimatedRecoveryHours: _drop, ...preFix } = pinecone
+    const html = renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [], preFix)
+    expect(html).toContain('4h 55m (faster than ~15h est.)')
+  })
+
+  it('an ACTIVE incident still shows the CURRENT estimate (a visitor needs the live ETA)', () => {
+    const { resolvedAt: _r, ...active } = pinecone
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [], active)
+    expect(html).toContain('Est. Recovery:')
+    expect(html).toContain('8–15h')          // the re-anchored ETA, not the superseded 1–4h
+    expect(html).not.toContain('Predicted vs actual:')
+  })
+})
+
 describe('renderAIInsight — multiple active incidents (#926, dashboard-modal parity)', () => {
   const mkInsight = (over: Partial<{ summary: string; incidentTitle: string; affectedScope: string[] }> = {}) => ({
     summary: over.summary ?? 'Elevated error rates on model inference.',

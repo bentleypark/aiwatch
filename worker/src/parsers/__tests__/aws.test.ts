@@ -594,4 +594,14 @@ describe('parseAwsRegionHealth (#574)', () => {
     expect(parseAwsRegionHealth(null)).toEqual({})
     expect(parseAwsRegionHealth([])).toEqual({})
   })
+
+  it('passes `global` through as a region key (Route 53 / IAM / CloudFront / STS)', () => {
+    // The PARSER keeps the key. The #1000 supply-chain gate then deliberately never correlates it:
+    // `awsRegionsNamedByService` only emits <area>-<direction>-<n> tokens, so `global` can never enter
+    // the intersection. A wildcard ("degraded everywhere → it can't contradict anyone") was implemented
+    // and REVERTED — it let a CloudFront advisory attribute Pinecone's routine us-east-1 lag, i.e. #1000
+    // again. Do not wire one up: see supply-chain.test.ts › 'global AWS events (deliberately do NOT correlate)'.
+    const out = parseAwsRegionHealth([ev({ region: 'global', service: 'ROUTE53', typeCode: 'AWS_ROUTE53_OPERATIONAL_ISSUE' })])
+    expect(Object.keys(out)).toEqual(['global'])
+  })
 })

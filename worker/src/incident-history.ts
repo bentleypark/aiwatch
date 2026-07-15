@@ -35,8 +35,11 @@ export interface IncidentHistoryRecord {
   resolvedAt: string
   /** Actual duration in minutes (startedAt → resolvedAt). */
   durationMin: number
-  /** AI-predicted recovery, upper bound of the range in hours (from
-   *  AIAnalysisResult.estimatedRecoveryHours). Absent when no analysis. */
+  /** AI-predicted recovery, upper bound of the range in hours — the FIRST estimate made for the
+   *  incident (`scoringBaselineHours` → `AIAnalysisResult.firstEstimatedRecoveryHours`, falling back
+   *  to `estimatedRecoveryHours` for pre-#1003 analyses). Explicitly NOT the current estimate: a
+   *  re-analysis only fires on an incident that outran its prediction and can only raise the bound,
+   *  so grading against it scored every miss as a win (#1003). Absent when no analysis. */
   predictedRecoveryHours?: number
   /** AI summary text at resolution. Absent when no analysis. */
   predictedSummary?: string
@@ -70,6 +73,37 @@ export function durationMinOf(startedAt: string, resolvedAt: string): number {
  *  Pure — reused by the prompt grounding (PR-B) and the monthly accuracy
  *  aggregate (Feature 1). */
 export type AccuracyVerdict = 'accurate' | 'over-predicted' | 'under-predicted' | 'unknown'
+
+/**
+ * #1003 — the estimate a resolved incident is SCORED against: the first, hindsight-free prediction.
+ *
+ * `estimatedRecoveryHours` is the CURRENT estimate, which re-analysis ratchets upward once an
+ * incident outruns its own prediction (the re-analysis prompt forbids an upper bound below the
+ * elapsed hours). Scoring against it inverted the verdict on exactly the incidents the model got
+ * wrong: Pinecone was first estimated 1–4h, re-estimated ~15h at the 4h mark, recovered at 4h 55m,
+ * and shipped as "faster than ~15h est." — a win, when it was really a near-miss over the 4h bound.
+ *
+ * Every surface that compares predicted-vs-actual (Discord recovery embed, Slack /feed, the durable
+ * history corpus and the accuracy aggregate + RAG grounding built from it) reads this. Live surfaces
+ * — the ongoing-incident ETA, `recoveryExceeded` — must keep using `estimatedRecoveryHours`.
+ *
+ * Falls back to the current estimate when no first estimate was recorded (analyses written before
+ * this shipped), so an in-flight incident at deploy time still gets a comparison line.
+ *
+ * NOTE the SPA mirror (`baselineHoursFrom`) has one extra fallback rung: it also parses the display
+ * STRING ("2–4h" → 4) when no numeric field exists at all. That asymmetry predates #1003 (the worker
+ * has never string-parsed here) and only shows on analyses old enough to lack `estimatedRecoveryHours`
+ * entirely, which the 1h/2h TTL makes vanishingly rare — a very old analysis can therefore render a
+ * comparison in the modal that Discord/`/feed`/the corpus omit.
+ */
+export function scoringBaselineHours(
+  analysis: { estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number } | null | undefined,
+): number | null {
+  const first = analysis?.firstEstimatedRecoveryHours
+  if (typeof first === 'number' && first > 0) return first
+  const current = analysis?.estimatedRecoveryHours
+  return typeof current === 'number' && current > 0 ? current : null
+}
 
 export function accuracyOf(rec: { predictedRecoveryHours?: number; durationMin: number }): AccuracyVerdict {
   const predicted = rec.predictedRecoveryHours
@@ -113,12 +147,15 @@ const MAX_SUMMARY = 500
 export function buildHistoryRecord(
   svc: { id: string; provider: string; category: 'api' | 'app' | 'agent' },
   inc: { id: string; title?: string; impact?: 'minor' | 'major' | 'critical' | null; status: string; startedAt?: string; resolvedAt?: string | null },
-  analysis: { estimatedRecoveryHours?: number; summary?: string; affectedScope?: string[]; model?: string } | null,
+  analysis: { estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; summary?: string; affectedScope?: string[]; model?: string } | null,
   now: string,
 ): IncidentHistoryRecord | null {
   if (!inc.startedAt) return null
   if (inc.status !== 'resolved' && inc.status !== 'monitoring') return null
   const resolvedAt = inc.resolvedAt ?? now
+  // #1003 — the durable record is the ledger the accuracy aggregate AND the RAG grounding are built
+  // from, so it must store the hindsight-free baseline, not the re-analysis-inflated current estimate.
+  const predicted = scoringBaselineHours(analysis)
   return {
     svcId: svc.id,
     incId: inc.id,
@@ -129,7 +166,7 @@ export function buildHistoryRecord(
     startedAt: inc.startedAt,
     resolvedAt,
     durationMin: durationMinOf(inc.startedAt, resolvedAt),
-    ...(analysis?.estimatedRecoveryHours != null && { predictedRecoveryHours: analysis.estimatedRecoveryHours }),
+    ...(predicted != null && { predictedRecoveryHours: predicted }),
     ...(analysis?.summary && { predictedSummary: analysis.summary.slice(0, MAX_SUMMARY) }),
     ...(analysis?.affectedScope?.length ? { affectedScope: analysis.affectedScope } : {}),
     ...normalizeModel(analysis?.model),
@@ -295,14 +332,19 @@ export function resolvedAtOf(inc: Incident): string {
 /** #846 — plain-text "🎯 AI prediction: …" line for the Discord Incident-Resolved embed, matching
  *  the Slack `/feed` line (rss.ts `descHtml`). Returns null when the analysis carried no numeric
  *  estimate (model returned `N/A`/unparseable, or no analysis existed) — the line is omitted rather
- *  than fabricating a comparison. `actual` = startedAt→resolvedAtOf, identical to the /feed side. */
+ *  than fabricating a comparison. `actual` = startedAt→resolvedAtOf, identical to the /feed side.
+ *
+ *  #1003 — takes the ANALYSIS, not a bare number, so a caller cannot hand it the re-analysis-inflated
+ *  `estimatedRecoveryHours`: the baseline choice lives in `scoringBaselineHours` and the type checker
+ *  enforces it at every call site. */
 export function resolvedPredictionLine(
-  estimatedRecoveryHours: number | null | undefined,
+  analysis: { estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number } | null | undefined,
   inc: Incident,
 ): string | null {
-  if (estimatedRecoveryHours == null) return null
+  const predicted = scoringBaselineHours(analysis)
+  if (predicted == null) return null
   const pva = predictedVsActualText({
-    predictedRecoveryHours: estimatedRecoveryHours,
+    predictedRecoveryHours: predicted,
     durationMin: durationMinOf(inc.startedAt, resolvedAtOf(inc)),
   })
   return pva ? `🎯 AI prediction: ${pva}` : null

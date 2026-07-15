@@ -194,6 +194,39 @@ export function computeMedianRtt(snapshots: ProbeSnapshot[], serviceId: string):
  * Returns false if probes show spikes/failures or no recent data exists.
  * Conservative: returns false (don't override) when data is insufficient.
  */
+/** #1004 — does our own probe INDEPENDENTLY corroborate an outage? A fetch-failure `degraded` renders as
+ *  a neutral "unknown" badge ("we can't read the source") — but that would be a false reassurance when
+ *  the service is probed and the probe is failing, so this is the flag that keeps such a case amber.
+ *
+ *  Deliberately a POSITIVE test, not `!isProbeHealthy`: that negation also swallows "not enough data"
+ *  (one recent sample, no median), so a perfectly healthy service with a single sample would have been
+ *  read as contradicting and the #1004 fix would silently not apply to it. Mirrors `isProbeHealthy`'s
+ *  evidence bar — ≥2 recent samples, majority rule — and requires the samples to be actually BAD:
+ *  a failed probe (`rtt <= 0`, written by `failedProbe()`) or a >3× median spike. The three predicates
+ *  therefore partition the probed set into healthy / failing / not-enough-evidence, and only the middle
+ *  one suppresses the neutral badge. */
+export function isProbeFailing(
+  snapshots: ProbeSnapshot[],
+  serviceId: string,
+  maxAgeMs = 900_000,
+): boolean {
+  const now = Date.now()
+  const recent = snapshots.filter((s) => {
+    const age = now - new Date(s.t).getTime()
+    return age >= 0 && age < maxAgeMs && serviceId in s.data
+  })
+  if (recent.length < 2) return false // not enough evidence to contradict anything
+
+  const median = computeMedianRtt(snapshots, serviceId)
+  // No usable median (every sample failed) → the probe is unambiguously failing.
+  const threshold = median !== null && median > 0 ? median * 3 : Infinity
+  const failing = recent.filter((s) => {
+    const probe = s.data[serviceId]
+    return probe.rtt <= 0 || probe.rtt > threshold
+  }).length
+  return failing >= Math.ceil(recent.length * 2 / 3)
+}
+
 export function isProbeHealthy(
   snapshots: ProbeSnapshot[],
   serviceId: string,

@@ -7,6 +7,10 @@ const STATUS_STYLE: Record<string, { label: string; color: string; bg: string }>
   operational: { label: 'Operational', color: '#3fb950', bg: '#1a3d22' },
   degraded:    { label: 'Degraded',    color: '#e86235', bg: '#3d2a1a' },
   down:        { label: 'Down',        color: '#f85149', bg: '#3d1a1a' },
+  // #1004 — AIWatch could not READ the provider's status page, so the card must not claim a verdict.
+  // This entry is load-bearing, not cosmetic: without it an 'unknown' status hits the `if (!s)` fallback
+  // and the unfurled card would say a confident GREEN "Operational" — worse than the amber it replaces.
+  unknown:     { label: 'Unknown',     color: '#8b949e', bg: '#21262d' },
 }
 
 export function generateOgSvg(service: string, status: string, score: string, uptime: string): string {

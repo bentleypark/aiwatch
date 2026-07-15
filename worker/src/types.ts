@@ -115,6 +115,12 @@ export interface ServiceStatus {
    *  Then the badge stays operational (probe-backed) instead of "Unknown"; the un-probed case
    *  (sourceDead without this) shows "Unknown". Set by the cross-validation in `fetchAllServices`. */
   probeConfirmed?: boolean
+  /** #1004 — set when a fetch-failure `degraded` is CORROBORATED by our own probe (the service is
+   *  probed, and the probe is not healthy). The UI neutralises an unreadable-source `degraded` into an
+   *  "unknown" badge; this flag says "don't — independent evidence backs this outage", so it stays
+   *  amber. Distinct from `probeConfirmed` (which is about `sourceDead` + a HEALTHY probe). Set by the
+   *  cross-validation in `fetchAllServices`. */
+  probeContradicted?: boolean
 }
 
 export type DailyImpactLevel = 'minor' | 'major' | 'critical'
@@ -137,7 +143,7 @@ export interface ServiceConfig {
   incidentKeywords?: string[]
   incidentExclude?: string[]
   // #683 — exact-component-name incident scoping for a SHARED status page where this is the only
-  // AIWatch service but siblings' component incidents leak (Junie on status.jetbrains.ai: a
+  // AIWatch service but siblings' component incidents leak (Junie on the shared JetBrains page: a
   // Grazie-only incident must NOT attribute to Junie). When set, filterIncidents keeps an incident
   // only if its `componentNames` contains an EXACT (case-insensitive) match — NOT substring, so
   // 'AI Platform' can't collide with the sibling 'AI Platform China'. Takes precedence over
