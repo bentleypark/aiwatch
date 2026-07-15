@@ -256,14 +256,27 @@ export async function deleteConfirmed(kv: KVNamespace, hash: string): Promise<vo
   await kvDel(kv, `${SUB_PREFIX}${hash}`)
 }
 
+/** A real subscriber key is `webhook:sub:{sha256hex}` — 64 lowercase hex. Other keys that share the
+ *  SUB_PREFIX — notably the daily `webhook:sub:count:{date}` snapshot (7d TTL) — must NOT be counted
+ *  as subscribers (#1011): the prefix-only list swept them in, inflating the count to `real + ~7`
+ *  (self-compounding, since the daily snapshot writes that inflated length) and polluting the
+ *  growth-series `subscribers` field. Matching the hash shape excludes any such non-hash key. */
+export function isSubscriberHash(hashPart: string): boolean {
+  return /^[0-9a-f]{64}$/.test(hashPart)
+}
+
 /** List all confirmed-sub hashes, paginating the KV `list` cursor until complete (1000 keys/page —
- *  never assume a single call; #486 acceptance criterion). Returns the bare hashes (key minus prefix). */
+ *  never assume a single call; #486 acceptance criterion). Returns the bare hashes (key minus prefix),
+ *  filtered to real subscriber hashes so the `webhook:sub:count:{date}` snapshots don't leak in (#1011). */
 export async function listConfirmedHashes(kv: KVNamespace): Promise<string[]> {
   const hashes: string[] = []
   let cursor: string | undefined
   for (;;) {
     const res = await kv.list({ prefix: SUB_PREFIX, cursor })
-    for (const k of res.keys) hashes.push(k.name.slice(SUB_PREFIX.length))
+    for (const k of res.keys) {
+      const hash = k.name.slice(SUB_PREFIX.length)
+      if (isSubscriberHash(hash)) hashes.push(hash)
+    }
     if (res.list_complete) break
     cursor = res.cursor
     if (!cursor) break
