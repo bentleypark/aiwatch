@@ -214,9 +214,7 @@ export default async function handler(req: Request) {
           langsmith: 6, helicone: 6, langfuse: 6, // Observability (#601) — keep in sync with worker/src/fallback.ts
           stability: 7, bfl: 7, // Image (#756) — keep in sync with worker/src/fallback.ts
           pinecone: 8, turbopuffer: 8, // Vector (#857) — keep in sync with worker/src/fallback.ts
-          claudecode: 11, codex: 11,
-          cursor: 12, windsurf: 12,
-          copilot: 13, junie: 13,
+          claudecode: 11, codex: 11, cursor: 11, windsurf: 11, copilot: 11, junie: 11, // Coding agents (#1027) — one tier; keep in sync with worker/src/fallback.ts
           chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21,
         }
         // Inline tierFor — same warn-once shape as worker/src/fallback.ts and src/utils/constants.js.

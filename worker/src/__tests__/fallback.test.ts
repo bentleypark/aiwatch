@@ -288,21 +288,16 @@ describe('buildGroupedFallbackText', () => {
   })
 })
 
-// #402 — coding-agent tier (T11 CLI / T12 IDE / T13 Plugin) regression coverage.
-// Pre-#402 every agent fell through to `?? 99`, so getFallbacks ordered purely by Score, which let
-// Junie (new service, shallow incident history → inflated Score) appear as #1 for unrelated agents.
-// These tests pin the post-fix contract — same-tier peer ranks above cross-tier peers regardless of
-// Score, so the recommendation matches the affected agent's usage pattern (CLI/IDE/Plugin).
-describe('getFallbacks — coding agent tiers (#402)', () => {
-  // Adversarial Score layout: each tier's "wrong" candidates are given Scores that beat the
-  // correct same-tier peer, so a Score-only sort surfaces them first. Tier-distance sort must
-  // override that bias for the assertions below to pass.
-  //
-  // The two highest-Score services (cursor 99 / junie 95) sit in different tiers (T12 / T13)
-  // intentionally. That way, every "affected → expected #1" assertion below names a service that
-  // is NOT the highest Score in the fixture, so a regression that drops the tier-distance term and
-  // collapses to Score-only ordering provably fails — pinned by the simulator at the bottom of
-  // each test comment.
+// #1027 — coding agents share ONE tier (11). The CLI/IDE/Plugin sub-tiers (11/12/13, added in #402)
+// encoded a delivery-FORM axis that collapsed once every agent shipped both a CLI and an IDE surface,
+// so a single-form label was inaccurate. With all six at tier 11, tier-distance is always 0 and
+// ordering reduces to Score within the agent category (top-2). These tests pin that contract.
+//
+// The #402 "Junie-as-#1 from an inflated Score" failure is now guarded at the SCORE layer (coverage
+// gate #802 + low-confidence withholding #713) rather than by form sub-tiers — a shallow-history
+// agent can't carry a *trusted* Score to the top slot. getFallbacks itself filters on status/incident,
+// not Score/confidence, so these fixtures pass raw Scores and assert the pure Score ordering.
+describe('getFallbacks — coding agents share one tier, Score-ordered (#1027)', () => {
   const agentServices = [
     { id: 'claudecode', category: 'agent', name: 'Claude Code', status: 'operational', aiwatchScore: 70 },
     { id: 'codex',      category: 'agent', name: 'Codex',       status: 'operational', aiwatchScore: 75 },
@@ -312,61 +307,88 @@ describe('getFallbacks — coding agent tiers (#402)', () => {
     { id: 'junie',      category: 'agent', name: 'Junie',       status: 'operational', aiwatchScore: 95 },
   ]
 
-  it('Claude Code (T11 CLI) → Codex first, despite Cursor + Junie having higher Scores', () => {
-    // Score-only regression would yield [Cursor 99, Junie 95]; tier-distance must produce Codex first.
+  it('Claude Code affected → top-2 by Score across all agents = [Cursor 99, Junie 95]', () => {
+    // No more same-form preference: the two highest-Score operational peers win regardless of form.
     const result = getFallbacks('claudecode', 'agent', agentServices)
-    expect(result[0].name).toBe('Codex')                // T11 same-tier peer (dist 0)
-    expect(result[1].name).toBe('Cursor')               // T12 dist 1, Cursor 99 > Windsurf 65
+    expect(result[0].name).toBe('Cursor') // Score 99
+    expect(result[1].name).toBe('Junie')  // Score 95
   })
 
-  it('Cursor (T12 IDE) → Windsurf first as same-tier peer, despite Junie having a higher Score', () => {
-    // Score-only regression would yield [Junie 95, Copilot 78]; tier-distance must produce Windsurf first.
-    const result = getFallbacks('cursor', 'agent', agentServices)
-    expect(result[0].name).toBe('Windsurf')             // T12 same-tier peer (dist 0)
-    // Second slot: T11 and T13 are equidistant (1) — Score breaks the tie. Junie 95 wins.
+  it('Codex affected → same top-2 by Score = [Cursor 99, Junie 95]', () => {
+    // The live #402 trigger was a Codex outage; post-#1027 it recommends the best-scored operational
+    // agents, not a same-form peer.
+    const result = getFallbacks('codex', 'agent', agentServices)
+    expect(result[0].name).toBe('Cursor')
     expect(result[1].name).toBe('Junie')
   })
 
-  it('GitHub Copilot (T13 Plugin) → Junie first, despite Cursor having a higher Score', () => {
-    // The "Junie #1 is correct" case — but only when Junie is the same-tier peer of the affected
-    // agent. Pre-bump fixture had cursor 80 < junie 95, so Score-only happened to agree with the
-    // tier verdict; the new cursor 99 makes this assertion load-bearing.
-    const result = getFallbacks('copilot', 'agent', agentServices)
-    expect(result[0].name).toBe('Junie')                // T13 same-tier peer (dist 0)
-    expect(result[1].name).toBe('Cursor')               // T12 dist 1 beats CLI dist 2
+  it('affected service is excluded even when it is the highest Score (Cursor affected → [Junie 95, Copilot 78])', () => {
+    const result = getFallbacks('cursor', 'agent', agentServices)
+    expect(result.find(f => f.name === 'Cursor')).toBeUndefined()
+    expect(result[0].name).toBe('Junie')          // 95
+    expect(result[1].name).toBe('GitHub Copilot') // 78
   })
 
-  it('Codex (T11 CLI) → Claude Code first, mirroring the claudecode case', () => {
-    // Symmetry pin for the CLI tier — the live #402 trigger was a Codex outage, so this is the
-    // exact scenario users hit. Score-only regression gives [Cursor 99, Junie 95]; tier yields
-    // Claude Code despite its Score 70.
-    const result = getFallbacks('codex', 'agent', agentServices)
-    expect(result[0].name).toBe('Claude Code')
-    expect(result[1].name).toBe('Cursor')               // T12 dist 1, Cursor 99 > Windsurf 65
-  })
-
-  it('Junie (T13 Plugin) → GitHub Copilot first, mirroring the copilot case', () => {
-    // The "new service has its first outage" scenario that motivated #402. With Junie itself
-    // affected, the only same-tier candidate is Copilot — and that must win even though Cursor's
-    // Score (99) is higher.
-    const result = getFallbacks('junie', 'agent', agentServices)
-    expect(result[0].name).toBe('GitHub Copilot')       // T13 same-tier peer
-    expect(result[1].name).toBe('Cursor')               // T12 dist 1 beats CLI dist 2
-  })
-
-  it('Plugin tier wiped out (copilot affected, junie down) → walks to IDE tier (Cursor + Windsurf)', () => {
-    // Sibling-outage realism: when the only same-tier peer is unhealthy, the recommendation must
-    // walk to the nearest healthy tier rather than skip into a far tier just because Score is high.
-    // Score-only regression here produces [Cursor 99, Codex 75]; tier-walk produces [Cursor 99, Windsurf 65]
-    // because both IDE peers are dist 1 vs CLI peers at dist 2 — Windsurf 65 still beats Codex 75
-    // on tier-distance. Second-slot assertion is what makes this load-bearing.
-    const services = agentServices.map(s =>
-      s.id === 'junie' ? { ...s, status: 'down' } : s,
-    )
+  it('down peers AND operational-but-incident-carrying peers are both dropped before Score ordering', () => {
+    // junie is down; cursor (the highest Score, 99) stays 'operational' but carries an UNRESOLVED
+    // incident — hasActiveIncident must drop it too, exercising the operational-with-incident path for
+    // an agent (not just a 'down' status). Copilot is the affected source. Remaining eligible:
+    // claudecode 70, codex 75, windsurf 65 → top-2 = [Codex 75, Claude Code 70].
+    const services = agentServices.map(s => {
+      if (s.id === 'junie') return { ...s, status: 'down' }
+      if (s.id === 'cursor') return { ...s, incidents: [{ status: 'investigating', title: 'Editor outage' }] }
+      return s
+    })
     const result = getFallbacks('copilot', 'agent', services)
+    expect(result.find(f => f.name === 'Junie')).toBeUndefined()          // down
+    expect(result.find(f => f.name === 'Cursor')).toBeUndefined()         // operational + active incident
+    expect(result.find(f => f.name === 'GitHub Copilot')).toBeUndefined() // affected source
+    expect(result[0].name).toBe('Codex')       // 75
+    expect(result[1].name).toBe('Claude Code') // 70 (windsurf 65 lower)
+  })
+
+  it('agent-category-wide outage → no recommendation (empty result, empty fallback text)', () => {
+    // The boundary the old tier-walk suite gestured at: when every peer agent is down/affected there is
+    // nothing left to recommend. With the tiers collapsed there is no walk to a neighbouring tier, so
+    // getFallbacks must return [] and buildFallbackText must emit '' (never a misleading "no fallback").
+    const services = agentServices.map(s =>
+      s.id === 'cursor' ? s : { ...s, status: 'down' }, // cursor is the affected source; all others down
+    )
+    const result = getFallbacks('cursor', 'agent', services)
+    expect(result).toEqual([])
+    expect(buildFallbackText(result)).toBe('')
+  })
+
+  it('a null-Score agent sinks to the bottom via `?? 0` (the only structural backstop after #1027)', () => {
+    // #1027 removed the form sub-tiers, so the sole thing keeping a dataless agent out of the top slot is
+    // the `aiwatchScore ?? 0` coalesce in the sort. A withheld/null Score must order LAST, below every
+    // real Score. (Note: this does NOT protect against a shallow-history agent with an *inflated* non-null
+    // Score — that #402 risk is procedural-only post-#1027; see the comment in fallback.ts.)
+    const services = agentServices.map(s =>
+      s.id === 'junie' ? { ...s, aiwatchScore: null } : s, // junie was 95 → now null
+    )
+    const result = getFallbacks('claudecode', 'agent', services)
+    expect(result[0].name).toBe('Cursor') // 99
+    expect(result[1].name).toBe('GitHub Copilot') // 78 — junie(null) no longer in the top-2
     expect(result.find(f => f.name === 'Junie')).toBeUndefined()
-    expect(result[0].name).toBe('Cursor')               // T12 dist 1, Score 99
-    expect(result[1].name).toBe('Windsurf')             // T12 dist 1, Score 65 — still beats Codex 75 (T11 dist 2)
+  })
+
+  it('Score ties keep both peers eligible (order is stable but the tie is not dropped)', () => {
+    // The one ambiguity the collapse introduces: two agents at an equal Score. V8 sort is stable so the
+    // input order is preserved, but the contract that matters is that BOTH tied peers remain candidates
+    // (a tie must not silently drop one). copilot & junie both 88 here.
+    const services = agentServices.map(s =>
+      s.id === 'copilot' || s.id === 'junie' ? { ...s, aiwatchScore: 88 } : s,
+    )
+    const result = getFallbacks('claudecode', 'agent', services)
+    expect(result[0].name).toBe('Cursor') // 99 still first
+    expect(['GitHub Copilot', 'Junie']).toContain(result[1].name) // one of the tied 88s takes slot 2
+  })
+
+  it('every agent resolves to tier 11 (no residual 12/13 sub-tiers)', () => {
+    for (const id of ['claudecode', 'codex', 'cursor', 'windsurf', 'copilot', 'junie']) {
+      expect(tierFor(id)).toBe(11)
+    }
   })
 })
 
@@ -555,7 +577,7 @@ describe('tierLabelFor (#403)', () => {
 
   it('returns the mapped label for a known tier (no warning)', () => {
     expect(tierLabelFor(1)).toBe('LLM')
-    expect(tierLabelFor(11)).toBe('CLI Agent')
+    expect(tierLabelFor(11)).toBe('Coding Agent') // #1027 — single agent tier
     expect(warnSpy).not.toHaveBeenCalled()
   })
 
@@ -596,7 +618,7 @@ describe('getGroupedFallbacks (#781) — per-category structure + perGroup parit
     const byLabel = Object.fromEntries(groups.map(g => [g.label, g.fallbacks.map(f => f.name)]))
     expect(byLabel['LLM']).toEqual(['OpenAI API'])
     expect(byLabel['AI Apps']).toEqual(['ChatGPT'])
-    expect(byLabel['CLI Agent']).toEqual(['Codex']) // claudecode/codex are tier 11 → 'CLI Agent' label
+    expect(byLabel['Coding Agent']).toEqual(['Codex']) // #1027 — claudecode/codex share tier 11 → 'Coding Agent'
   })
 
   it('excludes operational / EXCLUDE_FALLBACK affected services from anchoring a group', () => {
@@ -609,6 +631,6 @@ describe('getGroupedFallbacks (#781) — per-category structure + perGroup parit
     const text = buildGroupedFallbackText(['claude', 'claudecode'], svcs)
     expect(text).toContain('👉 Suggested fallback:')
     expect(text).toContain('LLM: OpenAI API')
-    expect(text).toContain('CLI Agent: Codex') // claudecode/codex tier 11 → 'CLI Agent'
+    expect(text).toContain('Coding Agent: Codex') // #1027 — claudecode/codex tier 11 → 'Coding Agent'
   })
 })
