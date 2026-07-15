@@ -1,8 +1,52 @@
 import { describe, it, expect } from 'vitest'
-import { calculateAIWatchScore, classifyProbe, MIN_VALID_DAYS, type ProbeContext } from '../score'
+import { calculateAIWatchScore, classifyProbe, computeMttrHours, MTTR_PRIOR_MIN, MTTR_PRIOR_WEIGHT, MIN_VALID_DAYS, type ProbeContext } from '../score'
 import { PROBE_TARGETS, resolveProbeId } from '../probe'
 import { scoreFor } from '../index'
 import type { ProbeSummary, ServiceStatus } from '../types'
+
+describe('computeMttrHours (#1019 Part B — small-sample robustness)', () => {
+  it('returns null for an empty (or all-zero) sample', () => {
+    expect(computeMttrHours([])).toBeNull()
+    expect(computeMttrHours([0, 0])).toBeNull()
+  })
+
+  it('uses the robust MEDIAN at ≥3 (one outlier cannot move it)', () => {
+    // [10, 30, 60, 90, 799] → median 60 min = 1h. The 799 outlier is ignored.
+    expect(computeMttrHours([10, 30, 60, 90, 799])).toBeCloseTo(1, 5)
+    // even count → lower-median index (floor(n/2)) — unchanged from the prior behaviour
+    expect(computeMttrHours([20, 40, 60, 800])).toBeCloseTo(1, 5)
+  })
+
+  it('leaves a thin sample FASTER than the prior untouched (no churn on good low-incident services)', () => {
+    // 1 incident, 30 min < 60 min prior → unchanged 0.5h (a genuinely fast recovery keeps its score).
+    expect(computeMttrHours([30])).toBeCloseTo(0.5, 5)
+    // 2 fast incidents → plain mean, no shrinkage.
+    expect(computeMttrHours([20, 40])).toBeCloseTo(0.5, 5)
+    // exactly at the prior → boundary is "≤", so unchanged.
+    expect(computeMttrHours([MTTR_PRIOR_MIN])).toBeCloseTo(1, 5)
+  })
+
+  it('shrinks a thin sample WORSE than the prior toward it — the luma/gemini case', () => {
+    // luma: 1 incident, 7.5h (450 min) → (450 + 2·60)/(1+2) = 190 min = 3.1667h (vs 7.5h raw).
+    expect(computeMttrHours([450])).toBeCloseTo(190 / 60, 5)
+    // gemini: 1 incident, 4.6h (276 min) → (276 + 120)/3 = 132 min = 2.2h.
+    expect(computeMttrHours([276])).toBeCloseTo(2.2, 5)
+    // 2 incidents, mean 300 min > 60 prior → shrunk (200+400 + 2·60)/(2+2) = 720/4 = 180 min = 3h.
+    expect(computeMttrHours([200, 400])).toBeCloseTo((600 + MTTR_PRIOR_WEIGHT * MTTR_PRIOR_MIN) / (2 + MTTR_PRIOR_WEIGHT) / 60, 5)
+  })
+
+  it('the shrunk value stays between the prior and the raw mean (bounded, never fully spared, never below prior)', () => {
+    const raw = 450, shrunkH = computeMttrHours([raw])!
+    expect(shrunkH * 60).toBeGreaterThan(MTTR_PRIOR_MIN) // still penalises (> prior)
+    expect(shrunkH * 60).toBeLessThan(raw)               // but bounded below the raw outlier
+  })
+
+  it('is continuous into the median at the 3-incident boundary (no cliff)', () => {
+    // At exactly 3 it switches to median; a thin 2-sample shrinks. Same durations, different regime.
+    expect(computeMttrHours([120, 480])).toBeCloseTo((600 + 120) / 4 / 60, 5) // 2 → shrunk
+    expect(computeMttrHours([120, 480, 300])).toBeCloseTo(300 / 60, 5)         // 3 → median (300)
+  })
+})
 
 function makeSvc(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
   return {
@@ -144,9 +188,10 @@ describe('calculateAIWatchScore', () => {
     expect(scoreUnprobed(makeSvc({ incidents })).metrics.mttrHours).toBe(1)
   })
 
-  it('uses mean MTTR for <3 samples', () => {
+  it('#1019 Part B: shrinks a <3 sample worse than the prior toward it', () => {
+    // [2h, 4h] mean = 3h > 1h prior → shrunk (120+240 + 2·60)/(2+2) = 120 min = 2h (was 3h raw mean).
     const incidents = [makeIncident(1, '2h 0m'), makeIncident(2, '4h 0m')]
-    expect(scoreUnprobed(makeSvc({ incidents })).metrics.mttrHours).toBe(3)
+    expect(scoreUnprobed(makeSvc({ incidents })).metrics.mttrHours).toBe(2)
   })
 
   it('#713: no official uptime + no probe → score WITHHELD (null), confidence low', () => {
@@ -240,9 +285,10 @@ describe('calculateAIWatchScore', () => {
   })
 
   it('handles duration edge cases correctly', () => {
-    expect(scoreUnprobed(makeSvc({ incidents: [makeIncident(1, '1h')] })).metrics.mttrHours).toBe(1)
-    expect(scoreUnprobed(makeSvc({ incidents: [makeIncident(1, '30m')] })).metrics.mttrHours).toBe(0.5)
-    expect(scoreUnprobed(makeSvc({ incidents: [makeIncident(1, '2h 30m')] })).metrics.mttrHours).toBe(2.5)
+    expect(scoreUnprobed(makeSvc({ incidents: [makeIncident(1, '1h')] })).metrics.mttrHours).toBe(1)     // = prior → unchanged
+    expect(scoreUnprobed(makeSvc({ incidents: [makeIncident(1, '30m')] })).metrics.mttrHours).toBe(0.5)  // < prior → unchanged
+    // 2h30m (150m) > 1h prior → #1019 Part B shrinks: (150 + 2·60)/(1+2) = 90 min = 1.5h (was 2.5h raw).
+    expect(scoreUnprobed(makeSvc({ incidents: [makeIncident(1, '2h 30m')] })).metrics.mttrHours).toBe(1.5)
   })
 
   it('gives 0 recovery score for unresolved incidents', () => {
@@ -251,8 +297,9 @@ describe('calculateAIWatchScore', () => {
   })
 
   it('skips 0-duration incidents in MTTR', () => {
+    // 0m dropped → single 2h sample; > 1h prior → #1019 Part B shrinks (120+120)/3 = 80 min ≈ 1.3h.
     const incidents = [makeIncident(1, '0m'), makeIncident(2, '2h 0m')]
-    expect(scoreUnprobed(makeSvc({ incidents })).metrics.mttrHours).toBe(2)
+    expect(scoreUnprobed(makeSvc({ incidents })).metrics.mttrHours).toBe(1.3)
   })
 
   // ── #707: null-impact incidents are informational (compliance/advisory) — excluded from MTTR/recovery
@@ -272,8 +319,9 @@ describe('calculateAIWatchScore', () => {
 
   it('#707: MTTR ignores a null-impact incident when a real (impactful) one is present', () => {
     const incidents = [makeIncident(1, '2h 0m'), nullImpactInc(2, '100h 0m')]
-    // only the real 2h incident drives MTTR — not diluted/dominated by the 100h advisory
-    expect(scoreUnprobed(makeSvc({ incidents })).metrics.mttrHours).toBe(2)
+    // only the real 2h incident reaches the MTTR set (the 100h advisory is excluded, not dominating);
+    // that lone 2h sample > 1h prior → #1019 Part B shrinks (120+120)/3 = 80 min ≈ 1.3h.
+    expect(scoreUnprobed(makeSvc({ incidents })).metrics.mttrHours).toBe(1.3)
   })
 
   // ── Responsiveness component (probe-supported services) ──
