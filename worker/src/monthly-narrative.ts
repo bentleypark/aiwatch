@@ -14,7 +14,8 @@
 // One AI call per month. Failure-isolated: any error returns null and the
 // archive still builds (narrative: null → report falls back to the placeholder).
 
-import { GEMMA_MODEL, AI_GATEWAY_ANTHROPIC_URL } from './ai-analysis'
+import { GEMMA_MODEL } from './ai-analysis'
+import { callAnthropicMessages } from './anthropic'
 import type { MonthlyArchive, MonthlyIncidentEntry } from './monthly-archive'
 
 // ── Public types ─────────────────────────────────────────────────────
@@ -50,7 +51,8 @@ const MAX_INCIDENT_CANDIDATES = 14
 // any incident plus a few clean high-scorers is plenty of signal.
 const MAX_OBSERVATION_SERVICES = 20
 const GEMMA_MAX_TOKENS = 1400
-const SONNET_MAX_TOKENS = 1400
+// #955 — headroom for Sonnet 5's new tokenizer (~30% more tokens for the same text).
+const SONNET_MAX_TOKENS = 1800
 const AI_TIMEOUT_MS = 20_000
 
 // ── Duration formatting ──────────────────────────────────────────────
@@ -255,27 +257,17 @@ async function callGemma(ai: unknown, systemPrompt: string, userPrompt: string):
 }
 
 async function callSonnet(apiKey: string, systemPrompt: string, userPrompt: string): Promise<string | null> {
-  const res = await fetch(AI_GATEWAY_ANTHROPIC_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: SONNET_MAX_TOKENS,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
-    }),
-    signal: AbortSignal.timeout(AI_TIMEOUT_MS),
+  // #955 — model id, request shape, retry and status classification all live in `anthropic.ts`.
+  // This module used to hardcode `claude-sonnet-4-20250514` independently of ai-analysis.ts, so
+  // when that id retired BOTH fallbacks died and neither could see the other's breakage.
+  const outcome = await callAnthropicMessages(apiKey, {
+    system: systemPrompt,
+    user: userPrompt,
+    maxTokens: SONNET_MAX_TOKENS,
+    timeoutMs: AI_TIMEOUT_MS,
+    logPrefix: '[monthly-narrative]',
   })
-  if (!res.ok) {
-    console.error(`[monthly-narrative] Claude API returned ${res.status}: ${await res.text().catch(() => '')}`)
-    return null
-  }
-  const data = await res.json() as { content: Array<{ type: string; text?: string }> }
-  return data.content?.find(c => c.type === 'text')?.text ?? null
+  return outcome.kind === 'ok' ? outcome.text : null
 }
 
 // ── Public entry point ───────────────────────────────────────────────

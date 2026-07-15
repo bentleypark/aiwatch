@@ -8,8 +8,14 @@ import fixture from './fixtures/deepseek-flashduty.json'
 // 99.88 (API) / 99.48 (Web Chat).
 const feed = fixture as FlashdutyFeed
 
+// #1006 — uptime is COMPUTED over the trailing 30 days from `component_impacts`, not copied from the
+// feed's published `component_uptimes` aggregate (whose period is Flashduty's, not ours). The fixture is a
+// real capture, so `nowMs` is pinned to its capture date — otherwise "the last 30 days" would drift past
+// the captured impacts and every assertion would decay to 100%.
+const CAPTURED_AT = Date.parse('2026-06-12T00:00:00Z')
+
 describe('parseFlashdutyFeed (#618)', () => {
-  const parsed = parseFlashdutyFeed(feed)
+  const parsed = parseFlashdutyFeed(feed, { nowMs: CAPTURED_AT })
 
   it('maps the two page components to breakdown rows, all operational when no active incident', () => {
     expect(parsed.components.map((c) => c.name)).toEqual([
@@ -53,9 +59,13 @@ describe('parseFlashdutyFeed (#618)', () => {
     expect(inc.impact).toBe('major')
   })
 
-  it('uptime30d = worst (min) component uptime from structure', () => {
-    // min(API 99.88, Web Chat 99.48) — the 90-day values shown on the official page (#619)
-    expect(parsed.uptime30d).toBeCloseTo(99.48, 2)
+  it('uptime30d = the worst component, computed over the trailing 30 days (#1006)', () => {
+    // The feed PUBLISHES 99.88 (API) / 99.48 (Web Chat) over its own ~90-day period. Recomputed over the
+    // trailing 30 days with the weights on /methodology: 99.93 / 99.90 — the older outages that drag the
+    // published figures down fall outside the window. Worst-of → 99.90.
+    expect(parsed.uptime30d).toBeCloseTo(99.9, 2)
+    // …and it is NOT the published aggregate, which is the entire point of #1006.
+    expect(parsed.uptime30d).not.toBeCloseTo(99.48, 2)
   })
 
   it('builds a dailyImpact map keyed by YYYY-MM-DD with valid levels', () => {
@@ -105,7 +115,7 @@ describe('parseFlashdutyFeed (#618)', () => {
   describe('option A — scope to the API component only (#618)', () => {
     const API_ID = '01KR3NC9ETZYF436Z8YT1HM047' // API Service (api.deepseek.com)
     const WEBCHAT_ID = '01KR3NC9ETESRRQ4GABE0TGW53' // Web Chat (chat.deepseek.com) — excluded
-    const scoped = parseFlashdutyFeed(feed, { primaryComponentId: API_ID })
+    const scoped = parseFlashdutyFeed(feed, { nowMs: CAPTURED_AT, primaryComponentId: API_ID })
 
     it('drops Web-Chat-only incidents (e.g. 6/9 6551550194287 affected only Web Chat)', () => {
       expect(scoped.incidents.find((i) => i.id === 'flashduty:6551550194287')).toBeUndefined()
@@ -120,8 +130,11 @@ describe('parseFlashdutyFeed (#618)', () => {
       expect(scoped.components.map((c) => c.id)).toEqual([API_ID])
     })
 
-    it('uptime = the API component uptime (99.88), not the min-with-Web-Chat (99.48)', () => {
-      expect(scoped.uptime30d).toBeCloseTo(99.88, 2)
+    it('uptime is scoped to the API component alone, not a worst-of with Web Chat', () => {
+      // #1006 — computed over 30 days: API 99.93, Web Chat 99.90. Scoping must yield the API figure,
+      // so the two must differ for this assertion to prove anything.
+      expect(scoped.uptime30d).toBeCloseTo(99.93, 2)
+      expect(scoped.uptime30d).not.toBeCloseTo(parsed.uptime30d!, 2)
     })
 
     it('a Web-Chat-only active incident does NOT flip the API badge', () => {

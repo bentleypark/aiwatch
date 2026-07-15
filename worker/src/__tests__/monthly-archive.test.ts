@@ -1,14 +1,18 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   computeMonthlyUptime,
   computeMonthlyComponentUptime,
+  curateComponentUptime,
   computeMonthlyOfficialUptime,
   computeMonthlyLatency,
+  computeMonthlyScore,
   computeMonthlyLatencyStats,
   getMonthDates,
   isInMonthlyArchiveWindow,
   buildMonthlyArchive,
   accumulateMonthlyIncidents,
+  prunePhantomIncidents,
+  PHANTOM_PRUNE_AFTER_MISSED_RUNS,
   accumulateIncidentsOnlyIfChanged,
   buildPartialIncidentArchive,
   parseDurationMin,
@@ -24,12 +28,17 @@ import {
   normalizeDegradationMonthly,
   summarizeDegradation,
   buildMonthlyAccuracy,
+  filterSuppressedFromMonthly,
+  stripInternalFields,
+  aggregateIncidentDurations,
+  resolveArchiveOfficialUptime,
 } from '../monthly-archive'
+import type { SuppressionEntry } from '../suppression'
 import type { ServiceStatus, Incident } from '../types'
 import type { IncidentHistoryRecord } from '../incident-history'
-import type { MonthlySecurityEntry, MonthlySecuritySummary } from '../monthly-archive'
+import type { MonthlySecurityEntry, MonthlySecuritySummary, MonthlyIncidents, MonthlyIncidentEntry } from '../monthly-archive'
 import type { OsvTimeline } from '../security-monitor'
-import { SERVICE_ADDED_AT } from '../services'
+import { SERVICE_ADDED_AT, resolveSvcComponents } from '../services'
 
 // ── parseDurationMin ─────────────────────────────────────────────────
 
@@ -233,16 +242,88 @@ describe('computeMonthlyComponentUptime (#605)', () => {
   })
 })
 
+// ── curateComponentUptime (#605 Phase 3 — display-set curation) ──────
+describe('curateComponentUptime (#605 Phase 3)', () => {
+  const comps = [
+    { id: 'fedramp', name: 'FedRAMP', uptime: 42.27 },      // noise
+    { id: 'chat', name: 'Chat Completions', uptime: 99.98 },
+    { id: 'emb', name: 'Embeddings', uptime: 99.99 },
+    { id: 'login', name: 'Login', uptime: 99.66 },          // noise
+  ]
+
+  it('displayComponentIds allowlist keeps only the listed ids (drops FedRAMP/Login noise), preserving order', () => {
+    const out = curateComponentUptime(comps, { displayComponentIds: ['chat', 'emb'] })
+    expect(out).toEqual([
+      { id: 'chat', name: 'Chat Completions', uptime: 99.98 },
+      { id: 'emb', name: 'Embeddings', uptime: 99.99 },
+    ])
+  })
+
+  it('displayAllComponents keeps all EXCEPT componentDenylist (by name, case-insensitive)', () => {
+    const out = curateComponentUptime(comps, { displayAllComponents: true, componentDenylist: ['FedRAMP', 'login'] })
+    expect(out!.map(c => c.id)).toEqual(['chat', 'emb'])
+  })
+
+  it('falls back to statusComponentIds when displayComponentIds absent', () => {
+    const out = curateComponentUptime(comps, { statusComponentIds: ['chat', 'login'] })
+    expect(out!.map(c => c.id)).toEqual(['chat', 'login'])
+  })
+
+  it('returns undefined when no display config (component table omitted)', () => {
+    expect(curateComponentUptime(comps, {})).toBeUndefined()
+  })
+
+  it('returns undefined when <2 survive (a one-row breakdown adds nothing)', () => {
+    expect(curateComponentUptime(comps, { displayComponentIds: ['chat'] })).toBeUndefined()
+  })
+
+  it('returns undefined for empty/absent components or config', () => {
+    expect(curateComponentUptime([], { displayComponentIds: ['chat'] })).toBeUndefined()
+    expect(curateComponentUptime(undefined, { displayComponentIds: ['chat'] })).toBeUndefined()
+    expect(curateComponentUptime(comps, undefined)).toBeUndefined()
+  })
+
+  // Parity guard: the report's curation and the dashboard's live curation are maintained in
+  // parallel (curateComponentUptime here vs resolveSvcComponents in services.ts). Feeding the
+  // SAME config + component set to both must yield the SAME membership (id set) — otherwise the
+  // report highlights different components than the dashboard, the exact bug this whole feature
+  // exists to prevent. (Order can differ — report is least-reliable-first — so compare Sets.)
+  it('membership matches resolveSvcComponents (report == dashboard)', () => {
+    const raw = [
+      { id: 'fedramp', name: 'FedRAMP' },
+      { id: 'chat', name: 'Chat Completions' },
+      { id: 'emb', name: 'Embeddings' },
+      { id: 'login', name: 'Login' },
+    ]
+    const cases = [
+      { displayComponentIds: ['chat', 'emb', 'login'] },
+      { displayAllComponents: true, componentDenylist: ['FedRAMP', 'Login'] },
+      { statusComponentIds: ['chat', 'emb'] },
+      {}, // no config → both empty
+    ]
+    for (const config of cases) {
+      const live = resolveSvcComponents(config, { components: raw.map(c => ({ ...c, status: 'operational' })) })
+      const report = curateComponentUptime(raw.map(c => ({ ...c, uptime: 99 })), config) ?? []
+      expect(new Set(report.map(c => c.id))).toEqual(new Set(live.map(c => c.id)))
+    }
+  })
+})
+
 // ── computeMonthlyOfficialUptime (#586 daily snapshot) ───────────────
 describe('computeMonthlyOfficialUptime (#586)', () => {
   it('returns the most-recent day\'s officialUptime per service', () => {
+    // #951 — the fixture is dense enough that the 1st falls OUTSIDE the tail window, so this now
+    // guards the cutoff too: the later day wins for chatgpt, and openai's early-only value is residue
+    // (it published nothing for the rest of the month) rather than a month-end figure to be "carried".
     const daily = {
       '2026-06-01': { chatgpt: { ok: 200, total: 288, officialUptime: 98.5 }, openai: { ok: 288, total: 288, officialUptime: 99.9 } },
-      '2026-06-30': { chatgpt: { ok: 210, total: 288, officialUptime: 99.83 } }, // later day wins for chatgpt
+      '2026-06-28': { chatgpt: { ok: 210, total: 288, officialUptime: 99.7 } },
+      '2026-06-29': { chatgpt: { ok: 210, total: 288, officialUptime: 99.8 } },
+      '2026-06-30': { chatgpt: { ok: 210, total: 288, officialUptime: 99.83 } },
     }
     const r = computeMonthlyOfficialUptime(daily)
-    expect(r.chatgpt).toBe(99.83)  // month-end value, not the earlier 98.5
-    expect(r.openai).toBe(99.9)    // only present on the 1st → carried
+    expect(r.chatgpt).toBe(99.83)   // month-end value, not the earlier 98.5
+    expect(r.openai).toBeUndefined() // last seen on the 1st → not month-end data (pre-#951 carried it)
   })
   it('omits services with no officialUptime on any day (→ caller falls back to null)', () => {
     const daily = { '2026-06-01': { cohere: { ok: 288, total: 288 } } } // no officialUptime field
@@ -254,6 +335,89 @@ describe('computeMonthlyOfficialUptime (#586)', () => {
       '2026-06-15': { gemini: { ok: 288, total: 288, officialUptime: null } }, // null does not clobber
     }
     expect(computeMonthlyOfficialUptime(daily).gemini).toBe(97.0)
+  })
+
+  // #951 — "as of the LATEST day" now means it. A sticky last-non-null let a value observed mid-month
+  // stand in for month end, which is how the pre-#713 estimate and Character.AI's dead source survived.
+  it('#951 ignores a value that stopped being published before the month\'s final days', () => {
+    const daily: Record<string, Record<string, { ok: number; total: number; officialUptime?: number | null }>> = {}
+    for (let d = 13; d <= 30; d++) {
+      const day = `2026-06-${String(d).padStart(2, '0')}`
+      daily[day] = {
+        stability: { ok: 288, total: 288, officialUptime: d <= 17 ? 100 : null }, // estimate until #713 (06-19)
+        groq: { ok: 288, total: 288, officialUptime: 100 },                       // a real source, all month
+      }
+    }
+    const r = computeMonthlyOfficialUptime(daily)
+    expect(r.stability).toBeUndefined() // last seen 06-17, thirteen days before month end → residue
+    expect(r.groq).toBe(100)
+  })
+
+  it('#951 tolerates a transient null on the final day (the snapshot is that day\'s last cron cycle)', () => {
+    const daily = {
+      '2026-06-28': { groq: { ok: 288, total: 288, officialUptime: 100 } },
+      '2026-06-29': { groq: { ok: 288, total: 288, officialUptime: 99.98 } },
+      '2026-06-30': { groq: { ok: 288, total: 288, officialUptime: null } }, // one bad fetch
+    }
+    expect(computeMonthlyOfficialUptime(daily).groq).toBe(99.98)
+  })
+
+  it('#951 drops a source that has been silent for the whole tail window', () => {
+    const daily = {
+      '2026-06-28': { characterai: { ok: 288, total: 288, officialUptime: null } },
+      '2026-06-29': { characterai: { ok: 288, total: 288, officialUptime: null } },
+      '2026-06-30': { characterai: { ok: 288, total: 288, officialUptime: null } },
+    }
+    expect(computeMonthlyOfficialUptime(daily).characterai).toBeUndefined()
+  })
+})
+
+// ── resolveArchiveOfficialUptime (#951 — display must agree with the Score) ──
+// The archive showed "Official · 100.00% uptime" beside a Score that was rescaled over /60 as if no
+// uptime existed. Two independent ways the two drifted apart, both reproduced below.
+describe('resolveArchiveOfficialUptime (#951 + #1016)', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('emits the month-end daily snapshot for a service the Score scored on uptime', () => {
+    expect(resolveArchiveOfficialUptime(100, { id: 'groq', scoreConfidence: 'high' })).toBe(100)
+    expect(resolveArchiveOfficialUptime(99.83, { id: 'chatgpt', scoreConfidence: 'high' })).toBe(99.83)
+  })
+
+  it('#1016 — returns null when there is NO daily snapshot, never a live services:latest fallback', () => {
+    // The rebuild path used to fall back to today's live `uptime30d` here, surfacing "Official · 100%"
+    // on a frozen month whose monthlyScore had dropped uptime (openrouter, June). A high LIVE confidence
+    // must not conjure a value the month never recorded.
+    expect(resolveArchiveOfficialUptime(undefined, { id: 'openrouter', scoreConfidence: 'high' })).toBeNull()
+  })
+
+  it('withholds a month-end value the Score did not consume (would print "Official" beside a /60 score)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(resolveArchiveOfficialUptime(100, { id: 'groq', scoreConfidence: 'medium' })).toBeNull()
+    // Discarding a month-observed figure is exactly the silent drop this issue is about — it must warn.
+    // (Reachable when a status-page fetch fails on the single build-day read of services:latest.)
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn.mock.calls[0][0]).toContain('withholding month-end official uptime 100')
+  })
+
+  it('does NOT warn when there was no month-end value to discard (openrouter never publishes one)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(resolveArchiveOfficialUptime(undefined, { id: 'openrouter', scoreConfidence: 'medium' })).toBeNull()
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('keeps the month-end value when services:latest was unreadable (no score to contradict)', () => {
+    // index.ts console.errors the parse failure and passes scoreData=[]. Nulling everything would let
+    // ONE parse failure erase every service's official uptime from an archive the cron never rebuilds.
+    expect(resolveArchiveOfficialUptime(99.83, undefined)).toBe(99.83)
+    expect(resolveArchiveOfficialUptime(undefined, undefined)).toBeNull()
+  })
+
+  it('emits the month-end snapshot only (never a live value) for a caller that omits scoreConfidence', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(resolveArchiveOfficialUptime(99.5, { id: 'legacy' })).toBe(99.5)
+    expect(resolveArchiveOfficialUptime(undefined, { id: 'legacy' })).toBeNull()
+    expect(warn).toHaveBeenCalledTimes(2)
+    expect(warn.mock.calls[0][0]).toContain('omits scoreConfidence')
   })
 })
 
@@ -356,6 +520,69 @@ describe('isInMonthlyArchiveWindow', () => {
   })
 })
 
+// ── filterSuppressedFromMonthly (#904) ───────────────────────────────
+
+describe('filterSuppressedFromMonthly', () => {
+  // Build a realistic stored accumulator via the real accumulator, mirroring the OpenAI June case:
+  // one 264h56m FedRAMP incident + one 40m real incident.
+  const svcWith = (incs: Array<{ id: string; title: string; duration: string }>): ServiceStatus => ({
+    id: 'openai', name: 'openai', provider: '', category: 'api', status: 'operational',
+    latency: null, uptime30d: 99.99, lastChecked: '', incidents: incs.map(i => ({
+      id: i.id, title: i.title, status: 'resolved' as const, impact: 'minor' as const,
+      startedAt: '2026-06-15T22:00:00Z', duration: i.duration, timeline: [],
+    })),
+  })
+  const built = () => accumulateMonthlyIncidents(null, [svcWith([
+    { id: 'fr-1', title: 'FedRAMP workspaces and API orgs have degraded performance', duration: '264h 56m' },
+    { id: 'real-1', title: 'Image API requests failing with 401s', duration: '40m' },
+  ])], '2026-06', [])
+
+  it('drops a service-pattern-suppressed incident + recomputes aggregates', () => {
+    const before = built()
+    expect(before.services.openai.count).toBe(2)
+    expect(before.services.openai.totalMinutes).toBe(15936) // 264h56m + 40m
+    expect(before.services.openai.longestMinutes).toBe(15896)
+
+    const list: SuppressionEntry[] = [{ scope: 'service-pattern', svcId: 'openai', match: 'fedramp' }]
+    const after = filterSuppressedFromMonthly(before, list)
+    expect(after.services.openai.count).toBe(1)
+    expect(after.services.openai.totalMinutes).toBe(40)
+    expect(after.services.openai.longestMinutes).toBe(40)
+    expect(after.services.openai.incidentIds).toEqual(['real-1'])
+    expect(after.services.openai.incidents?.map(i => i.id)).toEqual(['real-1'])
+    expect(after.services.openai.durations).toEqual({ 'real-1': 40 })
+  })
+
+  it('drops an incident-scope-suppressed incident by id', () => {
+    const after = filterSuppressedFromMonthly(built(), [{ scope: 'incident', incId: 'fr-1' }])
+    expect(after.services.openai.count).toBe(1)
+    expect(after.services.openai.incidentIds).toEqual(['real-1'])
+  })
+
+  it('returns input by identity when nothing matches (or empty list)', () => {
+    const before = built()
+    expect(filterSuppressedFromMonthly(before, [])).toBe(before)
+    const noMatch = filterSuppressedFromMonthly(before, [{ scope: 'service-pattern', svcId: 'claude', match: 'fedramp' }])
+    expect(noMatch.services.openai).toBe(before.services.openai) // untouched service kept by reference
+  })
+
+  it('returns identity on a structurally-corrupt accumulator (no .services) even with a suppression', () => {
+    const list: SuppressionEntry[] = [{ scope: 'service-pattern', svcId: 'openai', match: 'fedramp' }]
+    const corrupt = { lastUpdated: 'x' } as unknown as Parameters<typeof filterSuppressedFromMonthly>[0]
+    expect(() => filterSuppressedFromMonthly(corrupt, list)).not.toThrow()
+    expect(filterSuppressedFromMonthly(corrupt, list)).toBe(corrupt)
+  })
+
+  it('does not cross-attribute a pattern to another service', () => {
+    // same title under a different svcId key must NOT be dropped by an openai pattern
+    const data = accumulateMonthlyIncidents(null, [{
+      ...svcWith([{ id: 'fr-x', title: 'FedRAMP degraded', duration: '1h' }]), id: 'chatgpt', name: 'chatgpt',
+    }], '2026-06', [])
+    const after = filterSuppressedFromMonthly(data, [{ scope: 'service-pattern', svcId: 'openai', match: 'fedramp' }])
+    expect(after.services.chatgpt.count).toBe(1)
+  })
+})
+
 // ── accumulateMonthlyIncidents ───────────────────────────────────────
 
 describe('accumulateMonthlyIncidents', () => {
@@ -378,7 +605,7 @@ describe('accumulateMonthlyIncidents', () => {
       ]),
     ]
 
-    const result = accumulateMonthlyIncidents(null, services, '2026-04')
+    const result = accumulateMonthlyIncidents(null, services, '2026-04', [])
     expect(result.services.claude.count).toBe(2)
     expect(result.services.claude.totalMinutes).toBe(210) // 150+60
     expect(result.services.claude.longestMinutes).toBe(150)
@@ -395,11 +622,11 @@ describe('accumulateMonthlyIncidents', () => {
       ]),
     ]
 
-    const first = accumulateMonthlyIncidents(null, services, '2026-04')
+    const first = accumulateMonthlyIncidents(null, services, '2026-04', [])
     expect(first.services.claude.count).toBe(1)
 
     // Run again with same incident — should not double-count
-    const second = accumulateMonthlyIncidents(first, services, '2026-04')
+    const second = accumulateMonthlyIncidents(first, services, '2026-04', [])
     expect(second.services.claude.count).toBe(1)
     expect(second.services.claude.incidentIds).toEqual(['inc-1'])
   })
@@ -409,14 +636,14 @@ describe('accumulateMonthlyIncidents', () => {
       makeService('claude', [
         { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '1h' },
       ]),
-    ], '2026-04')
+    ], '2026-04', [])
 
     const second = accumulateMonthlyIncidents(first, [
       makeService('claude', [
         { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '1h' },
         { id: 'inc-2', startedAt: '2026-04-03T10:00:00Z', status: 'resolved', duration: '30m' },
       ]),
-    ], '2026-04')
+    ], '2026-04', [])
 
     expect(second.services.claude.count).toBe(2)
     expect(second.services.claude.totalMinutes).toBe(90) // 60+30
@@ -430,14 +657,14 @@ describe('accumulateMonthlyIncidents', () => {
       ]),
     ]
 
-    const result = accumulateMonthlyIncidents(null, services, '2026-04')
+    const result = accumulateMonthlyIncidents(null, services, '2026-04', [])
     expect(result.services.claude.count).toBe(1)
     expect(result.services.claude.incidentIds).toEqual(['inc-2'])
   })
 
   it('handles services with no incidents', () => {
     const services = [makeService('claude', [])]
-    const result = accumulateMonthlyIncidents(null, services, '2026-04')
+    const result = accumulateMonthlyIncidents(null, services, '2026-04', [])
     expect(result.services.claude).toBeUndefined()
   })
 
@@ -447,7 +674,7 @@ describe('accumulateMonthlyIncidents', () => {
       makeService('claude', [
         { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'investigating', duration: null },
       ]),
-    ], '2026-04')
+    ], '2026-04', [])
     expect(first.services.claude.longestMinutes).toBe(0)
     expect(first.services.claude.totalMinutes).toBe(0)
 
@@ -456,7 +683,7 @@ describe('accumulateMonthlyIncidents', () => {
       makeService('claude', [
         { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '3h' },
       ]),
-    ], '2026-04')
+    ], '2026-04', [])
     expect(second.services.claude.longestMinutes).toBe(180)
     expect(second.services.claude.totalMinutes).toBe(180) // delta: 180-0 = 180
     expect(second.services.claude.count).toBe(1) // count unchanged
@@ -468,11 +695,11 @@ describe('accumulateMonthlyIncidents', () => {
         { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '2h' },
       ]),
     ]
-    const first = accumulateMonthlyIncidents(null, services, '2026-04')
+    const first = accumulateMonthlyIncidents(null, services, '2026-04', [])
     expect(first.services.claude.totalMinutes).toBe(120)
 
     // Same resolved incident accumulated again — should not add duration
-    const second = accumulateMonthlyIncidents(first, services, '2026-04')
+    const second = accumulateMonthlyIncidents(first, services, '2026-04', [])
     expect(second.services.claude.totalMinutes).toBe(120) // unchanged
   })
 
@@ -488,7 +715,7 @@ describe('accumulateMonthlyIncidents', () => {
     // Ensure makeService sets resolvedAt on resolved incidents (verify shape).
     services[0].incidents[0].resolvedAt = '2026-04-01T12:00:00Z'
 
-    const result = accumulateMonthlyIncidents(null, services, '2026-04')
+    const result = accumulateMonthlyIncidents(null, services, '2026-04', [])
     const detail = result.services.claude.incidents
     expect(detail).toBeDefined()
     expect(detail!.length).toBe(2)
@@ -507,7 +734,7 @@ describe('accumulateMonthlyIncidents', () => {
       { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '1h' },
     ])
     svc.incidents[0].impact = 'major' // override the makeService null default
-    const result = accumulateMonthlyIncidents(null, [svc], '2026-04')
+    const result = accumulateMonthlyIncidents(null, [svc], '2026-04', [])
     expect(result.services.bedrock.incidents![0].impact).toBe('major')
 
     // A later run refreshes impact if it changed (e.g. upgraded from null to major after escalation).
@@ -515,7 +742,7 @@ describe('accumulateMonthlyIncidents', () => {
       { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '2h' },
     ])
     svc2.incidents[0].impact = 'critical'
-    const second = accumulateMonthlyIncidents(result, [svc2], '2026-04')
+    const second = accumulateMonthlyIncidents(result, [svc2], '2026-04', [])
     expect(second.services.bedrock.incidents![0].impact).toBe('critical')
   })
 
@@ -525,7 +752,7 @@ describe('accumulateMonthlyIncidents', () => {
       makeService('claude', [
         { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'investigating', duration: null },
       ]),
-    ], '2026-04')
+    ], '2026-04', [])
     expect(first.services.claude.incidents![0].finalStatus).toBe('investigating')
 
     // Second pass: now resolved with a duration + resolvedAt.
@@ -533,7 +760,7 @@ describe('accumulateMonthlyIncidents', () => {
       { id: 'inc-1', startedAt: '2026-04-01T10:00:00Z', status: 'resolved', duration: '90m' },
     ])
     resolvedSvc.incidents[0].resolvedAt = '2026-04-01T11:30:00Z'
-    const second = accumulateMonthlyIncidents(first, [resolvedSvc], '2026-04')
+    const second = accumulateMonthlyIncidents(first, [resolvedSvc], '2026-04', [])
     const updated = second.services.claude.incidents![0]
     expect(updated.finalStatus).toBe('resolved')
     expect(updated.durationMin).toBe(90)
@@ -559,7 +786,7 @@ describe('accumulateMonthlyIncidents', () => {
       const j = next() % (i + 1)
       ;[incs[i], incs[j]] = [incs[j], incs[i]]
     }
-    const result = accumulateMonthlyIncidents(null, [makeService('mistral', incs)], '2026-04')
+    const result = accumulateMonthlyIncidents(null, [makeService('mistral', incs)], '2026-04', [])
     const data = result.services.mistral
     // Aggregate counts include every incident (the cap binds detail only).
     expect(data.count).toBe(overflow)
@@ -585,7 +812,7 @@ describe('accumulateMonthlyIncidents', () => {
         { id: 'new-1', startedAt: '2026-04-02T10:00:00Z', status: 'resolved', duration: '30m' },
       ]),
     ]
-    const result = accumulateMonthlyIncidents(legacy, services, '2026-04')
+    const result = accumulateMonthlyIncidents(legacy, services, '2026-04', [])
     expect(result.services.claude.count).toBe(2)
     expect(result.services.claude.incidents).toBeDefined()
     // Legacy entry has no detail; only the new incident is in the detail array.
@@ -821,9 +1048,70 @@ describe('accumulateIncidentsOnlyIfChanged (#587)', () => {
     expect(writes()).toBe(2)
     expect(JSON.parse(store['incidents:monthly:2026-06']).services.chatgpt.count).toBe(1) // still one incident
   })
+  // #975 — a THROWN kv.get was collapsed to `null`, which made the accumulator rebuild the month from
+  // this cycle alone and WRITE it: one transient read blip erased the whole month's history.
+  it('a KV read ERROR aborts the cycle and never overwrites the accumulator', async () => {
+    const seeded = JSON.stringify({
+      lastUpdated: '2026-07-01T00:00:00Z',
+      services: { pinecone: { count: 5, totalMinutes: 500, longestMinutes: 200, dates: ['2026-07-01'], incidentIds: ['a','b','c','d','e'], durations: { a:100,b:100,c:100,d:100,e:100 }, incidents: [] } },
+    })
+    let writes = 0
+    const kv = {
+      get: async (k: string) => { if (k.startsWith('incidents:monthly:')) throw new Error('KV unavailable'); return null },
+      put: async () => { writes++ },
+    } as unknown as KVNamespace
+
+    const res = await accumulateIncidentsOnlyIfChanged(kv, [svc('pinecone', [
+      { id: 'new-one', startedAt: '2026-07-09T00:00:00Z', status: 'investigating', duration: null },
+    ])], '2026-07')
+
+    expect(res).toBe('failed')
+    expect(writes).toBe(0) // the seeded month survives untouched
+    expect(JSON.parse(seeded).services.pinecone.count).toBe(5)
+  })
+
+  it('a genuinely ABSENT key still starts the month from scratch', async () => {
+    const { kv, store } = makeKV()
+    const res = await accumulateIncidentsOnlyIfChanged(kv, [svc('pinecone', [
+      { id: 'first', startedAt: '2026-07-09T00:00:00Z', status: 'resolved', duration: '1h' },
+    ])], '2026-07')
+    expect(res).toBe('written')
+    expect(JSON.parse(store['incidents:monthly:2026-07']).services.pinecone.count).toBe(1)
+  })
+
 })
 
 // ── buildMonthlyArchive ──────────────────────────────────────────────
+
+describe('aggregateIncidentDurations (#915 — long-open inflation)', () => {
+  const entry = (durationMin: number) => ({ id: String(durationMin), title: 't', startedAt: '2026-06-01', resolvedAt: null, durationMin, finalStatus: 'resolved' as const, impact: null })
+
+  it('sums/maxes the per-incident FINAL durations (the Deepgram case — ignores the inflated accumulator)', () => {
+    // 6 incidents summing to 2733m / max 1620m; accumulator monotonically inflated to 10602/8470.
+    const incidents = [1620, 601, 1, 137, 373, 1].map(entry)
+    const r = aggregateIncidentDurations(incidents, 6, 10602, 8470)
+    expect(r.totalMin).toBe(2733)
+    expect(r.longestMin).toBe(1620)
+  })
+
+  it('falls back to the accumulator when the list is TRUNCATED (< count)', () => {
+    // Only 2 of 250 incidents survived the per-service cap → the list is not the full population.
+    const incidents = [30, 20].map(entry)
+    const r = aggregateIncidentDurations(incidents, 250, 9999, 500)
+    expect(r.totalMin).toBe(9999)
+    expect(r.longestMin).toBe(500)
+  })
+
+  it('returns null/null when there are no incidents', () => {
+    expect(aggregateIncidentDurations([], 0, 0, 0)).toEqual({ totalMin: null, longestMin: null })
+    expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, longestMin: null })
+  })
+
+  it('treats a full list of zero-duration incidents as null (no downtime)', () => {
+    const r = aggregateIncidentDurations([entry(0), entry(0)], 2, 0, 0)
+    expect(r).toEqual({ totalMin: null, longestMin: null })
+  })
+})
 
 describe('buildMonthlyArchive', () => {
   const mockKV = {
@@ -872,19 +1160,17 @@ describe('buildMonthlyArchive', () => {
     expect(archive.services.openai.avgLatencyMs).toBeNull()
   })
 
-  it('#586 hybrid: threads officialUptime (status-page) separately from the daily-counter uptime', async () => {
-    // claude's daily counters give ~98.61% (AIWatch-measured) — see test above. The status-page
-    // officialUptime (from services:latest's uptime30d) is passed through scoreData and must NOT
-    // overwrite or equal the daily-counter uptime; estimate services (null uptime30d) → null.
-    const scoreData = [
-      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const, officialUptime: 99.83 },
-      { id: 'openai', aiwatchScore: 92, scoreGrade: 'excellent' as const, officialUptime: null },
-    ]
-    const archive = await buildMonthlyArchive(mockKV, 2026, 3, scoreData)
-    expect(archive.services.claude.officialUptime).toBe(99.83)        // status-page value, for display
-    expect(archive.services.claude.uptime).toBeCloseTo(98.61, 0)      // daily-counter value, for the Score — unchanged
-    expect(archive.services.claude.officialUptime).not.toBe(archive.services.claude.uptime)
-    expect(archive.services.openai.officialUptime).toBeNull()         // no published metric → null
+  it('#1016 — a live high-confidence Score with NO daily snapshot yields null officialUptime (no live leak into a frozen month)', async () => {
+    // The bug: the rebuild path re-snapshotted today's live `uptime30d` into a frozen month, so a service
+    // that gained an uptime source AFTER the month (openrouter post-#1006) showed "Official · 100%" beside
+    // a monthlyScore that dropped the uptime component. mockKV carries claude's daily COUNTERS but no
+    // daily officialUptime snapshot — the archived display must be null, and `scoreConfidence: 'high'`
+    // (standing in for today's live read) must not conjure one.
+    const archive = await buildMonthlyArchive(mockKV, 2026, 3, [
+      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const, scoreConfidence: 'high' as const },
+    ])
+    expect(archive.services.claude.officialUptime).toBeNull()      // no snapshot → null, not a live leak
+    expect(archive.services.claude.uptime).toBeCloseTo(98.61, 0)   // daily-counter value, unchanged
   })
 
   it('officialUptime defaults to null when scoreData omits it (forward/back compat)', async () => {
@@ -892,6 +1178,48 @@ describe('buildMonthlyArchive', () => {
       { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const },
     ])
     expect(archive.services.claude.officialUptime).toBeNull()
+  })
+
+  // #951 — the June 2026 contamination, reproduced through the full builder. The daily counter stores
+  // `uptime30d` WITHOUT its `uptimeSource`, so the incident-derived estimate that #713 removed on
+  // 2026-06-19 is indistinguishable from an official % in the snapshot. `computeMonthlyOfficialUptime`
+  // is a sticky last-non-null, so one pre-#713 day stamped "Official · 100.00%" on Stability's whole
+  // month — beside a Score the build (2026-07-01) had already rescaled over /60 as if no uptime existed.
+  it('#951 does not surface a month-end uptime the Score never consumed', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {}) // the withheld-value warning
+    const juneKV = {
+      get: async (key: string) => ({
+        // 06-17: pre-#713 — stability's estimate and groq's real official uptime look identical here.
+        'history:2026-06-17': JSON.stringify({
+          stability: { ok: 288, total: 288, officialUptime: 100 },
+          groq: { ok: 288, total: 288, officialUptime: 100 },
+        }),
+        // 06-29: post-#713 — stability's value is gone; groq's real one persists.
+        'history:2026-06-29': JSON.stringify({
+          stability: { ok: 288, total: 288, officialUptime: null },
+          groq: { ok: 288, total: 288, officialUptime: 100 },
+        }),
+      } as Record<string, string>)[key] ?? null,
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+
+    const archive = await buildMonthlyArchive(juneKV, 2026, 6, [
+      // Scored at build time (post-#713): no uptime component → medium confidence, /60 rescale.
+      { id: 'stability', aiwatchScore: 76, scoreGrade: 'good' as const, scoreConfidence: 'medium' as const },
+      { id: 'groq', aiwatchScore: 85, scoreGrade: 'good' as const, scoreConfidence: 'high' as const },
+    ])
+
+    // The sticky 100 from 06-17 must NOT resurface as Stability's "Official Uptime".
+    expect(archive.services.stability.officialUptime).toBeNull()
+    expect(archive.services.stability.uptime).toBe(100)   // AIWatch-measured — untouched, still honest
+    expect(archive.services.stability.score).toBe(76)     // the /60 score the display now agrees with
+    expect(archive.services.stability.scoreConfidence).toBe('medium')
+
+    // A service that really does publish uptime keeps it, month-end value and all.
+    expect(archive.services.groq.officialUptime).toBe(100)
+    expect(archive.services.groq.scoreConfidence).toBe('high')
   })
 
   it('#591 threads incidentSourceStale into the archive (only when set)', async () => {
@@ -904,20 +1232,36 @@ describe('buildMonthlyArchive', () => {
     expect(archive.services.claude.incidentSourceStale).toBeUndefined()
   })
 
-  it('#809 threads static addedAt into the archive (present for configured, absent for established)', async () => {
+  it('#809 threads static addedAt into the archive for a month the service existed in', async () => {
     const recentId = Object.keys(SERVICE_ADDED_AT)[0] // a service that carries an addedAt date
     expect(recentId).toBeDefined()
-    const archive = await buildMonthlyArchive(mockKV, 2026, 3, [
+    const addedAt = SERVICE_ADDED_AT[recentId]
+    const y = Number(addedAt.slice(0, 4)); const m = Number(addedAt.slice(5, 7)) // the month it was added
+    const archive = await buildMonthlyArchive(mockKV, y, m, [
       { id: recentId, aiwatchScore: 80, scoreGrade: 'good' as const },
       { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const },
     ])
-    expect(archive.services[recentId].addedAt).toBe(SERVICE_ADDED_AT[recentId]) // static config date, for the report-side gate
+    expect(archive.services[recentId].addedAt).toBe(addedAt) // static config date, for the report-side gate
     expect(archive.services.claude.addedAt).toBeUndefined() // established service → absent = full coverage
   })
 
-  it('#586 daily snapshot WINS over the build-time scoreData fallback', async () => {
-    // History days carry officialUptime; the month-end (2026-03-02) value must be used over the
-    // scoreData snapshot (which is the build-time fallback for months that lack daily snapshots).
+  it('#909 excludes a service from a month that ended before it was added (post-month roster leak)', async () => {
+    const recentId = Object.keys(SERVICE_ADDED_AT)[0]
+    const addedAt = SERVICE_ADDED_AT[recentId]
+    const y = Number(addedAt.slice(0, 4)); const m = Number(addedAt.slice(5, 7))
+    const prev = m === 1 ? { y: y - 1, m: 12 } : { y, m: m - 1 } // the month BEFORE it was added
+    // scoreData carries recentId (a REBUILD reads the current roster) — it must still be dropped.
+    const archive = await buildMonthlyArchive(mockKV, prev.y, prev.m, [
+      { id: recentId, aiwatchScore: 80, scoreGrade: 'good' as const },
+      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const },
+    ])
+    expect(archive.services[recentId]).toBeUndefined() // added after this month → not monitored → excluded
+    expect(archive.services.claude).toBeDefined()      // established service is unaffected
+  })
+
+  it('#586/#1006 officialUptime comes from the month-end daily snapshot (no scoreData/live source)', async () => {
+    // History days carry officialUptime; the archived display value is the month-end (2026-03-02) daily
+    // snapshot — the same value the monthly Score consumed. There is no scoreData/live fallback.
     const dailyKV = {
       get: async (key: string) => ({
         'history:2026-03-01': JSON.stringify({ claude: { ok: 280, total: 288, officialUptime: 98.0 } }),
@@ -925,9 +1269,9 @@ describe('buildMonthlyArchive', () => {
       } as Record<string, string>)[key] ?? null,
     } as unknown as KVNamespace
     const archive = await buildMonthlyArchive(dailyKV, 2026, 3, [
-      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const, officialUptime: 50 }, // stale fallback — must be ignored
+      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const, scoreConfidence: 'high' as const },
     ])
-    expect(archive.services.claude.officialUptime).toBe(99.83) // month-end daily value, not 50
+    expect(archive.services.claude.officialUptime).toBe(99.83) // month-end daily snapshot
     expect(archive.services.claude.uptime).toBeCloseTo(98.61, 0) // daily-counter uptime unchanged
   })
 
@@ -1095,6 +1439,35 @@ describe('buildMonthlyArchive', () => {
     // Mutate the archive copy and verify the source array is untouched.
     archive.services.claude.incidentList![0].title = 'mutated'
     expect(sharedDetail[0].title).toBe('incident')
+  })
+
+  it('#915 — downtime aggregate derives from the incident list, NOT the inflated monotonic accumulator', async () => {
+    // Deepgram June shape: accumulator locked at 176h42m/141h10m (a long-open incident's peak) while
+    // the per-incident detail carries the corrected final durations summing to 2733m (45h33m) / max 1620m.
+    const detail = [1620, 601, 1, 137, 373, 1].map((d, i) => ({
+      id: `d${i}`, title: `t${i}`, startedAt: '2026-03-10', resolvedAt: '2026-03-11',
+      durationMin: d, finalStatus: 'resolved' as const, impact: null,
+    }))
+    const kv = {
+      get: async (key: string) => key === 'incidents:monthly:2026-03'
+        ? JSON.stringify({
+            lastUpdated: '2026-03-31T09:00:00Z',
+            services: {
+              deepgram: {
+                count: 6, totalMinutes: 10602, longestMinutes: 8470, // inflated accumulator
+                dates: [], incidentIds: detail.map(e => e.id),
+                durations: Object.fromEntries(detail.map(e => [e.id, e.durationMin])),
+                incidents: detail, // corrected per-incident detail (source of truth)
+              },
+            },
+          })
+        : null,
+      put: async () => {}, delete: async () => {}, list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+    const archive = await buildMonthlyArchive(kv, 2026, 3)
+    expect(archive.services.deepgram.totalDowntimeMin).toBe(2733)   // 45h 33m — not the accumulator's 10602
+    expect(archive.services.deepgram.longestIncidentMin).toBe(1620) // 27h — not 8470
+    expect(archive.services.deepgram.avgResolutionMin).toBe(Math.round(2733 / 6)) // 456m, from the real total
   })
 
   it('handles empty KV (no data)', async () => {
@@ -1520,5 +1893,382 @@ describe('buildPartialIncidentArchive (#587)', () => {
     const out = buildPartialIncidentArchive('2026-06', acc)
     expect(out.services.bedrock.incidentList[0]).not.toBe(entry)
     expect(out.services.bedrock.incidentList[0]).toEqual(entry)
+  })
+})
+
+// ── #975 phantom prune (upstream delete + re-publish) ────────────────
+
+describe('prunePhantomIncidents (#975)', () => {
+  // A stored accumulator entry, defaulting to the shape a live-observed unresolved incident leaves.
+  const entry = (o: Partial<MonthlyIncidentEntry> & { id: string }): MonthlyIncidentEntry => ({
+    title: `Incident ${o.id}`, startedAt: '2026-07-09T13:34:38.481Z', resolvedAt: null,
+    durationMin: 0, finalStatus: 'monitoring', impact: 'major', ...o,
+  })
+
+  const stored = (entries: MonthlyIncidentEntry[]): MonthlyIncidents => ({
+    lastUpdated: '2026-07-09T14:00:00.000Z',
+    services: {
+      pinecone: {
+        count: entries.length,
+        totalMinutes: entries.reduce((a: number, e: MonthlyIncidentEntry) => a + e.durationMin, 0),
+        longestMinutes: entries.reduce((m: number, e: MonthlyIncidentEntry) => Math.max(m, e.durationMin), 0),
+        dates: ['2026-07-09'],
+        incidentIds: entries.map((e: MonthlyIncidentEntry) => e.id),
+        durations: Object.fromEntries(entries.map((e: MonthlyIncidentEntry) => [e.id, e.durationMin])),
+        incidents: entries,
+      },
+    },
+  })
+
+  const liveSvc = (incidents: Array<{ id: string; startedAt: string; status?: string }>): ServiceStatus => ({
+    id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', status: 'degraded',
+    latency: null, uptime30d: null, lastChecked: '', incidents: incidents.map(i => ({
+      id: i.id, title: `Incident ${i.id}`, status: (i.status ?? 'resolved') as any, impact: null,
+      startedAt: i.startedAt, duration: null, timeline: [],
+    })),
+  })
+
+  // The real event: Pinecone published `xqp5fkvlyg6t` (started 13:34), then deleted it and
+  // re-published the same outage as `m3wrr6csl9jm` (backdated to 09:50, title reworded).
+  const PHANTOM = entry({ id: 'xqp5fkvlyg6t', startedAt: '2026-07-09T13:34:38.481Z' })
+  const REPLACEMENT = { id: 'm3wrr6csl9jm', startedAt: '2026-07-09T09:50:14.000Z' }
+
+  const runs = (data: MonthlyIncidents, svc: ServiceStatus, n: number): MonthlyIncidents => {
+    let out = data
+    for (let i = 0; i < n; i++) out = prunePhantomIncidents(out, [svc], [])
+    return out
+  }
+
+  it('prunes the phantom only after PHANTOM_PRUNE_AFTER_MISSED_RUNS consecutive misses', () => {
+    const live = liveSvc([REPLACEMENT])
+    let data = stored([PHANTOM])
+
+    for (let i = 1; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS; i++) {
+      data = prunePhantomIncidents(data, [live], [])
+      expect(data.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+      expect(data.services.pinecone.incidents![0].missedRuns).toBe(i)
+    }
+    data = prunePhantomIncidents(data, [live], [])
+    expect(data.services.pinecone.incidents).toEqual([])
+    expect(data.services.pinecone.incidentIds).toEqual([])
+    expect(data.services.pinecone.count).toBe(0)
+  })
+
+  it('a transient single-cycle miss never prunes — the counter resets on reappearance', () => {
+    const gone = liveSvc([REPLACEMENT])
+    const back = liveSvc([REPLACEMENT, { id: 'xqp5fkvlyg6t', startedAt: PHANTOM.startedAt, status: 'monitoring' }])
+
+    let data = prunePhantomIncidents(stored([PHANTOM]), [gone], [])
+    expect(data.services.pinecone.incidents![0].missedRuns).toBe(1)
+
+    data = prunePhantomIncidents(data, [back], [])
+    expect(data.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+
+    // Two more misses would have pruned had the counter not reset.
+    data = runs(data, gone, PHANTOM_PRUNE_AFTER_MISSED_RUNS - 1)
+    expect(data.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+  })
+
+  it('never prunes a RESOLVED entry, however long it is absent', () => {
+    const resolved = entry({ id: 'old-resolved', finalStatus: 'resolved', resolvedAt: '2026-07-02T00:00:00Z', durationMin: 30, startedAt: '2026-07-01T00:00:00Z' })
+    // Live feed has only a NEWER incident, so `oldestLiveStart` is after the resolved entry —
+    // guard 3 would hold it anyway; guard 1 must hold it regardless.
+    const live = liveSvc([{ id: 'other', startedAt: '2026-07-08T00:00:00Z' }])
+    const out = runs(stored([resolved]), live, PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2)
+    expect(out.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['old-resolved'])
+    expect(out.services.pinecone.count).toBe(1)
+  })
+
+  it('an empty live list (failed fetch) never prunes', () => {
+    const empty = liveSvc([])
+    const out = runs(stored([PHANTOM]), empty, PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2)
+    expect(out.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+    expect(out.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+  })
+
+  it('a service missing from this cycle entirely never prunes', () => {
+    const out = runs(stored([PHANTOM]), liveSvc([REPLACEMENT]), 0)
+    expect(prunePhantomIncidents(out, [], []).services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+  })
+
+  it('guard 3: an entry OLDER than everything in the live feed is held, not pruned (feed truncation)', () => {
+    // The phantom started before the oldest live incident → we cannot distinguish "deleted" from
+    // "fell off the end of the feed window", so it must survive indefinitely.
+    const oldPhantom = entry({ id: 'ancient', startedAt: '2026-07-01T00:00:00Z' })
+    const live = liveSvc([{ id: 'newer', startedAt: '2026-07-05T00:00:00Z' }])
+    const out = runs(stored([oldPhantom]), live, PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2)
+    expect(out.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['ancient'])
+    expect(out.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+  })
+
+  it('recomputes count / totalMinutes / longestMinutes from the survivors', () => {
+    const a = entry({ id: 'a', startedAt: '2026-07-09T02:00:00Z', finalStatus: 'resolved', durationMin: 30 })
+    const b = entry({ id: 'b', startedAt: '2026-07-09T03:00:00Z', finalStatus: 'resolved', durationMin: 90 })
+    const live = liveSvc([
+      { id: 'a', startedAt: '2026-07-09T02:00:00Z' },
+      { id: 'b', startedAt: '2026-07-09T03:00:00Z' },
+    ])
+    const out = runs(stored([a, b, PHANTOM]), live, PHANTOM_PRUNE_AFTER_MISSED_RUNS)
+    const svc = out.services.pinecone
+    expect(svc.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['a', 'b'])
+    expect(svc.count).toBe(2)
+    expect(svc.totalMinutes).toBe(120)
+    expect(svc.longestMinutes).toBe(90)
+    expect(svc.durations).toEqual({ a: 30, b: 90 })
+    // `dates` is intentionally untouched (no consumer; recomputing would drop truncated entries' dates).
+    expect(svc.dates).toEqual(['2026-07-09'])
+  })
+
+  it('a truncated-but-counted incident (id present, no detail row) is never mistaken for a phantom', () => {
+    const data = stored([PHANTOM])
+    data.services.pinecone.incidentIds.unshift('truncated-old')
+    data.services.pinecone.durations['truncated-old'] = 45
+    data.services.pinecone.count = 2
+    data.services.pinecone.totalMinutes = 45
+
+    const out = runs(data, liveSvc([REPLACEMENT]), PHANTOM_PRUNE_AFTER_MISSED_RUNS)
+    // Phantom gone; the truncated entry survives in incidentIds/durations and still counts.
+    expect(out.services.pinecone.incidents).toEqual([])
+    expect(out.services.pinecone.incidentIds).toEqual(['truncated-old'])
+    expect(out.services.pinecone.count).toBe(1)
+    expect(out.services.pinecone.totalMinutes).toBe(45)
+  })
+
+  // #975 — the highest-consequence guard. `fetchAllServices` applies `applySuppressions` BEFORE the
+  // accumulator sees the list (services.ts), so an operator-hidden incident is missing from the live
+  // feed by POLICY. Pruning it would erase durable data that `filterSuppressedFromMonthly` is only
+  // supposed to hide, and un-suppressing would restore nothing.
+  it('never prunes an operator-SUPPRESSED unresolved incident (id scope)', () => {
+    const suppressions = [{ scope: 'incident' as const, incId: 'xqp5fkvlyg6t' }]
+    const out = (() => {
+      let d = stored([PHANTOM])
+      for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2; i++) d = prunePhantomIncidents(d, [liveSvc([REPLACEMENT])], suppressions)
+      return d
+    })()
+    expect(out.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+    expect(out.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+    expect(out.services.pinecone.count).toBe(1)
+  })
+
+  it('never prunes an operator-SUPPRESSED unresolved incident (service-pattern scope)', () => {
+    const suppressions = [{ scope: 'service-pattern' as const, svcId: 'pinecone', match: '5xx errors' }]
+    const phantom = entry({ id: 'xqp5fkvlyg6t', title: '[Serverless][Azure][eastus2] 5xx errors for some requests' })
+    let d = stored([phantom])
+    for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2; i++) d = prunePhantomIncidents(d, [liveSvc([REPLACEMENT])], suppressions)
+    expect(d.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+  })
+
+  // Fail-CLOSED: an unreadable suppression list must not read as "nothing is hidden".
+  it('null suppressions (unreadable list) disables pruning entirely', () => {
+    let d = stored([PHANTOM])
+    for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2; i++) d = prunePhantomIncidents(d, [liveSvc([REPLACEMENT])], null)
+    expect(d.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+    expect(d.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+    expect(prunePhantomIncidents(d, [liveSvc([REPLACEMENT])], null)).toBe(d) // identity, no work done
+  })
+
+  // Review finding (#975): a hold is NOT a confident miss. Without the reset, a phantom whose older
+  // live sibling ages out of the feed freezes at missedRuns=2 forever — never pruned, never cleared,
+  // and the internal counter then leaks into the permanent archive at month rollover.
+  it('guard-3 hold RESETS the counter, so the N runs are strictly consecutive', () => {
+    const withOlder = liveSvc([REPLACEMENT]) // older sibling present → guard 3 passes
+    const noOlder = liveSvc([{ id: 'newer', startedAt: '2026-07-09T20:00:00Z' }]) // nothing older → hold
+
+    let d = prunePhantomIncidents(stored([PHANTOM]), [withOlder], [])
+    d = prunePhantomIncidents(d, [withOlder], [])
+    expect(d.services.pinecone.incidents![0].missedRuns).toBe(2)
+
+    d = prunePhantomIncidents(d, [noOlder], []) // hold → reset
+    expect(d.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+
+    // One more confident miss must NOT prune (would have, if the counter had frozen at 2).
+    d = prunePhantomIncidents(d, [withOlder], [])
+    expect(d.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['xqp5fkvlyg6t'])
+    expect(d.services.pinecone.incidents![0].missedRuns).toBe(1)
+  })
+
+  it('a malformed stored startedAt is held, never pruned (lexicographic trap)', () => {
+    // 'pending' sorts AFTER any '2xxx-…' ISO string, so an unvalidated compare would pass guard 3.
+    const bad = entry({ id: 'bad-start', startedAt: 'pending' })
+    let d = stored([bad])
+    for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2; i++) d = prunePhantomIncidents(d, [liveSvc([REPLACEMENT])], [])
+    expect(d.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['bad-start'])
+    expect(d.services.pinecone.incidents![0].missedRuns).toBeUndefined()
+  })
+
+  it('an id that is present but non-string on the live side still counts as SEEN', () => {
+    // A parser regression emitting numeric ids must not make a present incident look deleted.
+    const svc = liveSvc([REPLACEMENT])
+    ;(svc.incidents[0] as unknown as { id: unknown }).id = 12345
+    const stored1 = stored([entry({ id: '12345', startedAt: '2026-07-09T13:34:38.481Z' })])
+    let d = stored1
+    for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS + 2; i++) d = prunePhantomIncidents(d, [svc], [])
+    expect(d.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['12345'])
+  })
+
+  it('is pure — the input accumulator is not mutated', () => {
+    const data = stored([PHANTOM])
+    const before = structuredClone(data)
+    prunePhantomIncidents(data, [liveSvc([REPLACEMENT])], [])
+    expect(data).toEqual(before)
+  })
+
+  it('returns the input by identity when nothing changed', () => {
+    const data = stored([entry({ id: 'x', finalStatus: 'resolved', durationMin: 10 })])
+    expect(prunePhantomIncidents(data, [liveSvc([{ id: 'x', startedAt: '2026-07-09T13:34:38.481Z' }])], [])).toBe(data)
+  })
+
+  it('tolerates a structurally-corrupt accumulator', () => {
+    expect(prunePhantomIncidents({ lastUpdated: '', services: undefined as any }, [], [])).toEqual({ lastUpdated: '', services: undefined })
+  })
+})
+
+// ── #975 end-to-end through accumulateMonthlyIncidents ───────────────
+
+describe('accumulateMonthlyIncidents — phantom self-heal (#975)', () => {
+  const svc = (incidents: Array<{ id: string; startedAt: string; status: string; duration: string | null }>): ServiceStatus => ({
+    id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', status: 'degraded',
+    latency: null, uptime30d: null, lastChecked: '', incidents: incidents.map(i => ({
+      id: i.id, title: `Incident ${i.id}`, status: i.status as any, impact: 'major',
+      startedAt: i.startedAt, duration: i.duration, timeline: [],
+    })),
+  })
+
+  it('reproduces the reported bug: id A observed live, upstream replaces it with id B → A is gone and count === 1', () => {
+    // Cycle 1 — Pinecone is showing `xqp5fkvlyg6t`, unresolved.
+    let acc = accumulateMonthlyIncidents(null, [svc([
+      { id: 'xqp5fkvlyg6t', startedAt: '2026-07-09T13:34:38.481Z', status: 'monitoring', duration: null },
+    ])], '2026-07', [])
+    expect(acc.services.pinecone.count).toBe(1)
+
+    // Upstream deletes it and re-publishes the same outage under a new id, backdated + reworded.
+    const replaced = svc([
+      { id: 'm3wrr6csl9jm', startedAt: '2026-07-09T09:50:14.000Z', status: 'resolved', duration: '4h 48m' },
+    ])
+
+    // Both are present for the first few cycles (count 2 — the bug, as observed in production).
+    acc = accumulateMonthlyIncidents(acc, [replaced], '2026-07', [])
+    expect(acc.services.pinecone.count).toBe(2)
+    expect(acc.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id).sort()).toEqual(['m3wrr6csl9jm', 'xqp5fkvlyg6t'])
+
+    // …then the phantom is reconciled away.
+    for (let i = 1; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS; i++) acc = accumulateMonthlyIncidents(acc, [replaced], '2026-07', [])
+
+    expect(acc.services.pinecone.incidents!.map((e: MonthlyIncidentEntry) => e.id)).toEqual(['m3wrr6csl9jm'])
+    expect(acc.services.pinecone.count).toBe(1)
+    expect(acc.services.pinecone.totalMinutes).toBe(288)
+    expect(acc.services.pinecone.longestMinutes).toBe(288)
+    expect(acc.services.pinecone.incidents![0].finalStatus).toBe('resolved')
+  })
+
+  it('self-heals even on a cycle where the service reports no incident for THIS period', () => {
+    // The replacement resolved and aged out of the feed; only a previous-month incident remains.
+    // The period filter would `continue` past this service, so the prune must run before it.
+    let acc = accumulateMonthlyIncidents(null, [svc([
+      { id: 'phantom', startedAt: '2026-07-09T13:34:38.481Z', status: 'monitoring', duration: null },
+    ])], '2026-07', [])
+
+    const onlyLastMonth = svc([{ id: 'june', startedAt: '2026-06-20T00:00:00Z', status: 'resolved', duration: '1h' }])
+    for (let i = 0; i < PHANTOM_PRUNE_AFTER_MISSED_RUNS; i++) acc = accumulateMonthlyIncidents(acc, [onlyLastMonth], '2026-07', [])
+
+    expect(acc.services.pinecone.incidents).toEqual([])
+    expect(acc.services.pinecone.count).toBe(0)
+  })
+})
+
+// ── #975 internal bookkeeping must not leak to public payloads ───────
+
+describe('stripInternalFields (#975)', () => {
+  const withCounter: MonthlyIncidentEntry = {
+    id: 'p1', title: 'x', startedAt: '2026-07-09T13:34:38.481Z', resolvedAt: null,
+    durationMin: 0, finalStatus: 'monitoring', impact: 'major', missedRuns: 2,
+  }
+
+  it('drops missedRuns and preserves everything else', () => {
+    const out = stripInternalFields(withCounter)
+    expect(out).not.toHaveProperty('missedRuns')
+    expect(out).toEqual({
+      id: 'p1', title: 'x', startedAt: '2026-07-09T13:34:38.481Z', resolvedAt: null,
+      durationMin: 0, finalStatus: 'monitoring', impact: 'major',
+    })
+  })
+
+  // Guards the whole class, not just today's one field: `stripInternalFields` hard-codes the fields it
+  // drops, so a future internal-only addition to MonthlyIncidentEntry would leak silently. This pins
+  // the PUBLIC key set of the emitted payload — add a field here only if the reports site may see it.
+  it('the emitted public entry exposes ONLY the allowlisted keys', () => {
+    const PUBLIC_KEYS = ['id', 'title', 'startedAt', 'resolvedAt', 'durationMin', 'finalStatus', 'impact']
+    const acc: MonthlyIncidents = {
+      lastUpdated: '', services: { pinecone: {
+        count: 1, totalMinutes: 0, longestMinutes: 0, dates: [], incidentIds: ['p1'],
+        durations: { p1: 0 }, incidents: [withCounter],
+      } },
+    }
+    const emitted = buildPartialIncidentArchive('2026-07', acc).services.pinecone.incidentList[0]
+    expect(Object.keys(emitted).sort()).toEqual([...PUBLIC_KEYS].sort())
+  })
+
+  it('buildPartialIncidentArchive (/api/report, current month) never emits missedRuns', () => {
+    const acc: MonthlyIncidents = {
+      lastUpdated: '', services: { pinecone: {
+        count: 1, totalMinutes: 0, longestMinutes: 0, dates: [], incidentIds: ['p1'],
+        durations: { p1: 0 }, incidents: [withCounter],
+      } },
+    }
+    const out = buildPartialIncidentArchive('2026-07', acc)
+    expect(out.services.pinecone.incidentList[0]).not.toHaveProperty('missedRuns')
+    expect(JSON.stringify(out)).not.toContain('missedRuns')
+  })
+})
+
+describe('computeMonthlyScore (#993)', () => {
+  const WINDOW = { startISO: '2026-06-01T00:00:00.000Z', endISO: '2026-07-01T00:00:00.000Z' }
+  const noProbe = new Map() // empty summaries → unsupported/insufficient, matching a no-probe month
+
+  const inc = (startedAt: string, durationMin: number, impact: 'minor' | 'major' | 'critical' = 'major') => ({
+    id: startedAt, title: 't', startedAt, resolvedAt: startedAt, durationMin,
+    finalStatus: 'resolved' as const, impact,
+  })
+
+  it('scores over the calendar month, not a build-day snapshot — fewer/shorter incidents ⇒ higher Score', () => {
+    // The Deepgram paradox this fixes: month-aggregate incidents improved yet the snapshot Score fell.
+    // With a month-windowed score, a genuinely better month must score at least as well.
+    const bad = computeMonthlyScore('x', [inc('2026-06-05T00:00:00Z', 600), inc('2026-06-12T00:00:00Z', 600), inc('2026-06-20T00:00:00Z', 600)], 99, noProbe, WINDOW, undefined)
+    const good = computeMonthlyScore('x', [inc('2026-06-10T00:00:00Z', 60)], 99, noProbe, WINDOW, undefined)
+    expect(good.score).not.toBeNull()
+    expect(bad.score).not.toBeNull()
+    expect(good.score!).toBeGreaterThan(bad.score!)
+  })
+
+
+  it('includes a last-second incident regardless of sub-second precision (#993 boundary)', () => {
+    // A next-day-midnight end bound is precision-agnostic; a `…T23:59:59.999Z` bound would exclude a
+    // `…T23:59:59Z` (no ms) incident because 'Z' > '.' in a string compare.
+    const lastSecNoMs = computeMonthlyScore('x', [inc('2026-06-30T23:59:59Z', 600)], 99, noProbe, WINDOW, undefined)
+    const lastSecMs = computeMonthlyScore('x', [inc('2026-06-30T23:59:59.000Z', 600)], 99, noProbe, WINDOW, undefined)
+    const empty = computeMonthlyScore('x', [], 99, noProbe, WINDOW, undefined)
+    // Both last-second incidents must be counted → a worse score than the incident-free month.
+    expect(lastSecNoMs.score!).toBeLessThan(empty.score!)
+    expect(lastSecNoMs.score).toBe(lastSecMs.score)
+  })
+
+  it('only counts incidents INSIDE the window', () => {
+    // An incident in May (before the window) must not drag June's score down.
+    const withMay = computeMonthlyScore('x', [inc('2026-05-15T00:00:00Z', 600), inc('2026-06-10T00:00:00Z', 60)], 99, noProbe, WINDOW, undefined)
+    const juneOnly = computeMonthlyScore('x', [inc('2026-06-10T00:00:00Z', 60)], 99, noProbe, WINDOW, undefined)
+    expect(withMay.score).toBe(juneOnly.score)
+  })
+
+  it('no official uptime ⇒ Uptime component dropped ⇒ low confidence (mirrors the live #713 rule)', () => {
+    // Deepgram's real shape: no official uptime, no probe → score computed on incidents+recovery only.
+    const r = computeMonthlyScore('x', [inc('2026-06-10T00:00:00Z', 60)], null, noProbe, WINDOW, undefined)
+    expect(r.confidence).toBe('low')
+    expect(r.score).toBeNull() // #713 withholds a low-confidence score
+  })
+
+  it('a clean month with official uptime and no incidents scores high', () => {
+    const r = computeMonthlyScore('x', [], 100, noProbe, WINDOW, undefined)
+    expect(r.confidence).toBe('high')
+    expect(r.score).toBeGreaterThan(80)
   })
 })

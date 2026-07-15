@@ -129,6 +129,104 @@ describe('renderAIInsight — predicted vs actual (#827 F4)', () => {
   })
 })
 
+describe('renderAIInsight — scored against the FIRST estimate (#1003)', () => {
+  // This public SEO card renders the same verdict as the Discord recovery embed, /feed and the
+  // dashboard modal, so it must grade on the same baseline. Pinecone: first estimated 1–4h, re-estimated
+  // ~15h once it outran that, actually recovered in 4h 55m. Grading against the CURRENT (re-analysis-
+  // inflated) estimate turned that miss into "faster than ~15h est." — a fabricated win.
+  const pinecone = {
+    summary: 'Freshness lag in some serverless namespaces.',
+    estimatedRecovery: '8–15h', estimatedRecoveryHours: 15, firstEstimatedRecoveryHours: 4,
+    affectedScope: ['Pinecone Serverless'],
+    analyzedAt: new Date(Date.now() - 30 * 60000).toISOString(),
+    startedAt: new Date(Date.now() - 295 * 60000).toISOString(), // 4h 55m before resolution
+    resolvedAt: new Date().toISOString(),
+  }
+
+  it('renders the honest near-miss, not the inflated win', () => {
+    const html = renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [], pinecone)
+    expect(html).toContain('4h 55m (over ~4h est.)')
+    expect(html).not.toContain('faster than ~15h est.')
+  })
+
+  it('falls back to the current estimate for a pre-#1003 analysis (no first field)', () => {
+    const { firstEstimatedRecoveryHours: _drop, ...preFix } = pinecone
+    const html = renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [], preFix)
+    expect(html).toContain('4h 55m (faster than ~15h est.)')
+  })
+
+  it('an ACTIVE incident still shows the CURRENT estimate (a visitor needs the live ETA)', () => {
+    const { resolvedAt: _r, ...active } = pinecone
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [], active)
+    expect(html).toContain('Est. Recovery:')
+    expect(html).toContain('8–15h')          // the re-anchored ETA, not the superseded 1–4h
+    expect(html).not.toContain('Predicted vs actual:')
+  })
+})
+
+describe('renderAIInsight — multiple active incidents (#926, dashboard-modal parity)', () => {
+  const mkInsight = (over: Partial<{ summary: string; incidentTitle: string; affectedScope: string[] }> = {}) => ({
+    summary: over.summary ?? 'Elevated error rates on model inference.',
+    estimatedRecovery: '30m–1h', affectedScope: over.affectedScope ?? ['API'],
+    analyzedAt: new Date(Date.now() - 10 * 60000).toISOString(),
+    needsFallback: true,
+    ...(over.incidentTitle ? { incidentTitle: over.incidentTitle } : {}),
+  })
+  // renderPage positional args: slug, service, seo, fallbacks, aiInsight, regionRec, reports,
+  // ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights.
+  const pageWith = (aiInsights: ReturnType<typeof mkInsight>[]) =>
+    renderPage('claude', mkService({ status: 'down' }), mkSeo(), [
+      { id: 'gemini', name: 'Gemini API', score: 95, status: 'operational' },
+    ], aiInsights[0], undefined, undefined, undefined, undefined, undefined, aiInsights)
+
+  it('shows every incident\'s analysis inside ONE card (single header), not just the first', () => {
+    const html = pageWith([
+      mkInsight({ summary: 'First incident: auth failures.', incidentTitle: 'Auth failures', affectedScope: ['Login'] }),
+      mkInsight({ summary: 'Second incident: streaming timeouts.', incidentTitle: 'Streaming timeouts', affectedScope: ['Streaming'] }),
+    ])
+    expect(html).toContain('First incident: auth failures.')
+    expect(html).toContain('Second incident: streaming timeouts.') // was DROPPED before #926
+    // ONE card → the "🤖 AI Analysis" header + Beta badge + disclaimer each render exactly once
+    expect((html.match(/AI Analysis</g) ?? []).length).toBe(1)
+    expect((html.match(/>Beta</g) ?? []).length).toBe(1)
+    expect((html.match(/AI-generated estimation/g) ?? []).length).toBe(1)
+    // incident titles label each sub-block when there are multiple
+    expect(html).toContain('Auth failures')
+    expect(html).toContain('Streaming timeouts')
+    // titles alone disambiguate — no "(N incidents)" count badge in the header
+    expect(html).not.toMatch(/\(\d+ incidents\)/)
+  })
+
+  it('renders the 🔄 Alternatives block only once for the whole card', () => {
+    const html = pageWith([
+      mkInsight({ summary: 'First.', incidentTitle: 'A' }),
+      mkInsight({ summary: 'Second.', incidentTitle: 'B' }),
+    ])
+    expect((html.match(/🔄 Alternatives/g) ?? []).length).toBe(1)
+  })
+
+  it('marks each sub-block title by its own resolved state (✅ resolved / 🔸 active)', () => {
+    // Operational service (isResolved) carrying one recently-recovered + one still-active analysis.
+    const recoveredAt = new Date(Date.now() - 3 * 60000).toISOString()
+    const html = renderPage('claude', mkService({ status: 'operational' }), mkSeo(), [], undefined,
+      undefined, undefined, undefined, undefined, undefined, [
+        { ...mkInsight({ summary: 'Recovered one.', incidentTitle: 'Recovered incident' }), resolvedAt: recoveredAt },
+        mkInsight({ summary: 'Still active one.', incidentTitle: 'Active incident' }),
+      ])
+    expect(html).toContain('✅ Recovered incident')
+    expect(html).toContain('🔸 Active incident')
+  })
+
+  it('single scalar aiInsight still renders exactly one card, no incident-title line / count badge (regression)', () => {
+    const html = renderPage('claude', mkService({ status: 'down' }), mkSeo(), [],
+      mkInsight({ summary: 'Only incident.', incidentTitle: 'Only' }))
+    expect(html).toContain('Only incident.')
+    expect((html.match(/AI Analysis</g) ?? []).length).toBe(1)
+    expect(html).not.toMatch(/\(\d+ incidents\)/) // no count badge
+    expect(html).not.toContain('🔸 Only') // title line suppressed for a single incident
+  })
+})
+
 describe('buildMetaDescription', () => {
   it('operational + uptime + incidents: all clauses in canonical order', () => {
     const svc = mkService({
@@ -696,7 +794,7 @@ function mkRegionRec(overrides: Partial<RegionStatusResult> = {}): RegionStatusR
     hasRegionSpecific: true,
     allDown: false,
     recommendedRegion: usWest,
-    docsUrl: 'https://docs.pinecone.io/troubleshooting/available-cloud-regions',
+    docsUrl: 'https://docs.pinecone.io/guides/index-data/create-an-index#cloud-regions',
     ongoingCount: 1,
     ...overrides,
   }

@@ -241,108 +241,153 @@ describe('parseInstatusIncidents — ongoing Nuxt incident has no duration (Mist
   })
 })
 
-describe('parseInstatusUptime (#627)', () => {
-  // Nuxt encodes each component's uptime as a flat-array index ref to a direct float %.
-  function nuxtHtmlWithUptime() {
-    const arr: unknown[] = [
-      'API', 99.599,                 // 0 name, 1 uptime value
-      'Le Chat', 99.854,             // 2, 3
-      { id: 9, name: 0, uptime: 1, services: 8 }, // 4 component "API"
-      { id: 9, name: 2, uptime: 3, services: 8 }, // 5 component "Le Chat"
-      [4, 5],                        // 6 components list
-      { components: 6 },             // 7
-      [],                            // 8
-      'comp-id',                     // 9
-    ]
+describe('parseInstatusUptime — Nuxt (#627 → #1006: computed, not copied)', () => {
+  // #1006 — the old parser read the component's published `uptime` float. That aggregate spans the
+  // page's own period (status.mistral.ai renders 90 days), so it was not comparable with the 30-day
+  // figures every other source now yields. The raw material sits beside it: each component carries
+  // `days` (90 × {date, events[]}) and each event has `created_at` + `duration` (seconds) + `severity`.
+  const NOW = Date.parse('2026-07-14T00:00:00Z')
+  const DAY = 86_400_000
+  const ago = (d: number) => new Date(NOW - d * DAY).toISOString()
+
+  /** Nuxt serialises as a flat array with index refs; component = {days, id, name, uptime}. */
+  function nuxtHtml(events: Array<{ daysAgo: number; duration: number; severity: string }>) {
+    const arr: unknown[] = ['API', 99.599, 'ignored-published-aggregate']
+    const eventIdx: number[] = []
+    for (const e of events) {
+      arr.push(ago(e.daysAgo)); const createdAt = arr.length - 1
+      arr.push(e.severity); const sev = arr.length - 1
+      // EVERY Nuxt scalar is an index ref — including numbers. Inlining a raw duration would be
+      // dereferenced as an array index and silently read as undefined.
+      arr.push(e.duration); const dur = arr.length - 1
+      arr.push({ created_at: createdAt, duration: dur, severity: sev })
+      eventIdx.push(arr.length - 1)
+    }
+    // 90 days; every event is pinned to day 0's bucket (the parser reads created_at, not the bucket).
+    const dayIdx: number[] = []
+    for (let i = 0; i < 90; i++) {
+      arr.push(i === 0 ? eventIdx : [])
+      const evList = arr.length - 1
+      arr.push({ date: ago(i), events: evList })
+      dayIdx.push(arr.length - 1)
+    }
+    arr.push(dayIdx); const daysList = arr.length - 1
+    arr.push({ id: 0, name: 0, uptime: 1, days: daysList })
     return `<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`
   }
 
-  it('resolves the named component’s 30-day uptime% from the Nuxt flat array', () => {
-    expect(parseInstatusUptime(nuxtHtmlWithUptime(), 'API')).toBeCloseTo(99.599, 3)
-    expect(parseInstatusUptime(nuxtHtmlWithUptime(), 'Le Chat')).toBeCloseTo(99.854, 3)
+  it('computes the trailing 30 days from days[].events, ignoring the published aggregate', () => {
+    // 24h MAJOR inside the window → 1 day of 30 → 96.66%. The page's own `uptime` (99.599) is not used.
+    const html = nuxtHtml([{ daysAgo: 5, duration: 86_400, severity: 'CRITICAL' }])
+    expect(parseInstatusUptime(html, 'API', NOW)).toBe(96.66)
   })
 
-  it('returns null for an unknown component, missing name, or Next.js without componentsUptime', () => {
-    expect(parseInstatusUptime(nuxtHtmlWithUptime(), 'Nonexistent')).toBeNull()
-    expect(parseInstatusUptime(nuxtHtmlWithUptime(), undefined)).toBeNull()
-    expect(parseInstatusUptime('<script>self.__next_f.push([1,"x"])</script>', 'API')).toBeNull()
+  it('weights a MEDIUM severity as a partial outage (0.3), per /methodology', () => {
+    // 24h × 0.3 = 7.2h of 30 days → 99.00%
+    const html = nuxtHtml([{ daysAgo: 5, duration: 86_400, severity: 'MEDIUM' }])
+    expect(parseInstatusUptime(html, 'API', NOW)).toBe(99)
+  })
+
+  it('ignores an event OUTSIDE the 30-day window — the whole point of the rewrite', () => {
+    const html = nuxtHtml([{ daysAgo: 60, duration: 86_400, severity: 'CRITICAL' }])
+    expect(parseInstatusUptime(html, 'API', NOW)).toBe(100)
+  })
+
+  it('clips an event that straddles the window edge', () => {
+    // Starts 31 days ago, runs 2 days → only ~1 day lands inside.
+    const html = nuxtHtml([{ daysAgo: 31, duration: 2 * 86_400, severity: 'CRITICAL' }])
+    expect(parseInstatusUptime(html, 'API', NOW)).toBe(96.66)
+  })
+
+  it('returns null for an unknown component or a missing name', () => {
+    const html = nuxtHtml([])
+    expect(parseInstatusUptime(html, 'Nonexistent', NOW)).toBeNull()
+    expect(parseInstatusUptime(html, undefined, NOW)).toBeNull()
   })
 })
 
-describe('parseInstatusUptime — Next.js componentsUptime (#635, Perplexity)', () => {
-  // Mirrors status.perplexity.com: escaped component defs (id→name) + a `componentsUptime` object
-  // keyed by component id, each entry nesting an `outages` array and an aggregate `"uptime"` string.
-  function nextHtmlWithUptime() {
+describe('parseInstatusUptime — Next.js componentsUptime (#635 → #1006)', () => {
+  // Mirrors status.perplexity.com: escaped component defs (id→name) + a `componentsUptime` object keyed
+  // by component id, each entry nesting an `outages` array and an aggregate `"uptime"` string. #1006 —
+  // the OUTAGES are now the source of truth; the aggregate (over the page's own 90-day period) is not.
+  const NOW = Date.parse('2026-07-14T00:00:00Z')
+  const DAY = 86_400_000
+  const iso = (daysAgo: number) => new Date(NOW - daysAgo * DAY).toISOString()
+
+  const compDef = (id: string, name: string) =>
+    `\\"id\\":\\"${id}\\",\\"name\\":{\\"default\\":\\"${name}\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003e${name}\\u003c/p\\u003e\\"},\\"group\\":null,\\"children\\":[],`
+
+  const outage = (fromDaysAgo: number, hours: number, status: string, customPct?: number) => {
+    const from = iso(fromDaysAgo)
+    const to = new Date(Date.parse(from) + hours * 3_600_000).toISOString()
+    const custom = customPct != null
+      ? `,\\"customImpactPercentage\\":${customPct},\\"isCustomPercentage\\":true`
+      : ''
+    return `{\\"from\\":\\"${from}\\",\\"to\\":\\"${to}\\",\\"status\\":\\"${status}\\"${custom}}`
+  }
+
+  const nextHtml = (outages: string[]) => {
     const escaped =
-      '\\"id\\":\\"clyi6jhgg31469ihojbwbsmeeg\\",\\"name\\":{\\"default\\":\\"Website\\"}' +
-      '\\"id\\":\\"clyiakn7i60113hvojwho6za6j\\",\\"name\\":{\\"default\\":\\"API\\"}' +
-      '\\"componentsUptime\\":{' +
-        '\\"clyi6jhgg31469ihojbwbsmeeg\\":{\\"5\\":\\"99.47\\",' +
-          '\\"outages\\":[{\\"from\\":\\"2026-06-05T01:00:00.000Z\\",\\"to\\":\\"2026-06-05T01:40:38.000Z\\",\\"status\\":\\"MAJOROUTAGE\\"}],' +
-          '\\"uptime\\":\\"99.82\\"},' +
-        '\\"clyiakn7i60113hvojwho6za6j\\":{\\"outages\\":[],\\"uptime\\":\\"100.0\\"}' +
-      '}'
+      compDef('cidapi001', 'API') +
+      '\\"componentsUptime\\":{\\"cidapi001\\":{' +
+        `\\"outages\\":[${outages.join(',')}],` +
+        '\\"uptime\\":\\"99.82\\"}}'   // the page's own aggregate — deliberately NOT what we return
     return `<script>self.__next_f.push([1,"${escaped}"])</script>`
   }
 
-  it('resolves the named component’s uptime% from componentsUptime[id].uptime', () => {
-    expect(parseInstatusUptime(nextHtmlWithUptime(), 'API')).toBeCloseTo(100.0, 3)
-    expect(parseInstatusUptime(nextHtmlWithUptime(), 'Website')).toBeCloseTo(99.82, 2)
+  it('computes from outages over 30 days, not from the published aggregate', () => {
+    const html = nextHtml([outage(5, 24, 'MAJOROUTAGE')])
+    expect(parseInstatusUptime(html, 'API', NOW)).toBe(96.66) // NOT 99.82
+  })
+
+  it('uses the provider’s OWN impact fraction when it states one (customImpactPercentage)', () => {
+    // Instatus says this partial outage hit 50% of capacity. Their number beats our 0.3 default.
+    // 24h × 0.5 = 12h of 30 days → 98.33%
+    const html = nextHtml([outage(5, 24, 'PARTIALOUTAGE', 50)])
+    expect(parseInstatusUptime(html, 'API', NOW)).toBe(98.33)
+  })
+
+  it('falls back to the documented weights when no custom fraction is given', () => {
+    // PARTIALOUTAGE → 0.3. 24h × 0.3 = 7.2h of 30 → 99.00%
+    const html = nextHtml([outage(5, 24, 'PARTIALOUTAGE')])
+    expect(parseInstatusUptime(html, 'API', NOW)).toBe(99)
+  })
+
+  it('ignores an OPERATIONAL "outage" row and anything outside the window', () => {
+    expect(parseInstatusUptime(nextHtml([outage(5, 24, 'OPERATIONAL')]), 'API', NOW)).toBe(100)
+    expect(parseInstatusUptime(nextHtml([outage(60, 24, 'MAJOROUTAGE')]), 'API', NOW)).toBe(100)
+  })
+
+  // #1006 review — an OPEN outage has `to: null`; it must count to now, not be dropped (the "spotless
+  // 100% during a live outage" symptom the rewrite exists to kill).
+  it('an ONGOING outage (to null) counts to now, it is not dropped', () => {
+    const openOutage = `{\\"from\\":\\"${iso(1)}\\",\\"to\\":null,\\"status\\":\\"MAJOROUTAGE\\"}` // started 24h ago, still open
+    expect(parseInstatusUptime(nextHtml([openOutage]), 'API', NOW)).toBe(96.66) // 24h of 30d, NOT 100
+  })
+
+  it('a clean component is 100%', () => {
+    expect(parseInstatusUptime(nextHtml([]), 'API', NOW)).toBe(100)
   })
 
   it('returns null for an unknown component or undefined name', () => {
-    expect(parseInstatusUptime(nextHtmlWithUptime(), 'Nonexistent')).toBeNull()
-    expect(parseInstatusUptime(nextHtmlWithUptime(), undefined)).toBeNull()
-  })
-
-  it('matchBrace ignores braces inside string values (would truncate under a naive regex)', () => {
-    // A nested outage carries `{`/`}` INSIDE string values — the quote-aware matcher must not
-    // miscount them, else the slice truncates and JSON.parse fails → wrong null.
-    const escaped =
-      '\\"id\\":\\"abc123\\",\\"name\\":{\\"default\\":\\"API\\"}' +
-      '\\"componentsUptime\\":{\\"abc123\\":{' +
-        '\\"outages\\":[{\\"status\\":\\"DEGRADED}{\\",\\"noticeId\\":\\"x}y\\"}],' +
-        '\\"uptime\\":\\"97.5\\"}}'
-    const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
-    expect(parseInstatusUptime(html, 'API')).toBeCloseTo(97.5, 2)
-  })
-
-  it('returns null for an uptime value outside [0,100]', () => {
-    const escaped =
-      '\\"id\\":\\"abc123\\",\\"name\\":{\\"default\\":\\"API\\"}' +
-      '\\"componentsUptime\\":{\\"abc123\\":{\\"uptime\\":\\"150.0\\"}}'
-    const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
-    expect(parseInstatusUptime(html, 'API')).toBeNull()
-  })
-
-  it('returns null when the component resolves but has no componentsUptime entry', () => {
-    const escaped =
-      '\\"id\\":\\"abc123\\",\\"name\\":{\\"default\\":\\"API\\"}' +
-      '\\"componentsUptime\\":{\\"other999\\":{\\"uptime\\":\\"99.0\\"}}'
-    const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
-    expect(parseInstatusUptime(html, 'API')).toBeNull()
-  })
-
-  it('returns null (warn-once shape path) when the component resolves but the componentsUptime block is absent', () => {
-    // Resolvable component map but no `componentsUptime` key → the structural-breakage warn path.
-    const escaped = '\\"id\\":\\"abc123\\",\\"name\\":{\\"default\\":\\"API\\"}\\"notices\\":{}'
-    const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
-    expect(parseInstatusUptime(html, 'API')).toBeNull()
+    expect(parseInstatusUptime(nextHtml([]), 'Nonexistent', NOW)).toBeNull()
+    expect(parseInstatusUptime(nextHtml([]), undefined, NOW)).toBeNull()
   })
 })
 
 describe('parseInstatusIncidents — Next.js component capture (#623, Perplexity)', () => {
-  // Mirrors the real status.perplexity.com payload: a `components` array (id→name: Website, API,
-  // name has ONLY a `default` key) + notices that reference component ids and carry `name:{en,default}`.
+  // Mirrors the real status.perplexity.com payload: a `components` array (id→name: Website, API) —
+  // each TOP-LEVEL component carries `nameHtml` + a `group` field (#911) — plus notices that reference
+  // component ids and carry `name:{en,default}` (no nameHtml).
   function nextHtmlWithComponents() {
     // Real Instatus ids are cuid-style (e.g. clyi6jhgg31469ihojbwbsmeeg) — use that shape so the test
     // exercises the regex's id charset/length faithfully.
     const WEB = 'clyi6jhgg31469ihojbwbsmeeg'
     const API = 'clyiakn7i60113hvojwho6za6j'
+    const comp = (id: string, name: string) =>
+      `{\\"id\\":\\"${id}\\",\\"name\\":{\\"default\\":\\"${name}\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003e${name}\\u003c/p\\u003e\\"},\\"status\\":\\"OPERATIONAL\\",\\"group\\":null,\\"children\\":[]}`
     const components =
-      '\\"components\\":[' +
-      `{\\"id\\":\\"${WEB}\\",\\"name\\":{\\"default\\":\\"Website\\"},\\"status\\":\\"OPERATIONAL\\"},` +
-      `{\\"id\\":\\"${API}\\",\\"name\\":{\\"default\\":\\"API\\"},\\"status\\":\\"OPERATIONAL\\"}]`
+      '\\"components\\":[' + comp(WEB, 'Website') + ',' + comp(API, 'API') + ']'
     const n1 =
       '\\"n1\\":{\\"id\\":\\"n1\\",\\"name\\":{\\"en\\":\\"Website and API incident\\",\\"default\\":\\"Website and API incident\\"},' +
       '\\"impact\\":\\"DEGRADEDPERFORMANCE\\",\\"started\\":\\"2026-05-08T00:20:00.000Z\\",\\"resolved\\":\\"2026-05-08T04:19:00.000Z\\",' +
@@ -378,9 +423,11 @@ describe('parseInstatusComponents (#761) — per-component snapshot', () => {
   // definitions carry `"id":"…","name":{"default":"…"},…,"status":"<STATE>"`. Children (e.g. fal's
   // "Model API" under the "API" group) serialize differently and are intentionally NOT matched, so
   // the snapshot stays at a uniform top-level granularity.
+  // A TOP-LEVEL component carries a `"group"` field before `"children"` (#911 discriminator). The real
+  // Instatus payload includes it; the fixture must too, or the `"group"`-gated regex won't match.
   function nextHtmlWithComponents(states: Record<string, string>) {
     const comp = (id: string, name: string, status: string) =>
-      `\\"id\\":\\"${id}\\",\\"name\\":{\\"default\\":\\"${name}\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003e${name}\\u003c/p\\u003e\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"${status}\\",\\"isParent\\":false,\\"children\\":[]`
+      `\\"id\\":\\"${id}\\",\\"name\\":{\\"default\\":\\"${name}\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003e${name}\\u003c/p\\u003e\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"${status}\\",\\"isParent\\":false,\\"group\\":null,\\"children\\":[]`
     const escaped =
       comp('clzmj6mni0276gwmw95xftvtd', 'Website', states.web ?? 'OPERATIONAL') + ',' +
       comp('clzmj6mnv0283gwmwtdqtt9u3', 'API', states.api ?? 'OPERATIONAL') + ',' +
@@ -424,5 +471,89 @@ describe('parseInstatusComponents (#761) — per-component snapshot', () => {
 
   it('returns [] for a non-Instatus / empty payload', () => {
     expect(parseInstatusComponents('<html></html>')).toEqual([])
+  })
+
+  // #911 — Perplexity added a TOP-LEVEL "Computer" component whose name object carries an `"en"`
+  // locale key BEFORE `"default"` (`{"en":"Computer","default":"Computer"}`), unlike the older
+  // `default`-only "API"/"Website". The old `"name":{"default":` anchor silently dropped it.
+  it('extracts a top-level component whose name has an `en` locale key before `default` (Perplexity Computer)', () => {
+    const withEn = (id: string, name: string, status: string, en: boolean, group: boolean) => {
+      const nameObj = en ? `{\\"en\\":\\"${name}\\",\\"default\\":\\"${name}\\"}` : `{\\"default\\":\\"${name}\\"}`
+      const groupField = group ? `\\"group\\":null,` : ''
+      return `\\"id\\":\\"${id}\\",\\"name\\":${nameObj},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003e${name}\\u003c/p\\u003e\\"},\\"isCollapsed\\":true,\\"order\\":3,\\"showUptime\\":true,\\"status\\":\\"${status}\\",\\"isParent\\":false,${groupField}\\"children\\":[]`
+    }
+    const escaped =
+      withEn('clyiakn7i60113hvojwho6za6j', 'API', 'OPERATIONAL', false, true) + ',' +
+      withEn('clyi6jhgg31469ihojbwbsmeeg', 'Website', 'OPERATIONAL', false, true) + ',' +
+      withEn('cmr18ih7201l20rqmap66bx4l', 'Computer', 'DEGRADEDPERFORMANCE', true, true)
+    const comps = parseInstatusComponents(`<script>self.__next_f.push([1,"x:${escaped}"])</script>`)
+    const byName = Object.fromEntries(comps.map((c) => [c.name, c.status]))
+    expect(byName['Computer']).toBe('degraded_performance') // en-key top-level now matched + status read
+    expect(byName['API']).toBe('operational')
+    expect(byName['Website']).toBe('operational')
+    expect(comps.map((c) => c.id)).toContain('cmr18ih7201l20rqmap66bx4l')
+  })
+
+  // #911 — a CHILD sub-component (e.g. fal's "Model API" under the "API" parent) ALSO carries the
+  // `{"en":…,"default":…}` shape, so the `en` key can't discriminate top-level from child. Children
+  // have NO `"group"` field — the `"group"`-gated regex excludes them, preserving top-level granularity.
+  it('excludes a child sub-component that shares the `en` name shape but has no `group` field (fal Model API)', () => {
+    // Parent "API" (has group + a nested child), then the child "Model API" (en shape, NO group).
+    const parent =
+      `\\"id\\":\\"clzmj6mnv0283gwmwtdqtt9u3\\",\\"name\\":{\\"default\\":\\"API\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003eAPI\\u003c/p\\u003e\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"OPERATIONAL\\",\\"isParent\\":true,\\"group\\":null,\\"children\\":[` +
+        `{\\"id\\":\\"cmp1437hn01j2bv9drf8hek1u\\",\\"name\\":{\\"en\\":\\"Model API\\",\\"default\\":\\"Model API\\"},\\"nameHtml\\":{\\"en\\":\\"\\u003cp\\u003eModel API\\u003c/p\\u003e\\",\\"default\\":\\"\\u003cp\\u003eModel API\\u003c/p\\u003e\\"},\\"isCollapsed\\":true,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"MAJOROUTAGE\\",\\"isParent\\":false,\\"children\\":[]}` +
+      `]`
+    const comps = parseInstatusComponents(`<script>self.__next_f.push([1,"x:${parent}"])</script>`)
+    expect(comps.map((c) => c.name)).toEqual(['API'])                 // parent only
+    expect(comps.map((c) => c.id)).not.toContain('cmp1437hn01j2bv9drf8hek1u') // child dropped
+    // The bounded first-`"status"` scan must read the PARENT's status (OPERATIONAL), NOT the nested
+    // child's (MAJOROUTAGE) — a regression in the anchor/window would read the child's and go unnoticed.
+    expect(comps.find((c) => c.name === 'API')!.status).toBe('operational')
+  })
+
+  // #911 — an incident notice also serializes `{"en":…,"default":…}` but is followed by `"started"`,
+  // not `"nameHtml"`. Anchoring on the trailing `,"nameHtml"` keeps notices out of the component map.
+  it('excludes an incident notice (en name shape, no nameHtml)', () => {
+    const comp =
+      `\\"id\\":\\"clzmj6mnv0283gwmwtdqtt9u3\\",\\"name\\":{\\"default\\":\\"API\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003eAPI\\u003c/p\\u003e\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"OPERATIONAL\\",\\"isParent\\":false,\\"group\\":null,\\"children\\":[]`
+    const notice =
+      `\\"id\\":\\"cmr3uqd3801w80kqfk6xdj08m\\",\\"name\\":{\\"en\\":\\"Computer Sandbox Issue\\",\\"default\\":\\"Computer Sandbox Issue\\"},\\"started\\":\\"2026-07-02T18:30:00.000Z\\",\\"resolved\\":null,\\"status\\":\\"INVESTIGATING\\",\\"impact\\":\\"PARTIALOUTAGE\\"`
+    const comps = parseInstatusComponents(`<script>self.__next_f.push([1,"x:${comp},${notice}"])</script>`)
+    expect(comps.map((c) => c.name)).toEqual(['API'])                    // notice excluded
+    expect(comps.map((c) => c.name)).not.toContain('Computer Sandbox Issue')
+  })
+
+  // #911 — verbatim real-payload regression. The hand-built fixtures above are authored to the regex,
+  // so they're self-consistent; this one uses bytes captured from the LIVE status.perplexity.com Next.js
+  // payload (2026-07-06, full field set + real order) so an upstream serialization change is caught, not
+  // assumed. API/Website are `default`-only; Computer carries the `{"en":…,"default":…}` shape.
+  it('extracts all three components from a verbatim real status.perplexity.com payload', () => {
+    // Verbatim escaped component bytes captured from a real status.perplexity.com Next.js
+    // payload (2026-07-06) — defeats fixture circularity: if Instatus ever reorders/renames a
+    // field the regex depends on, this real-bytes test catches it (#911).
+    const REAL_API = '\\"id\\":\\"clyiakn7i60113hvojwho6za6j\\",\\"name\\":{\\"default\\":\\"API\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003eAPI\\u003c/p\\u003e\\"},\\"description\\":{\\"default\\":\\"\\"},\\"descriptionHtml\\":{\\"default\\":\\"\\"},\\"isCollapsed\\":false,\\"order\\":2,\\"showUptime\\":true,\\"status\\":\\"OPERATIONAL\\",\\"archivedAt\\":null,\\"isThirdParty\\":false,\\"isParent\\":false,\\"thirdPartyComponentService\\":null,\\"startDate\\":null,\\"metrics\\":[],\\"group\\":null,\\"children\\":[]}'
+    const REAL_WEB = '\\"id\\":\\"clyi6jhgg31469ihojbwbsmeeg\\",\\"name\\":{\\"default\\":\\"Website\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003eWebsite\\u003c/p\\u003e\\"},\\"description\\":{\\"default\\":\\"\\"},\\"descriptionHtml\\":{\\"default\\":\\"\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"OPERATIONAL\\",\\"archivedAt\\":null,\\"isThirdParty\\":false,\\"isParent\\":false,\\"thirdPartyComponentService\\":null,\\"startDate\\":null,\\"metrics\\":[],\\"group\\":null,\\"children\\":[]}'
+    const REAL_COMP = '\\"id\\":\\"cmr18ih7201l20rqmap66bx4l\\",\\"name\\":{\\"en\\":\\"Computer\\",\\"default\\":\\"Computer\\"},\\"nameHtml\\":{\\"en\\":\\"\\u003cp\\u003eComputer\\u003c/p\\u003e\\",\\"default\\":\\"\\u003cp\\u003eComputer\\u003c/p\\u003e\\"},\\"description\\":{\\"default\\":\\"\\"},\\"descriptionHtml\\":{\\"default\\":\\"\\"},\\"isCollapsed\\":true,\\"order\\":3,\\"showUptime\\":true,\\"status\\":\\"OPERATIONAL\\",\\"archivedAt\\":null,\\"isThirdParty\\":false,\\"isParent\\":false,\\"thirdPartyComponentService\\":null,\\"startDate\\":null,\\"metrics\\":[],\\"group\\":null,\\"children\\":[]}'
+    const html = `<script>self.__next_f.push([1,"x:\\"components\\":[${REAL_API},${REAL_WEB},${REAL_COMP}]"])</script>`
+    const comps = parseInstatusComponents(html)
+    expect(comps.map((c) => c.name).sort()).toEqual(['API', 'Computer', 'Website'])
+    expect(comps.map((c) => c.id)).toContain('cmr18ih7201l20rqmap66bx4l')
+    expect(comps.every((c) => c.status === 'operational')).toBe(true)
+  })
+
+  // #911 — a top-level component that ships WITHOUT a `group` field is (by design) silently dropped:
+  // the `group`-gated regex can't tell it from a child. This documents that known fragility AND asserts
+  // the diagnostic warn-once fires so the silent miss is observable (mirrors warnNextUptimeShape).
+  it('drops a groupless top-level component but warns once (shape-drift diagnostic)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const noGroup =
+        `\\"id\\":\\"nogroupid001\\",\\"name\\":{\\"default\\":\\"API\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003eAPI\\u003c/p\\u003e\\"},\\"isCollapsed\\":false,\\"order\\":1,\\"showUptime\\":true,\\"status\\":\\"OPERATIONAL\\",\\"isParent\\":false,\\"children\\":[]`
+      const comps = parseInstatusComponents(`<script>self.__next_f.push([1,"x:${noGroup}"])</script>`)
+      expect(comps).toEqual([]) // dropped — the documented `group`-presence fragility
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('top-level (`group`-gated) discriminator'))
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

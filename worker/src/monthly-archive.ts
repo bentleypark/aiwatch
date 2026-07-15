@@ -7,15 +7,23 @@
 // incident counts, unlike services:latest which is a point-in-time snapshot.
 
 import type { ProbeDailyData } from './probe-archival'
-import type { ServiceStatus, Incident } from './types'
+import { summariesFromDailyData } from './probe-archival'
+import type { ServiceStatus, Incident, ServiceConfig, ProbeSummary } from './types'
+import { calculateAIWatchScore, classifyProbe } from './score'
+import { resolveProbeId, PROBE_TARGETS } from './probe'
 import type { OsvTimeline, OsvTimelineEntry } from './security-monitor'
 import { osvTimelineKey, isPubliclyVerifiedAlert } from './security-monitor'
 import { generateMonthlyNarrative, type MonthlyNarrativeDraft, type NarrativeAiOptions } from './monthly-narrative'
-import { SERVICE_ADDED_AT, SERVICES } from './services'
+import { SERVICE_ADDED_AT, SERVICES, existedInMonth } from './services'
 import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type IncidentHistoryRecord } from './incident-history'
+import { readSuppressionsFresh, readSuppressionsFreshOrNull, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
+import { readOverridesFresh, applyDurationOverrides } from './overrides'
 import { kvPut } from './utils'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
+// #951 — mirrors AIWatchScore.confidence. 'high' ⟺ the service had an official uptime% at score
+// time, i.e. the Score included the 40-pt uptime component (`score.ts` `hasUptime`).
+export type ScoreConfidence = 'high' | 'medium' | 'low'
 
 /** Per-incident snapshot kept in the permanent monthly archive (#375).
  *  Sourced from accumulated incidents:monthly:{period} at archive build time, before its
@@ -36,13 +44,43 @@ export interface MonthlyIncidentEntry {
   // written before #653 → consumers treat missing as null (informational), i.e. conservatively
   // contributes no downtime (won't fabricate an outage from pre-#653 data).
   impact?: 'minor' | 'major' | 'critical' | null
+  // #975 — consecutive accumulation runs this UNRESOLVED entry has been confidently missing from the
+  // upstream feed (see `prunePhantomIncidents`). Absent means zero: the field exists only while an
+  // entry is in the missing state, so a resolved or currently-present entry serializes exactly as
+  // before and the every-5-min write-skip guard in `accumulateIncidentsOnlyIfChanged` still
+  // short-circuits. Deleted the moment the entry reappears, and gone with the entry once pruned.
+  //
+  // One state DOES add writes: an unresolved incident that flaps in and out of the feed each cycle
+  // (the Instatus/Nuxt publish→delete pattern, #929) toggles the field, so each transition persists.
+  // Bounded and self-limiting — it stops once the incident resolves or reaches the prune threshold —
+  // and only on services that are already the noisy ones. Accepted, not overlooked.
+  missedRuns?: number
 }
 
 export interface MonthlyServiceData {
   uptime: number | null          // AIWatch-measured uptime% from daily ok/total counters — feeds the Score (null if no data)
-  officialUptime: number | null  // #586 — status-page rolling-30d uptime (month-end daily snapshot, build-time fallback) for the "Official Uptime" DISPLAY table; separate from the daily-counter `uptime` that feeds the Score. null if the service publishes no metric
+  officialUptime: number | null  // #586 — the rolling-30d official uptime (month-end daily snapshot) for the "Official Uptime" DISPLAY table; separate from the daily-counter `uptime` that feeds the Score. #951 — emitted ONLY when the Score actually consumed an official uptime (scoreConfidence 'high'); null otherwise. #1006 — this is AIWatch's OWN computation over the provider's published records (one window + one formula for every service), NOT a copy of the % on the provider's page; the report's table caption must say so, and the old "the window varies by page — 30 or 90 days" caveat is now false
+  /** #1006 — WHERE the records `officialUptime` was computed from came from: 'official' = the provider's
+   *  own incident/outage records; 'platform_avg' = the status-page platform's own monitors (Better
+   *  Stack), which is a measurement rather than the provider declaring an incident. Both are AIWatch's
+   *  own 30-day computation with the same weights — only the evidence differs. Absent on archives written
+   *  before #1006, and on a service with no uptime at all. The report's "Uptime Source" column reads this
+   *  instead of inferring the taxonomy from a hand-maintained service list (which drifted, aiwatch#951). */
+  uptimeSource?: 'official' | 'platform_avg'
   score: number | null           // AIWatch Score at archive time (null if unavailable)
   grade: ScoreGrade | null       // Score grade (null if score unavailable)
+  // #993 — Score computed over THIS CALENDAR MONTH (score.ts run on the month's incidents + monthly
+  // probe summary), as opposed to `score` which is a build-day snapshot of the rolling live Score.
+  // The report's trend chart + Notable Movers read this so the Score delta shares the month window
+  // with the MTTR/downtime deltas. CAVEAT: only the Incidents (25) and Recovery (15) components are
+  // truly calendar-windowed; the 40-pt Uptime component still uses the month-END rolling-30d
+  // official-uptime snapshot (status pages expose no calendar-month uptime), and Responsiveness uses
+  // the month's probe summary. Still a strict improvement over the build-day `score`. Absent on
+  // archives built before #993 → consumers fall back to `score`.
+  monthlyScore?: number | null
+  monthlyGrade?: ScoreGrade | null
+  monthlyScoreConfidence?: ScoreConfidence | null
+  scoreConfidence?: ScoreConfidence | null // #951 — 'high' = the Score included the 40-pt uptime component; the report labels the uptime source from this instead of a hardcoded service list
   incidents: number              // incident count for the month (from accumulated data)
   avgResolutionMin: number | null // average resolution time in minutes (null if no resolved incidents)
   totalDowntimeMin: number | null // sum of all incident durations for the month (null if no resolved incidents — unresolved durations are tracked as 0 upstream)
@@ -239,15 +277,214 @@ export interface MonthlyIncidents {
   services: Record<string, MonthlyIncidentServiceData>
 }
 
-/** Accumulate current service incidents into monthly totals. Deduplicates by incident ID. */
+/** #975 — consecutive runs an unresolved entry must be *confidently* missing before it is pruned.
+ *  The accumulator runs on the every-5-minute cron, so 3 runs is about 15 minutes: long enough that a
+ *  single malformed upstream response can't delete real data, short enough that a phantom doesn't sit
+ *  in the dashboard's 30/90-day list for hours. Raising it only delays cleanup; lowering it to 1 would
+ *  make one bad parse destructive. */
+export const PHANTOM_PRUNE_AFTER_MISSED_RUNS = 3
+
+/** #975 — copy an accumulator entry for PUBLIC emission, dropping bookkeeping that exists only to
+ *  drive the phantom prune. Both emit sites are trust boundaries: `buildPartialIncidentArchive` feeds
+ *  `/api/report` for the current month, and `buildMonthlyArchive` bakes the PERMANENT
+ *  `archive:monthly:{YYYY-MM}` the reports site reads. A phantom sitting at `missedRuns: 2` at month
+ *  rollover would otherwise freeze an internal counter into an immutable public snapshot forever. */
+export function stripInternalFields(e: MonthlyIncidentEntry): MonthlyIncidentEntry {
+  const { missedRuns: _missedRuns, ...rest } = e
+  return rest
+}
+
+/** Is this a value we may order lexicographically as an ISO instant? Guards the #975 watermark
+ *  comparison: `'2026-01-01T00:00:00Z' < 'pending'` is `true`, so an unvalidated non-ISO string would
+ *  satisfy guard 3 and enable a prune. Anything that isn't a 4-digit-year ISO prefix is untrusted. */
+function isIsoish(v: unknown): v is string {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)
+}
+
+/**
+ * #975 — remove entries stranded by an upstream **delete + re-publish**, and recompute the affected
+ * service's aggregates. Pure; the input is not mutated.
+ *
+ * The accumulator is additive and keyed on the upstream incident id: it only ever *updates* a stored
+ * entry while that same id is still in the live feed. When a provider retires an id — Pinecone
+ * deleted `xqp5fkvlyg6t` and re-published the same outage as `m3wrr6csl9jm` with a reworded title and
+ * a backdated start — the old entry is never resolved and never removed. It sits in the dashboard's
+ * 30/90-day list forever as `finalStatus: 'monitoring'`, `resolvedAt: null`, `durationMin: 0`, i.e.
+ * an eternal "Ongoing" row, and its `count++` inflates the month's incident total. Live-wins-on-id
+ * dedup can't help: the ids differ, so the phantom and its replacement never collide.
+ *
+ * An entry is pruned only when ALL of these hold, re-checked every run:
+ *   1. it is UNRESOLVED — a resolved entry is never touched. Resolved incidents legitimately age out
+ *      of the upstream feed window, so their absence tells us nothing.
+ *   2. its id is absent from the service's live incident list.
+ *   3. the live list still contains an incident that started STRICTLY EARLIER. This is the load-bearing
+ *      guard, and it is stronger than "the service reported at least one incident this cycle": it
+ *      proves the feed window has not truncated *past* our entry, so absence means deletion rather
+ *      than truncation. It is also vacuously false when the live list is empty, so a failed fetch —
+ *      which yields no incidents — can never prune anything.
+ *   4. 1-3 have held for `PHANTOM_PRUNE_AFTER_MISSED_RUNS` consecutive runs (`missedRuns`), so one
+ *      transient hiccup cannot delete real data. The counter resets the moment the entry reappears.
+ *
+ * Entries that were TRUNCATED to `MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE` have no detail row, and this
+ * only walks detail rows — so a counted-but-truncated incident is never mistaken for a phantom.
+ * (Truncation drops the OLDEST entries; a phantom is by definition recent.)
+ *
+ * **Suppressed incidents are never pruned.** `fetchAllServices` returns lists that already had
+ * `applySuppressions` applied (#904), so an operator-suppressed incident is missing from the live list
+ * *by policy*, not because upstream deleted it. Without this carve-out an unresolved suppressed
+ * incident (e.g. OpenAI's FedRAMP one) would be erased from the accumulator ~15 minutes after the
+ * suppression is added, and removing the suppression would restore nothing — destroying the
+ * reversibility that is the whole point of the suppression layer. `suppressions` is REQUIRED rather
+ * than optional so the type-checker forces every call site to decide (an optional param would let a
+ * future caller silently reintroduce this).
+ *
+ * `suppressions === null` means "the list could not be read" and **disables pruning entirely for this
+ * run** — fail-closed. Collapsing an unreadable list to `[]` would be fail-open in the destructive
+ * direction: three consecutive KV blips would be enough to erase a suppressed incident.
+ *
+ * Aggregate rollback mirrors `filterSuppressedFromMonthly` exactly — `durations` is the complete,
+ * uncapped per-id map, so `count`/`totalMinutes`/`longestMinutes` recompute from it precisely.
+ * `dates` is deliberately left alone, as it is there too: it has no consumer, and recomputing it from
+ * the capped detail rows would silently drop the dates of truncated incidents.
+ *
+ * Scope: `accumulateMonthlyIncidents` only ever runs for the CURRENT month, so this self-heals the
+ * current month's accumulator. A phantom already stranded in a past month stays until an operator
+ * suppression drops it at archive-build time (#904).
+ *
+ * Known residual false-positive path, accepted: a still-open incident that keeps its upstream id but
+ * gets its TITLE reworded such that `filterIncidents` keyword attribution (services.ts) stops
+ * matching it would disappear from the live list exactly like a phantom, and could be pruned. It
+ * needs a keyword-attributed service, a concurrent older live incident, and the mismatch to persist
+ * past the miss threshold — and while it holds, the incident is already invisible on every live
+ * surface, so the accumulator row is the lesser loss. The prune logs every deletion so this is
+ * reconstructible rather than silent.
+ */
+export function prunePhantomIncidents(
+  data: MonthlyIncidents,
+  services: ServiceStatus[],
+  suppressions: SuppressionEntry[] | null,
+): MonthlyIncidents {
+  // Unreadable suppression list → we cannot tell "hidden by policy" from "deleted upstream". Hold.
+  // Logged: otherwise the self-heal silently does nothing and no operator can tell it was skipped.
+  if (suppressions === null) {
+    console.warn('[monthly-archive] #975 phantom prune skipped — suppression list unreadable (fail-closed)')
+    return data
+  }
+  if (!data?.services || typeof data.services !== 'object') return data
+
+  const liveBySvc = new Map<string, Incident[]>()
+  for (const svc of services) liveBySvc.set(svc.id, svc.incidents ?? [])
+
+  let touched = false
+  const nextServices: Record<string, MonthlyIncidentServiceData> = {}
+
+  for (const [svcId, svc] of Object.entries(data.services)) {
+    const details = svc.incidents
+    const live = liveBySvc.get(svcId)
+    // A service absent from this cycle's list (removed, or a whole-fetch failure) is never pruned.
+    if (!details?.length || !live?.length) { nextServices[svcId] = svc; continue }
+
+    // `String(...)` on both sides: a strict-equality miss would read a PRESENT incident as absent and
+    // eventually delete it, so the id comparison must not depend on a parser emitting the declared
+    // `string` type. Falsy ids are dropped here and skipped below, never matched by accident.
+    const liveIds = new Set(live.map((i) => i?.id).filter(Boolean).map(String))
+    // Earliest start among live incidents — the truncation watermark for guard 3. Compared as ISO
+    // strings, which sort lexicographically. Non-ISO values are ignored, which can only move the
+    // watermark LATER, making guard 3 harder to satisfy — i.e. it fails toward not pruning.
+    let oldestLiveStart: string | null = null
+    for (const i of live) {
+      const s = i?.startedAt
+      if (isIsoish(s) && (oldestLiveStart === null || s < oldestLiveStart)) oldestLiveStart = s
+    }
+
+    const pruned = new Set<string>()
+    const nextDetails: MonthlyIncidentEntry[] = []
+    let svcTouched = false
+
+    for (const entry of details) {
+      const e = { ...entry }
+      const seen = !e.id || liveIds.has(String(e.id))
+      // Absent because an operator hid it, not because upstream deleted it — see the doc comment.
+      const hidden = suppressions.length > 0 && isSuppressedByIdTitle(e.id, e.title, svcId, suppressions)
+      // A malformed stored `startedAt` can't be ordered against the watermark. Holding here makes
+      // "malformed → never pruned" TOTAL: without it, a value like `'pending'` sorts after any
+      // `'2xxx-…'` ISO string, so guard 3 would pass and a real entry could be deleted.
+      const orderable = isIsoish(e.startedAt)
+
+      if (e.finalStatus === 'resolved' || seen || hidden || !orderable) {
+        if (e.missedRuns !== undefined) { delete e.missedRuns; svcTouched = true }
+        nextDetails.push(e)
+        continue
+      }
+      // Guard 3 — can't tell "deleted upstream" from "fell off the end of the feed window", so hold.
+      // Reset the counter too: the threshold means N runs of CONFIDENT absence, and a hold is not
+      // one. Without the reset a phantom whose older live sibling ages out freezes mid-count forever.
+      if (oldestLiveStart === null || !(oldestLiveStart < e.startedAt)) {
+        if (e.missedRuns !== undefined) { delete e.missedRuns; svcTouched = true }
+        nextDetails.push(e)
+        continue
+      }
+
+      const misses = (e.missedRuns ?? 0) + 1
+      if (misses >= PHANTOM_PRUNE_AFTER_MISSED_RUNS) {
+        // This DELETES durable data — the one operation in this module that does. Log it, so a
+        // false positive is reconstructible later instead of appearing as a row that silently
+        // vanished from the 30/90-day list.
+        console.log(`[monthly-archive] #975 pruning phantom ${svcId}/${e.id} after ${misses} confident misses — "${e.title}" (started ${e.startedAt}, oldest live ${oldestLiveStart})`)
+        pruned.add(e.id)
+        svcTouched = true
+        continue // dropped — do not carry into nextDetails
+      }
+      console.log(`[monthly-archive] #975 phantom candidate ${svcId}/${e.id} missing ${misses}/${PHANTOM_PRUNE_AFTER_MISSED_RUNS} runs`)
+      e.missedRuns = misses
+      svcTouched = true
+      nextDetails.push(e)
+    }
+
+    if (!svcTouched) { nextServices[svcId] = svc; continue }
+    touched = true
+
+    if (pruned.size === 0) { nextServices[svcId] = { ...svc, incidents: nextDetails }; continue }
+
+    const incidentIds = svc.incidentIds.filter((id) => !pruned.has(id))
+    const durations: Record<string, number> = {}
+    for (const [id, dur] of Object.entries(svc.durations ?? {})) {
+      if (!pruned.has(id)) durations[id] = dur
+    }
+    const durationVals = Object.values(durations)
+    nextServices[svcId] = {
+      ...svc,
+      count: incidentIds.length,
+      totalMinutes: durationVals.reduce((a, b) => a + b, 0),
+      longestMinutes: durationVals.reduce((m, d) => Math.max(m, d), 0),
+      incidentIds,
+      durations,
+      incidents: nextDetails,
+    }
+  }
+
+  return touched ? { ...data, services: nextServices } : data
+}
+
+/** Accumulate current service incidents into monthly totals. Deduplicates by incident ID.
+ *  `suppressions` is only consumed by the #975 phantom prune (an operator-hidden incident must never
+ *  be pruned); accumulation itself needs no filtering, since `services` arrives already suppressed.
+ *  `null` = the list could not be read → the prune is skipped for this run (fail-closed). */
 export function accumulateMonthlyIncidents(
   existing: MonthlyIncidents | null,
   services: ServiceStatus[],
   period: string, // YYYY-MM
+  suppressions: SuppressionEntry[] | null,
 ): MonthlyIncidents {
-  const result: MonthlyIncidents = existing
+  const base: MonthlyIncidents = existing
     ? { lastUpdated: new Date().toISOString(), services: structuredClone(existing.services) }
     : { lastUpdated: new Date().toISOString(), services: {} }
+
+  // #975 — reconcile BEFORE accumulating, and outside the per-service `continue` below: a phantom must
+  // still be prunable on a cycle where the service reports no incident *for this period* (its only
+  // remaining live incidents may be from an earlier month). The prune reads the service's FULL live
+  // list, not the period-filtered one, because feed truncation is global rather than per-month.
+  const result = prunePhantomIncidents(base, services, suppressions)
 
   for (const svc of services) {
     const incidents = (svc.incidents ?? []).filter(
@@ -341,12 +578,30 @@ export async function accumulateIncidentsOnlyIfChanged(
   month: string, // YYYY-MM
 ): Promise<'unchanged' | 'written' | 'failed'> {
   const incKey = `incidents:monthly:${month}`
-  const existingRaw = await kv.get(incKey).catch(() => null)
+  // #975 — a THROWN KV get must not be collapsed into "no accumulator yet". `existing = null` makes
+  // `accumulateMonthlyIncidents` rebuild the month from this cycle alone, and since the JSON compare
+  // then differs, that stripped object is WRITTEN — silently destroying the month's history on a
+  // single transient read blip. Only a genuinely absent key (null, first write of the month) may
+  // legitimately start from scratch; a read error aborts the cycle and retries in 5 minutes.
+  let existingRaw: string | null
+  try {
+    existingRaw = await kv.get(incKey)
+  } catch (err) {
+    console.error(`[monthly-archive] ${incKey} read failed — skipping accumulation this cycle:`, err instanceof Error ? err.message : String(err))
+    return 'failed'
+  }
   let existing: MonthlyIncidents | null = null
   if (existingRaw) {
     try { existing = JSON.parse(existingRaw) } catch { existing = null /* corrupt → rebuild from current */ }
   }
-  const updated = accumulateMonthlyIncidents(existing, services, month)
+  // #975 — a suppressed-but-unresolved incident is absent from `services` by policy (fetchAllServices
+  // applies suppressions), and the prune must not mistake that for an upstream deletion and erase it.
+  // `…OrNull` rather than `readSuppressions`/`readSuppressionsFresh` NOT for freshness — the prune
+  // needs 3 runs (~15 min) to act, so a 60s-cached list is current enough — but because both siblings
+  // collapse a KV read/parse failure to `[]` (or a stale cache), i.e. to "nothing is hidden". A
+  // destructive caller must be able to tell that apart, and `null` disables the prune for this run.
+  const suppressions = await readSuppressionsFreshOrNull(kv)
+  const updated = accumulateMonthlyIncidents(existing, services, month, suppressions)
   // Compare incident payload only — `lastUpdated` is bumped every call, so a whole-object compare
   // would always differ. No service-payload change → nothing to persist → skip the write.
   const existingServices = existing ? JSON.stringify(existing.services) : null
@@ -371,7 +626,7 @@ export function buildPartialIncidentArchive(
   const services: Record<string, { incidentList: MonthlyIncidentEntry[] }> = {}
   for (const [id, svc] of Object.entries(incidentData?.services ?? {})) {
     if (svc?.incidents && svc.incidents.length > 0) {
-      services[id] = { incidentList: svc.incidents.map(e => ({ ...e })) }
+      services[id] = { incidentList: svc.incidents.map(stripInternalFields) }
     }
   }
   return { period, partial: true, services }
@@ -408,21 +663,91 @@ type DailyCounters = Record<string, {
   components?: Record<string, { ok: number; total: number; name: string }>
 }>
 
+/** How many of the month's FINAL days may supply the "as of month end" official uptime. A value last
+ *  observed earlier than this is not month-end data — it is residue (#951). Three days tolerates a
+ *  transient status-page fetch failure on the last day (the snapshot is the day's last cron cycle)
+ *  without tolerating a source that went away mid-month. */
+export const OFFICIAL_UPTIME_TAIL_DAYS = 3
+
 /** #586 — per-service "Official Uptime" for the month: the status-page rolling-30d value as of the
  *  LATEST day in the window (≈ the month, since uptime30d trails 30 days). Reads the per-cycle daily
  *  snapshots (DailyCounters.officialUptime) rather than a one-shot build-time snapshot, so it stays
  *  month-accurate and survives a later rebuild. Omits a service when no day carried a value (months
- *  before this shipped, or a service that publishes no metric) → the caller falls back to null. */
+ *  before this shipped, or a service that publishes no metric) → the caller falls back to null.
+ *
+ *  #951 — "as of the LATEST day" is now what the code actually does. It used to scan every day and keep
+ *  the last NON-NULL value, so a figure last seen on the 17th was still reported as the month's official
+ *  uptime even though the source published nothing for the final two weeks. That is how the pre-#713
+ *  incident-derived ESTIMATE (removed 2026-06-19; the daily counter stores `uptime30d` without its
+ *  `uptimeSource`, so an estimate is indistinguishable from an official %) stamped a fabricated
+ *  "Official · 100.00%" on Stability/ElevenLabs/Replicate for all of June 2026 — and how Character.AI
+ *  kept a real-but-dead 99.58% after its status page was deactivated (#689/#800). Only the final
+ *  OFFICIAL_UPTIME_TAIL_DAYS days with data can supply the value now. */
 export function computeMonthlyOfficialUptime(
   dailyData: Record<string, DailyCounters>,
 ): Record<string, number> {
   const result: Record<string, number> = {}
-  for (const date of Object.keys(dailyData).sort()) { // ascending → later dates overwrite (most-recent wins)
+  const dates = Object.keys(dailyData).sort()
+  const tail = dates.slice(-OFFICIAL_UPTIME_TAIL_DAYS)
+  for (const date of tail) { // ascending → later dates overwrite (most-recent wins)
     for (const [id, c] of Object.entries(dailyData[date])) {
       if (c.officialUptime !== null && c.officialUptime !== undefined) result[id] = c.officialUptime
     }
   }
   return result
+}
+
+/** #951 — SECOND line of defence, after `computeMonthlyOfficialUptime` narrowed the value to the
+ *  month's final days. The archive's "Official Uptime" DISPLAY must agree with what the Score actually
+ *  consumed, or the report prints "Official · 100.00%" beside a score rescaled over /60 as if no
+ *  uptime existed. `scoreConfidence === 'high'` ⟺ `score.ts` `hasUptime` ⟺ the 40-pt uptime component
+ *  was included.
+ *
+ *  The two signals can legitimately disagree, and the disagreement is worth surfacing rather than
+ *  silently resolving. The month-end value comes from the daily snapshots; `scoreConfidence` comes from
+ *  ONE read of `services:latest` on build day. If a status-page fetch happened to fail on that read,
+ *  a service that published uptime all month reads `medium` and loses its figure. That is a real way to
+ *  discard correct data, so we warn — the same class of silent drop this whole issue is about. We still
+ *  withhold the number (a displayed uptime beside a `/60` score is the contradiction #951 exists to
+ *  remove), but the operator can see it happened; the archived `score` is wrong in that case too.
+ *
+ *  `scoreSvc === undefined` means `services:latest` was unreadable (index.ts logs the parse failure and
+ *  passes an empty scoreData). Do NOT null everything then: the month-end daily snapshots stand on their
+ *  own, and there is no score to contradict. This is what the pre-#951 code did — tying officialUptime
+ *  to scoreData would let one parse failure erase every service's uptime from an archive the cron never
+ *  rebuilds (it only builds when the entry is absent).
+ *
+ *  Historical archives written before this shipped still carry the contaminated values and are corrected
+ *  out-of-band — do NOT reach for `/api/admin/rebuild-archive`. It is not idempotent (it re-snapshots
+ *  `score` from the CURRENT `services:latest`), and because this gate reads that same current confidence,
+ *  rebuilding a month whose service has since LOST its source (Character.AI, #689/#800) also withholds the
+ *  uptime it genuinely published back then. Patch the `archive:{period}` KV entry directly instead. */
+export function resolveArchiveOfficialUptime(
+  monthEndValue: number | undefined,
+  scoreSvc: ArchiveScoreInput | undefined,
+): number | null {
+  if (!scoreSvc) return monthEndValue ?? null
+  // #1016 — emit the MONTH-END daily snapshot ONLY; never fall back to a live `services:latest` value.
+  // The rebuild path re-snapshots today's `uptime30d` into a frozen month, so a null month-end value used
+  // to fall back to today's LIVE figure — "Official · 100%" beside a monthlyScore that had dropped the
+  // uptime component (openrouter, June 2026). A month with no snapshot now correctly reads null.
+  if (scoreSvc.scoreConfidence == null) {
+    // Both production callers pass it; this only guards an external caller. Confidence unknown → we can't
+    // confirm the Score consumed an uptime, so surface the month-end snapshot at most (never a live value).
+    console.warn(`[monthly-archive] ${scoreSvc.id}: scoreData omits scoreConfidence — emitting the month-end snapshot only`)
+    return monthEndValue ?? null
+  }
+  if (scoreSvc.scoreConfidence !== 'high') {
+    if (monthEndValue != null) {
+      console.warn(
+        `[monthly-archive] ${scoreSvc.id}: withholding month-end official uptime ${monthEndValue} — ` +
+        `build-time scoreConfidence=${scoreSvc.scoreConfidence} (uptime30d was null when the Score was ` +
+        `snapshotted, so the archived score is a /60 rescale). Transient status-page failure on build day?`,
+      )
+    }
+    return null
+  }
+  return monthEndValue ?? null
 }
 
 /** Compute per-service uptime% from daily counters */
@@ -475,6 +800,90 @@ export function computeMonthlyComponentUptime(
     if (arr.length > 0) result[svcId] = arr
   }
   return result
+}
+
+/** #605 Phase 3 — curate the aggregated per-component uptime down to the service's DISPLAY set,
+ *  applying the SAME selection `resolveSvcComponents` uses live (services.ts): `displayAllComponents`
+ *  → all minus `componentDenylist` (by name); else the `displayComponentIds` / `statusComponentIds`
+ *  allowlist. So the report shows only reliability-relevant surfaces, NOT billing/compliance noise
+ *  (e.g. OpenAI's FedRAMP component at 42% would otherwise read as "OpenAI 42% uptime"). Returns
+ *  `undefined` (→ the `components` field is omitted) when there's no display config or <2 survive —
+ *  a one-row breakdown adds nothing. Pure + unit-tested; keeps the least-reliable-first order. */
+// Pick (not a hand-written struct) so a rename of any of these fields on ServiceConfig breaks
+// the build here instead of silently diverging the report's curation from the dashboard's
+// (mirrors StatusResolverConfig in services.ts). #605 Phase 3.
+type ComponentDisplayConfig = Pick<ServiceConfig, 'displayComponentIds' | 'statusComponentIds' | 'displayAllComponents' | 'componentDenylist'>
+export function curateComponentUptime(
+  components: Array<{ id: string; name: string; uptime: number }> | undefined,
+  config: ComponentDisplayConfig | undefined,
+): Array<{ id: string; name: string; uptime: number }> | undefined {
+  if (!components || components.length === 0 || !config) return undefined
+  let kept: typeof components
+  if (config.displayAllComponents) {
+    const deny = new Set((config.componentDenylist ?? []).map((n: string) => n.toLowerCase()))
+    kept = components.filter((c) => !deny.has(c.name.toLowerCase()))
+  } else {
+    const ids = config.displayComponentIds ?? config.statusComponentIds
+    if (!ids || ids.length === 0) return undefined
+    const idSet = new Set(ids)
+    kept = components.filter((c) => idSet.has(c.id))
+  }
+  return kept.length >= 2 ? kept : undefined
+}
+
+const PROBED_IDS = new Set(PROBE_TARGETS.map((t) => t.id))
+
+/** Format integer minutes back to the "Xh Ym" string score.ts's MTTR parser expects (lossless). */
+function minutesToDurationString(mins: number): string {
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`
+}
+
+/**
+ * A calendar-month AIWatch Score (#993). PURE. Runs the SAME `calculateAIWatchScore` the live path
+ * uses, but over an explicit month window: the month's incidents (adapted from the archived
+ * per-incident entries), the month's official uptime, and a month-scoped probe summary. This makes
+ * the archived Score share the calendar-month window with the MTTR/downtime aggregates beside it, so
+ * the report's Notable Movers stops juxtaposing two different windows. Reuses score.ts as the single
+ * source of the formula — no reimplementation. (Uptime input is the month-END rolling official
+ * uptime, not a calendar-month figure — status pages expose none; incidents + recovery are the
+ * calendar-windowed parts.) Returns null when there is nothing to score.
+ */
+export function computeMonthlyScore(
+  id: string,
+  monthIncidents: MonthlyIncidentEntry[] | undefined,
+  officialUptime: number | null,
+  monthlySummaries: Map<string, ProbeSummary>,
+  window: { startISO: string; endISO: string },
+  svcConfig: ServiceConfig | undefined,
+): { score: number | null; grade: ScoreGrade | null; confidence: ScoreConfidence } {
+  // Adapt the archived incident entries to the minimal Incident shape calculateAIWatchScore reads
+  // (startedAt, impact, status, duration). finalStatus → status; durationMin → the "Xh Ym" string
+  // its MTTR parser expects (lossless for integer minutes); missing impact → null (informational).
+  const incidents: Incident[] = (monthIncidents ?? []).map((e) => ({
+    id: e.id,
+    title: e.title,
+    status: e.finalStatus,
+    impact: e.impact ?? null,
+    startedAt: e.startedAt,
+    resolvedAt: e.resolvedAt,
+    duration: e.finalStatus === 'resolved' ? minutesToDurationString(e.durationMin) : null,
+    timeline: [],
+  }))
+  const service: ServiceStatus = {
+    id,
+    name: svcConfig?.name ?? id,
+    provider: svcConfig?.provider ?? '',
+    category: svcConfig?.category ?? 'api',
+    status: 'operational', // unread by calculateAIWatchScore; the window + incidents drive the score
+    latency: null,
+    uptime30d: officialUptime, // month official uptime — null drops the Uptime component (as live)
+    lastChecked: window.endISO,
+    incidents,
+  }
+  const probeId = resolveProbeId(id) // #883 — inheriting services score against the parent's probe
+  const probe = classifyProbe(probeId, PROBED_IDS.has(probeId), monthlySummaries)
+  const r = calculateAIWatchScore(service, 30 /* unused when window is set */, probe, window)
+  return { score: r.score, grade: r.grade, confidence: r.confidence }
 }
 
 /** Compute per-service average probe RTT (p75) from daily probe summaries */
@@ -634,11 +1043,13 @@ export interface ArchiveScoreInput {
   id: string
   aiwatchScore?: number | null
   scoreGrade?: ScoreGrade | null
-  // #586 hybrid — FALLBACK source for officialUptime: the live status-page rolling-30d uptime
-  // (ServiceStatus.uptime30d) snapshotted from services:latest at archive-build time. The PRIMARY
-  // source is computeMonthlyOfficialUptime (the month-end daily snapshot), which is month-accurate
-  // and rebuild-safe; this build-time value only applies to months with no daily snapshots.
-  officialUptime?: number | null
+  // #951 — the confidence the Score was computed at. 'high' ⟺ an official uptime% was available and
+  // the 40-pt uptime component was included. This is what gates the archived `officialUptime` display.
+  scoreConfidence?: ScoreConfidence | null
+  // #1006 — provenance of the uptime figure ('official' = the provider's own records; 'platform_avg' =
+  // the status-page platform's monitors). Carried into the archive so the report labels the source from
+  // the data rather than a hand-maintained list.
+  uptimeSource?: 'official' | 'platform_avg'
   // #591 — the service's incident source is known-stale (frozen feed). Threaded into the archive so
   // the report generator can exclude it from the Score ranking, parity with the live dashboard.
   incidentSourceStale?: boolean
@@ -673,6 +1084,78 @@ export async function buildMonthlyAccuracy(
   }))
   const stats = summarizeAccuracy(all) // ignores prediction-less records in the denominator
   return stats.total > 0 ? stats : null
+}
+
+/** #904 — pure: drop operator-suppressed incidents from a stored monthly accumulator and recompute
+ *  each affected service's aggregates (count / totalMinutes / longestMinutes) from the survivors.
+ *  `durations` is the complete per-id map (uncapped), so totalMinutes = Σ durations and
+ *  longestMinutes = max(durations) recompute exactly; a service with nothing suppressed is returned
+ *  by identity. Titles for service-pattern matching come from the (capped) `incidents` detail array;
+ *  incident-scope entries match by id even when a detail row is absent. */
+export function filterSuppressedFromMonthly(
+  data: MonthlyIncidents,
+  list: SuppressionEntry[],
+): MonthlyIncidents {
+  // Identity for a no-op list OR a structurally-corrupt accumulator (parses but lacks `.services`) —
+  // so a caller outside a try/catch (the /api/report partial) can't throw on `Object.entries(undefined)`.
+  if (!list.length || !data?.services || typeof data.services !== 'object') return data
+  const services: Record<string, MonthlyIncidentServiceData> = {}
+  for (const [svcId, svc] of Object.entries(data.services)) {
+    const details = svc.incidents ?? []
+    const titleById = new Map(details.map((d) => [d.id, d.title]))
+    const suppressed = new Set<string>()
+    for (const id of svc.incidentIds) {
+      if (isSuppressedByIdTitle(id, titleById.get(id) ?? '', svcId, list)) suppressed.add(id)
+    }
+    if (suppressed.size === 0) { services[svcId] = svc; continue }
+    const incidentIds = svc.incidentIds.filter((id) => !suppressed.has(id))
+    const durations: Record<string, number> = {}
+    for (const [id, dur] of Object.entries(svc.durations ?? {})) {
+      if (!suppressed.has(id)) durations[id] = dur
+    }
+    const durationVals = Object.values(durations)
+    services[svcId] = {
+      ...svc,
+      count: incidentIds.length,
+      totalMinutes: durationVals.reduce((a, b) => a + b, 0),
+      longestMinutes: durationVals.reduce((m, d) => Math.max(m, d), 0),
+      incidentIds,
+      durations,
+      incidents: details.filter((d) => !suppressed.has(d.id)),
+    }
+  }
+  return { ...data, services }
+}
+
+/** #915 — the per-service monthly downtime aggregates. Sums/maxes the per-incident FINAL durations
+ *  (`incidents[].durationMin`) rather than the accumulator's `totalMinutes`/`longestMinutes`, which
+ *  grow MONOTONICALLY (`accumulateMonthlyIncidents`: `if (dur > oldDur)`) and so lock in a long-open
+ *  incident's inflated open-window duration — never corrected down when it resolves shorter (Deepgram
+ *  June: 176h42m/141h10m aggregate vs the real 45h33m/27h from the incident list). The per-incident
+ *  detail IS updated to the final duration, so it's the source of truth. Falls back to the accumulator
+ *  ONLY when the list was TRUNCATED to the per-service cap (`incidents.length < count`), where it is
+ *  no longer the full population. Returns both null when there are no incidents. Pure — unit-tested. */
+export function aggregateIncidentDurations(
+  incidents: MonthlyIncidentEntry[] | undefined,
+  count: number,
+  accumulatorTotal: number,
+  accumulatorLongest: number,
+): { totalMin: number | null; longestMin: number | null } {
+  if (!incidents || incidents.length === 0 || incidents.length < count) {
+    // Truncated (>MAX cap) or no detail — the accumulator is the only full-population source.
+    return {
+      totalMin: accumulatorTotal > 0 ? accumulatorTotal : null,
+      longestMin: accumulatorLongest > 0 ? accumulatorLongest : null,
+    }
+  }
+  let total = 0
+  let longest = 0
+  for (const e of incidents) {
+    const d = typeof e.durationMin === 'number' && e.durationMin > 0 ? e.durationMin : 0
+    total += d
+    if (d > longest) longest = d
+  }
+  return { totalMin: total > 0 ? total : null, longestMin: longest > 0 ? longest : null }
 }
 
 export async function buildMonthlyArchive(
@@ -731,6 +1214,21 @@ export async function buildMonthlyArchive(
     try { incidentData = JSON.parse(incRaw) } catch (err) {
       console.warn(`[monthly-archive] corrupt incident accumulation for ${period}:`, err instanceof Error ? err.message : err)
     }
+  }
+
+  // #904 — build-time suppression filter. The already-stored accumulator may contain incidents an
+  // operator has since suppressed (e.g. OpenAI FedRAMP), so a rebuild-archive of a past month drops
+  // them + recomputes count/downtime/longest from the survivors — WITHOUT deleting the accumulator KV
+  // (rebuild-safe). The live path is already suppressed upstream in fetchAllServices.
+  if (incidentData) {
+    // Fresh read (bypass the isolate cache used on the hot /api/status path) — a rebuild is a rare,
+    // manual, correctness-critical one-shot, so it must see a just-added suppression immediately.
+    const suppressions = await readSuppressionsFresh(kv)
+    if (suppressions.length) incidentData = filterSuppressedFromMonthly(incidentData, suppressions)
+    // #1019 — build-time duration overrides: pin a paperwork-inflated incident's duration to the
+    // operator value, recomputing downtime/longest from the survivors (rebuild-safe, no KV surgery).
+    const overrides = await readOverridesFresh(kv)
+    if (overrides.length) incidentData = applyDurationOverrides(incidentData, overrides)
   }
 
   // Snapshot accumulated security alerts before their 60d TTL lapses (#290). Missing
@@ -792,34 +1290,70 @@ export async function buildMonthlyArchive(
     for (const id of Object.keys(incidentData.services)) allIds.add(id)
   }
 
+  // #909 — a REBUILD reads the current services:latest roster (scoreData), so a service added AFTER
+  // this month would otherwise get a null-data entry that leaks into the report's monitored count /
+  // "zero incidents" line / uptime+latency tables. Drop services added after the month's last day;
+  // established + genuine mid-month adds are kept (the #802 ranking gate still handles partial coverage).
+  const monthEnd = dates[dates.length - 1] // 'YYYY-MM-DD'
+
+  // #993 — a month-scoped probe summary (same cvCombined logic as the live 7-day path) and the
+  // calendar-month window, computed ONCE for the monthly-Score pass below. The window uses CLEAN DAY
+  // boundaries ([month-01 00:00, next-month-01 00:00)) rather than `...T23:59:59.999Z`: incident
+  // `startedAt` values are compared as STRINGS, and a mixed-precision compare ('…59Z' vs '…59.999Z')
+  // wrongly excludes a last-second incident because 'Z' > '.' lexically. A next-day midnight bound
+  // is precision-agnostic.
+  const monthlySummaries = summariesFromDailyData(Object.values(probeData))
+  const nextMonth = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 }
+  const monthWindow = {
+    startISO: `${period}-01T00:00:00.000Z`,
+    endISO: `${nextMonth.y}-${String(nextMonth.m).padStart(2, '0')}-01T00:00:00.000Z`,
+  }
+
   for (const id of allIds) {
+    if (!existedInMonth(SERVICE_ADDED_AT[id], monthEnd)) continue
     const scoreSvc = scoreData?.find(s => s.id === id)
     const incSvc = incidentData?.services[id]
-
-    let avgResolutionMin: number | null = null
-    if (incSvc && incSvc.count > 0 && incSvc.totalMinutes > 0) {
-      avgResolutionMin = Math.round(incSvc.totalMinutes / incSvc.count)
-    }
-    // totalMinutes / longestMinutes are already tracked per-service by accumulateMonthlyIncidents
-    // — surface them in the permanent archive so monthly reports can render full Incident Summary
-    // columns (Downtime, Longest) without losing data after the 60d incidents:monthly:* TTL lapses.
-    const totalDowntimeMin = incSvc && incSvc.totalMinutes > 0 ? incSvc.totalMinutes : null
-    const longestIncidentMin = incSvc && incSvc.longestMinutes > 0 ? incSvc.longestMinutes : null
 
     // Snapshot per-incident detail (#375) so the dashboard's 90-day filter can read it
     // post-archive. accumulateMonthlyIncidents already enforces the per-service cap and
     // dedup, so we just defensively-clone the array (avoids accidental mutation downstream).
     const incidentList = incSvc?.incidents && incSvc.incidents.length > 0
-      ? incSvc.incidents.map(e => ({ ...e }))
+      ? incSvc.incidents.map(stripInternalFields)
       : undefined
+
+    // #915 — derive the downtime aggregates from the per-incident FINAL durations (incidentList),
+    // NOT the accumulator's `totalMinutes`/`longestMinutes`, which grow monotonically and lock in a
+    // long-open incident's inflated open-window duration (never corrected down when it resolves
+    // shorter — Deepgram June read 176h42m/141h10m vs the real 45h33m/27h). The per-incident
+    // durationMin is updated to the final value, so it's the source of truth; the accumulator is the
+    // fallback only when the list was truncated (>MAX cap, no longer full-population).
+    const { totalMin, longestMin } = aggregateIncidentDurations(
+      incidentList, incSvc?.count ?? 0, incSvc?.totalMinutes ?? 0, incSvc?.longestMinutes ?? 0,
+    )
+    const totalDowntimeMin = totalMin
+    const longestIncidentMin = longestMin
+    const avgResolutionMin = incSvc && incSvc.count > 0 && totalMin != null && totalMin > 0
+      ? Math.round(totalMin / incSvc.count)
+      : null
 
     services[id] = {
       uptime: uptimeMap[id] ?? null,
-      // #586 — prefer the daily-snapshot month-end value (month-accurate, rebuild-safe); fall back
-      // to the build-time services:latest snapshot (scoreData) for months with no daily snapshots.
-      officialUptime: officialUptimeMap[id] ?? scoreSvc?.officialUptime ?? null,
+      // #586 — the daily-snapshot month-end value (month-accurate, rebuild-safe); a month with no daily
+      // snapshot reads null (#1016 — no live/scoreData fallback; that leaked today's uptime into a frozen
+      // month on rebuild). #951 — and only when the Score itself consumed an official uptime, so display ≡ score.
+      officialUptime: resolveArchiveOfficialUptime(officialUptimeMap[id], scoreSvc),
+      // #1006 — carry the provenance so the report can label Official vs Platform from the DATA rather
+      // than from a hand-maintained list. Only meaningful when a figure was actually archived.
+      ...(resolveArchiveOfficialUptime(officialUptimeMap[id], scoreSvc) != null && scoreSvc?.uptimeSource
+        ? { uptimeSource: scoreSvc.uptimeSource }
+        : {}),
       score: scoreSvc?.aiwatchScore ?? null,
       grade: scoreSvc?.scoreGrade ?? null,
+      ...(scoreSvc?.scoreConfidence ? { scoreConfidence: scoreSvc.scoreConfidence } : {}),
+      ...(() => { // #993 — calendar-month Score (window-aligned with the MTTR/downtime aggregates)
+        const m = computeMonthlyScore(id, incSvc?.incidents, officialUptimeMap[id] ?? null, monthlySummaries, monthWindow, SERVICES.find((s) => s.id === id))
+        return { monthlyScore: m.score, monthlyGrade: m.grade, ...(m.confidence ? { monthlyScoreConfidence: m.confidence } : {}) }
+      })(),
       incidents: incSvc?.count ?? 0,
       avgResolutionMin,
       totalDowntimeMin,
@@ -829,7 +1363,10 @@ export async function buildMonthlyArchive(
       latencySpikes: latencyStats[id]?.spikes ?? null,
       ...(incidentList ? { incidentList } : {}),
       ...(scoreSvc?.incidentSourceStale ? { incidentSourceStale: true } : {}),
-      ...(componentUptimeMap[id] ? { components: componentUptimeMap[id] } : {}), // #605 Phase 2
+      ...(() => { // #605 Phase 2 aggregate + Phase 3 curate to the display set (drops billing/compliance noise)
+        const curated = curateComponentUptime(componentUptimeMap[id], SERVICES.find((s) => s.id === id))
+        return curated ? { components: curated } : {}
+      })(),
       ...(SERVICE_ADDED_AT[id] ? { addedAt: SERVICE_ADDED_AT[id] } : {}), // #809 — report-side coverage gate
     }
   }

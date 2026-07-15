@@ -238,6 +238,53 @@ export async function detectComponentMismatches(
   return results
 }
 
+/**
+ * #992 — new-status-page-component change detection (the inverse of the #135 component-MISS alert:
+ * that fires when a CONFIGURED id disappears; this fires when an UNSEEN id appears). Pure so it is
+ * fully unit-testable; the cron does the KV read/write + Discord around it.
+ *
+ * Given a page's CURRENT components and `seen` (every component id ever recorded for this page; `null`
+ * = first-ever sight), return the components that are genuinely NEW (id never seen) plus the next
+ * `seen` set to persist. Semantics:
+ *   - **bootstrap** (`seen === null`): record the current ids but flag NOTHING new — we only alert on
+ *     components that appear AFTER we start watching a page, never on the initial snapshot (which would
+ *     otherwise dump every existing component of a rich shared page like status.openai.com as "new").
+ *   - `seen` UNIONS current ids (never shrinks), so a component removed then re-added does not re-alert,
+ *     and a component we already alerted on stays suppressed forever (one alert per component, ever).
+ * Provider component renames keep the Atlassian UUID → no false alert; a genuine id swap reads as new.
+ */
+export function diffPageComponents(
+  current: Array<{ id: string; name: string }>,
+  seen: string[] | null,
+): { newComponents: Array<{ id: string; name: string }>; nextSeen: string[]; bootstrap: boolean } {
+  const currentIds = current.map((c) => c.id)
+  if (seen === null) {
+    return { newComponents: [], nextSeen: [...new Set(currentIds)], bootstrap: true }
+  }
+  const seenSet = new Set(seen)
+  const newComponents = current.filter((c) => !seenSet.has(c.id))
+  const nextSeen = [...new Set([...seen, ...currentIds])]
+  return { newComponents, nextSeen, bootstrap: false }
+}
+
+/**
+ * #992 — operator Discord body for a page that gained ≥1 new component. `pageServices` are the AIWatch
+ * service names monitoring the page (context: which service's config to update); `dynamic` flags a
+ * displayAllComponents page where the component is ALREADY auto-tracked (informational, no action).
+ */
+export function formatNewComponentAlert(
+  pageServices: string[],
+  newComponents: Array<{ id: string; name: string }>,
+  dynamic: boolean,
+): string {
+  const list = newComponents.map((c) => `• \`${c.name}\` (\`${c.id}\`)`).join('\n')
+  const who = pageServices.length > 0 ? pageServices.join(', ') : '(no AIWatch service)'
+  const action = dynamic
+    ? '**Action**: none — this page runs `displayAllComponents`, so the component is already auto-tracked. Heads-up only.'
+    : `**Action**: decide whether to track it. To include, add the id to \`statusComponentIds\`/\`displayComponentIds\` for the relevant service in \`worker/src/services.ts\`; otherwise ignore (this fires once per component, ever).`
+  return `Status page for **${who}** added ${newComponents.length} new component${newComponents.length === 1 ? '' : 's'}:\n${list}\n\n${action}`
+}
+
 /** Check if cached data is stale (strictly older than threshold, or missing cachedAt). */
 export function isCacheStale(raw: string | null, thresholdMs: number, now = Date.now()): { stale: boolean; services: unknown[] } {
   if (!raw) return { stale: true, services: [] }
@@ -266,14 +313,30 @@ export function appendStatusHint(url: string, hint: string): string {
   return `${url}${sep}e=${encodeURIComponent(hint)}`
 }
 
-// #548 — UTM tags for outage-share links so GA4 cleanly attributes consent-free, channel-specific
-// inflow (the X tweet path already carries its own `X_UTM` in alerts.ts; this covers the RSS feed
-// item links + Reddit promote links). campaign=outage matches the X constant so all share channels
-// roll up under one campaign. `source` is the channel (rss/reddit); medium groups feed vs social.
-const UTM_MEDIUM: Record<'rss' | 'reddit', string> = { rss: 'feed', reddit: 'social' }
-export function appendUtm(url: string, source: 'rss' | 'reddit'): string {
-  const sep = url.includes('?') ? '&' : '?'
-  return `${url}${sep}utm_source=${source}&utm_medium=${UTM_MEDIUM[source]}&utm_campaign=outage`
+// #548/#936 — UTM tags for the links WE emit, so GA4 (and the #842-B outage-audience classifier)
+// attribute consent-free, channel-specific inflow instead of collapsing it to (direct). The X tweet
+// path carries its own `X_UTM` in alerts.ts; this covers RSS feed items + Reddit (#548) AND the three
+// #936 leaks: the Discord alert "View on AIWatch" link, and statusline OSC-8 links. `campaign=outage`
+// groups the outage-driven share/alert channels under one campaign; the always-on statusline nav link
+// carries no outage campaign (it's not incident-scoped). The Chrome extension tags its own links in
+// plain JS (extension/config.js) — it can't import worker code.
+type UtmSource = 'rss' | 'reddit' | 'discord' | 'statusline'
+const UTM_CONFIG: Record<UtmSource, { medium: string; campaign?: string }> = {
+  rss: { medium: 'feed', campaign: 'outage' },
+  reddit: { medium: 'social', campaign: 'outage' },
+  discord: { medium: 'notification', campaign: 'outage' },
+  statusline: { medium: 'referral' },
+}
+export function appendUtm(url: string, source: UtmSource): string {
+  const { medium, campaign } = UTM_CONFIG[source]
+  const params = `utm_source=${source}&utm_medium=${medium}${campaign ? `&utm_campaign=${campaign}` : ''}`
+  // A hash-routed dashboard link (ai-watch.dev/#claude) needs the query BEFORE the '#' or GA4 — which
+  // reads location.search — never sees it. Insert ahead of the fragment; is-down/root links have none.
+  const hashIdx = url.indexOf('#')
+  const base = hashIdx === -1 ? url : url.slice(0, hashIdx)
+  const frag = hashIdx === -1 ? '' : url.slice(hashIdx)
+  const sep = base.includes('?') ? '&' : '?'
+  return `${base}${sep}${params}${frag}`
 }
 
 // #707/#811 — classify an incident's TEXT as a NON-reliability advisory (compliance / export-control /

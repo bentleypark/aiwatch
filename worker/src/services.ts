@@ -3,11 +3,12 @@
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
 import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, kvPut } from './utils'
-import { isProbeHealthy, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
+import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
+import { readSuppressions, applySuppressions } from './suppression'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
-import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, enrichIncidentIoText } from './parsers/incident-io'
+import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
   AISTUDIO_ENDPOINT,
@@ -17,14 +18,36 @@ import {
   parseAistudioIncidents,
   computeDailyImpactFromIncidents,
 } from './parsers/aistudio'
-import { parseInstatusIncidents, parseInstatusUptime, parseInstatusComponents } from './parsers/instatus'
-import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
-import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
+import { parseInstatusIncidents, parseInstatusUptime, parseInstatusReportedUptime, parseInstatusUptimeDays, parseInstatusComponents } from './parsers/instatus'
+import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
+import { parseOnlineOrNotIncidents, computeOnlineOrNotUptime } from './parsers/onlineornot'
 import { parseAwsRssIncidents, parseAwsHealthEvents, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
+import { mergeXaiRegionalIncidents } from './xai-regions'
+
+// #990 — OpenAI (openai/chatgpt/codex all share status.openai.com) occasionally posts a
+// "kitchen-sink" advisory scoped to a gov-compliance ENVIRONMENT (e.g. the 2026-07 "Codex, workspace
+// analytics, conversation search, … download endpoint not working in FedRAMP workspaces"),
+// impact:minor, componentNames:[]. Its title enumerates many product names, so the substring
+// attribution in filterIncidents pulls it onto ChatGPT + Codex, firing New+Resolved alerts for what
+// is not a general-availability outage. A structural "drop minor+untagged" rule was rejected — it
+// would silently drop legitimate minor incidents, the same class of invisible loss #970 fixed for
+// impact:none incidents; the only signal is the title wording, which a denylist token keys on
+// without that blast radius across 18+ statuspage services.
+//
+// Spread into chatgpt + codex ONLY, NOT openai: openai already drops the kitchen-sink advisory via
+// its existing tokens (codex/conversation/chatgpt/download), AND #693 deliberately KEEPS a genuine
+// FedRAMP *API* degradation ("FedRAMP workspaces and API orgs have degraded performance") under
+// openai — a 'fedramp' exclude on openai would regress that. chatgpt/codex never match that API-only
+// title (leak guard, #693), so excluding 'fedramp' there is safe. Vetoed BEFORE incidentKeywords;
+// neither sets statusComponent so the #357 exclude-bypass can't fire → clean drop.
+export const ENVIRONMENT_SCOPE_EXCLUDE = ['fedramp']
 
 export const SERVICES: ServiceConfig[] = [
   // AI API Services
-  { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp' },
+  // #934 — scopeResolvedToComponent: claude is EXCLUDE-only (no positive incidentKeywords) on the shared
+  // status.claude.com page, so a resolved Claude-Code-only incident cross-attributed to Claude API. See
+  // filterByComponentStatus. claudeai/claudecode are keyword-scoped and do NOT set this.
+  { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp', scopeResolvedToComponent: true },
   // displayComponentIds (#606 Cat B): the official "APIs" group (12) + "Platform" group (FedRAMP,
   // Ads Manager) on the shared status.openai.com page (incident.io). Display-only allowlist (badge
   // unchanged — no statusComponentId); disjoint from chatgpt/codex (pinned by the shared-page no-leak
@@ -57,7 +80,13 @@ export const SERVICES: ServiceConfig[] = [
   // Le Chat first would be dropped despite affecting the API. Low-probability; revisit if observed.
   // #627 — statusComponent 'API' selects the Instatus "API" group component for the official uptime%
   // (status.mistral.ai groups all API endpoints under it; → ~99.6% instead of "Not provided").
-  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1', incidentExclude: ['le chat', 'le console', 'documentation', 'website'], statusComponent: 'API' },
+  // #929 — holdShortIncidents: the Instatus auto-monitor posts frequent very short-lived
+  // "○○ API Degraded" MEDIUM (→ minor) incidents that self-resolve in seconds/minutes and are then
+  // pruned from the page, so the */5 cron fired a phantom "New Incident" alert on each (e.g. the
+  // 2026-07-03 AI Registry Prompts/Skills flaps). Same knob Langfuse uses (#792): a non-major NEW
+  // incident is held ~2 cron cycles before alerting, so a self-resolving flap never fires while a
+  // genuine longer incident (e.g. the 120h Fine Tuning degradation) still alerts.
+  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1', incidentExclude: ['le chat', 'le console', 'documentation', 'website'], statusComponent: 'API', holdShortIncidents: true },
   // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
   // (dynamic, so new/retired models need no config edit). componentSurfaces stay as individual rows;
   // the rest fold into a collapsible "Models" group (matches the official Endpoints/Models split).
@@ -65,22 +94,28 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'groq', name: 'Groq Cloud', provider: 'Groq', category: 'api', statusUrl: 'https://groqstatus.com', apiUrl: 'https://groqstatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://groqstatus.com/incidents', incidentIoComponentId: '01K053E2FAKWKEYHXEV7WAHJBM', displayAllComponents: true, componentDenylist: ['Docs', 'Website'], componentSurfaces: ['API'] },
   { id: 'together', name: 'Together AI', provider: 'Together', category: 'api', statusUrl: 'https://status.together.ai', apiUrl: null, rssFeedUrl: 'https://status.together.ai/feed', betterStackUrl: 'https://status.together.ai', flapSuppression: true, componentDenylist: ['Website'] },
   { id: 'fireworks', name: 'Fireworks AI', provider: 'Fireworks', category: 'api', statusUrl: 'https://status.fireworks.ai', apiUrl: null, rssFeedUrl: 'https://status.fireworks.ai/feed', betterStackUrl: 'https://status.fireworks.ai', flapSuppression: true, componentDenylist: ['Website'] },
-  // Cerebras Inference (#391) — Atlassian Statuspage, 5 components: 4 model surfaces + Developer Console.
-  // Multi-component worst-of (#379): statusComponentIds lists all 5 so any degraded model degrades the
-  // service; statusComponentId (Developer Console) is the primary for uptime parsing / calendar /
-  // component-miss alerting. Single-tenant page → no incidentKeywords needed.
-  { id: 'cerebras', name: 'Cerebras Inference', provider: 'Cerebras', category: 'api', statusUrl: 'https://status.cerebras.ai', apiUrl: 'https://status.cerebras.ai/api/v2/summary.json', statusComponentId: '83h1cchw4vs4', statusComponentIds: ['83h1cchw4vs4', '7xvps6c9lqwc', 'bhqw2gr7r710', 'hgfykfsb36gn', '8ygyx5vydlm2'] },
-  // #623 — status.perplexity.com (Instatus, Next.js) has 2 components: "API" (Sonar) + "Website"
-  // (the consumer perplexity.ai). The Next.js parser now resolves each incident's affected components
+  // Cerebras Inference (#391, #992) — Atlassian Statuspage, single-tenant, per-model. Its model lineup
+  // churns (models added/retired), so instead of a hardcoded statusComponentIds allowlist (which went
+  // stale — 2 dead ids + a missing new Gemma4-31B-Multimodal, #992) it runs DYNAMIC (displayAllComponents,
+  // like cohere/groq): the breakdown lists every live component and the badge worst-ofs them (the #992
+  // resolveSvcStatus dynamic branch), so a new/retired model needs no config edit. statusComponentId
+  // (Developer Console) stays the primary for uptime parsing / calendar / component-miss alerting;
+  // Developer Console is a componentSurfaces row (models fold into the collapsible "Models" group).
+  // componentDenylist mirrors the cohere/groq convention — a future non-availability component
+  // (Website/Docs) must not enter the dynamic worst-of badge or the breakdown.
+  { id: 'cerebras', name: 'Cerebras Inference', provider: 'Cerebras', category: 'api', statusUrl: 'https://status.cerebras.ai', apiUrl: 'https://status.cerebras.ai/api/v2/summary.json', statusComponentId: '83h1cchw4vs4', displayAllComponents: true, componentSurfaces: ['Developer Console'], componentDenylist: ['Website', 'Docs'] },
+  // #623 — status.perplexity.com (Instatus, Next.js) has 3 components: "API" (Sonar) + "Website"
+  // (the consumer perplexity.ai) + "Computer" (agentic/computer-use surface, added #911).
+  // The Next.js parser now resolves each incident's affected components
   // → componentNames (#623), so `incidentKeywords: ['api']` (matched against componentNames) scopes
   // the badge/Score to the API: a Website-only incident is dropped, a Website+API incident kept (it
   // affects the API). Allowlist is correct here — the API component is literally named "API", and
   // unlike a title-denylist it keeps a multi-component "Website and API" incident.
   // #635 — statusComponent 'API' selects the Instatus "API" component for the official uptime% (the
   // Next.js payload carries componentsUptime[id].uptime, ~90d) instead of "Not provided".
-  // displayComponentIds (#761): top-level Instatus components API (Sonar) + Website. Display-only —
-  // badge stays on statusComponent 'API'. Next.js Instatus exposes per-component status.
-  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com', incidentKeywords: ['api'], statusComponent: 'API', displayComponentIds: ['clyiakn7i60113hvojwho6za6j', 'clyi6jhgg31469ihojbwbsmeeg'] },
+  // displayComponentIds (#761): top-level Instatus components API (Sonar) + Website + Computer (#911).
+  // Display-only — badge stays on statusComponent 'API'. Next.js Instatus exposes per-component status.
+  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api', statusUrl: 'https://status.perplexity.com', apiUrl: null, instatusUrl: 'https://status.perplexity.com', incidentKeywords: ['api'], statusComponent: 'API', displayComponentIds: ['clyiakn7i60113hvojwho6za6j', 'clyi6jhgg31469ihojbwbsmeeg', 'cmr18ih7201l20rqmap66bx4l'] },
   { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api', statusUrl: 'https://status.x.ai', apiUrl: null, rssFeedUrl: 'https://status.x.ai/feed.xml', incidentKeywords: ['api'], incidentExclude: ['[API Console]', 'Test+Incident'] },
   // status.deepseek.com (Flashduty, #507) blocks NON-BROWSER TLS fingerprints — a Worker fetch()
   // is reset at the TLS layer regardless of egress IP (verified 2026-06-12: a real Chromium from
@@ -101,6 +136,9 @@ export const SERVICES: ServiceConfig[] = [
   // while the breakdown stayed all-operational — a visible contradiction. The row label reads
   // 'ElevenCreative' (broader suite), the accepted trade-off since no finer-grained component exists.
   // Display-only: badge stays on the overall page indicator (no statusComponentIds).
+  // #1006 — uptime scoped to the badge/detail components (Text-to-Speech + STT + Conversations + RAG +
+  // Telephony + …), not just Text-to-Speech: they are distinct product surfaces, and an STT outage was
+  // showing in the incident list while uptime, read from TTS alone, sat at 100%.
   { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['webpage'], displayComponentIds: ['01JP2RQVGDHPEEDAFM5KV2MH9P', '01JYDTNNSJBT4X90MAC47YPM9S', '01JY3H5SJJZNC33AYMAE4SK4TH', '01JY3H5SJJD2BMSGSW5FZE08ST', '01JY3H5SJJJG47J60JPKX882H8', '01JY3H5SJJFKTXYQHG5A8Z1KYH', '01JJM5RKYAEWNM3XYRHXM8FJQ3'] },
   // displayComponentIds (#606): curated user-facing API surfaces for assemblyai + deepgram
   // (excludes internal infra / Website / Billing / Docs, and the badge's umbrella statusComponentId
@@ -122,7 +160,11 @@ export const SERVICES: ServiceConfig[] = [
   //   (ungrouped surfaces) = Replicate Registry (r8.im), Official Models
   //   Support = Billing, Support Tickets  (renders AFTER the surface rows, per the official page)
   // Excludes Home Page. Display-only (decoupled from the worst-of badge).
-  { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: '01JRJYHBWCXHFZ0NHMP1N7T2G3', displayComponentIds: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JRG9WZ84ABEY9ZJBB72CJBS8', '01JRGA5ZQKJX2NMG45VCFP9Y9C', '01JRGA5ZQKF3SW674WMFD92PAC', '01JS0A88GKRF5DNW74REX185D3', '01JS0A88GKZAMP8BD3W9BCCBWX', '01J5NNACBNTG5GR693P6RH5Q6J', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01JS0AB43BH206N6Z4WNSB0Z0F', '01JS0AB43BNHTEGYYQBSWS3KDP'], componentGroups: { '01JRJYHBWCXHFZ0NHMP1N7T2G3': 'API', '01JRJYHBWC358ZXKRXZD0BENPD': 'API', '01JRG9WZ84ABEY9ZJBB72CJBS8': 'Inference and Training', '01JRGA5ZQKJX2NMG45VCFP9Y9C': 'Inference and Training', '01JRGA5ZQKF3SW674WMFD92PAC': 'Inference and Training', '01JS0A88GKRF5DNW74REX185D3': 'Inference and Training', '01JS0A88GKZAMP8BD3W9BCCBWX': 'Inference and Training', '01J5NNACBNTG5GR693P6RH5Q6J': 'Website', '01JS0AB43BH206N6Z4WNSB0Z0F': 'Support', '01JS0AB43BNHTEGYYQBSWS3KDP': 'Support' }, componentGroupsInline: true },
+  // #1006 — uptime is a worst-of over the SAME components the badge + detail page show
+  // (displayComponentIds), not the single HTTP API component. Its GPU hardware (H100/A100/L40S/T4) is
+  // core availability — a model can't run without it — but uptime read only HTTP API, so a multi-day
+  // H100 degradation showed in the incident list beside a spotless 100%.
+  { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JRG9WZ84ABEY9ZJBB72CJBS8', '01JRGA5ZQKJX2NMG45VCFP9Y9C', '01JRGA5ZQKF3SW674WMFD92PAC', '01JS0A88GKRF5DNW74REX185D3', '01JS0A88GKZAMP8BD3W9BCCBWX', '01J5NNACBNTG5GR693P6RH5Q6J', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01JS0AB43BH206N6Z4WNSB0Z0F', '01JS0AB43BNHTEGYYQBSWS3KDP'], displayComponentIds: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JRG9WZ84ABEY9ZJBB72CJBS8', '01JRGA5ZQKJX2NMG45VCFP9Y9C', '01JRGA5ZQKF3SW674WMFD92PAC', '01JS0A88GKRF5DNW74REX185D3', '01JS0A88GKZAMP8BD3W9BCCBWX', '01J5NNACBNTG5GR693P6RH5Q6J', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01JS0AB43BH206N6Z4WNSB0Z0F', '01JS0AB43BNHTEGYYQBSWS3KDP'], componentGroups: { '01JRJYHBWCXHFZ0NHMP1N7T2G3': 'API', '01JRJYHBWC358ZXKRXZD0BENPD': 'API', '01JRG9WZ84ABEY9ZJBB72CJBS8': 'Inference and Training', '01JRGA5ZQKJX2NMG45VCFP9Y9C': 'Inference and Training', '01JRGA5ZQKF3SW674WMFD92PAC': 'Inference and Training', '01JS0A88GKRF5DNW74REX185D3': 'Inference and Training', '01JS0A88GKZAMP8BD3W9BCCBWX': 'Inference and Training', '01J5NNACBNTG5GR693P6RH5Q6J': 'Website', '01JS0AB43BH206N6Z4WNSB0Z0F': 'Support', '01JS0AB43BNHTEGYYQBSWS3KDP': 'Support' }, componentGroupsInline: true },
   // fal.ai (#758) — generative-media inference platform (image/video/audio/3D, 600+ models incl.
   // FLUX/Kling/Hailuo). Peer of Replicate/Hugging Face. Instatus (Next.js) page like Perplexity:
   // `statusComponent: 'API'` selects the Instatus "API" group component for the official uptime%
@@ -138,15 +180,29 @@ export const SERVICES: ServiceConfig[] = [
   // — the Region card already covers per-region status. Display-only — badge stays on statusComponentId.
   { id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', statusUrl: 'https://status.pinecone.io', apiUrl: 'https://status.pinecone.io/api/v2/summary.json', statusComponentId: 'r7tngp2p3sjd', displayComponentIds: ['jhky1rj0ps27', 'g7400gqyfhh9', 'r7tngp2p3sjd', 'hrgtfbcqygpc', '34h37xk5ltv1', 'pxr1b208pdh1'] },
   // turbopuffer (#857) — serverless vector-search DB; the Vector fallback sibling for Pinecone (un-blocks
-  // the vector sub-tier, #601 → both un-excluded from EXCLUDE_FALLBACK, API_TIER 8). Single-tenant Atlassian
-  // Statuspage (no incidentKeywords needed). No statusComponentId: the only components are per-region endpoints,
-  // so (a) parseUptimeData never runs (it's gated on statusComponentId) → uptime30d stays null [the page also
-  // publishes no showcase uptimeData, but the config is the code-level cause], and (b) the badge rides the
-  // overall page indicator (status-determination step 4). Score is therefore probe-based (api.turbopuffer.com →
-  // {"status":"🐡"}): confidence settles to `medium` once ≥7d of probe samples accrue — during the initial ramp
-  // it's `low` and the Score is withheld (null), and the #802 coverage gate holds it out of the ranking for 30d
-  // regardless. A region belongs on a Region card, not the badge/breakdown, so no displayComponentIds for v1.
-  { id: 'turbopuffer', name: 'turbopuffer', provider: 'turbopuffer', category: 'api', statusUrl: 'https://status.turbopuffer.com', apiUrl: 'https://status.turbopuffer.com/api/v2/summary.json', addedAt: '2026-07-01' }, // #802 / #857
+  // the vector sub-tier, #601 → both un-excluded from EXCLUDE_FALLBACK, API_TIER 8). Single-tenant page,
+  // no incidentKeywords needed. It serves a Statuspage-compatible summary.json but is an **incident.io**
+  // page (ULID component ids, `component_uptimes`) — the same shape as langsmith below. Correcting the
+  // original config: it was read as an Atlassian Statuspage, so neither statusComponentId (→ parseUptimeData,
+  // Atlassian-only) nor incidentIoComponentId was set; `needsHtml` therefore never fetched the status HTML
+  // and uptime30d stayed null, dropping the 40-pt uptime component (score 73/fair/medium instead of
+  // 84/good/high). The page published uptime the whole time (display_uptime_mode 'chart_and_percentage'
+  // as of 2026-07). Should it ever flip to 'chart_only' the values become "$undefined" and this degrades
+  // to "No official uptime" — the honest state, not a misreading.
+  // Uptime = worst-of across the 15 per-region API components. There is no group aggregate to read
+  // (every component is ungrouped), so a single region would be an arbitrary pick that reports 100%
+  // while another region is down; worst-of matches the statusComponentIds badge convention (#379).
+  // `Dashboard` (01K0Q5QSJV9KAZMEMMQ0NCHD9E) is deliberately EXCLUDED because it is not an API surface —
+  // same principle as langsmith's uptime (count only representative API surfaces), though the direction
+  // differs: excluding Run Ingestion stopped an over-good ~100% from hiding incidents, while excluding
+  // Dashboard stops a non-API component from dragging the worst-of down. A new region must be added here;
+  // `computeIncidentIoUptime` warns when a configured id no longer resolves (ULID rotation), and
+  // turbopuffer-uptime.test.ts pins the roster against the Dashboard id.
+  // The badge still rides the overall page indicator (status-determination step 4) — a region belongs on a
+  // Region card, not the badge/breakdown — so no statusComponentId / displayComponentIds. Score keeps its
+  // probe (api.turbopuffer.com → {"status":"🐡"}) and the #802 coverage gate still holds it out of the
+  // ranking until 30d of coverage accrue, independent of this uptime fix.
+  { id: 'turbopuffer', name: 'turbopuffer', provider: 'turbopuffer', category: 'api', statusUrl: 'https://status.turbopuffer.com', apiUrl: 'https://status.turbopuffer.com/api/v2/summary.json', incidentIoComponentId: ['01KMGBMBN2JWWWC92RADN719MQ', '01K0Q28Y8010Y0QES8NQ9TSA0N', '01K0Q28Y8002ZDVXC1HEM8WBRA', '01KMGBMBN2VKMTFD9T6WBBY1DQ', '01KMGBMBN2JJYP251E9JA8WB1H', '01K0Q28Y80F4SGGMEYYG7G9GWZ', '01K0Q28Y80DA6WT9WN08K0N96C', '01K0Q28Y801TPC8YT7PS1CXVMR', '01KMGBMBN21AW19JHKPFJJJFN1', '01K0Q28Y80TDVJ2HYNEJ99W98G', '01K0Q28Y80K7Y1SSEX7Z2NYXNK', '01K0Q28Y80NZ19ARGHR79HTKZJ', '01K0Q1X4P70458SR04MTQ2CA7F', '01K0Q28Y80TXNQD9N86J2EXSRT', '01K0Q28Y80N7CW8FF73CEVK0YD'], addedAt: '2026-07-01' }, // #802 / #857
   { id: 'stability', name: 'Stability AI', provider: 'Stability AI', category: 'api', statusUrl: 'https://status.stability.ai', apiUrl: 'https://status.stability.ai/api/v2/summary.json', incidentIoBaseUrl: 'https://status.stability.ai/incidents', incidentIoComponentId: '01JW9J39X55NDFZTZT3K5NYR48' },
   // Black Forest Labs / FLUX (#756) — image-generation sibling for Stability AI (un-blocks the image
   // fallback sub-tier, #601). Single-tenant Atlassian Statuspage (no incidentKeywords needed). Badge
@@ -167,7 +223,15 @@ export const SERVICES: ServiceConfig[] = [
   // EXCLUDE_FALLBACK: no API_TIER; video understanding has no clean substitute.
   // displayComponentIds (#606): all 10 individual API surfaces (Search/Embed/Analyze/Index/Video
   // list) under the API group. Excludes Platform/Playground/Dashboard (non-API surfaces).
-  { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', '2k0gnkk2kjmz', 'j21c5rdfj8kf', '91lzwtn6071h'], addedAt: '2026-07-02' },
+  // #983 — Twelve Labs' Statuspage auto-monitor opens a BRAND-NEW incident per component blip, all
+  // under one fixed title, and Statuspage stamps `impact: 'major'` on it whenever the affected
+  // sub-component reads `major_outage`. On 2026-07-09 that produced four 5–16m incidents with
+  // identical titles + identical machine-emitted timeline text. `autoMonitorTitles` tags them so the
+  // alert path may hold/dedup them (impact is component-derived, not editorial) and the UI groups
+  // them into one ×N row; `flapSuppression` then dedups a repeat within the 60-min window (#283).
+  // The provider's REAL, human-written incidents use distinct titles ("Search API failure", "API
+  // server failure") and never match this anchored pattern.
+  { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', '2k0gnkk2kjmz', 'j21c5rdfj8kf', '91lzwtn6071h'], autoMonitorTitles: [/^Some API features are experiencing issues\.?$/i], flapSuppression: true, addedAt: '2026-07-02' },
   // LangSmith (#561) — LangChain's hosted observability/eval platform. incident.io page exposes a
   // statuspage v2-compatible API so statuspage.ts covers it. Multi-component worst-of (#379): badge
   // tracks the three load-bearing surfaces (Run Ingestion + API + Application); the other components
@@ -211,20 +275,25 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   // displayComponentIds (#606): all Character.AI surfaces (single-owner page). Display-only.
   { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl', displayComponentIds: ['fw8g76r7dqcl', 'ngscynkb3c53', 'v58xb4x4tg0l', '8b8kpp2h7w82', 'dtcqb0ffqv21'], statusSourceDeactivated: true }, // #800 — Statuspage deactivated (401) since ~2026-06-18 (#689), no replacement; suppress recurring dead-source alerts. REMOVE when the page reactivates.
-  // ChatGPT has no single umbrella status-page component, but status.openai.com
-  // does publish a ChatGPT group aggregate over its sub-components — that's the
-  // user-facing uptime number on the page. Status determination still uses the
-  // overall indicator + incidentKeywords filter with the "no relevant unresolved
-  // incidents → operational" cross-contamination guard (#292); the new
-  // incidentIoComponentId / incidentIoGroupId pair only feeds parseIncidentIoUptime
-  // (#367), not the status path. Component fallback is Conversations
-  // (01JMXBNJXGV1T5GT2M9XA83XNG, 99.92% sample) — not perfect coverage but a
-  // reasonable proxy if OpenAI ever restructures the ChatGPT group.
+  // ChatGPT has no single umbrella status-page component. Status determination uses the overall
+  // indicator + incidentKeywords filter with the "no relevant unresolved incidents → operational"
+  // cross-contamination guard (#292); `incidentIoComponentId` only feeds uptime, not the status path.
+  // #1006 — uptime is now COMPUTED from the impact records of the ChatGPT badge scope (the full
+  // `statusComponentIds` worst-of, matching the badge), over a common 30 days, instead of copying the
+  // page's published ChatGPT-group aggregate (#367). That aggregate is
+  // not a 30-day figure and OpenAI's page excludes degraded/partial states from it, so it was never
+  // comparable with any other service's number. `incidentIoGroupId` survives with a NEW job: it is the
+  // figure the page actually DISPLAYS for this service, so `uptimeReported` reads it and the detail page
+  // can show the provider's own number beside ours. Conversations carries the real incident activity.
   // displayComponentIds (#606 Cat B): the official "ChatGPT" group (12) on status.openai.com.
   // Display-only; disjoint from openai/codex. Compliance API + Agent belong to ChatGPT per the
   // official grouping (not the API group, despite the names). Login here is the ChatGPT Login
   // (the APIs group has a separate API-Login id absent from summary.json).
-  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K8C008QVXHA6JX98PAS42VPD', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ'], displayComponentIds: ['01K8C008QVXHA6JX98PAS42VPD', '01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ'] },
+  // #1008: "Codex in ChatGPT Desktop" (01KMKFAMWKQ81YWSE1Z18R6VHR) is officially a ChatGPT-group
+  //   component (Codex surfaced inside the ChatGPT desktop app, sits between ChatGPT Atlas / ChatGPT
+  //   Work on the official page), so it belongs here — NOT under codex, where it used to be
+  //   mis-attributed and let a ChatGPT-only incident flip the Codex badge to degraded.
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', incidentKeywords: ['chatgpt', 'conversation', 'login', 'pinned', 'file', 'download', 'upload', 'us-east-1', 'us-west-2', 'eu-central-1'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', incidentIoGroupId: '01K5H8S53SY1KMS4GQMNMZXTR1', statusComponentId: '01JMXBNJXGV1T5GT2M9XA83XNG', statusComponentIds: ['01JMXBNJXGV1T5GT2M9XA83XNG', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JSYVYQSWMJ9QG35XHP08BHA7', '01K8C008QVXHA6JX98PAS42VPD', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR'], displayComponentIds: ['01K8C008QVXHA6JX98PAS42VPD', '01JMXBNJXGV1T5GT2M9XA83XNG', '01K6TVGGGDCP0PPGCHXAG3AQX8', '01JSYVYQSWMJ9QG35XHP08BHA7', '01JMXBNJXGKKP51D4DEJ2HZJ8Q', '01JSFK5QX36ZRW0TW0ZV0ZYFXQ', '01JQ7EKW990MSPSWVXC7VPV2ZJ', '01JMXBNJXGGT5SR5DB9J7GYY48', '01JMXBNJXG1S2D9V65P1ZZTD94', '01JMXBNJXG1YMQPPCPCQX3MPA2', '01JSG1XMJ9RVJJQ0E85NVSJ2AZ', '01KMKFAMWKQ81YWSE1Z18R6VHR'] },
   // #619 — DeepSeek's consumer app (chat.deepseek.com, "DeepSeek App"). Same Flashduty feed as
   // DeepSeek API (#618), scoped to the Web Chat component — the api-vs-app split mirror of
   // OpenAI API↔ChatGPT. Feed-only (no apiUrl): when the scraper feed is fresh it supersedes +
@@ -255,10 +324,15 @@ export const SERVICES: ServiceConfig[] = [
   // ID becomes invalid, the parser falls through to the per-component lookup
   // rather than returning null. Surface-specific outages (e.g., Codex Web only)
   // still surface via incidentKeywords in Recent Incidents.
-  // displayComponentIds (#606 Cat B): the official "Codex" group (5) on status.openai.com.
-  // Display-only; disjoint from openai/chatgpt. App shares Codex's id prefix (01KMKFAMWK) and
-  // is in neither the ChatGPT(12) nor APIs(12) official group → Codex.
-  { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', incidentIoGroupId: '01KMKF9EBTCD8BN9PG8DJZXRSQ', statusComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', statusComponentIds: ['01KMP3KP5MGE23B80K1EK4S8PV', '01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK', '01KMKFAMWKQ81YWSE1Z18R6VHR'], displayComponentIds: ['01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK', '01KMP3KP5MGE23B80K1EK4S8PV', '01KMKFAMWKQ81YWSE1Z18R6VHR'] },
+  // displayComponentIds (#606 Cat B): the official "Codex" group (4) on status.openai.com —
+  // Codex API + CLI + VS Code extension + Codex Web. Display-only; disjoint from openai/chatgpt.
+  // #1008: "Codex in ChatGPT Desktop" (01KMKFAMWKQ81YWSE1Z18R6VHR) is NOT a Codex-group component —
+  //   it's officially in the ChatGPT group (Codex surfaced inside the ChatGPT desktop app, sits among
+  //   ChatGPT Atlas / ChatGPT Work on the page). It was mis-attributed here, so a ChatGPT-only
+  //   incident flipped it to partial_outage and dragged the Codex badge to degraded while the real
+  //   Codex product (API/CLI/VS Code/Web) was operational. Removed from BOTH arrays and moved to
+  //   chatgpt where it belongs.
+  { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', statusUrl: 'https://status.openai.com', apiUrl: 'https://status.openai.com/api/v2/summary.json', componentsUrl: 'https://status.openai.com/api/v2/components.json', incidentKeywords: ['codex', 'cli', 'vs code'], incidentExclude: [...ENVIRONMENT_SCOPE_EXCLUDE], incidentIoBaseUrl: 'https://status.openai.com/incidents', incidentIoComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', incidentIoGroupId: '01KMKF9EBTCD8BN9PG8DJZXRSQ', statusComponentId: '01KMP3KP5MGE23B80K1EK4S8PV', statusComponentIds: ['01KMP3KP5MGE23B80K1EK4S8PV', '01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK'], displayComponentIds: ['01KMKFAMWKNQ84Z1766MV08ZDE', '01KMP3KP5M8X0EBTVW6KN327EE', '01JVCV8YSWZFRSM1G5CVP253SK', '01KMP3KP5MGE23B80K1EK4S8PV'] },
   // cursor badge reflects worst-of: IDE primary + Cloud Agents + Automations + CLI (#379).
   // Bugbot/cursor.com/Marketplace are auxiliary surfaces and intentionally excluded.
   { id: 'cursor', name: 'Cursor', provider: 'Anysphere', category: 'agent', statusUrl: 'https://status.cursor.com', apiUrl: 'https://status.cursor.com/api/v2/summary.json', statusComponentId: 'rflc60xp5jp2', statusComponentIds: ['rflc60xp5jp2', 'mwv1g9sc7kdh', 'k0trcq273dr6', 'vsny1qv7v86c'] },
@@ -266,16 +340,34 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2', statusComponentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82'], incidentKeywords: ['copilot'] },
   // windsurf badge reflects worst-of: Cascade primary + Windsurf Tab (autocomplete agent surface) (#379).
   { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m', statusComponentIds: ['r5wf1ykd7y1m', '8q19cygxvshj'] },
-  // displayComponentIds (#606): Junie + its AI Platform dependency only. status.jetbrains.ai is a
-  // shared JetBrains page, but junie is the only AIWatch service on it, so excluding the sibling
-  // products (AI Assistant, Grazie, AI Platform China) keeps the breakdown Junie-relevant. Display-only.
-  // #683 — incidentComponents scopes incidents to Junie's OWN component on the shared
-  // status.jetbrains.ai page (Junie / AI Assistant / Grazie / AI Platform / AI Platform China).
-  // Without it, sibling-only incidents (e.g. a Grazie-only "Raised error rates from NLP services")
-  // leaked onto Junie. Exact-name match to Junie's badge scope (statusComponentId = Junie); AI
-  // Platform is a display dependency (displayComponentIds) but intentionally NOT an incident source,
-  // so the incident scope stays consistent with the Junie-only badge.
-  { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.ai', apiUrl: 'https://status.jetbrains.ai/api/v2/summary.json', statusComponentId: '9vbyyqkkjxl4', displayComponentIds: ['9vbyyqkkjxl4', 'x4pcb5vz7jj2'], incidentComponents: ['Junie'] },
+  // #1004 — JetBrains migrated this page Atlassian Statuspage (status.jetbrains.ai) → incident.io
+  // (status.jetbrains.cloud) on 2026-07-09, then ~2026-07-15 REMOVED the standalone "Junie" component
+  // the first migration adopted (→ #135 component-miss alert + null uptime/Score). Junie's status now
+  // spans the TWO components that carry JetBrains' OWN AI-platform health:
+  //   • "JetBrains AI" (01KX3EN535A0SKSZK3S84949V1) — the KB-named roll-up (SUPPORT-A-2595 tells users
+  //     to check "JetBrains AI Status" for Junie). But created 2026-07-09 with ZERO incident history +
+  //     ~6d of data — a near-empty new component on its own.
+  //   • "JetBrains Central Console" (01KST6ZB60NWW1MAB3ECRMJFS0) — the AI GATEWAY that actually carries
+  //     the platform incidents. Cross-checked against OUR OWN pre-migration Junie archive: "AI Platform
+  //     LLM APIs outage" (2026-05-29), auth degradations, quota — all now tag Central Console; NONE tag
+  //     "JetBrains AI". Data since 2026-05-29 → full 30d window, uptime ~99.95%.
+  // Badge + uptime run on Central Console ALONE; JetBrains AI rides along only in the breakdown +
+  // incident scope. Why not a worst-of-both badge (statusComponentIds): uptime is computed over the
+  // SAME scope as the badge (`statusComponentIds ?? incidentIoComponentId`, the #1006 invariant that
+  // keeps uptime/calendar/badge aligned), and computeIncidentIoUptime reports the SHORTEST covered
+  // window across that scope. JetBrains AI's records start 2026-07-09 (~6d), so putting it in the badge
+  // scope pins uptimeWindowDays to 6 while the % reflects Console's 30 days — an incoherent "99.8% over
+  // 6d". Console's records reach 2026-05-29 → the honest 30d window. JetBrains AI is 100%/empty anyway,
+  // so the badge loses nothing by resolving on Console.
+  //   • displayComponentIds lists BOTH (≥2 → a real 2-row breakdown that discloses the JetBrains AI
+  //     roll-up the KB names, alongside the Console gateway).
+  //   • incidentComponents scopes to BOTH names, so if JetBrains ever starts tagging incidents on the
+  //     "JetBrains AI" component we catch them without a config change. Today they all tag Console.
+  // We EXCLUDE the upstream provider components (Anthropic/OpenAI/Gemini — their own cards; #683
+  // neutrality) and Grazie (sibling NLP product; #683 drops Grazie-only incidents).
+  // The #802 coverage gate keys on `addedAt`, not the provider window — junie is established (no
+  // addedAt) → full coverage, high-confidence Score.
+  { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.cloud', apiUrl: 'https://status.jetbrains.cloud/api/v2/summary.json', statusComponentId: '01KST6ZB60NWW1MAB3ECRMJFS0', incidentIoBaseUrl: 'https://status.jetbrains.cloud/incidents', incidentIoComponentId: '01KST6ZB60NWW1MAB3ECRMJFS0', displayComponentIds: ['01KST6ZB60NWW1MAB3ECRMJFS0', '01KX3EN535A0SKSZK3S84949V1'], incidentComponents: ['JetBrains AI', 'JetBrains Central Console'] },
 ]
 
 /**
@@ -450,6 +542,10 @@ type StatusResolverConfig = Pick<ServiceConfig, 'statusComponent' | 'statusCompo
  *      configured ids resolve in the page's components (drift), fall back to
  *      the overall indicator; the separate component-miss alert path picks
  *      the drift up so operators can reconcile.
+ *   2.5. **`displayAllComponents` dynamic worst-of (#992)** — worst-of every
+ *      shown component (all page components minus `componentDenylist`), so a
+ *      churny per-model page (Cerebras) tracks new/retired models with no config
+ *      edit. After #379 (BFL keeps its curated worst-of), before single-component.
  *   3. **Single-component** (`statusComponent` name-prefix match OR
  *      `statusComponentId` exact match) — use that component's status; fall
  *      back to overall if neither matches.
@@ -472,6 +568,21 @@ export function resolveSvcStatus(
       .filter((c): c is NonNullable<typeof c> => c != null)
     if (matched.length > 0) {
       return worstStatus(matched.map((c) => normalizeStatus(c.status)))
+    }
+    return overall
+  }
+  // 2.5. Dynamic mode (#992) — displayAllComponents services badge = worst-of every shown component
+  //   (all page components minus componentDenylist names), mirroring the resolveSvcComponents dynamic
+  //   breakdown so a new/churned model degrades the badge with NO config edit. Positioned AFTER the
+  //   statusComponentIds branch (BFL has BOTH and keeps its curated worst-of) and BEFORE the single-
+  //   component branch (so a dynamic service's uptime-primary statusComponentId — e.g. Cerebras'
+  //   Developer Console — does not pin the badge to that one component). cohere/groq/together have no
+  //   statusComponent* so they returned at branch 1 (overall indicator) already; they never reach here.
+  if (config.displayAllComponents && summaryData.components) {
+    const deny = new Set((config.componentDenylist ?? []).map((n) => n.toLowerCase()))
+    const shown = summaryData.components.filter((c) => !deny.has(c.name.toLowerCase()))
+    if (shown.length > 0) {
+      return worstStatus(shown.map((c) => normalizeStatus(c.status)))
     }
     return overall
   }
@@ -564,6 +675,11 @@ export function pickBreakdownComponents(
 /** #802 — minimum days of AIWatch coverage before a service is eligible for the Reliability Ranking. */
 export const MIN_COVERAGE_DAYS = 30
 
+/** #1006 — the uptime window AIWatch presents and scores on. One window for every service, computed by
+ *  us from the provider's own records — the precondition the Reliability Ranking always claimed. */
+export const UPTIME_WINDOW_DAYS = 30
+
+
 /** #809 — id → static `addedAt` ISO date, only for services that carry one. Persisted per-service into
  *  the monthly archive (`/api/report`) so the report-side coverage gate (aiwatch-reports#45) can detect
  *  a service added mid-month by comparing this STATIC date to the report month — `coverageDays` (live,
@@ -580,6 +696,47 @@ export function coverageDaysFrom(addedAt: string | undefined, nowIso: string): n
   const ms = Date.parse(nowIso) - Date.parse(addedAt)
   if (Number.isNaN(ms)) return null
   return Math.max(0, Math.floor(ms / 86_400_000))
+}
+
+/** #909 — did a service exist during the archive month? A service added AFTER the month never
+ *  existed in it; a post-month archive REBUILD (which reads the current services:latest roster)
+ *  would otherwise inject it with null month data, leaking into a historical report's monitored
+ *  count / "zero incidents" line / uptime+latency tables. Compares the static `addedAt` DATE to the
+ *  month's last day (both `YYYY-MM-DD`, lexicographic — slice guards an ISO datetime `addedAt`).
+ *  Absent `addedAt` (established service) and genuine mid-month adds (`addedAt ≤ month-end`) are KEPT;
+ *  only post-month additions are dropped. Fail-open: a malformed `addedAt` is kept. Pure — unit-tested. */
+export function existedInMonth(addedAt: string | undefined, monthEndDate: string): boolean {
+  if (!addedAt) return true
+  const date = addedAt.slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return true // malformed → fail-open (keep, never silently drop a real service)
+  return date <= monthEndDate
+}
+
+/** #983 — does this incident's title match one of the provider's machine-emitted auto-monitor titles?
+ *  Pure. Exact (anchored) patterns only — see `ServiceConfig.autoMonitorTitles`. A service with no
+ *  patterns can never tag, so this is opt-in per service. Unit-tested. */
+export function isAutoMonitorIncident(inc: Incident, config: ServiceConfig): boolean {
+  const patterns = config.autoMonitorTitles
+  if (!patterns || patterns.length === 0) return false
+  const title = inc.title.trim()
+  return patterns.some((re) => re.test(title))
+}
+
+/** #983 — stamp `autoMonitor` on every machine-emitted incident. Applied ONCE, to the ServiceStatus
+ *  `fetchService` returns, so it survives every parse branch, `filterIncidents`, `includeUntaggedIncidents`
+ *  (which re-adds from the RAW parsed array and would bypass a tag stamped inside filterIncidents) and
+ *  the aistudio/xAI source merges. It never touches `title` — the #940 review Critical: a title rewrite
+ *  before `filterIncidents` drops the incident wholesale when an `incidentKeywords` token lives in the
+ *  title. Returns the SAME array reference when nothing matched, so untagged services allocate nothing. */
+export function tagAutoMonitorIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
+  if (!config.autoMonitorTitles?.length || incidents.length === 0) return incidents
+  let tagged = false
+  const out = incidents.map((inc) => {
+    if (!isAutoMonitorIncident(inc, config)) return inc
+    tagged = true
+    return { ...inc, autoMonitor: true }
+  })
+  return tagged ? out : incidents
 }
 
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
@@ -605,7 +762,7 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
     // processing outage"). See #310.
     if (inc.id.startsWith('aistudio:')) return true
     // #683 — exact-component-name scoping for a SHARED status page where this is the only AIWatch
-    // service but siblings' incidents leak (Junie on status.jetbrains.ai: a Grazie-only incident
+    // service but siblings' incidents leak (Junie on the shared JetBrains page: a Grazie-only incident
     // must NOT attribute to Junie). EXACT (case-insensitive) match, NOT substring, so 'AI Platform'
     // can't collide with the sibling 'AI Platform China'. An untagged incident (no componentNames)
     // matches nothing → dropped (real Junie incidents always list 'Junie'). Takes precedence over
@@ -630,11 +787,139 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
  * Filter out active incidents when the service's component is operational (#228).
  * Providers like Anthropic bulk-link incidents to all components even when only one is affected.
  * If this service's component is operational, remove unresolved incidents to prevent cross-contamination.
+ *
+ * #934 — the operational branch retained ALL resolved/monitoring incidents, which cross-attributed a
+ * sibling-component-only incident to this service ONCE IT RESOLVED. `claude` (Claude API) has no positive
+ * `incidentKeywords` — it relies on title-based `incidentExclude` + this component-status guard — so a
+ * Claude-Code-only incident whose title names no exclude keyword (the 2026-07-06 "Claude Tag seeing
+ * elevated GitHub operation failures", componentNames: ['Claude Code']) stayed in claude's candidate set.
+ * While active it was hidden here (Claude API component operational → drop unresolved); the moment it
+ * RESOLVED this guard kept it → it surfaced under Claude API + fired a Claude-API-included recovery alert.
+ * The fix is gated behind the opt-in `scopeResolvedToComponent` flag (set on `claude` only, see types.ts):
+ * when set, a resolved/monitoring incident is retained only if it plausibly involved THIS service's own
+ * component — its `componentNames` prefix-match our `statusComponent` (same convention as the #359
+ * exclude-bypass), OR it is untagged (no componentNames → ambiguous → keep, fail-open). Default-off so
+ * single-tenant services (mistral/perplexity/fal, whose broad `statusComponent: 'API'` would wrongly drop
+ * a specific-component incident) and keyword-scoped siblings (claudeai/claudecode) are byte-unchanged
+ * IN THIS RESOLVED/MONITORING BRANCH. (#970 below is NOT flag-gated, so it does change the ACTIVE branch
+ * for claudeai/claudecode — they set `apiUrl` + `statusComponentId` and so reach this guard.)
+ *
+ * #970 — the active-drop rests on the premise "our component is operational ⇒ this incident is not
+ * about us". That premise only holds when the incident degraded SOME component, i.e. `impact >= minor`
+ * (Statuspage derives `impact` from the worst status of the components linked to the incident — unless
+ * the provider sets an `impact_override`, the one case where `none` does not imply "nothing degraded").
+ * For an `impact: none` incident there is no degraded sibling to contrast against, so "our component is
+ * operational" carries zero information and the guard
+ * discarded a genuine incident on every cron cycle — invisibly, because `buildIncidentAlerts` then saw
+ * an empty list (no New alert) and the resolved path requires a prior New alert to fire. Runway's
+ * 2026-07-08 "Aleph 2.0 delayed generations" (impact none, 23min) reached NEITHER Discord nor Slack,
+ * yet surfaced on the dashboard once resolved (resolved incidents pass this guard). Every
+ * component-scoped Statuspage service was exposed (18 of them at the time).
+ *
+ * So an ACTIVE incident survives an operational component only when BOTH hold:
+ *   1. `impact == null` (Statuspage `none`) — the provider itself claims no availability impact, and
+ *   2. its `componentNames` name a component in THIS service's badge group.
+ * Both are required. Anthropic's bulk-link — the #228 target — attaches 4 of 6 components, a strict
+ * subset that DOES intersect the Claude API badge group, so (2) alone would regress #228; its impact is
+ * always `minor`/`major`, so (1) is what separates the two. (2) then keeps a Billing/Support-only
+ * `impact: none` incident (outside the badge group) from alerting. An UNTAGGED `impact: none` incident
+ * is dropped rather than fail-open: on a shared page it would otherwise leak onto every sibling service.
+ *
+ * The `impact === null` ⇒ Statuspage `none` reading only holds for STATUSPAGE-sourced incidents (see
+ * `parsers/statuspage.ts`, which maps anything outside {critical,major,minor} to null). Other parsers
+ * (instatus/betterstack) also null out an UNMAPPED severity, where null means "unknown", not "none".
+ * The sole call site is inside the statuspage `apiUrl` branch, so the invariant holds — keep it that way.
+ *
+ * Every drop here is a *silent* one (no alert, no dashboard row until it resolves) — that silence IS
+ * bug #970. So the two cases where we cannot actually judge are made observable rather than quiet:
+ *   - badge group unresolvable (`components` empty / every configured id missing from the page) → we
+ *     have nothing to match against, so FAIL OPEN (keep + warn). Dropping a real alert is worse than a
+ *     phantom, the same trade `shouldHoldNewIncident` makes. A partially-resolved group is already
+ *     surfaced by the #135 miss-check below (primary id → Discord; secondary ids → warn).
+ *   - untagged `impact: none` → still dropped (shared-page leak), but warn so it is never invisible.
  */
-export function filterByComponentStatus(incidents: Incident[], componentStatus: string, config: ServiceConfig): Incident[] {
+export function filterByComponentStatus(
+  incidents: Incident[],
+  componentStatus: NormalizedStatus,
+  config: ServiceConfig,
+  components: Array<{ id: string; name: string }>,
+): Incident[] {
   if (componentStatus !== 'operational') return incidents
   if (!config.statusComponentId && !config.statusComponent) return incidents
-  return incidents.filter(i => i.status === 'resolved' || i.status === 'monitoring')
+  const ownComponent = config.statusComponent?.toLowerCase()
+  const ids = badgeGroupIds(config)
+  const badgeGroup = badgeGroupNames(config, components)
+  // Ids were configured but NONE resolved (and no `statusComponent` name to fall back on) → the badge
+  // group is empty for a reason we cannot distinguish from "matches nothing". Never silently drop on it.
+  const unjudgeable = badgeGroup.size === 0 && ids.length > 0
+  return incidents.filter(i => {
+    const names = (i.componentNames ?? []).map(n => n.toLowerCase())
+    // #970 — active incident: retained only when the provider degraded nothing AND it names one of
+    // our badge-group components. Id-resolved names match exactly (same page, same strings);
+    // `statusComponent` is a PREFIX by the #359 convention ('Claude API' must match the page's
+    // 'Claude API (api.anthropic.com)').
+    if (i.status !== 'resolved' && i.status !== 'monitoring') {
+      if (i.impact !== null) return false
+      if (unjudgeable) {
+        console.warn(`[filterByComponentStatus] #970 ${config.id}: badge group unresolvable (${ids.join(',')}) — keeping impact:none incident ${i.id} rather than dropping it silently`)
+        return true
+      }
+      // `names` empty ⇒ `some()` is false ⇒ untagged. Warn: we cannot attribute it, so the drop is a
+      // guess, not a verdict. A TAGGED non-match (e.g. Billing-only) is a confident drop — no warn.
+      if (names.length === 0) {
+        console.warn(`[filterByComponentStatus] #970 ${config.id}: dropping UNTAGGED impact:none incident ${i.id} (no componentNames to attribute it by)`)
+        return false
+      }
+      return names.some(n => badgeGroup.has(n) || (ownComponent !== undefined && n.startsWith(ownComponent)))
+    }
+    if (!config.scopeResolvedToComponent || !ownComponent) return true
+    if (names.length === 0) return true
+    return names.some(n => n.startsWith(ownComponent))
+  })
+}
+
+/** The component ids this service's badge is scoped to (#970 helper) — `statusComponentIds` when set,
+ *  else the single `statusComponentId`, else none (a `statusComponent`-name-only service). */
+function badgeGroupIds(config: ServiceConfig): string[] {
+  return config.statusComponentIds ?? (config.statusComponentId ? [config.statusComponentId] : [])
+}
+
+/**
+ * The lowercased component NAMES that make up this service's badge group (#970 helper).
+ * `statusComponentIds`/`statusComponentId` are page component IDs, while an `Incident` carries
+ * component NAMES — so resolve ids → names through the page's component list. `statusComponent` is
+ * already a name (a prefix by the #359 convention), so it joins the set directly. An id we cannot
+ * resolve (component renamed/removed) contributes nothing; the caller distinguishes "resolved to
+ * nothing" (unjudgeable → fail open) from "matched nothing" (a real non-membership verdict).
+ */
+export function badgeGroupNames(
+  config: ServiceConfig,
+  components: Array<{ id: string; name: string }>,
+): Set<string> {
+  // #992 — a DYNAMIC (displayAllComponents) service's badge group is EVERY shown component (all page
+  // components minus componentDenylist), matching its #992 dynamic worst-of badge. Without this the
+  // group would collapse to the single statusComponentId (Cerebras' Developer Console) and #970 would
+  // silently drop an active impact:none incident naming any OTHER Cerebras model. The guard MIRRORS
+  // resolveSvcStatus branch precedence exactly: a service with BOTH flags (BFL) resolves its BADGE via
+  // the statusComponentIds worst-of (branch 2, NOT the 2.5 dynamic branch), so its keep-group must stay
+  // the curated ids too — else the group would broaden past the badge and #970 would KEEP an impact:none
+  // incident the curated badge doesn't cover. So dynamic-group ONLY when there's no statusComponentIds.
+  if (config.displayAllComponents && !(config.statusComponentIds && config.statusComponentIds.length > 0)) {
+    const deny = new Set((config.componentDenylist ?? []).map((n) => n.toLowerCase()))
+    const names = new Set<string>()
+    for (const c of components) {
+      const lower = c.name.toLowerCase()
+      if (!deny.has(lower)) names.add(lower)
+    }
+    return names
+  }
+  const names = new Set<string>()
+  for (const id of badgeGroupIds(config)) {
+    const match = components.find(c => c.id === id)
+    if (match) names.add(match.name.toLowerCase())
+  }
+  if (config.statusComponent) names.add(config.statusComponent.toLowerCase())
+  return names
 }
 
 /**
@@ -737,6 +1022,8 @@ async function readFlashdutyStatus(kv: KVNamespace, config: ServiceConfig, base:
     status: parsed.status,
     lastChecked: now,
     incidents: parsed.incidents,
+    // #1006 — COMPUTED over the trailing 30 days from the feed's `component_impacts` intervals, like
+    // every other source; the feed's own `component_uptimes` aggregate is used only as the roster.
     ...(parsed.uptime30d != null ? { uptime30d: parsed.uptime30d, uptimeSource: 'official' as const } : {}),
     ...(Object.keys(parsed.dailyImpact).length > 0 ? { dailyImpact: parsed.dailyImpact } : {}),
     ...(parsed.components.length >= 2 ? { components: parsed.components } : {}),
@@ -760,7 +1047,21 @@ export function classifyStatusPageFailure(httpStatus: number): 'dead-source' | '
   return httpStatus >= 400 && httpStatus < 500 ? 'dead-source' : 'transient'
 }
 
-async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
+/** #983 — the single tagging choke point. `fetchServiceUntagged` has ~10 return paths (flashduty feed,
+ *  summary.json, AWS health, Azure RSS, BetterStack/Instatus/xAI/aistudio, plus the early operational
+ *  and error bases); stamping `autoMonitor` on its result covers all of them, and is safe AFTER
+ *  filtering because the tag is additive (no `title` mutation → `filterIncidents` is unaffected). */
+// Exported ONLY so a test can drive the REAL production call path end-to-end (parse → filterIncidents
+// → includeUntaggedIncidents → tag). Unit-testing `tagAutoMonitorIncidents` alone would leave this
+// wrapper unguarded: drop the call here, or move it before `filterIncidents`, and every pure test
+// stays green while the tag never reaches /api/status (the #966 / #940 "tested twin" failure).
+export async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
+  const svc = await fetchServiceUntagged(config, prefetched, kv)
+  const incidents = tagAutoMonitorIncidents(svc.incidents, config)
+  return incidents === svc.incidents ? svc : { ...svc, incidents }
+}
+
+async function fetchServiceUntagged(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
   const now = new Date().toISOString()
   let parseErrors = 0 // Track internal parse/fetch failures — prevents resetFetchFailure from masking repeated errors
   const base: ServiceStatus = {
@@ -860,6 +1161,45 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         }
       }
 
+      // #1004 — incident.io's Statuspage-compat API returns `components: []` on every incident (verified
+      // on all four incident.io pages we monitor), so a service scoped by `incidentComponents` would have
+      // EVERY incident dropped by the filter below — silently and forever, because the
+      // `includeUntaggedIncidents` valve is gated on `incidentKeywords`, which such a service doesn't set.
+      // The tags are rebuilt from the page HTML's `component_impacts`, which makes that HTML LOAD-BEARING
+      // for correctness, not just for uptime. The prefetch may not have it (its own fetch 5s-timed out,
+      // or the whole prefetch entry is missing because summary.json failed that cycle and fetchService
+      // re-fetched it above) — so fetch it here rather than silently dropping every incident.
+      let uptimeHtml = prefetched?.uptimeHtml
+      const tagsNeedHtml = !!(config.incidentComponents && config.incidentIoComponentId)
+      if (!uptimeHtml && tagsNeedHtml) {
+        try {
+          // 3s, not the prefetch's 5s: the prefetch already waited on this same host this cycle, so a
+          // serial 5+5s would eat the batch's budget on exactly the page that's already slow.
+          const htmlRes = await fetchWithTimeout(config.statusUrl, 3000)
+          if (htmlRes.ok) uptimeHtml = await htmlRes.text()
+          else htmlRes.body?.cancel()
+        } catch (err) {
+          console.warn(`[fetchService] ${config.id} status-page HTML fetch failed:`, err instanceof Error ? err.message : err)
+        }
+      }
+      if (tagsNeedHtml) {
+        // Must precede filterIncidents: a transform after the filter can't resurrect what it dropped (#940).
+        const tagged = uptimeHtml
+          ? attachIncidentIoComponentNames(incidents, uptimeHtml, summaryData.components ?? [])
+          : incidents
+        // Fail LOUD, not silent — and OUTSIDE the html guard, so the "no HTML at all" case (the one that
+        // drops every incident) is the loudest, not the quietest. Covers both: HTML missing, and HTML
+        // present but its shape changed upstream.
+        if (incidents.length > 0 && !tagged.some((i) => (i.componentNames ?? []).length > 0)) {
+          console.warn(
+            `[fetchService] ${config.id}: incidentComponents is set but NO incident could be tagged from ` +
+            `component_impacts (uptimeHtml ${uptimeHtml ? 'present — upstream shape change?' : 'MISSING'}) — ` +
+            'every incident will be filtered out this cycle',
+          )
+        }
+        incidents = tagged
+      }
+
       let filtered = filterIncidents(incidents, config)
 
       // #606 Cat B / #693 follow-up — source the component list from componentsUrl (components.json, a
@@ -909,16 +1249,19 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
 
       // Compute daily impact for calendar from uptimeData HTML (Statuspage services only).
       // Daily impact for calendar: Statuspage uptimeData OR incident.io component_impacts
-      const uptimeResult = (prefetched?.uptimeHtml && config.statusComponentId)
-        ? parseUptimeData(prefetched.uptimeHtml, config.statusComponentId)
+      const uptimeResult = (uptimeHtml && config.statusComponentId)
+        // #1006 — the same scope the badge + calendar use (worst-of, #379), not the single primary
+        // component: a multi-component service showed outages in its incident list while uptime, read
+        // from one component, sat at 100%.
+        ? parseUptimeData(uptimeHtml, config.statusComponentIds ?? config.statusComponentId)
         : null
       // Aggregate the impact calendar over the whole badge group (statusComponentIds) when set, so a
       // multi-component service's calendar matches its badge scope + the official group calendar
       // (#693 follow-up); else the single primary component. incident.io HTML carries impacts for ALL
       // components (incl. ones absent from summary.json), so the group calendar can be more complete
       // than the summary.json-sourced badge.
-      const ioDailyImpact = (prefetched?.uptimeHtml && config.incidentIoComponentId)
-        ? parseIncidentIoComponentImpacts(prefetched.uptimeHtml, config.statusComponentIds ?? config.incidentIoComponentId)
+      const ioDailyImpact = (uptimeHtml && config.incidentIoComponentId)
+        ? parseIncidentIoComponentImpacts(uptimeHtml, config.statusComponentIds ?? config.incidentIoComponentId)
         : null
       // Statuspage uptimeData is the preferred per-day source — but ONLY when it actually produced
       // days. For an incident.io service, parseUptimeData(incident.io HTML) returns an EMPTY map, which
@@ -929,26 +1272,74 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         ? statuspageDaily
         : (ioDailyImpact && Object.keys(ioDailyImpact).length > 0 ? ioDailyImpact : null)
 
-      // Uptime%: Statuspage uptimeData > incident.io component_uptimes > incident duration estimate
+      // Uptime% — AIWatch COMPUTES it, from the provider's own published records, with ONE formula and
+      // ONE window (30 days) for every service it can:
+      //   Atlassian    → parseUptimeData sums the per-day outage SECONDS the page publishes, over the
+      //                  TRAILING 30 of the ~90 days it embeds (#1006 — the pre-fix code divided by all
+      //                  90, so `uptime30d` held a ninety-day figure).
+      //   incident.io  → computeIncidentIoUptime sums the component_impacts intervals over 30 days.
+      // Both use the weights on /methodology (full outage 1.0, partial/degraded 0.3, announced
+      // maintenance excluded). This is what makes the Score coherent — its other components (Incidents
+      // 25, Recovery 15) are 30-day — and the Reliability Ranking comparable at all.
+      //
+      // `uptimeReported` is set ONLY for incident.io, where the page publishes ONE fixed aggregate that
+      // genuinely differs from our measure (LangSmith's page really does show 98.48% while its trailing-30
+      // record is spotless). An Atlassian page has no such single number — its window follows the viewport
+      // (90/60/30 days) — so there is nothing to place beside ours.
       let uptimeValue: number | null = null
       let uptimeSrc: 'official' | undefined
+      let uptimeWindow: number | undefined
+      let uptimeRep: number | undefined
+      let uptimeRepDays: number | undefined
       if (uptimeResult?.uptimePercent != null) {
         uptimeValue = uptimeResult.uptimePercent
         uptimeSrc = 'official'
-      } else if (prefetched?.uptimeHtml && config.incidentIoComponentId) {
-        const ioUptime = parseIncidentIoUptime(prefetched.uptimeHtml, config.incidentIoComponentId, config.incidentIoGroupId)
-        if (ioUptime != null) {
-          uptimeValue = ioUptime
-          uptimeSrc = 'official'
+        if (uptimeResult.windowDays != null && uptimeResult.windowDays < UPTIME_WINDOW_DAYS) uptimeWindow = uptimeResult.windowDays
+        // The provider's own figure IS shown for Atlassian too — the ~90-day number a desktop visitor
+        // sees on their page (status.claude.com: "90 days ago … 99.58%"). Its period is stated, because
+        // theirs isn't fixed: the page renders 30 / 60 / 90 days depending on viewport width.
+        if (uptimeResult.uptimeReported != null && uptimeResult.uptimeReported !== uptimeValue) {
+          uptimeRep = uptimeResult.uptimeReported
+          uptimeRepDays = uptimeResult.uptimeReportedDays ?? undefined
         }
-        // #713 — NO estimate fallback: if incident.io exposes no component_uptimes for this component
-        // (Replicate/ElevenLabs edge), leave uptime null rather than inventing a value. The service is
-        // scored on its incidents + recovery (+ probe), and the uptime display reads "No official uptime".
+      } else if (uptimeHtml && config.incidentIoComponentId) {
+        // #1006 — uptime is computed over the SAME component scope the badge and the impact calendar use
+        // (`statusComponentIds`, worst-of per #379), not over the single `incidentIoComponentId`.
+        // LangSmith exposed the gap: its badge spans API + Run Ingestion + Application, but uptime read
+        // only the API component — so a partial outage on Run Ingestion showed up in the incident list
+        // while uptime sat at a spotless 100%. The old 90-day published figure happened to be low enough
+        // that nobody noticed; computing an honest 30 days made the mismatch visible.
+        // `incidentIoComponentId` still identifies which figure the PAGE displays (uptimeReported).
+        const uptimeScope = config.statusComponentIds ?? config.incidentIoComponentId
+        const io = computeIncidentIoUptime(uptimeHtml, uptimeScope, Date.now())
+        if (io) {
+          uptimeValue = io.pct
+          uptimeSrc = 'official'
+          // A status-page migration creates a NEW component whose records may not reach back 30 days.
+          // The figure is honest for the days it covers — surface WHICH, rather than passing a short
+          // window off as a 30-day one. Absent when the window is whole. (junie itself dodges this by
+          // sourcing uptime from the older Central Console component — see its config comment.)
+          if (io.days < UPTIME_WINDOW_DAYS) uptimeWindow = io.days
+          const reported = parseIncidentIoReportedUptime(uptimeHtml, config.incidentIoComponentId, config.incidentIoGroupId)
+          // Shown whenever it differs at all — no "meaningful gap" threshold. A cutoff would be an
+          // editorial judgement made from one day's snapshot, and it would give the reader an invisible
+          // rule ("why does LangSmith show two numbers and OpenAI one?"). A near-identical pair is not
+          // noise either: it CORROBORATES our figure against the provider's. Identical → nothing to say.
+          if (reported != null && reported !== uptimeValue) uptimeRep = reported
+        }
+        // #713 — NO invented uptime. A component the page does not track at all (no
+        // `data_available_since`) yields null here rather than a fabricated 100%: absence of impact
+        // records is not evidence of absence of downtime. The service is then scored on its incidents +
+        // recovery (+ probe), and the display reads "No official uptime".
       }
       // (a bare incidentIoComponentId with no uptime HTML also leaves uptime null — same #713 rule.)
 
-      // Filter out active incidents when component is operational (#228)
-      filtered = filterByComponentStatus(filtered, svcStatus, config)
+      // Filter out active incidents when component is operational (#228).
+      // #970 — pass the resolved component list (the SAME superset the badge resolves from) so the
+      // guard can map `statusComponentIds` → component NAMES and keep an `impact: none` incident that
+      // genuinely names one of our badge-group components. `?? []` mirrors includeUntaggedIncidents
+      // above; an empty list makes the guard fail OPEN + warn rather than silently drop (see its doc).
+      filtered = filterByComponentStatus(filtered, svcStatus, config, breakdownComponents ?? [])
 
       // Track component ID misses for migration detection (#135).
       // Primary statusComponentId drives the alerted-on tracker. Additional ids
@@ -1016,6 +1407,9 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
         calendarDays: config.statusComponentId ? 30 : 14,
         ...(uptimeValue != null ? { uptime30d: uptimeValue, uptimeSource: uptimeSrc } : {}),
+        ...(uptimeWindow != null ? { uptimeWindowDays: uptimeWindow } : {}),
+        ...(uptimeRep != null ? { uptimeReported: uptimeRep } : {}),
+        ...(uptimeRepDays != null ? { uptimeReportedDays: uptimeRepDays } : {}),
       }
     } else {
       // No Statuspage API — HTTP check + optional scraping (parallel)
@@ -1131,18 +1525,21 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
 
       let incidents: Incident[] = []
       let instatusUptime: number | null = null // #627 — Instatus per-component official uptime%
+      let instatusReported: number | null = null // #1006 — the page's own published aggregate (disclosure)
+      let instatusReportedDays: number | null = null
       let instatusComponents: ServiceComponent[] = [] // #761 — Instatus per-component snapshot (Next.js only)
       if (config.onlineOrNotUrl && res.ok) {
         const html = await res.text()
         incidents = parseOnlineOrNotIncidents(html)
-        if (config.onlineOrNotComponent) {
-          const uptime = parseOnlineOrNotUptime(html, config.onlineOrNotComponent)
-          if (uptime != null) {
-            base.uptime30d = uptime
-            base.uptimeSource = 'platform_avg'
-          } else {
-            console.warn(`[fetchService] ${config.id} OnlineOrNot uptime not found for component: ${config.onlineOrNotComponent}`)
-          }
+        // #1006 — computed over the trailing 30 days from the page's own incident records (started/ended/
+        // impact), like every other source, instead of reading its aggregate over an unknown period. It's
+        // the PROVIDER's own status page (not a third-party monitor), so this is 'official', not platform.
+        const uptime = computeOnlineOrNotUptime(html)
+        if (uptime != null) {
+          base.uptime30d = uptime
+          base.uptimeSource = 'official'
+        } else {
+          console.warn(`[fetchService] ${config.id} OnlineOrNot uptime could not be computed (payload shape change?)`)
         }
       } else if (config.onlineOrNotUrl && !res.ok) {
         console.warn(`[fetchService] ${config.id} OnlineOrNot status page returned ${res.status}`)
@@ -1160,6 +1557,10 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
             const mainHtml = await res.text()
             if (config.statusComponent) {
               instatusUptime = parseInstatusUptime(mainHtml, config.statusComponent)
+              // #1006 — the % the page itself shows (over its own ~90-day period), for the side-by-side
+              // disclosure. Only kept when it differs from our computed figure.
+              instatusReported = parseInstatusReportedUptime(mainHtml, config.statusComponent)
+              instatusReportedDays = parseInstatusUptimeDays(mainHtml)
             }
             const instatusComps = parseInstatusComponents(mainHtml)
             if (instatusComps.length > 0) {
@@ -1174,7 +1575,11 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
           if (config.rssFeedUrl) {
             const rssText = await scrapeRes.text()
             incidents = config.rssFeedUrl.includes('status.x.ai')
-              ? parseXaiRssIncidents(rssText)
+              // #940 — collapse xAI per-region incidents (same event across us-east-1/eu-west-1/…) to
+              // ONE canonical incident at the source, so the dashboard list, Analyze modal, RSS/Slack
+              // feed, and Discord new+resolved alerts all see a single incident (the older per-surface
+              // merges were cycle-local and leaked duplicates across cron cycles).
+              ? mergeXaiRegionalIncidents(parseXaiRssIncidents(rssText))
               : parseRssIncidents(rssText)
           } else if (config.gcloudProduct) {
             const data: GCloudIncident[] = await scrapeRes.json()
@@ -1205,6 +1610,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
 
       // Better Stack uptime + status: parse /index.json for aggregate_state and availability
       let betterStackUptime: number | null = null
+      let betterStackReported: number | null = null // #1006 — the page's displayed availability (disclosure)
       let betterStackStat: 'operational' | 'degraded' | 'down' | null = null
       let betterStackPartial = 0
       let betterStackComponents: ServiceComponent[] = []
@@ -1217,6 +1623,7 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         try {
           const bsData: BetterStackIndex = await betterStackRes.json()
           betterStackUptime = parseBetterStackUptime(bsData)
+          betterStackReported = parseBetterStackReportedUptime(bsData)
           betterStackStat = parseBetterStackStatus(bsData)
           betterStackPartial = parseBetterStackPartialCount(bsData)
           // #606 Cat C — per-resource breakdown grouped by status_page_section (display-only;
@@ -1299,9 +1706,26 @@ async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, 
         calendarDays: has30dCalendar ? 30 : 14,
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
         ...(betterStackUptime != null
-          ? { uptime30d: betterStackUptime, uptimeSource: 'platform_avg' as const }
+          ? {
+              uptime30d: betterStackUptime,
+              uptimeSource: 'platform_avg' as const,
+              // #1006 — Better Stack's own displayed availability (over its ~90-day window), shown beside
+              // our 30-day figure when it differs.
+              ...(betterStackReported != null && betterStackReported !== betterStackUptime
+                ? { uptimeReported: betterStackReported, uptimeReportedDays: 90 }
+                : {}),
+            }
           : instatusUptime != null
-            ? { uptime30d: instatusUptime, uptimeSource: 'official' as const } // #627 — Instatus component uptime
+            // #627 — Instatus component uptime. #1006 — COMPUTED by us over the trailing 30 days from the
+            // page's own outage records (Next.js `componentsUptime[].outages`, Nuxt `days[].events`), not
+            // copied from its published aggregate (their pages declare `maxUptimeDays: 90`).
+            ? {
+                uptime30d: instatusUptime,
+                uptimeSource: 'official' as const,
+                ...(instatusReported != null && instatusReported !== instatusUptime
+                  ? { uptimeReported: instatusReported, ...(instatusReportedDays != null ? { uptimeReportedDays: instatusReportedDays } : {}) }
+                  : {}),
+              }
             : {}),
         ...(betterStackPartial > 0 ? { partialCount: betterStackPartial } : {}),
         ...(betterStackComponents.length > 0
@@ -1397,7 +1821,7 @@ export async function recordProbeSuppression(kv: KVNamespace, svcId: string, dat
   await kvPut(kv, supKey, String(prev + 1), { expirationTtl: 172800 })
 }
 
-export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeSnapshot[]): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[] }> {
+export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeSnapshot[]): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[]; pageComponents: Record<string, Array<{ id: string; name: string }>> }> {
   // Pre-fetch unique Atlassian status API endpoints once.
   // Services sharing a status page (claude+claudeai+claudecode, openai+chatgpt) would each fetch
   // the same URLs independently. Deduplicating saves 6 subrequests, freeing budget for enrichment.
@@ -1447,6 +1871,17 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       console.warn(`[prefetch] ${isJsonErr ? 'JSON parse' : 'network'} failure for ${baseUrl}:`, err instanceof Error ? err.message : err)
     }
   }))
+
+  // #992 — per-page raw component list (apiUrl → {id,name}[]) harvested from the prefetch, for the
+  // cron's new-component change detector. Only successfully-prefetched Statuspage/incident.io pages
+  // carry a components array; a page that failed prefetch this cycle is simply checked next cycle.
+  const pageComponents: Record<string, Array<{ id: string; name: string }>> = {}
+  for (const [apiUrl, data] of prefetchMap) {
+    const comps = data.summary?.components
+    if (Array.isArray(comps) && comps.length > 0) {
+      pageComponents[apiUrl] = comps.map((c) => ({ id: c.id, name: c.name }))
+    }
+  }
 
   // Batch services to avoid exceeding Cloudflare Workers concurrent connection limit.
   // BetterStack services use 3 connections each (statusUrl + RSS + index.json);
@@ -1539,11 +1974,19 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     if (probeSnapshots && probeSnapshots.length > 0) {
       const date = new Date().toISOString().split('T')[0]
       for (const svc of degradedFromFetch) {
-        if (svc.status === 'degraded' && isProbeHealthy(probeSnapshots, svc.id)) {
+        if (svc.status !== 'degraded') continue
+        if (isProbeHealthy(probeSnapshots, svc.id)) {
           console.log(`[cross-validation] ${svc.id}: status page down but probe RTT normal — holding operational`)
           svc.status = 'operational'
           // Daily suppression counter — see recordProbeSuppression() docstring.
           if (kv) await recordProbeSuppression(kv, svc.id, date)
+        } else if (isProbeFailing(probeSnapshots, svc.id)) {
+          // #1004 — the probe INDEPENDENTLY corroborates the outage: the status page is unreadable AND
+          // our direct call to the service is failing. The UI neutralises a fetch-failure `degraded` into
+          // an "unknown" badge ("we can't read the source"), which would be a false reassurance here —
+          // this `degraded` is backed by evidence. Mark it so the display keeps it amber. A service with
+          // no probe (junie) or with too few samples to judge stays neutral, which is the honest default.
+          svc.probeContradicted = true
         }
       }
     }
@@ -1592,5 +2035,15 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     }
   }
 
-  return { raw, enriched }
+  // #904 — operator suppression layer: drop policy-hidden incidents from every downstream consumer
+  // (live /api/status list, scoreFor, the go-forward monthly accumulator, and the services:latest
+  // cache) in one place. Applied AFTER attribution/status determination so the badge (already scoped
+  // by e.g. #741) is unaffected — this only removes the incident from the LIST + Score inputs. Empty
+  // list is identity (no churn); a KV read failure falls back to "nothing suppressed".
+  const suppressions = await readSuppressions(kv)
+  return {
+    raw: applySuppressions(raw, suppressions),
+    enriched: applySuppressions(enriched, suppressions),
+    pageComponents,
+  }
 }

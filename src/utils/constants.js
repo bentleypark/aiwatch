@@ -1,4 +1,5 @@
 import { regionStatusOf } from './regionStatus'
+import { isDisplayAffected } from './statusDisplay'
 
 export const VALID_THEMES = ['dark', 'light', 'system']
 
@@ -389,7 +390,10 @@ export function getGroupedFallbacksExcludingRegionSwitchable(affected, allServic
  */
 export function shouldShowFallback(svcs, allRecovered) {
   if (allRecovered || !Array.isArray(svcs) || svcs.length === 0) return false
-  if (!svcs.some(s => s.status !== 'operational')) return false
+  // #1004 — the DISPLAY state, matching the Overview ActionBanner this is documented to stay consistent
+  // with. A service whose status source we can't read must never trigger a "switch to X" recommendation:
+  // we'd be telling users to abandon a service we just admitted we can't see.
+  if (!svcs.some(isDisplayAffected)) return false
   if (svcs.every(s => EXCLUDE_FALLBACK.includes(s.id))) return false
   return true
 }

@@ -16,6 +16,14 @@ export interface Incident {
   resolvedAt?: string | null
   duration: string | null
   timeline: TimelineEntry[]
+  // #983 — this incident was opened by the provider's AUTO-MONITOR, not written by a human.
+  // Stamped in services.ts from `ServiceConfig.autoMonitorTitles`; serialized on /api/status so the
+  // SPA + is-down SSR grouping read the same tag the alert path does (the #940 "tag at the source"
+  // precedent). Everything downstream previously inferred "a human wrote this" from `impact != null`
+  // / `impact !== 'major'`, which is false for an Atlassian page: Statuspage DERIVES `impact` from
+  // component status, so one sub-component at `major_outage` yields `impact: 'major'` on a 6-minute
+  // machine-emitted blip. Absent (undefined) on every untagged service — never assume `false`.
+  autoMonitor?: boolean
 }
 
 /** A single status-page component preserved for the per-component breakdown (#604).
@@ -76,7 +84,32 @@ export interface ServiceStatus {
   // UTC-vs-local off-by-one; #693 follow-up). buildCalendarFromIncidents handles both key forms.
   dailyImpact?: Record<string, DailyImpactLevel>
   calendarDays?: number
-  uptimeSource?: 'official' | 'platform_avg' // #713 — 'estimate' removed; no invented uptime
+  /** Where `uptime30d` came from — the reader MUST know, because they are not the same kind of number.
+   *  #713 — 'estimate' removed; no invented uptime.
+   *  #1006 —
+   *    'official'      → AIWatch's OWN computation over the trailing 30 days, from the provider's
+   *                      published per-day / impact records, with the weights on /methodology. Atlassian,
+   *                      incident.io, Instatus and Flashduty — every source that publishes raw records.
+   *    'platform_avg'  → the same 30-day AIWatch computation, but over BetterStack's OWN monitoring
+   *                      history (`status_history`) rather than the provider's incident declarations, and
+   *                      averaged across the page's resources. Same window and same weights as 'official';
+   *                      the label survives because the EVIDENCE differs — an active monitor's downtime
+   *                      is not the provider saying "we had an incident". */
+  uptimeSource?: 'official' | 'platform_avg'
+  /** #1006 — the % the PROVIDER displays on its own status page, when AIWatch's own 30-day figure differs
+   *  from it (Atlassian: their ~90-day window; incident.io: their published aggregate). A disclosure, not
+   *  the metric: #41 deliberately reproduced the provider's number, so the detail page shows it beside
+   *  ours instead of dropping it. Absent when the two agree, or when there is nothing to compare. */
+  uptimeReported?: number
+  /** #1006 — the period `uptimeReported` covers, when we know it (Atlassian: the ~90 days its page
+   *  embeds and shows a desktop visitor). Absent for incident.io, whose pages publish an aggregate
+   *  without stating its window. */
+  uptimeReportedDays?: number
+  /** #1006 — days the uptime figure actually covers, when the provider's records don't reach back the
+   *  full 30 (a status-page migration creates a NEW component and resets its clock — #1004). ABSENT
+   *  when the window is whole, which is the normal case. The UI states the real window rather than
+   *  passing a short one off as a 30-day figure. */
+  uptimeWindowDays?: number
   detectedAt?: string
   /** BetterStack only: count of resources reporting a real issue (degraded/downtime)
    *  while the service stays operational under the <30% threshold (#447). UI shows a
@@ -107,6 +140,12 @@ export interface ServiceStatus {
    *  Then the badge stays operational (probe-backed) instead of "Unknown"; the un-probed case
    *  (sourceDead without this) shows "Unknown". Set by the cross-validation in `fetchAllServices`. */
   probeConfirmed?: boolean
+  /** #1004 — set when a fetch-failure `degraded` is CORROBORATED by our own probe (the service is
+   *  probed, and the probe is not healthy). The UI neutralises an unreadable-source `degraded` into an
+   *  "unknown" badge; this flag says "don't — independent evidence backs this outage", so it stays
+   *  amber. Distinct from `probeConfirmed` (which is about `sourceDead` + a HEALTHY probe). Set by the
+   *  cross-validation in `fetchAllServices`. */
+  probeContradicted?: boolean
 }
 
 export type DailyImpactLevel = 'minor' | 'major' | 'critical'
@@ -129,7 +168,7 @@ export interface ServiceConfig {
   incidentKeywords?: string[]
   incidentExclude?: string[]
   // #683 — exact-component-name incident scoping for a SHARED status page where this is the only
-  // AIWatch service but siblings' component incidents leak (Junie on status.jetbrains.ai: a
+  // AIWatch service but siblings' component incidents leak (Junie on the shared JetBrains page: a
   // Grazie-only incident must NOT attribute to Junie). When set, filterIncidents keeps an incident
   // only if its `componentNames` contains an EXACT (case-insensitive) match — NOT substring, so
   // 'AI Platform' can't collide with the sibling 'AI Platform China'. Takes precedence over
@@ -138,6 +177,15 @@ export interface ServiceConfig {
   incidentIoBaseUrl?: string
   statusComponent?: string
   statusComponentId?: string
+  // #934 — opt-in: on a SHARED status page, an EXCLUDE-ONLY service (no positive incidentKeywords/
+  // incidentComponents) keeps a resolved/monitoring incident in filterByComponentStatus only if the
+  // incident named THIS service's own `statusComponent`. Prevents a sibling-component-only incident
+  // (e.g. a Claude-Code-only "GitHub failures" incident, componentNames: ['Claude Code']) from
+  // cross-attributing to Claude API on resolution. Set on `claude` ONLY — single-tenant services
+  // (mistral/perplexity/fal) have no sibling to leak from and a broad statusComponent ('API') would
+  // wrongly drop a specific-component incident; keyword-scoped siblings (claudeai/claudecode) already
+  // scope upstream and could drop 'across surfaces' incidents. Off by default.
+  scopeResolvedToComponent?: boolean
   // Optional: multiple components to track for the badge (worst-status wins).
   // When set, the dashboard status is `down` if any component is `major_outage`,
   // `degraded` if any is `partial_outage`/`degraded_performance`, else `operational`.
@@ -197,8 +245,20 @@ export interface ServiceConfig {
   // FedRAMP, Chat Completions, the separate API Login). Status/incidents/uptime still come from
   // summary.json; only resolveSvcComponents reads this. Falls back to summary.json on fetch error.
   componentsUrl?: string
-  incidentIoComponentId?: string
-  incidentIoGroupId?: string       // incident.io group uptime (e.g. "APIs" aggregate)
+  // A list is a worst-of (min) across the components — for a page whose only components are
+  // per-region endpoints and which publishes no group aggregate (turbopuffer, #857). Unlike
+  // `statusComponentId`/`statusComponentIds` (two fields because they carry two DIFFERENT roles —
+  // calendar/miss anchor vs badge group), this field has a single role (which components to read
+  // uptime from), so the list form generalizes it rather than needing a sibling field.
+  // The tuple forbids `[]`, which would be silently truthy: it passes the `needsHtml` gate, runs the
+  // parser over zero ids, and yields null — reinstating the exact silent uptime drop #857 fixed.
+  incidentIoComponentId?: string | [string, ...string[]]
+  /** #367 → #1006 — the incident.io GROUP aggregate id (e.g. OpenAI's "APIs" group). Its role changed:
+   *  it no longer feeds `uptime30d` (that is computed from component_impacts over a common 30 days now).
+   *  It identifies the number the page actually DISPLAYS for this service — status.openai.com shows the
+   *  group figure (APIs 99.97%), not the member component's (API 100.00%) — so `uptimeReported` reads it
+   *  and the detail page can put the provider's own number beside ours. Omit when the page has no group. */
+  incidentIoGroupId?: string
   betterStackUrl?: string
   onlineOrNotUrl?: string
   onlineOrNotComponent?: string
@@ -218,6 +278,16 @@ export interface ServiceConfig {
   // Distinct from flapSuppression (which only holds the BetterStack "— down/recovered" title shape).
   // See isShortIncidentHoldable() in alerts.ts. `major` + Tier-1 always alert immediately.
   holdShortIncidents?: boolean
+  // #983 — EXACT-match patterns for this provider's machine-emitted incident titles. A matching
+  // incident gets `Incident.autoMonitor = true` (see tagAutoMonitorIncidents in services.ts), which
+  // makes it hold-eligible + flap-suppressible REGARDLESS of `impact`, and groupable in the UI.
+  // Needed for a page whose auto-monitor opens a brand-new incident per blip under one fixed title
+  // (Twelve Labs: "Some API features are experiencing issues" ×4 on 2026-07-09, 5–16m each, 3 of
+  // them `impact: 'major'` purely because one sub-component read `major_outage`).
+  // Anchor every pattern (`^…$`): a substring match would swallow the provider's real, human-written
+  // incidents, which use distinct titles ("Search API failure", "API server failure"). `critical` is
+  // never held/suppressed even when tagged, so a genuine broad outage always alerts immediately.
+  autoMonitorTitles?: RegExp[]
   // #591 — mark a service whose status page migrated to a server-side-unreachable platform, so
   // the feed AIWatch reads is FROZEN (e.g. DeepSeek → Flashduty, #507). Propagated to
   // ServiceStatus.incidentSourceStale → all ranking surfaces exclude it (a frozen empty 30-day

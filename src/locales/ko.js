@@ -9,6 +9,8 @@ const ko = {
   'nav.uptime': '업타임 현황',
   'nav.ranking': '신뢰도 랭킹',
   'nav.statusline': '스테이터스라인',
+  'nav.plugin': '플러그인',
+  'nav.claudeCode': 'Claude Code',
   'nav.settings': '설정',
   'nav.dashboard': '대시보드',
   'nav.reports': '월간 리포트',
@@ -74,12 +76,14 @@ const ko = {
   'overview.panel.latency.sub': '현재 기준 ms',
   'overview.stats.uptime.sub': '전체 평균',
   'overview.incidents.monitoring': '모니터링 중',
+  'overview.incidents.total': '총 {d}',
   'overview.banner.degraded': '성능 저하',
   'overview.banner.down': '서비스 중단',
   'overview.banner.affected': '{n}개 서비스 장애',
   // #574 — 공급망 상관 배너 (AWS 리전 저하 + 의존 AI 서비스 저하)
   'supplychain.title': 'AWS 인프라 이슈',
-  // 서비스 자신이 확인: 저하 + 자체 상태페이지가 원인을 AWS/upstream으로 명시(StatusGator식 크로스체크) — 단순 시간 우연 아님.
+  // 서비스 자신이 확인: 저하 + 자체 상태페이지가 AWS가 실제로 degraded로 보고하는 리전을 지목(#1000 리전 대조) — 단순 시간 우연 아님.
+  // 리전 없는 'upstream provider' 언급만으로는 더 이상 귀속되지 않는다 (리전 일치가 핵심).
   'supplychain.affectingNow': '저하 · AWS 귀속 확인:',
   'supplychain.mayAffect': 'AWS 의존 · 영향 가능:',
   'supplychain.region.degraded': '성능 저하',
@@ -99,7 +103,6 @@ const ko = {
   'overview.recovered': '최근 복구',
   'overview.recentlyResolved': '최근 복구됨',
   'overview.seeAnalysis': '분석 상세 보기',
-  'overview.security.title': '최근 보안 알림',
   'analysis.recoveredAt': '복구 시각',
   // Empty States
   'empty.issues.title': '현재 이슈 없음',
@@ -120,7 +123,7 @@ const ko = {
   'latency.slowest': '가장 느림',
   'latency.trend': '24시간 추세',
   'latency.top8': 'Score 상위 8개',
-  'latency.excludeNote': '* AI 앱(claude.ai, ChatGPT 등)은 측정할 공개 API 엔드포인트가 없어 제외됩니다. 코딩 에이전트는 자체 API를 제공하는 경우(예: Cursor)만 probe합니다.',
+  'latency.excludeNote': '* 랭킹은 API 서비스와 자체 API가 있는 코딩 에이전트(예: Cursor)를 포함합니다. AI 앱은 랭킹에 없습니다 — 대부분 측정할 엔드포인트가 없고, Character.AI는 백엔드 health 엔드포인트로 probe하여 상세 페이지에만 표시됩니다.',
   'latency.dummy': '데이터 수집 중 (24시간 후 실데이터로 전환)',
   'latency.avg.services': '개 서비스',
 
@@ -168,6 +171,10 @@ const ko = {
   'uptime.rankings': '업타임 순위',
   'uptime.matrix': '3개월 이력',
   'uptime.incidents': '인시던트',
+  // #1006 — 행마다 기준이 다르므로 헤더는 '주장'이 아니라 '범례'다. 전역으로 "30일"이라고 쓰면
+  // #654가 찾아내 지웠던 바로 그 거짓 표기를 되풀이하는 것.
+  'uptime.legend.official': 'AIWatch 30일',
+  'uptime.legend.platform': '플랫폼 측정',
   'uptime.basis': '보고된 업타임',
   'uptime.basis.suffix': '기준',
   'uptime.matrix.sub': '최근 3개월',
@@ -180,10 +187,23 @@ const ko = {
   'svc.latency.inherited': 'API 응답 시간 · {p} 기반',
   'svc.latency.inherited.sub': '{p}와 동일 엔드포인트 (상속)',
   'svc.uptime30d': '업타임',
-  'uptime.label.official': '공식 Uptime',
-  'uptime.sub.official': '공식 status page 기준',
+  // #1006 — 이 카드의 숫자는 '우리가' 산출한 값이다. 여기에 '공식'을 붙이면 바로 아래의 '제공사 발표'와
+  // 충돌해 어느 쪽이 공식인지 뒤집혀 읽힌다. '공식'은 제공사 발표값에만 쓴다.
+  'uptime.label.official': '30일 Uptime',
+  // #1006 — 제공사 발표값을 복사하지 않고, 제공사가 공개한 인시던트·임팩트 기록에서
+  // AIWatch가 동일한 30일 창·동일한 가중 방식으로 직접 계산한다(그래야 서비스 간 비교가 성립).
+  'uptime.sub.official': '상태 페이지 기록으로 AIWatch가 산출',
+  // 제공사 발표값과 우리 30일 측정이 다를 때 상세 페이지에 나란히 보여주는 줄.
+  // 한 줄에 두 값의 귀속을 모두 담는다 — 콜론(:)만 두면 뒤 숫자가 대표값처럼 읽힌다.
+  'uptime.compare.reported': '상태 페이지 기록으로 AIWatch 산출 (상태 페이지 표시값 {v}%)',
+  // 제공사 값의 집계 기간을 아는 경우(Atlassian ≈90일)엔 함께 밝힌다 — 그 기간이 우리와 다르다는 게
+  // 두 숫자가 갈리는 이유이기 때문.
+  'uptime.compare.reported.days': '상태 페이지 기록으로 AIWatch 산출 (상태 페이지 표시값 {d}일 기준 {v}%)',
+  // 상태페이지 이전 등으로 제공사 기록이 30일을 못 채울 때: 창을 숨기지 않고 밝힌다.
+  'uptime.sub.official.partial': 'AIWatch 산출 · 제공사 기록이 {d}일치뿐',
+  'uptime.partialWindow.tooltip': '제공사가 이 구성요소의 기록을 {d}일치만 갖고 있습니다(상태 페이지를 옮긴 경우 등). 30일이 쌓이면 자동으로 정상 표시됩니다.',
   'uptime.label.platform_avg': '플랫폼 평균',
-  'uptime.sub.platform_avg': '전체 리소스 uptime 평균',
+  'uptime.sub.platform_avg': '상태 페이지 기록으로 AIWatch가 산출',
   'svc.incidents': '인시던트',
   'svc.mttr': '복구 시간',
   'svc.recovery.worst': '최장 {d} · 7일',
@@ -257,6 +277,10 @@ const ko = {
   'svc.sourceDead.title': '상태 출처 비활성화',
   'svc.sourceDead.body': '이 서비스의 공식 상태 페이지가 비활성화되어 현재 운영 상태를 확인할 수 없습니다. 실시간 상태·업타임·인시던트는 출처가 복구되면 자동으로 갱신됩니다.',
   'svc.sourceDead.bodyProbe': '이 서비스의 공식 상태 페이지는 비활성화됐지만, AIWatch가 API 엔드포인트를 직접 확인한 결과 정상 응답하고 있어 운영 중으로 표시합니다. 업타임·인시던트는 출처가 복구되면 다시 제공됩니다.',
+  // #1004 — 우리 읽기가 실패한 것이지 서비스가 장애인 게 아니라는 점을 분명히. sourceUnknown은 파싱 실패뿐
+  // 아니라 타임아웃·5xx도 포함하므로("해석하지 못했습니다"로 단정하면 거짓), 원인을 열어둔 문구를 쓴다.
+  'svc.sourceUnknown.title': '상태 출처를 읽을 수 없음',
+  'svc.sourceUnknown.body': 'AIWatch가 이 서비스의 공식 상태 페이지를 읽지 못하고 있습니다 — 페이지가 이전됐거나, 오류·응답 지연일 수 있습니다. 서비스에 장애가 있다는 뜻이 아니라, AIWatch가 현재 상태를 확인할 수 없다는 뜻입니다. 출처가 복구되면 자동으로 갱신됩니다.',
   'svc.components.title': '구성요소 상태',
   'svc.components.sub': '공식 상태 페이지의 구성요소별 상태',
   'svc.components.groupCount': '구성요소 {n}개',

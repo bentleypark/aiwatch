@@ -13,6 +13,14 @@ import {
   buildExtTrafficSql,
   parseExtTrafficResponse,
   queryExtTraffic,
+  buildStatuslineTrafficSql,
+  parseStatuslineTrafficResponse,
+  queryStatuslineTraffic,
+  serializeStatuslineSnapshot,
+  computeStatuslineDelta,
+  buildPluginTrafficSql,
+  parsePluginTrafficResponse,
+  queryPluginTraffic,
   countFirstSeenWithin24h,
   countNewFeedItems,
 } from '../api-traffic'
@@ -306,5 +314,143 @@ describe('ext-claude traffic (#837)', () => {
   it('queryExtTraffic parses a successful response', async () => {
     const ok = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [{ requests: 123 }] }) })
     expect(await queryExtTraffic('acc', 'tok', ok as unknown as typeof fetch)).toBe(123)
+  })
+})
+
+describe('statusline traffic (#918)', () => {
+  it('buildStatuslineTrafficSql filters index1 LIKE statusline-%, 24h window, per-preset group', () => {
+    const sql = buildStatuslineTrafficSql()
+    expect(sql).toContain("index1 LIKE 'statusline-%'")
+    expect(sql).toContain('index1 AS preset')
+    expect(sql).toContain('SUM(_sample_interval) AS requests')
+    expect(sql).toContain('FROM aiwatch_statusline')
+    expect(sql).toContain("INTERVAL '1' DAY")
+    expect(sql).toContain('GROUP BY index1') // per-preset (index1 is multi-valued, unlike ext-claude)
+  })
+
+  it('parseStatuslineTrafficResponse strips the prefix, sums per-preset + total (string/number tolerant)', () => {
+    const json = { data: [
+      { preset: 'statusline-branded', requests: '120' },
+      { preset: 'statusline-degraded_only', requests: 45 },
+      { preset: 'statusline-clickable', requests: 'nope' }, // unparseable → 0
+    ] }
+    expect(parseStatuslineTrafficResponse(json)).toEqual({
+      byPreset: { branded: 120, degraded_only: 45, clickable: 0 },
+      serverRenderTotal: 165,
+      legacyProxy: 0,
+      total: 165,
+    })
+  })
+
+  it('parseStatuslineTrafficResponse routes the legacy `proxy` catch-all into legacyProxy, not byPreset (#944)', () => {
+    const json = { data: [
+      { preset: 'statusline-proxy', requests: 9888 },        // legacy jq cohort → legacyProxy, NOT a preset
+      { preset: 'statusline-branded', requests: 2693 },
+      { preset: 'statusline-degraded_only', requests: 91 },
+    ] }
+    expect(parseStatuslineTrafficResponse(json)).toEqual({
+      byPreset: { branded: 2693, degraded_only: 91 },
+      serverRenderTotal: 2784,   // proxy excluded from the adoption signal
+      legacyProxy: 9888,
+      total: 12672,              // grand total still spans both cohorts
+    })
+  })
+
+  it('parseStatuslineTrafficResponse ignores rows whose index1 is not a statusline- tag', () => {
+    const json = { data: [
+      { preset: 'statusline-branded', requests: 10 },
+      { preset: 'ext-claude', requests: 999 },   // wrong tag (LIKE guard belt-and-suspenders) → skipped
+      { preset: null, requests: 5 },             // invalid → skipped
+    ] }
+    expect(parseStatuslineTrafficResponse(json)).toEqual({
+      byPreset: { branded: 10 }, serverRenderTotal: 10, legacyProxy: 0, total: 10,
+    })
+  })
+
+  it('parseStatuslineTrafficResponse returns null on malformed shape, empty on no rows', () => {
+    expect(parseStatuslineTrafficResponse({})).toBeNull()
+    expect(parseStatuslineTrafficResponse(null)).toBeNull()
+    expect(parseStatuslineTrafficResponse({ data: [] })).toEqual({
+      byPreset: {}, serverRenderTotal: 0, legacyProxy: 0, total: 0,
+    })
+  })
+
+  it('serializeStatuslineSnapshot emits compact {sr,lp} for the day-over-day snapshot (#944)', () => {
+    expect(serializeStatuslineSnapshot({ byPreset: { branded: 2693 }, serverRenderTotal: 2784, legacyProxy: 9888, total: 12672 }))
+      .toBe('{"sr":2784,"lp":9888}')
+  })
+
+  it('computeStatuslineDelta diffs each cohort vs yesterday; null per cohort on no/corrupt baseline (#944)', () => {
+    const today = { byPreset: { branded: 2693 }, serverRenderTotal: 2784, legacyProxy: 9888, total: 12672 }
+    // fresh baseline → per-cohort signed delta
+    expect(computeStatuslineDelta(today, '{"sr":2472,"lp":10428}')).toEqual({ serverRender: 312, legacyProxy: -540 })
+    // no baseline (first day / empty) → null per cohort, NOT a bogus full-count jump
+    expect(computeStatuslineDelta(today, null)).toEqual({ serverRender: null, legacyProxy: null })
+    expect(computeStatuslineDelta(today, '   ')).toEqual({ serverRender: null, legacyProxy: null })
+    // corrupt (non-JSON) baseline → null per cohort
+    expect(computeStatuslineDelta(today, 'not-json')).toEqual({ serverRender: null, legacyProxy: null })
+    // partially-present baseline → only the parseable cohort deltas
+    expect(computeStatuslineDelta(today, '{"sr":2000}')).toEqual({ serverRender: 784, legacyProxy: null })
+  })
+
+  it('queryStatuslineTraffic returns null without creds and never throws on failure', async () => {
+    expect(await queryStatuslineTraffic(undefined, undefined)).toBeNull()
+    const boom = vi.fn().mockRejectedValue(new Error('network'))
+    expect(await queryStatuslineTraffic('acc', 'tok', boom as unknown as typeof fetch)).toBeNull()
+    const notOk = vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    expect(await queryStatuslineTraffic('acc', 'tok', notOk as unknown as typeof fetch)).toBeNull()
+  })
+
+  it('queryStatuslineTraffic parses a successful response', async () => {
+    const ok = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [
+      { preset: 'statusline-branded', requests: 88 },
+      { preset: 'statusline-scoped', requests: 12 },
+    ] }) })
+    expect(await queryStatuslineTraffic('acc', 'tok', ok as unknown as typeof fetch)).toEqual({
+      byPreset: { branded: 88, scoped: 12 }, serverRenderTotal: 100, legacyProxy: 0, total: 100,
+    })
+  })
+})
+
+describe('plugin traffic (#920)', () => {
+  it('buildPluginTrafficSql filters index1 IN (aiwatch-monitor, aiwatch-brief), 24h, per-tag', () => {
+    const sql = buildPluginTrafficSql()
+    expect(sql).toContain("index1 IN ('aiwatch-monitor', 'aiwatch-brief')")
+    expect(sql).toContain('SUM(_sample_interval) AS requests')
+    expect(sql).toContain('FROM aiwatch_statusline')
+    expect(sql).toContain("INTERVAL '1' DAY")
+    expect(sql).toContain('GROUP BY index1')
+    expect(sql).not.toContain("LIKE 'statusline-%'") // must NOT pull the statusline preset metric
+  })
+
+  it('parsePluginTrafficResponse splits monitor vs brief (string/number tolerant)', () => {
+    const json = { data: [
+      { tag: 'aiwatch-monitor', requests: '1440' },
+      { tag: 'aiwatch-brief', requests: 12 },
+      { tag: 'statusline-branded', requests: 999 }, // wrong tag → ignored
+    ] }
+    expect(parsePluginTrafficResponse(json)).toEqual({ monitor: 1440, brief: 12 })
+  })
+
+  it('parsePluginTrafficResponse null on malformed, zeros on no rows', () => {
+    expect(parsePluginTrafficResponse({})).toBeNull()
+    expect(parsePluginTrafficResponse(null)).toBeNull()
+    expect(parsePluginTrafficResponse({ data: [] })).toEqual({ monitor: 0, brief: 0 })
+  })
+
+  it('queryPluginTraffic returns null without creds and never throws on failure', async () => {
+    expect(await queryPluginTraffic(undefined, undefined)).toBeNull()
+    const boom = vi.fn().mockRejectedValue(new Error('network'))
+    expect(await queryPluginTraffic('acc', 'tok', boom as unknown as typeof fetch)).toBeNull()
+    const notOk = vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    expect(await queryPluginTraffic('acc', 'tok', notOk as unknown as typeof fetch)).toBeNull()
+  })
+
+  it('queryPluginTraffic parses a successful response', async () => {
+    const ok = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [
+      { tag: 'aiwatch-monitor', requests: 720 },
+      { tag: 'aiwatch-brief', requests: 5 },
+    ] }) })
+    expect(await queryPluginTraffic('acc', 'tok', ok as unknown as typeof fetch)).toEqual({ monitor: 720, brief: 5 })
   })
 })

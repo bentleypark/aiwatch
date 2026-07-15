@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine } from '../daily-summary'
+import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine, formatAiUsageSection } from '../daily-summary'
 import type { ServiceStatus } from '../types'
 import type { AccuracyStats } from '../incident-history'
 import type { AudienceCounts } from '../outage-audience'
@@ -78,7 +78,7 @@ describe('buildDailySummary', () => {
     expect(result).toContain('AI Analysis Usage')
     expect(result).toContain('5 calls (4 success, 1 failed)')
     expect(result).toContain('Gemma: 3, Sonnet: 1')
-    expect(result).toContain('$0.006')
+    expect(result).toContain('$0.009')
     expect(result).toContain('Sonnet only')
   })
 
@@ -582,6 +582,81 @@ describe('buildDailySummary — #548 webhook delta + feed section', () => {
     expect(out).toContain('📡 **Feed Polls (RSS/Slack)**')
     expect(out).toContain('Last 24h: 15')
   })
+  it('renders the statusline-poll section when statuslineTraffic is present (#918)', () => {
+    const out = buildDailySummary({ ...base, statuslineTraffic: { byPreset: { branded: 88, scoped: 12 }, serverRenderTotal: 100, legacyProxy: 0, total: 100 } })
+    expect(out).toContain('📟 **Statusline Polls (Claude Code)**')
+    expect(out).toContain('Server-render (#918): ~100')
+  })
+})
+
+describe('formatPluginTrafficSection (#920)', () => {
+  it('renders monitor polls + /aiwatch briefings', () => {
+    const out = formatPluginTrafficSection({ monitor: 1440, brief: 12 })
+    expect(out).toContain('🧩 **Plugin (Claude Code)**')
+    expect(out).toContain('~1440 monitor polls')
+    expect(out).toContain('~12 /aiwatch briefings')
+  })
+  it('omits a zero-count part', () => {
+    const out = formatPluginTrafficSection({ monitor: 60, brief: 0 })
+    expect(out).toContain('~60 monitor polls')
+    expect(out).not.toContain('briefings')
+  })
+  it('is empty when null/undefined or both are 0', () => {
+    expect(formatPluginTrafficSection(null)).toBe('')
+    expect(formatPluginTrafficSection(undefined)).toBe('')
+    expect(formatPluginTrafficSection({ monitor: 0, brief: 0 })).toBe('')
+  })
+})
+
+describe('formatStatuslineTrafficSection (#918; #944 cohort-split + delta)', () => {
+  it('splits server-render vs legacy proxy on separate lines; server-render carries the breakdown', () => {
+    const out = formatStatuslineTrafficSection({
+      byPreset: { degraded_only: 91, branded: 2693, full_list: 2 }, serverRenderTotal: 2786, legacyProxy: 9888, total: 12674,
+    })
+    expect(out).toContain('📟 **Statusline Polls (Claude Code)**')
+    expect(out).toContain('Server-render (#918): ~2786')
+    expect(out).toContain('branded 2693 · degraded_only 91 · full_list 2') // count-desc, proxy absent
+    expect(out).toContain('Legacy/untagged (apex proxy): ~9888')
+    expect(out).not.toContain('migrating')                  // neutral label, no trend claim (#944)
+    expect(out).not.toContain('proxy 9888')                 // proxy never shown as a preset
+  })
+  it('appends a day-over-day ▲/▼ delta per cohort when a baseline exists', () => {
+    const out = formatStatuslineTrafficSection({
+      byPreset: { branded: 2693 }, serverRenderTotal: 2786, legacyProxy: 9888, total: 12674,
+      delta: { serverRender: 312, legacyProxy: -540 },
+    })
+    expect(out).toContain('Server-render (#918): ~2786 (▲+312 vs yesterday)')
+    expect(out).toContain('Legacy/untagged (apex proxy): ~9888 (▼-540 vs yesterday)')
+  })
+  it('omits the delta suffix when the cohort delta is null (first day / corrupt snapshot)', () => {
+    const out = formatStatuslineTrafficSection({
+      byPreset: { branded: 5 }, serverRenderTotal: 5, legacyProxy: 0, total: 5,
+      delta: { serverRender: null, legacyProxy: null },
+    })
+    expect(out).toContain('Server-render (#918): ~5')
+    expect(out).not.toContain('vs yesterday')
+  })
+  it('omits the legacy line entirely when there is no proxy traffic', () => {
+    const out = formatStatuslineTrafficSection({ byPreset: { branded: 5, clickable: 0 }, serverRenderTotal: 5, legacyProxy: 0, total: 5 })
+    expect(out).toContain('branded 5')
+    expect(out).not.toContain('clickable')
+    expect(out).not.toContain('apex proxy')
+  })
+  it('is empty when null/undefined or grand total is 0 (section skipped until adoption)', () => {
+    expect(formatStatuslineTrafficSection(null)).toBe('')
+    expect(formatStatuslineTrafficSection(undefined)).toBe('')
+    expect(formatStatuslineTrafficSection({ byPreset: {}, serverRenderTotal: 0, legacyProxy: 0, total: 0 })).toBe('')
+  })
+})
+
+describe('formatStatuslineDeltaSuffix (#944)', () => {
+  it('▲ for positive, ▼ for negative (sign carried), ±0 for zero, empty for null', () => {
+    expect(formatStatuslineDeltaSuffix(312)).toBe(' (▲+312 vs yesterday)')
+    expect(formatStatuslineDeltaSuffix(-540)).toBe(' (▼-540 vs yesterday)')
+    expect(formatStatuslineDeltaSuffix(0)).toBe(' (±0 vs yesterday)')
+    expect(formatStatuslineDeltaSuffix(null)).toBe('')
+    expect(formatStatuslineDeltaSuffix(undefined)).toBe('')
+  })
 })
 
 describe('formatReferralLine (#842 — outbound referral evidence)', () => {
@@ -684,38 +759,39 @@ describe('formatExtActivitySection (#837)', () => {
 describe('formatAudienceLine (#842-B)', () => {
   const counts = (o: Partial<AudienceCounts>): AudienceCounts => ({
     total: 0, activeTotal: 0,
-    bySource: { x: 0, search: 0, feed: 0, direct: 0 },
-    activeBySource: { x: 0, search: 0, feed: 0, direct: 0 },
+    bySource: { x: 0, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
+    activeBySource: { x: 0, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
     ...o,
   })
 
   it('leads with the active-outage subset by source + total when an outage was viewed', () => {
     const line = formatAudienceLine(counts({
       total: 320, activeTotal: 240,
-      bySource: { x: 210, search: 60, feed: 30, direct: 20 },
-      activeBySource: { x: 180, search: 40, feed: 15, direct: 5 },
+      bySource: { x: 210, search: 60, feed: 30, owned: 12, direct: 20, plugin: 0 },
+      activeBySource: { x: 180, search: 40, feed: 15, owned: 8, direct: 5, plugin: 0 },
     }))
     expect(line).toContain('Outage Audience')
     expect(line).toContain('240 during outages')
-    expect(line).toContain('X 180 · search 40 · feed 15 · direct 5')
+    expect(line).toContain('X 180 · search 40 · feed 15 · owned 8 · direct 5') // #936 owned bucket rendered
     expect(line).toContain('320 total views')
   })
 
   it('drops zero buckets from the breakdown', () => {
     const line = formatAudienceLine(counts({
       total: 100, activeTotal: 100,
-      bySource: { x: 100, search: 0, feed: 0, direct: 0 },
-      activeBySource: { x: 100, search: 0, feed: 0, direct: 0 },
+      bySource: { x: 100, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
+      activeBySource: { x: 100, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
     }))
     expect(line).toContain('X 100')
     expect(line).not.toContain('search 0')
     expect(line).not.toContain('feed 0')
+    expect(line).not.toContain('owned 0')
   })
 
   it('falls back to the general is-down audience when no active outage was viewed', () => {
     const line = formatAudienceLine(counts({
       total: 50, activeTotal: 0,
-      bySource: { x: 10, search: 35, feed: 5, direct: 0 },
+      bySource: { x: 10, search: 35, feed: 5, owned: 0, direct: 0, plugin: 0 },
     }))
     expect(line).toContain('is-down Audience')
     expect(line).toContain('50 views')
@@ -727,5 +803,44 @@ describe('formatAudienceLine (#842-B)', () => {
     expect(formatAudienceLine(null)).toBe('')
     expect(formatAudienceLine(undefined)).toBe('')
     expect(formatAudienceLine(counts({ total: 0 }))).toBe('')
+  })
+})
+
+// ── #955: AI usage section ──
+
+describe('formatAiUsageSection', () => {
+  it('returns empty string when nothing ran', () => {
+    expect(formatAiUsageSection(null)).toBe('')
+    expect(formatAiUsageSection({ calls: 0, success: 0, failed: 0 })).toBe('')
+  })
+
+  it('renders succeeded/attempted per model', () => {
+    const out = formatAiUsageSection({ calls: 10, success: 8, failed: 2, gemma: 7, sonnet: 1, gemmaAttempts: 10, sonnetAttempts: 3 })
+    expect(out).toContain('10 calls (8 success, 2 failed)')
+    expect(out).toContain('(Gemma: 7/10, Sonnet: 1/3)')
+    expect(out).toContain('$0.009')
+  })
+
+  it('surfaces timeouts as their own outcome', () => {
+    const out = formatAiUsageSection({ calls: 5, success: 3, failed: 1, timedOut: 1, gemma: 3, gemmaAttempts: 5 })
+    expect(out).toContain('3 success, 1 failed, 1 timed out')
+  })
+
+  // The whole point of the attempt counters: a fallback that is always reached and never
+  // succeeds is broken, not unlucky. `Sonnet: 0` alone could never say that.
+  it('warns when Sonnet is attempted but never succeeds', () => {
+    const out = formatAiUsageSection({ calls: 16, success: 9, failed: 7, gemma: 9, sonnet: 0, gemmaAttempts: 16, sonnetAttempts: 7 })
+    expect(out).toContain('⚠️ Sonnet fallback: 7 attempts, 0 successes')
+  })
+
+  it('stays quiet when Sonnet was never reached', () => {
+    const out = formatAiUsageSection({ calls: 9, success: 9, failed: 0, gemma: 9, gemmaAttempts: 9 })
+    expect(out).not.toContain('⚠️')
+  })
+
+  it('renders a pre-#955 counter payload without attempt counts', () => {
+    const out = formatAiUsageSection({ calls: 5, success: 4, failed: 1, gemma: 3, sonnet: 1 })
+    expect(out).toContain('(Gemma: 3, Sonnet: 1)')
+    expect(out).not.toContain('/')
   })
 })

@@ -72,12 +72,45 @@ git worktree remove ../aiwatch-wt-852                                # when done
 A worktree is a **fresh checkout**, so it starts without dependencies or gitignored local
 config.
 
-1. **Local env** — handled automatically. [`.worktreeinclude`](../../.worktreeinclude) copies
-   `.env`, `.env.local`, and `.dev.vars` into every Claude-Code-created worktree (gitignore
-   syntax; only gitignored matches are copied). Manual `git worktree add` does **not** run
-   this — copy them yourself.
+1. **Local env** — handled automatically. [`.worktreeinclude`](../../.worktreeinclude) lists the
+   gitignored local config copied into every Claude-Code-created worktree: `.env`, `.env.local`,
+   `.dev.vars`, and `.vercel/project.json` (gitignore syntax; only gitignored matches are copied).
+   Both copiers — `--worktree` / `EnterWorktree` **and** subagent `isolation: worktree` — copy all
+   four. Manual `git worktree add` copies **nothing**; do it yourself.
+
+   Two behaviours, common to both copiers, each established by probe rather than assumed:
+   - **The list and the source files are read from the MAIN checkout**, not from the worktree you
+     happen to be sitting in. So an edit to `.worktreeinclude` only takes effect once it is merged
+     and pulled into main — you cannot test a new entry from inside a worktree.
+   - Patterns match at **any depth** and the copier **creates missing directories**: `.dev.vars`
+     picks up `worker/.dev.vars`, and `.vercel/project.json` lands even though a fresh worktree has
+     no `.vercel/`.
+
+   > **Correction (2026-07-10).** PR #977 claimed a subagent worktree receives only the top-level
+   > entries. That was wrong, and it is worth recording *why*: the probe `stat`ed the subagent's
+   > worktree **after the subagent finished**, and the harness auto-removes an unchanged worktree —
+   > so "file not found" was reading a deleted directory, not an uncopied file. Re-probed twice from
+   > inside a live subagent: `worker/.dev.vars` and `.vercel/project.json` are both present. When
+   > probing a worktree's contents, run the check **inside** the worktree's own session; a
+   > post-mortem `ls` from outside proves nothing.
 2. **Dependencies** — **not** shared. Run `npm install` in each new worktree (`node_modules`
    and Python venvs are per-directory).
+
+> **Why `.vercel/project.json` is on the list.** Verifying an Edge SSR page (`/intro`,
+> `/is-*-down`, `/methodology`, …) needs `vercel dev`. In an unlinked worktree `vercel dev --yes`
+> does not fail — it silently **creates a new Vercel project named after the worktree directory**
+> and links to it. Eight such empty throwaway projects had accumulated (`fix-940-…`, `fix-926-…`,
+> `aiwatch-951`, …), one per worktree that ever ran the Edge dev server. Copying the link points
+> every worktree at the same project the main checkout uses. Only `project.json` is copied — never
+> the `.vercel` build cache (which also holds `README.txt` and build output).
+>
+> The file carries `projectId` / `orgId` / `projectName` and **no credentials** — Vercel CLI auth
+> lives in the global `~/.vercel` store — and `.vercel` is gitignored, so a copied link can never be
+> committed. Note that **`aiwatch-dev` is the production project despite its name**: main merges
+> auto-deploy to it. So a linked worktree could `vercel deploy --prod` straight to production. That
+> is not a *new* hazard — the main checkout is linked to the same project and already carries it,
+> and the frontend never ships via the CLI (`git push origin main` does) — worktrees simply reach
+> parity with main.
 
 ## Port-offset convention (concurrent dev servers)
 

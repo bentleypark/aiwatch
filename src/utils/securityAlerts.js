@@ -52,8 +52,11 @@ export function filterSecurityAlertsForService(alerts, service, allServices) {
   return (alerts ?? []).filter((a) => securityAlertMatchesService(a, service, allServices))
 }
 
-// The single service whose NAME the alert tag should show in the Overview banner (one line
-// per alert). Name match wins; otherwise the provider's primary service; null if neither.
+// The single service whose NAME the alert tag should show. Name match wins; otherwise the
+// provider's primary service; null if neither.
+// #950 — CURRENTLY UNUSED in production: the Overview aggregate banner (its only consumer)
+// was removed; retained (with its unit test) to ease re-surfacing once #949 first-party CVE
+// data lands. ServiceDetails uses filterSecurityAlertsForService, not this.
 export function tagServiceForAlert(alert, allServices) {
   if (alert.service) return null // OSV uses its own service label as the tag
   const titleLC = alert.title?.toLowerCase() ?? ''

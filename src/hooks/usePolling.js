@@ -3,11 +3,13 @@
 // Return shape: { services, loading, error, lastUpdated, refresh }
 
 import { useState, useEffect, useCallback, useRef, createContext, useContext, createElement } from 'react'
+import { resolveApiUrl, cachedUrlFor } from '../utils/apiUrl'
 const POLL_INTERVAL = 60_000 // 60s
 
-// Worker API URL — defaults to local dev, override via env
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787/api/status'
-const CACHED_URL = API_URL.endsWith('/api/status') ? API_URL + '/cached' : API_URL
+// Worker API URL — defaults to local dev (8788, matches `npm run dev:worker`),
+// override via VITE_API_URL. Resolution extracted to utils/apiUrl for unit tests (#953).
+const API_URL = resolveApiUrl(import.meta.env.VITE_API_URL)
+const CACHED_URL = cachedUrlFor(API_URL)
 
 // ── Mock data fallback (used when Worker is unavailable) ──
 
@@ -691,7 +693,7 @@ function usePollingInternal() {
     recentlyRecovered: {},
     securityAlerts: [],
     reportFeed: {},
-    supplyChainBanner: null, // #574 — AWS region degraded + dependent AI service degraded; null otherwise
+    supplyChainBanner: null, // #574/#1000 — AWS region degraded + a dependent degraded that NAMES that region; null otherwise
   })
   const cancelledRef = useRef(false)
   const controllerRef = useRef(null)
@@ -826,7 +828,13 @@ function usePollingInternal() {
         const isDev = import.meta.env.DEV
         const isNetworkError = err instanceof TypeError && /fetch|network/i.test(err.message)
         if (isDev && isNetworkError) {
-          // Worker not running — show mock data for local development
+          // Worker not running — show mock data for local development.
+          // #953: warn loudly so the fallback isn't silent (it previously masked a
+          // wrong API URL / worker-not-running as if the data were real).
+          console.warn(
+            `[usePolling] Worker fetch failed (${API_URL}) — falling back to MOCK_SERVICES. ` +
+            `Start the local worker (npm run dev:worker) or set VITE_API_URL for real data.`
+          )
           hasDataRef.current = true
           setState({
             services: MOCK_SERVICES,

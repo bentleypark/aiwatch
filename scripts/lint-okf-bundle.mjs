@@ -5,8 +5,15 @@
 // history (see docs/reference/index.md). Nothing enforces that shape, so it silently drifts: a new
 // doc lands without frontmatter or without an index line, a rename leaves a dangling cross-link, or a
 // `description` carrying a bare `#N` gets truncated by YAML's inline-comment rule (the exact gotcha
-// hit in #891 Phase 1). This is the STRUCTURAL half of the `memory-lint` skill, run in CI on every PR
-// (`npm run test:scripts`) — catching drift the moment docs change instead of on a periodic sweep.
+// hit in #891 Phase 1). This is the STRUCTURAL half of the `memory-lint` skill — catching drift the
+// moment docs change instead of on a periodic sweep.
+//
+// CI wiring (#961): a DOCS PR is gated by `.github/workflows/docs-lint.yml`, which runs this file
+// directly (`node scripts/lint-okf-bundle.mjs`). A CODE PR is gated by the `REAL docs/reference
+// bundle` assertion in `lint-okf-bundle.test.mjs`, under `npm run test:scripts` in `test.yml`. Two
+// workflows because `test.yml` `paths-ignore`s `docs/**`, so a docs-only PR starts none of its jobs
+// — which is how this lint came to be skipped exactly when docs changed. `workflow-paths-sync.test.mjs`
+// pins the two path lists complementary.
 //
 // CHECKS (all structural / mechanical — no judgement calls):
 //   1. frontmatter integrity — every page has `type` + `title` + `description`; `type` is a known

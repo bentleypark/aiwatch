@@ -58,19 +58,29 @@ function audit(decision, note = '') {
 
 // ── Pure helpers (exported for tests) ───────────────────────────────────────
 
-// A path that renders to a human-visible surface (dashboard SPA / is-down + intro Edge SSR). Worker,
+// User-facing Edge SSR page surfaces — each renders to a human-visible page, so a change needs the
+// step-3.5 in-browser confirmation. ONE list, consumed by BOTH isUiEdgePath and BASH_WRITE_RE so they
+// cannot drift (#1023). Longer names FIRST so `plugin-privacy` isn't shadowed by `plugin` in the
+// alternation. Deliberately EXCLUDED (not human-rendered pages): api/reports.ts (proxy → aiwatch-reports),
+// api/csp-report.ts (violation sink), api/_shared/ (helpers). #1023 added methodology/badges/plugin/
+// plugin-privacy/extension-privacy/confirm — the blind spot that let the #1019 /methodology copy commit
+// pass ungated (isUiEdgePath then matched only is-down/intro).
+const EDGE_PAGE_NAMES = 'extension-privacy|plugin-privacy|is-down|intro|methodology|badges|plugin|confirm'
+// Matches BOTH the `_`-prefixed template dir (`api/_methodology/…`) AND the inline-content Function file
+// (`api/plugin-privacy.ts`). The optional `_?` keeps helper dirs matched post-rename (#862 count exclusion).
+const UI_EDGE_RE = new RegExp(`(?:^|/)src/|(?:^|/)api/_?(?:${EDGE_PAGE_NAMES})(?:/|\\.tsx?)`)
+
+// A path that renders to a human-visible surface (dashboard SPA / the Edge SSR pages above). Worker,
 // docs, config, and TEST files are excluded — they have no in-browser surface to confirm.
 export function isUiEdgePath(p) {
   if (!p) return false
   if (/(?:^|\/)__tests__\/|\.test\.|\.spec\./.test(p)) return false
-  // Match a `src/` or `api/(_)?(is-down|intro)/` segment at any path boundary so this works for BOTH the
-  // git-relative paths from the staged diff (`src/x`) AND the Edit/Write tool's absolute `file_path`
-  // (`/repo/src/x`) — anchoring `^src/` broke the edit-event correlation in lastUiEditIndex (#664,
-  // every UI commit fail-closed). Exclude the worker's own `worker/src/` (not frontend UI).
-  // The is-down/intro Edge helper dirs are `_`-prefixed (excluded from Vercel's Serverless-Function
-  // count, #862) — the optional `_?` keeps this gate matching them post-rename.
+  // Match at any path boundary so this works for BOTH the git-relative staged-diff path (`src/x`) AND
+  // the Edit/Write tool's absolute `file_path` (`/repo/src/x`) — anchoring `^src/` broke the edit-event
+  // correlation in lastUiEditIndex (#664, every UI commit fail-closed). Exclude the worker's own
+  // `worker/src/` (not frontend UI) FIRST — its mid-path `/src/` would otherwise match.
   if (/(?:^|\/)worker\/src\//.test(p)) return false
-  return /(?:^|\/)src\//.test(p) || /(?:^|\/)api\/_?(?:is-down|intro)\//.test(p)
+  return UI_EDGE_RE.test(p)
 }
 
 // Genuine in-browser verification confirmation (KO + EN). DELIBERATELY NARROW — bare "확인"
@@ -87,7 +97,12 @@ export const OVERRIDE_RE = /검증\s?생략|확인\s?생략|스킵하고\s?커�
 export const HOOK_WORK_RE = /#?657\b|step-?35|step-?3\.?5\s?gate|(?:hooks?|gate|훅|게이트)\s*(?:작업|수정|개선|편집|edit|fix|work)|(?:work\s?on|edit|fix|수정|작업|개선)[^.\n]{0,15}(?:gate|hook|훅|게이트)/i
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 // Bash write-redirect to a UI/Edge path (cat > / >> / tee). Heuristic — covers the heredoc edit path.
-const BASH_WRITE_RE = />>?\s*("?)(src\/[^\s"]+|api\/_?(?:is-down|intro)\/[^\s"]+)|tee\s+("?)(src\/|api\/_?(?:is-down|intro)\/)/
+// Shares EDGE_PAGE_NAMES with UI_EDGE_RE (#1023) so the two matchers can't drift. Matches the template
+// dir (`api/_methodology/…`) and the inline Function file (`> api/plugin-privacy.ts`).
+const BASH_WRITE_RE = new RegExp(
+  `>>?\\s*("?)(src/[^\\s"]+|api/_?(?:${EDGE_PAGE_NAMES})(?:/[^\\s"]+|\\.tsx?))` +
+  `|tee\\s+("?)(src/|api/_?(?:${EDGE_PAGE_NAMES})(?:/|\\.tsx?))`,
+)
 
 /** Index of the last transcript entry that EDITED a UI/Edge file (Edit/Write tool_use or a Bash
  *  write-redirect). -1 if none seen in this transcript. */

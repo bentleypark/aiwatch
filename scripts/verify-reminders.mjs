@@ -14,20 +14,115 @@
 import { execFileSync } from 'node:child_process'
 // #873 — Tier-A auto-verify: evaluate a machine-checkable `assert:` clause on a verify-after line and
 // close the loop (tick + comment + drop verify-blocked) instead of only pinging. See verify-assertions.mjs.
-import { pairVerifyAssertions, runAssertion, planIssueAutoVerify, truncate } from './verify-assertions.mjs'
+import { pairVerifyAssertions, runAssertion, planIssueAutoVerify, truncate, isSuppressedReminderLine, findQuotedVerifyAfterBoxes } from './verify-assertions.mjs'
 
 // Matches a `verify-after 2026-09-01` token anywhere on a line; captures the date + the rest of the
 // line as a free-form note. Case-insensitive; `after` may be followed by space, `:` or `-`.
 const VERIFY_RE = /verify-after[\s:-]+(\d{4}-\d{2}-\d{2})([^\n]*)/gi
 
-// A CHECKED markdown task-list marker at the start of a line (`- [x]` / `* [X]` / `+ [x]`, leading
-// indent ok). Ticking the box is the SSOT "this verify is done" action, so a verify-after on such a
-// line must STOP firing — otherwise a completed item re-fires forever (the old whole-body scan
-// ignored the checkbox; #586's done `- [x] verify-after 2026-06-12` re-fired for 7 days). Unchecked
-// boxes (`- [ ]`) and plain prose lines still fire. The marker→`[` space is REQUIRED (`\s+`): GFM
-// renders `-[x]` (no space) as literal text, NOT a checked task, so it must still fire (don't
-// over-suppress a genuinely-open reminder).
-const CHECKED_BOX_RE = /^\s*[-*+]\s+\[[xX]\]/
+// Which lines a verify-after scan must SKIP (checked box `- [x]` / blockquote `>`) now lives in
+// verify-assertions.mjs as `isSuppressedReminderLine` — one definition shared by both scanners (#966).
+// Unchecked boxes (`- [ ]`) and non-quoted prose still fire.
+
+// An UNCHECKED markdown task-list marker at the start of a line (`- [ ]` / `* [ ]` / `+ [ ]`, leading
+// indent ok). Used by the body-drift guard below. The marker→`[` space is REQUIRED (`\s+`), mirroring
+// the checked-box marker inside `isSuppressedReminderLine` (verify-assertions.mjs), so `-[ ]` (GFM
+// literal text, not a task) is not treated as a checkbox.
+const UNCHECKED_BOX_RE = /^\s*[-*+]\s+\[ \]/
+// A verify-after line is legitimately unchecked until its production signal lands, so it is NOT drift.
+const VERIFY_AFTER_LINE_RE = /verify-after[\s:-]+\d{4}-\d{2}-\d{2}/i
+
+/**
+ * Body-drift guard (issue-body-sync backstop). A `verify-blocked` issue means "code shipped; only a
+ * dated production verify-after remains", so EVERY implementation checkbox should already be ticked —
+ * the only lines still `- [ ]` should be the verify-after line(s). Any OTHER unchecked box means the
+ * body was never synced at merge (the late/no-gate/other-system step) or the label is wrong. This
+ * returns the count + a few samples of those stray unchecked boxes so the caller can flag the issue.
+ * Pure + unit-tested. verify-after lines and checked boxes are excluded; an empty body → no drift.
+ * Known limitation (accepted): the scan is line-based and NOT fence-aware, so a `- [ ]` inside a
+ * ```fenced``` checklist template/example counts too — tolerable here (label-only, self-heals, and the
+ * verify-blocked bucket rarely embeds template checklists).
+ */
+export function findBodyDrift(body) {
+  if (!body) return { count: 0, samples: [] }
+  const items = []
+  for (const line of body.split('\n')) {
+    if (!UNCHECKED_BOX_RE.test(line)) continue
+    if (VERIFY_AFTER_LINE_RE.test(line)) continue // open-until-verified, not drift
+    items.push(line.replace(UNCHECKED_BOX_RE, '').replace(/\*+/g, '').trim())
+  }
+  return { count: items.length, samples: items.slice(0, 5) }
+}
+
+/**
+ * True when an issue is a body-drift candidate: labeled `verify-blocked` (code shipped, verify-gated)
+ * AND NOT `tracking`. A `tracking` umbrella legitimately keeps many open sub-item checkboxes (future
+ * work, not drift), so it is exempt — this scopes the guard to exactly the single-deliverable
+ * verify-blocked bucket where checkbox drift actually concentrates. `labels` = the gh `--json labels`
+ * array (`{name}` objects) or a plain string array.
+ */
+export function isDriftCandidate(labels) {
+  const set = new Set((labels || []).map((l) => (typeof l === 'string' ? l : l?.name)).filter(Boolean))
+  return set.has('verify-blocked') && !set.has('tracking')
+}
+
+/** True when `labels` (gh `--json labels` objects or plain strings) carries `name`. */
+export function hasLabel(labels, name) {
+  return (labels || []).some((l) => (typeof l === 'string' ? l : l?.name) === name)
+}
+
+/** True when the issue currently carries the `body-drift` label (so the guard can self-heal / clear it). */
+export function hasBodyDriftLabel(labels) {
+  return hasLabel(labels, 'body-drift')
+}
+
+/** Stable identity for an issue across repos (the sibling scan means numbers alone collide). */
+const issueKey = (i) => `${i.repo || ''}#${i.number}`
+
+/**
+ * `verify-overdue` self-heal (#966). The label answers "is this issue past its verify date *right
+ * now*", so it must clear when that stops being true — otherwise it is a permanent scar: it was added
+ * on every fire (see main) and removed by NOTHING. Not by the #873 auto-verify (which drops only
+ * `verify-blocked`), not by `gh issue close`. #857 was auto-verified and closed at 02:05 UTC and still
+ * wore `verify-overdue` hours later, so any triage query filtering on it read stale state. Mirrors the
+ * self-healing `body-drift` clear.
+ *
+ * The clear predicate is "this issue has NO still-overdue, unticked `verify-after` line" — derived
+ * from the dates, NOT from this run's `due` set. Those differ: `due` is throttled by `shouldFire`'s
+ * weekly cadence (`d % 7 === 0`), so a genuinely-overdue issue is absent from `due` on 6 of every 7
+ * days. Clearing on "not in `due`" would strip the label the day after every ping and re-add it a week
+ * later — a flapping label that a `label:verify-overdue` triage query would see 1 day in 7, plus daily
+ * add/remove API churn. (Caught in review; the first draft of this function had exactly that bug.)
+ *
+ * `tickedKeys` are the `repo#number#lineIndex` keys the auto-verify pass ticked THIS run — the fetched
+ * `body` still shows them unchecked, so they must not count as overdue. Suppressed lines (checked
+ * boxes, blockquotes) never reach here: `pairVerifyAssertions` already drops them.
+ *
+ * An INVALID date (a typo'd `2026-13-45`) holds the label OPEN — fail-safe, not fail-open. The ping
+ * loop already skips such a line, so clearing the label too would take the issue completely dark: no
+ * ping, no label, no warning. Keeping the label preserves the last attention signal; `main` warns.
+ *
+ * Pure — no I/O.
+ */
+export function findStaleOverdueLabels(considered, today, tickedKeys = new Set()) {
+  return (considered || []).filter((iss) => {
+    if (!hasLabel(iss.labels, 'verify-overdue')) return false
+    const holdsLabelOpen = pairVerifyAssertions(iss.body).some(({ date, lineIndex }) => {
+      if (!isValidIsoDate(date)) return true // fail-safe: unparseable date keeps the signal alive
+      if (tickedKeys.has(`${issueKey(iss)}#${lineIndex}`)) return false // ticked moments ago this run
+      return daysSinceDue(date, today) >= 0
+    })
+    return !holdsLabelOpen
+  })
+}
+
+/**
+ * `verify-after` lines whose date isn't a real calendar date (`2026-02-30`, `2026-13-01`). Such a line
+ * silently never pings (the due loop skips it), so the daily job surfaces it. Pure — no I/O.
+ */
+export function findInvalidVerifyAfterDates(body) {
+  return pairVerifyAssertions(body).filter((it) => !isValidIsoDate(it.date))
+}
 
 /** True only for a real calendar date (rejects 2026-02-30, which Date would silently roll over). */
 export function isValidIsoDate(s) {
@@ -35,14 +130,14 @@ export function isValidIsoDate(s) {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s
 }
 
-/** Extract every {date, note} pair from an issue body. Calendar-invalid dates are skipped, and a
- *  verify-after on a CHECKED checkbox line (`- [x]`) is skipped — a done item must not keep firing. */
+/** Extract every {date, note} pair from an issue body. Calendar-invalid dates are skipped, as are
+ *  CHECKED checkbox (`- [x]`) and BLOCKQUOTE (`>`) lines — see isSuppressedReminderLine. */
 export function parseVerifyAfter(body) {
   const out = []
   if (!body) return out
-  // Scan line-by-line so a per-line CHECKED checkbox can suppress that line's verify-after.
+  // Scan line-by-line so a per-line checkbox/blockquote can suppress that line's verify-after.
   for (const line of body.split('\n')) {
-    if (CHECKED_BOX_RE.test(line)) continue
+    if (isSuppressedReminderLine(line)) continue
     for (const m of line.matchAll(VERIFY_RE)) {
       if (!isValidIsoDate(m[1])) continue
       const note = m[2].replace(/^[\s—–:*_)·-]+/, '').replace(/\*+$/, '').trim()
@@ -156,7 +251,7 @@ async function postDiscord(webhook, items) {
 // failure (e.g. the cross-repo PAT is missing so a sibling repo 403/404s) warns + returns [] so the
 // primary reminder still runs. Each issue is tagged with its `repo` for later ref/label targeting.
 function fetchRepoIssues(repo) {
-  const args = ['issue', 'list', '--state', 'open', '--limit', '200', '--json', 'number,title,body,author']
+  const args = ['issue', 'list', '--state', 'open', '--limit', '200', '--json', 'number,title,body,author,labels']
   if (repo) args.push('--repo', repo)
   try {
     const issues = JSON.parse(gh(args))
@@ -180,6 +275,51 @@ async function main() {
   // Empty set only for pure-local (`repos: [null]`) → no filter, so the maintainer can test own board.
   const trusted = parseTrustedAuthors(process.env, repos)
   const considered = trusted.size > 0 ? issues.filter((i) => trusted.has(i.author?.login)) : issues
+
+  // ── Body-drift guard (issue-body-sync backstop) ───────────────────────────────
+  // Catch the drift where a verify-blocked (non-tracking) issue shipped its code but its body still
+  // lists unchecked NON-verify-after checkboxes — the boxes weren't synced at merge (the late, no-gate
+  // step in a different system than git) or the label is wrong. Mechanically backstops the ship-issue
+  // merge-time sync. LABEL-ONLY, no Discord: the `body-drift` label is the signal issue-triage consumes,
+  // and label ops don't spam the operator channel daily. Self-healing — the label is removed once the
+  // body is synced (0 stray boxes). Best-effort: a label failure must never abort the reminder run.
+  const driftScanned = considered
+    .filter((i) => isDriftCandidate(i.labels))
+    .map((i) => ({ iss: i, drift: findBodyDrift(i.body) })) // compute once per candidate (reused below)
+  const toFlagDrift = driftScanned.filter((x) => x.drift.count > 0)
+  const toClearDrift = driftScanned
+    .filter((x) => x.drift.count === 0 && hasBodyDriftLabel(x.iss.labels))
+    .map((x) => x.iss)
+  if (toFlagDrift.length) console.log(`[verify-reminders] ${today}: ${toFlagDrift.length} body-drift → ${toFlagDrift.map((x) => `${displayRef(x.iss.repo, x.iss.number)}(${x.drift.count})`).join(', ')}`)
+  if (dryRun) {
+    if (toFlagDrift.length) console.log('[verify-reminders] --dry-run: would LABEL body-drift:\n' + JSON.stringify(
+      toFlagDrift.map((x) => ({ ref: displayRef(x.iss.repo, x.iss.number), strayBoxes: x.drift.count, samples: x.drift.samples })), null, 2))
+    if (toClearDrift.length) console.log('[verify-reminders] --dry-run: would CLEAR body-drift on: ' + toClearDrift.map((i) => displayRef(i.repo, i.number)).join(', '))
+  } else {
+    for (const { iss } of toFlagDrift) {
+      const a = ['issue', 'edit', String(iss.number), '--add-label', 'body-drift']
+      if (iss.repo) a.push('--repo', iss.repo)
+      try { gh(a) } catch (e) { console.warn(`[verify-reminders] could not add body-drift on ${displayRef(iss.repo, iss.number)}: ${e.message.split('\n')[0]}`) }
+    }
+    for (const iss of toClearDrift) {
+      const a = ['issue', 'edit', String(iss.number), '--remove-label', 'body-drift']
+      if (iss.repo) a.push('--repo', iss.repo)
+      try { gh(a) } catch (e) { console.warn(`[verify-reminders] could not clear body-drift on ${displayRef(iss.repo, iss.number)}: ${e.message.split('\n')[0]}`) }
+    }
+  }
+
+  // ── Silent-drop guards (#966) ─────────────────────────────────────────────────
+  // This system exists so a verification is never forgotten, so both ways a line can go dark must be
+  // observable. Warn-only (never mutating, never fatal) — a run that drops a real reminder must not
+  // look identical to a run with nothing to do.
+  for (const iss of considered) {
+    for (const q of findQuotedVerifyAfterBoxes(iss.body)) {
+      console.warn(`[verify-reminders] ${displayRef(iss.repo, iss.number)}: an UNCHECKED verify-after box is nested in a blockquote (line ${q.lineIndex + 1}) — it will NEVER fire. Unquote it: ${truncate(q.text, 100)}`)
+    }
+    for (const bad of findInvalidVerifyAfterDates(iss.body)) {
+      console.warn(`[verify-reminders] ${displayRef(iss.repo, iss.number)}: verify-after date '${bad.date}' (line ${bad.lineIndex + 1}) is not a valid calendar date — it will never ping. Fix the date.`)
+    }
+  }
 
   // ── #873 Tier-A auto-verify pass ──────────────────────────────────────────────
   // Independent of the due/weekly ping cadence: evaluate every OPEN verify-after line that carries a
@@ -222,12 +362,19 @@ async function main() {
     }
   }
 
-  if (autoVerified.length === 0 && due.length === 0) {
-    console.log(`[verify-reminders] ${today}: nothing to auto-verify or ping.`)
+  // Stale `verify-overdue` labels (#966). Derived from the verify-after DATES, not from `due` — see
+  // findStaleOverdueLabels: `due` is weekly-throttled, so "not due today" ≠ "not overdue". Placed after
+  // the auto-verify scan (so `tickedKeys` is known) and before the early returns below: a run with
+  // nothing to ping is exactly when a previous ping's label needs clearing.
+  const toClearOverdue = findStaleOverdueLabels(considered, today, tickedKeys)
+
+  if (autoVerified.length === 0 && due.length === 0 && toClearOverdue.length === 0) {
+    console.log(`[verify-reminders] ${today}: nothing to auto-verify, ping, or unlabel.`)
     return
   }
   if (autoVerified.length) console.log(`[verify-reminders] ${today}: ${autoVerified.length} auto-verifiable → ${autoVerified.map((a) => a.ref).join(', ')}`)
   if (due.length) console.log(`[verify-reminders] ${today}: ${due.length} due to ping → ${due.map((d) => d.ref).join(', ')}`)
+  if (toClearOverdue.length) console.log(`[verify-reminders] ${today}: ${toClearOverdue.length} stale verify-overdue → ${toClearOverdue.map((i) => displayRef(i.repo, i.number)).join(', ')}`)
 
   if (dryRun) {
     if (autoVerified.length) {
@@ -235,6 +382,7 @@ async function main() {
         autoVerified.map((a) => ({ ref: a.ref, pass: a.plan.passCount, dropLabel: a.plan.dropLabel, close: a.plan.close, ticked: a.plan.ticked })), null, 2))
     }
     if (due.length) console.log('[verify-reminders] --dry-run: would PING:\n' + JSON.stringify(due, null, 2))
+    if (toClearOverdue.length) console.log('[verify-reminders] --dry-run: would CLEAR verify-overdue on: ' + toClearOverdue.map((i) => displayRef(i.repo, i.number)).join(', '))
     return
   }
 
@@ -270,8 +418,17 @@ async function main() {
     }
   }
 
+  // Clear stale `verify-overdue` (#966). AFTER the auto-verify pass, so an issue that was ticked (and
+  // possibly closed) moments ago loses the label in the same run — that's #857's exact path. Removing a
+  // label from a closed issue is fine. Best-effort: a label failure must never abort the run.
+  for (const iss of toClearOverdue) {
+    const a = ['issue', 'edit', String(iss.number), '--remove-label', 'verify-overdue']
+    if (iss.repo) a.push('--repo', iss.repo)
+    try { gh(a) } catch (e) { console.warn(`[verify-reminders] could not clear verify-overdue on ${displayRef(iss.repo, iss.number)}: ${e.message.split('\n')[0]}`) }
+  }
+
   if (due.length === 0) {
-    console.log('[verify-reminders] no reminders to ping (auto-verify only).')
+    console.log(`[verify-reminders] no reminders to ping (auto-verify / unlabel only).`)
     return
   }
 

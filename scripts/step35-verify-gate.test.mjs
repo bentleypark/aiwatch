@@ -22,9 +22,28 @@ test('isUiEdgePath — dashboard + Edge SSR are UI; worker/docs/tests are not', 
   assert.equal(isUiEdgePath('src/locales/ko.js'), true)
   assert.equal(isUiEdgePath('api/_is-down/html-template.ts'), true) // Edge helper dirs are `_`-prefixed (#862)
   assert.equal(isUiEdgePath('api/_intro/html-template.ts'), true)
+  // #1023 — the other user-facing Edge SSR pages (the blind spot that let the #1019 /methodology commit through)
+  assert.equal(isUiEdgePath('api/_methodology/html-template.ts'), true)
+  assert.equal(isUiEdgePath('api/_badges/html-template.ts'), true)
+  assert.equal(isUiEdgePath('api/_plugin/html-template.ts'), true)
+  assert.equal(isUiEdgePath('api/methodology.ts'), true)          // inline-content Function file form
+  assert.equal(isUiEdgePath('api/plugin-privacy.ts'), true)       // NOT shadowed by `plugin`
+  assert.equal(isUiEdgePath('api/extension-privacy.ts'), true)
+  assert.equal(isUiEdgePath('api/confirm.ts'), true)
+  assert.equal(isUiEdgePath('api/plugin.ts'), true)
+  // #1023 — deliberately EXCLUDED (not human-rendered pages)
+  assert.equal(isUiEdgePath('api/reports.ts'), false)            // proxy → aiwatch-reports, no own render
+  assert.equal(isUiEdgePath('api/csp-report.ts'), false)         // violation sink
+  assert.equal(isUiEdgePath('api/_shared/extension-cta.ts'), false) // shared helper (scoped out)
+  // #1023 — prefix-collision guards (the `(?:/|\.tsx?)` boundary must not let a page name prefix a foreign file)
+  assert.equal(isUiEdgePath('api/plugin-something.ts'), false)   // `plugin` must not shadow-match this
+  assert.equal(isUiEdgePath('api/methodology-helper.ts'), false)
+  assert.equal(isUiEdgePath('api/introspect.ts'), false)         // `intro` prefix
+  assert.equal(isUiEdgePath('api/badge.ts'), false)              // page is `badges`, not `badge`
   assert.equal(isUiEdgePath('worker/src/services.ts'), false)
   assert.equal(isUiEdgePath('docs/reference/x.md'), false)
   assert.equal(isUiEdgePath('src/utils/__tests__/constants.test.js'), false) // test excluded
+  assert.equal(isUiEdgePath('api/__tests__/methodology.test.ts'), false)     // test excluded even for a page name
   assert.equal(isUiEdgePath('tests/overview.spec.js'), false)
 })
 
@@ -43,6 +62,10 @@ test('lastUiEditIndex — picks the last UI/Edge edit (Edit + Bash write); -1 wh
   assert.equal(lastUiEditIndex([userText('hi'), edit('src/a.jsx'), userText('ok')]), 1)
   assert.equal(lastUiEditIndex([edit('src/a.jsx'), edit('worker/src/b.ts'), edit('src/c.jsx')]), 2) // worker edit doesn't reset
   assert.equal(lastUiEditIndex([bashWrite('cat > src/x.js <<EOF\n...')]), 0)
+  // #1023 — BASH_WRITE_RE also catches a heredoc/redirect write to the newly-covered Edge pages
+  assert.equal(lastUiEditIndex([bashWrite('cat > api/_methodology/html-template.ts <<EOF\n...')]), 0)
+  assert.equal(lastUiEditIndex([bashWrite('cat > api/plugin-privacy.ts <<EOF\n...')]), 0) // Function-file form
+  assert.equal(lastUiEditIndex([bashWrite('cat > api/reports.ts <<EOF\n...')]), -1)        // proxy excluded
   assert.equal(lastUiEditIndex([edit('worker/src/b.ts'), edit('docs/x.md')]), -1) // no UI edit
   // #664 — absolute file_path (what the Edit tool actually supplies) must be found, not -1
   assert.equal(lastUiEditIndex([userText('hi'), edit('/Users/x/aiwatch/src/pages/Overview.jsx')]), 1)

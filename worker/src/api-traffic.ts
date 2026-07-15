@@ -194,6 +194,197 @@ export async function queryExtTraffic(
   }
 }
 
+// ── Statusline poll volume (#918, feeds #400 Phase 1 measurement) ─────────
+// The Claude Code statusline snippets (#400) poll /api/status/cached?src=statusline-<preset>,
+// each tagged with its FULL preset slug in the SAME aiwatch_statusline dataset (index.ts writes
+// index1 = the `statusline-*` src, #494). Counting them is the consent-free adoption proxy that
+// #400 Phase 1's distribution/measurement gate needs — collected since #494 but never read back
+// (unlike ext-claude / feed). Unlike ext-claude's single 'ext-claude' index, statusline's index1
+// is MULTI-VALUED (one per preset: statusline-branded / -clickable / -degraded_only / -compact_badge
+// / -full_list / -scoped), so filter with LIKE + GROUP BY index1 (feed's per-variant shape).
+// NOTE: poll volume ≈ active-usage proxy, NOT user count — Claude Code re-renders the statusline
+// per prompt, so a single active user generates many polls; the day-over-day step-up is the signal.
+const STATUSLINE_INDEX_PREFIX = 'statusline-'
+// The legacy Vercel-rewrite catch-all tag (#452/#453): every hit on ai-watch.dev/api/status/cached
+// is rewritten to the worker with ?src=statusline-proxy. NOT a display preset — it's the pre-#918
+// jq-snippet cohort (preset-unknown) plus any other apex-cached traffic. Tracked SEPARATELY from the
+// path-tagged server-render presets (#918) because the two cohorts move in opposite target
+// directions: legacy should SHRINK as users re-copy, server-render should GROW. Blending them into
+// one total cancels the adoption signal (#944).
+const STATUSLINE_PROXY_KEY = 'proxy'
+
+export interface StatuslineTrafficCounts {
+  byPreset: Record<string, number>  // path-tagged server-render presets ONLY (proxy excluded) → last-24h polls
+  serverRenderTotal: number         // sum across path-tagged presets — the #918 adoption signal (want ↑)
+  legacyProxy: number               // the legacy jq-snippet cohort (statusline-proxy tag; want ↓)
+  total: number                     // serverRenderTotal + legacyProxy (grand total across all statusline-* polls)
+}
+
+/** Per-cohort day-over-day delta (today − yesterday); null per cohort when no usable baseline. */
+export interface StatuslineTrafficDelta {
+  serverRender: number | null
+  legacyProxy: number | null
+}
+
+/** AE SQL summing the last-24h statusline poll count per preset (sampling-corrected via SUM(_sample_interval)). */
+export function buildStatuslineTrafficSql(dataset = V1_DATASET): string {
+  return (
+    `SELECT index1 AS preset, SUM(_sample_interval) AS requests ` +
+    `FROM ${dataset} ` +
+    `WHERE index1 LIKE '${STATUSLINE_INDEX_PREFIX}%' AND timestamp > NOW() - INTERVAL '1' DAY ` +
+    `GROUP BY index1 ` +
+    `FORMAT JSON`
+  )
+}
+
+/** Parse the AE SQL statusline JSON into per-cohort counts. Strips the 'statusline-' prefix from the
+ *  key for readability, and routes the legacy `proxy` catch-all (#452/#453) into its OWN `legacyProxy`
+ *  field so it's never blended into the server-render preset adoption signal (#944). Tolerant of
+ *  string/number requests + a missing/invalid preset. */
+export function parseStatuslineTrafficResponse(json: unknown): StatuslineTrafficCounts | null {
+  const data = (json as { data?: unknown })?.data
+  if (!Array.isArray(data)) return null
+  const byPreset: Record<string, number> = {}
+  let serverRenderTotal = 0
+  let legacyProxy = 0
+  for (const row of data) {
+    const r = row as { preset?: unknown; requests?: unknown }
+    if (typeof r.preset !== 'string' || !r.preset.startsWith(STATUSLINE_INDEX_PREFIX)) continue
+    const parsed = Number(r.requests)
+    const n = Number.isFinite(parsed) ? parsed : 0
+    const key = r.preset.slice(STATUSLINE_INDEX_PREFIX.length) || r.preset
+    if (key === STATUSLINE_PROXY_KEY) {
+      legacyProxy += n
+    } else {
+      byPreset[key] = (byPreset[key] ?? 0) + n
+      serverRenderTotal += n
+    }
+  }
+  return { byPreset, serverRenderTotal, legacyProxy, total: serverRenderTotal + legacyProxy }
+}
+
+/** Serialize today's cohort totals for the day-over-day snapshot KV (read tomorrow by
+ *  computeStatuslineDelta). Compact JSON `{sr,lp}` — mirrors the #548 subscriber-count snapshot. */
+export function serializeStatuslineSnapshot(counts: StatuslineTrafficCounts): string {
+  return JSON.stringify({ sr: counts.serverRenderTotal, lp: counts.legacyProxy })
+}
+
+/** Diff today's cohort totals against yesterday's persisted snapshot. Returns null PER COHORT when
+ *  there's no usable baseline (absent / empty / non-JSON / non-numeric field) — same empty-string
+ *  footgun guard as computeSubscriberDelta (#548), so a corrupt snapshot reads as "no delta" rather
+ *  than a bogus full-count jump. Pure. */
+export function computeStatuslineDelta(
+  counts: StatuslineTrafficCounts,
+  prevSnapshotRaw: string | null,
+): StatuslineTrafficDelta {
+  const none: StatuslineTrafficDelta = { serverRender: null, legacyProxy: null }
+  if (prevSnapshotRaw == null || prevSnapshotRaw.trim() === '') return none
+  let prev: unknown
+  try {
+    prev = JSON.parse(prevSnapshotRaw)
+  } catch {
+    return none
+  }
+  const p = prev as { sr?: unknown; lp?: unknown }
+  const prevSr = Number(p?.sr)
+  const prevLp = Number(p?.lp)
+  return {
+    serverRender: Number.isFinite(prevSr) ? counts.serverRenderTotal - prevSr : null,
+    legacyProxy: Number.isFinite(prevLp) ? counts.legacyProxy - prevLp : null,
+  }
+}
+
+/** Query the last-24h statusline poll count via the AE SQL API. Best-effort: null on missing creds /
+ *  HTTP failure / unparseable response. Never throws. Mirrors queryFeedTraffic / queryExtTraffic. */
+export async function queryStatuslineTraffic(
+  accountId: string | undefined,
+  token: string | undefined,
+  fetchImpl: typeof fetch = fetch,
+): Promise<StatuslineTrafficCounts | null> {
+  if (!accountId || !token) return null
+  try {
+    const res = await fetchImpl(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: buildStatuslineTrafficSql() },
+    )
+    if (!res.ok) {
+      console.warn(`[wae] statusline SQL query failed: HTTP ${res.status}`)
+      return null
+    }
+    return parseStatuslineTrafficResponse(await res.json())
+  } catch (err) {
+    console.warn('[wae] statusline SQL query error:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
+// ── Claude Code plugin usage (#920) ───────────────────────────────────────
+// The plugin (#920) tags two DISTINCT indexes in the same dataset — deliberately NOT
+// `statusline-*`, so continuous monitor polling doesn't pollute the #918 preset metric:
+//   'aiwatch-monitor' — every 60s background-monitor poll of /api/statusline/down
+//   'aiwatch-brief'   — every on-demand /aiwatch briefing (/api/statusline/brief)
+// Collected since #920 but, like the pre-#918 statusline tags, needs a read-back to be
+// usable. This is the consent-free plugin-adoption proxy (monitor volume ≈ installs × up-time;
+// brief volume ≈ active engagement). Same NOT-a-user-count caveat as statusline.
+const PLUGIN_MONITOR_INDEX = 'aiwatch-monitor'
+const PLUGIN_BRIEF_INDEX = 'aiwatch-brief'
+
+export interface PluginTrafficCounts {
+  monitor: number  // last-24h background-monitor polls
+  brief: number    // last-24h /aiwatch briefings
+}
+
+/** AE SQL summing the last-24h plugin poll counts per index (sampling-corrected). */
+export function buildPluginTrafficSql(dataset = V1_DATASET): string {
+  return (
+    `SELECT index1 AS tag, SUM(_sample_interval) AS requests ` +
+    `FROM ${dataset} ` +
+    `WHERE index1 IN ('${PLUGIN_MONITOR_INDEX}', '${PLUGIN_BRIEF_INDEX}') AND timestamp > NOW() - INTERVAL '1' DAY ` +
+    `GROUP BY index1 ` +
+    `FORMAT JSON`
+  )
+}
+
+/** Parse the AE SQL plugin JSON into monitor/brief counts. Tolerant of string/number + missing rows. */
+export function parsePluginTrafficResponse(json: unknown): PluginTrafficCounts | null {
+  const data = (json as { data?: unknown })?.data
+  if (!Array.isArray(data)) return null
+  let monitor = 0
+  let brief = 0
+  for (const row of data) {
+    const r = row as { tag?: unknown; requests?: unknown }
+    const parsed = Number(r.requests)
+    const n = Number.isFinite(parsed) ? parsed : 0
+    if (r.tag === PLUGIN_MONITOR_INDEX) monitor += n
+    else if (r.tag === PLUGIN_BRIEF_INDEX) brief += n
+  }
+  return { monitor, brief }
+}
+
+/** Query the last-24h Claude Code plugin usage via the AE SQL API. Best-effort: null on missing
+ *  creds / HTTP failure / unparseable response. Never throws. Mirrors queryStatuslineTraffic. */
+export async function queryPluginTraffic(
+  accountId: string | undefined,
+  token: string | undefined,
+  fetchImpl: typeof fetch = fetch,
+): Promise<PluginTrafficCounts | null> {
+  if (!accountId || !token) return null
+  try {
+    const res = await fetchImpl(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`,
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: buildPluginTrafficSql() },
+    )
+    if (!res.ok) {
+      console.warn(`[wae] plugin SQL query failed: HTTP ${res.status}`)
+      return null
+    }
+    return parsePluginTrafficResponse(await res.json())
+  } catch (err) {
+    console.warn('[wae] plugin SQL query error:', err instanceof Error ? err.message : err)
+    return null
+  }
+}
+
 // ── New-feed-items count (#748) ───────────────────────────────────────────
 // The poll volume above is mostly EMPTY no-op fetches (Slack RSS polls ~every 15min regardless of
 // content). The figure that actually matters — how many alert-worthy items were published — is the

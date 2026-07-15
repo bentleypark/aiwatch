@@ -29,9 +29,15 @@ Read this index first, then load only the pages you need.
 - [Content-Security-Policy (CSP) — #482](reference-csp.md) — per-surface enforcement (nonce vs content-hash) + SPA policy.
 - [Reference Tooling](reference-tooling.md) — chub vs modern-web-guidance trigger map + the PreToolUse backstop.
 - [Tier-A `verify-after` assertions (#873)](verify-assertions.md) — machine-checkable assert-clause grammar.
+- [Directory map](directory-map.md) — every module's purpose + the #-issue history behind it (CLAUDE.md keeps only the map).
+- [Product constraints](product-constraints.md) — AI analysis, fallback gating, deploy/cron rules, CSP, PWA, Edge SSR surfaces.
+- [Decision Graph — ontology-lite (#917)](decision-graph.md) — the entity + relation vocabulary the strategy-review skill traverses to fuse progress × priority × decision-context.
 
 > **Structural health** (frontmatter integrity, unquoted-`#` truncation, dangling cross-links, index
-> drift) is enforced in CI on every PR by `scripts/lint-okf-bundle.mjs` (`npm run lint:okf`; the
-> `REAL docs/reference bundle` assertion in its test runs under `npm run test:scripts`). **Judgement
+> drift) is enforced in CI on every PR by `scripts/lint-okf-bundle.mjs` — on a **docs** PR by the
+> `Docs Lint` workflow (`.github/workflows/docs-lint.yml`, #961), and on a **code** PR by the
+> `REAL docs/reference bundle` assertion in its test, which runs under `npm run test:scripts` in
+> `test.yml`. The split exists because `test.yml` `paths-ignore`s `docs/**`, so a docs-only PR starts
+> none of its jobs (#961 — the lint was skipped exactly when docs changed). **Judgement
 > health** (contradictions, stale claims, whether cross-linking is *sufficient*) is a manual pass via
 > the `memory-lint` skill; findings are recorded in [log.md](log.md).

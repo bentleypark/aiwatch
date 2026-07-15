@@ -1,0 +1,7 @@
+[
+  {
+    "name": "aiwatch-outages",
+    "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/aiwatch-monitor.sh",
+    "description": "Upstream AI service outages (AIWatch) — notifies on down / recovery of monitored providers"
+  }
+]

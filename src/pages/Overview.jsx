@@ -1,7 +1,7 @@
 // Overview — summary stats, service grid, recent incidents, latency rankings, AI panel.
 // Design mockup: svc-card with left border, provider, 3-col metrics, variable-height history bars.
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, Fragment } from 'react'
 import IncidentTimeline from '../components/IncidentTimeline'
 import ReportModal from '../components/ReportModal'
 import RecentUserReports from '../components/RecentUserReports'
@@ -11,18 +11,17 @@ import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
-import { tagServiceForAlert } from '../utils/securityAlerts'
 import { computePredictionOutcome, withinEstimateText } from '../utils/predictionAccuracy'
 import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionSwitchable, ALL_SERVICES_FEED_URL, outboundReferralUrl, sendReferralBeacon } from '../utils/constants'
 import RssCopyIcon from '../components/RssCopyIcon'
 import { regionStatusOf } from '../utils/regionStatus'
 import { buildCalendarFromIncidents } from '../utils/calendar'
-import { compareIncidents, compareGroupedRows, getContextualTime, dominantGroupStatus } from '../utils/incidentSort'
+import { compareIncidents, compareGroupedRows, getContextualTime, dominantGroupStatus, sumGroupDuration, formatDurationMs } from '../utils/incidentSort'
 import { groupIncidents } from '../utils/incidentGrouping'
 import { formatTime, formatDate } from '../utils/time'
 import SkeletonUI from '../components/SkeletonUI'
 import StatusPill from '../components/StatusPill'
-import { resolveStatusDisplay } from '../utils/statusDisplay'
+import { resolveStatusDisplay, sourceFlagsOf, displayStatusOf, isDisplayAffected, isDisplayOperational } from '../utils/statusDisplay'
 import EmptyState from '../components/EmptyState'
 
 // ── Status color maps ────────────────────────────────────────
@@ -112,6 +111,10 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
     : 'text-[var(--red)]'
   const uptimeStr = hasUptime ? `${service.uptime30d.toFixed(2)}%` : t('uptime.unavailable.short')
   const scoreStr = service.aiwatchScore != null ? `${service.aiwatchScore} ${service.scoreGrade}` : null
+  // #1004 — one derivation of the source flags, shared by the pill, the stripe, and the banner/stats
+  // filters, so those surfaces can never disagree about whether this service is affected.
+  const [sourceDead, sourceUnknown] = sourceFlagsOf(service)
+  const statusDisplay = resolveStatusDisplay(service.status, service.partialCount, sourceDead, sourceUnknown)
 
   return (
     <button
@@ -121,10 +124,13 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
       style={{
         animationDelay: `${index * 80}ms`,
         // #744 — match the StatusPill badge: partial (operational + partialCount) → yellow, not green.
+        // #1004 — drive the border from the SAME resolved display state as the pill, so an
+        // unreadable-source card can't pair a neutral "Unknown" pill with an alarming amber border.
         borderLeft: `3px solid ${
-          service.status === 'down' ? 'var(--red)'
-          : service.status === 'degraded' ? 'var(--amber)'
-          : resolveStatusDisplay(service.status, service.partialCount, service.sourceDead && !service.probeConfirmed) === 'partial' ? 'var(--yellow)'
+          statusDisplay === 'down' ? 'var(--red)'
+          : statusDisplay === 'degraded' ? 'var(--amber)'
+          : statusDisplay === 'partial' ? 'var(--yellow)'
+          : statusDisplay === 'unknown' ? 'var(--border-hi)'
           : 'var(--green)'}`,
       }}
     >
@@ -134,7 +140,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
           <span className="text-[13px] font-medium text-[var(--text0)] truncate min-w-0">{service.name}</span>
           <div className="flex items-center gap-1.5">
             {isRecovered && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
-            <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={service.sourceDead && !service.probeConfirmed} />
+            <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={sourceDead} sourceUnknown={sourceUnknown} />
           </div>
         </div>
         <div className="flex items-center justify-between" style={{ marginBottom: '4px' }}>
@@ -156,7 +162,7 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
           </div>
           <div className="flex items-center gap-1.5">
             {isRecovered && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
-            <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={service.sourceDead && !service.probeConfirmed} />
+            <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={sourceDead} sourceUnknown={sourceUnknown} />
           </div>
         </div>
 
@@ -202,10 +208,14 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
 // Score color maps from constants
 
 // Filter: pill-style segment control per design mockup
-function FilterTabs({ filter, setFilter, total, issueCount, downCount, t }) {
+// #1004 — `operationalCount` is PASSED IN, not derived as `total - issueCount`. Deriving it assumed the
+// two buckets partition the roster, which they don't: a `partial` service (#722 — up overall, some
+// components affected) and an `unknown` one (source unreadable) are in neither. The derived badge then
+// counted them while the list didn't render them.
+function FilterTabs({ filter, setFilter, total, operationalCount, issueCount, downCount, t }) {
   const tabs = [
     { key: 'all',         labelKey: 'overview.filter.all',        count: total },
-    { key: 'operational', labelKey: 'overview.filter.operational', count: total - issueCount },
+    { key: 'operational', labelKey: 'overview.filter.operational', count: operationalCount },
     { key: 'issues',      labelKey: 'overview.filter.issues',      count: issueCount },
   ]
   return (
@@ -278,7 +288,7 @@ function CategoryTabs({ categoryFilter, setCategoryFilter, t }) {
 }
 
 // Grouped flap incidents (same title, same day) — compact expandable row (#496)
-function GroupIncidentItem({ group, lang, t }) {
+export function GroupIncidentItem({ group, lang, t }) {
   const [expanded, setExpanded] = useState(false)
   // Use canonical dominantGroupStatus (handles 'ongoing' alias + uniformStatus fast-path)
   const dominantStatus = dominantGroupStatus(group)
@@ -287,6 +297,16 @@ function GroupIncidentItem({ group, lang, t }) {
   const representative = group.entries[0]
   const serviceName = representative.serviceName ?? representative.affectedNames?.[0] ?? ''
   const dateStr = formatDate(group.rangeEnd, lang).split(' ').slice(0, 2).join(' ')
+  // Show the SUM of all grouped flips' downtime (labeled "총"/"total"), not just
+  // the newest entry's duration — a "×N" group's impact is every flip combined.
+  // Reuses the canonical sumGroupDuration/formatDurationMs shared with Incidents.jsx;
+  // null when nothing has resolved yet → falls back to the monitoring/ongoing label.
+  const summed = sumGroupDuration(group)
+  const totalDuration = summed.resolvedCount === 0
+    ? null
+    : summed.hasOngoing
+      ? `${t('overview.incidents.total').replace('{d}', formatDurationMs(summed.totalMs))} + ${t('incidents.duration.ongoing')}`
+      : t('overview.incidents.total').replace('{d}', formatDurationMs(summed.totalMs))
   return (
     <div style={{ marginBottom: '8px' }}>
       <div
@@ -322,7 +342,8 @@ function GroupIncidentItem({ group, lang, t }) {
             </span>
           </div>
           <div className="mono text-[10px] text-[var(--text2)]">
-            {representative.duration ?? (dominantStatus === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}
+            {totalDuration
+              ?? (dominantStatus === 'monitoring' ? t('overview.incidents.monitoring') : t('incidents.status.ongoing'))}
           </div>
         </div>
       </div>
@@ -438,9 +459,11 @@ function Panel({ title, dotColor, subtitle, children }) {
 
 // ── Action Banner — shows fallback recommendations during outages ──
 
-// #574 — Supply-chain correlation banner: an AWS region is degraded AND ≥1 AWS-dependent AI service
-// is also degraded (the worker's correlation gate; `banner` is null otherwise). Rendered as a sibling
-// ABOVE ActionBanner. AIWatch's differentiator vs AIDown's static dependency map = this LIVE gate.
+// #574 — Supply-chain correlation banner. Rendered as a sibling ABOVE ActionBanner; `banner` is null
+// unless the worker's region-aware gate fires (worker/src/supply-chain.ts — deliberately NOT restated
+// here: the rule has already moved twice and a mirrored copy rots every time it does). AIWatch's
+// differentiator vs AIDown's static dependency map = that LIVE gate. `banner.regions` carries only the
+// regions an affected service actually named, so joining them into the headline is safe (#1000).
 function SupplyChainBanner({ banner, setPage, t }) {
   if (!banner) return null
   const isDown = banner.severity === 'down'
@@ -476,15 +499,18 @@ function SupplyChainBanner({ banner, setPage, t }) {
   )
 }
 
-function ActionBanner({ services, setPage, t }) {
-  const affected = services.filter(s => s.status === 'down' || s.status === 'degraded')
+export function ActionBanner({ services, setPage, t }) {
+  // #1004 — filter on the DISPLAY state, not the raw status: an unreadable-source service renders a
+  // neutral "Unknown" pill, so it must not also appear here as "Degraded — try X instead" (AIWatch
+  // recommending users abandon a service it just admitted it cannot read).
+  const affected = services.filter(isDisplayAffected)
   const withActiveIncidents = services.filter(s => s.status === 'operational' && (s.incidents ?? []).some(i => i.status !== 'resolved'))
   const monitoring = withActiveIncidents.filter(s => (s.incidents ?? []).some(i => i.status === 'monitoring') && !(s.incidents ?? []).some(i => i.status === 'investigating' || i.status === 'identified'))
   const investigating = withActiveIncidents.filter(s => !monitoring.includes(s))
   if (affected.length === 0 && withActiveIncidents.length === 0) return null
 
-  const downList = affected.filter(s => s.status === 'down')
-  const degradedList = affected.filter(s => s.status === 'degraded')
+  const downList = affected.filter(s => displayStatusOf(s) === 'down')
+  const degradedList = affected.filter(s => displayStatusOf(s) === 'degraded')
   const hasDown = downList.length > 0
   const borderColor = hasDown ? 'var(--red)' : affected.length > 0 ? 'var(--amber)' : 'var(--blue)'
 
@@ -613,24 +639,30 @@ function ActionBanner({ services, setPage, t }) {
               {grp.items.map((f, fi) => {
                 const outUrl = outboundReferralUrl(f.id)
                 return (
-                  <span key={f.id} style={{ whiteSpace: 'nowrap' }}>
+                  // #903 — the ', ' separator lives OUTSIDE the nowrap item span so a line
+                  // break can occur BETWEEN alternatives (else two glued items overflow the
+                  // banner on mobile, clipping the trailing "Open ↗" pill). Intra-item nowrap
+                  // still keeps each name+pill together.
+                  <Fragment key={f.id}>
                     {fi > 0 && ', '}
-                    <span
-                      className="text-[var(--green)] hover:underline cursor-pointer"
-                      onClick={() => { trackEvent('fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); setPage({ name: 'service', serviceId: f.id }) }}
-                    >
-                      {f.name}{f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}
+                    <span style={{ whiteSpace: 'nowrap' }}>
+                      <span
+                        className="text-[var(--green)] hover:underline cursor-pointer"
+                        onClick={() => { trackEvent('fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); setPage({ name: 'service', serviceId: f.id }) }}
+                      >
+                        {f.name}{f.aiwatchScore != null ? ` (${f.aiwatchScore})` : ''}
+                      </span>
+                      {outUrl && (
+                        <a
+                          href={outUrl} target="_blank" rel="nofollow noopener noreferrer"
+                          className="text-[9px] rounded-sm border border-[var(--green)] text-[var(--green)] hover:bg-[var(--green)] hover:text-[var(--bg0)] no-underline"
+                          style={{ marginLeft: '4px', padding: '0 4px', verticalAlign: 'middle', lineHeight: '1.4' }}
+                          onClick={() => { trackEvent('outbound_fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); sendReferralBeacon('', f.id) }}
+                          aria-label={`Open ${f.name} (opens provider site)`}
+                        >{t('overview.banner.openAlt')}</a>
+                      )}
                     </span>
-                    {outUrl && (
-                      <a
-                        href={outUrl} target="_blank" rel="nofollow noopener noreferrer"
-                        className="text-[9px] rounded-sm border border-[var(--green)] text-[var(--green)] hover:bg-[var(--green)] hover:text-[var(--bg0)] no-underline"
-                        style={{ marginLeft: '4px', padding: '0 4px', verticalAlign: 'middle', lineHeight: '1.4' }}
-                        onClick={() => { trackEvent('outbound_fallback_click', { from_service: 'banner', to_service: f.id, location: 'action_banner' }); sendReferralBeacon('', f.id) }}
-                        aria-label={`Open ${f.name} (opens provider site)`}
-                      >{t('overview.banner.openAlt')}</a>
-                    )}
-                  </span>
+                  </Fragment>
                 )
               })}
             </span>
@@ -654,7 +686,7 @@ function ActionBanner({ services, setPage, t }) {
 export default function Overview() {
   const { t, lang } = useLang()
   const { setPage, categoryFilter, setCategoryFilter } = usePage()
-  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis, securityAlerts, probeServiceIds, reportFeed, supplyChainBanner } = usePolling()
+  const { services: allServices, loading, error, lastUpdated, refresh, recentlyRecovered, aiAnalysis, probeServiceIds, reportFeed, supplyChainBanner } = usePolling()
   const { settings } = useSettings()
   const services = allServices.filter((s) => settings.enabledServices.includes(s.id))
   const [filter, setFilter] = useState('all')
@@ -693,20 +725,29 @@ export default function Overview() {
   }
 
   // Stats are based on category-filtered services
-  const operationalCount = catServices.filter((s) => s.status === 'operational').length
-  const degradedCount    = catServices.filter((s) => s.status === 'degraded').length
-  const downCount        = catServices.filter((s) => s.status === 'down').length
+  // #1004 — display state, so an unreadable source counts as neither operational nor degraded. A
+  // `partial` service, though, IS up overall (#722/#744 — that's why its is-down SEO answer stays "No"),
+  // so it belongs in the operational bucket. isDisplayOperational is the single predicate behind the
+  // stat card, the tab badge AND the tab's list — they drifted apart when only some of them moved.
+  const operationalCount = catServices.filter(isDisplayOperational).length
+  const degradedCount    = catServices.filter((s) => displayStatusOf(s) === 'degraded').length
+  const downCount        = catServices.filter((s) => displayStatusOf(s) === 'down').length
   const issueCount       = degradedCount + downCount
   const uptimeServices = catServices.filter((s) => s.uptime30d != null && !isUnreliableUptime(s))
   const avgUptime = uptimeServices.length
     ? (uptimeServices.reduce((sum, s) => sum + s.uptime30d, 0) / uptimeServices.length).toFixed(1)
     : '—'
 
-  const statusPriority = { down: 0, degraded: 1, operational: 2 }
-  const issueSort = (a, b) => (statusPriority[a.status] - statusPriority[b.status]) || ((a.aiwatchScore ?? 0) - (b.aiwatchScore ?? 0))
+  // #1004 — the tab COUNTS (above) resolve the display state, so the LISTS must too. Keying the counts
+  // on the display state while the filter still keyed on the raw status made the Issues badge read 0
+  // while the tab rendered 1 card. An unreadable-source service ('unknown') belongs to neither tab — it
+  // is neither confirmed-healthy nor confirmed-affected — matching the stat cards.
+  const statusPriority = { down: 0, degraded: 1, partial: 2, operational: 3, unknown: 4 }
+  const issueSort = (a, b) =>
+    (statusPriority[displayStatusOf(a)] - statusPriority[displayStatusOf(b)]) || ((a.aiwatchScore ?? 0) - (b.aiwatchScore ?? 0))
   const applyStatusFilter = (list) =>
-    filter === 'operational' ? list.filter((s) => s.status === 'operational')
-    : filter === 'issues'    ? [...list.filter((s) => s.status !== 'operational')].sort(issueSort)
+    filter === 'operational' ? list.filter(isDisplayOperational)
+    : filter === 'issues'    ? [...list.filter(isDisplayAffected)].sort(issueSort)
     : list
 
   // Build per-category sections mirroring the sidebar taxonomy (#646), replacing the old
@@ -836,57 +877,9 @@ export default function Overview() {
         </div>
       )}
 
-      {/* ── Security Alerts Banner (24h only) ── */}
-      {(() => {
-        const cutoff = Date.now() - 24 * 3600_000
-        const recent = (securityAlerts ?? []).filter(a => a.detectedAt && new Date(a.detectedAt).getTime() > cutoff)
-        if (recent.length === 0) return null
-        return (
-          <div className="rounded-lg border border-[var(--purple)]" style={{ background: 'color-mix(in srgb, var(--purple) 8%, transparent)', padding: '8px 12px' }}>
-            <div className="flex flex-col gap-0.5 text-[12px] min-w-0">
-              <span className="text-[var(--text0)] font-medium mono text-[11px]">
-                🔒 {t('overview.security.title')} ({recent.length})
-              </span>
-              {recent.slice(0, 3).map((a, i) => {
-                const safeUrl = a.url?.startsWith('https://') ? a.url : '#'
-                // Derive service tag: use service field (OSV) or detect from title (HN).
-                // #821 — provider-only HN matches resolve to the provider's primary service
-                // (shared helper, mirrors the detail-page matcher). Logic in src/utils/securityAlerts.js.
-                let tag = a.service || ''
-                if (!tag) {
-                  // Use the FULL service list (not the enabled-filtered `services`) so the
-                  // provider-primary resolution matches the detail page, which sees all services.
-                  const match = tagServiceForAlert(a, allServices)
-                  if (match) tag = match.name
-                }
-                // #326: EPSS prefix mirroring ServiceDetails. Thresholds duplicated
-                // here because the frontend bundle cannot import from worker — keep
-                // in sync with EPSS_ACTIVE (0.8) / EPSS_ELEVATED (0.5) in
-                // worker/src/security-monitor.ts.
-                const epss = a.epssPercentile
-                let epssTag = null
-                if (typeof epss === 'number') {
-                  if (epss >= 0.8) epssTag = { icon: '🔥', color: 'var(--red)' }
-                  else if (epss >= 0.5) epssTag = { icon: '⚠️', color: 'var(--amber)' }
-                }
-                return (
-                  <a key={i} href={safeUrl} target="_blank" rel="noopener noreferrer"
-                    className="text-[var(--text1)] hover:text-[var(--purple)] truncate text-[11px]"
-                  >
-                    {a.severity === 'critical' ? '🔴' : a.severity === 'high' ? '🟠' : '🟡'}
-                    {epssTag && (
-                      <span style={{ color: epssTag.color, marginLeft: '4px' }}
-                        title={`EPSS ${Math.round(epss * 100)}th percentile — ${epss >= 0.8 ? 'actively exploited' : 'elevated exploit risk'}`}
-                      >{epssTag.icon}</span>
-                    )}
-                    {' '}{tag ? `[${tag}] ` : ''}{a.title}
-                  </a>
-                )
-              })}
-            </div>
-          </div>
-        )
-      })()}
+      {/* Security findings surface removed from Overview (#950) — the ServiceDetails
+          per-service security card remains the contextual surface. Re-surfacing (Overview
+          vs a dedicated screen) is deferred pending the #949 NVD first-party data. */}
 
       {/* #574 — supply-chain banner: directly ABOVE the "Operational · N services running" summary cards. */}
       <SupplyChainBanner banner={supplyChainBanner} setPage={setPage} t={t} />
@@ -906,7 +899,7 @@ export default function Overview() {
           shrinks to its content width instead of stretching full-width); centered single row on desktop. */}
       <div className="flex flex-col items-start gap-3 md:flex-row md:items-center md:justify-between">
         <CategoryTabs categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} t={t} />
-        <FilterTabs filter={filter} setFilter={setFilter} total={catServices.length} issueCount={issueCount} downCount={downCount} t={t} />
+        <FilterTabs filter={filter} setFilter={setFilter} total={catServices.length} operationalCount={operationalCount} issueCount={issueCount} downCount={downCount} t={t} />
       </div>
 
       {/* ── Per-category service sections (#646) ──

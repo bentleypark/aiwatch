@@ -2,47 +2,238 @@
 
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
 import { fetchWithTimeout } from '../utils'
+import { INCIDENT_IO_STATUS_WEIGHTS } from './impact-weights'
+import { weightedDowntimeSeconds, type OutageInterval } from './uptime-interval'
 
-export function parseIncidentIoUptime(html: string, componentId: string, groupId?: string): number | null {
+// ── Uptime (#1006) ────────────────────────────────────────────────────────────────────────────────
+//
+// AIWatch computes uptime ITSELF, from the provider's own published impact records, using the weights
+// documented on /methodology — for BOTH parser families. Atlassian already worked this way
+// (`parseUptimeData` sums the per-day outage SECONDS the page publishes); incident.io was the anomaly:
+// it copied the page's published `component_uptimes[].uptime` aggregate straight into `uptime30d`.
+//
+// That aggregate is not a 30-day figure, and it is not even the same figure page to page. Measured
+// 2026-07-14 against the live pages:
+//   · LangSmith publishes 98.48% while its component had ZERO impacts in the last 30 days (its true
+//     30-day uptime is 100.00%) — the number tracks a ~90-day window and is driven by MAY outages.
+//     AIWatch ranked it `Score 67 / fair` on that basis.
+//   · Langfuse: same shape (99.96% published, zero impacts in 30 days).
+//   · OpenAI's page publishes 100.00% for components with 3-5 impacts in the last 30 days — no window
+//     explains that, so that page evidently excludes degraded/partial states from its uptime entirely.
+// So the windows AND the downtime definitions differ per page. The Reliability Ranking was comparing
+// numbers that are not comparable.
+//
+// The fix is to stop reading their aggregate and compute from their RAW records (`component_impacts`:
+// start_at / end_at / status), which every incident.io page publishes — including the `chart_only`
+// pages (ElevenLabs / Replicate / Stability) that hide the percentage and therefore had NO uptime at
+// all under the old path. One window, one formula, every service.
+
+export interface IncidentIoUptime {
+  /** Uptime % over the window below, floor-rounded to 2dp (never overstate). */
+  pct: number
+  /** Days the computation actually covers — `windowDays` unless the component is younger than that.
+   *  A status-page migration creates a NEW component, so this can drop to a handful of days (#1004):
+   *  the figure is then honest for the days it has, and the UI says which. */
+  days: number
+}
+
+/** Every `component_impacts` entry on the page, parsed once. Returns [] when the page has no impacts
+ *  array — which callers MUST treat as "no information", never as "no downtime". */
+// Returns [] ONLY when the page carries no `component_impacts` at all (a genuinely clean page). When a
+// `component_impacts` marker WAS present but its array could not be parsed, returns null — callers must
+// then WITHHOLD uptime (#713), never read the empty list as "no downtime" and fabricate a 100%. The
+// `data_available_since` gate is a separate regex, so without this signal a component resolves `since`,
+// gets [], and reports a phantom 100% while its real impacts sat behind an unparseable blob.
+export function parseIncidentIoImpacts(html: string): IncidentIoImpact[] | null {
+  const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
+  let sawMarker = false
+  let failed = false
+  const all: IncidentIoImpact[] = []
+  // ACCUMULATE across every qualifying chunk: incident.io can split `component_impacts` across RSC
+  // pushes, and reading only the first would silently undercount the tail → inflated uptime. Duplicate
+  // impacts across chunks are harmless — the sweep-line accumulator merges identical intervals.
+  for (const chunk of chunks) {
+    if (!chunk.includes('component_impacts')) continue
+    const idx1 = chunk.indexOf('component_impacts')
+    const idx2 = chunk.indexOf('component_uptimes')
+    if (idx1 === -1 || idx2 === -1 || idx2 <= idx1) continue
+    sawMarker = true
+    const segment = chunk.substring(idx1, idx2)
+    const arrStart = segment.indexOf('[')
+    const arrEnd = segment.lastIndexOf(']')
+    if (arrStart === -1 || arrEnd === -1) { failed = true; continue }
+    const raw = segment.substring(arrStart, arrEnd + 1).replace(/\\"/g, '"').replace(/"\$undefined"/g, 'null')
+    try {
+      all.push(...(JSON.parse(raw) as IncidentIoImpact[]))
+    } catch (err) {
+      console.warn('[parseIncidentIoImpacts] parse failed:', err instanceof Error ? err.message : err)
+      failed = true
+    }
+  }
+  if (!sawMarker) return [] // no component_impacts on the page at all → genuinely clean
+  // A marker was present but a chunk was unreadable → withhold (#713), never fabricate a clean 100%.
+  return failed ? null : all
+}
+
+export interface IncidentIoImpact {
+  component_id?: string
+  start_at?: string
+  end_at?: string
+  status?: string
+  status_page_incident_id?: string
+}
+
+/** #1006 — the percentage the page ITSELF displays for a component (`component_uptimes[].uptime`).
+ *  This is NOT the metric any more — it is not a 30-day figure and its downtime definition differs page
+ *  to page, which is the whole bug. It is kept as a DISCLOSURE: #41 deliberately made AIWatch reproduce
+ *  the provider's published number, and the detail page still shows it beside our own 30-day measure
+ *  rather than dropping it silently. null on a `chart_only` page (`$undefined` — Stability / ElevenLabs
+ *  / Replicate publish the impact records but hide the %). */
+export function parseIncidentIoReportedUptime(
+  html: string,
+  componentId: string | string[],
+  groupId?: string,
+): number | null {
+  const ids = Array.isArray(componentId) ? componentId : [componentId]
+  const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
+  let worst: number | null = null
+  for (const chunk of chunks) {
+    if (!chunk.includes('component_uptimes')) continue
+    const section = chunk.substring(chunk.indexOf('component_uptimes'))
+    // A page that groups its components DISPLAYS the group aggregate, not the member's own figure
+    // (status.openai.com: "APIs 99.97%" while the API component itself publishes 100.00%). Reading the
+    // member would put a number on the page that the provider never shows — the very thing this field
+    // exists to avoid. Group entries carry component_id=$undefined + status_page_component_group_id.
+    if (groupId) {
+      const groupMatch = section.match(new RegExp(
+        `\\\\"component_id\\\\":\\\\"\\$undefined\\\\"[\\s\\S]{0,300}?\\\\"status_page_component_group_id\\\\":\\\\"${groupId}\\\\"[\\s\\S]{0,300}?\\\\"uptime\\\\":\\\\"([^\\\\"]*)\\\\"`,
+      ))
+      if (groupMatch) {
+        const pct = parseFloat(groupMatch[1])
+        if (!Number.isNaN(pct) && pct >= 0 && pct <= 100) return pct
+      }
+    }
+    for (const id of ids) {
+      const match = section.match(new RegExp(`\\\\"component_id\\\\":\\\\"${id}\\\\"[\\s\\S]{0,300}?\\\\"uptime\\\\":\\\\"([^\\\\"]*)\\\\"`))
+      if (!match) continue
+      const raw = match[1]
+      if (raw === '$undefined' || raw === '') continue
+      const pct = parseFloat(raw)
+      if (Number.isNaN(pct) || pct < 0 || pct > 100) continue
+      if (worst === null || pct < worst) worst = pct
+    }
+  }
+  return worst
+}
+
+/** How far back a component's own records reach (`component_uptimes[].data_available_since`). incident.io
+ *  starts that clock when the COMPONENT is created, so a page migration resets it. Also the only proof
+ *  that the page TRACKS this component at all — an id absent here yields null, and the caller must then
+ *  withhold uptime rather than read "no impacts" as "no downtime". */
+export function parseIncidentIoDataAvailableSince(html: string, componentId: string): string | null {
   const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
   for (const chunk of chunks) {
     if (!chunk.includes('component_uptimes')) continue
-    // Search only within the component_uptimes section to avoid matching the same
-    // componentId in component_impacts (incident data) which would then greedily
-    // skip ahead to the wrong uptime value from a different component.
-    const uptimesIdx = chunk.indexOf('component_uptimes')
-    const uptimesSection = chunk.substring(uptimesIdx)
-
-    // 1. Try group uptime first (e.g. "APIs 99.99%" aggregate)
-    //    Group uptimes have component_id=$undefined with a status_page_component_group_id
-    if (groupId) {
-      const groupRe = new RegExp(
-        `\\\\"component_id\\\\":\\\\"\\$undefined\\\\"[\\s\\S]*?\\\\"status_page_component_group_id\\\\":\\\\"${groupId}\\\\"[\\s\\S]*?\\\\"uptime\\\\":\\\\"([^\\\\"]*)\\\\"`
-      )
-      const groupMatch = uptimesSection.match(groupRe)
-      if (groupMatch) {
-        const pct = parseFloat(groupMatch[1])
-        if (!isNaN(pct) && pct >= 0 && pct <= 100) return pct
-      }
-    }
-
-    // 2. Fall back to individual component uptime
-    const re = new RegExp(
-      `\\\\"component_id\\\\":\\\\"${componentId}\\\\"[\\s\\S]*?\\\\"uptime\\\\":\\\\"([^\\\\"]*)\\\\"`
+    const section = chunk.substring(chunk.indexOf('component_uptimes'))
+    // Bounded gap: data_available_since sits a few fields from component_id in the SAME entry. An
+    // unbounded `[\s\S]*?` would walk into the next entry when this one omits the field.
+    const match = section.match(
+      new RegExp(`\\\\"component_id\\\\":\\\\"${componentId}\\\\"[\\s\\S]{0,200}?\\\\"data_available_since\\\\":\\\\"([^\\\\"]*)\\\\"`),
     )
-    const match = uptimesSection.match(re)
     if (!match) continue
     const raw = match[1]
-    if (raw === '$undefined' || raw === '') return null
-    const pct = parseFloat(raw)
-    if (isNaN(pct) || pct < 0 || pct > 100) {
-      console.warn(`[parseIncidentIoUptime] unexpected uptime value "${raw}" for ${componentId}`)
-      return null
-    }
-    return pct
+    if (raw === '$undefined' || raw === '' || Number.isNaN(Date.parse(raw))) return null
+    return raw
   }
   return null
 }
+
+/** Uptime for ONE component over the trailing window, from its impact records.
+ *  null when the page doesn't track the component (no `data_available_since`) — absence of impacts is
+ *  NOT evidence of absence of downtime, so we withhold rather than invent a 100%. */
+function componentUptime(
+  impacts: IncidentIoImpact[],
+  componentId: string,
+  since: string,
+  nowMs: number,
+  windowDays: number,
+): IncidentIoUptime | null {
+  const sinceMs = Date.parse(since)
+  if (Number.isNaN(sinceMs)) return null
+  const covered = Math.min(windowDays, (nowMs - sinceMs) / 86_400_000)
+  if (covered <= 0) return null
+  const windowStart = nowMs - covered * 86_400_000
+  const windowSec = covered * 86_400
+
+  const intervals: OutageInterval[] = []
+  for (const impact of impacts) {
+    if (impact.component_id !== componentId) continue
+    const weight = impact.status ? INCIDENT_IO_STATUS_WEIGHTS[impact.status] : undefined
+    if (weight === undefined) {
+      // A status incident.io added since this was written. Warn rather than silently score it as zero
+      // downtime — a new "major_outage"-like state would otherwise inflate every affected service.
+      console.warn(`[incidentIoUptime] unknown component_impacts status "${impact.status}" — ignored`)
+      continue
+    }
+    if (weight === 0) continue // under_maintenance: announced, not downtime
+    // An ongoing impact has end_at null (parseIncidentIoImpacts rewrote "$undefined"→null); the shared
+    // accumulator clamps that to now and merges overlaps (worst-weight-wins) so an escalation isn't
+    // summed on top of itself.
+    intervals.push({ start: Date.parse(impact.start_at ?? ''), end: Date.parse(impact.end_at ?? ''), weight })
+  }
+  const weightedSec = weightedDowntimeSeconds(intervals, windowStart, nowMs)
+  // Floor, like parseUptimeData: never round 99.998% up to a clean 100%.
+  const pct = Math.max(0, Math.floor((1 - weightedSec / windowSec) * 10000) / 100)
+  return { pct, days: Math.floor(covered) }
+}
+
+/** #1006 — the trailing-30-day uptime for a service, computed from the provider's impact records.
+ *
+ *  A LIST of ids is a WORST-OF (the badge convention for a multi-component service, #379/#857 —
+ *  turbopuffer's per-region components have no group aggregate, so the honest headline is the worst
+ *  region, not an arbitrary one). The reported `days` is the SHORTEST covered window among the ids that
+ *  resolved — the conservative bound.
+ *
+ *  null when NO configured id is tracked by the page. Warns when only some resolve: an incident.io ULID
+ *  rotation silently stops matching on a 200-OK page, and a shrinking worst-of could then report a
+ *  healthy 100% while a vanished region is down. */
+export function computeIncidentIoUptime(
+  html: string,
+  componentId: string | string[],
+  nowMs: number,
+  windowDays = 30,
+): IncidentIoUptime | null {
+  const ids = Array.isArray(componentId) ? componentId : [componentId]
+  const impacts = parseIncidentIoImpacts(html)
+  // null = a component_impacts marker was present but unreadable → withhold, never fabricate 100% (#713).
+  if (impacts === null) {
+    console.warn('[computeIncidentIoUptime] component_impacts present but unparseable — withholding uptime')
+    return null
+  }
+  let worstPct = Infinity
+  let shortestDays = Infinity
+  let resolved = 0
+
+  for (const id of ids) {
+    const since = parseIncidentIoDataAvailableSince(html, id)
+    if (!since) continue // the page doesn't track this component — withhold, don't assume 100%
+    const result = componentUptime(impacts, id, since, nowMs, windowDays)
+    if (!result) continue
+    resolved++
+    worstPct = Math.min(worstPct, result.pct)
+    shortestDays = Math.min(shortestDays, result.days)
+  }
+
+  if (resolved === 0) return null
+  if (ids.length > 1 && resolved < ids.length) {
+    console.warn(
+      `[computeIncidentIoUptime] ${ids.length - resolved}/${ids.length} configured components absent from ` +
+      `component_uptimes (upstream id rotation?) — uptime is a worst-of over the ${resolved} that resolved`,
+    )
+  }
+  return { pct: worstPct, days: shortestDays }
+}
+
 
 // componentId accepts a single id OR a list (the service's statusComponentIds group): the per-day
 // result is the WORST impact across all matched components — so a service whose badge spans several
@@ -114,6 +305,75 @@ export function parseIncidentIoComponentImpacts(html: string, componentId: strin
     break
   }
   return result
+}
+
+// #1004 — incident.io's Statuspage-compatible API returns `components: []` on EVERY incident. Verified
+// across every incident.io page we monitor: status.jetbrains.cloud 0/14, status.smith.langchain.com
+// 0/25, status.langfuse.com 0/25, status.openai.com 0/25. So `parseIncidents` yields no
+// `componentNames`, and a service scoped by `incidentComponents` (an exact component-NAME allowlist,
+// #683) drops EVERY incident — permanently and silently, since the `includeUntaggedIncidents` valve is
+// gated on `incidentKeywords`, which such a service does not set. Junie hit exactly this when JetBrains
+// moved to incident.io: it would have traded a false `degraded` for a service that could never report
+// an incident again (no dashboard list, no Discord alert, no RSS, and a spotless Score).
+//
+// The mapping is not lost, just not in the JSON: the page HTML's `component_impacts` carries
+// `status_page_incident_id` → `component_id`, and that incident id is the SAME id the v2 API returns
+// (verified: 13/14 of the JetBrains incidents join). So rebuild the tags from the HTML.
+//
+// Returns incidentId → component ids (deduped). Empty when the page has no impacts array — callers
+// must treat that as "no information", never as "no components".
+export function parseIncidentIoIncidentComponentIds(html: string): Record<string, string[]> {
+  const result: Record<string, string[]> = {}
+  const chunks = html.match(/self\.__next_f\.push\(\[1,([\s\S]*?)\]\)\s*<\/script/g) ?? []
+  for (const chunk of chunks) {
+    if (!chunk.includes('component_impacts')) continue
+    const idx1 = chunk.indexOf('component_impacts')
+    const idx2 = chunk.indexOf('component_uptimes')
+    if (idx1 === -1 || idx2 === -1 || idx2 <= idx1) continue
+    const segment = chunk.substring(idx1, idx2)
+    const arrStart = segment.indexOf('[')
+    const arrEnd = segment.lastIndexOf(']')
+    if (arrStart === -1 || arrEnd === -1) continue
+    const raw = segment.substring(arrStart, arrEnd + 1).replace(/\\"/g, '"').replace(/"\$undefined"/g, 'null')
+    try {
+      const impacts = JSON.parse(raw) as Array<{ component_id?: string; status_page_incident_id?: string }>
+      for (const impact of impacts) {
+        const incId = impact.status_page_incident_id
+        const compId = impact.component_id
+        if (!incId || !compId) continue
+        const ids = (result[incId] ??= [])
+        if (!ids.includes(compId)) ids.push(compId)
+      }
+    } catch (err) {
+      // `continue`, not `break`: a malformed first chunk must not hide a well-formed later one. (The
+      // sibling parsers break here; this one carries incident SCOPING, where a silent empty result
+      // drops every incident — so it keeps scanning.)
+      console.warn('[parseIncidentIoIncidentComponentIds] parse failed:', err instanceof Error ? err.message : err)
+      continue
+    }
+    break
+  }
+  return result
+}
+
+/** #1004 — restore the `componentNames` that incident.io's JSON API drops, from the page HTML (see
+ *  `parseIncidentIoIncidentComponentIds`). Only fills incidents that have NO names — an API that starts
+ *  populating them again wins. Unknown component ids are skipped rather than emitted raw, so a name
+ *  allowlist can never match a ULID. Pure; must run BEFORE `filterIncidents` (#940 — a transform after
+ *  the filter is a no-op on already-dropped incidents). */
+export function attachIncidentIoComponentNames(
+  incidents: Incident[],
+  html: string,
+  components: ReadonlyArray<{ id: string; name: string }>,
+): Incident[] {
+  const idsByIncident = parseIncidentIoIncidentComponentIds(html)
+  if (Object.keys(idsByIncident).length === 0) return incidents
+  const nameById = new Map(components.map((c) => [c.id, c.name]))
+  return incidents.map((inc) => {
+    if ((inc.componentNames ?? []).length > 0) return inc
+    const names = (idsByIncident[inc.id] ?? []).map((id) => nameById.get(id)).filter((n): n is string => !!n)
+    return names.length > 0 ? { ...inc, componentNames: names } : inc
+  })
 }
 
 interface IncidentIoUpdate {

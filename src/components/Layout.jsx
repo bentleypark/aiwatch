@@ -68,9 +68,13 @@ export default function Layout({
             onClick={onSidebarClose}
             aria-hidden="true"
           />
+          {/* Sits BELOW the topbar rather than under a `pt-[48px]` inset: index.css's unlayered
+              `* { padding: 0 }` reset outranks Tailwind's layered padding utilities, so that
+              padding never applied and the drawer painted over the topbar (#978).
+              `dvh` so the drawer tracks the collapsing mobile URL bar. */}
           <aside
-            className="fixed left-0 top-0 z-[80] h-full w-[220px] pt-[48px]
-                       overflow-y-auto overflow-x-hidden md:hidden
+            className="fixed left-0 top-[48px] z-[80] h-[calc(100dvh-48px)] w-[220px]
+                       overflow-y-auto overflow-x-hidden overscroll-contain md:hidden
                        bg-[var(--bg1)] border-r border-[var(--border)]"
           >
             {sidebar}

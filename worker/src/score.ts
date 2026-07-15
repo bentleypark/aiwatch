@@ -1,6 +1,6 @@
 // AIWatch Score — service reliability composite score (0-100)
 
-import type { ProbeSummary, ServiceStatus } from './types'
+import type { Incident, ProbeSummary, ServiceStatus } from './types'
 import { INCIDENT_IO_IMPACT_WEIGHTS } from './parsers/impact-weights'
 
 export interface AIWatchScore {
@@ -39,6 +39,38 @@ export type ProbeContext =
   | { kind: 'unavailable' }                       // KV cache read failed → no penalty (treat like unsupported for scoring)
 
 // Responsiveness tuning constants (validated against 7-day probe data, see #132)
+// #1019 Part B — small-sample MTTR robustness. A resolved-impactful sample of <3 incidents makes MTTR a
+// mean/single value, so ONE incident left open long after its component recovered (paperwork inflation;
+// see the #1019 duration-override layer) — or one genuinely long one-off — tanks a low-incident service's
+// Recovery (15·exp(−mttr/4) collapses). `MTTR_PRIOR_MIN` is a neutral prior ≈ the cross-service median
+// MTTR (~1h in observed data): "a typical AI-service incident recovers in about an hour". `MTTR_PRIOR_WEIGHT`
+// counts the prior as N pseudo-incidents. See `computeMttrHours` for the ASYMMETRIC application.
+export const MTTR_PRIOR_MIN = 60
+export const MTTR_PRIOR_WEIGHT = 2
+
+/** MTTR (hours) from resolved-impactful incident durations (minutes). ≥3 → the robust MEDIAN (one
+ *  outlier can't move it). 1–2 → an ASYMMETRIC shrinkage toward `MTTR_PRIOR_MIN`: shrink toward the prior
+ *  ONLY when the thin-sample mean is WORSE (longer) than the prior, so a single paperwork-inflated / one-off
+ *  long incident can't tank a low-incident service, while a genuinely fast recovery keeps its score
+ *  untouched (no churn on well-performing low-incident services). Continuous into the median as the sample
+ *  grows to 3. Returns null for an empty sample (the caller picks the Recovery default). Pure — unit-tested. */
+export function computeMttrHours(durationsMin: number[]): number | null {
+  const d = durationsMin.filter((m) => m > 0)
+  if (d.length === 0) return null
+  if (d.length >= 3) {
+    const sorted = [...d].sort((a, b) => a - b)
+    return sorted[Math.floor(sorted.length / 2)] / 60
+  }
+  const sum = d.reduce((s, v) => s + v, 0)
+  const mean = sum / d.length
+  // Asymmetric: a thin sample that is faster-than-prior is left alone (its good score is earned and
+  // shrinking it would penalise well-performing low-incident services); only a worse-than-prior thin
+  // sample is pulled toward the prior, bounding a single long outlier's effect. Still penalises (the
+  // shrunk value stays > prior when mean > prior) — unlike a cap it never fully spares a long outage.
+  if (mean <= MTTR_PRIOR_MIN) return mean / 60
+  return (sum + MTTR_PRIOR_WEIGHT * MTTR_PRIOR_MIN) / (d.length + MTTR_PRIOR_WEIGHT) / 60
+}
+
 export const REFERENCE_MS = 400
 export const REFERENCE_CV = 0.5
 export const MIN_VALID_DAYS = 7
@@ -110,17 +142,28 @@ export function calculateAIWatchScore(
   service: ServiceStatus,
   cutoffDays: number,
   probe: ProbeContext,
+  window?: { startISO: string; endISO: string },
 ): AIWatchScore {
-  const cutoff = new Date(Date.now() - cutoffDays * 86_400_000).toISOString()
-  const incidents30d = (service.incidents ?? []).filter((i) => i.startedAt >= cutoff)
-  const incidentCount = incidents30d.length
+  // #993 — incident selection is the only place this function derives a time window internally.
+  // Default: the trailing `cutoffDays` from now (the live 30-day Score). An explicit
+  // {startISO, endISO} scores a FIXED past window (a calendar month) so the monthly archive can
+  // persist a month-aligned Score instead of a build-day snapshot of the rolling one. `uptime30d`
+  // and the probe summary are already scoped by the caller, so only this filter changes.
+  const inWindow: (i: Incident) => boolean = window
+    ? (i) => i.startedAt >= window.startISO && i.startedAt < window.endISO
+    : (() => {
+        const cutoff = new Date(Date.now() - cutoffDays * 86_400_000).toISOString()
+        return (i: Incident) => i.startedAt >= cutoff
+      })()
+  const windowIncidents = (service.incidents ?? []).filter(inWindow)
+  const incidentCount = windowIncidents.length
 
   // Affected days — only count incidents with measurable impact (#261).
   // null-impact entries are informational (component renames, post-mortems) — including
   // them in affected_days inflates services like cohere/groq whose feeds mix info posts
   // with real incidents, producing scores ~10pts lower than reality.
   const impactfulDays = new Set(
-    incidents30d.filter((i) => i.impact != null).map((i) => i.startedAt.slice(0, 10)),
+    windowIncidents.filter((i) => i.impact != null).map((i) => i.startedAt.slice(0, 10)),
   )
   const affectedDays = impactfulDays.size
 
@@ -132,7 +175,7 @@ export function calculateAIWatchScore(
   // so this is the catch-all log for new Atlassian impact levels reaching score calc.
   const dailyMaxWeight = new Map<string, number>()
   const unknownImpacts = new Set<string>()
-  for (const inc of incidents30d) {
+  for (const inc of windowIncidents) {
     if (inc.impact == null) continue
     const weight = INCIDENT_IO_IMPACT_WEIGHTS[inc.impact]
     if (weight === undefined) {
@@ -153,19 +196,14 @@ export function calculateAIWatchScore(
   // revocation, deprecation) has a duration but is NOT a reliability recovery, so counting it would
   // zero the Recovery score on a service that never actually went down (symmetric with the #261
   // null-impact exclusion from affectedDays / the uptime estimate).
-  const impactfulIncidents30d = incidents30d.filter((i) => i.impact != null)
-  const durations = impactfulIncidents30d
+  const impactfulWindowIncidents = windowIncidents.filter((i) => i.impact != null)
+  const durations = impactfulWindowIncidents
     .filter((i) => i.status === 'resolved' && i.duration)
     .map((i) => parseDurationMin(i.duration!))
     .filter((m) => m > 0)
 
-  let mttrHours: number | null = null
-  if (durations.length >= 3) {
-    durations.sort((a, b) => a - b)
-    mttrHours = durations[Math.floor(durations.length / 2)] / 60
-  } else if (durations.length > 0) {
-    mttrHours = (durations.reduce((s, v) => s + v, 0) / durations.length) / 60
-  }
+  // #1019 Part B — ≥3: robust median; 1–2: asymmetric shrinkage toward the prior (see computeMttrHours).
+  const mttrHours = computeMttrHours(durations)
 
   // Component scores on 40/25/15 scale (base = max 80, leaves 20 for Responsiveness)
   const hasUptime = service.uptime30d != null
@@ -182,7 +220,7 @@ export function calculateAIWatchScore(
   // null-impact advisories has no reliability recovery to penalize → full 15, not 0.
   const recoveryScore = mttrHours != null
     ? 15 * Math.exp(-mttrHours / 4)
-    : impactfulIncidents30d.length > 0 ? 0 : 15
+    : impactfulWindowIncidents.length > 0 ? 0 : 15
 
   // Responsiveness (probe) — compute first so the rescale below knows whether it's an available
   // component. Exhaustive switch — adding a new ProbeContext kind is a compile error until handled.

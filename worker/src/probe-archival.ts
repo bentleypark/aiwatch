@@ -87,8 +87,6 @@ export function aggregateProbeDaily(
 /** Compute 7-day probe summary per service from daily archives.
  *  Returns Map<serviceId, ProbeSummary> for Responsiveness scoring. */
 export async function computeProbeSummaries(kv: KVNamespace, days = 7): Promise<Map<string, ProbeSummary>> {
-  const result = new Map<string, ProbeSummary>()
-
   // Read daily archives in parallel (skip today — not yet archived)
   const keys = Array.from({ length: days }, (_, i) => {
     return `probe:daily:${new Date(Date.now() - (i + 1) * 86_400_000).toISOString().split('T')[0]}`
@@ -109,6 +107,17 @@ export async function computeProbeSummaries(kv: KVNamespace, days = 7): Promise<
     } catch (err) { console.warn('[probe-archival] malformed daily data:', err instanceof Error ? err.message : err) }
   }
 
+  return summariesFromDailyData(dailyData)
+}
+
+/**
+ * PURE core of computeProbeSummaries: turn a list of daily probe stats into per-service
+ * ProbeSummary (p50 / p95 / cvCombined / validDays). Extracted (#993) so the monthly archive can
+ * build a MONTH's summary from the same logic the live 7-day path uses — the single source of the
+ * cvCombined formula, rather than re-deriving it. Empty when <2 usable days (CV needs ≥2 points).
+ */
+export function summariesFromDailyData(dailyData: ProbeDailyData[]): Map<string, ProbeSummary> {
+  const result = new Map<string, ProbeSummary>()
   if (dailyData.length < 2) return result // need at least 2 days for CV
 
   // Collect per-service daily p50 and p95 values

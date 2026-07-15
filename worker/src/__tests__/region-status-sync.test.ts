@@ -21,7 +21,11 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 // Vitest resolves cross-package paths via the repo root; this works because frontend `src/`
 // and worker `src/` share a single repo with one node_modules. The import is data-only.
-import { SERVICE_REGIONS as frontendRegions, REGION_DOCS_URL as frontendDocs } from '../../../src/utils/regionStatus'
+import {
+  SERVICE_REGIONS as frontendRegions,
+  REGION_DOCS_URL as frontendDocs,
+  REGION_SWITCHABLE as frontendSwitchable,
+} from '../../../src/utils/regionStatus'
 
 const REPO_ROOT = join(__dirname, '..', '..', '..')
 const EDGE_FILE = readFileSync(join(REPO_ROOT, 'api/_is-down/region-status.ts'), 'utf-8')
@@ -65,10 +69,68 @@ describe('SERVICE_REGIONS cross-mirror sync (#422 Phase 2)', () => {
     }
   })
 
-  it('every service id in REGION_DOCS_URL also appears in the Edge file', () => {
+  // #973 — the old version of this test only asserted that each SPA doc-url KEY appeared in the
+  // Edge file. It never compared the URL VALUES, and never checked the reverse direction, so
+  // fixing a rotted URL in one mirror (or deleting an entry from one) stayed green. That is
+  // exactly the drift that shipped: both mirrors held a pinecone URL Pinecone had retired.
+  // NOTE this pins mirror EQUALITY, not URL correctness — a link that 301s to the wrong page
+  // still returns 200, so only a human looking at the landing page can catch rot (step 3.5).
+  it('REGION_DOCS_URL is byte-identical across mirrors (ids AND urls, both directions)', () => {
+    expect(parseEdgeDocsUrl()).toEqual(frontendDocs)
+  })
+
+  it('REGION_SWITCHABLE membership matches across mirrors', () => {
+    expect(parseEdgeStringSet('REGION_SWITCHABLE')).toEqual([...frontendSwitchable].sort())
+  })
+
+  // Every switchable service must be region-aware, else `recommendedRegion` can never resolve
+  // and the entry is a silent no-op.
+  it('every REGION_SWITCHABLE service has a SERVICE_REGIONS map', () => {
+    for (const id of frontendSwitchable) {
+      expect(Object.keys(frontendRegions), `REGION_SWITCHABLE["${id}"] has no SERVICE_REGIONS entry`).toContain(id)
+    }
+  })
+
+  // A docs link is only ever rendered next to a recommended region, so a doc url for a
+  // non-switchable service is unreachable — the dead `chatgpt` entry #973 removed.
+  it('every REGION_DOCS_URL service is switchable (no unreachable doc links)', () => {
     for (const id of Object.keys(frontendDocs)) {
-      const re = new RegExp(`^  ${id}: ['"]`, 'm')
-      expect(re.test(EDGE_FILE), `Edge file missing REGION_DOCS_URL["${id}"]`).toBe(true)
+      expect(frontendSwitchable.has(id), `REGION_DOCS_URL["${id}"] is not switchable — the link can never render`).toBe(true)
     }
   })
 })
+
+// These parsers read the Edge file as TEXT (it can't be imported here — different compilation
+// surface). A reformat or a service id outside the expected charset would make them read nothing.
+// Each therefore asserts a non-empty result BEFORE its caller diffs it, so "the parser broke" fails
+// with that message instead of masquerading as a full-object "the mirrors drifted" diff.
+
+/** Extract the Edge file's `REGION_DOCS_URL` object literal as a plain id→url record. */
+function parseEdgeDocsUrl(): Record<string, string> {
+  const block = sliceObjectLiteral('REGION_DOCS_URL')
+  const out: Record<string, string> = {}
+  for (const [, id, url] of block.matchAll(/^\s*([a-zA-Z0-9_-]+):\s*['"]([^'"]+)['"]/gm)) out[id] = url
+  expect(Object.keys(out).length, 'parser read 0 REGION_DOCS_URL entries — Edge file formatting changed, not a data drift').toBeGreaterThan(0)
+  return out
+}
+
+/** Extract a `new Set([...])` of string literals from the Edge file, sorted. */
+function parseEdgeStringSet(name: string): string[] {
+  const m = EDGE_FILE.match(new RegExp(`export const ${name}(?![A-Za-z0-9_]) = new Set\\(\\[([^\\]]*)\\]`))
+  expect(m, `Edge file: could not locate export const ${name}`).toBeTruthy()
+  const ids = [...m![1].matchAll(/['"]([^'"]+)['"]/g)].map((x) => x[1]).sort()
+  expect(ids.length, `parser read 0 ${name} members — Edge file formatting changed, not a data drift`).toBeGreaterThan(0)
+  return ids
+}
+
+/** Body of a top-level `export const <name> = { ... }` in the Edge file, comments stripped. */
+function sliceObjectLiteral(name: string): string {
+  // Anchored on a non-identifier char after `name`, else an unanchored substring match would
+  // prefix-match a RENAMED export (`REGION_DOCS_URL` would still find `REGION_DOCS_URLS`) and the
+  // test would pass on a file that no longer exports what it claims to pin.
+  const start = EDGE_FILE.search(new RegExp(`export const ${name}(?![A-Za-z0-9_])`))
+  expect(start, `Edge file: could not locate export const ${name}`).toBeGreaterThan(-1)
+  const open = EDGE_FILE.indexOf('{', start)
+  const close = EDGE_FILE.indexOf('\n}', open)
+  return EDGE_FILE.slice(open, close).replace(/^\s*\/\/.*$/gm, '')
+}

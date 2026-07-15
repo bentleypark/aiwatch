@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 // #568/#643: upper bound on the is-down "ranked #X of N" denominator. constants.js is a pure data
 // module (no browser deps) → importable in node/Playwright, so this auto-tracks service additions.
 //

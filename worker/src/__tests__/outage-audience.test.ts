@@ -18,9 +18,14 @@ describe('classifyReferrer (#842-B)', () => {
     expect(classifyReferrer('', 't.co')).toBe('x')
     expect(classifyReferrer('', 'mobile.twitter.com')).toBe('x')
   })
-  it('classifies our feed links via utm_source=rss/feed', () => {
+  it('classifies our feed links via utm_source=rss/feed, and the Discord alert as feed (#936)', () => {
     expect(classifyReferrer('rss', '')).toBe('feed')
     expect(classifyReferrer('feed', '')).toBe('feed')
+    expect(classifyReferrer('discord', '')).toBe('feed') // #936 — Discord alert = our notification feed
+  })
+  it('classifies our own client surfaces (extension/statusline) as owned (#936)', () => {
+    expect(classifyReferrer('extension', '')).toBe('owned')
+    expect(classifyReferrer('statusline', '')).toBe('owned')
   })
   it('classifies organic search by host', () => {
     expect(classifyReferrer('', 'www.google.com')).toBe('search')
@@ -32,6 +37,10 @@ describe('classifyReferrer (#842-B)', () => {
     expect(classifyReferrer('threads', '')).toBe('direct')
     expect(classifyReferrer('copy-link', '')).toBe('direct')
     expect(classifyReferrer('', 'some-blog.example')).toBe('direct')
+  })
+  it('buckets the Claude Code plugin is-down links (utm_source=claude-code) as plugin (#920)', () => {
+    expect(classifyReferrer('claude-code', '')).toBe('plugin')
+    expect(classifyReferrer('Claude-Code', '')).toBe('plugin') // case-insensitive
   })
   it('utm takes priority and is case-insensitive', () => {
     expect(classifyReferrer('X', 'google.com')).toBe('x')
@@ -72,12 +81,13 @@ describe('parseOutageAudienceResponse (#842-B)', () => {
       { source: 'x', phase: 'clear', views: '20' },
       { source: 'search', phase: 'clear', views: 40 },
       { source: 'feed', phase: 'active', views: 15 },
+      { source: 'owned', phase: 'active', views: 10 }, // #936 — extension/statusline bucket
     ] }
     const r = parseOutageAudienceResponse(json)!
-    expect(r.total).toBe(255)
-    expect(r.activeTotal).toBe(195)
-    expect(r.bySource).toEqual({ x: 200, search: 40, feed: 15, direct: 0 })
-    expect(r.activeBySource).toEqual({ x: 180, search: 0, feed: 15, direct: 0 })
+    expect(r.total).toBe(265)
+    expect(r.activeTotal).toBe(205)
+    expect(r.bySource).toEqual({ x: 200, search: 40, feed: 15, owned: 10, direct: 0, plugin: 0 })
+    expect(r.activeBySource).toEqual({ x: 180, search: 0, feed: 15, owned: 10, direct: 0, plugin: 0 })
   })
   it('skips unknown source buckets and tolerates bad views', () => {
     const r = parseOutageAudienceResponse({ data: [

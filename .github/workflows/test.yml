@@ -86,7 +86,11 @@ jobs:
           else
             DIFF=$(gh pr diff ${{ github.event.pull_request.number }} --name-only 2>/dev/null || echo "")
           fi
-          if echo "$DIFF" | grep -qE '^(src/|public/|index\.html|vite\.config|package\.json)'; then
+          # #998 — `tests/` + `playwright` MUST be here: without them a tests-only PR (e.g. one
+          # that rewrites the e2e suite) skips the E2E job entirely, so the very code it changes
+          # never runs in CI and a broken fixture merges green. The `build` job below deliberately
+          # does NOT match them — a spec change needs no production build.
+          if echo "$DIFF" | grep -qE '^(src/|tests/|playwright|public/|index\.html|vite\.config|package\.json)'; then
             echo "frontend=true" >> "$GITHUB_OUTPUT"
           else
             echo "frontend=false" >> "$GITHUB_OUTPUT"

@@ -11,6 +11,7 @@ import {
   predictedVsActualText,
   resolvedAtOf,
   resolvedPredictionLine,
+  scoringBaselineHours,
   summarizeAccuracy,
   historyKey,
   HISTORY_CAP,
@@ -407,30 +408,95 @@ describe('resolvedAtOf (shared with rss.ts /feed)', () => {
 })
 
 describe('resolvedPredictionLine (#846 — Discord Incident-Resolved, matches /feed wording)', () => {
+  // #1003 — takes the ANALYSIS, so the baseline choice can't be made wrong at the call site.
+  const an = (estimatedRecoveryHours?: number, firstEstimatedRecoveryHours?: number) =>
+    ({ estimatedRecoveryHours, firstEstimatedRecoveryHours })
+
   it('builds the same single-line phrasing as Slack /feed', () => {
     // 45m actual vs 0.75h (45m) estimate → within
-    expect(resolvedPredictionLine(0.75, inc())).toBe('🎯 AI prediction: 45m (within ~45m est.)')
+    expect(resolvedPredictionLine(an(0.75), inc())).toBe('🎯 AI prediction: 45m (within ~45m est.)')
   })
   it('reflects an under-prediction (actual exceeded estimate)', () => {
     // 45m actual vs 0.25h (15m) estimate → over
-    expect(resolvedPredictionLine(0.25, inc())).toBe('🎯 AI prediction: 45m (over ~15m est.)')
+    expect(resolvedPredictionLine(an(0.25), inc())).toBe('🎯 AI prediction: 45m (over ~15m est.)')
   })
   it('reflects an over-prediction (actual well under estimate) through the wrapper', () => {
     // 45m actual vs 2h estimate → faster than
-    expect(resolvedPredictionLine(2, inc())).toBe('🎯 AI prediction: 45m (faster than ~2h est.)')
+    expect(resolvedPredictionLine(an(2), inc())).toBe('🎯 AI prediction: 45m (faster than ~2h est.)')
   })
   it('derives actual duration from the timeline when resolvedAt is absent (no drift vs /feed)', () => {
     const i = inc({ resolvedAt: null, timeline: [{ stage: 'resolved', text: null, at: '2026-07-01T00:45:00.000Z' }] })
-    expect(resolvedPredictionLine(0.75, i)).toBe('🎯 AI prediction: 45m (within ~45m est.)')
+    expect(resolvedPredictionLine(an(0.75), i)).toBe('🎯 AI prediction: 45m (within ~45m est.)')
   })
   it('returns null when the analysis carried no numeric estimate (N/A → omit the line)', () => {
+    expect(resolvedPredictionLine(an(undefined), inc())).toBeNull()
     expect(resolvedPredictionLine(undefined, inc())).toBeNull()
     expect(resolvedPredictionLine(null, inc())).toBeNull()
   })
   it('returns null for a non-positive estimate (predictedVsActualText fall-through, line omitted)', () => {
-    // Clears the `== null` guard but predictedVsActualText rejects <= 0 → still null.
-    expect(resolvedPredictionLine(0, inc())).toBeNull()
-    expect(resolvedPredictionLine(-1, inc())).toBeNull()
+    expect(resolvedPredictionLine(an(0), inc())).toBeNull()
+    expect(resolvedPredictionLine(an(-1), inc())).toBeNull()
+  })
+  it('#1003 — scores against the FIRST estimate, not the re-analysis-inflated current one', () => {
+    // A re-analyzed incident: first estimated 45m, re-estimated 2h after it outran that. Actual 45m.
+    // Scoring against the current 2h would read "faster than ~2h est." — a fabricated win.
+    expect(resolvedPredictionLine(an(2, 0.75), inc())).toBe('🎯 AI prediction: 45m (within ~45m est.)')
+  })
+})
+
+describe('scoringBaselineHours (#1003 — hindsight-free baseline)', () => {
+  it('prefers the first estimate over the re-analysis-inflated current one', () => {
+    expect(scoringBaselineHours({ estimatedRecoveryHours: 15, firstEstimatedRecoveryHours: 4 })).toBe(4)
+  })
+  it('falls back to the current estimate for analyses written before #1003 (no first field)', () => {
+    expect(scoringBaselineHours({ estimatedRecoveryHours: 4 })).toBe(4)
+  })
+  it('ignores a non-positive first estimate and falls back', () => {
+    expect(scoringBaselineHours({ estimatedRecoveryHours: 4, firstEstimatedRecoveryHours: 0 })).toBe(4)
+  })
+  it('returns null when neither estimate is usable (N/A analysis → no comparison line)', () => {
+    expect(scoringBaselineHours({})).toBeNull()
+    expect(scoringBaselineHours(null)).toBeNull()
+    expect(scoringBaselineHours(undefined)).toBeNull()
+    expect(scoringBaselineHours({ estimatedRecoveryHours: 0 })).toBeNull()
+  })
+})
+
+describe('#1003 regression — the Pinecone false win', () => {
+  // The incident that surfaced the bug: first analysis "1–4h" (upper bound 4), re-analysis at the
+  // 4h mark forced the bound up to ~15h (its prompt forbids a bound below the elapsed hours), actual
+  // recovery 4h 55m. Grading against the 15h bound shipped "faster than ~15h est." — scoring a MISS
+  // as a win, and writing 15 into the durable corpus that feeds the accuracy aggregate + RAG.
+  const pineconeInc: Incident = {
+    id: 'pc-1',
+    title: '[Serverless][AWS][us-east-1] Increase in freshness lag for some namespaces',
+    status: 'resolved',
+    impact: 'minor',
+    startedAt: '2026-07-13T03:37:00.000Z',
+    resolvedAt: '2026-07-13T08:32:00.000Z', // 4h 55m
+    duration: null,
+    timeline: [],
+  }
+  const svc = { id: 'pinecone', provider: 'Pinecone', category: 'api' as const }
+  const reanalyzed = { estimatedRecoveryHours: 15, firstEstimatedRecoveryHours: 4, summary: 'freshness lag' }
+
+  it('stores the FIRST estimate in the durable corpus, not the inflated one', () => {
+    const r = buildHistoryRecord(svc, pineconeInc, reanalyzed, '2026-07-13T08:32:00.000Z')
+    expect(r?.predictedRecoveryHours).toBe(4)
+    expect(r?.durationMin).toBe(295)
+  })
+
+  it('reports the honest near-miss instead of "faster than ~15h est."', () => {
+    const r = buildHistoryRecord(svc, pineconeInc, reanalyzed, '2026-07-13T08:32:00.000Z')!
+    expect(accuracyOf(r)).toBe('under-predicted')
+    expect(predictedVsActualText(r)).toBe('4h 55m (over ~4h est.)')
+    expect(resolvedPredictionLine(reanalyzed, pineconeInc)).toBe('🎯 AI prediction: 4h 55m (over ~4h est.)')
+  })
+
+  it('would have scored it as a win before the fix (guards the regression)', () => {
+    // Same incident, analysis WITHOUT the carried first estimate = the pre-#1003 shape.
+    const preFix = buildHistoryRecord(svc, pineconeInc, { estimatedRecoveryHours: 15 }, '2026-07-13T08:32:00.000Z')!
+    expect(predictedVsActualText(preFix)).toBe('4h 55m (faster than ~15h est.)')
   })
 })
 

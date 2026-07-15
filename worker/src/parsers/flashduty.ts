@@ -12,6 +12,8 @@
 //   summary/structure   → { component_impacts[], component_uptimes[] } (per-component outage windows + uptime%)
 import type { Incident, TimelineEntry, ServiceComponent, DailyImpactLevel } from '../types'
 import { formatDuration } from '../utils'
+import { MAJOR_WEIGHT, MINOR_WEIGHT } from './impact-weights'
+import { weightedDowntimeSeconds, type OutageInterval } from './uptime-interval'
 
 // ── Raw Flashduty payload shapes (only the fields we consume) ──
 export interface FlashdutyComponent {
@@ -53,6 +55,56 @@ interface FlashdutyComponentImpact {
 interface FlashdutyComponentUptime {
   component_id: string
   uptime: number
+}
+
+/** #1006 — trailing-30-day uptime from the feed's outage intervals, weighted per /methodology.
+ *  `component_uptimes` is used only as the component ROSTER (which components the feed tracks) — a
+ *  component absent from it is one Flashduty doesn't monitor, and an empty roster yields null rather
+ *  than a fabricated 100%: absence of impact records is not evidence of absence of downtime (#713).
+ *  Worst-of across the roster. Times are unix SECONDS on this feed. */
+export function computeFlashdutyUptime(
+  impacts: FlashdutyComponentImpact[],
+  roster: FlashdutyComponentUptime[],
+  nowMs: number,
+  windowDays = 30,
+): number | null {
+  if (roster.length === 0) return null
+  const windowStart = nowMs - windowDays * 86_400_000
+  const windowSec = windowDays * 86_400
+
+  let worst: number | null = null
+  for (const component of roster) {
+    // Collect (start, end, weight) in ms and let the shared accumulator clamp open impacts (0/absent
+    // end) to now and merge overlaps (worst-weight-wins) so an escalation isn't summed on top of itself.
+    const intervals: OutageInterval[] = []
+    for (const impact of impacts) {
+      if (impact.component_id !== component.component_id) continue
+      const weight = flashdutyImpactWeight(impact.status)
+      if (weight === 0) continue
+      intervals.push({
+        start: (impact.start_at_seconds ?? NaN) * 1000,
+        end: impact.end_at_seconds ? impact.end_at_seconds * 1000 : null, // 0/absent = still open
+        weight,
+      })
+    }
+    const weightedSec = weightedDowntimeSeconds(intervals, windowStart, nowMs)
+    const pct = Math.max(0, Math.floor((1 - weightedSec / windowSec) * 10000) / 100)
+    if (worst === null || pct < worst) worst = pct
+  }
+  return worst
+}
+
+/** Flashduty component status → the weights on /methodology. Unknown → counted as a partial outage and
+ *  warned about, never as zero downtime (a new status must not silently inflate the service to 100%). */
+function flashdutyImpactWeight(status: string): number {
+  const s = (status ?? '').toLowerCase()
+  if (s.includes('major') || s.includes('full') || s.includes('down') || s.includes('outage')) {
+    return s.includes('partial') ? MINOR_WEIGHT : MAJOR_WEIGHT
+  }
+  if (s.includes('degrad') || s.includes('partial') || s.includes('minor')) return MINOR_WEIGHT
+  if (s.includes('maintenance') || s.includes('operational') || s === '') return 0
+  console.warn(`[flashduty] unknown component_impacts status "${status}" — counted as a partial outage`)
+  return MINOR_WEIGHT
 }
 
 /** The payload the GitHub Action POSTs — the three Flashduty `data` objects, verbatim. */
@@ -208,6 +260,8 @@ export interface ParseFlashdutyOptions {
   // from this component, and `components` collapses to just it (so the ≥2-gated breakdown is
   // suppressed). When absent, the whole feed is in-scope (all components, worst-of badge).
   primaryComponentId?: string
+  /** #1006 — override 'now' so the trailing-30-day uptime is deterministic in tests. */
+  nowMs?: number
 }
 
 /** Whether a change touched the given component (in its affected_components or any update). */
@@ -223,6 +277,7 @@ function changeAffectsComponent(c: FlashdutyChange, compId: string): boolean {
  */
 export function parseFlashdutyFeed(feed: FlashdutyFeed, opts: ParseFlashdutyOptions = {}): ParsedFlashduty {
   const primaryId = opts.primaryComponentId
+  const nowMs = opts.nowMs ?? Date.now() // #1006 — injectable for deterministic uptime tests
   const pageComponents = (feed.active?.page?.components ?? []).filter((pc) => !primaryId || pc.component_id === primaryId)
   const activeChanges = (feed.active?.active_changes ?? []).filter((c) => mapStage(c.status) !== 'resolved')
 
@@ -258,13 +313,17 @@ export function parseFlashdutyFeed(feed: FlashdutyFeed, opts: ParseFlashdutyOpti
     .map(toIncident)
     .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
 
-  // Uptime: the primary component's uptime when scoped; otherwise the worst (min) across components —
-  // a multi-component service's availability is gated by its weakest surface.
-  const uptimes = (feed.structure?.component_uptimes ?? [])
-    .filter((u) => !primaryId || u.component_id === primaryId)
-    .map((u) => u.uptime)
-    .filter((n) => typeof n === 'number')
-  const uptime30d = uptimes.length > 0 ? Math.min(...uptimes) : null
+  // #1006 — uptime is COMPUTED over the trailing 30 days from `component_impacts` (the same start/end
+  // intervals this parser already turns into `dailyImpact` below), not copied from the feed's published
+  // `component_uptimes` aggregate. That aggregate's period is Flashduty's, not ours, and every other
+  // source now produces a 30-day figure with the weights on /methodology — which is the only thing that
+  // makes the Reliability Ranking a ranking. Worst-of across components when the service isn't scoped to
+  // one: a multi-component service's availability is gated by its weakest surface.
+  const uptime30d = computeFlashdutyUptime(
+    (feed.structure?.component_impacts ?? []).filter((imp) => !primaryId || imp.component_id === primaryId),
+    (feed.structure?.component_uptimes ?? []).filter((u) => !primaryId || u.component_id === primaryId),
+    nowMs,
+  )
 
   const dailyImpact = buildDailyImpact(
     (feed.structure?.component_impacts ?? []).filter((imp) => !primaryId || imp.component_id === primaryId),

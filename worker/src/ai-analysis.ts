@@ -5,17 +5,43 @@ import type { Incident, ServiceStatus } from './types'
 import { sanitize, kvPut, kvDel, type KVLike } from './utils'
 import { collapseXaiRegionalIncidents } from './xai-regions'
 import { findSimilarHistory, formatDurationMin, accuracyOf, readIncidentHistory, type IncidentHistoryRecord } from './incident-history'
+import { callAnthropicMessages, type AnthropicOutcome } from './anthropic'
 
 // Workers AI model ID for the Gemma primary path. Exported so monthly-narrative.ts
 // (which runs its own hybrid call with a different prompt + response shape) reuses
 // the same model rather than drifting to a stale ID.
 export const GEMMA_MODEL = '@cf/google/gemma-4-26b-a4b-it'
 
-// Cloudflare AI Gateway endpoint for the Anthropic API. Exported so the
-// monthly-narrative module shares the exact same gateway route — a gateway
-// account / slug change then lives in one place, not two.
-export const AI_GATEWAY_ANTHROPIC_URL =
-  'https://gateway.ai.cloudflare.com/v1/11485987aa7d4639df5ba09d671b5615/aiwatch/anthropic/v1/messages'
+// The Anthropic model id + gateway URL now live in `anthropic.ts` (#955) — re-exported
+// here only so existing importers keep working. Do NOT re-inline a model string.
+export { AI_GATEWAY_ANTHROPIC_URL, ANTHROPIC_MODEL } from './anthropic'
+
+/**
+ * Output budget for the Sonnet fallback. Raised from 300 (#955): Sonnet 5 ships a new
+ * tokenizer that produces ~30% more tokens for the same text, so the old ceiling risked
+ * truncating the JSON payload mid-object.
+ */
+export const SONNET_MAX_TOKENS = 600
+
+/**
+ * Wall-clock budget for the ONE inline analysis the cron runs on an incident's first sighting.
+ *
+ * #955 Part 2: this was an 8s `Promise.race` that (a) left the Sonnet leg no room to finish
+ * after a Gemma failure — Sonnet's own cap is 10s — and (b) cancelled nothing when it won, so a
+ * Sonnet response arriving at 9s was paid for, thrown away, and booked as `failed`. It is now an
+ * AbortController budget that reaches the Sonnet fetch, and it leaves room for a Gemma failure to
+ * fall through to a Sonnet success inline. That matters most for Tier-1 (claude/openai/gemini),
+ * which #882 never holds: for those services the inline call is the only chance to attach an AI
+ * section before the alert ships.
+ *
+ * 15s is a judgement call, not a measurement. Gemma's own latency is wildly variable (0.3s to
+ * >115s against the real binding on 2026-07-09), so some inline calls WILL overrun no matter what
+ * this is set to. That is by design and now costs nothing: an overrun is booked as `timedOut`
+ * (not `failed`), writes no re-analysis lock, and the next cron cycle retries — for non-Tier-1
+ * inside the #882 hold window. The `timedOut` counter in the daily summary is what should drive
+ * any future change to this number; do not tune it on intuition.
+ */
+export const INLINE_ANALYSIS_BUDGET_MS = 15_000
 
 /**
  * Detect boilerplate timeline entries that contain no actionable technical detail.
@@ -129,6 +155,14 @@ export interface AIAnalysisResult {
   summary: string
   estimatedRecovery: string
   estimatedRecoveryHours?: number  // upper bound parsed from estimatedRecovery (e.g., "4–6h" → 6)
+  // #1003 — the FIRST estimate ever made for this incident, stamped on every write by `putAnalysis`
+  // (which pins it in the durable `ai:first-est:` key). Re-analysis only fires once an incident has
+  // outrun its own estimate, and its prompt forces the new upper bound to be >= elapsed hours —
+  // so `estimatedRecoveryHours` can only ratchet UP with hindsight. Grading recovery against that
+  // value turned every miss into a win ("4h 55m — faster than ~15h est." on an incident first
+  // estimated at 1–4h). Live surfaces show `estimatedRecoveryHours` (a user needs the CURRENT
+  // ETA); anything that SCORES the prediction reads this instead (`scoringBaselineHours`).
+  firstEstimatedRecoveryHours?: number
   affectedScope: string[]
   needsFallback: boolean  // AI-assessed: true if incident warrants switching to alternative service
   analyzedAt: string
@@ -178,6 +212,144 @@ export function formatRecoveryDisplay(recovery: string): string {
 /** Centralized KV key for per-incident analysis */
 export function analysisKey(svcId: string, incId: string): string {
   return `ai:analysis:${svcId}:${incId}`
+}
+
+/** A prior analysis as seen by `firstEstimateOf` — structural, so any KV write path can pass
+ *  whatever it already parsed. */
+interface PriorEstimate {
+  estimatedRecoveryHours?: number
+  firstEstimatedRecoveryHours?: number
+}
+
+function positiveHours(v: number | undefined | null): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
+}
+
+/**
+ * #1003 — the scoring baseline gets its OWN durable key, not a field that lives or dies with the
+ * 1h-TTL analysis value.
+ *
+ * `ai:analysis:*` is deliberately allowed to LAPSE mid-incident: once an analysis is 2h+ old and the
+ * per-cron re-analysis cap is exhausted, `refreshOrReanalyze` stops refreshing its TTL so a later
+ * cycle re-analyzes from scratch. A broad outage can starve one long incident for the ~12 cycles that
+ * takes — and the fresh analysis replacing it would install ITS estimate (made hours in, with the full
+ * timeline in the prompt) as "the first" one. That re-runs this very bug on exactly the long incidents
+ * where scoring matters most. Write-once here, outliving any realistic incident, so the baseline
+ * survives an analysis-key lapse.
+ */
+export function firstEstimateKey(svcId: string, incId: string): string {
+  return `ai:first-est:${svcId}:${incId}`
+}
+
+/** 30d — outlives both the analysis key (1h active / 2h resolved) and the longest incidents we see
+ *  (Mistral's ~120h flaps), while staying bounded. Written at most once per incident. */
+export const FIRST_ESTIMATE_TTL_S = 30 * 86400
+
+/**
+ * Pure baseline resolution, in precedence order:
+ *   1. `stored` — the durable key. Already pinned; nothing may move it (so N re-analyses are idempotent)
+ *   2. the prior analysis's own first estimate (same cycle, or the durable write failed)
+ *   3. the prior analysis's CURRENT estimate — a pre-#1003 value IS the earlier prediction, so an
+ *      incident already in flight at deploy time still scores against its original bound
+ *   4. this fresh estimate — there is no prior, so it IS the first
+ * Null when nothing usable exists ("N/A"): `scoringBaselineHours` then has nothing to grade and the
+ * comparison line is omitted rather than fabricated.
+ */
+export function firstEstimateOf(
+  next: AIAnalysisResult,
+  prior: PriorEstimate | null,
+  stored: number | null,
+): number | null {
+  return positiveHours(stored)
+    ?? positiveHours(prior?.firstEstimatedRecoveryHours)
+    ?? positiveHours(prior?.estimatedRecoveryHours)
+    ?? positiveHours(next.estimatedRecoveryHours)
+}
+
+/**
+ * #1003 — stamp the scoring baseline onto a fresh analysis, pinning it durably on first sight.
+ *
+ * EVERY write of a fresh `AIAnalysisResult` to `ai:analysis:{svcId}:{incId}` MUST route through this
+ * (CI-enforced by `first-estimate-write-paths.test.ts`, which scans the worker source): re-analysis
+ * fires only once an incident has outrun its own estimate, and its prompt forbids a bound below the
+ * elapsed hours — so `estimatedRecoveryHours` ratchets UP with hindsight and must never be the value
+ * a resolution is graded against.
+ *
+ * Best-effort on the KV side: a read or write failure degrades to the in-value carry (the prior
+ * analysis), never to dropping the estimate or aborting the caller's write.
+ */
+export async function pinFirstEstimate(
+  kv: KVLike,
+  svcId: string,
+  incId: string,
+  next: AIAnalysisResult,
+  prior: PriorEstimate | null,
+): Promise<AIAnalysisResult> {
+  const key = firstEstimateKey(svcId, incId)
+  const raw = await kv.get(key).catch(() => null)
+  const stored = positiveHours(raw != null ? Number(raw) : null)
+  const first = firstEstimateOf(next, prior, stored)
+  if (first == null) return next
+  // Get-or-set — only the first sighting writes, so no later re-analysis can move the baseline.
+  if (stored == null) await kvPut(kv, key, String(first), { expirationTtl: FIRST_ESTIMATE_TTL_S })
+  return { ...next, firstEstimatedRecoveryHours: first }
+}
+
+export interface PutAnalysisResult {
+  /** The analysis with its scoring baseline stamped. Valid even when `ok` is false: `pinFirstEstimate`
+   *  has already resolved (and durably pinned) the baseline by then, so a caller that SCORES off this
+   *  value still scores correctly when only the persist failed. */
+  pinned: AIAnalysisResult
+  /** False when the KV write failed — the caller decides whether that is fatal. */
+  ok: boolean
+  /** Failure detail, surfaced by `/api/admin/analyze` (an operator endpoint whose whole point is
+   *  telling you WHY the automated path is broken — a bare "failed" there is the blindness #955 removed). */
+  error?: string
+}
+
+/**
+ * #1003 — the SINGLE chokepoint for writing `ai:analysis:{svcId}:{incId}`.
+ *
+ * Every write goes through here so the scoring baseline cannot be lost by construction: an analysis-key
+ * write anywhere else fails CI (`first-estimate-write-paths.test.ts`). That matters because the bug was
+ * never in a helper — it was in ONE of the (then) nine write paths, and a tenth added later would
+ * silently reintroduce it. Routing the TTL-refresh writes through here too costs one KV read each, but
+ * means the durable pin also self-heals for analyses that predate #1003.
+ *
+ * `prior` is whatever that key already held (`null` when it held nothing) — pass the same object being
+ * re-serialized on a refresh. Writes via a raw `kv.put` rather than the `kvPut` helper only so the
+ * failure message survives for `/api/admin/analyze`'s 502 detail; it never throws.
+ */
+export async function putAnalysis(
+  kv: KVLike,
+  svcId: string,
+  incId: string,
+  analysis: AIAnalysisResult,
+  prior: PriorEstimate | null,
+  ttlSec: number,
+): Promise<PutAnalysisResult> {
+  const pinned = await pinFirstEstimate(kv, svcId, incId, analysis, prior)
+  try {
+    await kv.put(analysisKey(svcId, incId), JSON.stringify(pinned), { expirationTtl: ttlSec })
+    return { pinned, ok: true }
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
+    console.warn('[kv] ai:analysis write failed:', svcId, incId, error)
+    return { pinned, ok: false, error }
+  }
+}
+
+/** Parse a raw `ai:analysis:*` KV value, returning null on absent/corrupt/non-object rather than
+ *  throwing — the write paths need the prior analysis only to carry its first estimate forward, and
+ *  a corrupt prior must not abort the write. (An array parses as an `object` in JS — reject it too.) */
+export function parseAnalysis(raw: string | null): AIAnalysisResult | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as AIAnalysisResult
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -393,51 +565,76 @@ async function analyzeWithGemma(
 }
 
 /**
- * Analyze incident using Claude Sonnet via AI Gateway (fallback).
+ * Analyze incident using Claude Sonnet via AI Gateway (fallback), reporting WHY it failed.
+ *
+ * #955: the failure kind is the whole reason this exists. A retired-model 404 and a 529
+ * overload both used to collapse into `null`, so the caller could neither retry the one that
+ * deserved a retry nor stop punishing the incident for the one that didn't.
  */
-// Exported for the /api/admin/analyze endpoint (#299) so operators can force a
-// Sonnet analysis on an incident where Gemma produced low-signal output. Production
-// cron still reaches it via the analyzeIncident fallback path below.
-export async function analyzeWithSonnet(
+export async function analyzeWithSonnetDetailed(
   apiKey: string,
   prompt: string,
   incidentId: string,
   timelineAt: string,
-): Promise<AIAnalysisResult | null> {
-  const res = await fetch(AI_GATEWAY_ANTHROPIC_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 300,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-    signal: AbortSignal.timeout(10000),
+  signal?: AbortSignal,
+): Promise<{ result: AIAnalysisResult | null; outcome: AnthropicOutcome }> {
+  const outcome = await callAnthropicMessages(apiKey, {
+    system: SYSTEM_PROMPT,
+    user: prompt,
+    maxTokens: SONNET_MAX_TOKENS,
+    signal,
+    logPrefix: '[ai-analysis]',
   })
+  if (outcome.kind !== 'ok') return { result: null, outcome }
+  return { result: parseAnalysisResponse(outcome.text, incidentId, 'sonnet', timelineAt), outcome }
+}
 
-  if (!res.ok) {
-    console.error(`[ai-analysis] Claude API returned ${res.status}: ${await res.text().catch(() => '')}`)
-    return null
-  }
+/**
+ * Why a hybrid analysis produced no result.
+ *
+ * - `permanent` — a request-level problem (bad model id, revoked key, unparseable model output)
+ *   or no API key at all. Retrying soon cannot help; the caller should back off hard.
+ * - `transient` — 429 / 5xx / network. The very next cron cycle should try again.
+ * - `aborted`   — the caller's budget or a per-attempt timeout ran out. Nothing is known about
+ *   the upstream; retry next cycle.
+ * - `unknown`   — an unexpected throw. Treated as transient-ish but backed off one cycle.
+ */
+export type AnalysisFailureKind = 'permanent' | 'transient' | 'aborted' | 'unknown'
 
-  const data = await res.json() as { content: Array<{ type: string; text?: string }> }
-  const text = data.content?.find(c => c.type === 'text')?.text
-  if (!text) return null
+/** Calls actually issued to each model — successes AND failures. */
+export interface AttemptCounter { gemma: number; sonnet: number }
 
-  return parseAnalysisResponse(text, incidentId, 'sonnet', timelineAt)
+export interface AnalysisAttempt {
+  result: AIAnalysisResult | null
+  /** null iff `result` is non-null. */
+  failure: AnalysisFailureKind | null
+  attempts: AttemptCounter
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof Error && (err.name === 'AbortError' || err.message === 'aborted')
 }
 
 /**
  * Hybrid analysis: try Gemma first (Workers AI), fall back to Sonnet on failure.
+ *
+ * `signal` is the caller's wall-clock budget. It is propagated into the **Sonnet fetch**, where it
+ * genuinely cancels the request instead of leaving a paid-for response to be discarded (#955 Part 2).
+ * It also short-circuits the leg boundaries below, so a budget that expires during Gemma never
+ * starts a Sonnet call nobody is waiting for.
+ *
+ * The **Gemma leg is awaited plainly, never wrapped**. Workers AI's `ai.run()` exposes no abort hook,
+ * so a wrapper could only bound how long we WAIT — and `analyzeIncidentWithBudget` already does that
+ * one level up by racing this function's ordinary promise. Wrapping the I/O promise as well bought
+ * nothing and added an orphaned-promise hazard (an un-awaited `ai.run()` whose eventual rejection has
+ * no handler). Keep it plain.
+ *
+ * `counter` is a caller-owned tally so a budget overrun can still report which models were actually
+ * called: this function keeps running after the caller stops awaiting it.
  */
-export async function analyzeIncident(
+export async function analyzeIncidentDetailed(
   // #533 Phase 2 — honest type: callers gate on `(apiKey || ai)`, so apiKey may be undefined here when
-  // only the Gemma binding is present. The `if (!apiKey) return null` guard below already handles it
+  // only the Gemma binding is present. The `if (!apiKey)` guard below already handles it
   // (Sonnet is skipped), so this is a type-accuracy fix, not a behavior change.
   apiKey: string | undefined,
   serviceName: string,
@@ -449,33 +646,293 @@ export async function analyzeIncident(
   // service's own history). findSimilarHistory picks the relevant subset; empty → prompt falls
   // back to the in-memory title-only history (no behavior change before the corpus accumulates).
   historyRecords: IncidentHistoryRecord[] = [],
-): Promise<AIAnalysisResult | null> {
+  signal?: AbortSignal,
+  counter: AttemptCounter = { gemma: 0, sonnet: 0 },
+): Promise<AnalysisAttempt> {
   const similar = findSimilarIncidents(currentIncident.title, allIncidents)
   const similarHistory = findSimilarHistory({ title: currentIncident.title }, historyRecords, 3, currentIncident.id)
   const prompt = buildAnalysisPrompt(serviceName, currentIncident, similar, prevPrediction, similarHistory)
   const timelineAt = currentIncident.timeline?.at(-1)?.at ?? ''
+  const attempts = counter
+  const snapshot = () => ({ ...attempts })
 
-  // Primary: Gemma via Workers AI
+  if (signal?.aborted) return { result: null, failure: 'aborted', attempts: snapshot() }
+
+  // Primary: Gemma via Workers AI. Awaited plainly — never wrapped (see the doc comment).
+  // Measured 2026-07-09 against the real binding: ai.run() latency ranged 0.3s to >115s, so the
+  // caller's budget — not this leg — is what bounds the wait.
   if (ai) {
+    attempts.gemma++
     try {
       const result = await analyzeWithGemma(ai, prompt, currentIncident.id, timelineAt)
       if (result) {
         console.log(`[ai-analysis] Gemma success for ${serviceName}`)
-        return result
+        return { result, failure: null, attempts: snapshot() }
       }
       console.warn(`[ai-analysis] Gemma returned unparseable response for ${serviceName}, falling back to Sonnet`)
     } catch (err) {
+      if (isAbortError(err)) return { result: null, failure: 'aborted', attempts: snapshot() }
       console.warn(`[ai-analysis] Gemma failed for ${serviceName}: ${err instanceof Error ? err.message : err}, falling back to Sonnet`)
     }
   }
 
+  // Gemma may have overrun the caller's budget. Don't start a Sonnet call nobody is waiting for.
+  if (signal?.aborted) return { result: null, failure: 'aborted', attempts: snapshot() }
+
   // Fallback: Claude Sonnet via AI Gateway (requires API key)
-  if (!apiKey) return null
+  if (!apiKey) {
+    console.error('[ai-analysis] no ANTHROPIC_API_KEY — Sonnet fallback unavailable')
+    // A Gemma-only deployment (self-hosters, and `refreshOrReanalyze`'s `(apiKey || ai)` guard
+    // means `ai` is always present here) gets no fallback — but the thing that actually failed
+    // was Gemma, and a Gemma glitch is usually transient. Calling it `permanent` would earn the
+    // 30-min lock and reproduce the exact #955 pathology on a no-key config. Only a deployment
+    // with NEITHER model is a genuine configuration failure.
+    return { result: null, failure: attempts.gemma > 0 ? 'transient' : 'permanent', attempts: snapshot() }
+  }
+
+  attempts.sonnet++
   try {
-    return await analyzeWithSonnet(apiKey, prompt, currentIncident.id, timelineAt)
+    const { result, outcome } = await analyzeWithSonnetDetailed(apiKey, prompt, currentIncident.id, timelineAt, signal)
+    if (result) return { result, failure: null, attempts: snapshot() }
+    // outcome.kind === 'ok' here means a 200 whose body held no parseable JSON — the same
+    // prompt would reproduce it, so it is permanent, not worth a retry.
+    const failure: AnalysisFailureKind =
+      outcome.kind === 'transient' ? 'transient'
+        : outcome.kind === 'aborted' ? 'aborted'
+          : 'permanent'
+    return { result: null, failure, attempts: snapshot() }
   } catch (err) {
-    console.error('[ai-analysis] Sonnet fallback failed:', err instanceof Error ? err.message : err)
-    return null
+    console.error('[ai-analysis] Sonnet fallback threw unexpectedly:', err instanceof Error ? err.message : err)
+    return { result: null, failure: isAbortError(err) ? 'aborted' : 'unknown', attempts: snapshot() }
+  }
+}
+
+
+// ── ai:usage daily counters ──
+
+/** #995 — retention for `ai:usage:{date}`. 30d (was 2d) so a rolling trend outlives the day. */
+export const AI_USAGE_TTL_S = 30 * 86400
+
+/**
+ * Daily AI-analysis counters (`ai:usage:{date}` KV, 30d TTL — #995).
+ *
+ * `gemma` / `sonnet` count SUCCESSES; `gemmaAttempts` / `sonnetAttempts` count calls actually
+ * issued (#955). Before the attempt counters existed a dead fallback was invisible: Sonnet
+ * showed `0` whether it was never reached or reached and 404ing every single time.
+ */
+export interface AiUsageCounters {
+  calls: number
+  success: number
+  failed: number
+  /** Budget/timeout aborts — a distinct outcome from "the model returned nothing". */
+  timedOut?: number
+  gemma?: number
+  sonnet?: number
+  gemmaAttempts?: number
+  sonnetAttempts?: number
+}
+
+export function emptyUsage(): AiUsageCounters {
+  return { calls: 0, success: 0, failed: 0 }
+}
+
+/** Tolerant of the pre-#955 shape (`{calls, success, failed, gemma?, sonnet?}`). */
+export function parseUsage(raw: string | null): AiUsageCounters {
+  if (!raw) return emptyUsage()
+  try {
+    const parsed = JSON.parse(raw) as Partial<AiUsageCounters>
+    return {
+      ...emptyUsage(),
+      ...parsed,
+      calls: parsed.calls ?? 0,
+      success: parsed.success ?? 0,
+      failed: parsed.failed ?? 0,
+    }
+  } catch {
+    return emptyUsage()
+  }
+}
+
+/**
+ * Fold one attempt into the daily counters. Pure.
+ *
+ * `calls` is incremented here rather than at the call site because the old code did
+ * `usage.calls++` AFTER awaiting the model, inside the `try` — so a thrown error incremented
+ * neither `calls` nor `failed` and vanished from the ledger entirely (#955).
+ */
+export function applyAttempt(usage: AiUsageCounters, attempt: AnalysisAttempt): AiUsageCounters {
+  const next: AiUsageCounters = { ...usage }
+  next.calls++
+  if (attempt.attempts.gemma) next.gemmaAttempts = (next.gemmaAttempts ?? 0) + attempt.attempts.gemma
+  if (attempt.attempts.sonnet) next.sonnetAttempts = (next.sonnetAttempts ?? 0) + attempt.attempts.sonnet
+
+  if (attempt.result) {
+    next.success++
+    if (attempt.result.model === 'gemma') next.gemma = (next.gemma ?? 0) + 1
+    else if (attempt.result.model === 'sonnet') next.sonnet = (next.sonnet ?? 0) + 1
+  } else if (attempt.failure === 'aborted') {
+    next.timedOut = (next.timedOut ?? 0) + 1
+  } else {
+    next.failed++
+  }
+  return next
+}
+
+/** #995 — a multi-day roll-up of AiUsageCounters for the trend surfaces. */
+export interface AiUsageTrend {
+  days: number
+  calls: number
+  gemma: number
+  gemmaAttempts: number
+  sonnet: number
+  sonnetAttempts: number
+  timedOut: number
+  failed: number
+  /** gemma / gemmaAttempts — null when Gemma was never attempted (no denominator). */
+  gemmaSuccessRate: number | null
+  /** timedOut / calls — null when there were no calls. */
+  timedOutRate: number | null
+}
+
+/**
+ * #995 — sum a window of daily `AiUsageCounters` into one trend. Pure; the caller supplies whichever
+ * days it read from `ai:usage:{date}`. Rates are null (not 0) when their denominator is 0, so the
+ * formatter can omit a meaningless "0%" and a division never yields NaN.
+ */
+export function summarizeAiUsageTrend(entries: AiUsageCounters[]): AiUsageTrend {
+  const s = entries.reduce(
+    (a, u) => ({
+      calls: a.calls + (u.calls ?? 0),
+      gemma: a.gemma + (u.gemma ?? 0),
+      gemmaAttempts: a.gemmaAttempts + (u.gemmaAttempts ?? 0),
+      sonnet: a.sonnet + (u.sonnet ?? 0),
+      sonnetAttempts: a.sonnetAttempts + (u.sonnetAttempts ?? 0),
+      timedOut: a.timedOut + (u.timedOut ?? 0),
+      failed: a.failed + (u.failed ?? 0),
+    }),
+    { calls: 0, gemma: 0, gemmaAttempts: 0, sonnet: 0, sonnetAttempts: 0, timedOut: 0, failed: 0 },
+  )
+  return {
+    days: entries.length,
+    ...s,
+    gemmaSuccessRate: s.gemmaAttempts > 0 ? s.gemma / s.gemmaAttempts : null,
+    timedOutRate: s.calls > 0 ? s.timedOut / s.calls : null,
+  }
+}
+
+/**
+ * #995 — one-line Discord render of the trend (weekly briefing). Empty string when there were no
+ * calls in the window (nothing to report — caller omits the line). `failed` is ALWAYS shown (the
+ * real health signal), `timedOut` only when non-zero (a benign, by-design budget-overrun path — see
+ * INLINE_ANALYSIS_BUDGET_MS), so a rising `failed` is never hidden behind a noisy timeout count.
+ */
+export function formatAiUsageTrendLine(trend: AiUsageTrend): string {
+  if (trend.calls === 0) return ''
+  const pct = trend.gemmaSuccessRate != null ? ` (${Math.round(trend.gemmaSuccessRate * 100)}%)` : ''
+  const parts = [`${trend.calls} calls`, `Gemma ${trend.gemma}/${trend.gemmaAttempts}${pct}`]
+  if (trend.sonnet > 0) parts.push(`Sonnet ${trend.sonnet} fallback`)
+  if (trend.timedOut > 0) parts.push(`${trend.timedOut} timed out`)
+  parts.push(`${trend.failed} failed`)
+  return `🤖 **AI Analysis** (${trend.days}d): ${parts.join(' · ')}`
+}
+
+/**
+ * Run ONE analysis under a cancellable wall-clock budget and book it into `ai:usage`.
+ *
+ * This is the cron's first-sighting inline call, extracted so the budget wiring is testable at
+ * the site the #955 Part-2 bug actually lived. Until #955 the cron raced the hybrid analysis
+ * against a bare 8s timer, which never cancelled the in-flight fetch — a
+ * Sonnet response arriving at 9s was paid for, discarded, and booked as `failed`. Here the
+ * `AbortSignal` reaches the fetch, the timer is always cleared, and a budget overrun is recorded
+ * as `timedOut` rather than `failed`.
+ *
+ * Never throws: a throw from the analysis is booked as `unknown` and returned, so the caller's
+ * alert path is never taken down by the analysis.
+ */
+export async function analyzeIncidentWithBudget(
+  kv: KVLike,
+  apiKey: string | undefined,
+  ai: Ai | undefined,
+  serviceName: string,
+  currentIncident: { id: string; title: string; status: string; startedAt: string; impact: string | null; timeline?: Array<{ stage: string; text: string | null; at: string }> },
+  allIncidents: Incident[],
+  historyRecords: IncidentHistoryRecord[] = [],
+  budgetMs: number = INLINE_ANALYSIS_BUDGET_MS,
+  now: number = Date.now(),
+  analyzeFn: typeof analyzeIncidentDetailed = analyzeIncidentDetailed,
+): Promise<AnalysisAttempt> {
+  const ctrl = new AbortController()
+  // The tally the analysis mutates as it goes. When the budget wins we stop AWAITING the analysis
+  // but it keeps running, so this is the only honest way to report which models were called.
+  const counter: AttemptCounter = { gemma: 0, sonnet: 0 }
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const BUDGET = Symbol('budget')
+  const budget = new Promise<typeof BUDGET>((resolve) => {
+    timer = setTimeout(() => {
+      // Abort first: this genuinely cancels an in-flight Sonnet fetch (it takes an AbortSignal),
+      // so a response nobody will read is not paid for. Gemma has no abort hook.
+      ctrl.abort()
+      resolve(BUDGET)
+    }, budgetMs)
+  })
+
+  let attempt: AnalysisAttempt
+  try {
+    // Race the analysis's ORDINARY promise. This is the level the pre-#955 code raced at, and it
+    // is the right one: the analysis is a plain async function, so racing it is safe, whereas the
+    // Gemma leg inside is an un-cancellable Workers-AI subrequest that must simply be awaited.
+    const raced = await Promise.race([
+      analyzeFn(apiKey, serviceName, currentIncident, allIncidents, undefined, ai, historyRecords, ctrl.signal, counter),
+      budget,
+    ])
+    attempt = raced === BUDGET
+      ? { result: null, failure: 'aborted', attempts: { ...counter } }
+      : raced
+  } catch (err) {
+    console.error('[ai] inline analysis threw:', err instanceof Error ? err.message : err)
+    attempt = { result: null, failure: 'unknown', attempts: { ...counter } }
+  } finally {
+    // The Promise executor runs synchronously, so `timer` is always assigned by now — the guard
+    // is for the type checker, which cannot see that.
+    if (timer !== undefined) clearTimeout(timer)
+  }
+  await recordUsage(kv, now, attempt)
+  return attempt
+}
+
+/** Read-modify-write the daily counters. Best-effort — bookkeeping never fails an analysis. */
+export async function recordUsage(kv: KVLike, now: number, attempt: AnalysisAttempt): Promise<void> {
+  try {
+    const usageKey = `ai:usage:${new Date(now).toISOString().split('T')[0]}`
+    const usage = applyAttempt(parseUsage(await kv.get(usageKey).catch(() => null)), attempt)
+    // #995 — 30d TTL (was 2d) so the Gemma-success / timedOut / failed trend survives long enough to
+    // answer "is the timeout/fallback rate rising?" (the weekly briefing reads these; #995). One
+    // write/day per date key already; only the retention window changes.
+    await kvPut(kv, usageKey, JSON.stringify(usage), { expirationTtl: AI_USAGE_TTL_S })
+  } catch (err) {
+    console.warn('[ai] ai:usage counter bump failed:', err instanceof Error ? err.message : err)
+  }
+}
+
+/**
+ * How long an incident is locked out of re-analysis after a failure.
+ *
+ * #955 Part 4: this used to be a flat 30 minutes for EVERY failure, written by
+ * `refreshOrReanalyze` on both the null and the throw path. With a five-minute cron that skips
+ * the next six cycles — and because the lock is keyed per incident, not per model, a single
+ * transient Gemma parse failure that fell through to a broken Sonnet froze the incident for
+ * half an hour even though Gemma would have succeeded on the very next cycle. It also
+ * out-lived the #882 `AI_HOLD_MS` (~10min) window, guaranteeing an AI-less alert.
+ *
+ * Only a `permanent` failure earns the long lock now.
+ */
+export function reanalysisLockTtlSec(failure: AnalysisFailureKind): number {
+  switch (failure) {
+    case 'permanent': return 1800  // 30min — a bad model id / missing key won't fix itself
+    case 'unknown': return 300     // one cron cycle — an unexpected throw, don't hammer
+    case 'transient': return 0     // 429/5xx — retry on the next cycle
+    case 'aborted': return 0       // our budget, not theirs — retry on the next cycle
   }
 }
 
@@ -500,7 +957,9 @@ export async function refreshOrReanalyze(
   activeServices: ServiceStatus[],
   kv: KVLike,
   apiKey: string | undefined,
-  analyzeFn: typeof analyzeIncident,
+  // #955 — the detailed variant: `refreshOrReanalyze` needs the FAILURE KIND to decide how long
+  // (if at all) to lock the incident out of re-analysis. See `reanalysisLockTtlSec`.
+  analyzeFn: typeof analyzeIncidentDetailed,
   cap = 2,
   now = Date.now(),
   ai?: Ai,
@@ -536,7 +995,7 @@ export async function refreshOrReanalyze(
           // incident resolution (resolvedAt write overwrites this key with 2h TTL).
           if (parsed.sticky === true) {
             parsed._lastRefresh = new Date(now).toISOString()
-            await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+            await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
             analyzedIncidents.set(inc.id, key)
             result.refreshed.push(svc.id)
             continue
@@ -560,7 +1019,7 @@ export async function refreshOrReanalyze(
             if (parsed.timelineHash && hashTime === latestTime && !recoveryExceeded) {
               // No new timeline updates — just refresh TTL, skip API call
               parsed._lastRefresh = new Date(now).toISOString()
-              await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+              await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
               analyzedIncidents.set(inc.id, key)
               result.refreshed.push(svc.id)
               continue
@@ -573,7 +1032,7 @@ export async function refreshOrReanalyze(
                 // Update timelineHash to avoid rechecking, but skip API call
                 parsed.timelineHash = latestTimelineAt
                 parsed._lastRefresh = new Date(now).toISOString()
-                await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+                await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
                 analyzedIncidents.set(inc.id, key)
                 result.refreshed.push(svc.id)
                 continue
@@ -588,7 +1047,7 @@ export async function refreshOrReanalyze(
               // #827 — RAG grounding from this service's durable history (read lazily here, only
               // when actually re-analyzing — capped at `cap`/cron — not for every TTL refresh).
               const svcHistory = await readIncidentHistory(kv, svc.id)
-              const newAnalysis = await analyzeFn(
+              const attempt = await analyzeFn(
                 apiKey, svc.name,
                 { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline },
                 svc.incidents ?? [],
@@ -596,33 +1055,30 @@ export async function refreshOrReanalyze(
                 ai,
                 svcHistory,
               )
-              // Track usage
-              const today = new Date(now).toISOString().split('T')[0]
-              const usageKey = `ai:usage:${today}`
-              const usageRaw = await kv.get(usageKey).catch(() => null)
-              const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0 }
-              usage.calls++
-              if (newAnalysis) {
-                usage.success++
-                if (newAnalysis.model === 'gemma') usage.gemma = (usage.gemma ?? 0) + 1
-                else if (newAnalysis.model === 'sonnet') usage.sonnet = (usage.sonnet ?? 0) + 1
-                await kvPut(kv, key, JSON.stringify(newAnalysis), { expirationTtl: 3600 })
+              await recordUsage(kv, now, attempt)
+              if (attempt.result) {
+                // #1003 — this overwrite is exactly where the original prediction used to die. The
+                // re-analysis above was handed `prevPrediction`, whose prompt forbids an upper bound
+                // below the elapsed hours, so `attempt.result` is hindsight-inflated by construction;
+                // carry the pre-inflation estimate forward so resolution still grades against it.
+                await putAnalysis(kv, svc.id, inc.id, attempt.result, parsed, 3600)
                 analyzedIncidents.set(inc.id, key)
                 result.reanalyzed.push(svc.id)
               } else {
-                usage.failed++
-                // Keep old analysis, just refresh TTL
-                console.warn(`[ai] time-based re-analysis returned null for ${svc.id}:${inc.id}, keeping old`)
+                // Keep old analysis, just refresh TTL. No lock here — this branch already has a
+                // usable analysis, so retrying every cycle costs nothing extra.
+                console.warn(`[ai] time-based re-analysis produced nothing (${attempt.failure}) for ${svc.id}:${inc.id}, keeping old`)
                 parsed._lastRefresh = new Date(now).toISOString()
-                await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+                await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
                 result.refreshed.push(svc.id)
               }
-              await kvPut(kv, usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
             } catch (err) {
               console.warn(`[ai] time-based re-analysis failed for ${svc.id}:${inc.id}:`, err instanceof Error ? err.message : err)
+              // A throw never reached the counters before #955 — not even `calls`.
+              await recordUsage(kv, now, { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } })
               // Keep old analysis on failure
               parsed._lastRefresh = new Date(now).toISOString()
-              await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+              await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
               result.refreshed.push(svc.id)
             }
             continue
@@ -638,7 +1094,7 @@ export async function refreshOrReanalyze(
           const elapsed = now - new Date(lastRefresh).getTime()
           if (elapsed >= 1_800_000) {
             parsed._lastRefresh = new Date(now).toISOString()
-            await kvPut(kv, key, JSON.stringify(parsed), { expirationTtl: 3600 })
+            await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
             result.refreshed.push(svc.id)
           }
           continue
@@ -651,9 +1107,15 @@ export async function refreshOrReanalyze(
       // Dedup: check if another service already has analysis for the same incidentId
       const siblingKey = analyzedIncidents.get(inc.id)
       if (siblingKey) {
-        const siblingRaw = await kv.get(siblingKey).catch(() => null)
-        if (siblingRaw) {
-          await kvPut(kv, key, siblingRaw, { expirationTtl: 3600 })
+        const sibling = parseAnalysis(await kv.get(siblingKey).catch(() => null))
+        if (sibling) {
+          // #1003 — copy through `putAnalysis` rather than byte-for-byte, so THIS service also gets its
+          // own durable `ai:first-est:` pin. Copying the raw value carried the baseline inside the
+          // value but pinned nothing: if this service's analysis key later lapsed (cap exhaustion) while
+          // the pinned sibling's didn't, its next fresh analysis would adopt a hindsight-inflated
+          // estimate as "the first" — the same bug, one service over. `prior = sibling` so the sibling's
+          // FIRST estimate wins over its (possibly re-analyzed, inflated) current one.
+          await putAnalysis(kv, svc.id, inc.id, sibling, sibling, 3600)
           analyzedIncidents.set(inc.id, key)
           result.reanalyzed.push(svc.id)
           continue
@@ -671,7 +1133,7 @@ export async function refreshOrReanalyze(
         continue
       }
 
-      // 30min cooldown after failure (per-incident)
+      // Outcome-scaled cooldown after failure (per-incident) — see `reanalysisLockTtlSec`.
       const skipKey = `ai:reanalysis-skip:${svc.id}:${inc.id}`
       const skipped = await kv.get(skipKey).catch(() => null)
       if (skipped) {
@@ -684,7 +1146,7 @@ export async function refreshOrReanalyze(
         // #827 — RAG grounding from this service's durable history (read lazily — only on an
         // actual re-analysis, capped per cron).
         const svcHistory = await readIncidentHistory(kv, svc.id)
-        const analysis = await analyzeFn(
+        const attempt = await analyzeFn(
           apiKey,
           svc.name,
           { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline },
@@ -693,31 +1155,29 @@ export async function refreshOrReanalyze(
           ai,
           svcHistory,
         )
+        await recordUsage(kv, now, attempt)
 
-        // Track in ai:usage daily counter
-        const today = new Date(now).toISOString().split('T')[0]
-        const usageKey = `ai:usage:${today}`
-        const usageRaw = await kv.get(usageKey).catch(() => null)
-        const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0 }
-        usage.calls++
-
-        if (analysis) {
-          usage.success++
-          if (analysis.model === 'gemma') usage.gemma = (usage.gemma ?? 0) + 1
-          else if (analysis.model === 'sonnet') usage.sonnet = (usage.sonnet ?? 0) + 1
-          await kvPut(kv, key, JSON.stringify(analysis), { expirationTtl: 3600 })
+        if (attempt.result) {
+          // No prior analysis on this KEY (the `if (raw)` branch above `continue`d otherwise) — but the
+          // key may have LAPSED mid-incident (cap exhaustion; see `firstEstimateKey`), in which case
+          // this estimate was made hours in and is NOT a hindsight-free baseline. `pinFirstEstimate`
+          // reads the durable key, so the original bound still wins when one was ever pinned.
+          await putAnalysis(kv, svc.id, inc.id, attempt.result, null, 3600)
           analyzedIncidents.set(inc.id, key)
           result.reanalyzed.push(svc.id)
         } else {
-          usage.failed++
-          console.warn(`[ai] re-analysis returned null for ${svc.id}:${inc.id}`)
-          await kvPut(kv, skipKey, '1', { expirationTtl: 1800 })
+          const failure = attempt.failure ?? 'unknown'
+          console.warn(`[ai] re-analysis produced nothing (${failure}) for ${svc.id}:${inc.id}`)
+          // A transient/aborted failure retries on the NEXT cron cycle, which lands inside the
+          // #882 AI-hold window — so the alert can still ship WITH its analysis (#955 Part 4).
+          const ttl = reanalysisLockTtlSec(failure)
+          if (ttl > 0) await kvPut(kv, skipKey, '1', { expirationTtl: ttl })
           result.skipped.push(svc.id)
         }
-        await kvPut(kv, usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
       } catch (err) {
         console.warn(`[ai] re-analysis failed for ${svc.id}:${inc.id}:`, err instanceof Error ? err.message : err)
-        await kvPut(kv, skipKey, '1', { expirationTtl: 1800 })
+        await recordUsage(kv, now, { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } })
+        await kvPut(kv, skipKey, '1', { expirationTtl: reanalysisLockTtlSec('unknown') })
         result.skipped.push(svc.id)
       }
     }

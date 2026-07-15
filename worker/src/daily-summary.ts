@@ -7,7 +7,9 @@ import { formatVitalsSection } from './vitals'
 import { aggregateProbeDaily } from './probe-archival'
 import { formatReportCountsSection } from './report'
 import type { AccuracyStats } from './incident-history'
+import type { AiUsageCounters } from './ai-analysis'
 import { AUDIENCE_SOURCES, type AudienceCounts, type AudienceSource } from './outage-audience'
+import type { StatuslineTrafficCounts, StatuslineTrafficDelta } from './api-traffic'
 
 // #679 — the "detection lead" (faster-than-official) metric was removed (structurally null — status-page
 // polling is always later than the official publish; #464 already retired the framing). The RTT-degradation
@@ -21,9 +23,58 @@ export function classifyDegradation(svcStatusOperational: boolean): DegradationO
   return svcStatusOperational ? 'degradation_nostatus' : 'degradation'
 }
 
+/**
+ * Rough per-successful-Sonnet-call cost, USD.
+ *
+ * #955: was 0.006, sized for Sonnet 4 at `max_tokens: 300`. Sonnet 5 keeps the $3/$15-per-MTok
+ * sticker but our prompt now carries the RAG history block and the ceiling is 600 output tokens
+ * — roughly 1.5k in + 300 out ≈ $0.0045 + $0.0045. Only SUCCESSES are billed here: a 404 or a
+ * pre-response abort costs nothing, which is why the line counts `sonnet`, not `sonnetAttempts`.
+ */
+export const SONNET_COST_PER_CALL_USD = 0.009
+
+/**
+ * Render the 🤖 AI Analysis Usage section, or '' when nothing ran today.
+ *
+ * Surfaces ATTEMPTS alongside successes (#955). The old line showed `Sonnet: 0` whether the
+ * fallback was never reached or reached and 404ing on every single call — which is precisely
+ * how a retired model id went unnoticed for weeks.
+ */
+export function formatAiUsageSection(aiUsage: AiUsageCounters | null): string {
+  if (!aiUsage || aiUsage.calls <= 0) return ''
+  const gemma = aiUsage.gemma ?? 0
+  const sonnet = aiUsage.sonnet ?? 0
+  const gemmaAttempts = aiUsage.gemmaAttempts ?? 0
+  const sonnetAttempts = aiUsage.sonnetAttempts ?? 0
+  const timedOut = aiUsage.timedOut ?? 0
+
+  const cost = (sonnet * SONNET_COST_PER_CALL_USD).toFixed(3)
+  const outcomes = [`${aiUsage.success} success`, `${aiUsage.failed} failed`]
+  if (timedOut > 0) outcomes.push(`${timedOut} timed out`)
+
+  // "3/7" reads as succeeded/attempted. Attempt counts are absent on pre-#955 days, so fall
+  // back to the bare success count rather than printing a misleading "0 attempts".
+  const gemmaCell = gemmaAttempts > 0 ? `${gemma}/${gemmaAttempts}` : `${gemma}`
+  const sonnetCell = sonnetAttempts > 0 ? `${sonnet}/${sonnetAttempts}` : `${sonnet}`
+  const breakdown = gemmaAttempts || sonnetAttempts || gemma || sonnet
+    ? ` (Gemma: ${gemmaCell}, Sonnet: ${sonnetCell})`
+    : ''
+
+  const lines = [
+    '\n🤖 **AI Analysis Usage**',
+    `   Today: ${aiUsage.calls} calls (${outcomes.join(', ')})${breakdown}`,
+    `   Est. cost: $${cost} (Sonnet only)`,
+  ]
+  // A fallback that is always reached and never succeeds is a broken fallback, not bad luck.
+  if (sonnetAttempts > 0 && sonnet === 0) {
+    lines.push(`   ⚠️ Sonnet fallback: ${sonnetAttempts} attempts, 0 successes — check the model id / API key`)
+  }
+  return lines.join('\n')
+}
+
 export interface DailySummaryData {
   services: ServiceStatus[]
-  aiUsage: { calls: number; success: number; failed: number; gemma?: number; sonnet?: number } | null
+  aiUsage: AiUsageCounters | null
   latencySnapshots: Array<{ t: string; data: Record<string, number> }>
   incidentCountToday: { newCount: number; resolvedCount: number }
   alertCounts?: { incidents: number; resolved: number; down: number; degraded: number; recovered: number } | null
@@ -67,6 +118,15 @@ export interface DailySummaryData {
   // `ext-claude` tag; null when the SQL API isn't configured) + today's extension-sourced report
   // count (KV). Absent when neither signal exists → section omitted.
   extActivity?: { polls: number | null; reports: number } | null
+  // #918 — Claude Code statusline poll volume (last-24h, WAE `statusline-*` tags): the consent-free
+  // adoption proxy #400 Phase 1 needs. #944 splits it into two cohorts (server-render presets vs the
+  // legacy `proxy` catch-all) + a day-over-day delta. Absent (null) when the SQL API isn't configured;
+  // a poll ≈ active-usage proxy (Claude Code re-renders per prompt), not a user count.
+  statuslineTraffic?: (StatuslineTrafficCounts & { delta?: StatuslineTrafficDelta | null }) | null
+  // #920 — Claude Code PLUGIN usage (last-24h, WAE `aiwatch-monitor` + `aiwatch-brief` tags): the
+  // consent-free plugin-adoption proxy (monitor polls ≈ installs × up-time; briefings ≈ engagement).
+  // Absent (null) when the SQL API isn't configured. Same not-a-user-count caveat as statusline.
+  pluginTraffic?: { monitor: number; brief: number } | null
   // #575 Phase A — crowd "Report an issue" counts today (svcId → count). Internal demand signal
   // only (coverage priority); never a public "N reporting" verdict. Empty/absent → section omitted.
   reportCounts?: Record<string, number>
@@ -100,13 +160,8 @@ export function buildDailySummary(data: DailySummaryData): string {
   }
 
   // Section 3: AI Analysis usage
-  if (aiUsage && aiUsage.calls > 0) {
-    const gemma = aiUsage.gemma ?? 0
-    const sonnet = aiUsage.sonnet ?? 0
-    const sonnetCost = (sonnet * 0.006).toFixed(3)
-    const modelBreakdown = gemma || sonnet ? ` (Gemma: ${gemma}, Sonnet: ${sonnet})` : ''
-    lines.push(`\n🤖 **AI Analysis Usage**\n   Today: ${aiUsage.calls} calls (${aiUsage.success} success, ${aiUsage.failed} failed)${modelBreakdown}\n   Est. cost: $${sonnetCost} (Sonnet only)`)
-  }
+  const aiUsageLine = formatAiUsageSection(aiUsage)
+  if (aiUsageLine) lines.push(aiUsageLine)
 
   // #827 Feature 1 — AI recovery-prediction accuracy (predicted vs actual, across the durable corpus)
   const accuracyLine = formatAccuracyLine(data.accuracy)
@@ -235,6 +290,15 @@ export function buildDailySummary(data: DailySummaryData): string {
   const extSection = formatExtActivitySection(data.extActivity)
   if (extSection) lines.push(extSection)
 
+  // Section: statusline poll volume (#918) — consent-free adoption proxy for the Claude Code
+  // statusline snippets (#400 Phase 1 measurement gate).
+  const statuslineSection = formatStatuslineTrafficSection(data.statuslineTraffic)
+  if (statuslineSection) lines.push(statuslineSection)
+
+  // Section: Claude Code plugin usage (#920) — monitor polls + /aiwatch briefings.
+  const pluginSection = formatPluginTrafficSection(data.pluginTraffic)
+  if (pluginSection) lines.push(pluginSection)
+
   // Section: crowd "Report an issue" counts (#575 Phase A) — internal demand signal only.
   if (data.reportCounts) {
     const nameOf = new Map(services.map((s) => [s.id, s.name]))
@@ -281,7 +345,7 @@ export function formatReferralLine(
   return `\n🔗 **Outbound Referrals**: ${referralCounts.total}${top ? ` (${top})` : ''}`
 }
 
-const AUDIENCE_LABEL: Record<AudienceSource, string> = { x: 'X', search: 'search', feed: 'feed', direct: 'direct' }
+const AUDIENCE_LABEL: Record<AudienceSource, string> = { x: 'X', search: 'search', feed: 'feed', owned: 'owned', direct: 'direct', plugin: 'plugin' }
 
 /** #842-B — outage-moment audience line (consent-free is-down views by source). Leads with the
  *  active-outage subset (the sponsor-evidence "outage-spike audience") when any outage was viewed,
@@ -360,6 +424,66 @@ export function formatExtActivitySection(
   if (ext.reports > 0) parts.push(`${ext.reports} issue report${ext.reports === 1 ? '' : 's'}`)
   if (parts.length === 0) return ''
   return `\n🧩 **Chrome Extension**\n   Last 24h: ${parts.join(' · ')}`
+}
+
+/** ` (▲+312 vs yesterday)` / ` (▼-540 vs yesterday)` / ` (±0 vs yesterday)`; '' when no baseline
+ *  (null delta — first day or corrupt snapshot). A negative delta already carries its own `-` sign. */
+export function formatStatuslineDeltaSuffix(delta: number | null | undefined): string {
+  if (delta == null) return ''
+  if (delta > 0) return ` (▲+${delta} vs yesterday)`
+  if (delta < 0) return ` (▼${delta} vs yesterday)`
+  return ` (±0 vs yesterday)`
+}
+
+/**
+ * Format the Claude Code statusline poll volume as a Discord section (#918; #944 cohort-split).
+ * Empty string when unavailable (SQL API not configured) OR the 24h grand total is 0, so the caller
+ * skips it. Renders TWO cohorts on separate lines instead of one blended total (#944):
+ *   • Server-render (#918) — path-tagged presets, the adoption signal we want to GROW (+ per-preset
+ *     breakdown, highest-first).
+ *   • Legacy/untagged (apex proxy) — the `?src=statusline-proxy` catch-all: pre-#918 jq installs PLUS
+ *     any other apex /api/status/cached traffic. NOT a pure adoption signal (it never fully migrates
+ *     to zero while the apex rewrite exists), so labelled neutrally — no "migrating" trend claim.
+ * Each carries a day-over-day delta (▲/▼ vs yesterday) when a baseline exists. Counts are WAE
+ * sampling estimates (SUM(_sample_interval)), shown with `~`; the day-over-day step-up is the signal,
+ * not absolute precision. A poll ≈ active-usage proxy (re-renders per prompt), NOT a user count. Pure.
+ */
+export function formatStatuslineTrafficSection(
+  statusline: DailySummaryData['statuslineTraffic'],
+): string {
+  if (!statusline || statusline.total <= 0) return ''
+  const delta = statusline.delta
+  const breakdown = Object.entries(statusline.byPreset)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([preset, n]) => `${preset} ${n}`)
+    .join(' · ')
+  const lines = [
+    `\n📟 **Statusline Polls (Claude Code)**`,
+    `   Server-render (#918): ~${statusline.serverRenderTotal}${formatStatuslineDeltaSuffix(delta?.serverRender)}`,
+  ]
+  if (breakdown) lines.push(`     ${breakdown}`)
+  if (statusline.legacyProxy > 0) {
+    lines.push(`   Legacy/untagged (apex proxy): ~${statusline.legacyProxy}${formatStatuslineDeltaSuffix(delta?.legacyProxy)}`)
+  }
+  return lines.join('\n')
+}
+
+/**
+ * Format the Claude Code PLUGIN usage as a Discord section (#920). Empty string when unavailable
+ * (SQL API not configured) OR both counts are 0, so the caller skips it until the plugin sees
+ * adoption. Shows the last-24h background-monitor poll volume + on-demand /aiwatch briefings.
+ * WAE sampling estimates (shown with `~`); the day-over-day step-up is the signal. A poll ≈
+ * active-usage proxy (the monitor polls every 60s while a session is open), NOT a user count. Pure.
+ */
+export function formatPluginTrafficSection(
+  plugin: DailySummaryData['pluginTraffic'],
+): string {
+  if (!plugin || (plugin.monitor <= 0 && plugin.brief <= 0)) return ''
+  const parts: string[] = []
+  if (plugin.monitor > 0) parts.push(`~${plugin.monitor} monitor polls`)
+  if (plugin.brief > 0) parts.push(`~${plugin.brief} /aiwatch briefings`)
+  return `\n🧩 **Plugin (Claude Code)**\n   Last 24h: ${parts.join(' · ')}`
 }
 
 /**

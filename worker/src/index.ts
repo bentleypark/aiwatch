@@ -3,11 +3,15 @@
 // Uses KV cache to serve last-known-good data on fetch failures
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
+import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, type SuppressionEntry } from './suppression'
+import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
-import { analyzeIncident, analyzeWithSonnet, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, shouldSkipInitialAnalysis, type AIAnalysisResult } from './ai-analysis'
-import { kvPut, kvDel, detectComponentMismatches, isCacheStale, formatDuration, isAllowedAlertWebhook, countsAsUptimeOk } from './utils'
+import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
+import type { AnthropicOutcome } from './anthropic'
+import { kvPut, kvDel, detectComponentMismatches, diffPageComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
+import { markIncidentResolved } from './recovery-mark'
 import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForAlert, type AlertFeedEntry } from './alert-feed'
@@ -16,9 +20,9 @@ import { refreshStatusCacheOnChange } from './cache-refresh'
 import { pingIndexNow } from './indexnow'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
 import { corsHeaders, matchOrigin } from './cors'
-import { buildStatuslinePayload, isStatuslineRequest } from './statusline'
+import { buildStatuslinePayload, isStatuslineRequest, renderStatuslinePreset, isStatuslinePreset, renderStatuslineBrief, renderStatuslineDownList } from './statusline'
 import { buildExtClaudePayload, isExtClaudeRequest, EXT_CLAUDE_IDS } from './ext-claude'
-import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, queryExtTraffic, countNewFeedItems } from './api-traffic'
+import { recordV1Traffic, queryV1Traffic, recordFeedTraffic, queryFeedTraffic, queryExtTraffic, queryStatuslineTraffic, queryPluginTraffic, countNewFeedItems, computeStatuslineDelta, serializeStatuslineSnapshot } from './api-traffic'
 import { EDGE_FALLBACK_ALERT_TTL_S, EDGE_FALLBACK_ALERT_KEY_PREFIX } from './edge-fallback-alert-keys'
 import { DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_TTL_S, type FlashdutyFeed, type StoredFlashdutyFeed } from './parsers/flashduty'
 import { maybeDispatchDeepseekFeed } from './deepseek-dispatch'
@@ -431,6 +435,30 @@ async function sendDiscordAlert(webhookUrl: string, embed: { title: string; desc
   }
 }
 
+// #936 — send a PLAIN-TEXT operator message (no embed). Used for the mobile-copyable tweet-reply
+// draft: a ``` code block inside an embed only gets Discord's one-click Copy button on DESKTOP, and
+// mobile long-press copies the whole embed (useless). A standalone plain message lets mobile "Copy
+// Text" grab exactly the reply, clean for pasting into a tweet. `flags: 4` = SUPPRESS_EMBEDS so the
+// is-down link in the reply doesn't unfurl a card under the copyable text. Operator channel only.
+async function sendDiscordMessage(webhookUrl: string, content: string): Promise<boolean> {
+  try {
+    const resp = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, flags: 4 }),
+    })
+    if (!resp.ok) {
+      console.error(`[discord] reply message returned ${resp.status}: ${await resp.text().catch(() => '')}`)
+      return false
+    }
+    resp.body?.cancel()
+    return true
+  } catch (err) {
+    console.error('[discord] reply message failed:', err instanceof Error ? err.message : err)
+    return false
+  }
+}
+
 // #778 — operator phone push for a Tier-1-family NEW down/degraded incident (ntfy.sh). The `Click`
 // header makes tapping the notification open the X "is {service} down" Top search directly → the
 // operator replies to the viral tweet within the short window. Fail-soft: no NTFY_TOPIC secret → skip
@@ -534,6 +562,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // Does NOT write to KV — cache writes are handled exclusively by /api/status handler's cacheWrite()
   // so the 10-min KV write throttle keeps us well inside the Workers Paid 1M writes/month inclusion.
   let cronProbes: ProbeSnapshot[] = []
+  // #992 — per-page raw components from the live fetch, for the new-component detector below. Only
+  // populated on a stale-triggered live fetch (a fresh-cache cycle skips detection — it runs next cycle).
+  let cronPageComponents: Record<string, Array<{ id: string; name: string }>> = {}
   if (stale) {
     try {
       // Read probe data for cross-validation of status page failures
@@ -541,10 +572,11 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       if (probeRaw) {
         try { cronProbes = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[cron] probe24h parse failed:', err instanceof Error ? err.message : err) }
       }
-      const { raw: freshServices } = await fetchAllServices(env.STATUS_CACHE, cronProbes)
+      const { raw: freshServices, pageComponents } = await fetchAllServices(env.STATUS_CACHE, cronProbes)
       if (freshServices.length > 0) {
         services = freshServices
       }
+      cronPageComponents = pageComponents
     } catch (err) {
       console.error('[cron] live fetch failed, using stale cache:', err instanceof Error ? err.message : err)
       // Fall through with whatever we have (stale data better than nothing for alerts)
@@ -624,6 +656,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   for (const svc of scored) {
     const config = SERVICES.find(c => c.id === svc.id)
     for (const inc of svc.incidents ?? []) {
+      // One clock per incident: the flap-escape (#983) and the first-seen hold window (#835) must
+      // agree on "now", and re-reading Date.now() between them would let them disagree by ms.
+      const nowMs = Date.now()
       const wasAlerted = await env.STATUS_CACHE.get(`alerted:new:${inc.id}`).catch(() => null)
       if (wasAlerted) {
         let set = alertedNewMap.get(inc.id)
@@ -632,10 +667,17 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
         if (corrupt) console.warn('[cron] #545 corrupt alerted:new roster, treating as legacy:', inc.id, wasAlerted.slice(0, 80))
         for (const id of ids) set.add(id)
       }
-      if (config && isFlapSuppressible(svc.id, config, inc)) {
+      if (config && isFlapSuppressible(svc.id, config, inc, nowMs)) {
         const flapKey = flapSuppressionKey(svc.id, inc)
         const flapActive = await env.STATUS_CACHE.get(flapKey).catch(() => null)
-        if (flapActive) suppressedIncIds.add(inc.id)
+        if (flapActive) {
+          // #983 — leave a forensic trail. Suppression drops BOTH the New and the Resolved alert, so
+          // without this line a post-incident triage cannot tell "AIWatch suppressed it" from
+          // "AIWatch never saw it" (the #970 silent-drop forensics gap). Tagged auto-monitor incidents
+          // are the ones whose `major` impact no longer protects them, so name the tag explicitly.
+          console.log('[cron] #283/#983 flap-suppressed (same-title window active):', svc.id, inc.id, `autoMonitor=${inc.autoMonitor === true}`, JSON.stringify(inc.title.slice(0, 60)))
+          suppressedIncIds.add(inc.id)
+        }
         else flapKeysToWrite.set(inc.id, flapKey)
       }
       // #633 — hold a flap-shaped new incident on its first sight (no pending marker from a prior
@@ -649,7 +691,6 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
         // is worse than one phantom on a transient KV blip (preserves the prior fail-not-hold).
         // A legacy '1' marker (pre-#835) parses to 1 → age huge → fires immediately — a safe one-time
         // transition (no in-flight incident gets stuck held across the deploy).
-        const nowMs = Date.now()
         const pendingRaw = await env.STATUS_CACHE.get(pendingNewKey(inc.id)).catch((err) => {
           console.warn('[cron] #835 pending:new read failed — failing open (will not hold):', inc.id, err instanceof Error ? err.message : err)
           return '0'
@@ -885,36 +926,37 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
             console.log(`[cron] skipping initial AI analysis for ${svc.id}:${inc.id}: ${skipReason}`)
           } else {
             try {
-              const today = new Date().toISOString().split('T')[0]
-              const usageKey = `ai:usage:${today}`
-              const usageRaw = await env.STATUS_CACHE.get(usageKey).catch(() => null)
-              const usage = usageRaw ? JSON.parse(usageRaw) : { calls: 0, success: 0, failed: 0, gemma: 0, sonnet: 0 }
-              usage.calls++
-              const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))
               // #827 Feature 2 — RAG grounding from this service's durable incident history.
               const svcHistory = await readIncidentHistory(env.STATUS_CACHE, svc.id)
-              const analysis = await Promise.race([
-                analyzeIncident(env.ANTHROPIC_API_KEY ?? '', svc.name, { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline }, svc.incidents ?? [], undefined, env.AI, svcHistory),
-                timeout,
-              ])
-              if (analysis) {
-                usage.success++
-                if (analysis.model === 'gemma') usage.gemma = (usage.gemma ?? 0) + 1
-                else if (analysis.model === 'sonnet') usage.sonnet = (usage.sonnet ?? 0) + 1
+              // #955 Part 2 — a REAL, cancellable budget (see `analyzeIncidentWithBudget`).
+              const attempt = await analyzeIncidentWithBudget(
+                env.STATUS_CACHE, env.ANTHROPIC_API_KEY, env.AI, svc.name,
+                { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline },
+                svc.incidents ?? [], svcHistory,
+              )
+              if (attempt.result) {
                 // #299: preserve sticky operator overrides written between cycles.
                 const stickyRaw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
                 const skipWrite = isStickyExistingAnalysis(stickyRaw)
                 if (skipWrite) console.log(`[cron] Preserving sticky analysis for ${svc.id}:${inc.id}; not overwriting`)
-                const kvOk = skipWrite
-                  ? true
-                  : await kvPut(env.STATUS_CACHE, analysisKey(svc.id, inc.id), JSON.stringify(analysis), { expirationTtl: 3600 })
-                if (kvOk) analysisSection = formatAnalysisEmbedSection(analysis, DIV)
+                // #1003 — the incident's first sighting, so this estimate is normally THE baseline;
+                // `putAnalysis` pins it durably (and lets a non-sticky prior, e.g. an expired-then-
+                // rewritten analysis, keep its original bound).
+                const written = skipWrite
+                  ? null
+                  : await putAnalysis(env.STATUS_CACHE, svc.id, inc.id, attempt.result, parseAnalysis(stickyRaw), 3600)
+                // Section only when the sticky prior stands, or the write actually landed (as before:
+                // an embed advertising an analysis no reader can fetch is worse than none).
+                const analysis = skipWrite ? attempt.result : (written?.ok ? written.pinned : null)
+                if (analysis) analysisSection = formatAnalysisEmbedSection(analysis, DIV)
               } else {
-                usage.failed++
+                console.warn(`[cron] inline AI analysis produced nothing (${attempt.failure}) for ${svc.id}:${inc.id}`)
               }
-              await kvPut(env.STATUS_CACHE, usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
             } catch (err) {
+              // Only `readIncidentHistory` / the sticky KV read can reach here — the analysis
+              // itself never throws and books its own usage.
               console.error('[cron] AI analysis failed:', err instanceof Error ? err.message : err)
+              await recordUsage(env.STATUS_CACHE, Date.now(), { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } })
             }
           }
         }
@@ -1023,32 +1065,21 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       // resolves ≥2 incidents in a cycle (the per-incId recovered: markers below use distinct
       // keys, so they're safe to race).
       const historyRecords: IncidentHistoryRecord[] = []
-      await Promise.all(incidents.map(async (inc) => {
-        // Independent recovery marker (works even without AI analysis)
-        const duration = inc.startedAt ? formatDuration(new Date(inc.startedAt), new Date(now)) : undefined
-        const recoveredOk = await kvPut(env.STATUS_CACHE, `recovered:${svcId}:${inc.id}`, JSON.stringify({
-          resolvedAt: now,
-          incidentTitle: inc.title ?? '',
-          duration: duration ?? '',
-        }), { expirationTtl: 7200 })
-        if (!recoveredOk) console.error('[cron] failed to write recovery marker:', svcId, inc.id)
-        // Also mark AI analysis as resolved if it exists (kept for the #827 history record below)
-        const key = analysisKey(svcId, inc.id)
-        const analysisRaw = await env.STATUS_CACHE.get(key).catch(() => null)
-        let analysis: AIAnalysisResult | null = null
-        if (analysisRaw) {
-          try {
-            analysis = JSON.parse(analysisRaw) as AIAnalysisResult
-            if (!analysis.resolvedAt) {
-              analysis.resolvedAt = now
-              await kvPut(env.STATUS_CACHE, key, JSON.stringify(analysis), { expirationTtl: 7200 })
-            }
-          } catch (err) {
-            console.warn('[kv] ai:analysis parse failed during recovery mark:', svcId, inc.id, err instanceof Error ? err.message : err)
-            await kvDel(env.STATUS_CACHE, key)
-            analysis = null
-          }
-        }
+      // #1003 — only TERMINAL incidents may be marked resolved. This map used to run over EVERY
+      // incident on the service, so an operational service still carrying an ACTIVE one (an
+      // `incidentExclude`d entry, a maintenance notice, a component mapping to nothing monitored)
+      // had `resolvedAt` stamped on a live analysis. That was invisible before — nothing read the
+      // stamp on the normal path — but now it is exactly what flips a surface into "resolved":
+      // the modal/is-down would render a predicted-vs-actual verdict for an incident still running,
+      // and suppress the "past estimate" wording that belongs there. `buildHistoryRecord` already
+      // gates on these two statuses, and the `alerted:res:` path is resolved-only by construction —
+      // so this also makes the two paths structurally symmetric.
+      const terminal = incidents.filter(i => i.status === 'resolved' || i.status === 'monitoring')
+      await Promise.all(terminal.map(async (inc) => {
+        // The recovery marker + the analysis `resolvedAt` stamp are the two writes every
+        // resolved-incident READ surface is gated on; `markIncidentResolved` is the shared step both
+        // cron resolution paths call, so they can't drift again (see recovery-mark.ts).
+        const analysis = await markIncidentResolved(env.STATUS_CACHE, svcId, inc, now)
         // #827 Phase 1 keystone — durable record joining the AI prediction (when an analysis
         // existed) with the actual outcome. buildHistoryRecord gates terminal states + measures
         // duration to inc.resolvedAt; null = skip. Collected here, written once below.
@@ -1089,40 +1120,47 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     // outer `for (const alert of sent)` loop is sequential, so per-svcId appendIncidentHistoryBatch RMWs
     // across sibling alerts don't race (mirrors why the alerted:recovered: block batches).
     if (alert.key.startsWith('alerted:res:')) {
-      const incId = alert.key.slice('alerted:res:'.length)
       const now = new Date().toISOString()
       const affectedIds = alert.svcIds ?? []
       const primaryId = affectedIds[0]
+      // #1003 — a COLLAPSED resolved alert (merged xAI regions / Together models) carries EVERY merged
+      // incident's key in `_mergedKeys` (a replacement list — `_mergedKeys[0] === alert.key`; see
+      // alerts.ts `mergeTogetherAlerts`/`mergeXaiRegionalAlerts`), while `alert.key` alone is just the
+      // first. Processing only `alert.key` left every other merged incident with no marker, no
+      // `resolvedAt` stamp and no corpus record — a 3-region xAI resolution lit the banner for one
+      // incident and left the other two invisible. `?? [alert.key]` is the repo-wide idiom for this.
+      const incIds = (alert._mergedKeys ?? [alert.key])
+        .filter(k => k.startsWith('alerted:res:'))
+        .map(k => k.slice('alerted:res:'.length))
+      const primaryIncId = incIds[0]
       for (const svcId of affectedIds) {
-        try {
-          const svc = scored.find(s => s.id === svcId)
-          const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : undefined
-          if (!svc || !inc) continue
-          const analysisK = analysisKey(svc.id, inc.id)
-          const raw = await env.STATUS_CACHE.get(analysisK).catch(() => null)
-          let analysis: AIAnalysisResult | null = null
-          if (raw) {
-            try {
-              analysis = JSON.parse(raw) as AIAnalysisResult
-            } catch (err) {
-              // Mirror the sibling alerted:recovered: block (a corrupt ai:analysis value is a
-              // data-integrity signal worth a trace, not a silent null) — log + drop the poisoned key.
-              console.warn('[kv] ai:analysis parse failed during resolved corpus write:', svc.id, inc.id, err instanceof Error ? err.message : err)
-              await kvDel(env.STATUS_CACHE, analysisK)
-              analysis = null
+        // Collect this service's records across every merged incident, then write them in ONE batched
+        // RMW — the same lost-update guard the status-edge block uses on `incident:history:{svcId}`.
+        const records: IncidentHistoryRecord[] = []
+        const svc = scored.find(s => s.id === svcId)
+        for (const incId of incIds) {
+          try {
+            const inc = svc ? (svc.incidents ?? []).find(i => i.id === incId) : undefined
+            if (!svc || !inc) continue
+            // #1003 — THIS is the path a normal incident resolution takes, and it never wrote the two
+            // things the read surfaces need: the `recovered:` marker (the "Recently Resolved" banner)
+            // and `resolvedAt` on the analysis (the modal + is-down "Predicted vs actual" verdict).
+            // Both were written only by the rarely-firing status-edge block above, which is why those
+            // three surfaces effectively never appeared while Discord and /feed worked fine.
+            const analysis = await markIncidentResolved(env.STATUS_CACHE, svc.id, inc, now)
+            // #847 — durable corpus record joining prediction + actual outcome (best-effort, idempotent).
+            const rec = buildHistoryRecord(svc, inc, analysis, now)
+            if (rec) records.push(rec)
+            // #846 — ONE prediction line for the embed: primary service, primary incident.
+            if (svcId === primaryId && incId === primaryIncId && !recoverySection) {
+              const line = resolvedPredictionLine(analysis, inc)
+              if (line) recoverySection = `\n${DIV}\n${line}`
             }
+          } catch (err) {
+            console.warn('[cron] #846/#847 resolved corpus/prediction failed (alert still sent):', svcId, incId, err instanceof Error ? err.message : err)
           }
-          // #847 — durable corpus record joining prediction + actual outcome (best-effort, idempotent).
-          const rec = buildHistoryRecord(svc, inc, analysis, now)
-          if (rec) await appendIncidentHistoryBatch(env.STATUS_CACHE, svc.id, [rec])
-          // #846 — one prediction line for the embed, from the primary service only.
-          if (svcId === primaryId && !recoverySection) {
-            const line = resolvedPredictionLine(analysis?.estimatedRecoveryHours, inc)
-            if (line) recoverySection = `\n${DIV}\n${line}`
-          }
-        } catch (err) {
-          console.warn('[cron] #846/#847 resolved corpus/prediction failed (alert still sent):', svcId, incId, err instanceof Error ? err.message : err)
         }
+        if (records.length > 0) await appendIncidentHistoryBatch(env.STATUS_CACHE, svcId, records)
       }
     }
 
@@ -1145,7 +1183,9 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     // #422 — region-switch hint below the cross-service fallback. Cheaper first-line
     // action (same SDK/IAM) when the outage is region-specific with healthy regions left.
     if (alert.regionText) parts.push(`${DIV}\n${alert.regionText}`)
-    parts.push(`${DIV}\n[View on AIWatch](${alert.url})`)
+    // #936 — tag the primary CTA so alert clicks attribute to `discord/notification` instead of
+    // collapsing to (direct). The per-user relay rewrites this to a tagged is-down link (toPerUserEntry).
+    parts.push(`${DIV}\n[View on AIWatch](${appendUtm(alert.url, 'discord')})`)
     const description = parts.join('\n')
     // #475 invariant: the per-user relay feed must use the CLEAN description — build it before the
     // operator-only tweet draft is appended, so the draft (an operator action) never reaches a
@@ -1188,6 +1228,17 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       description: operatorDescription,
       color: alert.color,
     })
+    // #936 — send the tweet-reply draft as its OWN plain-text operator message right below the embed so
+    // it's one-tap copyable on Discord MOBILE (the embed code block only copies cleanly on desktop; the
+    // embed now just points here). Operator channel ONLY (never the per-user relay). Fully isolated: a
+    // failure here must never affect the alert already sent above. `reply` is already defused (#539).
+    if (reply) {
+      try {
+        await sendDiscordMessage(env.DISCORD_WEBHOOK_URL, reply.text)
+      } catch (err) {
+        console.error('[cron] reply copy message failed (operator alert sent):', alert.key, err instanceof Error ? err.message : err)
+      }
+    }
     // #778 — operator phone push for a Tier-1-family NEW down/degraded incident, so the short (~1–2h)
     // reply window isn't missed when the Discord channel is buried. Gated + scoped by pushTargetFor;
     // the Click target is the same #777 Top-search URL (push → tap → viral tweets). Fires AFTER the
@@ -1351,7 +1402,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   const activeServices = scored.filter(s =>
     (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring')
   )
-  await refreshOrReanalyze(activeServices, env.STATUS_CACHE, env.ANTHROPIC_API_KEY, analyzeIncident, 2, Date.now(), env.AI, heldNewIncIds)
+  await refreshOrReanalyze(activeServices, env.STATUS_CACHE, env.ANTHROPIC_API_KEY, analyzeIncidentDetailed, 2, Date.now(), env.AI, heldNewIncIds)
 
   // Component ID mismatch detection (#135) — alert when statusComponentId is not found
   const mismatches = await detectComponentMismatches(COMPONENT_ID_SERVICES, env.STATUS_CACHE)
@@ -1365,6 +1416,47 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       await kvPut(env.STATUS_CACHE, svc.alertKey, '1', { expirationTtl: 86400 })
     } catch (err) {
       console.error(`[cron] component mismatch alert failed for ${svc.id}:`, err instanceof Error ? err.message : err)
+    }
+  }
+
+  // New status-page component detection (#992) — the inverse of the #135 miss alert: fires once, ever,
+  // when a provider ADDS a component AIWatch has never seen for that page. Bootstraps silently on first
+  // sight (per page), so it never dumps a rich shared page's existing components. Data comes free from
+  // the cron's live prefetch (cronPageComponents); a fresh-cache cycle leaves it empty and just skips.
+  for (const [apiUrl, components] of Object.entries(cronPageComponents)) {
+    try {
+      // Fail-CLOSED on a KV read error: a transient get() fault must NOT be read as "first sight"
+      // (which bootstraps silently + overwrites the durable snapshot, permanently dropping the
+      // one-shot alert). Distinguish a genuinely-absent key (→ bootstrap) from a read that threw
+      // (→ skip this page this cycle, retry next cron with the real snapshot).
+      let readFailed = false
+      const seenRaw = await env.STATUS_CACHE.get(`component-seen:${apiUrl}`).catch(() => { readFailed = true; return null })
+      if (readFailed) continue
+      let seen: string[] | null = null
+      if (seenRaw !== null) {
+        // corrupt snapshot → treat as empty (re-alerts current components, never bootstraps a page we
+        // already watched); warn so the rare event is observable rather than silent.
+        try { seen = JSON.parse(seenRaw) } catch { console.warn(`[cron] corrupt component-seen snapshot for ${apiUrl} — re-alerting current components`); seen = [] }
+      }
+      const { newComponents, nextSeen, bootstrap } = diffPageComponents(components, seen)
+      if (bootstrap) {
+        await kvPut(env.STATUS_CACHE, `component-seen:${apiUrl}`, JSON.stringify(nextSeen)) // no TTL — a page's component identity is durable
+        continue
+      }
+      if (newComponents.length === 0) continue // nextSeen == seen → no write (KV budget)
+      const pageSvcs = SERVICES.filter(s => s.apiUrl === apiUrl)
+      const dynamic = pageSvcs.some(s => s.displayAllComponents)
+      const sent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+        title: `🆕 New status-page component${newComponents.length === 1 ? '' : 's'}: ${pageSvcs.map(s => s.name).join(', ') || apiUrl}`,
+        description: formatNewComponentAlert(pageSvcs.map(s => s.name), newComponents, dynamic),
+        color: 0x3B82F6,
+      })
+      // Persist ONLY after a CONFIRMED send — sendDiscordAlert returns false (does NOT throw) on a
+      // webhook failure, so gating the write on `sent` makes a Discord hiccup retry next cron instead
+      // of silently marking the component seen and dropping the one-shot alert.
+      if (sent) await kvPut(env.STATUS_CACHE, `component-seen:${apiUrl}`, JSON.stringify(nextSeen))
+    } catch (err) {
+      console.error(`[cron] new-component detection failed for ${apiUrl}:`, err instanceof Error ? err.message : err)
     }
   }
 
@@ -1393,13 +1485,14 @@ import { detectSecurityAlerts, fetchOSVAlerts, formatSecurityDigest, securityDet
 import { detectNewRepos, formatGitHubAlert } from './competitive'
 import { buildDailySummary, isInSummaryWindow, classifyDegradation } from './daily-summary'
 import { collectChangelogs, getStaleSources } from './changelog'
-import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek } from './weekly-briefing'
+import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings, parseStrategyBrief } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { parseReferralBody, recordReferral, type ReferralCounts } from './referral'
+import { buildGrowthDailyRow, recordGrowthDaily } from './growth-series'
 import { parsePageviewBody, recordOutageView, queryOutageAudience, type AudienceCounts } from './outage-audience'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
-import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
+import { buildMonthlyArchive, isInMonthlyArchiveWindow, accumulateIncidentsOnlyIfChanged, buildPartialIncidentArchive, filterSuppressedFromMonthly, buildArchiveReadyEmbed, archiveNotifiedKey, degradationMonthlyKey, addDegradationToMonthly, normalizeDegradationMonthly, DEGRADATION_MONTHLY_TTL_SECONDS, type ArchiveScoreInput, type ScoreGrade, type MonthlyIncidents } from './monthly-archive'
 import { checkPlatformStatus, formatPlatformOutageAlert, formatPlatformRecoveryAlert, platformStatusKey, platformAlertKey, countPlatformServices, type PlatformStatus } from './platform-monitor'
 
 // ── #299: sticky-aware analysis write ─────────────────────────
@@ -1544,57 +1637,71 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
   }, similar)
   const timelineAt = incident.timeline?.at(-1)?.at ?? ''
 
-  let analysis: AIAnalysisResult | null
+  // #955 — the operator reaches for this endpoint precisely WHEN the automated path is broken,
+  // so it must not repeat the bug it exists to work around: report the upstream status + detail
+  // rather than a bare "returned null", and book the failure into ai:usage like every other path.
+  let attempt: AnalysisAttempt
+  // Extra diagnostics for the sonnet path — `outcome` carries the upstream status + body.
+  let sonnetOutcome: AnthropicOutcome | null = null
   try {
     if (model === 'sonnet') {
-      analysis = await analyzeWithSonnet(env.ANTHROPIC_API_KEY, prompt, incident.id, timelineAt)
+      const { result, outcome } = await analyzeWithSonnetDetailed(env.ANTHROPIC_API_KEY ?? '', prompt, incident.id, timelineAt)
+      sonnetOutcome = outcome
+      const failure: AnalysisFailureKind | null = result
+        ? null
+        : outcome.kind === 'transient' ? 'transient' : outcome.kind === 'aborted' ? 'aborted' : 'permanent'
+      attempt = { result, failure, attempts: { gemma: 0, sonnet: 1 } }
     } else {
-      // Gemma path: go via analyzeIncident (tries Gemma first, falls back to Sonnet).
+      // Gemma path: go via analyzeIncidentDetailed (tries Gemma first, falls back to Sonnet).
       // The operator picked 'gemma' explicitly, but if Workers AI returns null we'd
       // rather ship a Sonnet result than error out.
-      analysis = await analyzeIncident(env.ANTHROPIC_API_KEY, service.name, {
+      attempt = await analyzeIncidentDetailed(env.ANTHROPIC_API_KEY, service.name, {
         id: incident.id, title: incident.title, status: incident.status,
         startedAt: incident.startedAt, impact: incident.impact, timeline: incident.timeline,
       }, service.incidents ?? [], undefined, env.AI, await readIncidentHistory(env.STATUS_CACHE, service.id))
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'analysis failed'
+    await recordUsage(env.STATUS_CACHE, Date.now(), { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } })
     return json(502, { ok: false, error: 'analysis failed', detail: message })
   }
 
+  const analysis = attempt.result
   if (!analysis) {
-    return json(502, { ok: false, error: 'analysis returned null — upstream model error or unparseable response' })
+    // Book the failure like every other path, then tell the operator WHY — a bare
+    // "returned null" is what made the retired model id so hard to find in the first place.
+    await recordUsage(env.STATUS_CACHE, Date.now(), attempt)
+    const upstream = sonnetOutcome && (sonnetOutcome.kind === 'permanent' || sonnetOutcome.kind === 'transient')
+      ? { status: sonnetOutcome.status, detail: sonnetOutcome.detail }
+      : {}
+    return json(502, {
+      ok: false,
+      error: 'analysis returned null — upstream model error or unparseable response',
+      kind: attempt.failure,
+      ...upstream,
+    })
   }
 
   if (sticky) analysis.sticky = true
 
+  // Bump ai:usage:{date} so the Daily Summary attributes the manual call. Routed through the
+  // shared `recordUsage`/`applyAttempt` (#955) so the manual path books attempt counts too and
+  // cannot drift from the cron's ledger. Bookkeeping — never fails the request.
+  //
+  // Booked BEFORE the KV persist: the model call already happened and already cost money, so a
+  // failed persist must not erase it from the ledger. "A call happened but the ledger doesn't
+  // show it" is the exact class of blindness #955 exists to remove.
+  await recordUsage(env.STATUS_CACHE, Date.now(), attempt)
+
   const key = analysisKey(svcId, incidentId)
   const ttl = 3600
-  try {
-    await env.STATUS_CACHE.put(key, JSON.stringify(analysis), { expirationTtl: ttl })
-  } catch (err) {
-    return json(502, { ok: false, error: 'KV write failed', detail: err instanceof Error ? err.message : String(err) })
-  }
+  // #1003 — an operator re-analysis re-estimates a live incident too, so it must not rewrite the
+  // scoring baseline: `putAnalysis` pins the first estimate exactly as the cron's paths do.
+  const prior = parseAnalysis(await env.STATUS_CACHE.get(key).catch(() => null))
+  const written = await putAnalysis(env.STATUS_CACHE, svcId, incidentId, analysis, prior, ttl)
+  if (!written.ok) return json(502, { ok: false, error: 'KV write failed', detail: written.error })
 
-  // Bump ai:usage:{date} counter so the Daily Summary attributes the manual call.
-  // Match the shape used elsewhere: { calls, success, failed, gemma?, sonnet? }.
-  try {
-    const today = new Date().toISOString().slice(0, 10)
-    const usageKey = `ai:usage:${today}`
-    const raw = await env.STATUS_CACHE.get(usageKey).catch(() => null)
-    const usage: { calls: number; success: number; failed: number; gemma?: number; sonnet?: number } =
-      raw ? JSON.parse(raw) : { calls: 0, success: 0, failed: 0 }
-    usage.calls++
-    usage.success++
-    if (analysis.model === 'gemma') usage.gemma = (usage.gemma ?? 0) + 1
-    else if (analysis.model === 'sonnet') usage.sonnet = (usage.sonnet ?? 0) + 1
-    await env.STATUS_CACHE.put(usageKey, JSON.stringify(usage), { expirationTtl: 172800 })
-  } catch (err) {
-    // Counter is bookkeeping — don't fail the request over it.
-    console.warn('[admin/analyze] ai:usage counter bump failed:', err instanceof Error ? err.message : err)
-  }
-
-  return json(200, { ok: true, wrote: key, ttl, analysis })
+  return json(200, { ok: true, wrote: key, ttl, analysis: written.pinned })
 }
 
 // ── POST /api/internal/edge-fallback ───────────────────────────
@@ -1758,7 +1865,7 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
       const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'admin/rebuild-archive')
       scoreData = services.map((s) => {
         const r = scoreFor(s, probeSummaries)
-        return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade, officialUptime: s.uptime30d ?? null, ...(s.incidentSourceStale ? { incidentSourceStale: true } : {}) }
+        return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade, scoreConfidence: r.confidence, ...(s.incidentSourceStale ? { incidentSourceStale: true } : {}) }
       })
       for (const s of services) serviceNames[s.id] = s.name
     } catch (parseErr) {
@@ -1797,6 +1904,123 @@ async function handleAdminRebuildArchive(request: Request, env: Env, cors: Recor
     daysCollected: archive.daysCollected,
     servicesWithScore: scoreData.filter(s => s.aiwatchScore !== null).length,
   })
+}
+
+// ── #904: GET/POST /api/admin/suppress ───────────────────────────
+// Operator-managed incident-suppression list (see suppression.ts). GET returns the current list;
+// POST { action:'add'|'remove', scope:'incident'|'service-pattern', incId? | (svcId?+match?), reason? }
+// mutates it. Auth via X-Admin-Key (same ADMIN_API_KEY as /api/admin/analyze). The pure add/remove
+// logic lives in mutateSuppressions; this wraps it with auth + KV read/write + cache invalidation.
+interface AdminSuppressRequest {
+  action?: unknown
+  scope?: unknown
+  incId?: unknown
+  svcId?: unknown
+  match?: unknown
+  reason?: unknown
+}
+
+async function handleAdminSuppress(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+
+  if (!env.ADMIN_API_KEY) return json(401, { ok: false, error: 'unauthorized' })
+  const provided = request.headers.get('X-Admin-Key') ?? ''
+  if (!constantTimeEqual(provided, env.ADMIN_API_KEY)) return json(401, { ok: false, error: 'unauthorized' })
+  if (!env.STATUS_CACHE) return json(503, { ok: false, error: 'Service unavailable' })
+
+  let current: SuppressionEntry[]
+  try {
+    const raw = await env.STATUS_CACHE.get(SUPPRESSIONS_KEY)
+    current = raw ? normalizeSuppressions(JSON.parse(raw)) : []
+  } catch (err) {
+    console.error('[admin/suppress] KV read failed:', err instanceof Error ? err.message : err)
+    return json(502, { ok: false, error: 'failed to read suppression list' })
+  }
+
+  if (request.method === 'GET') return json(200, { ok: true, suppressions: current })
+
+  let body: AdminSuppressRequest
+  try { body = await request.json() } catch { return json(400, { ok: false, error: 'invalid JSON body' }) }
+
+  const result = mutateSuppressions(current, {
+    action: body.action === 'remove' ? 'remove' : body.action === 'add' ? 'add' : ('' as 'add'),
+    scope: body.scope === 'incident' ? 'incident' : body.scope === 'service-pattern' ? 'service-pattern' : ('' as 'incident'),
+    incId: typeof body.incId === 'string' ? body.incId : undefined,
+    svcId: typeof body.svcId === 'string' ? body.svcId : undefined,
+    match: typeof body.match === 'string' ? body.match : undefined,
+    reason: typeof body.reason === 'string' ? body.reason : undefined,
+    by: 'admin',
+    createdAt: new Date().toISOString(),
+  })
+  if (!result.ok) return json(400, { ok: false, error: result.error })
+
+  if (result.changed) {
+    try {
+      await env.STATUS_CACHE.put(SUPPRESSIONS_KEY, JSON.stringify(result.list))
+    } catch (err) {
+      console.error('[admin/suppress] KV write failed:', err instanceof Error ? err.message : err)
+      return json(502, { ok: false, error: 'failed to write suppression list' })
+    }
+    invalidateSuppressionCache() // this isolate reflects the change immediately; others within ≤60s
+  }
+  return json(200, { ok: true, changed: result.changed, suppressions: result.list })
+}
+
+// ── #1019: GET/POST /api/admin/duration-override ──────────────────
+// Operator-managed incident duration-override list (see overrides.ts). GET returns the current list;
+// POST { action:'add'|'remove', id, durationMin?, reason? } mutates it. Auth via X-Admin-Key (same
+// ADMIN_API_KEY). Pure add/remove logic lives in mutateOverrides; no cache to invalidate (the apply
+// sites read fresh). Corrects a paperwork-inflated duration WITHOUT hiding the incident.
+interface AdminOverrideRequest {
+  action?: unknown
+  id?: unknown
+  durationMin?: unknown
+  reason?: unknown
+}
+
+async function handleAdminOverride(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+
+  if (!env.ADMIN_API_KEY) return json(401, { ok: false, error: 'unauthorized' })
+  const provided = request.headers.get('X-Admin-Key') ?? ''
+  if (!constantTimeEqual(provided, env.ADMIN_API_KEY)) return json(401, { ok: false, error: 'unauthorized' })
+  if (!env.STATUS_CACHE) return json(503, { ok: false, error: 'Service unavailable' })
+
+  let current: DurationOverride[]
+  try {
+    const raw = await env.STATUS_CACHE.get(OVERRIDES_KEY)
+    current = raw ? normalizeOverrides(JSON.parse(raw)) : []
+  } catch (err) {
+    console.error('[admin/duration-override] KV read failed:', err instanceof Error ? err.message : err)
+    return json(502, { ok: false, error: 'failed to read override list' })
+  }
+
+  if (request.method === 'GET') return json(200, { ok: true, overrides: current })
+
+  let body: AdminOverrideRequest
+  try { body = await request.json() } catch { return json(400, { ok: false, error: 'invalid JSON body' }) }
+
+  const result = mutateOverrides(current, {
+    action: body.action === 'remove' ? 'remove' : body.action === 'add' ? 'add' : ('' as 'add'),
+    id: typeof body.id === 'string' ? body.id : undefined,
+    durationMin: typeof body.durationMin === 'number' ? body.durationMin : undefined,
+    reason: typeof body.reason === 'string' ? body.reason : undefined,
+    by: 'admin',
+    createdAt: new Date().toISOString(),
+  })
+  if (!result.ok) return json(400, { ok: false, error: result.error })
+
+  if (result.changed) {
+    try {
+      await env.STATUS_CACHE.put(OVERRIDES_KEY, JSON.stringify(result.list))
+    } catch (err) {
+      console.error('[admin/duration-override] KV write failed:', err instanceof Error ? err.message : err)
+      return json(502, { ok: false, error: 'failed to write override list' })
+    }
+  }
+  return json(200, { ok: true, changed: result.changed, overrides: result.list })
 }
 
 export default {
@@ -2135,11 +2359,18 @@ export default {
           const currMonthKey = `incidents:monthly:${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
           const prevMonth = new Date(now); prevMonth.setUTCMonth(prevMonth.getUTCMonth() - 1)
           const prevMonthKey = `incidents:monthly:${prevMonth.getUTCFullYear()}-${String(prevMonth.getUTCMonth() + 1).padStart(2, '0')}`
+          // #904 — filter operator-suppressed incidents out of the raw accumulator before summarizing,
+          // else a suppressed incident (e.g. FedRAMP) resurfaces in the weekly Discord incident summary.
+          const weeklySuppressions = await readSuppressionsFresh(env.STATUS_CACHE)
+          const weeklyOverrides = await readOverridesFresh(env.STATUS_CACHE) // #1019
           for (const mk of [currMonthKey, prevMonthKey]) {
             const mRaw = await env.STATUS_CACHE.get(mk).catch(() => null)
             if (!mRaw) continue
             try {
-              allMonthlyIncidents.push(...parseMonthlyIncidents(JSON.parse(mRaw), serviceNameMap))
+              const parsed = JSON.parse(mRaw) as MonthlyIncidents
+              const suppressed = weeklySuppressions.length ? filterSuppressedFromMonthly(parsed, weeklySuppressions) : parsed
+              const filtered = weeklyOverrides.length ? applyDurationOverrides(suppressed, weeklyOverrides) : suppressed
+              allMonthlyIncidents.push(...parseMonthlyIncidents(filtered, serviceNameMap))
             } catch (err) { console.warn(`[cron] ${mk} parse failed:`, err instanceof Error ? err.message : String(err)) }
           }
           const incidents = buildIncidentSummary(allMonthlyIncidents, weekStart, weekEnd)
@@ -2207,7 +2438,38 @@ export default {
 
           // Per-source last-fetch staleness check — surfaces silent collection gaps (#274)
           const staleSources = await getStaleSources(env.STATUS_CACHE).catch(() => [])
-          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, stabilityDataAvailable, security, staleSources })
+
+          // #995 — AI-analysis usage trend from the retained ai:usage:{date} keys across the week.
+          // parseUsage(null) → zeros, so missing days contribute nothing but keep the window at 7d.
+          let aiUsageTrend = null
+          try {
+            const entries = await Promise.all(
+              weekDateStrings(weekStart, weekEnd).map((dt) => env.STATUS_CACHE.get(`ai:usage:${dt}`).catch(() => null).then(parseUsage)),
+            )
+            aiUsageTrend = summarizeAiUsageTrend(entries)
+          } catch (err) {
+            console.warn('[cron] weekly ai:usage trend read failed:', err instanceof Error ? err.message : err)
+          }
+
+          // #917 — operator-authored strategy status (initiative page Status + Next action). Absent
+          // key → section omitted; present-but-malformed → surface a fix nudge (not a silent drop),
+          // since a broken write is operator error worth showing.
+          let strategyBrief = null
+          let strategyBriefMalformed = false
+          try {
+            const raw = await env.STATUS_CACHE.get('strategy:brief')
+            if (raw) {
+              strategyBrief = parseStrategyBrief(raw)
+              if (!strategyBrief) {
+                strategyBriefMalformed = true
+                console.warn('[cron] weekly strategy:brief present but malformed — briefing shows a fix nudge')
+              }
+            }
+          } catch (err) {
+            console.warn('[cron] weekly strategy:brief read failed:', err instanceof Error ? err.message : err)
+          }
+
+          const briefing = buildWeeklyBriefing({ weekStart, weekEnd, changelog, incidents, stabilityChanges, stabilityDataAvailable, security, staleSources, aiUsageTrend, strategyBrief, strategyBriefMalformed })
           await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
             title: `📋 Weekly Briefing (${weekStart} ~ ${weekEnd})`,
             description: briefing,
@@ -2276,7 +2538,7 @@ export default {
               const probeSummaries = await readProbeSummaries(env.STATUS_CACHE, 'monthly-archive')
               scoreData = services.map((s) => {
                 const r = scoreFor(s, probeSummaries)
-                return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade, officialUptime: s.uptime30d ?? null, ...(s.incidentSourceStale ? { incidentSourceStale: true } : {}) }
+                return { id: s.id, aiwatchScore: r.score, scoreGrade: r.grade, scoreConfidence: r.confidence, ...(s.incidentSourceStale ? { incidentSourceStale: true } : {}) }
               })
               for (const s of services) serviceNames[s.id] = s.name
             } catch (parseErr) {
@@ -2399,19 +2661,32 @@ export default {
 
           // #842 — consent-free outbound-referral counts (is-down "Open ↗" beacon). null on absence/parse fail.
           let referralCounts: ReferralCounts | null = null
+          // #986 — the growth series must tell "nobody clicked" (absent key → 0) apart from "we could
+          // not read it" (throw / malformed → null). A broken day recorded as a quiet day would corrupt
+          // the very lift comparison the series exists for.
+          let referralReadFailed = false
           try {
-            const rRaw = await env.STATUS_CACHE.get(`referral:out:${today}`).catch(() => null)
+            const rRaw = await env.STATUS_CACHE.get(`referral:out:${today}`)
             // Guard BOTH fields: a corrupt value with a non-object byService would throw in formatReferralLine's Object.entries.
-            if (rRaw) { const p = JSON.parse(rRaw); if (p && typeof p.total === 'number' && p.byService && typeof p.byService === 'object') referralCounts = p }
-          } catch (err) { console.warn('[daily-summary] referral read failed:', err instanceof Error ? err.message : err) }
+            if (rRaw) {
+              const p = JSON.parse(rRaw)
+              if (p && typeof p.total === 'number' && p.byService && typeof p.byService === 'object') referralCounts = p
+              else referralReadFailed = true // present but malformed
+            }
+          } catch (err) { referralReadFailed = true; console.warn('[daily-summary] referral read failed:', err instanceof Error ? err.message : err) }
 
           // Count active webhook subscriptions. Since #486 PR3 this is the number of confirmed
           // server-side subscriptions (webhook:sub:*) — the source of truth now that delivery is
           // server-side (replaced the legacy webhook:reg:* count removed with the browser relay).
           let webhookCounts: { discord: number; newToday: number | null } = { discord: 0, newToday: null }
+          // #986 — `webhookCounts.discord` stays 0 when the listing throws, which the Discord report can
+          // live with but the growth series cannot: 0 subscribers and "we could not count" are different
+          // days. Capture the snapshot separately so a failed read stays null in the series.
+          let subscribersSnapshot: number | null = null
           try {
             const hashes = await listConfirmedHashes(env.STATUS_CACHE)
             webhookCounts.discord = hashes.length
+            subscribersSnapshot = hashes.length
             // #548 — new-today delta: diff against yesterday's snapshot, then persist today's for
             // tomorrow's diff (7d TTL so a missed day still leaves a baseline). Consent-free signal.
             const yesterday = new Date(now.getTime() - 86_400_000).toISOString().split('T')[0]
@@ -2578,6 +2853,39 @@ export default {
           }
           const extActivity = (extPolls != null || extReports > 0) ? { polls: extPolls, reports: extReports } : null
 
+          // #918 — Claude Code statusline poll volume (consent-free adoption proxy, #400 Phase 1).
+          // Last-24h counts from WAE (`statusline-*` tags). #944: split into cohorts (server-render
+          // vs legacy proxy) + a day-over-day delta vs yesterday's snapshot, then persist today's for
+          // tomorrow's diff (7d TTL, mirrors the #548 subscriber-count snapshot). Best-effort/
+          // null-tolerant like the ext/feed reads; null (section omitted) when the AE token is absent.
+          let statuslineTraffic = null
+          try {
+            const counts = await queryStatuslineTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+            if (counts) {
+              const yesterday = new Date(now.getTime() - 86_400_000).toISOString().split('T')[0]
+              const prevRaw = await env.STATUS_CACHE.get(`statusline:cohort:${yesterday}`).catch(() => null)
+              const delta = computeStatuslineDelta(counts, prevRaw)
+              // A CORRUPT baseline (present but unparseable) collapses both cohorts to null like a
+              // clean first-day — log that case only (mirrors the #548 subscriber-snapshot visibility).
+              if (prevRaw != null && prevRaw.trim() !== '' && delta.serverRender === null && delta.legacyProxy === null) {
+                console.warn(`[daily-summary] statusline snapshot corrupt for ${yesterday}: ${JSON.stringify(prevRaw)}`)
+              }
+              await env.STATUS_CACHE.put(`statusline:cohort:${today}`, serializeStatuslineSnapshot(counts), { expirationTtl: 7 * 86400 })
+                .catch((err) => console.warn('[daily-summary] statusline snapshot write failed:', err instanceof Error ? err.message : err))
+              statuslineTraffic = { ...counts, delta }
+            }
+          } catch (err) {
+            console.warn('[daily-summary] statusline traffic read failed:', err instanceof Error ? err.message : err)
+          }
+
+          // #920 — Claude Code plugin usage (monitor polls + /aiwatch briefings). Best-effort like above.
+          let pluginTraffic = null
+          try {
+            pluginTraffic = await queryPluginTraffic(env.CF_ACCOUNT_ID, env.CF_ANALYTICS_TOKEN)
+          } catch (err) {
+            console.warn('[daily-summary] plugin traffic read failed:', err instanceof Error ? err.message : err)
+          }
+
           // #575 — internal demand signal: today's per-service crowd "Report an issue" counts.
           // Bounded read (one GET per known service, no KV list); surfaced only inside the operator
           // summary, never as a public "N reporting" verdict (that gating is Phase B).
@@ -2626,8 +2934,33 @@ export default {
             feedTraffic,
             audience,
             extActivity,
+            statuslineTraffic,
+            pluginTraffic,
             reportCounts,
           })
+
+          // #986 — mirror today's consent-free growth counters into the permanent monthly series.
+          // The values above are about to expire (referral:out 2d, webhook:sub:count 7d) and nothing
+          // else accrues them, so the #547·16 lift measurement had no dataset to read. Zero extra
+          // reads; one KV write/day. Isolated: a failure here must never abort the Discord report,
+          // and re-running the same date overwrites its row rather than duplicating it.
+          //
+          // The outage-day axis is `alertCounts` (the `alert:count:{date}` DAILY accumulator), NOT
+          // `result.newCount` — the latter counts only the alerts sent by THIS 5-minute cron cycle, and
+          // the daily report runs in a single 09:00-09:04 UTC window, so an 04:00 outage would have
+          // been recorded as a quiet day. That is the one classification this dataset exists to make.
+          try {
+            await recordGrowthDaily(env.STATUS_CACHE, buildGrowthDailyRow({
+              date: today,
+              alertCounts,
+              referralTotal: referralReadFailed ? null : (referralCounts?.total ?? 0),
+              subscribers: subscribersSnapshot,
+              subscriberNewToday: webhookCounts.newToday,
+              audience,
+            }))
+          } catch (err) {
+            console.warn('[growth-series] append failed:', err instanceof Error ? err.message : err)
+          }
 
           if (isCatchUp) console.log(`[daily-summary] catch-up run for ${today}`)
           await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
@@ -2646,7 +2979,9 @@ export default {
             try {
               const currentMonth = today.slice(0, 7) // YYYY-MM
               const res = await accumulateIncidentsOnlyIfChanged(env.STATUS_CACHE, dailyServices, currentMonth)
-              if (res === 'failed') console.error(`[daily-summary] incident accumulation KV write failed for ${currentMonth}`)
+              // #975 — 'failed' now covers a KV READ error too (which aborts before writing), not only
+              // a failed write. Either way the cycle is a no-op and the next one retries.
+              if (res === 'failed') console.error(`[daily-summary] incident accumulation KV read/write failed for ${currentMonth}`)
             } catch (err) {
               console.error('[daily-summary] incident accumulation failed:', err instanceof Error ? err.message : err)
             }
@@ -2928,6 +3263,21 @@ export default {
       return handleAdminRebuildArchive(request, env, cors)
     }
 
+    // #904 — GET/POST /api/admin/suppress — operator incident-suppression list. POST adds/removes a
+    // suppression (per-incident id, or per-service title pattern); GET lists. Applied across the live
+    // list, Score, monthly accumulator, and rebuilt archives so un-exposing an incident needs no deploy.
+    if ((request.method === 'POST' || request.method === 'GET') && url.pathname === '/api/admin/suppress') {
+      return handleAdminSuppress(request, env, cors)
+    }
+
+    // #1019 — GET/POST /api/admin/duration-override — operator incident duration-override list. POST
+    // adds/removes { id, durationMin }; GET lists. Pins a paperwork-inflated incident's duration to the
+    // real value across the monthly archive, the report partial, and the weekly briefing (keeps the
+    // incident; only corrects its duration — unlike suppression, which hides it).
+    if ((request.method === 'POST' || request.method === 'GET') && url.pathname === '/api/admin/duration-override') {
+      return handleAdminOverride(request, env, cors)
+    }
+
     // #486 — server-side per-user Discord subscription endpoints. The browser POSTs the raw URL +
     // filters here; the worker stores the AES-GCM-encrypted URL and (PR3) the cron fan-out delivers
     // directly, so alerts fire tab-independently. Ownership is proven by a confirm code sent THROUGH
@@ -3175,6 +3525,8 @@ export default {
                   incidentId: inc.id, summary: a.summary,
                   estimatedRecovery: a.estimatedRecovery, affectedScope: a.affectedScope ?? [],
                   ...(a.estimatedRecoveryHours != null && { estimatedRecoveryHours: a.estimatedRecoveryHours }),
+                  // #1003 — the resolved item scores against the FIRST estimate, so carry it too.
+                  ...(a.firstEstimatedRecoveryHours != null && { firstEstimatedRecoveryHours: a.firstEstimatedRecoveryHours }),
                 })
               } catch (err) { console.warn('[rss] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err) }
             }),
@@ -3403,6 +3755,118 @@ export default {
         }),
         cachedAt: cached.cachedAt,
       }), { status: 200, headers: publicHeaders })
+    }
+
+    // GET /api/statusline/down — parseable UNCAPPED down-list (#920) for the plugin monitor's
+    // poll-over-poll diff (`status<TAB>name` per non-operational service, empty when all clear).
+    // Distinct from the capped emoji presets; consumed only by bin/aiwatch-monitor.sh. Must precede
+    // the generic /api/statusline/:preset route ('down' is not a preset). WAE-tagged 'aiwatch-monitor'
+    // (NOT statusline-*, so continuous monitor polling doesn't pollute the #918 preset-adoption metric).
+    if (request.method === 'GET' && url.pathname === '/api/statusline/down') {
+      if (env.ANALYTICS) {
+        try {
+          env.ANALYTICS.writeDataPoint({ blobs: ['aiwatch-monitor'], doubles: [1], indexes: ['aiwatch-monitor'] })
+        } catch (err) {
+          console.warn('[wae] aiwatch-monitor writeDataPoint failed:', err instanceof Error ? err.message : err)
+        }
+      }
+      const liteCache = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+      const { services } = buildStatuslinePayload(liteCache)
+      return new Response(renderStatuslineDownList(services), {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=30',
+        },
+      })
+    }
+
+    // GET /api/statusline/brief — server-rendered compact INCIDENT briefing (#920) for the
+    // Claude Code plugin's /aiwatch command. text/plain, multi-line: each non-operational service
+    // with its active incident (title + impact), the AI summary of that incident when present, and
+    // a per-category fallback — the "what's actually happening" the names-only presets can't give.
+    // A generalization of the ext-claude projection (#837) to text; keeps the plugin a thin curl
+    // (no jq). Must precede the generic /api/statusline/:preset route ('brief' isn't a preset).
+    if (request.method === 'GET' && url.pathname === '/api/statusline/brief') {
+      if (env.ANALYTICS) {
+        // Tag as 'aiwatch-brief', NOT 'statusline-<preset>': the #918 read-back
+        // (queryStatuslineTraffic) selects `index1 LIKE 'statusline-%'`, so a statusline-
+        // prefix here would misattribute on-demand /aiwatch briefing traffic as statusline
+        // PRESET adoption (a distinct feature). Distinct index → measurable separately later.
+        try {
+          env.ANALYTICS.writeDataPoint({ blobs: ['aiwatch-brief'], doubles: [1], indexes: ['aiwatch-brief'] })
+        } catch (err) {
+          console.warn('[wae] aiwatch-brief writeDataPoint failed:', err instanceof Error ? err.message : err)
+        }
+      }
+      const cacheData = await cacheRead(env.STATUS_CACHE)
+      const summaries = await readProbeSummaries(env.STATUS_CACHE, 'statusline-brief')
+      // Score the FULL set — getFallbacks needs the candidate pool — then narrow in the renderer.
+      const scoredAll = (cacheData?.services ?? []).map((svc) => {
+        const s = scoreFor(svc, summaries)
+        return { ...svc, aiwatchScore: s.score, scoreGrade: s.grade }
+      })
+      // AI summary of each ACTIVE incident on a non-operational service (bounded: only down/degraded
+      // services, usually few). Best-effort per key: a missing/unparseable ai:analysis → no summary,
+      // never a 500 (mirrors the ext-claude reads).
+      const briefAiSummary: Record<string, string> = {}
+      await Promise.all(scoredAll
+        .filter((svc) => svc.status !== 'operational')
+        .flatMap((svc) => (svc.incidents ?? [])
+          .filter((i) => i.status !== 'resolved' && i.status !== 'monitoring')
+          .map(async (inc) => {
+            const raw = await env.STATUS_CACHE.get(analysisKey(svc.id, inc.id)).catch(() => null)
+            if (!raw) return
+            try {
+              const a = JSON.parse(raw) as AIAnalysisResult
+              if (a.summary) briefAiSummary[`${svc.id}:${inc.id}`] = a.summary
+            } catch (err) {
+              console.warn('[statusline-brief] ai:analysis parse failed:', svc.id, inc.id, err instanceof Error ? err.message : err)
+            }
+          })))
+      return new Response(renderStatuslineBrief(scoredAll, briefAiSummary), {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=30',
+        },
+      })
+    }
+
+    // GET /api/statusline/:preset — server-rendered Claude Code statusline string (#918).
+    // Returns text/plain (the exact OSC-8 string the statusline shows), so the settings.json
+    // snippet is a thin `curl … || true` with NO jq. The old model shipped the display logic
+    // as a client-side jq program frozen in the user's config — a display change (e.g. the +N
+    // overflow) could never reach an installed statusline. Rendering server-side means every
+    // future display change ships to all users via a worker deploy, and drops the jq dependency.
+    if (request.method === 'GET' && url.pathname.startsWith('/api/statusline/')) {
+      const preset = url.pathname.slice('/api/statusline/'.length)
+      // Unknown preset → 404 (curl -sf drops it → clean empty statusline). Allowlist-guarded.
+      if (!isStatuslinePreset(preset)) {
+        return new Response('', { status: 404, headers: { 'Access-Control-Allow-Origin': '*' } })
+      }
+      // WAE: tag with the SAME `statusline-<preset>` index as the legacy ?src poll (#494) so the
+      // #918 daily read-back (queryStatuslineTraffic) counts old + new polls uniformly. Best-effort:
+      // writeDataPoint can throw on payload/binding errors — never let that abort the response.
+      if (env.ANALYTICS) {
+        try {
+          const tag = `statusline-${preset}`.slice(0, 32)
+          env.ANALYTICS.writeDataPoint({ blobs: [tag], doubles: [1], indexes: [tag] })
+        } catch (err) {
+          console.warn('[wae] statusline writeDataPoint failed:', err instanceof Error ? err.message : err)
+        }
+      }
+      const liteCache = env.STATUS_CACHE ? await cacheRead(env.STATUS_CACHE) : null
+      const { services } = buildStatuslinePayload(liteCache)
+      // Empty body on cache miss (renderStatuslinePreset over []): degraded presets show nothing,
+      // branded shows "AIWatch 🟢" — same fail-silent contract as the legacy lite endpoint.
+      return new Response(renderStatuslinePreset(preset, services), {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=30',
+        },
+      })
     }
 
     // GET /api/status/cached — KV cache only (no live fetch), for Is X Down SSR pages
@@ -3691,6 +4155,18 @@ export default {
                 status: 502, headers: { ...cors, 'Content-Type': 'application/json' },
               })
             }
+          }
+          // #904 — the current-month partial reads the raw accumulator, which still holds any incident
+          // accumulated BEFORE it was suppressed (go-forward suppression in fetchAllServices only stops
+          // future accumulation). Filter it here too, else a suppressed incident reappears in the
+          // dashboard's 90-day incident view (mergeArchiveIntoMap) until next month's real archive.
+          if (incidentData) {
+            const suppressions = await readSuppressionsFresh(env.STATUS_CACHE)
+            if (suppressions.length) incidentData = filterSuppressedFromMonthly(incidentData, suppressions)
+            // #1019 — pin any operator-overridden incident duration so the dashboard 30/90-day list
+            // shows the corrected value, not the provider's paperwork-inflated open→close span.
+            const overrides = await readOverridesFresh(env.STATUS_CACHE)
+            if (overrides.length) incidentData = applyDurationOverrides(incidentData, overrides)
           }
           const partial = buildPartialIncidentArchive(month, incidentData)
           return new Response(JSON.stringify(partial), {

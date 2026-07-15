@@ -53,3 +53,30 @@ describe('region-status.ts mirror — FedRAMP exclusion (#693)', () => {
     expect(result!.regions.find((r) => r.key === 'us-west-2')!.status).toBe('ok')
   })
 })
+
+// This mirror also backs the Worker Discord region hint (buildRegionHint), so the switchability
+// gate must hold here too — otherwise Discord keeps recommending a region the reader cannot pick.
+describe('region-status.ts mirror — region-aware but not region-switchable (#973)', () => {
+  test('openai: regions still resolve, recommendedRegion is null, no docs link', () => {
+    const result = regionStatusOf({
+      id: 'openai',
+      status: 'degraded',
+      incidents: [{ id: 'r1', status: 'investigating', title: 'Elevated errors in us-east-1' }],
+    })
+    expect(result).not.toBeNull()
+    expect(result!.hasRegionSpecific).toBe(true)
+    expect(result!.regions.find((r) => r.key === 'us-east-1')!.status).toBe('incident')
+    expect(result!.okRegions.map((r) => r.key)).toEqual(['us-west-2', 'eu-central-1'])
+    expect(result!.recommendedRegion).toBeNull()
+    expect(result!.docsUrl).toBeUndefined()
+  })
+
+  test('pinecone (switchable) still recommends the next healthy region', () => {
+    const result = regionStatusOf({
+      id: 'pinecone',
+      incidents: [{ id: 'p1', status: 'investigating', title: 'AWS us-east-1 degraded' }],
+    })
+    expect(result!.recommendedRegion!.key).toBe('AWS us-west-2')
+    expect(result!.docsUrl).toBe('https://docs.pinecone.io/guides/index-data/create-an-index#cloud-regions')
+  })
+})

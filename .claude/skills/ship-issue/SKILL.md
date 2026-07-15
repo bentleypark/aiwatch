@@ -21,6 +21,10 @@ is the *procedure* — follow it top to bottom.
 1. **Local verify (step 3.5)** — before committing, start the right dev server AND get the USER's
    explicit **in-browser confirmation**. Your own curl/Playwright/test runs do **not** satisfy this.
    "Tests pass" ≠ "feature verified". After requesting verification, **STOP and wait** for the user.
+   - Dashboard data source: DEFAULT to the **local worker with real data** (`npm run dev:worker` +
+     `ALLOWED_ORIGIN=*` in `worker/.dev.vars`) — the SPA's `MOCK_SERVICES` fixture is stale/fabricated
+     and misrepresents real states, and the prod `workers.dev` worker is CORS-blocked from localhost
+     (Origin allowlist). See CLAUDE.md "Local verification by page type" Note.
    - Reachability gate: if the change only manifests under a specific state (active incident,
      `down`/`degraded`, AI analysis, error/empty, a flag), that state is usually absent in live data
      — set up the trigger yourself (mock `usePolling`, seed local KV, craft a fixture), confirm it
@@ -44,6 +48,17 @@ is the *procedure* — follow it top to bottom.
    never commit to main. Before committing, `git status` must show **only** the intended files
    (branch switches can drag a prior PR's staged/untracked files along).
    - First check `gh pr list` for an existing open PR on the same issue (avoid dupes).
+   - **Worktree (parallel sessions):** run `git worktree list` FIRST, before branching. A worktree or a
+     main-repo branch you didn't create means a concurrent session is active (already being in your OWN
+     worktree satisfies this); in that case do this work in a git worktree
+     (`claude --worktree <name>` / `git worktree add`), NOT an in-place branch on the shared main repo
+     (a concurrent session can `git checkout` it out from under you, dragging its uncommitted WIP into
+     your diff — the failure this rule exists to prevent). Launched via the
+     VS Code extension? It does **not** auto-create a worktree (the Desktop app does) — say "work in a
+     worktree" right after the session starts to relocate via the `EnterWorktree` tool. See CLAUDE.md
+     "Parallel sessions (git worktrees)". Once in a worktree, edit / `cd` / test **only** via the
+     worktree path: an absolute or main-root path silently leaks edits into the main repo (memory
+     `feedback_worktree_edit_path`). `ls` early to confirm you're in the worktree.
 2. **Design check** (UI only) — compare against `docs/AIWatch_화면디자인_초안_v2.html`; list every
    spacing/color/font/layout/text difference before coding.
 3. **Code** the change.
@@ -80,6 +95,18 @@ is the *procedure* — follow it top to bottom.
      `exists`); NOT GA4/GSC-CTR/consent-gated or behavioral checks — leave those as a plain human ping.
      Validate it before it ships: `node scripts/verify-assertions.mjs --issue N --dry-run`. Grammar +
      allowlist + fail-open semantics: **[docs/reference/verify-assertions.md](../../../docs/reference/verify-assertions.md)**.
+   - **Placement (canonical, #921 format):** collect EVERY `verify-after` line — each with its indented
+     `assert:` sub-line, if any — under ONE dedicated heading at the **bottom of the body**:
+     ```
+     ## Production-gated verification
+     - [ ] **verify-after YYYY-MM-DD** — what to check + where. PR #N.
+           assert: GET /api/status/cached | services[id=X].field == "value"
+     ```
+     One consistent home — NOT inline in a part's checklist, NOT a top `> Status:` callout — so the
+     reminder lines are always in the same place and the body-drift guard reads cleanly. A multi-part
+     issue lists one `verify-after` line per part under the same heading (keep each line's note so it's
+     clear which part it verifies). The `verify-reminders` scanner is whole-body, so placement is
+     cosmetic for the automation — this convention is purely for human consistency across issues.
    - **Cross-issue reconciliation** — also scan OTHER open issues this change touches:
      fully implements another → add `closes #M`; partially advances → `refs #M` + comment;
      **supersedes/invalidates** another (a newer finding/feature makes it moot) → comment the why + close it.
@@ -89,12 +116,36 @@ is the *procedure* — follow it top to bottom.
     - Deploy: Vercel auto-deploys on main merge; **Worker is manual** — `npm run deploy:worker` (confirm
       output says `Uploaded aiwatch-worker`), once, after user approval. If several worker PRs are open,
       merge + resolve all THEN deploy once (no half-deploys).
+    - **Sync the issue body NOW — do NOT defer to close.** When the PR used `refs #N` (the issue stays
+      open for a `verify-after`), immediately reconcile the body: **tick every shipped `- [ ]` box**, add
+      a dated `> **Status (YYYY-MM-DD):**` line summarizing what shipped + what remains, and apply the
+      **`verify-blocked`** label. Why here and not step 11: step 11's checklist-sync fires at CLOSE, but a
+      verify-blocked issue never reaches close for weeks — so its body silently drifts (shipped code still
+      showing `- [ ]`) until a triage sweep finds it. This is the single most-missed sync (it's a late,
+      no-gate step in GitHub, a different system than the git diff the hooks watch). The daily
+      `verify-reminders` **body-drift guard** backstops it — it labels any `verify-blocked` (non-`tracking`)
+      issue whose body still has unchecked NON-`verify-after` boxes — but the guard is the safety net;
+      syncing at merge is the fix. (`tracking` umbrellas are exempt: they legitimately keep open sub-items.)
 11. **Verify checklist** — `gh issue view N`; confirm **every** `- [ ]` item is actually implemented in
     code before closing. Re-run step-11-style verification on `U3-someday`/`tracking` issues periodically —
     later/incremental work may have completed one without any PR claiming `closes`.
 12. **Close** — only after verification: `gh issue close N`. Unverified/not-yet-done items remain → keep the
     issue open with a label (`U3-someday`) whose **exit condition is written in the body** (e.g. "close when secrets set
     & data confirmed"). Never close immediately after merge.
+    - **Flip the initiative edge (#969).** If this issue advanced an Initiative, move its `advances:: #N`
+      to `delivered:: #N` on the `initiative_*` memory page — the one moment that fact becomes true.
+      `advances` means *pending*; a closed issue left on it is a lint finding. Add `(pin — why)` when the
+      delivered work still binds a future decision (e.g. it invalidates data a pending review will read).
+      Without this step the graph holds only backlog, and `strategy-review` must re-derive progress from
+      prose. Rules: [docs/reference/decision-graph.md](../../../docs/reference/decision-graph.md).
+      - **Flipping the edge is not enough — the prose goes stale too.** The lint checks edges, not
+        currency, so a `delivered::` can be correct while the `Next action` / `Inputs` / blocker prose
+        that framed the same issue as *pending* keeps lying. When you flip an edge, grep the page for that
+        issue number and retire any sentence that called it a blocker, a next action, or a precondition
+        — the resolution you just recorded made it moot. Same for a governing **Decision** that a closed
+        issue resolves: set its `Status:` and any child decision whose trigger was that review. (This gap
+        was hit on 2026-07-15: `delivered:: #547` landed, but the "#547·16 blocks the review" analysis
+        sat stale until the next review swept it.)
 
 ## Why this is a skill, not just CLAUDE.md
 CLAUDE.md loads once at session start and fades on long sessions / compaction, so its Development

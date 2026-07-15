@@ -15,6 +15,14 @@ export const REPORT_URL = `${WORKER_BASE}/api/report-issue`
 // Per-surface "Is X Down?" deep links are built from SITE_BASE + render.js isDownPath();
 // the footer "Open full status" goes to the SITE_BASE dashboard (the whole board).
 
+// #936 — tag the outbound site links so click-through inflow attributes to `utm_source=extension`
+// instead of collapsing to (direct) — the extension carries no HTTP referrer. It's an always-on
+// product surface, not an outage campaign, so source+medium only (no utm_campaign). Kept in plain JS
+// here because the extension bundle cannot import the worker's appendUtm.
+export function withExtUtm(url) {
+  return `${url}${url.includes('?') ? '&' : '?'}utm_source=extension&utm_medium=referral`
+}
+
 // Poll cadence — 2 min (AIWatch data updates on the */5 cron; 2 min catches an
 // alert-edge cache refresh #488 within ~2 min without redundant fetches). The popup
 // always does a fresh fetch on open regardless of this cadence.

@@ -263,6 +263,36 @@ describe('POST /api/admin/analyze (#299)', () => {
     expect(usage.sonnet).toBe(1)
   })
 
+  it('#1003 — an operator re-analysis does NOT move the scoring baseline', async () => {
+    // The manual twin of the cron's re-analysis: an operator re-runs analysis on a live 4h-old incident
+    // and the model returns a hindsight-inflated 15h. The first estimate (4h) must survive, in both the
+    // persisted blob and the response body, or the resolution alert grades the miss as a win.
+    const { kv, store } = makeKV()
+    seedServicesLatest(store, [makeService()])
+    store['ai:analysis:chatgpt:inc-abc'] = JSON.stringify({
+      summary: 'first', estimatedRecovery: '1–4h', estimatedRecoveryHours: 4, firstEstimatedRecoveryHours: 4,
+      affectedScope: ['API'], needsFallback: false, analyzedAt: '2026-07-13T03:47:00Z', incidentId: 'inc-abc',
+    })
+    store['ai:first-est:chatgpt:inc-abc'] = '4'
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      content: [{ type: 'text', text: JSON.stringify({
+        summary: 'S', estimatedRecovery: '8–15h', affectedScope: ['API'], needsFallback: false,
+      }) }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const env = envWith({ adminKey: 'k', anthropicKey: 'sk-test', kv })
+    const res = await workerModule.fetch(req({ svcId: 'chatgpt', incidentId: 'inc-abc' }, { 'X-Admin-Key': 'k' }), env, {} as ExecutionContext)
+    expect(res.status).toBe(200)
+
+    const body = await res.json() as { analysis: { estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number } }
+    expect(body.analysis.estimatedRecoveryHours).toBe(15)      // live surfaces show the current ETA
+    expect(body.analysis.firstEstimatedRecoveryHours).toBe(4)  // …but scoring keeps the original bound
+    const persisted = JSON.parse(store['ai:analysis:chatgpt:inc-abc'])
+    expect(persisted.estimatedRecoveryHours).toBe(15)
+    expect(persisted.firstEstimatedRecoveryHours).toBe(4)
+    expect(store['ai:first-est:chatgpt:inc-abc']).toBe('4')    // durable key untouched (get-or-set)
+  })
+
   it('honors sticky=false override — writes analysis without sticky field', async () => {
     // Operator can opt out if they want the analysis to be auto-refreshable by the cron.
     const { kv, store } = makeKV()
@@ -296,6 +326,83 @@ describe('POST /api/admin/analyze (#299)', () => {
     const env = envWith({ adminKey: 'k', anthropicKey: 'sk-test', kv })
     const res = await workerModule.fetch(req({ svcId: 'chatgpt', incidentId: 'inc-abc' }, { 'X-Admin-Key': 'k' }), env, {} as ExecutionContext)
     expect(res.status).toBe(502)
+    // A 200 whose body doesn't parse is permanent — retrying the same prompt reproduces it.
+    expect((await res.json() as { kind: string }).kind).toBe('permanent')
+  })
+
+  // #955 — this endpoint is what an operator reaches for WHEN the automated path is broken, so
+  // a bare "analysis returned null" is the worst possible answer. It is exactly the ambiguity
+  // that let a retired Sonnet model id 404 silently for weeks.
+  it('surfaces the upstream status + detail on a permanent 404 (retired model id)', async () => {
+    const { kv, store } = makeKV()
+    seedServicesLatest(store, [makeService()])
+    const fetchMock = vi.fn(async () => new Response('{"type":"error","error":{"type":"not_found_error"}}', { status: 404 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const env = envWith({ adminKey: 'k', anthropicKey: 'sk-test', kv })
+    const res = await workerModule.fetch(req({ svcId: 'chatgpt', incidentId: 'inc-abc' }, { 'X-Admin-Key': 'k' }), env, {} as ExecutionContext)
+
+    expect(res.status).toBe(502)
+    const body = await res.json() as { kind: string; status: number; detail: string }
+    expect(body.kind).toBe('permanent')
+    expect(body.status).toBe(404)
+    expect(body.detail).toContain('not_found_error')
+    expect(fetchMock).toHaveBeenCalledOnce() // permanent → never retried
+  })
+
+  it('reports a 529 overload as transient, after one retry', async () => {
+    const { kv, store } = makeKV()
+    seedServicesLatest(store, [makeService()])
+    const fetchMock = vi.fn(async () => new Response('overloaded', { status: 529 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const env = envWith({ adminKey: 'k', anthropicKey: 'sk-test', kv })
+    const res = await workerModule.fetch(req({ svcId: 'chatgpt', incidentId: 'inc-abc' }, { 'X-Admin-Key': 'k' }), env, {} as ExecutionContext)
+
+    const body = await res.json() as { kind: string; status: number }
+    expect(body.kind).toBe('transient')
+    expect(body.status).toBe(529)
+    expect(fetchMock).toHaveBeenCalledTimes(2) // retried once
+  })
+
+  // The model call already happened and already cost money; a failed persist must not erase it
+  // from the ledger. `recordUsage` therefore runs BEFORE the `ai:analysis` write.
+  it('books a SUCCESSFUL analysis into ai:usage even when the KV persist fails', async () => {
+    const { kv, store } = makeKV()
+    seedServicesLatest(store, [makeService()])
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      content: [{ type: 'text', text: '{"summary":"s","estimatedRecovery":"1h","affectedScope":[],"needsFallback":false}' }],
+    }), { status: 200 })))
+    const realPut = kv.put as unknown as (k: string, v: string, o?: unknown) => Promise<void>
+    ;(kv as unknown as { put: unknown }).put = vi.fn(async (k: string, v: string, o?: unknown) => {
+      if (k.startsWith('ai:analysis:')) throw new Error('KV unavailable')
+      return realPut(k, v, o)
+    })
+
+    const env = envWith({ adminKey: 'k', anthropicKey: 'sk-test', kv })
+    const res = await workerModule.fetch(req({ svcId: 'chatgpt', incidentId: 'inc-abc' }, { 'X-Admin-Key': 'k' }), env, {} as ExecutionContext)
+
+    expect(res.status).toBe(502)
+    expect((await res.json() as { error: string }).error).toBe('KV write failed')
+    const usageKey = Object.keys(store).find(k => k.startsWith('ai:usage:'))!
+    expect(JSON.parse(store[usageKey])).toMatchObject({ calls: 1, success: 1, sonnet: 1 })
+  })
+
+  // The counter used to be bumped only AFTER the `if (!analysis) return 502` guard, so a failed
+  // manual analysis incremented neither `calls` nor `failed` — under-reporting exactly the
+  // failures the counter exists to surface.
+  it('books a FAILED manual analysis into ai:usage', async () => {
+    const { kv, store } = makeKV()
+    seedServicesLatest(store, [makeService()])
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('not found', { status: 404 })))
+
+    const env = envWith({ adminKey: 'k', anthropicKey: 'sk-test', kv })
+    await workerModule.fetch(req({ svcId: 'chatgpt', incidentId: 'inc-abc' }, { 'X-Admin-Key': 'k' }), env, {} as ExecutionContext)
+
+    const usageKey = Object.keys(store).find(k => k.startsWith('ai:usage:'))!
+    const usage = JSON.parse(store[usageKey])
+    expect(usage).toMatchObject({ calls: 1, success: 0, failed: 1, sonnetAttempts: 1 })
+    expect(usage.sonnet).toBeUndefined() // attempted, never succeeded
   })
 
   it('preserves pre-seeded ai:usage counters — increments rather than overwrites', async () => {

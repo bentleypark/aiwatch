@@ -5,6 +5,7 @@ import {
   parseAssertionLine, parseLiteral, parseSelector, evalSelector, compare,
   evaluateAssertion, isAllowedUrl, resolveSource, pairVerifyAssertions, tickBox, runAssertion,
   truncate, countOpenBoxes, countOpenVerifyAfter, planIssueAutoVerify, DEFAULT_ASSERT_BASE,
+  isSuppressedReminderLine, findQuotedVerifyAfterBoxes,
 } from './verify-assertions.mjs'
 
 test('parseAssertionLine — valid GET + selector + quoted expected', () => {
@@ -13,8 +14,8 @@ test('parseAssertionLine — valid GET + selector + quoted expected', () => {
 })
 
 test('parseAssertionLine — GET optional, absolute url, numeric op', () => {
-  const a = parseAssertionLine('assert: https://ai-watch.dev/api/report | predictionAccuracy.sampleCount >= 1')
-  assert.deepEqual(a, { source: 'https://ai-watch.dev/api/report', selector: 'predictionAccuracy.sampleCount', op: '>=', expected: '1' })
+  const a = parseAssertionLine('assert: https://ai-watch.dev/api/report | predictionAccuracy.total >= 1')
+  assert.deepEqual(a, { source: 'https://ai-watch.dev/api/report', selector: 'predictionAccuracy.total', op: '>=', expected: '1' })
 })
 
 test('parseAssertionLine — exists takes no operand', () => {
@@ -140,6 +141,71 @@ test('pairVerifyAssertions — pairs verify-after with following assert, skips c
   assert.equal(items[0].lineIndex, 0)
   assert.equal(items[1].date, '2026-08-05')
   assert.equal(items[1].assertion, null) // no following assert line
+})
+
+// #966 — pairVerifyAssertions is the scanner main() actually drives (parseVerifyAfter is its twin),
+// so the blockquote guard MUST hold here or the daily ping keeps firing on quoted prose.
+test('pairVerifyAssertions — skips BLOCKQUOTE lines, keeps the real box (#966)', () => {
+  const body = [
+    '> **Status (2026-07-06):** the `verify-after 2026-07-09` assert should auto-pass via the daily job.',
+    '>       assert: GET /api/status | services[id=turbopuffer].aiwatchScore >= 1',
+    '',
+    '- [ ] **verify-after 2026-07-09** — turbopuffer is actually scored',
+    '      assert: GET /api/status | services[id=turbopuffer].aiwatchScore >= 1',
+  ].join('\n')
+  const items = pairVerifyAssertions(body)
+  assert.equal(items.length, 1)
+  assert.equal(items[0].lineIndex, 3) // the checkbox, not the quote
+  assert.equal(items[0].assertion.selector, 'services[id=turbopuffer].aiwatchScore')
+})
+
+test('pairVerifyAssertions — a body whose ONLY verify-after mentions are quoted yields nothing (#966)', () => {
+  const body = [
+    '> the `verify-after 2026-07-09` assert was changed to the honest `aiwatchScore >= 1`.',
+    '  > indented quote: verify-after 2026-07-09 still narrative',
+  ].join('\n')
+  assert.deepEqual(pairVerifyAssertions(body), [])
+})
+
+// False negatives are the dangerous direction: a real reminder that stops firing is worse than a
+// noisy ping. Pin that the blockquote guard did NOT over-suppress the shapes that must still fire.
+test('pairVerifyAssertions — non-quoted prose and `>` mid-line still fire (#966 over-suppression guard)', () => {
+  assert.equal(pairVerifyAssertions('Open: verify-after 2026-07-02 (prose ref)')[0].date, '2026-07-02')
+  // A `>` that is not the line's first non-space char is a comparison, not a blockquote.
+  assert.equal(pairVerifyAssertions('- [ ] verify-after 2026-07-02 — score > 5')[0].date, '2026-07-02')
+  // Guard is blockquote-LINE-only: a token inside a fenced block or a table row still fires. Accepted
+  // (real bodies don't do this); documented so a future "why did my code sample ping?" is unsurprising.
+  assert.equal(pairVerifyAssertions('| verify-after 2026-07-02 | a table row |')[0].date, '2026-07-02')
+})
+
+test('findQuotedVerifyAfterBoxes — flags a quoted OPEN box, ignores quoted prose (#966)', () => {
+  const body = [
+    '> **Status:** the `verify-after 2026-07-09` assert should auto-pass.', // prose — expected, silent
+    '> - [ ] verify-after 2026-09-01 quoted live reminder',                 // DANGEROUS — never fires
+    '>   - [ ] **verify-after 2026-09-02** indented inside quote',          // also dangerous
+    '> - [x] verify-after 2026-09-03 quoted but already done',              // done — not a live loss
+    '- [ ] verify-after 2026-09-04 a normal box',                           // fires; not quoted
+  ].join('\n')
+  const found = findQuotedVerifyAfterBoxes(body)
+  assert.deepEqual(found.map((f) => f.lineIndex), [1, 2])
+})
+
+test('findQuotedVerifyAfterBoxes — nested quote markers + empty bodies (#966)', () => {
+  assert.equal(findQuotedVerifyAfterBoxes('> > - [ ] verify-after 2026-09-01 double-quoted').length, 1)
+  assert.deepEqual(findQuotedVerifyAfterBoxes(''), [])
+  assert.deepEqual(findQuotedVerifyAfterBoxes(null), [])
+  assert.deepEqual(findQuotedVerifyAfterBoxes('> just a quote, no token'), [])
+})
+
+test('isSuppressedReminderLine — checked boxes and blockquotes only (#966)', () => {
+  assert.equal(isSuppressedReminderLine('- [x] verify-after 2026-01-01'), true)
+  assert.equal(isSuppressedReminderLine('   * [X] verify-after 2026-01-01'), true)
+  assert.equal(isSuppressedReminderLine('> quoted'), true)
+  assert.equal(isSuppressedReminderLine('   > indented quote'), true)
+  assert.equal(isSuppressedReminderLine('- [ ] verify-after 2026-01-01'), false)
+  assert.equal(isSuppressedReminderLine('plain prose verify-after 2026-01-01'), false)
+  // GFM renders `-[x]` (no space) as literal text, not a task — must still fire (#586 edge, retained).
+  assert.equal(isSuppressedReminderLine('-[x] verify-after 2026-01-01'), false)
 })
 
 test('pairVerifyAssertions — tolerates a blank line before the assert', () => {

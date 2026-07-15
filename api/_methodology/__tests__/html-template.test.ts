@@ -88,9 +88,10 @@ describe('renderMethodologyPage', () => {
   })
 
   it('surfaces the "what we cannot measure" transparency table (the moat)', () => {
-    // the no-rolling-uptime services must be named with the honest "Not provided" treatment
-    // Mistral + Perplexity were removed once their Instatus pages exposed official rolling uptime.
-    for (const svc of ['Bedrock', 'Azure', 'Gemini', 'OpenRouter', 'xAI', 'Deepgram']) {
+    // the no-uptime-records services must be named with the honest "Not provided" treatment.
+    // Mistral + Perplexity were removed once their Instatus pages were read (#1006); OpenRouter followed
+    // once AIWatch computed its uptime from the OnlineOrNot incident records (#1006).
+    for (const svc of ['Bedrock', 'Azure', 'Gemini', 'xAI', 'Deepgram', 'Character']) {
       expect(html, `limits table should name ${svc}`).toContain(svc)
     }
     expect(html).toMatch(/Not provided|not provided|미제공|제공.*않/)
@@ -153,8 +154,8 @@ describe('renderMethodologyPage', () => {
     // count from the source of truth (worker/src/probe.PROBE_TARGETS) so a change to probe.ts that
     // forgets to update this page fails HERE — otherwise the two layers drift independently (the
     // exact regression #678 guards against).
-    const n = PROBE_TARGETS.length // 31 (#883 cursor + #839 twelvelabs)
-    expect(html).toContain(`${n} AI service`)  // EN (matches "31 AI services")
+    const n = PROBE_TARGETS.length // 32 (#921 characterai + #883 cursor + #839 twelvelabs)
+    expect(html).toContain(`${n} AI service`)  // EN (matches "32 AI services")
     expect(html).toContain(`${n}개 AI 서비스`)   // KO
     // the 3 remaining non-probed API services must be named...
     for (const svc of ['Bedrock', 'Azure OpenAI', 'Modal']) {

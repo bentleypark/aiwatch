@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from '../onlineornot'
+import { parseOnlineOrNotIncidents, computeOnlineOrNotUptime } from '../onlineornot'
 
 // Minimal OnlineOrNot HTML with embedded React Router SSR data
 function makeHtml(
@@ -190,31 +190,34 @@ describe('parseOnlineOrNotIncidents', () => {
   })
 })
 
-describe('parseOnlineOrNotUptime', () => {
-  it('parses uptime percentage for named component', () => {
-    const html = makeHtml([], { name: 'Chat (/api/v1/chat/completions)', uptime: '0.99886991' })
-    const uptime = parseOnlineOrNotUptime(html, 'Chat (/api/v1/chat/completions)')
-    expect(uptime).toBe(99.89)
+describe('computeOnlineOrNotUptime (#1006 — computed from incidents, not the aggregate)', () => {
+  const NOW = Date.parse('2026-07-14T00:00:00Z')
+  const DAY = 86_400_000
+  const ago = (d: number) => new Date(NOW - d * DAY).toISOString()
+  const inc = (id: string, startDaysAgo: number, hours: number, impact: string) => ({
+    id, title: `${impact} event`, started: ago(startDaysAgo),
+    ended: new Date(NOW - startDaysAgo * DAY + hours * 3_600_000).toISOString(), impact,
   })
 
-  it('returns null for unknown component', () => {
-    const html = makeHtml([], { name: 'Chat API', uptime: '0.99886991' })
-    expect(parseOnlineOrNotUptime(html, 'Unknown Component')).toBeNull()
+  it('a clean 30-day window is 100%', () => {
+    expect(computeOnlineOrNotUptime(makeHtml([]), NOW)).toBe(100)
   })
 
-  it('parses low uptime below 90%', () => {
-    const html = makeHtml([], { name: 'Chat API', uptime: '0.85000000' })
-    const uptime = parseOnlineOrNotUptime(html, 'Chat API')
-    expect(uptime).toBe(85)
+  it('a 24h MAJOR_OUTAGE is weighted 1.0 — 1 day of 30', () => {
+    expect(computeOnlineOrNotUptime(makeHtml([inc('i1', 5, 24, 'MAJOR_OUTAGE')]), NOW)).toBe(96.66)
   })
 
-  it('parses perfect uptime of 1.0', () => {
-    const html = makeHtml([], { name: 'Chat API', uptime: '1.00000000' })
-    const uptime = parseOnlineOrNotUptime(html, 'Chat API')
-    expect(uptime).toBe(100)
+  it('DEGRADED/PARTIAL is weighted 0.3, per /methodology', () => {
+    // 24h × 0.3 = 7.2h of 30 days → 99.00%
+    expect(computeOnlineOrNotUptime(makeHtml([inc('i1', 5, 24, 'DEGRADED_PERFORMANCE')]), NOW)).toBe(99)
+    expect(computeOnlineOrNotUptime(makeHtml([inc('i1', 5, 24, 'PARTIAL_OUTAGE')]), NOW)).toBe(99)
   })
 
-  it('returns null for invalid HTML', () => {
-    expect(parseOnlineOrNotUptime('<html></html>', 'Chat')).toBeNull()
+  it('an incident OUTSIDE the 30-day window does not count', () => {
+    expect(computeOnlineOrNotUptime(makeHtml([inc('i1', 60, 24, 'MAJOR_OUTAGE')]), NOW)).toBe(100)
+  })
+
+  it('returns null for a page that is not an OnlineOrNot status page (never a fabricated 100%)', () => {
+    expect(computeOnlineOrNotUptime('<html></html>', NOW)).toBeNull()
   })
 })

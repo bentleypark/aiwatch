@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, shouldHoldNewIncident, shouldHoldForAiAnalysis, AI_HOLD_MS, pendingAiKey, FLAP_HOLD_MS, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, FLAP_SUPPRESSION_ESCAPE_MS, incidentRunMs, shouldHoldNewIncident, shouldHoldForAiAnalysis, AI_HOLD_MS, pendingAiKey, FLAP_HOLD_MS, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
+import { SERVICES } from '../services'
 
 describe('sourceLivenessOf (#714)', () => {
   it('dead when sourceDead (confirmed 4xx)', () => {
@@ -396,6 +397,14 @@ describe('region-switch hint (#422)', () => {
     expect(buildRegionHint(mistral)).toBeUndefined()
   })
 
+  it('buildRegionHint returns undefined for a region-AWARE but non-switchable service (#973)', () => {
+    // openai names regions in incident text but exposes no selectable region endpoint, so the
+    // Discord hint must stay silent — "📍 Try region: US West" was an unactionable instruction.
+    const openai = mockService({ id: 'openai', name: 'OpenAI API', status: 'degraded',
+      incidents: [inc({ id: 'o1', title: 'Elevated errors in us-east-1', status: 'investigating', startedAt: recentDate, impact: 'major' })] })
+    expect(buildRegionHint(openai)).toBeUndefined()
+  })
+
   it('buildRegionHint returns undefined for a global (non-region-specific) incident', () => {
     // No region in title/components → every region marked down via fallback → allDown → no recommendation
     const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', status: 'down',
@@ -445,17 +454,43 @@ describe('region-switch hint (#422)', () => {
   })
 
   it('#641 suppresses the cross-service fallback when a region switch IS offered', () => {
-    // OpenAI is region-aware (SERVICE_REGIONS) AND fallback-eligible (not EXCLUDE_FALLBACK). A
+    // Pinecone is region-SWITCHABLE (#973) AND fallback-eligible (un-excluded in #857). A
     // region-specific outage is solved by the cheaper same-provider region switch, so the
-    // cross-service fallback (Claude) must be suppressed to avoid redundant noise.
+    // cross-service fallback (turbopuffer) must be suppressed to avoid redundant noise.
+    const pinecone = mockService({ id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', status: 'degraded', incidents: [
+      inc({ id: 'pc-r', title: 'Elevated errors', status: 'investigating', startedAt: recentDate, impact: 'major', componentNames: ['AWS us-east-1'] }),
+    ] })
+    const turbopuffer = mockService({ id: 'turbopuffer', name: 'turbopuffer', provider: 'turbopuffer', category: 'api', status: 'operational', aiwatchScore: 95 })
+    const alert = buildIncidentAlerts([pinecone, turbopuffer], alertedMap(), NOW).find(a => a.key === 'alerted:new:pc-r')
+    expect(alert).toBeDefined()
+    expect(alert!.regionText).toBe('📍 Try region: AWS US West')
+    expect(alert!.fallbackText).toBe('') // suppressed despite turbopuffer being an operational same-tier fallback
+
+    // Contrast — proves the assertion above tests SUPPRESSION, not the absence of any fallback for
+    // pinecone. Same two services, but a GLOBAL incident (no region key) → no region switch to
+    // offer → turbopuffer must surface. Without this, a future change that de-pairs turbopuffer
+    // from pinecone would leave the `fallbackText === ''` assertion passing vacuously.
+    const globalPinecone = mockService({ id: 'pinecone', name: 'Pinecone', provider: 'Pinecone', category: 'api', status: 'degraded', incidents: [
+      inc({ id: 'pc-g', title: 'API authentication broken', status: 'investigating', startedAt: recentDate, impact: 'major' }),
+    ] })
+    const globalAlert = buildIncidentAlerts([globalPinecone, turbopuffer], alertedMap(), NOW).find(a => a.key === 'alerted:new:pc-g')
+    expect(globalAlert!.regionText).toBeUndefined()
+    expect(globalAlert!.fallbackText).toContain('turbopuffer')
+  })
+
+  it('#973 keeps the cross-service fallback for a region-AWARE but non-switchable service', () => {
+    // The inverse of the case above, and the regression #973 fixed. OpenAI names us-east-1 in the
+    // incident, so the pre-#973 code offered "📍 Try region: US West (us-west-2)" — an endpoint the
+    // caller cannot select — AND suppressed the Claude fallback, which they CAN act on. Now the
+    // region hint is silent and the fallback survives.
     const openai = mockService({ id: 'openai', name: 'OpenAI API', status: 'degraded', incidents: [
       inc({ id: 'oai-r', title: 'Elevated errors', status: 'investigating', startedAt: recentDate, impact: 'major', componentNames: ['us-east-1'] }),
     ] })
     const claude = mockService({ id: 'claude', name: 'Claude API', provider: 'Anthropic', status: 'operational', aiwatchScore: 95 })
     const alert = buildIncidentAlerts([openai, claude], alertedMap(), NOW).find(a => a.key === 'alerted:new:oai-r')
     expect(alert).toBeDefined()
-    expect(alert!.regionText).toBe('📍 Try region: US West (us-west-2)')
-    expect(alert!.fallbackText).toBe('') // suppressed despite Claude being an operational same-tier fallback
+    expect(alert!.regionText).toBeUndefined()
+    expect(alert!.fallbackText).toContain('Claude API')
   })
 
   it('#641 still shows the cross-service fallback for a GLOBAL (non-region) incident', () => {
@@ -1018,30 +1053,30 @@ describe('flap suppression (#283)', () => {
     const config = { flapSuppression: true }
 
     it('returns true for a flap notice on an opted-in service', () => {
-      expect(isFlapSuppressible('fireworks', config, mkInc())).toBe(true)
+      expect(isFlapSuppressible('fireworks', config, mkInc(), NOW)).toBe(true)
     })
 
     it('returns false for opted-out services (flag absent or false)', () => {
-      expect(isFlapSuppressible('fireworks', {}, mkInc())).toBe(false)
-      expect(isFlapSuppressible('fireworks', { flapSuppression: false }, mkInc())).toBe(false)
+      expect(isFlapSuppressible('fireworks', {}, mkInc(), NOW)).toBe(false)
+      expect(isFlapSuppressible('fireworks', { flapSuppression: false }, mkInc(), NOW)).toBe(false)
     })
 
     it('returns false for `major` impact (real outages never suppressed) but true for `minor` flaps (#565)', () => {
-      expect(isFlapSuppressible('fireworks', config, mkInc({ impact: 'major' }))).toBe(false)
+      expect(isFlapSuppressible('fireworks', config, mkInc({ impact: 'major' }), NOW)).toBe(false)
       // #564/#565 maps BetterStack "— down" flaps to `minor` — these MUST stay suppressible.
-      expect(isFlapSuppressible('fireworks', config, mkInc({ impact: 'minor', title: 'X — down' }))).toBe(true)
+      expect(isFlapSuppressible('fireworks', config, mkInc({ impact: 'minor', title: 'X — down' }), NOW)).toBe(true)
     })
 
     it('returns false for titles without the " — recovered" suffix', () => {
-      expect(isFlapSuppressible('fireworks', config, mkInc({ title: 'API Outage' }))).toBe(false)
+      expect(isFlapSuppressible('fireworks', config, mkInc({ title: 'API Outage' }), NOW)).toBe(false)
     })
 
     it('Tier-1 guard: never suppresses claude / openai / gemini even if flag set', () => {
       // Defense-in-depth: a configuration mistake enabling flapSuppression on a Tier-1
       // service would silently swallow real outage alerts. Hard-coded exclusion.
-      expect(isFlapSuppressible('claude', config, mkInc())).toBe(false)
-      expect(isFlapSuppressible('openai', config, mkInc())).toBe(false)
-      expect(isFlapSuppressible('gemini', config, mkInc())).toBe(false)
+      expect(isFlapSuppressible('claude', config, mkInc(), NOW)).toBe(false)
+      expect(isFlapSuppressible('openai', config, mkInc(), NOW)).toBe(false)
+      expect(isFlapSuppressible('gemini', config, mkInc(), NOW)).toBe(false)
     })
   })
 
@@ -1335,6 +1370,42 @@ describe('short-incident hold (#792)', () => {
       expect(buildIncidentAlerts([svc], alertedMap(), t0 + 10 * 60 * 1000, s3).map(a => a.key)).toEqual(['alerted:new:lf-real'])
     })
   })
+
+  describe('Mistral opt-in (#929)', () => {
+    // status.mistral.ai (Instatus, Nuxt) auto-posts frequent short "○○ API Degraded" MEDIUM (→ minor)
+    // flaps that self-resolve in seconds/minutes and get pruned, so each fired a phantom "New Incident"
+    // alert (the 2026-07-03 AI Registry Prompts/Skills case). Mistral now opts into the #792 hold.
+    const mistralFlap = (overrides: Partial<Incident> = {}): Incident => inc({
+      id: 'mistral-reg-1',
+      title: 'AI Registry Prompts API Degraded',
+      status: 'investigating',
+      impact: 'minor', // Nuxt severity MEDIUM → mapInstatusImpact → 'minor'
+      startedAt: new Date(NOW - 60_000).toISOString(),
+      timeline: [],
+      ...overrides,
+    })
+
+    it('the real SERVICES config opts Mistral into holdShortIncidents', () => {
+      const s = SERVICES.find((x) => x.id === 'mistral')
+      expect(s, 'mistral missing from SERVICES').toBeDefined()
+      expect(s!.holdShortIncidents, 'mistral must opt into the #792/#929 short-incident hold').toBe(true)
+    })
+
+    it('holds a Registry-shaped minor flap on first sight, using the real config', () => {
+      const cfg = SERVICES.find((x) => x.id === 'mistral')!
+      expect(shouldHoldNewIncident('mistral', cfg, mistralFlap(), firstSight)).toBe(true)
+    })
+
+    it('fires once the flap survives ~2 cycles (a genuine longer incident, e.g. the 120h Fine Tuning)', () => {
+      const cfg = SERVICES.find((x) => x.id === 'mistral')!
+      expect(shouldHoldNewIncident('mistral', cfg, mistralFlap(), confirmed)).toBe(false)
+    })
+
+    it('does NOT hold a `major` Mistral incident — a real broad outage alerts immediately', () => {
+      const cfg = SERVICES.find((x) => x.id === 'mistral')!
+      expect(shouldHoldNewIncident('mistral', cfg, mistralFlap({ impact: 'major' }), firstSight)).toBe(false)
+    })
+  })
 })
 
 describe('shouldHoldForAiAnalysis (#882 — Discord AI-hold on the push path)', () => {
@@ -1391,5 +1462,259 @@ describe('pendingAiKey (#882)', () => {
   it('scopes the AI-hold marker to the incident id, distinct from pending:new', () => {
     expect(pendingAiKey('mistral-ocr-123')).toBe('pending:ai:mistral-ocr-123')
     expect(pendingAiKey('x')).not.toBe(pendingNewKey('x'))
+  })
+})
+
+// #983 — Twelve Labs' Statuspage auto-monitor opens a brand-new incident per component blip under one
+// fixed title, and Statuspage stamps `impact: 'major'` whenever the affected sub-component reads
+// `major_outage`. The four incidents below are the REAL 2026-07-09 (PDT) burst. Before the fix, none
+// of them was hold-eligible (no flag on the service; and `holdShortIncidents` would still have bailed
+// on the three `major` ones) → 4 New + 4 Resolved operator alerts for a 6–16m machine-emitted blip.
+describe('auto-monitor tagged incidents (#983)', () => {
+  const AM_NOW = 1_752_100_000_000
+  const mkAm = (overrides: Partial<Incident> = {}): Incident => inc({
+    id: 'tl-1',
+    title: 'Some API features are experiencing issues',
+    status: 'investigating',
+    impact: 'major',
+    startedAt: new Date(AM_NOW - 60_000).toISOString(),
+    autoMonitor: true,
+    ...overrides,
+  })
+
+  describe('isShortIncidentHoldable', () => {
+    it('holds a `major` autoMonitor incident — impact is component-derived, not editorial', () => {
+      expect(isShortIncidentHoldable('twelvelabs', {}, mkAm())).toBe(true)
+    })
+
+    it('holds without needing holdShortIncidents — the tag is its own opt-in', () => {
+      expect(isShortIncidentHoldable('twelvelabs', { holdShortIncidents: false }, mkAm())).toBe(true)
+    })
+
+    it('holds the `minor` member of the same burst', () => {
+      expect(isShortIncidentHoldable('twelvelabs', {}, mkAm({ impact: 'minor' }))).toBe(true)
+    })
+
+    it('never holds `critical` even when tagged — the escape hatch for a genuine broad outage', () => {
+      expect(isShortIncidentHoldable('twelvelabs', {}, mkAm({ impact: 'critical' }))).toBe(false)
+    })
+
+    it('never holds Tier-1 even when tagged', () => {
+      expect(isShortIncidentHoldable('claude', {}, mkAm())).toBe(false)
+    })
+
+    it('leaves an untagged `major` incident alone (no regression for everyone else)', () => {
+      expect(isShortIncidentHoldable('langfuse', { holdShortIncidents: true }, mkAm({ autoMonitor: undefined }))).toBe(false)
+    })
+  })
+
+  describe('isFlapNotice / isFlapSuppressible', () => {
+    const config = { flapSuppression: true }
+
+    it('treats a tagged `major` incident as a flap despite no "— down" suffix', () => {
+      expect(isFlapNotice(mkAm())).toBe(true)
+    })
+
+    it('still refuses `critical`', () => {
+      expect(isFlapNotice(mkAm({ impact: 'critical' }))).toBe(false)
+    })
+
+    it('untagged `major` with no flap suffix is still not a flap', () => {
+      expect(isFlapNotice(mkAm({ autoMonitor: undefined }))).toBe(false)
+    })
+
+    it('preserves the BetterStack suffix path for untagged minor incidents', () => {
+      expect(isFlapNotice(inc({ id: 'm', title: 'Web endpoints — down', status: 'investigating', impact: 'minor', startedAt: recentDate }))).toBe(true)
+    })
+
+    it('the critical-first reorder: an UNTAGGED `critical` "— down" incident is no longer a flap', () => {
+      // Behavior change on the pre-existing BetterStack path. Unreachable today (mapBetterStackImpact
+      // only emits minor/major), but pinned so a future parser that CAN emit `critical` can't have its
+      // most severe incident silently swallowed by the 60-min window.
+      expect(isFlapNotice(inc({ id: 'c', title: 'Web endpoints — down', status: 'investigating', impact: 'critical', startedAt: recentDate }))).toBe(false)
+    })
+
+    it('is suppressible on twelvelabs (flapSuppression is on) and keyed by the shared title', () => {
+      expect(isFlapSuppressible('twelvelabs', config, mkAm(), AM_NOW)).toBe(true)
+      // The whole burst shares one normalized title → one 60-min suppression window.
+      expect(flapSuppressionKey('twelvelabs', mkAm({ id: 'tl-2' })))
+        .toBe(flapSuppressionKey('twelvelabs', mkAm({ id: 'tl-3', impact: 'minor' })))
+    })
+  })
+
+  // The exposure #983 introduced and this guard closes: enabling flapSuppression on a service whose
+  // `major` incidents are suppressible means a REAL sustained outage reusing the machine title could
+  // have had BOTH its New and Resolved dropped for up to an hour.
+  describe('FLAP_SUPPRESSION_ESCAPE_MS — a long incident is never a flap', () => {
+    const config = { flapSuppression: true }
+    const longAgo = new Date(AM_NOW - (FLAP_SUPPRESSION_ESCAPE_MS + 60_000)).toISOString()
+
+    it('an ONGOING tagged incident past the escape window alerts despite an active flap window', () => {
+      expect(isFlapSuppressible('twelvelabs', config, mkAm({ startedAt: longAgo }), AM_NOW)).toBe(false)
+    })
+
+    it('its RESOLVED half escapes too — an escaped New must never lose its Resolved', () => {
+      const resolved = mkAm({ status: 'resolved', startedAt: longAgo, resolvedAt: new Date(AM_NOW).toISOString() })
+      expect(isFlapSuppressible('twelvelabs', config, resolved, AM_NOW)).toBe(false)
+    })
+
+    it('a short resolved blip is still suppressed (the burst members)', () => {
+      const blip = mkAm({ status: 'resolved', startedAt: new Date(AM_NOW - 16 * 60_000).toISOString(), resolvedAt: new Date(AM_NOW).toISOString() })
+      expect(isFlapSuppressible('twelvelabs', config, blip, AM_NOW)).toBe(true)
+    })
+
+    it('generalizes to the pre-existing BetterStack flap services', () => {
+      const longFlap = inc({ id: 'mf', title: 'Web endpoints — down', status: 'investigating', impact: 'minor', startedAt: longAgo })
+      expect(isFlapSuppressible('modal', config, longFlap, AM_NOW)).toBe(false)
+      const shortFlap = inc({ id: 'mf2', title: 'Web endpoints — down', status: 'investigating', impact: 'minor', startedAt: new Date(AM_NOW - 60_000).toISOString() })
+      expect(isFlapSuppressible('modal', config, shortFlap, AM_NOW)).toBe(true)
+    })
+
+    it('a backdated first sight on a flapSuppression-only service alerts immediately (modal/together/fireworks)', () => {
+      // These services have flapSuppression but NOT holdShortIncidents and carry no tag, so the flap
+      // branch is their only path into the hold. Past the escape window it closes → no hold → alert.
+      const backdated = inc({ id: 'mb', title: 'Web endpoints — down', status: 'investigating', impact: 'minor', startedAt: longAgo })
+      expect(shouldHoldNewIncident('modal', config, backdated, { alreadyAlerted: false, firstSeenMs: null, nowMs: AM_NOW })).toBe(false)
+      // ...while a fresh one on the same service is still held on first sight (unchanged behavior).
+      const fresh = inc({ id: 'mf3', title: 'Web endpoints — down', status: 'investigating', impact: 'minor', startedAt: new Date(AM_NOW - 60_000).toISOString() })
+      expect(shouldHoldNewIncident('modal', config, fresh, { alreadyAlerted: false, firstSeenMs: null, nowMs: AM_NOW })).toBe(true)
+    })
+
+    describe('incidentRunMs', () => {
+      it('measures to resolvedAt when resolved, else to now', () => {
+        expect(incidentRunMs(mkAm({ startedAt: new Date(AM_NOW - 5 * 60_000).toISOString() }), AM_NOW)).toBe(5 * 60_000)
+        expect(incidentRunMs(mkAm({ startedAt: new Date(AM_NOW - 60 * 60_000).toISOString(), resolvedAt: new Date(AM_NOW - 50 * 60_000).toISOString() }), AM_NOW)).toBe(10 * 60_000)
+      })
+
+      it('FAILS OPEN on an unparseable startedAt — Infinity → escapes suppression → the alert ships', () => {
+        // The direction matters: returning 0 here would pin a real outage below the escape threshold on
+        // every cron cycle and mute it for the whole 60-min window, with no trail. Dropping a real
+        // alert is worse than one phantom (#835 rule).
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        expect(incidentRunMs(mkAm({ startedAt: 'not-a-date' }), AM_NOW)).toBe(Number.POSITIVE_INFINITY)
+        expect(isFlapSuppressible('twelvelabs', { flapSuppression: true }, mkAm({ startedAt: 'not-a-date' }), AM_NOW)).toBe(false)
+        expect(warn).toHaveBeenCalled()
+        warn.mockRestore()
+      })
+
+      it('an unparseable resolvedAt degrades to measuring against now, not to 0', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const started = new Date(AM_NOW - 45 * 60_000).toISOString()
+        expect(incidentRunMs(mkAm({ startedAt: started, resolvedAt: 'garbage' }), AM_NOW)).toBe(45 * 60_000)
+        expect(warn).toHaveBeenCalled()
+        warn.mockRestore()
+      })
+
+      it('a future startedAt (clock skew) clamps to 0 and stays suppressible — self-corrects as now advances', () => {
+        expect(incidentRunMs(mkAm({ startedAt: new Date(AM_NOW + 60_000).toISOString() }), AM_NOW)).toBe(0)
+        expect(isFlapSuppressible('twelvelabs', { flapSuppression: true }, mkAm({ startedAt: new Date(AM_NOW + 60_000).toISOString() }), AM_NOW)).toBe(true)
+      })
+    })
+  })
+
+  describe('shouldHoldNewIncident — the burst as it actually arrived', () => {
+    const firstSight = { alreadyAlerted: false, firstSeenMs: null, nowMs: AM_NOW }
+
+    it('holds every member of the burst on first sight', () => {
+      for (const impact of ['major', 'minor'] as const) {
+        expect(shouldHoldNewIncident('twelvelabs', {}, mkAm({ impact }), firstSight)).toBe(true)
+      }
+    })
+
+    it('the 6m `minor` blip resolves inside the hold window → never alerts', () => {
+      const midWindow = { alreadyAlerted: false, firstSeenMs: AM_NOW - 6 * 60_000, nowMs: AM_NOW }
+      expect(shouldHoldNewIncident('twelvelabs', {}, mkAm({ impact: 'minor' }), midWindow)).toBe(true)
+    })
+
+    it('a 14m incident outlives the window → confirms and alerts once', () => {
+      const outlived = { alreadyAlerted: false, firstSeenMs: AM_NOW - (FLAP_HOLD_MS + 1000), nowMs: AM_NOW }
+      expect(shouldHoldNewIncident('twelvelabs', {}, mkAm(), outlived)).toBe(false)
+    })
+
+    it('a tagged `critical` incident alerts immediately, never held', () => {
+      expect(shouldHoldNewIncident('twelvelabs', {}, mkAm({ impact: 'critical' }), firstSight)).toBe(false)
+    })
+  })
+
+  // The actual user-visible bug: 4 New + 4 Resolved Discord messages. The predicates above are only
+  // half the story — the Resolved half is gated by `alertedNewMap.has` inside buildIncidentAlerts, not
+  // by any predicate. Compose the same three functions index.ts wires together.
+  describe('buildIncidentAlerts integration — the reported 4 New + 4 Resolved', () => {
+    const burst = (status: Incident['status']) => [
+      mkAm({ id: 'kqk7gdf0h84l', impact: 'minor', status, startedAt: new Date(AM_NOW - 6 * 60_000).toISOString() }),
+      mkAm({ id: 'qyc0cyhlqctg', impact: 'major', status, startedAt: new Date(AM_NOW - 5 * 60_000).toISOString() }),
+      mkAm({ id: 'qkkqnhkfs69j', impact: 'major', status, startedAt: new Date(AM_NOW - 4 * 60_000).toISOString() }),
+      mkAm({ id: '7wk40blkybtq', impact: 'major', status, startedAt: new Date(AM_NOW - 3 * 60_000).toISOString() }),
+    ]
+
+    it('first sight: every member is held → ZERO New alerts (was 4)', () => {
+      const incidents = burst('investigating')
+      const suppressed = new Set<string>()
+      for (const i of incidents) {
+        if (shouldHoldNewIncident('twelvelabs', {}, i, { alreadyAlerted: false, firstSeenMs: null, nowMs: AM_NOW })) suppressed.add(i.id)
+      }
+      expect(suppressed.size).toBe(4)
+      const svc = mockService({ id: 'twelvelabs', status: 'down', incidents })
+      expect(buildIncidentAlerts([svc], alertedMap(), AM_NOW, suppressed)).toHaveLength(0)
+    })
+
+    it('the burst self-resolves inside the hold window → ZERO Resolved alerts (was 4)', () => {
+      // Never entered alertedNewMap (their New was held), so the resolved branch is skipped entirely.
+      const incidents = burst('resolved').map((i) => ({ ...i, resolvedAt: new Date(AM_NOW).toISOString(), duration: '11m' }))
+      const svc = mockService({ id: 'twelvelabs', status: 'operational', incidents })
+      const suppressed = new Set(incidents.map((i) => i.id))
+      expect(buildIncidentAlerts([svc], alertedMap(), AM_NOW, suppressed)).toHaveLength(0)
+      // ...and still zero even if the cron had NOT re-suppressed them this cycle: alertedNewMap gates it.
+      expect(buildIncidentAlerts([svc], alertedMap(), AM_NOW, new Set())).toHaveLength(0)
+
+      // Positive control — the two zeros above must come from the alertedNewMap gate, NOT from
+      // buildIncidentAlerts being unable to emit a Resolved for a tagged incident at all. Had these
+      // incidents actually alerted New in a prior cycle, all four Resolved alerts DO fire.
+      const roster = alertedMap(Object.fromEntries(incidents.map((i) => [i.id, ['twelvelabs']])))
+      const resolvedAlerts = buildIncidentAlerts([svc], roster, AM_NOW, new Set())
+      expect(resolvedAlerts).toHaveLength(4)
+      expect(resolvedAlerts.every((a) => a.key.startsWith('alerted:res:'))).toBe(true)
+    })
+
+    it('an incident that outlives the hold fires exactly ONE New alert', () => {
+      const survivor = mkAm({ id: 'tl-long' })
+      const svc = mockService({ id: 'twelvelabs', status: 'down', incidents: [survivor] })
+      const held = shouldHoldNewIncident('twelvelabs', {}, survivor, { alreadyAlerted: false, firstSeenMs: AM_NOW - (FLAP_HOLD_MS + 1000), nowMs: AM_NOW })
+      expect(held).toBe(false)
+      const alerts = buildIncidentAlerts([svc], alertedMap(), AM_NOW, new Set())
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].key).toBe('alerted:new:tl-long')
+    })
+
+    it('a REAL sustained outage under the machine title still alerts even inside an active flap window', () => {
+      // The regression this guards: escape window → not suppressible → the cron never adds it to
+      // suppressedIncIds, so its New alert ships.
+      const real = mkAm({ id: 'tl-real', startedAt: new Date(AM_NOW - 45 * 60_000).toISOString() })
+      expect(isFlapSuppressible('twelvelabs', { flapSuppression: true }, real, AM_NOW)).toBe(false)
+      const svc = mockService({ id: 'twelvelabs', status: 'down', incidents: [real] })
+      const alerts = buildIncidentAlerts([svc], alertedMap(), AM_NOW, new Set())
+      expect(alerts.map((a) => a.key)).toEqual(['alerted:new:tl-real'])
+    })
+  })
+
+  describe('the real twelvelabs SERVICES config', () => {
+    const cfg = SERVICES.find((s) => s.id === 'twelvelabs')!
+
+    it('opts into both the tag and the 60-min flap-suppression window', () => {
+      expect(cfg.autoMonitorTitles?.length).toBeGreaterThan(0)
+      expect(cfg.flapSuppression).toBe(true)
+    })
+
+    it('matches the machine-emitted title but NOT the provider human-written ones', () => {
+      const matches = (title: string) => cfg.autoMonitorTitles!.some((re) => re.test(title))
+      expect(matches('Some API features are experiencing issues')).toBe(true)
+      // Real Twelve Labs incidents from the same page — must stay ungrouped + alert immediately.
+      expect(matches('Search API failure')).toBe(false)
+      expect(matches('API server failure')).toBe(false)
+      expect(matches('Analyze Disruption')).toBe(false)
+      expect(matches('Youtube video upload not working')).toBe(false)
+      // Anchored: a longer human title that merely CONTAINS the phrase must not match.
+      expect(matches('Some API features are experiencing issues after the migration')).toBe(false)
+    })
   })
 })

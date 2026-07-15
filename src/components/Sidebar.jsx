@@ -8,6 +8,7 @@ import { usePolling } from '../hooks/usePolling'
 import { trackEvent } from '../utils/analytics'
 import { SERVICE_CATEGORIES, ALL_SERVICES_FEED_URL, categoryRankOf } from '../utils/constants'
 import { isUnreliableUptime } from '../utils/serviceReliability'
+import { displayStatusOf, isDisplayAffected } from '../utils/statusDisplay'
 import RssCopyIcon from './RssCopyIcon'
 
 const EMPTY = []
@@ -104,6 +105,14 @@ function IconTerminal() {
   )
 }
 
+function IconPlugin() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ opacity: 0.6 }}>
+      <path d="M8.6 2.2a1.2 1.2 0 0 0-2.4 0v.9H3.3v2.9h-.9a1.2 1.2 0 1 0 0 2.4h.9v2.9h2.9v-.9a1.2 1.2 0 0 1 2.4 0v.9h2.9V8.4h.9a1.2 1.2 0 1 0 0-2.4h-.9V3.1H8.6v-.9z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 const NAV_ICONS = { overview: IconGrid, latency: IconChart, incidents: IconClock, uptime: IconTarget, ranking: IconTrophy }
 
 const DASHBOARD_ITEMS = [
@@ -116,8 +125,10 @@ const DASHBOARD_ITEMS = [
 
 const STATUS_DOT_CLASS = {
   operational: 'bg-[var(--green)]',
+  partial: 'bg-[var(--yellow)]',
   degraded: 'bg-[var(--amber)]',
   down: 'bg-[var(--red)]',
+  unknown: 'bg-[var(--bg3)]', // #1004 — status source unreadable: neutral, not amber
 }
 
 function uptimeBadgeCls(uptime) {
@@ -135,11 +146,14 @@ const uptimeBadgeStyle = { ...badgeStyle, whiteSpace: 'nowrap', minWidth: '46px'
 
 function ServiceNavItem({ svc, page, setPage, onNavigate }) {
   const active = page.name === 'service' && page.serviceId === svc.id
-  const dotClass = STATUS_DOT_CLASS[svc.status] ?? STATUS_DOT_CLASS.operational
+  // #1004 — the DISPLAY state, so a service whose status source we can't read shows a neutral dot
+  // instead of the amber "degraded" one the card next to it has already stopped showing.
+  const display = displayStatusOf(svc)
+  const dotClass = STATUS_DOT_CLASS[display] ?? STATUS_DOT_CLASS.operational
   const hasUptime = svc.uptime30d != null && !isUnreliableUptime(svc) // #591 — hide frozen stale uptime too
   const badgeCls = hasUptime ? uptimeBadgeCls(svc.uptime30d) : 'bg-[var(--bg3)] text-[var(--text2)]'
-  const statusTextCls = svc.status === 'degraded' ? 'text-[var(--amber)]'
-    : svc.status === 'down' ? 'text-[var(--red)]' : null
+  const statusTextCls = display === 'degraded' ? 'text-[var(--amber)]'
+    : display === 'down' ? 'text-[var(--red)]' : null
 
   return (
     <button
@@ -183,7 +197,7 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
   // raw worker order (api → apps → agents). Stable sort keeps the worker order WITHIN each bucket.
   const orderedServices = [...categoryServices].sort((a, b) => categoryRankOf(a.id) - categoryRankOf(b.id))
 
-  const issueCount = useMemo(() => services.filter((s) => s.status !== 'operational').length, [services])
+  const issueCount = useMemo(() => services.filter(isDisplayAffected).length, [services])
   // Count only unresolved incidents (investigating/identified/monitoring), deduplicated
   const incidentCount = useMemo(() => {
     const seen = new Set()
@@ -196,12 +210,19 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
     , 0)
   }, [services])
 
+  // h-full only from md up. Pinning the height at every breakpoint made the content exactly fill the
+  // mobile drawer, so the drawer's own overflow-y-auto never engaged (#978). Below md the content
+  // sizes itself and the drawer scrolls. (Don't reach for `min-h-full` here to bottom-pin the footer
+  // on a sparse list: the footer's `mt-auto` is inert — the unlayered `* { margin: 0 }` reset kills
+  // it — so that only adds dead space below the footer. Desktop pins it via the flex-1 list.)
   return (
-    <div className="flex flex-col h-full" style={{ padding: '16px 0' }}>
+    <div className="flex flex-col md:h-full" style={{ padding: '16px 0' }}>
 
       {/* ── Dashboard section ── */}
-      {/* NOTE: inline styles used because Tailwind v4 fails to apply certain utilities
-           (py-[7px], px-[8px], gap-[8px]) on button elements due to base layer reset. */}
+      {/* NOTE: inline styles used because index.css's unlayered `* { margin: 0; padding: 0 }` reset
+           outranks Tailwind v4's *layered* utilities, so py-[7px]/px-[8px] compute to 0 — on every
+           element, not just buttons. It is what silently nullified the mobile drawer's `pt-[48px]`
+           too (#978). gap-[8px] is kept inline alongside them for consistency. */}
       <nav style={{ padding: '0 12px', marginBottom: '8px' }} aria-label="Dashboard">
         <div style={sectionTitleStyle}>{t('nav.dashboard')}</div>
         {DASHBOARD_ITEMS.map((item) => {
@@ -261,9 +282,26 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
           <span className="shrink-0"><IconBadge /></span>
           {t('nav.badges')}
         </a>
-        {/* Divider — separates "data viewing" group above from "settings / integrations" group below.
+        {/* "Request a service" is a feedback link, not a Claude Code integration — grouped with the data/resources items above the divider. */}
+        <a
+          href="https://github.com/bentleypark/aiwatch/issues/new?template=service_request.md"
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => { trackEvent('click_request_service', {}); onNavigate?.() }}
+          className="w-full text-left flex items-center transition-all cursor-pointer text-[var(--text1)] hover:bg-[var(--bg3)] hover:text-[var(--text0)]"
+          style={navItemStyle}
+        >
+          <span className="shrink-0"><IconSend /></span>
+          {t('nav.requestService')}
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ marginLeft: 'auto', opacity: 0.4 }}>
+            <path d="M3 1h6v6M9 1L4 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </a>
+        {/* Divider — separates the data/resources group above from the Claude Code integrations below.
             aria-hidden because this sits inside the nav landmark and is purely visual. */}
         <div aria-hidden="true" style={{ height: '1px', background: 'var(--border)', margin: '6px 0' }} />
+        {/* #920 — Claude Code integrations group: the statusline SPA guide + the /plugin Edge landing. */}
+        <div style={sectionTitleStyle}>{t('nav.claudeCode')}</div>
         {(() => {
           const isStatuslineActive = page.name === 'statusline'
           return (
@@ -280,19 +318,17 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
             </button>
           )
         })()}
+        {/* #920 — external link to the public /plugin landing (Edge route, not a SPA page) */}
         <a
-          href="https://github.com/bentleypark/aiwatch/issues/new?template=service_request.md"
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={() => { trackEvent('click_request_service', {}); onNavigate?.() }}
+          href="/plugin"
+          onClick={() => { trackEvent('click_plugin', { location: 'sidebar' }); onNavigate?.() }}
           className="w-full text-left flex items-center transition-all cursor-pointer text-[var(--text1)] hover:bg-[var(--bg3)] hover:text-[var(--text0)]"
           style={navItemStyle}
         >
-          <span className="shrink-0"><IconSend /></span>
-          {t('nav.requestService')}
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ marginLeft: 'auto', opacity: 0.4 }}>
-            <path d="M3 1h6v6M9 1L4 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <span className="shrink-0"><IconPlugin /></span>
+          {t('nav.plugin')}
+          {/* #920 — plugin is pre-marketplace-approval; mirrors the AI Analysis "Beta" pill convention */}
+          <span className="mono" style={{ marginLeft: '6px', color: 'var(--purple)', background: 'rgba(124,58,237,0.15)', padding: '1px 5px', borderRadius: '3px', fontSize: '9px' }}>Beta</span>
         </a>
       </nav>
 
@@ -323,10 +359,15 @@ export default function Sidebar({ visibleServiceIds, onNavigate }) {
       </div>
 
       {/* ── Filtered service list — single flat list in #658 category order (#676).
-           flex-1 min-h-0 so the list takes the remaining height and scrolls WITHIN itself
-           (not the whole sidebar), keeping the footer pinned + always-visible regardless of
-           how many services are listed (#601 — broke at 39 services without this). ── */}
-      <nav className="flex-1 min-h-0 overflow-y-auto" style={{ padding: '0 12px' }} aria-label={t('nav.services')}>
+           From md up, flex-1 so the list takes the remaining height and scrolls WITHIN itself
+           (not the whole sidebar), keeping the footer pinned regardless of how many services are
+           listed (#601 — broke at 39 services without this).
+           Being the only flexible child, it also absorbed the ENTIRE height shortfall on a short
+           viewport and collapsed to 0px, hiding every service (#978). The 160px floor (~5 rows)
+           replaces the old `min-h-0` so it can no longer vanish: once the sidebar can't fit, the
+           overflow moves out to the sidebar's own scroll container. Below md there is no floor to
+           enforce — the mobile drawer scrolls as a whole. ── */}
+      <nav className="md:flex-1 md:min-h-[160px] md:overflow-y-auto" style={{ padding: '0 12px' }} aria-label={t('nav.services')}>
         {orderedServices.map((svc) => (
           <ServiceNavItem key={svc.id} svc={svc} page={page} setPage={setPage} onNavigate={onNavigate} />
         ))}

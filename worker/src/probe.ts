@@ -40,14 +40,23 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   // #601 — LLM observability siblings; both expose a public, no-auth health endpoint (verified 2026-06-23)
   { id: 'helicone', url: 'https://api.helicone.ai/healthcheck' },                   // public 200 {"status":"healthy :)"}
   { id: 'langfuse', url: 'https://cloud.langfuse.com/api/public/health' },          // public 200 {"status":"OK"}
-  // #857 — turbopuffer has no official uptime (no statusComponentId → parseUptimeData never runs; region-only
-  // page), so the probe is its sole substantial measured signal → confidence `medium` once ≥7d of samples accrue
-  // (`low`/null Score during the initial ramp). Public no-auth health endpoint, verified 2026-07-01.
+  // #857 — turbopuffer's probe supplies the Responsiveness component. (It is NOT the sole measured signal:
+  // the page publishes official uptime via incident.io `component_uptimes`, read as a worst-of over the region
+  // roster — see the turbopuffer config in services.ts — so confidence is `high`.) Verified 2026-07-01.
   { id: 'turbopuffer', url: 'https://api.turbopuffer.com' },                        // public 200 {"status":"🐡"}
   // #883 — cursor (coding agent) runs on its OWN API infra, independent of any other probed target.
   // Live cross-check 2026-07-03: api2.cursor.sh routes real paths (200, body "Welcome to Cursor. From
   // <build>…") but 404s garbage → representative gateway, NOT a CDN catch-all (unlike windsurf.com).
   { id: 'cursor', url: 'https://api2.cursor.sh/' },                                 // 200, real API gateway
+  // #921 — Character.AI's official Statuspage was deactivated (401 "page inactive") since ~2026-06-18
+  // (#689/#800, statusSourceDeactivated) with no first-party replacement, leaving the card a dead
+  // surface. neo.character.ai (its backend API host) exposes a plain-fetch, non-bot-walled health
+  // endpoint — verified 2026-07-06: 200 {"redis":"UP"}, x-envoy-upstream-service-time header (real
+  // backend, not a CDN edge), RTT ~0.2s, no browser UA needed (the main character.ai root is CF-403
+  // bot-walled). This is a `probeConfirmed` case (services.ts): a healthy probe keeps the badge
+  // operational (probe-backed) despite the dead source. CAVEAT: it's a BACKEND health proxy — the
+  // user-facing app could be down while /health is UP; it does NOT restore incidents/uptime.
+  { id: 'characterai', url: 'https://neo.character.ai/health' },                    // 200 {"redis":"UP"}, app-category detail-card only (not Latency-ranked)
   // Not probed (#678): bedrock (region-specific runtime endpoint, estimate-only — incident-derived
   // reliability is enough), azureopenai (tenant-specific {resource}.openai.azure.com — no generic
   // endpoint), modal (api.modal.com returns a catch-all 200 on every path — not a representative
@@ -185,6 +194,39 @@ export function computeMedianRtt(snapshots: ProbeSnapshot[], serviceId: string):
  * Returns false if probes show spikes/failures or no recent data exists.
  * Conservative: returns false (don't override) when data is insufficient.
  */
+/** #1004 — does our own probe INDEPENDENTLY corroborate an outage? A fetch-failure `degraded` renders as
+ *  a neutral "unknown" badge ("we can't read the source") — but that would be a false reassurance when
+ *  the service is probed and the probe is failing, so this is the flag that keeps such a case amber.
+ *
+ *  Deliberately a POSITIVE test, not `!isProbeHealthy`: that negation also swallows "not enough data"
+ *  (one recent sample, no median), so a perfectly healthy service with a single sample would have been
+ *  read as contradicting and the #1004 fix would silently not apply to it. Mirrors `isProbeHealthy`'s
+ *  evidence bar — ≥2 recent samples, majority rule — and requires the samples to be actually BAD:
+ *  a failed probe (`rtt <= 0`, written by `failedProbe()`) or a >3× median spike. The three predicates
+ *  therefore partition the probed set into healthy / failing / not-enough-evidence, and only the middle
+ *  one suppresses the neutral badge. */
+export function isProbeFailing(
+  snapshots: ProbeSnapshot[],
+  serviceId: string,
+  maxAgeMs = 900_000,
+): boolean {
+  const now = Date.now()
+  const recent = snapshots.filter((s) => {
+    const age = now - new Date(s.t).getTime()
+    return age >= 0 && age < maxAgeMs && serviceId in s.data
+  })
+  if (recent.length < 2) return false // not enough evidence to contradict anything
+
+  const median = computeMedianRtt(snapshots, serviceId)
+  // No usable median (every sample failed) → the probe is unambiguously failing.
+  const threshold = median !== null && median > 0 ? median * 3 : Infinity
+  const failing = recent.filter((s) => {
+    const probe = s.data[serviceId]
+    return probe.rtt <= 0 || probe.rtt > threshold
+  }).length
+  return failing >= Math.ceil(recent.length * 2 / 3)
+}
+
 export function isProbeHealthy(
   snapshots: ProbeSnapshot[],
   serviceId: string,

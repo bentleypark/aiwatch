@@ -16,7 +16,7 @@
 // fan-out (deliverToSubscribers) is wired into the scheduled handler as of #486 PR3, which also
 // removed the old browser relay in the same release so the two paths never double-send.
 
-import { kvPut, kvDel, isAllowedAlertWebhook } from './utils'
+import { kvPut, kvDel, isAllowedAlertWebhook, appendUtm } from './utils'
 import { isDownUrl } from './rss'
 import type { AlertFeedEntry, AlertKind } from './alert-feed'
 
@@ -256,14 +256,27 @@ export async function deleteConfirmed(kv: KVNamespace, hash: string): Promise<vo
   await kvDel(kv, `${SUB_PREFIX}${hash}`)
 }
 
+/** A real subscriber key is `webhook:sub:{sha256hex}` — 64 lowercase hex. Other keys that share the
+ *  SUB_PREFIX — notably the daily `webhook:sub:count:{date}` snapshot (7d TTL) — must NOT be counted
+ *  as subscribers (#1011): the prefix-only list swept them in, inflating the count to `real + ~7`
+ *  (self-compounding, since the daily snapshot writes that inflated length) and polluting the
+ *  growth-series `subscribers` field. Matching the hash shape excludes any such non-hash key. */
+export function isSubscriberHash(hashPart: string): boolean {
+  return /^[0-9a-f]{64}$/.test(hashPart)
+}
+
 /** List all confirmed-sub hashes, paginating the KV `list` cursor until complete (1000 keys/page —
- *  never assume a single call; #486 acceptance criterion). Returns the bare hashes (key minus prefix). */
+ *  never assume a single call; #486 acceptance criterion). Returns the bare hashes (key minus prefix),
+ *  filtered to real subscriber hashes so the `webhook:sub:count:{date}` snapshots don't leak in (#1011). */
 export async function listConfirmedHashes(kv: KVNamespace): Promise<string[]> {
   const hashes: string[] = []
   let cursor: string | undefined
   for (;;) {
     const res = await kv.list({ prefix: SUB_PREFIX, cursor })
-    for (const k of res.keys) hashes.push(k.name.slice(SUB_PREFIX.length))
+    for (const k of res.keys) {
+      const hash = k.name.slice(SUB_PREFIX.length)
+      if (isSubscriberHash(hash)) hashes.push(hash)
+    }
     if (res.list_complete) break
     cursor = res.cursor
     if (!cursor) break
@@ -416,11 +429,15 @@ export function classifyDelivery(status: number | null): DeliveryOutcome {
 // direct cron post (not via deliverToSubscribers), so the operator link is never touched.
 // The link format is pinned by a test (toPerUserEntry rewrites the exact `[View on AIWatch](url)`
 // markup index.ts emits) so a host/format drift breaks the build, not silently per-user delivery.
-const DASHBOARD_HASH_LINK_RE = /https:\/\/ai-watch\.dev\/#([a-z0-9]+)/g
+// #936 — the operator View link is now UTM-tagged with the query BEFORE the fragment
+// (`ai-watch.dev/?utm_source=discord…#claude`), so the pattern tolerates an optional query segment.
+const DASHBOARD_HASH_LINK_RE = /https:\/\/ai-watch\.dev\/(?:\?[^#\s)]*)?#([a-z0-9]+)/g
 export function toPerUserEntry(entry: AlertFeedEntry): AlertFeedEntry {
   const desc = entry.embed.description
   if (!desc) return entry
-  const rewritten = desc.replace(DASHBOARD_HASH_LINK_RE, (_m, id) => isDownUrl(id))
+  // Rewrite to the is-down page AND re-tag it (discord/notification) so per-user clicks attribute the
+  // same as the operator's — isDownUrl() drops the operator's query, appendUtm re-adds ours.
+  const rewritten = desc.replace(DASHBOARD_HASH_LINK_RE, (_m, id) => appendUtm(isDownUrl(id), 'discord'))
   return rewritten === desc ? entry : { ...entry, embed: { ...entry.embed, description: rewritten } }
 }
 

@@ -9,6 +9,8 @@ const en = {
   'nav.uptime': 'Uptime Status',
   'nav.ranking': 'Reliability Ranking',
   'nav.statusline': 'Statusline',
+  'nav.plugin': 'Plugin',
+  'nav.claudeCode': 'Claude Code',
   'nav.settings': 'Settings',
   'nav.dashboard': 'Dashboard',
   'nav.reports': 'Reports',
@@ -74,13 +76,15 @@ const en = {
   'overview.panel.latency.sub': 'Current · ms',
   'overview.stats.uptime.sub': 'Overall average',
   'overview.incidents.monitoring': 'Monitoring',
+  'overview.incidents.total': '{d} total',
   'overview.banner.degraded': 'Partially Degraded',
   'overview.banner.down': 'Down',
   'overview.banner.affected': '{n} services affected',
   // #574 — supply-chain correlation banner (AWS region degraded + dependent AI service degraded)
   'supplychain.title': 'AWS infrastructure issue',
-  // Confirmed by the service ITSELF: these are degraded AND their own status page attributes the
-  // issue to AWS / an upstream provider (StatusGator-style cross-check) — not a mere timing coincidence.
+  // Confirmed by the service ITSELF: these are degraded AND their own status page names an AWS region
+  // that AWS reports degraded (#1000 region-aware cross-check) — not a mere timing coincidence. A
+  // region-less "upstream provider" mention no longer qualifies; the region match is the whole point.
   'supplychain.affectingNow': 'Degraded · AWS-attributed:',
   'supplychain.mayAffect': 'Other AWS-dependent · may be affected:',
   'supplychain.region.degraded': 'degraded',
@@ -100,7 +104,6 @@ const en = {
   'overview.recovered': 'Recently Resolved',
   'overview.recentlyResolved': 'Recently Resolved',
   'overview.seeAnalysis': 'See details in Analyze',
-  'overview.security.title': 'Recent security findings',
   'analysis.recoveredAt': 'Recovered',
   // Empty States
   'empty.issues.title': 'No Issues',
@@ -121,7 +124,7 @@ const en = {
   'latency.slowest': 'Slowest',
   'latency.trend': '24h Trend',
   'latency.top8': 'Top 8 by Score',
-  'latency.excludeNote': '* AI Apps (claude.ai, ChatGPT, etc.) are excluded — no public API endpoint to measure. Coding agents are probed only where they expose their own API (e.g. Cursor).',
+  'latency.excludeNote': '* Ranking covers API services and coding agents with their own API (e.g. Cursor). AI apps are not ranked — most have no measurable endpoint; Character.AI is probed on its backend health endpoint and shown on its detail page only.',
   'latency.dummy': 'Collecting data (switches to real data after 24h)',
   'latency.avg.services': 'services',
 
@@ -169,6 +172,10 @@ const en = {
   'uptime.rankings': 'Uptime Rankings',
   'uptime.matrix': '3-Month History',
   'uptime.incidents': 'incidents',
+  // #1006 — the rows are not on one basis, so the header is a LEGEND, not a claim. A global "30 days"
+  // line would repeat the inaccurate label #654 found and removed.
+  'uptime.legend.official': 'AIWatch 30d',
+  'uptime.legend.platform': 'platform-measured',
   'uptime.basis': 'reported uptime',
   'uptime.basis.suffix': 'basis',
   'uptime.matrix.sub': 'Last 3 months',
@@ -181,10 +188,23 @@ const en = {
   'svc.latency.inherited': 'API Response Time · via {p}',
   'svc.latency.inherited.sub': 'Shared endpoint with {p}',
   'svc.uptime30d': 'Uptime',
-  'uptime.label.official': 'Official Uptime',
-  'uptime.sub.official': 'Official status page',
+  // #1006 — this card's number is OURS. Calling it "Official" collides with the provider's figure shown
+  // right below it, and the reader can't tell which is which. "Official" now belongs to the provider only.
+  'uptime.label.official': '30-Day Uptime',
+  // #1006 — not a copy of the provider's published %, but computed by AIWatch from the incident/impact
+  // records the provider publishes, over the same 30-day window with the same weighting for every
+  // service (the precondition the ranking always claimed).
+  'uptime.sub.official': 'From status-page records · computed by AIWatch',
+  // Both attributions on ONE line — a bare colon makes the trailing number read as the headline value.
+  'uptime.compare.reported': 'Computed by AIWatch (status page shows {v}%)',
+  // State the provider's period when we know it (Atlassian ≈90d) — that difference is WHY the two
+  // numbers diverge.
+  'uptime.compare.reported.days': 'Computed by AIWatch (status page shows {v}% over {d}d)',
+  // When the provider's records don't reach back 30 days (a status-page migration), say so.
+  'uptime.sub.official.partial': "Computed by AIWatch · provider's records go back only {d}d",
+  'uptime.partialWindow.tooltip': "The provider's records for this component only go back {d} days (e.g. a status-page migration). It returns to a full 30-day window automatically.",
   'uptime.label.platform_avg': 'Platform Average',
-  'uptime.sub.platform_avg': 'All resources avg uptime',
+  'uptime.sub.platform_avg': 'From status-page records · computed by AIWatch',
   'svc.incidents': 'Incidents',
   'svc.mttr': 'Recovery',
   'svc.recovery.worst': 'worst {d} · 7d',
@@ -258,6 +278,10 @@ const en = {
   'svc.sourceDead.title': 'Status source unavailable',
   'svc.sourceDead.body': "This provider's status page is inactive, so its operational status can't currently be confirmed. Live status, uptime, and incidents resume automatically when the source recovers.",
   'svc.sourceDead.bodyProbe': "This provider's status page is inactive, but its API still responds to AIWatch's direct probe — so the service is shown as operational. Uptime and incidents resume when the source recovers.",
+  // #1004 — make clear this is OUR read failing, not the provider's service being impaired. sourceUnknown
+  // covers timeouts and 5xx as well as unparseable bodies, so don't claim we "parsed and failed".
+  'svc.sourceUnknown.title': 'Status source unreadable',
+  'svc.sourceUnknown.body': "AIWatch can't read this provider's status page — it may have moved, or be erroring or timing out. It does NOT mean the service is impaired: it means AIWatch can't currently confirm its status. Live status resumes automatically when the source is readable again.",
   'svc.components.title': 'Component Status',
   'svc.components.sub': 'Per-component breakdown from the official status page',
   'svc.components.groupCount': '{n} components',

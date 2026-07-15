@@ -41,6 +41,24 @@ function recoveryUpperBoundHours(insight: { estimatedRecovery?: string; estimate
   return hours > 0 ? hours : null
 }
 
+/** #1003 — the bound a RESOLVED incident is SCORED against: the first, hindsight-free estimate.
+ *  Mirrors the worker `scoringBaselineHours` (incident-history.ts) exactly — NUMERIC fields only, no
+ *  display-string parse, so this SEO card and the Discord/`/feed`/corpus verdicts can never disagree
+ *  about the same incident (and a resolved card with no numeric estimate keeps falling back to the
+ *  bare "Est. Recovery", as before).
+ *
+ *  `estimatedRecoveryHours` is the CURRENT estimate, which the worker's re-analysis ratchets upward
+ *  once an incident outruns its own prediction — scoring against it turns the model's misses into wins.
+ *  Falls back to it only for analyses written before #1003. The LIVE helpers below deliberately keep
+ *  using `recoveryUpperBoundHours` (current estimate + string parse): an ongoing incident needs the
+ *  current ETA, not the superseded original. */
+function scoringBaselineEn(insight: { estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number }): number | null {
+  const first = insight.firstEstimatedRecoveryHours
+  if (typeof first === 'number' && first > 0) return first
+  const current = insight.estimatedRecoveryHours
+  return typeof current === 'number' && current > 0 ? current : null
+}
+
 /** True when an ACTIVE incident has already run past its estimated recovery upper bound, so the stale
  *  short range is no longer credible (a 2–4h estimate on an incident ongoing for days). Mirrors the
  *  frontend `estimateExceeded` + the worker's `recoveryExceeded` gate. Gated on `resolvedAt` (a resolved
@@ -114,6 +132,13 @@ export interface ServiceData {
   rankTied?: boolean
   totalRanked?: number
   incidentSourceStale?: boolean
+  // #1004 — the source-liveness flags. `sourceDead` (status page 4xx/deactivated, #689) and
+  // `sourceUnknown` (fetch threw / 5xx, #714) both mean AIWatch could NOT read the provider's page —
+  // so any "Yes/No" answer here would be a claim we cannot back. See `isStatusUnknown`.
+  sourceDead?: boolean
+  sourceUnknown?: boolean
+  probeConfirmed?: boolean
+  probeContradicted?: boolean
   /** #722 — BetterStack sub-threshold affected-resource count (degraded+downtime). When the
    *  service reads operational but this is >0, the provider page shows "Some services are down";
    *  surfaced as a yellow "partial" note. SEO answer stays "operational" — the service IS up overall. */
@@ -150,12 +175,33 @@ function statusEmoji(status: string): string {
   if (status === 'operational') return '&#x1F7E2;'
   if (status === 'partial') return '&#x1F7E1;'   // #722/#744 — yellow (visible header only)
   if (status === 'degraded') return '&#x1F7E1;'
+  if (status === 'unknown') return '&#x26AA;'    // #1004 — white circle: source unreadable, no verdict
   return '&#x1F534;'
+}
+
+// #1004 — AIWatch could not READ the provider's status page, so it has no verdict to publish. This is
+// the highest-reach surface AIWatch has (the SERP answer), and it was answering "Issues — X is having
+// problems right now" off a `degraded` that only ever meant "our fetch failed 3 times" — which is what
+// JetBrains' status-page migration did to Junie. `sourceDead` (4xx) already had this hole too.
+// A healthy probe (`probeConfirmed`, #689) or a failing one (`probeContradicted`, #1004) means we DO
+// have independent evidence — then the raw status stands.
+function isStatusUnknown(service: ServiceData): boolean {
+  if (service.sourceDead && !service.probeConfirmed) return true
+  if (service.sourceUnknown && !service.probeContradicted && service.status === 'degraded') return true
+  return false
+}
+
+/** The status the page may honestly ASSERT — 'unknown' when the source is unreadable. Unlike the
+ *  #744 `partial` state (visible header only, since the service IS up overall), this one MUST also
+ *  drive the <title>/meta: "No — operational" and "Issues" are both false when we can't see. */
+function assertableStatus(service: ServiceData): string {
+  return isStatusUnknown(service) ? 'unknown' : service.status
 }
 
 function statusLabel(status: string): string {
   if (status === 'operational') return 'Operational'
   if (status === 'degraded') return 'Degraded Performance'
+  if (status === 'unknown') return 'Unknown'
   return 'Down'
 }
 
@@ -169,6 +215,7 @@ function statusLabel(status: string): string {
 function statusTitleLabel(status: string): string {
   if (status === 'operational') return 'Operational'
   if (status === 'degraded') return 'Having Issues'
+  if (status === 'unknown') return 'Status Unknown'  // #1004 — we can't read the source; don't guess
   return 'Down Right Now'
 }
 
@@ -177,6 +224,9 @@ function statusTitleLabel(status: string): string {
 function statusAnswer(status: string): { yesno: string; phrase: string } {
   if (status === 'operational') return { yesno: 'No', phrase: 'is operational' }
   if (status === 'degraded') return { yesno: 'Issues', phrase: 'is having problems right now' }
+  // #1004 — an honest non-answer beats a confident wrong one. Say WHY, so a panicking visitor can tell
+  // "AIWatch is blind" apart from "the service is broken".
+  if (status === 'unknown') return { yesno: 'Unknown', phrase: "status can't be confirmed — AIWatch can't read the provider's status page right now" }
   return { yesno: 'Yes', phrase: 'is down right now' }
 }
 
@@ -208,6 +258,7 @@ function statusColor(status: string): string {
   if (status === 'operational') return '#3fb950'
   if (status === 'partial') return '#d29922'   // #722/#744 — yellow (visible header only)
   if (status === 'degraded') return '#e86235'
+  if (status === 'unknown') return '#8b949e'   // #1004 — neutral grey: no verdict
   return '#f85149'
 }
 
@@ -251,7 +302,7 @@ export function renderPage(
   service: ServiceData | null,
   seo: ServiceSEO,
   fallbacks: Fallback[],
-  aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; startedAt?: string } | null,
+  aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string } | null,
   // Region recommendation (refs #422 Phase 2). When the affected service has
   // region-specific incidents AND at least one healthy region, surface an
   // actionable "Try region: X" line right under the AI Insight block. Null
@@ -277,11 +328,16 @@ export function renderPage(
   // the stale card. canonical / <title> / JSON-LD stay clean (SEO indexes those, not og:url). The caller
   // (api/is-down.ts) has already sanitized it to id-safe chars.
   ogIncidentToken?: string | null,
+  // #926 — the FULL per-incident AI analysis list for the visible AI Analysis card, so a service with
+  // multiple active incidents renders one card each (parity with the dashboard AnalysisModal). The scalar
+  // `aiInsight` above remains the primary [0] for meta/share/OG. Omitted/empty → fall back to the single
+  // `aiInsight` (older callers / single-incident path) so the card still renders.
+  aiInsights?: Array<{ summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }> | null,
 ): string {
   // #566: lead the SERP title with the live status answer (falls back to "Live Status"
   // when status data is unavailable) so the result answers the query before the click.
   const title = service
-    ? `Is ${seo.displayName} Down? ${statusTitleLabel(service.status)} | AIWatch`
+    ? `Is ${seo.displayName} Down? ${statusTitleLabel(assertableStatus(service))} | AIWatch`
     : `Is ${seo.displayName} Down? Live Status | AIWatch`
   const desc = buildMetaDescription(seo, service, aiInsight ?? null)
   const canonical = `https://ai-watch.dev/is-${slug}-down`
@@ -291,7 +347,11 @@ export function renderPage(
   // not the live status that may have drifted by unfurl time). HINT_TO_OG_STATUS (module scope) maps
   // the `?e=` hint → an og status the generator knows; 'reddit'/unknown/absent falls through to live.
   const pinnedHint = ogStatusHint && HINT_TO_OG_STATUS[ogStatusHint] ? ogStatusHint : null
-  const ogStatus = (pinnedHint && HINT_TO_OG_STATUS[pinnedHint]) || service?.status || 'operational'
+  // #1004 — the ASSERTABLE status: the og:image + og:title are what actually get unfurled in Slack/X/
+  // Discord, so an unreadable source must not publish "Having Issues" there while the page title says
+  // "Status Unknown". (og.ts carries a matching `unknown` style — without it the card falls back to a
+  // green "Operational".) The explicit `?e=` pinned hint still wins, as before.
+  const ogStatus = (pinnedHint && HINT_TO_OG_STATUS[pinnedHint]) || (service ? assertableStatus(service) : 'operational')
   const ogParams = new URLSearchParams({ service: seo.displayName, status: ogStatus })
   if (service?.aiwatchScore != null && Number.isFinite(service.aiwatchScore)) ogParams.set('score', String(service.aiwatchScore))
   if (typeof service?.uptime30d === 'number' && !Number.isNaN(service.uptime30d)) ogParams.set('uptime', service.uptime30d.toFixed(2))
@@ -425,7 +485,7 @@ button.btn{cursor:pointer;font-family:inherit;line-height:inherit}
 .cta-alt{font-size:12px;margin-top:10px;color:#8b949e}
 .cta-alt a{color:#8b949e;text-decoration:underline}
 /* #888 — quiet standalone install strip below the answer/alert block (NOT a loud promo banner; muted card tone to avoid banner-blindness). */
-.ext-strip{max-width:560px;margin:12px auto 0;padding:9px 14px;border:1px solid #21262d;border-radius:8px;background:#0d1117;text-align:center;font-size:13px;line-height:1.45}
+.ext-strip{margin:12px 0 0;padding:9px 14px;border:1px solid #21262d;border-radius:8px;background:#0d1117;text-align:center;font-size:13px;line-height:1.45}
 .ext-strip a{color:#8b949e;text-decoration:none}
 .ext-strip a:hover{color:#c9d1d9}
 .ext-strip strong{color:#58a6ff;font-weight:600}
@@ -479,9 +539,9 @@ textarea.report-input{min-height:72px;resize:vertical}
 <div class="container">
 
 ${renderStatusHeader(service, seo)}
-${renderCTA(seo, service?.status ?? 'operational', slug, service?.id ?? slug)}
+${renderCTA(seo, service ? assertableStatus(service) : 'operational', slug, service?.id ?? slug)}
 ${isClaudeSurface(service?.id ?? slug) ? renderExtInstallCta(EXTENSION_STORE_URL, { loc: 'is_down_page', variant: 'is-down' }) : ''}
-${renderAIInsight(aiInsight, service?.status, fallbacks)}
+${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks)}
 ${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS infrastructure issue (${esc(supplyChainNote.regions)}) &mdash; ${supplyChainNote.confirmed ? `${esc(seo.displayName)} is degraded and attributes it to an AWS/upstream issue` : `${esc(seo.displayName)} runs on AWS and may be affected`}</p>` : ''}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
 ${renderComponents(service)}
@@ -495,7 +555,7 @@ ${renderBadgeEmbed(slug, seo)}
 ${renderFooter(slug)}
 
 </div>
-${renderDelegatedListeners(service?.id ?? slug, service?.status === 'down' || service?.status === 'degraded')}
+${renderDelegatedListeners(service?.id ?? slug, service ? ['down', 'degraded'].includes(assertableStatus(service)) : false)}
 ${cookieBannerHtml()}
 </body>
 </html>`
@@ -649,33 +709,35 @@ function predictedVsActualEn(predictedHours: number, actualMin: number): string 
   return `${fmtMinEn(actualMin)} (${within})`
 }
 
-function renderAIInsight(insight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; startedAt?: string } | null, serviceStatus?: string, fallbacks?: Fallback[]): string {
+type AIInsight = { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }
+
+// #926 — accepts a SINGLE insight or the full per-incident LIST and renders ONE card for the service,
+// mirroring the dashboard AnalysisModal (which groups a service's incidents into a single card, NOT one
+// card per incident): a single "🤖 AI Analysis" header, one 🔄 Alternatives block, and one disclaimer,
+// with each active incident as a sub-block inside. A per-incident title labels each sub-block only when
+// the card holds more than one incident. The single-incident render is visually unchanged (each body is
+// wrapped in a transparent <div>; the Alternatives block + disclaimer moved up to the card level).
+function renderAIInsight(insight?: AIInsight | AIInsight[] | null, serviceStatus?: string, fallbacks?: Fallback[]): string {
   if (!insight) return ''
-  const ago = Math.floor((Date.now() - new Date(insight.analyzedAt).getTime()) / 60000)
-  const agoText = ago < 1 ? 'just now' : ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`
+  const list = Array.isArray(insight) ? insight : [insight]
+  if (list.length === 0) return ''
   const isResolved = serviceStatus === 'operational'
-  // An ACTIVE incident that has already run past its estimated recovery upper bound: the stale short
-  // range is no longer credible (a 2–4h estimate on an incident ongoing for days). Show how long it's
-  // been running vs the estimate ("Ongoing ~12h · exceeded ~2–4h est.") — same gate as the dashboard
-  // modal. Meta/share surfaces keep the terse "Exceeded typical pattern" (reads cleaner in-sentence).
-  const recovery = recoveryEstimateExceeded(insight) ? exceededRecoveryTextEn(insight) : formatRecoveryDisplay(insight.estimatedRecovery)
-  const isRecentlyRecovered = isResolved && !!insight.resolvedAt
-  // #827 F4 — once resolved, replace the bare estimate with "predicted vs actual" (actual = startedAt→
-  // resolvedAt). Null until resolved or when the numeric estimate / startedAt isn't available.
-  const outcome = isResolved && insight.estimatedRecoveryHours != null && insight.startedAt && insight.resolvedAt
-    ? predictedVsActualEn(insight.estimatedRecoveryHours, Math.round((new Date(insight.resolvedAt).getTime() - new Date(insight.startedAt).getTime()) / 60000))
-    : null
+  const multi = list.length > 1
+  const isRecentlyRecovered = isResolved && list.some(i => !!i.resolvedAt)
   const resolvedBadge = isResolved
     ? '<span class="mono" style="font-size:10px;color:#3fb950;background:rgba(63,185,80,0.15);padding:2px 8px;border-radius:4px">Resolved</span>'
     : ''
-  // #641 — only render the Alternatives block when we actually have a recommendation; we don't
-  // assert "No operational alternatives" (a subjective claim from our own incomplete coverage).
-  const fallbackHtml = insight.needsFallback && !isResolved && fallbacks && fallbacks.length > 0
+  // #641 — only render the Alternatives block when we actually have a recommendation; we don't assert
+  // "No operational alternatives" (a subjective claim from our own incomplete coverage). Rendered ONCE
+  // per card (gated on ANY active incident wanting a fallback), like the modal.
+  const anyNeedsFallback = list.some(i => i.needsFallback)
+  const fallbackHtml = anyNeedsFallback && !isResolved && fallbacks && fallbacks.length > 0
     ? `<div style="margin-top:8px;padding:8px 10px;background:#0d1117;border-radius:6px;border-left:3px solid #d29922">
 <span class="mono" style="font-size:11px;color:#c9d1d9;font-weight:600">🔄 Alternatives</span>
 ${fallbacks.map(f => `<div class="mono" style="font-size:11px;color:#c9d1d9;margin-top:3px">• ${esc(f.name)}${f.score != null ? ` (Score: ${f.score})` : ''}</div>`).join('')}
 </div>`
     : ''
+  const bodies = list.map((ins, idx) => renderInsightBody(ins, isResolved, multi, idx)).join('')
   return `<div class="card" style="border-left:3px solid ${isResolved ? '#3fb950' : '#7C3AED'};margin:16px 0${isResolved && !isRecentlyRecovered ? ';opacity:0.75' : ''}">
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
 <span style="font-size:16px">🤖</span>
@@ -683,7 +745,36 @@ ${fallbacks.map(f => `<div class="mono" style="font-size:11px;color:#c9d1d9;marg
 <span class="mono" style="font-size:10px;color:#7C3AED;background:rgba(124,58,237,0.15);padding:2px 8px;border-radius:4px">Beta</span>
 ${resolvedBadge}
 </div>
-<p style="font-size:13px;color:#c9d1d9;line-height:1.6;margin-bottom:8px">${esc(insight.summary)}</p>
+${bodies}
+${fallbackHtml}
+<p class="mono" style="font-size:9px;color:#484f58;margin-top:8px;opacity:0.7">⚠️ AI-generated estimation based on historical data. Actual time may vary.</p>
+</div>`
+}
+
+// One incident's analysis block inside the shared card. `multi`/`idx` control the separator + the
+// incident-title line (shown only when the card holds more than one incident, like the modal).
+function renderInsightBody(insight: AIInsight, isResolved: boolean, multi: boolean, idx: number): string {
+  const ago = Math.floor((Date.now() - new Date(insight.analyzedAt).getTime()) / 60000)
+  const agoText = ago < 1 ? 'just now' : ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`
+  // An ACTIVE incident that has already run past its estimated recovery upper bound: the stale short
+  // range is no longer credible (a 2–4h estimate on an incident ongoing for days). Show how long it's
+  // been running vs the estimate ("Ongoing ~12h · exceeded ~2–4h est.") — same gate as the dashboard
+  // modal. Meta/share surfaces keep the terse "Exceeded typical pattern" (reads cleaner in-sentence).
+  const recovery = recoveryEstimateExceeded(insight) ? exceededRecoveryTextEn(insight) : formatRecoveryDisplay(insight.estimatedRecovery)
+  // #827 F4 — once resolved, replace the bare estimate with "predicted vs actual" (actual = startedAt→
+  // resolvedAt). Null until resolved or when no usable estimate / startedAt is available.
+  // #1003 — scored against the FIRST estimate (scoringBaselineEn), NOT the re-analysis-inflated current
+  // one, so this public SEO card agrees with the Discord embed, /feed, the corpus and the dashboard modal.
+  const baseline = scoringBaselineEn(insight)
+  const outcome = isResolved && baseline != null && insight.startedAt && insight.resolvedAt
+    ? predictedVsActualEn(baseline, Math.round((new Date(insight.resolvedAt).getTime() - new Date(insight.startedAt).getTime()) / 60000))
+    : null
+  const sep = multi && idx > 0 ? 'border-top:1px solid #21262d;margin-top:10px;padding-top:10px' : ''
+  const titleLine = multi && insight.incidentTitle
+    ? `<div class="mono" style="font-size:10px;color:#8b949e;font-weight:600;margin-bottom:4px">${insight.resolvedAt ? '✅' : '🔸'} ${esc(insight.incidentTitle)}</div>`
+    : ''
+  return `<div${sep ? ` style="${sep}"` : ''}>
+${titleLine}<p style="font-size:13px;color:#c9d1d9;line-height:1.6;margin-bottom:8px">${esc(insight.summary)}</p>
 <div class="mono" style="font-size:11px;color:#8b949e;display:flex;flex-direction:column;gap:4px">
 ${outcome
   ? `<span>🎯 <strong style="color:#c9d1d9">Predicted vs actual:</strong> ${esc(outcome)}</span>`
@@ -692,8 +783,6 @@ ${insight.affectedScope.length > 0 ? `<span>📡 <strong style="color:#c9d1d9">S
 ${insight.resolvedAt ? `<span>✅ Recovered: ${(() => { const m = Math.floor((Date.now() - new Date(insight.resolvedAt).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : Math.floor(m / 60) + 'h ago' })()}</span>` : ''}
 <span>🕐 ${agoText}</span>
 </div>
-${fallbackHtml}
-<p class="mono" style="font-size:9px;color:#484f58;margin-top:8px;opacity:0.7">⚠️ AI-generated estimation based on historical data. Actual time may vary.</p>
 </div>`
 }
 
@@ -755,12 +844,15 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
   // since the service IS up overall — only specific components are affected (no SERP-snippet flip).
   const partialCount = typeof service.partialCount === 'number' ? service.partialCount : 0
   const isPartial = service.status === 'operational' && partialCount > 0
-  const displayStatus = isPartial ? 'partial' : service.status // VISIBLE header only — never the title/meta
+  // #1004 — 'unknown' outranks both: when the source is unreadable there is no verdict to render, and
+  // (unlike `partial`) it propagates to the title/meta too — see assertableStatus.
+  const asserted = assertableStatus(service)
+  const displayStatus = asserted === 'unknown' ? 'unknown' : isPartial ? 'partial' : service.status
   const color = statusColor(displayStatus)
   const compStr = `${partialCount} component${partialCount > 1 ? 's' : ''}`
-  const answer = isPartial
+  const answer = displayStatus === 'partial'
     ? { yesno: 'Partial', phrase: `has ${compStr} affected (operational overall)` }
-    : statusAnswer(service.status) // #566 — on-page direct answer (feeds Google's auto-snippet)
+    : statusAnswer(displayStatus) // #566 — on-page direct answer (feeds Google's auto-snippet)
   const hasUptime = typeof service.uptime30d === 'number' && !Number.isNaN(service.uptime30d)
   const gradeStr = service.scoreGrade ? ` (${service.scoreGrade.charAt(0).toUpperCase() + service.scoreGrade.slice(1)})` : ''
   // #591 — a stale-source service carries a frozen uptime30d + an inflated score; omit both here
@@ -919,7 +1011,12 @@ function renderCTA(seo: ServiceSEO, status: string, slug: string, svcId: string)
   const stateLead = status === 'down'
     ? `${seo.displayName} is down right now.`
     : `${seo.displayName} is having issues right now.`
-  const message = isDown
+  // #1004 — 'unknown' must NOT fall through to the outage lead: the CTA sits directly under the status
+  // header (#297), so a header saying "we can't read the source" above a line saying "X is having issues
+  // right now" asserts and denies the outage in adjacent paragraphs. It gets its own copy.
+  const message = status === 'unknown'
+    ? `AIWatch can't read ${seo.displayName}'s status page right now — get notified when it's readable again.`
+    : isDown
     ? `${stateLead} Stop refreshing — we'll ping you when it's back.`
     : `Get notified the next time ${seo.displayName} goes down.`
   // #547/#696: the outage-day funnel leaked — 9 is-down sessions on the 6/11 Claude outage → 0
@@ -1070,7 +1167,7 @@ export function buildMetaDescription(
   service: ServiceData | null,
   aiInsight: { summary: string; estimatedRecovery: string; estimatedRecoveryHours?: number; startedAt?: string; resolvedAt?: string } | null,
 ): string {
-  if (aiInsight && service && service.status !== 'operational') {
+  if (aiInsight && service && service.status !== 'operational' && !isStatusUnknown(service)) {
     const a = statusAnswer(service.status)
     const recovery = recoveryEstimateExceeded(aiInsight) ? 'Exceeded typical pattern' : formatRecoveryDisplay(aiInsight.estimatedRecovery)
     return `${a.yesno} — ${seo.displayName} ${a.phrase}. AI Analysis: ${aiInsight.summary.slice(0, 120)} Est. recovery: ${recovery}.`
@@ -1089,7 +1186,7 @@ export function buildMetaDescription(
   const incidentClause = thirtyDayIncidentCount > 0 ? ` ${thirtyDayIncidentCount} incidents tracked (30d).` : ''
   // #566: answer-first ("No — X is operational" / "Yes — X is down right now") so the
   // SERP snippet leads with the answer; freshness hint stays to frame it as a live tracker.
-  const a = statusAnswer(service.status)
+  const a = statusAnswer(assertableStatus(service))
   return `${a.yesno} — ${seo.displayName} ${a.phrase}.${uptimeClause}${incidentClause} Live status, updated every 5 minutes.`
 }
 
@@ -1257,8 +1354,11 @@ ${anyOutbound ? `<p class="mono fallback-disclosure">Open &#8599; goes to the pr
 }
 
 export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null, canonical: string, ogImageUrl: string, aiInsight?: { summary: string; estimatedRecovery: string; affectedScope: string[]; estimatedRecoveryHours?: number; startedAt?: string; resolvedAt?: string } | null): string {
-  const status = service ? statusLabel(service.status) : 'Operational'
-  const rawStatus = service?.status ?? 'operational'
+  // #1004 — the ASSERTABLE status, not the raw one: an unreadable source shipped "Degraded Performance"
+  // (and would have shipped "Operational" for a dead source) into the share/copy payload — the Web Share
+  // description, the copy text, and the X post.
+  const rawStatus = service ? assertableStatus(service) : 'operational'
+  const status = statusLabel(rawStatus)
 
   // Status-based share templates — randomly selected per render for variety
   // Include AI analysis when available
@@ -1284,6 +1384,11 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
     `All clear — ${n} is fully operational right now via AIWatch.`,
     `${n} status: operational. No issues detected — tracked on AIWatch.`,
   ]
+  // #1004 — no verdict to share: say so rather than picking one of the two verdicts we don't have.
+  const unknownTexts = [
+    `${n} status is unconfirmed — its status page isn't readable right now. Tracked on AIWatch.`,
+    `AIWatch can't currently read ${n}'s status page, so its status is unknown.`,
+  ]
   const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
   // Brand the down/degraded copy text too — the operational templates carry "AIWatch" inline but the
   // outage ones didn't, so a share posted DURING an incident (the highest-share moment) dropped the
@@ -1297,6 +1402,8 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
     ? `${pick(downTexts)}${aiSuffix}\nTracked live on AIWatch:\n${copyShareUrl}`
     : rawStatus === 'degraded'
     ? `${pick(degradedTexts)}${aiSuffix}\nTracked live on AIWatch:\n${copyShareUrl}`
+    : rawStatus === 'unknown'
+    ? `${pick(unknownTexts)}\n${copyShareUrl}`
     : pick(operationalTexts)
 
   // X hashtag from display name (e.g. "Claude" → "#Claude", "GitHub Copilot" → "#GitHubCopilot")
@@ -1319,13 +1426,16 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
     `All clear — ${n} is fully operational \u2705 via AIWatch`,
     `${n} status: all systems go \u2705 — tracked on AIWatch`,
   ]
+  const xUnknownTexts = [`${n} status is unconfirmed — AIWatch can't read its status page right now.`]
   const xBase = rawStatus === 'down'
     ? pick(xDownTexts)
     : rawStatus === 'degraded'
     ? pick(xDegradedTexts)
+    : rawStatus === 'unknown'
+    ? pick(xUnknownTexts)
     : pick(xOperationalTexts)
   const aiSnippet = aiSuffix ? ' AI: ' + aiInsight!.summary.slice(0, 60) : ''
-  const xTag = rawStatus !== 'operational' ? ` ${tag} #AIWatch` : ''
+  const xTag = rawStatus !== 'operational' && rawStatus !== 'unknown' ? ` ${tag} #AIWatch` : ''
   const xText = rawStatus === 'down'
     ? `${xBase}${aiSnippet}${xTag}`
     : rawStatus === 'degraded'

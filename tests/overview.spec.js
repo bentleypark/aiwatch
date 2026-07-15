@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, blockGaHits } from './fixtures.js'
 import { waitForDataLoad } from './helpers.js'
 
 test.describe('Overview page', () => {
@@ -275,6 +275,7 @@ test.describe('Overview page', () => {
       lastUpdated: new Date().toISOString(),
     } }
     const ctx = await browser.newContext()
+    await blockGaHits(ctx) // #998 — self-made context skips the `context` fixture's GA4 block
     const page = await ctx.newPage()
     await page.route('**/api/status**', async (route) => { await route.fulfill(multiTierMock) })
     await page.route('**/api/status/cached', async (route) => { await route.fulfill(multiTierMock) })
@@ -454,6 +455,48 @@ test.describe('ActionBanner region recommendation', () => {
     await expect(page.locator('main').getByText(/Switch region|리전 전환/)).not.toBeVisible()
   })
 
+  test('region-AWARE but non-switchable service shows fallback, not a region line (#973)', async ({ page }) => {
+    // The regression #973 fixed. OpenAI HAS a SERVICE_REGIONS map and this incident names
+    // `us-east-1`, so hasRegionSpecific=true and two regions stay OK — every pre-#973 gate
+    // passed and the banner printed "Switch region: OpenAI API → US West (us-west-2)", an
+    // endpoint OpenAI does not let a caller select, while suppressing the Claude fallback.
+    // REGION_SWITCHABLE now nulls recommendedRegion, so the line is gone and the fallback returns.
+    //
+    // NOTE this must be a REGION-SPECIFIC incident: the sibling "global outage" test above is
+    // suppressed by the older !allDown gate and would pass against the un-fixed code too.
+    const inc = {
+      id: 'openai-region-973',
+      title: 'Elevated error rates in us-east-1',
+      status: 'investigating',
+      impact: 'major',
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+      componentNames: [],
+      timeline: [],
+    }
+    const mockData = { json: {
+      services: [
+        { id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI',
+          status: 'degraded', latency: 250, uptime30d: 99.7, calendarDays: 30, incidents: [inc] },
+        { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic',
+          status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [], aiwatchScore: 95 },
+        operationalize('xai', 'xAI (Grok)'),
+        operationalize('huggingface', 'Hugging Face'),
+        operationalize('elevenlabs', 'ElevenLabs'),
+      ],
+      lastUpdated: new Date().toISOString(),
+    } }
+    await page.route('**/api/status**', async (route) => { await route.fulfill(mockData) })
+    await page.route('**/api/status/cached', async (route) => { await route.fulfill(mockData) })
+    await page.goto('/')
+    await page.locator('main button').first().waitFor({ state: 'visible', timeout: 20000 })
+
+    // No unactionable region-switch instruction …
+    await expect(page.locator('main').getByText(/Switch region|리전 전환/)).not.toBeVisible()
+    await expect(page.locator('main').getByText(/US West \(us-west-2\)/)).not.toBeVisible()
+    // … and the cross-service fallback the reader CAN act on is no longer suppressed.
+    await expect(page.locator('main').getByText(/Suggested fallback|대체 서비스/)).toBeVisible({ timeout: 10000 })
+  })
+
   test('affected service without region data does not show region line', async ({ page }) => {
     // Mistral has no SERVICE_REGIONS entry → regionStatusOf returns null →
     // banner skips the region line entirely. The fallback line still renders.
@@ -510,11 +553,13 @@ test.describe('RSS subscribe affordances (#433)', () => {
 
   test('sidebar footer shows an always-visible RSS copy icon', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
-    // Pre-grant cookie consent so the first-visit cookie banner (a fixed full-width bottom overlay,
+    // Pre-set cookie consent so the first-visit cookie banner (a fixed full-width bottom overlay,
     // z-9999) isn't racing the click on the bottom-of-sidebar RSS icon. The banner covers the bottom
     // ~125px including the sidebar footer until dismissed; this test asserts the RSS affordance itself,
     // not first-visit consent layout, so removing that orthogonal overlay keeps the click deterministic.
-    await page.addInitScript(() => { try { localStorage.setItem('aiwatch-cookie-consent', 'granted') } catch { /* ignore */ } })
+    // 'denied' — NOT 'granted' (#998): any non-null value dismisses the banner, but only 'granted'
+    // makes initGA() inject gtag.js, which would fire a real page_view at the production property.
+    await page.addInitScript(() => { try { localStorage.setItem('aiwatch-cookie-consent', 'denied') } catch { /* ignore */ } })
     await page.goto('/')
     // Sidebar footer is static chrome — renders without waiting on service data.
     await expect(page.getByRole('link', { name: 'AIWatch' }).first()).toBeVisible({ timeout: 15000 })
@@ -613,8 +658,9 @@ test.describe('Overview — crowd reports (#575)', () => {
       await route.fulfill({ status: 200, json: { ok: true, message: 'Thanks' } })
     })
     // Returning-user state: consent set so the one-time cookie banner (bottom, full-width) doesn't
-    // overlap the bottom-right floating button.
-    await page.addInitScript(() => { try { localStorage.setItem('aiwatch-cookie-consent', 'granted') } catch { /* private mode */ } })
+    // overlap the bottom-right floating button. 'denied' dismisses the banner just as well as
+    // 'granted' and keeps GA4 uninitialized (#998).
+    await page.addInitScript(() => { try { localStorage.setItem('aiwatch-cookie-consent', 'denied') } catch { /* private mode */ } })
     await page.goto('/')
     await page.locator('main button').first().waitFor({ state: 'visible', timeout: 20000 })
     await page.getByRole('button', { name: /Report an issue|문제 신고/ }).click()
@@ -637,7 +683,7 @@ test.describe('Overview — supply-chain banner (#574)', () => {
     supplyChainBanner: {
       cloud: 'aws', severity: 'degraded',
       regions: [{ region: 'us-east-1', level: 'degraded', summary: 'Increased error rates in us-east-1' }],
-      affectedNow: [{ id: 'claude', name: 'Claude API' }],
+      affectedNow: [{ id: 'claude', name: 'Claude API', regions: ['us-east-1'] }], // #1000 — real payload carries per-service regions
       mayBeAffected: [{ id: 'bedrock', name: 'Amazon Bedrock', confidence: 'certain' }, { id: 'together', name: 'Together AI', confidence: 'medium' }],
     },
     lastUpdated: new Date().toISOString(),

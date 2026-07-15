@@ -24,6 +24,8 @@ import { regionStatusOf, SERVICE_REGIONS } from '../utils/regionStatus'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
 import StatusPill from '../components/StatusPill'
+import { sourceFlagsOf } from '../utils/statusDisplay'
+import { STATUS_URL } from '../utils/statusPageUrls'
 import { ensureChart } from '../utils/chartLoader'
 import { filterLast24h } from '../utils/time'
 
@@ -50,52 +52,6 @@ const SERVICE_COLOR = {
   twelvelabs:  '#79c0ff',
 }
 
-// Official status page URLs for each monitored service
-const STATUS_URL = {
-  claude:      'https://status.claude.com',
-  openai:      'https://status.openai.com',
-  gemini:      'https://aistudio.google.com/status',
-  mistral:     'https://status.mistral.ai',
-  cohere:      'https://status.cohere.ai',
-  groq:        'https://status.groq.com',
-  together:    'https://status.together.ai',
-  fireworks:   'https://status.fireworks.ai',
-  cerebras:    'https://status.cerebras.ai',
-  perplexity:  'https://status.perplexity.ai',
-  huggingface: 'https://status.huggingface.co',
-  replicate:   'https://www.replicatestatus.com',
-  fal:         'https://status.fal.ai',
-  elevenlabs:  'https://status.elevenlabs.io',
-  xai:         'https://status.x.ai',
-  deepseek:    'https://status.deepseek.com',
-  openrouter:  'https://status.openrouter.ai',
-  bedrock:     'https://health.aws.amazon.com/health/status',
-  pinecone:    'https://status.pinecone.io',
-  turbopuffer: 'https://status.turbopuffer.com',
-  stability:   'https://status.stability.ai',
-  bfl:         'https://status.bfl.ml',
-  voyageai:    'https://voyageai-status.statuspage.io',
-  modal:       'https://status.modal.com',
-  twelvelabs:  'https://status.twelvelabs.io',
-  langsmith:   'https://status.smith.langchain.com',
-  helicone:    'https://status.helicone.ai',
-  langfuse:    'https://status.langfuse.com',
-  runway:      'https://status.runwayml.com',
-  luma:        'https://status.lumalabs.ai',
-  assemblyai:  'https://status.assemblyai.com',
-  deepgram:    'https://status.deepgram.com',
-  azureopenai: 'https://azure.status.microsoft/en-us/status',
-  characterai: 'https://status.character.ai',
-  claudeai:    'https://status.claude.com',
-  chatgpt:     'https://status.openai.com',
-  deepseekapp: 'https://status.deepseek.com',
-  claudecode:  'https://status.claude.com',
-  copilot:     'https://githubstatus.com',
-  cursor:      'https://status.cursor.com',
-  windsurf:    'https://status.windsurf.com',
-  junie:       'https://status.jetbrains.ai',
-  codex:       'https://status.openai.com',
-}
 
 // #717 — services whose status is sourced from MORE THAN ONE upstream status page. The worker
 // already merges both feeds (e.g. Gemini = AI Studio + Google Cloud / Vertex); this surfaces both
@@ -523,18 +479,27 @@ export function ComponentBreakdown({ service, t }) {
 }
 
 function RegionalAvailability({ service, t }) {
+  // #932 — only the derived-state computation can throw synchronously (malformed region data);
+  // guard THAT, not the JSX. react-hooks/error-boundaries flags JSX-in-try/catch because a
+  // try/catch can't catch a child component's render error anyway — the right guard scope is the
+  // data prep, and a genuine render fault should surface (to an error boundary), not be swallowed.
+  let state
   try {
-    const state = regionStatusOf(service)
-    if (!state) return null
+    state = regionStatusOf(service)
+  } catch (err) {
+    console.error('[RegionalAvailability] regionStatusOf failed:', err)
+    return null
+  }
+  if (!state) return null
 
-    const { regions, okRegions, allDown, recommendedRegion, docsUrl, ongoingCount } = state
-    // recommendText interpolates the FIRST OK region's label — the recommendation
-    // policy itself (array-order, same-cloud-first by SERVICE_REGIONS layout)
-    // lives in regionStatus.js.
-    const recommendText = (t('svc.region.recommend') || '').replace('{region}', recommendedRegion?.label ?? '')
+  const { regions, okRegions, allDown, recommendedRegion, docsUrl, ongoingCount } = state
+  // recommendText interpolates the FIRST OK region's label — the recommendation
+  // policy itself (array-order, same-cloud-first by SERVICE_REGIONS layout)
+  // lives in regionStatus.js.
+  const recommendText = (t('svc.region.recommend') || '').replace('{region}', recommendedRegion?.label ?? '')
 
-    return (
-      <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
+  return (
+    <section className="bg-[var(--bg1)] border border-[var(--border)] rounded-lg overflow-hidden">
         <div className="border-b border-[var(--border)]" style={{ padding: '12px 16px' }}>
           <div className="mono text-[10px] text-[var(--text1)] uppercase tracking-wider flex items-center gap-1.5">
             <span className="rounded-full shrink-0" style={{ width: '5px', height: '5px', background: ongoingCount > 0 ? 'var(--amber)' : 'var(--green)' }} />
@@ -576,7 +541,13 @@ function RegionalAvailability({ service, t }) {
                  awkwardly low on mobile.
               `gap-2` replaces `ml-2` so the gap survives any future wrap /
               RTL layout change. */}
-          {!allDown && okRegions.length > 0 && ongoingCount > 0 && (
+          {/* `recommendedRegion` is null for a region-AWARE but non-switchable service (#973,
+              REGION_SWITCHABLE) — the per-region status list above still renders, but there is no
+              region to recommend. Without this guard the callout would render with an empty region
+              name (recommendText interpolates `?? ''`). It cannot crash on the anchor's
+              `recommendedRegion.key`: that anchor needs `docsUrl`, and every REGION_DOCS_URL
+              service is switchable (pinned by both mirrors' tests). */}
+          {recommendedRegion && !allDown && okRegions.length > 0 && ongoingCount > 0 && (
             <div className="mono text-[10px] text-[var(--blue)] flex items-start justify-between gap-2" style={{ marginTop: '20px', padding: '12px 14px', background: 'var(--bg2)', borderRadius: '4px' }}>
               <span>{recommendText}</span>
               {docsUrl && (
@@ -599,11 +570,7 @@ function RegionalAvailability({ service, t }) {
           )}
         </div>
       </section>
-    )
-  } catch (err) {
-    console.error('[RegionalAvailability] render failed:', err)
-    return null
-  }
+  )
 }
 
 
@@ -825,6 +792,9 @@ export default function ServiceDetails({ serviceId }) {
   // uptime / incidents / MTTR / score cards + the status calendar (showing a frozen 30-day window as
   // current would mislead). Latency stays — it's probe-measured + current.
   const isUnreliableData = isUnreliableUptime(service)
+  // #1004 — the same source-flag derivation the Overview cards + banner use, so this page can't
+  // disagree with them about whether the status source is readable.
+  const [sourceDead, sourceUnknown] = sourceFlagsOf(service)
   // #713 — distinguish "no official uptime source" (honest: "No official uptime — incident-tracked")
   // from the frozen-stale case ("Not provided"). No invented uptime % for these services.
   const noOfficialUptimeFlag = noOfficialUptime(service)
@@ -890,7 +860,7 @@ export default function ServiceDetails({ serviceId }) {
           >
             ⚠ {t('report.button')}
           </button>
-          <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={service.sourceDead && !service.probeConfirmed} />
+          <StatusPill status={service.status} partialCount={service.partialCount} sourceDead={sourceDead} sourceUnknown={sourceUnknown} />
         </div>
       </div>
       <ReportModal isOpen={reportOpen} onClose={() => setReportOpen(false)} services={services} presetServiceId={service.id} />
@@ -902,6 +872,17 @@ export default function ServiceDetails({ serviceId }) {
         <div className="rounded-lg border" style={{ borderColor: 'var(--amber)', background: 'var(--bg2)', padding: '12px 16px' }}>
           <div className="text-[13px] font-medium" style={{ color: 'var(--amber)' }}>⚠ {t('svc.sourceDead.title')}</div>
           <div className="mono text-[11px] text-[var(--text1)]" style={{ marginTop: '5px', lineHeight: 1.5 }}>{t(service.probeConfirmed ? 'svc.sourceDead.bodyProbe' : 'svc.sourceDead.body')}</div>
+        </div>
+      )}
+
+      {/* #1004 — AIWatch could not READ the status source (throw / 5xx, #714 — a moved page, a timeout,
+          an upstream error). The worker's fallback then marks the service degraded after 3 consecutive
+          failures, which a reader cannot tell apart from a real outage. Say plainly that this is OUR
+          read failing, not the provider's service. `sourceDead` (a 4xx) wins if somehow both are set. */}
+      {sourceUnknown && !service.sourceDead && service.status === 'degraded' && (
+        <div className="rounded-lg border" style={{ borderColor: 'var(--border-hi)', background: 'var(--bg2)', padding: '12px 16px' }}>
+          <div className="text-[13px] font-medium text-[var(--text0)]">{t('svc.sourceUnknown.title')}</div>
+          <div className="mono text-[11px] text-[var(--text1)]" style={{ marginTop: '5px', lineHeight: 1.5 }}>{t('svc.sourceUnknown.body')}</div>
         </div>
       )}
 
@@ -928,7 +909,23 @@ export default function ServiceDetails({ serviceId }) {
             : service.uptime30d != null ? `${service.uptime30d.toFixed(2)}%` : '—'}
           sub={isUnreliableData
             ? t(noOfficialUptimeFlag ? 'uptime.noOfficial' : 'uptime.unavailable')
-            : t({ official: 'uptime.sub.official', platform_avg: 'uptime.sub.platform_avg' }[service.uptimeSource] ?? 'uptime.unavailable')}
+            // #1006 — when the provider's records don't reach back 30 days (a status-page migration
+            // creates a NEW component and resets its clock), say which window the figure covers instead
+            // of passing a 4-day number off as a 30-day one.
+            // #1006 — a short window (a status-page migration resets the provider's component clock) is
+            // stated instead of passing a few days off as 30.
+            : service.uptimeWindowDays != null
+              ? t('uptime.sub.official.partial').replace('{d}', String(service.uptimeWindowDays))
+              // #1006 — whenever our computed figure differs from the number the provider/platform
+              // publishes, show theirs beside ours (with its period). Applies to BOTH computed sources —
+              // 'official' (provider records) and 'platform_avg' (Better Stack monitors) — since both now
+              // carry `uptimeReported`. #41 built AIWatch to reproduce the provider's number; we no longer
+              // use it as the metric, but we don't hide it.
+              : service.uptimeReported != null
+                ? (service.uptimeReportedDays != null
+                    ? t('uptime.compare.reported.days').replace('{v}', service.uptimeReported.toFixed(2)).replace('{d}', String(service.uptimeReportedDays))
+                    : t('uptime.compare.reported').replace('{v}', service.uptimeReported.toFixed(2)))
+                : t({ official: 'uptime.sub.official', platform_avg: 'uptime.sub.platform_avg' }[service.uptimeSource] ?? 'uptime.unavailable')}
           colorClass="text-[var(--green)]"
         />
         <MetricCard

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.js'
 import { waitForDataLoad } from './helpers.js'
 
 test.describe('ServiceDetails page', () => {
@@ -345,6 +345,42 @@ test.describe('OpenAI Regional Availability', () => {
     // Global incident → all 3 regions should show incident
     await expect(page.locator('main').getByText(/Incident Detected|장애 감지/)).toHaveCount(3)
     await expect(page.locator('main').getByText(/all regions|모든 리전/i)).toBeVisible()
+  })
+
+  test('region-specific incident: per-region list renders but NO switch recommendation (#973)', async ({ page }) => {
+    // OpenAI is region-AWARE (we can say which region broke) but not region-SWITCHABLE (the caller
+    // cannot pick an endpoint). The card must keep its informational value — the per-region badges —
+    // while dropping the "Use US West to avoid service interruption" callout and its docs link.
+    //
+    // Deliberately region-SPECIFIC: the global-incident test above trips the older !allDown gate and
+    // would pass against the un-fixed code, so it cannot pin the REGION_SWITCHABLE behavior.
+    await page.route('**/api/status**', async (route) => {
+      await route.fulfill({ json: {
+        services: [
+          { id: 'claude', category: 'api', name: 'Claude API', provider: 'Anthropic', status: 'operational', latency: 120, uptime30d: 99.95, calendarDays: 30, incidents: [] },
+          {
+            id: 'openai', category: 'api', name: 'OpenAI API', provider: 'OpenAI', status: 'degraded',
+            latency: 250, uptime30d: 99.70, calendarDays: 30,
+            incidents: [
+              { id: 'oa-region-973', title: 'Elevated error rates in us-east-1', startedAt: new Date(Date.now() - 1800000).toISOString(), duration: null, status: 'investigating', impact: 'major', timeline: [] },
+            ],
+          },
+        ],
+        lastUpdated: new Date().toISOString(),
+      } })
+    })
+    await page.goto('/')
+    await waitForDataLoad(page)
+    await page.locator('main button').filter({ hasText: 'OpenAI API' }).first().click()
+
+    // The card and its per-region breakdown survive: us-east-1 hit, the other two healthy.
+    await expect(page.locator('main').getByText(/Regional Availability|리전별 가용성/)).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('main').getByText('US East (us-east-1)')).toBeVisible()
+    await expect(page.locator('main').getByText(/No Active Incidents|활성 장애 없음/).first()).toBeVisible()
+
+    // The unactionable recommendation callout and its docs link are gone.
+    await expect(page.locator('main').getByText(/to avoid service interruption|서비스 중단을 피하려면/)).not.toBeVisible()
+    await expect(page.locator('main').getByText(/Check API Guide|API 가이드 확인/)).not.toBeVisible()
   })
 })
 

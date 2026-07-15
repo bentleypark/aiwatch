@@ -4,6 +4,8 @@
 import type { ChangelogEntry, StaleSourceInfo } from './changelog'
 import { formatChangelogSection, formatStaleSourcesWarning } from './changelog'
 import type { MonthlyIncidentEntry } from './monthly-archive'
+import type { AiUsageTrend } from './ai-analysis'
+import { formatAiUsageTrendLine } from './ai-analysis'
 
 export interface WeeklyIncidentSummary {
   serviceId: string
@@ -25,6 +27,49 @@ export interface WeeklySecuritySummary {
   highlights: string[] // top security alert titles (max 5)
 }
 
+/** #917 — operator-authored strategy status, mirroring the active initiative page's `Status` +
+ *  `Next action`. Lives in the `strategy:brief` KV key (the worker cannot read the memory bundle
+ *  the initiative page lives in). Deliberately carries NO metrics: the growth counters already ship
+ *  in the daily summary (#986); this is the judgment layer above them, which moves on the ~monthly
+ *  cadence the weekly briefing matches. */
+export interface StrategyBrief {
+  status: string
+  nextAction: string
+  updatedAt: string // ISO date the operator last set it (YYYY-MM-DD)
+}
+
+/** A brief older than this (relative to the briefing's week-end) renders a refresh nudge instead of
+ *  reading as current — the initiative-thread cadence is ~30d, so a note that hasn't moved in a
+ *  month is likely stale, not stable. */
+export const STRATEGY_STALE_DAYS = 30
+
+/** Tolerant parse of the `strategy:brief` KV value. Returns null on any missing/empty/non-string
+ *  required field so a malformed write omits the section rather than throwing the whole briefing. */
+export function parseStrategyBrief(raw: string): StrategyBrief | null {
+  let obj: unknown
+  try {
+    obj = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!obj || typeof obj !== 'object') return null
+  const o = obj as Record<string, unknown>
+  const { status, nextAction, updatedAt } = o
+  if (typeof status !== 'string' || typeof nextAction !== 'string' || typeof updatedAt !== 'string') return null
+  if (!status.trim() || !nextAction.trim() || !updatedAt.trim()) return null
+  return { status: status.trim(), nextAction: nextAction.trim(), updatedAt: updatedAt.trim() }
+}
+
+/** True when the brief is older than `horizonDays` relative to `refDateISO` (the briefing's
+ *  week-end). An unparseable date counts as stale — fail toward surfacing the nudge rather than
+ *  silently presenting a possibly-frozen note as current (#733 principle). */
+export function isStrategyBriefStale(updatedAt: string, refDateISO: string, horizonDays = STRATEGY_STALE_DAYS): boolean {
+  const updated = Date.parse(updatedAt)
+  const ref = Date.parse(refDateISO)
+  if (Number.isNaN(updated) || Number.isNaN(ref)) return true
+  return (ref - updated) / 86_400_000 > horizonDays
+}
+
 export interface WeeklyBriefingData {
   weekStart: string // ISO date (Mon)
   weekEnd: string   // ISO date (Sun)
@@ -38,6 +83,17 @@ export interface WeeklyBriefingData {
   security?: WeeklySecuritySummary
   /** Per-source last-fetch staleness — surfaces silent collection gaps (#274) */
   staleSources?: StaleSourceInfo[]
+  /** #995 — 7-day AI-analysis usage roll-up (Gemma/Sonnet/timedOut/failed), from the retained
+   *  `ai:usage:{date}` keys. Absent/null → the section is omitted (no analyses that week). */
+  aiUsageTrend?: AiUsageTrend | null
+  /** #917 — operator-authored strategy status from the `strategy:brief` KV key. Absent/null → the
+   *  section is omitted; stale (>STRATEGY_STALE_DAYS) → rendered with a refresh nudge. */
+  strategyBrief?: StrategyBrief | null
+  /** #917 — true when the `strategy:brief` key WAS set but `parseStrategyBrief` rejected it (bad
+   *  JSON / missing field). Surfaces a fix nudge instead of a silent omission — a present-but-broken
+   *  write is operator error worth showing, distinct from an unset key. Ignored when strategyBrief
+   *  is non-null. */
+  strategyBriefMalformed?: boolean
 }
 
 /**
@@ -106,6 +162,20 @@ export function getWeekRange(date: Date): { start: string; end: string } {
     start: mon.toISOString().split('T')[0],
     end: sun.toISOString().split('T')[0],
   }
+}
+
+/**
+ * #995 — enumerate every `YYYY-MM-DD` from `weekStart`..`weekEnd` INCLUSIVE (used to read the week's
+ * `ai:usage:{date}` keys for the trend line). Pure + UTC-only (no DST/local drift). Returns `[]` when
+ * the range is inverted, so a bad range yields an empty (omitted) trend rather than a hang.
+ */
+export function weekDateStrings(weekStart: string, weekEnd: string): string[] {
+  const dates: string[] = []
+  const end = new Date(`${weekEnd}T00:00:00Z`)
+  for (let d = new Date(`${weekStart}T00:00:00Z`); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+    dates.push(d.toISOString().split('T')[0])
+  }
+  return dates
 }
 
 function formatDateRange(start: string, end: string): string {
@@ -245,6 +315,12 @@ export function buildWeeklyBriefing(data: WeeklyBriefingData): string {
     }
   }
 
+  // Section 3.5: AI Analysis usage trend (#995) — only when there were analyses this week.
+  if (data.aiUsageTrend) {
+    const aiLine = formatAiUsageTrendLine(data.aiUsageTrend)
+    if (aiLine) lines.push(`\n${aiLine}`)
+  }
+
   // Section 4: Security
   if (data.security && (data.security.hnCount > 0 || data.security.osvCount > 0)) {
     lines.push(`\n🔒 **Security**`)
@@ -259,7 +335,33 @@ export function buildWeeklyBriefing(data: WeeklyBriefingData): string {
     }
   }
 
+  // Section 5: Strategy (#917) — operator-authored initiative status, NOT derived metrics (those
+  // ship daily via #986). This is the judgment layer above the numbers; it moves on a ~monthly
+  // cadence, which is why it rides the weekly briefing rather than the daily summary.
+  if (data.strategyBrief) {
+    const b = data.strategyBrief
+    lines.push(`\n📈 **Strategy**`)
+    if (isStrategyBriefStale(b.updatedAt, data.weekEnd)) {
+      lines.push(`⚠️ Brief last updated ${b.updatedAt} (>${STRATEGY_STALE_DAYS}d ago) — refresh the \`strategy:brief\` KV key.`)
+    }
+    // Cap each field: the fields are operator-authored and unbounded, but Discord's embed
+    // description hard-caps at 4096 chars across ALL sections — an over-long brief would make the
+    // send fail and drop the ENTIRE briefing, not just this section.
+    lines.push(capField(b.status))
+    lines.push(`**Next:** ${capField(b.nextAction)}`)
+  } else if (data.strategyBriefMalformed) {
+    lines.push(`\n📈 **Strategy**`)
+    lines.push('⚠️ `strategy:brief` is set but malformed — check the JSON (see kv-schema.md).')
+  }
+
   return lines.join('\n')
+}
+
+/** Max chars per operator-authored strategy field before ellipsis — bounds the Strategy section
+ *  well under Discord's 4096-char embed-description cap so one long brief can't drop the briefing. */
+export const STRATEGY_FIELD_MAX = 600
+function capField(s: string): string {
+  return s.length > STRATEGY_FIELD_MAX ? s.slice(0, STRATEGY_FIELD_MAX - 1) + '…' : s
 }
 
 /**
