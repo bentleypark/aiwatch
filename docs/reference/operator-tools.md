@@ -95,3 +95,47 @@ plus `incId` (incident scope) or `svcId` + `match` (service-pattern scope), opti
 Failure modes: 401 `unauthorized`, 400 (missing/invalid scope or fields), 502 (KV read/write failed),
 503 (`STATUS_CACHE` unavailable). Auth reuses `X-Admin-Key` / `ADMIN_API_KEY`. The isolate caches the list
 for 60s (a write invalidates its own isolate immediately; others converge within ≤60s).
+
+# Operator Tools — `GET/POST /api/admin/duration-override` (#1019)
+
+**Sibling of suppress, different verb.** Suppress HIDES an incident; a duration override KEEPS it but
+PINS its `duration` to an operator-stated value. Use it when a provider left an incident open long AFTER
+the affected component recovered, so the paperwork `duration` (`resolved_at − created_at`) overstates real
+impact — inflating MTTR/Recovery and the monthly report's `longestIncidentMin`/`totalDowntimeMin`.
+Reference case: Cursor `h71m65my586h` (2026-07-14) reads 13h 20m; the component actually recovered in
+~18 min (sibling `96m8j04k15r5` resolved in 18 min). See [status-determination.md](status-determination.md).
+
+```bash
+# List current overrides
+curl -s https://<worker>/api/admin/duration-override -H "X-Admin-Key: $ADMIN_API_KEY"
+
+# Pin an incident's duration (minutes). Re-adding the same id UPDATES its value (a correction, not idempotent):
+curl -s -X POST https://<worker>/api/admin/duration-override -H "X-Admin-Key: $ADMIN_API_KEY" \
+  -d '{"action":"add","id":"h71m65my586h","durationMin":18,"reason":"provider left incident open ~13h after IDE recovered; real window ~18m (sibling Sol)"}'
+
+# Remove (restore the provider duration):
+curl -s -X POST https://<worker>/api/admin/duration-override -H "X-Admin-Key: $ADMIN_API_KEY" \
+  -d '{"action":"remove","id":"h71m65my586h"}'
+```
+
+**Where it applies** (all read the single `incident:duration-overrides` KV key, each right after
+suppression): `buildMonthlyArchive` build-time (rebuild-safe — run `POST /api/admin/rebuild-archive` for a
+past month), the `/api/report` current-month partial (dashboard 30/90-day list), and the weekly briefing.
+It recomputes `totalMinutes`/`longestMinutes` from the `durations` map, updates `incidents[].durationMin`,
+and (for a resolved entry) sets `incidents[].resolvedAt = startedAt + durationMin` so the grouped-incident
+row + Uptime calendar span agree. It also lands in the calendar-month `monthlyScore` (#993) — its MTTR
+reads the same durations — so the report's Score/ranking is corrected too, not just the display stats.
+
+**Caveats:**
+- **Applied on READ/BUILD, never by editing the accumulator** — `accumulateMonthlyIncidents`'s monotonic
+  `if (dur > oldDur)` guard would re-inflate a raw KV edit on the next cron while the incident is still in
+  the live feed. So a plain `wrangler kv put` correction does NOT stick; use this endpoint.
+- **Current-month dashboard lag**: for a still-live current-month incident, the live `/api/status` value
+  wins in `mergeArchiveIntoMap`, so the corrected duration shows on the dashboard only once the incident
+  ages out of the upstream feed. The permanent archive (built on the 1st) is unaffected.
+- **Live Score not overridden**: MTTR/Recovery on `/api/status` still uses the provider duration (median is
+  robust at ≥3 resolved incidents). General MTTR robustness is #1019 Part B.
+
+**Request body** (POST, JSON): `action` (`'add' | 'remove'`), `id`, `durationMin` (add only, finite ≥ 0),
+optional `reason`. **Response**: `{ ok, changed, overrides }` on 200. Failure modes mirror suppress
+(401/400/502/503). No isolate cache (the apply sites read fresh).

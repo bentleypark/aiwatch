@@ -69,6 +69,38 @@ e.g. `{svcId:'openai', match:'fedramp'}`). Applied at two points: `fetchAllServi
 unaffected** — suppression runs after status determination, removing the incident only from the LIST +
 Score inputs. Removing a suppression restores the incident with zero code change.
 
+### Duration override — the "correct but overstated" sibling of suppression (#1019)
+
+Suppression HIDES an incident; a **duration override** KEEPS it but PINS its duration. The problem it
+solves: an incident's `duration` is the provider's **paperwork** span (`resolved_at − created_at`;
+`parsers/statuspage.ts`), and some providers leave an incident open in `investigating`/`monitoring` long
+**after the affected component actually recovered**. Cursor `h71m65my586h` (2026-07-14) — IDE went
+`degraded_performance` at 19:52 UTC and was already `operational` well before the formal 09:11 UTC resolve
+(its `affected_components` on the resolve update reads `operational → operational`), yet the stored
+duration is **13h 20m**; the sibling `96m8j04k15r5` ("- Sol") on the same component resolved in **18 min**,
+the best proxy for when the shared degradation cleared. That overstated duration feeds **MTTR / the
+Recovery score** (median-robust at ≥3 resolved incidents, but the `<3` mean fallback lets one such outlier
+tank a low-incident service) and the monthly report's `longestIncidentMin` / `totalDowntimeMin`.
+
+The **override layer** (`worker/src/overrides.ts`, operated via `GET/POST /api/admin/duration-override`)
+mirrors suppression: an `incident:duration-overrides` KV list of `{ id, durationMin, reason }`, applied by
+`applyDurationOverrides` which recomputes each affected service's `totalMinutes`/`longestMinutes` from the
+`durations` map (the `filterSuppressedFromMonthly` pattern) and updates `incidents[].durationMin` (the #915
+`aggregateIncidentDurations` source of truth) AND, for a resolved entry, `incidents[].resolvedAt` (=
+`startedAt + durationMin`) so the timestamp-derived consumers — the grouped-incident row duration
+(`sumGroupDuration`) and the Uptime calendar span — agree rather than still painting the paperwork span.
+It also flows into the calendar-month `monthlyScore` (#993), whose MTTR reads the same per-incident
+durations. Applied on **READ/BUILD** of the monthly accumulator — NOT
+by editing it — because `accumulateMonthlyIncidents`'s monotonic `if (dur > oldDur)` guard would re-inflate
+a lowered stored value on the next cron while the incident is still in the live feed. Three apply points,
+each right after suppression: `buildMonthlyArchive` (rebuild-safe), the `/api/report` current-month partial
+(dashboard 30/90-day list — but for a still-live current-month incident the live `/api/status` value wins
+in `mergeArchiveIntoMap`, so the override's visible effect there lags until the incident ages out of the
+feed; the permanent archive is unaffected), and the weekly briefing. The live `/api/status` Score is
+deliberately **not** overridden — MTTR robustness for the general case is tracked as #1019 Part B (a
+confidence-gate or small-sample shrinkage on MTTR, vs. computing duration from AIWatch's own observed
+`degraded → operational` edge). Removing an override restores the provider duration with zero code change.
+
 ## Per-component snapshot — `resolveSvcComponents` (#604)
 
 `resolveSvcStatus` collapses the `statusComponentIds` subset into one worst-of badge and **discards** the per-component statuses. `resolveSvcComponents(config, summaryData)` is the **display counterpart**: it preserves the same matched subset as `ServiceComponent[]` (`{ id, name, status }`, normalized, in configured order) on `ServiceStatus.components`, so the ServiceDetails + "Is X Down" surfaces can render a per-component breakdown card (parity with StatusGator / IsDown).
