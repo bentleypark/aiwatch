@@ -110,7 +110,7 @@ describe('tierLabelFor (#403)', () => {
 
   it('returns the mapped label for known tier numbers (no warning)', () => {
     expect(tierLabelFor(1)).toBe('LLM')
-    expect(tierLabelFor(11)).toBe('CLI Agent')
+    expect(tierLabelFor(11)).toBe('Coding Agent') // #1027 — single agent tier
     expect(warnSpy).not.toHaveBeenCalled()
   })
 

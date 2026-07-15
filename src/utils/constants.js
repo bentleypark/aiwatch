@@ -168,9 +168,16 @@ export function feedUrlOf(serviceId) {
 // makes sense (Settings Alerts, incident banner, sidebar footer — #433).
 export const ALL_SERVICES_FEED_URL = 'https://ai-watch.dev/feed.xml'
 
-// Fallback tier priority — API services (1-4) and coding agents (11-13) use distinct number ranges
+// Fallback tier priority — API services (1-8) and coding agents (11) use distinct number ranges
 // so TIER_LABEL maps each tier number to one unambiguous label. Within a category, getFallbacks
 // orders by tier-distance then by Score.
+//
+// #1027 — coding agents share ONE tier. The old CLI/IDE/Plugin sub-tiers (11/12/13) were a
+// delivery-FORM axis that no longer distinguishes agents — Claude Code, Codex, Cursor, Windsurf,
+// Copilot and Junie each ship both a CLI and an IDE surface — so a single-form label was inaccurate.
+// Unlike the LLM tiers (1-3 = a still-valid capability axis), the form axis no longer discriminates,
+// so agents fall back by Score within the category. Trade-off + the re-exposed #402 risk: see the
+// canonical note in worker/src/fallback.ts (the worker is the fallback authority).
 //
 // Cross-mirror sync test (worker/src/__tests__/api-tier-sync.test.ts) asserts byte-for-byte equality
 // against worker/src/fallback.ts API_TIER. api/is-down.ts inline copy is checked via string-match.
@@ -188,9 +195,8 @@ export const API_TIER = {
   stability: 7, bfl: 7,
   // Tier 8 = Vector database (#857) — Pinecone + turbopuffer; pinecone un-excluded (≥2 members).
   pinecone: 8, turbopuffer: 8,
-  claudecode: 11, codex: 11,
-  cursor: 12, windsurf: 12,
-  copilot: 13, junie: 13,
+  // Tier 11 = Coding agents (#1027) — one tier for all six; multi-form (CLI + IDE), Score-ordered.
+  claudecode: 11, codex: 11, cursor: 11, windsurf: 11, copilot: 11, junie: 11,
   chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21,
 }
 
@@ -198,7 +204,7 @@ export const API_TIER = {
 // promoted here so the sync test can compare both copies via a single import without parsing JSX.
 export const TIER_LABEL = {
   1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector',
-  11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
+  11: 'Coding Agent', // #1027 — single tier for all coding agents (was CLI/IDE/Plugin Agent)
   21: 'AI Apps',
 }
 
@@ -218,7 +224,7 @@ export function tierFor(id) {
 
 // #859 — a specialized non-LLM API sub-tier (Voice 4 / Video 5 / Observability 6 / Image 7 / Vector 8)
 // only recommends its OWN tier; cross-tier fill stays for LLM tiers (1-3). Mirror of worker/src/fallback.ts
-// isSpecializedSubTier. Agents (11-13) + apps (21) are separate categories → excluded (range 4-10).
+// isSpecializedSubTier. Agents (11) + apps (21) are separate categories → excluded (range 4-10).
 export function isSpecializedSubTier(tier) {
   return tier >= 4 && tier <= 10
 }

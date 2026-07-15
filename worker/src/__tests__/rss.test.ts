@@ -1026,7 +1026,7 @@ describe('buildRssFeed — #781 grouped per-category "Try instead" (feed parity 
     expect(line).not.toContain('→') // no category labels for a single-category incident
   })
 
-  it('multi-category incident → labeled per-category groups (LLM/App/CLI Agent)', () => {
+  it('multi-category incident → labeled per-category groups (LLM/App/Coding Agent)', () => {
     const shared = incident({ id: 'multi', title: 'Opus errors' })
     const svcs = [
       service({ id: 'claude', name: 'Claude API', category: 'api', status: 'down', incidents: [shared] }),
@@ -1038,7 +1038,7 @@ describe('buildRssFeed — #781 grouped per-category "Try instead" (feed parity 
     const line = tryLine(xml)
     expect(line).toContain('LLM → OpenAI API')
     expect(line).toContain('AI Apps → ChatGPT')
-    expect(line).toContain('CLI Agent → Codex')
+    expect(line).toContain('Coding Agent → Codex') // #1027 — single agent tier label
   })
 })
 

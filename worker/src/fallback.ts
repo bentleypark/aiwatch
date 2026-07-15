@@ -10,10 +10,24 @@ import { isNonReliabilityAdvisory } from './utils'
 export const EXCLUDE_FALLBACK = ['replicate', 'huggingface', 'fal', 'voyageai', 'modal', 'characterai', 'bedrock', 'azureopenai', 'twelvelabs']
 
 // Tier-based priority — same-tier services sorted by Score, then adjacent tiers by distance.
-// API tiers (1-4) and agent tiers (11-13) use distinct number ranges so TIER_LABEL stays unambiguous
+// API tiers (1-8) and the agent tier (11) use distinct number ranges so TIER_LABEL stays unambiguous
 // and the cross-category category filter in getFallbacks already prevents API ↔ agent leakage.
-// Without agent tiers (#402), all 6 agents fell through to `?? 99` and got Score-only ordering, which
-// pushed Junie (new service, shallow incident history → inflated Score) to #1 for unrelated outages.
+//
+// #1027 — all six coding agents share ONE tier (11). The old CLI/IDE/Plugin sub-tiers (11/12/13)
+// encoded a delivery-FORM axis that no longer distinguishes agents — each now ships both a CLI and an
+// IDE surface — so a single-form label was inaccurate and the IDE-vs-Plugin split was arbitrary.
+// Agents now fall back by Score within the category, like ties inside an LLM tier. Keeping a defined
+// tier (vs the pre-#402 `?? 99` fall-through) still suppresses the tierFor warn-once.
+//
+// TRADE-OFF (honest): this RE-EXPOSES the #402 failure mode — a shallow-history agent whose Score is
+// *inflated* (few incidents → high, non-null Score) ranking #1 for an unrelated agent outage — WITHIN
+// the agent category. The old sub-tiers masked it via form-proximity; #1027 adds NO structural guard.
+// getFallbacks (below) sorts on raw aiwatchScore and does NOT consult the coverage gate (#802 is a
+// rankings-page-only exclusion) or confidence withholding (#713 nulls a Score only when a service has
+// neither official uptime nor a probe — every agent HAS official uptime, so #713 never fires for them).
+// Only a genuinely null Score sinks, via `?? 0`. Mitigation is procedural, not structural: verify after
+// adding any new agent that it doesn't dominate the fallback slot on an unrelated outage. This is an
+// accepted trade-off of design A (Score-neutral ordering over a form axis that no longer discriminates).
 //
 // Exported for the cross-mirror sync test (worker/src/__tests__/api-tier-sync.test.ts) — that test
 // is the only safeguard against drift between the three independent copies of this map (#403).
@@ -36,14 +50,13 @@ export const API_TIER: Record<string, number> = {
   // un-excluded from EXCLUDE_FALLBACK now that the category has ≥2 members. A distinct tier so a degraded
   // vector DB recommends its vector sibling (distance 0) over an LLM/voice/image/infra service.
   pinecone: 8, turbopuffer: 8,
-  claudecode: 11, codex: 11,
-  cursor: 12, windsurf: 12,
-  copilot: 13, junie: 13,
-  // App-category services. All three share tier 21, so same-tier distance collapses to 0
+  // Tier 11 = Coding agents (#1027) — one tier for all six; multi-form (CLI + IDE), Score-ordered.
+  claudecode: 11, codex: 11, cursor: 11, windsurf: 11, copilot: 11, junie: 11,
+  // App-category services. All four share tier 21, so same-tier distance collapses to 0
   // across every pairing and ordering reduces to Score — identical to the pre-#403 `?? 99`
   // fall-through, just without the warn-once noise. Entries exist only to suppress the
-  // `tierFor` warn-once that would otherwise fire whenever chatgpt/claudeai surface as the
-  // affected service in a fallback flow (Character.AI is in EXCLUDE_FALLBACK so it never does).
+  // `tierFor` warn-once that would otherwise fire whenever chatgpt/claudeai/deepseekapp surface as
+  // the affected service in a fallback flow (Character.AI is in EXCLUDE_FALLBACK so it never does).
   chatgpt: 21, claudeai: 21, characterai: 21, deepseekapp: 21,
 }
 
@@ -101,7 +114,7 @@ function hasActiveIncident(s: FallbackCandidate): boolean {
 // (6) / Image (7) / Vector (8) are NOT mutually substitutable, so a degraded vector DB must not be
 // offered an image model as its 2nd recommendation (the exact reason these were split into their own
 // tiers in #601/#602/#756/#857). Range 4–10 covers the current + near-future API sub-tiers; agents
-// (11–13) and apps (21) are separate CATEGORIES (filtered by `category` in getFallbacks) and keep
+// (11) and apps (21) are separate CATEGORIES (filtered by `category` in getFallbacks) and keep
 // cross-tier fill within their category, so they're intentionally excluded.
 export function isSpecializedSubTier(tier: number): boolean {
   return tier >= 4 && tier <= 10
@@ -148,16 +161,15 @@ export function buildFallbackText(fallbacks: Array<{ name: string; score: number
 const CATEGORY_LABEL: Record<string, string> = {
   api: 'API', app: 'AI Apps', agent: 'Coding Agent',
 }
-// Agent tier labels carry an "Agent" suffix to keep the noun visible — without it the bare
-// `CLI` / `IDE` / `Plugin` reads as untyped jargon next to category-named peers in the same
-// fallback line ("AI Apps → claude.ai" + "CLI → Claude Code" was the asymmetry that triggered
-// the rename). LLM / Voice / Infra stay bare because those abbreviations are already
-// self-identifying as service categories in the API space.
+// #1027 — coding agents collapse to a single "Coding Agent" label (was CLI/IDE/Plugin Agent). It
+// matches CATEGORY_LABEL[agent], mirroring how tier 21 matches CATEGORY_LABEL[app], so the grouped
+// fallback line reads "Coding Agent: Claude Code (Score 90)". LLM / Voice / Infra stay bare because
+// those abbreviations are already self-identifying as service categories in the API space.
 // Exported for the cross-mirror sync test (#403). Mirrored as TIER_LABEL in src/utils/constants.js;
 // Overview.jsx imports from there so there is no third inline copy to drift against.
 export const TIER_LABEL: Record<number, string> = {
   1: 'LLM', 2: 'LLM', 3: 'Infra', 4: 'Voice', 5: 'Video', 6: 'Observability', 7: 'Image', 8: 'Vector',
-  11: 'CLI Agent', 12: 'IDE Agent', 13: 'Plugin Agent',
+  11: 'Coding Agent', // #1027 — single tier for all coding agents (matches CATEGORY_LABEL[agent])
   21: 'AI Apps', // matches CATEGORY_LABEL[app] so the existing buildGroupedFallbackText copy stays consistent
 }
 
