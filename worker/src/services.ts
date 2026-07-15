@@ -8,7 +8,7 @@ import { readSuppressions, applySuppressions } from './suppression'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
-import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, enrichIncidentIoText } from './parsers/incident-io'
+import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
   AISTUDIO_ENDPOINT,
@@ -18,9 +18,9 @@ import {
   parseAistudioIncidents,
   computeDailyImpactFromIncidents,
 } from './parsers/aistudio'
-import { parseInstatusIncidents, parseInstatusUptime, parseInstatusComponents } from './parsers/instatus'
-import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
-import { parseOnlineOrNotIncidents, parseOnlineOrNotUptime } from './parsers/onlineornot'
+import { parseInstatusIncidents, parseInstatusUptime, parseInstatusReportedUptime, parseInstatusUptimeDays, parseInstatusComponents } from './parsers/instatus'
+import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
+import { parseOnlineOrNotIncidents, computeOnlineOrNotUptime } from './parsers/onlineornot'
 import { parseAwsRssIncidents, parseAwsHealthEvents, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
 import { mergeXaiRegionalIncidents } from './xai-regions'
 
@@ -136,6 +136,9 @@ export const SERVICES: ServiceConfig[] = [
   // while the breakdown stayed all-operational — a visible contradiction. The row label reads
   // 'ElevenCreative' (broader suite), the accepted trade-off since no finer-grained component exists.
   // Display-only: badge stays on the overall page indicator (no statusComponentIds).
+  // #1006 — uptime scoped to the badge/detail components (Text-to-Speech + STT + Conversations + RAG +
+  // Telephony + …), not just Text-to-Speech: they are distinct product surfaces, and an STT outage was
+  // showing in the incident list while uptime, read from TTS alone, sat at 100%.
   { id: 'elevenlabs', name: 'ElevenLabs', provider: 'ElevenLabs', category: 'api', statusUrl: 'https://status.elevenlabs.io', apiUrl: 'https://status.elevenlabs.io/api/v2/summary.json', incidentIoBaseUrl: 'https://status.elevenlabs.io/incidents', incidentIoComponentId: '01JP2RQVGDHPEEDAFM5KV2MH9P', incidentExclude: ['webpage'], displayComponentIds: ['01JP2RQVGDHPEEDAFM5KV2MH9P', '01JYDTNNSJBT4X90MAC47YPM9S', '01JY3H5SJJZNC33AYMAE4SK4TH', '01JY3H5SJJD2BMSGSW5FZE08ST', '01JY3H5SJJJG47J60JPKX882H8', '01JY3H5SJJFKTXYQHG5A8Z1KYH', '01JJM5RKYAEWNM3XYRHXM8FJQ3'] },
   // displayComponentIds (#606): curated user-facing API surfaces for assemblyai + deepgram
   // (excludes internal infra / Website / Billing / Docs, and the badge's umbrella statusComponentId
@@ -157,7 +160,11 @@ export const SERVICES: ServiceConfig[] = [
   //   (ungrouped surfaces) = Replicate Registry (r8.im), Official Models
   //   Support = Billing, Support Tickets  (renders AFTER the surface rows, per the official page)
   // Excludes Home Page. Display-only (decoupled from the worst-of badge).
-  { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: '01JRJYHBWCXHFZ0NHMP1N7T2G3', displayComponentIds: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JRG9WZ84ABEY9ZJBB72CJBS8', '01JRGA5ZQKJX2NMG45VCFP9Y9C', '01JRGA5ZQKF3SW674WMFD92PAC', '01JS0A88GKRF5DNW74REX185D3', '01JS0A88GKZAMP8BD3W9BCCBWX', '01J5NNACBNTG5GR693P6RH5Q6J', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01JS0AB43BH206N6Z4WNSB0Z0F', '01JS0AB43BNHTEGYYQBSWS3KDP'], componentGroups: { '01JRJYHBWCXHFZ0NHMP1N7T2G3': 'API', '01JRJYHBWC358ZXKRXZD0BENPD': 'API', '01JRG9WZ84ABEY9ZJBB72CJBS8': 'Inference and Training', '01JRGA5ZQKJX2NMG45VCFP9Y9C': 'Inference and Training', '01JRGA5ZQKF3SW674WMFD92PAC': 'Inference and Training', '01JS0A88GKRF5DNW74REX185D3': 'Inference and Training', '01JS0A88GKZAMP8BD3W9BCCBWX': 'Inference and Training', '01J5NNACBNTG5GR693P6RH5Q6J': 'Website', '01JS0AB43BH206N6Z4WNSB0Z0F': 'Support', '01JS0AB43BNHTEGYYQBSWS3KDP': 'Support' }, componentGroupsInline: true },
+  // #1006 — uptime is a worst-of over the SAME components the badge + detail page show
+  // (displayComponentIds), not the single HTTP API component. Its GPU hardware (H100/A100/L40S/T4) is
+  // core availability — a model can't run without it — but uptime read only HTTP API, so a multi-day
+  // H100 degradation showed in the incident list beside a spotless 100%.
+  { id: 'replicate', name: 'Replicate', provider: 'Replicate', category: 'api', statusUrl: 'https://www.replicatestatus.com', apiUrl: 'https://www.replicatestatus.com/api/v2/summary.json', incidentIoBaseUrl: 'https://www.replicatestatus.com/incidents', incidentIoComponentId: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JRG9WZ84ABEY9ZJBB72CJBS8', '01JRGA5ZQKJX2NMG45VCFP9Y9C', '01JRGA5ZQKF3SW674WMFD92PAC', '01JS0A88GKRF5DNW74REX185D3', '01JS0A88GKZAMP8BD3W9BCCBWX', '01J5NNACBNTG5GR693P6RH5Q6J', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01JS0AB43BH206N6Z4WNSB0Z0F', '01JS0AB43BNHTEGYYQBSWS3KDP'], displayComponentIds: ['01JRJYHBWCXHFZ0NHMP1N7T2G3', '01JRJYHBWC358ZXKRXZD0BENPD', '01JRG9WZ84ABEY9ZJBB72CJBS8', '01JRGA5ZQKJX2NMG45VCFP9Y9C', '01JRGA5ZQKF3SW674WMFD92PAC', '01JS0A88GKRF5DNW74REX185D3', '01JS0A88GKZAMP8BD3W9BCCBWX', '01J5NNACBNTG5GR693P6RH5Q6J', '01JXJT0JC265GZN0BAJ446XBD2', '01JS0AB43BGQC1H06HKGPHP1F2', '01JS0AB43BH206N6Z4WNSB0Z0F', '01JS0AB43BNHTEGYYQBSWS3KDP'], componentGroups: { '01JRJYHBWCXHFZ0NHMP1N7T2G3': 'API', '01JRJYHBWC358ZXKRXZD0BENPD': 'API', '01JRG9WZ84ABEY9ZJBB72CJBS8': 'Inference and Training', '01JRGA5ZQKJX2NMG45VCFP9Y9C': 'Inference and Training', '01JRGA5ZQKF3SW674WMFD92PAC': 'Inference and Training', '01JS0A88GKRF5DNW74REX185D3': 'Inference and Training', '01JS0A88GKZAMP8BD3W9BCCBWX': 'Inference and Training', '01J5NNACBNTG5GR693P6RH5Q6J': 'Website', '01JS0AB43BH206N6Z4WNSB0Z0F': 'Support', '01JS0AB43BNHTEGYYQBSWS3KDP': 'Support' }, componentGroupsInline: true },
   // fal.ai (#758) — generative-media inference platform (image/video/audio/3D, 600+ models incl.
   // FLUX/Kling/Hailuo). Peer of Replicate/Hugging Face. Instatus (Next.js) page like Perplexity:
   // `statusComponent: 'API'` selects the Instatus "API" group component for the official uptime%
@@ -189,7 +196,7 @@ export const SERVICES: ServiceConfig[] = [
   // same principle as langsmith's uptime (count only representative API surfaces), though the direction
   // differs: excluding Run Ingestion stopped an over-good ~100% from hiding incidents, while excluding
   // Dashboard stops a non-API component from dragging the worst-of down. A new region must be added here;
-  // `parseIncidentIoUptime` warns when a configured id no longer resolves (ULID rotation), and
+  // `computeIncidentIoUptime` warns when a configured id no longer resolves (ULID rotation), and
   // turbopuffer-uptime.test.ts pins the roster against the Dashboard id.
   // The badge still rides the overall page indicator (status-determination step 4) — a region belongs on a
   // Region card, not the badge/breakdown — so no statusComponentId / displayComponentIds. Score keeps its
@@ -268,15 +275,16 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentKeywords: ['claude.ai', 'across surfaces', 'claude desktop'], statusComponent: 'claude.ai', statusComponentId: 'rwppv331jlwc' },
   // displayComponentIds (#606): all Character.AI surfaces (single-owner page). Display-only.
   { id: 'characterai', name: 'Character.AI', provider: 'Character AI', category: 'app', statusUrl: 'https://status.character.ai', apiUrl: 'https://status.character.ai/api/v2/summary.json', statusComponentId: 'fw8g76r7dqcl', displayComponentIds: ['fw8g76r7dqcl', 'ngscynkb3c53', 'v58xb4x4tg0l', '8b8kpp2h7w82', 'dtcqb0ffqv21'], statusSourceDeactivated: true }, // #800 — Statuspage deactivated (401) since ~2026-06-18 (#689), no replacement; suppress recurring dead-source alerts. REMOVE when the page reactivates.
-  // ChatGPT has no single umbrella status-page component, but status.openai.com
-  // does publish a ChatGPT group aggregate over its sub-components — that's the
-  // user-facing uptime number on the page. Status determination still uses the
-  // overall indicator + incidentKeywords filter with the "no relevant unresolved
-  // incidents → operational" cross-contamination guard (#292); the new
-  // incidentIoComponentId / incidentIoGroupId pair only feeds parseIncidentIoUptime
-  // (#367), not the status path. Component fallback is Conversations
-  // (01JMXBNJXGV1T5GT2M9XA83XNG, 99.92% sample) — not perfect coverage but a
-  // reasonable proxy if OpenAI ever restructures the ChatGPT group.
+  // ChatGPT has no single umbrella status-page component. Status determination uses the overall
+  // indicator + incidentKeywords filter with the "no relevant unresolved incidents → operational"
+  // cross-contamination guard (#292); `incidentIoComponentId` only feeds uptime, not the status path.
+  // #1006 — uptime is now COMPUTED from the impact records of the ChatGPT badge scope (the full
+  // `statusComponentIds` worst-of, matching the badge), over a common 30 days, instead of copying the
+  // page's published ChatGPT-group aggregate (#367). That aggregate is
+  // not a 30-day figure and OpenAI's page excludes degraded/partial states from it, so it was never
+  // comparable with any other service's number. `incidentIoGroupId` survives with a NEW job: it is the
+  // figure the page actually DISPLAYS for this service, so `uptimeReported` reads it and the detail page
+  // can show the provider's own number beside ours. Conversations carries the real incident activity.
   // displayComponentIds (#606 Cat B): the official "ChatGPT" group (12) on status.openai.com.
   // Display-only; disjoint from openai/codex. Compliance API + Agent belong to ChatGPT per the
   // official grouping (not the API group, despite the names). Login here is the ChatGPT Login
@@ -656,6 +664,11 @@ export function pickBreakdownComponents(
 /** #802 — minimum days of AIWatch coverage before a service is eligible for the Reliability Ranking. */
 export const MIN_COVERAGE_DAYS = 30
 
+/** #1006 — the uptime window AIWatch presents and scores on. One window for every service, computed by
+ *  us from the provider's own records — the precondition the Reliability Ranking always claimed. */
+export const UPTIME_WINDOW_DAYS = 30
+
+
 /** #809 — id → static `addedAt` ISO date, only for services that carry one. Persisted per-service into
  *  the monthly archive (`/api/report`) so the report-side coverage gate (aiwatch-reports#45) can detect
  *  a service added mid-month by comparing this STATIC date to the report month — `coverageDays` (live,
@@ -998,6 +1011,8 @@ async function readFlashdutyStatus(kv: KVNamespace, config: ServiceConfig, base:
     status: parsed.status,
     lastChecked: now,
     incidents: parsed.incidents,
+    // #1006 — COMPUTED over the trailing 30 days from the feed's `component_impacts` intervals, like
+    // every other source; the feed's own `component_uptimes` aggregate is used only as the roster.
     ...(parsed.uptime30d != null ? { uptime30d: parsed.uptime30d, uptimeSource: 'official' as const } : {}),
     ...(Object.keys(parsed.dailyImpact).length > 0 ? { dailyImpact: parsed.dailyImpact } : {}),
     ...(parsed.components.length >= 2 ? { components: parsed.components } : {}),
@@ -1224,7 +1239,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       // Compute daily impact for calendar from uptimeData HTML (Statuspage services only).
       // Daily impact for calendar: Statuspage uptimeData OR incident.io component_impacts
       const uptimeResult = (uptimeHtml && config.statusComponentId)
-        ? parseUptimeData(uptimeHtml, config.statusComponentId)
+        // #1006 — the same scope the badge + calendar use (worst-of, #379), not the single primary
+        // component: a multi-component service showed outages in its incident list while uptime, read
+        // from one component, sat at 100%.
+        ? parseUptimeData(uptimeHtml, config.statusComponentIds ?? config.statusComponentId)
         : null
       // Aggregate the impact calendar over the whole badge group (statusComponentIds) when set, so a
       // multi-component service's calendar matches its badge scope + the official group calendar
@@ -1243,21 +1261,64 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         ? statuspageDaily
         : (ioDailyImpact && Object.keys(ioDailyImpact).length > 0 ? ioDailyImpact : null)
 
-      // Uptime%: Statuspage uptimeData > incident.io component_uptimes > incident duration estimate
+      // Uptime% — AIWatch COMPUTES it, from the provider's own published records, with ONE formula and
+      // ONE window (30 days) for every service it can:
+      //   Atlassian    → parseUptimeData sums the per-day outage SECONDS the page publishes, over the
+      //                  TRAILING 30 of the ~90 days it embeds (#1006 — the pre-fix code divided by all
+      //                  90, so `uptime30d` held a ninety-day figure).
+      //   incident.io  → computeIncidentIoUptime sums the component_impacts intervals over 30 days.
+      // Both use the weights on /methodology (full outage 1.0, partial/degraded 0.3, announced
+      // maintenance excluded). This is what makes the Score coherent — its other components (Incidents
+      // 25, Recovery 15) are 30-day — and the Reliability Ranking comparable at all.
+      //
+      // `uptimeReported` is set ONLY for incident.io, where the page publishes ONE fixed aggregate that
+      // genuinely differs from our measure (LangSmith's page really does show 98.48% while its trailing-30
+      // record is spotless). An Atlassian page has no such single number — its window follows the viewport
+      // (90/60/30 days) — so there is nothing to place beside ours.
       let uptimeValue: number | null = null
       let uptimeSrc: 'official' | undefined
+      let uptimeWindow: number | undefined
+      let uptimeRep: number | undefined
+      let uptimeRepDays: number | undefined
       if (uptimeResult?.uptimePercent != null) {
         uptimeValue = uptimeResult.uptimePercent
         uptimeSrc = 'official'
-      } else if (uptimeHtml && config.incidentIoComponentId) {
-        const ioUptime = parseIncidentIoUptime(uptimeHtml, config.incidentIoComponentId, config.incidentIoGroupId)
-        if (ioUptime != null) {
-          uptimeValue = ioUptime
-          uptimeSrc = 'official'
+        if (uptimeResult.windowDays != null && uptimeResult.windowDays < UPTIME_WINDOW_DAYS) uptimeWindow = uptimeResult.windowDays
+        // The provider's own figure IS shown for Atlassian too — the ~90-day number a desktop visitor
+        // sees on their page (status.claude.com: "90 days ago … 99.58%"). Its period is stated, because
+        // theirs isn't fixed: the page renders 30 / 60 / 90 days depending on viewport width.
+        if (uptimeResult.uptimeReported != null && uptimeResult.uptimeReported !== uptimeValue) {
+          uptimeRep = uptimeResult.uptimeReported
+          uptimeRepDays = uptimeResult.uptimeReportedDays ?? undefined
         }
-        // #713 — NO estimate fallback: if incident.io exposes no component_uptimes for this component
-        // (Replicate/ElevenLabs edge), leave uptime null rather than inventing a value. The service is
-        // scored on its incidents + recovery (+ probe), and the uptime display reads "No official uptime".
+      } else if (uptimeHtml && config.incidentIoComponentId) {
+        // #1006 — uptime is computed over the SAME component scope the badge and the impact calendar use
+        // (`statusComponentIds`, worst-of per #379), not over the single `incidentIoComponentId`.
+        // LangSmith exposed the gap: its badge spans API + Run Ingestion + Application, but uptime read
+        // only the API component — so a partial outage on Run Ingestion showed up in the incident list
+        // while uptime sat at a spotless 100%. The old 90-day published figure happened to be low enough
+        // that nobody noticed; computing an honest 30 days made the mismatch visible.
+        // `incidentIoComponentId` still identifies which figure the PAGE displays (uptimeReported).
+        const uptimeScope = config.statusComponentIds ?? config.incidentIoComponentId
+        const io = computeIncidentIoUptime(uptimeHtml, uptimeScope, Date.now())
+        if (io) {
+          uptimeValue = io.pct
+          uptimeSrc = 'official'
+          // A status-page migration creates a NEW component, so its records may not reach back 30 days
+          // (#1004/junie: 6 days). The figure is honest for the days it covers — surface WHICH, rather
+          // than passing a short window off as a 30-day one. Absent when the window is whole.
+          if (io.days < UPTIME_WINDOW_DAYS) uptimeWindow = io.days
+          const reported = parseIncidentIoReportedUptime(uptimeHtml, config.incidentIoComponentId, config.incidentIoGroupId)
+          // Shown whenever it differs at all — no "meaningful gap" threshold. A cutoff would be an
+          // editorial judgement made from one day's snapshot, and it would give the reader an invisible
+          // rule ("why does LangSmith show two numbers and OpenAI one?"). A near-identical pair is not
+          // noise either: it CORROBORATES our figure against the provider's. Identical → nothing to say.
+          if (reported != null && reported !== uptimeValue) uptimeRep = reported
+        }
+        // #713 — NO invented uptime. A component the page does not track at all (no
+        // `data_available_since`) yields null here rather than a fabricated 100%: absence of impact
+        // records is not evidence of absence of downtime. The service is then scored on its incidents +
+        // recovery (+ probe), and the display reads "No official uptime".
       }
       // (a bare incidentIoComponentId with no uptime HTML also leaves uptime null — same #713 rule.)
 
@@ -1334,6 +1395,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
         calendarDays: config.statusComponentId ? 30 : 14,
         ...(uptimeValue != null ? { uptime30d: uptimeValue, uptimeSource: uptimeSrc } : {}),
+        ...(uptimeWindow != null ? { uptimeWindowDays: uptimeWindow } : {}),
+        ...(uptimeRep != null ? { uptimeReported: uptimeRep } : {}),
+        ...(uptimeRepDays != null ? { uptimeReportedDays: uptimeRepDays } : {}),
       }
     } else {
       // No Statuspage API — HTTP check + optional scraping (parallel)
@@ -1449,18 +1513,21 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
 
       let incidents: Incident[] = []
       let instatusUptime: number | null = null // #627 — Instatus per-component official uptime%
+      let instatusReported: number | null = null // #1006 — the page's own published aggregate (disclosure)
+      let instatusReportedDays: number | null = null
       let instatusComponents: ServiceComponent[] = [] // #761 — Instatus per-component snapshot (Next.js only)
       if (config.onlineOrNotUrl && res.ok) {
         const html = await res.text()
         incidents = parseOnlineOrNotIncidents(html)
-        if (config.onlineOrNotComponent) {
-          const uptime = parseOnlineOrNotUptime(html, config.onlineOrNotComponent)
-          if (uptime != null) {
-            base.uptime30d = uptime
-            base.uptimeSource = 'platform_avg'
-          } else {
-            console.warn(`[fetchService] ${config.id} OnlineOrNot uptime not found for component: ${config.onlineOrNotComponent}`)
-          }
+        // #1006 — computed over the trailing 30 days from the page's own incident records (started/ended/
+        // impact), like every other source, instead of reading its aggregate over an unknown period. It's
+        // the PROVIDER's own status page (not a third-party monitor), so this is 'official', not platform.
+        const uptime = computeOnlineOrNotUptime(html)
+        if (uptime != null) {
+          base.uptime30d = uptime
+          base.uptimeSource = 'official'
+        } else {
+          console.warn(`[fetchService] ${config.id} OnlineOrNot uptime could not be computed (payload shape change?)`)
         }
       } else if (config.onlineOrNotUrl && !res.ok) {
         console.warn(`[fetchService] ${config.id} OnlineOrNot status page returned ${res.status}`)
@@ -1478,6 +1545,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
             const mainHtml = await res.text()
             if (config.statusComponent) {
               instatusUptime = parseInstatusUptime(mainHtml, config.statusComponent)
+              // #1006 — the % the page itself shows (over its own ~90-day period), for the side-by-side
+              // disclosure. Only kept when it differs from our computed figure.
+              instatusReported = parseInstatusReportedUptime(mainHtml, config.statusComponent)
+              instatusReportedDays = parseInstatusUptimeDays(mainHtml)
             }
             const instatusComps = parseInstatusComponents(mainHtml)
             if (instatusComps.length > 0) {
@@ -1527,6 +1598,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
 
       // Better Stack uptime + status: parse /index.json for aggregate_state and availability
       let betterStackUptime: number | null = null
+      let betterStackReported: number | null = null // #1006 — the page's displayed availability (disclosure)
       let betterStackStat: 'operational' | 'degraded' | 'down' | null = null
       let betterStackPartial = 0
       let betterStackComponents: ServiceComponent[] = []
@@ -1539,6 +1611,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         try {
           const bsData: BetterStackIndex = await betterStackRes.json()
           betterStackUptime = parseBetterStackUptime(bsData)
+          betterStackReported = parseBetterStackReportedUptime(bsData)
           betterStackStat = parseBetterStackStatus(bsData)
           betterStackPartial = parseBetterStackPartialCount(bsData)
           // #606 Cat C — per-resource breakdown grouped by status_page_section (display-only;
@@ -1621,9 +1694,26 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         calendarDays: has30dCalendar ? 30 : 14,
         ...(dailyImpact && Object.keys(dailyImpact).length > 0 ? { dailyImpact } : {}),
         ...(betterStackUptime != null
-          ? { uptime30d: betterStackUptime, uptimeSource: 'platform_avg' as const }
+          ? {
+              uptime30d: betterStackUptime,
+              uptimeSource: 'platform_avg' as const,
+              // #1006 — Better Stack's own displayed availability (over its ~90-day window), shown beside
+              // our 30-day figure when it differs.
+              ...(betterStackReported != null && betterStackReported !== betterStackUptime
+                ? { uptimeReported: betterStackReported, uptimeReportedDays: 90 }
+                : {}),
+            }
           : instatusUptime != null
-            ? { uptime30d: instatusUptime, uptimeSource: 'official' as const } // #627 — Instatus component uptime
+            // #627 — Instatus component uptime. #1006 — COMPUTED by us over the trailing 30 days from the
+            // page's own outage records (Next.js `componentsUptime[].outages`, Nuxt `days[].events`), not
+            // copied from its published aggregate (their pages declare `maxUptimeDays: 90`).
+            ? {
+                uptime30d: instatusUptime,
+                uptimeSource: 'official' as const,
+                ...(instatusReported != null && instatusReported !== instatusUptime
+                  ? { uptimeReported: instatusReported, ...(instatusReportedDays != null ? { uptimeReportedDays: instatusReportedDays } : {}) }
+                  : {}),
+              }
             : {}),
         ...(betterStackPartial > 0 ? { partialCount: betterStackPartial } : {}),
         ...(betterStackComponents.length > 0

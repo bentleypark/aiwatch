@@ -884,32 +884,61 @@ describe('parseBetterStackStatus', () => {
   })
 })
 
-describe('parseBetterStackUptime', () => {
-  it('computes average availability from resources', () => {
-    const data = {
-      included: [
-        { type: 'status_page_resource', attributes: { availability: 0.999 } },
-        { type: 'status_page_resource', attributes: { availability: 1.0 } },
-        { type: 'status_page_section', attributes: { name: 'section' } },
-      ],
-    }
-    const result = parseBetterStackUptime(data)
-    expect(result).toBe(99.95) // (99.9 + 100) / 2
+describe('parseBetterStackUptime (#1006 — computed, not copied)', () => {
+  // #1006 — the old parser averaged `attributes.availability`, a single float whose period the API never
+  // states (the page renders 90 days). Every other source moved to a computed trailing-30-day figure, and
+  // leaving this one on an unknown period would keep the ranking comparing incomparable numbers. The raw
+  // material was already in the payload: `status_history` is 90 × {day, status, downtime_duration,
+  // maintenance_duration} — the same per-day-seconds shape Atlassian publishes.
+  const days = (specs: Array<{ status?: string; down?: number; maint?: number }>) =>
+    specs.map((spec, i) => ({
+      day: `2026-06-${String(i + 1).padStart(2, '0')}`,
+      status: spec.status ?? 'operational',
+      downtime_duration: spec.down ?? 0,
+      maintenance_duration: spec.maint ?? 0,
+    }))
+  const resource = (history: ReturnType<typeof days>) => ({
+    type: 'status_page_resource',
+    attributes: { public_name: 'API', status_history: history },
   })
 
-  it('returns null when no resources', () => {
+  it('computes uptime from the per-day downtime seconds, averaged across resources', () => {
+    // r1: 8640s down over 30 days → 99.66%. r2: clean → 100%. Average → 99.83%.
+    const clean = days(Array.from({ length: 30 }, () => ({})))
+    const withOutage = days([{ status: 'downtime', down: 8640 }, ...Array.from({ length: 29 }, () => ({}))])
+    const result = parseBetterStackUptime({ included: [resource(withOutage), resource(clean)] })
+    expect(result).toBe(99.83)
+  })
+
+  it('EXCLUDES announced maintenance — a provider must not be penalised for announcing a window', () => {
+    const history = days([{ status: 'maintenance', maint: 86_400 }, ...Array.from({ length: 29 }, () => ({}))])
+    expect(parseBetterStackUptime({ included: [resource(history)] })).toBe(100)
+  })
+
+  it('drops `not_monitored` days from the denominator rather than scoring them as perfect', () => {
+    // 10 monitored days, one of them fully down → 90.00%. Scoring the 20 unmonitored days as
+    // operational would inflate this to 96.66%.
+    const history = days([
+      { status: 'downtime', down: 86_400 },
+      ...Array.from({ length: 9 }, () => ({})),
+      ...Array.from({ length: 20 }, () => ({ status: 'not_monitored' })),
+    ])
+    expect(parseBetterStackUptime({ included: [resource(history)] })).toBe(90)
+  })
+
+  it('uses only the TRAILING 30 days of the ~90 the page carries', () => {
+    // A full-day outage 60 days ago must not count — that is the LangSmith bug in another source.
+    const history = days([
+      { status: 'downtime', down: 86_400 },
+      ...Array.from({ length: 89 }, () => ({})),
+    ])
+    expect(parseBetterStackUptime({ included: [resource(history)] })).toBe(100)
+  })
+
+  it('returns null when no resource carries a usable history (never a fabricated 100%)', () => {
     expect(parseBetterStackUptime({ included: [] })).toBeNull()
     expect(parseBetterStackUptime({})).toBeNull()
-  })
-
-  it('returns null for out-of-range availability', () => {
-    const data = {
-      included: [
-        { type: 'status_page_resource', attributes: { availability: 9.99 } },
-      ],
-    }
-    // 9.99 * 100 = 999% → out of range
-    expect(parseBetterStackUptime(data)).toBeNull()
+    expect(parseBetterStackUptime({ included: [{ type: 'status_page_resource', attributes: { availability: 1 } }] })).toBeNull()
   })
 })
 

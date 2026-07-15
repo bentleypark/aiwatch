@@ -60,6 +60,9 @@ function UptimeBar({ service, sla, t }) {
   const clampedPct = Math.max(MIN_DISPLAY, uptime)
   const widthPct = hasUptime ? Math.round(((clampedPct - MIN_DISPLAY) / range) * 100) : 0
   const slaPos = Math.round(((sla - MIN_DISPLAY) / range) * 100)
+  // #1006 — a short window can now happen on any computed source (a status-page migration resets the
+  // provider's component clock), not just the 'official' one.
+  const isPartialWindow = hasUptime && service.uptimeWindowDays != null
   const barColorClass = hasUptime ? uptimeColorClass(uptime, sla) : 'bg-[var(--bg3)]'
   const textColorClass = hasUptime ? uptimeTextClass(uptime, sla) : 'text-[var(--text2)]'
 
@@ -78,10 +81,14 @@ function UptimeBar({ service, sla, t }) {
             title={!hasUptime ? t(noOfficialUptime(service) ? 'uptime.noOfficial.tooltip' : 'uptime.unavailable.tooltip') : undefined}>
         {hasUptime ? `${uptime.toFixed(2)}%` : t('uptime.unavailable.short')}
       </span>
-      <span className="w-8 shrink-0 text-right text-[9px] mono text-[var(--text2)]"
-            title={service.uptimeSource === 'official' ? t('uptime.sub.official')
+      {/* #1006 — 'off' = computed by AIWatch from the provider's official records (30d). A provider whose
+          records don't reach back 30 days (status-page migration) is marked '<Nd' with the real window
+          in the tooltip, so a short-window figure is never read as a 30-day one. */}
+      <span className={`w-8 shrink-0 text-right text-[9px] mono ${isPartialWindow ? 'text-[var(--amber)]' : 'text-[var(--text2)]'}`}
+            title={isPartialWindow ? t('uptime.partialWindow.tooltip').replace('{d}', String(service.uptimeWindowDays))
+              : service.uptimeSource === 'official' ? t('uptime.sub.official')
               : service.uptimeSource === 'platform_avg' ? t('uptime.sub.platform_avg') : undefined}>
-        {!hasUptime ? '' : service.uptimeSource === 'official' ? 'off' : service.uptimeSource === 'platform_avg' ? 'avg' : ''}
+        {!hasUptime ? '' : isPartialWindow ? `${service.uptimeWindowDays}d` : service.uptimeSource === 'official' ? 'off' : service.uptimeSource === 'platform_avg' ? 'avg' : ''}
       </span>
     </div>
   )
@@ -137,8 +144,18 @@ export default function Uptime() {
           <span className="text-[var(--green)] font-semibold">//</span>
           {t('nav.uptime')}
         </h2>
-        <span className="mono text-[10px] text-[var(--text2)]">
-          {hasUptimeData ? t('uptime.basis') : t('uptime.collecting')}
+        {/* #1006 — a LEGEND, not a claim. The rows are not on one basis: most services are AIWatch's own
+            30-day computation from the provider's records (`off`), and the BetterStack ones are that
+            platform's monitors, same computation (`avg`). A partial-window service adds an amber `{N}d`
+            marker inline. A single header line saying "30 days" would repeat the mistake #654 removed. */}
+        <span className="mono text-[10px] text-[var(--text2)] flex items-center gap-2 flex-wrap justify-end">
+          {hasUptimeData ? (
+            <>
+              <span title={t('uptime.sub.official')}><span className="text-[var(--text1)]">off</span> {t('uptime.legend.official')}</span>
+              <span className="opacity-40">·</span>
+              <span title={t('uptime.sub.platform_avg')}><span className="text-[var(--text1)]">avg</span> {t('uptime.legend.platform')}</span>
+            </>
+          ) : t('uptime.collecting')}
         </span>
       </div>
 

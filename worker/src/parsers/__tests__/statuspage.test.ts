@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { normalizeStatus, parseIncidents, parseUptimeData } from '../statuspage'
 
 describe('normalizeStatus', () => {
@@ -108,12 +108,13 @@ describe('parseUptimeData', () => {
   })
 
   it('uses floor to avoid overstating uptime (tiny outage should not round to 100%)', () => {
-    // 90 days with a single 302s partial outage → weighted = 90.6s
-    // round: (1 - 90.6 / 7776000) * 10000 = 9999.88... → round = 10000 → 100.00% (wrong)
-    // floor: 9999.88... → floor = 9999 → 99.99% (correct)
+    // #1006 — the window is the trailing 30 days of the ~90 the page embeds, so the outage has to sit
+    // INSIDE it (here: the most recent day). A 302s partial outage → weighted = 90.6s
+    // round: (1 - 90.6 / 2592000) * 10000 = 9999.65... → round = 10000 → 100.00% (wrong)
+    // floor: 9999.65... → floor = 9999 → 99.99% (correct)
     const days = Array.from({ length: 90 }, (_, i) => ({
       date: `2026-${String(Math.floor(i / 28) + 1).padStart(2, '0')}-${String((i % 28) + 1).padStart(2, '0')}`,
-      outages: i === 0 ? { p: 302, m: 0 } : { p: 0, m: 0 },
+      outages: i === 89 ? { p: 302, m: 0 } : { p: 0, m: 0 },
     }))
     const html = makeHtml({ comp1: { days } })
     const result = parseUptimeData(html, 'comp1')
@@ -150,5 +151,45 @@ describe('parseUptimeData', () => {
     const result = parseUptimeData('<html></html>', 'comp1')
     expect(result.dailyImpact).toEqual({})
     expect(result.uptimePercent).toBeNull()
+  })
+
+  // #1006 core coverage — the trailing-window + worst-of paths the rewrite hinges on.
+  it('a clean window is exactly 100.00 (not null — a tracked, incident-free component)', () => {
+    const days = Array.from({ length: 30 }, (_, i) => ({
+      date: `2026-06-${String((i % 28) + 1).padStart(2, '0')}`,
+      outages: { p: 0, m: 0 },
+    }))
+    const result = parseUptimeData(makeHtml({ comp1: { days } }), 'comp1')
+    expect(result.uptimePercent).toBe(100)
+  })
+
+  it('an outage OUTSIDE the trailing 30-day window is dropped by slice(-windowDays)', () => {
+    // 90 days; the ONLY outage sits on the oldest day (index 0) → outside the trailing 30 → 100%.
+    const days = Array.from({ length: 90 }, (_, i) => ({
+      date: `2026-${String(Math.floor(i / 28) + 1).padStart(2, '0')}-${String((i % 28) + 1).padStart(2, '0')}`,
+      outages: i === 0 ? { p: 0, m: 86_400 } : { p: 0, m: 0 },
+    }))
+    const result = parseUptimeData(makeHtml({ comp1: { days } }), 'comp1')
+    expect(result.uptimePercent).toBe(100)
+  })
+
+  it('a LIST of ids is a worst-of across the badge scope (LangSmith-class multi-component)', () => {
+    const clean = Array.from({ length: 30 }, (_, i) => ({ date: `2026-06-${String((i % 28) + 1).padStart(2, '0')}`, outages: { p: 0, m: 0 } }))
+    const withOutage = clean.map((d, i) => (i === 29 ? { ...d, outages: { p: 0, m: 86_400 } } : d)) // 1 full day down
+    const html = makeHtml({ compA: { days: clean }, compB: { days: withOutage } })
+    const result = parseUptimeData(html, ['compA', 'compB'])
+    // worst-of → compB's 1-day-of-30 outage governs, not compA's clean 100%.
+    expect(result.uptimePercent).toBe(parseUptimeData(html, 'compB').uptimePercent)
+    expect(result.uptimePercent).toBeLessThan(100)
+  })
+
+  it('WARNS when a configured badge id no longer resolves — a rotated id must not silently shrink the worst-of', () => {
+    const days = Array.from({ length: 30 }, (_, i) => ({ date: `2026-06-${String((i % 28) + 1).padStart(2, '0')}`, outages: { p: 0, m: 0 } }))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const result = parseUptimeData(makeHtml({ compA: { days } }), ['compA', 'rotated-gone'])
+    expect(result.uptimePercent).toBe(100) // still resolves compA
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn.mock.calls[0][0]).toContain('1/2 configured components absent')
+    warn.mockRestore()
   })
 })

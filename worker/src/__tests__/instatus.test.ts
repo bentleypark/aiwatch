@@ -241,96 +241,137 @@ describe('parseInstatusIncidents — ongoing Nuxt incident has no duration (Mist
   })
 })
 
-describe('parseInstatusUptime (#627)', () => {
-  // Nuxt encodes each component's uptime as a flat-array index ref to a direct float %.
-  function nuxtHtmlWithUptime() {
-    const arr: unknown[] = [
-      'API', 99.599,                 // 0 name, 1 uptime value
-      'Le Chat', 99.854,             // 2, 3
-      { id: 9, name: 0, uptime: 1, services: 8 }, // 4 component "API"
-      { id: 9, name: 2, uptime: 3, services: 8 }, // 5 component "Le Chat"
-      [4, 5],                        // 6 components list
-      { components: 6 },             // 7
-      [],                            // 8
-      'comp-id',                     // 9
-    ]
+describe('parseInstatusUptime — Nuxt (#627 → #1006: computed, not copied)', () => {
+  // #1006 — the old parser read the component's published `uptime` float. That aggregate spans the
+  // page's own period (status.mistral.ai renders 90 days), so it was not comparable with the 30-day
+  // figures every other source now yields. The raw material sits beside it: each component carries
+  // `days` (90 × {date, events[]}) and each event has `created_at` + `duration` (seconds) + `severity`.
+  const NOW = Date.parse('2026-07-14T00:00:00Z')
+  const DAY = 86_400_000
+  const ago = (d: number) => new Date(NOW - d * DAY).toISOString()
+
+  /** Nuxt serialises as a flat array with index refs; component = {days, id, name, uptime}. */
+  function nuxtHtml(events: Array<{ daysAgo: number; duration: number; severity: string }>) {
+    const arr: unknown[] = ['API', 99.599, 'ignored-published-aggregate']
+    const eventIdx: number[] = []
+    for (const e of events) {
+      arr.push(ago(e.daysAgo)); const createdAt = arr.length - 1
+      arr.push(e.severity); const sev = arr.length - 1
+      // EVERY Nuxt scalar is an index ref — including numbers. Inlining a raw duration would be
+      // dereferenced as an array index and silently read as undefined.
+      arr.push(e.duration); const dur = arr.length - 1
+      arr.push({ created_at: createdAt, duration: dur, severity: sev })
+      eventIdx.push(arr.length - 1)
+    }
+    // 90 days; every event is pinned to day 0's bucket (the parser reads created_at, not the bucket).
+    const dayIdx: number[] = []
+    for (let i = 0; i < 90; i++) {
+      arr.push(i === 0 ? eventIdx : [])
+      const evList = arr.length - 1
+      arr.push({ date: ago(i), events: evList })
+      dayIdx.push(arr.length - 1)
+    }
+    arr.push(dayIdx); const daysList = arr.length - 1
+    arr.push({ id: 0, name: 0, uptime: 1, days: daysList })
     return `<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`
   }
 
-  it('resolves the named component’s 30-day uptime% from the Nuxt flat array', () => {
-    expect(parseInstatusUptime(nuxtHtmlWithUptime(), 'API')).toBeCloseTo(99.599, 3)
-    expect(parseInstatusUptime(nuxtHtmlWithUptime(), 'Le Chat')).toBeCloseTo(99.854, 3)
+  it('computes the trailing 30 days from days[].events, ignoring the published aggregate', () => {
+    // 24h MAJOR inside the window → 1 day of 30 → 96.66%. The page's own `uptime` (99.599) is not used.
+    const html = nuxtHtml([{ daysAgo: 5, duration: 86_400, severity: 'CRITICAL' }])
+    expect(parseInstatusUptime(html, 'API', NOW)).toBe(96.66)
   })
 
-  it('returns null for an unknown component, missing name, or Next.js without componentsUptime', () => {
-    expect(parseInstatusUptime(nuxtHtmlWithUptime(), 'Nonexistent')).toBeNull()
-    expect(parseInstatusUptime(nuxtHtmlWithUptime(), undefined)).toBeNull()
-    expect(parseInstatusUptime('<script>self.__next_f.push([1,"x"])</script>', 'API')).toBeNull()
+  it('weights a MEDIUM severity as a partial outage (0.3), per /methodology', () => {
+    // 24h × 0.3 = 7.2h of 30 days → 99.00%
+    const html = nuxtHtml([{ daysAgo: 5, duration: 86_400, severity: 'MEDIUM' }])
+    expect(parseInstatusUptime(html, 'API', NOW)).toBe(99)
+  })
+
+  it('ignores an event OUTSIDE the 30-day window — the whole point of the rewrite', () => {
+    const html = nuxtHtml([{ daysAgo: 60, duration: 86_400, severity: 'CRITICAL' }])
+    expect(parseInstatusUptime(html, 'API', NOW)).toBe(100)
+  })
+
+  it('clips an event that straddles the window edge', () => {
+    // Starts 31 days ago, runs 2 days → only ~1 day lands inside.
+    const html = nuxtHtml([{ daysAgo: 31, duration: 2 * 86_400, severity: 'CRITICAL' }])
+    expect(parseInstatusUptime(html, 'API', NOW)).toBe(96.66)
+  })
+
+  it('returns null for an unknown component or a missing name', () => {
+    const html = nuxtHtml([])
+    expect(parseInstatusUptime(html, 'Nonexistent', NOW)).toBeNull()
+    expect(parseInstatusUptime(html, undefined, NOW)).toBeNull()
   })
 })
 
-describe('parseInstatusUptime — Next.js componentsUptime (#635, Perplexity)', () => {
-  // Mirrors status.perplexity.com: escaped component defs (id→name) + a `componentsUptime` object
-  // keyed by component id, each entry nesting an `outages` array and an aggregate `"uptime"` string.
-  // A TOP-LEVEL component def carries `nameHtml` + a `group` field (#911) — the resolver requires both.
+describe('parseInstatusUptime — Next.js componentsUptime (#635 → #1006)', () => {
+  // Mirrors status.perplexity.com: escaped component defs (id→name) + a `componentsUptime` object keyed
+  // by component id, each entry nesting an `outages` array and an aggregate `"uptime"` string. #1006 —
+  // the OUTAGES are now the source of truth; the aggregate (over the page's own 90-day period) is not.
+  const NOW = Date.parse('2026-07-14T00:00:00Z')
+  const DAY = 86_400_000
+  const iso = (daysAgo: number) => new Date(NOW - daysAgo * DAY).toISOString()
+
   const compDef = (id: string, name: string) =>
     `\\"id\\":\\"${id}\\",\\"name\\":{\\"default\\":\\"${name}\\"},\\"nameHtml\\":{\\"default\\":\\"\\u003cp\\u003e${name}\\u003c/p\\u003e\\"},\\"group\\":null,\\"children\\":[],`
-  function nextHtmlWithUptime() {
+
+  const outage = (fromDaysAgo: number, hours: number, status: string, customPct?: number) => {
+    const from = iso(fromDaysAgo)
+    const to = new Date(Date.parse(from) + hours * 3_600_000).toISOString()
+    const custom = customPct != null
+      ? `,\\"customImpactPercentage\\":${customPct},\\"isCustomPercentage\\":true`
+      : ''
+    return `{\\"from\\":\\"${from}\\",\\"to\\":\\"${to}\\",\\"status\\":\\"${status}\\"${custom}}`
+  }
+
+  const nextHtml = (outages: string[]) => {
     const escaped =
-      compDef('clyi6jhgg31469ihojbwbsmeeg', 'Website') +
-      compDef('clyiakn7i60113hvojwho6za6j', 'API') +
-      '\\"componentsUptime\\":{' +
-        '\\"clyi6jhgg31469ihojbwbsmeeg\\":{\\"5\\":\\"99.47\\",' +
-          '\\"outages\\":[{\\"from\\":\\"2026-06-05T01:00:00.000Z\\",\\"to\\":\\"2026-06-05T01:40:38.000Z\\",\\"status\\":\\"MAJOROUTAGE\\"}],' +
-          '\\"uptime\\":\\"99.82\\"},' +
-        '\\"clyiakn7i60113hvojwho6za6j\\":{\\"outages\\":[],\\"uptime\\":\\"100.0\\"}' +
-      '}'
+      compDef('cidapi001', 'API') +
+      '\\"componentsUptime\\":{\\"cidapi001\\":{' +
+        `\\"outages\\":[${outages.join(',')}],` +
+        '\\"uptime\\":\\"99.82\\"}}'   // the page's own aggregate — deliberately NOT what we return
     return `<script>self.__next_f.push([1,"${escaped}"])</script>`
   }
 
-  it('resolves the named component’s uptime% from componentsUptime[id].uptime', () => {
-    expect(parseInstatusUptime(nextHtmlWithUptime(), 'API')).toBeCloseTo(100.0, 3)
-    expect(parseInstatusUptime(nextHtmlWithUptime(), 'Website')).toBeCloseTo(99.82, 2)
+  it('computes from outages over 30 days, not from the published aggregate', () => {
+    const html = nextHtml([outage(5, 24, 'MAJOROUTAGE')])
+    expect(parseInstatusUptime(html, 'API', NOW)).toBe(96.66) // NOT 99.82
+  })
+
+  it('uses the provider’s OWN impact fraction when it states one (customImpactPercentage)', () => {
+    // Instatus says this partial outage hit 50% of capacity. Their number beats our 0.3 default.
+    // 24h × 0.5 = 12h of 30 days → 98.33%
+    const html = nextHtml([outage(5, 24, 'PARTIALOUTAGE', 50)])
+    expect(parseInstatusUptime(html, 'API', NOW)).toBe(98.33)
+  })
+
+  it('falls back to the documented weights when no custom fraction is given', () => {
+    // PARTIALOUTAGE → 0.3. 24h × 0.3 = 7.2h of 30 → 99.00%
+    const html = nextHtml([outage(5, 24, 'PARTIALOUTAGE')])
+    expect(parseInstatusUptime(html, 'API', NOW)).toBe(99)
+  })
+
+  it('ignores an OPERATIONAL "outage" row and anything outside the window', () => {
+    expect(parseInstatusUptime(nextHtml([outage(5, 24, 'OPERATIONAL')]), 'API', NOW)).toBe(100)
+    expect(parseInstatusUptime(nextHtml([outage(60, 24, 'MAJOROUTAGE')]), 'API', NOW)).toBe(100)
+  })
+
+  // #1006 review — an OPEN outage has `to: null`; it must count to now, not be dropped (the "spotless
+  // 100% during a live outage" symptom the rewrite exists to kill).
+  it('an ONGOING outage (to null) counts to now, it is not dropped', () => {
+    const openOutage = `{\\"from\\":\\"${iso(1)}\\",\\"to\\":null,\\"status\\":\\"MAJOROUTAGE\\"}` // started 24h ago, still open
+    expect(parseInstatusUptime(nextHtml([openOutage]), 'API', NOW)).toBe(96.66) // 24h of 30d, NOT 100
+  })
+
+  it('a clean component is 100%', () => {
+    expect(parseInstatusUptime(nextHtml([]), 'API', NOW)).toBe(100)
   })
 
   it('returns null for an unknown component or undefined name', () => {
-    expect(parseInstatusUptime(nextHtmlWithUptime(), 'Nonexistent')).toBeNull()
-    expect(parseInstatusUptime(nextHtmlWithUptime(), undefined)).toBeNull()
-  })
-
-  it('matchBrace ignores braces inside string values (would truncate under a naive regex)', () => {
-    // A nested outage carries `{`/`}` INSIDE string values — the quote-aware matcher must not
-    // miscount them, else the slice truncates and JSON.parse fails → wrong null.
-    const escaped =
-      compDef('abc123', 'API') +
-      '\\"componentsUptime\\":{\\"abc123\\":{' +
-        '\\"outages\\":[{\\"status\\":\\"DEGRADED}{\\",\\"noticeId\\":\\"x}y\\"}],' +
-        '\\"uptime\\":\\"97.5\\"}}'
-    const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
-    expect(parseInstatusUptime(html, 'API')).toBeCloseTo(97.5, 2)
-  })
-
-  it('returns null for an uptime value outside [0,100]', () => {
-    const escaped =
-      compDef('abc123', 'API') +
-      '\\"componentsUptime\\":{\\"abc123\\":{\\"uptime\\":\\"150.0\\"}}'
-    const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
-    expect(parseInstatusUptime(html, 'API')).toBeNull()
-  })
-
-  it('returns null when the component resolves but has no componentsUptime entry', () => {
-    const escaped =
-      compDef('abc123', 'API') +
-      '\\"componentsUptime\\":{\\"other999\\":{\\"uptime\\":\\"99.0\\"}}'
-    const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
-    expect(parseInstatusUptime(html, 'API')).toBeNull()
-  })
-
-  it('returns null (warn-once shape path) when the component resolves but the componentsUptime block is absent', () => {
-    // Resolvable component map but no `componentsUptime` key → the structural-breakage warn path.
-    const escaped = compDef('abc123', 'API') + '\\"notices\\":{}'
-    const html = `<script>self.__next_f.push([1,"${escaped}"])</script>`
-    expect(parseInstatusUptime(html, 'API')).toBeNull()
+    expect(parseInstatusUptime(nextHtml([]), 'Nonexistent', NOW)).toBeNull()
+    expect(parseInstatusUptime(nextHtml([]), undefined, NOW)).toBeNull()
   })
 })
 
