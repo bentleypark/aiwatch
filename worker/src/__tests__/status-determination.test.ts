@@ -245,6 +245,68 @@ describe('svcStatus determination', () => {
     })
   })
 
+  describe('"Codex in ChatGPT Desktop" is a ChatGPT component, not a Codex one (#1008)', () => {
+    // 01KMKFAMWKQ81YWSE1Z18R6VHR "Codex in ChatGPT Desktop" is officially in the ChatGPT group
+    // (Codex surfaced inside the ChatGPT desktop app). It was mis-attributed to codex, so a
+    // ChatGPT-only incident flipped it to partial_outage and dragged the Codex badge to degraded.
+    const CODEX_IN_CHATGPT_DESKTOP = '01KMKFAMWKQ81YWSE1Z18R6VHR'
+    const codex = SERVICES.find((s) => s.id === 'codex')!
+    const chatgpt = SERVICES.find((s) => s.id === 'chatgpt')!
+
+    it('is absent from BOTH of codex\'s component arrays', () => {
+      expect(codex.statusComponentIds).not.toContain(CODEX_IN_CHATGPT_DESKTOP)
+      expect(codex.displayComponentIds).not.toContain(CODEX_IN_CHATGPT_DESKTOP)
+      // Only the four real Codex-product surfaces remain, badge scope == displayed group.
+      expect(codex.statusComponentIds).toEqual([
+        '01KMP3KP5MGE23B80K1EK4S8PV', // Codex API
+        '01KMKFAMWKNQ84Z1766MV08ZDE', // CLI
+        '01KMP3KP5M8X0EBTVW6KN327EE', // VS Code extension
+        '01JVCV8YSWZFRSM1G5CVP253SK', // Codex Web
+      ])
+      expect(new Set(codex.displayComponentIds)).toEqual(new Set(codex.statusComponentIds))
+    })
+
+    it('is present in BOTH of chatgpt\'s component arrays (correct attribution)', () => {
+      expect(chatgpt.statusComponentIds).toContain(CODEX_IN_CHATGPT_DESKTOP)
+      expect(chatgpt.displayComponentIds).toContain(CODEX_IN_CHATGPT_DESKTOP)
+    })
+
+    it('codex stays operational when only "Codex in ChatGPT Desktop" is partial (its ids are unaffected)', () => {
+      // Live 2026-07-15 shape: "Elevated errors affecting ChatGPT" partial-outages the ChatGPT-side
+      // components incl. Codex-in-ChatGPT-Desktop, while the Codex product surfaces are operational.
+      // indicator:'none' is deliberate — so chatgpt's degraded can ONLY come from the moved
+      // component matching in its worst-of, not the overall-indicator fallback (step 4). If the id
+      // were still (wrongly) absent from chatgpt, its worst-of would match nothing here and fall
+      // back to the 'none' indicator → operational, failing the assertion.
+      const summary: SummaryData = {
+        status: { indicator: 'none' },
+        components: [
+          { id: '01KMP3KP5MGE23B80K1EK4S8PV', name: 'Codex API', status: 'operational' },
+          { id: '01KMKFAMWKNQ84Z1766MV08ZDE', name: 'CLI', status: 'operational' },
+          { id: '01KMP3KP5M8X0EBTVW6KN327EE', name: 'VS Code extension', status: 'operational' },
+          { id: '01JVCV8YSWZFRSM1G5CVP253SK', name: 'Codex Web', status: 'operational' },
+          { id: CODEX_IN_CHATGPT_DESKTOP, name: 'Codex in ChatGPT Desktop', status: 'partial_outage' },
+        ],
+      }
+      expect(determineSvcStatus(codex as unknown as StatusConfig, summary, [])).toBe('operational')
+      // ChatGPT, which now owns the component, correctly reflects the same partial as degraded.
+      expect(determineSvcStatus(chatgpt as unknown as StatusConfig, summary, [])).toBe('degraded')
+    })
+
+    it('codex still degrades when a genuine Codex-product surface is impaired', () => {
+      const summary: SummaryData = {
+        status: { indicator: 'minor' },
+        components: [
+          { id: '01KMP3KP5MGE23B80K1EK4S8PV', name: 'Codex API', status: 'partial_outage' },
+          { id: '01KMKFAMWKNQ84Z1766MV08ZDE', name: 'CLI', status: 'operational' },
+          { id: '01KMP3KP5M8X0EBTVW6KN327EE', name: 'VS Code extension', status: 'operational' },
+          { id: '01JVCV8YSWZFRSM1G5CVP253SK', name: 'Codex Web', status: 'operational' },
+        ],
+      }
+      expect(determineSvcStatus(codex as unknown as StatusConfig, summary, [])).toBe('degraded')
+    })
+  })
+
   describe('with displayAllComponents dynamic worst-of (#992) — Cerebras shape', () => {
     // Cerebras: displayAllComponents + statusComponentId (uptime primary), NO statusComponentIds.
     const config: StatusConfig = { displayAllComponents: true, statusComponentId: 'dev' }
@@ -640,7 +702,8 @@ describe('displayComponentIds config sanity (#606)', () => {
   })
 
   // #606 Category B — shared status.openai.com page split across 3 services by the official groups.
-  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 12, chatgpt: 11, codex: 5 }
+  // #1008: "Codex in ChatGPT Desktop" moved from codex (5→4) to its official ChatGPT group (11→12).
+  const SHARED_PAGE_COUNT: Record<string, number> = { openai: 12, chatgpt: 12, codex: 4 }
 
   // #693 follow-up — openai/chatgpt/codex now SCOPE the badge to their official-group components
   // via a worst-of statusComponentIds (was: no statusComponentIds → overall page indicator). This
@@ -748,7 +811,7 @@ describe('displayComponentIds config sanity (#606)', () => {
     const all = lists.flat()
     // Every id assigned to exactly one service → flat length === unique count.
     expect(new Set(all).size).toBe(all.length)
-    expect(all.length).toBe(12 + 11 + 5)
+    expect(all.length).toBe(12 + 12 + 4) // #1008: moved "Codex in ChatGPT Desktop" codex(5→4) → chatgpt(11→12)
   })
 
   // #606 — single-owner statuspages: a curated displayComponentIds breakdown + the existing
@@ -788,8 +851,10 @@ describe('displayComponentIds config sanity (#606)', () => {
     expect(has('openai', '01KKAD7C71MCCH3FTREMJH4AAS'), 'FedRAMP NOT in openai').toBe(false)
     expect(has('openai', '01KTQBYVARFJ5KMCSECM06VKCF'), 'Ads Manager NOT in openai').toBe(false)
     expect(has('chatgpt', '01JNKS9D9S72PMP1938PVFFQN4'), 'Compliance API NOT in chatgpt').toBe(false)
-    // App is Codex.
-    expect(has('codex', '01KMKFAMWKQ81YWSE1Z18R6VHR'), 'App → codex').toBe(true)
+    // #1008 — "Codex in ChatGPT Desktop" is a ChatGPT-group surface (Codex inside the ChatGPT
+    // desktop app), NOT a Codex-product component. It was mis-attributed to codex; now under chatgpt.
+    expect(has('chatgpt', '01KMKFAMWKQ81YWSE1Z18R6VHR'), 'Codex in ChatGPT Desktop → chatgpt').toBe(true)
+    expect(has('codex', '01KMKFAMWKQ81YWSE1Z18R6VHR'), 'Codex in ChatGPT Desktop NOT in codex').toBe(false)
     // The two Logins are distinct ids (ChatGPT login vs API login) — both present, no collision.
     expect(has('chatgpt', '01JMXBNJXG1S2D9V65P1ZZTD94'), 'ChatGPT Login → chatgpt').toBe(true)
   })
