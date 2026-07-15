@@ -11,6 +11,13 @@ import type { Incident } from '../types'
 // fetchService fell into its catch, and after 3 consecutive failures junie sat on the fetch-failure
 // fallback: a FALSE `degraded` badge for a service JetBrains reported as fully operational.
 //
+// #1004 follow-on (~2026-07-15) — JetBrains then REMOVED the standalone "Junie" component the first
+// migration had adopted. Junie's badge + uptime now resolve on "JetBrains Central Console" (the AI
+// gateway that actually carries the LLM-API / auth / quota incidents, cross-checked against our
+// pre-migration Junie archive, data since 2026-05-29 → 30d window). The KB-named (but empty, new)
+// "JetBrains AI" roll-up rides along in displayComponentIds + incidentComponents only — NOT the badge
+// scope, because uptime is computed over the badge scope and JetBrains AI's ~6d would pin the window.
+//
 // The tests below are deliberately of two kinds, because they catch different things:
 //   - the CONFIG assertions are a REVERT guard. They pin our own constants, so a future upstream
 //     migration leaves them green — they cannot detect one. (Nothing can, today: the #992
@@ -20,9 +27,17 @@ import type { Incident } from '../types'
 //     component tags, which silently guts the #683 incident scoping — a far worse bug than the one
 //     being fixed, and invisible to any config pin.
 
-const JUNIE_ID = '01KX3EN5353NA7819G7ND9Q3KA'
-const AI_PLATFORM_ID = '01KX3EN535A0SKSZK3S84949V1'
-const GRAZIE_ID = '01KX3EN5354CVBD36GANTX2BC4'
+// #1004 follow-on — JetBrains REMOVED the standalone "Junie" component (DEAD_JUNIE_ID) ~2026-07-15,
+// a week after the first migration adopted it. Junie now scopes to the TWO components that carry
+// JetBrains' OWN AI-platform health: "JetBrains AI" (the KB-named roll-up, SUPPORT-A-2595 — but a new,
+// near-empty component) + "JetBrains Central Console" (the AI gateway that actually carries the LLM-API
+// / auth / quota incidents; verified against our pre-migration Junie archive). Grazie + the upstream
+// provider components stay OUT (#683 neutrality). Badge + uptime = Central Console ALONE; JetBrains AI
+// rides along only in the breakdown + incident scope (a worst-of badge would pin the ~6d window).
+const AI_ID = '01KX3EN535A0SKSZK3S84949V1'         // "JetBrains AI" — KB-named roll-up; breakdown + incident scope only (new/empty)
+const CONSOLE_ID = '01KST6ZB60NWW1MAB3ECRMJFS0'    // "JetBrains Central Console" — AI gateway; real incidents + 30d uptime
+const GRAZIE_ID = '01KX3EN5354CVBD36GANTX2BC4'     // a sibling product; a Grazie-only incident must not touch Junie
+const DEAD_JUNIE_ID = '01KX3EN5353NA7819G7ND9Q3KA' // the standalone "Junie" component JetBrains removed
 
 const junie = SERVICES.find((s) => s.id === 'junie')!
 
@@ -34,16 +49,22 @@ describe('junie config (#1004 revert guard)', () => {
     expect(JSON.stringify(junie)).not.toContain('status.jetbrains.ai')
   })
 
-  it('carries the new incident.io ULIDs, not the dead Atlassian hashes', () => {
-    expect(junie.statusComponentId).toBe(JUNIE_ID)
-    expect(junie.displayComponentIds).toEqual([JUNIE_ID, AI_PLATFORM_ID])
+  it('badge resolves on Central Console with JetBrains AI only in the breakdown + incident scope', () => {
+    expect(junie.statusComponentId).toBe(CONSOLE_ID)                // badge + uptime = the real gateway
+    expect(junie.statusComponentIds).toBeUndefined()               // NOT worst-of: that would pin the 6d window
+    expect(junie.displayComponentIds).toEqual([CONSOLE_ID, AI_ID]) // 2-row breakdown discloses both
+    expect(junie.incidentComponents).toEqual(['JetBrains AI', 'JetBrains Central Console'])
+    // both the retired Atlassian hash AND the removed standalone-Junie ULID must be gone everywhere.
     expect(JSON.stringify(junie)).not.toContain('9vbyyqkkjxl4')
+    expect(JSON.stringify(junie)).not.toContain(DEAD_JUNIE_ID)
   })
 
-  it('sets incidentIoComponentId — the flag that routes uptime through the incident.io parser', () => {
-    // incident.io keeps uptime in the page HTML's __next_f (component_uptimes), never in summary.json,
-    // so without this flag uptime30d stays null even on the right host.
-    expect(junie.incidentIoComponentId).toBe(JUNIE_ID)
+  it('routes uptime through Central Console — the 30d-window gateway, not the ~6d empty roll-up', () => {
+    // incident.io keeps uptime in the page HTML's __next_f (component_uptimes), never in summary.json.
+    // Uptime is computed over `statusComponentIds ?? incidentIoComponentId` and reports the SHORTEST
+    // covered window, so "JetBrains AI" (data since 2026-07-09, ~6d) is kept OUT of the badge scope;
+    // Central Console (since 2026-05-29) keeps the honest 30d window.
+    expect(junie.incidentIoComponentId).toBe(CONSOLE_ID)
     expect(junie.incidentIoBaseUrl).toBe('https://status.jetbrains.cloud/incidents')
   })
 })
@@ -97,18 +118,18 @@ const impact = (incidentId: string, componentId: string) =>
   `{\\"component_id\\":\\"${componentId}\\",\\"end_at\\":\\"2026-07-13T10:00:00Z\\",\\"id\\":\\"IMP${componentId.slice(-4)}\\",` +
   `\\"start_at\\":\\"2026-07-13T09:00:00Z\\",\\"status\\":\\"degraded_performance\\",\\"status_page_incident_id\\":\\"${incidentId}\\"}`
 
-const uptimeEntry = (id: string, uptime: string) =>
-  `{\\"component_id\\":\\"${id}\\",\\"data_available_since\\":\\"2026-07-09T12:46:46Z\\",` +
+const uptimeEntry = (id: string, uptime: string, since = '2026-07-09T12:46:46Z') =>
+  `{\\"component_id\\":\\"${id}\\",\\"data_available_since\\":\\"${since}\\",` +
   `\\"status_page_component_group_id\\":\\"$undefined\\",\\"uptime\\":\\"${uptime}\\"}`
 
 /** The page HTML shape: one RSC push carrying component_impacts followed by component_uptimes. */
-const pageHtml = (impacts: string[], uptimes: string[] = [uptimeEntry(JUNIE_ID, '100.00')]) =>
+const pageHtml = (impacts: string[], uptimes: string[] = [uptimeEntry(AI_ID, '100.00')]) =>
   `<script>self.__next_f.push([1,"a:{\\"component_impacts\\":[${impacts.join(',')}],` +
   `\\"component_uptimes\\":[${uptimes.join(',')}],\\"incident_links\\":[]}"])</script>`
 
 const COMPONENTS = [
-  { id: JUNIE_ID, name: 'Junie' },
-  { id: AI_PLATFORM_ID, name: 'AI Platform' },
+  { id: AI_ID, name: 'JetBrains AI' },
+  { id: CONSOLE_ID, name: 'JetBrains Central Console' },
   { id: GRAZIE_ID, name: 'Grazie' },
 ]
 
@@ -121,16 +142,16 @@ describe('attachIncidentIoComponentNames (#1004)', () => {
   it('rebuilds componentNames the incident.io JSON API omits', () => {
     // Verified live: status.jetbrains.cloud 0/14, status.smith.langchain.com 0/25, status.langfuse.com
     // 0/25 and status.openai.com 0/25 incidents carry a non-empty `components` array.
-    const html = pageHtml([impact('INC1', JUNIE_ID), impact('INC2', GRAZIE_ID)])
+    const html = pageHtml([impact('INC1', AI_ID), impact('INC2', GRAZIE_ID)])
     const out = attachIncidentIoComponentNames(
-      [apiIncident('INC1', 'Junie is slow'), apiIncident('INC2', 'NLP errors')], html, COMPONENTS,
+      [apiIncident('INC1', 'JetBrains AI is slow'), apiIncident('INC2', 'NLP errors')], html, COMPONENTS,
     )
-    expect(out[0].componentNames).toEqual(['Junie'])
+    expect(out[0].componentNames).toEqual(['JetBrains AI'])
     expect(out[1].componentNames).toEqual(['Grazie'])
   })
 
   it('leaves an incident untagged when the page has no impact for it (no invention)', () => {
-    const out = attachIncidentIoComponentNames([apiIncident('INC9', 'Unmapped')], pageHtml([impact('INC1', JUNIE_ID)]), COMPONENTS)
+    const out = attachIncidentIoComponentNames([apiIncident('INC9', 'Unmapped')], pageHtml([impact('INC1', AI_ID)]), COMPONENTS)
     expect(out[0].componentNames).toBeUndefined()
   })
 
@@ -141,7 +162,7 @@ describe('attachIncidentIoComponentNames (#1004)', () => {
 
   it('does not overwrite names the API DID provide', () => {
     const tagged = { ...apiIncident('INC1', 'x'), componentNames: ['FromAPI'] } as Incident
-    const out = attachIncidentIoComponentNames([tagged], pageHtml([impact('INC1', JUNIE_ID)]), COMPONENTS)
+    const out = attachIncidentIoComponentNames([tagged], pageHtml([impact('INC1', AI_ID)]), COMPONENTS)
     expect(out[0].componentNames).toEqual(['FromAPI'])
   })
 
@@ -151,8 +172,8 @@ describe('attachIncidentIoComponentNames (#1004)', () => {
   })
 
   it('collects every component an incident impacted', () => {
-    const html = pageHtml([impact('INC1', JUNIE_ID), impact('INC1', AI_PLATFORM_ID), impact('INC1', JUNIE_ID)])
-    expect(parseIncidentIoIncidentComponentIds(html)['INC1']).toEqual([JUNIE_ID, AI_PLATFORM_ID])
+    const html = pageHtml([impact('INC1', AI_ID), impact('INC1', GRAZIE_ID), impact('INC1', AI_ID)])
+    expect(parseIncidentIoIncidentComponentIds(html)['INC1']).toEqual([AI_ID, GRAZIE_ID])
   })
 })
 
@@ -163,30 +184,52 @@ describe('attachIncidentIoComponentNames (#1004)', () => {
 // `incidentKeywords`, which junie does not set). #940's lesson: a transform must be proven through the
 // real filter, not asserted in isolation.
 describe('junie incidents survive filterIncidents on the incident.io feed (#1004 + #683)', () => {
-  const html = pageHtml([impact('INC1', JUNIE_ID), impact('INC2', GRAZIE_ID)])
-  const fromApi = [apiIncident('INC1', 'Junie requests failing'), apiIncident('INC2', 'Raised error rates from NLP services')]
+  // INC1 = JetBrains AI, INC3 = Central Console (both in Junie's scope); INC2 = Grazie (scoped out).
+  // INC3 is the case that motivated option C: the real JetBrains-AI-platform incidents ("AI Platform
+  // LLM APIs outage") tag Central Console, so a JetBrains-AI-only scope would drop every one of them.
+  const html = pageHtml([impact('INC1', AI_ID), impact('INC2', GRAZIE_ID), impact('INC3', CONSOLE_ID)])
+  const fromApi = [
+    apiIncident('INC1', 'JetBrains AI requests failing'),
+    apiIncident('INC2', 'Raised error rates from NLP services'),
+    apiIncident('INC3', 'AI Platform LLM APIs outage'),
+  ]
 
   it('WITHOUT the tag rebuild, every incident is dropped (the bug)', () => {
     expect(filterIncidents(fromApi, junie)).toEqual([])
   })
 
-  it('WITH the tag rebuild, the Junie incident survives and the Grazie one is still scoped out', () => {
+  it('WITH the tag rebuild, JetBrains AI + Central Console survive and the Grazie one is scoped out', () => {
     const tagged = attachIncidentIoComponentNames(fromApi, html, COMPONENTS)
     const filtered = filterIncidents(tagged, junie)
-    expect(filtered.map((i) => i.id)).toEqual(['INC1'])
+    expect(filtered.map((i) => i.id).sort()).toEqual(['INC1', 'INC3'])
   })
 })
 
-describe('junie uptime is reachable through the configured id (#857 shape)', () => {
-  it('the configured incidentIoComponentId resolves a computed uptime, and reports its SHORT window', () => {
-    // Guards the "right host, uptime silently null" failure — the #857 class. #1006 — the figure is now
-    // computed from component_impacts, and junie's component was created on 2026-07-09 (the migration),
-    // so it reports the days it actually covers instead of passing a few days off as 30.
+describe('junie uptime is reachable through the Central Console id and reports the full 30d window (#1004 follow-on)', () => {
+  it('resolves a computed uptime through incidentIoComponentId, capped at the 30d window', () => {
+    // Guards the "right host, uptime silently null" failure (#857) AND the #1004-follow-on window fix:
+    // Central Console's records reach back to 2026-05-29 (> 30d), so the window caps at the full 30 —
+    // the honest figure the empty "JetBrains AI" component (data since 2026-07-09, ~6d) could not give.
     const now = Date.parse('2026-07-15T00:00:00Z')
     const out = computeIncidentIoUptime(
-      pageHtml([], [uptimeEntry(junie.incidentIoComponentId as string, '100.00')]), junie.incidentIoComponentId!, now,
+      pageHtml([], [uptimeEntry(junie.incidentIoComponentId as string, '100.00', '2026-05-29T00:00:00Z')]),
+      junie.incidentIoComponentId!, now,
     )
-    expect(out).toEqual({ pct: 100, days: 5 })
+    expect(out).toEqual({ pct: 100, days: 30 })
+  })
+
+  it('a worst-of [Central Console, JetBrains AI] scope WOULD pin the window to 6d — why the badge scope excludes it', () => {
+    // The regression this config avoids. computeIncidentIoUptime over BOTH ids reports the SHORTEST
+    // covered window across them, so the ~6d "JetBrains AI" component (since 2026-07-09) drags the 30d
+    // Central Console window down to 6 — the incoherent "99.x% over 6d" the config comment warns about.
+    // This is the exact behaviour that made keeping JetBrains AI OUT of statusComponentIds necessary.
+    const now = Date.parse('2026-07-15T12:46:46Z') // exactly 6d after JetBrains AI's 2026-07-09 start
+    const html = pageHtml([], [
+      uptimeEntry(CONSOLE_ID, '99.95', '2026-05-29T00:00:00Z'),
+      uptimeEntry(AI_ID, '100.00', '2026-07-09T12:46:46Z'),
+    ])
+    const out = computeIncidentIoUptime(html, [CONSOLE_ID, AI_ID], now)
+    expect(out?.days).toBe(6) // shortest window wins → the 6d we deliberately avoid by scoping to Console
   })
 })
 

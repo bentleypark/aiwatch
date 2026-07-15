@@ -340,23 +340,34 @@ export const SERVICES: ServiceConfig[] = [
   { id: 'copilot', name: 'GitHub Copilot', provider: 'Microsoft', category: 'agent', statusUrl: 'https://githubstatus.com', apiUrl: 'https://www.githubstatus.com/api/v2/summary.json', statusComponentId: 'pjmpxvq2cmr2', statusComponentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82'], incidentKeywords: ['copilot'] },
   // windsurf badge reflects worst-of: Cascade primary + Windsurf Tab (autocomplete agent surface) (#379).
   { id: 'windsurf', name: 'Windsurf', provider: 'Codeium', category: 'agent', statusUrl: 'https://status.windsurf.com', apiUrl: 'https://status.windsurf.com/api/v2/summary.json', statusComponentId: 'r5wf1ykd7y1m', statusComponentIds: ['r5wf1ykd7y1m', '8q19cygxvshj'] },
-  // #1004 — JetBrains migrated this page from Atlassian Statuspage (status.jetbrains.ai) to
-  // incident.io (status.jetbrains.cloud, "JetBrains Cloud Platform") on 2026-07-09, then 301'd the old
-  // host to the NEW SITE ROOT (path dropped). So the old apiUrl resolved to a 200 text/html page,
-  // `summaryRes.json()` threw, and junie sat on the fetch-failure fallback (degraded + sourceUnknown)
-  // while JetBrains reported all-operational. Ids below are the new incident.io ULIDs; the Atlassian
-  // hashes (9vbyyqkkjxl4 / x4pcb5vz7jj2) no longer exist anywhere.
-  // incidentIoComponentId is what routes uptime + the impact calendar through the incident.io parsers
-  // (component_uptimes lives in the page HTML's __next_f, not in summary.json).
-  // displayComponentIds (#606): Junie + its AI Platform dependency only. The new page still hosts the
-  // sibling products (AI Assistant, Grazie, Console, Central CLI, per-vendor components), so excluding
-  // them keeps the breakdown Junie-relevant. Display-only.
-  // #683 — incidentComponents scopes incidents to Junie's OWN component on the shared page. Without
-  // it, sibling-only incidents (e.g. a Grazie-only "Raised error rates from NLP services") leaked onto
-  // Junie. Exact-name match to Junie's badge scope (statusComponentId = Junie); AI Platform is a
-  // display dependency but intentionally NOT an incident source, so the incident scope stays
-  // consistent with the Junie-only badge.
-  { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.cloud', apiUrl: 'https://status.jetbrains.cloud/api/v2/summary.json', statusComponentId: '01KX3EN5353NA7819G7ND9Q3KA', incidentIoBaseUrl: 'https://status.jetbrains.cloud/incidents', incidentIoComponentId: '01KX3EN5353NA7819G7ND9Q3KA', displayComponentIds: ['01KX3EN5353NA7819G7ND9Q3KA', '01KX3EN535A0SKSZK3S84949V1'], incidentComponents: ['Junie'] },
+  // #1004 — JetBrains migrated this page Atlassian Statuspage (status.jetbrains.ai) → incident.io
+  // (status.jetbrains.cloud) on 2026-07-09, then ~2026-07-15 REMOVED the standalone "Junie" component
+  // the first migration adopted (→ #135 component-miss alert + null uptime/Score). Junie's status now
+  // spans the TWO components that carry JetBrains' OWN AI-platform health:
+  //   • "JetBrains AI" (01KX3EN535A0SKSZK3S84949V1) — the KB-named roll-up (SUPPORT-A-2595 tells users
+  //     to check "JetBrains AI Status" for Junie). But created 2026-07-09 with ZERO incident history +
+  //     ~6d of data — a near-empty new component on its own.
+  //   • "JetBrains Central Console" (01KST6ZB60NWW1MAB3ECRMJFS0) — the AI GATEWAY that actually carries
+  //     the platform incidents. Cross-checked against OUR OWN pre-migration Junie archive: "AI Platform
+  //     LLM APIs outage" (2026-05-29), auth degradations, quota — all now tag Central Console; NONE tag
+  //     "JetBrains AI". Data since 2026-05-29 → full 30d window, uptime ~99.95%.
+  // Badge + uptime run on Central Console ALONE; JetBrains AI rides along only in the breakdown +
+  // incident scope. Why not a worst-of-both badge (statusComponentIds): uptime is computed over the
+  // SAME scope as the badge (`statusComponentIds ?? incidentIoComponentId`, the #1006 invariant that
+  // keeps uptime/calendar/badge aligned), and computeIncidentIoUptime reports the SHORTEST covered
+  // window across that scope. JetBrains AI's records start 2026-07-09 (~6d), so putting it in the badge
+  // scope pins uptimeWindowDays to 6 while the % reflects Console's 30 days — an incoherent "99.8% over
+  // 6d". Console's records reach 2026-05-29 → the honest 30d window. JetBrains AI is 100%/empty anyway,
+  // so the badge loses nothing by resolving on Console.
+  //   • displayComponentIds lists BOTH (≥2 → a real 2-row breakdown that discloses the JetBrains AI
+  //     roll-up the KB names, alongside the Console gateway).
+  //   • incidentComponents scopes to BOTH names, so if JetBrains ever starts tagging incidents on the
+  //     "JetBrains AI" component we catch them without a config change. Today they all tag Console.
+  // We EXCLUDE the upstream provider components (Anthropic/OpenAI/Gemini — their own cards; #683
+  // neutrality) and Grazie (sibling NLP product; #683 drops Grazie-only incidents).
+  // The #802 coverage gate keys on `addedAt`, not the provider window — junie is established (no
+  // addedAt) → full coverage, high-confidence Score.
+  { id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent', statusUrl: 'https://status.jetbrains.cloud', apiUrl: 'https://status.jetbrains.cloud/api/v2/summary.json', statusComponentId: '01KST6ZB60NWW1MAB3ECRMJFS0', incidentIoBaseUrl: 'https://status.jetbrains.cloud/incidents', incidentIoComponentId: '01KST6ZB60NWW1MAB3ECRMJFS0', displayComponentIds: ['01KST6ZB60NWW1MAB3ECRMJFS0', '01KX3EN535A0SKSZK3S84949V1'], incidentComponents: ['JetBrains AI', 'JetBrains Central Console'] },
 ]
 
 /**
@@ -1304,9 +1315,10 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         if (io) {
           uptimeValue = io.pct
           uptimeSrc = 'official'
-          // A status-page migration creates a NEW component, so its records may not reach back 30 days
-          // (#1004/junie: 6 days). The figure is honest for the days it covers — surface WHICH, rather
-          // than passing a short window off as a 30-day one. Absent when the window is whole.
+          // A status-page migration creates a NEW component whose records may not reach back 30 days.
+          // The figure is honest for the days it covers — surface WHICH, rather than passing a short
+          // window off as a 30-day one. Absent when the window is whole. (junie itself dodges this by
+          // sourcing uptime from the older Central Console component — see its config comment.)
           if (io.days < UPTIME_WINDOW_DAYS) uptimeWindow = io.days
           const reported = parseIncidentIoReportedUptime(uptimeHtml, config.incidentIoComponentId, config.incidentIoGroupId)
           // Shown whenever it differs at all — no "meaningful gap" threshold. A cutoff would be an
