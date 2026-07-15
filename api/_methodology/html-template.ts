@@ -465,7 +465,7 @@ ${consentInitScript(nonce)}
         </tbody>
       </table>
     </div>
-    <p class="note" data-i18n="s4.rec.note">MTTR은 해결된 인시던트 지속 시간의 30일 중앙값입니다(3건 미만이면 평균으로 폴백).</p>
+    <p class="note" data-i18n="s4.rec.note">MTTR은 해결된 인시던트 지속 시간의 30일 중앙값입니다(3건 미만인 소표본에서는 지나치게 긴 값만 1시간 기준값 쪽으로 완화 — 단일 장기 인시던트가 인시던트 적은 서비스를 과도하게 깎지 않도록).</p>
   </div>
 
   <!-- Responsiveness sub -->
@@ -592,7 +592,7 @@ const i18n = {
     's4.inc.note': '표의 값은 critical/major 영향(가중치 1.0)을 기준으로 합니다. minor만 발생한 날은 가중치 0.3입니다 — 예: minor 5일 ≈ 가중 1.5일 ≈ 21.5점.',
     's4.inc.why': '<strong>영향 일수를 쓰는 이유:</strong> 일부 서비스(Anthropic 등)는 모델별(Opus/Sonnet/Haiku)로 인시던트를 따로 보고해 같은 장애가 여러 건으로 집계됩니다. 그래서 건수가 아닌 영향 일수를 쓰고, 각 날짜를 그날의 가장 심각한 영향도로 가중합니다 — critical/major = 1.0, minor = 0.3, 정보성/null = 제외.',
     's4.rec.title': 'Recovery Score (0~15)',
-    's4.rec.note': 'MTTR은 해결된 인시던트 지속 시간의 30일 중앙값입니다(3건 미만이면 평균으로 폴백).',
+    's4.rec.note': 'MTTR은 해결된 인시던트 지속 시간의 30일 중앙값입니다(3건 미만인 소표본에서는 지나치게 긴 값만 1시간 기준값 쪽으로 완화 — 단일 장기 인시던트가 인시던트 적은 서비스를 과도하게 깎지 않도록).',
     's4.resp.title': 'Responsiveness Score (0~20)',
     's4.resp.desc': '5분 간격 health-check probe로 실제 API 엔드포인트의 응답 속도와 안정성을 측정합니다(32개 AI 서비스). 응답 속도와 일관성을 함께 반영합니다.',
     's4.resp.speed': 'Speed (0~10) — p50 RTT 지수 감쇠',
@@ -677,7 +677,7 @@ const i18n = {
     's4.inc.note': 'Table values assume critical/major impact days (weight 1.0). Minor-only days are weighted 0.3 — e.g. 5 minor days ≈ 1.5 weighted days ≈ 21.5 points.',
     's4.inc.why': '<strong>Why affected days:</strong> some services (e.g. Anthropic) report incidents per model (Opus/Sonnet/Haiku), so one outage gets counted multiple times. We use affected days instead of raw count, each day weighted by its worst impact — critical/major = 1.0, minor = 0.3, informational/null = excluded.',
     's4.rec.title': 'Recovery Score (0–15)',
-    's4.rec.note': 'MTTR is the 30-day median of resolved-incident durations (mean fallback for fewer than 3 incidents).',
+    's4.rec.note': 'MTTR is the 30-day median of resolved-incident durations (for a small sample of fewer than 3, an unusually long value is eased toward a 1-hour baseline so a single long incident cannot over-penalize a low-incident service).',
     's4.resp.title': 'Responsiveness Score (0–20)',
     's4.resp.desc': 'Measures actual API endpoint speed and stability via 5-minute health-check probes (32 AI services). Combines response speed and consistency.',
     's4.resp.speed': 'Speed (0–10) — exp decay on p50 RTT',
