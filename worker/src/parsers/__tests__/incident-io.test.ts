@@ -1,50 +1,152 @@
 import { describe, it, expect } from 'vitest'
-import { parseIncidentIoUptime, parseIncidentIoComponentImpacts, parseIncidentIoUpdates, applyTextCache, buildTextCache } from '../incident-io'
+import { computeIncidentIoUptime, parseIncidentIoComponentImpacts, parseIncidentIoUpdates, applyTextCache, buildTextCache } from '../incident-io'
 import type { IncidentTextCache } from '../incident-io'
 import type { Incident } from '../../types'
 
-describe('parseIncidentIoUptime', () => {
-  const makeHtml = (uptimes: Array<{ component_id: string; uptime: string }>) => {
-    const escaped = JSON.stringify(uptimes).replace(/"/g, '\\"')
-    return `<script>self.__next_f.push([1,"component_uptimes\\":${escaped}"])</script>`
+// #1006 — AIWatch no longer copies incident.io's published `component_uptimes[].uptime`. That aggregate
+// is not a 30-day figure (LangSmith's tracks ~90 days and had it ranked `fair` on 60-day-old outages)
+// and is not even defined the same way page to page (OpenAI's excludes degraded/partial entirely). We
+// compute from the page's RAW `component_impacts` with the weights published on /methodology, so every
+// service is on one window and one formula.
+describe('computeIncidentIoUptime (#1006)', () => {
+  const NOW = Date.parse('2026-07-14T00:00:00Z')
+  const day = 86_400_000
+
+  /** The page's real backslash-escaped shape: component_impacts, then component_uptimes. */
+  const html = (
+    impacts: Array<{ id: string; start: string; end: string; status: string }>,
+    uptimes: Array<{ id: string; since: string | null }>,
+  ) => {
+    const imp = impacts.map((i) =>
+      `{\\"component_id\\":\\"${i.id}\\",\\"end_at\\":\\"${i.end}\\",\\"id\\":\\"IMP\\",` +
+      `\\"start_at\\":\\"${i.start}\\",\\"status\\":\\"${i.status}\\",\\"status_page_incident_id\\":\\"INC\\"}`).join(',')
+    const up = uptimes.map((u) =>
+      `{\\"component_id\\":\\"${u.id}\\",\\"data_available_since\\":\\"${u.since ?? '$undefined'}\\",` +
+      `\\"status_page_component_group_id\\":\\"$undefined\\",\\"uptime\\":\\"100.00\\"}`).join(',')
+    return `<script>self.__next_f.push([1,"a:{\\"component_impacts\\":[${imp}],\\"component_uptimes\\":[${up}],\\"incident_links\\":[]}"])</script>`
   }
 
-  it('extracts uptime for matching component', () => {
-    const html = makeHtml([
-      { component_id: 'comp1', uptime: '99.95' },
-      { component_id: 'comp2', uptime: '100.00' },
-    ])
-    expect(parseIncidentIoUptime(html, 'comp1')).toBe(99.95)
-    expect(parseIncidentIoUptime(html, 'comp2')).toBe(100)
+  const ESTABLISHED = [{ id: 'c1', since: '2024-01-01T00:00:00Z' }]
+  const at = (daysAgo: number, hours = 0) => new Date(NOW - daysAgo * day + hours * 3_600_000).toISOString()
+
+  it('a clean 30-day window is 100%', () => {
+    expect(computeIncidentIoUptime(html([], ESTABLISHED), 'c1', NOW)).toEqual({ pct: 100, days: 30 })
   })
 
-  it('returns null for $undefined uptime', () => {
-    const html = `<script>self.__next_f.push([1,"\\"component_id\\":\\"comp1\\",\\"uptime\\":\\"$undefined\\""])</script>`
-    // The actual HTML has component_uptimes context
-    const realHtml = `<script>self.__next_f.push([1,"component_uptimes\\":[{\\"component_id\\":\\"comp1\\",\\"uptime\\":\\"$undefined\\"}]"])</script>`
-    expect(parseIncidentIoUptime(realHtml, 'comp1')).toBeNull()
+  it('a full outage is weighted 1.0 — 24h out of 30 days', () => {
+    const out = computeIncidentIoUptime(
+      html([{ id: 'c1', start: at(5), end: at(4), status: 'full_outage' }], ESTABLISHED), 'c1', NOW,
+    )
+    // 1 day of 30 → 96.66% (floored, never rounded up)
+    expect(out).toEqual({ pct: 96.66, days: 30 })
   })
 
-  it('returns null when component not found', () => {
-    const html = '<html>no data</html>'
-    expect(parseIncidentIoUptime(html, 'missing')).toBeNull()
+  it('partial_outage and degraded_performance are weighted 0.3 — the same as Atlassian\'s `p` bucket', () => {
+    const partial = computeIncidentIoUptime(
+      html([{ id: 'c1', start: at(5), end: at(4), status: 'partial_outage' }], ESTABLISHED), 'c1', NOW,
+    )
+    const degraded = computeIncidentIoUptime(
+      html([{ id: 'c1', start: at(5), end: at(4), status: 'degraded_performance' }], ESTABLISHED), 'c1', NOW,
+    )
+    // 24h × 0.3 = 7.2h of 30 days → 99.00%
+    expect(partial?.pct).toBe(99)
+    expect(degraded?.pct).toBe(99)
   })
 
-  it('does not cross-match componentId from component_impacts section', () => {
-    // Simulates real OpenAI status page: same componentId appears in both
-    // component_impacts (incident data) and component_uptimes (uptime data).
-    // The regex must only match within component_uptimes to get the correct value.
-    const html = `<script>self.__next_f.push([1,"component_impacts\\":[{\\"component_id\\":\\"target\\",\\"status\\":\\"degraded\\"}],\\"component_uptimes\\":[{\\"component_id\\":\\"other\\",\\"uptime\\":\\"100.00\\"},{\\"component_id\\":\\"target\\",\\"uptime\\":\\"99.98\\"}]"])</script>`
-    expect(parseIncidentIoUptime(html, 'target')).toBe(99.98)
+  it('under_maintenance is NOT downtime — announced windows must not penalise a provider', () => {
+    const out = computeIncidentIoUptime(
+      html([{ id: 'c1', start: at(5), end: at(4), status: 'under_maintenance' }], ESTABLISHED), 'c1', NOW,
+    )
+    expect(out?.pct).toBe(100)
   })
 
-  it('prefers group uptime over individual component uptime when groupId provided', () => {
-    // OpenAI "APIs" group has aggregate uptime 99.99% with $undefined component_id
-    const html = `<script>self.__next_f.push([1,"component_uptimes\\":[{\\"component_id\\":\\"comp1\\",\\"data_available_since\\":\\"2021-01-01\\",\\"status_page_component_group_id\\":\\"$undefined\\",\\"uptime\\":\\"100.00\\"},{\\"component_id\\":\\"$undefined\\",\\"data_available_since\\":\\"2021-01-01\\",\\"status_page_component_group_id\\":\\"group1\\",\\"uptime\\":\\"99.99\\"}]"])</script>`
-    // With groupId → returns group aggregate (99.99%)
-    expect(parseIncidentIoUptime(html, 'comp1', 'group1')).toBe(99.99)
-    // Without groupId → returns individual component (100%)
-    expect(parseIncidentIoUptime(html, 'comp1')).toBe(100)
+  it('an impact OUTSIDE the window does not count — the LangSmith bug in one assertion', () => {
+    // LangSmith's published 98.48% was driven by ~10h partial outages in MAY. Its real 30-day record is
+    // spotless, and the old copy-the-aggregate path ranked it `fair` on that stale number.
+    const out = computeIncidentIoUptime(
+      html([{ id: 'c1', start: at(60), end: at(60, 10), status: 'partial_outage' }], ESTABLISHED), 'c1', NOW,
+    )
+    expect(out).toEqual({ pct: 100, days: 30 })
+  })
+
+  it('an impact STRADDLING the window edge is clipped to the part inside it', () => {
+    const out = computeIncidentIoUptime(
+      html([{ id: 'c1', start: at(31), end: at(29), status: 'full_outage' }], ESTABLISHED), 'c1', NOW,
+    )
+    // 2-day outage, only 1 day of it inside the window → same as a 1-day outage
+    expect(out?.pct).toBe(96.66)
+  })
+
+  it('a component the page does NOT track yields null — absence of impacts is not absence of downtime', () => {
+    // The #713 rule, enforced structurally: no `data_available_since` → we withhold, never invent 100%.
+    expect(computeIncidentIoUptime(html([], [{ id: 'other', since: '2024-01-01T00:00:00Z' }]), 'c1', NOW)).toBeNull()
+    expect(computeIncidentIoUptime(html([], [{ id: 'c1', since: null }]), 'c1', NOW)).toBeNull()
+    expect(computeIncidentIoUptime('<html>not a status page</html>', 'c1', NOW)).toBeNull()
+  })
+
+  it('a young component reports the window it actually covers (#1004 — a page migration resets it)', () => {
+    const out = computeIncidentIoUptime(html([], [{ id: 'c1', since: at(6) }]), 'c1', NOW)
+    expect(out).toEqual({ pct: 100, days: 6 })
+  })
+
+  it('a short window is not a free pass: the same outage weighs more against fewer days', () => {
+    const out = computeIncidentIoUptime(
+      html([{ id: 'c1', start: at(5), end: at(4), status: 'full_outage' }], [{ id: 'c1', since: at(6) }]), 'c1', NOW,
+    )
+    // 24h out of 6 days = 83.33% — which is exactly why the UI must state the window (#1006).
+    expect(out).toEqual({ pct: 83.33, days: 6 })
+  })
+
+  it('a LIST of ids is a worst-of, over the shortest covered window (turbopuffer regions, #857)', () => {
+    const out = computeIncidentIoUptime(
+      html(
+        [{ id: 'r2', start: at(5), end: at(4), status: 'full_outage' }],
+        [{ id: 'r1', since: '2024-01-01T00:00:00Z' }, { id: 'r2', since: at(20) }],
+      ),
+      ['r1', 'r2'], NOW,
+    )
+    expect(out).toEqual({ pct: 95, days: 20 }) // r2: 24h of 20 days = 95.00 (worse than r1's 100)
+  })
+
+  it('ids that resolve to nothing are skipped, and the result reflects only what resolved', () => {
+    const out = computeIncidentIoUptime(html([], [{ id: 'r1', since: '2024-01-01T00:00:00Z' }]), ['r1', 'gone'], NOW)
+    expect(out).toEqual({ pct: 100, days: 30 })
+  })
+
+  // #1006 review — an ONGOING impact has end_at `$undefined` (→ null). It must count to NOW, not be
+  // dropped: dropping it read a spotless ~100% next to a live outage, the incoherence this set out to kill.
+  it('an ONGOING impact (no end) counts to now, it is not dropped', () => {
+    const out = computeIncidentIoUptime(
+      html([{ id: 'c1', start: at(0, -24), end: '$undefined', status: 'full_outage' }], ESTABLISHED), 'c1', NOW,
+    )
+    // started 24h ago, still open → 24h of 30 days counts to now → 96.66%, NOT 100%.
+    expect(out).toEqual({ pct: 96.66, days: 30 })
+  })
+
+  // #1006 review — a degraded window escalating into a full outage must not double-count the overlap.
+  it('OVERLAPPING impacts on one component merge (worst-weight-wins), never sum', () => {
+    const out = computeIncidentIoUptime(
+      html(
+        [
+          { id: 'c1', start: at(5, 0), end: at(5, 10), status: 'degraded_performance' }, // 10h @0.3
+          { id: 'c1', start: at(5, 2), end: at(5, 3), status: 'full_outage' }, // 1h @1.0 nested inside
+        ],
+        ESTABLISHED,
+      ),
+      'c1', NOW,
+    )
+    // Summed: 10h*0.3 + 1h*1.0 = 4.0h. Merged: 9h@0.3 + 1h@1.0 = 3.7h of 30d → 99.48%.
+    expect(out).toEqual({ pct: 99.48, days: 30 })
+  })
+
+  // #1006 review / #713 — when component_impacts is PRESENT but unparseable, withhold (null), never read
+  // the empty list as "no downtime" and fabricate a 100% (data_available_since is a separate regex).
+  it('withholds (null) when component_impacts is present but unparseable — never a fabricated 100%', () => {
+    const broken =
+      `<script>self.__next_f.push([1,"a:{\\"component_impacts\\":[{\\"component_id\\":\\"c1\\" BROKEN}],` +
+      `\\"component_uptimes\\":[{\\"component_id\\":\\"c1\\",\\"data_available_since\\":\\"2024-01-01T00:00:00Z\\",` +
+      `\\"status_page_component_group_id\\":\\"$undefined\\",\\"uptime\\":\\"100.00\\"}],\\"incident_links\\":[]}"])</script>`
+    expect(computeIncidentIoUptime(broken, 'c1', NOW)).toBeNull()
   })
 })
 

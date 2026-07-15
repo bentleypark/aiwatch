@@ -416,20 +416,62 @@ export function parseBetterStackPartialCount(data: BetterStackIndex): number {
   ).length
 }
 
-export function parseBetterStackUptime(data: BetterStackIndex): number | null {
+/** #1006 — the availability % the BetterStack page itself DISPLAYS (`attributes.availability`, averaged
+ *  across resources, over the page's own ~90-day render window). This is the pre-#1006 number; it is no
+ *  longer the metric (we compute 30 days from status_history), but it is shown beside ours on the detail
+ *  page when they differ — the same disclosure every other source gets. null when no resource exposes it. */
+export function parseBetterStackReportedUptime(data: BetterStackIndex): number | null {
   const resources = (data.included ?? []).filter(
-    (r) => r.type === 'status_page_resource' && r.attributes?.availability != null
+    (r) => r.type === 'status_page_resource' && r.attributes?.availability != null,
+  )
+  if (resources.length === 0) return null
+  const sum = resources.reduce((acc, r) => acc + r.attributes!.availability! * 100, 0)
+  const avg = Math.round((sum / resources.length) * 100) / 100
+  return avg >= 0 && avg <= 100 ? avg : null
+}
+
+/** #1006 — AIWatch's own trailing-30-day uptime for a BetterStack page.
+ *
+ *  The old path copied `attributes.availability` — a single float whose period the API never states
+ *  (the page renders 90 days). Every other source was moved to a computed 30-day figure in #1006, and
+ *  leaving this one on an unknown period would keep the Reliability Ranking comparing incomparable
+ *  numbers, which is the whole bug.
+ *
+ *  The raw material was already here: `status_history` carries 90 entries of
+ *  `{day, status, downtime_duration, maintenance_duration}` — the same per-day-seconds shape Atlassian
+ *  publishes — and `parseBetterStackDailyImpact` has been reading it for the calendar all along. Uptime
+ *  just never used it.
+ *
+ *  Per resource: 1 − Σ downtime_duration / (days × 86400) over the trailing `windowDays`.
+ *  `maintenance_duration` is EXCLUDED — announced maintenance is not downtime, and penalising a provider
+ *  for announcing its windows would invert the incentive (same rule as every other source, /methodology).
+ *  `not_monitored` days are dropped from the denominator rather than scored as perfect.
+ *  Then AVERAGED across resources, preserving the pre-#1006 avg-of-resources convention that the
+ *  `platform_avg` label describes. Returns null when no resource carries a usable history. */
+export function parseBetterStackUptime(data: BetterStackIndex, windowDays = 30): number | null {
+  const resources = (data.included ?? []).filter(
+    (r) => r.type === 'status_page_resource' && Array.isArray(r.attributes?.status_history),
   )
   if (resources.length === 0) return null
 
-  const sum = resources.reduce((acc, r) => acc + (r.attributes!.availability! * 100), 0)
-  const avg = Math.round((sum / resources.length) * 100) / 100
-
-  if (avg < 0 || avg > 100) {
-    console.warn(`[parseBetterStackUptime] computed ${avg}% out of range — API format may have changed`)
-    return null
+  const perResource: number[] = []
+  for (const resource of resources) {
+    // status_history is chronological (oldest first) — the trailing window is the tail.
+    const days = resource.attributes!.status_history!.slice(-windowDays).filter((d) => d.status !== 'not_monitored')
+    if (days.length === 0) continue
+    const downSec = days.reduce((acc, d) => acc + (d.downtime_duration ?? 0), 0)
+    const pct = (1 - downSec / (days.length * 86_400)) * 100
+    if (pct < 0 || pct > 100) {
+      console.warn(`[parseBetterStackUptime] ${resource.attributes?.public_name}: computed ${pct}% — history shape may have changed`)
+      continue
+    }
+    perResource.push(pct)
   }
-  return avg
+  if (perResource.length === 0) return null
+
+  const avg = perResource.reduce((a, b) => a + b, 0) / perResource.length
+  // Floor, like every other source: never round 99.998% up to a clean 100%.
+  return Math.floor(avg * 100) / 100
 }
 
 /**

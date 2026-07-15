@@ -172,6 +172,10 @@ const en = {
   'uptime.rankings': 'Uptime Rankings',
   'uptime.matrix': '3-Month History',
   'uptime.incidents': 'incidents',
+  // #1006 — the rows are not on one basis, so the header is a LEGEND, not a claim. A global "30 days"
+  // line would repeat the inaccurate label #654 found and removed.
+  'uptime.legend.official': 'AIWatch 30d',
+  'uptime.legend.platform': 'platform-measured',
   'uptime.basis': 'reported uptime',
   'uptime.basis.suffix': 'basis',
   'uptime.matrix.sub': 'Last 3 months',
@@ -184,10 +188,23 @@ const en = {
   'svc.latency.inherited': 'API Response Time · via {p}',
   'svc.latency.inherited.sub': 'Shared endpoint with {p}',
   'svc.uptime30d': 'Uptime',
-  'uptime.label.official': 'Official Uptime',
-  'uptime.sub.official': 'Official status page',
+  // #1006 — this card's number is OURS. Calling it "Official" collides with the provider's figure shown
+  // right below it, and the reader can't tell which is which. "Official" now belongs to the provider only.
+  'uptime.label.official': '30-Day Uptime',
+  // #1006 — not a copy of the provider's published %, but computed by AIWatch from the incident/impact
+  // records the provider publishes, over the same 30-day window with the same weighting for every
+  // service (the precondition the ranking always claimed).
+  'uptime.sub.official': 'From status-page records · computed by AIWatch',
+  // Both attributions on ONE line — a bare colon makes the trailing number read as the headline value.
+  'uptime.compare.reported': 'Computed by AIWatch (status page shows {v}%)',
+  // State the provider's period when we know it (Atlassian ≈90d) — that difference is WHY the two
+  // numbers diverge.
+  'uptime.compare.reported.days': 'Computed by AIWatch (status page shows {v}% over {d}d)',
+  // When the provider's records don't reach back 30 days (a status-page migration), say so.
+  'uptime.sub.official.partial': "Computed by AIWatch · provider's records go back only {d}d",
+  'uptime.partialWindow.tooltip': "The provider's records for this component only go back {d} days (e.g. a status-page migration). It returns to a full 30-day window automatically.",
   'uptime.label.platform_avg': 'Platform Average',
-  'uptime.sub.platform_avg': 'All resources avg uptime',
+  'uptime.sub.platform_avg': 'From status-page records · computed by AIWatch',
   'svc.incidents': 'Incidents',
   'svc.mttr': 'Recovery',
   'svc.recovery.worst': 'worst {d} · 7d',

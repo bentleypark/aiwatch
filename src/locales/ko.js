@@ -171,6 +171,10 @@ const ko = {
   'uptime.rankings': '업타임 순위',
   'uptime.matrix': '3개월 이력',
   'uptime.incidents': '인시던트',
+  // #1006 — 행마다 기준이 다르므로 헤더는 '주장'이 아니라 '범례'다. 전역으로 "30일"이라고 쓰면
+  // #654가 찾아내 지웠던 바로 그 거짓 표기를 되풀이하는 것.
+  'uptime.legend.official': 'AIWatch 30일',
+  'uptime.legend.platform': '플랫폼 측정',
   'uptime.basis': '보고된 업타임',
   'uptime.basis.suffix': '기준',
   'uptime.matrix.sub': '최근 3개월',
@@ -183,10 +187,23 @@ const ko = {
   'svc.latency.inherited': 'API 응답 시간 · {p} 기반',
   'svc.latency.inherited.sub': '{p}와 동일 엔드포인트 (상속)',
   'svc.uptime30d': '업타임',
-  'uptime.label.official': '공식 Uptime',
-  'uptime.sub.official': '공식 status page 기준',
+  // #1006 — 이 카드의 숫자는 '우리가' 산출한 값이다. 여기에 '공식'을 붙이면 바로 아래의 '제공사 발표'와
+  // 충돌해 어느 쪽이 공식인지 뒤집혀 읽힌다. '공식'은 제공사 발표값에만 쓴다.
+  'uptime.label.official': '30일 Uptime',
+  // #1006 — 제공사 발표값을 복사하지 않고, 제공사가 공개한 인시던트·임팩트 기록에서
+  // AIWatch가 동일한 30일 창·동일한 가중 방식으로 직접 계산한다(그래야 서비스 간 비교가 성립).
+  'uptime.sub.official': '상태 페이지 기록으로 AIWatch가 산출',
+  // 제공사 발표값과 우리 30일 측정이 다를 때 상세 페이지에 나란히 보여주는 줄.
+  // 한 줄에 두 값의 귀속을 모두 담는다 — 콜론(:)만 두면 뒤 숫자가 대표값처럼 읽힌다.
+  'uptime.compare.reported': '상태 페이지 기록으로 AIWatch 산출 (상태 페이지 표시값 {v}%)',
+  // 제공사 값의 집계 기간을 아는 경우(Atlassian ≈90일)엔 함께 밝힌다 — 그 기간이 우리와 다르다는 게
+  // 두 숫자가 갈리는 이유이기 때문.
+  'uptime.compare.reported.days': '상태 페이지 기록으로 AIWatch 산출 (상태 페이지 표시값 {d}일 기준 {v}%)',
+  // 상태페이지 이전 등으로 제공사 기록이 30일을 못 채울 때: 창을 숨기지 않고 밝힌다.
+  'uptime.sub.official.partial': 'AIWatch 산출 · 제공사 기록이 {d}일치뿐',
+  'uptime.partialWindow.tooltip': '제공사가 이 구성요소의 기록을 {d}일치만 갖고 있습니다(상태 페이지를 옮긴 경우 등). 30일이 쌓이면 자동으로 정상 표시됩니다.',
   'uptime.label.platform_avg': '플랫폼 평균',
-  'uptime.sub.platform_avg': '전체 리소스 uptime 평균',
+  'uptime.sub.platform_avg': '상태 페이지 기록으로 AIWatch가 산출',
   'svc.incidents': '인시던트',
   'svc.mttr': '복구 시간',
   'svc.recovery.worst': '최장 {d} · 7일',

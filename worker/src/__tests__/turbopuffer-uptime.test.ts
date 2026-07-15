@@ -1,163 +1,91 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { parseIncidentIoUptime } from '../parsers/incident-io'
+import { computeIncidentIoUptime } from '../parsers/incident-io'
 import { SERVICES } from '../services'
 
-// #857 follow-up — turbopuffer's status page is an **incident.io** page (ULID component ids,
-// `component_uptimes`) that merely serves a Statuspage-compatible summary.json. It was configured as
-// an Atlassian Statuspage, so neither statusComponentId nor incidentIoComponentId was set, `needsHtml`
-// never fetched the status HTML, and uptime30d stayed null — even though the page publishes uptime for
-// all 15 per-region API components (display_uptime_mode: 'chart_and_percentage').
+// #857 — turbopuffer's status page is an **incident.io** page (ULID component ids) that merely serves a
+// Statuspage-compatible summary.json. It was configured as an Atlassian Statuspage, so `needsHtml` never
+// fetched the status HTML and uptime30d stayed null. The page has no group aggregate (every component is
+// ungrouped), so uptime is a WORST-OF across the per-region API components.
 //
-// The page has no group aggregate (every component is ungrouped), so uptime is a WORST-OF across the
-// regions. These fixtures mirror the real escaped shape: the HTML carries `\"component_id\":\"…\"`.
+// #1006 — the mechanism changed underneath: AIWatch no longer copies the page's published
+// `component_uptimes[].uptime`, it COMPUTES from `component_impacts` with the weights on /methodology.
+// What this file pins is that turbopuffer's REAL configured id roster still resolves through that path
+// (a silent null here is exactly what #857 was), and that the worst-of + rotation-warn conventions
+// survived the rewrite.
+//
+// It also pins the #1006 windfall: the three `chart_only` pages (Stability / ElevenLabs / Replicate)
+// publish impact records but HIDE the percentage (`uptime: "$undefined"`), so under the old
+// copy-the-aggregate path they had NO uptime at all ("Not provided", confidence capped at `medium`)
+// despite the page carrying the full impact history. Computing from the raw records gives them a real
+// figure — the same one, by the same formula, as everyone else.
 
-const DASHBOARD_ID = '01K0Q5QSJV9KAZMEMMQ0NCHD9E'
+const NOW = Date.parse('2026-07-14T00:00:00Z')
+const DAY = 86_400_000
+const ago = (days: number) => new Date(NOW - days * DAY).toISOString()
 
-/** One `component_uptimes` entry, in the page's real backslash-escaped form. */
-const entry = (id: string, uptime: string) =>
-  `{\\"component_id\\":\\"${id}\\",\\"data_available_since\\":\\"2023-12-07T00:00:00Z\\",` +
+/** One `component_uptimes` entry, in the page's real backslash-escaped form. `uptime` defaults to
+ *  `$undefined` — the chart_only shape — to prove we no longer depend on the published value. */
+const uptimeEntry = (id: string, since: string, uptime = '$undefined') =>
+  `{\\"component_id\\":\\"${id}\\",\\"data_available_since\\":\\"${since}\\",` +
   `\\"status_page_component_group_id\\":\\"$undefined\\",\\"uptime\\":\\"${uptime}\\"}`
 
-/** A group-aggregate entry (component_id=$undefined + a group id). */
-const groupEntry = (groupId: string, uptime: string) =>
-  `{\\"component_id\\":\\"$undefined\\",\\"status_page_component_group_id\\":\\"${groupId}\\",` +
-  `\\"uptime\\":\\"${uptime}\\"}`
+const impactEntry = (id: string, startDaysAgo: number, endDaysAgo: number, status: string) =>
+  `{\\"component_id\\":\\"${id}\\",\\"end_at\\":\\"${ago(endDaysAgo)}\\",\\"id\\":\\"IMP\\",` +
+  `\\"start_at\\":\\"${ago(startDaysAgo)}\\",\\"status\\":\\"${status}\\",\\"status_page_incident_id\\":\\"INC\\"}`
 
-const chunk = (entries: string[]) =>
-  `<script>self.__next_f.push([1,"a:{\\"component_uptimes\\":[${entries.join(',')}],\\"incident_links\\":[]}"])</script>`
+const page = (impacts: string[], uptimes: string[]) =>
+  `<script>self.__next_f.push([1,"a:{\\"component_impacts\\":[${impacts.join(',')}],` +
+  `\\"component_uptimes\\":[${uptimes.join(',')}],\\"incident_links\\":[]}"])</script>`
 
 afterEach(() => vi.restoreAllMocks())
 
-describe('parseIncidentIoUptime — single component (pre-#857 behaviour preserved)', () => {
-  it('reads a published value (groq shape)', () => {
-    expect(parseIncidentIoUptime(chunk([entry('GROQ_API', '100.00')]), 'GROQ_API')).toBe(100)
+describe('turbopuffer — the real region roster resolves to a worst-of uptime (#857 + #1006)', () => {
+  const turbopuffer = SERVICES.find((s) => s.id === 'turbopuffer')!
+  const ids = turbopuffer.incidentIoComponentId as string[]
+  const established = () => ids.map((id) => uptimeEntry(id, '2023-12-07T00:00:00Z'))
+
+  it('is configured as a LIST — an empty roster would be a silent uptime drop', () => {
+    expect(Array.isArray(ids)).toBe(true)
+    expect(ids.length).toBeGreaterThan(1)
   })
 
-  it('returns null when the component publishes no value (chart_only pages: Stability/ElevenLabs/Replicate)', () => {
-    expect(parseIncidentIoUptime(chunk([entry('STAB_API', '$undefined')]), 'STAB_API')).toBeNull()
-  })
-
-  it('returns null when the component is absent from component_uptimes', () => {
-    expect(parseIncidentIoUptime(chunk([entry('OTHER', '99.50')]), 'MISSING')).toBeNull()
-  })
-
-  it('returns null (and warns) on an out-of-range value', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(parseIncidentIoUptime(chunk([entry('X', '150')]), 'X')).toBeNull()
-    expect(warn).toHaveBeenCalledOnce()
-  })
-
-  it('keeps scanning later chunks when an earlier component_uptimes lacks the id', () => {
-    const html = chunk([entry('SOMEONE_ELSE', '99.00')]) + chunk([entry('MINE', '98.25')])
-    expect(parseIncidentIoUptime(html, 'MINE')).toBe(98.25)
-  })
-})
-
-describe('parseIncidentIoUptime — component LIST is a worst-of (#857)', () => {
-  it('returns the minimum across the matched components', () => {
-    const html = chunk([entry('R1', '100.00'), entry('R2', '99.61'), entry('R3', '100.00')])
-    expect(parseIncidentIoUptime(html, ['R1', 'R2', 'R3'])).toBe(99.61)
-  })
-
-  it('ignores ids absent from the page (a region removed upstream does not null the uptime)', () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const html = chunk([entry('R1', '100.00'), entry('R2', '99.80')])
-    expect(parseIncidentIoUptime(html, ['R1', 'R2', 'GONE'])).toBe(99.8)
-  })
-
-  it('accumulates the worst-of ACROSS chunks (a split component_uptimes must not drop later regions)', () => {
-    // A per-chunk early return would report the healthy 100.00 and miss the degraded region entirely.
-    const html = chunk([entry('R1', '100.00')]) + chunk([entry('R2', '96.30')])
-    expect(parseIncidentIoUptime(html, ['R1', 'R2'])).toBe(96.3)
-  })
-
-  it('a valueless first sighting does not block a later chunk from supplying the value', () => {
-    // `matched` (rotation warn) and `valued` (re-scan skip) are separate sets precisely so that a
-    // component seen once as "$undefined" can still contribute its real number from a later chunk.
-    const html = chunk([entry('R1', '$undefined'), entry('R2', '100.00')]) + chunk([entry('R1', '94.10')])
-    expect(parseIncidentIoUptime(html, ['R1', 'R2'])).toBe(94.1)
-  })
-
-  it('returns null when every matched component carries an out-of-range value', () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const html = chunk([entry('R1', '150'), entry('R2', '-3')])
-    expect(parseIncidentIoUptime(html, ['R1', 'R2'])).toBeNull()
+  it('computes a worst-of across the CONFIGURED ids, though the page publishes no percentage', () => {
+    // One region takes a 24h full outage; every other region is clean.
+    const html = page([impactEntry(ids[3], 5, 4, 'full_outage')], established())
+    expect(computeIncidentIoUptime(html, ids, NOW)).toEqual({ pct: 96.66, days: 30 })
   })
 
   it('WARNS when a configured id no longer resolves — a rotated ULID must not silently shrink the worst-of', () => {
     // The page still returns 200 and the parser still yields a number, so no fetch-failure or
     // component-miss alert fires. This warn is the only signal that the roster went stale.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const html = chunk([entry('R1', '100.00')])
-    expect(parseIncidentIoUptime(html, ['R1', 'ROTATED_AWAY'])).toBe(100)
+    const html = page([], [uptimeEntry(ids[0], '2023-12-07T00:00:00Z')])
+    expect(computeIncidentIoUptime(html, ids, NOW)).toEqual({ pct: 100, days: 30 })
     expect(warn).toHaveBeenCalledOnce()
-    expect(warn.mock.calls[0][0]).toContain('1/2 configured components absent')
+    expect(warn.mock.calls[0][0]).toContain(`${ids.length - 1}/${ids.length} configured components absent`)
   })
 
-  it('does NOT warn for a single configured id that is absent (the ordinary no-such-component case)', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(parseIncidentIoUptime(chunk([entry('OTHER', '99.50')]), 'MISSING')).toBeNull()
-    expect(warn).not.toHaveBeenCalled()
-  })
-
-  it('does NOT warn when the whole roster resolves', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(parseIncidentIoUptime(chunk([entry('R1', '100.00'), entry('R2', '99.90')]), ['R1', 'R2'])).toBe(99.9)
-    expect(warn).not.toHaveBeenCalled()
-  })
-
-  it('SKIPS a component with no published value rather than reading it as 0', () => {
-    const html = chunk([entry('R1', '$undefined'), entry('R2', '99.90')])
-    expect(parseIncidentIoUptime(html, ['R1', 'R2'])).toBe(99.9)
-  })
-
-  it('returns null when every matched component publishes no value', () => {
-    const html = chunk([entry('R1', '$undefined'), entry('R2', '$undefined')])
-    expect(parseIncidentIoUptime(html, ['R1', 'R2'])).toBeNull()
-  })
-
-  it('skips an out-of-range value but still returns the healthy sibling', () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const html = chunk([entry('R1', '150'), entry('R2', '99.10')])
-    expect(parseIncidentIoUptime(html, ['R1', 'R2'])).toBe(99.1)
-  })
-
-  it('a group aggregate still wins over the per-component worst-of', () => {
-    const html = chunk([groupEntry('GRP', '99.99'), entry('R1', '95.00')])
-    expect(parseIncidentIoUptime(html, ['R1'], 'GRP')).toBe(99.99)
+  it('null when the page tracks NONE of the configured ids (the #857 silent-null shape)', () => {
+    const html = page([], [uptimeEntry('some-other-component', '2023-12-07T00:00:00Z')])
+    expect(computeIncidentIoUptime(html, ids, NOW)).toBeNull()
   })
 })
 
-describe('turbopuffer config — the roster the worst-of reads (#857)', () => {
-  const turbopuffer = SERVICES.find((s) => s.id === 'turbopuffer')!
-  const ids = turbopuffer.incidentIoComponentId as string[]
+describe('chart_only pages now get an uptime (#1006)', () => {
+  // Chart-only pages hide the percentage but publish the impact records. The first configured component
+  // is the uptime primary (replicate/elevenlabs also worst-of the rest of their roster, #1006 — tested
+  // separately); one degraded window on it must still yield a computed figure, never "Not provided".
+  it.each(['stability', 'elevenlabs', 'replicate'])('%s resolves a figure from impacts alone', (id) => {
+    const svc = SERVICES.find((s) => s.id === id)!
+    const scope = svc.incidentIoComponentId!
+    const primary = Array.isArray(scope) ? scope[0] : scope
 
-  it('sets incidentIoComponentId so needsHtml fetches the status HTML at all', () => {
-    // The bug: without statusComponentId OR incidentIoComponentId, services.ts `needsHtml` is false,
-    // the page HTML is never fetched, and parseIncidentIoUptime never runs → uptime30d null.
-    expect(turbopuffer.statusComponentId).toBeUndefined() // badge still rides the overall indicator
-    expect(Array.isArray(ids)).toBe(true)
-  })
-
-  it('covers all 15 per-region API components', () => {
-    expect(ids).toHaveLength(15)
-    expect(new Set(ids).size).toBe(15) // no dupes
-  })
-
-  it('EXCLUDES the Dashboard component (not an API surface; the page\'s only sub-100 uptime)', () => {
-    expect(ids).not.toContain(DASHBOARD_ID)
-  })
-
-  it('worst-of over the real roster shape yields the degraded region, not the healthy majority', () => {
-    const html = chunk([
-      ...ids.map((id, i) => entry(id, i === 3 ? '97.40' : '100.00')),
-      entry(DASHBOARD_ID, '99.92'), // present on the page, must not be read
-    ])
-    expect(parseIncidentIoUptime(html, ids)).toBe(97.4)
-  })
-
-  it('the excluded Dashboard uptime never becomes the service uptime', () => {
-    const html = chunk([...ids.map((id) => entry(id, '100.00')), entry(DASHBOARD_ID, '99.92')])
-    expect(parseIncidentIoUptime(html, ids)).toBe(100)
+    const html = page(
+      [impactEntry(primary, 3, 3 - 6 / 24, 'degraded_performance')], // 6h degraded
+      // every configured component present + clean, so the worst-of is driven by the one impact above
+      (Array.isArray(scope) ? scope : [scope]).map((c) => uptimeEntry(c, '2024-01-01T00:00:00Z')),
+    )
+    // 6h × 0.3 = 1.8h of 30 days → 99.75%
+    expect(computeIncidentIoUptime(html, scope, NOW)).toEqual({ pct: 99.75, days: 30 })
   })
 })

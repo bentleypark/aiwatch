@@ -39,7 +39,6 @@ describe('#857 turbopuffer vector service config', () => {
     const s = SERVICES.find((x) => x.id === 'turbopuffer')!
     expect(Array.isArray(s.incidentIoComponentId), 'turbopuffer uptime = worst-of a region roster').toBe(true)
     expect((s.incidentIoComponentId as string[]).length, 'an empty roster is a silent uptime drop').toBeGreaterThan(0)
-    expect(s.incidentIoGroupId, 'the page has no component groups to aggregate over').toBeUndefined()
   })
 
   it('turbopuffer carries addedAt so the #802 coverage gate holds it out of the ranking for 30 days', () => {

@@ -2,6 +2,7 @@
 
 import type { TimelineEntry, Incident } from '../types'
 import { formatDuration } from '../utils'
+import { weightedDowntimeSeconds, type OutageInterval } from './uptime-interval'
 
 // #556 — map an Instatus severity/impact string to AIWatch's impact scale. Instatus exposes it
 // differently per SSR format, so this helper handles BOTH vocabularies:
@@ -225,32 +226,160 @@ function matchBrace(s: string, open: number): number {
 //     (The #627 "Next.js has no inline uptime" note was outdated — Instatus now serializes it.)
 // Returns null when the component isn't found or the value is out of range, so the caller falls back
 // to estimate/null.
-export function parseInstatusUptime(html: string, componentName: string | undefined): number | null {
+/** #1006 — the period the Instatus page says its uptime % covers. We cannot recompute these services on
+ *  our common 30-day window (they publish an aggregate, never per-day records), so the honest thing is to
+ *  name the period their number DOES cover rather than hand-wave "the provider's own window".
+ *  Both SSR shapes state it: Next.js serialises `maxUptimeDays` (Perplexity, fal → 90); Nuxt renders the
+ *  range as a label (Mistral → "90 days ago"). Verified on all three pages, 2026-07-14. null when neither
+ *  is present — the caller then falls back to the unqualified wording. */
+/** #1006 — the aggregate uptime % the Instatus page DISPLAYS for a component/group (its `uptime` field),
+ *  over the page's own period (these pages declare `maxUptimeDays: 90`). Not the metric — we compute a
+ *  30-day figure from the outage records — but shown beside ours on the detail page when they differ, so
+ *  the reader can check us against the provider (the same disclosure Atlassian + incident.io get). */
+export function parseInstatusReportedUptime(html: string, componentName: string | undefined): number | null {
   if (!componentName) return null
-  if (html.includes('__NUXT_DATA__')) return parseInstatusNuxtUptime(html, componentName)
-  if (html.includes('__next_f')) return parseInstatusNextUptime(html, componentName)
+  if (html.includes('__NUXT_DATA__')) {
+    const m = html.match(/__NUXT_DATA__[^>]*>([\s\S]*?)<\/script/)
+    if (!m) return null
+    try {
+      const arr: unknown[] = JSON.parse(m[1])
+      const deref = (v: unknown) => (typeof v === 'number' ? arr[v] : v)
+      for (const item of arr) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+        const o = item as Record<string, unknown>
+        if (!('uptime' in o) || deref(o.name) !== componentName) continue
+        const up = deref(o.uptime)
+        return typeof up === 'number' && up >= 0 && up <= 100 ? up : null
+      }
+    } catch { return null }
+    return null
+  }
+  if (html.includes('__next_f')) {
+    let id: string | undefined
+    for (const [cid, name] of buildInstatusComponentMap(html)) {
+      if (name === componentName) { id = cid; break }
+    }
+    if (!id) return null
+    const u = html.replace(/\\"/g, '"')
+    const ki = u.indexOf('"componentsUptime":')
+    if (ki < 0) return null
+    const objStart = u.indexOf('{', ki + '"componentsUptime":'.length)
+    const objEnd = objStart < 0 ? -1 : matchBrace(u, objStart)
+    if (objEnd < 0) return null
+    try {
+      const cu = JSON.parse(u.slice(objStart, objEnd + 1)) as Record<string, { uptime?: string | number }>
+      const raw = cu[id]?.uptime
+      const up = typeof raw === 'string' ? parseFloat(raw) : raw
+      return typeof up === 'number' && !isNaN(up) && up >= 0 && up <= 100 ? up : null
+    } catch { return null }
+  }
   return null
 }
 
-function parseInstatusNuxtUptime(html: string, componentName: string): number | null {
+export function parseInstatusUptimeDays(html: string): number | null {
+  const explicit = html.match(/maxUptimeDays\\?"?\s*:\s*\\?"?(\d{1,3})/)
+  const label = html.match(/(\d{1,3})\s*days? ago/)
+  const raw = explicit?.[1] ?? label?.[1]
+  if (!raw) return null
+  const days = parseInt(raw, 10)
+  return Number.isFinite(days) && days > 0 && days <= 400 ? days : null
+}
+
+export function parseInstatusUptime(
+  html: string,
+  componentName: string | undefined,
+  nowMs: number = Date.now(),
+  windowDays = 30,
+): number | null {
+  if (!componentName) return null
+  if (html.includes('__NUXT_DATA__')) return parseInstatusNuxtUptime(html, componentName, nowMs, windowDays)
+  if (html.includes('__next_f')) return parseInstatusNextUptime(html, componentName, nowMs, windowDays)
+  return null
+}
+
+function parseInstatusNuxtUptime(html: string, componentName: string, nowMs: number, windowDays: number): number | null {
   const match = html.match(/__NUXT_DATA__[^>]*>([\s\S]*?)<\/script/)
   if (!match) return null
   try {
     const arr: unknown[] = JSON.parse(match[1])
     const deref = (v: unknown) => (typeof v === 'number' ? arr[v] : v) // Nuxt scalars are index refs
+    const windowStart = nowMs - windowDays * 86_400_000
+
+    /** Weighted outage seconds inside the window for ONE component node (the node that carries `days`). */
+    const componentUptime = (node: Record<string, unknown>): number | null => {
+      const days = deref(node.days)
+      if (!Array.isArray(days)) return null
+      // Nuxt events carry a resolved `duration` (seconds), not an end timestamp, so an in-progress event
+      // (duration 0/absent) has no interval to place and is skipped. Collect the resolved ones and let
+      // the shared accumulator merge overlaps (worst-weight-wins) so concurrent events on one component
+      // aren't double-counted.
+      const intervals: OutageInterval[] = []
+      for (const dayRef of days) {
+        const day = deref(dayRef) as Record<string, unknown> | undefined
+        const events = day && deref(day.events)
+        if (!Array.isArray(events)) continue
+        for (const evRef of events) {
+          const ev = deref(evRef) as Record<string, unknown> | undefined
+          if (!ev) continue
+          const startedAt = Date.parse(String(deref(ev.created_at) ?? ''))
+          const duration = Number(deref(ev.duration) ?? 0) // seconds
+          if (Number.isNaN(startedAt) || !(duration > 0)) continue
+          const weight = instatusSeverityWeight(String(deref(ev.severity) ?? ''))
+          if (weight === 0) continue
+          intervals.push({ start: startedAt, end: startedAt + duration * 1000, weight })
+        }
+      }
+      const weightedSec = weightedDowntimeSeconds(intervals, windowStart, nowMs)
+      // Floor, like every other source — never round 99.998% up to a clean 100%.
+      return Math.max(0, Math.floor((1 - weightedSec / (windowDays * 86_400)) * 10000) / 100)
+    }
+
     for (const item of arr) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) continue
       const o = item as Record<string, unknown>
       if (!('uptime' in o) || !('name' in o)) continue
       if (deref(o.name) !== componentName) continue
-      const up = deref(o.uptime)
-      if (typeof up === 'number' && up >= 0 && up <= 100) return up
+
+      // #1006 — compute, don't copy. `o.uptime` is the page's own aggregate over ITS period (90 days on
+      // status.mistral.ai), which is not comparable with the 30-day figures every other source now
+      // produces. The raw material sits beside it: a COMPONENT carries `days` (90 × {date, events[]}),
+      // each event with `created_at` + `duration` (seconds) + `severity`.
+      if ('days' in o) return componentUptime(o)
+
+      // …but a configured name can also address a GROUP — mistral's `statusComponent: 'API'` is the API
+      // group, not a component. A group node carries `services` and the page's aggregate `uptime`, but no
+      // `days` of its own; its members do. Worst-of across the members, matching the badge convention for
+      // a multi-component service (#379). An earlier cut of this parser required `days` and so skipped
+      // the group entirely, silently dropping Mistral's uptime to "Not provided".
+      const services = deref(o.services)
+      if (!Array.isArray(services)) continue
+      let worst: number | null = null
+      for (const ref of services) {
+        const member = deref(ref) as Record<string, unknown> | undefined
+        if (!member || !('days' in member)) continue
+        const pct = componentUptime(member)
+        if (pct === null) continue
+        if (worst === null || pct < worst) worst = pct
+      }
+      return worst
     }
     return null
   } catch (err) {
     console.warn('[parseInstatusUptime] failed:', err instanceof Error ? err.message : err)
     return null
   }
+}
+
+/** #1006 — Instatus severity → the weights on /methodology (full outage 1.0, partial/degraded 0.3).
+ *  An unknown severity is warned about and weighted as a partial rather than silently scored as zero
+ *  downtime: a new Instatus level must not quietly inflate every affected service to 100%. */
+function instatusSeverityWeight(severity: string): number {
+  const s = severity.toUpperCase()
+  if (s === 'CRITICAL' || s === 'HIGH' || s === 'MAJOR' || s === 'MAJOROUTAGE') return 1.0
+  if (s === 'MEDIUM' || s === 'MINOR' || s === 'LOW' || s === 'PARTIALOUTAGE' || s === 'DEGRADEDPERFORMANCE') return 0.3
+  if (s === 'MAINTENANCE' || s === 'UNDERMAINTENANCE' || s === 'OPERATIONAL' || s === 'NONE' || s === '') return 0
+  console.warn(`[instatusSeverityWeight] unknown severity "${severity}" — counted as a partial outage`)
+  return 0.3
 }
 
 // Warn-once (per component) on a Next.js payload-SHAPE change — the component map or the
@@ -267,9 +396,9 @@ function warnNextUptimeShape(componentName: string, reason: string): null {
   return null
 }
 
-function parseInstatusNextUptime(html: string, componentName: string): number | null {
+function parseInstatusNextUptime(html: string, componentName: string, nowMs: number, windowDays: number): number | null {
   // Resolve component name → id from the escaped payload (buildInstatusComponentMap reads the `\"`
-  // form), then read componentsUptime[id].uptime from the unescaped JSON.
+  // form), then read componentsUptime[id] from the unescaped JSON.
   let id: string | undefined
   for (const [cid, name] of buildInstatusComponentMap(html)) {
     if (name === componentName) { id = cid; break }
@@ -286,15 +415,47 @@ function parseInstatusNextUptime(html: string, componentName: string): number | 
   const objEnd = objStart < 0 ? -1 : matchBrace(u, objStart)
   if (objEnd < 0) return warnNextUptimeShape(componentName, 'componentsUptime object could not be bounded')
   try {
-    const cu = JSON.parse(u.slice(objStart, objEnd + 1)) as Record<string, { uptime?: string | number }>
-    const raw = cu[id]?.uptime
-    const up = typeof raw === 'string' ? parseFloat(raw) : raw
-    if (typeof up === 'number' && !isNaN(up) && up >= 0 && up <= 100) return up
-    return null // component legitimately has no aggregate uptime (or out of range) — not a shape change
+    const cu = JSON.parse(u.slice(objStart, objEnd + 1)) as Record<string, InstatusNextUptimeEntry>
+    const entry = cu[id]
+    if (!entry) return null
+
+    // #1006 — compute over the trailing 30 days from `outages` instead of copying `entry.uptime`, which
+    // is the page's own aggregate over ITS period (these pages declare `maxUptimeDays: 90`). Every source
+    // now produces a 30-day figure with the same weighting, which is what makes the ranking a ranking.
+    if (!Array.isArray(entry.outages)) {
+      return warnNextUptimeShape(componentName, 'componentsUptime entry carries no outages array')
+    }
+    const windowStart = nowMs - windowDays * 86_400_000
+    // Collect (from, to, weight); the shared accumulator clamps an OPEN outage (`to` null → NaN) to now
+    // and merges overlaps (worst-weight-wins) so an escalation isn't summed on top of itself.
+    const intervals: OutageInterval[] = []
+    for (const outage of entry.outages) {
+      // Instatus states the impact fraction itself on a partial outage (`customImpactPercentage: 50`) —
+      // use the provider's own number when they give it, and fall back to our documented weights when
+      // they don't. Their figure is strictly better evidence than our 0.3 default.
+      const weight = outage.isCustomPercentage && typeof outage.customImpactPercentage === 'number'
+        ? outage.customImpactPercentage / 100
+        : instatusSeverityWeight(String(outage.status ?? ''))
+      if (weight === 0) continue
+      intervals.push({ start: Date.parse(outage.from ?? ''), end: Date.parse(outage.to ?? ''), weight })
+    }
+    const weightedSec = weightedDowntimeSeconds(intervals, windowStart, nowMs)
+    return Math.max(0, Math.floor((1 - weightedSec / (windowDays * 86_400)) * 10000) / 100)
   } catch (err) {
     console.warn('[parseInstatusNextUptime] failed:', err instanceof Error ? err.message : err)
     return null
   }
+}
+
+interface InstatusNextUptimeEntry {
+  uptime?: string | number
+  outages?: Array<{
+    from?: string
+    to?: string
+    status?: string
+    customImpactPercentage?: number | null
+    isCustomPercentage?: boolean
+  }>
 }
 
 export function parseInstatusIncidents(html: string): Incident[] {

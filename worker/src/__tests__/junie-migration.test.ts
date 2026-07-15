@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { SERVICES, filterIncidents, fetchService } from '../services'
-import { attachIncidentIoComponentNames, parseIncidentIoIncidentComponentIds, parseIncidentIoUptime } from '../parsers/incident-io'
+import { attachIncidentIoComponentNames, computeIncidentIoUptime, parseIncidentIoIncidentComponentIds } from '../parsers/incident-io'
 import { isProbeFailing, PROBE_TARGETS } from '../probe'
 import { STATUS_URL } from '../../../src/utils/statusPageUrls'
 import type { Incident } from '../types'
@@ -178,11 +178,15 @@ describe('junie incidents survive filterIncidents on the incident.io feed (#1004
 })
 
 describe('junie uptime is reachable through the configured id (#857 shape)', () => {
-  it('the configured incidentIoComponentId resolves a component_uptimes value', () => {
-    // Guards the "right host, uptime silently null" failure — the #857 class. It cannot prove the ULID
-    // still matches the LIVE page; that is what the production verify-after assert is for.
-    const pct = parseIncidentIoUptime(pageHtml([], [uptimeEntry(junie.incidentIoComponentId as string, '99.87')]), junie.incidentIoComponentId!)
-    expect(pct).toBe(99.87)
+  it('the configured incidentIoComponentId resolves a computed uptime, and reports its SHORT window', () => {
+    // Guards the "right host, uptime silently null" failure — the #857 class. #1006 — the figure is now
+    // computed from component_impacts, and junie's component was created on 2026-07-09 (the migration),
+    // so it reports the days it actually covers instead of passing a few days off as 30.
+    const now = Date.parse('2026-07-15T00:00:00Z')
+    const out = computeIncidentIoUptime(
+      pageHtml([], [uptimeEntry(junie.incidentIoComponentId as string, '100.00')]), junie.incidentIoComponentId!, now,
+    )
+    expect(out).toEqual({ pct: 100, days: 5 })
   })
 })
 

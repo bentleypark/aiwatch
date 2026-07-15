@@ -3,6 +3,7 @@
 import type { Incident, TimelineEntry } from '../types'
 import { formatDuration } from '../utils'
 import { MAINTENANCE_TITLE } from './betterstack'
+import { weightedDowntimeSeconds, type OutageInterval } from './uptime-interval'
 
 /**
  * Extract the flat data array from OnlineOrNot's React Router SSR HTML.
@@ -161,27 +162,38 @@ export function parseOnlineOrNotIncidents(html: string): Incident[] {
 }
 
 /**
- * Parse uptime percentage for a specific component from OnlineOrNot HTML.
- * Searches within [-10, +20] indices of the component name for a decimal value.
- * Window is asymmetric because uptime data typically follows the component name.
- * Returns uptime as a percentage (e.g., 99.89) or null.
+ * #1006 — OnlineOrNot uptime, COMPUTED over the trailing 30 days from the page's own incident records.
+ *
+ * The page publishes an aggregate % (e.g. "100% uptime"), but its own SSR payload also carries every
+ * incident with `started` / `ended` / `impact` — the same start/end/severity shape incident.io exposes
+ * — and `parseOnlineOrNotIncidents` already extracts them. So we compute here with the same window and
+ * the same weights as every other source (/methodology), instead of reading an aggregate over the page's
+ * unknown period. `parseOnlineOrNotIncidents` maps impact → 'major' | 'minor' | null; we weight
+ * major = 1.0, minor = 0.3, null (informational) = 0. An unresolved incident is counted to `now`.
+ *
+ * Returns 100 when the page is a valid OnlineOrNot page with no qualifying downtime (a clean 30 days),
+ * and null only when the payload has no incident structure at all (so a non-OnlineOrNot page — or a
+ * shape change — reads as "no official uptime" rather than a fabricated 100%).
  */
-export function parseOnlineOrNotUptime(html: string, componentName: string): number | null {
+export function computeOnlineOrNotUptime(html: string, nowMs: number = Date.now(), windowDays = 30): number | null {
   const data = extractData(html)
   if (!data) return null
+  // The page must actually be an OnlineOrNot status page: its loader data names the incident-shape keys
+  // (`title` + `started`). Without this guard a random page with no incidents would read as a clean 100%
+  // rather than "no official uptime".
+  if (!data.includes('title') || !data.includes('started')) return null
 
-  for (let i = 0; i < data.length; i++) {
-    if (data[i] === componentName) {
-      for (let j = Math.max(0, i - 10); j < Math.min(data.length, i + 20); j++) {
-        const val = data[j]
-        if (typeof val === 'string' && /^[01]\.\d+$/.test(val)) {
-          const parsed = parseFloat(val)
-          if (parsed >= 0 && parsed <= 1) {
-            return Math.round(parsed * 10000) / 100
-          }
-        }
-      }
-    }
-  }
-  return null
+  const incidents = parseOnlineOrNotIncidents(html)
+  const windowStart = nowMs - windowDays * 86_400_000
+  const windowSec = windowDays * 86_400
+  // Collect (start, end, weight) and let the shared accumulator clamp open incidents to now and merge
+  // overlaps (worst-weight-wins) so two concurrent incidents on the service aren't double-counted.
+  const intervals: OutageInterval[] = incidents.map((inc) => ({
+    start: Date.parse(inc.startedAt),
+    end: inc.resolvedAt ? Date.parse(inc.resolvedAt) : null, // open incident → clamped to now
+    weight: inc.impact === 'major' || inc.impact === 'critical' ? 1.0 : inc.impact === 'minor' ? 0.3 : 0,
+  }))
+  const weightedSec = weightedDowntimeSeconds(intervals, windowStart, nowMs)
+  // Floor, like every other source — never round 99.998% up to a clean 100%.
+  return Math.max(0, Math.floor((1 - weightedSec / windowSec) * 10000) / 100)
 }

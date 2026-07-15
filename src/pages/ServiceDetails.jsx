@@ -909,7 +909,23 @@ export default function ServiceDetails({ serviceId }) {
             : service.uptime30d != null ? `${service.uptime30d.toFixed(2)}%` : '—'}
           sub={isUnreliableData
             ? t(noOfficialUptimeFlag ? 'uptime.noOfficial' : 'uptime.unavailable')
-            : t({ official: 'uptime.sub.official', platform_avg: 'uptime.sub.platform_avg' }[service.uptimeSource] ?? 'uptime.unavailable')}
+            // #1006 — when the provider's records don't reach back 30 days (a status-page migration
+            // creates a NEW component and resets its clock), say which window the figure covers instead
+            // of passing a 4-day number off as a 30-day one.
+            // #1006 — a short window (a status-page migration resets the provider's component clock) is
+            // stated instead of passing a few days off as 30.
+            : service.uptimeWindowDays != null
+              ? t('uptime.sub.official.partial').replace('{d}', String(service.uptimeWindowDays))
+              // #1006 — whenever our computed figure differs from the number the provider/platform
+              // publishes, show theirs beside ours (with its period). Applies to BOTH computed sources —
+              // 'official' (provider records) and 'platform_avg' (Better Stack monitors) — since both now
+              // carry `uptimeReported`. #41 built AIWatch to reproduce the provider's number; we no longer
+              // use it as the metric, but we don't hide it.
+              : service.uptimeReported != null
+                ? (service.uptimeReportedDays != null
+                    ? t('uptime.compare.reported.days').replace('{v}', service.uptimeReported.toFixed(2)).replace('{d}', String(service.uptimeReportedDays))
+                    : t('uptime.compare.reported').replace('{v}', service.uptimeReported.toFixed(2)))
+                : t({ official: 'uptime.sub.official', platform_avg: 'uptime.sub.platform_avg' }[service.uptimeSource] ?? 'uptime.unavailable')}
           colorClass="text-[var(--green)]"
         />
         <MetricCard

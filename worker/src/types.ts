@@ -84,7 +84,32 @@ export interface ServiceStatus {
   // UTC-vs-local off-by-one; #693 follow-up). buildCalendarFromIncidents handles both key forms.
   dailyImpact?: Record<string, DailyImpactLevel>
   calendarDays?: number
-  uptimeSource?: 'official' | 'platform_avg' // #713 — 'estimate' removed; no invented uptime
+  /** Where `uptime30d` came from — the reader MUST know, because they are not the same kind of number.
+   *  #713 — 'estimate' removed; no invented uptime.
+   *  #1006 —
+   *    'official'      → AIWatch's OWN computation over the trailing 30 days, from the provider's
+   *                      published per-day / impact records, with the weights on /methodology. Atlassian,
+   *                      incident.io, Instatus and Flashduty — every source that publishes raw records.
+   *    'platform_avg'  → the same 30-day AIWatch computation, but over BetterStack's OWN monitoring
+   *                      history (`status_history`) rather than the provider's incident declarations, and
+   *                      averaged across the page's resources. Same window and same weights as 'official';
+   *                      the label survives because the EVIDENCE differs — an active monitor's downtime
+   *                      is not the provider saying "we had an incident". */
+  uptimeSource?: 'official' | 'platform_avg'
+  /** #1006 — the % the PROVIDER displays on its own status page, when AIWatch's own 30-day figure differs
+   *  from it (Atlassian: their ~90-day window; incident.io: their published aggregate). A disclosure, not
+   *  the metric: #41 deliberately reproduced the provider's number, so the detail page shows it beside
+   *  ours instead of dropping it. Absent when the two agree, or when there is nothing to compare. */
+  uptimeReported?: number
+  /** #1006 — the period `uptimeReported` covers, when we know it (Atlassian: the ~90 days its page
+   *  embeds and shows a desktop visitor). Absent for incident.io, whose pages publish an aggregate
+   *  without stating its window. */
+  uptimeReportedDays?: number
+  /** #1006 — days the uptime figure actually covers, when the provider's records don't reach back the
+   *  full 30 (a status-page migration creates a NEW component and resets its clock — #1004/junie: 6
+   *  days). ABSENT when the window is whole, which is the normal case. The UI states the real window
+   *  rather than passing a short one off as a 30-day figure. */
+  uptimeWindowDays?: number
   detectedAt?: string
   /** BetterStack only: count of resources reporting a real issue (degraded/downtime)
    *  while the service stays operational under the <30% threshold (#447). UI shows a
@@ -228,7 +253,12 @@ export interface ServiceConfig {
   // The tuple forbids `[]`, which would be silently truthy: it passes the `needsHtml` gate, runs the
   // parser over zero ids, and yields null — reinstating the exact silent uptime drop #857 fixed.
   incidentIoComponentId?: string | [string, ...string[]]
-  incidentIoGroupId?: string       // incident.io group uptime (e.g. "APIs" aggregate)
+  /** #367 → #1006 — the incident.io GROUP aggregate id (e.g. OpenAI's "APIs" group). Its role changed:
+   *  it no longer feeds `uptime30d` (that is computed from component_impacts over a common 30 days now).
+   *  It identifies the number the page actually DISPLAYS for this service — status.openai.com shows the
+   *  group figure (APIs 99.97%), not the member component's (API 100.00%) — so `uptimeReported` reads it
+   *  and the detail page can put the provider's own number beside ours. Omit when the page has no group. */
+  incidentIoGroupId?: string
   betterStackUrl?: string
   onlineOrNotUrl?: string
   onlineOrNotComponent?: string

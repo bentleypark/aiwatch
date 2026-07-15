@@ -340,23 +340,26 @@ ${consentInitScript(nonce)}
 <section class="section" id="uptime">
   <p class="section-label">// 03</p>
   <h2 data-i18n="s3.title">Uptime</h2>
-  <p class="lead" data-i18n="s3.lead">Uptime%는 출처에 따라 두 가지 방식으로 나뉩니다.</p>
+  <p class="lead" data-i18n="s3.lead">Uptime은 <strong>제공사가 공개한 장애 기록을 AIWatch가 직접 30일치로 계산</strong>합니다. 제공사가 자기 페이지에 표시하는 값을 그대로 쓰지는 않습니다 — 그 값은 페이지마다 집계 기간(30·60·90일)이 다르고, 어떤 상태를 다운타임으로 볼지도 달라서 서비스끼리 비교할 수 없기 때문입니다. <strong>모든 서비스가 같은 30일, 같은 가중 방식입니다.</strong></p>
+  <p data-i18n="s3.why30"><strong>왜 30일로 맞추나.</strong> 제공사마다 uptime 집계 기간이 30일·60일·90일로 제각각입니다. 기간이 다르면 서비스끼리 비교할 수 없으니, AIWatch가 30일로 통일해 계산합니다. AIWatch Score의 나머지 항목(인시던트·복구)도 같은 30일치로 계산합니다.</p>
   <ul>
-    <li><strong data-i18n="s3.official">Official</strong> <span data-i18n="s3.officialDesc">— 상태 페이지가 공개한 %를 그대로 읽습니다(페이지마다 집계 기간이 다름).</span></li>
-    <li><strong data-i18n="s3.platform">Platform</strong> <span data-i18n="s3.platformDesc">— 상태 페이지 플랫폼(Better Stack)이 자체 모니터로 측정한 가동률 (Together · Fireworks · HuggingFace · Modal · Luma). 제공사 공식 SLA가 아닌 플랫폼 측정치입니다.</span></li>
+    <li><strong data-i18n="s3.official">Official</strong> <span data-i18n="s3.officialDesc">— 제공사 상태 페이지가 공개한 <strong>일별 장애 기록·장애 구간</strong>으로 AIWatch가 <strong>최근 30일치</strong>를 직접 계산합니다(30개 서비스). 우리 숫자가 제공사 페이지의 숫자와 다를 수 있습니다. <strong>감추지 않습니다</strong> — 제공사가 발표한 값이 우리 계산과 다르면 서비스 상세 페이지에 <strong>그 값을 집계 기간과 함께 나란히</strong> 보여드립니다. 상태 페이지에 uptime %를 공개하지 않는 서비스(ElevenLabs · Replicate · Stability)는 비교할 값이 없어 우리 계산값만 보여줍니다. 제공사 기록이 30일에 못 미치면(상태 페이지를 옮긴 경우 등) 실제 며칠치인지 밝힙니다.</span></li>
+    <li><strong data-i18n="s3.platform">Platform</strong> <span data-i18n="s3.platformDesc">— 같은 30일, 같은 가중 방식으로 계산하지만 <strong>근거가 다릅니다</strong> (Together · Fireworks · HuggingFace · Modal · Luma · Helicone). 이 6개 서비스의 상태 페이지는 Better Stack이 운영하며, 장애 기록이 <strong>제공사의 인시던트 선언이 아니라 Better Stack 모니터가 직접 측정한 다운타임</strong>입니다. 제공사가 보증하는 SLA가 아니라는 뜻이라 라벨을 구분합니다.</span></li>
   </ul>
-  <p data-i18n="s3.weighted"><strong>Atlassian 가중 영향 일수:</strong> 다운타임은 단순 인시던트 건수가 아니라, 각 날짜를 그날의 가장 심각한 영향도로 가중한 "영향 일수"로 집계합니다 — critical · major = 1.0, minor = 0.3, 정보성/null = 제외. uptime과 score 모두 같은 가중 방식을 씁니다.</p>
+  <p data-i18n="s3.weighted"><strong>장애 시간 가중 집계:</strong> 다운타임은 인시던트 건수가 아니라 <strong>영향받은 시간</strong>으로 셉니다. 심각도에 따라 전면 장애는 1.0, 부분 장애·성능 저하는 0.3으로 가중하고, 정보성 공지와 <strong>사전 공지된 정기 점검은 빼줍니다</strong>(미리 알린 점검까지 감점할 이유는 없습니다). uptime과 Score가 같은 방식을 씁니다. 모든 서비스에 같은 기간과 같은 기준을 적용하다 보니, 우리 숫자가 제공사 페이지의 숫자와 다를 수 있습니다.</p>
+  <p class="note" data-i18n="s3.incidentGap">인시던트 건수와 uptime은 서로 다를 수 있습니다. 일부 제공사는 짧은 성능 저하를 <strong>가용성 기록에는 남기되 별도 인시던트로는 발행하지 않습니다</strong>(예: fal · Hugging Face의 수분~1시간 degraded). uptime은 그 실제 다운타임 시간을 반영하므로, "최근 인시던트 없음"인데도 uptime이 100%보다 낮게 나올 수 있습니다 — 제공사가 공식 발표하지 않았을 뿐 장애는 실제로 있었기 때문입니다.</p>
 
   <div class="limits">
     <div class="limits-label">⚠ <span data-i18n="s3.limits.label">측정 한계와 그 이유</span></div>
-    <p data-i18n="s3.limits.intro">아래 서비스는 공식 상태 페이지에 비교 가능한 30일 롤링 uptime%가 없습니다. 임의로 추측해 채우는 대신 "— Not provided"로 명확히 표시합니다.</p>
+    <p data-i18n="s3.limits.intro">아래 서비스는 상태 페이지에 <strong>계산할 장애 기록 자체가 없습니다</strong>. 임의로 추측해 채우지 않고 "— Not provided"로 표시하며, 인시던트와 복구 시간만으로 점수를 냅니다.</p>
     <div class="tbl-wrap">
       <table class="tbl">
         <thead><tr><th data-i18n="s3.limits.col1">서비스</th><th data-i18n="s3.limits.col2">측정 불가 사유</th></tr></thead>
         <tbody>
           <tr><td>Amazon Bedrock · Azure OpenAI</td><td data-i18n="s3.limits.estimate">공식 롤링 uptime% 미공개 — 인시던트 피드만 존재</td></tr>
-          <tr><td>Gemini · OpenRouter · Deepgram</td><td data-i18n="s3.limits.norolling">상태 페이지가 비교 가능한 롤링 30일 % 미노출</td></tr>
+          <tr><td>Gemini · Deepgram</td><td data-i18n="s3.limits.norolling">상태 페이지가 비교 가능한 롤링 30일 % 미노출</td></tr>
           <tr><td>xAI</td><td data-i18n="s3.limits.xai">재시작 이후 엔드포인트별 성공률만 노출 — 30일 수치와 비교 불가</td></tr>
+          <tr><td>Character.AI</td><td data-i18n="s3.limits.deadsource">공식 상태 페이지가 비활성화됨 — 읽을 기록이 없음 (API는 직접 probe로 확인)</td></tr>
         </tbody>
       </table>
     </div>
@@ -480,7 +483,7 @@ ${consentInitScript(nonce)}
   <!-- No uptime data -->
   <div class="subscore">
     <h3 data-i18n="s4.noUptime.title">Uptime 미제공 서비스</h3>
-    <p data-i18n="s4.noUptime.desc">일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 가정값을 넣지 않고 uptime 컴포넌트(40점)를 제외한 뒤 나머지 가용 컴포넌트만으로 100점 환산합니다. probe가 있는 서비스(Gemini·xAI·OpenRouter 등)는 인시던트·복구·응답성으로 점수를 산정해 랭킹에 포함합니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.</p>
+    <p data-i18n="s4.noUptime.desc">일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 가정값을 넣지 않고 uptime 컴포넌트(40점)를 제외한 뒤 나머지 가용 컴포넌트만으로 100점 환산합니다. probe가 있는 서비스(Gemini·xAI 등)는 인시던트·복구·응답성으로 점수를 산정해 랭킹에 포함합니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.</p>
     <div class="formula">Score = (가용 컴포넌트 점수 합) / (가용 컴포넌트 max 합) × 100 <span class="fl-sub">— uptime 40점 제외</span></div>
   </div>
 
@@ -567,16 +570,19 @@ const i18n = {
     's2.partial': '<strong>Partial</strong>은 다중 컴포넌트 서비스(Better Stack 기반 — Together · Fireworks · HuggingFace · Modal · Luma)에서 전체 서비스는 정상이지만 일부 컴포넌트(예: 특정 모델)만 영향받은 중간 상태입니다. 서비스 전체를 \\'degraded\\'로 격상시키지는 않되, 영향받은 컴포넌트의 실제 장애는 uptime · 인시던트 집계를 통해 AIWatch Score · 랭킹에 그대로 반영됩니다.',
     's2.note': '규칙의 전체 순서와 각 규칙의 근거는 오픈소스 저장소의 <a href="https://github.com/bentleypark/aiwatch/blob/main/docs/reference/status-determination.md" target="_blank" rel="noopener">status-determination 문서</a>에 공개되어 있습니다.',
     's3.title': 'Uptime',
-    's3.lead': 'Uptime%는 출처에 따라 두 가지 방식으로 나뉩니다.',
-    's3.official': 'Official', 's3.officialDesc': '— 상태 페이지가 공개한 %를 그대로 읽습니다(페이지마다 집계 기간이 다름).',
-    's3.platform': 'Platform', 's3.platformDesc': '— 상태 페이지 플랫폼(Better Stack)이 자체 모니터로 측정한 가동률 (Together · Fireworks · HuggingFace · Modal · Luma). 제공사 공식 SLA가 아닌 플랫폼 측정치입니다.',
-    's3.weighted': '<strong>Atlassian 가중 영향 일수:</strong> 다운타임은 단순 인시던트 건수가 아니라, 각 날짜를 그날의 가장 심각한 영향도로 가중한 "영향 일수"로 집계합니다 — critical · major = 1.0, minor = 0.3, 정보성/null = 제외. uptime과 score 모두 같은 가중 방식을 씁니다.',
+    's3.lead': 'Uptime은 <strong>제공사가 공개한 장애 기록을 AIWatch가 직접 30일치로 계산</strong>합니다. 제공사가 자기 페이지에 표시하는 값을 그대로 쓰지는 않습니다 — 그 값은 페이지마다 집계 기간(30·60·90일)이 다르고, 어떤 상태를 다운타임으로 볼지도 달라서 서비스끼리 비교할 수 없기 때문입니다. <strong>모든 서비스가 같은 30일, 같은 가중 방식입니다.</strong>',
+    's3.why30': '<strong>왜 30일로 맞추나.</strong> 제공사마다 uptime 집계 기간이 30일·60일·90일로 제각각입니다. 기간이 다르면 서비스끼리 비교할 수 없으니, AIWatch가 30일로 통일해 계산합니다. AIWatch Score의 나머지 항목(인시던트·복구)도 같은 30일치로 계산합니다.',
+    's3.official': 'Official', 's3.officialDesc': '— 제공사 상태 페이지가 공개한 <strong>일별 장애 기록·장애 구간</strong>으로 AIWatch가 <strong>최근 30일치</strong>를 직접 계산합니다(30개 서비스). 우리 숫자가 제공사 페이지의 숫자와 다를 수 있습니다. <strong>감추지 않습니다</strong> — 제공사가 발표한 값이 우리 계산과 다르면 서비스 상세 페이지에 <strong>그 값을 집계 기간과 함께 나란히</strong> 보여드립니다. 상태 페이지에 uptime %를 공개하지 않는 서비스(ElevenLabs · Replicate · Stability)는 비교할 값이 없어 우리 계산값만 보여줍니다. 제공사 기록이 30일에 못 미치면(상태 페이지를 옮긴 경우 등) 실제 며칠치인지 밝힙니다.',
+    's3.platform': 'Platform', 's3.platformDesc': '— 같은 30일, 같은 가중 방식으로 계산하지만 <strong>근거가 다릅니다</strong> (Together · Fireworks · HuggingFace · Modal · Luma · Helicone). 이 6개 서비스의 상태 페이지는 Better Stack이 운영하며, 장애 기록이 <strong>제공사의 인시던트 선언이 아니라 Better Stack 모니터가 직접 측정한 다운타임</strong>입니다. 제공사가 보증하는 SLA가 아니라는 뜻이라 라벨을 구분합니다.',
+    's3.weighted': '<strong>장애 시간 가중 집계:</strong> 다운타임은 인시던트 건수가 아니라 <strong>영향받은 시간</strong>으로 셉니다. 심각도에 따라 전면 장애는 1.0, 부분 장애·성능 저하는 0.3으로 가중하고, 정보성 공지와 <strong>사전 공지된 정기 점검은 빼줍니다</strong>(미리 알린 점검까지 감점할 이유는 없습니다). uptime과 Score가 같은 방식을 씁니다. 모든 서비스에 같은 기간과 같은 기준을 적용하다 보니, 우리 숫자가 제공사 페이지의 숫자와 다를 수 있습니다.',
+    's3.incidentGap': '인시던트 건수와 uptime은 서로 다를 수 있습니다. 일부 제공사는 짧은 성능 저하를 <strong>가용성 기록에는 남기되 별도 인시던트로는 발행하지 않습니다</strong>(예: fal · Hugging Face의 수분~1시간 degraded). uptime은 그 실제 다운타임 시간을 반영하므로, "최근 인시던트 없음"인데도 uptime이 100%보다 낮게 나올 수 있습니다 — 제공사가 공식 발표하지 않았을 뿐 장애는 실제로 있었기 때문입니다.',
     's3.limits.label': '측정 한계와 그 이유',
-    's3.limits.intro': '아래 서비스는 공식 상태 페이지에 비교 가능한 30일 롤링 uptime%가 없습니다. 임의로 추측해 채우는 대신 "— Not provided"로 명확히 표시합니다.',
+    's3.limits.intro': '아래 서비스는 상태 페이지에 <strong>계산할 장애 기록 자체가 없습니다</strong>. 임의로 추측해 채우지 않고 "— Not provided"로 표시하며, 인시던트와 복구 시간만으로 점수를 냅니다.',
     's3.limits.col1': '서비스', 's3.limits.col2': '측정 불가 사유',
     's3.limits.estimate': '공식 롤링 uptime% 미공개 — 인시던트 피드만 존재',
     's3.limits.norolling': '상태 페이지가 비교 가능한 롤링 30일 % 미노출',
     's3.limits.xai': '재시작 이후 엔드포인트별 성공률만 노출 — 30일 수치와 비교 불가',
+    's3.limits.deadsource': '공식 상태 페이지가 비활성화됨 — 읽을 기록이 없음 (API는 직접 probe로 확인)',
     's4.title': 'AIWatch Score',
     's4.intro': 'AIWatch Score는 uptime, 인시던트 영향 일수, 복구 시간, (probe 대상 API 서비스의 경우) 응답성을 종합한 0~100점 신뢰도 지표입니다. 30일 데이터를 기준으로 합니다.',
     's4.formulaStr': 'AIWatch Score = Uptime + Incidents + Recovery + Responsiveness',
@@ -596,7 +602,7 @@ const i18n = {
     's4.resp.naFormula': 'probe-less: base 80 → 100 환산',
     's4.resp.insufficient': '새로 추가된 probe 대상 서비스는 7일치 데이터가 쌓이기 전까지 5% 페널티를 적용합니다.',
     's4.noUptime.title': 'Uptime 미제공 서비스',
-    's4.noUptime.desc': '일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 가정값을 넣지 않고 uptime 컴포넌트(40점)를 제외한 뒤 나머지 가용 컴포넌트만으로 100점 환산합니다. probe가 있는 서비스(Gemini·xAI·OpenRouter 등)는 인시던트·복구·응답성으로 점수를 산정해 랭킹에 포함합니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.',
+    's4.noUptime.desc': '일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 가정값을 넣지 않고 uptime 컴포넌트(40점)를 제외한 뒤 나머지 가용 컴포넌트만으로 100점 환산합니다. probe가 있는 서비스(Gemini·xAI 등)는 인시던트·복구·응답성으로 점수를 산정해 랭킹에 포함합니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.',
     's4.grades.title': '등급 기준',
     's5.title': '레이턴시 (Probe RTT)',
     's5.lead': '32개 AI 서비스의 API 엔드포인트를 Cloudflare Workers 엣지에서 5분 간격으로 직접 측정합니다. p50 / p75 / p95 분위수를 산출합니다.',
@@ -649,16 +655,19 @@ const i18n = {
     's2.partial': '<strong>Partial</strong> is an intermediate state for multi-component services (Better Stack — Together · Fireworks · HuggingFace · Modal · Luma) where the overall service is operational but some components (e.g. a specific model) report issues. It does not escalate the whole service to \\'degraded\\', but the affected component\\'s real outage is still reflected in the AIWatch Score &amp; ranking through the uptime &amp; incident aggregation.',
     's2.note': 'The full ordered rules and the rationale for each are published in the open-source <a href="https://github.com/bentleypark/aiwatch/blob/main/docs/reference/status-determination.md" target="_blank" rel="noopener">status-determination reference</a>.',
     's3.title': 'Uptime',
-    's3.lead': 'Uptime% comes from one of two source types.',
-    's3.official': 'Official', 's3.officialDesc': '— read directly from the % the status page publishes (window varies by page).',
-    's3.platform': 'Platform', 's3.platformDesc': '— uptime measured by the status-page platform\\\'s own monitors (Better Stack) — a platform measurement, not the provider\\\'s official SLA (Together · Fireworks · HuggingFace · Modal · Luma).',
-    's3.weighted': '<strong>Atlassian-weighted affected days:</strong> downtime is counted not as raw incident count but as "affected days," where each day is weighted by its worst impact — critical · major = 1.0, minor = 0.3, informational/null = excluded. Uptime and the Score share the same weighting.',
+    's3.lead': 'Uptime is <strong>computed by AIWatch over a 30-day window from the incident and outage records the provider publishes</strong>. We do not copy the % a provider shows on its own page — those use different periods (30, 60 or 90 days) and different definitions of downtime, so they cannot be compared across services. <strong>Every service is on the same 30 days with the same weighting.</strong>',
+    's3.why30': '<strong>Why 30 days.</strong> Providers report uptime over different periods — 30, 60 or 90 days. Figures over different periods cannot be compared, so AIWatch computes every one of them over the same 30 days. The Score uses that same period for its other components (incidents, recovery).',
+    's3.official': 'Official', 's3.officialDesc': '— computed by AIWatch over the <strong>trailing 30 days</strong> from the <strong>per-day and component-impact records</strong> the provider publishes on its status page (30 services). We do not copy the % the page itself displays: those figures use different periods (30, 60 or 90 days) and different definitions of downtime from page to page, so they cannot be compared across services. <strong>We do not hide them either.</strong> Whenever the provider figure differs from ours, the service page shows it <strong>next to ours, with the period it covers</strong>. A few status pages publish no percentage at all (ElevenLabs, Replicate, Stability) — there is nothing to compare against, so only our figure appears. And when a provider does not have 30 days of records (after moving its status page, say), we state how many days it does cover.',
+    's3.platform': 'Platform', 's3.platformDesc': '— computed over the same 30 days with the same weights, but from <strong>different evidence</strong> (Together · Fireworks · HuggingFace · Modal · Luma · Helicone). These six status pages are run by Better Stack, and their outage records are <strong>downtime measured by Better Stack monitors</strong>, not incidents the provider declared. That is not the provider vouching for an SLA, so we label it separately.',
+    's3.weighted': '<strong>Weighted impact time:</strong> downtime is counted not as raw incident count but as affected time weighted by severity — full outage (critical · major) = 1.0, partial outage and degraded performance (minor) = 0.3, informational = excluded, and <strong>announced maintenance = excluded</strong> (we do not penalise a provider for announcing a window). Uptime and the Score share the same weighting. Our figure can differ from the one on a provider\\'s own page — that is the consequence of applying one window and one definition to every service.',
+    's3.incidentGap': 'Incident COUNT and uptime can differ. Some providers log a brief degradation in their availability record but <strong>never publish it as a formal incident</strong> (fal and Hugging Face have shown minutes-to-an-hour degradations this way). Uptime reflects that real downtime, so a service can read below 100% even with no recent incidents listed — the outage was real, the provider just did not announce it.',
     's3.limits.label': 'Coverage & limits — what we can\\\'t measure and why',
     's3.limits.intro': 'These services\\\' status pages do not expose a comparable rolling 30-day uptime %. We never fill it with a guess — they show "— Not provided".',
     's3.limits.col1': 'Service', 's3.limits.col2': 'Reason',
     's3.limits.estimate': 'No official rolling uptime — incident feed only',
     's3.limits.norolling': 'Status page exposes no comparable rolling-30d %',
     's3.limits.xai': 'Exposes a since-restart per-endpoint success rate — not comparable to a 30-day figure',
+    's3.limits.deadsource': 'Official status page deactivated — no records to read (the API is checked by direct probe instead)',
     's4.title': 'AIWatch Score',
     's4.intro': 'AIWatch Score is a composite 0–100 reliability metric combining uptime, incident affected days, recovery time, and (for probed API services) responsiveness. It is based on 30-day data.',
     's4.formulaStr': 'AIWatch Score = Uptime + Incidents + Recovery + Responsiveness',
@@ -678,7 +687,7 @@ const i18n = {
     's4.resp.naFormula': 'probe-less: rescale base 80 → 100',
     's4.resp.insufficient': 'Newly added probed services receive a 5% penalty until 7 days of probe data accumulate.',
     's4.noUptime.title': 'Services without uptime data',
-    's4.noUptime.desc': 'Some services (Gemini, xAI, Bedrock, etc.) publish no official uptime. We assume no value — the 40-point uptime component is dropped and the score is rescaled over the remaining available components. Services that ARE probed (Gemini, xAI, OpenRouter, etc.) are scored on incidents + recovery + responsiveness and included in the ranking. Services with no probe either (Bedrock, Azure OpenAI) have only incidents + recovery left as signals — too thin for a trustworthy score, so we publish no score for them and provide incident tracking only.',
+    's4.noUptime.desc': 'Some services (Gemini, xAI, Bedrock, etc.) publish no official uptime. We assume no value — the 40-point uptime component is dropped and the score is rescaled over the remaining available components. Services that ARE probed (Gemini, xAI, etc.) are scored on incidents + recovery + responsiveness and included in the ranking. Services with no probe either (Bedrock, Azure OpenAI) have only incidents + recovery left as signals — too thin for a trustworthy score, so we publish no score for them and provide incident tracking only.',
     's4.grades.title': 'Grade thresholds',
     's5.title': 'Latency (Probe RTT)',
     's5.lead': 'We measure the API endpoints of 32 AI services directly from the Cloudflare Workers edge every 5 minutes, producing p50 / p75 / p95 percentiles.',

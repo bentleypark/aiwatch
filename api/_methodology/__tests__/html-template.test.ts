@@ -88,9 +88,10 @@ describe('renderMethodologyPage', () => {
   })
 
   it('surfaces the "what we cannot measure" transparency table (the moat)', () => {
-    // the no-rolling-uptime services must be named with the honest "Not provided" treatment
-    // Mistral + Perplexity were removed once their Instatus pages exposed official rolling uptime.
-    for (const svc of ['Bedrock', 'Azure', 'Gemini', 'OpenRouter', 'xAI', 'Deepgram']) {
+    // the no-uptime-records services must be named with the honest "Not provided" treatment.
+    // Mistral + Perplexity were removed once their Instatus pages were read (#1006); OpenRouter followed
+    // once AIWatch computed its uptime from the OnlineOrNot incident records (#1006).
+    for (const svc of ['Bedrock', 'Azure', 'Gemini', 'xAI', 'Deepgram', 'Character']) {
       expect(html, `limits table should name ${svc}`).toContain(svc)
     }
     expect(html).toMatch(/Not provided|not provided|미제공|제공.*않/)

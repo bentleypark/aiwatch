@@ -34,7 +34,7 @@ describe('parseUptimeData embed-format handling (#868)', () => {
   })
 
   it('returns null (no throw) when no uptimeData embed is present', () => {
-    expect(parseUptimeData('<html><body>no data here</body></html>', 'comp1')).toEqual({ dailyImpact: {}, uptimePercent: null })
+    expect(parseUptimeData('<html><body>no data here</body></html>', 'comp1')).toEqual({ dailyImpact: {}, uptimePercent: null, windowDays: null, uptimeReported: null, uptimeReportedDays: null })
   })
 
   it('returns null for a component id not present in the data (no throw)', () => {

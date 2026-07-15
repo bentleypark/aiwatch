@@ -1020,12 +1020,12 @@ describe('ChatGPT without statusComponentId (#292)', () => {
 
   it('config has incidentIoComponentId + incidentIoGroupId for uptime sourcing (#367)', () => {
     // Separate code path from the cross-contamination guard above: the dashboard
-    // uptime number comes from parseIncidentIoUptime, which needs an incident.io
-    // group/component to read from. Without these, chatgpt.uptime30d was null.
-    // The guard above checks statusComponent / statusComponentId only, so adding
+    // uptime is COMPUTED from that component's impact records (#1006 — the page's published ChatGPT
+    // group aggregate is gone with `incidentIoGroupId`: it is not a 30-day figure, and OpenAI's page
+    // excludes degraded/partial states from it entirely, so it was not comparable with any other
+    // service's number). The guard above checks statusComponent / statusComponentId only, so having
     // incidentIoComponentId here does NOT defeat #292.
     expect(chatgptConfig.incidentIoComponentId).toBe('01JMXBNJXGV1T5GT2M9XA83XNG')  // Conversations
-    expect(chatgptConfig.incidentIoGroupId).toBe('01K5H8S53SY1KMS4GQMNMZXTR1')      // ChatGPT group
   })
 
   it('keyword-matched ChatGPT incident → degraded', () => {
@@ -1120,11 +1120,10 @@ describe('OpenAI Codex without statusComponentId (#294)', () => {
     expect(codexConfig.incidentExclude).toEqual(['fedramp']) // #990 environment-scope veto only
     // incidentIoComponentId = Codex API (#301) — kept as fallback if the group
     // lookup ever fails. incidentIoGroupId = Codex group (#367) — primary uptime
-    // source, matching what OpenAI publishes on status.openai.com (Codex
-    // group aggregate ≈ 99.98%, vs the single Codex API component which read
-    // 100% and disagreed with the published number).
+    // source. #1006 — uptime is now COMPUTED from this component's impact records rather than read off
+    // the page's Codex-group aggregate (#367), which tracked a different window and downtime definition
+    // than every other service's number.
     expect(codexConfig.incidentIoComponentId).toBe('01KMP3KP5MGE23B80K1EK4S8PV')
-    expect(codexConfig.incidentIoGroupId).toBe('01KMKF9EBTCD8BN9PG8DJZXRSQ')
     expect(codexConfig.incidentKeywords).toContain('codex')
     expect(codexConfig.incidentKeywords).toContain('cli')
     expect(codexConfig.incidentKeywords).toContain('vs code')

@@ -58,7 +58,14 @@ export interface MonthlyIncidentEntry {
 
 export interface MonthlyServiceData {
   uptime: number | null          // AIWatch-measured uptime% from daily ok/total counters — feeds the Score (null if no data)
-  officialUptime: number | null  // #586 — status-page rolling-30d uptime (month-end daily snapshot, build-time fallback) for the "Official Uptime" DISPLAY table; separate from the daily-counter `uptime` that feeds the Score. #951 — emitted ONLY when the Score actually consumed an official uptime (scoreConfidence 'high'); null otherwise
+  officialUptime: number | null  // #586 — the rolling-30d official uptime (month-end daily snapshot, build-time fallback) for the "Official Uptime" DISPLAY table; separate from the daily-counter `uptime` that feeds the Score. #951 — emitted ONLY when the Score actually consumed an official uptime (scoreConfidence 'high'); null otherwise. #1006 — this is AIWatch's OWN computation over the provider's published records (one window + one formula for every service), NOT a copy of the % on the provider's page; the report's table caption must say so, and the old "the window varies by page — 30 or 90 days" caveat is now false
+  /** #1006 — WHERE the records `officialUptime` was computed from came from: 'official' = the provider's
+   *  own incident/outage records; 'platform_avg' = the status-page platform's own monitors (Better
+   *  Stack), which is a measurement rather than the provider declaring an incident. Both are AIWatch's
+   *  own 30-day computation with the same weights — only the evidence differs. Absent on archives written
+   *  before #1006, and on a service with no uptime at all. The report's "Uptime Source" column reads this
+   *  instead of inferring the taxonomy from a hand-maintained service list (which drifted, aiwatch#951). */
+  uptimeSource?: 'official' | 'platform_avg'
   score: number | null           // AIWatch Score at archive time (null if unavailable)
   grade: ScoreGrade | null       // Score grade (null if score unavailable)
   // #993 — Score computed over THIS CALENDAR MONTH (score.ts run on the month's incidents + monthly
@@ -1035,6 +1042,10 @@ export interface ArchiveScoreInput {
   // #951 — the confidence the Score was computed at. 'high' ⟺ an official uptime% was available and
   // the 40-pt uptime component was included. This is what gates `officialUptime` below.
   scoreConfidence?: ScoreConfidence | null
+  // #1006 — provenance of the uptime figure ('official' = the provider's own records; 'platform_avg' =
+  // the status-page platform's monitors). Carried into the archive so the report labels the source from
+  // the data rather than a hand-maintained list.
+  uptimeSource?: 'official' | 'platform_avg'
   // #586 hybrid — FALLBACK source for officialUptime: the live status-page rolling-30d uptime
   // (ServiceStatus.uptime30d) snapshotted from services:latest at archive-build time. The PRIMARY
   // source is computeMonthlyOfficialUptime (the month-end daily snapshot), which is month-accurate
@@ -1328,6 +1339,11 @@ export async function buildMonthlyArchive(
       // to the build-time services:latest snapshot (scoreData) for months with no daily snapshots.
       // #951 — but only when the Score itself consumed an official uptime, so display ≡ score.
       officialUptime: resolveArchiveOfficialUptime(officialUptimeMap[id], scoreSvc),
+      // #1006 — carry the provenance so the report can label Official vs Platform from the DATA rather
+      // than from a hand-maintained list. Only meaningful when a figure was actually archived.
+      ...(resolveArchiveOfficialUptime(officialUptimeMap[id], scoreSvc) != null && scoreSvc?.uptimeSource
+        ? { uptimeSource: scoreSvc.uptimeSource }
+        : {}),
       score: scoreSvc?.aiwatchScore ?? null,
       grade: scoreSvc?.scoreGrade ?? null,
       ...(scoreSvc?.scoreConfidence ? { scoreConfidence: scoreSvc.scoreConfidence } : {}),
