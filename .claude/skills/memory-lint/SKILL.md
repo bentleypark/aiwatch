@@ -28,6 +28,24 @@ time; without periodic linting it drifts. This is the **lint** operation of the 
    session invalidated (e.g. a file/flag it names no longer exists — verify against current code before flagging).
 5. **Redundant clusters** — near-duplicate pages on one topic (e.g. the #891 Phase 1 review/close/verify
    clusters) that should be merged into one, preserving each original's **Why**.
+6. **Decision-graph structure** (#967) — run `npm run lint:graph -- --github`. **The `--` is required**:
+   `npm run lint:graph --github` silently swallows the flag and runs the offline subset, which then
+   *passes* while skipping every liveness check. (`node scripts/lint-decision-graph.mjs --github` works
+   too.) It checks what is mechanical and refuses to guess at what is not:
+   - **edge grammar** — `bounds::` only on a `constraint_*` page and only ever targeting a decision page;
+     `constrains::` only on `decision_*`; `advances::` only on `initiative_*` (rule 1b); `blocks::` never
+     a wiki edge.
+   - **dead edges** (`--github`) — every `advances:: #N` resolves to an OPEN issue that is not a PR.
+   - **duplicate claims** — no issue is a slice of two initiatives.
+   - **dangling `[[wikilinks]]`** — over the WHOLE bundle, not just the graph pages: this is the only
+     mechanical version of check 2 (which is otherwise a prose instruction), so a broken link anywhere
+     is a hard finding here.
+   - **unclaimed candidates** (`--github`) — open `area:biz`/`area:marketing` issues that no initiative
+     claims. **A report, never a finding, and exit code 0.** Whether an issue advances an initiative is a
+     judgement; a lint that decides it manufactures false confidence. Read the list, decide, edit the page.
+
+   Structural findings exit non-zero. The lint cannot run in CI — the memory bundle is harness-global, so
+   Actions has nothing to check out — but its pure functions are CI-gated via `npm run test:scripts`.
 
 ## Output
 - Write a `YYYY-MM-DD lint: <n> findings (<summary>)` line to `memory/log.md`.

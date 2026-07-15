@@ -132,6 +132,20 @@ is the *procedure* — follow it top to bottom.
 12. **Close** — only after verification: `gh issue close N`. Unverified/not-yet-done items remain → keep the
     issue open with a label (`U3-someday`) whose **exit condition is written in the body** (e.g. "close when secrets set
     & data confirmed"). Never close immediately after merge.
+    - **Flip the initiative edge (#969).** If this issue advanced an Initiative, move its `advances:: #N`
+      to `delivered:: #N` on the `initiative_*` memory page — the one moment that fact becomes true.
+      `advances` means *pending*; a closed issue left on it is a lint finding. Add `(pin — why)` when the
+      delivered work still binds a future decision (e.g. it invalidates data a pending review will read).
+      Without this step the graph holds only backlog, and `strategy-review` must re-derive progress from
+      prose. Rules: [docs/reference/decision-graph.md](../../../docs/reference/decision-graph.md).
+      - **Flipping the edge is not enough — the prose goes stale too.** The lint checks edges, not
+        currency, so a `delivered::` can be correct while the `Next action` / `Inputs` / blocker prose
+        that framed the same issue as *pending* keeps lying. When you flip an edge, grep the page for that
+        issue number and retire any sentence that called it a blocker, a next action, or a precondition
+        — the resolution you just recorded made it moot. Same for a governing **Decision** that a closed
+        issue resolves: set its `Status:` and any child decision whose trigger was that review. (This gap
+        was hit on 2026-07-15: `delivered:: #547` landed, but the "#547·16 blocks the review" analysis
+        sat stale until the next review swept it.)
 
 ## Why this is a skill, not just CLAUDE.md
 CLAUDE.md loads once at session start and fades on long sessions / compaction, so its Development
