@@ -12,6 +12,25 @@ export interface Incident {
   status: 'investigating' | 'identified' | 'monitoring' | 'resolved'
   impact: 'minor' | 'major' | 'critical' | null
   componentNames?: string[]
+  // #1032 — the status-page component IDS this incident affects, tagged at the source from the
+  // incident.io page HTML's `component_impacts` (`attachIncidentIoComponentIds`). Distinct from
+  // `componentNames` on purpose: status.openai.com has TWO components both literally named "Login"
+  // (one in the APIs group → openai, one in the ChatGPT group → chatgpt; verified live 2026-07-16 via
+  // components.json), so a name can NOT disambiguate them and every name-keyed rule (#359 bypass,
+  // #683 `incidentComponents`) is structurally blind here.
+  //
+  // Written ONLY by `attachIncidentIoComponentIds`, which must never touch `componentNames`: the
+  // EMPTINESS of `componentNames` is what `filterByComponentStatus` (#970) reads as "untagged →
+  // drop", and langsmith/langfuse are badge-id-scoped, so tagging them page-wide would silently flip
+  // their behaviour despite having no stake in #1032. (`includeUntaggedIncidents` keys on that
+  // emptiness too, but only for `incidentKeywords`-scoped services — which those two are not.)
+  //
+  // Sole reader TODAY is `filterIncidents`' exclude-bypass. That is a fact, not a rule the type can
+  // enforce — the field is serialized onto /api/status like `autoMonitor` (#983), so treat a new
+  // reader as a decision to make, not a violation. NOT index-aligned with `componentNames`, and the
+  // two may come from different sources (e.g. `parsers/aws.ts` writes AWS REGIONS into
+  // `componentNames`, which have no component id at all).
+  componentIds?: string[]
   startedAt: string
   resolvedAt?: string | null
   duration: string | null
