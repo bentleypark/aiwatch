@@ -8,7 +8,7 @@ import { readSuppressions, applySuppressions } from './suppression'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
-import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, enrichIncidentIoText } from './parsers/incident-io'
+import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
   AISTUDIO_ENDPOINT,
@@ -739,6 +739,20 @@ export function tagAutoMonitorIncidents(incidents: Incident[], config: ServiceCo
   return tagged ? out : incidents
 }
 
+/** #1032 — can the id-keyed exclude-bypass ever fire for this service? It needs all three: an
+ *  `incidentExclude` to veto an incident in the first place, a `statusComponentIds` badge group to
+ *  intersect against, and an incident.io page to read `component_impacts` from. Exactly
+ *  openai/chatgpt/codex today — the set the blast-radius replay measured (pinned by
+ *  `openai-login-attribution.test.ts`, so a config edit that widens or empties it fails loudly).
+ *
+ *  ONE predicate for BOTH ends — the fetch gate (does this service need the page HTML?) and the
+ *  reader (`filterIncidents`). Encoding it twice is how the two silently drift apart into a bypass
+ *  that never fires: the fetch side stops supplying `componentIds` and the reader just... never
+ *  matches, with no error. Same fix-the-called-path lesson as #966. */
+export function canIdBypass(config: ServiceConfig): boolean {
+  return !!(config.incidentIoComponentId && config.incidentExclude?.length && config.statusComponentIds?.length)
+}
+
 export function filterIncidents(incidents: Incident[], config: ServiceConfig): Incident[] {
   const { incidentKeywords, incidentExclude, incidentComponents } = config
   return incidents.filter((inc) => {
@@ -752,6 +766,26 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
         const compLower = config.statusComponent.toLowerCase()
         const incCompNames = (inc.componentNames ?? []).map((n) => n.toLowerCase())
         if (incCompNames.some((n) => n.startsWith(compLower))) return true
+      }
+      // #1032 — the same bypass on an ID axis, for a service scoped by `statusComponentIds` rather than
+      // a `statusComponent` NAME. openai sets no `statusComponent`, so the branch above never runs for
+      // it: its 'login' exclude vetoed by title an incident OpenAI itself had tagged onto the API-group
+      // Login component, and the openai card showed `degraded` (badge = statusComponentIds worst-of)
+      // with an empty incident list. A name-keyed fix could not have been added either — status.openai.com
+      // carries TWO components both literally named "Login" (APIs group → openai, ChatGPT group →
+      // chatgpt; verified live 2026-07-16 via components.json), so names cannot tell them apart and only
+      // the ids can. When the provider tags an incident onto a component in OUR badge group, that is the
+      // provider asserting it affects us: it outranks a title substring guess.
+      //
+      // `componentIds` is tagged at the source from the page HTML (`attachIncidentIoComponentIds`);
+      // absent ⇒ no bypass ⇒ pre-#1032 behaviour, so a missing/shape-changed page fails CLOSED (the
+      // fetch side warns when that happens — a silent revert to the bug is the failure mode here).
+      // Non-regressive by construction, not by luck: an incident only bypasses if its ids intersect
+      // this service's own badge group, so the #990 FedRAMP advisory (tagged 'FedRAMP', an id in NO
+      // service's `statusComponentIds`) can never reach chatgpt/codex through here.
+      if (canIdBypass(config) && inc.componentIds?.length) {
+        const badgeIds = config.statusComponentIds!
+        if (inc.componentIds.some((id) => badgeIds.includes(id))) return true
       }
       return false
     }
@@ -1171,13 +1205,32 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       // re-fetched it above) — so fetch it here rather than silently dropping every incident.
       let uptimeHtml = prefetched?.uptimeHtml
       const tagsNeedHtml = !!(config.incidentComponents && config.incidentIoComponentId)
-      if (!uptimeHtml && tagsNeedHtml) {
+      // #1032 — the id-axis twin (`canIdBypass`: exclude + badge group + incident.io page). Exactly
+      // openai/chatgpt/codex today — the same set the blast-radius replay measured, so the gate states
+      // the reachable set rather than widening it. Deliberately NOT "every incident.io service":
+      // `attachIncidentIoComponentIds` is cheap but its output would then ride the KV/API payload for
+      // the OTHER 9 incident.io services, which can never use it.
+      //
+      // Side effect worth knowing: this admits openai/chatgpt/codex to the 3s re-fetch below, which was
+      // `incidentComponents`-only before. On a cycle where the PREFETCH's own HTML fetch failed, that
+      // re-fetched HTML now also reaches `parseUptimeData` / `parseIncidentIoComponentImpacts` /
+      // `computeIncidentIoUptime` for these three — so uptime/calendar values appear where the cycle
+      // previously yielded `null`. A strict improvement (fewer null cycles), but a real behaviour change
+      // outside the #1032 blast radius, and it costs one serial 3s fetch on that failure path only.
+      const idsNeedHtml = canIdBypass(config)
+      if (!uptimeHtml && (tagsNeedHtml || idsNeedHtml)) {
         try {
           // 3s, not the prefetch's 5s: the prefetch already waited on this same host this cycle, so a
           // serial 5+5s would eat the batch's budget on exactly the page that's already slow.
           const htmlRes = await fetchWithTimeout(config.statusUrl, 3000)
           if (htmlRes.ok) uptimeHtml = await htmlRes.text()
-          else htmlRes.body?.cancel()
+          else {
+            // #1032 — a non-OK response logged NOTHING before, and three more services now depend on
+            // this HTML for incident-attribution correctness. "MISSING" downstream doesn't say WHY, and
+            // 403 (bot-wall — status.deepseek.com already does this) vs 503 are opposite diagnoses.
+            console.warn(`[fetchService] ${config.id} status-page HTML returned HTTP ${htmlRes.status}`)
+            htmlRes.body?.cancel()
+          }
         } catch (err) {
           console.warn(`[fetchService] ${config.id} status-page HTML fetch failed:`, err instanceof Error ? err.message : err)
         }
@@ -1195,6 +1248,31 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
             `[fetchService] ${config.id}: incidentComponents is set but NO incident could be tagged from ` +
             `component_impacts (uptimeHtml ${uptimeHtml ? 'present — upstream shape change?' : 'MISSING'}) — ` +
             'every incident will be filtered out this cycle',
+          )
+        }
+        incidents = tagged
+      }
+      if (idsNeedHtml) {
+        // Must precede filterIncidents, same reason as #1004 above (#940).
+        const tagged = uptimeHtml ? attachIncidentIoComponentIds(incidents, uptimeHtml) : incidents
+        // Fail LOUD — and OUTSIDE the html guard, so the "no HTML at all" case is the loudest, not the
+        // quietest (the #1004 shape). Without this the #1032 failure mode is invisible: nothing gets
+        // tagged, the bypass never fires, and the openai card silently reverts to `degraded` + empty
+        // incident list — the exact bug #1032 fixed — with nothing in the logs.
+        //
+        // Checks CONTENT, not the array reference. `attachIncidentIoComponentIds` returns the same
+        // reference only when `component_impacts` is entirely absent — but that array also drives the
+        // 30/90-day calendar (`parseIncidentIoComponentImpacts`), so it spans the historical window and
+        // is populated on any normal page load regardless of whether the CURRENT incidents join it. A
+        // reference check would therefore be silent on the likeliest drift: `status_page_incident_id`
+        // diverging from the v2 API's incident id (the #940 id-scheme lesson), where the map is
+        // non-empty, `.map()` allocates, and nothing is tagged. Quiet in normal operation — 23 of the
+        // 25 live incidents on the page join today, so this only fires when the join breaks entirely.
+        if (incidents.length > 0 && !tagged.some((i) => (i.componentIds ?? []).length > 0)) {
+          console.warn(
+            `[fetchService] ${config.id}: canIdBypass but NO incident could be tagged with component_impacts ` +
+            `ids (uptimeHtml ${uptimeHtml ? 'present — upstream shape change?' : 'MISSING'}) — the #1032 ` +
+            'exclude-bypass cannot fire this cycle',
           )
         }
         incidents = tagged

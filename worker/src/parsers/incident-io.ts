@@ -376,6 +376,25 @@ export function attachIncidentIoComponentNames(
   })
 }
 
+/** #1032 — tag each incident with the component IDS it affects, from the page HTML's `component_impacts`
+ *  (see `parseIncidentIoIncidentComponentIds`). The id-axis twin of `attachIncidentIoComponentNames`,
+ *  and deliberately NOT a variant of it: names collide on this page (status.openai.com has two
+ *  components both named "Login"), so only ids can tell the APIs-group Login from the ChatGPT one.
+ *
+ *  Writes ONLY `componentIds` — never `componentNames`, whose emptiness `filterByComponentStatus`
+ *  (#970) reads as "untagged → drop". Unknown-to-us ids are kept as-is: the
+ *  sole reader intersects them with `statusComponentIds`, so an id we don't configure simply never
+ *  matches. Pure; must run BEFORE `filterIncidents` (#940 — a transform after the filter is a no-op on
+ *  already-dropped incidents). Returns the SAME array reference when the page has no impacts. */
+export function attachIncidentIoComponentIds(incidents: Incident[], html: string): Incident[] {
+  const idsByIncident = parseIncidentIoIncidentComponentIds(html)
+  if (Object.keys(idsByIncident).length === 0) return incidents
+  return incidents.map((inc) => {
+    const ids = idsByIncident[inc.id]
+    return ids?.length ? { ...inc, componentIds: ids } : inc
+  })
+}
+
 interface IncidentIoUpdate {
   stage: TimelineEntry['stage']
   text: string
