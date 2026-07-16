@@ -76,6 +76,78 @@ export function hasBodyDriftLabel(labels) {
   return hasLabel(labels, 'body-drift')
 }
 
+/**
+ * The labels this job applies to track an OPEN verification obligation (#1037). Each is only ever
+ * meaningful while the issue is open: `verify-blocked` = a dated check is outstanding, `verify-overdue`
+ * = that check is past due, `body-drift` = the body's boxes weren't synced at merge.
+ */
+export const LIFECYCLE_LABELS = ['verify-overdue', 'verify-blocked', 'body-drift']
+
+/** Page size for the per-label closed-issue query (#1037). A truncated page still drains over later
+ *  runs (swept issues leave the result set), but the fetch warns so it never truncates silently. */
+export const CLOSED_SCAR_LIMIT = 100
+
+/**
+ * Plan the label removals for CLOSED issues still wearing a lifecycle label (#1037) — the closed half
+ * of #966's own complaint. Every self-heal in this job is derived from an OPEN issue's body, and the
+ * scan is `--state open`, so closing an issue puts its labels permanently out of reach: the label stops
+ * describing current state and becomes a scar any triage query then misreads. #966 was filed on exactly
+ * this evidence (#857, closed and still overdue-labeled) but only fixed the open case.
+ *
+ * No date logic, deliberately: CLOSED IS the terminal state of a verification obligation, so all three
+ * labels are unconditionally meaningless once the issue is closed. Nothing to re-derive.
+ *
+ * Groups every stale label of one issue into a SINGLE edit — an issue can wear all three (#547 did), and
+ * one `gh issue edit --remove-label a --remove-label b` is one API call instead of three.
+ *
+ * Pure — no I/O. `closedIssues` = gh `--json number,labels` objects, each tagged with its `repo`.
+ */
+export function planClosedScarRemovals(closedIssues) {
+  const out = []
+  for (const iss of closedIssues || []) {
+    const stale = LIFECYCLE_LABELS.filter((l) => hasLabel(iss.labels, l))
+    if (stale.length > 0) out.push({ repo: iss.repo ?? null, number: iss.number, labels: stale })
+  }
+  return out
+}
+
+/**
+ * Merge per-label closed-issue query results into one entry per issue (#1037). The fetch runs one
+ * bounded query PER LABEL (an issue wearing two labels comes back twice), so dedup by repo+number and
+ * union the label sets before planning — otherwise one issue would get one edit per label it wears.
+ *
+ * Flattens to ANY depth on purpose: the caller nests per-repo over per-label (`repos.map(fetchClosedScars)`
+ * → repo[] of label[] of issue[]), and a fixed one-level flat silently yielded arrays instead of issues,
+ * dropping every scar while the unit tests — which passed a shallower shape than the real caller — stayed
+ * green. Caught only by a live --dry-run.
+ * Pure — no I/O.
+ */
+export function mergeClosedIssues(issueLists, warn = console.warn) {
+  const byKey = new Map()
+  for (const iss of (issueLists || []).flat(Infinity)) {
+    // WARN rather than skip quietly. A silently-dropped entry is exactly how the one-level-flat bug
+    // above stayed invisible (0 scars reads identical to a clean board), and this file's own #966
+    // silent-drop guards exist on the principle that a dropped reminder must never look like a quiet
+    // day. `gh --json number,labels` always carries `number`, so this only fires on real shape drift.
+    if (!iss || iss.number == null) {
+      warn(`[verify-reminders] closed-scar entry without a number (gh output shape drift?) — skipped: ${truncate(JSON.stringify(iss), 80)}`)
+      continue
+    }
+    const key = issueKey(iss)
+    const prev = byKey.get(key)
+    if (!prev) {
+      byKey.set(key, { ...iss, labels: [...(iss.labels || [])] })
+      continue
+    }
+    const seen = new Set(prev.labels.map((l) => (typeof l === 'string' ? l : l?.name)))
+    for (const l of iss.labels || []) {
+      const name = typeof l === 'string' ? l : l?.name
+      if (!seen.has(name)) { prev.labels.push(l); seen.add(name) }
+    }
+  }
+  return [...byKey.values()]
+}
+
 /** Stable identity for an issue across repos (the sibling scan means numbers alone collide). */
 const issueKey = (i) => `${i.repo || ''}#${i.number}`
 
@@ -262,6 +334,32 @@ function fetchRepoIssues(repo) {
   }
 }
 
+// Fetch CLOSED issues still wearing a lifecycle label, for one repo (#1037). Bounded by construction:
+// one query PER LABEL, each returning only issues that already carry it — never a full closed-issue
+// scan. Best-effort per label, mirroring fetchRepoIssues: a failure warns + contributes [] so the
+// primary reminder still runs.
+//
+// Deliberately NOT gated by the trusted-author filter: this only REMOVES a label the job itself applies,
+// so there is no abuse surface to close, and the historical scars predate any authorship bookkeeping.
+function fetchClosedScars(repo) {
+  return LIFECYCLE_LABELS.map((label) => {
+    const args = ['issue', 'list', '--state', 'closed', '--label', label, '--limit', String(CLOSED_SCAR_LIMIT), '--json', 'number,labels']
+    if (repo) args.push('--repo', repo)
+    try {
+      const parsed = JSON.parse(gh(args))
+      // A truncated page is self-correcting (swept issues leave the result set, so the backlog drains
+      // over successive days) but must not be silent — same principle as the #966 silent-drop guards.
+      if (parsed.length === CLOSED_SCAR_LIMIT) {
+        console.warn(`[verify-reminders] closed '${label}' scars hit the ${CLOSED_SCAR_LIMIT} page limit for ${repo || 'current repo'} — sweeping the first page; the rest drain on later runs.`)
+      }
+      return parsed.map((i) => ({ ...i, repo }))
+    } catch (e) {
+      console.warn(`[verify-reminders] could not list closed '${label}' issues for ${repo || 'current repo'} (skipping): ${e.message.split('\n')[0]}`)
+      return []
+    }
+  })
+}
+
 async function main() {
   const dryRun = process.argv.includes('--dry-run') || process.env.DRY_RUN === '1'
   const today = todayUTC()
@@ -305,6 +403,30 @@ async function main() {
       const a = ['issue', 'edit', String(iss.number), '--remove-label', 'body-drift']
       if (iss.repo) a.push('--repo', iss.repo)
       try { gh(a) } catch (e) { console.warn(`[verify-reminders] could not clear body-drift on ${displayRef(iss.repo, iss.number)}: ${e.message.split('\n')[0]}`) }
+    }
+  }
+
+  // ── Closed-issue label scars (#1037) ──────────────────────────────────────────
+  // Clear every lifecycle label left on a CLOSED issue. The rest of this job self-heals from an OPEN
+  // issue's body, and the scan is `--state open` — so a label still on at close time is stranded forever
+  // (the #857 case #966 was filed over, which its open-only fix never reached). This job even makes its
+  // own: the #873 auto-verify path closes an issue while dropping only `verify-blocked`.
+  //
+  // Placed HERE, before the due/overdue stage: that stage early-returns when there is nothing to ping,
+  // and a quiet day is exactly when a scar sweep should still run. Best-effort per issue — a label
+  // failure must never abort the reminder run.
+  const closedScars = planClosedScarRemovals(mergeClosedIssues(repos.map(fetchClosedScars)))
+  if (closedScars.length) {
+    console.log(`[verify-reminders] ${today}: ${closedScars.length} closed-issue label scar(s) → ${closedScars.map((s) => `${displayRef(s.repo, s.number)}(${s.labels.join('+')})`).join(', ')}`)
+  }
+  if (dryRun) {
+    if (closedScars.length) console.log('[verify-reminders] --dry-run: would CLEAR closed-issue labels:\n' + JSON.stringify(closedScars, null, 2))
+  } else {
+    for (const scar of closedScars) {
+      const a = ['issue', 'edit', String(scar.number)]
+      for (const l of scar.labels) a.push('--remove-label', l)
+      if (scar.repo) a.push('--repo', scar.repo)
+      try { gh(a) } catch (e) { console.warn(`[verify-reminders] could not clear ${scar.labels.join('+')} on ${displayRef(scar.repo, scar.number)}: ${e.message.split('\n')[0]}`) }
     }
   }
 

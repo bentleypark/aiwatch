@@ -3,7 +3,7 @@
 // script, not src/worker code.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors, parseScanRepos, displayRef, findBodyDrift, isDriftCandidate, hasBodyDriftLabel, hasLabel, findStaleOverdueLabels, findInvalidVerifyAfterDates } from './verify-reminders.mjs'
+import { parseVerifyAfter, daysSinceDue, shouldFire, isValidIsoDate, parseTrustedAuthors, parseScanRepos, displayRef, findBodyDrift, isDriftCandidate, hasBodyDriftLabel, hasLabel, findStaleOverdueLabels, findInvalidVerifyAfterDates, planClosedScarRemovals, mergeClosedIssues, LIFECYCLE_LABELS, CLOSED_SCAR_LIMIT } from './verify-reminders.mjs'
 
 test('parseVerifyAfter — extracts date + note from a checklist line', () => {
   const body = '- [ ] **verify-after 2026-09-01** — check p95 after 3 months (#511)\nother text'
@@ -288,4 +288,118 @@ test('hasBodyDriftLabel — detects the self-heal label', () => {
 test('importing the module runs no side effects (main is guarded)', () => {
   // Reaching here proves importing did not invoke main() (which shells out to `gh` / posts Discord).
   assert.ok(true)
+})
+
+
+// ── #1037 — closed-issue label scars ────────────────────────────────────────────
+// The bug: every self-heal here derives from an OPEN issue's body and the scan is `--state open`, so a
+// lifecycle label still on at close time is stranded forever. #966 was filed on exactly that evidence
+// (#857) but only fixed the open case. Closed IS the terminal state → the labels are unconditionally
+// meaningless, so these assert the no-date-logic rule.
+
+test('planClosedScarRemovals — a closed issue wearing a lifecycle label is planned for removal', () => {
+  const plan = planClosedScarRemovals([{ number: 857, repo: null, labels: [{ name: 'verify-overdue' }] }])
+  assert.deepEqual(plan, [{ repo: null, number: 857, labels: ['verify-overdue'] }])
+})
+
+test('planClosedScarRemovals — groups ALL of one issue\'s stale labels into a single edit (#547 wore all three)', () => {
+  const plan = planClosedScarRemovals([
+    { number: 547, repo: null, labels: [{ name: 'verify-overdue' }, { name: 'verify-blocked' }, { name: 'body-drift' }] },
+  ])
+  assert.equal(plan.length, 1, 'one issue → one edit, not one per label')
+  assert.deepEqual(plan[0].labels, ['verify-overdue', 'verify-blocked', 'body-drift'])
+})
+
+test('planClosedScarRemovals — leaves non-lifecycle labels alone', () => {
+  const plan = planClosedScarRemovals([
+    { number: 1, repo: null, labels: [{ name: 'bug' }, { name: 'area:ops' }, { name: 'verify-blocked' }] },
+  ])
+  assert.deepEqual(plan[0].labels, ['verify-blocked'], 'only lifecycle labels are stripped')
+})
+
+test('planClosedScarRemovals — an issue with no lifecycle label is skipped entirely', () => {
+  assert.deepEqual(planClosedScarRemovals([{ number: 2, repo: null, labels: [{ name: 'bug' }] }]), [])
+  assert.deepEqual(planClosedScarRemovals([]), [])
+  assert.deepEqual(planClosedScarRemovals(null), [])
+})
+
+test('planClosedScarRemovals — carries the repo through for the sibling scan', () => {
+  const plan = planClosedScarRemovals([
+    { number: 54, repo: 'bentleypark/aiwatch-reports', labels: [{ name: 'verify-blocked' }] },
+  ])
+  assert.equal(plan[0].repo, 'bentleypark/aiwatch-reports')
+})
+
+test('planClosedScarRemovals — accepts plain string labels (hasLabel dual shape)', () => {
+  assert.deepEqual(planClosedScarRemovals([{ number: 3, repo: null, labels: ['body-drift'] }]),
+    [{ repo: null, number: 3, labels: ['body-drift'] }])
+})
+
+test('mergeClosedIssues — one issue returned by two per-label queries yields ONE entry, labels unioned', () => {
+  // The fetch runs one query per label, so an issue wearing two comes back twice. Without the merge it
+  // would get one edit per label — the exact waste the grouping exists to avoid.
+  const merged = mergeClosedIssues([
+    [{ number: 547, repo: null, labels: [{ name: 'verify-overdue' }, { name: 'body-drift' }] }],
+    [{ number: 547, repo: null, labels: [{ name: 'verify-overdue' }, { name: 'verify-blocked' }] }],
+  ])
+  assert.equal(merged.length, 1)
+  const plan = planClosedScarRemovals(merged)
+  assert.equal(plan.length, 1)
+  assert.deepEqual(plan[0].labels, ['verify-overdue', 'verify-blocked', 'body-drift'])
+})
+
+test('mergeClosedIssues — same number in DIFFERENT repos stays distinct (sibling scan collides on numbers)', () => {
+  const merged = mergeClosedIssues([
+    [{ number: 54, repo: null, labels: [{ name: 'verify-blocked' }] }],
+    [{ number: 54, repo: 'bentleypark/aiwatch-reports', labels: [{ name: 'verify-blocked' }] }],
+  ])
+  assert.equal(merged.length, 2, 'repo is part of the identity')
+})
+
+test('mergeClosedIssues — flattens the REAL caller shape: repo[] of label[] of issue[]', () => {
+  // Regression pin. The caller nests per-repo over per-label (`repos.map(fetchClosedScars)`), so the
+  // input is THREE levels deep. A one-level flat yielded arrays instead of issues and silently dropped
+  // every scar — green tests, zero effect in production. Mirror the caller's shape exactly.
+  const perRepoPerLabel = [
+    // repo A → [verify-overdue[], verify-blocked[], body-drift[]]
+    [
+      [{ number: 857, repo: null, labels: [{ name: 'verify-overdue' }] }],
+      [{ number: 547, repo: null, labels: [{ name: 'verify-blocked' }] }],
+      [],
+    ],
+    // repo B (sibling) → same shape
+    [
+      [],
+      [{ number: 41, repo: 'bentleypark/aiwatch-reports', labels: [{ name: 'verify-blocked' }] }],
+      [],
+    ],
+  ]
+  const plan = planClosedScarRemovals(mergeClosedIssues(perRepoPerLabel))
+  assert.equal(plan.length, 3, 'every scar across both repos is planned')
+  assert.deepEqual(plan.map((p) => p.number).sort((a, b) => a - b), [41, 547, 857])
+})
+
+test('mergeClosedIssues — tolerates empty input', () => {
+  assert.deepEqual(mergeClosedIssues([]), [])
+  assert.deepEqual(mergeClosedIssues(null), [])
+})
+
+test('mergeClosedIssues — WARNS on a shape-drifted entry instead of dropping it silently', () => {
+  // A silent drop is how the one-level-flat bug hid: 0 scars reads exactly like a clean board. This
+  // file's #966 guards exist on the rule that a dropped reminder must never look like a quiet day, and
+  // the sweep must honor it too.
+  const warnings = []
+  const merged = mergeClosedIssues([[null, { labels: [] }]], (m) => warnings.push(m))
+  assert.deepEqual(merged, [], 'the malformed entry is still skipped')
+  assert.equal(warnings.length, 2, 'but every skip is announced')
+  assert.match(warnings[0], /shape drift/)
+})
+
+test('LIFECYCLE_LABELS — covers exactly the three labels this job applies', () => {
+  assert.deepEqual([...LIFECYCLE_LABELS].sort(), ['body-drift', 'verify-blocked', 'verify-overdue'])
+})
+
+test('CLOSED_SCAR_LIMIT — a page size the fetch can compare against to warn on truncation', () => {
+  assert.equal(typeof CLOSED_SCAR_LIMIT, 'number')
+  assert.ok(CLOSED_SCAR_LIMIT > 0)
 })
