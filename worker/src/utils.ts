@@ -339,18 +339,27 @@ export function appendUtm(url: string, source: UtmSource): string {
   return `${base}${sep}${params}${frag}`
 }
 
-// #707/#811 — classify an incident's TEXT as a NON-reliability advisory (compliance / export-control /
-// access revocation OR SUSPENSION / deprecation / scheduled change) rather than a service fault. Two uses:
+// #707/#811/#1021 — classify an incident's TEXT as a NON-reliability advisory (compliance / export-control /
+// access revocation OR SUSPENSION / deprecation / scheduled change / usage-limit / quota / billing) rather
+// than a service fault. Three uses:
 //   (a) #707 — down-classify an AWS Health advisory to `null` impact (aws.ts) so it doesn't tank the Score
 //   (b) #811 — keep an operational service whose ONLY unresolved incident is such an advisory eligible as a
 //       fallback candidate (a Claude model-access SUSPENSION must not exclude Claude Code when ChatGPT is
 //       down). Mirrored in src/utils/constants.js (frontend getFallbacks); parity pinned by a sync test.
+//   (c) #1021 — generalize the #707 AWS carve-out to ALL providers: down-classify a usage-limits / quota /
+//       billing advisory to `null` impact at the live-fetch choke point (fetchAllServices) so it never
+//       inflates `totalDowntimeMin` or drops the Score (the Codex June "Usage Limits Depleting Faster Than
+//       Expected" 72h case — 79% of its archived downtime, dropped its Score 86→76 — was a quota notice).
 // An OUTAGE_SIGNAL term ALWAYS wins (never down-classify a real fault — the false-positive that would HIDE
-// an outage is the dangerous direction). `suspend` (the #811 incident.io wording) joins #707's `revoke`.
+// an outage is the dangerous direction). `suspend` (the #811 incident.io wording) joins #707's `revoke`;
+// `usage limit|quota|deplet|billing|invoice` (#1021) join them. `model access` is deliberately NOT included
+// — its concrete case (an access SUSPENSION) is already caught by `suspend`, and a bare "model access …"
+// title collides too readily with a real access outage. #1021 also added `errors?` to OUTAGE_SIGNAL so a
+// genuine fault titled "Quota errors" / "Billing errors" (no other outage word) still wins over the advisory.
 export const NON_RELIABILITY_RE =
-  /export control|compliance|regulatory|revoke|revoked|revoking|suspend(?:ed|ing|s)?|deprecat|end[ -]of[ -]life|retir(?:e|ed|ing|ement)|sunset|discontinu|scheduled (?:maintenance|change)/i
+  /export control|compliance|regulatory|revoke|revoked|revoking|suspend(?:ed|ing|s)?|deprecat|end[ -]of[ -]life|retir(?:e|ed|ing|ement)|sunset|discontinu|scheduled (?:maintenance|change)|usage limit|quota|deplet|billing|invoice/i
 export const OUTAGE_SIGNAL_RE =
-  /error rate|elevated error|5xx|disruption|outage|partial outage|degraded|unable to|throttl|increased latency|timeouts?|failure|not responding|impair/i
+  /error rate|elevated error|errors?|5xx|disruption|outage|partial outage|degraded|unable to|throttl|increased latency|timeouts?|failure|not responding|impair/i
 export function isNonReliabilityAdvisory(text: string): boolean {
   return !!text && NON_RELIABILITY_RE.test(text) && !OUTAGE_SIGNAL_RE.test(text)
 }

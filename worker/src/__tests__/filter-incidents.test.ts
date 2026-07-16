@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
-import { filterIncidents, includeUntaggedIncidents, filterByComponentStatus, badgeGroupNames, SERVICES } from '../services'
+import { filterIncidents, includeUntaggedIncidents, filterByComponentStatus, badgeGroupNames, downclassifyAdvisoryIncidents, SERVICES } from '../services'
 import { buildIncidentAlerts } from '../alerts'
 import { normalizeStatus } from '../parsers/statuspage'
-import type { Incident, ServiceConfig } from '../types'
+import type { Incident, ServiceConfig, ServiceStatus } from '../types'
 
 function mockIncident(overrides: Partial<Incident> = {}): Incident {
   return {
@@ -1074,4 +1074,38 @@ describe('#990 FedRAMP environment-scope exclude (chatgpt / codex)', () => {
       expect(includeUntaggedIncidents([], [active], get(), components, 'major')).toEqual([])
     },
   )
+})
+
+describe('downclassifyAdvisoryIncidents (#1021)', () => {
+  const svc = (incidents: Incident[]): ServiceStatus => ({
+    id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent',
+    status: 'operational', latency: null, uptime30d: null, lastChecked: '2026-06-30T00:00:00Z', incidents,
+  })
+
+  it('down-classifies a usage-limits/quota advisory to impact:null (the Codex June case)', () => {
+    const [out] = downclassifyAdvisoryIncidents([svc([
+      mockIncident({ id: 'a', title: 'Codex Usage Limits Depleting Faster Than Expected', impact: 'minor' }),
+      mockIncident({ id: 'b', title: 'Elevated error rates on Codex', impact: 'major' }),
+    ])])
+    expect(out.incidents.find(i => i.id === 'a')!.impact).toBeNull()  // advisory → down-classified
+    expect(out.incidents.find(i => i.id === 'b')!.impact).toBe('major') // real outage → untouched
+  })
+
+  it('an OUTAGE-signal title wins — a "quota errors" outage keeps its impact', () => {
+    const [out] = downclassifyAdvisoryIncidents([svc([
+      mockIncident({ id: 'c', title: 'Elevated 5xx errors — customers hitting quota limits', impact: 'minor' }),
+    ])])
+    expect(out.incidents[0].impact).toBe('minor')
+  })
+
+  it('is PURE — returns the same object reference when nothing changes (no churn)', () => {
+    const input = [svc([mockIncident({ id: 'd', title: 'Elevated error rates', impact: 'major' })])]
+    expect(downclassifyAdvisoryIncidents(input)[0]).toBe(input[0]) // untouched service is not re-allocated
+  })
+
+  it('does not mutate the input incident objects', () => {
+    const inc = mockIncident({ id: 'e', title: 'Usage limits increased', impact: 'minor' })
+    downclassifyAdvisoryIncidents([svc([inc])])
+    expect(inc.impact).toBe('minor') // original untouched (new objects returned)
+  })
 })

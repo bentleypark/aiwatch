@@ -429,16 +429,26 @@ describe('countsAsUptimeOk (#733)', () => {
   })
 })
 
-describe('isNonReliabilityAdvisory (#707/#811)', () => {
+describe('isNonReliabilityAdvisory (#707/#811/#1021)', () => {
   it('TRUE for non-reliability advisories (compliance / access revoke|suspend / deprecation)', () => {
     expect(isNonReliabilityAdvisory("We've suspended access to Claude Mythos 5 and Claude Fable 5")).toBe(true) // #811 live case
     expect(isNonReliabilityAdvisory('export control directive — Anthropic asked us to revoke access')).toBe(true) // #707 AWS case
     expect(isNonReliabilityAdvisory('Model deprecation: gpt-4-0314 retired')).toBe(true)
     expect(isNonReliabilityAdvisory('Scheduled maintenance window')).toBe(true)
   })
+  it('TRUE for usage-limits / quota / billing advisories (#1021)', () => {
+    expect(isNonReliabilityAdvisory('Codex Usage Limits Depleting Faster Than Expected')).toBe(true) // the #1021 live case
+    expect(isNonReliabilityAdvisory('Increased quota for all Pro tiers')).toBe(true)
+    expect(isNonReliabilityAdvisory('Billing system reconciliation delay')).toBe(true)
+    expect(isNonReliabilityAdvisory('Invoice generation running late this cycle')).toBe(true)
+  })
   it('FALSE when an OUTAGE signal is present — never down-classify a real fault', () => {
     expect(isNonReliabilityAdvisory('Access suspended due to elevated error rates')).toBe(false) // outage wins over suspend
     expect(isNonReliabilityAdvisory('Partial outage — API timeouts')).toBe(false)
+    expect(isNonReliabilityAdvisory('Elevated 5xx errors — customers hitting quota limits')).toBe(false) // #1021 outage wins over quota
+    expect(isNonReliabilityAdvisory('Billing API returning 5xx failures')).toBe(false) // #1021 outage wins over billing
+    expect(isNonReliabilityAdvisory('Quota errors returned to customers')).toBe(false) // #1021 `errors?` guard — quota fault, not advisory
+    expect(isNonReliabilityAdvisory('Billing errors on checkout')).toBe(false)          // #1021 `errors?` guard — billing fault
   })
   it('FALSE for empty/ordinary text', () => {
     expect(isNonReliabilityAdvisory('')).toBe(false)

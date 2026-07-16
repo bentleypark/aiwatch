@@ -2,7 +2,7 @@
 // Used by cronAlertCheck in index.ts
 
 import { buildGroupedFallbackText, API_TIER } from './fallback'
-import { sanitize, formatDuration, appendStatusHint } from './utils'
+import { sanitize, formatDuration, appendStatusHint, isNonReliabilityAdvisory } from './utils'
 import { kindFromKey, svcIdsForAlert, type AlertKind } from './alert-feed'
 import { XAI_REGION_RE } from './xai-regions'
 // #422 Phase 2 — region-switch hint in Discord alerts. We reuse the existing
@@ -283,6 +283,10 @@ export interface AlertCandidate {
    *  to them — so a service joining an already-alerted incident doesn't re-draft/re-notify the
    *  services that already fired. Absent on status alerts (down/degraded/recovered). */
   svcIds?: string[]
+  /** #1021 — set on a non-reliability ADVISORY alert (usage-limits/quota/…, reframed ℹ️/blue). Lets
+   *  downstream consumers keep the informational framing WITHOUT re-deriving from the title: buildTweetDrafts
+   *  skips it (an advisory must not draft an "X is having an outage" tweet). The dedup `key` is unchanged. */
+  advisory?: boolean
 }
 
 /** #714 — the status SOURCE's observed liveness this cron cycle, distinct from the service's status.
@@ -480,38 +484,52 @@ export function buildIncidentAlerts(
 
   for (const [incId, { names, ids, inc, firstSvc }] of newIncidents) {
     const displayName = names.length > 1 ? `${firstSvc.provider} (${names.join(', ')})` : names[0]
-    const regionText = buildRegionHint(firstSvc)
+    // #1021 — a non-reliability ADVISORY (usage-limits/quota/billing/deprecation — down-classified to
+    // impact:null upstream) is NOT an availability outage, so it must not go out with the red
+    // "🔴 New Incident" outage framing or a "try X instead" fallback (recommending users abandon a service
+    // over a quota notice). Reframe it informational: ℹ️ / blue / no fallback / no region switch. Keyed on
+    // the TITLE (same isNonReliabilityAdvisory the live down-classification + archive downtime use), NOT
+    // impact==null — a mis-parsed null-impact REAL incident (status-determination.md footgun) keeps the
+    // outage alert, the fail-safe direction. The dedup `key` is UNCHANGED, so the paired resolved alert
+    // still matches. The #778 phone push already skips impact==null (pushTargetFor), so it stays silent.
+    const isAdvisory = isNonReliabilityAdvisory(inc.title)
+    const regionText = isAdvisory ? undefined : buildRegionHint(firstSvc)
     // #641 — suppress the cross-service fallback when a region switch is offered: a region-specific
     // outage is solved by the cheaper same-provider region switch, so a full provider switch
     // alongside it is redundant noise. (buildRegionHint returns undefined when no switch applies.)
     // #781 — grouped per-category fallbacks across ALL affected surfaces of the incident (not just the
     // primary's category), matching the dashboard: a multi-surface Anthropic incident now recommends
     // an LLM + an App + a Coding-Agent alternative, not just two LLMs.
-    const fallbackText = (firstSvc.status !== 'operational' && !regionText)
+    const fallbackText = (!isAdvisory && firstSvc.status !== 'operational' && !regionText)
       ? buildGroupedFallbackText(ids, services)
       : ''
     alerts.push({
       key: `alerted:new:${incId}`,
-      title: `🔴 ${displayName} — New Incident`,
+      title: isAdvisory ? `ℹ️ ${displayName} — Advisory` : `🔴 ${displayName} — New Incident`,
       description: sanitize(inc.title),
       fallbackText,
       regionText,
-      color: 0xED4245,
+      color: isAdvisory ? 0x5865F2 : 0xED4245, // blurple (informational) vs red (outage)
       url: `https://ai-watch.dev/#${ids[0]}`,
       svcIds: ids, // #545 — the not-yet-alerted subset (all affected on first fire, only the joiner after)
+      ...(isAdvisory ? { advisory: true } : {}),
     })
   }
 
   for (const [incId, { names, ids, inc, firstSvc }] of resolvedIncidents) {
     const displayName = names.length > 1 ? `${firstSvc.provider} (${names.join(', ')})` : names[0]
+    // #1021 — match the new-alert framing: an advisory "clears" (ℹ️ / blue), it doesn't "resolve" like an
+    // outage, and its duration is not downtime so it is omitted (showing it would re-imply an outage).
+    const isAdvisory = isNonReliabilityAdvisory(inc.title)
     const durationText = inc.duration ? ` (${inc.duration})` : ''
     alerts.push({
       key: `alerted:res:${incId}`,
-      title: `🟢 ${displayName} — Incident Resolved${durationText}`,
+      title: isAdvisory ? `ℹ️ ${displayName} — Advisory cleared` : `🟢 ${displayName} — Incident Resolved${durationText}`,
       description: sanitize(inc.title),
-      color: 0x57F287,
+      color: isAdvisory ? 0x5865F2 : 0x57F287,
       url: `https://ai-watch.dev/#${ids[0]}`,
       svcIds: ids, // #545 — the affected set, so the tweet/relay scope matches this alert
+      ...(isAdvisory ? { advisory: true } : {}),
     })
   }
 
@@ -880,6 +898,7 @@ export function buildTweetDrafts(
 ): TweetDraft[] {
   const kind = kindFromKey(alert.key)
   if (!kind) return []
+  if (alert.advisory) return [] // #1021 — an advisory is not an outage; never draft an "X is having an outage" tweet
   // #545: incident alerts carry `svcIds` — the exact services this alert represents (new-incident: the
   // not-yet-alerted joiners; resolved: the full affected set) — so a service joining an already-alerted
   // incident later doesn't re-draft the services that already fired. Status alerts have no svcIds →
@@ -1010,6 +1029,7 @@ export interface TweetSearch {
 export function buildTweetSearches(alert: AlertCandidate, services: ScoredService[]): TweetSearch[] {
   const kind = kindFromKey(alert.key)
   if (!kind) return []
+  if (alert.advisory) return [] // #1021 — an advisory is not an outage; no "is X down" viral-reply search links
   const keys = alert._mergedKeys ?? [alert.key]
   const svcIds = alert.svcIds ?? svcIdsForAlert(keys, kind, services)
   const out: TweetSearch[] = []
@@ -1044,6 +1064,10 @@ export interface ReplyDraft {
 export function buildReplyDraft(alert: AlertCandidate, services: ScoredService[]): ReplyDraft | null {
   const kind = kindFromKey(alert.key)
   if (!kind) return null
+  // #1021 — an advisory leaves the service `operational`, so this would otherwise emit a factually-FALSE
+  // "🔴 yes — {name} is down right now" reply (svc.status drives the down/degraded wording). Never for an
+  // advisory — same reason buildTweetDrafts is gated: a quota notice is not an outage to reply-tweet.
+  if (alert.advisory) return null
   const keys = alert._mergedKeys ?? [alert.key]
   const svcIds = alert.svcIds ?? svcIdsForAlert(keys, kind, services)
   const id = svcIds.find((s) => TWEET_SEARCH_TERMS[s]) // primary in-scope service

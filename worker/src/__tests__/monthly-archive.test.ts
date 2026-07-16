@@ -1103,13 +1103,45 @@ describe('aggregateIncidentDurations (#915 — long-open inflation)', () => {
   })
 
   it('returns null/null when there are no incidents', () => {
-    expect(aggregateIncidentDurations([], 0, 0, 0)).toEqual({ totalMin: null, longestMin: null })
-    expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, longestMin: null })
+    expect(aggregateIncidentDurations([], 0, 0, 0)).toEqual({ totalMin: null, longestMin: null, countedCount: null })
+    expect(aggregateIncidentDurations(undefined, 0, 0, 0)).toEqual({ totalMin: null, longestMin: null, countedCount: null })
   })
 
   it('treats a full list of zero-duration incidents as null (no downtime)', () => {
     const r = aggregateIncidentDurations([entry(0), entry(0)], 2, 0, 0)
-    expect(r).toEqual({ totalMin: null, longestMin: null })
+    expect(r).toEqual({ totalMin: null, longestMin: null, countedCount: 2 })
+  })
+})
+
+describe('aggregateIncidentDurations (#1021 — usage-limits/quota advisory exclusion)', () => {
+  const mk = (durationMin: number, title: string, impact: 'minor' | 'major' | null = 'minor') =>
+    ({ id: title, title, startedAt: '2026-06-01', resolvedAt: null, durationMin, finalStatus: 'resolved' as const, impact })
+
+  it('excludes a usage-limits/quota advisory from total/longest/count (the Codex June case)', () => {
+    // The 4323m (72h 3m) "Usage Limits Depleting" advisory (79% of Codex's archived downtime) must NOT
+    // count; only the genuine 372m (6h 12m) elevated-error outage does.
+    const incidents = [
+      mk(4323, 'Codex Usage Limits Depleting Faster Than Expected'), // advisory → excluded
+      mk(372, 'Elevated error rates on Codex', 'major'),             // real outage → counted
+    ]
+    const r = aggregateIncidentDurations(incidents, 2, 0, 0)
+    expect(r.totalMin).toBe(372)
+    expect(r.longestMin).toBe(372)
+    expect(r.countedCount).toBe(1)
+  })
+
+  it('an outage-signal term in the title wins — a "quota errors" outage still counts', () => {
+    const incidents = [mk(300, 'Elevated 5xx errors — customers hitting quota limits')]
+    const r = aggregateIncidentDurations(incidents, 1, 0, 0)
+    expect(r.totalMin).toBe(300)
+    expect(r.countedCount).toBe(1)
+  })
+
+  it('a month whose ONLY incident is an advisory reports null downtime + 0 counted', () => {
+    const r = aggregateIncidentDurations([mk(4323, 'Usage limits increased for all tiers')], 1, 0, 0)
+    expect(r.totalMin).toBeNull()
+    expect(r.longestMin).toBeNull()
+    expect(r.countedCount).toBe(0)
   })
 })
 
@@ -2270,5 +2302,20 @@ describe('computeMonthlyScore (#993)', () => {
     const r = computeMonthlyScore('x', [], 100, noProbe, WINDOW, undefined)
     expect(r.confidence).toBe('high')
     expect(r.score).toBeGreaterThan(80)
+  })
+
+  it('#1021 — excludes a usage-limits/quota advisory from the Score by TITLE, even with a stored minor impact', () => {
+    // The rebuild-divergence case: a pre-#1021 month stored the Codex "Usage Limits Depleting" advisory as
+    // impact:'minor'. The Score must exclude it by title (as the downtime aggregate does), so a month whose
+    // ONLY incident is that advisory scores identically to an incident-free month — not the depressed 86→76.
+    const advisory = { id: 'a', title: 'Codex Usage Limits Depleting Faster Than Expected', startedAt: '2026-06-05T00:00:00Z', resolvedAt: '2026-06-08T03:00:00Z', durationMin: 4323, finalStatus: 'resolved' as const, impact: 'minor' as const }
+    const withAdvisory = computeMonthlyScore('x', [advisory], 100, noProbe, WINDOW, undefined)
+    const clean = computeMonthlyScore('x', [], 100, noProbe, WINDOW, undefined)
+    expect(withAdvisory.score).toBe(clean.score) // advisory contributes nothing to the Score
+
+    // Control: a real outage with the SAME stored impact + duration DOES drop the Score.
+    const realOutage = { ...advisory, title: 'Elevated error rates on Codex' }
+    const withOutage = computeMonthlyScore('x', [realOutage], 100, noProbe, WINDOW, undefined)
+    expect(withOutage.score!).toBeLessThan(clean.score!)
   })
 })

@@ -240,15 +240,18 @@ export function tierLabelFor(tier) {
   return undefined
 }
 
-// #707/#811 — MIRROR of worker/src/utils.ts `isNonReliabilityAdvisory` (+ the two regexes). A NON-
+// #707/#811/#1021 — MIRROR of worker/src/utils.ts `isNonReliabilityAdvisory` (+ the two regexes). A NON-
 // reliability advisory (compliance / export-control / access revocation OR suspension / deprecation /
-// scheduled change) with NO outage signal must not disqualify an operational fallback candidate (#811 —
-// a Claude model-access suspension must not exclude Claude Code when ChatGPT is down). Parity with the
-// worker copy is pinned by a sync test. An outage-signal term ALWAYS wins (never hide a real fault).
+// scheduled change / usage-limit / quota / billing) with NO outage signal must not disqualify an operational
+// fallback candidate (#811 — a Claude model-access suspension must not exclude Claude Code when ChatGPT is
+// down). Parity with the worker copy is pinned by a sync test. An outage-signal term ALWAYS wins (never hide
+// a real fault). #1021 added the usage-limit/quota/billing terms (the Codex "Usage Limits Depleting" case)
+// + `errors?` to OUTAGE_SIGNAL so "Quota errors"/"Billing errors" real faults still win. (`model access`
+// deliberately excluded — `suspend` already covers access suspension; a bare "model access" title collides.)
 const NON_RELIABILITY_RE =
-  /export control|compliance|regulatory|revoke|revoked|revoking|suspend(?:ed|ing|s)?|deprecat|end[ -]of[ -]life|retir(?:e|ed|ing|ement)|sunset|discontinu|scheduled (?:maintenance|change)/i
+  /export control|compliance|regulatory|revoke|revoked|revoking|suspend(?:ed|ing|s)?|deprecat|end[ -]of[ -]life|retir(?:e|ed|ing|ement)|sunset|discontinu|scheduled (?:maintenance|change)|usage limit|quota|deplet|billing|invoice/i
 const OUTAGE_SIGNAL_RE =
-  /error rate|elevated error|5xx|disruption|outage|partial outage|degraded|unable to|throttl|increased latency|timeouts?|failure|not responding|impair/i
+  /error rate|elevated error|errors?|5xx|disruption|outage|partial outage|degraded|unable to|throttl|increased latency|timeouts?|failure|not responding|impair/i
 export function isNonReliabilityAdvisory(text) {
   return !!text && NON_RELIABILITY_RE.test(text) && !OUTAGE_SIGNAL_RE.test(text)
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, FLAP_SUPPRESSION_ESCAPE_MS, incidentRunMs, shouldHoldNewIncident, shouldHoldForAiAnalysis, AI_HOLD_MS, pendingAiKey, FLAP_HOLD_MS, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
+import { buildIncidentAlerts, buildServiceAlerts, buildTweetDrafts, buildTweetSearches, buildReplyDraft, mergeTogetherAlerts, mergeXaiRegionalAlerts, isFlapNotice, normalizeFlapTitle, flapSuppressionKey, isFlapSuppressible, isShortIncidentHoldable, FLAP_SUPPRESSION_ESCAPE_MS, incidentRunMs, shouldHoldNewIncident, shouldHoldForAiAnalysis, AI_HOLD_MS, pendingAiKey, FLAP_HOLD_MS, pendingNewKey, PENDING_NEW_TTL_S, buildRegionHint, parseAlertedRoster, shouldAlertSourceDead, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from '../alerts'
 import type { AlertCandidate, ScoredService } from '../alerts'
 import type { Incident } from '../types'
 import { SERVICES } from '../services'
@@ -231,6 +231,74 @@ describe('buildIncidentAlerts', () => {
     expect(alerts).toHaveLength(1)
     expect(alerts[0].key).toBe('alerted:res:inc1')
     expect(alerts[0].title).toContain('Resolved (30m)')
+  })
+
+  // #1021 — a non-reliability advisory (usage-limits/quota, down-classified to impact:null upstream) must
+  // not go out framed as a red outage; it's reframed informational (ℹ️/blue, no fallback, no tweet draft).
+  it('#1021 reframes a usage-limits/quota advisory as informational (ℹ️/blue), not 🔴 New Incident', () => {
+    const svc = mockService({
+      status: 'operational',
+      incidents: [inc({ id: 'adv1', title: 'Usage Limits Depleting Faster Than Expected', status: 'investigating', startedAt: recentDate, impact: null })],
+    })
+    const [a] = buildIncidentAlerts([svc], alertedMap(), NOW)
+    expect(a.title.startsWith('ℹ️')).toBe(true)
+    expect(a.title).toContain('Advisory')
+    expect(a.title).not.toContain('New Incident')
+    expect(a.color).toBe(0x5865F2)      // blurple (informational), not red
+    expect(a.advisory).toBe(true)
+    expect(a.fallbackText).toBe('')     // no "try X instead" — an advisory isn't an outage
+    expect(a.key).toBe('alerted:new:adv1') // #1021 dedup key UNCHANGED (paired resolved still matches)
+  })
+
+  it('#1021 an outage-signal title still gets 🔴 New Incident even with an advisory word (outage wins)', () => {
+    const svc = mockService({
+      incidents: [inc({ id: 'out1', title: 'Elevated error rates — quota exceeded', status: 'investigating', startedAt: recentDate, impact: 'major' })],
+    })
+    const [a] = buildIncidentAlerts([svc], alertedMap(), NOW)
+    expect(a.title).toContain('New Incident')
+    expect(a.color).toBe(0xED4245)
+    expect(a.advisory).toBeUndefined()
+  })
+
+  it('#1021 a resolved advisory clears as "ℹ️ Advisory cleared" with no downtime duration', () => {
+    const svc = mockService({
+      incidents: [inc({ id: 'adv1', title: 'Increased quota for all Pro tiers', status: 'resolved', startedAt: recentDate, duration: '72h 3m', impact: null })],
+    })
+    const [a] = buildIncidentAlerts([svc], alertedMap({ adv1: ['openai'] }), NOW)
+    expect(a.title).toContain('Advisory cleared')
+    expect(a.title).not.toContain('72h') // duration omitted — an advisory's up-time is not downtime
+    expect(a.advisory).toBe(true)
+  })
+
+  it('#1021 buildTweetDrafts skips an advisory alert (no "X is having an outage" tweet for a quota notice)', () => {
+    const svc = mockService({ // id 'openai' ∈ TWEET_DRAFT_SERVICES
+      incidents: [inc({ id: 'adv1', title: 'Usage Limits Depleting', status: 'investigating', startedAt: recentDate, impact: null })],
+    })
+    const [a] = buildIncidentAlerts([svc], alertedMap(), NOW)
+    expect(a.advisory).toBe(true)
+    expect(buildTweetDrafts(a, [svc])).toEqual([])
+  })
+
+  it('#1021 buildTweetSearches + buildReplyDraft ALSO skip an advisory (no false "is X down" reply/search)', () => {
+    // The motivating case: codex ∈ TWEET_SEARCH_TERMS + operational badge → a reply draft would otherwise
+    // read "🔴 yes — Codex is down right now", factually false for a quota notice.
+    const svc = mockService({ id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', status: 'operational',
+      incidents: [inc({ id: 'adv1', title: 'Codex Usage Limits Depleting Faster Than Expected', status: 'investigating', startedAt: recentDate, impact: null })],
+    })
+    const [a] = buildIncidentAlerts([svc], alertedMap(), NOW)
+    expect(a.advisory).toBe(true)
+    expect(buildTweetSearches(a, [svc])).toEqual([]) // no "is codex down" search links
+    expect(buildReplyDraft(a, [svc])).toBeNull()     // no false "Codex is down right now" reply
+  })
+
+  it('#1021 a REAL codex outage still gets its reply draft + search links (control)', () => {
+    const svc = mockService({ id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent', status: 'degraded',
+      incidents: [inc({ id: 'out1', title: 'Elevated error rates on Codex', status: 'investigating', startedAt: recentDate, impact: 'major' })],
+    })
+    const [a] = buildIncidentAlerts([svc], alertedMap(), NOW)
+    expect(a.advisory).toBeUndefined()
+    expect(buildTweetSearches(a, [svc]).length).toBeGreaterThan(0)
+    expect(buildReplyDraft(a, [svc])).not.toBeNull()
   })
 
   it('includes fallback text as separate field for degraded service', () => {
