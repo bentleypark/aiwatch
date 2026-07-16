@@ -2,7 +2,7 @@
 
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
-import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, kvPut } from './utils'
+import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, kvPut, isNonReliabilityAdvisory } from './utils'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
@@ -1821,6 +1821,41 @@ export async function recordProbeSuppression(kv: KVNamespace, svcId: string, dat
   await kvPut(kv, supKey, String(prev + 1), { expirationTtl: 172800 })
 }
 
+/**
+ * #1021 — down-classify a NON-reliability advisory incident (usage-limits / quota / billing / deprecation
+ * / model-access, no outage signal) to `impact: null`, generalizing the #707 AWS-Health carve-out to EVERY
+ * provider. A quota notice a provider posts as a `minor` status-page "incident" (e.g. Codex's June "Usage
+ * Limits Depleting Faster Than Expected", 72h) is not an availability outage, so counting its duration as
+ * downtime inflates `totalDowntimeMin` and drops the Score. Applied at the SINGLE fetchAllServices choke
+ * point (alongside #904 suppression) so every downstream consumer of the returned list sees it consistently:
+ *   - the live /api/status list;
+ *   - the live Score (calculateAIWatchScore already excludes null-impact per #707/#261);
+ *   - the go-forward monthly accumulator (stores `impact` from svc.incidents → future archives read null);
+ *   - the cron alert path — `buildIncidentAlerts` REFRAMES an advisory informational (ℹ️ / blurple /
+ *     "Advisory", no fallback), so the Discord alert, the Slack/RSS feed, and the #486 user webhooks (which
+ *     all inherit the alert object) no longer frame a quota notice as a red "🔴 New Incident" outage;
+ *     `buildTweetDrafts` skips it (no "X is having an outage" tweet); and the #778 operator phone push
+ *     already keyed off `impact == null` (`pushTargetFor`) so it stays silent. That reframing is title-keyed
+ *     in alerts.ts (not this null impact), so a mis-parsed null-impact REAL incident keeps the outage alert.
+ *     Flap/hold (`isFlapNotice`) is unchanged (both `minor` and `null` fall through to the title-shape test,
+ *     which a usage-limit title does not match).
+ * The incident stays in the LIST (unlike suppression, which drops it) — it's reclassified informational,
+ * exactly as an AWS advisory or a post-mortem already is. PURE (new objects; never mutates the input or a
+ * shared cache ref). An OUTAGE_SIGNAL term in the title always wins (isNonReliabilityAdvisory) — a real
+ * fault is never hidden (the false-positive that would HIDE an outage is the dangerous direction).
+ */
+export function downclassifyAdvisoryIncidents(services: ServiceStatus[]): ServiceStatus[] {
+  return services.map((svc) => {
+    if (!svc.incidents.some((i) => i.impact != null && isNonReliabilityAdvisory(i.title ?? ''))) return svc
+    return {
+      ...svc,
+      incidents: svc.incidents.map((i) =>
+        i.impact != null && isNonReliabilityAdvisory(i.title ?? '') ? { ...i, impact: null } : i,
+      ),
+    }
+  })
+}
+
 export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeSnapshot[]): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[]; pageComponents: Record<string, Array<{ id: string; name: string }>> }> {
   // Pre-fetch unique Atlassian status API endpoints once.
   // Services sharing a status page (claude+claudeai+claudecode, openai+chatgpt) would each fetch
@@ -2041,9 +2076,13 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
   // by e.g. #741) is unaffected — this only removes the incident from the LIST + Score inputs. Empty
   // list is identity (no churn); a KV read failure falls back to "nothing suppressed".
   const suppressions = await readSuppressions(kv)
+  // #1021 — down-classify usage-limits/quota advisories to null impact BEFORE suppression (order-free:
+  // suppression drops incidents, this only reclassifies survivors' impact) so the live Score + go-forward
+  // accumulator never count a quota notice as downtime. Applied in the same one place as #904, for the same
+  // "every downstream consumer, once" reason.
   return {
-    raw: applySuppressions(raw, suppressions),
-    enriched: applySuppressions(enriched, suppressions),
+    raw: applySuppressions(downclassifyAdvisoryIncidents(raw), suppressions),
+    enriched: applySuppressions(downclassifyAdvisoryIncidents(enriched), suppressions),
     pageComponents,
   }
 }

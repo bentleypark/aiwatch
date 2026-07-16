@@ -18,7 +18,7 @@ import { SERVICE_ADDED_AT, SERVICES, existedInMonth } from './services'
 import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type IncidentHistoryRecord } from './incident-history'
 import { readSuppressionsFresh, readSuppressionsFreshOrNull, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
 import { readOverridesFresh, applyDurationOverrides } from './overrides'
-import { kvPut } from './utils'
+import { kvPut, isNonReliabilityAdvisory } from './utils'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
 // #951 — mirrors AIWatchScore.confidence. 'high' ⟺ the service had an official uptime% at score
@@ -863,7 +863,14 @@ export function computeMonthlyScore(
     id: e.id,
     title: e.title,
     status: e.finalStatus,
-    impact: e.impact ?? null,
+    // #1021 — down-classify a non-reliability advisory (usage-limits/quota/billing/…) to null impact here
+    // too, so the monthly Score excludes it (calculateAIWatchScore filters impact == null per #707/#261)
+    // over the SAME title-keyed population aggregateIncidentDurations excludes from downtime. Keyed on the
+    // TITLE, not stored impact: a REBUILD of a pre-#1021 month (stored impact 'minor') — or an advisory
+    // open across the deploy boundary, whose stored 'minor' a later live null never overwrites
+    // (accumulateMonthlyIncidents nullish-coalesces impact) — would otherwise drop the advisory from
+    // downtime yet still count it in the Score, an internally-contradictory report (the Codex June case).
+    impact: isNonReliabilityAdvisory(e.title ?? '') ? null : (e.impact ?? null),
     startedAt: e.startedAt,
     resolvedAt: e.resolvedAt,
     duration: e.finalStatus === 'resolved' ? minutesToDurationString(e.durationMin) : null,
@@ -1140,22 +1147,36 @@ export function aggregateIncidentDurations(
   count: number,
   accumulatorTotal: number,
   accumulatorLongest: number,
-): { totalMin: number | null; longestMin: number | null } {
+): { totalMin: number | null; longestMin: number | null; countedCount: number | null } {
   if (!incidents || incidents.length === 0 || incidents.length < count) {
-    // Truncated (>MAX cap) or no detail — the accumulator is the only full-population source.
+    // Truncated (>MAX cap) or no detail — the accumulator is the only full-population source. It's a
+    // pre-summed total that can't be re-filtered per-incident, so the #1021 advisory exclusion is
+    // best-effort here; countedCount null tells the caller to keep the full-count avg-resolution divisor.
     return {
       totalMin: accumulatorTotal > 0 ? accumulatorTotal : null,
       longestMin: accumulatorLongest > 0 ? accumulatorLongest : null,
+      countedCount: null,
     }
   }
+  // #1021 — EXCLUDE non-reliability advisories (usage-limits / quota / billing / deprecation / model-access,
+  // no outage signal) from the downtime aggregates: they carry a duration but are NOT availability downtime,
+  // so summing one inflates totalDowntimeMin / longestIncidentMin (Codex's June "Usage Limits Depleting
+  // Faster Than Expected" 72h was 79% of its archived downtime). Keyed on the TITLE classifier
+  // (isNonReliabilityAdvisory — the same one the live path uses to down-classify impact→null for the Score),
+  // NOT on `impact == null`: null is also the lazy default for plain informational entries, and a REBUILD of
+  // stored data may carry a pre-down-classification `minor` impact — the title is the stable signal. An
+  // OUTAGE_SIGNAL term in the title always wins, so a real fault is never dropped. countedCount → avg.
   let total = 0
   let longest = 0
+  let countedCount = 0
   for (const e of incidents) {
+    if (isNonReliabilityAdvisory(e.title ?? '')) continue
+    countedCount++
     const d = typeof e.durationMin === 'number' && e.durationMin > 0 ? e.durationMin : 0
     total += d
     if (d > longest) longest = d
   }
-  return { totalMin: total > 0 ? total : null, longestMin: longest > 0 ? longest : null }
+  return { totalMin: total > 0 ? total : null, longestMin: longest > 0 ? longest : null, countedCount }
 }
 
 export async function buildMonthlyArchive(
@@ -1327,13 +1348,17 @@ export async function buildMonthlyArchive(
     // shorter — Deepgram June read 176h42m/141h10m vs the real 45h33m/27h). The per-incident
     // durationMin is updated to the final value, so it's the source of truth; the accumulator is the
     // fallback only when the list was truncated (>MAX cap, no longer full-population).
-    const { totalMin, longestMin } = aggregateIncidentDurations(
+    const { totalMin, longestMin, countedCount } = aggregateIncidentDurations(
       incidentList, incSvc?.count ?? 0, incSvc?.totalMinutes ?? 0, incSvc?.longestMinutes ?? 0,
     )
     const totalDowntimeMin = totalMin
     const longestIncidentMin = longestMin
-    const avgResolutionMin = incSvc && incSvc.count > 0 && totalMin != null && totalMin > 0
-      ? Math.round(totalMin / incSvc.count)
+    // #1021 — average over the COUNTED (non-advisory) incidents only: a quota advisory excluded from
+    // downtime must not sit in the divisor either (it's what pushed Codex's June avg resolution to 11h25m).
+    // Truncated detail (countedCount null) falls back to the full count, matching the accumulator numerator.
+    const avgDivisor = countedCount ?? (incSvc?.count ?? 0)
+    const avgResolutionMin = avgDivisor > 0 && totalMin != null && totalMin > 0
+      ? Math.round(totalMin / avgDivisor)
       : null
 
     services[id] = {

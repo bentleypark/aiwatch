@@ -7,7 +7,7 @@ import { escapeXml } from './badge'
 import { getGroupedFallbacks } from './fallback'
 import { defuseAutolinkDomain } from './alerts'
 import { formatRecoveryDisplay } from './ai-analysis'
-import { appendStatusHint, appendUtm } from './utils'
+import { appendStatusHint, appendUtm, isNonReliabilityAdvisory } from './utils'
 import { durationMinOf, predictedVsActualText, resolvedAtOf, scoringBaselineHours } from './incident-history'
 
 const SITE = 'https://ai-watch.dev'
@@ -293,6 +293,10 @@ function fallbackLine(svc: ServiceStatus, inc: Incident, services: ServiceStatus
 // status colors — note the feed additionally treats `major` impact as red even when the service
 // is only `degraded` (the dashboard pill stays amber there), favoring alert legibility.
 function severityEmoji(svc: ServiceStatus, inc: Incident, isResolved: boolean): string {
+  // #1021 — a non-reliability advisory (usage-limits/quota/…) is informational, not an outage severity, so
+  // the public feed shows ℹ️ (matching the Discord/webhook "ℹ️ Advisory" reframe) instead of 🟡/🟢. Keyed
+  // on the title (OUTAGE_SIGNAL guard inside), so a real outage that reuses a quota word stays red/amber.
+  if (isNonReliabilityAdvisory(inc.title)) return 'ℹ️'
   if (isResolved) return '🟢'
   if (inc.impact === 'critical' || inc.impact === 'major' || svc.status === 'down') return '🔴'
   return '🟡'

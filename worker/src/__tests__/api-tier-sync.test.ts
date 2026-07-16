@@ -131,7 +131,12 @@ describe('isNonReliabilityAdvisory cross-mirror sync (#811)', () => {
     'export control directive — revoke access',                    // #707 AWS case → advisory
     'Model deprecation: gpt-4-0314 retired',                       // advisory
     'Scheduled maintenance window',                                // advisory
+    'Codex Usage Limits Depleting Faster Than Expected',           // #1021 live case → advisory
+    'Increased quota for all Pro tiers',                           // #1021 → advisory
+    'Billing system reconciliation delay',                         // #1021 → advisory
     'Access suspended due to elevated error rates',                // outage signal wins → NOT advisory
+    'Elevated 5xx errors — customers hitting quota limits',        // #1021 outage wins → NOT advisory
+    'Quota errors returned to customers',                          // #1021 `errors?` guard → NOT advisory
     'Partial outage — API timeouts',                               // outage → NOT advisory
     'Elevated 5xx on the Messages API',                            // outage → NOT advisory
     '',                                                            // empty → NOT advisory
