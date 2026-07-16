@@ -102,9 +102,23 @@ Two deliberate edges, both pinned by tests:
 
 | Label | Added by | Removed by |
 |---|---|---|
-| `verify-blocked` | operator at merge (ship-issue step 10) | auto-verify, once no unchecked `verify-after` line remains |
-| `body-drift` | daily guard, when stray unchecked boxes exist | daily guard, once the body is synced (self-healing) |
-| `verify-overdue` | daily job, on every ping | daily job, once the issue is no longer due (self-healing since #966) |
+| `verify-blocked` | operator at merge (ship-issue step 10) | auto-verify, once no unchecked `verify-after` line remains; **or the closed-issue sweep (#1037)** |
+| `body-drift` | daily guard, when stray unchecked boxes exist | daily guard, once the body is synced (self-healing); **or the closed-issue sweep (#1037)** |
+| `verify-overdue` | daily job, on every ping | daily job, once the issue is no longer due (self-healing since #966); **or the closed-issue sweep (#1037)** |
+
+**Closing an issue clears all three (#1037).** Each label describes an *open* verification obligation,
+so closing is that obligation's terminal state — the daily job sweeps closed issues and strips every one
+of them, unconditionally (no date logic: closed is closed). Grouped into one edit per issue, from one
+bounded query per label. This is what makes the labels safe to filter on in triage: a hit means current
+state.
+
+> **Reopening a swept issue does not restore `verify-blocked` — re-add it by hand.** Closing is terminal
+> for the *obligation*, not for the *issue*. Only `verify-overdue` comes back on its own (the next ping;
+> that path is gated on the scanned set, not on any label). **Nothing in this job ever adds
+> `verify-blocked`** — it is applied by hand at merge. And because `isDriftCandidate` gates on
+> `verify-blocked`, `body-drift` does **not** come back either: without it the issue never enters the
+> drift scan at all, so a reopened swept issue silently loses body-drift detection until you restore
+> `verify-blocked`.
 
 `verify-overdue` was **add-only** before #966 — nothing removed it, not the auto-verify (which drops
 only `verify-blocked`) and not `gh issue close`. A verified-and-closed issue kept the label
@@ -116,9 +130,23 @@ Two properties of the self-heal worth knowing:
   weekly (`shouldFire`: due date, then every 7th day), so an issue is genuinely overdue on days it is
   not pinged. Clearing on "not pinged today" would flap the label on and off six days a week.
 - **It only reaches OPEN issues** (plus an issue closed by the auto-verify pass earlier in the same
-  run — it was still open when fetched). `fetchRepoIssues` lists `--state open`, so a `verify-overdue`
-  scar left on an issue closed by an *earlier* run is never revisited. This PR fixes forward; #857's
-  pre-existing scar was removed by hand.
+  run — it was still open when fetched, and `toClearOverdue` runs after that pass, which is #857's exact
+  path). `fetchRepoIssues` lists `--state open`, so a `verify-overdue` scar left on an issue closed by
+  an *earlier* run is never revisited. #966 fixed forward only; #857's pre-existing scar was removed by
+  hand at the time. **#1037 closed that half** with the separate closed-issue sweep above, which needs
+  no body and no dates. The two are complementary: the date-derived self-heal governs the label while
+  the issue is open; the sweep collects whatever was still on it at close. A `--dry-run` on 2026-07-16
+  planned **19** historical scars (26 labels) — all of them **human** closes (0 of the 8 `verify-overdue`
+  scars carry an `Auto-verified` comment), which is the gap's real shape: the automated close path
+  already self-heals, so what strands a label is closing by hand between runs.
+
+To reproduce the sweep locally, pass the repo explicitly — `parseScanRepos` falls back to the sibling
+repo alone when `GITHUB_REPOSITORY` is unset (as it is outside CI), so a bare run silently scans neither
+the main board nor its scars:
+
+```bash
+GITHUB_REPOSITORY=bentleypark/aiwatch node scripts/verify-reminders.mjs --dry-run
+```
 
 ## When to add an `assert:` (and when not)
 
