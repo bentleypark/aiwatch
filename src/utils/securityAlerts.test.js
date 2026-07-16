@@ -1,12 +1,17 @@
 import { describe, it, expect } from 'vitest'
 import {
   OSV_SERVICE_MAP,
+  NVD_SERVICE_MAP,
+  serviceIdForAlertLabel,
+  securitySourceLabel,
   primaryServiceIdForProvider,
   securityAlertMatchesService,
   filterSecurityAlertsForService,
   tagServiceForAlert,
 } from './securityAlerts'
-import { OSV_PACKAGES } from '../../worker/src/security-monitor'
+import { OSV_PACKAGES, NVD_FIRST_PARTY } from '../../worker/src/security-monitor'
+import ko from '../locales/ko'
+import en from '../locales/en'
 
 // Minimal service fixtures — list order matters (primary = first api-category, else first).
 // langsmith included: its OSV label ('LangChain'), id ('langsmith') and name all differ,
@@ -107,6 +112,87 @@ describe('OSV_SERVICE_MAP ↔ worker OSV_PACKAGES cross-layer sync (#821)', () =
     for (const id of Object.values(OSV_SERVICE_MAP)) {
       expect(typeof id).toBe('string')
       expect(id).toMatch(/^[a-z0-9]+$/)
+    }
+  })
+})
+
+// NVD first-party CVEs (#949) carry a `service` label like OSV, resolved via NVD_SERVICE_MAP.
+const NVD_SERVICES = [
+  { id: 'claudecode', name: 'Claude Code', provider: 'Anthropic', category: 'agent' },
+  { id: 'claudeai', name: 'claude.ai', provider: 'Anthropic', category: 'app' },
+  { id: 'codex', name: 'Codex', provider: 'OpenAI', category: 'agent' },
+  { id: 'chatgpt', name: 'ChatGPT', provider: 'OpenAI', category: 'app' },
+  { id: 'azureopenai', name: 'Azure OpenAI', provider: 'Microsoft', category: 'api' },
+  { id: 'gemini', name: 'Gemini API', provider: 'Google', category: 'api' },
+  { id: 'xai', name: 'xAI (Grok)', provider: 'xAI', category: 'api' },
+  { id: 'perplexity', name: 'Perplexity', provider: 'Perplexity AI', category: 'api' },
+]
+const nvdSvc = (id) => NVD_SERVICES.find((s) => s.id === id)
+
+describe('NVD_SERVICE_MAP ↔ worker NVD_FIRST_PARTY cross-layer sync (#949)', () => {
+  it('every worker NVD_FIRST_PARTY `service` label is a key in NVD_SERVICE_MAP', () => {
+    // Same authoritative sync as OSV: a label without a map key silently drops its CVE
+    // from the ServiceDetails security card (serviceIdForAlertLabel → null → no match).
+    for (const e of NVD_FIRST_PARTY) {
+      expect(Object.keys(NVD_SERVICE_MAP)).toContain(e.service)
+    }
+  })
+  it('every NVD_SERVICE_MAP target id is a non-empty lowercase id', () => {
+    for (const id of Object.values(NVD_SERVICE_MAP)) {
+      expect(id).toMatch(/^[a-z0-9]+$/)
+    }
+  })
+  it('OSV and NVD labels do not collide (serviceIdForAlertLabel is unambiguous)', () => {
+    const overlap = Object.keys(NVD_SERVICE_MAP).filter((k) => k in OSV_SERVICE_MAP)
+    expect(overlap).toEqual([])
+  })
+})
+
+describe('securityAlertMatchesService — NVD label routing (#949)', () => {
+  it('routes an NVD alert to exactly its mapped service card', () => {
+    const alert = { source: 'nvd', service: 'Claude Code', title: 'CVE-2025-52882: …' }
+    expect(securityAlertMatchesService(alert, nvdSvc('claudecode'), NVD_SERVICES)).toBe(true)
+    expect(securityAlertMatchesService(alert, nvdSvc('claudeai'), NVD_SERVICES)).toBe(false)
+    expect(securityAlertMatchesService(alert, nvdSvc('codex'), NVD_SERVICES)).toBe(false)
+  })
+  it('Claude Desktop maps to the claude.ai card (no dedicated desktop service)', () => {
+    const alert = { source: 'nvd', service: 'Claude Desktop', title: 'CVE-x' }
+    expect(securityAlertMatchesService(alert, nvdSvc('claudeai'), NVD_SERVICES)).toBe(true)
+    expect(securityAlertMatchesService(alert, nvdSvc('claudecode'), NVD_SERVICES)).toBe(false)
+  })
+  it('serviceIdForAlertLabel resolves both sources and unknown labels', () => {
+    expect(serviceIdForAlertLabel('OpenAI Codex')).toBe('codex')  // NVD
+    expect(serviceIdForAlertLabel('Anthropic (Claude)')).toBe('claude')  // OSV
+    expect(serviceIdForAlertLabel('Nonexistent')).toBeNull()
+  })
+})
+
+describe('securitySourceLabel (#949 — card labels each finding by what it is about)', () => {
+  it('maps each real source to its label token', () => {
+    expect(securitySourceLabel('nvd')).toBe('product')       // a CVE in the product itself
+    expect(securitySourceLabel('osv')).toBe('sdk')           // a CVE in an installed package
+    expect(securitySourceLabel('hackernews')).toBe('news')   // community chatter
+  })
+
+  it('returns null for an unknown/missing source (renders no badge, never a wrong one)', () => {
+    expect(securitySourceLabel('futuresource')).toBeNull()
+    expect(securitySourceLabel(undefined)).toBeNull()
+  })
+
+  it('every label token has both i18n keys in ko AND en (else the UI renders a raw key)', () => {
+    for (const source of ['nvd', 'osv', 'hackernews']) {
+      const token = securitySourceLabel(source)
+      for (const locale of [ko, en]) {
+        expect(locale[`svc.security.src.${token}`]).toBeTruthy()
+        expect(locale[`svc.security.src.${token}.title`]).toBeTruthy()
+      }
+    }
+  })
+
+  it('covers every SecurityAlert source the worker can emit (no unlabeled feed)', () => {
+    // Cross-layer guard: worker/src/security-monitor.ts SecurityAlert['source'] union.
+    for (const source of ['hackernews', 'osv', 'nvd']) {
+      expect(securitySourceLabel(source)).not.toBeNull()
     }
   })
 })

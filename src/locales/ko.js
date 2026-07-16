@@ -220,6 +220,13 @@ const ko = {
   'svc.mttr.none': '최근 7일 인시던트 없음',
   'svc.mttr.ongoing': '인시던트 진행 중',
   'svc.security': '보안 알림',
+  // #949 — 발견 내용을 "무엇에 대한 취약점인가"로 라벨링 (제품 자체 / SDK / 뉴스)
+  'svc.security.src.product': '제품',
+  'svc.security.src.product.title': '이 서비스 제품 자체의 취약점 (NVD)',
+  'svc.security.src.sdk': 'SDK',
+  'svc.security.src.sdk.title': '설치해 쓰는 SDK·패키지의 취약점 (OSV)',
+  'svc.security.src.news': '뉴스',
+  'svc.security.src.news.title': '보안 뉴스·커뮤니티 논의 (Hacker News)',
   'svc.badge': '상태 배지',
   'svc.badge.copy': '복사',
   'svc.badge.copied': '복사됨 ✓',

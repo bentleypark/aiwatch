@@ -193,14 +193,26 @@ describe('buildWeeklyBriefing', () => {
       changelog: [],
       incidents: [],
       stabilityChanges: [],
-      security: { hnCount: 3, osvCount: 2, highlights: ['xAI API key leaked on GitHub', 'CVE-2026-1234 in anthropic SDK'] },
+      security: { hnCount: 3, osvCount: 2, nvdCount: 4, highlights: ['xAI API key leaked on GitHub', 'CVE-2026-1234 in anthropic SDK'] },
     }
     const result = buildWeeklyBriefing(data)
     expect(result).toContain('🔒 **Security**')
     expect(result).toContain('2 SDK vulnerabilities')
+    expect(result).toContain('4 first-party CVEs')
     expect(result).toContain('3 security news')
     expect(result).toContain('xAI API key leaked')
     expect(result).toContain('CVE-2026-1234')
+  })
+
+  it('renders the Security section for an NVD-only week (#949 — was suppressed)', () => {
+    const data: WeeklyBriefingData = {
+      weekStart: '2026-04-06', weekEnd: '2026-04-12',
+      changelog: [], incidents: [], stabilityChanges: [],
+      security: { hnCount: 0, osvCount: 0, nvdCount: 2, highlights: ['CVE-2025-52882 in Claude Code'] },
+    }
+    const result = buildWeeklyBriefing(data)
+    expect(result).toContain('🔒 **Security**')
+    expect(result).toContain('2 first-party CVEs')
   })
 
   it('omits security section when no security data', () => {
@@ -420,15 +432,17 @@ describe('parseMonthlyIncidents', () => {
 })
 
 describe('buildSecuritySummary', () => {
-  it('counts HN and OSV keys separately', () => {
+  it('counts HN, OSV and NVD keys separately', () => {
     const keys = [
       { name: 'security:seen:hn:12345' },
       { name: 'security:seen:hn:67890' },
       { name: 'security:seen:osv:GHSA-abc' },
+      { name: 'security:seen:nvd:CVE-2025-52882' }, // #949 first-party CVE
     ]
     const result = buildSecuritySummary(keys, ['Some highlight'])
     expect(result.hnCount).toBe(2)
     expect(result.osvCount).toBe(1)
+    expect(result.nvdCount).toBe(1)
     expect(result.highlights).toEqual(['Some highlight'])
   })
 
@@ -436,6 +450,7 @@ describe('buildSecuritySummary', () => {
     const result = buildSecuritySummary([], [])
     expect(result.hnCount).toBe(0)
     expect(result.osvCount).toBe(0)
+    expect(result.nvdCount).toBe(0)
     expect(result.highlights).toEqual([])
   })
 

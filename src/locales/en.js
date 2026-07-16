@@ -221,6 +221,13 @@ const en = {
   'svc.mttr.none': 'No incidents in 7 days',
   'svc.mttr.ongoing': 'Incident ongoing',
   'svc.security': 'Security Alerts',
+  // #949 — label each finding by WHAT it's about (the product itself / an SDK / news)
+  'svc.security.src.product': 'Product',
+  'svc.security.src.product.title': 'A CVE in this service’s own product (NVD)',
+  'svc.security.src.sdk': 'SDK',
+  'svc.security.src.sdk.title': 'A CVE in an SDK/package you install (OSV)',
+  'svc.security.src.news': 'News',
+  'svc.security.src.news.title': 'Security news / community discussion (Hacker News)',
   'svc.badge': 'Status Badge',
   'svc.badge.copy': 'Copy',
   'svc.badge.copied': 'Copied ✓',

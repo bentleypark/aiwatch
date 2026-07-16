@@ -288,6 +288,7 @@ ${consentInitScript(nonce)}
   <p data-i18n="s1.secDesc">상태·신뢰도 측정과는 별개로, AI 스택에 영향을 주는 보안 이슈도 함께 추적해 <strong>월간 리포트</strong>에 집계합니다. 이 데이터는 AIWatch Score나 인시던트 집계에는 반영되지 않습니다.</p>
   <ul>
     <li><strong>OSV.dev</strong> <span data-i18n="s1.sec.osv">— SDK 취약점 (PyPI · npm 24개 추적 패키지), GitHub Advisories로 상세 보강</span></li>
+    <li><strong>NVD</strong> <span data-i18n="s1.sec.nvd">— 자사 제품 CVE (Claude Code · Codex · ChatGPT 앱 등)</span></li>
     <li><strong>Hacker News</strong> <span data-i18n="s1.sec.hn">— AI 서비스 관련 보안 뉴스 (Algolia 검색 API)</span></li>
   </ul>
 </section>
@@ -558,7 +559,7 @@ const i18n = {
     's1.src.atlassian': '— 다수의 주요 제공사', 's1.src.incidentio': '— 컴포넌트 단위 인시던트 + 영향도', 's1.src.gcloud': '— Gemini API (Google Cloud 상태 + AI Studio 컴포넌트 인시던트 병합)', 's1.src.others': '— 그 외 상태 페이지 플랫폼 (인시던트 RSS + 가동률 JSON)', 's1.src.flashduty': '— DeepSeek 상태 피드 정규화 (status.deepseek.com)', 's1.src.awshealth': '— Amazon Bedrock — 공개 이벤트 JSON API(인시던트 start/end), 가동률 API 없음', 's1.src.rss': '— Azure Status(Azure OpenAI) · xAI(status.x.ai) — 가동률 API 없이 인시던트 RSS만 수집', 's1.src.probe': '— 32개 AI 서비스의 API 엔드포인트 직접 측정',
     's1.secTitle': '보안 이슈 모니터링',
     's1.secDesc': '상태·신뢰도 측정과는 별개로, AI 스택에 영향을 주는 보안 이슈도 함께 추적해 <strong>월간 리포트</strong>에 집계합니다. 이 데이터는 AIWatch Score나 인시던트 집계에는 반영되지 않습니다.',
-    's1.sec.osv': '— SDK 취약점 (PyPI · npm 24개 추적 패키지), GitHub Advisories로 상세 보강', 's1.sec.hn': '— AI 서비스 관련 보안 뉴스 (Algolia 검색 API)',
+    's1.sec.osv': '— SDK 취약점 (PyPI · npm 24개 추적 패키지), GitHub Advisories로 상세 보강', 's1.sec.nvd': '— 자사 제품 CVE (Claude Code · Codex · ChatGPT 앱 등)', 's1.sec.hn': '— AI 서비스 관련 보안 뉴스 (Algolia 검색 API)',
     's2.title': '상태 결정',
     's2.lead': '서비스별 상태는 계층화된 우선순위 체인으로 결정되며, 화면에는 <strong>Operational · Partial · Degraded · Down</strong> 로 표기됩니다. 규칙은 위에서부터 순서대로 확인하며, 처음 일치하는 규칙에서 상태가 결정됩니다.',
     's2.1.tag': 'worst-of', 's2.1.title': '멀티 컴포넌트 worst-of', 's2.1.body': '하나의 서비스가 여러 컴포넌트로 구성된 경우(예: Cursor의 IDE + Cloud Agents + CLI), 그중 가장 심각한 상태를 서비스 배지에 표시합니다 (Down > Degraded > Operational).',
@@ -643,7 +644,7 @@ const i18n = {
     's1.src.atlassian': '— many major providers', 's1.src.incidentio': '— per-component incidents + impact', 's1.src.gcloud': '— Gemini API (Google Cloud status + AI Studio component incidents, merged)', 's1.src.others': '— additional status-page platforms (incident RSS + uptime JSON)', 's1.src.flashduty': '— normalized DeepSeek status feed (status.deepseek.com)', 's1.src.awshealth': '— Amazon Bedrock — public events JSON API (incident start/end), no uptime API', 's1.src.rss': '— Azure Status (Azure OpenAI) · xAI (status.x.ai) — incident RSS only, no uptime API', 's1.src.probe': '— direct measurement of 32 AI services\\\' API endpoints',
     's1.secTitle': 'Security-issue monitoring',
     's1.secDesc': 'On a track separate from status & reliability, we also track security issues affecting the AI stack, aggregated into the <strong>monthly report</strong>. This data does not feed the AIWatch Score or incident counts.',
-    's1.sec.osv': '— SDK vulnerabilities (24 tracked PyPI · npm packages), enriched via GitHub Advisories', 's1.sec.hn': '— security news about AI services (Algolia search API)',
+    's1.sec.osv': '— SDK vulnerabilities (24 tracked PyPI · npm packages), enriched via GitHub Advisories', 's1.sec.nvd': '— first-party product CVEs (Claude Code, Codex, ChatGPT app, …)', 's1.sec.hn': '— security news about AI services (Algolia search API)',
     's2.title': 'Status determination',
     's2.lead': 'Per-service status is resolved by a layered priority chain and shown as <strong>Operational · Partial · Degraded · Down</strong>. Rules apply top-to-bottom and stop at the first match.',
     's2.1.tag': 'worst-of', 's2.1.title': 'Multi-component worst-of', 's2.1.body': 'When a user-facing surface spans multiple components (e.g. Cursor IDE + Cloud Agents + CLI), the worst of their statuses becomes the badge (Down > Degraded > Operational).',

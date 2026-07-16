@@ -24,6 +24,7 @@ export interface WeeklyStabilityChange {
 export interface WeeklySecuritySummary {
   hnCount: number
   osvCount: number
+  nvdCount: number // #949 — first-party product CVEs
   highlights: string[] // top security alert titles (max 5)
 }
 
@@ -322,10 +323,11 @@ export function buildWeeklyBriefing(data: WeeklyBriefingData): string {
   }
 
   // Section 4: Security
-  if (data.security && (data.security.hnCount > 0 || data.security.osvCount > 0)) {
+  if (data.security && (data.security.hnCount > 0 || data.security.osvCount > 0 || data.security.nvdCount > 0)) {
     lines.push(`\n🔒 **Security**`)
     const parts: string[] = []
     if (data.security.osvCount > 0) parts.push(`${data.security.osvCount} SDK vulnerabilities`)
+    if (data.security.nvdCount > 0) parts.push(`${data.security.nvdCount} first-party CVEs`)
     if (data.security.hnCount > 0) parts.push(`${data.security.hnCount} security news`)
     lines.push(parts.join(', '))
     if (data.security.highlights.length > 0) {
@@ -365,8 +367,8 @@ function capField(s: string): string {
 }
 
 /**
- * Build security summary from KV keys list (security:seen:hn:*, security:seen:osv:*).
- * Called by cron with the list of security KV keys created this week.
+ * Build security summary from KV keys list (security:seen:hn:*, security:seen:osv:*,
+ * security:seen:nvd:*). Called by cron with the list of security KV keys created this week.
  */
 export function buildSecuritySummary(
   keys: Array<{ name: string; metadata?: unknown }>,
@@ -374,9 +376,11 @@ export function buildSecuritySummary(
 ): WeeklySecuritySummary {
   let hnCount = 0
   let osvCount = 0
+  let nvdCount = 0
   for (const k of keys) {
     if (k.name.startsWith('security:seen:hn:')) hnCount++
     else if (k.name.startsWith('security:seen:osv:')) osvCount++
+    else if (k.name.startsWith('security:seen:nvd:')) nvdCount++
   }
-  return { hnCount, osvCount, highlights: highlights.slice(0, 5) }
+  return { hnCount, osvCount, nvdCount, highlights: highlights.slice(0, 5) }
 }
