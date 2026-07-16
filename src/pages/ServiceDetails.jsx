@@ -19,7 +19,7 @@ import { SCORE_TEXT_CLASS, feedUrlOf } from '../utils/constants'
 import { computeRecoveryStats, formatRecoveryMin } from '../utils/recovery'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
 import { latencyCardState } from '../utils/latencyCard'
-import { filterSecurityAlertsForService } from '../utils/securityAlerts'
+import { filterSecurityAlertsForService, securitySourceLabel } from '../utils/securityAlerts'
 import { regionStatusOf, SERVICE_REGIONS } from '../utils/regionStatus'
 import { ServiceDetailsSkeleton } from '../components/SkeletonUI'
 import EmptyState from '../components/EmptyState'
@@ -1146,9 +1146,9 @@ export default function ServiceDetails({ serviceId }) {
       {/* ── Security Alerts (service-specific) ── */}
       {(() => {
         if (!securityAlerts?.length) return null
-        // #785/#821 — OSV matches by mapped service id; HN matches by service name (exact) or,
-        // when only the provider is named, the provider's single primary service (no sibling
-        // fan-out). Logic + OSV_SERVICE_MAP in src/utils/securityAlerts.js.
+        // #785/#821 — OSV and NVD (#949) match by mapped service id; HN matches by service name
+        // (exact) or, when only the provider is named, the provider's single primary service (no
+        // sibling fan-out). Logic + OSV_SERVICE_MAP/NVD_SERVICE_MAP in src/utils/securityAlerts.js.
         const filtered = filterSecurityAlertsForService(securityAlerts, service, services)
         if (filtered.length === 0) return null
         // #785 — first SECURITY_PREVIEW, rest behind a toggle (same as incident history).
@@ -1170,6 +1170,7 @@ export default function ServiceDetails({ serviceId }) {
                  worker/src/security-monitor.ts. */}
               {visibleAlerts.map((a, i) => {
                 const safeUrl = a.url?.startsWith('https://') ? a.url : '#'
+                const srcLabel = securitySourceLabel(a.source)
                 const epss = a.epssPercentile
                 let epssPrefix = null
                 if (typeof epss === 'number') {
@@ -1185,6 +1186,19 @@ export default function ServiceDetails({ serviceId }) {
                       <span className="shrink-0 mono text-[10px]" style={{ color: epssPrefix.color }}
                         title={`EPSS ${Math.round(epss * 100)}th percentile — ${epss >= 0.8 ? 'actively exploited' : 'elevated exploit risk'}`}
                       >{epssPrefix.tag}</span>
+                    )}
+                    {/* #949 — label every finding by WHAT it's about (제품/SDK/뉴스). A CVE in the
+                       product itself is the headline signal OSV/HN can't surface, so it takes the
+                       accent colour while SDK/news stay muted. Mapping: utils/securityAlerts.js */}
+                    {srcLabel && (
+                      <span className="shrink-0 mono uppercase" title={t(`svc.security.src.${srcLabel}.title`)}
+                        style={{
+                          fontSize: '9px', letterSpacing: '0.05em', borderRadius: '3px',
+                          padding: '1px 5px', lineHeight: 1.5,
+                          color: srcLabel === 'product' ? 'var(--purple)' : 'var(--text2)',
+                          border: `1px solid ${srcLabel === 'product' ? 'var(--purple)' : 'var(--border)'}`,
+                        }}
+                      >{t(`svc.security.src.${srcLabel}`)}</span>
                     )}
                     <span className="truncate">{a.title}</span>
                   </a>

@@ -1,7 +1,9 @@
 // Security Alerts → service matching (#785, refined #821).
 //
-// Two alert sources reach the dashboard via `securityAlerts`:
+// Three alert sources reach the dashboard via `securityAlerts`:
 //   - OSV (SDK CVEs): carry a `service` label → matched to a specific AIWatch service id.
+//   - NVD (first-party product CVEs, #949): carry a `service` label too → matched via
+//     NVD_SERVICE_MAP (Claude Code / Codex / ChatGPT / … → service id).
 //   - HN (Hacker News): no `service` → matched by the service NAME or PROVIDER appearing
 //     in the title.
 //
@@ -21,6 +23,43 @@ export const OSV_SERVICE_MAP = {
   'LangChain': 'langsmith', // #561 — langchain ecosystem CVEs now have a detail-page home
 }
 
+// Maps an NVD `service` label → specific AIWatch service ID (#949). The label is set by
+// NVD_FIRST_PARTY in worker/src/security-monitor.ts — keep the two in sync. Some products
+// have no exact monitored card (Claude Desktop is not a tracked service, "Gemini" here is
+// the vendor product not only the API), so they map to the closest same-provider service.
+export const NVD_SERVICE_MAP = {
+  'Claude Code': 'claudecode',
+  'Claude Desktop': 'claudeai',  // no dedicated desktop card — nearest Anthropic app surface
+  'OpenAI Codex': 'codex',
+  'ChatGPT': 'chatgpt',
+  'Azure OpenAI': 'azureopenai',
+  'Gemini': 'gemini',
+  'Grok': 'xai',
+  'Perplexity': 'perplexity',
+}
+
+// A `service` label from either CVE source → its AIWatch service id (labels don't collide
+// across the two maps).
+export function serviceIdForAlertLabel(label) {
+  return OSV_SERVICE_MAP[label] ?? NVD_SERVICE_MAP[label] ?? null
+}
+
+// #949 — the card labels every finding by WHAT it is about, not by which feed it came from:
+// a CVE in the product itself (NVD) reads distinctly from a CVE in an SDK you install (OSV)
+// or from community news (HN). Naming the *source* ("NVD"/"first-party") was rejected — the
+// former is jargon, and "first-party"/"자사" is ambiguous about whose company is speaking
+// (AIWatch's? the vendor's?). Returns a label token, or null for an unknown source so an
+// unrecognized feed renders no badge rather than a wrong one.
+const SECURITY_SOURCE_LABELS = {
+  nvd: 'product',
+  osv: 'sdk',
+  hackernews: 'news',
+}
+
+export function securitySourceLabel(source) {
+  return SECURITY_SOURCE_LABELS[source] ?? null
+}
+
 // The representative service id for a provider: its first `api`-category service, else its
 // first service in list order. Deterministic given a stable `allServices` order — so a
 // provider-only HN item resolves to exactly one service id.
@@ -34,8 +73,9 @@ export function primaryServiceIdForProvider(provider, allServices) {
 
 // Whether a single security alert should render on `service`'s detail page.
 export function securityAlertMatchesService(alert, service, allServices) {
-  // OSV: match by mapped service ID (e.g. "Anthropic (Claude)" → "claude", not "claudeai").
-  if (alert.service) return OSV_SERVICE_MAP[alert.service] === service.id
+  // OSV/NVD: match by mapped service ID (e.g. "Anthropic (Claude)" → "claude", not
+  // "claudeai"; "Claude Code" → "claudecode").
+  if (alert.service) return serviceIdForAlertLabel(alert.service) === service.id
   // HN: name match → exact service; provider-only match → the provider's primary service only.
   const titleLC = alert.title?.toLowerCase() ?? ''
   const nameLC = service.name?.toLowerCase() ?? ''

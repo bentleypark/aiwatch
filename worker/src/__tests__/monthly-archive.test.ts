@@ -830,12 +830,15 @@ describe('summarizeSecurityAlerts', () => {
       { title: 'B', url: 'u2', source: 'osv',        severity: 'high',     service: 'OpenAI',             detectedAt: '2026-03-02T00:00:00Z' },
       { title: 'C', url: 'u3', source: 'osv',        severity: 'medium',   service: 'Anthropic (Claude)', detectedAt: '2026-03-03T00:00:00Z' },
       { title: 'D', url: 'u4', source: 'hackernews',                                                      detectedAt: '2026-03-04T00:00:00Z' },
+      { title: 'E', url: 'u5', source: 'nvd',        severity: 'low',      service: 'Claude Code',        detectedAt: '2026-03-05T00:00:00Z' },
     ]
     const s = summarizeSecurityAlerts(entries)
-    expect(s.totalAlerts).toBe(4)
-    expect(s.bySource).toEqual({ osv: 3, hackernews: 1 })
-    expect(s.bySeverity).toEqual({ critical: 1, high: 1, medium: 1, low: 0 })
-    expect(s.byService).toEqual({ OpenAI: 2, 'Anthropic (Claude)': 1 })
+    expect(s.totalAlerts).toBe(5)
+    expect(s.bySource).toEqual({ osv: 3, hackernews: 1, nvd: 1 })
+    // Invariant: the source buckets partition totalAlerts (no source silently uncounted).
+    expect(s.bySource.osv + s.bySource.hackernews + s.bySource.nvd).toBe(s.totalAlerts)
+    expect(s.bySeverity).toEqual({ critical: 1, high: 1, medium: 1, low: 1 })
+    expect(s.byService).toEqual({ OpenAI: 2, 'Anthropic (Claude)': 1, 'Claude Code': 1 })
     // Regression guard: a refactor that narrows the projection to {title, url, severity}
     // would quietly break the report template that renders service + detectedAt.
     expect(s.topFindings[0]).toEqual(entries[0])
@@ -890,7 +893,7 @@ describe('summarizeSecurityAlerts', () => {
   it('returns zero-filled summary with empty topFindings for empty input', () => {
     const s = summarizeSecurityAlerts([])
     expect(s.totalAlerts).toBe(0)
-    expect(s.bySource).toEqual({ osv: 0, hackernews: 0 })
+    expect(s.bySource).toEqual({ osv: 0, hackernews: 0, nvd: 0 })
     expect(s.bySeverity).toEqual({ critical: 0, high: 0, medium: 0, low: 0 })
     expect(s.byService).toEqual({})
     expect(s.topFindings).toEqual([])
@@ -928,7 +931,7 @@ describe('extractOsvVulnId', () => {
 describe('enrichTopFindingsWithTimelines', () => {
   const baseSummary: MonthlySecuritySummary = {
     totalAlerts: 3,
-    bySource: { osv: 2, hackernews: 1 },
+    bySource: { osv: 2, hackernews: 1, nvd: 0 },
     bySeverity: { critical: 0, high: 1, medium: 1, low: 0 },
     byService: {},
     topFindings: [
@@ -1350,7 +1353,7 @@ describe('buildMonthlyArchive', () => {
     const archive = await buildMonthlyArchive(secKV, 2026, 3)
     expect(archive.security).not.toBeNull()
     expect(archive.security!.totalAlerts).toBe(2)                       // chatter excluded from the count
-    expect(archive.security!.bySource).toEqual({ osv: 1, hackernews: 1 })
+    expect(archive.security!.bySource).toEqual({ osv: 1, hackernews: 1, nvd: 0 })
     const titles = archive.security!.topFindings.map(f => f.title)
     expect(titles).toContain('anthropic SDK advisory')
     expect(titles).toContain('Copilot RCE (CVE-2025-53773)')
@@ -1577,7 +1580,7 @@ describe('buildMonthlyArchive', () => {
     const archive = await buildMonthlyArchive(kvWithSecurity, 2026, 3)
     expect(archive.security).not.toBeNull()
     expect(archive.security?.totalAlerts).toBe(3)
-    expect(archive.security?.bySource).toEqual({ osv: 2, hackernews: 1 })
+    expect(archive.security?.bySource).toEqual({ osv: 2, hackernews: 1, nvd: 0 })
     expect(archive.security?.topFindings[0].title).toBe('RCE in openai') // critical first
   })
 

@@ -1,12 +1,13 @@
 // Security incident monitoring for AI services
-// Sources: Hacker News Algolia API, OSV.dev vulnerability database
+// Sources: Hacker News Algolia API, OSV.dev vulnerability database (SDK/package CVEs),
+//          NVD (first-party product CVEs — Claude Code, Codex, ChatGPT app, … — #949)
 // Runs hourly alongside Reddit security monitoring
 
 // ---------- Types ----------
 
 export interface SecurityAlert {
-  source: 'hackernews' | 'osv'
-  id: string             // HN story ID or OSV vuln ID
+  source: 'hackernews' | 'osv' | 'nvd'
+  id: string             // HN story ID, OSV vuln ID, or NVD CVE ID
   title: string
   url: string
   severity?: 'critical' | 'high' | 'medium' | 'low'
@@ -427,6 +428,269 @@ export async function fetchOSVAlerts(kv: KVNamespace | null = null): Promise<Sec
   return alerts
 }
 
+// ---------- NVD first-party CVE source (#949) ----------
+//
+// OSV covers *package* CVEs (SDK deps); it never surfaces CVEs in the AI vendors'
+// OWN products — Claude Code, OpenAI Codex, ChatGPT desktop, etc. Those are exactly
+// the "security" signal users expect on a service card, and they live in NVD keyed by
+// vendor product name, not by an npm/PyPI package.
+//
+// Strategy: ONE `lastModStartDate..lastModEndDate` query per cron cycle (hourly) over a
+// FIXED rolling window, then filtering client-side to first-party products. A single
+// request/hour sits far under NVD's unauthenticated 5-req/30s limit, so no NVD_API_KEY is
+// needed. See NVD_WINDOW_MS below for why the window is fixed (and short) rather than
+// cursor-driven. The #949 PoC found precision ≈ 75-80% on the raw vendor match; three noise
+// classes — rejected CVEs, third-party clones/wrappers, and AI-authorship-credited
+// kernel patches — are filtered by the pure predicates below, measured live at 37 → 30.
+
+const NVD_ENDPOINT = 'https://services.nvd.nist.gov/rest/json/cves/2.0'
+// Fixed rolling window, NO cursor — deliberately mirrors fetchOSVAlerts (a 7-day rolling
+// window + `security:seen:*` dedup, no persisted position). A cursor that advanced to
+// `now` inside the fetcher would make NVD *consume-once*: if the caller's Discord send
+// throws before it writes the seen-markers (index.ts sends first, marks second —
+// "duplicate better than lost"), the cursor would already have moved past those CVEs and
+// they'd be lost forever. A fixed window keeps NVD re-derivable like OSV: an undelivered
+// CVE stays in-window (≈6 hourly retries) until it's delivered AND seen-marked, and the
+// 7d seen-marker dedup stops re-surfacing once it is. Window is kept small because NVD's
+// lastMod response time is super-linear (measured 2026-07-16: 2h→0.26MB/2.4s, 6h→0.36MB/
+// 1.5s, 12h→1.8MB/10s, 24h→7.8MB/51s) — a wide window would blow the fetch timeout.
+const NVD_WINDOW_MS = 6 * 3600 * 1000           // fetch CVEs modified in the last 6h (~95 CVEs / 0.36MB / 1.5s)
+const NVD_FETCH_TIMEOUT_MS = 20000              // ample headroom over the ~1.5s 6h-window fetch, well under cron limits
+const NVD_RESULTS_PER_PAGE = 2000               // NVD's max page size (one page covers a 6h window many times over)
+const NVD_MAX_PAGES = 4                          // 8000-CVE/cycle ceiling — an unreachable backstop given the 6h window
+
+// First-party product → AIWatch service. `strong` phrases identify the product on
+// their own (multi-word, low-collision); `weak` single tokens ('grok', 'gemini',
+// 'codex' — each also a common English/unrelated word) match ONLY when a `context`
+// vendor marker co-occurs, so the generic sense doesn't false-positive. The `service`
+// label is carried on the alert and mapped to a service id by NVD_SERVICE_MAP in
+// src/utils/securityAlerts.js (dashboard side) — keep the two in sync. Order = priority
+// when a description names more than one product (the subject is listed first).
+export const NVD_FIRST_PARTY: Array<{
+  service: string
+  strong: string[]
+  weak: string[]
+  context: string[]
+}> = [
+  { service: 'Claude Code',    strong: ['claude code'], weak: [], context: [] },
+  { service: 'Claude Desktop', strong: ['claude desktop', 'claude for windows', 'claude for mac', 'claude for macos', 'claude cowork'], weak: [], context: [] },
+  { service: 'OpenAI Codex',   strong: ['openai codex', 'codex cli', 'codex desktop', 'codex ide', 'codex extension'], weak: ['codex'], context: ['openai'] },
+  { service: 'ChatGPT',        strong: ['chatgpt desktop', 'chatgpt atlas', 'chatgpt for windows', 'chatgpt for macos', 'chatgpt app'], weak: ['chatgpt'], context: ['openai'] },
+  { service: 'Azure OpenAI',   strong: ['azure openai'], weak: [], context: [] },
+  { service: 'Gemini',         strong: ['gemini cli', 'gemini code assist'], weak: ['gemini'], context: ['google'] },
+  { service: 'Grok',           strong: [], weak: ['grok'], context: ['xai', 'x.ai'] },
+  { service: 'Perplexity',     strong: ['perplexity comet', 'comet browser'], weak: ['perplexity'], context: ['perplexity ai', 'perplexity.ai'] },
+]
+
+// Minimal shape of a CVE object from the NVD 2.0 `vulnerabilities[].cve` payload.
+interface NvdCve {
+  id: string
+  vulnStatus?: string
+  descriptions?: Array<{ lang: string; value: string }>
+  metrics?: Record<string, Array<{ cvssData?: { baseScore?: number; baseSeverity?: string } }>>
+  weaknesses?: Array<{ description?: Array<{ lang: string; value: string }> }>
+}
+
+// English description (NVD always ships `lang:'en'`; fall back to the first entry).
+export function extractNvdDescription(cve: NvdCve): string {
+  const descs = cve.descriptions ?? []
+  return (descs.find(d => d.lang === 'en') ?? descs[0])?.value ?? ''
+}
+
+// CVSS base score → our severity band. Prefer the newest metric version present
+// (v4.0 → v3.1 → v3.0 → v2); undefined when the CVE carries no score yet (e.g.
+// "Awaiting Analysis" without a CNA-provided vector) — severity is optional on the alert.
+export function extractNvdSeverity(cve: NvdCve): SecurityAlert['severity'] | undefined {
+  const metrics = cve.metrics ?? {}
+  for (const key of ['cvssMetricV40', 'cvssMetricV31', 'cvssMetricV30', 'cvssMetricV2']) {
+    const score = metrics[key]?.[0]?.cvssData?.baseScore
+    if (typeof score === 'number') {
+      if (score >= 9.0) return 'critical'
+      if (score >= 7.0) return 'high'
+      if (score >= 4.0) return 'medium'
+      return 'low'
+    }
+  }
+  return undefined
+}
+
+export function extractNvdCwes(cve: NvdCve): string[] | undefined {
+  const cwes = new Set<string>()
+  for (const w of cve.weaknesses ?? []) {
+    for (const d of w.description ?? []) {
+      if (d.lang === 'en' && /^CWE-\d+$/.test(d.value)) cwes.add(d.value)
+    }
+  }
+  return cwes.size > 0 ? [...cwes] : undefined
+}
+
+// A CVE the CNA has withdrawn — `vulnStatus:"Rejected"`, or the description carries
+// NVD's canonical rejection preamble. These are not real vulnerabilities (#949 noise class 1).
+export function isRejectedCve(cve: NvdCve): boolean {
+  if ((cve.vulnStatus ?? '').toLowerCase() === 'rejected') return true
+  const d = extractNvdDescription(cve).toLowerCase().trimStart()
+  return d.startsWith('rejected reason:') || d.startsWith('** reject')
+}
+
+// Vendor product tokens that anchor the "<3P noun> for <product>" rule below.
+const NVD_PRODUCT_TOKENS = '(?:claude|chatgpt|codex|gemini|grok|perplexity)'
+
+// A third-party clone / wrapper / router whose SUBJECT is not the vendor's own product
+// (#949 noise class 2). The lastMod stream is polluted by tools that merely NAME a
+// first-party product — verified against live NVD 2026-07-16: WordPress "ChatGPT" plugins,
+// `claude-code-router`, `AgentAPI` ("HTTP API for Claude Code, …"), `MCP Manager for Claude
+// Desktop`, `LibreChat` ("an enhanced ChatGPT clone"). Dropping these took the live set
+// 37 → 29 with no genuine findings lost.
+//
+// Every marker is ANCHORED rather than a bare noun, because this predicate tests the WHOLE
+// description: a bare `\bplugin\b` or `<noun> for` would veto genuine first-party CVEs on an
+// incidental mention. Concretely — Claude Code ships AS a JetBrains plugin and has a plugin
+// marketplace (#920), so "the Claude Code plugin for JetBrains IDEs is vulnerable" must
+// survive; and 'claude for windows' / 'chatgpt for windows' are first-party product names in
+// NVD_FIRST_PARTY itself, so "client for macOS" must survive. A dropped CVE is invisible
+// (there is no feedback channel), so each rule is pinned by a keeps-genuine test.
+const NVD_THIRD_PARTY_RE = new RegExp([
+  'wordpress',                                                        // WP plugins wrapping the vendor API
+  '\\bclone\\b',                                                      // "an enhanced ChatGPT clone"
+  '\\b\\w+-router\\b',                                                // "claude-code-router" (a named 3P router tool)
+  '\\baka\\b[^.]{0,60}\\b(ui|clone|wrapper|proxy|fork|mirror)\\b',
+  '\\b(un ?official|third[- ]party)\\b[^.]{0,40}\\b(client|wrapper|clone|proxy|port|ui|plugin)\\b',
+  '\\bis\\s+(?:a|an)\\s+(?:clone|fork|wrapper|reverse[- ]proxy|proxy|unofficial)\\b',
+  // "<3P noun> for <vendor product>" — the product anchor is what keeps first-party
+  // phrasings like "client for macOS" / "REST API for model inference" alive.
+  `\\b(manager|wrapper|gateway|proxy|client|dashboard|ui|sdk|api)\\s+for\\s+(?:the\\s+)?${NVD_PRODUCT_TOKENS}\\b`,
+].join('|'), 'i')
+export function isThirdPartyCloneSubject(description: string): boolean {
+  return NVD_THIRD_PARTY_RE.test(description)
+}
+
+// An OSS/kernel patch that merely CREDITS an AI tool (#949 noise class 3) — e.g. a
+// Linux-kernel CVE whose commit credits "Claude Code" as the tool that found it. The
+// subject is the kernel, not the AI product. Two signals: a kernel/firmware subject that a
+// first-party product CVE never is, or explicit "found/generated by <tool>" credit phrasing.
+// Deliberately NOT a general OSS-library list (openssl/glibc/systemd/…): a real first-party
+// CVE can legitimately name a bundled lib ("Claude Code ships a vulnerable OpenSSL"), and
+// dropping those would defeat the feature — only kernel/bootloader subjects are safe to veto.
+const NVD_OSS_SUBJECT_RE = /\b(linux kernel|the kernel\b|u-boot)\b/i
+const NVD_AI_CREDIT_RE = /\b(found|discovered|reported|identified|generated|written|authored|fixed)\s+(using|with|by)\s+(claude code|codex|chatgpt|gemini|grok)\b/i
+export function isAiCreditedOssPatch(description: string): boolean {
+  return NVD_OSS_SUBJECT_RE.test(description) || NVD_AI_CREDIT_RE.test(description)
+}
+
+// Attribute a description to a first-party product (the attribution gate). Returns the
+// service label or null. `strong` phrases match as substrings; `weak` tokens are
+// word-boundary'd AND require a context marker so 'grok'/'gemini'/'codex' don't trip on
+// their generic senses. First matching TABLE entry wins (deterministic + precision-favoring;
+// this is table order, not description position — a desc naming two products attributes to
+// whichever appears earlier in NVD_FIRST_PARTY).
+export function matchNvdFirstParty(description: string): string | null {
+  const lc = description.toLowerCase()
+  for (const entry of NVD_FIRST_PARTY) {
+    if (entry.strong.some(p => lc.includes(p))) return entry.service
+    if (entry.weak.length > 0) {
+      const hasWeak = entry.weak.some(p => new RegExp(`\\b${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(lc))
+      if (hasWeak && entry.context.some(c => lc.includes(c))) return entry.service
+    }
+  }
+  return null
+}
+
+export function nvdCveToAlert(cve: NvdCve, service: string): SecurityAlert {
+  const desc = extractNvdDescription(cve)
+  // Title = CVE id + first sentence, capped — the long NVD description is unwieldy in a
+  // Discord digest / card row, and the full text stays one click away at the NVD URL.
+  const firstSentence = desc.split(/(?<=\.)\s/)[0] ?? desc
+  const summary = firstSentence.length > 140 ? `${firstSentence.slice(0, 137)}...` : firstSentence
+  return {
+    source: 'nvd',
+    id: cve.id,
+    title: summary ? `${cve.id}: ${summary}` : cve.id,
+    url: `https://nvd.nist.gov/vuln/detail/${cve.id}`,
+    severity: extractNvdSeverity(cve),
+    kvKey: `security:seen:nvd:${cve.id}`,
+    service,
+    cweIds: extractNvdCwes(cve),
+  }
+}
+
+// Full candidate pipeline: rejected/clone/kernel filters → first-party attribution →
+// alert. Pure over the CVE list so it's exhaustively unit-testable without network.
+export function filterNvdCves(cves: NvdCve[]): SecurityAlert[] {
+  const alerts: SecurityAlert[] = []
+  for (const cve of cves) {
+    if (isRejectedCve(cve)) continue
+    const desc = extractNvdDescription(cve)
+    if (!desc) continue
+    if (isThirdPartyCloneSubject(desc)) continue
+    if (isAiCreditedOssPatch(desc)) continue
+    const service = matchNvdFirstParty(desc)
+    if (!service) continue
+    alerts.push(nvdCveToAlert(cve, service))
+  }
+  return alerts
+}
+
+// Format an epoch-ms as the ISO-8601 string NVD's lastMod params accept (verified:
+// `new Date().toISOString()` with the trailing `Z` and millis is honored).
+function nvdDate(ms: number): string {
+  return new Date(ms).toISOString()
+}
+
+// Fetch first-party CVEs modified in the last NVD_WINDOW_MS, self-deduped against prior
+// cycles' `security:seen:nvd:*` markers (mirrors fetchOSVAlerts so detectSecurityAlerts
+// needs no extra nvd dedup). Throws on HTTP error so the outer allSettled logs it and the
+// window simply re-opens next cycle (no state to leave inconsistent). `kv = null` for tests.
+export async function fetchNvdAlerts(kv: KVNamespace | null = null): Promise<SecurityAlert[]> {
+  const now = Date.now()
+  const startISO = encodeURIComponent(nvdDate(now - NVD_WINDOW_MS))
+  const endISO = encodeURIComponent(nvdDate(now))
+
+  const cves: NvdCve[] = []
+  let startIndex = 0
+  let total = Infinity
+  let pages = 0
+  while (startIndex < total && pages < NVD_MAX_PAGES) {
+    const url = `${NVD_ENDPOINT}?lastModStartDate=${startISO}&lastModEndDate=${endISO}&resultsPerPage=${NVD_RESULTS_PER_PAGE}&startIndex=${startIndex}`
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'AIWatch/1.0 (ai-watch.dev; security monitoring)' },
+      signal: AbortSignal.timeout(NVD_FETCH_TIMEOUT_MS),
+    })
+    if (!res.ok) {
+      res.body?.cancel()
+      throw new Error(`NVD HTTP ${res.status}`)
+    }
+    const json = await res.json() as { totalResults?: number; resultsPerPage?: number; vulnerabilities?: Array<{ cve?: NvdCve }> }
+    total = json.totalResults ?? 0
+    const batch = json.vulnerabilities ?? []
+    for (const item of batch) if (item?.cve) cves.push(item.cve)
+    pages++
+    if (batch.length === 0) break
+    startIndex += json.resultsPerPage ?? NVD_RESULTS_PER_PAGE
+  }
+  // Truncation is unreachable at an 8000-CVE cap over a 6h window (~95 CVEs), but if NVD
+  // ever spiked past it the overflow is simply re-fetched next cycle (the window re-opens
+  // from page 0 — there is no cursor to skip it), so a warn is all that's warranted.
+  if (startIndex < total && pages >= NVD_MAX_PAGES) {
+    console.warn(`[security] NVD window truncated at ${startIndex}/${total} (${NVD_MAX_PAGES}-page cap); overflow re-fetched next cycle`)
+  }
+
+  let alerts = filterNvdCves(cves)
+
+  // Pre-dedup against seen markers (fail-open on KV error, mirrors OSV).
+  if (kv && alerts.length > 0) {
+    const seen = await Promise.allSettled(alerts.map(a => kv.get(a.kvKey)))
+    alerts = alerts.filter((a, i) => {
+      const r = seen[i]
+      if (r?.status === 'rejected') {
+        console.error('[security] NVD pre-dedup KV read failed; treating as unseen:', a.id, r.reason instanceof Error ? r.reason.message : r.reason)
+        return true
+      }
+      return !(r?.status === 'fulfilled' && r.value)
+    })
+  }
+  return alerts
+}
+
 // ---------- EPSS enrichment (#326) ----------
 //
 // EPSS (Exploit Prediction Scoring System) is published by FIRST.org and surfaces
@@ -552,12 +816,13 @@ export async function detectSecurityAlerts(
 ): Promise<SecurityAlert[]> {
   if (!kv) return []
 
-  // OSV alerts are pre-deduped inside fetchOSVAlerts (avoids per-vuln detail fetches
-  // for already-seen entries). HN still needs dedup here since fetchHNSecurityPosts
-  // doesn't touch KV.
-  const [hnAlerts, osvAlerts] = await Promise.allSettled([
+  // OSV + NVD alerts are pre-deduped inside their fetchers (OSV avoids per-vuln detail
+  // fetches for seen entries; NVD avoids re-surfacing across rolling-window overlap). HN
+  // still needs dedup here since fetchHNSecurityPosts doesn't touch KV.
+  const [hnAlerts, osvAlerts, nvdAlerts] = await Promise.allSettled([
     fetchHNSecurityPosts(),
     fetchOSVAlerts(kv),
+    fetchNvdAlerts(kv),
   ])
 
   if (hnAlerts.status === 'rejected') {
@@ -565,6 +830,9 @@ export async function detectSecurityAlerts(
   }
   if (osvAlerts.status === 'rejected') {
     console.error('[security] OSV.dev fetch failed:', osvAlerts.reason instanceof Error ? osvAlerts.reason.message : osvAlerts.reason)
+  }
+  if (nvdAlerts.status === 'rejected') {
+    console.error('[security] NVD fetch failed:', nvdAlerts.reason instanceof Error ? nvdAlerts.reason.message : nvdAlerts.reason)
   }
 
   const hnFinal: SecurityAlert[] = []
@@ -582,6 +850,7 @@ export async function detectSecurityAlerts(
   const combined = [
     ...hnFinal,
     ...(osvAlerts.status === 'fulfilled' ? osvAlerts.value : []),
+    ...(nvdAlerts.status === 'fulfilled' ? nvdAlerts.value : []),
   ]
   // #326: enrich OSV alerts with EPSS (fail-open). Inside detectSecurityAlerts so
   // everything downstream (Discord format, KV meta write, dashboard display) sees
@@ -634,9 +903,18 @@ function formatHNLine(alert: SecurityAlert): string {
   return `• ${alert.title}\n  [HN](${hnUrl})${sourceLink}`
 }
 
+// NVD first-party product CVE (#949). Unlike OSV there's no affectedPackage/fixedVersion
+// remediation — just the mapped service, severity, and the CVE (already embedded in title).
+function formatNvdLine(alert: SecurityAlert): string {
+  const emoji = SEVERITY_EMOJI[alert.severity || 'medium']
+  const serviceTag = alert.service ? `[${alert.service}] ` : ''
+  // alert.title is `CVE-YYYY-NNNN: <summary>`, so the id is already present — don't repeat it.
+  return `${emoji} ${serviceTag}${alert.title}\n[Details](${alert.url})`
+}
+
 /**
  * Format all security alerts into a single Discord embed.
- * Groups OSV vulnerabilities and HN news into sections.
+ * Groups OSV SDK vulnerabilities, NVD first-party product CVEs (#949), and HN news.
  */
 export function formatSecurityDigest(alerts: SecurityAlert[]): {
   title: string
@@ -644,6 +922,7 @@ export function formatSecurityDigest(alerts: SecurityAlert[]): {
   color: number
 } {
   const osvAlerts = alerts.filter(a => a.source === 'osv')
+  const nvdAlerts = alerts.filter(a => a.source === 'nvd')
   const hnAlerts = alerts.filter(a => a.source === 'hackernews')
 
   const sections: string[] = []
@@ -655,6 +934,14 @@ export function formatSecurityDigest(alerts: SecurityAlert[]): {
     }
   }
 
+  if (nvdAlerts.length > 0) {
+    if (sections.length > 0) sections.push('')
+    sections.push(`**First-Party CVEs (${nvdAlerts.length})**`)
+    for (const alert of nvdAlerts) {
+      sections.push(formatNvdLine(alert))
+    }
+  }
+
   if (hnAlerts.length > 0) {
     if (sections.length > 0) sections.push('')
     sections.push(`**Security News (${hnAlerts.length})**`)
@@ -663,9 +950,11 @@ export function formatSecurityDigest(alerts: SecurityAlert[]): {
     }
   }
 
-  // Color: highest severity wins
-  const hasCritical = osvAlerts.some(a => a.severity === 'critical')
-  const hasHigh = osvAlerts.some(a => a.severity === 'high')
+  // Color: highest severity wins across the CVE-backed sources (OSV + NVD; HN severity is
+  // keyword-inferred and unreliable, so it doesn't drive the embed color).
+  const cveAlerts = [...osvAlerts, ...nvdAlerts]
+  const hasCritical = cveAlerts.some(a => a.severity === 'critical')
+  const hasHigh = cveAlerts.some(a => a.severity === 'high')
   const color = hasCritical ? 0xf85149 : hasHigh ? 0xd29922 : 0x8b949e
 
   return {
@@ -721,16 +1010,17 @@ export const CVE_ID_RE = /\bCVE-\d{4}-\d{4,}\b/i
  * Whether a stored finding is verified enough for the PUBLIC surfaces (Overview
  * banner + ServiceDetails card, via /api/status[/cached] `securityAlerts`) — #892.
  *
- * OSV entries are CVE-backed vuln-DB records → always public. HN entries are
- * unverified community chatter matched by title keywords → public ONLY when the
- * title carries an explicit CVE id. The operator Discord digest is unaffected: it
+ * OSV entries are CVE-backed vuln-DB records → always public. NVD entries are
+ * first-party CVEs straight from the national DB (#949) → likewise always public. HN
+ * entries are unverified community chatter matched by title keywords → public ONLY when
+ * the title carries an explicit CVE id. The operator Discord digest is unaffected: it
  * sends `detectSecurityAlerts` output directly and never passes through this reader,
  * so operators keep full visibility of every DETECTED HN finding (i.e. this CVE gate
  * adds no restriction to the operator path beyond the existing `titleMatchesAiSecurity`
  * / `isShowOrLaunchHN` filters). Unknown source → withheld (fail-closed for exposure).
  */
 export function isPubliclyVerifiedAlert(meta: Pick<SecurityAlertMeta, 'source' | 'title'>): boolean {
-  if (meta.source === 'osv') return true
+  if (meta.source === 'osv' || meta.source === 'nvd') return true
   if (meta.source === 'hackernews') return CVE_ID_RE.test(meta.title ?? '')
   return false
 }
