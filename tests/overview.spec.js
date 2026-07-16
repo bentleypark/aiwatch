@@ -33,28 +33,61 @@ test.describe('Overview page', () => {
     await expect(page.locator('main').getByText('Status Calendar')).toBeVisible({ timeout: 5000 })
   })
 
-  test('filter tabs switch between All / Operational / Issues', async ({ page }) => {
+  // #1034 — asserts the filter INVARIANT ("the grid renders exactly as many cards as the active
+  // tab's own badge claims"), not the live status of a named service.
+  //
+  // The previous version asserted `Claude API` was visible under Operational, commented "always
+  // operational". That is a live-data assumption: when Claude API is genuinely degraded it is
+  // correctly filtered out and the test hard-failed, blaming the filter for working. It could
+  // only ever fail LOCALLY — CI starts no worker, so the SPA falls back to MOCK_SERVICES where
+  // `claude` is hard-coded `operational` (usePolling.js) and the assertion is vacuously true.
+  // Meanwhile CLAUDE.md makes the real local worker the DEFAULT, so the documented workflow met a
+  // failure CI could never reproduce.
+  //
+  // The count↔list agreement is also strictly better coverage: #1004 was exactly that drift — the
+  // Issues badge read 0 while the tab rendered 1 card, because the counts resolved the DISPLAY
+  // state while the filter still keyed on the raw status. This now guards it in both directions.
+  test('filter tabs switch between All / Operational / Issues (#1034)', async ({ page }) => {
     // Filter tabs are pill-style segment control (bg2 rounded container)
     const tabBar = page.locator('main .flex.bg-\\[var\\(--bg2\\)\\]')
+    const cards = page.locator('[data-testid="service-card"]')
 
-    // Click Operational tab via evaluate
-    const opTab = tabBar.getByRole('button', { name: /Operational|정상/ })
-    await opTab.evaluate((el) => el.click())
-    // Wait for filter to apply
-    await page.waitForTimeout(200)
-    // Claude API should be visible (always operational)
-    await expect(page.locator('main button').filter({ hasText: 'Claude API' })).toBeVisible()
+    // Each tab renders `<label> <count>`; read the count off the tab itself so the expectation is
+    // derived from the app's own state rather than any assumption about live data.
+    const countOnTab = async (tab) => {
+      const text = await tab.textContent()
+      const m = text.match(/(\d+)/)
+      expect(m, `tab should render a count: "${text}"`).not.toBeNull()
+      return Number(m[1])
+    }
 
-    // Click All tab to restore
-    const allTab2 = tabBar.getByRole('button').first()
-    await allTab2.evaluate((el) => el.click())
-    await page.waitForTimeout(200)
-
-    // Click All tab to restore
     const allTab = tabBar.getByRole('button').first()
+    const opTab = tabBar.getByRole('button', { name: /Operational|정상/ })
+    const issuesTab = tabBar.getByRole('button', { name: /Issues|이슈/ })
+
+    // Baseline: All shows every card in the active category.
+    const totalCount = await countOnTab(allTab)
+    expect(totalCount).toBeGreaterThan(0)
+    await expect(cards).toHaveCount(totalCount)
+
+    // Operational: the grid must match the tab's own badge.
+    const opCount = await countOnTab(opTab)
+    await opTab.evaluate((el) => el.click())
+    await expect(cards).toHaveCount(opCount)
+
+    // Issues: same invariant. Zero is a legitimate live state (everything healthy) — the tab then
+    // renders the "No Issues" empty state instead of cards, which is still 0 cards.
+    const issueCount = await countOnTab(issuesTab)
+    await issuesTab.evaluate((el) => el.click())
+    await expect(cards).toHaveCount(issueCount)
+
+    // Operational + Issues do NOT partition the total: an unreadable-source service resolves to
+    // 'unknown' and belongs to neither tab (#1004). Assert the weaker, true relation.
+    expect(opCount + issueCount).toBeLessThanOrEqual(totalCount)
+
+    // All restores the full grid.
     await allTab.evaluate((el) => el.click())
-    await page.waitForTimeout(200)
-    await expect(page.locator('main button').filter({ hasText: 'Claude API' })).toBeVisible()
+    await expect(cards).toHaveCount(totalCount)
   })
 
   test('category tabs filter the grid into per-category sections (#646)', async ({ page }) => {
