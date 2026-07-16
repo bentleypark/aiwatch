@@ -119,6 +119,12 @@ function ServiceCard({ service, index, onClick, t, isRecovered, isProbed }) {
   return (
     <button
       onClick={onClick}
+      // #1034 — stable hook for the filter-tab e2e, which counts rendered cards and asserts they
+      // match the active tab's own badge count. A structural selector can't do it: ServiceCard
+      // itself contains a `grid` (the metrics row), so `div.grid > button` is ambiguous, and the
+      // section grid's responsive classes are styling, not contract. Mirrors the existing
+      // `data-testid="supply-chain-banner"` precedent below.
+      data-testid="service-card"
       className="w-full text-left bg-[var(--bg1)] border border-[var(--border)] rounded-lg
                  hover:border-t-[var(--border-hi)] hover:border-r-[var(--border-hi)] hover:border-b-[var(--border-hi)] transition-colors animate-[fade-in_0.3s_ease_both]"
       style={{

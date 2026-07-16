@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveStatusDisplay, sourceFlagsOf, displayStatusOf, isDisplayAffected } from './statusDisplay'
+import { resolveStatusDisplay, sourceFlagsOf, displayStatusOf, isDisplayAffected, isDisplayOperational } from './statusDisplay'
 
 // #722/#744 — the shared badge/stripe display-status resolver. Drives the StatusPill, the Overview
 // card left stripe, the sidebar dot, and (mirrored) the is-down header. Pure; never mutates the raw
@@ -84,5 +84,54 @@ describe('isDisplayAffected', () => {
 
   it('does not count a sub-threshold partial as an outage (#722 — the service is up overall)', () => {
     expect(isDisplayAffected({ status: 'operational', partialCount: 2 })).toBe(false)
+  })
+})
+
+// #1034 — `isDisplayOperational` had NO unit coverage despite #1004 calling it "the single predicate
+// behind the stat card, the tab badge AND the tab's list" (they drifted apart when only some moved).
+// The Overview filter-tab e2e asserts the tab COUNT and the rendered LIST agree, which catches that
+// drift — but both derive from THIS predicate, so a bug inside it breaks them identically and the
+// e2e still passes. That blind spot is why the predicate needs its own deterministic test.
+describe('isDisplayOperational (#1034 — the predicate the filter e2e cannot catch)', () => {
+  it('is true for a plainly operational service', () => {
+    expect(isDisplayOperational({ status: 'operational' })).toBe(true)
+  })
+
+  it('counts `partial` as operational (#722/#744 — the service IS up overall)', () => {
+    // Not a formality: this is why a partial service's is-down SEO answer stays "No".
+    expect(isDisplayOperational({ status: 'operational', partialCount: 2 })).toBe(true)
+  })
+
+  it('is false for confirmed outages', () => {
+    expect(isDisplayOperational({ status: 'degraded' })).toBe(false)
+    expect(isDisplayOperational({ status: 'down' })).toBe(false)
+  })
+
+  it('is false for an unreadable source — `unknown` is neither healthy nor affected (#1004)', () => {
+    // The bucket that makes operational + issues NOT partition the total; the Overview tabs rely on
+    // this, so an 'unknown' service must fall out of BOTH tabs rather than pad the operational one.
+    expect(isDisplayOperational({ status: 'operational', sourceDead: true })).toBe(false)
+    expect(isDisplayOperational({ status: 'degraded', sourceUnknown: true })).toBe(false)
+    expect(isDisplayAffected({ status: 'operational', sourceDead: true })).toBe(false)
+  })
+
+  it('honours the probe overrides (#689/#1004)', () => {
+    // probeConfirmed suppresses sourceDead → we know it's up despite the dead status page.
+    expect(isDisplayOperational({ status: 'operational', sourceDead: true, probeConfirmed: true })).toBe(true)
+    // probeContradicted suppresses sourceUnknown → the degraded is real, so NOT operational.
+    expect(isDisplayOperational({ status: 'degraded', sourceUnknown: true, probeContradicted: true })).toBe(false)
+  })
+
+  it('never reports a service as both operational and affected (the tabs must not double-count)', () => {
+    const cases = [
+      { status: 'operational' }, { status: 'operational', partialCount: 2 },
+      { status: 'degraded' }, { status: 'down' },
+      { status: 'operational', sourceDead: true }, { status: 'degraded', sourceUnknown: true },
+      { status: 'operational', sourceDead: true, probeConfirmed: true },
+      { status: 'degraded', sourceUnknown: true, probeContradicted: true },
+    ]
+    for (const s of cases) {
+      expect(isDisplayOperational(s) && isDisplayAffected(s), JSON.stringify(s)).toBe(false)
+    }
   })
 })
