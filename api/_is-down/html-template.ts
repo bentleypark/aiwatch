@@ -1441,6 +1441,12 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
   const rawStatus = service ? assertableStatus(service) : 'operational'
   const status = statusLabel(rawStatus)
 
+  // #1063 — the active incident's id becomes the shared og:url's `&i=` token so each outage is a
+  // distinct social-card identity (the platform re-scrapes instead of reusing the prior outage's
+  // cached card, #804). First UNRESOLVED incident = the current outage; null → the share still pins
+  // `?e=<status>` (fresh card vs the operational one), just without a per-incident identity.
+  const activeIncidentToken = service?.incidents?.find((i) => i.status !== 'resolved')?.id ?? null
+
   // Status-based share templates — randomly selected per render for variety
   // Include AI analysis when available
   const aiRecovery = aiInsight ? (recoveryEstimateExceeded(aiInsight) ? 'Exceeded typical pattern' : formatRecoveryDisplay(aiInsight.estimatedRecovery)) : ''
@@ -1478,7 +1484,7 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
   // #842-B (#547): tag the SHARED url per channel with UTM so outage-moment inflow via the X app
   // (which strips the referrer) is attributable instead of collapsing to GA4 (direct). The page's
   // <link rel=canonical> stays clean — only the copy/X/Threads share links carry the tag.
-  const copyShareUrl = buildShareUrl(canonical, rawStatus, 'copy')
+  const copyShareUrl = buildShareUrl(canonical, rawStatus, 'copy', activeIncidentToken)
   const copyText = rawStatus === 'down'
     ? `${pick(downTexts)}${aiSuffix}\nTracked live on AIWatch:\n${copyShareUrl}`
     : rawStatus === 'degraded'
@@ -1524,8 +1530,8 @@ export function renderShareButtons(seo: ServiceSEO, service: ServiceData | null,
     : xBase
   const encodedText = encodeURIComponent(xText)
   // Per-channel UTM-tagged share URLs (#842-B); untagged for operational (no URL shared then).
-  const xShareUrl = rawStatus !== 'operational' ? encodeURIComponent(buildShareUrl(canonical, rawStatus, 'x')) : ''
-  const threadsShareUrl = rawStatus !== 'operational' ? encodeURIComponent(buildShareUrl(canonical, rawStatus, 'threads')) : ''
+  const xShareUrl = rawStatus !== 'operational' ? encodeURIComponent(buildShareUrl(canonical, rawStatus, 'x', activeIncidentToken)) : ''
+  const threadsShareUrl = rawStatus !== 'operational' ? encodeURIComponent(buildShareUrl(canonical, rawStatus, 'threads', activeIncidentToken)) : ''
   const xUrlParam = xShareUrl ? `&amp;url=${xShareUrl}` : ''
 
   // Use JSON.stringify for safe JS string interpolation (prevents XSS via backslash/newline).

@@ -11,6 +11,23 @@
 //
 // Scoped to outage shares only: the share bar attaches a URL solely on down/degraded (operational
 // shares are text-only), which is precisely the outage-moment audience this is meant to attribute.
+//
+// #1063 — the shared URL ALSO carries the OG status pin `?e=<status>` (+ the per-incident `&i=<id>`
+// token) the operator tweet path already emits (`buildTweetForService` in worker/src/alerts.ts).
+// Without it the destination page renders a status-invariant BARE og:url, and X/Threads/FB dedupe the
+// unfurled card BY og:url — so a public "Post" during an outage kept showing the pre-outage
+// (operational) card X had cached from a routine crawl. `?e=` pins the card's status to the share
+// moment; `&i=` (the active incident id) makes each outage a distinct og:url identity so the platform
+// re-scrapes a fresh card (#804). We reuse `appendStatusHint` (the SAME `?e=` primitive the worker
+// path uses) so the `?e=` PIN can't drift between the two surfaces; the `&i=` token is computed
+// independently on each (here: first-unresolved incident id; worker: `incidentTokenForAlert`) and
+// resolves to the SAME incident id for a `new`/`resolved` incident alert (so those two surfaces'
+// cards pool) — a worker status-EDGE alert carries no `&i=`, so in that window only same-surface
+// shares pool. Either way every share of one outage on a given surface pools onto one card, and a
+// new outage gets a fresh one. `status` is only ever 'down'/'degraded' here
+// (the early return below), both valid HINT_TO_OG_STATUS keys — no operational/unknown hint ever ships.
+
+import { appendStatusHint } from '../../worker/src/utils'
 
 export type ShareChannel = 'x' | 'threads' | 'copy'
 
@@ -22,13 +39,25 @@ const CHANNEL_UTM: Record<ShareChannel, { source: string; medium: string }> = {
 }
 
 /**
- * Append per-channel UTM to a shared is-down URL. Returns `canonical` unchanged for any non-outage
- * status (operational shares carry no URL anyway) so the tag only ever rides an outage-moment share.
- * Pure — safe to unit-test apart from the template. `sep` mirrors appendUtm (worker/src/utils.ts).
+ * Build a shared is-down URL for an outage: the OG status pin `?e=<status>` + per-channel UTM +
+ * (when an incident is active) the `&i=<incidentToken>` card-identity token. Returns `canonical`
+ * unchanged for `operational` (a text-only share, no URL) — and for any OTHER non-outage status
+ * (`unknown`), where the caller still shares this BARE canonical: `unknown` isn't an outage status
+ * and isn't a HINT_TO_OG_STATUS key, so it gets no pin and no UTM, just the plain page URL.
+ * Ordering (`?e=` then `&utm_*` then `&i=`) mirrors the operator tweet path (`buildTweetForService`).
+ * The utm params are stripped when the destination rebuilds og:url from just `e`+`i`, so the two
+ * surfaces' resulting OG:URLS (not the shared links, which differ per channel by utm) pool onto one
+ * card per outage. Pure — safe to unit-test apart from the template.
  */
-export function buildShareUrl(canonical: string, status: string, channel: ShareChannel): string {
+export function buildShareUrl(
+  canonical: string,
+  status: string,
+  channel: ShareChannel,
+  incidentToken?: string | null,
+): string {
   if (status !== 'down' && status !== 'degraded') return canonical
   const { source, medium } = CHANNEL_UTM[channel]
-  const sep = canonical.includes('?') ? '&' : '?'
-  return `${canonical}${sep}utm_source=${source}&utm_medium=${medium}&utm_campaign=outage`
+  const pinned = appendStatusHint(canonical, status) // …?e=down|degraded (canonical is query-less → '?')
+  const tagged = `${pinned}&utm_source=${source}&utm_medium=${medium}&utm_campaign=outage`
+  return incidentToken ? `${tagged}&i=${encodeURIComponent(incidentToken)}` : tagged
 }
