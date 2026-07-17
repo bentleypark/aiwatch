@@ -202,6 +202,109 @@ describe('buildIncidentAlerts', () => {
     expect(alerts[0].title).toContain('New Incident')
   })
 
+  // #1039 — the alert path was the ONLY consumer treating `monitoring` as a new outage. Every other
+  // site (ext-claude.ts:86, incident-history.ts:154, six in index.ts incl. the "monitoring = recovery
+  // confirmed" one) filters `!== 'resolved' && !== 'monitoring'`. The dissent shipped a real red
+  // `🔴 OpenAI API — New Incident` for an already-recovering incident on 2026-07-16.
+  describe('#1039 — `monitoring` is not a NEW outage', () => {
+    const sso = (status: Incident['status']) =>
+      inc({ id: 'sso1', title: 'Elevated Error Rates For SSO Login', status, startedAt: recentDate, impact: 'minor' })
+
+    it('fires NO new alert for an incident first observed at `monitoring` (the production bug)', () => {
+      const svc = mockService({ status: 'degraded', incidents: [sso('monitoring')] })
+      expect(buildIncidentAlerts([svc], alertedMap(), NOW)).toHaveLength(0)
+    })
+
+    it('the #545 joiner case: a service joining while the incident is already `monitoring` stays silent', () => {
+      // Exactly 2026-07-16: chatgpt had alerted; the #1032 deploy made openai join the same incident id,
+      // which was `monitoring` by then → openai got its own red "New Incident".
+      const openai = mockService({ id: 'openai', name: 'OpenAI API', status: 'degraded', incidents: [sso('monitoring')] })
+      const chatgpt = mockService({ id: 'chatgpt', name: 'ChatGPT', category: 'app', status: 'degraded', incidents: [sso('monitoring')] })
+      expect(buildIncidentAlerts([openai, chatgpt], alertedMap({ sso1: ['chatgpt'] }), NOW)).toHaveLength(0)
+    })
+
+    it('still fires for `investigating` and `identified` — only `monitoring` is excluded', () => {
+      for (const status of ['investigating', 'identified'] as const) {
+        const svc = mockService({ status: 'degraded', incidents: [sso(status)] })
+        const alerts = buildIncidentAlerts([svc], alertedMap(), NOW)
+        expect(alerts, `status=${status}`).toHaveLength(1)
+        expect(alerts[0].title).toContain('New Incident')
+      }
+    })
+
+    it('a reopen does NOT re-alert a service already in the roster — the #545 dedup still rules', () => {
+      // Documents the REAL behaviour, which is NOT "reopens alert again": the branch also requires
+      // `!alertedNewMap...has(svc.id)`, so a service that alerted at `investigating` stays deduped
+      // through monitoring → investigating. Only a service never alerted for this incident (i.e. the
+      // monitoring-first case) can alert on a reopen. Asserting with an EMPTY roster would model no
+      // reopen at all and pass for the wrong reason.
+      const svc = mockService({ status: 'degraded', incidents: [sso('investigating')] })
+      expect(buildIncidentAlerts([svc], alertedMap({ sso1: ['openai'] }), NOW)).toHaveLength(0)
+    })
+
+    it('a monitoring-first service DOES alert if the incident reopens to `investigating` (never rostered)', () => {
+      const svc = mockService({ status: 'degraded', incidents: [sso('investigating')] })
+      expect(buildIncidentAlerts([svc], alertedMap(), NOW)).toHaveLength(1)
+    })
+
+    it('logs the withheld alert — a judgement drop must be observable (#970/#983)', () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+      const svc = mockService({ status: 'degraded', incidents: [sso('monitoring')] })
+      buildIncidentAlerts([svc], alertedMap(), NOW)
+      const line = log.mock.calls.flat().join(' ')
+      expect(line).toContain('#1039')
+      // The line describes a STATE, not an event: this fn is stateless and a withheld alert is never
+      // rostered, so it reprints every cycle (below). "first sight" would be false from cycle 2 on.
+      expect(line).not.toContain('first sight')
+      log.mockRestore()
+    })
+
+    it('the log repeats each cycle — so line COUNT is not a frequency (count distinct incident ids)', () => {
+      // Pins the reasoning the comment + doc rely on: three cron cycles over one withheld incident
+      // produce three lines, not one. Anyone grepping this line to size the residual risk must dedup
+      // by incident id, or they overcount by the monitoring duration in cycles.
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+      const svc = mockService({ status: 'degraded', incidents: [sso('monitoring')] })
+      for (let i = 0; i < 3; i++) buildIncidentAlerts([svc], alertedMap(), NOW + i * 300_000)
+      expect(log.mock.calls.filter((c) => c.join(' ').includes('#1039'))).toHaveLength(3)
+      log.mockRestore()
+    })
+
+    it('does NOT log when the service was already rostered (normal path stays quiet)', () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+      const svc = mockService({ status: 'degraded', incidents: [sso('monitoring')] })
+      buildIncidentAlerts([svc], alertedMap({ sso1: ['openai'] }), NOW)
+      expect(log.mock.calls.flat().join(' ')).not.toContain('#1039')
+      log.mockRestore()
+    })
+
+    it('`monitoring` → `resolved` still fires exactly one resolved alert when it HAD been alerted', () => {
+      // The normal path: alerted at `investigating`, silent through `monitoring`, resolved alert at the end.
+      const svc = mockService({
+        incidents: [inc({ id: 'sso1', title: 'Elevated Error Rates For SSO Login', status: 'resolved', startedAt: recentDate, duration: '2h', impact: 'minor' })],
+      })
+      const alerts = buildIncidentAlerts([svc], alertedMap({ sso1: ['openai'] }), NOW)
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].key).toBe('alerted:res:sso1')
+    })
+
+    it('a joiner that stayed silent still appears in the resolved alert (accurate: it WAS affected)', () => {
+      const resolved = inc({ id: 'sso1', title: 'Elevated Error Rates For SSO Login', status: 'resolved', startedAt: recentDate, duration: '2h', impact: 'minor' })
+      const openai = mockService({ id: 'openai', name: 'OpenAI API', incidents: [resolved] })
+      const chatgpt = mockService({ id: 'chatgpt', name: 'ChatGPT', category: 'app', incidents: [resolved] })
+      const alerts = buildIncidentAlerts([openai, chatgpt], alertedMap({ sso1: ['chatgpt'] }), NOW)
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].svcIds).toEqual(['openai', 'chatgpt'])
+    })
+
+    it('no `new` candidate ⇒ the #778 phone push has nothing to find (leak closed for free)', () => {
+      const svc = mockService({ status: 'degraded', incidents: [sso('monitoring')] })
+      const alerts = buildIncidentAlerts([svc], alertedMap(), NOW)
+      // pushTargetFor only ever reads a `new`-keyed candidate; with none built it cannot fire.
+      expect(alerts.filter((a) => a.key.startsWith('alerted:new:'))).toHaveLength(0)
+    })
+  })
+
   it('skips already-alerted new incidents', () => {
     const svc = mockService({
       incidents: [inc({ id: 'inc1', title: 'API Error', status: 'investigating', startedAt: recentDate, impact: 'major' })],
