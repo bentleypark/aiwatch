@@ -17,7 +17,7 @@ import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, g
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForAlert, type AlertFeedEntry } from './alert-feed'
 import { buildSupplyChainBanner } from './supply-chain'
 import { buildUpstreamLinks } from './upstream-link'
-import { refreshStatusCacheOnChange } from './cache-refresh'
+import { refreshStatusCacheOnChange, refreshStatusCacheOnLiveEdge } from './cache-refresh'
 import { pingIndexNow } from './indexnow'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
 import { corsHeaders, matchOrigin } from './cors'
@@ -171,9 +171,14 @@ function todayUTC(): string {
   return new Date().toISOString().split('T')[0]
 }
 
-async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl?: string): Promise<void> {
+// Returns true when this call PASSED the 10-min throttle and issued the writes (counters + CACHE_KEY),
+// false when the throttle skipped it. (The write itself is best-effort — the Promise.all `.catch`
+// below swallows a KV failure — so `true` means "attempted", not "guaranteed persisted".) #1057 — the
+// /api/status handler reads this boolean: a `false` means CACHE_KEY still holds the previous snapshot,
+// so a status edge on this poll must be force-refreshed (throttle bypassed).
+async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl?: string): Promise<boolean> {
   const now = Date.now()
-  if (now - lastKvWrite < KV_WRITE_INTERVAL_MS) return
+  if (now - lastKvWrite < KV_WRITE_INTERVAL_MS) return false
   lastKvWrite = now
 
   const today = todayUTC()
@@ -205,7 +210,10 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl
     accumulateComponentCounters(counters[s.id], s.components)
   })
 
-  // Write cache + daily counters (2 writes per interval)
+  // Write cache + daily counters (2 writes per interval). The CACHE_KEY snapshot shape
+  // ({ services, cachedAt }) MUST match cache-refresh.ts `writeStatusCache` (the #488/#1057 primitive);
+  // it stays inline here (not routed through writeStatusCache) only so the KV-limit-exceeded alert can
+  // hang off this shared Promise.all `.catch` — kvPut swallows internally and would hide the limit.
   await Promise.all([
     kv.put(CACHE_KEY, JSON.stringify({
       services,
@@ -242,6 +250,7 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl
     }
   }
 
+  return true
 }
 
 // 30-min latency snapshot — independent of cacheWrite throttle (+48 writes/day)
@@ -4242,8 +4251,26 @@ export default {
       // Cache results after cross-validation (probe-verified, no fallback substitution — prevents cache poisoning)
       // Await cacheWrite so badge/v1 endpoints see data immediately
       if (env.STATUS_CACHE) {
-        await cacheWrite(env.STATUS_CACHE, raw, env.DISCORD_WEBHOOK_URL)
+        const wrote = await cacheWrite(env.STATUS_CACHE, raw, env.DISCORD_WEBHOOK_URL)
         ctx.waitUntil(writeLatencySnapshot(env.STATUS_CACHE, raw))
+        // #1057 — when the 10-min throttle skipped cacheWrite, CACHE_KEY still holds the previous
+        // snapshot, which the is-down/OG surfaces (via /api/status/cached) read. If THIS poll's fresh
+        // status differs from that snapshot, force an immediate CACHE_KEY-only refresh (throttle
+        // bypassed) so the social card flips on this poll instead of waiting for the next throttled
+        // write or the cron's #488 alert-edge refresh — decoupling OG freshness from the Discord alert
+        // timing. Off the response path (ctx.waitUntil). The cache READ inside runs on the throttled
+        // path — i.e. MOST polls (60s poll vs 10-min throttle) — but KV reads are cheap and not the
+        // budgeted resource; the WRITE is, and it fires only on a rare status edge (self-silencing: the
+        // next poll reads the fresh snapshot → no edge). Counters stay with cacheWrite (the #488 rule).
+        ctx.waitUntil(
+          refreshStatusCacheOnLiveEdge(env.STATUS_CACHE, wrote, raw, CACHE_KEY, CACHE_TTL_SECONDS, cacheRead).then((outcome) => {
+            if (outcome === 'refreshed') console.log('[api/status] #1057 status edge while throttled — forced CACHE_KEY refresh so OG/SSR reflect it now')
+            else if (outcome === 'refresh-failed') console.error('[api/status] #1057 status edge while throttled but forced CACHE_KEY refresh FAILED — OG/SSR may show pre-edge state until the next throttled write or the cron #488 refresh')
+          // Defensive: the helper's reader/writer both swallow (never reject) today, so this can't fire
+          // — but a future reader swap that throws must surface as a logged error, not an unhandled
+          // rejection inside waitUntil.
+          }).catch((err) => console.error('[api/status] #1057 live-edge refresh threw unexpectedly:', err instanceof Error ? err.message : err)),
+        )
       }
 
       // Mistral-only probe cross-validation removed in #373 — same-title incident grouping
