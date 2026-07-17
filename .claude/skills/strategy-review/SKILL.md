@@ -157,6 +157,28 @@ to connect each candidate to its rationale, then output BOTH:
   thread's next step rests on a choice with no `decision_*` page, the next step *is that decision* — say
   so, and do not dress a diligence lead-list up as a plan.
 
+  **Inputs present ≠ startable. Open the issue and read its OWN gate first.** A gate is not an input,
+  and the input vocabulary below cannot express it — so an issue can have every input resolved and
+  still be forbidden. Look for `Status: BACKLOG`, `DO NOT start`, `Build gate`, `signal-gated`,
+  `ON HOLD` in the body. If one is there, that **issue** is not the do-next no matter how ready it
+  looks. Never let an initiative page's "no blocking prerequisites" stand in for reading the issue:
+  the page states technical readiness, the issue states permission.
+
+  **A gate on ONE slice silences that slice, never the thread.** Having found a gate, walk the rest of
+  `advances::` and gate-check each — the do-next is the first UNGATED slice that serves the stated
+  bottleneck. Only if **every bottleneck-serving slice** is gated does the thread emit no action, and
+  then you must say **who fires the trigger**: a trigger nobody owns is not "waiting", it is a thread
+  that will sit `active` forever with no action, which is `parked` wearing the wrong label — say that
+  outright. (This is intra-thread slice selection; it feeds the active-first thread ordering above.)
+
+  Both rules come from the same brief, in two failed drafts (2026-07-17). First it ranked **#861**
+  first because `initiative_growth` said *"착수 가능, 막는 선행 항목 없음"* — true about inputs, while
+  the issue's first line said `Status: BACKLOG — do NOT start`; the brief never opened it (→ rule 1).
+  Corrected to "read the gate", the next draft found #861 gated and declared "Growth emits no action" —
+  never checking that **#887/#270/#346 carry no gate at all**, nor that #861's trigger can only fire
+  from the *parked* monetization thread's outreach, so nobody will (→ rule 2). Both drafts were true
+  and useless: one recommended forbidden work, the other said to wait for something nobody would cause.
+
   **Every do-next line must be executable on reading.** Before you write one, resolve its inputs —
   open the issue and list which boxes are actually unticked; look in `discovery/` before claiming a
   draft is missing; grep the code before calling a checkbox done. Then:
