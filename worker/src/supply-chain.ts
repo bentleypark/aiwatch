@@ -10,6 +10,7 @@
 // The dependency map below is the curation moat; it lives worker-side only (clients just render text).
 
 import type { ServiceStatus } from './types'
+import { causalIncidents } from './incident-text'
 
 export type DepConfidence = 'certain' | 'high' | 'medium'
 
@@ -81,24 +82,23 @@ const isImpacted = (s?: ServiceStatus) => s != null && (s.status === 'degraded' 
 const AWS_REGION_RE = /\b(?:us|eu|ap|sa|ca|me|af|il|cn|mx)-(?:gov-)?(?:east|west|central|north|south|northeast|northwest|southeast|southwest)-\d(?=[a-z]?\b)/gi
 
 /**
- * The AWS regions this service's OWN active incidents name (title + componentNames + timeline).
+ * The AWS regions this service's OWN active incidents name.
  *
- * Reading the TIMELINE, not just the title, is load-bearing — verified against real data (2026-07-13):
- * Hugging Face titles an incident `Elevated error rate – AWS CDN (Singapore)` (a human place name, no
- * token) and only names the region in the update body: "…in the Asia-Pacific (Singapore /
- * ap-southeast-1) region". Title-only extraction would leave HF permanently unattributable despite it
- * explicitly blaming AWS. Pinecone is the opposite — it front-loads `[AWS][us-east-1]` into the title.
+ * Which incidents count as a cause, and what text is searched (title + componentNames + TIMELINE — the
+ * timeline read is load-bearing), is `causalIncidents` in `incident-text.ts` — shared with #1053's
+ * upstream-link layer, which asks the same question with a different needle. The rationale for each
+ * filter lives there.
  *
  * Empty when the service blames nothing region-specific — including the "our upstream provider is
- * having issues" phrasing that carries no region. That case is deliberately NOT attributed: the
+ * having issues" phrasing that carries no region. That case is deliberately NOT attributed here: the
  * banner's headline is region-scoped, so listing a service under regions its own status page never
  * mentions would re-create the very claim this gate removes. Fail-closed — we under-claim rather
  * than assert an unverifiable cause.
  *
- * `impact: null` incidents are skipped, mirroring the AWS side: `awsHealthImpact` drops non-reliability
- * advisories (#707) from region health, and a Statuspage `none` means the provider itself claims no
- * availability impact — such an incident cannot be the cause of a degradation, so it must not lend its
- * region tokens to one.
+ * (Region-less phrasing that NAMES a specific provider — "HuggingFace download issues" — is what
+ * `upstream-link.ts` (#1053) picks up instead, which is why it is a separate layer and not a
+ * loosening of this one. NOT the fully generic phrasing quoted above: that names nothing, so its
+ * gate 3 has no alias to match and it is missed by BOTH layers — see that module's "Accepted cost".)
  *
  * Bedrock needs no special case: it is AWS-native, and its incidents come from the AWS Health feed
  * with `componentNames: [region]` (`parsers/aws.ts`), so its regions parse out like any other
@@ -107,10 +107,7 @@ const AWS_REGION_RE = /\b(?:us|eu|ap|sa|ca|me|af|il|cn|mx)-(?:gov-)?(?:east|west
  */
 export function awsRegionsNamedByService(svc: ServiceStatus): Set<string> {
   const named = new Set<string>()
-  for (const inc of svc.incidents ?? []) {
-    if (inc.status === 'resolved') continue
-    if (inc.impact === null) continue // provider claims no availability impact → not a cause
-    const text = [inc.title ?? '', ...(inc.componentNames ?? []), ...(inc.timeline ?? []).map((e) => e.text ?? '')].join(' ')
+  for (const { text } of causalIncidents(svc)) {
     for (const m of text.matchAll(AWS_REGION_RE)) named.add(m[0].toLowerCase())
   }
   return named

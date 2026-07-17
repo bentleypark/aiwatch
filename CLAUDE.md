@@ -249,7 +249,7 @@ api/                 # Vercel Edge Functions (SSR pages + proxies). `_`-prefixed
   badges.ts          # "AI Status Badges" gallery (/badges, #805)
   confirm.ts         # Per-user Discord webhook double-opt-in confirmation page (#486)
   csp-report.ts      # CSP violation sink (#482)
-  _is-down/ _intro/ _methodology/ _plugin/ _badges/ _shared/   # SSR templates + shared helpers
+  _is-down/ _intro/ _methodology/ _plugin/ _badges/ _shared/   # SSR templates + shared helpers (incl. _is-down/upstream-note.ts — the #1053 card's per-service claim)
 src/                 # React 19 SPA (Vite, no router — hash routing in App.jsx)
   components/        # StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, AnalysisModal
   pages/             # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, Ranking, Statusline
@@ -268,6 +268,8 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   recovery-mark.ts   # The shared "incident resolved" step both cron paths call — recovered: marker + analysis resolvedAt stamp (#1003)
   rss.ts             # Incident RSS feeds (/feed.xml, /feed/:slug) + Slack-poller behaviours
   fallback.ts        # Fallback recommendation (tiered, Score-ranked)
+  upstream-link.ts   # Cross-provider upstream link (#1053) — a dependent's own incident names a provider that is itself down
+  incident-text.ts   # Shared "which incidents can be a CAUSE + their searchable text" primitive (#1053; supply-chain + upstream-link)
   suppression.ts     # Operator incident-suppression layer (#904)
   overrides.ts       # Operator incident duration-override layer (#1019) — pins a paperwork-inflated duration, keeps the incident
   probe.ts probe-archival.ts   # Direct RTT probing (32 targets) + daily archival

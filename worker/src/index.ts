@@ -16,6 +16,7 @@ import { checkPersistentFetchFailures } from './persistent-failure'
 import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, getDetectionTimestamp, isProbeEarlier } from './detection'
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForAlert, type AlertFeedEntry } from './alert-feed'
 import { buildSupplyChainBanner } from './supply-chain'
+import { buildUpstreamLinks } from './upstream-link'
 import { refreshStatusCacheOnChange } from './cache-refresh'
 import { pingIndexNow } from './indexnow'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
@@ -4064,6 +4065,21 @@ export default {
 
         // #574 — supply-chain banner (AWS region degraded + dependent AI service also degraded).
         const supplyChainBanner = buildSupplyChainBanner(scoredCached)
+        // #1053 — cross-provider upstream links. THIS is the path is-down reads; omitting it here
+        // would leave the SSR page permanently linkless while the dashboard worked.
+        //
+        // Emitted UNCONDITIONALLY (an empty array when the gate stays quiet), unlike the
+        // alertFeed/reportFeed/supplyChainBanner neighbours below which omit their key. Deliberate:
+        // this gate fires only during a live cross-provider outage — a handful of times a year — and
+        // the worker deploy is manual + batched, so with a conditional key `upstreamLinks ===
+        // undefined` would mean EITHER "no #1053 worker deployed" OR "deployed and correctly quiet",
+        // with no observable separating them, ever. The feature could be dead on arrival for weeks
+        // with zero signal (#1032's stale-branch deploy is a live way for that to happen). Presence of
+        // the key now means "the #1053 code is live", which is both the cheapest deploy check and what
+        // makes a #873 `assert:` clause possible on this issue — the gate RESULT is not assertable
+        // because it is outage-timed. #574's banner has the conditional shape and has sat
+        // verify-blocked ever since; that is the outcome this avoids.
+        const upstreamLinks = buildUpstreamLinks(scoredCached, Date.now())
 
         return new Response(JSON.stringify({
           services: scoredCached,
@@ -4077,6 +4093,7 @@ export default {
           ...(alertFeed.length > 0 ? { alertFeed } : {}),
           ...(Object.keys(reportFeed).length > 0 ? { reportFeed } : {}),
           ...(supplyChainBanner ? { supplyChainBanner } : {}),
+          upstreamLinks,
         }), {
           status: 200,
           headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=30' },
@@ -4310,6 +4327,10 @@ export default {
       const reportFeed = env.STATUS_CACHE ? await buildReportFeedMap(env.STATUS_CACHE, servicesWithScore) : {}
       // #574 — supply-chain banner (AWS region degraded + dependent AI service also degraded).
       const supplyChainBanner = buildSupplyChainBanner(servicesWithScore)
+      // #1053 — cross-provider upstream links (a dependent's own incident blames a provider that is
+      // itself down). Must be emitted on BOTH status paths — is-down reads /api/status/cached.
+      // Unconditional key (empty array when quiet) — see the /api/status/cached path for why.
+      const upstreamLinks = buildUpstreamLinks(servicesWithScore, Date.now())
 
       return new Response(JSON.stringify({
         services: servicesWithScore,
@@ -4322,6 +4343,7 @@ export default {
         ...(alertFeed.length > 0 ? { alertFeed } : {}),
         ...(Object.keys(reportFeed).length > 0 ? { reportFeed } : {}),
         ...(supplyChainBanner ? { supplyChainBanner } : {}),
+        upstreamLinks,
       }), {
         status: 200,
         headers: {
