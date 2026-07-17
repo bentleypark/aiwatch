@@ -85,6 +85,9 @@ docs_reminder=0
 # those rules — the recurring drift surfaced in #934. This high-precision reminder fires when the
 # rules doc is staged but the mirror page is not.
 methodology_reminder=0
+# Pre-initialized like its siblings above: assigned only inside the git-commit branch, but
+# dereferenced unconditionally below — under `set -u` a non-commit op would otherwise leave it unset.
+truncated_id=""
 if [ "$op" = "git-commit" ]; then
   HCWD="$(printf '%s' "$INPUT" | jq -r '.cwd // ""' 2>/dev/null)"
   [ -n "$HCWD" ] && cd "$HCWD" 2>/dev/null || true
@@ -110,6 +113,21 @@ if [ "$op" = "git-commit" ]; then
     if [ "$statusdet_changed" = 1 ] && [ "$methodology_changed" = 0 ]; then
       methodology_reminder=1
     fi
+    # Truncated-id guard (#1053 retro). A backtick-quoted identifier truncated with a `…` (U+2026)
+    # cannot be verified against its source, and — recorded as evidence — invites a SPLICE: #1053's
+    # 8-round review ate its last two rounds on a chimera id `#f2c4fda9…c3310` that pasted one
+    # incident's head onto another's tail, a value never on the wire. Unlike the semantic
+    # comment-drift that class of bug also produced, THIS one has a lexical signature, so it is
+    # cheap to name exactly. Scope: only `…` (ASCII `...` is spread/chains/prose — a false-positive
+    # factory), only a >=6-char alnum run that CONTAINS A DIGIT (ids here carry digits; prose words
+    # like `something…` / `reference…` do not), only inside backticks, only on ADDED lines. Soft:
+    # a truncated id is a review-caught fidelity issue, not a correctness bug — worth naming, not
+    # blocking. Robust: any git/parse failure leaves truncated_id empty (no fire).
+    truncated_id="$(git diff --cached -U0 2>/dev/null \
+      | grep -E '^\+' | grep -vE '^\+\+\+' \
+      | grep -oE '`[^`]+`' 2>/dev/null \
+      | grep -oE '[0-9A-Za-z]{6,}…' 2>/dev/null \
+      | grep -E '[0-9]' 2>/dev/null | head -3 | tr '\n' ' ')"
   fi
 fi
 
@@ -133,10 +151,13 @@ fi
 if [ "$methodology_reminder" -eq 1 ]; then
   warnings+=("🔗 ${op}: docs/reference/status-determination.md changed but api/_methodology/html-template.ts is NOT in this commit. The public /methodology §2 \"STATUS DETERMINATION\" cards mirror these rules and are a recurring sync miss (#934/#937). Verify the §2 cards still match — update them in THIS commit if the rule changed user-visibly.")
 fi
+if [ -n "${truncated_id// /}" ]; then
+  warnings+=("✂️ ${op}: a truncated identifier is recorded in an added backtick — ${truncated_id}(#1053). A \`…\`-elided id can't be checked against its source and invites a splice (#1053 shipped a chimera \`#f2c4fda9…c3310\`, one incident's head + another's tail). Record the FULL id, or if you don't need the id here (titles/timestamps usually justify a fixture, not ids) drop it. Keep the fact in one place a test asserts.")
+fi
 
 # Soft warning: surface a systemMessage, allow the tool to proceed.
 msg="$(printf '%s\n' "${warnings[@]}")"
-note="${op}; dev_server=$([ "$dev_running" -eq 1 ] && echo up || echo down); no_verify=${noverify}; docs_reminder=${docs_reminder}; methodology_reminder=${methodology_reminder}"
+note="${op}; dev_server=$([ "$dev_running" -eq 1 ] && echo up || echo down); no_verify=${noverify}; docs_reminder=${docs_reminder}; methodology_reminder=${methodology_reminder}; truncated_id=$([ -n "${truncated_id// /}" ] && echo 1 || echo 0)"
 audit "warn" "$note"
 # jq -Rs . turns raw stdin into a properly-escaped JSON string literal.
 esc="$(printf '%s' "$msg" | jq -Rs . 2>/dev/null)"
