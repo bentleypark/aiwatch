@@ -140,3 +140,82 @@ test('the reminder coexists with the step-3.5 reminder (both present)', () => {
     assert.ok(msg.includes('step 3.5'))
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
+
+// ── Truncated-id guard (#1053 retro) ───────────────────────────────────────────────────────────
+// A backtick `…`(U+2026)-elided identifier recorded as evidence invites a splice (the #1053 chimera
+// `#f2c4fda9…c3310`). Marker is a stable substring of the ✂️ warning.
+const TRUNC_MARKER = 'truncated identifier'
+
+test('truncated-id: FIRES on a `…`-elided id in an added comment, and names the token', () => {
+  const dir = makeRepo()
+  try {
+    stage(dir, 'worker/src/foo.ts', '// evidence: huggingface `#f2c4fda9…c3310` off the wire\n')
+    const msg = runHook(dir)
+    assert.ok(msg.includes(TRUNC_MARKER), `expected truncated-id warning; got:\n${msg}`)
+    assert.ok(msg.includes('f2c4fda9…'), `warning must name the offending token; got:\n${msg}`)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('truncated-id: FIRES on a head-only elision too (`01KXN0VF…`)', () => {
+  const dir = makeRepo()
+  try {
+    stage(dir, 'worker/src/foo.ts', '// replicate id `01KXN0VF…`\n')
+    const msg = runHook(dir)
+    assert.ok(msg.includes(TRUNC_MARKER), `got:\n${msg}`)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('truncated-id: SILENT on a FULL id in backticks (no `…`)', () => {
+  const dir = makeRepo()
+  try {
+    stage(dir, 'worker/src/foo.ts', '// id `#f2c4fda9badba95128e25e85914727efd6d44476a8434b4e8f57fdc0ccf5912c`\n')
+    const msg = runHook(dir)
+    assert.ok(!msg.includes(TRUNC_MARKER), `a full id must not fire; got:\n${msg}`)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('truncated-id: SILENT on prose `…` after a digitless word (`something…`)', () => {
+  const dir = makeRepo()
+  try {
+    stage(dir, 'worker/src/foo.ts', '// keep the fact in one place `something…` and move on\n')
+    const msg = runHook(dir)
+    assert.ok(!msg.includes(TRUNC_MARKER), `digitless word must not fire; got:\n${msg}`)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('truncated-id: SILENT on ASCII `...` (spread / chains / prose are not U+2026)', () => {
+  const dir = makeRepo()
+  try {
+    // `config99...rest` has a digit-bearing >=6 token before `...`, so ONLY the U+2026 scoping keeps it quiet.
+    stage(dir, 'worker/src/foo.ts', '// spread `config99...rest` and a range `1...10`\n')
+    const msg = runHook(dir)
+    assert.ok(!msg.includes(TRUNC_MARKER), `ASCII ... must not fire; got:\n${msg}`)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('truncated-id: SILENT when the `…` id is NOT inside backticks', () => {
+  const dir = makeRepo()
+  try {
+    stage(dir, 'worker/src/foo.ts', '// bare prose f2c4fda9…c3310 with no backticks\n')
+    const msg = runHook(dir)
+    assert.ok(!msg.includes(TRUNC_MARKER), `outside backticks must not fire; got:\n${msg}`)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('truncated-id: SILENT on a digitless path-like token in backticks (`reference…`)', () => {
+  const dir = makeRepo()
+  try {
+    stage(dir, 'worker/src/foo.ts', '// see `docs/reference…` for more\n')
+    const msg = runHook(dir)
+    assert.ok(!msg.includes(TRUNC_MARKER), `digitless token must not fire; got:\n${msg}`)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('truncated-id: does NOT fire on a non-commit mutation (git push) even with a truncated id', () => {
+  const dir = makeRepo()
+  try {
+    stage(dir, 'worker/src/foo.ts', '// id `7gpjd8n5…`\n')
+    const msg = runHook(dir, 'git push origin HEAD')
+    assert.ok(!msg.includes(TRUNC_MARKER), `push must not fire; got:\n${msg}`)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
