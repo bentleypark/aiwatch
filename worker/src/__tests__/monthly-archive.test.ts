@@ -32,6 +32,7 @@ import {
   stripInternalFields,
   aggregateIncidentDurations,
   resolveArchiveOfficialUptime,
+  resolveArchiveProbeSummary,
 } from '../monthly-archive'
 import type { SuppressionEntry } from '../suppression'
 import type { ServiceStatus, Incident } from '../types'
@@ -369,6 +370,49 @@ describe('computeMonthlyOfficialUptime (#586)', () => {
       '2026-06-30': { characterai: { ok: 288, total: 288, officialUptime: null } },
     }
     expect(computeMonthlyOfficialUptime(daily).characterai).toBeUndefined()
+  })
+})
+
+// ── resolveArchiveProbeSummary (#1002 / aiwatch-reports#76 — the SAME display ≡ score rule) ──
+// Responsiveness is 20% of the Score and neither of its two inputs was published anywhere: both are
+// computed at build time to derive monthlyScore, then discarded. Publishing them is only safe if the
+// figure shown is the figure that scored — hence delegating to classifyProbe rather than re-deriving
+// "is this probe scorable?". These tests pin that delegation from both sides.
+const summary = (p50: number, cvCombined: number, validDays = 30) => ({ p50, p95: p50 * 2, cvCombined, validDays })
+
+describe('resolveArchiveProbeSummary (#1002 / aiwatch-reports#76)', () => {
+  it('returns the p50 + cvCombined the month Responsiveness actually scored', () => {
+    const summaries = new Map([['groq', summary(174, 0.21)]])
+    expect(resolveArchiveProbeSummary('groq', summaries)).toEqual({ p50LatencyMs: 174, cvCombined: 0.21 })
+  })
+
+  it('an inheriting service reports its PARENT probe (#883) — the p50 that moved its Score', () => {
+    // claudecode/codex have no probe of their own; resolveProbeId points them at claude/openai, and
+    // computeMonthlyScore scores them on that summary. Keying by the service's own id would return null
+    // here and publish "—" for a service whose Score DID include a Responsiveness component.
+    const summaries = new Map([['claude', summary(173, 0.4)], ['openai', summary(223, 0.3)]])
+    expect(resolveArchiveProbeSummary('claudecode', summaries)).toEqual({ p50LatencyMs: 173, cvCombined: 0.4 })
+    expect(resolveArchiveProbeSummary('codex', summaries)).toEqual({ p50LatencyMs: 223, cvCombined: 0.3 })
+  })
+
+  it('withholds for a service with no probe at all (Score has no Responsiveness component)', () => {
+    // bedrock is not a PROBE_TARGET → classifyProbe 'unsupported'. A stray summary under its id must
+    // not be published as if it scored.
+    expect(resolveArchiveProbeSummary('bedrock', new Map([['bedrock', summary(500, 0.2)]]))).toBeNull()
+  })
+
+  it("withholds when the probe is 'insufficient' — probed, but the Score scored NO Responsiveness", () => {
+    // The subtle one, and the reason this delegates rather than checking PROBED_IDS alone: <7 valid days
+    // costs a confidence penalty and yields no component. Publishing that p50 would show a figure the
+    // Score explicitly declined to use — the #951 defect, rebuilt on a new field.
+    expect(resolveArchiveProbeSummary('groq', new Map([['groq', summary(174, 0.21, 6)]]))).toBeNull()
+    expect(resolveArchiveProbeSummary('groq', new Map([['groq', summary(0, 0.21, 30)]]))).toBeNull()
+  })
+
+  it('withholds when the month produced no summary for the probe', () => {
+    // summariesFromDailyData drops partial / spike-dominated / extreme-spread days and needs >=2
+    // survivors, so a probed service can legitimately have no month summary at all.
+    expect(resolveArchiveProbeSummary('groq', new Map())).toBeNull()
   })
 })
 
@@ -1842,6 +1886,101 @@ describe('degradation monthly accumulator (#511)', () => {
       // A hand-edited/corrupt accumulator with byService empty but noStatus populated → null (garbage
       // in → null out). Pins the byService-drives-total invariant.
       expect(summarizeDegradation({ byService: {}, noStatusByService: { deepseek: 3 } })).toBeNull()
+    })
+  })
+})
+
+// The WIRING half of #1002 / aiwatch-reports#76. resolveArchiveProbeSummary being correct proves
+// nothing about the archive carrying its result — deleting the spread at the per-service build site
+// left every unit test above green. This drives the real buildMonthlyArchive and reads the field off
+// the archive it produced.
+describe('buildMonthlyArchive — Responsiveness inputs (#1002 / aiwatch-reports#76)', () => {
+  // 7 days is the floor classifyProbe needs (MIN_VALID_DAYS); count 288 = a full day of 5-min probes,
+  // over summariesFromDailyData's 200-snapshot bar. p95/p50 = 3× stays under its 10× spread cut.
+  const probeDays = Object.fromEntries(
+    Array.from({ length: 7 }, (_, i) => [
+      `probe:daily:2026-03-${String(i + 1).padStart(2, '0')}`,
+      JSON.stringify({
+        claude: { p50: 100, p75: 200, p95: 300, min: 50, max: 400, count: 288, spikes: 0 },
+        // A second probed service with a DISTINCT p50 — without it nothing pins that each row gets its
+        // OWN summary: hardcoding the lookup to 'claude', or hoisting the per-service local out of the
+        // loop so one service's summary leaks onto the next row, both pass a claude-only fixture. That
+        // leak would publish a p50 under the wrong service, which is the misattribution the display ≡
+        // score rule exists to prevent.
+        groq: { p50: 250, p75: 400, p95: 600, min: 120, max: 800, count: 288, spikes: 0 },
+      }),
+    ]),
+  )
+  const kv = {
+    get: async (key: string) => (probeDays as Record<string, string>)[key] ?? null,
+    put: async () => {},
+    delete: async () => {},
+    list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+  } as unknown as KVNamespace
+
+  it('carries the p50 + cvCombined the month scored, per service, from that service\'s own summary', async () => {
+    const archive = await buildMonthlyArchive(kv, 2026, 3, [
+      { id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const },
+      { id: 'groq', aiwatchScore: 91, scoreGrade: 'excellent' as const },
+      // gemini IS a probe target but has no probe data this month → no summary. It sits in the same
+      // archive as two services that DO have one, which is what opens the leak path: a lookup that
+      // falls back to the previous row's summary only misbehaves on a row that has none of its own.
+      { id: 'gemini', aiwatchScore: 64, scoreGrade: 'fair' as const },
+    ])
+    // cvCombined = 0.3·cvDaily + 0.7·spread = 0.3·0 + 0.7·((300−100)/100) = 1.4
+    expect(archive.services.claude.p50LatencyMs).toBe(100)
+    expect(archive.services.claude.cvCombined).toBeCloseTo(1.4, 3)
+    // Distinct values, so a row reading the wrong service's summary fails here rather than passing.
+    // 0.7·((600−250)/250) = 0.98
+    expect(archive.services.groq.p50LatencyMs).toBe(250)
+    expect(archive.services.groq.cvCombined).toBeCloseTo(0.98, 3)
+    // A row with no summary of its own must report null — never inherit a neighbour's figure.
+    expect(archive.services.gemini.p50LatencyMs).toBeNull()
+    expect(archive.services.gemini.cvCombined).toBeNull()
+  })
+
+  it('the p50 is NOT the unfiltered mean the p75/p95 columns use — they answer different questions', async () => {
+    const archive = await buildMonthlyArchive(kv, 2026, 3, [{ id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const }])
+    // avgLatencyMs is a mean of daily p75 over ALL days; p50LatencyMs comes from the filtered summary.
+    // Publishing the former as "the Responsiveness input" is the defect aiwatch-reports#76 exists to fix.
+    expect(archive.services.claude.avgLatencyMs).toBe(200)
+    expect(archive.services.claude.p50LatencyMs).toBe(100)
+  })
+
+  // Load-bearing beyond its title: the other wiring fixtures use a CONSTANT daily p50, so an unfiltered
+  // daily-p50 mean — aiwatch-reports#76's original proposal — is numerically identical to the filtered
+  // summary there and no assertion can tell them apart. Here they diverge (count 100 drops every day →
+  // null, but an unfiltered mean still returns 100), so this is the only test standing between the code
+  // and a silent regression back to the wrong source. Do not relax the count.
+  it('nulls both fields when the days are too thin to score (probed, but no Responsiveness)', async () => {
+    // count 100 < the 200-snapshot bar → every day dropped → no summary → classifyProbe 'insufficient'.
+    // avgLatencyMs still reports, because it never filters: exactly the pair the display ≡ score rule
+    // has to keep apart.
+    const thin = {
+      get: async (key: string) =>
+        key.startsWith('probe:daily:2026-03-0')
+          ? JSON.stringify({ claude: { p50: 100, p75: 200, p95: 300, min: 50, max: 400, count: 100, spikes: 0 } })
+          : null,
+      put: async () => {},
+      delete: async () => {},
+      list: async () => ({ keys: [], list_complete: true, cacheStatus: null }),
+    } as unknown as KVNamespace
+    const archive = await buildMonthlyArchive(thin, 2026, 3, [{ id: 'claude', aiwatchScore: 85, scoreGrade: 'excellent' as const }])
+    expect(archive.services.claude.avgLatencyMs).toBe(200)
+    expect(archive.services.claude.p50LatencyMs).toBeNull()
+    expect(archive.services.claude.cvCombined).toBeNull()
+  })
+
+  it('an inheriting service reports the PARENT probe end-to-end, with its own avgLatencyMs still null', () => {
+    // The row a reader will find odd, and the one the unit tests could not pin: claudecode has no probe
+    // of its own, so avgLatencyMs (keyed by its own id) is null while p50LatencyMs carries claude's —
+    // because claude's probe is what actually scored it (#883). Asserted together, on one object, since
+    // the pair is the confusing part. It also warns the reports side: a p50 column filtered on
+    // `avgLatencyMs !== null` (generate-report.js's existing idiom) would drop exactly this row.
+    return buildMonthlyArchive(kv, 2026, 3, [{ id: 'claudecode', aiwatchScore: 80, scoreGrade: 'good' as const }]).then((archive) => {
+      expect(archive.services.claudecode.avgLatencyMs).toBeNull()
+      expect(archive.services.claudecode.p50LatencyMs).toBe(100)
+      expect(archive.services.claudecode.cvCombined).toBeCloseTo(1.4, 3)
     })
   })
 })

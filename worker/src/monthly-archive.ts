@@ -88,6 +88,15 @@ export interface MonthlyServiceData {
   avgLatencyMs: number | null    // average probe RTT p75 in ms (null if no probe data)
   p95LatencyMs: number | null    // mean of daily probe RTT p95 in ms (#17 — null if no valid p95 data)
   latencySpikes: number | null   // total RTT spikes this month (rtt>3×median or failed probe; #17 — null if no probe data)
+  /** #1002 / aiwatch-reports#76 — the two figures **`monthlyScore`'s** Responsiveness component (20 pts)
+   *  was scored on: `computeResponsiveness` reads p50 (the `speed` axis) + cvCombined (`stability`).
+   *  Both are computed at build time to derive `monthlyScore`, and were then discarded — so a reader
+   *  told Responsiveness is 20% of the Score could see neither. Null when it scored no Responsiveness;
+   *  ABSENT on archives written before this (a reader must treat both as "—", i.e. test `!= null`).
+   *  Not interchangeable with `avgLatencyMs`/`p95LatencyMs` above — see resolveArchiveProbeSummary for
+   *  why, and for the display ≡ score rule that decides when these are populated. */
+  p50LatencyMs: number | null    // median probe RTT (ms) the Responsiveness `speed` axis scored
+  cvCombined: number | null      // combined RTT variance the Responsiveness `stability` axis scored
   // Per-incident detail (#375). Capped at MAX_INCIDENTS_PER_SERVICE_IN_ARCHIVE to bound KV size;
   // when the cap is hit, oldest entries are truncated (the most-recent-N policy keeps the
   // dashboard's 30-90d filter useful even on high-frequency services like Together AI).
@@ -833,6 +842,47 @@ export function curateComponentUptime(
 
 const PROBED_IDS = new Set(PROBE_TARGETS.map((t) => t.id))
 
+/**
+ * PURE. #1002 / aiwatch-reports#76 — the Responsiveness inputs **`monthlyScore` was computed from**, or
+ * null when it scored no Responsiveness component. The canonical rationale for both new fields.
+ *
+ * WHY NOT the sibling latency fields. `computeMonthlyLatency`/`computeMonthlyLatencyStats` mean every
+ * day's p75/p95, dropping only days with a non-positive value, and key by the service's OWN id. The
+ * Score never sees those. Responsiveness reads `summariesFromDailyData`, which first drops partial days
+ * (<200 snapshots), spike-dominated days (≥50%) and extreme-spread days (p95/p50 > 10×), needs ≥2
+ * survivors, and is keyed by the PROBE's id. So the two genuinely differ, and publishing the mean as
+ * "the Responsiveness input" — aiwatch-reports#76's original proposal — would relabel a figure the
+ * Score never read, which is the defect that issue exists to fix.
+ *
+ * WHY DELEGATE to `classifyProbe` rather than re-derive "is this probe scorable?" from PROBED_IDS +
+ * validDays + p50: the predicate is subtle ('insufficient' means probed-but-unscorable — it costs a
+ * confidence penalty yet yields NO component), and computeMonthlyScore asks the identical question
+ * further down this file. A second copy would drift silently into publishing a p50 the Score ignored.
+ * Sharing it makes display ≡ score true by construction.
+ *
+ * The anchor is **`monthlyScore`, not `score`** — the archive carries both, and `score` is a build-day
+ * snapshot of the LIVE rolling-30d figure whose Responsiveness came from a different (7-day) summary
+ * with a different p50. So this is #951's display ≡ score rule pointed at the month-scoped score. It
+ * holds for the report only because #993 moved it onto `monthlyScore` — adopted reports-side in
+ * aiwatch-reports PR #82, which resolves it at each of the THREE archive-load paths that read services
+ * raw. So a fourth read path added later would skip the normalization and render these beside a raw
+ * `score`, quietly breaking the guarantee.
+ *
+ * `resolveProbeId` (#883): an inheriting service (claudecode→claude, codex→openai) is scored on its
+ * PARENT's probe, so that is the p50 that moved its Score — even though its own `avgLatencyMs`, keyed
+ * by its own id, is null. A consumer filtering the table on `avgLatencyMs` therefore drops the very
+ * services this inheritance exists to serve; filter on this field instead.
+ */
+export function resolveArchiveProbeSummary(
+  serviceId: string,
+  monthlySummaries: Map<string, ProbeSummary>,
+): { p50LatencyMs: number; cvCombined: number } | null {
+  const probeId = resolveProbeId(serviceId)
+  const probe = classifyProbe(probeId, PROBED_IDS.has(probeId), monthlySummaries)
+  if (probe.kind !== 'available') return null
+  return { p50LatencyMs: probe.summary.p50, cvCombined: probe.summary.cvCombined }
+}
+
 /** Format integer minutes back to the "Xh Ym" string score.ts's MTTR parser expects (lossless). */
 function minutesToDurationString(mins: number): string {
   return `${Math.floor(mins / 60)}h ${mins % 60}m`
@@ -1358,6 +1408,7 @@ export async function buildMonthlyArchive(
     // downtime must not sit in the divisor either (it's what pushed Codex's June avg resolution to 11h25m).
     // Truncated detail (countedCount null) falls back to the full count, matching the accumulator numerator.
     const avgDivisor = countedCount ?? (incSvc?.count ?? 0)
+    const probeSummary = resolveArchiveProbeSummary(id, monthlySummaries)
     const avgResolutionMin = avgDivisor > 0 && totalMin != null && totalMin > 0
       ? Math.round(totalMin / avgDivisor)
       : null
@@ -1387,6 +1438,12 @@ export async function buildMonthlyArchive(
       avgLatencyMs: latencyMap[id] ?? null,
       p95LatencyMs: latencyStats[id]?.p95 ?? null,
       latencySpikes: latencyStats[id]?.spikes ?? null,
+      // #1002 / aiwatch-reports#76 — the p50 + cvCombined monthlyScore's Responsiveness was computed
+      // from, off the same `monthlySummaries` computeMonthlyScore reads. Null (not absent) when it
+      // scored none, matching how every other later-added measurement here reports "no data"
+      // (officialUptime #586, p95LatencyMs #17). See resolveArchiveProbeSummary.
+      p50LatencyMs: probeSummary?.p50LatencyMs ?? null,
+      cvCombined: probeSummary?.cvCombined ?? null,
       ...(incidentList ? { incidentList } : {}),
       ...(scoreSvc?.incidentSourceStale ? { incidentSourceStale: true } : {}),
       ...(() => { // #605 Phase 2 aggregate + Phase 3 curate to the display set (drops billing/compliance noise)
