@@ -11,7 +11,7 @@ import { usePolling } from '../hooks/usePolling'
 import { useSettings } from '../hooks/useSettings'
 import { trackEvent } from '../utils/analytics'
 import { isUnreliableUptime, noOfficialUptime } from '../utils/serviceReliability'
-import { computePredictionOutcome, withinEstimateText } from '../utils/predictionAccuracy'
+import { buildRecoveredRows, recoveredDetailText } from '../utils/recoveredGrouping'
 import { SCORE_BG_CLASS, SERVICE_CATEGORIES, getGroupedFallbacksExcludingRegionSwitchable, ALL_SERVICES_FEED_URL, outboundReferralUrl, sendReferralBeacon } from '../utils/constants'
 import RssCopyIcon from '../components/RssCopyIcon'
 import { regionStatusOf } from '../utils/regionStatus'
@@ -697,6 +697,9 @@ export default function Overview() {
   const services = allServices.filter((s) => settings.enabledServices.includes(s.id))
   const [filter, setFilter] = useState('all')
   const [reportOpen, setReportOpen] = useState(false)
+  // #1045 — the Recently Resolved banner's rows, collapsed to one per incident. Not memoized: it keys
+  // off `services`, which is rebuilt every render anyway, so a memo would never hit.
+  const recoveredRows = buildRecoveredRows(recentlyRecovered, services, aiAnalysis)
 
   // #575 — flatten the gated crowd-report map into a single newest-first list for the panel.
   const reportItems = useMemo(() => {
@@ -833,7 +836,7 @@ export default function Overview() {
       <ActionBanner services={services} setPage={setPage} t={t} />
 
       {/* ── Recently Resolved Banner ── */}
-      {Object.keys(recentlyRecovered).some(id => services.find(s => s.id === id)) && (
+      {recoveredRows.length > 0 && (
         <div className="rounded-lg border" style={{ borderColor: 'var(--blue)', background: 'var(--blue-dim)', padding: '12px 16px' }}>
           {/* Header row: label + See-Analysis link */}
           <div className="flex items-center gap-2 flex-wrap text-[12px]">
@@ -841,7 +844,9 @@ export default function Overview() {
             <span className="text-[var(--text0)] font-medium">
               {t('overview.recentlyResolved')}
             </span>
-            {Object.keys(recentlyRecovered).some(id => aiAnalysis[id]) && (
+            {/* #1045 — gate on the rows actually shown. Keying this by service (as the rows once were)
+                offered the Analyze link for services the user has disabled, i.e. for no visible row. */}
+            {recoveredRows.some(row => row.hasAnalysis) && (
               <span
                 className="mono text-[10px] cursor-pointer hover:underline"
                 style={{ color: 'var(--blue)' }}
@@ -851,34 +856,29 @@ export default function Overview() {
               </span>
             )}
           </div>
-          {/* One row per recovered service so multiple services stay visually distinct (#827 F4) */}
+          {/* One row per recovered INCIDENT (#1045) — sibling services of one provider incident share
+              an incidentId and would otherwise print identical duplicate rows (#827 F4's
+              one-row-per-service). Every row carries a detail, so an unanalyzed service no longer
+              renders as a bare name beside a detailed one. */}
           <div className="flex flex-col" style={{ gap: '3px', marginTop: '6px' }}>
-            {Object.keys(recentlyRecovered).map(id => {
-              const svc = services.find(s => s.id === id)
-              if (!svc) return null
-              // #827 F4 — "how our estimate held up" beside the recovered service (detail stays in the
-              // modal). Null when not computable (e.g. the incident already aged out of the feed).
-              const recIncIds = recentlyRecovered[id] ?? []
-              const analyses = aiAnalysis[id] ?? []
-              const analysis = analyses.find(a => recIncIds.includes(a.incidentId)) ?? analyses[0]
-              const inc = svc.incidents?.find(i => i.id === analysis?.incidentId)
-              const outcome = computePredictionOutcome(analysis, inc)
-              // Natural phrase: actual recovery time as the lead, the estimate folded into one
-              // direction-aware fragment — "42m 만에 복구 (예측 ~1h 이내)" / "3h 10m 만에 복구 (예측 ~1h 초과)".
-              const detail = outcome && (lang === 'ko'
-                ? `${outcome.actualText} 만에 복구 (${withinEstimateText(outcome, lang)})`
-                : `recovered in ${outcome.actualText} (${withinEstimateText(outcome, lang)})`)
-              return (
-                <div key={id} className="text-[12px]">
-                  <span
-                    className="cursor-pointer hover:underline font-medium"
-                    style={{ color: 'var(--blue)' }}
-                    onClick={() => setPage({ name: 'service', serviceId: id })}
-                  >{svc.name}</span>
-                  {detail && <span className="mono text-[10px] text-[var(--text2)]"> — {detail}</span>}
-                </div>
-              )
-            })}
+            {recoveredRows.map(row => (
+              <div key={row.incidentId} className="text-[12px]">
+                {row.services.map((svc, i) => (
+                  <Fragment key={svc.id}>
+                    {/* ", " matches how every other surface labels one incident's affected siblings
+                        (Incidents.jsx / the Overview incident panel `affectedNames.join(', ')`).
+                        Rendered as separate spans, not a join, so each name stays clickable. */}
+                    {i > 0 && <span className="text-[var(--text2)]">, </span>}
+                    <span
+                      className="cursor-pointer hover:underline font-medium"
+                      style={{ color: 'var(--blue)' }}
+                      onClick={() => setPage({ name: 'service', serviceId: svc.id })}
+                    >{svc.name}</span>
+                  </Fragment>
+                ))}
+                <span className="mono text-[10px] text-[var(--text2)]"> — {recoveredDetailText(row, lang)}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
