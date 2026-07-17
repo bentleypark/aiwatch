@@ -14,8 +14,14 @@ The plugin **reads no code and collects no data** — it only polls AIWatch's pu
 ## Install
 
 ```
-/plugin marketplace add anthropics/claude-plugins-community
-/plugin install aiwatch@claude-community
+/plugin marketplace add bentleypark/aiwatch
+/plugin install aiwatch@aiwatch-dev
+```
+
+Later, pull updates with:
+
+```
+/plugin marketplace update aiwatch-dev
 ```
 
 Or test a local checkout without installing:

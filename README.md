@@ -58,7 +58,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **AI Analysis (Beta)** — Hybrid AI auto-analysis on incidents (Gemma 4 primary + Sonnet fallback): cause estimation, recovery time, affected scope, contextual fallback recommendations. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 - **Landing page** — Landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, optional `?banner=` campaign slot, and GA4 tracking
 - **Chrome extension** — Claude-only toolbar badge + popup showing live Claude API / claude.ai / Claude Code status, AIWatch Score, active incidents (with AI summary), gated community reports, and a one-click issue report. Polls the lite `?src=ext-claude` API only — reads no page content (zero data collection) — [install from the Chrome Web Store](https://chromewebstore.google.com/detail/aiwatch-%E2%80%94-claude-status-d/mmngmhijlancegmfgcbegiackjkalocc)
-- **Claude Code plugin (Beta)** — a background outage monitor that notifies you the moment an upstream AI service goes down or recovers, plus an `/aiwatch` command that briefs the current incident (title, impact, AI summary, fallback). Reads no code, collects no data. In review on the Claude Code community marketplace — [details](https://ai-watch.dev/plugin)
+- **Claude Code plugin (Beta)** — a background outage monitor that notifies you the moment an upstream AI service goes down or recovers, plus an `/aiwatch` command that briefs the current incident (title, impact, AI summary, fallback). Reads no code, collects no data. `/plugin marketplace add bentleypark/aiwatch` — [details](https://ai-watch.dev/plugin)
 - **Web Vitals monitoring** — Real user LCP, FCP, TTFB, CLS, INP collection with p75 aggregation and threshold-based alerts in Discord Daily Report
 - **Weekly briefing** — Sunday Discord digest with AI service changelog detection (OpenAI, Google, Anthropic), incident summary, and stability trends
 - **Security monitoring** — AI service security incident detection via Hacker News, Reddit (r/netsec, r/cybersecurity), and OSV.dev SDK vulnerability scanning across 24 AI SDK packages (PyPI + npm, including Langchain ecosystem adapters) with dashboard alerts + Discord digest
@@ -364,11 +364,11 @@ Beyond the status bar, the [AIWatch Claude Code plugin](https://ai-watch.dev/plu
 - **Background outage monitor** — notifies you the moment a monitored provider goes down (`🔴 Claude API is down`) or recovers (`✅ Claude API has recovered`), naming each service. Diffs each poll (default every 60s), so it only speaks up on a real transition — never spams.
 - **`/aiwatch` command** — briefs which AI services are degraded/down right now, each with its active incident (title + impact), an AI summary, and a fallback suggestion.
 
-Reads no code and collects no data — it only polls AIWatch's public status feed. Currently **in review** on the `claude-community` marketplace; once approved:
+Reads no code and collects no data — it only polls AIWatch's public status feed. Install it from AIWatch's own marketplace:
 
 ```
-/plugin marketplace add anthropics/claude-plugins-community
-/plugin install aiwatch@claude-community
+/plugin marketplace add bentleypark/aiwatch
+/plugin install aiwatch@aiwatch-dev
 ```
 
 Source + docs: [`plugin/aiwatch/`](plugin/aiwatch/). Full details: **[ai-watch.dev/plugin](https://ai-watch.dev/plugin)**.

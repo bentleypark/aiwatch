@@ -3,5 +3,7 @@
 extension/
 
 # The Claude Code plugin (#920) is a standalone bundle consuming the Worker API only —
-# not part of the Vercel (SPA + Edge Functions) deployment.
+# not part of the Vercel (SPA + Edge Functions) deployment. `.claude-plugin/marketplace.json`
+# is the catalog that serves it to `/plugin marketplace add` — read from GitHub, never from Vercel.
 plugin/
+.claude-plugin/

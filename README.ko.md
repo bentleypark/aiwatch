@@ -57,7 +57,7 @@
 - **AI 분석 (Beta)** — 장애 발생 시 하이브리드 AI 자동 분석 (Gemma 4 primary + Sonnet fallback): 원인 추정, 예상 복구 시간, 영향 범위, 대체 서비스 추천. 인시던트 Discord 알림에 통합(단일 embed), Topbar Analyze 모달, Is X Down AI Insight 카드
 - **랜딩 페이지** — 랜딩 페이지(`/intro`), 대시보드 프리뷰 mock, KO/EN 이중 언어, Flow 애니메이션, `?banner=` 캠페인 슬롯(선택), GA4 트래킹
 - **Chrome 확장 프로그램** — Claude 전용 툴바 배지 + 팝업으로 Claude API / claude.ai / Claude Code 실시간 상태, AIWatch Score, 진행 중 인시던트(AI 요약 포함), gated 커뮤니티 리포트, 원클릭 이슈 리포트 제공. lite `?src=ext-claude` API만 폴링하며 페이지 내용은 읽지 않음(데이터 수집 없음) — [Chrome 웹 스토어에서 설치](https://chromewebstore.google.com/detail/aiwatch-%E2%80%94-claude-status-d/mmngmhijlancegmfgcbegiackjkalocc)
-- **Claude Code 플러그인 (Beta)** — 업스트림 AI 서비스가 다운되거나 복구되는 순간 알려주는 백그라운드 아웃티지 모니터 + 현재 인시던트(제목, 영향도, AI 요약, 대체 서비스)를 브리핑하는 `/aiwatch` 명령. 코드를 읽지 않고 데이터도 수집하지 않음. Claude Code 커뮤니티 마켓플레이스 심사 중 — [자세히](https://ai-watch.dev/plugin)
+- **Claude Code 플러그인 (Beta)** — 업스트림 AI 서비스가 다운되거나 복구되는 순간 알려주는 백그라운드 아웃티지 모니터 + 현재 인시던트(제목, 영향도, AI 요약, 대체 서비스)를 브리핑하는 `/aiwatch` 명령. 코드를 읽지 않고 데이터도 수집하지 않음. `/plugin marketplace add bentleypark/aiwatch` — [자세히](https://ai-watch.dev/plugin)
 - **Web Vitals 모니터링** — 실사용자 LCP, FCP, TTFB, CLS, INP 수집, p75 집계 및 Discord Daily Report 임계값 알림
 - **주간 브리핑** — 매주 일요일 Discord 다이제스트: AI 서비스 변경 감지(OpenAI, Google, Anthropic), 인시던트 요약, 안정성 트렌드
 - **보안 모니터링** — Hacker News, Reddit(r/netsec, r/cybersecurity), OSV.dev를 통한 AI 서비스 보안 사고 감지 및 24개 AI SDK 패키지(PyPI + npm, Langchain 에코시스템 어댑터 포함) 취약점 스캔, 대시보드 알림 + Discord 다이제스트
@@ -363,11 +363,11 @@ Claude API, OpenAI, Gemini, GitHub Copilot 등 43개 AI 서비스의 장애 여�
 - **백그라운드 아웃티지 모니터** — 모니터링 중인 프로바이더가 다운(`🔴 Claude API is down`)되거나 복구(`✅ Claude API has recovered`)되는 순간, 서비스명을 명시해 알림. 매 폴링(기본 60초)을 이전과 diff하여 **실제 상태 변화 시에만** 알리므로 스팸이 없음.
 - **`/aiwatch` 명령** — 지금 degraded/down인 AI 서비스를 각각의 진행 인시던트(제목+영향도), AI 요약, 대체 서비스 제안과 함께 브리핑.
 
-코드를 읽지 않고 데이터도 수집하지 않으며 — AIWatch 공개 상태 피드만 폴링. 현재 `claude-community` 마켓플레이스 **심사 중**이며, 승인되면:
+코드를 읽지 않고 데이터도 수집하지 않으며 — AIWatch 공개 상태 피드만 폴링. AIWatch 자체 마켓플레이스에서 설치:
 
 ```
-/plugin marketplace add anthropics/claude-plugins-community
-/plugin install aiwatch@claude-community
+/plugin marketplace add bentleypark/aiwatch
+/plugin install aiwatch@aiwatch-dev
 ```
 
 소스 + 문서: [`plugin/aiwatch/`](plugin/aiwatch/). 자세히: **[ai-watch.dev/plugin](https://ai-watch.dev/plugin)**.
