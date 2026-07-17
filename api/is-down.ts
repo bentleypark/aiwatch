@@ -7,6 +7,7 @@ import { cspForHtml } from './_shared/csp-hash'
 import { computeRankPosition } from './_is-down/ranking'
 import { regionStatusOf, type RegionStatusResult } from './_is-down/region-status'
 import { buildSupplyChainNote, type SupplyChainBannerLike, type SupplyChainNote } from './_is-down/supply-chain-note'
+import { buildUpstreamNote, type UpstreamLinkLike, type UpstreamNote } from './_is-down/upstream-note'
 
 export const config = { runtime: 'edge' }
 
@@ -89,6 +90,7 @@ export default async function handler(req: Request) {
     let aiInsights: Array<{ summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }> = []
     // #574 — supply-chain note for THIS service (set if it's in the banner's affectedNow/mayBeAffected).
     let supplyChainNote: SupplyChainNote | null = null
+    let upstreamNote: UpstreamNote | null = null
     // Track the precise reason for the fallback render so the Discord alert can
     // distinguish operational classes (timeout vs HTTP failure vs missing service
     // vs JSON parse error). Defaults to a generic label that should never ship —
@@ -123,6 +125,9 @@ export default async function handler(req: Request) {
           // #574 — supply-chain banner: when this service is in affectedNow/mayBeAffected, render a note.
           // Shape declared once, next to the logic that reads it — two copies of one wire contract drift.
           supplyChainBanner?: SupplyChainBannerLike
+          // #1053 — cross-provider upstream links (a dependent's own incident blames a provider that is
+          // itself down). Optional: a worker predating #1053 omits the key entirely (deploy skew).
+          upstreamLinks?: UpstreamLinkLike[]
         }
         const allServices = data.services ?? []
 
@@ -284,6 +289,8 @@ export default async function handler(req: Request) {
 
         // #574/#1000 — supply-chain note (region choice is load-bearing; see supply-chain-note.ts).
         supplyChainNote = buildSupplyChainNote(data.supplyChainBanner, entry.id)
+        // #1053 — cross-provider upstream note (the dependent's OWN claim; see upstream-note.ts).
+        upstreamNote = buildUpstreamNote(data.upstreamLinks, entry.id)
       } catch (parseErr) {
         fallbackReason = 'parse_error'
         console.error(`[is-down/${slug}] JSON parse failed:`, parseErr instanceof Error ? parseErr.message : parseErr)
@@ -334,7 +341,7 @@ export default async function handler(req: Request) {
       }
     }
 
-    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights)
+    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights, upstreamNote)
 
     // #378: when the upstream Worker fetch failed and we're rendering the
     // "Status data is temporarily unavailable" fallback, the response must NOT

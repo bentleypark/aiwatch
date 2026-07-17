@@ -13,6 +13,9 @@ import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init
 import { cookieBannerHtml } from '../_shared/cookie-banner'
 import { EXTENSION_STORE_URL, renderExtInstallCta, isClaudeSurface } from '../_shared/extension-cta'
 import type { RegionStatusResult } from './region-status'
+// #1053 — the note shape is owned by upstream-note.ts (where the claim is built); importing it keeps
+// one definition of the contract instead of a second copy that can drift.
+import type { UpstreamNote as UpstreamNoteLike } from './upstream-note'
 
 /** Format recovery display — shared with worker/src/ai-analysis.ts */
 function formatRecoveryDisplay(recovery: string): string {
@@ -333,6 +336,11 @@ export function renderPage(
   // `aiInsight` above remains the primary [0] for meta/share/OG. Omitted/empty → fall back to the single
   // `aiInsight` (older callers / single-incident path) so the card still renders.
   aiInsights?: Array<{ summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }> | null,
+  // #1053 — cross-provider upstream note for THIS service: its own status page names a provider that
+  // is itself down. Set by api/is-down.ts from /api/status/cached's `upstreamLinks`; null when the
+  // worker's gate did not fire OR when the worker predates #1053 (deploy skew — Vercel ships this on
+  // merge, the worker deploy is manual). Distinct from `supplyChainNote`, which is AWS-region-scoped.
+  upstreamNote?: UpstreamNoteLike | null,
 ): string {
   // #566: lead the SERP title with the live status answer (falls back to "Live Status"
   // when status data is unavailable) so the result answers the query before the click.
@@ -543,6 +551,7 @@ ${renderCTA(seo, service ? assertableStatus(service) : 'operational', slug, serv
 ${isClaudeSurface(service?.id ?? slug) ? renderExtInstallCta(EXTENSION_STORE_URL, { loc: 'is_down_page', variant: 'is-down' }) : ''}
 ${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks)}
 ${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS infrastructure issue (${esc(supplyChainNote.regions)}) &mdash; ${supplyChainNote.confirmed ? `${esc(seo.displayName)} is degraded and attributes it to an AWS/upstream issue` : `${esc(seo.displayName)} runs on AWS and may be affected`}</p>` : ''}
+${renderUpstreamNote(upstreamNote, seo.displayName)}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
 ${renderComponents(service)}
 ${renderIncidents(service)}
@@ -786,6 +795,78 @@ ${insight.resolvedAt ? `<span>✅ Recovered: ${(() => { const m = Math.floor((Da
 </div>`
 }
 
+/** "less than a minute" / "36m" / "1h 30m" / "24h" — the gap between the upstream incident and the
+ *  dependent noticing.
+ *
+ *  Hours all the way up, no day unit, because #1053's `CAUSE_WINDOW_MS` caps the lead at exactly 24h
+ *  (`upstream-link.ts` gate 5) — so "24h" IS the ceiling and a `2d 3h` arm would be dead code. An
+ *  earlier revision had one, justified by "gate 5 admits ANY incident predating the claim … for
+ *  weeks"; the same PR's window removed that premise, leaving a branch nothing could reach and a
+ *  docstring its own test contradicted. If the window ever widens, add the unit back WITH a fixture. */
+function leadLabel(mins: number): string {
+  if (mins < 1) return 'less than a minute'
+  if (mins < 60) return `${mins}m`
+  const h = Math.floor(mins / 60)
+  return mins % 60 === 0 ? `${h}h` : `${h}h ${mins % 60}m`
+}
+
+function upstreamRow(u: UpstreamNoteLike['upstream'][number], displayName: string, fromId: string): string {
+  const color = statusColor(u.status)
+  const lead = u.leadMinutes != null
+    ? ` &middot; ${leadLabel(u.leadMinutes)} before ${esc(displayName)}&rsquo;s report`
+    : ''
+  // `from_service`/`to_service` are EXISTING delegated-listener params (a service→service link is
+  // exactly their semantics), so no new GA parameter or listener branch is needed. The event name is
+  // NOT `outbound_fallback_click`, so the #842 referral beacon deliberately stays out of this — that
+  // beacon counts sponsor-evidence traffic LEAVING AIWatch for the sponsor figure; this link stays on
+  // AIWatch and would inflate it.
+  const link = u.href
+    ? `<div style="margin-top:6px"><a class="mono" style="font-size:11px" href="${esc(u.href)}" data-ga="upstream_link" data-ga-loc="is_down_page" data-ga-from="${esc(fromId)}" data-ga-to="${esc(u.id)}">Check ${esc(u.name)} status &rarr;</a></div>`
+    : ''
+  return `<div style="padding:4px 0">
+<div style="display:flex;align-items:center;gap:8px">
+<span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>
+<span class="mono" style="font-size:13px;color:#c9d1d9">${esc(u.name)}</span>
+<span class="mono" style="font-size:11px;color:${color};margin-left:auto">${esc(statusLabel(u.status))}</span>
+</div>
+<div style="margin-left:15px">
+<div class="mono" style="font-size:12px;color:#c9d1d9;margin-top:4px">&ldquo;${esc(u.incidentTitle)}&rdquo;</div>
+<div class="mono" style="font-size:11px;color:#8b949e;margin-top:2px">Started ${esc(timeAgo(u.startedAt))}${lead}</div>
+${link}
+</div>
+</div>`
+}
+
+// #1053 — the Related Upstream Incident section.
+//
+// A CARD, not the one-line `<p class="meta">` the supply-chain note uses. That note was the obvious
+// thing to copy — it sits one slot away and makes a structurally identical claim — but it has never
+// been VERIFIED to render in production (#574 is still verify-blocked awaiting a real AWS regional
+// outage; that label evidences that nobody watched, NOT that it never fired), so consistency with it
+// was consistency with something unproven. The same supply-chain data gets a full
+// card on the dashboard (`Overview.jsx` SupplyChainBanner); a lone sentence above the component
+// breakdown is is-down's weakest treatment and the answer the visitor actually came for.
+//
+// Placement: after the AI Analysis card, before the component breakdown. NOT in the alert block —
+// #888's CRO evidence says that cluster must not accumulate more competing calls-to-action, and
+// tests/is-down.spec.js pins the CTA→AI-Insight order.
+//
+// The wording reports the DEPENDENT'S OWN claim ("X's status page attributes …") and never asserts a
+// cause of our own. That is the ethic of the whole feature: the worker's gate (upstream-link.ts) only
+// emits a link the dependent itself made, so the copy must not quietly upgrade it into "X is down
+// BECAUSE of Y". Naming the dependent's incident is what scopes the claim — a page-level sentence
+// would read as "the whole degradation is Y's fault" when only one of several incidents named Y.
+//
+// Returns '' when there is no note (no worker claim, or a worker predating #1053 — deploy skew).
+export function renderUpstreamNote(note: UpstreamNoteLike | null | undefined, displayName: string): string {
+  if (!note || note.upstream.length === 0) return ''
+  return `<div class="card" style="border-left:3px solid #d29922">
+<div class="mono" style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#8b949e;margin-bottom:10px">Related Upstream Incident</div>
+<div class="mono" style="font-size:12px;color:#8b949e;margin-bottom:8px">${esc(displayName)}&rsquo;s status page attributes &ldquo;${esc(note.incidentTitle)}&rdquo; to an upstream provider, which is reporting its own incident:</div>
+${note.upstream.map((u) => upstreamRow(u, displayName, note.fromId)).join('')}
+</div>`
+}
+
 // ── Region recommendation (refs #422 Phase 2) ─────────────────────────
 //
 // When the SSR page is rendered during a partial regional outage (e.g.
@@ -794,7 +875,7 @@ ${insight.resolvedAt ? `<span>✅ Recovered: ${(() => { const m = Math.floor((Da
 // Region-switch is structurally cheaper than service-switch (same SDK / IAM /
 // billing — only the endpoint URL changes), so it deserves first-line
 // visibility. Returns '' when there's nothing actionable to show.
-//
+
 // Exported (alongside other render helpers) so api/_is-down/__tests__/html-template.test.ts
 // can pin both the happy-path HTML structure and the three skip conditions.
 export function renderRegionRecommendation(rec: RegionStatusResult | null, slug: string): string {
