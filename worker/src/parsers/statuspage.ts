@@ -21,7 +21,11 @@ export interface StatuspageResponse {
     components?: Array<{ name: string }>
     incident_updates?: Array<{
       status: string; body: string; created_at: string; display_at?: string
-      affected_components?: Array<{ code: string; name: string; new_status: string }>
+      // `| null` is not defensive padding: status.claude.com really sends `affected_components: null`
+      // on an update that touched no component (9 such updates on the page as of 2026-07-17, including
+      // `kqbd7wm6hnnr`'s own resolve). Declaring it non-nullable made the type lie about the payload
+      // `resolveComponentNames` reads (#1047).
+      affected_components?: Array<{ code: string; name: string; new_status: string }> | null
     }>
   }>
 }
@@ -42,6 +46,53 @@ export function normalizeStatus(indicator: string): 'operational' | 'degraded' |
     default:
       return 'operational'
   }
+}
+
+type RawIncident = NonNullable<StatuspageResponse['incidents']>[number]
+
+/**
+ * The component names an incident affected (#1047).
+ *
+ * `inc.components` can be EMPTY on an incident that really did degrade components: a provider may
+ * UNLINK them all as it resolves (Anthropic's 2026-07-16 `kqbd7wm6hnnr` went out tagged with 4 and
+ * resolved with `components: []`). That destroys attribution for a service scoped by `incidentKeywords`
+ * — `filterIncidents` matches those keywords against the title OR these names, so an incident whose
+ * title carries no token silently stops being theirs at the moment it resolves. The update history
+ * still names the components, so recover from there.
+ *
+ * ONLY when the live list is empty. Same empty-only rule, and the same deference to a source that
+ * starts populating the field again, as `attachIncidentIoComponentNames` (#1004,
+ * parsers/incident-io.ts) — the two are the house convention for this field; keep them in step. Do NOT
+ * turn it into a union with the history: `filterIncidents` reads these names on EVERY incident, so a
+ * union broadens attribution page-wide (the #361 cross-attribution class) to "fix" incidents that were
+ * never broken.
+ *
+ * Updates arrive newest-first, so walk them in reverse. Every consumer that GATES on these names is a
+ * membership test, so none is order-sensitive — this is determinism, not correctness. (`supply-chain.ts`
+ * joins them into a text blob instead, but only to regex out region tokens, and it skips resolved
+ * incidents outright.) It unions ACROSS updates because each one names only the components IT touched,
+ * so no single update is guaranteed complete.
+ *
+ * Two deliberate residuals: a PARTIAL unlink leaves a non-empty list, so this never fires (unobserved —
+ * don't widen on speculation); and `new_status` is ignored, so a component named only as `operational`
+ * still counts as affected — the alternative loses attribution outright when the resolve update is the
+ * only one carrying components, and losing attribution is the bug this exists to fix.
+ *
+ * Measured blast radius, the downstream emptiness-coupling this reclassifies (#970 / #934 / #359 /
+ * `includeUntaggedIncidents`), and why it is inert for incident.io — all with their numbers and dates:
+ * docs/reference/status-determination.md, the #1047 bullet.
+ */
+export function resolveComponentNames(inc: RawIncident): string[] {
+  const live = inc.components?.map((c) => c.name) ?? []
+  if (live.length > 0) return live
+
+  const recovered: string[] = []
+  for (const update of [...(inc.incident_updates ?? [])].reverse()) {
+    for (const comp of update.affected_components ?? []) {
+      if (comp?.name && !recovered.includes(comp.name)) recovered.push(comp.name)
+    }
+  }
+  return recovered
 }
 
 export function parseIncidents(data: StatuspageResponse): Incident[] {
@@ -73,7 +124,7 @@ export function parseIncidents(data: StatuspageResponse): Incident[] {
       : inc.impact === 'minor' ? 'minor' as const
       : null
 
-    const componentNames = inc.components?.map((c) => c.name) ?? []
+    const componentNames = resolveComponentNames(inc)
 
     return {
       id: inc.id,
