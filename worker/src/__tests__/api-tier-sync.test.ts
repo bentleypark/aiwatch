@@ -19,11 +19,11 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { API_TIER as workerTier, TIER_LABEL as workerLabel, EXCLUDE_FALLBACK as workerExclude, isSpecializedSubTier as workerIsSpecialized } from '../fallback'
+import { API_TIER as workerTier, TIER_LABEL as workerLabel, EXCLUDE_FALLBACK as workerExclude, isSpecializedSubTier as workerIsSpecialized, SERVICE_CAPABILITY as workerCap, sharesCapability as workerShares } from '../fallback'
 // Vitest resolves cross-package paths via the repo root; this works because frontend `src/` and
 // worker `src/` share a single repo with one node_modules. The import is data-only (no runtime
 // side effects from constants.js — no environment variables are read at module load).
-import { API_TIER as frontendTier, TIER_LABEL as frontendLabel, EXCLUDE_FALLBACK as frontendExclude, isSpecializedSubTier as frontendIsSpecialized } from '../../../src/utils/constants'
+import { API_TIER as frontendTier, TIER_LABEL as frontendLabel, EXCLUDE_FALLBACK as frontendExclude, isSpecializedSubTier as frontendIsSpecialized, SERVICE_CAPABILITY as frontendCap, sharesCapability as frontendShares } from '../../../src/utils/constants'
 
 const REPO_ROOT = join(__dirname, '..', '..', '..')
 
@@ -180,5 +180,61 @@ describe('isSpecializedSubTier cross-mirror sync (#859)', () => {
     }
     expect(lo, 'is-down lower bound must match worker isSpecializedSubTier').toBe(workerLo)
     expect(hi, 'is-down upper bound must match worker isSpecializedSubTier').toBe(workerHi)
+  })
+})
+
+// #1062 — pin the worker ↔ frontend ↔ is-down parity of SERVICE_CAPABILITY / sharesCapability (the 5th
+// triplicated piece of fallback logic). A drift here would make one surface cross-recommend STT↔TTS while
+// another suppresses it — the same silent-divergence class this file guards for API_TIER.
+describe('SERVICE_CAPABILITY cross-mirror sync (#1062)', () => {
+  it('worker/src/fallback.ts ≡ src/utils/constants.js (deep equal)', () => {
+    expect(workerCap).toEqual(frontendCap)
+  })
+
+  it('sharesCapability agrees across worker and frontend for every service pair', () => {
+    // Exhaustive over the capability-tagged ids + a non-tagged control (claude) — the branch that
+    // returns true when either side is untagged must match on both copies too.
+    const ids = [...Object.keys(workerCap), 'claude', 'openai']
+    for (const a of ids) {
+      for (const b of ids) {
+        expect(frontendShares(a, b), `sharesCapability("${a}","${b}") worker/frontend divergence`).toBe(workerShares(a, b))
+      }
+    }
+  })
+
+  it('the STT/TTS intent holds (both copies): TTS↔STT do NOT share, Deepgram bridges both', () => {
+    // ElevenLabs (TTS) and AssemblyAI (STT) are not mutually substitutable; Deepgram (both) is.
+    expect(workerShares('elevenlabs', 'assemblyai')).toBe(false)
+    expect(workerShares('elevenlabs', 'deepgram')).toBe(true)
+    expect(workerShares('assemblyai', 'deepgram')).toBe(true)
+    // An untagged service pair (LLM tier) is never capability-gated — governed by tier logic alone.
+    expect(workerShares('openai', 'claude')).toBe(true)
+    expect(workerShares('elevenlabs', 'openai')).toBe(true) // one side untagged → not gated
+  })
+
+  it('api/is-down.ts inline copy is EXACTLY the canonical map (bidirectional — no extra service / over-broad cap)', () => {
+    // Parse the inline literal into an object and deep-equal it against the worker map, mirroring how
+    // workerCap/frontendCap are locked. A one-directional subset check (canonical ⊆ inline) would MISS
+    // the drift that re-introduces this very bug: an over-broad inline cap like `elevenlabs:['tts','stt']`
+    // would make the Edge surface cross-recommend AssemblyAI to a TTS caller. toEqual catches extras too.
+    const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
+    const blockMatch = isDownSource.match(/const SERVICE_CAPABILITY:\s*Record<[^>]+>\s*=\s*\{([\s\S]*?)\}/)
+    expect(blockMatch, 'SERVICE_CAPABILITY block not found in api/is-down.ts').not.toBeNull()
+    const block = blockMatch![1]
+    const inlineCap: Record<string, string[]> = {}
+    for (const m of block.matchAll(/(\w+):\s*\[([^\]]*)\]/g)) {
+      inlineCap[m[1]] = [...m[2].matchAll(/'([^']+)'/g)].map(c => c[1])
+    }
+    expect(inlineCap).toEqual(workerCap)
+  })
+
+  it('api/is-down.ts wires the capability gate into the fallback filter (wiring, not just data)', () => {
+    // The pure fn / data parity above does not prove the inline getFallbacks actually CALLS the gate —
+    // the "순수fn 초록 ≠ 배선 초록" trap. Assert the filter chain still invokes sharesCapability on the
+    // Edge surface so a silent removal of the clause (re-opening the STT↔TTS cross-recommendation on
+    // is-down) fails CI. Regex-level because the Edge module can't be imported here (see file header).
+    const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
+    expect(/sharesCapability\(\s*entry\.id\s*,\s*s\.id\s*\)/.test(isDownSource),
+      'api/is-down.ts fallback filter no longer calls sharesCapability(entry.id, s.id)').toBe(true)
   })
 })

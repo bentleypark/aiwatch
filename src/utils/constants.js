@@ -229,6 +229,27 @@ export function isSpecializedSubTier(tier) {
   return tier >= 4 && tier <= 10
 }
 
+// #1062 — MIRROR of worker/src/fallback.ts SERVICE_CAPABILITY. Capability sub-tags for services whose
+// fallback TIER is not internally substitutable: the Voice tier (4) mixes STT/TTS, which do not
+// substitute for each other. Each tag is AIWatch's modelling of a service's primary substitutable
+// capability (not a claim about the vendor's full API surface). A service absent from this map is
+// governed by tier proximity alone (unchanged). Data parity pinned by api-tier-sync.test.ts (deep-equal
+// vs the worker copy); this getFallbacks wiring is pinned by the constants.test.js facet-A tests.
+export const SERVICE_CAPABILITY = {
+  elevenlabs: ['tts'],
+  assemblyai: ['stt'],
+  deepgram: ['stt', 'tts'],
+}
+
+// #1062 — two services are mutually substitutable only if they share ≥1 capability. EITHER lacking a tag
+// → not capability-gated (true → tier logic alone decides), so it's a no-op outside the listed services.
+export function sharesCapability(a, b) {
+  const ca = SERVICE_CAPABILITY[a]
+  const cb = SERVICE_CAPABILITY[b]
+  if (!ca || !cb) return true
+  return ca.some((c) => cb.includes(c))
+}
+
 const warnedLabelTiers = new Set()
 export function tierLabelFor(tier) {
   const l = TIER_LABEL[tier]
@@ -285,7 +306,9 @@ export function getFallbacks(service, allServices) {
   return allServices
     // #616 — exclude stale-source services (#591): ranking-excluded → not a trusted fallback either
     .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale && !EXCLUDE_FALLBACK.includes(s.id)
-      && (!sameTierOnly || tierFor(s.id) === sourceTier))
+      && (!sameTierOnly || tierFor(s.id) === sourceTier)
+      // #1062 — within a capability-mixed tier (Voice), only a candidate sharing a capability qualifies
+      && sharesCapability(service.id, s.id))
     .sort((a, b) => {
       const distA = Math.abs(tierFor(a.id) - sourceTier)
       const distB = Math.abs(tierFor(b.id) - sourceTier)

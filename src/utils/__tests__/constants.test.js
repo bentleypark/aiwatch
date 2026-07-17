@@ -245,6 +245,43 @@ describe('getGroupedFallbacks (#445 multi-category incident alternatives)', () =
   })
 })
 
+describe('#1062 facet A — frontend getFallbacks Voice STT/TTS capability gate', () => {
+  // Pins the frontend WIRING (constants.js getFallbacks calls sharesCapability), not just the pure fn /
+  // data parity the api-tier-sync test covers — deleting the `&& sharesCapability(...)` filter clause
+  // must fail here (feedback_mutation_test_both_directions: 순수fn 초록 ≠ 배선 초록).
+  const v = (id, name, status, aiwatchScore) => ({ id, category: 'api', name, status, aiwatchScore, incidents: [] })
+
+  it('ElevenLabs (TTS) recommends only Deepgram (STT+TTS), NOT AssemblyAI (STT)', () => {
+    const services = [
+      v('elevenlabs', 'ElevenLabs', 'degraded', 80),
+      v('assemblyai', 'AssemblyAI', 'operational', 90), // higher Score, but STT-only → filtered
+      v('deepgram', 'Deepgram', 'operational', 85),
+    ]
+    // Without the gate this returns [assemblyai(90), deepgram(85)] (top-2 by Score); with it, only deepgram.
+    expect(getFallbacks(services[0], services).map(f => f.id)).toEqual(['deepgram'])
+  })
+
+  it('AssemblyAI (STT) recommends only Deepgram, NOT ElevenLabs (TTS)', () => {
+    const services = [
+      v('assemblyai', 'AssemblyAI', 'degraded', 90),
+      v('elevenlabs', 'ElevenLabs', 'operational', 80),
+      v('deepgram', 'Deepgram', 'operational', 85),
+    ]
+    expect(getFallbacks(services[0], services).map(f => f.id)).toEqual(['deepgram'])
+  })
+
+  it('suppresses (empty) when the only capability-sharing sibling is itself down', () => {
+    // ElevenLabs (TTS) down + Deepgram (the only TTS sibling) down → AssemblyAI (STT) must NOT be offered.
+    // Without the gate this would surface AssemblyAI — the exact wrong-capability recommendation #1062 kills.
+    const services = [
+      v('elevenlabs', 'ElevenLabs', 'down', 80),
+      v('deepgram', 'Deepgram', 'down', 85),
+      v('assemblyai', 'AssemblyAI', 'operational', 90),
+    ]
+    expect(getFallbacks(services[0], services)).toEqual([])
+  })
+})
+
 describe('hasActiveIncident / getFallbacks active-incident exclusion (#550)', () => {
   const op = (id, category, aiwatchScore, extra = {}) => ({ id, category, aiwatchScore, status: 'operational', incidents: [], ...extra })
   const inc = (status) => ({ id: `${status}-inc`, status })

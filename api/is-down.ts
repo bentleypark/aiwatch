@@ -235,6 +235,20 @@ export default async function handler(req: Request) {
           }
           return 99
         }
+        // #1062 — inline mirror of worker/src/fallback.ts SERVICE_CAPABILITY / sharesCapability. The Voice
+        // tier (4) mixes STT/TTS (AIWatch models elevenlabs=tts, assemblyai=stt, deepgram=both — the
+        // primary substitutable capability, not the vendor's full surface), so the same-tier gate alone
+        // still cross-recommended STT↔TTS. A service absent from the map is not capability-gated.
+        // api-tier-sync.test.ts deep-equals this DATA block vs the worker copy AND asserts the filter still
+        // calls sharesCapability below; the 3-line body is kept identical to the worker copy by hand.
+        const SERVICE_CAPABILITY: Record<string, string[]> = {
+          elevenlabs: ['tts'], assemblyai: ['stt'], deepgram: ['stt', 'tts'],
+        }
+        const sharesCapability = (a: string, b: string): boolean => {
+          const ca = SERVICE_CAPABILITY[a], cb = SERVICE_CAPABILITY[b]
+          if (!ca || !cb) return true
+          return ca.some(c => cb.includes(c))
+        }
         if (!EXCLUDE_FALLBACK.includes(entry.id)) {
           const sourceTier = tierFor(entry.id)
           // #859 — a specialized non-LLM API sub-tier (Voice 4 / Video 5 / Observability 6 / Image 7 /
@@ -248,7 +262,9 @@ export default async function handler(req: Request) {
               && !(s.incidents ?? []).some(i => (i as { status?: string }).status !== 'resolved')
               && !s.incidentSourceStale
               && !EXCLUDE_FALLBACK.includes(s.id)
-              && (!sameTierOnly || tierFor(s.id) === sourceTier))
+              && (!sameTierOnly || tierFor(s.id) === sourceTier)
+              // #1062 — within a capability-mixed tier (Voice), only a capability-sharing candidate qualifies
+              && sharesCapability(entry.id, s.id))
             .sort((a, b) => {
               const distA = Math.abs(tierFor(a.id) - sourceTier)
               const distB = Math.abs(tierFor(b.id) - sourceTier)
