@@ -433,12 +433,17 @@ export function parseAlertedRoster(raw: string, currentSvcId: string): { ids: st
 /**
  * Build incident alerts (new + resolved) from service data.
  * Does NOT check KV dedup — caller is responsible for filtering already-sent alerts.
+ * A new-incident alert requires an ACTIVE incident: `investigating`/`identified`. `monitoring` is
+ * excluded (#1039) — the provider has applied a fix, so it is not new; see the branch comment for why
+ * silence (rather than a down-classed alert) is what matches every other consumer.
  * @param alertedNewMap incidentId → set of service ids already alerted for that incident (#545).
  *                      A service is included in a new-incident alert only if it is NOT already in
  *                      its incident's set — so a service joining an already-alerted incident later
  *                      (e.g. ChatGPT joining a Codex incident after the title was renamed) still
  *                      gets its own alert. The resolved path fires once per incident that had ANY
- *                      service alerted (incidentId-level), as before.
+ *                      service alerted (incidentId-level), as before — so a service that joined while
+ *                      the incident was already `monitoring` still appears in the resolved alert,
+ *                      which is accurate: the incident did affect it.
  * @param suppressedIncIds Set of incident IDs to silently drop (both new and resolved paths).
  *                        Used by #283 flap suppression to skip a repeat flap within the window.
  */
@@ -460,7 +465,30 @@ export function buildIncidentAlerts(
 
       // #545: per-service (not per-incident) — only services NOT yet alerted for this incident.
       // A service joining an already-alerted incident later still produces its own alert.
-      if (inc.status !== 'resolved' && !alertedNewMap.get(inc.id)?.has(svc.id)) {
+      //
+      // #1039 — `monitoring` is excluded: Statuspage `monitoring` means the provider APPLIED a fix and
+      // is watching it, so the incident is not NEW. Gating on `!== 'resolved'` alone shipped a real
+      // `🔴 OpenAI API — New Incident` for an already-recovering incident (2026-07-16). Silence, not a
+      // down-classed alert: the normal path is ALREADY silent here (an incident alerted at
+      // `investigating` is in the roster by the time it reaches `monitoring`), so emitting only on a
+      // first-sight-at-`monitoring` would invent an alert type reachable solely from the edge case.
+      // Rationale, the reachable paths, and the accepted residual risk (incl. what the #929/#882 holds
+      // do here, and why /feed still covers it): docs/reference/discord-alert-paths.md #1039.
+      // Observable, per this repo's twice-settled rule that a JUDGEMENT-call drop must never be quiet
+      // (#970: "Every drop here is a silent one … that silence IS bug #970"; #983: without a line, triage
+      // cannot tell "AIWatch suppressed it" from "AIWatch never saw it"). A confident drop needs no log;
+      // this one is a judgement.
+      //
+      // Describes a STATE, not an event: this fn is stateless and a withheld alert is never rostered, so
+      // the condition holds every cycle the incident sits in `monitoring` (bounded by the 24h `incAge`
+      // cap). Same cadence as the #283/#983 flap line at index.ts — which is why it must not say "first
+      // sight", which would be false from cycle 2 on. For the same reason line COUNT is not a frequency:
+      // it is withheld-incidents × cycles-in-monitoring. Count distinct incident ids to measure how often
+      // this actually fires.
+      if (inc.status === 'monitoring' && !alertedNewMap.get(inc.id)?.has(svc.id)) {
+        console.log(`[alerts] #1039 ${svc.id}: ${inc.id} is 'monitoring' and was never alerted — withholding the new alert (provider applied a fix; /feed still carries it)`)
+      }
+      if (inc.status !== 'resolved' && inc.status !== 'monitoring' && !alertedNewMap.get(inc.id)?.has(svc.id)) {
         const existing = newIncidents.get(inc.id)
         if (existing) {
           if (!existing.names.includes(svc.name)) existing.names.push(svc.name)
