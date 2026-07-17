@@ -35,7 +35,11 @@ export default defineConfig({
     {
       name: 'desktop',
       use: { ...devices['Desktop Chrome'] },
-      testIgnore: /mobile\.spec|is-down\.spec|intro\.spec|reports\.spec|consent\.spec/,
+      // An Edge spec needs THREE things in sync: its own project below, this testIgnore (`desktop`
+      // points at Vite :5173, where Edge paths 404), and `--project=<name>` in package.json
+      // test:edge. Omitting the third is exactly what #1051 was — specs existed, nothing ran them.
+      // All three are enforced by scripts/check-edge-e2e-coverage.mjs.
+      testIgnore: /mobile\.spec|is-down\.spec|intro\.spec|reports\.spec|consent\.spec|edge-pages\.spec/,
     },
     {
       name: 'mobile',
@@ -63,6 +67,14 @@ export default defineConfig({
       // Edge SSR + inline cookie banner gate (#352) — runs against vercel dev :3333.
       use: EDGE_USE,
       testMatch: /consent\.spec/,
+    },
+    {
+      // #1051 — the Edge pages that had no e2e at all (plugin/methodology/badges/*-privacy/confirm).
+      // One project rather than five: they share a single SSR contract (200 + title + canonical +
+      // robots + CSP), so a table beats five near-identical projects.
+      name: 'edge-pages',
+      use: EDGE_USE,
+      testMatch: /edge-pages\.spec/,
     },
   ],
   // Skip the Vite dev server when running only the Edge projects against a remote
