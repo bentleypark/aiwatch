@@ -57,7 +57,7 @@ Three kinds of candidate, and they are not comparable:
 Best additive pick per category, all on parsers AIWatch already has: **MiniMax** (video) · **Qdrant**
 (vector — the earlier shortlist's pick; the table bolds Zilliz too, and nothing here separates them) ·
 **Ideogram** (image — #601 Phase 4 named it the optional 3rd) · **W&B or Comet** (observability —
-undifferentiated in the table; pick at Step-0) · **DeepInfra** (inference — the only row).
+undifferentiated in the table; pick at Step-0) · **DeepInfra** (inference — a generic host; **Kimi/Moonshot** #989 is the other row, richer provenance but pulls in non-English `titleMap` infra).
 The earlier shortlist also named Langfuse and FLUX; both have since shipped.
 
 ## Video — CLOSED (Runway + Luma)
@@ -138,6 +138,7 @@ coverage-additive, **not** a fallback gap. Do not let them block the gap work ab
 | Candidate | Status page | Platform | Monitorable | Note |
 |---|---|---|---|---|
 | **DeepInfra** | status.deepinfra.com | Better Stack ✅ (`/index.json`) | Yes | Serverless LLM inference. `api.deepinfra.com/v1/openai/models` → 200, probeable RTT (~1.1s). Existing BetterStack parser + probe; no new parser. Verified 2026-06-23 |
+| **Kimi (Moonshot AI)** | status.moonshot.cn | Atlassian ✅ | Yes | Step-0 verdict **RICH** (2026-07-10), fully worked in **#989**. Not a plain inference host — a Moonshot model lab (DeepSeek-class), so also a frontier-LLM add. Its incident titles are Chinese-only, so it introduces the first per-service `titleMap` (the `sanitize()` non-ASCII passthrough gap); needs `holdShortIncidents` (auto-monitor flap). `.cn` is a CNAME to Statuspage → no China-network reachability risk; `Open API` component drives badge/uptime, model components display-only (#606) |
 
 ## Declined
 
