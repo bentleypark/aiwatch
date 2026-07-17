@@ -279,6 +279,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   parsers/           # statuspage, incident-io, gcloud, aistudio, instatus, betterstack, aws, flashduty
 extension/           # Claude-only Chrome extension (MV3, #837) — consumes ?src=ext-claude only
 plugin/aiwatch/      # Claude Code plugin (#920) — outage monitor + /aiwatch command
+.claude-plugin/      # marketplace.json — AIWatch's OWN plugin catalog (`aiwatch-dev`); makes plugin/aiwatch/ installable with no third-party review (#920)
 scripts/             # Build/CI/ops scripts (verify-reminders, lint-okf-bundle, check-vercel-function-count, …)
 docs/reference/      # OKF knowledge bundle — read index.md first
 ```

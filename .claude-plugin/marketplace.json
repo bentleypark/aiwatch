@@ -1,0 +1,17 @@
+{
+  "name": "aiwatch-dev",
+  "description": "AIWatch's own Claude Code plugin marketplace — live AI-service reliability inside your terminal.",
+  "owner": {
+    "name": "AIWatch"
+  },
+  "plugins": [
+    {
+      "name": "aiwatch",
+      "source": "./plugin/aiwatch",
+      "description": "Know the moment an upstream AI provider (Claude, OpenAI, Gemini, and more) goes down — a background outage monitor plus an /aiwatch incident briefing. Reads no code, collects no data.",
+      "homepage": "https://ai-watch.dev/plugin",
+      "license": "AGPL-3.0",
+      "keywords": ["status", "uptime", "incidents", "monitoring", "reliability"]
+    }
+  ]
+}

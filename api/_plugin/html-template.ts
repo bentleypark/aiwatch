@@ -4,8 +4,8 @@
 // <head>, a single nonce'd <script> with a delegated [data-ga] listener (no inline handlers → CSP-clean),
 // GA4 Consent Mode via the shared helper, cookie banner. English-only (the body is copy-paste command
 // heavy) with a KO notice, like the statusline guide page. Indexable (real HTML on the edge runtime →
-// zero Serverless-Function cost). The install CTA is gated (api/_shared/plugin-cta.ts) until the plugin
-// clears the claude-community marketplace review.
+// zero Serverless-Function cost). The install CTA (api/_shared/plugin-cta.ts) is ungated — it serves
+// AIWatch's own `aiwatch-dev` marketplace, so it works regardless of the claude-community review.
 
 import { CONSENT_INIT_COMMENT, consentInitScript } from '../_shared/consent-init'
 import { cookieBannerHtml } from '../_shared/cookie-banner'
@@ -70,7 +70,6 @@ code,.cmd{font-family:var(--font-mono);}
 code{background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-size:12px;color:var(--text0);}
 .cmd{display:block;background:var(--bg0);border:1px solid var(--border);border-radius:8px;padding:13px 15px;font-size:12.5px;color:var(--text0);white-space:pre;overflow-x:auto;line-height:1.7;}
 .install{margin-top:8px;}
-.install-note{color:var(--amber);font-size:13px;}
 .mkt-link{display:inline-block;margin-top:10px;font-size:13px;}
 .eg{border:1px solid var(--border);background:var(--bg0);border-radius:8px;padding:13px 15px;font-family:var(--font-mono);font-size:12px;color:var(--text1);white-space:pre-wrap;line-height:1.7;}
 ul.caveats{list-style:disc;padding-left:20px;color:var(--text2);font-size:13px;line-height:1.8;}
