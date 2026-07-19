@@ -22,6 +22,7 @@ export const STATUS_URL = {
   elevenlabs:  'https://status.elevenlabs.io',
   xai:         'https://status.x.ai',
   deepseek:    'https://status.deepseek.com',
+  kimi:        'https://status.moonshot.cn',
   openrouter:  'https://status.openrouter.ai',
   bedrock:     'https://health.aws.amazon.com/health/status',
   pinecone:    'https://status.pinecone.io',

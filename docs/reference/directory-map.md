@@ -22,7 +22,7 @@ api/
   _intro/
     html-template.ts # SSR HTML template (i18n, dashboard mock, GA4)
     announcements.ts # Reusable campaign-banner config + resolver (?banner=<key>, #265) — empty by default
-  is-down.ts        # "Is X Down?" Edge Function (40 services — excludes bedrock/azureopenai per #263)
+  is-down.ts        # "Is X Down?" Edge Function (42 services — excludes bedrock/azureopenai per #263)
   reports.ts        # Monthly Reports proxy (/reports/* → bentleypark.github.io/aiwatch-reports/*, fetched directly to bypass the Cloudflare 301 on the public reports.ai-watch.dev hostname) with HTML path rewriting (#264)
   methodology.ts    # Public "How AIWatch Works" methodology page Edge Function (/methodology, #673) — self-contained SSR, no data fetch
   _methodology/

@@ -192,4 +192,22 @@ describe('parseUptimeData', () => {
     expect(warn.mock.calls[0][0]).toContain('1/2 configured components absent')
     warn.mockRestore()
   })
+
+  it('#989 — WARNS when a SINGLE configured badge id is absent (the #956/#958 silent-null trap)', () => {
+    const days = Array.from({ length: 30 }, (_, i) => ({ date: `2026-06-${String((i % 28) + 1).padStart(2, '0')}`, outages: { p: 0, m: 0 } }))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // A single statusComponentId that isn't present in a NON-empty uptimeData → null uptime + a warn.
+    const result = parseUptimeData(makeHtml({ compA: { days } }), 'typoed-id')
+    expect(result.uptimePercent).toBeNull()
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn.mock.calls[0][0]).toContain("'typoed-id' absent from window.uptimeData")
+    warn.mockRestore()
+  })
+
+  it('#989 — does NOT warn when window.uptimeData is genuinely empty (no false alarm)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    parseUptimeData(makeHtml({}), 'compA') // empty uptimeData object → quiet
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
 })

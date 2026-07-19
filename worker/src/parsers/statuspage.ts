@@ -226,10 +226,12 @@ export function parseUptimeData(html: string, componentId: string | string[], wi
       uptimeReportedDays: worst.uptimeReportedDays,
     }
   }
-  return parseUptimeDataSingle(html, ids[0], windowDays)
+  // #989 — warnOnMiss only on the genuine single-component path; the multi-id branch above owns its own
+  // aggregate "N/M configured components absent" warn, so per-id warns here would double-count it.
+  return parseUptimeDataSingle(html, ids[0], windowDays, true)
 }
 
-function parseUptimeDataSingle(html: string, componentId: string, windowDays = 30): UptimeDataResult {
+function parseUptimeDataSingle(html: string, componentId: string, windowDays = 30, warnOnMiss = false): UptimeDataResult {
   const result: UptimeDataResult = { dailyImpact: {}, uptimePercent: null, windowDays: null, uptimeReported: null, uptimeReportedDays: null }
   // Locate the uptimeData JSON object, then extract it by brace counting (50KB+ object).
   // #868 — Atlassian Statuspage now embeds it as `window.uptimeData = {…}` with a
@@ -254,7 +256,16 @@ function parseUptimeDataSingle(html: string, componentId: string, windowDays = 3
     // Structure: { componentId: { component: {...}, days: [{date, outages: {p, m}}] } }
     const data = JSON.parse(html.substring(jsonStart, jsonEnd)) as Record<string, { days?: UptimeDayEntry[] }>
     const comp = data[componentId]
-    if (!comp?.days || !Array.isArray(comp.days)) return result
+    if (!comp?.days || !Array.isArray(comp.days)) {
+      // #989 — a configured single `statusComponentId` that resolves to nothing (typo, or upstream id
+      // rotation) silently yields null uptime → confidence 'low' → the Score is withheld, with no
+      // operator signal (the #956/#958 silent-null trap). The multi-id branch already warns on a missed
+      // id; mirror it here. Guarded on a non-empty parse so a genuinely empty uptimeData stays quiet.
+      if (warnOnMiss && Object.keys(data).length > 0) {
+        console.warn(`[parseUptimeData] component id '${componentId}' absent from window.uptimeData (${Object.keys(data).length} components present) — uptime will be null; check statusComponentId for upstream id rotation`)
+      }
+      return result
+    }
 
     // The impact CALENDAR still spans every published day (it renders 30/90-day history), so it is
     // built from the whole array; only the uptime WINDOW is trimmed.

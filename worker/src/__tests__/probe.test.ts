@@ -70,6 +70,7 @@ describe('PROBE_TARGETS', () => {
   const EXPECTED_IDS = [
     'claude', 'openai', 'gemini', 'mistral', 'cohere', 'groq', 'together',
     'fireworks', 'cerebras', 'perplexity', 'huggingface', 'replicate', 'fal', 'elevenlabs', 'xai', 'deepseek',
+    'kimi', // #989 — Moonshot AI, api.moonshot.ai/v1/models (401, no auth for RTT)
     'openrouter', 'stability', 'bfl', 'assemblyai', 'deepgram', 'voyageai', 'twelvelabs',
     'pinecone', 'langsmith', 'runway', 'luma', // #678 — added (stable representative API path)
     'turbopuffer', // #857 — no official uptime, probe is the sole measured signal
@@ -77,8 +78,8 @@ describe('PROBE_TARGETS', () => {
     'characterai', // #921 — app whose Statuspage died (#689/#800); neo.character.ai/health backend probe
   ]
 
-  it('has all 32 probe targets', () => {
-    expect(PROBE_TARGETS).toHaveLength(32)
+  it('has all 33 probe targets', () => {
+    expect(PROBE_TARGETS).toHaveLength(33)
     const ids = PROBE_TARGETS.map((t) => t.id)
     for (const expected of EXPECTED_IDS) {
       expect(ids).toContain(expected)

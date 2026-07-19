@@ -215,8 +215,8 @@ When adding a new monitored service, files across worker, frontend, docs, SEO me
 
 ## Architecture
 
-**AIWatch** is a React SPA that monitors 43 AI services in real time:
-- **33 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Fireworks, Cerebras, Perplexity, HuggingFace, Replicate, fal.ai, ElevenLabs, AssemblyAI, Deepgram, xAI, DeepSeek, OpenRouter, Bedrock, Azure OpenAI, Pinecone, turbopuffer, Stability AI, Black Forest Labs (FLUX), Voyage AI, Modal, Twelve Labs, LangChain (LangSmith), Helicone, Langfuse, Runway, Luma (Dream Machine)
+**AIWatch** is a React SPA that monitors 44 AI services in real time:
+- **34 API services**: Claude, OpenAI, Gemini, Mistral, Cohere, Groq, Together, Fireworks, Cerebras, Perplexity, HuggingFace, Replicate, fal.ai, ElevenLabs, AssemblyAI, Deepgram, xAI, DeepSeek, Kimi (Moonshot AI), OpenRouter, Bedrock, Azure OpenAI, Pinecone, turbopuffer, Stability AI, Black Forest Labs (FLUX), Voyage AI, Modal, Twelve Labs, LangChain (LangSmith), Helicone, Langfuse, Runway, Luma (Dream Machine)
 - **4 AI apps**: claude.ai, ChatGPT, Character.AI, DeepSeek App
 - **6 coding agents**: Claude Code, Codex, Cursor, GitHub Copilot, Windsurf, Junie
 
@@ -240,7 +240,7 @@ The full KV reference (40+ keys: pattern, value, TTL, writes/day, purpose) and t
 ```
 api/                 # Vercel Edge Functions (SSR pages + proxies). `_`-prefixed dirs = helpers, not Functions (#867)
   intro.ts           # Landing page (/intro); ?banner=<key> announcement slot
-  is-down.ts         # "Is X Down?" SEO pages (40 services; excl. bedrock/azureopenai)
+  is-down.ts         # "Is X Down?" SEO pages (42 services; excl. bedrock/azureopenai)
   reports.ts         # /reports/* proxy → aiwatch-reports Jekyll site (#264)
   methodology.ts     # Public "How AIWatch Works" page (/methodology, #673)
   plugin.ts          # Claude Code plugin landing (/plugin, #920)

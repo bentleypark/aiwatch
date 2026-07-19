@@ -126,6 +126,25 @@ export const SERVICES: ServiceConfig[] = [
   // (#498) is the FALLBACK when the feed is missing/expired — it FROZE at 2026-05-08 (#591/#507),
   // returning 200 with stale data, so `incidentSourceStale` keeps it out of Score rankings then.
   { id: 'deepseek', name: 'DeepSeek API', provider: 'DeepSeek', category: 'api', statusUrl: 'https://status.deepseek.com', apiUrl: 'https://deepseek.statuspage.io/api/v2/summary.json', statusComponentId: 'j4n367d9mh3x', incidentKeywords: ['api'], incidentSourceStale: true, flashdutyFeed: true, flashdutyPrimaryComponentId: '01KR3NC9ETZYF436Z8YT1HM047' },
+  // #989 — Kimi (Moonshot AI). Atlassian Statuspage, data-rich (verified 2026-07-18: x-statuspage-version
+  // header + window.uptimeData for the badge component). `.cn` is a CNAME to Statuspage (AtlassianEdge)
+  // so a Worker fetch reaches it — no China-network risk, no mirror needed.
+  //   • statusComponentId 'Open API' drives the badge + uptime; the model components are display-only
+  //     (displayComponentIds, #606) — NOT the badge, so a model-component change can't flip the card
+  //     (which would drag status-edge alerts + cache refresh). componentGroups folds the six `* Model`
+  //     components under one collapsible "Models" header (replicate pattern); Open API + API Service
+  //     stay as ungrouped surface rows.
+  //   • The auto-monitor opens frequent `critical` incidents titled `Agentic 模型错误报警` that attach to
+  //     no component (verified 2026-07-18) and carry paperwork-inflated durations (recorded hours vs
+  //     minutes of real impact — the #1019 pattern). autoMonitorTitles tags them → grouped in the UI +
+  //     excluded from the Score (isReliabilityIncident, #989) as an unusable signal — see that helper
+  //     for the accepted limitation. titleMap renders the Chinese titles English on every surface.
+  //   • NO holdShortIncidents/flapSuppression: a `critical` incident bypasses every hold/flap path
+  //     (alerts.ts), so both are inert here — the Discord flood is prevented instead by
+  //     filterByComponentStatus (#970: an active non-null-impact incident is dropped while Open API is
+  //     operational). Plain LLM at API_TIER 2 (fallback.ts); the fallback capability nuance is tracked
+  //     on #1062 (unbuilt) — no per-service entry needed here.
+  { id: 'kimi', name: 'Kimi (Moonshot AI)', provider: 'Moonshot AI', category: 'api', statusUrl: 'https://status.moonshot.cn', apiUrl: 'https://status.moonshot.cn/api/v2/summary.json', statusComponentId: '8psr5dfdld0s', displayComponentIds: ['8psr5dfdld0s', 'rf64wcbxt3r2', 'x0zsqgy57b75', 'z2zfp65lvb2z', 'lk7q3z0fcylp', 'p1j9ttb7jwhp', '8rkd3yj051gl', 'wmn9wzv84k1v'], componentGroups: { 'x0zsqgy57b75': 'Models', 'z2zfp65lvb2z': 'Models', 'lk7q3z0fcylp': 'Models', 'p1j9ttb7jwhp': 'Models', '8rkd3yj051gl': 'Models', 'wmn9wzv84k1v': 'Models' }, autoMonitorTitles: [/^agentic\s*模型错误报警$/i], titleMap: { 'Agentic 模型错误报警': 'Agentic model error alert', 'agentic模型错误报警': 'Agentic model error alert', '搜索请求出现大量报错': 'Elevated search request error rate', '短信登录异常': 'SMS login failure', 'deep research workflow错误率异常': 'Deep Research workflow error rate anomaly' }, addedAt: '2026-07-18' },
   { id: 'openrouter', name: 'OpenRouter', provider: 'OpenRouter', category: 'api', statusUrl: 'https://status.openrouter.ai', apiUrl: null, onlineOrNotUrl: 'https://status.openrouter.ai', onlineOrNotComponent: 'Chat (/api/v1/chat/completions)' },
   // Voice & Speech AI
   // displayComponentIds (#606): curated availability surfaces for the breakdown card —
@@ -817,6 +836,48 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
   })
 }
 
+/** Normalize a title for `titleMap` lookup: lowercase + strip ALL whitespace. This matches the
+ *  flexibility of the `autoMonitorTitles` regexes (`/i` + `\s*`), so a title the tagger matched is a
+ *  title the map recognizes — otherwise a casing/spacing variant is tagged `autoMonitor` but NOT
+ *  translated, silently surfacing the original (non-English) string downstream (#989 review). */
+function normalizeTitleKey(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, '')
+}
+
+/**
+ * #989 — rewrite non-English incident titles to English via a per-service `titleMap` (Moonshot's
+ * Atlassian page emits Chinese titles). Applied to the OUTPUT of the incident pipeline — AFTER
+ * filterIncidents / includeUntaggedIncidents / filterByComponentStatus — so every filter above still
+ * matches the ORIGINAL title (incidentExclude, incidentKeywords, the #970 component guard read the
+ * source string) while every downstream consumer (dashboard, RSS, Discord, the AI prompt,
+ * flapSuppressionKey, the #827 corpus) sees the English one. This ordering avoids the #940 class of bug
+ * (a title transform BEFORE the filter dropping incidents whose keyword tokens it destroyed).
+ *
+ * Match is case/whitespace-insensitive (`normalizeTitleKey`), aligned to the `autoMonitorTitles`
+ * regexes so every tagged variant translates. An unmapped title passes through UNCHANGED — never
+ * dropped. No `titleMap` → identity (same reference). ANY unmapped incident whose title still carries
+ * CJK text warns loudly (not just `autoMonitor` ones — a real gateway incident arrives in Chinese too,
+ * and its untranslated headline is the class most worth surfacing): the map is missing an entry and the
+ * raw title would ship untranslated to the dashboard/RSS/Discord/AI prompt — a config gap made visible
+ * rather than silent. Pure aside from that diagnostic; exported for unit testing.
+ */
+export function applyTitleMap(incidents: Incident[], config: ServiceConfig): Incident[] {
+  const map = config.titleMap
+  if (!map) return incidents
+  const lookup = new Map<string, string>()
+  for (const [k, v] of Object.entries(map)) lookup.set(normalizeTitleKey(k), v)
+  return incidents.map((inc) => {
+    const mapped = lookup.get(normalizeTitleKey(inc.title))
+    if (mapped) return { ...inc, title: mapped }
+    // Unmapped → pass through. A title still carrying CJK on a titleMap service is a config gap (a
+    // variant the map lacks) — warn so it isn't silent, whether or not it was autoMonitor-tagged.
+    if (/[㐀-鿿]/.test(inc.title)) {
+      console.warn(`[applyTitleMap] ${config.id}: incident title not in titleMap — untranslated non-English text will surface${inc.autoMonitor ? ' (autoMonitor)' : ''}: ${JSON.stringify(inc.title)}`)
+    }
+    return inc
+  })
+}
+
 /**
  * Filter out active incidents when the service's component is operational (#228).
  * Providers like Anthropic bulk-link incidents to all components even when only one is affected.
@@ -1084,14 +1145,23 @@ export function classifyStatusPageFailure(httpStatus: number): 'dead-source' | '
 /** #983 — the single tagging choke point. `fetchServiceUntagged` has ~10 return paths (flashduty feed,
  *  summary.json, AWS health, Azure RSS, BetterStack/Instatus/xAI/aistudio, plus the early operational
  *  and error bases); stamping `autoMonitor` on its result covers all of them, and is safe AFTER
- *  filtering because the tag is additive (no `title` mutation → `filterIncidents` is unaffected). */
+ *  filtering because the tag is additive (no `title` mutation → `filterIncidents` is unaffected).
+ *
+ *  #989 — `applyTitleMap` (non-English → English) runs HERE too, and ORDER MATTERS: tag FIRST, then
+ *  map. `autoMonitorTitles` patterns match the provider's ORIGINAL title (Moonshot's Chinese
+ *  `Agentic 模型错误报警`, case-insensitively — robust to the auto-monitor's casing drift); mapping first
+ *  would leave the tagger matching an English string its Chinese patterns never hit (the tag would
+ *  silently never apply — grouping + Score-exclusion both break). Map is likewise AFTER `filterIncidents`
+ *  (inside untagged), so every filter still reads the original title (#940). */
 // Exported ONLY so a test can drive the REAL production call path end-to-end (parse → filterIncidents
-// → includeUntaggedIncidents → tag). Unit-testing `tagAutoMonitorIncidents` alone would leave this
-// wrapper unguarded: drop the call here, or move it before `filterIncidents`, and every pure test
-// stays green while the tag never reaches /api/status (the #966 / #940 "tested twin" failure).
+// → includeUntaggedIncidents → tag → titleMap). Unit-testing the pure helpers alone would leave this
+// wrapper unguarded: drop a call here, or swap the tag/map order, and every pure test stays green while
+// the tag never reaches /api/status (the #966 / #940 "tested twin" failure class — a swapped tag/map
+// order was caught in local verification before this shipped).
 export async function fetchService(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
   const svc = await fetchServiceUntagged(config, prefetched, kv)
-  const incidents = tagAutoMonitorIncidents(svc.incidents, config)
+  const tagged = tagAutoMonitorIncidents(svc.incidents, config)  // matches ORIGINAL (e.g. Chinese) titles
+  const incidents = applyTitleMap(tagged, config)                // THEN rewrite to English
   return incidents === svc.incidents ? svc : { ...svc, incidents }
 }
 

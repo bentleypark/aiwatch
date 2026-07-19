@@ -307,6 +307,18 @@ export interface ServiceConfig {
   // incidents, which use distinct titles ("Search API failure", "API server failure"). `critical` is
   // never held/suppressed even when tagged, so a genuine broad outage always alerts immediately.
   autoMonitorTitles?: RegExp[]
+  // #989 — rewrite a non-English incident title to English. Moonshot's status page is Atlassian with
+  // rich data, but every incident title is Chinese; `sanitize()` passes non-ASCII through untouched, so
+  // without this the title would land verbatim on the dashboard, RSS, Discord, and the AI prompt (the
+  // only non-English source among all services). Case/whitespace-insensitive match (via
+  // `normalizeTitleKey`, aligned to the `autoMonitorTitles` regexes so every tagged variant translates);
+  // an unmapped title passes through unchanged (never dropped — the provider's auto-monitor emits
+  // inconsistent casing/spacing, so a new variant must degrade to the original). Applied by `applyTitleMap` at the
+  // OUTPUT of the incident pipeline (after filterIncidents / includeUntaggedIncidents /
+  // filterByComponentStatus), so every filter above still matches the ORIGINAL title. Deterministic, so
+  // `flapSuppressionKey` stays stable. A static map beats a translation call here: the page emits a
+  // handful of fixed titles, so this is zero-latency, no LLM round-trip, and offline-testable.
+  titleMap?: Record<string, string>
   // #591 — mark a service whose status page migrated to a server-side-unreachable platform, so
   // the feed AIWatch reads is FROZEN (e.g. DeepSeek → Flashduty, #507). Propagated to
   // ServiceStatus.incidentSourceStale → all ranking surfaces exclude it (a frozen empty 30-day

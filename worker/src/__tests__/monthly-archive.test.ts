@@ -2433,6 +2433,17 @@ describe('computeMonthlyScore (#993)', () => {
     expect(withMay.score).toBe(juneOnly.score)
   })
 
+  it('#989 — excludes an archived autoMonitor incident from the monthly Score (parity with the live path)', () => {
+    // 3 daily `critical` blips with paperwork-inflated 11h durations (the Moonshot pattern). Without the
+    // persisted `autoMonitor` tag the monthly Score would crater (the half-fix the code review caught);
+    // with it they're excluded exactly as the live Score excludes the tagged live incidents.
+    const blip = (startedAt: string) => ({ ...inc(startedAt, 660, 'critical'), autoMonitor: true })
+    const noisy = computeMonthlyScore('kimi', [blip('2026-06-05T00:00:00Z'), blip('2026-06-12T00:00:00Z'), blip('2026-06-20T00:00:00Z')], 99.98, noProbe, WINDOW, undefined)
+    const clean = computeMonthlyScore('kimi', [], 99.98, noProbe, WINDOW, undefined)
+    expect(noisy.score).not.toBeNull()
+    expect(noisy.score).toBe(clean.score) // the autoMonitor blips do not drag the month below incident-free
+  })
+
   it('no official uptime ⇒ Uptime component dropped ⇒ low confidence (mirrors the live #713 rule)', () => {
     // Deepgram's real shape: no official uptime, no probe → score computed on incidents+recovery only.
     const r = computeMonthlyScore('x', [inc('2026-06-10T00:00:00Z', 60)], null, noProbe, WINDOW, undefined)
