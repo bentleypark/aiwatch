@@ -6,6 +6,7 @@ import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type Serv
 import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, type SuppressionEntry } from './suppression'
 import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
+import { serviceGroupOf } from './service-groups'
 import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
@@ -3731,6 +3732,7 @@ export default {
         return new Response(JSON.stringify({
           service: {
             id: svc.id, name: svc.name, provider: svc.provider, category: svc.category,
+            group: serviceGroupOf(svc.id), // #1068 — fine category (llm/voice/…); coarse `category` unchanged
             status: svc.status, latency: svc.latency, uptime30d: svc.uptime30d,
             uptimeSource: svc.uptimeSource, lastChecked: svc.lastChecked,
             incidents: (svc.incidents ?? []).slice(0, 5).map((i) => ({
@@ -3754,6 +3756,7 @@ export default {
           const scoreData = scoreFor(svc, v1ProbeSummaries)
           return {
             id: svc.id, name: svc.name, provider: svc.provider, category: svc.category,
+            group: serviceGroupOf(svc.id), // #1068 — fine category (llm/voice/…); coarse `category` unchanged
             status: svc.status, latency: svc.latency, uptime30d: svc.uptime30d,
             uptimeSource: svc.uptimeSource, lastChecked: svc.lastChecked,
             incidentCount: (svc.incidents ?? []).length,
