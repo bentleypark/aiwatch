@@ -49,6 +49,7 @@ const SERVICE_COLOR = {
   elevenlabs:  '#6be5e2',
   xai:         '#e0e0e0',
   deepseek:    '#ff6b6b',
+  kimi:        '#8b7cf6',
   twelvelabs:  '#79c0ff',
 }
 

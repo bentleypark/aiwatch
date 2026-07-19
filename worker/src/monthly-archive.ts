@@ -44,6 +44,12 @@ export interface MonthlyIncidentEntry {
   // written before #653 → consumers treat missing as null (informational), i.e. conservatively
   // contributes no downtime (won't fabricate an outage from pre-#653 data).
   impact?: 'minor' | 'major' | 'critical' | null
+  // #989 — persisted so `computeMonthlyScore` excludes provider auto-monitor machine-noise from the
+  // MONTHLY Score too (parity with the live path, which reads the tag off fetchService). It CANNOT be
+  // re-derived at score time like #1021's advisory titles: `autoMonitorTitles` matches the ORIGINAL
+  // (e.g. Chinese) title, but the archive stores the English `titleMap` output. Absent on pre-#989
+  // archives → treated as false (those blips count, same transition behaviour as #653/#1021).
+  autoMonitor?: boolean
   // #975 — consecutive accumulation runs this UNRESOLVED entry has been confidently missing from the
   // upstream feed (see `prunePhantomIncidents`). Absent means zero: the field exists only while an
   // entry is in the missing state, so a resolved or currently-present entry serializes exactly as
@@ -548,6 +554,7 @@ export function accumulateMonthlyIncidents(
         durationMin: dur,
         finalStatus,
         impact: inc.impact ?? null, // #653 — for archive-window estimate-uptime weighting
+        ...(inc.autoMonitor ? { autoMonitor: true } : {}), // #989 — so the monthly Score excludes it too
       })
 
       const date = inc.startedAt.slice(0, 10)
@@ -921,6 +928,9 @@ export function computeMonthlyScore(
     // (accumulateMonthlyIncidents nullish-coalesces impact) — would otherwise drop the advisory from
     // downtime yet still count it in the Score, an internally-contradictory report (the Codex June case).
     impact: isNonReliabilityAdvisory(e.title ?? '') ? null : (e.impact ?? null),
+    // #989 — carry the persisted auto-monitor tag through so isReliabilityIncident excludes it from the
+    // monthly Score exactly as on the live path (a pre-#989 archive has it absent → counts, as before).
+    autoMonitor: e.autoMonitor,
     startedAt: e.startedAt,
     resolvedAt: e.resolvedAt,
     duration: e.finalStatus === 'resolved' ? minutesToDurationString(e.durationMin) : null,

@@ -238,6 +238,18 @@ const SEO_CONTENT: Record<string, ServiceSEO> = {
       { q: 'How do I check DeepSeek status?', a: 'You can check DeepSeek status on this page, on the official DeepSeek status page at status.deepseek.com, or on the AIWatch dashboard at ai-watch.dev.' },
     ],
   },
+  kimi: {
+    displayName: 'Kimi (Moonshot AI)',
+    description: 'Kimi is the AI assistant and API from Moonshot AI, a Chinese AI lab known for very long context windows and its agentic K2 model family. The Kimi Open API exposes chat, vision, and reasoning models to developers, and is OpenAI-API-compatible.',
+    insight: 'Moonshot runs an automated monitor that opens a fresh incident per short model-error blip (often just a few minutes), so Kimi\'s status page can list frequent brief "Agentic model" alerts even while the Open API gateway stays operational. AIWatch drives Kimi\'s badge off the Open API component and groups those machine-generated alerts, so a 3-minute blip does not read as a full outage. Incident titles are published in Chinese; AIWatch renders them in English.',
+    whenDown: 'When the Kimi API is down, applications using Moonshot\'s long-context or K2 agentic models will fail. Deployments that chose Kimi for its large context window or lower cost lose their primary backend until it recovers.',
+    faqs: [
+      { q: 'Is Kimi (Moonshot AI) down right now?', a: 'Check the live status indicator at the top of this page. AIWatch monitors the Kimi Open API every 5 minutes and shows real-time operational status.' },
+      { q: 'Why does Kimi show frequent short incidents?', a: 'Moonshot\'s automated monitor opens a new incident for each brief spike in model error rates, usually lasting a few minutes. These are grouped on AIWatch and do not affect the Open API availability badge, which tracks the developer API gateway.' },
+      { q: 'What are alternatives to Kimi?', a: 'DeepSeek, Mistral, OpenAI, and Claude are alternatives depending on your needs. For long-context or reasoning workloads, Claude and OpenAI offer comparable capability at higher cost.' },
+      { q: 'How do I check Kimi status?', a: 'You can check Kimi status on this page, on the official Moonshot status page at status.moonshot.cn, or on the AIWatch dashboard at ai-watch.dev.' },
+    ],
+  },
   openrouter: {
     displayName: 'OpenRouter',
     description: 'OpenRouter is a unified API gateway providing access to 100+ models from multiple providers (OpenAI, Anthropic, Google, Mistral, Meta, etc.) through a single endpoint. It handles routing, fallbacks, and per-model pricing.',

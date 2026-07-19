@@ -27,6 +27,7 @@ export const SLUG_TO_SERVICE: Record<string, { id: string; name: string; provide
   'perplexity':      { id: 'perplexity', name: 'Perplexity',       provider: 'Perplexity AI', category: 'api', group: 'llm' },
   'xai':             { id: 'xai',        name: 'xAI (Grok)',       provider: 'xAI',         category: 'api', group: 'llm' },
   'deepseek':        { id: 'deepseek',   name: 'DeepSeek API',     provider: 'DeepSeek',    category: 'api', group: 'llm' },
+  'kimi':            { id: 'kimi',       name: 'Kimi (Moonshot AI)', provider: 'Moonshot AI', category: 'api', group: 'llm' },
   'openrouter':      { id: 'openrouter', name: 'OpenRouter',       provider: 'OpenRouter',  category: 'api', group: 'llm' },
   // Voice & speech AI (#263)
   'elevenlabs':      { id: 'elevenlabs', name: 'ElevenLabs',       provider: 'ElevenLabs',  category: 'api', group: 'voice' },
@@ -100,6 +101,7 @@ export const RELATED_SLUGS: Record<string, string[]> = {
   'perplexity':     ['openai', 'claude', 'gemini'],
   'xai':            ['openai', 'claude', 'gemini'],
   'deepseek':       ['deepseek-app', 'mistral', 'groq', 'openai'],
+  'kimi':           ['deepseek', 'mistral', 'openai', 'claude'],
   'openrouter':     ['openai', 'claude', 'mistral'],
   // Voice — same category
   'elevenlabs':     ['assemblyai', 'deepgram'],
@@ -145,7 +147,7 @@ export const SERVICE_SITE_URL: Record<string, string> = {
   claude: 'https://claude.com', openai: 'https://platform.openai.com', gemini: 'https://ai.google.dev',
   mistral: 'https://mistral.ai', cohere: 'https://cohere.com', groq: 'https://groq.com',
   together: 'https://together.ai', fireworks: 'https://fireworks.ai', cerebras: 'https://cerebras.ai',
-  deepseek: 'https://www.deepseek.com', xai: 'https://x.ai', perplexity: 'https://www.perplexity.ai',
+  deepseek: 'https://www.deepseek.com', kimi: 'https://www.moonshot.ai', xai: 'https://x.ai', perplexity: 'https://www.perplexity.ai',
   openrouter: 'https://openrouter.ai',
   // Voice & speech (#842 category extension)
   elevenlabs: 'https://elevenlabs.io', assemblyai: 'https://www.assemblyai.com', deepgram: 'https://deepgram.com',

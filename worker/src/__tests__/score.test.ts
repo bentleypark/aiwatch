@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calculateAIWatchScore, classifyProbe, computeMttrHours, MTTR_PRIOR_MIN, MTTR_PRIOR_WEIGHT, MIN_VALID_DAYS, type ProbeContext } from '../score'
+import { calculateAIWatchScore, classifyProbe, computeMttrHours, isReliabilityIncident, MTTR_PRIOR_MIN, MTTR_PRIOR_WEIGHT, MIN_VALID_DAYS, type ProbeContext } from '../score'
 import { PROBE_TARGETS, resolveProbeId } from '../probe'
 import { scoreFor } from '../index'
 import type { ProbeSummary, ServiceStatus } from '../types'
@@ -551,5 +551,62 @@ describe('parent-probe inheritance in scoring (#883)', () => {
     // chatgpt is neither probed nor an inheritor → must stay unsupported through the real path.
     const svc = makeSvc({ id: 'chatgpt', category: 'app', uptime30d: 99.9 })
     expect(scoreFor(svc, new Map()).breakdown.responsivenessStatus).toBe('unsupported')
+  })
+})
+
+describe('isReliabilityIncident (#989 — autoMonitor + null-impact excluded from Score)', () => {
+  it('counts a real impactful incident; excludes null-impact and autoMonitor machine noise', () => {
+    expect(isReliabilityIncident({ impact: 'critical' })).toBe(true)
+    expect(isReliabilityIncident({ impact: 'minor' })).toBe(true)
+    expect(isReliabilityIncident({ impact: null })).toBe(false)                            // #707/#261 advisory
+    expect(isReliabilityIncident({ impact: 'critical', autoMonitor: true })).toBe(false)   // #989 machine noise
+    expect(isReliabilityIncident({ impact: 'major', autoMonitor: false })).toBe(true)      // explicit false = counts
+  })
+
+  it('a provider auto-monitor firing ~1 critical/day does NOT crater the Score (the Kimi case)', () => {
+    // 30 daily `critical` autoMonitor blips — the Moonshot pattern. Without the #989 exclusion these
+    // drive weightedAffectedDays ~30 and collapse the 25-pt Incidents component to ~1. The ONLY
+    // difference between the two services below is the autoMonitor tag.
+    const days = Array.from({ length: 30 }, (_, i) => {
+      const d = new Date(Date.now() - (i + 1) * 86_400_000).toISOString()
+      return {
+        id: `am-${i}`, title: 'Agentic model error alert', status: 'resolved' as const,
+        impact: 'critical' as const, autoMonitor: true, startedAt: d, resolvedAt: d, duration: '3m', timeline: [],
+      }
+    })
+    const tagged = calculateAIWatchScore(makeSvc({ id: 'kimi', uptime30d: 99.98, incidents: days }), 30, probeUnsupported)
+    const untagged = calculateAIWatchScore(
+      makeSvc({ id: 'kimi', uptime30d: 99.98, incidents: days.map(({ autoMonitor, ...rest }) => rest) }),
+      30, probeUnsupported,
+    )
+    // The tag rescues the Incidents component: near-full vs near-zero — proving the exclusion is what
+    // does the work (not some incidental clamp).
+    expect(tagged.breakdown.incidents).toBeGreaterThan(24)
+    expect(untagged.breakdown.incidents).toBeLessThan(5)
+    expect(tagged.score).not.toBeNull()
+    expect(untagged.score).not.toBeNull()
+    expect(tagged.score!).toBeGreaterThan(untagged.score! + 15)
+  })
+
+  it('excludes autoMonitor from Recovery/MTTR too — a paperwork-inflated duration must not tank recovery', () => {
+    // Moonshot's auto-monitor leaves incidents open for HOURS (recorded ~11h median vs minutes of real
+    // impact — the #1019 pattern). This guards the isReliabilityIncident use at the MTTR site
+    // specifically: long durations move Recovery but NOT breakdown.incidents, so the prior test can't
+    // see a mutation that reverts only that site. Same fixture tagged vs untagged.
+    const longBlips = Array.from({ length: 5 }, (_, i) => {
+      const d = new Date(Date.now() - (i + 1) * 86_400_000).toISOString()
+      return {
+        id: `lb-${i}`, title: 'Agentic model error alert', status: 'resolved' as const,
+        impact: 'critical' as const, autoMonitor: true, startedAt: d, resolvedAt: d, duration: '11h 0m', timeline: [],
+      }
+    })
+    const tagged = calculateAIWatchScore(makeSvc({ id: 'kimi', uptime30d: 99.98, incidents: longBlips }), 30, probeUnsupported)
+    const untagged = calculateAIWatchScore(
+      makeSvc({ id: 'kimi', uptime30d: 99.98, incidents: longBlips.map(({ autoMonitor, ...rest }) => rest) }),
+      30, probeUnsupported,
+    )
+    expect(tagged.breakdown.recovery).toBeGreaterThan(14)  // excluded → no MTTR penalty → ~full 15
+    expect(untagged.breakdown.recovery).toBeLessThan(2)    // 11h MTTR → recovery craters (~1)
+    expect(tagged.breakdown.recovery - untagged.breakdown.recovery).toBeGreaterThan(12) // the tag does the work
   })
 })

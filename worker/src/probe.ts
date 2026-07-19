@@ -23,6 +23,7 @@ export const PROBE_TARGETS: ProbeTarget[] = [
   { id: 'elevenlabs', url: 'https://api.elevenlabs.io/v1/voices' },
   { id: 'xai', url: 'https://api.x.ai/v1/models' },
   { id: 'deepseek', url: 'https://api.deepseek.com/v1/models' },
+  { id: 'kimi', url: 'https://api.moonshot.ai/v1/models' },                          // #989 — 401 (auth not required for RTT), TTFB ~0.14s
   { id: 'openrouter', url: 'https://openrouter.ai/api/v1/models' },
   { id: 'stability', url: 'https://api.stability.ai/v1/engines/list' },
   { id: 'bfl', url: 'https://api.bfl.ai/v1/get_result' },                            // #756 — real API handler, 422 (missing id), no auth for RTT
