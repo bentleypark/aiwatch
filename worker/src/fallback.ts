@@ -120,6 +120,33 @@ export function isSpecializedSubTier(tier: number): boolean {
   return tier >= 4 && tier <= 10
 }
 
+// #1062 — capability sub-tags for services whose fallback TIER is not internally substitutable. The
+// Voice tier (4) mixes speech-to-text and text-to-speech, which do NOT substitute for each other, so
+// `isSpecializedSubTier`'s same-tier gate alone still cross-recommended STT↔TTS (ElevenLabs down →
+// AssemblyAI). Each tag is AIWatch's MODELLING of a service's primary substitutable capability, not a
+// claim about the vendor's full API surface: `elevenlabs:['tts']` (text-to-speech), `assemblyai:['stt']`
+// (transcription), `deepgram:['stt','tts']` (both). A service ABSENT from this map is not capability-
+// gated — tier proximity governs it exactly as before, so this narrows nothing outside the listed
+// services. Keep the three copies in lockstep with src/utils/constants.js + the api/is-down.ts inline
+// copy: api-tier-sync.test.ts deep-equals the DATA on all three and asserts the is-down filter WIRING;
+// the 3-line sharesCapability body is kept identical by hand.
+export const SERVICE_CAPABILITY: Record<string, string[]> = {
+  elevenlabs: ['tts'],
+  assemblyai: ['stt'],
+  deepgram: ['stt', 'tts'],
+}
+
+// #1062 — two services are mutually substitutable only if they share ≥1 capability. When EITHER lacks a
+// tag the pair is NOT capability-gated (returns true → tier logic alone decides), so this is a no-op for
+// every tier without SERVICE_CAPABILITY entries. (The empty-candidate-set → suppress consequence is
+// getFallbacks' emergent behavior; it lives at the call-site comment + docs, not on this pure predicate.)
+export function sharesCapability(a: string, b: string): boolean {
+  const ca = SERVICE_CAPABILITY[a]
+  const cb = SERVICE_CAPABILITY[b]
+  if (!ca || !cb) return true
+  return ca.some((c) => cb.includes(c))
+}
+
 export function getFallbacks(
   serviceId: string,
   category: string,
@@ -131,7 +158,9 @@ export function getFallbacks(
   const sameTierOnly = isSpecializedSubTier(sourceTier)
   return services
     .filter(s => s.category === category && s.id !== serviceId && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale && !EXCLUDE_FALLBACK.includes(s.id)
-      && (!sameTierOnly || tierFor(s.id) === sourceTier))
+      && (!sameTierOnly || tierFor(s.id) === sourceTier)
+      // #1062 — within a capability-mixed tier (Voice), only a candidate sharing a capability qualifies
+      && sharesCapability(serviceId, s.id))
     .sort((a, b) => {
       // Prefer same or adjacent tier to the affected service
       const tierA = tierFor(a.id)

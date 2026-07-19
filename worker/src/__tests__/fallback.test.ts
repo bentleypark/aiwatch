@@ -123,11 +123,12 @@ describe('getFallbacks', () => {
     expect(getFallbacks('huggingface', 'api', mockServices)).toEqual([])
   })
 
-  it('returns voice tier fallbacks for ElevenLabs', () => {
+  it('#1062 — ElevenLabs (TTS) recommends only capability-sharing Voice peers (Deepgram), NOT AssemblyAI (STT)', () => {
+    // Pre-#1062 this returned [AssemblyAI(STT), Deepgram] — AssemblyAI is transcription-only and cannot
+    // substitute a text-to-speech caller. Now only Deepgram (STT+TTS) qualifies; AssemblyAI is filtered.
     const result = getFallbacks('elevenlabs', 'api', mockServices)
-    expect(result).toHaveLength(2)
-    expect(result[0].name).toBe('AssemblyAI')
-    expect(result[1].name).toBe('Deepgram')
+    expect(result).toEqual([{ name: 'Deepgram', score: 85 }])
+    expect(result.find(f => f.name === 'AssemblyAI')).toBeUndefined()
   })
 
   it('excludes EXCLUDE_FALLBACK services from candidates', () => {
@@ -190,6 +191,37 @@ describe('getFallbacks', () => {
       { id: 'b', category: 'app', name: 'B', status: 'degraded', aiwatchScore: 40 },
     ]
     expect(getFallbacks('a', 'app', services)).toEqual([])
+  })
+})
+
+describe('#1062 facet A — Voice tier STT/TTS capability gating', () => {
+  const voice = [
+    { id: 'elevenlabs', category: 'api', name: 'ElevenLabs', status: 'operational', aiwatchScore: 80 },
+    { id: 'assemblyai', category: 'api', name: 'AssemblyAI', status: 'operational', aiwatchScore: 90 },
+    { id: 'deepgram', category: 'api', name: 'Deepgram', status: 'operational', aiwatchScore: 85 },
+  ]
+
+  it('AssemblyAI (STT) recommends only Deepgram (STT), NOT ElevenLabs (TTS)', () => {
+    const result = getFallbacks('assemblyai', 'api', voice.map(s => s.id === 'assemblyai' ? { ...s, status: 'degraded' } : s))
+    expect(result).toEqual([{ name: 'Deepgram', score: 85 }])
+  })
+
+  it('Deepgram (STT+TTS) bridges both — recommends ElevenLabs AND AssemblyAI, Score-ordered', () => {
+    const result = getFallbacks('deepgram', 'api', voice.map(s => s.id === 'deepgram' ? { ...s, status: 'degraded' } : s))
+    // Both share a capability with Deepgram (AssemblyAI=STT, ElevenLabs=TTS). Same tier (distance 0) so
+    // ordering is Score-descending: AssemblyAI(90) before ElevenLabs(80). Assert the real order (no .sort()).
+    expect(result).toEqual([{ name: 'AssemblyAI', score: 90 }, { name: 'ElevenLabs', score: 80 }])
+  })
+
+  it('suppresses (empty) when the only capability-sharing sibling is itself down', () => {
+    // ElevenLabs (TTS) is down and Deepgram (the only TTS sibling) is also down → AssemblyAI (STT) must
+    // NOT be offered as a wrong-capability substitute. Route-else-suppress: no recommendation is correct.
+    const services = [
+      { id: 'elevenlabs', category: 'api', name: 'ElevenLabs', status: 'down', aiwatchScore: 80 },
+      { id: 'deepgram', category: 'api', name: 'Deepgram', status: 'down', aiwatchScore: 85 },
+      { id: 'assemblyai', category: 'api', name: 'AssemblyAI', status: 'operational', aiwatchScore: 90 },
+    ]
+    expect(getFallbacks('elevenlabs', 'api', services)).toEqual([])
   })
 })
 
