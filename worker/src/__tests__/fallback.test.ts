@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { getFallbacks, buildFallbackText, buildGroupedFallbackText, getGroupedFallbacks, EXCLUDE_FALLBACK, tierFor, tierLabelFor, API_TIER, isSpecializedSubTier } from '../fallback'
+import { getFallbacks, buildFallbackText, buildGroupedFallbackText, getGroupedFallbacks, EXCLUDE_FALLBACK, tierFor, tierLabelFor, API_TIER, isSpecializedSubTier, routingTier, capabilityOfComponent, effectiveTierFor, CAPABILITY_TIER, isCapabilityProvider, CAPABILITY_PROVIDERS } from '../fallback'
 
 const mockServices = [
   { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 85 },
@@ -664,5 +664,241 @@ describe('getGroupedFallbacks (#781) — per-category structure + perGroup parit
     expect(text).toContain('👉 Suggested fallback:')
     expect(text).toContain('LLM: OpenAI API')
     expect(text).toContain('Coding Agent: Codex') // #1027 — claudecode/codex tier 11 → 'Coding Agent'
+  })
+})
+
+describe('#1062 facet B — capability routing on a secondary-component outage', () => {
+  // A multi-capability service whose per-component snapshot shows ONLY a secondary surface degraded.
+  const openai = (comps: Array<{ name: string; status: string }> | undefined) => ({ id: 'openai', category: 'api', name: 'OpenAI API', status: 'down', aiwatchScore: 72, components: comps })
+  const pool = [
+    { id: 'claude', category: 'api', name: 'Claude API', status: 'operational', aiwatchScore: 95 },
+    { id: 'gemini', category: 'api', name: 'Gemini API', status: 'operational', aiwatchScore: 90 },
+    { id: 'stability', category: 'api', name: 'Stability AI', status: 'operational', aiwatchScore: 70 },
+    { id: 'bfl', category: 'api', name: 'Black Forest Labs (FLUX)', status: 'operational', aiwatchScore: 65 },
+    { id: 'runway', category: 'api', name: 'Runway', status: 'operational', aiwatchScore: 60 },
+    { id: 'luma', category: 'api', name: 'Luma (Dream Machine)', status: 'operational', aiwatchScore: 55 },
+    { id: 'elevenlabs', category: 'api', name: 'ElevenLabs', status: 'operational', aiwatchScore: 80 },
+    { id: 'deepgram', category: 'api', name: 'Deepgram', status: 'operational', aiwatchScore: 85 },
+    { id: 'assemblyai', category: 'api', name: 'AssemblyAI', status: 'operational', aiwatchScore: 90 },
+  ]
+
+  describe('capabilityOfComponent — component name → capability', () => {
+    it('maps modality component names to their capability; anything else is the primary llm', () => {
+      expect(capabilityOfComponent('Images')).toBe('image')
+      expect(capabilityOfComponent('Sora')).toBe('video')
+      expect(capabilityOfComponent('Audio')).toBe('audio')
+      expect(capabilityOfComponent('Realtime')).toBe('realtime')
+      expect(capabilityOfComponent('Embeddings')).toBe('embeddings')
+      expect(capabilityOfComponent('Chat Completions')).toBe('llm')
+      expect(capabilityOfComponent('Responses')).toBe('llm')
+      expect(capabilityOfComponent('Login')).toBe('llm')
+    })
+  })
+
+  describe('routingTier — when to route / suppress / default', () => {
+    const svc = (comps: Array<{ name: string; status: string }> | undefined) => ({ id: 'openai', category: 'api', name: 'OpenAI API', status: 'down', components: comps })
+    it('routes a single secondary-capability outage to that capability tier', () => {
+      expect(routingTier(svc([{ name: 'Chat Completions', status: 'operational' }, { name: 'Images', status: 'down' }]))).toBe(7)
+      expect(routingTier(svc([{ name: 'Chat Completions', status: 'operational' }, { name: 'Sora', status: 'down' }]))).toBe(5)
+      expect(routingTier(svc([{ name: 'Chat Completions', status: 'operational' }, { name: 'Audio', status: 'degraded' }]))).toBe(4)
+    })
+    it('suppresses (-1) a secondary capability with no peer tier (realtime; embeddings pre-#880)', () => {
+      expect(routingTier(svc([{ name: 'Chat Completions', status: 'operational' }, { name: 'Realtime', status: 'down' }]))).toBe(-1)
+      expect(routingTier(svc([{ name: 'Chat Completions', status: 'operational' }, { name: 'Embeddings', status: 'down' }]))).toBe(-1)
+    })
+    it('defaults (null) when the primary llm surface is degraded, or ambiguous/absent signal', () => {
+      // primary among the degraded → LLM peers, not a modality reroute
+      expect(routingTier(svc([{ name: 'Chat Completions', status: 'down' }, { name: 'Images', status: 'down' }]))).toBeNull()
+      // ≥2 distinct secondary capabilities → ambiguous, don't guess
+      expect(routingTier(svc([{ name: 'Images', status: 'down' }, { name: 'Audio', status: 'down' }]))).toBeNull()
+      // no per-component signal
+      expect(routingTier(svc(undefined))).toBeNull()
+      expect(routingTier(svc([]))).toBeNull()
+      expect(routingTier(undefined)).toBeNull()
+    })
+  })
+
+  it('OpenAI Images-only outage → recommends the Image tier (Stability/FLUX), NOT LLM peers', () => {
+    const services = [openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Images', status: 'down' }]), ...pool]
+    const result = getFallbacks('openai', 'api', services)
+    expect(result).toEqual([{ name: 'Stability AI', score: 70 }, { name: 'Black Forest Labs (FLUX)', score: 65 }])
+    expect(result.find(f => f.name === 'Claude API')).toBeUndefined()
+  })
+
+  it('OpenAI Sora-only outage → recommends the Video tier (Runway/Luma)', () => {
+    const services = [openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Sora', status: 'down' }]), ...pool]
+    expect(getFallbacks('openai', 'api', services)).toEqual([{ name: 'Runway', score: 60 }, { name: 'Luma (Dream Machine)', score: 55 }])
+  })
+
+  it('OpenAI Audio-only outage → recommends the Voice tier (top-2 by Score; NOT STT/TTS-gated)', () => {
+    // Routed audio is NOT facet-A gated: openai is untagged in SERVICE_CAPABILITY, so all 3 Voice
+    // services are eligible and it reduces to top-2 by Score. AssemblyAI(90) > Deepgram(85) > ElevenLabs(80).
+    // Exact assertion (not `.every`, which passes vacuously on []) so an audio-route regression to empty fails.
+    const services = [openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Audio', status: 'down' }]), ...pool]
+    expect(getFallbacks('openai', 'api', services)).toEqual([{ name: 'AssemblyAI', score: 90 }, { name: 'Deepgram', score: 85 }])
+  })
+
+  it('OpenAI Realtime-only outage → SUPPRESSED (no peer tier), not an LLM peer', () => {
+    const services = [openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Realtime', status: 'down' }]), ...pool]
+    expect(getFallbacks('openai', 'api', services)).toEqual([])
+  })
+
+  it('Cohere embeddings-only outage → SUPPRESSED until Voyage un-excluded (#880)', () => {
+    const cohere = { id: 'cohere', category: 'api', name: 'Cohere API', status: 'down', aiwatchScore: 76,
+      components: [{ name: 'Coral', status: 'operational' }, { name: 'embeddings', status: 'down' }] }
+    expect(getFallbacks('cohere', 'api', [cohere, ...pool])).toEqual([])
+  })
+
+  it('OpenAI whole-API outage (primary degraded) → falls back to LLM peers (default, unchanged)', () => {
+    const services = [openai([{ name: 'Chat Completions', status: 'down' }, { name: 'Images', status: 'down' }]), ...pool]
+    expect(getFallbacks('openai', 'api', services)).toEqual([{ name: 'Claude API', score: 95 }, { name: 'Gemini API', score: 90 }])
+  })
+
+  it('a service without components[] is unaffected (Mistral-style, #761) — default LLM peers', () => {
+    const mistral = { id: 'mistral', category: 'api', name: 'Mistral API', status: 'down', aiwatchScore: 76 }
+    const result = getFallbacks('mistral', 'api', [mistral, ...pool])
+    // mistral is tier 2 → tier-1 LLM peers by distance; routing is a no-op with no components
+    expect(result.map(f => f.name)).toEqual(['Claude API', 'Gemini API'])
+  })
+
+  describe('getGroupedFallbacks — routed group is LABELLED by the capability tier', () => {
+    it('labels a routed OpenAI-Images outage by CAPABILITY ("Image generation"), not the LLM tier, + tags capability', () => {
+      const services = [openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Images', status: 'down' }]), ...pool]
+      const groups = getGroupedFallbacks(['openai'], services)
+      expect(groups).toHaveLength(1)
+      expect(groups[0].label).toBe('Image generation') // #1062 facet B — self-describing (not bare "Image")
+      expect(groups[0].capability).toBe('image')
+      expect(groups[0].fallbacks.map(f => f.name)).toEqual(['Stability AI', 'Black Forest Labs (FLUX)'])
+    })
+    it('effectiveTierFor returns the routed tier for a secondary outage, else the service tier', () => {
+      expect(effectiveTierFor(openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Images', status: 'down' }]))).toBe(7)
+      expect(effectiveTierFor(openai([{ name: 'Chat Completions', status: 'down' }]))).toBe(1) // primary → own tier
+      expect(CAPABILITY_TIER).toEqual({ image: 7, video: 5, audio: 4 })
+    })
+
+    // A SUPPRESSED anchor (Realtime-only OpenAI) has effectiveTierFor = its own LLM tier, so its group
+    // key is `api:LLM`. It must NOT reserve that key: a genuinely-LLM-down sibling (mistral) sharing the
+    // key must still get its LLM group, regardless of order. (Pre-fix, `seen.add` before the empty check
+    // dropped the sibling's group when the suppressed anchor came first.)
+    const suppressedOpenai = { id: 'openai', category: 'api', name: 'OpenAI API', status: 'down', aiwatchScore: 72,
+      components: [{ name: 'Chat Completions', status: 'operational' }, { name: 'Realtime', status: 'down' }] }
+    const mistralDown = { id: 'mistral', category: 'api', name: 'Mistral API', status: 'down', aiwatchScore: 76 }
+
+    it('a suppressed anchor does not steal a later LLM sibling\'s group (suppressed ordered FIRST)', () => {
+      const services = [suppressedOpenai, mistralDown, ...pool]
+      const groups = getGroupedFallbacks(['openai', 'mistral'], services)
+      // openai realtime → suppressed (no group). mistral (LLM) → its LLM group survives.
+      expect(groups).toHaveLength(1)
+      expect(groups[0].label).toBe('LLM')
+      expect(groups[0].fallbacks.map(f => f.name)).toContain('Claude API')
+    })
+
+    it('a suppressed anchor does not steal a later LLM sibling\'s group (suppressed ordered LAST)', () => {
+      const groups = getGroupedFallbacks(['mistral', 'openai'], [mistralDown, suppressedOpenai, ...pool])
+      expect(groups).toHaveLength(1)
+      expect(groups[0].label).toBe('LLM')
+    })
+
+    it('a routed Image outage + an LLM outage yield TWO groups (perGroup=1 each), suppressed one not counted', () => {
+      const imagesOpenai = openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Images', status: 'down' }])
+      const groups = getGroupedFallbacks(['openai', 'mistral'], [imagesOpenai, mistralDown, ...pool])
+      expect(groups.map(g => g.label).sort()).toEqual(['Image generation', 'LLM'])
+      expect(groups.every(g => g.fallbacks.length === 1)).toBe(true) // perGroup=1 with 2 rendered groups
+    })
+
+    it('buildGroupedFallbackText (Discord render layer) emits the routed "Image generation:" label end-to-end', () => {
+      // Proves the components signal is actually threaded through the render path callers use, not only
+      // the pure getGroupedFallbacks — the objects passed here carry components[] like the real ScoredService.
+      const imagesOpenai = openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Images', status: 'down' }])
+      const text = buildGroupedFallbackText(['openai'], [imagesOpenai, ...pool])
+      expect(text).toContain('Image generation: Stability AI')
+      expect(text).not.toContain('LLM:')
+    })
+  })
+})
+
+describe('#1062 facet C — reverse: a dedicated capability service also recommends the multimodal provider', () => {
+  const svc = (id: string, name: string, status = 'operational', aiwatchScore = 90) => ({ id, name, category: 'api', status, aiwatchScore })
+
+  describe('isCapabilityProvider', () => {
+    it('OpenAI provides image/video/audio (their tiers); not observability/vector/LLM tiers', () => {
+      expect(isCapabilityProvider('openai', 7)).toBe(true)  // image
+      expect(isCapabilityProvider('openai', 5)).toBe(true)  // video
+      expect(isCapabilityProvider('openai', 4)).toBe(true)  // audio (Voice tier)
+      expect(isCapabilityProvider('openai', 6)).toBe(false) // observability — no capability
+      expect(isCapabilityProvider('openai', 8)).toBe(false) // vector — no capability
+      expect(isCapabilityProvider('openai', 1)).toBe(false) // LLM tier itself
+      expect(isCapabilityProvider('claude', 7)).toBe(false) // Claude has no image API
+      expect(CAPABILITY_PROVIDERS).toEqual({ image: ['openai'], video: ['openai'], audio: ['openai'] })
+    })
+  })
+
+  it('Stability (image) down → FLUX sibling FIRST, then OpenAI (DALL·E) — not Claude/other LLMs', () => {
+    const services = [
+      svc('stability', 'Stability AI', 'down'),
+      svc('bfl', 'Black Forest Labs (FLUX)', 'operational', 84),
+      svc('openai', 'OpenAI API', 'operational', 99),
+      svc('claude', 'Claude API', 'operational', 95),
+      svc('gemini', 'Gemini API', 'operational', 92),
+    ]
+    // FLUX (tier 7, dist 0) beats OpenAI (tier 1, dist 6) despite OpenAI's higher Score; Claude/Gemini excluded.
+    expect(getFallbacks('stability', 'api', services)).toEqual([
+      { name: 'Black Forest Labs (FLUX)', score: 84 },
+      { name: 'OpenAI API', score: 99 },
+    ])
+  })
+
+  it('Stability AND FLUX both down → OpenAI (the multimodal image provider) is offered', () => {
+    const services = [
+      svc('stability', 'Stability AI', 'down'),
+      svc('bfl', 'Black Forest Labs (FLUX)', 'down'),
+      svc('openai', 'OpenAI API', 'operational', 99),
+      svc('claude', 'Claude API', 'operational', 95),
+    ]
+    expect(getFallbacks('stability', 'api', services)).toEqual([{ name: 'OpenAI API', score: 99 }])
+  })
+
+  it('Runway (video) down → Luma sibling first, then OpenAI (Sora)', () => {
+    const services = [
+      svc('runway', 'Runway', 'down'),
+      svc('luma', 'Luma (Dream Machine)', 'operational', 80),
+      svc('openai', 'OpenAI API', 'operational', 99),
+    ]
+    expect(getFallbacks('runway', 'api', services)).toEqual([
+      { name: 'Luma (Dream Machine)', score: 80 },
+      { name: 'OpenAI API', score: 99 },
+    ])
+  })
+
+  it('ElevenLabs (voice) down → Deepgram sibling, then OpenAI (Audio); AssemblyAI still STT-excluded (facet A)', () => {
+    const services = [
+      svc('elevenlabs', 'ElevenLabs', 'down'),
+      svc('deepgram', 'Deepgram', 'operational', 85),
+      svc('assemblyai', 'AssemblyAI', 'operational', 90),
+      svc('openai', 'OpenAI API', 'operational', 99),
+    ]
+    const names = getFallbacks('elevenlabs', 'api', services).map(f => f.name)
+    expect(names).toContain('Deepgram')      // shares tts
+    expect(names).toContain('OpenAI API')    // audio provider
+    expect(names).not.toContain('AssemblyAI') // STT-only, no shared capability with TTS ElevenLabs
+  })
+
+  it('a DEGRADED OpenAI is NOT offered as an image alternative (its worst-of status already reflects a down component)', () => {
+    const services = [
+      svc('stability', 'Stability AI', 'down'),
+      svc('bfl', 'Black Forest Labs (FLUX)', 'operational', 84),
+      svc('openai', 'OpenAI API', 'degraded', 99), // e.g. its own Images is down → overall degraded → excluded
+    ]
+    expect(getFallbacks('stability', 'api', services)).toEqual([{ name: 'Black Forest Labs (FLUX)', score: 84 }])
+  })
+
+  it('does NOT widen non-capability specialized tiers (observability/vector) — LangSmith down offers only its siblings', () => {
+    const services = [
+      svc('langsmith', 'LangChain (LangSmith)', 'down'),
+      svc('helicone', 'Helicone', 'operational', 80),
+      svc('openai', 'OpenAI API', 'operational', 99),
+    ]
+    // tier 6 has no capability → OpenAI must NOT be pulled in.
+    expect(getFallbacks('langsmith', 'api', services).map(f => f.name)).toEqual(['Helicone'])
   })
 })

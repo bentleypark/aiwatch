@@ -250,6 +250,87 @@ export function sharesCapability(a, b) {
   return ca.some((c) => cb.includes(c))
 }
 
+// #1062 facet B — MIRROR of worker/src/fallback.ts. A status-page component NAME (keyword) → the
+// capability it represents; first match wins, anything unmatched is the primary 'llm'. Keep the regex
+// list + the CAPABILITY_TIER map in lockstep with the worker copy (pinned by api-tier-sync.test.ts).
+export const COMPONENT_CAPABILITY = [
+  [/image/i, 'image'],
+  [/\b(sora|video)\b/i, 'video'],
+  [/audio|speech|voice|transcri/i, 'audio'],
+  [/embed/i, 'embeddings'],
+  [/realtime/i, 'realtime'],
+]
+export function capabilityOfComponent(name) {
+  for (const [re, cap] of COMPONENT_CAPABILITY) if (re.test(name)) return cap
+  return 'llm'
+}
+
+// #1062 facet B — the fallback TIER a degraded secondary capability routes to. Absent capabilities
+// (embeddings until #880; realtime — no peer) have no substitute → suppressed. MIRROR of worker copy.
+export const CAPABILITY_TIER = {
+  image: 7,
+  video: 5,
+  audio: 4,
+}
+const ROUTE_SUPPRESS = -1
+
+// #1062 facet B — MIRROR of worker CAPABILITY_LABEL. The human label a ROUTED group shows under, so the
+// recommendation self-describes WHY it switched ("Image generation → Stability AI", not a bare "Image").
+export const CAPABILITY_LABEL = {
+  image: 'Image generation',
+  video: 'Video generation',
+  audio: 'Audio / speech',
+}
+
+// #1062 facet C — MIRROR of worker CAPABILITY_PROVIDERS. Multimodal LLM services that also provide a
+// specialized capability via a MONITORED component, so a dedicated capability service's outage (Stability
+// image / Runway video / ElevenLabs voice) also recommends them. Only OpenAI qualifies (Images/Sora/Audio
+// are monitored components → overall status is a faithful health proxy; Gemini's Imagen/Veo are unmonitored).
+export const CAPABILITY_PROVIDERS = {
+  image: ['openai'],
+  video: ['openai'],
+  audio: ['openai'],
+}
+
+// #1062 facet C — MIRROR of worker isCapabilityProvider. Is `candidateId` a cross-tier provider of the
+// capability whose dedicated tier is `sourceTier`? getFallbacks widens a specialized sub-tier's pool to it.
+export function isCapabilityProvider(candidateId, sourceTier) {
+  const cap = Object.keys(CAPABILITY_TIER).find((k) => CAPABILITY_TIER[k] === sourceTier)
+  return cap ? (CAPABILITY_PROVIDERS[cap]?.includes(candidateId) ?? false) : false
+}
+
+// #1062 facet B — MIRROR of worker/src/fallback.ts routingTier. When a multi-capability service is
+// non-operational ONLY because a single SECONDARY-capability component is degraded (primary llm/chat
+// surface still operational), route the fallback to that capability's tier. Returns null (default: use
+// own tier — primary degraded, no components signal, or ≥2 distinct secondary caps), ROUTE_SUPPRESS (a
+// secondary cap with no peer tier), or a tier number. Needs ServiceStatus.components[] (#604).
+export function routingTier(service) {
+  const comps = service?.components
+  if (!Array.isArray(comps) || comps.length === 0) return null
+  const degraded = new Set(comps.filter(c => c.status !== 'operational').map(c => capabilityOfComponent(c.name)))
+  if (degraded.size === 0 || degraded.has('llm') || degraded.size > 1) return null
+  const cap = [...degraded][0]
+  return cap in CAPABILITY_TIER ? CAPABILITY_TIER[cap] : ROUTE_SUPPRESS
+}
+
+// #1062 facet B — the affected secondary CAPABILITY when this outage routes (non-null ⟺ routingTier is a
+// positive tier), else null. getGroupedFallbacks reads it to label the routed group by capability. MIRROR.
+export function routedCapability(service) {
+  const comps = service?.components
+  if (!Array.isArray(comps) || comps.length === 0) return null
+  const degraded = new Set(comps.filter(c => c.status !== 'operational').map(c => capabilityOfComponent(c.name)))
+  if (degraded.size !== 1) return null
+  const cap = [...degraded][0]
+  return cap !== 'llm' && cap in CAPABILITY_TIER ? cap : null
+}
+
+// #1062 facet B — the tier a service's fallback group is drawn from + labelled by (routed capability
+// tier for a secondary-only outage, else the service's own tier). MIRROR of worker/src/fallback.ts.
+export function effectiveTierFor(service) {
+  const routed = routingTier(service)
+  return routed !== null && routed !== ROUTE_SUPPRESS ? routed : tierFor(service.id)
+}
+
 const warnedLabelTiers = new Set()
 export function tierLabelFor(tier) {
   const l = TIER_LABEL[tier]
@@ -300,13 +381,19 @@ export function hasActiveIncident(s) {
  */
 export function getFallbacks(service, allServices) {
   if (!service || !Array.isArray(allServices) || EXCLUDE_FALLBACK.includes(service.id)) return []
-  const sourceTier = tierFor(service.id)
+  // #1062 facet B — a single secondary-capability outage (e.g. OpenAI 'Images') routes to that
+  // capability's tier; a secondary cap with no peer tier (realtime/embeddings) suppresses.
+  const routed = routingTier(service)
+  if (routed === ROUTE_SUPPRESS) return []
+  const sourceTier = routed ?? tierFor(service.id)
   // #859 — specialized sub-tier source → same-tier candidates only (no cross-tier bleed)
   const sameTierOnly = isSpecializedSubTier(sourceTier)
   return allServices
     // #616 — exclude stale-source services (#591): ranking-excluded → not a trusted fallback either
     .filter(s => s.category === service.category && s.id !== service.id && s.status === 'operational' && !hasActiveIncident(s) && !s.incidentSourceStale && !EXCLUDE_FALLBACK.includes(s.id)
-      && (!sameTierOnly || tierFor(s.id) === sourceTier)
+      // #1062 facet C — a specialized sub-tier (Image/Video/Voice) also admits the multimodal providers of
+      // its capability (OpenAI), ranked after the dedicated sibling by tier distance.
+      && (!sameTierOnly || tierFor(s.id) === sourceTier || isCapabilityProvider(s.id, sourceTier))
       // #1062 — within a capability-mixed tier (Voice), only a candidate sharing a capability qualifies
       && sharesCapability(service.id, s.id))
     .sort((a, b) => {
@@ -359,28 +446,32 @@ export function getGroupedFallbacks(affected, allServices) {
   // Defensive: getFallbacks already excludes non-operational AND active-incident candidates (#550),
   // so this set currently never drops anything — kept as a guard in case that contract changes.
   const nonOperationalIds = new Set(allServices.filter(s => s.status !== 'operational' || hasActiveIncident(s)).map(s => s.id))
-  const eligibleAffected = affected.filter(a => !EXCLUDE_FALLBACK.includes(a.id))
-  const numGroups = new Set(eligibleAffected.map(a => {
-    const tierLabel = tierLabelFor(tierFor(a.id))
-    return tierLabel ? `${a.category}:${tierLabel}` : a.category
-  })).size
-  const perGroup = numGroups === 1 ? 2 : 1
+  // #1062 facet B — key/label by the EFFECTIVE tier (routed capability tier for a secondary-only outage)
+  // so a routed OpenAI-'Images' outage groups + reads as "Image", not the source's LLM tier. Resolve each
+  // anchor's candidates FIRST and keep only groups that render: a routed service that SUPPRESSES
+  // (Realtime/embeddings) yields none and its effectiveTierFor falls back to its own (LLM) tier — so
+  // reserving that key pre-resolve dropped a later genuine-LLM sibling's group and inflated numGroups.
+  // First-non-empty-per-key wins; numGroups is the count of rendered groups.
   const seenGroups = new Set()
-  const groups = []
+  const resolved = []
   for (const svc of affected) {
     if (EXCLUDE_FALLBACK.includes(svc.id)) continue
-    const tierLabel = tierLabelFor(tierFor(svc.id))
+    const tierLabel = tierLabelFor(effectiveTierFor(svc))
     const groupKey = tierLabel ? `${svc.category}:${tierLabel}` : svc.category
     if (seenGroups.has(groupKey)) continue
-    seenGroups.add(groupKey)
     // #554 — selection parity with the worker: keep only the live-clean guard (getFallbacks
     // already enforces it; nonOperationalIds is a defensive backstop). No same-provider exclusion.
     const candidates = getFallbacks(svc, allServices).filter(f => !nonOperationalIds.has(f.id))
-    if (candidates.length === 0) continue
-    const label = tierLabel || CATEGORY_LABEL[svc.category] || svc.category
-    groups.push({ category: svc.category, label, items: candidates.slice(0, perGroup) })
+    if (candidates.length === 0) continue // suppressed / no candidate → does NOT reserve the key
+    seenGroups.add(groupKey)
+    // #1062 facet B — a routed group is labelled by the affected CAPABILITY ("Image generation") so the
+    // recommendation self-describes WHY it switched; a non-routed group keeps its tier/category label.
+    const cap = routedCapability(svc)
+    const label = cap ? CAPABILITY_LABEL[cap] : (tierLabel || CATEGORY_LABEL[svc.category] || svc.category)
+    resolved.push({ category: svc.category, label, capability: cap || undefined, candidates })
   }
-  return groups
+  const perGroup = resolved.length === 1 ? 2 : 1
+  return resolved.map(g => ({ category: g.category, label: g.label, ...(g.capability ? { capability: g.capability } : {}), items: g.candidates.slice(0, perGroup) }))
 }
 
 /**

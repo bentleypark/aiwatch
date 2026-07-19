@@ -282,6 +282,106 @@ describe('#1062 facet A — frontend getFallbacks Voice STT/TTS capability gate'
   })
 })
 
+describe('#1062 facet B — frontend capability routing on a secondary-component outage', () => {
+  // Pins the frontend WIRING: getFallbacks/getGroupedFallbacks must call routingTier/effectiveTierFor.
+  const op2 = (id, name, score) => ({ id, category: 'api', name, status: 'operational', aiwatchScore: score, incidents: [] })
+  const openai = (comps) => ({ id: 'openai', category: 'api', name: 'OpenAI API', status: 'down', aiwatchScore: 72, incidents: [], components: comps })
+  const pool = [
+    op2('claude', 'Claude API', 95), op2('gemini', 'Gemini API', 90),
+    op2('stability', 'Stability AI', 70), op2('bfl', 'Black Forest Labs (FLUX)', 65),
+    op2('runway', 'Runway', 60), op2('luma', 'Luma (Dream Machine)', 55),
+  ]
+
+  it('OpenAI Images-only outage → Image tier (Stability/FLUX), NOT LLM peers', () => {
+    const src = openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Images', status: 'down' }])
+    const ids = getFallbacks(src, [src, ...pool]).map(f => f.id)
+    expect(ids).toEqual(['stability', 'bfl'])
+    expect(ids).not.toContain('claude')
+  })
+
+  it('OpenAI Realtime-only outage → suppressed (empty), not an LLM peer', () => {
+    const src = openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Realtime', status: 'down' }])
+    expect(getFallbacks(src, [src, ...pool])).toEqual([])
+  })
+
+  it('OpenAI whole-API outage (primary degraded) → LLM peers (default, unchanged)', () => {
+    const src = openai([{ name: 'Chat Completions', status: 'down' }, { name: 'Images', status: 'down' }])
+    expect(getFallbacks(src, [src, ...pool]).map(f => f.id)).toEqual(['claude', 'gemini'])
+  })
+
+  it('≥2 distinct secondary caps degraded → default LLM peers (ambiguous, no reroute)', () => {
+    const src = openai([{ name: 'Images', status: 'down' }, { name: 'Audio', status: 'down' }])
+    expect(getFallbacks(src, [src, ...pool]).map(f => f.id)).toEqual(['claude', 'gemini'])
+  })
+
+  it('no components[] → default LLM peers (Mistral-style, unaffected)', () => {
+    const src = { id: 'openai', category: 'api', name: 'OpenAI API', status: 'down', aiwatchScore: 72, incidents: [] }
+    expect(getFallbacks(src, [src, ...pool]).map(f => f.id)).toEqual(['claude', 'gemini'])
+  })
+
+  it('getGroupedFallbacks labels a routed OpenAI-Images outage by CAPABILITY ("Image generation") + tags capability', () => {
+    const src = openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Images', status: 'down' }])
+    const groups = getGroupedFallbacks([src], [src, ...pool])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].label).toBe('Image generation') // #1062 facet B — self-describing, not bare "Image"
+    expect(groups[0].capability).toBe('image')
+    expect(groups[0].items.map(i => i.id)).toEqual(['stability', 'bfl'])
+  })
+
+  it('a suppressed anchor does not steal a later LLM sibling\'s group (both orderings)', () => {
+    // openai Realtime-only → suppressed; effectiveTierFor falls back to its LLM tier (key api:LLM). It
+    // must NOT reserve that key — mistral (LLM, down) must still get its group either way.
+    const suppressed = openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Realtime', status: 'down' }])
+    const mistral = { id: 'mistral', category: 'api', name: 'Mistral API', status: 'down', aiwatchScore: 76, incidents: [] }
+    for (const order of [[suppressed, mistral], [mistral, suppressed]]) {
+      const groups = getGroupedFallbacks(order, [...order, ...pool])
+      expect(groups).toHaveLength(1)
+      expect(groups[0].label).toBe('LLM')
+      expect(groups[0].items.map(i => i.id)).toContain('claude')
+    }
+  })
+
+  it('routed Image outage + LLM outage → two groups (perGroup=1)', () => {
+    const images = openai([{ name: 'Chat Completions', status: 'operational' }, { name: 'Images', status: 'down' }])
+    const mistral = { id: 'mistral', category: 'api', name: 'Mistral API', status: 'down', aiwatchScore: 76, incidents: [] }
+    const groups = getGroupedFallbacks([images, mistral], [images, mistral, ...pool])
+    expect(groups.map(g => g.label).sort()).toEqual(['Image generation', 'LLM'])
+    expect(groups.every(g => g.items.length === 1)).toBe(true)
+  })
+})
+
+describe('#1062 facet C — frontend: a dedicated capability service also recommends the multimodal provider', () => {
+  const v = (id, name, status, score) => ({ id, category: 'api', name, status, aiwatchScore: score, incidents: [] })
+
+  it('Stability (image) down → FLUX sibling first, then OpenAI (DALL·E); not Claude', () => {
+    const services = [
+      v('stability', 'Stability AI', 'down', 88),
+      v('bfl', 'Black Forest Labs (FLUX)', 'operational', 84),
+      v('openai', 'OpenAI API', 'operational', 99),
+      v('claude', 'Claude API', 'operational', 95),
+    ]
+    expect(getFallbacks(services[0], services).map(f => f.id)).toEqual(['bfl', 'openai'])
+  })
+
+  it('Stability AND FLUX both down → OpenAI is offered (mutation: dropping the facet-C clause would return [])', () => {
+    const services = [
+      v('stability', 'Stability AI', 'down', 88),
+      v('bfl', 'Black Forest Labs (FLUX)', 'down', 84),
+      v('openai', 'OpenAI API', 'operational', 99),
+    ]
+    expect(getFallbacks(services[0], services).map(f => f.id)).toEqual(['openai'])
+  })
+
+  it('a degraded OpenAI is NOT offered (overall status reflects its down component)', () => {
+    const services = [
+      v('stability', 'Stability AI', 'down', 88),
+      v('bfl', 'Black Forest Labs (FLUX)', 'operational', 84),
+      v('openai', 'OpenAI API', 'degraded', 99),
+    ]
+    expect(getFallbacks(services[0], services).map(f => f.id)).toEqual(['bfl'])
+  })
+})
+
 describe('hasActiveIncident / getFallbacks active-incident exclusion (#550)', () => {
   const op = (id, category, aiwatchScore, extra = {}) => ({ id, category, aiwatchScore, status: 'operational', incidents: [], ...extra })
   const inc = (status) => ({ id: `${status}-inc`, status })

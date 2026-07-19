@@ -19,11 +19,11 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { API_TIER as workerTier, TIER_LABEL as workerLabel, EXCLUDE_FALLBACK as workerExclude, isSpecializedSubTier as workerIsSpecialized, SERVICE_CAPABILITY as workerCap, sharesCapability as workerShares } from '../fallback'
+import { API_TIER as workerTier, TIER_LABEL as workerLabel, EXCLUDE_FALLBACK as workerExclude, isSpecializedSubTier as workerIsSpecialized, SERVICE_CAPABILITY as workerCap, sharesCapability as workerShares, CAPABILITY_TIER as workerCapTier, capabilityOfComponent as workerCapOf, COMPONENT_CAPABILITY as workerCompCap, CAPABILITY_LABEL as workerCapLabel, routedCapability as workerRoutedCap, routingTier as workerRoutingTier, CAPABILITY_PROVIDERS as workerCapProv, isCapabilityProvider as workerIsCapProv } from '../fallback'
 // Vitest resolves cross-package paths via the repo root; this works because frontend `src/` and
 // worker `src/` share a single repo with one node_modules. The import is data-only (no runtime
 // side effects from constants.js — no environment variables are read at module load).
-import { API_TIER as frontendTier, TIER_LABEL as frontendLabel, EXCLUDE_FALLBACK as frontendExclude, isSpecializedSubTier as frontendIsSpecialized, SERVICE_CAPABILITY as frontendCap, sharesCapability as frontendShares } from '../../../src/utils/constants'
+import { API_TIER as frontendTier, TIER_LABEL as frontendLabel, EXCLUDE_FALLBACK as frontendExclude, isSpecializedSubTier as frontendIsSpecialized, SERVICE_CAPABILITY as frontendCap, sharesCapability as frontendShares, CAPABILITY_TIER as frontendCapTier, capabilityOfComponent as frontendCapOf, COMPONENT_CAPABILITY as frontendCompCap, CAPABILITY_LABEL as frontendCapLabel, routedCapability as frontendRoutedCap, CAPABILITY_PROVIDERS as frontendCapProv, isCapabilityProvider as frontendIsCapProv } from '../../../src/utils/constants'
 
 const REPO_ROOT = join(__dirname, '..', '..', '..')
 
@@ -236,5 +236,140 @@ describe('SERVICE_CAPABILITY cross-mirror sync (#1062)', () => {
     const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
     expect(/sharesCapability\(\s*entry\.id\s*,\s*s\.id\s*\)/.test(isDownSource),
       'api/is-down.ts fallback filter no longer calls sharesCapability(entry.id, s.id)').toBe(true)
+  })
+})
+
+// #1062 facet B — pin the worker ↔ frontend ↔ is-down parity of the capability-ROUTING maps
+// (COMPONENT_CAPABILITY via capabilityOfComponent + CAPABILITY_TIER). A drift would make one surface
+// route an OpenAI-Images outage to the Image tier while another recommends LLM peers.
+describe('CAPABILITY_TIER / capabilityOfComponent cross-mirror sync (#1062 facet B)', () => {
+  const COMPONENT_NAMES = ['Images', 'Image Generation', 'Sora', 'Video', 'Audio', 'Speech', 'Voice mode',
+    'Transcription', 'Realtime', 'Embeddings', 'Chat Completions', 'Responses', 'Login', 'Fine-tuning']
+
+  it('worker CAPABILITY_TIER ≡ frontend (deep equal)', () => {
+    expect(workerCapTier).toEqual(frontendCapTier)
+  })
+
+  it('capabilityOfComponent agrees across worker and frontend for every representative component name', () => {
+    for (const n of COMPONENT_NAMES) {
+      expect(frontendCapOf(n), `capabilityOfComponent("${n}") worker/frontend divergence`).toBe(workerCapOf(n))
+    }
+  })
+
+  it('the routing intent holds (both copies): modality names map to their capability, else llm', () => {
+    expect(workerCapOf('Images')).toBe('image')
+    expect(workerCapOf('Sora')).toBe('video')
+    expect(workerCapOf('Audio')).toBe('audio')
+    expect(workerCapOf('Realtime')).toBe('realtime')
+    expect(workerCapOf('Embeddings')).toBe('embeddings')
+    expect(workerCapOf('Chat Completions')).toBe('llm')
+    // image/video/audio route to a tier; embeddings/realtime deliberately absent (→ suppress).
+    expect(workerCapTier).toEqual({ image: 7, video: 5, audio: 4 })
+  })
+
+  it('api/is-down.ts inline CAPABILITY_TIER is EXACTLY the canonical map', () => {
+    const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
+    const m = isDownSource.match(/const CAPABILITY_TIER:\s*Record<[^>]+>\s*=\s*\{([^}]*)\}/)
+    expect(m, 'CAPABILITY_TIER literal not found in api/is-down.ts').not.toBeNull()
+    const inline: Record<string, number> = {}
+    for (const e of m![1].matchAll(/(\w+):\s*(\d+)/g)) inline[e[1]] = Number(e[2])
+    expect(inline).toEqual(workerCapTier)
+  })
+
+  it('worker COMPONENT_CAPABILITY ≡ frontend (regex source + flags + capability)', () => {
+    // Deep-equal the regex BODIES, not just behavior — a weakened pattern (e.g. dropping `speech`/`voice`)
+    // could pass the name-agreement check above if no representative name happened to exercise it.
+    const shape = (list: Array<[RegExp, string]>) => list.map(([re, cap]) => [re.source, re.flags, cap])
+    expect(shape(workerCompCap)).toEqual(shape(frontendCompCap as Array<[RegExp, string]>))
+  })
+
+  it('api/is-down.ts inline COMPONENT_CAPABILITY carries every canonical regex LITERAL + guards + wires routingTier', () => {
+    const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
+    // Match to the outer array's closing `]` on its own line — the pairs contain nested `[...]`, so a
+    // non-greedy `]` would stop at the first inner bracket.
+    const block = isDownSource.match(/const COMPONENT_CAPABILITY:\s*Array<\[RegExp, string\]>\s*=\s*\[([\s\S]*?)\n\s*\]/)
+    expect(block, 'COMPONENT_CAPABILITY block not found in api/is-down.ts').not.toBeNull()
+    // Pin each canonical [regex, capability] PAIR verbatim — `[/audio|speech|voice|transcri/i, 'audio']` —
+    // so weakening an is-down regex (dropping `voice`, or /image/i→/images/i) fails CI, not just a dropped
+    // capability string. The Edge module can't be imported, so this literal-match is the strongest pin here.
+    for (const [re, cap] of workerCompCap) {
+      const pair = `[/${re.source}/${re.flags}, '${cap}']`
+      expect(block![1].includes(pair), `api/is-down.ts COMPONENT_CAPABILITY missing exact pair ${pair}`).toBe(true)
+    }
+    // Pin the routingTier BODY guards too (control-flow copy, not data) so a dropped branch fails CI.
+    expect(/degraded\.has\('llm'\)/.test(isDownSource), 'is-down routingTier lost the has(llm) guard').toBe(true)
+    expect(/degraded\.size\s*>\s*1/.test(isDownSource), 'is-down routingTier lost the size>1 guard').toBe(true)
+    expect(/cap in CAPABILITY_TIER \? CAPABILITY_TIER\[cap\] : ROUTE_SUPPRESS/.test(isDownSource),
+      'is-down routingTier lost the route-else-suppress').toBe(true)
+    // Wiring: the fallback path must actually consult routingTier on the fetched service.
+    expect(/routingTier\(target\)/.test(isDownSource), 'api/is-down.ts no longer calls routingTier(target)').toBe(true)
+  })
+
+  it('worker CAPABILITY_LABEL ≡ frontend (deep equal), and only routable caps have a label', () => {
+    expect(workerCapLabel).toEqual(frontendCapLabel)
+    // Every label key must be a routable capability (has a CAPABILITY_TIER entry) — a label for a
+    // suppressed cap (embeddings/realtime) would never render, signalling a mistake.
+    for (const cap of Object.keys(workerCapLabel)) {
+      expect(cap in workerCapTier, `CAPABILITY_LABEL has '${cap}' but it has no CAPABILITY_TIER entry`).toBe(true)
+    }
+  })
+
+  it('routedCapability agrees worker↔frontend AND is non-null ⟺ routingTier is a positive tier', () => {
+    const comps = (arr: Array<[string, string]>) => arr.map(([name, status]) => ({ name, status }))
+    const fixtures = [
+      { components: comps([['Chat Completions', 'operational'], ['Images', 'down']]) },        // route image
+      { components: comps([['Chat Completions', 'operational'], ['Sora', 'down']]) },           // route video
+      { components: comps([['Chat Completions', 'operational'], ['Audio', 'degraded']]) },      // route audio
+      { components: comps([['Chat Completions', 'operational'], ['Realtime', 'down']]) },       // suppress
+      { components: comps([['Chat Completions', 'operational'], ['Embeddings', 'down']]) },     // suppress
+      { components: comps([['Chat Completions', 'down'], ['Images', 'down']]) },                // default (llm)
+      { components: comps([['Images', 'down'], ['Audio', 'down']]) },                           // default (≥2)
+      { components: [] },                                                                        // default (none)
+      { id: 'x' },                                                                               // default (no comps)
+    ]
+    for (const f of fixtures) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const svc = { id: 'openai', category: 'api', status: 'down', ...f } as any
+      const wCap = workerRoutedCap(svc)
+      expect(frontendRoutedCap(svc), `routedCapability worker/frontend divergence for ${JSON.stringify(f)}`).toBe(wCap)
+      const tier = workerRoutingTier(svc)
+      const isPositiveTier = typeof tier === 'number' && tier > 0
+      expect(wCap !== null, `routedCapability non-null must match routingTier positive-tier for ${JSON.stringify(f)}`).toBe(isPositiveTier)
+    }
+  })
+
+  it('api/is-down.ts inline CAPABILITY_LABEL ≡ canonical (used in the Alternatives heading)', () => {
+    const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
+    const m = isDownSource.match(/const CAPABILITY_LABEL:\s*Record<[^>]+>\s*=\s*\{([^}]*)\}/)
+    expect(m, 'CAPABILITY_LABEL literal not found in api/is-down.ts').not.toBeNull()
+    const inline: Record<string, string> = {}
+    for (const e of m![1].matchAll(/(\w+):\s*'([^']*)'/g)) inline[e[1]] = e[2]
+    expect(inline).toEqual(workerCapLabel)
+  })
+
+  it('worker CAPABILITY_PROVIDERS ≡ frontend, and isCapabilityProvider agrees over tier + candidate pairs (#1062 facet C)', () => {
+    expect(workerCapProv).toEqual(frontendCapProv)
+    // Every provider capability must have a CAPABILITY_TIER entry (else isCapabilityProvider never fires).
+    for (const cap of Object.keys(workerCapProv)) {
+      expect(cap in workerCapTier, `CAPABILITY_PROVIDERS has '${cap}' but no CAPABILITY_TIER entry`).toBe(true)
+    }
+    for (const id of ['openai', 'claude', 'stability']) {
+      for (let tier = 1; tier <= 12; tier++) {
+        expect(frontendIsCapProv(id, tier), `isCapabilityProvider("${id}",${tier}) worker/frontend divergence`).toBe(workerIsCapProv(id, tier))
+      }
+    }
+    // Intent: OpenAI provides the 3 capability tiers, not the LLM/observability/vector tiers.
+    expect([4, 5, 7].every(t => workerIsCapProv('openai', t))).toBe(true)
+    expect([1, 6, 8].some(t => workerIsCapProv('openai', t))).toBe(false)
+  })
+
+  it('api/is-down.ts inline CAPABILITY_PROVIDERS ≡ canonical + wires isCapabilityProvider into the filter', () => {
+    const isDownSource = readFileSync(join(REPO_ROOT, 'api', 'is-down.ts'), 'utf8')
+    const m = isDownSource.match(/const CAPABILITY_PROVIDERS:\s*Record<[^>]+>\s*=\s*\{([^}]*)\}/)
+    expect(m, 'CAPABILITY_PROVIDERS literal not found in api/is-down.ts').not.toBeNull()
+    const inline: Record<string, string[]> = {}
+    for (const e of m![1].matchAll(/(\w+):\s*\[([^\]]*)\]/g)) inline[e[1]] = [...e[2].matchAll(/'([^']+)'/g)].map(x => x[1])
+    expect(inline).toEqual(workerCapProv)
+    expect(/isCapabilityProvider\(s\.id,\s*sourceTier\)/.test(isDownSource), 'is-down filter no longer calls isCapabilityProvider').toBe(true)
   })
 })
