@@ -31,7 +31,7 @@ export const STATUS_URL = {
   voyageai:    'https://voyageai-status.statuspage.io',
   modal:       'https://status.modal.com',
   twelvelabs:  'https://status.twelvelabs.io',
-  langsmith:   'https://status.smith.langchain.com',
+  langsmith:   'https://global.status.smith.langchain.com/gcp-us',
   helicone:    'https://status.helicone.ai',
   langfuse:    'https://status.langfuse.com',
   runway:      'https://status.runwayml.com',

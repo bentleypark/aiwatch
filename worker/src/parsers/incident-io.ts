@@ -1,6 +1,7 @@
 // incident.io Parsers — uptime, component impacts, incident text enrichment
 
 import type { TimelineEntry, Incident, DailyImpactLevel } from '../types'
+import type { StatuspageResponse } from './statuspage'
 import { fetchWithTimeout } from '../utils'
 import { INCIDENT_IO_STATUS_WEIGHTS } from './impact-weights'
 import { weightedDowntimeSeconds, type OutageInterval } from './uptime-interval'
@@ -232,6 +233,305 @@ export function computeIncidentIoUptime(
     )
   }
   return { pct: worstPct, days: shortestDays }
+}
+
+
+// ── incident.io "global" / multi-region page adapter (#1066) ────────────────────────────────────────
+//
+// incident.io moved LangSmith from a single statuspage-compatible page to a multi-region "global" page
+// (status.smith.langchain.com now 301s to global.status.smith.langchain.com/gcp-us). That format DOES
+// NOT serve the Atlassian v2 compat API: summary.json / components.json / status.json all return
+// `components: []` for every region. So the badge worst-of found none of its configured ids →
+// permanent "Component ID Mismatch" alert + an unresolvable status. The live data is present only in the
+// page-root RSC (`self.__next_f` pushes), which we already fetch as `uptimeHtml`.
+//
+// This adapter reconstructs the summary.json shape (components + overall indicator + active incidents)
+// from that RSC, so the ENTIRE existing pipeline (resolveSvcStatus / parseIncidents / filterIncidents /
+// the impact calendar / the #135 miss-tracker) works unchanged. Uptime is unaffected — it already reads
+// the same RSC via computeIncidentIoUptime / parseIncidentIoComponentImpacts.
+//
+// Component statuses in the RSC use incident.io's vocabulary (operational / degraded_performance /
+// partial_outage / full_outage / under_maintenance). We EMIT the Atlassian vocabulary the rest of the
+// pipeline (normalizeStatus, parseIncidents) expects — full_outage → major_outage is the one that
+// matters: normalizeStatus has no `full_outage` case and would silently read it as operational.
+
+/** Rank incident.io component statuses so a worst-of can pick the most severe. Higher = worse. */
+const IO_STATUS_RANK: Record<string, number> = {
+  operational: 0,
+  under_maintenance: 0, // announced maintenance is not a live outage for the badge
+  degraded_performance: 1,
+  partial_outage: 2,
+  full_outage: 3,
+}
+
+/** incident.io component status → the Atlassian component-status string the pipeline normalizes.
+ *  full_outage → major_outage is load-bearing (normalizeStatus has no full_outage case). */
+function ioComponentStatusToAtlassian(io: string | undefined): string {
+  switch (io) {
+    case 'degraded_performance': return 'degraded_performance'
+    case 'partial_outage': return 'partial_outage'
+    case 'full_outage': return 'major_outage'
+    default: return 'operational' // operational / under_maintenance / unknown
+  }
+}
+
+/** incident.io impact status → Atlassian incident impact (parseIncidents reads critical/major/minor). */
+function ioImpactToAtlassian(io: string | undefined): 'critical' | 'major' | 'minor' | 'none' {
+  switch (io) {
+    case 'full_outage': return 'critical'
+    case 'partial_outage': return 'major'
+    case 'degraded_performance': return 'minor'
+    default: return 'none'
+  }
+}
+
+// The `"$undefined"`→null unescape (parseIncidentIoGlobalPage) means a present-but-undefined RSC field
+// arrives as JSON `null`, not `undefined` — so every string field below is `string | null` at runtime, not
+// just `?: string`. Modelled honestly (matching `end_at`) so a consumer can't assume `.startsWith` is safe.
+interface RscAffectedComponent { component_id?: string | null; current_status?: string | null; status?: string | null }
+interface RscUpdate { message_string?: string | null; published_at?: string | null; to_status?: string | null }
+interface RscIncident {
+  id?: string | null
+  name?: string | null
+  status?: string | null
+  type?: string | null
+  published_at?: string | null
+  affected_components?: RscAffectedComponent[] | null
+  status_summaries?: Array<{ start_at?: string | null; end_at?: string | null; worst_component_status?: string | null }> | null
+  updates?: RscUpdate[] | null
+}
+
+/** One entry of the page's `incident_links` — the FULL incident history (the `incidents` array carries
+ *  only the recent/active feed). Lightweight: no affected_components / updates; the timing + component
+ *  attribution come from `component_impacts` (joined by `status_page_incident_id`), the text from the
+ *  permalink (enrichIncidentIoText scrapes it over cycles). */
+interface RscIncidentLink { id?: string | null; name?: string | null; status?: string | null; published_at?: string | null; permalink?: string | null }
+interface RscImpact { component_id?: string | null; start_at?: string | null; end_at?: string | null; status?: string | null; status_page_incident_id?: string | null }
+
+/** Depth-scan the JSON array whose opening `[` is at `start`. Skips string contents so a `[`/`]` inside
+ *  a value can't unbalance the count. Returns the array text (incl. brackets) or null. */
+function sliceArray(s: string, start: number): string | null {
+  let depth = 0
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i]
+    if (ch === '[') depth++
+    else if (ch === ']') { depth--; if (depth === 0) return s.substring(start, i + 1) }
+    else if (ch === '"') {
+      i++
+      while (i < s.length && s[i] !== '"') { if (s[i] === '\\') i++; i++ }
+    }
+  }
+  return null
+}
+
+/** Bracket-match the JSON array that starts at the FIRST `"<key>":[`, from an already-unescaped RSC
+ *  string. Returns the array text or null. */
+function extractJsonArray(s: string, key: string): string | null {
+  const marker = s.indexOf(`"${key}":[`)
+  if (marker === -1) return null
+  return sliceArray(s, s.indexOf('[', marker))
+}
+
+/** Parse the FIRST `"<key>":[…]` array from an unescaped RSC string into a typed list, [] on absence/error. */
+function parseRscArray<T>(s: string, key: string): T[] {
+  const arr = extractJsonArray(s, key)
+  if (!arr) return []
+  try { return JSON.parse(arr) as T[] }
+  catch (err) { console.warn(`[parseIncidentIoGlobalPage] "${key}" array unparseable:`, err instanceof Error ? err.message : err); return [] }
+}
+
+/** Every `component_impacts` entry on the page, grouped by the incident it belongs to
+ *  (`status_page_incident_id`). Scans ALL such arrays (incident.io splits them across RSC pushes), so an
+ *  incident's impacts aren't undercounted. Used to give each history incident its start/end + components. */
+function collectImpactsByIncident(s: string): Map<string, RscImpact[]> {
+  const map = new Map<string, RscImpact[]>()
+  for (let from = s.indexOf('"component_impacts":['); from !== -1; from = s.indexOf('"component_impacts":[', from + 1)) {
+    const arrText = sliceArray(s, s.indexOf('[', from))
+    // Warn rather than silently skip — every sibling parser here warns, and a swallowed shape change would
+    // silently empty an incident's impacts (→ wrong outage window + lost component attribution, no log).
+    if (!arrText) { console.warn('[collectImpactsByIncident] component_impacts array unterminated — skipped'); continue }
+    let impacts: RscImpact[]
+    try { impacts = JSON.parse(arrText) as RscImpact[] }
+    catch (err) { console.warn('[collectImpactsByIncident] component_impacts parse failed:', err instanceof Error ? err.message : err); continue }
+    for (const imp of impacts) {
+      const incId = imp.status_page_incident_id
+      if (!incId) continue
+      const list = map.get(incId)
+      if (list) list.push(imp); else map.set(incId, [imp])
+    }
+  }
+  return map
+}
+
+/** incident.io marks announced maintenance with a `maintenance*` status (or `type:"maintenance"`). It is
+ *  not an outage and belongs in the maintenance track, not the incident list (Atlassian keeps
+ *  scheduled_maintenances separate too). */
+function isMaintenanceStatus(status: string | null | undefined): boolean {
+  return !!status && (status.startsWith('maintenance') || status === 'under_maintenance')
+}
+
+/**
+ * #1066 — reconstruct a summary.json-shaped `StatuspageResponse` from an incident.io "global"/multi-
+ * region page's RSC payload.
+ *
+ * Returns null when the load-bearing data is unreadable — NO component catalog, or the `incidents` array
+ * (which drives live component status) is present-but-unparseable. The caller (fetchService) then treats
+ * this like an unreadable source: it does NOT fabricate an operational badge from the empty reconstruction
+ * — it flags `sourceUnknown` + trackFetchFailure, so the badge withholds (→ `unknown` after the strike
+ * threshold, the #1004 display rule), the #713 no-invention rule. A missing/`[]` `incidents` array is a
+ * VALID "no active incidents" state (not a failure); only a present-but-unparseable one withholds.
+ *
+ * Components: every `{"component":{component_id,name,…}}` entry, default `operational`, overridden by the
+ * worst live status any ACTIVE (non-resolved) incident reports for it via `affected_components`.
+ *
+ * Incidents: the UNION of `incident_links` (the FULL ~90-day history — id/name/status/published_at/
+ * permalink) and the `incidents` array (the recent/active feed, which alone carries live `current_status`
+ * + timeline updates). Each is joined with `component_impacts` (by `status_page_incident_id`) for its
+ * start/end + affected components, then mapped to the Atlassian incident shape so parseIncidents consumes
+ * it unchanged. Maintenance entries are dropped (announced maintenance is not an outage). The permalink
+ * becomes `shortlink` so enrichIncidentIoText can backfill each history incident's timeline text.
+ */
+export function parseIncidentIoGlobalPage(html: string): StatuspageResponse | null {
+  // The RSC is JS-string-escaped inside `self.__next_f.push([1,"…"])`. Unescape once; `"$undefined"` is
+  // incident.io's null sentinel. (Matches the per-segment unescaping the sibling parsers do.)
+  const s = html.replace(/\\"/g, '"').replace(/"\$undefined"/g, 'null')
+
+  // 1) Component catalog: id → display name. `[^{}]` keeps the match inside a single component object.
+  const nameById = new Map<string, string>()
+  const compRe = /"component":\{"component_id":"([0-9A-Z]{26})"[^{}]*?"name":"([^"]+)"\}/g
+  for (let m = compRe.exec(s); m !== null; m = compRe.exec(s)) nameById.set(m[1], m[2])
+  if (nameById.size === 0) return null // no components on the page → withhold (shape change / not this format)
+
+  // 2) Data sources. The `incidents` array is LOAD-BEARING (it drives live component status in step 3), so
+  //    it gets the #713 present-but-unparseable → withhold discipline: if its RSC marker is there but the
+  //    array can't be parsed, return null rather than read `[]` as "no active incidents" and fabricate an
+  //    all-operational badge. A genuinely absent/`[]` array is the valid "nothing active" state.
+  //    `incident_links` (history only) and `component_impacts` (timing) are NOT load-bearing for status, so
+  //    they degrade to `[]` with a warn — the badge stays correct, only the incident LIST is thinner.
+  let detailed: RscIncident[] = []
+  const detailedArr = extractJsonArray(s, 'incidents')
+  if (detailedArr !== null) {
+    try { detailed = JSON.parse(detailedArr) as RscIncident[] }
+    catch (err) { console.warn('[parseIncidentIoGlobalPage] "incidents" array present but unparseable — withholding:', err instanceof Error ? err.message : err); return null }
+  } else if (s.includes('"incidents":[')) {
+    // marker present but bracket-match failed (unterminated array — a shape change) → withhold, don't read as empty
+    console.warn('[parseIncidentIoGlobalPage] "incidents" marker present but array unterminated — withholding')
+    return null
+  }
+  const links = parseRscArray<RscIncidentLink>(s, 'incident_links')
+  const impactsByIncident = collectImpactsByIncident(s)
+
+  // 3) Live component status = worst-of the current_status any ACTIVE detailed incident reports for it. A
+  //    resolved incident reports current_status:"operational", so it never degrades the badge.
+  const worstIoByComp = new Map<string, string>()
+  for (const inc of detailed) {
+    if (inc.type && inc.type !== 'incident') continue
+    if (inc.status === 'resolved') continue
+    for (const ac of inc.affected_components ?? []) {
+      if (!ac.component_id) continue
+      const cur = ac.current_status ?? ac.status ?? 'operational'
+      const prev = worstIoByComp.get(ac.component_id)
+      if (prev === undefined || (IO_STATUS_RANK[cur] ?? 0) > (IO_STATUS_RANK[prev] ?? 0)) worstIoByComp.set(ac.component_id, cur)
+    }
+  }
+
+  const components = [...nameById.entries()].map(([id, name]) => ({
+    id,
+    name,
+    status: ioComponentStatusToAtlassian(worstIoByComp.get(id)),
+  }))
+
+  // 4) Overall indicator = worst live component (a fallback; a badge-scoped service reads its own
+  //    statusComponentIds worst-of, not this).
+  let worstIndicatorRank = 0
+  for (const io of worstIoByComp.values()) worstIndicatorRank = Math.max(worstIndicatorRank, IO_STATUS_RANK[io] ?? 0)
+  const indicator = worstIndicatorRank >= 3 ? 'critical' : worstIndicatorRank >= 1 ? 'minor' : 'none'
+
+  // 5) Incident list = history links ∪ detailed feed, deduped by id (detailed wins — it's richer), with
+  //    maintenance dropped, each joined with its component_impacts.
+  interface Merged { id: string; name?: string | null; status?: string | null; published_at?: string | null; permalink?: string | null; detailed?: RscIncident }
+  const byId = new Map<string, Merged>()
+  for (const l of links) if (l.id) byId.set(l.id, { id: l.id, name: l.name, status: l.status, published_at: l.published_at, permalink: l.permalink })
+  for (const d of detailed) if (d.id) {
+    const ex = byId.get(d.id)
+    byId.set(d.id, { id: d.id, name: d.name ?? ex?.name, status: d.status ?? ex?.status, published_at: d.published_at ?? ex?.published_at, permalink: ex?.permalink, detailed: d })
+  }
+
+  const worstOf = (statuses: Array<string | null | undefined>): string | undefined =>
+    statuses.reduce<string | undefined>((worst, st) => (
+      (IO_STATUS_RANK[st ?? ''] ?? 0) > (IO_STATUS_RANK[worst ?? ''] ?? 0) ? (st ?? undefined) : worst
+    ), undefined)
+  const validDate = (d: string | null | undefined): d is string => !!d && !Number.isNaN(Date.parse(d))
+
+  const incidents = [...byId.values()]
+    .filter((m) => !isMaintenanceStatus(m.status) && (!m.detailed?.type || m.detailed.type === 'incident'))
+    .map((m) => {
+      const imps = impactsByIncident.get(m.id) ?? []
+      const det = m.detailed
+      // Active from the merged status (detailed feed OR the history link), not `det` alone: a hypothetical
+      // active incident present only in incident_links would otherwise be emitted as `resolved`. (In
+      // practice active incidents always carry a detailed-feed entry — that's the only source of
+      // affected_components, so step 3's component degrade still needs `det`; this keeps the ROW honest.)
+      const incStatus = det?.status ?? m.status
+      const active = !!incStatus && incStatus !== 'resolved'
+
+      // Severity + affected components: prefer the impact records (present for every history incident),
+      // fall back to the detailed feed's affected_components.
+      const worstImpact = worstOf([...imps.map((i) => i.status), ...(det?.affected_components ?? []).map((ac) => ac.status)])
+      const compIds = new Set<string>()
+      for (const i of imps) if (i.component_id) compIds.add(i.component_id)
+      for (const ac of det?.affected_components ?? []) if (ac.component_id) compIds.add(ac.component_id)
+      const componentNames = [...compIds].map((id) => nameById.get(id)).filter((n): n is string => !!n)
+
+      // Outage window comes from the IMPACT records, not `published_at`: incident.io's published_at is
+      // when the status post went up, which can be MINUTES AFTER a short impact already ended (a
+      // retroactively-logged blip) — using it as the start yields a negative duration. So start = the
+      // earliest impact start, end = the latest impact end; this also matches the window computeIncidentIoUptime
+      // measures. Fall back to published_at / status_summaries only when no impact records exist.
+      const impactStart = imps.map((i) => i.start_at).filter(validDate)
+        .reduce<string | null>((earliest, e) => (earliest === null || Date.parse(e) < Date.parse(earliest) ? e : earliest), null)
+      const impactEnd = imps.map((i) => i.end_at).filter(validDate)
+        .reduce<string | null>((latest, e) => (latest === null || Date.parse(e) > Date.parse(latest) ? e : latest), null)
+      const detEnd = det?.status_summaries?.[det.status_summaries.length - 1]?.end_at
+      // An incident with neither an impact start nor a published_at can't be placed in time; emitting it
+      // with the `new Date(0)` fallback would inject a 1970 timestamp (a ~56yr duration) into the calendar
+      // and MTTR/Score aggregates. Drop it with a warn instead (filtered out below).
+      if (!impactStart && !validDate(m.published_at)) {
+        console.warn(`[parseIncidentIoGlobalPage] incident ${m.id} has no impact start and no published_at — skipping (cannot place in time)`)
+        return null
+      }
+      const startedAt = impactStart ?? m.published_at!
+      let resolvedAt = active ? null : (impactEnd ?? (validDate(detEnd) ? detEnd : null) ?? m.published_at ?? null)
+      // Never let a resolve precede its start (defensive — impact min/max can't, but a fallback mix could).
+      if (resolvedAt && Date.parse(resolvedAt) < Date.parse(startedAt)) resolvedAt = startedAt
+
+      return {
+        id: m.id,
+        name: m.name ?? 'Incident',
+        // parseIncidents maps resolved/postmortem → resolved, else investigating/identified/monitoring.
+        status: active ? (incStatus ?? 'investigating') : 'resolved',
+        impact: ioImpactToAtlassian(worstImpact),
+        created_at: startedAt,
+        resolved_at: resolvedAt,
+        components: componentNames.map((name) => ({ name })),
+        // RSC updates are oldest-first; the Atlassian `incident_updates` parseIncidents reads are
+        // newest-first (it reverses them back to oldest-first), so reverse here to match. Only the recent
+        // detailed feed carries updates; a history-only incident's text is backfilled from its permalink.
+        incident_updates: (det?.updates ?? [])
+          .filter((u) => u.published_at)
+          .map((u) => ({
+            status: u.to_status ?? 'investigating',
+            body: u.message_string ?? '',
+            created_at: u.published_at!,
+          }))
+          .reverse(),
+        // enrichIncidentIoText reads pageUrls from shortlink → scrapes the detail page for timeline text.
+        ...(m.permalink ? { shortlink: m.permalink } : {}),
+      }
+    })
+    .filter((inc): inc is NonNullable<typeof inc> => inc !== null) // drop un-timeable incidents (guard above)
+
+  return { status: { indicator, description: '' }, components, incidents }
 }
 
 
