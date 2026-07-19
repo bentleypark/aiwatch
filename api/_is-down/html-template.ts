@@ -341,6 +341,10 @@ export function renderPage(
   // worker's gate did not fire OR when the worker predates #1053 (deploy skew — Vercel ships this on
   // merge, the worker deploy is manual). Distinct from `supplyChainNote`, which is AWS-region-scoped.
   upstreamNote?: UpstreamNoteLike | null,
+  // #1062 facet B — set when the outage ROUTES to a capability tier (e.g. "Image generation"); names the
+  // affected capability in the Alternatives headings so a routed recommendation self-describes. Absent = a
+  // normal outage (heading stays generic).
+  fallbackCapabilityLabel?: string,
 ): string {
   // #566: lead the SERP title with the live status answer (falls back to "Live Status"
   // when status data is unavailable) so the result answers the query before the click.
@@ -549,7 +553,7 @@ textarea.report-input{min-height:72px;resize:vertical}
 ${renderStatusHeader(service, seo)}
 ${renderCTA(seo, service ? assertableStatus(service) : 'operational', slug, service?.id ?? slug)}
 ${isClaudeSurface(service?.id ?? slug) ? renderExtInstallCta(EXTENSION_STORE_URL, { loc: 'is_down_page', variant: 'is-down' }) : ''}
-${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks)}
+${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks, fallbackCapabilityLabel)}
 ${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS infrastructure issue (${esc(supplyChainNote.regions)}) &mdash; ${supplyChainNote.confirmed ? `${esc(seo.displayName)} is degraded and attributes it to an AWS/upstream issue` : `${esc(seo.displayName)} runs on AWS and may be affected`}</p>` : ''}
 ${renderUpstreamNote(upstreamNote, seo.displayName)}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
@@ -558,7 +562,7 @@ ${renderIncidents(service)}
 ${renderReportFeed(reports, seo)}
 ${renderDescription(seo, service)}
 ${renderFAQ(seo, fallbacks)}
-${renderFallbacks(seo, fallbacks, service?.id)}
+${renderFallbacks(seo, fallbacks, service?.id, fallbackCapabilityLabel)}
 ${renderShareButtons(seo, service, canonical, ogImageUrl, aiInsight)}
 ${renderBadgeEmbed(slug, seo)}
 ${renderFooter(slug)}
@@ -726,7 +730,7 @@ type AIInsight = { summary: string; estimatedRecovery: string; affectedScope: st
 // with each active incident as a sub-block inside. A per-incident title labels each sub-block only when
 // the card holds more than one incident. The single-incident render is visually unchanged (each body is
 // wrapped in a transparent <div>; the Alternatives block + disclaimer moved up to the card level).
-function renderAIInsight(insight?: AIInsight | AIInsight[] | null, serviceStatus?: string, fallbacks?: Fallback[]): string {
+function renderAIInsight(insight?: AIInsight | AIInsight[] | null, serviceStatus?: string, fallbacks?: Fallback[], capabilityLabel?: string): string {
   if (!insight) return ''
   const list = Array.isArray(insight) ? insight : [insight]
   if (list.length === 0) return ''
@@ -742,7 +746,7 @@ function renderAIInsight(insight?: AIInsight | AIInsight[] | null, serviceStatus
   const anyNeedsFallback = list.some(i => i.needsFallback)
   const fallbackHtml = anyNeedsFallback && !isResolved && fallbacks && fallbacks.length > 0
     ? `<div style="margin-top:8px;padding:8px 10px;background:#0d1117;border-radius:6px;border-left:3px solid #d29922">
-<span class="mono" style="font-size:11px;color:#c9d1d9;font-weight:600">🔄 Alternatives</span>
+<span class="mono" style="font-size:11px;color:#c9d1d9;font-weight:600">🔄 Alternatives${capabilityLabel ? ` for ${esc(capabilityLabel.toLowerCase())}` : ''}</span>
 ${fallbacks.map(f => `<div class="mono" style="font-size:11px;color:#c9d1d9;margin-top:3px">• ${esc(f.name)}${f.score != null ? ` (Score: ${f.score})` : ''}</div>`).join('')}
 </div>`
     : ''
@@ -1390,7 +1394,7 @@ function renderFAQ(seo: ServiceSEO, fallbacks: Fallback[]): string {
 <div class="card">${items}</div>`
 }
 
-function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string): string {
+function renderFallbacks(seo: ServiceSEO, fallbacks: Fallback[], fromId?: string, capabilityLabel?: string): string {
   if (fallbacks.length === 0) return ''
   let anyOutbound = false
   const items = fallbacks.map(f => {
@@ -1423,7 +1427,7 @@ ${tryBtn}
 </div>`
   }).join('\n')
 
-  return `<h2>Alternatives When ${esc(seo.displayName)} is Down</h2>
+  return `<h2>${capabilityLabel ? `Alternatives for ${esc(capabilityLabel.toLowerCase())} when ${esc(seo.displayName)} is Down` : `Alternatives When ${esc(seo.displayName)} is Down`}</h2>
 <div class="card">
 ${items}
 ${anyOutbound ? `<p class="mono fallback-disclosure">Open &#8599; goes to the provider site &middot; ranked by AIWatch Score, not paid.</p>` : ''}

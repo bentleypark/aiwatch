@@ -83,7 +83,9 @@ describe('upstreamNote → renderPage wiring (#1053)', () => {
   it('api/is-down.ts computes the note and passes it to renderPage', () => {
     expect(IS_DOWN_SRC).toMatch(/import\s*\{[^}]*buildUpstreamNote[^}]*\}\s*from\s*'\.\/_is-down\/upstream-note'/)
     expect(IS_DOWN_SRC).toContain('buildUpstreamNote(data.upstreamLinks, entry.id)')
-    expect(IS_DOWN_SRC).toMatch(/renderPage\([^)]*upstreamNote\)/)
+    // upstreamNote must be among the renderPage args (a later positional arg — e.g. #1062's
+    // fallbackCapabilityLabel — may follow it, so don't require it to be last).
+    expect(IS_DOWN_SRC).toMatch(/renderPage\([^)]*upstreamNote[^)]*\)/)
   })
 
 })

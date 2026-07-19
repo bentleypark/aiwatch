@@ -82,6 +82,9 @@ export default async function handler(req: Request) {
     // without paying the ~34-service live fan-out of /api/status on this high-traffic SEO surface.
     let serviceData = null
     let fallbacks: Array<{ id: string; name: string; score: number | null; status: string }> = []
+    // #1062 facet B — set when the outage ROUTES to a capability tier (OpenAI 'Images' down → image tier),
+    // so the Alternatives block heading names the affected capability ("… for image generation").
+    let fallbackCapabilityLabel: string | undefined
     let aiInsight: { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string } | null = null
     // #926 — the worker returns ONE analysis per active incident (aiAnalysis: Record<svcId, AIAnalysisResult[]>).
     // Keep the FULL array for the visible AI Analysis card (parity with the dashboard AnalysisModal, which
@@ -249,8 +252,49 @@ export default async function handler(req: Request) {
           if (!ca || !cb) return true
           return ca.some(c => cb.includes(c))
         }
-        if (!EXCLUDE_FALLBACK.includes(entry.id)) {
-          const sourceTier = tierFor(entry.id)
+        // #1062 facet B — inline mirror of worker/src/fallback.ts routingTier. When THIS service's own
+        // component snapshot shows ONLY a single secondary-capability surface degraded (e.g. OpenAI
+        // 'Images' down, 'Chat Completions' operational), route the fallback to that capability's tier
+        // instead of LLM peers; a capability with no CAPABILITY_TIER entry (realtime; embeddings until #880
+        // adds a tier) suppresses. Keep identical to the worker copy: api-tier-sync.test.ts pins this via
+        // SOURCE match (Edge can't be imported) — CAPABILITY_TIER deep-equal, each COMPONENT_CAPABILITY
+        // [regex, cap] literal, the routingTier guards (has('llm') / size>1 / route-else-suppress), and the
+        // routingTier(target) wiring. Not execution-verified; keep the body byte-identical to the worker.
+        const COMPONENT_CAPABILITY: Array<[RegExp, string]> = [
+          [/image/i, 'image'], [/\b(sora|video)\b/i, 'video'],
+          [/audio|speech|voice|transcri/i, 'audio'], [/embed/i, 'embeddings'], [/realtime/i, 'realtime'],
+        ]
+        const CAPABILITY_TIER: Record<string, number> = { image: 7, video: 5, audio: 4 }
+        const CAPABILITY_LABEL: Record<string, string> = { image: 'Image generation', video: 'Video generation', audio: 'Audio / speech' }
+        // #1062 facet C — inline mirror. Multimodal providers admitted into a dedicated capability tier's
+        // candidate pool (only OpenAI has monitored image/video/audio components → faithful health proxy).
+        const CAPABILITY_PROVIDERS: Record<string, string[]> = { image: ['openai'], video: ['openai'], audio: ['openai'] }
+        const isCapabilityProvider = (candidateId: string, srcTier: number): boolean => {
+          const cap = Object.keys(CAPABILITY_TIER).find(k => CAPABILITY_TIER[k] === srcTier)
+          return cap ? (CAPABILITY_PROVIDERS[cap]?.includes(candidateId) ?? false) : false
+        }
+        const ROUTE_SUPPRESS = -1
+        const routingTier = (svc?: { components?: Array<{ name: string; status: string }> }): number | null => {
+          const comps = svc?.components
+          if (!comps || comps.length === 0) return null
+          const degraded = new Set(comps.filter(c => c.status !== 'operational').map(c => {
+            for (const [re, cap] of COMPONENT_CAPABILITY) if (re.test(c.name)) return cap
+            return 'llm'
+          }))
+          if (degraded.size === 0 || degraded.has('llm') || degraded.size > 1) return null
+          const cap = [...degraded][0]
+          return cap in CAPABILITY_TIER ? CAPABILITY_TIER[cap] : ROUTE_SUPPRESS
+        }
+        const routed = routingTier(target)
+        // #1062 facet B — human label for a routed outage's capability, so the is-down "🔄 Alternatives"
+        // heading reads "Alternatives for image generation" (self-describing). Derived by inverting
+        // CAPABILITY_TIER on the routed tier (injective); undefined when the outage does not route.
+        if (typeof routed === 'number' && routed > 0) {
+          const cap = Object.keys(CAPABILITY_TIER).find(k => CAPABILITY_TIER[k] === routed)
+          fallbackCapabilityLabel = cap ? CAPABILITY_LABEL[cap] : undefined
+        }
+        if (!EXCLUDE_FALLBACK.includes(entry.id) && routed !== ROUTE_SUPPRESS) {
+          const sourceTier = routed ?? tierFor(entry.id)
           // #859 — a specialized non-LLM API sub-tier (Voice 4 / Video 5 / Observability 6 / Image 7 /
           // Vector 8) recommends its OWN tier only (no cross-tier bleed); LLM tiers 1-3 keep cross-tier
           // fill. Mirror of worker/src/fallback.ts isSpecializedSubTier (range 4-10). Inline here like tierFor.
@@ -262,7 +306,8 @@ export default async function handler(req: Request) {
               && !(s.incidents ?? []).some(i => (i as { status?: string }).status !== 'resolved')
               && !s.incidentSourceStale
               && !EXCLUDE_FALLBACK.includes(s.id)
-              && (!sameTierOnly || tierFor(s.id) === sourceTier)
+              // #1062 facet C — a specialized sub-tier also admits the multimodal providers of its capability
+              && (!sameTierOnly || tierFor(s.id) === sourceTier || isCapabilityProvider(s.id, sourceTier))
               // #1062 — within a capability-mixed tier (Voice), only a capability-sharing candidate qualifies
               && sharesCapability(entry.id, s.id))
             .sort((a, b) => {
@@ -357,7 +402,7 @@ export default async function handler(req: Request) {
       }
     }
 
-    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights, upstreamNote)
+    const html = renderPage(slug, serviceData as Parameters<typeof renderPage>[1], seo, fallbacks, aiInsight, regionRec, reports, ogStatusHint, supplyChainNote, ogIncidentToken, aiInsights, upstreamNote, fallbackCapabilityLabel)
 
     // #378: when the upstream Worker fetch failed and we're rendering the
     // "Status data is temporarily unavailable" fallback, the response must NOT
