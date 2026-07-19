@@ -268,6 +268,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   recovery-mark.ts   # The shared "incident resolved" step both cron paths call — recovered: marker + analysis resolvedAt stamp (#1003)
   rss.ts             # Incident RSS feeds (/feed.xml, /feed/:slug) + Slack-poller behaviours
   fallback.ts        # Fallback recommendation (tiered, Score-ranked)
+  service-groups.ts  # Fine service taxonomy (llm/voice/inference/…) → /api/v1/status `group` (mirror of frontend SERVICE_CATEGORIES, sync-tested) (#1068)
   upstream-link.ts   # Cross-provider upstream link (#1053) — a dependent's own incident names a provider that is itself down
   incident-text.ts   # Shared "which incidents can be a CAUSE + their searchable text" primitive (#1053; supply-chain + upstream-link)
   suppression.ts     # Operator incident-suppression layer (#904)
