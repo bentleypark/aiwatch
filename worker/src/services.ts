@@ -8,7 +8,7 @@ import { readSuppressions, applySuppressions } from './suppression'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
-import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText } from './parsers/incident-io'
+import { computeIncidentIoUptime, parseIncidentIoReportedUptime, parseIncidentIoComponentImpacts, attachIncidentIoComponentNames, attachIncidentIoComponentIds, enrichIncidentIoText, parseIncidentIoGlobalPage } from './parsers/incident-io'
 import { type GCloudIncident, parseGCloudIncidents } from './parsers/gcloud'
 import {
   AISTUDIO_ENDPOINT,
@@ -232,20 +232,34 @@ export const SERVICES: ServiceConfig[] = [
   // The provider's REAL, human-written incidents use distinct titles ("Search API failure", "API
   // server failure") and never match this anchored pattern.
   { id: 'twelvelabs', name: 'Twelve Labs', provider: 'Twelve Labs', category: 'api', statusUrl: 'https://status.twelvelabs.io', apiUrl: 'https://status.twelvelabs.io/api/v2/summary.json', statusComponentId: 'mvv53x91b74m', displayComponentIds: ['mrclkkqtj01j', '2zsl201s8df5', 'jnvb5r3v74q1', '751304vy1s9x', 'hr353rqqmwmk', 'yklrkrhkd1by', '3t1cjx55dyrf', '2k0gnkk2kjmz', 'j21c5rdfj8kf', '91lzwtn6071h'], autoMonitorTitles: [/^Some API features are experiencing issues\.?$/i], flapSuppression: true, addedAt: '2026-07-02' },
-  // LangSmith (#561) — LangChain's hosted observability/eval platform. incident.io page exposes a
-  // statuspage v2-compatible API so statuspage.ts covers it. Multi-component worst-of (#379): badge
+  // LangSmith (#561) — LangChain's hosted observability/eval platform on an incident.io page. Since #1066
+  // that page is a "global"/multi-region page whose Atlassian v2 compat API returns `components: []`, so
+  // it is NO LONGER covered by statuspage.ts directly — `incidentIoGlobalPage` routes it through
+  // parseIncidentIoGlobalPage (see the #1066 note below). Multi-component worst-of (#379): badge
   // tracks the three load-bearing surfaces (Run Ingestion + API + Application); the other components
   // (Billing, Sandboxes, Bulk Exports, PromptHub, Fleet, Deployments Data/Control Plane) are excluded
   // so non-availability blips don't flip the badge. Single-tenant (dedicated) page → no
   // incidentKeywords needed. is-down slug is 'langchain' (see slug-map.ts / rss.ts).
-  // Official 30-day uptime comes from the incident.io `component_uptimes` of the API component
-  // (incidentIoComponentId, 98.48%-class) — NOT the statuspage uptime-showcase (incident.io pages
-  // don't emit it) — so without this the resolver would fall through to null ("Not provided"). The
-  // API surface is the developer-facing one and tracks the real incident activity; Run Ingestion
-  // reads ~100% despite the incidents, so it would understate. That API component is also
-  // statusComponentIds[1], so it doubles as one of the three worst-of badge inputs AND (via
-  // incidentIoComponentId) the source of official uptime + calendar impact + text enrichment.
-  { id: 'langsmith', name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', statusUrl: 'https://status.smith.langchain.com', apiUrl: 'https://status.smith.langchain.com/api/v2/summary.json', statusComponentId: '01JT46QKH7HC0HA6RHD82GQYME', statusComponentIds: ['01JT46QKH7HC0HA6RHD82GQYME', '01JT46QKH7CWH1K3K3CAVMSQ7E', '01JT46QKH7PSQYR4CKSVXJ7PHS'], incidentIoBaseUrl: 'https://status.smith.langchain.com/incidents', incidentIoComponentId: '01JT46QKH7CWH1K3K3CAVMSQ7E', addedAt: '2026-06-11' }, // #802
+  // Official 30-day uptime is COMPUTED from the API component's `component_impacts` (#1006), and its
+  // published `component_uptimes` figure is surfaced as `uptimeReported` — NOT the statuspage uptime-
+  // showcase (incident.io pages don't emit it). The API surface is the developer-facing one and tracks
+  // the real incident activity; Run Ingestion reads ~100% despite the incidents, so it would understate.
+  // That API component is also statusComponentIds[1], so it doubles as one of the three worst-of badge
+  // inputs AND (via incidentIoComponentId) the source of official uptime + calendar impact + text enrichment.
+  // #1066 — `displayComponentIds` shows ALL 10 page components in the breakdown (decoupled from the
+  // 3-component badge, #606): the badge stays on the availability core (API/Run Ingestion/Application)
+  // so a Billing/Bulk-Exports blip can't flip it, while the dashboard mirrors the official page's full
+  // component list. Order: badge core first, then the remaining surfaces.
+  // #1066 — LangSmith migrated to an incident.io "global"/multi-region page: status.smith.langchain.com
+  // now 301s to global.status.smith.langchain.com/gcp-us, whose Atlassian v2 compat API returns
+  // `components: []`. `incidentIoGlobalPage` routes it through parseIncidentIoGlobalPage, which rebuilds
+  // the summary.json shape from the page-root RSC. Component ids ALL rotated (01JT46QKH7… → 01KX6FV0RR…);
+  // the badge worst-of is still Run Ingestion + API + Application, incidentIoComponentId is still the API
+  // component (whose published `component_uptimes` figure — a rolling window, not consumed by the Score —
+  // becomes uptimeReported), and statusComponentId (Run Ingestion) stays the
+  // calendar/miss anchor. New components' data_available_since is 2026-07-10, so uptime reports a <30-day
+  // window until the migration clock catches up (#1006 uptimeWindowDays).
+  { id: 'langsmith', name: 'LangChain (LangSmith)', provider: 'LangChain', category: 'api', statusUrl: 'https://global.status.smith.langchain.com/gcp-us', apiUrl: 'https://global.status.smith.langchain.com/gcp-us/api/v2/summary.json', incidentIoGlobalPage: true, statusComponentId: '01KX6FV0RR5XXJ0SM3NXZRKMBY', statusComponentIds: ['01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RRKA56PXCRWEHJTMXM'], displayComponentIds: ['01KX6FV0RRSSTKC5V2GPAMCEQR', '01KX6FV0RR5XXJ0SM3NXZRKMBY', '01KX6FV0RRKA56PXCRWEHJTMXM', '01KX6FV0RR6F81Q8VM6KMACNXQ', '01KX6FV0RR46HM5EVSKG4BVY01', '01KX6FV0RRY9DS9G7ZGB46MQQ2', '01KX6FV0RRHHPK0Y474ESRYV0X', '01KX6FV0RRSDVTKHP03BBR1799', '01KX6FV0RR5Q12SE5Q6SH2RF8E', '01KX6FV0RR0E7AJPG60HR2ZTT9'], incidentIoBaseUrl: 'https://global.status.smith.langchain.com/gcp-us/incidents', incidentIoComponentId: '01KX6FV0RRSSTKC5V2GPAMCEQR', addedAt: '2026-06-11' }, // #802
   // #601 — LLM observability siblings for LangSmith (un-blocks the observability fallback sub-tier).
   // Helicone: Better Stack (mirror together/luma — official uptime + RSS). Langfuse: incident.io
   // (mirror langsmith — summary.json + incidents). Both data-rich (verified uptime / incident history).
@@ -1179,6 +1193,38 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         }
       }
 
+      // #1066 — incident.io "global"/multi-region pages (LangSmith migrated to one) serve `components: []`
+      // from the Atlassian v2 compat API; the live data is only in the page-root RSC (`uptimeHtml`). Rebuild
+      // a summary.json-shaped object from that HTML so everything below (status resolution, incident parse,
+      // calendar, the #135 miss-tracker) runs unchanged. Done here, before the incidents parse, so the
+      // rebuilt `incidents` are what parseIncidents reads.
+      let uptimeHtml = prefetched?.uptimeHtml
+      if (config.incidentIoGlobalPage) {
+        if (!uptimeHtml) {
+          try {
+            const htmlRes = await fetchWithTimeout(config.statusUrl, 5000)
+            if (htmlRes.ok) uptimeHtml = await htmlRes.text()
+            else { console.warn(`[fetchService] ${config.id} global-page HTML returned HTTP ${htmlRes.status}`); htmlRes.body?.cancel() }
+          } catch (err) { console.warn(`[fetchService] ${config.id} global-page HTML fetch failed:`, err instanceof Error ? err.message : err) }
+        }
+        const rebuilt = uptimeHtml ? parseIncidentIoGlobalPage(uptimeHtml) : null
+        if (rebuilt) {
+          summaryData = rebuilt
+          rawIncData = rebuilt
+        } else {
+          // Reconstruction failed (no component catalog, or the load-bearing `incidents` array was
+          // present-but-unparseable) — the source is UNREADABLE. Do NOT leave the empty summary.json in
+          // place: with statusComponentIds set + `components: []`, resolveSvcStatus finds no match and
+          // returns the overall indicator (`none`) = a fabricated OPERATIONAL badge during a possible
+          // outage. Instead flag `sourceUnknown` + trackFetchFailure — the same path a 5xx summary takes
+          // above — so the badge withholds (→ `unknown` after the strike threshold, the #1004 display
+          // rule) rather than inventing operational (#713). Auto-recovers the moment the RSC parses again.
+          console.warn(`[fetchService] ${config.id}: incidentIoGlobalPage RSC unreadable (HTML ${uptimeHtml ? 'present — upstream shape change?' : 'MISSING'}) — withholding status this cycle`)
+          const shouldDegrade = await trackFetchFailure(kv, config.id)
+          return { ...base, status: shouldDegrade ? 'degraded' : 'operational', sourceUnknown: true }
+        }
+      }
+
       // incidents.json has full history; summary.json only has active ones
       let incidents: Incident[] = []
       const pageUrls = new Map<string, string>()
@@ -1203,7 +1249,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       // for correctness, not just for uptime. The prefetch may not have it (its own fetch 5s-timed out,
       // or the whole prefetch entry is missing because summary.json failed that cycle and fetchService
       // re-fetched it above) — so fetch it here rather than silently dropping every incident.
-      let uptimeHtml = prefetched?.uptimeHtml
+      // (uptimeHtml is declared + possibly populated above for the #1066 global-page rebuild.)
       const tagsNeedHtml = !!(config.incidentComponents && config.incidentIoComponentId)
       // #1032 — the id-axis twin (`canIdBypass`: exclude + badge group + incident.io page). Exactly
       // openai/chatgpt/codex today — the same set the blast-radius replay measured, so the gate states

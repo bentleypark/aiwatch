@@ -194,6 +194,12 @@ export interface ServiceConfig {
   // incidentKeywords; an untagged incident (no componentNames) matches nothing and is dropped.
   incidentComponents?: string[]
   incidentIoBaseUrl?: string
+  // #1066 — this apiUrl is an incident.io "global"/multi-region page whose Atlassian v2 compat API
+  // returns `components: []` (the live data is only in the page-root RSC). When set, fetchService
+  // reconstructs the summary.json shape (components + indicator + incidents) from that HTML via
+  // parseIncidentIoGlobalPage, so the rest of the pipeline runs unchanged. Requires statusUrl to point
+  // at the RSC page (apiUrl's baseUrl minus /api/v2).
+  incidentIoGlobalPage?: boolean
   statusComponent?: string
   statusComponentId?: string
   // #934 — opt-in: on a SHARED status page, an EXCLUDE-ONLY service (no positive incidentKeywords/
