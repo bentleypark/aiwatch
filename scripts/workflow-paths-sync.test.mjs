@@ -192,8 +192,100 @@ for (const trigger of ['push', 'pull_request']) {
   })
 }
 
-test('docs-lint.yml guards its own inputs — the lint script and itself', () => {
-  const watched = pathsUnder(wf('docs-lint.yml'), 'pull_request', 'paths')
-  assert.ok(watched.includes('scripts/lint-okf-bundle.mjs'), 'a change to the lint must re-run the lint')
-  assert.ok(watched.includes('.github/workflows/docs-lint.yml'), 'a change to the guard must re-run the guard')
+// Both triggers, not just pull_request: dropping the entry from `push` alone left the suite green,
+// so a push to main touching only the lockstep re-ran nothing that guards it. Asymmetric drift between
+// the two trigger blocks is exactly the class this file exists to pin.
+for (const trigger of ['push', 'pull_request']) {
+  test(`docs-lint.yml guards its own inputs on ${trigger} — the lint script, the count lockstep, and itself`, () => {
+    const watched = pathsUnder(wf('docs-lint.yml'), trigger, 'paths')
+    assert.ok(watched.includes('scripts/lint-okf-bundle.mjs'), 'a change to the lint must re-run the lint')
+    assert.ok(watched.includes('api/__tests__/service-count-lockstep.test.ts'), 'a change to the count lockstep must re-run it')
+    assert.ok(watched.includes('vitest.config.js'), 'the lockstep gate depends on vitest defaults — a config change must re-run it')
+    assert.ok(watched.includes('.github/workflows/docs-lint.yml'), 'a change to the guard must re-run the guard')
+  })
+}
+
+// #1081 — the paths mirror above proves a docs-only PR starts SOME workflow; it says nothing about
+// WHICH checks run. docs-lint.yml ran only the OKF bundle lint, which reads docs/reference/ and never
+// a README — so #1074's count lockstep, whose whole point is pinning README.md / README.ko.md /
+// CLAUDE.md, was unreachable from the one PR shape that edits them. Assert the job is actually wired,
+// or deleting it is silent (a guard whose default state is "pass" needs its own guard).
+test('docs-lint.yml actually RUNS the count lockstep, not just the OKF lint (#1081)', () => {
+  const yaml = wf('docs-lint.yml')
+  // ANCHORED to a step line, so a `#` in front of it breaks the match. An unanchored search matched a
+  // commented-out step and stayed green while the job ran `npm ci` and nothing else — and commenting
+  // out a step is how a red CI usually gets unblocked, in a file that is already half comment prose.
+  assert.match(yaml, /^  count-lockstep:/m, 'the count-lockstep job must exist')
+  // Scope to the job's OWN block (up to the next top-level job key or EOF). The earlier
+  // `[\s\S]*?` form was non-greedy across the WHOLE file, so it never matched an `if:` sitting
+  // immediately under this job — `if: false` passed silently.
+  // Charset covers `_` and uppercase so a later job id like `count_lockstep_v2:` still terminates the
+  // slice — otherwise that job's keys bleed in and produce a confusing red.
+  const block = yaml.split(/^  count-lockstep:$/m)[1]?.split(/^  [A-Za-z_][A-Za-z0-9_-]*:$/m)[0] ?? ''
+  assert.ok(block.length > 0, 'the count-lockstep job block must be parseable')
+
+  // Strip comments FIRST — full-line AND trailing. The ban list runs on raw text and this file's house
+  // style is heavy prose, so a comment merely containing `if:` would fail CI for no reason, which is
+  // precisely how an annoying guard gets deleted. Trailing `#` is only stripped from lines with no
+  // quote character, since a `#` inside a quoted scalar is data, not a comment.
+  const code = block
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .map((l) => (/['"]/.test(l) ? l : l.replace(/\s+#.*$/, '')))
+    .join('\n')
+
+  // The step's TEXT existing is not the same as the step being able to FAIL THE WORKFLOW, and every
+  // escape found in review lived in that gap. Scope to the JOB BLOCK, not the file: the assertion used
+  // to read the whole yaml, so the step could satisfy it from a different (even `if: false`) job.
+  assert.match(
+    code,
+    /^\s+- run: [^\n]*vitest run[^\n]*api\/__tests__\/service-count-lockstep\.test\.ts/m,
+    'the count-lockstep job must RUN the lockstep in an uncommented step — otherwise a README-only PR can change a service count with no CI watching',
+  )
+  for (const [pattern, why] of [
+    [/\bif:/, 'a job- or step-level `if:` can skip it, and a skipped check reports green'],
+    [/\bcontinue-on-error\b/, '`continue-on-error` makes a failing step non-fatal'],
+  ]) {
+    assert.doesNotMatch(code, pattern, `count-lockstep job: ${why}`)
+  }
+  // Targeted rather than a block-wide `||` ban: a legitimate retry on the INSTALL step cannot affect
+  // gating, so banning `||` everywhere was pure false-positive risk for no added coverage.
+  assert.doesNotMatch(
+    code,
+    /vitest run[^\n]*(--passWithNoTests|\|\|)/,
+    'the vitest step must not be made non-failing (`--passWithNoTests` or a `||` fallback)',
+  )
+  // Pin the CONFIG the step uses, because the passWithNoTests assertion below hardcodes
+  // `vitest.config.js`. Without this the step could point at a sibling root config (worker/ already
+  // has one) that DOES set passWithNoTests, and the guard would keep reading the innocent file — the
+  // round-3 escape relocated one file further out.
+  assert.match(code, /vitest run[^\n]*--config vitest\.config\.js/, 'the step must use the config the passWithNoTests guard checks')
+})
+
+// The "a renamed lockstep file fails loudly" property does not live in the workflow at all — it lives
+// in vitest's default, which `vitest.config.js` can silently override. Round 3 verified it: with
+// `passWithNoTests: true` in the config and the lockstep file missing, vitest exits 0 and prints
+// "No test files found". That is the round-2 escape class relocated one file over, and it is the kind
+// of ergonomics tweak someone adds for an unrelated reason. Pin it where it actually lives.
+test('vitest.config.js does not set passWithNoTests — a missing lockstep must fail (#1081)', () => {
+  const cfg = readFileSync(new URL('../vitest.config.js', import.meta.url), 'utf-8')
+  assert.doesNotMatch(
+    cfg.split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n'),
+    /passWithNoTests/,
+    'passWithNoTests would make a renamed or deleted service-count-lockstep.test.ts exit 0, disarming the docs-lint gate',
+  )
+})
+
+// A cheap tripwire, not a proof: it only asserts each filename still APPEARS in the lockstep source.
+// That survives the loop-style refactor already present in that file (`read(file)` over a list), and
+// catches the case that matters — a surface dropped from coverage entirely. It cannot tell whether the
+// assertions around the name are still meaningful; only the lockstep's own mutation coverage does that.
+test('the count lockstep still names the .md surfaces test.yml ignores (#1081)', () => {
+  const lockstep = readFileSync(new URL('../api/__tests__/service-count-lockstep.test.ts', import.meta.url), 'utf-8')
+  for (const f of ['README.md', 'README.ko.md', 'CLAUDE.md']) {
+    assert.ok(
+      lockstep.includes(`'${f}'`),
+      `${f} is paths-ignored by test.yml, so docs-lint.yml is its only gate — the lockstep must still cover it`,
+    )
+  }
 })

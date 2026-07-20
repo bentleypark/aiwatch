@@ -23,9 +23,10 @@ name: Docs Lint
 # `test.yml` carries the same shape via its `paths-ignore`, so this applies to its four jobs too.
 # As of 2026-07-09 `main` has NO required status checks, so the trap is latent, not live.
 # If you ever want these required, first move the path decision from the workflow trigger into the
-# job (always run the workflow; skip the lint step when no docs changed) — note that doing so
-# removes the `paths:` list that `scripts/workflow-paths-sync.test.mjs` asserts against, so that
-# guard would need rewriting too.
+# job (always run the workflow; skip each job's step when no docs changed). There are TWO jobs here
+# now — `Service Count Lockstep` is a second context that likewise never reports on a code-only PR,
+# so both need converting. Note that doing so removes the `paths:` list that
+# `scripts/workflow-paths-sync.test.mjs` asserts against, so that guard would need rewriting too.
 
 on:
   push:
@@ -36,6 +37,8 @@ on:
       - 'docs/**'
       - '.github/**/*.md'
       - 'scripts/lint-okf-bundle.mjs'      # the guard guards itself
+      - 'api/__tests__/service-count-lockstep.test.ts'   # ditto, for the count lockstep
+      - 'vitest.config.js'                 # passWithNoTests there would disarm the lockstep gate
       - '.github/workflows/docs-lint.yml'
   pull_request:
     branches: [main]
@@ -45,6 +48,8 @@ on:
       - 'docs/**'
       - '.github/**/*.md'
       - 'scripts/lint-okf-bundle.mjs'
+      - 'api/__tests__/service-count-lockstep.test.ts'
+      - 'vitest.config.js'
       - '.github/workflows/docs-lint.yml'
 
 permissions:
@@ -67,3 +72,33 @@ jobs:
       # Zero-dependency script (node: builtins only) — deliberately no `npm ci`.
       # Checks: frontmatter integrity, unquoted-`#` truncation, dangling cross-links, index.md drift.
       - run: node scripts/lint-okf-bundle.mjs
+
+  count-lockstep:
+    name: Service Count Lockstep
+    runs-on: ubuntu-latest
+    # #1081 — #1074's guard pins the service count / category breakdown / probe count / OSV package
+    # count across six files, THREE of which are README.md, README.ko.md and CLAUDE.md. It only ran
+    # inside test.yml's `Frontend Unit Tests` job, and test.yml paths-ignores exactly those files at
+    # the WORKFLOW level — so a README-only edit started no jobs and a wrong count merged green.
+    # Verified before the fix: breaking README.md's count left `lint-okf-bundle.mjs` PASSING (it reads
+    # only docs/reference/) while test.yml never started. Same shape as #877 and #961: a guard that
+    # exists but is not wired to the diffs it guards.
+    #
+    # Unlike the OKF job above this one cannot be dependency-free: the test is TypeScript run under
+    # vitest, and it renders the two Edge templates (which pull in the api/_shared subtree). The
+    # worker constants it reads — GROUP_MEMBERS / PROBE_TARGETS / OSV_PACKAGES — are NOT the reason;
+    # those three modules have zero imports between them. Reimplementing the checks as a zero-dep
+    # node:test script would mean re-declaring the counts away from those constants, which is exactly
+    # the drift #1074 exists to kill. So docs PRs pay an `npm ci`; `cache: 'npm'` blunts it.
+    #
+    # Runs ONLY the lockstep file, not `npm run test:src` — the rest of that suite is gated by
+    # test.yml on code PRs, and re-running it here would duplicate ~4s of unrelated work on every
+    # doc edit for no added coverage.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - run: npm ci --no-audit --fund=false
+      - run: npx vitest run --config vitest.config.js api/__tests__/service-count-lockstep.test.ts
