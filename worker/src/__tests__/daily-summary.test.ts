@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { buildDailySummary, computeLatencyAvg, isInSummaryWindow, formatDegradationSection, formatV1TrafficSection, classifyDegradation, formatSubscriberDelta, formatFeedTrafficSection, formatExtActivitySection, formatStatuslineTrafficSection, formatStatuslineDeltaSuffix, formatPluginTrafficSection, formatPushLine, formatAccuracyLine, formatReferralLine, formatAudienceLine, formatAiUsageSection } from '../daily-summary'
 import type { ServiceStatus } from '../types'
 import type { AccuracyStats } from '../incident-history'
-import type { AudienceCounts } from '../outage-audience'
+import { AUDIENCE_SOURCES, type AudienceCounts, type AudienceSource } from '../outage-audience'
 
 function makeSvc(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
   return {
@@ -757,18 +757,24 @@ describe('formatExtActivitySection (#837)', () => {
 })
 
 describe('formatAudienceLine (#842-B)', () => {
+  // #1055 — build the per-source map from AUDIENCE_SOURCES rather than a literal, so widening the
+  // bucket enum doesn't require editing every fixture below (it widened by 3 here). Callers pass only
+  // the buckets they care about; the rest zero-fill.
+  const src = (o: Partial<Record<AudienceSource, number>> = {}): Record<AudienceSource, number> =>
+    Object.fromEntries(AUDIENCE_SOURCES.map((s) => [s, o[s] ?? 0])) as Record<AudienceSource, number>
+
   const counts = (o: Partial<AudienceCounts>): AudienceCounts => ({
     total: 0, activeTotal: 0,
-    bySource: { x: 0, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
-    activeBySource: { x: 0, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
+    bySource: src(),
+    activeBySource: src(),
     ...o,
   })
 
   it('leads with the active-outage subset by source + total when an outage was viewed', () => {
     const line = formatAudienceLine(counts({
       total: 320, activeTotal: 240,
-      bySource: { x: 210, search: 60, feed: 30, owned: 12, direct: 20, plugin: 0 },
-      activeBySource: { x: 180, search: 40, feed: 15, owned: 8, direct: 5, plugin: 0 },
+      bySource: src({ x: 210, search: 60, feed: 30, owned: 12, direct: 20 }),
+      activeBySource: src({ x: 180, search: 40, feed: 15, owned: 8, direct: 5 }),
     }))
     expect(line).toContain('Outage Audience')
     expect(line).toContain('240 during outages')
@@ -776,11 +782,25 @@ describe('formatAudienceLine (#842-B)', () => {
     expect(line).toContain('320 total views')
   })
 
+  it('renders the #1055 buckets with their operator labels', () => {
+    // The labels are the ONLY surface a human reads, and nothing else asserts them: with every
+    // fixture zero-filling the new buckets, mislabelling `refhost` as "direct" would restore exactly
+    // the ambiguity #1055 removes and no test would notice.
+    const line = formatAudienceLine(counts({
+      total: 15, activeTotal: 15,
+      activeBySource: src({ reddit: 5, hn: 3, refhost: 7 }),
+    }))
+    expect(line).toContain('Reddit 5')
+    expect(line).toContain('HN 3')
+    expect(line).toContain('other-ref 7')
+    expect(line).not.toContain('direct') // refhost must NOT read as direct
+  })
+
   it('drops zero buckets from the breakdown', () => {
     const line = formatAudienceLine(counts({
       total: 100, activeTotal: 100,
-      bySource: { x: 100, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
-      activeBySource: { x: 100, search: 0, feed: 0, owned: 0, direct: 0, plugin: 0 },
+      bySource: src({ x: 100 }),
+      activeBySource: src({ x: 100 }),
     }))
     expect(line).toContain('X 100')
     expect(line).not.toContain('search 0')
@@ -791,7 +811,7 @@ describe('formatAudienceLine (#842-B)', () => {
   it('falls back to the general is-down audience when no active outage was viewed', () => {
     const line = formatAudienceLine(counts({
       total: 50, activeTotal: 0,
-      bySource: { x: 10, search: 35, feed: 5, owned: 0, direct: 0, plugin: 0 },
+      bySource: src({ x: 10, search: 35, feed: 5 }),
     }))
     expect(line).toContain('is-down Audience')
     expect(line).toContain('50 views')

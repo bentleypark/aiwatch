@@ -6,6 +6,7 @@ import {
   buildOutageAudienceSql,
   queryOutageAudience,
   recordOutageView,
+  AUDIENCE_SOURCES,
 } from '../outage-audience'
 
 describe('classifyReferrer (#842-B)', () => {
@@ -32,11 +33,94 @@ describe('classifyReferrer (#842-B)', () => {
     expect(classifyReferrer('', 'duckduckgo.com')).toBe('search')
     expect(classifyReferrer('', 'search.brave.com')).toBe('search')
   })
-  it('falls back to direct for no referrer / unknown / minor share channels', () => {
+  it('falls back to direct ONLY when there is no referrer host at all (#1055 narrowed this)', () => {
     expect(classifyReferrer('', '')).toBe('direct')
     expect(classifyReferrer('threads', '')).toBe('direct')
     expect(classifyReferrer('copy-link', '')).toBe('direct')
-    expect(classifyReferrer('', 'some-blog.example')).toBe('direct')
+  })
+  // #1055 — the buckets that split the old catch-all `direct` (measured 83% over one 5-day window;
+  // see the module docstring for the caveat). The whole point is that these no longer
+  // land in `direct`, so each case asserts BOTH the new bucket and (via the block above) that
+  // `direct` now requires an empty host.
+  it('names Reddit by utm or host (#1055)', () => {
+    expect(classifyReferrer('reddit', '')).toBe('reddit') // utm-tagged (our own #270 outreach links)
+    expect(classifyReferrer('', 'www.reddit.com')).toBe('reddit')
+    expect(classifyReferrer('', 'old.reddit.com')).toBe('reddit')
+    expect(classifyReferrer('', 'reddit.com')).toBe('reddit')
+    expect(classifyReferrer('', 'redd.it')).toBe('reddit') // short-link domain
+    expect(classifyReferrer('Reddit', '')).toBe('reddit') // case-insensitive, like the others
+  })
+  it('names Hacker News by utm or host (#1055)', () => {
+    expect(classifyReferrer('hn', '')).toBe('hn')
+    expect(classifyReferrer('hackernews', '')).toBe('hn')
+    expect(classifyReferrer('', 'news.ycombinator.com')).toBe('hn')
+    expect(classifyReferrer('', 'hn.algolia.com')).toBe('hn')
+  })
+  it('sends any OTHER referring host to refhost, not direct (#1055 — this is the split)', () => {
+    expect(classifyReferrer('', 'some-blog.example')).toBe('refhost')
+    expect(classifyReferrer('', 'news.example.org')).toBe('refhost')
+    expect(classifyReferrer('threads', 'l.threads.net')).toBe('refhost') // unknown utm + a real host
+  })
+  it('does not let a lookalike host hijack a community bucket (#1055)', () => {
+    // The reddit/HN/X/search host regexes are all anchored on a dot-or-start boundary AND
+    // end-of-string, so these are NOT reddit/HN — they are someone else's domain that merely
+    // contains the string. `notreddit`/`fakenews` pin the LEADING boundary (no dot before the
+    // label); the `.evil.example` cases pin the trailing `$`.
+    expect(classifyReferrer('', 'reddit.com.evil.example')).toBe('refhost')
+    expect(classifyReferrer('', 'notreddit.com')).toBe('refhost')
+    expect(classifyReferrer('', 'fakenews.ycombinator.com')).toBe('refhost') // leading anchor
+    expect(classifyReferrer('', 'news.ycombinator.com.example')).toBe('refhost') // trailing anchor
+  })
+  it('does not let a lookalike host hijack the SEARCH bucket either (#1055 review fix)', () => {
+    // Regression pin: SEARCH_HOSTS used to end at `\.` with no `$`, so any domain carrying an engine
+    // label anywhere counted as organic search — inflating a bucket #1055 exists to make trustworthy.
+    expect(classifyReferrer('', 'google.evil.example')).toBe('refhost')
+    expect(classifyReferrer('', 'bing.attacker.com')).toBe('refhost')
+    expect(classifyReferrer('', 'naver.phishing.example')).toBe('refhost')
+    // ...while real search hosts, including multi-label ccTLDs, still classify.
+    expect(classifyReferrer('', 'www.google.com')).toBe('search')
+    expect(classifyReferrer('', 'google.co.uk')).toBe('search')
+    expect(classifyReferrer('', 'yahoo.co.jp')).toBe('search')
+    expect(classifyReferrer('', 'yandex.ru')).toBe('search')
+    expect(classifyReferrer('', 'ecosia.org')).toBe('search')
+  })
+  it('books our OWN hosts as owned, not refhost (#1055 review fix)', () => {
+    // is-down pages cross-link each other, so without this an internal click-through would read as a
+    // large unidentified EXTERNAL referrer — corrupting the #887-vs-#270 signal this split produces.
+    expect(classifyReferrer('', 'ai-watch.dev')).toBe('owned')
+    expect(classifyReferrer('', 'www.ai-watch.dev')).toBe('owned')
+    expect(classifyReferrer('', 'aiwatch-git-feat-x.vercel.app')).toBe('owned') // our preview deploys
+    expect(classifyReferrer('', 'localhost')).toBe('owned')
+    // Not ours — these must stay EXTERNAL. vercel.app is a shared apex, so a third party's site
+    // there would otherwise be booked as our own navigation: the same misclassification #1055
+    // fixes, pointed the other way.
+    expect(classifyReferrer('', 'ai-watch.dev.evil.example')).toBe('refhost')
+    expect(classifyReferrer('', 'notai-watch.dev')).toBe('refhost')
+    expect(classifyReferrer('', 'someone-elses-tool.vercel.app')).toBe('refhost')
+    expect(classifyReferrer('', 'evil.localhost')).toBe('refhost')
+  })
+  it('lowercases the HOST, not just the utm (#1055 — /api/pageview is public)', () => {
+    // Browsers already lowercase `location.hostname`, but the beacon endpoint accepts a hand-crafted
+    // body, so the classifier must not depend on the client behaving.
+    expect(classifyReferrer('', 'WWW.Reddit.COM')).toBe('reddit')
+    expect(classifyReferrer('', 'News.YCombinator.com')).toBe('hn')
+    expect(classifyReferrer('', 'AI-Watch.dev')).toBe('owned')
+  })
+  it('takes a bare hostname, NOT a full URL — the beacon precondition (#1055)', () => {
+    // Documents the silent-degradation failure mode: every host pattern is `$`-anchored, so if the
+    // beacon ever sent `document.referrer` raw instead of `.hostname`, reddit/hn would sit at
+    // permanent zero while refhost absorbed everything and the line still looked plausible.
+    // The beacon side is pinned in api/__tests__/is-down-render.test.ts.
+    expect(classifyReferrer('', 'https://www.reddit.com/r/ClaudeAI')).toBe('refhost')
+  })
+  it('lets an explicit utm tag beat a conflicting host (#1055 ordering)', () => {
+    expect(classifyReferrer('reddit', 'www.google.com')).toBe('reddit')
+    expect(classifyReferrer('rss', 'www.reddit.com')).toBe('feed')
+  })
+  it('keeps X winning over a reddit host, since the X app strips referrers anyway (#1055)', () => {
+    // Ordering pin: a link tagged utm_source=x that somehow carries a reddit referrer is still an X
+    // share (our own tag is the stronger claim). Guards against a future reorder silently reclassing.
+    expect(classifyReferrer('x', 'www.reddit.com')).toBe('x')
   })
   it('buckets the Claude Code plugin is-down links (utm_source=claude-code) as plugin (#920)', () => {
     expect(classifyReferrer('claude-code', '')).toBe('plugin')
@@ -68,9 +152,31 @@ describe('parsePageviewBody (#842-B)', () => {
     expect(parsePageviewBody({ svc: 'openai', active: 'yes' }, ids)?.active).toBe(false)
     expect(parsePageviewBody({ svc: 'openai' }, ids)?.active).toBe(false)
   })
-  it('tolerates non-string utm/ref (→ direct) and does not throw on long input', () => {
+  it('tolerates non-string utm/ref and does not throw on long input', () => {
+    // #1055 — a 500-char junk `ref` is still A HOST as far as we can tell (truncated to 128, never
+    // stored raw), so it belongs in `refhost`, not `direct`. `direct` now asserts the absence of a
+    // referrer, and a garbage referrer is not an absent one.
     const r = parsePageviewBody({ svc: 'claude', utm: 123, ref: 'x'.repeat(500) }, ids)
-    expect(r).toEqual({ svc: 'claude', source: 'direct', active: false })
+    expect(r).toEqual({ svc: 'claude', source: 'refhost', active: false })
+  })
+
+  it('maps a non-string (absent) ref to direct — no host at all (#1055)', () => {
+    expect(parsePageviewBody({ svc: 'claude', utm: 123, ref: 456 }, ids))
+      .toEqual({ svc: 'claude', source: 'direct', active: false })
+  })
+})
+
+describe('bucket-vocabulary sync (#1055)', () => {
+  it('AUDIENCE_SOURCES covers every AudienceSource — the widening edit tsc CANNOT catch', () => {
+    // Three edits are needed to add a bucket (the union, zeroBySource, AUDIENCE_SOURCES) but only the
+    // first two fail the build; AUDIENCE_SOURCES is a plain array. Omitting it is silent AND total:
+    // parseOutageAudienceResponse skips rows whose source isn't listed, and formatAudienceLine
+    // iterates it — so the bucket sits at a permanent zero everywhere while tsc and every other test
+    // stay green. zeroBySource() is the tsc-enforced Record, so its keys are the authoritative set;
+    // reading them back through the parser avoids exporting an internal just for a test.
+    const zeroed = parseOutageAudienceResponse({ data: [] })
+    expect(zeroed).not.toBeNull()
+    expect([...AUDIENCE_SOURCES].sort()).toEqual(Object.keys(zeroed!.bySource).sort())
   })
 })
 
@@ -86,8 +192,11 @@ describe('parseOutageAudienceResponse (#842-B)', () => {
     const r = parseOutageAudienceResponse(json)!
     expect(r.total).toBe(265)
     expect(r.activeTotal).toBe(205)
-    expect(r.bySource).toEqual({ x: 200, search: 40, feed: 15, owned: 10, direct: 0, plugin: 0 })
-    expect(r.activeBySource).toEqual({ x: 180, search: 0, feed: 15, owned: 10, direct: 0, plugin: 0 })
+    // Exhaustive shape (not objectContaining) on purpose: a new bucket must show up here, so adding
+    // one to AudienceSource without zero-initializing it in zeroBySource() fails loudly. #1055 added
+    // reddit/hn/refhost.
+    expect(r.bySource).toEqual({ x: 200, search: 40, feed: 15, owned: 10, direct: 0, plugin: 0, reddit: 0, hn: 0, refhost: 0 })
+    expect(r.activeBySource).toEqual({ x: 180, search: 0, feed: 15, owned: 10, direct: 0, plugin: 0, reddit: 0, hn: 0, refhost: 0 })
   })
   it('skips unknown source buckets and tolerates bad views', () => {
     const r = parseOutageAudienceResponse({ data: [

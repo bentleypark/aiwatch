@@ -45,6 +45,20 @@ export interface GrowthDailyRow {
   subscriberNewToday: number | null // null on a first day or a corrupt baseline (#548 semantics)
   audienceTotal: number | null // is-down views, 24h (WAE)
   audienceActiveTotal: number | null // views during an active outage — the sponsor evidence
+  // Deliberately `Record<string, number>` and NOT `Record<AudienceSource, number>`: this is a durable
+  // KV series, so rows keep the vocabulary that was live when they were written and a row must stay
+  // readable after the enum moves on. The cost is that widening `AudienceSource` does NOT produce a
+  // type error here (#1055 widened it by 3 buckets) — the exhaustive sites `tsc` does catch are
+  // `AUDIENCE_LABEL` (daily-summary.ts) and `zeroBySource()` (outage-audience.ts). NOTE that is the
+  // tsc-caught subset, not the full widening checklist: `AUDIENCE_SOURCES` must be widened too and
+  // `tsc` does NOT catch it — the canonical checklist lives next to the union in outage-audience.ts.
+  // So when reading
+  // this field across a deploy boundary, treat a missing key as "not classified then", never as 0:
+  // `direct` before the #1055 deploy absorbed reddit/hn/refhost/self-referrals and is NOT comparable
+  // to `direct` after it. Key COUNT discriminates the version, but only on rows where the WAE read
+  // SUCCEEDED — a failed/unconfigured read stores `null` here, not a 9-key map (see the `?? null` at
+  // the write site). The deploy date is to be recorded in docs/reference/kv-schema.md's
+  // `growth:daily` row.
   audienceBySource: Record<string, number> | null
 }
 
