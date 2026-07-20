@@ -65,12 +65,27 @@ Is X Down pages (Edge SSR) and Landing page use inline `gtag()` calls directly s
 
 Every clickable inbound link **we** emit is UTM-tagged so GA4 (and the `#842-B` outage-audience classifier) attribute the channel instead of collapsing to `(direct)` (the X app strips the HTTP referrer). Sources:
 
+> **#1055** — `classifyReferrer` also names buckets we do NOT tag: `reddit` / `hn` by referrer host,
+> `refhost` for any other host we saw but don't name, and our own hosts (`ai-watch.dev`,
+> `*.vercel.app`, `localhost`) → `owned`, since is-down pages cross-link each other and that
+> navigation is not inbound traffic. `direct` therefore now means **no referrer at all** (a
+> type-in/bookmark, or a referrer-stripping app). Before #1055 all of these collapsed into `direct` —
+> the issue measured 83% unclassified over a 5-day sample (2026-07-13→17); treat that as one window's
+> measurement, not a standing property.
+>
+> On Reddit specifically, what was **verified** on 2026-07-20 is narrow: `old.reddit.com` sets `<meta
+> name="referrer" content="always">` and its user-posted outbound links carry `rel="nofollow ugc"`
+> with no `noreferrer`. `www.reddit.com` (the majority surface) and the Reddit **mobile app** were
+> NOT verified — both are expected to send at least the origin under the modern browser default, but
+> that is an inference. So a low `reddit` count is not evidence of no Reddit traffic; a UTM-tagged
+> link (`reddit.ts` appends `utm_source=reddit`, #548) remains the only reliable attribution.
+
 | `utm_source` | `utm_medium` | `utm_campaign` | Emitted by | `classifyReferrer` bucket |
 |---|---|---|---|---|
 | `x` | `social` | `outage` | tweet/reply drafts (`X_UTM`/`X_REPLY_UTM`, alerts.ts), is-down X share | `x` |
-| `threads` / `copy-link` | `share` | `outage` | is-down share buttons (`buildShareUrl`) | `direct` (not bucketed separately) |
+| `threads` / `copy-link` | `share` | `outage` | is-down share buttons (`buildShareUrl`) | `direct` if the visit carries no referrer host, else `refhost` (#1055) |
 | `rss` | `feed` | `outage` | RSS feed items (`appendUtm`, rss.ts) | `feed` |
-| `reddit` | `social` | `outage` | Reddit promote links (`appendUtm`, reddit.ts) | `feed`-adjacent → `direct` |
+| `reddit` | `social` | `outage` | Reddit promote links (`appendUtm`, reddit.ts) | **`reddit`** (#1055 — was `direct`) |
 | **`discord`** | **`notification`** | **`outage`** | **#936 — Discord alert "View on AIWatch" (operator dashboard + per-user is-down, `appendUtm`)** | `feed` |
 | **`extension`** | **`referral`** | — | **#936 — Chrome extension deep links + dashboard (`withExtUtm`, extension/config.js)** | `owned` |
 | **`statusline`** | **`referral`** | — | **#936 — statusline OSC-8 links (`appendUtm`, statusline.ts)** | `owned` |
