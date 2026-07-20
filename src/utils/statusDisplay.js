@@ -27,8 +27,10 @@
 //     (A probe that is HEALTHY already flipped the service back to operational server-side, in
 //     fetchAllServices' cross-validation — it never reaches this function as `degraded`.)
 //   - `down` is never masked: it can only come from a source we actually read.
-// Scope: only the Statuspage summary.json paths set `sourceUnknown`. The AWS-Health and Azure-RSS
-// fetch-failure paths do not, so bedrock/azureopenai still render a plain `degraded` when their source
+// Scope: the Statuspage summary.json paths set `sourceUnknown`, and since #1089 so does the Instatus
+// path when the incident list is unreadable (scrape fetch failed / non-ok, or the payload no longer
+// parses) — so mistral/perplexity/fal reach this resolver too. The AWS-Health and Azure-RSS
+// fetch-failure paths still do not, so bedrock/azureopenai render a plain `degraded` when their source
 // fails — a known gap, not something this resolver can see.
 export function resolveStatusDisplay(status = 'operational', partialCount = 0, sourceDead = false, sourceUnknown = false) {
   if (sourceDead) return 'unknown'
