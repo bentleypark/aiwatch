@@ -463,7 +463,9 @@ describe('parseInstatusComponents (#761) — per-component snapshot', () => {
     expect(resolved.find((c) => c.name === 'API')!.status).toBe('down')      // major_outage → normalizeStatus → down
   })
 
-  it('returns [] for a Nuxt payload (no per-component status field exposed) — Mistral deferred', () => {
+  // NOT "Nuxt is unsupported" — #761 made Nuxt a first-class producer (see the Nuxt describe block
+  // below). This payload returns [] because it has no component GROUP object, not because it is Nuxt.
+  it('returns [] for a Nuxt payload with no component tree', () => {
     const arr = [{ uptime: 1, name: 2 }, 99.6, 'API']
     const html = `<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`
     expect(parseInstatusComponents(html)).toEqual([])
@@ -555,5 +557,313 @@ describe('parseInstatusComponents (#761) — per-component snapshot', () => {
     } finally {
       warn.mockRestore()
     }
+  })
+})
+
+describe('parseInstatusComponents (#761) — Nuxt per-component snapshot (Mistral)', () => {
+  // Faithful to the real status.mistral.ai __NUXT_DATA__ shape (captured 2026-07-20): a FLAT array
+  // where every scalar is an index-ref into that same array. The payload publishes NO per-component
+  // status, so the snapshot is derived from the component tree + each ongoing incident's `services[]`.
+  // Built as a real index-ref graph — a fixture of plain literals would pass a parser that never
+  // dereferences, which is the bug most likely to ship here.
+  function nuxtHtml(opts: {
+    groups: Record<string, string[]>            // group name → component names
+    incidents?: Array<{ name: string; severity: string; status: string; services: string[] }>
+  }) {
+    const arr: unknown[] = []
+    const put = (v: unknown) => { arr.push(v); return arr.length - 1 }
+    const idOf = (name: string) => `id-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+
+    const compRef = new Map<string, number>()
+    for (const names of Object.values(opts.groups)) {
+      for (const name of names) {
+        // Component object: {id,name,createdAt,order} — note `createdAt`, which distinguishes it
+        // from a GROUP (the discriminator the parser relies on).
+        // `createdAt` mirrors the live component shape; note the parser SELECTS groups by the
+        // services+order+name+id signature — `createdAt` is one of the defence-in-depth exclusions,
+        // not the discriminator that does the work.
+        compRef.set(name, put({
+          id: put(idOf(name)), name: put(name),
+          createdAt: put('2025-06-01T18:12:11.236Z'), order: put(0),
+        }))
+      }
+    }
+    for (const [group, names] of Object.entries(opts.groups)) {
+      put({
+        id: put(idOf(group)), name: put(group), order: put(0),
+        services: put(names.map((n) => compRef.get(n)!)),
+      })
+    }
+    for (const inc of opts.incidents ?? []) {
+      put({
+        id: put(idOf(inc.name)), name: put(inc.name),
+        severity: put(inc.severity), duration: put(0),
+        created_at: put('2026-07-17T07:55:56.406Z'), updated_at: put('2026-07-17T07:55:56.428Z'),
+        lastUpdateStatus: put(inc.status),
+        // An incident's `services[]` entries are the SAME component objects the tree references —
+        // matching ids is what makes the attribution work (verified against the live payload).
+        services: put(inc.services.map((n) => compRef.get(n)!)),
+        incidentUpdates: put([]),
+      })
+    }
+    return `<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`
+  }
+
+  const MISTRAL_GROUPS = {
+    API: ['Chat Completions API', 'Embeddings API', 'Audio API', 'Batch API'],
+    Services: ['Documentation', 'Mistral.ai Website'],
+  }
+
+  it('derives the whole component tree as operational when nothing is ongoing', () => {
+    const comps = parseInstatusComponents(nuxtHtml({ groups: MISTRAL_GROUPS }))
+    expect(comps).toHaveLength(6)
+    expect(comps.every((c) => c.status === 'operational')).toBe(true)
+    expect(comps.map((c) => c.name)).toContain('Audio API')
+  })
+
+  it('marks ONLY the components an ongoing incident names (the #1062 facet-B signal)', () => {
+    const comps = parseInstatusComponents(nuxtHtml({
+      groups: MISTRAL_GROUPS,
+      incidents: [{ name: 'Audio API Degraded', severity: 'MEDIUM', status: 'INVESTIGATING', services: ['Audio API'] }],
+    }))
+    const byName = Object.fromEntries(comps.map((c) => [c.name, c.status]))
+    expect(byName['Audio API']).toBe('degraded_performance')
+    // The service's PRIMARY surface must stay operational — that separation is the whole point.
+    expect(byName['Chat Completions API']).toBe('operational')
+    expect(byName['Embeddings API']).toBe('operational')
+  })
+
+  it('ignores a RESOLVED incident (it is history, not current state)', () => {
+    const comps = parseInstatusComponents(nuxtHtml({
+      groups: MISTRAL_GROUPS,
+      incidents: [{ name: 'Batch API Degraded', severity: 'MAJOR', status: 'RESOLVED', services: ['Batch API'] }],
+    }))
+    expect(comps.find((c) => c.name === 'Batch API')!.status).toBe('operational')
+  })
+
+  it('maps severity to the Atlassian vocabulary via mapInstatusImpact', () => {
+    const comps = parseInstatusComponents(nuxtHtml({
+      groups: MISTRAL_GROUPS,
+      incidents: [
+        { name: 'Down', severity: 'CRITICAL', status: 'INVESTIGATING', services: ['Chat Completions API'] },
+        { name: 'Slow', severity: 'MINOR', status: 'MONITORING', services: ['Embeddings API'] },
+      ],
+    }))
+    const byName = Object.fromEntries(comps.map((c) => [c.name, c.status]))
+    expect(byName['Chat Completions API']).toBe('major_outage')
+    expect(byName['Embeddings API']).toBe('degraded_performance')
+  })
+
+  // BOTH orderings — the severe-first case is the one that fails under a naive last-write-wins
+  // overlay, so testing only minor-first would pass a parser with no worst-of at all.
+  it.each([
+    ['minor first', ['MINOR', 'CRITICAL']],
+    ['severe first', ['CRITICAL', 'MINOR']],
+  ])('worst-ofs two ongoing incidents on the same component (%s)', (_label, [a, b]) => {
+    const comps = parseInstatusComponents(nuxtHtml({
+      groups: MISTRAL_GROUPS,
+      incidents: [
+        { name: 'First', severity: a, status: 'INVESTIGATING', services: ['Audio API'] },
+        { name: 'Second', severity: b, status: 'INVESTIGATING', services: ['Audio API'] },
+      ],
+    }))
+    expect(comps.find((c) => c.name === 'Audio API')!.status).toBe('major_outage')
+  })
+
+  it('does not mistake an incident object for a component group', () => {
+    // An incident carries `services` + `name` + `id` just like a GROUP does, so it reaches the tree
+    // scan. This asserts the OUTCOME that matters — no phantom component row, no incident title
+    // leaking in as a component name — with the incident also given an `order` field so it clears the
+    // group signature. Note the incident-field guard in the parser is defence-in-depth, NOT what saves
+    // us here: an incident's `services[]` reference the very same component objects the tree does, so
+    // reading one as a group would re-add known components rather than invent new ones. Mutating that
+    // guard away therefore does NOT fail this test, and no claim is made that it would.
+    const html = nuxtHtml({
+      groups: MISTRAL_GROUPS,
+      incidents: [{ name: 'Audio API Degraded', severity: 'MEDIUM', status: 'INVESTIGATING', services: ['Audio API'] }],
+    })
+    const arr = JSON.parse(html.slice(html.indexOf('>') + 1, html.lastIndexOf('<')))
+    const inc = arr.find((v: unknown) => v != null && typeof v === 'object' && !Array.isArray(v) && 'severity' in (v as object))
+    inc.order = arr.push(0) - 1
+    const comps = parseInstatusComponents(
+      `<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`,
+    )
+    expect(comps).toHaveLength(6)
+    expect(comps.map((c) => c.name)).not.toContain('Audio API Degraded')
+  })
+
+  it('leaves components operational for an in-progress MAINTENANCE window', () => {
+    // Maintenance clears the RESOLVED skip (its lastUpdateStatus is NOTSTARTEDYET/INPROGRESS/…), so
+    // it reaches the severity mapping and must land on `operational` via mapInstatusImpact's null.
+    const comps = parseInstatusComponents(nuxtHtml({
+      groups: MISTRAL_GROUPS,
+      incidents: [{ name: 'Scheduled upgrade', severity: 'MAINTENANCE', status: 'INPROGRESS', services: ['Batch API'] }],
+    }))
+    expect(comps.find((c) => c.name === 'Batch API')!.status).toBe('operational')
+  })
+
+  it('treats an UNKNOWN severity as degraded, not operational (fails safe)', () => {
+    // mapInstatusImpact maps an unrecognised severity to 'minor' + warns. Pinning it here so the
+    // fail-safe direction is a decision on record: a new Instatus word must not read as green.
+    const comps = parseInstatusComponents(nuxtHtml({
+      groups: MISTRAL_GROUPS,
+      incidents: [{ name: 'Odd', severity: 'CATASTROPHIC', status: 'INVESTIGATING', services: ['Audio API'] }],
+    }))
+    expect(comps.find((c) => c.name === 'Audio API')!.status).toBe('degraded_performance')
+  })
+
+  it('ignores an ongoing incident with an empty services[] (no attribution yet)', () => {
+    // Very common real state: the incident is opened before components are attached.
+    const comps = parseInstatusComponents(nuxtHtml({
+      groups: MISTRAL_GROUPS,
+      incidents: [{ name: 'Investigating elevated errors', severity: 'MAJOR', status: 'INVESTIGATING', services: [] }],
+    }))
+    expect(comps.every((c) => c.status === 'operational')).toBe(true)
+  })
+
+  it('drops an incident-named component that is absent from the tree (no phantom row)', () => {
+    const html = nuxtHtml({
+      groups: MISTRAL_GROUPS,
+      incidents: [{ name: 'Ungrouped surface down', severity: 'MAJOR', status: 'INVESTIGATING', services: [] }],
+    })
+    const arr = JSON.parse(html.slice(html.indexOf('>') + 1, html.lastIndexOf('<')))
+    // Point the incident at a component object that no group references.
+    const orphan = arr.push({ id: arr.push('id-orphan') - 1, name: arr.push('Orphan API') - 1 }) - 1
+    const inc = arr.find((v: unknown) => v != null && typeof v === 'object' && !Array.isArray(v) && 'severity' in (v as object))
+    inc.services = arr.push([orphan]) - 1
+    const comps = parseInstatusComponents(`<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`)
+    expect(comps).toHaveLength(6)
+    expect(comps.map((c) => c.name)).not.toContain('Orphan API')
+    expect(comps.every((c) => c.status === 'operational')).toBe(true)
+  })
+
+  it('prefers the Nuxt path when BOTH SSR markers are present', () => {
+    const nuxt = nuxtHtml({
+      groups: MISTRAL_GROUPS,
+      incidents: [{ name: 'Audio API Degraded', severity: 'MEDIUM', status: 'INVESTIGATING', services: ['Audio API'] }],
+    })
+    const comps = parseInstatusComponents(`${nuxt}<script>self.__next_f.push([1,"x:"])</script>`)
+    expect(comps).toHaveLength(6)
+    expect(comps.find((c) => c.name === 'Audio API')!.status).toBe('degraded_performance')
+  })
+
+  it('returns [] on a payload with no component tree, and on malformed JSON', () => {
+    expect(parseInstatusComponents(nuxtHtml({ groups: {} }))).toEqual([])
+    expect(parseInstatusComponents('<script id="__NUXT_DATA__" type="application/json">{{oops</script>')).toEqual([])
+  })
+
+  // The two drift diagnostics. A warn is "pass by default" code — it fires only on a payload nobody
+  // has yet seen — so each is asserted in BOTH directions: it fires on the drifted fixture AND stays
+  // silent on the healthy one. Without the negative half a warn wired to `true` would look tested.
+  describe('drift diagnostics (#761)', () => {
+    // The module warns ONCE per isolate; vitest shares module state across tests in a file, so each
+    // case re-imports the parser fresh to get an un-fired warn latch.
+    async function freshParse(html: string) {
+      vi.resetModules()
+      const mod = await import('../parsers/instatus')
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const out = mod.parseInstatusComponents(html)
+        return { out, warns: warn.mock.calls.map((c) => String(c[0])) }
+      } finally {
+        warn.mockRestore()
+      }
+    }
+
+    const healthy = () => nuxtHtml({
+      groups: MISTRAL_GROUPS,
+      incidents: [{ name: 'Audio API Degraded', severity: 'MEDIUM', status: 'INVESTIGATING', services: ['Audio API'] }],
+    })
+
+    it('warns when the component tree matches nothing (group shape drift)', async () => {
+      // Assumption (a) broken: groups now also carry `createdAt`, so the exclusion skips every one.
+      const html = healthy()
+      const arr = JSON.parse(html.slice(html.indexOf('>') + 1, html.lastIndexOf('<')))
+      for (const v of arr) {
+        if (v && typeof v === 'object' && !Array.isArray(v) && 'services' in v && 'order' in v) {
+          v.createdAt = arr.push('2025-06-01T18:12:11.236Z') - 1
+        }
+      }
+      const { out, warns } = await freshParse(`<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`)
+      expect(out).toEqual([])
+      expect(warns.some((w) => w.includes('NO component group matched'))).toBe(true)
+    })
+
+    it('warns when unresolved incidents exist but NONE overlay onto a component', async () => {
+      // Assumption (b) broken: the incident's services[] no longer deref to component objects. The
+      // tree still parses, so the output is a full all-operational snapshot — the malignant case.
+      const html = healthy()
+      const arr = JSON.parse(html.slice(html.indexOf('>') + 1, html.lastIndexOf('<')))
+      const inc = arr.find((v: unknown) => v != null && typeof v === 'object' && !Array.isArray(v) && 'severity' in (v as object))
+      inc.services = arr.push(['not-a-ref']) - 1
+      const { out, warns } = await freshParse(`<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`)
+      expect(out).toHaveLength(6)
+      expect(out.every((c) => c.status === 'operational')).toBe(true) // the wrong-looking-right output
+      expect(warns.some((w) => w.includes('NONE overlaid onto a tree component'))).toBe(true)
+    })
+
+    // A maintenance window and an incident with no components attached yet are BOTH legitimate
+    // reasons for an all-operational snapshot, so neither may trip the drift warn — a diagnostic that
+    // fires on ordinary traffic gets learned as noise. Asserting the OUTPUT alone (as the tests above
+    // do) would not catch a warn that fires anyway, so the silence is pinned here explicitly.
+    it.each([
+      ['an in-progress MAINTENANCE window', { name: 'Scheduled upgrade', severity: 'MAINTENANCE', status: 'INPROGRESS', services: ['Batch API'] }],
+      ['an ongoing incident with no components attached', { name: 'Investigating', severity: 'MAJOR', status: 'INVESTIGATING', services: [] }],
+    ])('stays SILENT on %s', async (_label, incident) => {
+      const { out, warns } = await freshParse(nuxtHtml({ groups: MISTRAL_GROUPS, incidents: [incident as never] }))
+      expect(out.every((c) => c.status === 'operational')).toBe(true)
+      expect(warns.filter((w) => w.includes('NONE overlaid'))).toEqual([])
+    })
+
+    it('stays SILENT on a healthy payload, and on one with no ongoing incidents', async () => {
+      const ok = await freshParse(healthy())
+      expect(ok.out.find((c) => c.name === 'Audio API')!.status).toBe('degraded_performance')
+      expect(ok.warns.filter((w) => w.includes('parseInstatusNuxtComponents'))).toEqual([])
+
+      // No ongoing incidents at all is the healthy steady state — an all-operational snapshot here
+      // must NOT warn, or the diagnostic would fire on every quiet cron cycle and be ignored.
+      const quiet = await freshParse(nuxtHtml({ groups: MISTRAL_GROUPS }))
+      expect(quiet.out.every((c) => c.status === 'operational')).toBe(true)
+      expect(quiet.warns.filter((w) => w.includes('parseInstatusNuxtComponents'))).toEqual([])
+    })
+
+    // The boundary of what this diagnostic can see, pinned so nobody later reads the warn as a
+    // guarantee. If the incident-side `services` KEY is renamed away, no incident is counted and no
+    // warn fires — undiagnosable here, because the payload offers nothing that separates it from the
+    // benign "opened before attribution" state (live: 1 of 284 incident objects carries `services`,
+    // and 0 resolved ones do, so past incidents cannot witness the field either).
+    it('does NOT warn when the incident-side services key itself is renamed (known limitation)', async () => {
+      const html = healthy()
+      const arr = JSON.parse(html.slice(html.indexOf('>') + 1, html.lastIndexOf('<')))
+      const inc = arr.find((v: unknown) => v != null && typeof v === 'object' && !Array.isArray(v) && 'severity' in (v as object))
+      inc.affectedComponents = inc.services
+      delete inc.services
+      const { out, warns } = await freshParse(`<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`)
+      expect(out).toHaveLength(6)
+      expect(out.every((c) => c.status === 'operational')).toBe(true) // wrong, and knowingly unwarned
+      expect(warns.filter((w) => w.includes('parseInstatusNuxtComponents'))).toEqual([])
+    })
+
+    it('logs a malformed payload distinguishably from a traversal failure', async () => {
+      const { out, warns } = await freshParse('<script id="__NUXT_DATA__" type="application/json">{{oops</script>')
+      expect(out).toEqual([])
+      expect(warns.some((w) => w.includes('JSON parse failed'))).toBe(true)
+    })
+  })
+
+  it('feeds resolveSvcComponents with the service displayComponentIds (end-to-end wiring)', () => {
+    const comps = parseInstatusComponents(nuxtHtml({
+      groups: MISTRAL_GROUPS,
+      incidents: [{ name: 'Audio API Degraded', severity: 'MEDIUM', status: 'INVESTIGATING', services: ['Audio API'] }],
+    }))
+    const cfg = {
+      id: 'mistral',
+      displayComponentIds: ['id-chat-completions-api', 'id-audio-api', 'id-batch-api'],
+    } as unknown as ServiceConfig
+    const resolved = resolveSvcComponents(cfg, { components: comps })
+    expect(resolved.map((c) => c.name)).toEqual(['Chat Completions API', 'Audio API', 'Batch API'])
+    expect(resolved.find((c) => c.name === 'Audio API')!.status).toBe('degraded')
+    // Website/Documentation are outside displayComponentIds → never reach the API-surface card.
+    expect(resolved.map((c) => c.name)).not.toContain('Mistral.ai Website')
   })
 })

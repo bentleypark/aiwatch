@@ -682,6 +682,58 @@ describe('#1062 facet B — capability routing on a secondary-component outage',
     { id: 'assemblyai', category: 'api', name: 'AssemblyAI', status: 'operational', aiwatchScore: 90 },
   ]
 
+  // #761 — Mistral joins this path (its Nuxt page now yields components[]). Pinned with Mistral's REAL
+  // component names, so a rename upstream fails here rather than silently reverting to LLM peers.
+  describe('mistral (#761) — the Nuxt-derived snapshot drives the same routing', () => {
+    const mistralPool = [
+      { id: 'cohere', category: 'api', name: 'Cohere API', status: 'operational', aiwatchScore: 95 },
+      { id: 'cerebras', category: 'api', name: 'Cerebras Inference', status: 'operational', aiwatchScore: 95 },
+      ...pool.filter((p) => ['assemblyai', 'elevenlabs', 'deepgram'].includes(p.id)),
+    ]
+    const mistral = (comps: Array<{ name: string; status: string }>) => ({
+      id: 'mistral', category: 'api', name: 'Mistral API', status: 'degraded', aiwatchScore: 88, components: comps,
+    })
+    const allOperational = [
+      'Chat Completions API', 'Embeddings API', 'OCR API', 'Agents API', 'Conversations API', 'Audio API',
+      'Integrations API', 'Files API', 'Batch API', 'Workflows API', 'AI Registry Prompts API', 'AI Registry Skills API',
+    ].map((name) => ({ name, status: 'operational' }))
+    const only = (name: string) => allOperational.map((c) => (c.name === name ? { ...c, status: 'degraded' } : c))
+
+    it('routes an Audio-API-only outage to the Voice tier (the case #1062 reported)', () => {
+      const svc = mistral(only('Audio API'))
+      expect(routingTier(svc)).toBe(CAPABILITY_TIER.audio)
+      const groups = getGroupedFallbacks(['mistral'], [svc, ...mistralPool])
+      expect(groups).toHaveLength(1)
+      expect(groups[0].label).toBe('Audio / speech')
+      expect(groups[0].fallbacks.map((f) => f.name)).not.toContain('Cohere API') // never an LLM peer
+    })
+
+    it('SUPPRESSES an Embeddings-API-only outage until #880 adds an embeddings tier', () => {
+      // Deliberate, recorded behaviour change: previously this emitted default LLM peers. OpenAI and
+      // Cohere already suppress here; #761 makes Mistral consistent rather than leaving it with a
+      // wrong-capability recommendation. Flip this test when #880 lands.
+      const svc = mistral(only('Embeddings API'))
+      expect(routingTier(svc)).toBe(-1) // ROUTE_SUPPRESS
+      expect(getFallbacks('mistral', 'api', [svc, ...mistralPool])).toEqual([])
+      expect(getGroupedFallbacks(['mistral'], [svc, ...mistralPool])).toEqual([])
+    })
+
+    it('falls back to normal LLM peers when the primary surface is degraded', () => {
+      const svc = mistral(only('Chat Completions API'))
+      expect(routingTier(svc)).toBeNull()
+      const groups = getGroupedFallbacks(['mistral'], [svc, ...mistralPool])
+      expect(groups[0].label).toBe('LLM')
+      expect(groups[0].fallbacks.map((f) => f.name)).toContain('Cohere API')
+    })
+
+    it('does NOT route when two distinct secondary capabilities are degraded (ambiguous)', () => {
+      const svc = mistral(allOperational.map((c) =>
+        c.name === 'Audio API' || c.name === 'Embeddings API' ? { ...c, status: 'degraded' } : c))
+      expect(routingTier(svc)).toBeNull()
+      expect(getGroupedFallbacks(['mistral'], [svc, ...mistralPool])[0].label).toBe('LLM')
+    })
+  })
+
   describe('capabilityOfComponent — component name → capability', () => {
     it('maps modality component names to their capability; anything else is the primary llm', () => {
       expect(capabilityOfComponent('Images')).toBe('image')
