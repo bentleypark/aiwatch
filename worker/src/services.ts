@@ -40,15 +40,16 @@ import { mergeXaiRegionalIncidents } from './xai-regions'
 // FedRAMP *API* degradation ("FedRAMP workspaces and API orgs have degraded performance") under
 // openai — a 'fedramp' exclude on openai would regress that. chatgpt/codex never match that API-only
 // title (leak guard, #693), so excluding 'fedramp' there is safe. Vetoed BEFORE incidentKeywords;
-// neither sets statusComponent so the #357 exclude-bypass can't fire → clean drop.
+// neither sets statusComponent so the #359 exclude-bypass can't fire → clean drop.
 export const ENVIRONMENT_SCOPE_EXCLUDE = ['fedramp']
 
 export const SERVICES: ServiceConfig[] = [
   // AI API Services
-  // #934 — scopeResolvedToComponent: claude is EXCLUDE-only (no positive incidentKeywords) on the shared
-  // status.claude.com page, so a resolved Claude-Code-only incident cross-attributed to Claude API. See
+  // #934/#1090 — scopeIncidentsToComponent: claude is EXCLUDE-only (no positive incidentKeywords) on the shared
+  // status.claude.com page, so a Claude-Code-only incident cross-attributed to Claude API — at ANY incident
+  // status, and (the #1090 half) whether or not Claude API was itself degraded at the time. See
   // filterByComponentStatus. claudeai/claudecode are keyword-scoped and do NOT set this.
-  { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp', scopeResolvedToComponent: true },
+  { id: 'claude', name: 'Claude API', provider: 'Anthropic', category: 'api', statusUrl: 'https://status.claude.com', apiUrl: 'https://status.claude.com/api/v2/summary.json', incidentExclude: ['claude.ai', 'claude code', 'claude desktop', 'cowork'], statusComponent: 'Claude API', statusComponentId: 'k8w3r06qmzrp', scopeIncidentsToComponent: true },
   // displayComponentIds (#606 Cat B): the official "APIs" group (12) + "Platform" group (FedRAMP,
   // Ads Manager) on the shared status.openai.com page (incident.io). Display-only allowlist (badge
   // unchanged — no statusComponentId); disjoint from chatgpt/codex (pinned by the shared-page no-leak
@@ -106,7 +107,7 @@ export const SERVICES: ServiceConfig[] = [
   // by label), destroying the per-component visibility this card exists for — the 12 names are
   // already self-describing. Display-only (#606): components[] never feeds the badge — on this branch the
   // badge is `hasOngoing ? 'degraded' : httpStatus` (the filtered incident list + the root page's
-  // HTTP status); statusComponent feeds only the uptime% and the #357 exclude-bypass.
+  // HTTP status); statusComponent feeds only the uptime% and the #359 exclude-bypass.
   { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/activity/page/1', incidentExclude: ['le chat', 'le console', 'documentation', 'website'], statusComponent: 'API', holdShortIncidents: true, displayComponentIds: ['c4869a5a-054c-4c1b-88d1-3d195ba58511', '6d1417e5-81f5-44f4-bfd4-d2eb44d95988', '09f74bbf-a6e6-4751-a057-70da6c502c06', 'd7e0541d-b743-4cad-96cb-dd1395422904', '9f01cfda-c067-426b-b1aa-081541169174', 'd8e1e02e-48a4-4d97-8168-a8aabc1c51fb', '033ab409-a16e-4574-aef5-f2f0afc1f6cd', '4051fbf9-fea4-434a-90c1-b347c16e02ba', '78e74758-aa8f-4067-9147-d7f1ab90849a', '02a249ad-72d5-432a-8937-a5ab69a0b7f8', '7fadf202-f02f-40a2-84a4-c4f4041b7865', 'bd64fd4f-286c-4a86-bd31-006a7ea5aa03'] },
   // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
   // (dynamic, so new/retired models need no config edit). componentSurfaces stay as individual rows;
@@ -815,7 +816,7 @@ export function filterIncidents(incidents: Incident[], config: ServiceConfig): I
       // Bypass exclude when the incident explicitly lists this service's component.
       // Prevents e.g. "claude.ai and API unavailable" from being dropped from the
       // Claude API service just because the title matches the 'claude.ai' exclude
-      // pattern (#357).
+      // pattern (#359).
       if (config.statusComponent) {
         const compLower = config.statusComponent.toLowerCase()
         const incCompNames = (inc.componentNames ?? []).map((n) => n.toLowerCase())
@@ -914,25 +915,36 @@ export function applyTitleMap(incidents: Incident[], config: ServiceConfig): Inc
 }
 
 /**
- * Filter out active incidents when the service's component is operational (#228).
- * Providers like Anthropic bulk-link incidents to all components even when only one is affected.
- * If this service's component is operational, remove unresolved incidents to prevent cross-contamination.
+ * Two independent rules, in order:
+ *   1. `scopeIncidentsToComponent` (#934/#1090, opt-in — `claude` only) — drop any incident whose
+ *      `componentNames` name no component in THIS service's badge group, regardless of the incident's
+ *      status AND regardless of our own. Untagged ⇒ keep (fail-open).
+ *   2. #228/#970 (not flag-gated) — when our component is `operational`, drop ACTIVE incidents, since
+ *      providers like Anthropic bulk-link an incident to every component even when one is affected.
  *
- * #934 — the operational branch retained ALL resolved/monitoring incidents, which cross-attributed a
- * sibling-component-only incident to this service ONCE IT RESOLVED. `claude` (Claude API) has no positive
- * `incidentKeywords` — it relies on title-based `incidentExclude` + this component-status guard — so a
- * Claude-Code-only incident whose title names no exclude keyword (the 2026-07-06 "Claude Tag seeing
- * elevated GitHub operation failures", componentNames: ['Claude Code']) stayed in claude's candidate set.
- * While active it was hidden here (Claude API component operational → drop unresolved); the moment it
- * RESOLVED this guard kept it → it surfaced under Claude API + fired a Claude-API-included recovery alert.
- * The fix is gated behind the opt-in `scopeResolvedToComponent` flag (set on `claude` only, see types.ts):
- * when set, a resolved/monitoring incident is retained only if it plausibly involved THIS service's own
- * component — its `componentNames` prefix-match our `statusComponent` (same convention as the #359
- * exclude-bypass), OR it is untagged (no componentNames → ambiguous → keep, fail-open). Default-off so
- * single-tenant services (mistral/perplexity/fal, whose broad `statusComponent: 'API'` would wrongly drop
- * a specific-component incident) and keyword-scoped siblings (claudeai/claudecode) are byte-unchanged
- * IN THIS RESOLVED/MONITORING BRANCH. (#970 below is NOT flag-gated, so it does change the ACTIVE branch
- * for claudeai/claudecode — they set `apiUrl` + `statusComponentId` and so reach this guard.)
+ * #934 — rule 1, first version. The operational branch retained ALL resolved/monitoring incidents,
+ * which cross-attributed a sibling-component-only incident to this service ONCE IT RESOLVED. `claude`
+ * (Claude API) has no positive `incidentKeywords` — it relies on title-based `incidentExclude` + this
+ * component-status guard — so a Claude-Code-only incident whose title names no exclude keyword (the
+ * 2026-07-06 "Claude Tag seeing elevated GitHub operation failures", componentNames: ['Claude Code'])
+ * stayed in claude's candidate set. While active it was hidden here (Claude API component operational
+ * → drop unresolved); the moment it RESOLVED this guard kept it → it surfaced under Claude API + fired
+ * a Claude-API-included recovery alert. #934 therefore scoped resolved/monitoring incidents by name.
+ *
+ * #1090 — but #934 put that check INSIDE the `componentStatus === 'operational'` gate, so it could
+ * only ever run while our component was fine. Once `claude` was degraded by an unrelated incident the
+ * early return skipped BOTH rules and a Claude-Code-only incident was attributed to Claude API again
+ * (2026-07-20, verified in production). Rule 1 was hoisted above the gate and now applies to every
+ * incident status; membership widened from `statusComponent` prefix-only to badge-group-or-prefix, so
+ * one predicate (`inBadgeGroup`) answers this question for both rules. Extensionally identical for
+ * `claude` today — its badge group resolves to ['claude api (api.anthropic.com)', 'claude api'], both
+ * of which prefix-match — so the widening is latent until a future opt-in sets `statusComponentIds` ALONGSIDE a `statusComponent`
+ * name — ids alone leave rule 1 inactive entirely (see the INACTIVE warn below).
+ *
+ * Rule 1 is default-off so single-tenant services (mistral/perplexity/fal, whose broad
+ * `statusComponent: 'API'` would wrongly drop a specific-component incident) and keyword-scoped
+ * siblings (claudeai/claudecode) are byte-unchanged in BOTH branches. Rule 2 is NOT flag-gated, so it
+ * does apply to claudeai/claudecode — they set `apiUrl` + `statusComponentId` and so reach this guard.
  *
  * #970 — the active-drop rests on the premise "our component is operational ⇒ this incident is not
  * about us". That premise only holds when the incident degraded SOME component, i.e. `impact >= minor`
@@ -974,7 +986,6 @@ export function filterByComponentStatus(
   config: ServiceConfig,
   components: Array<{ id: string; name: string }>,
 ): Incident[] {
-  if (componentStatus !== 'operational') return incidents
   if (!config.statusComponentId && !config.statusComponent) return incidents
   const ownComponent = config.statusComponent?.toLowerCase()
   const ids = badgeGroupIds(config)
@@ -982,12 +993,54 @@ export function filterByComponentStatus(
   // Ids were configured but NONE resolved (and no `statusComponent` name to fall back on) → the badge
   // group is empty for a reason we cannot distinguish from "matches nothing". Never silently drop on it.
   const unjudgeable = badgeGroup.size === 0 && ids.length > 0
-  return incidents.filter(i => {
+  // Id-resolved names match exactly (same page, same strings); `statusComponent` is a PREFIX by the
+  // #359 convention ('Claude API' must match the page's 'Claude API (api.anthropic.com)').
+  const inBadgeGroup = (names: string[]) =>
+    names.some(n => badgeGroup.has(n) || (ownComponent !== undefined && n.startsWith(ownComponent)))
+
+  // #1090 — "does this incident involve MY component?" is independent of whether I am CURRENTLY
+  // degraded, so this scoping runs BEFORE the operational gate below. #934 put the same question
+  // inside that gate, so a sibling-component-only incident was scoped out only while our component
+  // was operational: once `claude` was degraded by an unrelated incident, a Claude-Code-only one was
+  // attributed to Claude API (2026-07-20 'Fable 5 requiring usage credits on Max plans', tagged
+  // `Claude Code` alone). `claude` has no positive `incidentKeywords` and its title-based
+  // `incidentExclude` names no keyword in that title, so nothing else stopped it — and since the
+  // filtered list is passed on unchanged, it REACHES the card, the Score inputs (`score.ts`) and
+  // `buildIncidentAlerts` (traced through the call graph; the wrong-service alert was not itself
+  // observed). Opt-in (claude only) for the reasons in types.ts. Untagged ⇒ ambiguous ⇒ keep.
+  // No `!unjudgeable` term here — it could not change the outcome. This rule already requires
+  // `ownComponent`, and `inBadgeGroup`'s `startsWith(ownComponent)` fallback is live whenever that is
+  // truthy, so an empty badge group can never make the predicate reject everything. (NOT because
+  // `badgeGroupNames` always seeds the set with `statusComponent`: its `displayAllComponents` branch
+  // returns before that line. No service can reach the gap today — cerebras is the only such shape
+  // and sets no `statusComponent` — but the guarantee comes from the prefix fallback, not the seed.)
+  const scoped = config.scopeIncidentsToComponent && ownComponent
+    ? incidents.filter(i => {
+        const names = (i.componentNames ?? []).map(n => n.toLowerCase())
+        return names.length === 0 || inBadgeGroup(names)
+      })
+    : incidents
+
+  // #1090 — the operational branch drops on a self-consistent premise ("we are fine ⇒ not ours").
+  // Scoping while we are DEGRADED has no such premise: something is wrong with us and we may have
+  // just discarded the only record of it. A degraded badge with an empty incident list is the exact
+  // state #1032 filed as a bug, so make the contradiction observable rather than shipping it quietly
+  // (#970/#983: a judgement drop must never be silent).
+  if (config.scopeIncidentsToComponent && componentStatus !== 'operational' && incidents.length > 0 && scoped.length === 0) {
+    console.warn(`[filterByComponentStatus] #1090 ${config.id}: component is ${componentStatus} but component-scoping dropped all ${incidents.length} candidate incident(s) (${incidents.map(i => `${i.id}:[${(i.componentNames ?? []).join('|')}]`).join(', ')}) — a non-operational badge with no incident left to explain it`)
+  }
+  // A service that opts in with ids but no `statusComponent` NAME silently gets no scoping at all
+  // (`openai` is shaped that way today, so this is a realistic next opt-in). Warn rather than no-op.
+  // Only that shape reaches here: with NEITHER an id nor a name the early return above already left.
+  if (config.scopeIncidentsToComponent && !ownComponent) {
+    console.warn(`[filterByComponentStatus] #1090 ${config.id}: scopeIncidentsToComponent is set but no statusComponent NAME is configured — component scoping is INACTIVE for this service`)
+  }
+
+  if (componentStatus !== 'operational') return scoped
+  return scoped.filter(i => {
     const names = (i.componentNames ?? []).map(n => n.toLowerCase())
     // #970 — active incident: retained only when the provider degraded nothing AND it names one of
-    // our badge-group components. Id-resolved names match exactly (same page, same strings);
-    // `statusComponent` is a PREFIX by the #359 convention ('Claude API' must match the page's
-    // 'Claude API (api.anthropic.com)').
+    // our badge-group components.
     if (i.status !== 'resolved' && i.status !== 'monitoring') {
       if (i.impact !== null) return false
       if (unjudgeable) {
@@ -1000,11 +1053,10 @@ export function filterByComponentStatus(
         console.warn(`[filterByComponentStatus] #970 ${config.id}: dropping UNTAGGED impact:none incident ${i.id} (no componentNames to attribute it by)`)
         return false
       }
-      return names.some(n => badgeGroup.has(n) || (ownComponent !== undefined && n.startsWith(ownComponent)))
+      return inBadgeGroup(names)
     }
-    if (!config.scopeResolvedToComponent || !ownComponent) return true
-    if (names.length === 0) return true
-    return names.some(n => n.startsWith(ownComponent))
+    // resolved/monitoring: already scoped above when the service opts in (#1090), so nothing further.
+    return true
   })
 }
 
@@ -1552,11 +1604,13 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       }
       // (a bare incidentIoComponentId with no uptime HTML also leaves uptime null — same #713 rule.)
 
-      // Filter out active incidents when component is operational (#228).
-      // #970 — pass the resolved component list (the SAME superset the badge resolves from) so the
-      // guard can map `statusComponentIds` → component NAMES and keep an `impact: none` incident that
-      // genuinely names one of our badge-group components. `?? []` mirrors includeUntaggedIncidents
-      // above; an empty list makes the guard fail OPEN + warn rather than silently drop (see its doc).
+      // Component-scope the incidents, then drop active ones when our component is operational
+      // (#934/#1090 + #228). #970 — pass the resolved component list (the SAME superset the badge
+      // resolves from) so the guard can map `statusComponentIds` → component NAMES and keep an
+      // `impact: none` incident that genuinely names one of our badge-group components. `?? []`
+      // mirrors includeUntaggedIncidents above. For the #970 branch an empty list still means fail
+      // OPEN + warn; #1090's scoping does NOT consult `unjudgeable`, so for an opting-in service the
+      // prefix fallback keeps judging (and a sibling-tagged incident is still dropped) — see its doc.
       filtered = filterByComponentStatus(filtered, svcStatus, config, breakdownComponents ?? [])
 
       // Track component ID misses for migration detection (#135).

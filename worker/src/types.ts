@@ -202,15 +202,21 @@ export interface ServiceConfig {
   incidentIoGlobalPage?: boolean
   statusComponent?: string
   statusComponentId?: string
-  // #934 — opt-in: on a SHARED status page, an EXCLUDE-ONLY service (no positive incidentKeywords/
-  // incidentComponents) keeps a resolved/monitoring incident in filterByComponentStatus only if the
-  // incident named THIS service's own `statusComponent`. Prevents a sibling-component-only incident
-  // (e.g. a Claude-Code-only "GitHub failures" incident, componentNames: ['Claude Code']) from
-  // cross-attributing to Claude API on resolution. Set on `claude` ONLY — single-tenant services
+  // #934/#1090 — opt-in: on a SHARED status page, an EXCLUDE-ONLY service (no positive
+  // incidentKeywords/incidentComponents) keeps an incident in filterByComponentStatus only if the
+  // incident named a component in THIS service's badge group. Prevents a sibling-component-only
+  // incident (e.g. a Claude-Code-only "GitHub failures" incident, componentNames: ['Claude Code'])
+  // from cross-attributing to Claude API. Set on `claude` ONLY — single-tenant services
   // (mistral/perplexity/fal) have no sibling to leak from and a broad statusComponent ('API') would
   // wrongly drop a specific-component incident; keyword-scoped siblings (claudeai/claudecode) already
   // scope upstream and could drop 'across surfaces' incidents. Off by default.
-  scopeResolvedToComponent?: boolean
+  //
+  // #934 named this `scopeResolvedToComponent` and applied it to resolved/monitoring incidents only,
+  // because it lived inside filterByComponentStatus's `componentStatus === 'operational'` gate. So
+  // WHILE OUR COMPONENT WAS OPERATIONAL, active incidents were covered by the #970 branch and
+  // resolved/monitoring ones by this flag — and once our own component was degraded the early return
+  // skipped both. #1090 hoisted it above that gate; it is no longer resolved-only, hence the rename.
+  scopeIncidentsToComponent?: boolean
   // Optional: multiple components to track for the badge (worst-status wins).
   // When set, the dashboard status is `down` if any component is `major_outage`,
   // `degraded` if any is `partial_outage`/`degraded_performance`, else `operational`.
