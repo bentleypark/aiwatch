@@ -298,6 +298,83 @@ function warnEmptyInstatusComponents(): void {
   console.warn('[parseInstatusComponents] payload has component-shaped objects but none matched the top-level (`group`-gated) discriminator — Instatus Next.js shape may have changed (#911)')
 }
 
+/**
+ * #1089 — would this Next notice survive `parseInstatusNextIncidents`' per-notice skips?
+ *
+ * Mirrors the two documented filters (unparseable `started`; a RESOLVED incident under 60s) so the
+ * result-wrapper can tell "the filters dropped everything" from "the list was lost". Deliberately
+ * conservative: anything it cannot read is treated as SHOULD-have-yielded, so an unrecognised shape
+ * biases toward reporting drift rather than toward a silent green badge.
+ */
+function wouldYieldIncident(notice: unknown): boolean {
+  if (!notice || typeof notice !== 'object') return true
+  const n = notice as { started?: unknown; resolved?: unknown; status?: unknown }
+  const started = typeof n.started === 'string' ? new Date(n.started) : null
+  if (!started || isNaN(started.getTime())) return false          // bad start date → skipped
+  if (n.status !== 'RESOLVED') return true                        // ongoing → always yields
+  if (typeof n.resolved !== 'string') return true
+  const ms = new Date(n.resolved).getTime() - started.getTime()
+  return !(ms >= 0 && ms < 60_000)                                // <60s micro-incident → skipped
+}
+
+/**
+ * #1089 — Next.js counterpart of `parseInstatusIncidentsResult`. Kept in the same shape so the fix
+ * covers `perplexity` / `fal` (Next format) and not just `mistral` (Nuxt) — a status-source guard that
+ * protects one of three Instatus services would read as protection while two stayed exposed.
+ */
+function parseInstatusNextIncidentsResult(html: string): InstatusIncidentsResult {
+  const incidents = parseInstatusNextIncidents(html)
+  if (incidents.length > 0) return { ok: true, incidents }
+
+  // Empty result — decide WHICH empty it is. A bare "is the substring present?" check was too weak:
+  // it only caught the envelope vanishing, so every INNER shape change (the `,\"metrics` anchor
+  // moving, ids no longer `[a-z0-9]`-initial, corrupt inner JSON) still read as a healthy quiet page —
+  // and inner-shape drift is exactly the failure Mistral actually hit on the Nuxt side. So mirror the
+  // Nuxt path's rigour: gate on the parse's OWN pattern, and accept only a literally-empty envelope
+  // (`notices\":{}`) as a genuine "no incidents".
+  // EXTRACT the envelope rather than pattern-match around it. An earlier cut asked "does the raw HTML
+  // literally contain `notices\":{},`?" and called everything else drift — which fabricated an outage
+  // in two legitimate cases the parser handles by design: a page whose notices are ALL filtered out
+  // (the <60s micro-incident filter, i.e. exactly the automated noise it exists for) and one with an
+  // unparseable `started` date. Both yield zero incidents from a populated envelope, and both would
+  // have gone `sourceUnknown` → `degraded` after three cycles. The Nuxt path has always treated that
+  // case as healthy (its per-item skips are invisible); this makes the two agree.
+  // UNESCAPE FIRST, then extract. `matchBrace` is quote-aware but assumes ordinary JSON: on the raw
+  // Next payload (`{\"n1\":{...`) the backslash before each quote sits OUTSIDE a string as far as it is
+  // concerned, so the first `\"` opens a string that never closes and the scan runs to the end. Found
+  // by probing a realistically-escaped fixture rather than trusting the fixture was at fault.
+  const unescaped = html.replace(/\\"/g, '"')
+  const at = unescaped.indexOf('"notices":{')
+  if (at === -1) return { ok: false, reason: 'no-next-notices' }
+  const open = unescaped.indexOf('{', at)
+  const close = matchBrace(unescaped, open)
+  if (close === -1) return { ok: false, reason: 'next-shape-changed' }
+  try {
+    const parsed = JSON.parse(unescaped.slice(open, close + 1)) as Record<string, unknown>
+    // Envelope readable and empty = a genuinely quiet page.
+    if (Object.keys(parsed).length === 0) return { ok: true, incidents: [] }
+    // Entries present. Two ways that yields zero incidents, and they are NOT the same:
+    //   • the parser's own per-notice filters dropped them all (<60s micro-incident, bad start date)
+    //     — legitimate, and the Nuxt path treats its equivalents as invisible;
+    //   • `parseInstatusNextIncidents`'s single regex mis-anchored — key order changed, an extra key
+    //     between `notices` and `metrics` (its lazy `[\s\S]*?` spans right across, matches, then the
+    //     JSON.parse of the over-wide slice throws), or ids no longer `[a-z0-9]`-initial. That drops
+    //     the WHOLE list, open incidents included: exactly the #1089 class.
+    //
+    // Nuxt cannot conflate these — its skips are genuinely per-entry — while Next has one regex
+    // covering the entire list. Testing whether the regex MATCHED is not enough (the extra-key case
+    // matches and still loses everything), so decide from the envelope we already parsed: ask how many
+    // of these notices SHOULD have survived the documented filters. Zero expected ⇒ the filters did
+    // their job. Some expected but none produced ⇒ the list was lost, whatever the mechanism.
+    const expected = Object.values(parsed).filter((n) => wouldYieldIncident(n)).length
+    if (expected > 0 && incidents.length === 0) return { ok: false, reason: 'next-shape-changed' }
+    return { ok: true, incidents }
+  } catch {
+    // The envelope is there but its contents no longer parse — the shape genuinely moved.
+    return { ok: false, reason: 'next-shape-changed' }
+  }
+}
+
 function parseInstatusNextIncidents(html: string): Incident[] {
   try {
     // Next.js SSR payload has escaped quotes: notices\":{\"id\":{...}}
@@ -636,14 +713,45 @@ interface InstatusNextUptimeEntry {
   }>
 }
 
-export function parseInstatusIncidents(html: string): Incident[] {
+/**
+ * #1089 — why the incident parse reports a REASON instead of just `[]`.
+ *
+ * On the Instatus branch the badge is `hasOngoing ? 'degraded' : httpStatus` (`services.ts`), so an
+ * empty incident list is what makes a service read as operational. That means "the payload changed
+ * shape and we parsed nothing" and "this page genuinely has no incidents" had the same return value
+ * and opposite meanings — a silent parse miss published a **false recovery** while an incident was
+ * still open upstream. #761 removed one trigger (a 301'ing scrape URL); this distinguishes the class.
+ *
+ * NOT every `return []` inside the parse is a failure: the per-incident skips (a malformed entry, the
+ * deliberate <60s micro-incident filter) are correct behavior on a healthy payload and must stay
+ * invisible here. Only the STRUCTURAL exits — the payload envelope missing or unreadable — are
+ * failures, because only those mean "we could not see the incident list at all".
+ */
+export type InstatusParseFailure =
+  | 'no-nuxt-payload'   // the __NUXT_DATA__ script tag is absent / unterminated
+  | 'no-incident-refs'  // payload parsed, but carries no `incidents-by-date` ref
+  | 'no-incident-index' // the ref exists but points at nothing usable
+  | 'bad-json'          // the payload is not valid JSON
+  | 'no-next-notices'   // Next.js format: the `notices` envelope is absent
+  | 'next-shape-changed' // Next.js format: the envelope is there but the payload no longer matches
+  | 'scrape-unreadable' // set by the CALLER: the scrape fetch failed or returned non-ok
+
+export type InstatusIncidentsResult =
+  | { ok: true; incidents: Incident[] }
+  | { ok: false; reason: InstatusParseFailure }
+
+/**
+ * Structural-failure-aware incident parse. `ok: true` with an empty array is a REAL "no incidents";
+ * `ok: false` means we could not read the list and the caller must not treat that as recovery.
+ */
+export function parseInstatusIncidentsResult(html: string): InstatusIncidentsResult {
   // Instatus has two SSR formats: Nuxt (__NUXT_DATA__) and Next.js (__next_f)
   if (!html.includes('__NUXT_DATA__') && html.includes('__next_f')) {
-    return parseInstatusNextIncidents(html)
+    return parseInstatusNextIncidentsResult(html)
   }
   // Extract Nuxt SSR payload — match everything between the script tags, let JSON.parse validate
   const match = html.match(/__NUXT_DATA__[^>]*>([\s\S]*?)<\/script/)
-  if (!match) return []
+  if (!match) return { ok: false, reason: 'no-nuxt-payload' }
   try {
     const arr: unknown[] = JSON.parse(match[1])
 
@@ -653,13 +761,36 @@ export function parseInstatusIncidents(html: string): Incident[] {
         typeof item === 'object' && item !== null && !Array.isArray(item) &&
         Object.keys(item).some((k) => k.startsWith('incidents-by-date'))
     )
-    if (!dataRefs) return []
+    if (!dataRefs) return { ok: false, reason: 'no-incident-refs' }
     const incKey = Object.keys(dataRefs).find((k) => k.startsWith('incidents-by-date'))!
     const incObj = arr[dataRefs[incKey]] as { incidents?: number } | undefined
-    if (!incObj?.incidents) return []
+    // `== null`, not `!`: a legitimate array index of 0 is falsy. Pre-existing, but #1089 escalated
+    // the cost — it used to mean a silent `[]`, now it would mean sourceUnknown → a fabricated outage.
+    if (incObj?.incidents == null) return { ok: false, reason: 'no-incident-index' }
     const incIndices = arr[incObj.incidents] as number[]
-    if (!Array.isArray(incIndices)) return []
+    if (!Array.isArray(incIndices)) return { ok: false, reason: 'no-incident-index' }
+    // Deliberately inside the outer try, with no handler of its own: every entry maps within its own
+    // try/catch (and so does the nested timeline flatMap), so nothing can escape here. An earlier cut
+    // added an `entry-mapping-threw` reason for this — a diagnostic value that could never appear,
+    // which is worse than no value, so it is gone.
+    return { ok: true, incidents: parseNuxtIncidentEntries(arr, incIndices) }
+  } catch {
+    return { ok: false, reason: 'bad-json' }
+  }
+}
 
+/**
+ * Back-compat wrapper: collapses a structural failure back to `[]`. Callers that must distinguish the
+ * two (i.e. anything deriving a STATUS) have to use `parseInstatusIncidentsResult` instead — that is
+ * the whole point of #1089, so this stays for read-only consumers (tests, display paths).
+ */
+export function parseInstatusIncidents(html: string): Incident[] {
+  const res = parseInstatusIncidentsResult(html)
+  return res.ok ? res.incidents : []
+}
+
+/** The per-entry mapping, extracted so the structural exits above stay readable. */
+function parseNuxtIncidentEntries(arr: unknown[], incIndices: number[]): Incident[] {
     // Parse all incidents, then limit to 20
     return incIndices.flatMap((idx) => {
       try {
@@ -754,7 +885,4 @@ export function parseInstatusIncidents(html: string): Incident[] {
         }]
       } catch { return [] }
     }).slice(0, 20)
-  } catch {
-    return []
-  }
 }

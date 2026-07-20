@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { mapInstatusImpact, parseInstatusIncidents, parseInstatusUptime, parseInstatusComponents } from '../parsers/instatus'
+import { mapInstatusImpact, parseInstatusIncidents, parseInstatusIncidentsResult, parseInstatusUptime, parseInstatusComponents } from '../parsers/instatus'
 import { filterIncidents, resolveSvcComponents } from '../services'
 import type { ServiceConfig } from '../types'
 
@@ -865,5 +865,226 @@ describe('parseInstatusComponents (#761) — Nuxt per-component snapshot (Mistra
     expect(resolved.find((c) => c.name === 'Audio API')!.status).toBe('degraded')
     // Website/Documentation are outside displayComponentIds → never reach the API-surface card.
     expect(resolved.map((c) => c.name)).not.toContain('Mistral.ai Website')
+  })
+})
+
+describe('#1089 — an unreadable incident list is NOT "no incidents"', () => {
+  // The bug: every failure path returned `[]`, identical to a healthy page with zero incidents. On the
+  // Instatus branch the badge is `hasOngoing ? 'degraded' : httpStatus`, so that `[]` published a false
+  // RECOVERY while the incident was still open upstream (observed 2026-07-20 on Mistral, whose incident
+  // 4288f6a2 stayed `investigating` throughout while the monitor emitted "✅ recovered").
+
+  /** A structurally VALID Nuxt payload carrying `incidents` — count controlled by the caller. */
+  function nuxtPayload(incIndices: number[]) {
+    return [
+      'Audio API Degraded', 'INVESTIGATING', '2026-07-17T07:55:56.406Z', 0, 'MEDIUM', 'inc-1', [], [],
+      { id: 5, name: 0, lastUpdateStatus: 1, created_at: 2, duration: 3, severity: 4, services: 6, incidentUpdates: 7 },
+      incIndices,
+      { incidents: 9 },
+      { 'incidents-by-date-2026': 10 },
+    ]
+  }
+  const wrap = (arr: unknown[]) => `<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`
+
+  it('a genuinely empty page is ok:true with no incidents — NOT a failure', () => {
+    // The distinction the whole fix rests on. If this ever flips to ok:false, every quiet day would be
+    // reported as an unreadable source and `sourceUnknown` would be permanently on.
+    const got = parseInstatusIncidentsResult(wrap(nuxtPayload([])))
+    expect(got).toEqual({ ok: true, incidents: [] })
+  })
+
+  it('a healthy page with an ongoing incident is ok:true and carries it', () => {
+    const got = parseInstatusIncidentsResult(wrap(nuxtPayload([8])))
+    expect(got.ok).toBe(true)
+    expect(got.ok && got.incidents.map(i => i.status)).toEqual(['investigating'])
+  })
+
+  it.each([
+    ['no __NUXT_DATA__ script at all', '<html><body>maintenance</body></html>', 'no-nuxt-payload'],
+    ['payload is not valid JSON', '<script id="__NUXT_DATA__" type="application/json">{oops</script>', 'bad-json'],
+  ])('structural failure — %s → ok:false (%s)', (_label, html, reason) => {
+    expect(parseInstatusIncidentsResult(html)).toEqual({ ok: false, reason })
+  })
+
+  it('structural failure — payload parses but carries no incidents-by-date ref', () => {
+    expect(parseInstatusIncidentsResult(wrap([{ 'components-by-id': 0 }]))).toEqual({ ok: false, reason: 'no-incident-refs' })
+  })
+
+  it('structural failure — the ref exists but points at nothing usable', () => {
+    const arr: unknown[] = ['x', { incidents: undefined }, { 'incidents-by-date-2026': 1 }]
+    expect(parseInstatusIncidentsResult(wrap(arr))).toEqual({ ok: false, reason: 'no-incident-index' })
+  })
+
+  it('structural failure — the incident index is not an array', () => {
+    const arr: unknown[] = ['not-an-array', { incidents: 0 }, { 'incidents-by-date-2026': 1 }]
+    expect(parseInstatusIncidentsResult(wrap(arr))).toEqual({ ok: false, reason: 'no-incident-index' })
+  })
+
+  // The five per-item `return []` sites inside the flatMap are CORRECT behavior on a healthy payload —
+  // counting them as failures would report a normal quiet page as an unreadable source. The <60s
+  // micro-incident filter is the one most likely to empty the list on a real page.
+  it('a payload whose only incident is filtered out (<60s micro-incident) stays ok:true', () => {
+    const arr = nuxtPayload([8]) as unknown[]
+    arr[1] = 'RESOLVED'
+    arr[3] = 30 // 30s → dropped by the micro-incident filter
+    const got = parseInstatusIncidentsResult(wrap(arr))
+    expect(got).toEqual({ ok: true, incidents: [] })
+  })
+
+  it('a malformed single entry does not fail the whole parse', () => {
+    const arr = nuxtPayload([8, 999]) as unknown[] // 999 is out of range → per-item skip
+    const got = parseInstatusIncidentsResult(wrap(arr))
+    expect(got.ok).toBe(true)
+    expect(got.ok && got.incidents).toHaveLength(1)
+  })
+
+  it('the back-compat wrapper still collapses a failure to [] for read-only callers', () => {
+    expect(parseInstatusIncidents('<html>nothing</html>')).toEqual([])
+    expect(parseInstatusIncidentsResult('<html>nothing</html>').ok).toBe(false)
+  })
+
+  // perplexity / fal are Next-format. A guard covering only Mistral would read as protection while two
+  // of the three Instatus services stayed exposed.
+  it('Next.js format — a missing notices envelope is a structural failure, not "no incidents"', () => {
+    expect(parseInstatusIncidentsResult('<script>self.__next_f.push([1,"other"])</script>'))
+      .toEqual({ ok: false, reason: 'no-next-notices' })
+  })
+
+  it('Next.js format — a present-but-empty notices envelope is a genuine empty', () => {
+    const html = '<script>self.__next_f.push([1,"{\\"notices\\":{},\\"metrics\\":{}}"])</script>'
+    const got = parseInstatusIncidentsResult(html)
+    expect(got).toEqual({ ok: true, incidents: [] })
+  })
+})
+
+describe('#1089 review — Next.js inner-shape drift is a failure, not a quiet page', () => {
+  // Review round 1 (Important 2): the first guard only asked "is the `notices` substring present?",
+  // so every INNER shape change still returned ok:true with []. That is the same class of failure
+  // Mistral actually hit on the Nuxt side — so perplexity/fal would have stayed exposed while the
+  // comment claimed all three Instatus services were covered.
+  const withEnvelope = (inner: string) => `<script>self.__next_f.push([1,"{\\"notices\\":{${inner}},\\"metrics\\":{}}"])</script>`
+
+  it('an empty envelope is a genuine quiet page', () => {
+    expect(parseInstatusIncidentsResult(withEnvelope(''))).toEqual({ ok: true, incidents: [] })
+  })
+
+  // The id-charset drift case lives in the round-3 describe below, with a REALISTIC notice. The version
+  // that sat here carried no `started` field, so the parser would legitimately skip it either way —
+  // the fixture, not the payload shape, was doing the work. It asserted the right thing for the wrong
+  // reason, which is worse than not asserting it.
+
+
+  it('a missing envelope is still reported as such', () => {
+    expect(parseInstatusIncidentsResult('<script>self.__next_f.push([1,"other"])</script>'))
+      .toEqual({ ok: false, reason: 'no-next-notices' })
+  })
+})
+
+describe('#1089 review round 2 — a filtered-out Next page is quiet, not broken', () => {
+  // Round-2 CRITICAL: the first Next guard accepted only a literally-empty `notices\\":{},` envelope.
+  // A page whose notices are ALL dropped by the parser's own filters (the <60s micro-incident filter —
+  // exactly the automated noise it exists for — or an unparseable `started`) yields zero incidents from
+  // a POPULATED envelope, and was reported as a structural failure → sourceUnknown → a fabricated
+  // outage after three cycles. The Nuxt path has always treated its per-item skips as invisible; these
+  // make the two agree.
+  //
+  // Fixtures are built the way the real payload is — whole blob JSON-stringified, then every quote
+  // escaped — after an ad-hoc hand-escaped version turned out to be malformed and produced failures
+  // that looked like product bugs.
+  const page = (obj: unknown) =>
+    `<script>self.__next_f.push([1,"${JSON.stringify(obj).replace(/"/g, '\\"')}"])</script>`
+  const mk = (o: Record<string, unknown>) => ({ id: 'n', name: { default: 'X' }, impact: 'minor', status: 'RESOLVED', ...o })
+
+  it('a page whose only notice is a <60s micro-incident is ok:true, not a source failure', () => {
+    const html = page({ notices: { n1: mk({ id: 'n1', started: '2026-07-20T00:00:00Z', resolved: '2026-07-20T00:00:30Z' }) }, metrics: {} })
+    const got = parseInstatusIncidentsResult(html)
+    expect(got.ok, `micro-incident-only must not read as drift: ${JSON.stringify(got)}`).toBe(true)
+    expect(got.ok && got.incidents).toEqual([])
+  })
+
+  it('a page whose only notice has an unparseable start date is ok:true', () => {
+    const html = page({ notices: { n2: mk({ id: 'n2', started: 'not-a-date', resolved: null, status: 'INVESTIGATING' }) }, metrics: {} })
+    const got = parseInstatusIncidentsResult(html)
+    expect(got.ok, `bad-date-only must not read as drift: ${JSON.stringify(got)}`).toBe(true)
+  })
+
+  it('a real ongoing notice still parses through', () => {
+    // Guards the false-negative direction: the fix must not make everything ok:true-with-nothing.
+    const html = page({ notices: { n3: mk({ id: 'n3', name: { default: 'API Degraded' }, started: '2026-07-20T00:00:00Z', resolved: null, status: 'INVESTIGATING' }) }, metrics: {} })
+    const got = parseInstatusIncidentsResult(html)
+    expect(got.ok && got.incidents.length, `an ongoing notice must survive: ${JSON.stringify(got)}`).toBe(1)
+  })
+
+  it('an empty envelope is a genuine quiet page — regardless of key order', () => {
+    // The old guard hard-coded `notices\\":{},`; if Instatus ever emitted `notices` LAST, every quiet
+    // day on perplexity/fal became a fabricated outage. Extraction does not care about key order.
+    expect(parseInstatusIncidentsResult(page({ notices: {}, metrics: {} })).ok).toBe(true)
+    expect(parseInstatusIncidentsResult(page({ metrics: {}, notices: {} })).ok).toBe(true)
+  })
+
+  it('an envelope whose contents no longer parse IS a failure', () => {
+    const html = `<script>self.__next_f.push([1,"{\\"notices\\":{\\"n\\":{oops},\\"metrics\\":{}}"])</script>`
+    expect(parseInstatusIncidentsResult(html)).toEqual({ ok: false, reason: 'next-shape-changed' })
+  })
+
+  it('a missing envelope is still reported as such', () => {
+    expect(parseInstatusIncidentsResult('<script>self.__next_f.push([1,"other"])</script>'))
+      .toEqual({ ok: false, reason: 'no-next-notices' })
+  })
+})
+
+describe('#1089 review round 2 — a Nuxt incidents ref at index 0 is a valid ref', () => {
+  it('does not read a falsy array index as "no incident index"', () => {
+    // `if (!incObj?.incidents)` treated a legitimate index of 0 as absent. Pre-existing, but #1089
+    // escalated the cost: it used to mean a silent `[]` (badge unchanged), and would now mean
+    // sourceUnknown → degraded after three cycles, i.e. a fabricated outage from a healthy page.
+    // Index 0 is unusual in a real Nuxt payload but nothing in the format forbids it.
+    const arr: unknown[] = [
+      [7],                          // 0 — incIndices, deliberately at index 0
+      'API Degraded',               // 1 name
+      'INVESTIGATING',              // 2 lastUpdateStatus
+      '2026-07-20T00:00:00.000Z',   // 3 created_at
+      0,                            // 4 duration
+      'MEDIUM',                     // 5 severity
+      'inc-0',                      // 6 id
+      { id: 6, name: 1, lastUpdateStatus: 2, created_at: 3, duration: 4, severity: 5, services: 9, incidentUpdates: 9 }, // 7
+      { incidents: 0 },             // 8 incObj → points at index 0
+      [],                           // 9 empty services / updates
+      { 'incidents-by-date-2026': 8 }, // 10 dataRefs
+    ]
+    const html = `<script id="__NUXT_DATA__" type="application/json">${JSON.stringify(arr)}</script>`
+    const got = parseInstatusIncidentsResult(html)
+    expect(got.ok, `index 0 must be honoured, not read as absent: ${JSON.stringify(got)}`).toBe(true)
+    expect(got.ok && got.incidents.map(i => i.status)).toEqual(['investigating'])
+  })
+})
+
+describe('#1089 review round 3 — Next whole-list regex failure is drift, not a quiet page', () => {
+  // Round-3 Important: extraction alone made the Next path only APPEAR to agree with Nuxt. Nuxt's skips
+  // are per-entry (losing the whole list needs every entry to fail independently); Next has ONE regex
+  // covering the entire list, so a single anchor failure drops open incidents silently. These pin the
+  // three drift shapes the reviewer demonstrated, each carrying a genuinely ONGOING incident.
+  const page = (obj: unknown) =>
+    `<script>self.__next_f.push([1,"${JSON.stringify(obj).replace(/"/g, '\\"')}"])</script>`
+  const ongoing = (id: string) => ({ id, name: { default: 'API Degraded' }, impact: 'major', started: '2026-07-20T00:00:00Z', resolved: null, status: 'INVESTIGATING' })
+
+  it('baseline: notices then metrics parses the ongoing incident', () => {
+    const got = parseInstatusIncidentsResult(page({ notices: { n1: ongoing('n1') }, metrics: {} }))
+    expect(got.ok && got.incidents).toHaveLength(1)
+  })
+
+  it('key order flipped (metrics before notices) → drift, not a quiet page', () => {
+    const got = parseInstatusIncidentsResult(page({ metrics: {}, notices: { n1: ongoing('n1') } }))
+    expect(got, 'an ongoing incident must not vanish into ok:true').toEqual({ ok: false, reason: 'next-shape-changed' })
+  })
+
+  it('an extra key between notices and metrics → drift', () => {
+    const got = parseInstatusIncidentsResult(page({ notices: { n1: ongoing('n1') }, extra: {}, metrics: {} }))
+    expect(got).toEqual({ ok: false, reason: 'next-shape-changed' })
+  })
+
+  it('id charset drift → drift', () => {
+    const got = parseInstatusIncidentsResult(page({ notices: { _N3: ongoing('_N3') }, metrics: {} }))
+    expect(got).toEqual({ ok: false, reason: 'next-shape-changed' })
   })
 })

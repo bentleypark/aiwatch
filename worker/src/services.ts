@@ -19,7 +19,7 @@ import {
   parseAistudioIncidents,
   computeDailyImpactFromIncidents,
 } from './parsers/aistudio'
-import { parseInstatusIncidents, parseInstatusUptime, parseInstatusReportedUptime, parseInstatusUptimeDays, parseInstatusComponents } from './parsers/instatus'
+import { parseInstatusIncidentsResult, type InstatusParseFailure, parseInstatusUptime, parseInstatusReportedUptime, parseInstatusUptimeDays, parseInstatusComponents } from './parsers/instatus'
 import { parseRssIncidents, parseXaiRssIncidents, type BetterStackIndex, parseBetterStackStatus, parseBetterStackUptime, parseBetterStackReportedUptime, parseBetterStackDailyImpact, parseBetterStackResolvedIds, parseBetterStackMaintenanceIds, parseBetterStackPartialCount, parseBetterStackComponents } from './parsers/betterstack'
 import { parseOnlineOrNotIncidents, computeOnlineOrNotUptime } from './parsers/onlineornot'
 import { parseAwsRssIncidents, parseAwsHealthEvents, parseAwsRegionHealth, decodeAwsHealthJson, deriveAwsStatus } from './parsers/aws'
@@ -1203,6 +1203,9 @@ export async function fetchService(config: ServiceConfig, prefetched?: Prefetche
 async function fetchServiceUntagged(config: ServiceConfig, prefetched?: PrefetchedData, kv?: KVNamespace): Promise<ServiceStatus> {
   const now = new Date().toISOString()
   let parseErrors = 0 // Track internal parse/fetch failures — prevents resetFetchFailure from masking repeated errors
+  // #1089 — set when the Instatus incident parse failed STRUCTURALLY (payload shape moved), as
+  // opposed to a page that genuinely lists no incidents. Only the former may not derive a status.
+  let instatusParseFailure: InstatusParseFailure | null = null
   const base: ServiceStatus = {
     id: config.id,
     name: config.name,
@@ -1759,71 +1762,100 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       } else if (config.onlineOrNotUrl && !res.ok) {
         console.warn(`[fetchService] ${config.id} OnlineOrNot status page returned ${res.status}`)
         res.body?.cancel()
-      } else if (scrapeRes?.ok) {
-        if (config.instatusUrl) {
-          incidents = parseInstatusIncidents(await scrapeRes.text())
-          // #627/#635 — Instatus exposes uptime per component (no summary.json). It lives on the MAIN
-          // status page (res = statusUrl), not the /incidents listing scraped above — so read res
-          // here to extract the named component's uptime% (mistral 'API' Nuxt flat-ref; perplexity
-          // 'API' Next.js componentsUptime[id].uptime). Else it shows "Not provided".
-          // #761 — the same main-page HTML also carries the per-component snapshot (Next.js publishes a
-          // per-component status; Nuxt has none, so parseInstatusComponents derives it from that page's
-          // component tree + ongoing-incident attribution), so read it ONCE for uptime + components.
-          if (res.ok) {
-            const mainHtml = await res.text()
-            if (config.statusComponent) {
-              instatusUptime = parseInstatusUptime(mainHtml, config.statusComponent)
-              // #1006 — the % the page itself shows (over its own ~90-day period), for the side-by-side
-              // disclosure. Only kept when it differs from our computed figure.
-              instatusReported = parseInstatusReportedUptime(mainHtml, config.statusComponent)
-              instatusReportedDays = parseInstatusUptimeDays(mainHtml)
-            }
-            const instatusComps = parseInstatusComponents(mainHtml)
-            if (instatusComps.length > 0) {
-              instatusComponents = resolveSvcComponents(config, { components: instatusComps })
-              // #761 — the #606 curated-id drift signal above is inside the ATLASSIAN branch and gates on
-              // `breakdownComponents`, so it never sees Instatus services (fal/perplexity/mistral) even
-              // though they carry the same hand-maintained `displayComponentIds`. Mistral's is another
-              // hand-maintained 12-id list; a rotated/renamed id would drop the breakdown
-              // under the ≥2 gate AND silently revert #1062 routing (components.length === 0 →
-              // routingTier null). Same warn, applied to the branch that actually produced these.
-              if (config.displayComponentIds) {
-                const missing = config.displayComponentIds.filter(
-                  (id) => !instatusComps.some((c) => c.id === id),
-                )
-                if (missing.length > 0) {
-                  console.warn(`[fetchService] ${config.id} displayComponentIds missing (Instatus breakdown drift): ${missing.join(', ')}`)
-                }
+      } else if (config.instatusUrl) {
+        // #1089 — this arm is entered for an Instatus service even when the scrape did NOT come back
+        // ok, deliberately. Gating it on `scrapeRes?.ok` (the original shape) meant a failed scrape
+        // skipped the whole block — including the MAIN-PAGE read below, which is a separate fetch and
+        // usually still fine. That turned one unreadable incident list into a total loss of uptime +
+        // the components snapshot. The scrape result is now checked inside, so the two fetches fail
+        // independently, as they actually do.
+        // #1089 — a STRUCTURAL parse failure must not read as "no incidents". On this branch the
+        // badge is `hasOngoing ? 'degraded' : httpStatus`, so an empty list is what makes a service
+        // look operational; collapsing a failed parse to `[]` published a false RECOVERY while the
+        // incident was still open upstream (observed 2026-07-20, Mistral). The gap was already
+        // written down at the top of this file in #761's note — that fix removed one trigger (a
+        // 301'ing scrape URL), not the class.
+        const parsed = scrapeRes?.ok
+          ? parseInstatusIncidentsResult(await scrapeRes.text())
+          // The scrape fetch itself failed (`.catch(() => null)`) or returned non-ok. The 404 case is
+          // #761's URL-drift scenario — the likeliest real trigger — and it left `incidents` empty
+          // with no marker, falling through to `httpStatus` exactly as a bad parse did.
+          : ({ ok: false, reason: 'scrape-unreadable' } as const)
+        if (!scrapeRes?.ok) {
+          console.warn(`[fetchService] ${config.id} Instatus scrape unreadable (${scrapeRes == null ? 'fetch failed' : `HTTP ${scrapeRes.status}`}) — NOT treating as "no incidents"`)
+          scrapeRes?.body?.cancel()
+        }
+        if (parsed.ok) {
+          incidents = parsed.incidents
+        } else {
+          instatusParseFailure = parsed.reason
+          console.warn(`[fetchService] ${config.id} Instatus incident parse failed (${parsed.reason}) — NOT treating as "no incidents"`)
+          // Deliberately NOT `parseErrors++`: the guard below returns before this branch's
+          // `if (parseErrors > 0)` accounting can run, so incrementing here would look like it
+          // books the failure while doing nothing. The guard calls `trackFetchFailure` itself —
+          // one accounting site, reachable.
+        }
+        // #627/#635 — Instatus exposes uptime per component (no summary.json). It lives on the MAIN
+        // status page (res = statusUrl), not the /incidents listing scraped above — so read res
+        // here to extract the named component's uptime% (mistral 'API' Nuxt flat-ref; perplexity
+        // 'API' Next.js componentsUptime[id].uptime). Else it shows "Not provided".
+        // #761 — the same main-page HTML also carries the per-component snapshot (Next.js publishes a
+        // per-component status; Nuxt has none, so parseInstatusComponents derives it from that page's
+        // component tree + ongoing-incident attribution), so read it ONCE for uptime + components.
+        if (res.ok) {
+          const mainHtml = await res.text()
+          if (config.statusComponent) {
+            instatusUptime = parseInstatusUptime(mainHtml, config.statusComponent)
+            // #1006 — the % the page itself shows (over its own ~90-day period), for the side-by-side
+            // disclosure. Only kept when it differs from our computed figure.
+            instatusReported = parseInstatusReportedUptime(mainHtml, config.statusComponent)
+            instatusReportedDays = parseInstatusUptimeDays(mainHtml)
+          }
+          const instatusComps = parseInstatusComponents(mainHtml)
+          if (instatusComps.length > 0) {
+            instatusComponents = resolveSvcComponents(config, { components: instatusComps })
+            // #761 — the #606 curated-id drift signal above is inside the ATLASSIAN branch and gates on
+            // `breakdownComponents`, so it never sees Instatus services (fal/perplexity/mistral) even
+            // though they carry the same hand-maintained `displayComponentIds`. Mistral's is another
+            // hand-maintained 12-id list; a rotated/renamed id would drop the breakdown
+            // under the ≥2 gate AND silently revert #1062 routing (components.length === 0 →
+            // routingTier null). Same warn, applied to the branch that actually produced these.
+            if (config.displayComponentIds) {
+              const missing = config.displayComponentIds.filter(
+                (id) => !instatusComps.some((c) => c.id === id),
+              )
+              if (missing.length > 0) {
+                console.warn(`[fetchService] ${config.id} displayComponentIds missing (Instatus breakdown drift): ${missing.join(', ')}`)
               }
-            } else if (config.displayComponentIds) {
-              // A service we asserted SHOULD have a breakdown produced none. Distinguishes "parse
-              // yielded nothing" from the ordinary "this page has no components" case, which the
-              // bare `length > 0` guard otherwise collapses together.
-              console.warn(`[fetchService] ${config.id} has displayComponentIds but the Instatus page yielded no components (parse/shape drift?)`)
             }
-          } else {
-            res.body?.cancel()
+          } else if (config.displayComponentIds) {
+            // A service we asserted SHOULD have a breakdown produced none. Distinguishes "parse
+            // yielded nothing" from the ordinary "this page has no components" case, which the
+            // bare `length > 0` guard otherwise collapses together.
+            console.warn(`[fetchService] ${config.id} has displayComponentIds but the Instatus page yielded no components (parse/shape drift?)`)
           }
         } else {
-          // Cancel statusUrl response body — only res.ok/status is needed for RSS / gcloud services
           res.body?.cancel()
-          if (config.rssFeedUrl) {
-            const rssText = await scrapeRes.text()
-            incidents = config.rssFeedUrl.includes('status.x.ai')
-              // #940 — collapse xAI per-region incidents (same event across us-east-1/eu-west-1/…) to
-              // ONE canonical incident at the source, so the dashboard list, Analyze modal, RSS/Slack
-              // feed, and Discord new+resolved alerts all see a single incident (the older per-surface
-              // merges were cycle-local and leaked duplicates across cron cycles).
-              ? mergeXaiRegionalIncidents(parseXaiRssIncidents(rssText))
-              : parseRssIncidents(rssText)
-          } else if (config.gcloudProduct) {
-            const data: GCloudIncident[] = await scrapeRes.json()
-            const vertexIncidents = parseGCloudIncidents(data, config.gcloudProduct, config.gcloudProductId)
-            if (config.aistudioStatus) {
-              for (const inc of vertexIncidents) inc.id = `vertex:${inc.id}`
-            }
-            incidents = vertexIncidents
+        }
+      } else if (scrapeRes?.ok) {
+        // Cancel statusUrl response body — only res.ok/status is needed for RSS / gcloud services
+        res.body?.cancel()
+        if (config.rssFeedUrl) {
+          const rssText = await scrapeRes.text()
+          incidents = config.rssFeedUrl.includes('status.x.ai')
+            // #940 — collapse xAI per-region incidents (same event across us-east-1/eu-west-1/…) to
+            // ONE canonical incident at the source, so the dashboard list, Analyze modal, RSS/Slack
+            // feed, and Discord new+resolved alerts all see a single incident (the older per-surface
+            // merges were cycle-local and leaked duplicates across cron cycles).
+            ? mergeXaiRegionalIncidents(parseXaiRssIncidents(rssText))
+            : parseRssIncidents(rssText)
+        } else if (config.gcloudProduct) {
+          const data: GCloudIncident[] = await scrapeRes.json()
+          const vertexIncidents = parseGCloudIncidents(data, config.gcloudProduct, config.gcloudProductId)
+          if (config.aistudioStatus) {
+            for (const inc of vertexIncidents) inc.id = `vertex:${inc.id}`
           }
+          incidents = vertexIncidents
         }
       } else {
         // No parser matched — cancel unconsumed response bodies to free connections
@@ -1915,6 +1947,36 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       const derivedStatus = config.betterStackUrl
         ? (betterStackStat ?? httpStatus)
         : (hasOngoing ? 'degraded' : httpStatus)
+
+      // #1089 — the incident list is unreadable, so `hasOngoing === false` above carries no
+      // information and `derivedStatus` must not be published. Route through the SAME primitive the
+      // two sibling unknown-source paths already use (the summary 5xx / throw returns below):
+      // `sourceUnknown` + `trackFetchFailure`'s consecutive-failure gate, so the UI says "we cannot
+      // read this source" (`svc.sourceUnknown.*`, #1004) instead of showing a green badge, and a
+      // single transient blip does not fabricate an outage either. This closes the case #761's note
+      // at the top of this file described but only mitigated: the discarded `shouldDegrade`.
+      if (instatusParseFailure) {
+        const shouldDegrade = await trackFetchFailure(kv, config.id)
+        return {
+          ...base,
+          status: shouldDegrade ? 'degraded' : 'operational',
+          sourceUnknown: true,
+          // Carry what WAS measured successfully. The main-page fetch is independent of the scrape, so
+          // uptime + components usually survive a scrape/parse failure — dropping them would turn one
+          // unreadable list into a wholesale data loss. `latency` mirrors the four sibling early
+          // returns in this function; `uptimeSource` must travel WITH `uptime30d` or the figure ships
+          // without provenance and the UI/archive treat it as unavailable.
+          latency: config.category === 'api' ? latency : null,
+          uptime30d: instatusUptime ?? base.uptime30d,
+          ...(instatusUptime != null ? { uptimeSource: 'official' as const } : {}),
+          // #1006's side-by-side disclosure comes from the SAME independent main-page fetch as
+          // `instatusUptime`, so carrying one without the others would silently drop the
+          // comparison on every parse failure.
+          ...(instatusReported != null ? { uptimeReported: instatusReported } : {}),
+          ...(instatusReportedDays != null ? { uptimeReportedDays: instatusReportedDays } : {}),
+          ...(instatusComponents.length > 0 ? { components: instatusComponents } : {}),
+        }
+      }
 
       // Successful fetch — reset or track based on parse errors
       if (parseErrors > 0) {
