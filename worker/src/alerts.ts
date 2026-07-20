@@ -38,7 +38,9 @@ import type { Incident } from './types'
 // Flow: first flap's down + res alerts both fire normally; flap KV key is written when
 // the first flap's res alert fires. Subsequent flaps (same normalized title, within 60min)
 // are suppressed on both down and res via suppressedIncIds passed to buildIncidentAlerts.
-const TIER1_IDS = new Set(['claude', 'openai', 'gemini'])
+/** Tier-1: alerted immediately and NEVER held for AI (#767/#778/#882). Exported so #1080's hold-ledger
+ *  diagnostic keys off the same set the hold gate uses, rather than a second copy that can drift. */
+export const TIER1_IDS = new Set(['claude', 'openai', 'gemini'])
 
 // BetterStack emits the literal em-dash (U+2014); guard against both "— recovered" and
 // "— down" since a flap cycle can be caught mid-state, and the suppression window should

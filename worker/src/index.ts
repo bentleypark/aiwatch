@@ -7,8 +7,8 @@ import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidate
 import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { serviceGroupOf } from './service-groups'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
-import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
+import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, TIER1_IDS, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
+import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
 import { kvPut, kvDel, detectComponentMismatches, diffPageComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
 import { buildHistoryRecord, appendIncidentHistoryBatch, readIncidentHistory, predictedVsActualText, resolvedPredictionLine, summarizeAccuracy, type IncidentHistoryRecord, type AccuracyStats } from './incident-history'
@@ -956,7 +956,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
               const svcHistory = await readIncidentHistory(env.STATUS_CACHE, svc.id)
               // #955 Part 2 — a REAL, cancellable budget (see `analyzeIncidentWithBudget`).
               const attempt = await analyzeIncidentWithBudget(
-                env.STATUS_CACHE, env.ANTHROPIC_API_KEY, env.AI, svc.name,
+                env.STATUS_CACHE, env.ANTHROPIC_API_KEY, env.AI, { id: svc.id, name: svc.name },
                 { id: inc.id, title: inc.title, status: inc.status, startedAt: inc.startedAt, impact: inc.impact, timeline: inc.timeline },
                 svc.incidents ?? [], svcHistory,
               )
@@ -982,7 +982,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
               // Only `readIncidentHistory` / the sticky KV read can reach here — the analysis
               // itself never throws and books its own usage.
               console.error('[cron] AI analysis failed:', err instanceof Error ? err.message : err)
-              await recordUsage(env.STATUS_CACHE, Date.now(), { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } })
+              await recordUsage(env.STATUS_CACHE, Date.now(), { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } }, svc.id)
             }
           }
         }
@@ -1011,6 +1011,11 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
             console.error('[cron] #882 pending:ai write failed — sending AI-less now (cannot bound the hold):', incId)
           } else {
             heldNewAlertKeys.add(alert.key)
+            // #1080 — book the hold ONLY here, on the first-sight stamp. The `else` branch below is a
+            // re-hold of an incident already counted, so bumping there too would inflate `held`
+            // against the release counters and make the two incomparable. Booked after the stamp
+            // succeeded, so a hold that never actually happened is never counted.
+            await recordHoldEvent(env.STATUS_CACHE, nowMs, 'held')
             console.log('[cron] #882 holding non-Tier-1 new-incident alert until AI lands (or fail-open window):', holdSvcId, incId)
             continue
           }
@@ -1022,7 +1027,35 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       }
       // Released (AI ready / Tier-1 / skipped / past window / unbounded-hold fail-open) — clear the
       // marker best-effort so a stale window value can't linger (harmless on failure; TTL bounds it).
-      if (firstSeenMs) await kvDel(env.STATUS_CACHE, pendingAiKey(incId)).catch(() => {})
+      // #1080 — `firstSeenMs` truthy means this incident HAD a marker and is being released now.
+      // Tier-1 never STAMPS a marker, so it is not counted here for its own incidents. (Not an
+      // absolute: the marker is keyed per incident while `holdSvcId` comes from `alert.svcIds[0]`,
+      // so a #545 Tier-1 late joiner on an incident a non-Tier-1 service already stamped will book
+      // the release. That is the correct behavior — the hold really is being released — it just
+      // means "Tier-1 is never in the ledger" is too strong a reading.) Which
+      // release it was is the whole point of #882 — `aiReady` separates the hold working as designed
+      // from the alert shipping AI-less anyway. Booked before the delete so a failed delete (which is
+      // best-effort by design) cannot lose the release from the ledger. That ordering trades "lose a
+      // release" for "occasionally double-book one": `kvDel` swallows its failure and a late joiner
+      // re-emits the same `alerted:new:{incId}`, so a surviving marker books the release twice. The
+      // right trade, but it does NOT leave the ratio untouched: the re-booked release usually lands on
+      // `releasedWithAi` (the next cycle has normally backfilled the analysis), so the skew favours
+      // "the hold worked". Read the ledger as a trend, never as an exact tally — see `holdLedger`.
+      //
+      // NOT a complete set, and deliberately not pretending otherwise: the marker read above
+      // fail-opens to '0' on a KV error, which is indistinguishable from "no marker" at this point.
+      // A genuinely-held incident whose read errored is therefore released without being booked. We
+      // cannot recover the fact (we never learned it was held), so the honest handling is to make it
+      // NOISY rather than silent — a silent under-count is what #1080 exists to stop shipping.
+      if (firstSeenMs) {
+        await recordHoldEvent(env.STATUS_CACHE, nowMs, aiReady ? 'releasedWithAi' : 'releasedWithoutAi')
+        await kvDel(env.STATUS_CACHE, pendingAiKey(incId)).catch(() => {})
+      } else if (firstSeenMs === 0 && !TIER1_IDS.has(holdSvcId)) {
+        // Tier-1 does not stamp markers for its own incidents, so a missing release is not something
+        // this warning can meaningfully claim for it — and unfiltered it would fire once per alert
+        // per cycle during a KV read outage.
+        console.warn('[cron] #1080 pending:ai read fail-open — if this alert was held, its release is missing from the ledger:', holdSvcId, incId)
+      }
     }
     if (alert.key.startsWith('alerted:new:')) {
       // #545: store the per-incident roster (svcIds), merging this alert's services into whatever
@@ -1688,7 +1721,7 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'analysis failed'
-    await recordUsage(env.STATUS_CACHE, Date.now(), { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } })
+    await recordUsage(env.STATUS_CACHE, Date.now(), { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } }, svcId)
     return json(502, { ok: false, error: 'analysis failed', detail: message })
   }
 
@@ -1696,7 +1729,7 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
   if (!analysis) {
     // Book the failure like every other path, then tell the operator WHY — a bare
     // "returned null" is what made the retired model id so hard to find in the first place.
-    await recordUsage(env.STATUS_CACHE, Date.now(), attempt)
+    await recordUsage(env.STATUS_CACHE, Date.now(), attempt, svcId)
     const upstream = sonnetOutcome && (sonnetOutcome.kind === 'permanent' || sonnetOutcome.kind === 'transient')
       ? { status: sonnetOutcome.status, detail: sonnetOutcome.detail }
       : {}
@@ -1717,7 +1750,7 @@ async function handleAdminAnalyze(request: Request, env: Env, cors: Record<strin
   // Booked BEFORE the KV persist: the model call already happened and already cost money, so a
   // failed persist must not erase it from the ledger. "A call happened but the ledger doesn't
   // show it" is the exact class of blindness #955 exists to remove.
-  await recordUsage(env.STATUS_CACHE, Date.now(), attempt)
+  await recordUsage(env.STATUS_CACHE, Date.now(), attempt, svcId)
 
   const key = analysisKey(svcId, incidentId)
   const ttl = 3600
