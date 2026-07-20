@@ -76,17 +76,195 @@ function instatusComponentStatusToStatuspage(raw: string): string {
   }
 }
 
-// #761 — per-component snapshot for the ServiceDetails / is-down breakdown card. ONLY the Next.js
-// Instatus SSR exposes a per-component `status` field; the Nuxt payload carries name/uptime/days but
-// NO component status, so Nuxt services (e.g. Mistral) return [] here (status snapshot deferred for
-// them). Reuses `buildInstatusComponentMap` — which isolates the TOP-LEVEL components (their children,
+// #761 — map a Nuxt INCIDENT SEVERITY to the Atlassian-Statuspage component vocabulary, by routing
+// through `mapInstatusImpact` so the severity words stay decoded in exactly ONE place (a second
+// severity switch here would drift from it the first time Instatus adds a level).
+// NOTE an UNKNOWN severity never reaches the default here: `mapInstatusImpact` maps unknown → 'minor'
+// (+ a warn-once), so it lands on `degraded_performance`. Only a null impact — OPERATIONAL /
+// UNDERMAINTENANCE / MAINTENANCE / NONE / empty — returns 'operational'. That asymmetry is deliberate
+// for the incident list (never silently drop a real incident) and is inherited here; the consequence
+// is that a new Instatus severity word paints components degraded rather than green, which fails safe.
+function instatusSeverityToStatuspage(raw: string | null | undefined): string {
+  switch (mapInstatusImpact(raw)) {
+    case 'critical':
+    case 'major': return 'major_outage'
+    case 'minor': return 'degraded_performance'
+    default: return 'operational' // null — maintenance / operational / none
+  }
+}
+
+// Statuspage component states ordered BEST → WORST (higher index = more severe). Used to worst-of two
+// ongoing incidents landing on the same component (Instatus lets several overlap), so the card shows
+// the most severe, not the last one written. `partial_outage` is unreachable from the Nuxt severity
+// mapping above (minor → degraded_performance) and is present only to keep this a complete ordering
+// over the Statuspage vocabulary.
+const STATUSPAGE_SEVERITY_ORDER = ['operational', 'degraded_performance', 'partial_outage', 'major_outage']
+
+// #761 — per-component snapshot for Nuxt Instatus pages (Mistral). The Nuxt payload exposes no
+// per-COMPONENT status field (unlike Next.js) — verified live 2026-07-20: none of the five Instatus
+// component-state literals (OPERATIONAL / UNDERMAINTENANCE / DEGRADEDPERFORMANCE / PARTIALOUTAGE /
+// MAJOROUTAGE) occurs anywhere in it. (Incidents DO carry a `lastUpdateStatus`, a different
+// vocabulary, which step 2 below reads.) So component status is DERIVED from what the page publishes:
+//   • the component tree — a group object `{id,name,order,services}` whose `services` deref to the
+//     components (observed fields: id/name/createdAt/order, plus uptime/days on the uptime-section
+//     copies; treat these as an observed superset, not an exhaustive schema), and
+//   • each ONGOING incident's `services[]`, which names the affected components explicitly (e.g.
+//     "Audio API Degraded" → `Audio API`) with ids that match the tree (verified live).
+// A component named by an unresolved incident takes that incident's severity; every other component
+// is `operational`. This is the same "which component is degraded" signal #1062 facet B needs, taken
+// from the provider's own attribution rather than from parsing the incident TITLE — the fragile
+// heuristic #1062 explicitly worried about.
+//
+// LOAD-BEARING ASSUMPTIONS on the current Instatus Nuxt serialization (not guaranteed by the format),
+// stated explicitly because the fixture is authored to match them and therefore cannot falsify them:
+//   (a) a GROUP is distinguishable by carrying `services` + `order` + `name` + `id` while a COMPONENT
+//       carries `createdAt` and an INCIDENT carries `severity`/`lastUpdateStatus`. If a group ever
+//       ships `createdAt` too, step 1 selects nothing.
+//   (b) an ongoing incident is `lastUpdateStatus !== 'RESOLVED'` with an index-ref `services[]` array
+//       whose entries deref to objects whose `id` matches a tree component.
+// Step 1 failing degrades to `[]` (a visibly absent card) and IS diagnosed. Step 2 failing degrades to
+// a confidently WRONG all-operational snapshot during a live outage, which also makes `routingTier`
+// (#1062 facet B) see `degraded.size === 0` and silently fall back to generic LLM peers — the very bug
+// #1062 was filed to fix, with every test still green. That is the malignant case, and it is diagnosed
+// ONLY for the sub-case where an incident still carries a non-empty `services[]` whose refs no longer
+// resolve to tree components (id scheme change, ref shape change).
+//
+// KNOWN UNDIAGNOSED (and, on this payload, undiagnosABLE): if the incident-side `services` KEY itself
+// is renamed or restructured away, the loop skips those objects, nothing is counted, and no warn
+// fires. There is no payload invariant to separate that from the benign "incident opened before
+// components were attached" state — live, exactly 1 of 284 incident-shaped objects carries a
+// `services` key at all, and 0 resolved ones do, so past incidents cannot witness the field's
+// existence either. Any counter that fired on this would fire on that benign state too, which is the
+// cry-wolf failure this warn was already narrowed once to avoid. Named here rather than papered over;
+// the real backstop for a shape change of that size is the `mistral-config.test.ts` name/id pin plus
+// the operator noticing a permanently-green breakdown.
+//
+// ACCEPTED LIMITATION (#761): because the status is derived from incidents, a component the provider
+// marks degraded WITHOUT opening an incident reads `operational` here. That state is unrepresentable
+// in the Nuxt payload — it publishes no component status at all — so this is an upper bound of the
+// source, not a gap in the derivation. (Runtime-indistinguishable from a step-2 drift on its own,
+// which is exactly why the drift gets its own warn.) Display-only: the badge never reads this (#606).
+export function parseInstatusNuxtComponents(html: string): Array<{ id: string; name: string; status: string }> {
+  const match = html.match(/__NUXT_DATA__[^>]*>([\s\S]*?)<\/script/)
+  if (!match) return []
+  let arr: unknown[]
+  // Narrow the try to the parse itself, so a malformed payload is distinguishable from a traversal
+  // bug below (the sibling parsers' single body-wide try conflates the two).
+  try {
+    arr = JSON.parse(match[1]) as unknown[]
+  } catch (err) {
+    console.warn('[parseInstatusNuxtComponents] __NUXT_DATA__ JSON parse failed:', err instanceof Error ? err.message : err)
+    return []
+  }
+  try {
+    // Nuxt serialises every scalar as an index into the flat array; a non-index value is already literal.
+    const deref = (v: unknown): unknown =>
+      typeof v === 'number' && Number.isInteger(v) && v >= 0 && v < arr.length ? arr[v] : v
+    const isObj = (v: unknown): v is Record<string, unknown> =>
+      typeof v === 'object' && v !== null && !Array.isArray(v)
+    const str = (v: unknown): string => (typeof deref(v) === 'string' ? (deref(v) as string) : '')
+
+    // 1. Component tree from the group objects (assumption (a) above). Incidents are excluded three
+    // times over (most carry no `services` key at all; all carry `severity`/`lastUpdateStatus`; none
+    // carry `order`). What `order` UNIQUELY excludes is the second group-SHAPED object
+    // `{id,name,services,uptime}` — the uptime rollup — which would otherwise re-add the same
+    // components. The explicit field exclusion below is defence-in-depth.
+    const tree = new Map<string, { name: string; status: string }>()
+    for (const v of arr) {
+      if (!isObj(v)) continue
+      if (!('services' in v) || !('order' in v) || !('name' in v) || !('id' in v)) continue
+      if ('severity' in v || 'lastUpdateStatus' in v || 'createdAt' in v) continue
+      const services = deref(v.services)
+      if (!Array.isArray(services)) continue
+      for (const ref of services) {
+        const comp = deref(ref)
+        if (!isObj(comp)) continue
+        const id = str(comp.id)
+        const name = str(comp.name)
+        if (id && name) tree.set(id, { name, status: 'operational' })
+      }
+    }
+    if (tree.size === 0) {
+      // Assumption (a) broke (or this simply isn't a status page). Mirrors the #911 warn-once on the
+      // Next.js path — an empty breakdown should read as diagnosable drift, not as a code bug.
+      warnEmptyNuxtTree()
+      return []
+    }
+
+    // 2. Overlay the ongoing incidents' own component attribution (worst-of on overlap).
+    // `incidentShaped` / `overlaid` exist ONLY to detect assumption (b) breaking: see below.
+    let incidentShaped = 0
+    let overlaid = 0
+    for (const v of arr) {
+      if (!isObj(v)) continue
+      if (!('lastUpdateStatus' in v) || !('services' in v) || !('severity' in v)) continue
+      if (str(v.lastUpdateStatus) === 'RESOLVED') continue
+      const status = instatusSeverityToStatuspage(str(v.severity))
+      if (status === 'operational') continue // in-progress MAINTENANCE lands here — not an outage
+      const services = deref(v.services)
+      if (!Array.isArray(services) || services.length === 0) continue
+      // Counted only once the incident is ATTRIBUTABLE — impactful AND carrying components. An
+      // in-progress maintenance window, or an incident opened before components are attached (a very
+      // common real state), is a legitimate reason for a fully-operational snapshot, so counting it
+      // here would make the drift warn below cry wolf on ordinary traffic — which is how a warn-once
+      // gets learned as noise and stops being read. Assumption (b) breaking still counts: those
+      // incidents carry a non-empty services[] and fail later, at `tree.get`.
+      incidentShaped++
+      for (const ref of services) {
+        const svc = deref(ref)
+        if (!isObj(svc)) continue
+        const entry = tree.get(str(svc.id))
+        if (!entry) continue // named a component outside the tree (e.g. ungrouped) — drop, don't invent
+        overlaid++
+        if (STATUSPAGE_SEVERITY_ORDER.indexOf(status) > STATUSPAGE_SEVERITY_ORDER.indexOf(entry.status)) {
+          entry.status = status
+        }
+      }
+    }
+    // THE malignant failure: the tree parsed, incidents that DO name components are unresolved, yet not
+    // one of them landed on a component. Every row then reads `operational` during a live outage — an
+    // affirmatively wrong "verified healthy" card, strictly worse than an empty one, and it silently
+    // defeats #1062 routing. Deliberately NOT fired when there are no ongoing incidents (the healthy
+    // steady state), nor when the only unresolved ones are maintenance or not-yet-attributed — those
+    // are legitimate reasons for an all-operational snapshot.
+    if (incidentShaped > 0 && overlaid === 0) warnNuxtOverlayNoop()
+
+    return [...tree].map(([id, { name, status }]) => ({ id, name, status }))
+  } catch (err) {
+    // Traversal (not parse) failure — a shape change that throws mid-walk. Logged distinguishably from
+    // the JSON.parse guard above so the two aren't conflated in the operator log.
+    console.warn('[parseInstatusNuxtComponents] traversal failed:', err instanceof Error ? err.message : err)
+    return []
+  }
+}
+
+let warnedEmptyNuxtTree = false
+function warnEmptyNuxtTree(): void {
+  if (warnedEmptyNuxtTree) return
+  warnedEmptyNuxtTree = true
+  console.warn('[parseInstatusNuxtComponents] __NUXT_DATA__ present but NO component group matched — Instatus Nuxt group shape may have changed (#761); the breakdown card will be absent')
+}
+
+let warnedNuxtOverlayNoop = false
+function warnNuxtOverlayNoop(): void {
+  if (warnedNuxtOverlayNoop) return
+  warnedNuxtOverlayNoop = true
+  console.warn('[parseInstatusNuxtComponents] component-attributed unresolved incidents exist but NONE overlaid onto a tree component — Instatus Nuxt component ids may have changed (#761); EVERY component will read operational and #1062 fallback routing will silently fall back to default peers')
+}
+
+// #761 — per-component snapshot for the ServiceDetails / is-down breakdown card. The two Instatus SSR
+// formats expose it differently, so this is the single entry point and dispatches (mirroring
+// `parseInstatusIncidents` / `parseInstatusUptime`): Next.js reads a real per-component `status`
+// field below; Nuxt has none and derives it from incident attribution in `parseInstatusNuxtComponents`.
+// Reuses `buildInstatusComponentMap` — which isolates the TOP-LEVEL components (their children,
 // e.g. fal's "Model API"/"Serverless API" under the "API" group, are excluded via the `"group"`-field
 // discriminator, #911), giving a uniform top-level granularity across services — then reads each
 // component's `status` from the unescaped payload. Returns the Atlassian-shaped {id,name,status} so it
 // feeds `resolveSvcComponents()` (with the service's `displayComponentIds`) exactly like a summary.json
 // component list.
 export function parseInstatusComponents(html: string): Array<{ id: string; name: string; status: string }> {
-  if (!html.includes('__next_f') || html.includes('__NUXT_DATA__')) return []
+  if (html.includes('__NUXT_DATA__')) return parseInstatusNuxtComponents(html)
+  if (!html.includes('__next_f')) return []
   // Blanket `\"`→`"` unescape (safe — same rationale as parseInstatusNextUptime): component objects
   // carry no embedded quotes in the fields we read (id, name.default, status enum).
   const u = html.replace(/\\"/g, '"')

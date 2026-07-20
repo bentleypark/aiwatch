@@ -300,6 +300,36 @@ describe('buildRssFeed — fallback suggestions (#467)', () => {
     expect(xml).not.toContain('Try instead:')
   })
 
+  // #1062 facet B — the routed/non-routed label split on the SINGLE-group path. Driven through the
+  // real buildRssFeed (fallbackLine is module-private), so this pins the shipped feed text, not a
+  // reimplementation of the expression.
+  it('keeps the capability label when a single group is ROUTED (secondary-capability outage)', () => {
+    // Mistral degraded ONLY on its Audio component → routes to the Voice tier. Without the label the
+    // item would read "Try instead: AssemblyAI · ElevenLabs" with no hint why voice services appear.
+    const mistral = service({
+      id: 'mistral', name: 'Mistral', category: 'api', status: 'degraded',
+      incidents: [incident({ id: 'm1', title: 'Audio API Degraded' })],
+      components: [
+        { id: 'c1', name: 'Chat Completions API', status: 'operational' },
+        { id: 'c2', name: 'Audio API', status: 'degraded' },
+      ],
+    })
+    const voice = [
+      service({ id: 'assemblyai', name: 'AssemblyAI', category: 'api', status: 'operational' }),
+      service({ id: 'elevenlabs', name: 'ElevenLabs', category: 'api', status: 'operational' }),
+    ]
+    const xml = buildRssFeed([mistral, ...voice, ...candidates], { scope: 'all' }, NOW)
+    expect(xml).toContain('Try instead: Audio / speech → ')
+    expect(xml).toMatch(/Try instead: Audio \/ speech → (AssemblyAI|ElevenLabs)/)
+  })
+
+  it('keeps the flat form when the single group is NOT routed (no behaviour change)', () => {
+    const down = service({ id: 'claude', name: 'Claude', category: 'api', status: 'down', incidents: [incident({ id: 'd2' })] })
+    const xml = buildRssFeed([down, ...candidates], { scope: 'all' }, NOW)
+    expect(xml).toMatch(/Try instead: (OpenAI|Gemini)/)
+    expect(xml).not.toContain('→') // no label arrow on a plain same-tier recommendation
+  })
+
   it('omits the fallback line on the resolved item', () => {
     const resolved = service({ id: 'claude', name: 'Claude', category: 'api', status: 'down', incidents: [incident({ id: 'rr', status: 'resolved', resolvedAt: '2026-05-10T14:00:00.000Z' })] })
     const xml = buildRssFeed([resolved, ...candidates], { scope: 'all' }, NOW)

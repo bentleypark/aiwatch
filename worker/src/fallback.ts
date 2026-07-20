@@ -94,7 +94,8 @@ interface FallbackCandidate {
   /** #1062 facet B — per-component status snapshot (ServiceStatus.components, #604). Read by
    *  `routingTier` to detect a secondary-capability-only outage (OpenAI 'Images' down while 'Chat
    *  Completions' operational) and route the fallback to that capability's tier. Absent for services
-   *  with <2 matched components (e.g. Mistral's single 'API' group — #761); those fall to the default. */
+   *  with <2 matched components; those fall to the default. Mistral's Nuxt page now supplies 12
+   *  (#761 — derived from its component tree + ongoing-incident attribution). */
   components?: Array<{ name: string; status: string }>
   /** #554 — provider is intentionally NOT read by selection here: the worker has no same-provider
    *  exclusion (the dashboard dropped its dashboard-only one for parity). Carried only so the #554
@@ -178,6 +179,13 @@ export function capabilityOfComponent(name: string): string {
 // has no monitored substitute → suppressed rather than mis-recommended. `embeddings`: no entry because
 // there is no embeddings tier — Voyage is both EXCLUDE_FALLBACK'd and untiered; enabling it needs #880 to
 // add a sibling + an API_TIER embeddings tier AND an entry here. `realtime`: no peer at all. Keep in lockstep.
+// LIVE CONSEQUENCE of the missing `embeddings` entry, recorded so it is a decision and not a
+// side effect: an embeddings-ONLY outage at a service whose components[] names an embeddings surface
+// emits NO fallback on any surface (RSS item, Discord alert, is-down card, Analyze modal) instead of
+// the pre-#1062 default LLM peers. That is already live for OpenAI and Cohere (whose components
+// include `embeddings`/`embed-*`), and #761 adds Mistral (`Embeddings API`) to the same behaviour —
+// deliberately, so all three act alike rather than Mistral keeping a wrong-capability recommendation.
+// #880 (Jina sibling + an embeddings tier + un-excluding Voyage) is what flips all of them to routing.
 export const CAPABILITY_TIER: Record<string, number> = {
   image: 7, // Stability / FLUX
   video: 5, // Runway / Luma
@@ -238,12 +246,22 @@ export function isCapabilityProvider(candidateId: string, sourceTier: number): b
 //                      because it has no CAPABILITY_TIER entry (`realtime`; `embeddings`, whose peer
 //                      Voyage is both EXCLUDE_FALLBACK'd AND untiered until #880) → suppress.
 //   • a tier number  → route candidates to that capability's tier.
-// Requires components[] (present only for ≥2-component services), so Mistral's single-'API' Nuxt page
-// (#761) yields null until it exposes components — then it is covered here with no further change.
+// Requires components[]. No enumeration of "which services are multi-capability" is kept here: the
+// set is emergent (any service whose components[] names a surface COMPONENT_CAPABILITY matches), the
+// two previous attempts to list it were both wrong, and a stale list reads as a guarantee. Derive it
+// from SERVICES × COMPONENT_CAPABILITY if you need it.
+// Mistral (#761) is worth one note because its components[] is DERIVED, not published: its Nuxt page
+// exposes no component status, so the snapshot comes from the component tree overlaid with each
+// ongoing incident's own `services[]` attribution. A live "Audio API Degraded" therefore routes to
+// the Voice tier — the case #1062 originally reported.
 // CAVEAT: components[] is sourced from `displayComponentIds` while the OVERALL status that gates
-// anchoring uses `statusComponentIds`. They are the same 12 ids for OpenAI (only multi-cap service
-// today); if a future multi-cap service diverges them, the component that drove the outage may be
-// absent from components[] → degraded.size===0 → default. Verify the two sets agree when adding one.
+// anchoring is resolved separately (statusComponentIds, or — for Mistral — from incidents). When the
+// two disagree, the component that drove the outage can be ABSENT from components[] → degraded.size
+// === 0 → default tier. This is live for Mistral, not hypothetical: displayComponentIds covers only
+// its 12 "API"-group components, so an incident on the "Services" group's `Vibe` or `Document
+// Library` (neither of which `incidentExclude` drops) degrades the badge while every listed component
+// still reads operational. Acceptable — it fails to the default, never to a wrong capability — but do
+// not assume the two sets agree; verify when adding a service.
 export function routingTier(svc: FallbackCandidate | undefined): number | null {
   const comps = svc?.components
   if (!comps || comps.length === 0) return null

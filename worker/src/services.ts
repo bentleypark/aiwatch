@@ -86,7 +86,27 @@ export const SERVICES: ServiceConfig[] = [
   // 2026-07-03 AI Registry Prompts/Skills flaps). Same knob Langfuse uses (#792): a non-major NEW
   // incident is held ~2 cron cycles before alerting, so a self-resolving flap never fires while a
   // genuine longer incident (e.g. the 120h Fine Tuning degradation) still alerts.
-  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/incidents/page/1', incidentExclude: ['le chat', 'le console', 'documentation', 'website'], statusComponent: 'API', holdShortIncidents: true },
+  // #761 — instatusUrl points at `/activity/page/1`, the incidents listing's CURRENT home. Mistral
+  // moved it: `/incidents/page/1` now 301s there (verified 2026-07-20). `fetchWithTimeout` follows
+  // redirects, so the stale URL still parsed and the drift was invisible. Fixed because the scrape
+  // fetch fails SILENTLY, not loudly: it has its own `.catch` (→ `null`, `parseErrors++`), and the
+  // Instatus return path calls `trackFetchFailure` but DISCARDS its `shouldDegrade` — the status it
+  // returns is derived from the ROOT `statusUrl` response instead. So a throwing scrape URL doesn't
+  // degrade the service; it empties `incidents`, risking a false RECOVERY (an ongoing incident
+  // vanishing) plus the loss of uptime + the components snapshot. Removing the hop also removes that
+  // exposure on the */5 cron. The root `statusUrl` still serves the component tree + uptime.
+  // #761 — displayComponentIds: the 12 components of Mistral's own "API" group. The 5 "Services"
+  // components (Le Console/Documentation/Vibe/Document Library/Website) are omitted so the breakdown
+  // stays an API-surface card — NOT because incidentExclude covers them: it is a substring match on
+  // the incident TITLE (['le chat','le console','documentation','website']) and drops only 3 of the 5
+  // ('Vibe' matches nothing; 'documentation' is not a substring of 'document library'). See the
+  // CAVEAT on routingTier in fallback.ts for what that divergence costs. NO
+  // componentGroups: a single group label would collapse all 12 into one row (ServiceDetails groups
+  // by label), destroying the per-component visibility this card exists for — the 12 names are
+  // already self-describing. Display-only (#606): components[] never feeds the badge — on this branch the
+  // badge is `hasOngoing ? 'degraded' : httpStatus` (the filtered incident list + the root page's
+  // HTTP status); statusComponent feeds only the uptime% and the #357 exclude-bypass.
+  { id: 'mistral', name: 'Mistral API', provider: 'Mistral AI', category: 'api', statusUrl: 'https://status.mistral.ai', apiUrl: null, instatusUrl: 'https://status.mistral.ai/activity/page/1', incidentExclude: ['le chat', 'le console', 'documentation', 'website'], statusComponent: 'API', holdShortIncidents: true, displayComponentIds: ['c4869a5a-054c-4c1b-88d1-3d195ba58511', '6d1417e5-81f5-44f4-bfd4-d2eb44d95988', '09f74bbf-a6e6-4751-a057-70da6c502c06', 'd7e0541d-b743-4cad-96cb-dd1395422904', '9f01cfda-c067-426b-b1aa-081541169174', 'd8e1e02e-48a4-4d97-8168-a8aabc1c51fb', '033ab409-a16e-4574-aef5-f2f0afc1f6cd', '4051fbf9-fea4-434a-90c1-b347c16e02ba', '78e74758-aa8f-4067-9147-d7f1ab90849a', '02a249ad-72d5-432a-8937-a5ab69a0b7f8', '7fadf202-f02f-40a2-84a4-c4f4041b7865', 'bd64fd4f-286c-4a86-bd31-006a7ea5aa03'] },
   // displayAllComponents (#606): per-model statuspage — show every model/surface except Docs/Website
   // (dynamic, so new/retired models need no config edit). componentSurfaces stay as individual rows;
   // the rest fold into a collapsible "Models" group (matches the official Endpoints/Models split).
@@ -1721,7 +1741,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       let instatusUptime: number | null = null // #627 — Instatus per-component official uptime%
       let instatusReported: number | null = null // #1006 — the page's own published aggregate (disclosure)
       let instatusReportedDays: number | null = null
-      let instatusComponents: ServiceComponent[] = [] // #761 — Instatus per-component snapshot (Next.js only)
+      let instatusComponents: ServiceComponent[] = [] // #761 — Instatus per-component snapshot (Next.js reads a published status; Nuxt derives one)
       if (config.onlineOrNotUrl && res.ok) {
         const html = await res.text()
         incidents = parseOnlineOrNotIncidents(html)
@@ -1745,8 +1765,9 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
           // status page (res = statusUrl), not the /incidents listing scraped above — so read res
           // here to extract the named component's uptime% (mistral 'API' Nuxt flat-ref; perplexity
           // 'API' Next.js componentsUptime[id].uptime). Else it shows "Not provided".
-          // #761 — the same main-page HTML also carries the per-component snapshot (Next.js only), so
-          // read it ONCE and parse uptime + components from it.
+          // #761 — the same main-page HTML also carries the per-component snapshot (Next.js publishes a
+          // per-component status; Nuxt has none, so parseInstatusComponents derives it from that page's
+          // component tree + ongoing-incident attribution), so read it ONCE for uptime + components.
           if (res.ok) {
             const mainHtml = await res.text()
             if (config.statusComponent) {
@@ -1759,6 +1780,25 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
             const instatusComps = parseInstatusComponents(mainHtml)
             if (instatusComps.length > 0) {
               instatusComponents = resolveSvcComponents(config, { components: instatusComps })
+              // #761 — the #606 curated-id drift signal above is inside the ATLASSIAN branch and gates on
+              // `breakdownComponents`, so it never sees Instatus services (fal/perplexity/mistral) even
+              // though they carry the same hand-maintained `displayComponentIds`. Mistral's is another
+              // hand-maintained 12-id list; a rotated/renamed id would drop the breakdown
+              // under the ≥2 gate AND silently revert #1062 routing (components.length === 0 →
+              // routingTier null). Same warn, applied to the branch that actually produced these.
+              if (config.displayComponentIds) {
+                const missing = config.displayComponentIds.filter(
+                  (id) => !instatusComps.some((c) => c.id === id),
+                )
+                if (missing.length > 0) {
+                  console.warn(`[fetchService] ${config.id} displayComponentIds missing (Instatus breakdown drift): ${missing.join(', ')}`)
+                }
+              }
+            } else if (config.displayComponentIds) {
+              // A service we asserted SHOULD have a breakdown produced none. Distinguishes "parse
+              // yielded nothing" from the ordinary "this page has no components" case, which the
+              // bare `length > 0` guard otherwise collapses together.
+              console.warn(`[fetchService] ${config.id} has displayComponentIds but the Instatus page yielded no components (parse/shape drift?)`)
             }
           } else {
             res.body?.cancel()
@@ -1925,7 +1965,7 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
         ...(betterStackComponents.length > 0
           ? { components: betterStackComponents }
           : instatusComponents.length > 0
-            ? { components: instatusComponents } // #761 — Instatus per-component snapshot (Next.js)
+            ? { components: instatusComponents } // #761 — Instatus per-component snapshot (Next.js + Nuxt)
             : {}),
       }
     }

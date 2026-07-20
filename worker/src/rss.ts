@@ -284,7 +284,18 @@ function fallbackLine(svc: ServiceStatus, inc: Incident, services: ServiceStatus
   const affectedIds = services.filter((s) => (s.incidents ?? []).some((i) => i.id === inc.id)).map((s) => s.id)
   const groups = getGroupedFallbacks(affectedIds.length > 0 ? affectedIds : [svc.id], services)
   if (groups.length === 0) return undefined
-  if (groups.length === 1) return `Try instead: ${groups[0].fallbacks.map((f) => f.name).join(' · ')}`
+  // #1062 facet B — a ROUTED group (one with a `capability`) must keep its label even when it is the
+  // ONLY group. Without it a Mistral "Audio API Degraded" item reads "Try instead: AssemblyAI ·
+  // ElevenLabs", leaving a subscriber no way to tell why voice services are offered for an LLM
+  // provider's outage — the exact gap the self-describing labels were introduced to close, which the
+  // single-group path was silently bypassing (it hit OpenAI's Images/Sora routing too, shipped in PR #1071).
+  // A NON-routed single group keeps the flat form, byte-identical to before.
+  if (groups.length === 1) {
+    const g = groups[0]
+    return g.capability
+      ? `Try instead: ${g.label} → ${g.fallbacks.map((f) => f.name).join(' · ')}`
+      : `Try instead: ${g.fallbacks.map((f) => f.name).join(' · ')}`
+  }
   return `Try instead: ${groups.map((g) => `${g.label} → ${g.fallbacks.map((f) => f.name).join('/')}`).join(' · ')}`
 }
 
