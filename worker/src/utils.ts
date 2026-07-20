@@ -285,17 +285,29 @@ export function formatNewComponentAlert(
   return `Status page for **${who}** added ${newComponents.length} new component${newComponents.length === 1 ? '' : 's'}:\n${list}\n\n${action}`
 }
 
-/** Check if cached data is stale (strictly older than threshold, or missing cachedAt). */
-export function isCacheStale(raw: string | null, thresholdMs: number, now = Date.now()): { stale: boolean; services: unknown[] } {
-  if (!raw) return { stale: true, services: [] }
+/** Check if cached data is stale (strictly older than threshold, or missing cachedAt).
+ *
+ *  Also returns the snapshot's `upstreamFeeds` (#1072). This function is the cron's ONLY parser of the
+ *  snapshot shape, and the cron's #488 alert-edge refresh REWRITES that snapshot — so without the feeds
+ *  here, a fresh-cache cron (which never live-fetches) would have nothing to write back and would erase
+ *  the feeds from KV on the very write that fires when an incident starts. Reading them out alongside
+ *  `services` keeps the read and the write symmetric in the one place that parses the shape.
+ *
+ *  `[]` when absent — a snapshot written by a pre-#1072 worker (manual, batched deploys) legitimately
+ *  has no such key, and an empty feed list is also the normal healthy state, so the two are correctly
+ *  indistinguishable to every consumer: both mean "claim no upstream". */
+export function isCacheStale(raw: string | null, thresholdMs: number, now = Date.now()): { stale: boolean; services: unknown[]; upstreamFeeds: unknown[] } {
+  if (!raw) return { stale: true, services: [], upstreamFeeds: [] }
   try {
     const parsed = JSON.parse(raw)
     const services = Array.isArray(parsed) ? parsed : parsed?.services
-    if (!Array.isArray(services) || services.length === 0) return { stale: true, services: [] }
+    // A bare-array snapshot (the legacy shape the line above still tolerates) has no room for feeds.
+    const upstreamFeeds = (!Array.isArray(parsed) && Array.isArray(parsed?.upstreamFeeds)) ? parsed.upstreamFeeds : []
+    if (!Array.isArray(services) || services.length === 0) return { stale: true, services: [], upstreamFeeds: [] }
     const cachedAt = parsed?.cachedAt ? new Date(parsed.cachedAt).getTime() : 0
-    return { stale: now - cachedAt > thresholdMs, services }
+    return { stale: now - cachedAt > thresholdMs, services, upstreamFeeds }
   } catch {
-    return { stale: true, services: [] }
+    return { stale: true, services: [], upstreamFeeds: [] }
   }
 }
 

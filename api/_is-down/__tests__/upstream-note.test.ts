@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { buildUpstreamNote, type UpstreamLinkLike } from '../upstream-note'
+import { buildUpstreamNote, type UpstreamLinkLike, isSafeExternalUrl } from '../upstream-note'
 import { renderUpstreamNote } from '../html-template'
 
 // The real 2026-07-17 payload, read off /api/status/cached: claude opened 'Elevated errors on Sonnet 5
@@ -32,6 +32,7 @@ describe('buildUpstreamNote (#1053)', () => {
         incidentTitle: 'Elevated errors on Sonnet 5 and Haiku 4.5',
         startedAt: '2026-07-17T06:47:54.909Z',
         href: '/is-claude-down',
+      external: false,
         leadMinutes: 29,
       }],
     })
@@ -223,4 +224,88 @@ describe('renderUpstreamNote (#1053) — a card, reporting the dependent\'s clai
     expect(html).toContain('Amazon Bedrock')
     expect(html).not.toContain('<a class="mono"')
   })
+})
+
+// #1072 — the external-link path and its scheme guard.
+describe('isSafeExternalUrl (#1072)', () => {
+  it('accepts http and https', () => {
+    expect(isSafeExternalUrl('https://www.githubstatus.com')).toBe(true)
+    expect(isSafeExternalUrl('http://status.example.com/x?a=1')).toBe(true)
+  })
+
+  it('rejects javascript: — the reason this guard exists', () => {
+    // `esc()` neutralizes markup characters and this payload contains none, so without the scheme
+    // check it would land verbatim in an href. The value crosses a network boundary behind a
+    // structural cast, so "our own config produces it" is a fact about today, not a type guarantee.
+    expect(isSafeExternalUrl('javascript:alert(1)')).toBe(false)
+    expect(isSafeExternalUrl('JaVaScRiPt:alert(1)')).toBe(false)
+    expect(isSafeExternalUrl('data:text/html,<script>alert(1)</script>')).toBe(false)
+  })
+
+  it('rejects a protocol-relative URL (no base → URL throws → fail closed)', () => {
+    expect(isSafeExternalUrl('//evil.example.com')).toBe(false)
+  })
+
+  it('rejects absent/empty', () => {
+    expect(isSafeExternalUrl(undefined)).toBe(false)
+    expect(isSafeExternalUrl('')).toBe(false)
+  })
+
+  it('a feed carrying an unsafe statusUrl renders a LINKLESS row, not a poisoned href', () => {
+    const poisoned = {
+      id: 'chatgpt',
+      incidentTitle: 'Elevated errors for GitHub-dependent ChatGPT and Codex workflows',
+      startedAt: '2026-07-20T00:34:34Z',
+      upstream: [{
+        id: 'github-platform', name: 'GitHub', status: 'degraded',
+        incidentTitle: 'Incident with GitHub Actions', startedAt: '2026-07-19T23:34:03.457Z',
+        statusUrl: 'javascript:alert(1)',
+      }],
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const note = buildUpstreamNote([poisoned], 'chatgpt')!
+      expect(note.upstream[0].href).toBeNull()
+      expect(note.upstream[0].external).toBe(false)
+      // A REJECTED url must be distinguishable from an ABSENT one. Absent is the expected state for
+      // every service upstream and for every feed during the post-merge deploy-skew window, so if the
+      // defect shared that path it would never be noticed.
+      expect(warn.mock.calls.map((c) => String(c[0])).join('\n')).toContain('rejected as unsafe')
+    } finally { warn.mockRestore() }
+  })
+
+  it('does NOT warn when statusUrl is simply absent (the expected deploy-skew state)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      buildUpstreamNote([{
+        id: 'chatgpt', incidentTitle: 'x', startedAt: '2026-07-20T00:34:34Z',
+        upstream: [{ id: 'github-platform', name: 'GitHub', status: 'degraded', incidentTitle: 'y', startedAt: '2026-07-19T23:34:03.457Z' }],
+      }], 'chatgpt')
+      expect(warn.mock.calls.map((c) => String(c[0])).join('\n')).not.toContain('rejected as unsafe')
+    } finally { warn.mockRestore() }
+  })
+})
+
+it('#1072 — an upstream with BOTH an is-down page and a statusUrl links INTERNALLY', () => {
+  // Two mechanisms, one rule: the ternary order in `buildUpstreamNote` decides the href, and the
+  // `!slug` in `external` decides the flag (and so target/rel/GA destination). Both are invisible
+  // unless an upstream carries a slug AND a statusUrl, which none does today — the worker emits
+  // statusUrl only for feeds, and feeds have no slug. A future feed that gains an is-down page would
+  // otherwise start sending readers off-site with nothing to catch it.
+  const both = {
+    id: 'chatgpt',
+    incidentTitle: 'Elevated errors for GitHub-dependent ChatGPT and Codex workflows',
+    startedAt: '2026-07-20T00:34:34Z',
+    upstream: [{
+      id: 'claude', name: 'Claude API', status: 'degraded',
+      // Claude's OWN incident stamp (2026-07-17) — the same payload this file's header describes.
+      // Not GitHub's 07-19 stamp: these assertions read only href/external, so there is no reason to
+      // carry another incident's timestamp under a Claude title.
+      incidentTitle: 'Elevated errors on Sonnet 5 and Haiku 4.5', startedAt: '2026-07-17T06:47:54.909Z',
+      statusUrl: 'https://status.claude.com',
+    }],
+  }
+  const note = buildUpstreamNote([both], 'chatgpt')!
+  expect(note.upstream[0].href).toBe('/is-claude-down')
+  expect(note.upstream[0].external).toBe(false)
 })

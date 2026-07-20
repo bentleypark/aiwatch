@@ -18,6 +18,7 @@ import { parseDetectionEntry, resolveDetectionUpdate, serializeDetectionEntry, g
 import { appendAlertFeed, readAlertFeed, buildFeedEntry, kindFromKey, svcIdsForAlert, type AlertFeedEntry } from './alert-feed'
 import { buildSupplyChainBanner } from './supply-chain'
 import { buildUpstreamLinks } from './upstream-link'
+import type { UpstreamCandidate } from './upstream-feed'
 import { refreshStatusCacheOnChange, refreshStatusCacheOnLiveEdge } from './cache-refresh'
 import { pingIndexNow } from './indexnow'
 import { subscribe as subscribeWebhook, confirm as confirmWebhook, updateFilters as updateWebhookFilters, unsubscribe as unsubscribeWebhook, sha256Hex as webhookSha256Hex, deliverToSubscribers, listConfirmedHashes, isValidEncKey, computeSubscriberDelta } from './webhook-subscriptions'
@@ -177,7 +178,7 @@ function todayUTC(): string {
 // below swallows a KV failure — so `true` means "attempted", not "guaranteed persisted".) #1057 — the
 // /api/status handler reads this boolean: a `false` means CACHE_KEY still holds the previous snapshot,
 // so a status edge on this poll must be force-refreshed (throttle bypassed).
-async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl?: string): Promise<boolean> {
+async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], upstreamFeeds: UpstreamCandidate[], discordUrl?: string): Promise<boolean> {
   const now = Date.now()
   if (now - lastKvWrite < KV_WRITE_INTERVAL_MS) return false
   lastKvWrite = now
@@ -212,12 +213,13 @@ async function cacheWrite(kv: KVNamespace, services: ServiceStatus[], discordUrl
   })
 
   // Write cache + daily counters (2 writes per interval). The CACHE_KEY snapshot shape
-  // ({ services, cachedAt }) MUST match cache-refresh.ts `writeStatusCache` (the #488/#1057 primitive);
+  // ({ services, upstreamFeeds, cachedAt }) MUST match cache-refresh.ts `writeStatusCache` (the #488/#1057 primitive);
   // it stays inline here (not routed through writeStatusCache) only so the KV-limit-exceeded alert can
   // hang off this shared Promise.all `.catch` — kvPut swallows internally and would hide the limit.
   await Promise.all([
     kv.put(CACHE_KEY, JSON.stringify({
       services,
+      upstreamFeeds,
       cachedAt: new Date().toISOString(),
     }), { expirationTtl: CACHE_TTL_SECONDS }),
     kv.put(dailyKey, JSON.stringify(counters), {
@@ -354,7 +356,12 @@ async function writeProbeSnapshot(kv: KVNamespace): Promise<void> {
   }
 }
 
-async function cacheRead(kv: KVNamespace): Promise<{ services: ServiceStatus[]; cachedAt: string } | null> {
+// `upstreamFeeds` is OPTIONAL on read while REQUIRED on write (#1072) — deliberately asymmetric, and
+// the asymmetry is not laziness. A snapshot written by the currently-deployed worker predates this
+// key, and the worker deploy is manual + batched (CLAUDE.md), so for hours after merge every read hits
+// a feed-less snapshot. Modelling it as required would be a type that lies about the bytes in KV.
+// Absence means "no feeds known" → the link stays quiet, which is the correct fail-closed answer.
+async function cacheRead(kv: KVNamespace): Promise<{ services: ServiceStatus[]; upstreamFeeds?: UpstreamCandidate[]; cachedAt: string } | null> {
   const raw = await kv.get(CACHE_KEY).catch(() => null)
   if (!raw) return null
   try { return JSON.parse(raw) } catch (err) { console.warn('[kv] cache parse failed:', err instanceof Error ? err.message : err); return null }
@@ -566,8 +573,12 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // Read cached service data — fetch live if cache is stale or missing
   const raw = await env.STATUS_CACHE.get(CACHE_KEY).catch(() => null)
   const STALE_THRESHOLD_MS = 10 * 60 * 1000
-  const { stale, services: cachedServices } = isCacheStale(raw, STALE_THRESHOLD_MS)
+  const { stale, services: cachedServices, upstreamFeeds: cachedFeeds } = isCacheStale(raw, STALE_THRESHOLD_MS)
   let services = cachedServices as ServiceStatus[]
+  // #1072 — mirrors `services` exactly: the cached snapshot's feeds, replaced by fresh ones only when
+  // this cycle actually live-fetched. The #488 refresh below rewrites the snapshot, so carrying the
+  // cached value forward is what stops a fresh-cache cron from erasing the feeds.
+  let upstreamFeeds = cachedFeeds as UpstreamCandidate[]
 
   // If cache is stale (>10min) or empty, fetch live data to avoid alert decisions on outdated status.
   // Does NOT write to KV — cache writes are handled exclusively by /api/status handler's cacheWrite()
@@ -583,9 +594,13 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       if (probeRaw) {
         try { cronProbes = JSON.parse(probeRaw).snapshots ?? [] } catch (err) { console.warn('[cron] probe24h parse failed:', err instanceof Error ? err.message : err) }
       }
-      const { raw: freshServices, pageComponents } = await fetchAllServices(env.STATUS_CACHE, cronProbes)
+      const { raw: freshServices, pageComponents, upstreamFeeds: freshFeeds } = await fetchAllServices(env.STATUS_CACHE, cronProbes)
       if (freshServices.length > 0) {
         services = freshServices
+        // Adopted only alongside a usable service list, so `services` and `upstreamFeeds` always come
+        // from the SAME cycle. A mixed snapshot (fresh feeds beside stale services) would let the
+        // upstream gate reason about two different moments in time.
+        upstreamFeeds = freshFeeds
       }
       cronPageComponents = pageComponents
     } catch (err) {
@@ -1378,7 +1393,7 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   // and is only re-snapshotted at the next edge (recovery) or by the throttled /api/status path. The
   // headline (status flip) is fixed; continuous score freshness during an active incident is a
   // deliberate non-goal here (it would mean a KV write every cron while any incident is active).
-  const refreshed = await refreshStatusCacheOnChange(env.STATUS_CACHE, services, sent.length, CACHE_KEY, CACHE_TTL_SECONDS)
+  const refreshed = await refreshStatusCacheOnChange(env.STATUS_CACHE, services, upstreamFeeds, sent.length, CACHE_KEY, CACHE_TTL_SECONDS)
   // Escalated to error (not warn): a failed refresh silently reintroduces the exact staleness bug
   // #488 fixes, and it's most likely to fail precisely during an incident (KV under write pressure).
   // kvPut already logs the underlying cause; this records the user-facing impact at the same severity
@@ -4091,7 +4106,8 @@ export default {
         // makes a #873 `assert:` clause possible on this issue — the gate RESULT is not assertable
         // because it is outage-timed. #574's banner has the conditional shape and has sat
         // verify-blocked ever since; that is the outcome this avoids.
-        const upstreamLinks = buildUpstreamLinks(scoredCached, Date.now())
+        // #1072 — feeds ride in the same snapshot (see cacheRead: absent on a pre-#1072 snapshot).
+        const upstreamLinks = buildUpstreamLinks(scoredCached, cached.upstreamFeeds ?? [], Date.now())
 
         return new Response(JSON.stringify({
           services: scoredCached,
@@ -4249,12 +4265,12 @@ export default {
         }
       }
 
-      const { raw, enriched } = await fetchAllServices(env.STATUS_CACHE, probe24h)
+      const { raw, enriched, upstreamFeeds } = await fetchAllServices(env.STATUS_CACHE, probe24h)
 
       // Cache results after cross-validation (probe-verified, no fallback substitution — prevents cache poisoning)
       // Await cacheWrite so badge/v1 endpoints see data immediately
       if (env.STATUS_CACHE) {
-        const wrote = await cacheWrite(env.STATUS_CACHE, raw, env.DISCORD_WEBHOOK_URL)
+        const wrote = await cacheWrite(env.STATUS_CACHE, raw, upstreamFeeds, env.DISCORD_WEBHOOK_URL)
         ctx.waitUntil(writeLatencySnapshot(env.STATUS_CACHE, raw))
         // #1057 — when the 10-min throttle skipped cacheWrite, CACHE_KEY still holds the previous
         // snapshot, which the is-down/OG surfaces (via /api/status/cached) read. If THIS poll's fresh
@@ -4266,7 +4282,7 @@ export default {
         // budgeted resource; the WRITE is, and it fires only on a rare status edge (self-silencing: the
         // next poll reads the fresh snapshot → no edge). Counters stay with cacheWrite (the #488 rule).
         ctx.waitUntil(
-          refreshStatusCacheOnLiveEdge(env.STATUS_CACHE, wrote, raw, CACHE_KEY, CACHE_TTL_SECONDS, cacheRead).then((outcome) => {
+          refreshStatusCacheOnLiveEdge(env.STATUS_CACHE, wrote, raw, upstreamFeeds, CACHE_KEY, CACHE_TTL_SECONDS, cacheRead).then((outcome) => {
             if (outcome === 'refreshed') console.log('[api/status] #1057 status edge while throttled — forced CACHE_KEY refresh so OG/SSR reflect it now')
             else if (outcome === 'refresh-failed') console.error('[api/status] #1057 status edge while throttled but forced CACHE_KEY refresh FAILED — OG/SSR may show pre-edge state until the next throttled write or the cron #488 refresh')
           // Defensive: the helper's reader/writer both swallow (never reject) today, so this can't fire
@@ -4360,7 +4376,7 @@ export default {
       // #1053 — cross-provider upstream links (a dependent's own incident blames a provider that is
       // itself down). Must be emitted on BOTH status paths — is-down reads /api/status/cached.
       // Unconditional key (empty array when quiet) — see the /api/status/cached path for why.
-      const upstreamLinks = buildUpstreamLinks(servicesWithScore, Date.now())
+      const upstreamLinks = buildUpstreamLinks(servicesWithScore, upstreamFeeds, Date.now())
 
       return new Response(JSON.stringify({
         services: servicesWithScore,

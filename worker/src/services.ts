@@ -5,6 +5,7 @@ export type { ServiceStatus } from './types'
 import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, kvPut, isNonReliabilityAdvisory } from './utils'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
+import { buildUpstreamFeeds, type UpstreamCandidate } from './upstream-feed'
 import { platformStatusKey, type PlatformStatus } from './platform-monitor'
 import { type StatuspageResponse, normalizeStatus, parseIncidents, parseUptimeData } from './parsers/statuspage'
 import { parseFlashdutyFeed, DEEPSEEK_FEED_KV_KEY, DEEPSEEK_FEED_SOFT_STALE_S, type StoredFlashdutyFeed } from './parsers/flashduty'
@@ -2090,7 +2091,7 @@ export function downclassifyAdvisoryIncidents(services: ServiceStatus[]): Servic
   })
 }
 
-export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeSnapshot[]): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[]; pageComponents: Record<string, Array<{ id: string; name: string }>> }> {
+export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeSnapshot[]): Promise<{ raw: ServiceStatus[]; enriched: ServiceStatus[]; pageComponents: Record<string, Array<{ id: string; name: string }>>; upstreamFeeds: UpstreamCandidate[] }> {
   // Pre-fetch unique Atlassian status API endpoints once.
   // Services sharing a status page (claude+claudeai+claudecode, openai+chatgpt) would each fetch
   // the same URLs independently. Deduplicating saves 6 subrequests, freeing budget for enrichment.
@@ -2151,6 +2152,11 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
       pageComponents[apiUrl] = comps.map((c) => ({ id: c.id, name: c.name }))
     }
   }
+
+  // #1072 — non-carded upstream feeds, built from the SAME prefetch map (zero extra subrequests).
+  // These never enter `raw`/`enriched`: they are not services, and everything downstream of this
+  // function (scoring, daily counters, alerts, badges, the service count) must never see them.
+  const upstreamFeeds = buildUpstreamFeeds(prefetchMap)
 
   // Batch services to avoid exceeding Cloudflare Workers concurrent connection limit.
   // BetterStack services use 3 connections each (statusUrl + RSS + index.json);
@@ -2318,5 +2324,10 @@ export async function fetchAllServices(kv?: KVNamespace, probeSnapshots?: ProbeS
     raw: applySuppressions(downclassifyAdvisoryIncidents(raw), suppressions),
     enriched: applySuppressions(downclassifyAdvisoryIncidents(enriched), suppressions),
     pageComponents,
+    // NOT suppression-filtered: `applySuppressions` is an operator layer over AIWatch's OWN service
+    // incidents (#904), and a feed has no card, no Score and no accumulator for a suppression to
+    // protect. Passing it through would also let an operator silently disable an upstream
+    // attribution from a UI built for a different purpose.
+    upstreamFeeds,
   }
 }

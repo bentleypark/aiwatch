@@ -23,37 +23,54 @@
 
 import { kvPut } from './utils'
 import type { ServiceStatus } from './services'
+import type { UpstreamCandidate } from './upstream-feed'
 
-/** The shared CACHE_KEY writer (#488 + #1057). Stores RAW ServiceStatus[] under { services, cachedAt }.
+/** The shared CACHE_KEY writer (#488 + #1057). Stores RAW ServiceStatus[] under
+ *  { services, upstreamFeeds, cachedAt }.
  *  A single primitive so the two event-driven refreshes write byte-identical snapshots — a second copy
  *  of this JSON shape would silently drift from /api/status/cached's read contract. Returns kvPut's
- *  success boolean; never throws (kvPut swallows + logs). */
+ *  success boolean; never throws (kvPut swallows + logs).
+ *
+ *  `upstreamFeeds` (#1072) is REQUIRED, not optional-with-a-default. The snapshot has three writers and
+ *  is-down renders whichever wrote last, so an optional param would let one path omit the feeds and
+ *  still compile — and the omitting path would be an EDGE refresh, i.e. exactly the write that fires
+ *  when an outage begins. The upstream note would then blink out at the moment it matters, on some
+ *  writes and not others. Required makes that a compile error instead of the #1003 dual-path mystery. */
 export async function writeStatusCache(
   kv: KVNamespace,
   services: ServiceStatus[],
+  upstreamFeeds: UpstreamCandidate[],
   cacheKey: string,
   ttlSeconds: number,
   now: number = Date.now(),
 ): Promise<boolean> {
   return kvPut(kv, cacheKey, JSON.stringify({
     services,
+    upstreamFeeds,
     cachedAt: new Date(now).toISOString(),
   }), { expirationTtl: ttlSeconds })
 }
 
 /** #488 — write the live `services` snapshot to `cacheKey` iff a status-change alert fired this cron.
  *  Returns true when a write was issued and succeeded (caller aligns its throttle clock), false when
- *  skipped (no change) or the KV write failed. */
+ *  skipped (no change) or the KV write failed.
+ *
+ *  Note the emptiness guard is on `services`, NOT on `upstreamFeeds`. `buildUpstreamFeeds` applies no
+ *  status filter, so a HEALTHY upstream is present with `status: 'operational'` — the list is empty
+ *  only when a feed could not be built at all (prefetch failure, or its component ids stopped
+ *  resolving). Either way it must be written: skipping the write would leave a recovered upstream's
+ *  stale `degraded` entry in the snapshot until the next full write. */
 export async function refreshStatusCacheOnChange(
   kv: KVNamespace,
   services: ServiceStatus[],
+  upstreamFeeds: UpstreamCandidate[],
   sentCount: number,
   cacheKey: string,
   ttlSeconds: number,
   now: number = Date.now(),
 ): Promise<boolean> {
   if (sentCount <= 0 || services.length === 0) return false
-  return writeStatusCache(kv, services, cacheKey, ttlSeconds, now)
+  return writeStatusCache(kv, services, upstreamFeeds, cacheKey, ttlSeconds, now)
 }
 
 /** #1057 — does the freshly-fetched `fresh` snapshot carry a service status the `cached` snapshot does
@@ -102,6 +119,7 @@ export async function refreshStatusCacheOnLiveEdge(
   kv: KVNamespace,
   wrote: boolean,
   fresh: ServiceStatus[],
+  upstreamFeeds: UpstreamCandidate[],
   cacheKey: string,
   ttlSeconds: number,
   readCached: (kv: KVNamespace) => Promise<{ services: ServiceStatus[] } | null>,
@@ -109,6 +127,10 @@ export async function refreshStatusCacheOnLiveEdge(
 ): Promise<LiveEdgeRefresh> {
   if (wrote) return 'skipped'                                     // cacheWrite already wrote `fresh`
   const cached = await readCached(kv)
+  // The edge is still decided by SERVICE status only (#1072). A feed has no card and no OG surface, so
+  // a GitHub-only status change is not a reason to spend a KV write — the note it feeds is rendered
+  // beside a dependent that must itself be degraded (gate 2) for the link to exist at all. The feeds
+  // ride along on the write that a real service edge triggers.
   if (!hasStatusEdge(fresh, cached?.services ?? null)) return 'skipped'
-  return (await writeStatusCache(kv, fresh, cacheKey, ttlSeconds, now)) ? 'refreshed' : 'refresh-failed'
+  return (await writeStatusCache(kv, fresh, upstreamFeeds, cacheKey, ttlSeconds, now)) ? 'refreshed' : 'refresh-failed'
 }

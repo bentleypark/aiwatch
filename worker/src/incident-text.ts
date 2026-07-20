@@ -34,7 +34,7 @@ export interface CausalIncident {
  *    it permanently unattributable despite explicitly blaming its upstream. Pinecone is the opposite —
  *    it front-loads `[AWS][us-east-1]` into the title. Both shapes occur, so read both.
  */
-export function causalIncidents(svc: ServiceStatus): CausalIncident[] {
+export function causalIncidents(svc: Pick<ServiceStatus, 'incidents'>): CausalIncident[] {
   const out: CausalIncident[] = []
   for (const inc of svc.incidents ?? []) {
     if (inc.status === 'resolved') continue
