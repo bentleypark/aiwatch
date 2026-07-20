@@ -184,6 +184,31 @@ all resolved. Use it to validate a freshly-authored `assert:` line before the da
 - **Abuse gate**: mutation is trusted-author-gated (ported from `verify-reminders.mjs`), because the
   `assert:` line is read straight from a public issue body.
 
+## Implementation + operational requirements
+
+Moved here from CLAUDE.md (#1076) so the always-loaded schema layer stays lean. Nothing behavioural
+changed.
+
+- **Where it lives** — the daily job is `.github/workflows/verify-reminders.yml`, driving
+  `scripts/verify-reminders.mjs` (#541, the reminder scan + labels) and `scripts/verify-assertions.mjs`
+  (#873, the Tier-A auto-verification). Their pure functions are unit-tested via `npm run test:scripts`.
+- **Cross-repo scan needs a PAT** — the scan covers this repo AND `aiwatch-reports`
+  (`parseScanRepos` + the `VERIFY_EXTRA_REPOS` input), so a `verify-after` line in either repo fires.
+  The sibling scan requires the **`VERIFY_CROSS_REPO_TOKEN`** secret (a PAT with issues:read+write on
+  BOTH repos). **If it is absent the sibling scan warn-skips, best-effort** — the aiwatch reminder
+  still runs, so the failure is silent from this repo's point of view and only shows up as
+  aiwatch-reports reminders never arriving. Sibling refs render qualified (`aiwatch-reports#N`) in the
+  Discord ping.
+- **Body-drift guard** — `findBodyDrift` / `isDriftCandidate` (pure, unit-tested; `tracking` umbrellas
+  excluded). Mechanics are in the label table above. What is NOT there: the root cause it targets —
+  body-sync is a late, no-gate step in GitHub, a different system from the git diff the #415 hooks
+  watch, so drift concentrates in the weeks-open `verify-blocked` bucket. The FIX is to sync the body
+  at MERGE (ship-issue step 10); this guard is the backstop, not the mechanism.
+
+- **Blockquote suppression + `verify-overdue` self-healing (#966)** — the rules and the label lifecycle are
+  in [Which lines are scanned](#which-lines-are-scanned-966) and the label table above; the pure fns are
+  `isSuppressedReminderLine` (shared by BOTH scanners), `findQuotedVerifyAfterBoxes`, `findStaleOverdueLabels`.
+
 Follow-ups tracked in #873: `ship-issue`/`issue-triage`/`adding-a-service` convention notes (done),
 an optional HTML/text-body assertion mode, and a Tier-B weekly "suggest-don't-auto-close" digest for
 the un-assertable remainder.

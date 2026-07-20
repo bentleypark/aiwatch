@@ -93,7 +93,7 @@ is the *procedure* — follow it top to bottom.
      `      assert: GET /api/status/cached | services[id=turbopuffer].scoreConfidence == "medium"`.
      Assertable = a predicate over an AIWatch JSON endpoint (a `/api/status` field, a count/threshold,
      `exists`); NOT GA4/GSC-CTR/consent-gated or behavioral checks — leave those as a plain human ping.
-     Validate it before it ships: `node scripts/verify-assertions.mjs --issue N --dry-run`. Grammar +
+     Validate it before it ships: `node scripts/verify-assertions.mjs --issue N` (dry-run is the default; `--apply` mutates). Grammar +
      allowlist + fail-open semantics: **[docs/reference/verify-assertions.md](../../../docs/reference/verify-assertions.md)**.
    - **Placement (canonical, #921 format):** collect EVERY `verify-after` line — each with its indented
      `assert:` sub-line, if any — under ONE dedicated heading at the **bottom of the body**:
