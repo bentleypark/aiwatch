@@ -10,7 +10,7 @@ tags: [worker, cron, data-flow]
 ```
 Browser (React SPA, 60s polling)
   → Cloudflare Worker (/api/status)
-    → parallel fetch (37 services)
+    → parallel fetch (44 services)
     → gemini dual-source (#310): gcloud Vertex feed + aistudio.google.com/status MakerSuite RPC — merged with vertex:/aistudio: ID prefixes (#717: failed aistudio read holds last-known ACTIVE aistudio incidents from services:latest instead of dropping to vertex-only, so the incident doesn't flap in/out per refresh; successful read is authoritative)
     → normalize to ServiceStatus[]
     → write to KV (cache + daily counters), THROTTLED to 10-min (cacheWrite)
@@ -23,7 +23,7 @@ Browser (React SPA, 60s polling)
     → platform quorum detection: 70%+ same-platform fetch failures → platform outage → hold operational for all affected services
     → probe cross-validation: individual probe RTT normal → hold operational (prevents false positives during status page failures)
   → React state (usePolling hook via PollingContext)
-    → overlay probe RTT onto service.latency (24 probe services)
+    → overlay probe RTT onto service.latency (33 probe services)
     → non-probe services (bedrock, azureopenai, modal) keep status page latency
   → all pages read from context
 

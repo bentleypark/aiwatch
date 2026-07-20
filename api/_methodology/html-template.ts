@@ -282,7 +282,7 @@ ${consentInitScript(nonce)}
     <li><strong>Flashduty</strong> <span data-i18n="s1.src.flashduty">— DeepSeek 상태 피드 정규화 (status.deepseek.com)</span></li>
     <li><strong>AWS Health Dashboard</strong> <span data-i18n="s1.src.awshealth">— Amazon Bedrock — 공개 이벤트 JSON API(인시던트 start/end), 가동률 API 없음</span></li>
     <li><strong>RSS incident feeds</strong> <span data-i18n="s1.src.rss">— Azure Status(Azure OpenAI) · xAI(status.x.ai) — 가동률 API 없이 인시던트 RSS만 수집</span></li>
-    <li><strong>Direct RTT probes</strong> <span data-i18n="s1.src.probe">— 33개 AI 서비스의 API 엔드포인트 직접 측정</span></li>
+    <li><strong>Direct RTT probes</strong> <span data-i18n="s1.src.probe">— 33개 AI 서비스의 엔드포인트 직접 측정</span></li>
   </ul>
   <h3 data-i18n="s1.secTitle">보안 이슈 모니터링</h3>
   <p data-i18n="s1.secDesc">상태·신뢰도 측정과는 별개로, AI 스택에 영향을 주는 보안 이슈도 함께 추적해 <strong>월간 리포트</strong>에 집계합니다. 이 데이터는 AIWatch Score나 인시던트 집계에는 반영되지 않습니다.</p>
@@ -344,7 +344,7 @@ ${consentInitScript(nonce)}
   <p class="lead" data-i18n="s3.lead">Uptime은 <strong>제공사가 공개한 장애 기록을 AIWatch가 직접 30일치로 계산</strong>합니다. 제공사가 자기 페이지에 표시하는 값을 그대로 쓰지는 않습니다 — 그 값은 페이지마다 집계 기간(30·60·90일)이 다르고, 어떤 상태를 다운타임으로 볼지도 달라서 서비스끼리 비교할 수 없기 때문입니다. <strong>모든 서비스가 같은 30일, 같은 가중 방식입니다.</strong></p>
   <p data-i18n="s3.why30"><strong>왜 30일로 맞추나.</strong> 제공사마다 uptime 집계 기간이 30일·60일·90일로 제각각입니다. 기간이 다르면 서비스끼리 비교할 수 없으니, AIWatch가 30일로 통일해 계산합니다. AIWatch Score의 나머지 항목(인시던트·복구)도 같은 30일치로 계산합니다.</p>
   <ul>
-    <li><strong data-i18n="s3.official">Official</strong> <span data-i18n="s3.officialDesc">— 제공사 상태 페이지가 공개한 <strong>일별 장애 기록·장애 구간</strong>으로 AIWatch가 <strong>최근 30일치</strong>를 직접 계산합니다(30개 서비스). 우리 숫자가 제공사 페이지의 숫자와 다를 수 있습니다. <strong>감추지 않습니다</strong> — 제공사가 발표한 값이 우리 계산과 다르면 서비스 상세 페이지에 <strong>그 값을 집계 기간과 함께 나란히</strong> 보여드립니다. 상태 페이지에 uptime %를 공개하지 않는 서비스(ElevenLabs · Replicate · Stability)는 비교할 값이 없어 우리 계산값만 보여줍니다. 제공사 기록이 30일에 못 미치면(상태 페이지를 옮긴 경우 등) 실제 며칠치인지 밝힙니다.</span></li>
+    <li><strong data-i18n="s3.official">Official</strong> <span data-i18n="s3.officialDesc">— 제공사 상태 페이지가 공개한 <strong>일별 장애 기록·장애 구간</strong>으로 AIWatch가 <strong>최근 30일치</strong>를 직접 계산합니다. 우리 숫자가 제공사 페이지의 숫자와 다를 수 있습니다. <strong>감추지 않습니다</strong> — 제공사가 발표한 값이 우리 계산과 다르면 서비스 상세 페이지에 <strong>그 값을 집계 기간과 함께 나란히</strong> 보여드립니다. 상태 페이지에 uptime %를 공개하지 않는 서비스(ElevenLabs · Replicate · Stability)는 비교할 값이 없어 우리 계산값만 보여줍니다. 제공사 기록이 30일에 못 미치면(상태 페이지를 옮긴 경우 등) 실제 며칠치인지 밝힙니다.</span></li>
     <li><strong data-i18n="s3.platform">Platform</strong> <span data-i18n="s3.platformDesc">— 같은 30일, 같은 가중 방식으로 계산하지만 <strong>근거가 다릅니다</strong> (Together · Fireworks · HuggingFace · Modal · Luma · Helicone). 이 6개 서비스의 상태 페이지는 Better Stack이 운영하며, 장애 기록이 <strong>제공사의 인시던트 선언이 아니라 Better Stack 모니터가 직접 측정한 다운타임</strong>입니다. 제공사가 보증하는 SLA가 아니라는 뜻이라 라벨을 구분합니다.</span></li>
   </ul>
   <p data-i18n="s3.weighted"><strong>장애 시간 가중 집계:</strong> 다운타임은 인시던트 건수가 아니라 <strong>영향받은 시간</strong>으로 셉니다. 심각도에 따라 전면 장애는 1.0, 부분 장애·성능 저하는 0.3으로 가중하고, 정보성 공지와 <strong>사전 공지된 정기 점검은 빼줍니다</strong>(미리 알린 점검까지 감점할 이유는 없습니다). uptime과 Score가 같은 방식을 씁니다. 모든 서비스에 같은 기간과 같은 기준을 적용하다 보니, 우리 숫자가 제공사 페이지의 숫자와 다를 수 있습니다.</p>
@@ -371,7 +371,7 @@ ${consentInitScript(nonce)}
 <section class="section" id="latency">
   <p class="section-label">// 04</p>
   <h2 data-i18n="s5.title">레이턴시 (Probe RTT)</h2>
-  <p class="lead" data-i18n="s5.lead">33개 AI 서비스의 API 엔드포인트를 Cloudflare Workers 엣지에서 5분 간격으로 직접 측정합니다. p50 / p75 / p95 분위수를 산출합니다.</p>
+  <p class="lead" data-i18n="s5.lead">33개 AI 서비스의 엔드포인트를 Cloudflare Workers 엣지에서 5분 간격으로 직접 측정합니다. p50 / p75 / p95 분위수를 산출합니다.</p>
   <div class="limits">
     <div class="limits-label">⚠ <span data-i18n="s5.limit.label">핵심 한계 — 네트워크 RTT ≠ 추론 레이턴시</span></div>
     <p data-i18n="s5.limit.body">Probe RTT는 <strong>네트워크 왕복 시간</strong>을 측정합니다. 모델의 추론(토큰 생성) 레이턴시가 아닙니다. "이 서비스가 얼마나 빨리 토큰을 만드나"가 아니라 "엔드포인트가 네트워크 계층에서 얼마나 빨리 응답하나"를 나타냅니다.</p>
@@ -472,7 +472,7 @@ ${consentInitScript(nonce)}
   <!-- Responsiveness sub -->
   <div class="subscore">
     <h3 data-i18n="s4.resp.title">Responsiveness Score (0~20)</h3>
-    <p data-i18n="s4.resp.desc">5분 간격 health-check probe로 실제 API 엔드포인트의 응답 속도와 안정성을 측정합니다(33개 AI 서비스). 응답 속도와 일관성을 함께 반영합니다.</p>
+    <p data-i18n="s4.resp.desc">5분 간격 health-check probe로 실제 엔드포인트의 응답 속도와 안정성을 측정합니다(33개 AI 서비스). 응답 속도와 일관성을 함께 반영합니다.</p>
     <div class="formula"><span class="fl-sub" data-i18n="s4.resp.speed">Speed (0~10) — p50 RTT 지수 감쇠</span><br>10 × exp(−max(p50, 50ms) / 400ms)</div>
     <div class="formula"><span class="fl-sub" data-i18n="s4.resp.stability">Stability (0~10) — 결합 변동계수 지수 감쇠</span><br>10 × exp(−CV_combined / 0.5)</div>
     <p data-i18n="s4.resp.na1">대부분의 앱은 측정할 공개 API 엔드포인트가 없어 probe 대상이 아닙니다. Character.AI는 예외로, 상태 페이지 폐지 후 백엔드 health 엔드포인트로 probe합니다(상세 페이지에만 표시하고 레이턴시 랭킹에서는 제외). 코딩 에이전트는 자체 API가 있으면 직접 probe하며(예: Cursor), Claude Code·Codex는 기반 API(Claude·OpenAI)의 응답성을 상속받습니다. probe 세트(33개)에 들지 않는 나머지 3개 AI 서비스(Bedrock · Azure OpenAI · Modal)도 probe하지 않습니다.</p>
@@ -556,7 +556,7 @@ const i18n = {
     's1.lead': 'AIWatch는 LLM API 16개, 코딩 에이전트 6개, 음성 3개, 추론·인프라 8개, 관측 3개, 영상 2개, 이미지 2개, AI 앱 4개 — 총 44개 AI 서비스를 최대 5분 간격으로 폴링합니다. 모든 시각은 UTC 기준입니다.',
     's1.sourcesTitle': '데이터 출처',
     's1.sourcesDesc': '상태·인시던트·uptime 데이터는 각 서비스의 공식 상태 페이지에서 수집됩니다. 제공사가 공개한 데이터가 1차 출처이며, 없는 값을 자체 추정으로 채우지 않습니다 — 공식 uptime이 없는 경우의 처리는 아래 <a href="#uptime">Uptime 섹션</a>에서 다룹니다.',
-    's1.src.atlassian': '— 다수의 주요 제공사', 's1.src.incidentio': '— 컴포넌트 단위 인시던트 + 영향도', 's1.src.gcloud': '— Gemini API (Google Cloud 상태 + AI Studio 컴포넌트 인시던트 병합)', 's1.src.others': '— 그 외 상태 페이지 플랫폼 (인시던트 RSS + 가동률 JSON)', 's1.src.flashduty': '— DeepSeek 상태 피드 정규화 (status.deepseek.com)', 's1.src.awshealth': '— Amazon Bedrock — 공개 이벤트 JSON API(인시던트 start/end), 가동률 API 없음', 's1.src.rss': '— Azure Status(Azure OpenAI) · xAI(status.x.ai) — 가동률 API 없이 인시던트 RSS만 수집', 's1.src.probe': '— 33개 AI 서비스의 API 엔드포인트 직접 측정',
+    's1.src.atlassian': '— 다수의 주요 제공사', 's1.src.incidentio': '— 컴포넌트 단위 인시던트 + 영향도', 's1.src.gcloud': '— Gemini API (Google Cloud 상태 + AI Studio 컴포넌트 인시던트 병합)', 's1.src.others': '— 그 외 상태 페이지 플랫폼 (인시던트 RSS + 가동률 JSON)', 's1.src.flashduty': '— DeepSeek 상태 피드 정규화 (status.deepseek.com)', 's1.src.awshealth': '— Amazon Bedrock — 공개 이벤트 JSON API(인시던트 start/end), 가동률 API 없음', 's1.src.rss': '— Azure Status(Azure OpenAI) · xAI(status.x.ai) — 가동률 API 없이 인시던트 RSS만 수집', 's1.src.probe': '— 33개 AI 서비스의 엔드포인트 직접 측정',
     's1.secTitle': '보안 이슈 모니터링',
     's1.secDesc': '상태·신뢰도 측정과는 별개로, AI 스택에 영향을 주는 보안 이슈도 함께 추적해 <strong>월간 리포트</strong>에 집계합니다. 이 데이터는 AIWatch Score나 인시던트 집계에는 반영되지 않습니다.',
     's1.sec.osv': '— SDK 취약점 (PyPI · npm 24개 추적 패키지), GitHub Advisories로 상세 보강', 's1.sec.nvd': '— 자사 제품 CVE (Claude Code · Codex · ChatGPT 앱 등)', 's1.sec.hn': '— AI 서비스 관련 보안 뉴스 (Algolia 검색 API)',
@@ -573,7 +573,7 @@ const i18n = {
     's3.title': 'Uptime',
     's3.lead': 'Uptime은 <strong>제공사가 공개한 장애 기록을 AIWatch가 직접 30일치로 계산</strong>합니다. 제공사가 자기 페이지에 표시하는 값을 그대로 쓰지는 않습니다 — 그 값은 페이지마다 집계 기간(30·60·90일)이 다르고, 어떤 상태를 다운타임으로 볼지도 달라서 서비스끼리 비교할 수 없기 때문입니다. <strong>모든 서비스가 같은 30일, 같은 가중 방식입니다.</strong>',
     's3.why30': '<strong>왜 30일로 맞추나.</strong> 제공사마다 uptime 집계 기간이 30일·60일·90일로 제각각입니다. 기간이 다르면 서비스끼리 비교할 수 없으니, AIWatch가 30일로 통일해 계산합니다. AIWatch Score의 나머지 항목(인시던트·복구)도 같은 30일치로 계산합니다.',
-    's3.official': 'Official', 's3.officialDesc': '— 제공사 상태 페이지가 공개한 <strong>일별 장애 기록·장애 구간</strong>으로 AIWatch가 <strong>최근 30일치</strong>를 직접 계산합니다(30개 서비스). 우리 숫자가 제공사 페이지의 숫자와 다를 수 있습니다. <strong>감추지 않습니다</strong> — 제공사가 발표한 값이 우리 계산과 다르면 서비스 상세 페이지에 <strong>그 값을 집계 기간과 함께 나란히</strong> 보여드립니다. 상태 페이지에 uptime %를 공개하지 않는 서비스(ElevenLabs · Replicate · Stability)는 비교할 값이 없어 우리 계산값만 보여줍니다. 제공사 기록이 30일에 못 미치면(상태 페이지를 옮긴 경우 등) 실제 며칠치인지 밝힙니다.',
+    's3.official': 'Official', 's3.officialDesc': '— 제공사 상태 페이지가 공개한 <strong>일별 장애 기록·장애 구간</strong>으로 AIWatch가 <strong>최근 30일치</strong>를 직접 계산합니다. 우리 숫자가 제공사 페이지의 숫자와 다를 수 있습니다. <strong>감추지 않습니다</strong> — 제공사가 발표한 값이 우리 계산과 다르면 서비스 상세 페이지에 <strong>그 값을 집계 기간과 함께 나란히</strong> 보여드립니다. 상태 페이지에 uptime %를 공개하지 않는 서비스(ElevenLabs · Replicate · Stability)는 비교할 값이 없어 우리 계산값만 보여줍니다. 제공사 기록이 30일에 못 미치면(상태 페이지를 옮긴 경우 등) 실제 며칠치인지 밝힙니다.',
     's3.platform': 'Platform', 's3.platformDesc': '— 같은 30일, 같은 가중 방식으로 계산하지만 <strong>근거가 다릅니다</strong> (Together · Fireworks · HuggingFace · Modal · Luma · Helicone). 이 6개 서비스의 상태 페이지는 Better Stack이 운영하며, 장애 기록이 <strong>제공사의 인시던트 선언이 아니라 Better Stack 모니터가 직접 측정한 다운타임</strong>입니다. 제공사가 보증하는 SLA가 아니라는 뜻이라 라벨을 구분합니다.',
     's3.weighted': '<strong>장애 시간 가중 집계:</strong> 다운타임은 인시던트 건수가 아니라 <strong>영향받은 시간</strong>으로 셉니다. 심각도에 따라 전면 장애는 1.0, 부분 장애·성능 저하는 0.3으로 가중하고, 정보성 공지와 <strong>사전 공지된 정기 점검은 빼줍니다</strong>(미리 알린 점검까지 감점할 이유는 없습니다). uptime과 Score가 같은 방식을 씁니다. 모든 서비스에 같은 기간과 같은 기준을 적용하다 보니, 우리 숫자가 제공사 페이지의 숫자와 다를 수 있습니다.',
     's3.incidentGap': '인시던트 건수와 uptime은 서로 다를 수 있습니다. 일부 제공사는 짧은 성능 저하를 <strong>가용성 기록에는 남기되 별도 인시던트로는 발행하지 않습니다</strong>(예: fal · Hugging Face의 수분~1시간 degraded). uptime은 그 실제 다운타임 시간을 반영하므로, "최근 인시던트 없음"인데도 uptime이 100%보다 낮게 나올 수 있습니다 — 제공사가 공식 발표하지 않았을 뿐 장애는 실제로 있었기 때문입니다.',
@@ -595,7 +595,7 @@ const i18n = {
     's4.rec.title': 'Recovery Score (0~15)',
     's4.rec.note': 'MTTR은 해결된 인시던트 지속 시간의 30일 중앙값입니다(3건 미만인 소표본에서는 지나치게 긴 값만 1시간 기준값 쪽으로 완화 — 단일 장기 인시던트가 인시던트 적은 서비스를 과도하게 깎지 않도록).',
     's4.resp.title': 'Responsiveness Score (0~20)',
-    's4.resp.desc': '5분 간격 health-check probe로 실제 API 엔드포인트의 응답 속도와 안정성을 측정합니다(33개 AI 서비스). 응답 속도와 일관성을 함께 반영합니다.',
+    's4.resp.desc': '5분 간격 health-check probe로 실제 엔드포인트의 응답 속도와 안정성을 측정합니다(33개 AI 서비스). 응답 속도와 일관성을 함께 반영합니다.',
     's4.resp.speed': 'Speed (0~10) — p50 RTT 지수 감쇠',
     's4.resp.stability': 'Stability (0~10) — 결합 변동계수 지수 감쇠',
     's4.resp.na1': '대부분의 앱은 측정할 공개 API 엔드포인트가 없어 probe 대상이 아닙니다. Character.AI는 예외로, 상태 페이지 폐지 후 백엔드 health 엔드포인트로 probe합니다(상세 페이지에만 표시하고 레이턴시 랭킹에서는 제외). 코딩 에이전트는 자체 API가 있으면 직접 probe하며(예: Cursor), Claude Code·Codex는 기반 API(Claude·OpenAI)의 응답성을 상속받습니다. probe 세트(33개)에 들지 않는 나머지 3개 AI 서비스(Bedrock · Azure OpenAI · Modal)도 probe하지 않습니다.',
@@ -606,7 +606,7 @@ const i18n = {
     's4.noUptime.desc': '일부 서비스(Gemini·xAI·Bedrock 등)는 공식 uptime 수치가 없습니다. 가정값을 넣지 않고 uptime 컴포넌트(40점)를 제외한 뒤 나머지 가용 컴포넌트만으로 100점 환산합니다. probe가 있는 서비스(Gemini·xAI 등)는 인시던트·복구·응답성으로 점수를 산정해 랭킹에 포함합니다. probe도 없는 서비스(Bedrock·Azure)는 측정 신호가 인시던트·복구뿐이라 신뢰할 점수를 낼 수 없어, 점수를 산출·표시하지 않고 인시던트 추적만 제공합니다.',
     's4.grades.title': '등급 기준',
     's5.title': '레이턴시 (Probe RTT)',
-    's5.lead': '33개 AI 서비스의 API 엔드포인트를 Cloudflare Workers 엣지에서 5분 간격으로 직접 측정합니다. p50 / p75 / p95 분위수를 산출합니다.',
+    's5.lead': '33개 AI 서비스의 엔드포인트를 Cloudflare Workers 엣지에서 5분 간격으로 직접 측정합니다. p50 / p75 / p95 분위수를 산출합니다.',
     's5.limit.label': '핵심 한계 — 네트워크 RTT ≠ 추론 레이턴시',
     's5.limit.body': 'Probe RTT는 <strong>네트워크 왕복 시간</strong>을 측정합니다. 모델의 추론(토큰 생성) 레이턴시가 아닙니다. "이 서비스가 얼마나 빨리 토큰을 만드나"가 아니라 "엔드포인트가 네트워크 계층에서 얼마나 빨리 응답하나"를 나타냅니다.',
     's5.limit.probe': '<strong>Probe 미적용:</strong> 레이턴시 랭킹은 직접 probe하는 API 서비스와 자체 API를 가진 코딩 에이전트(예: Cursor)를 대상으로 합니다 — 앱(Character.AI는 probe하되 상세 페이지에만 표시), 자체 API가 없는 코딩 에이전트, probe하지 않는 나머지 3개 AI 서비스는 제외됩니다.',
@@ -641,7 +641,7 @@ const i18n = {
     's1.lead': 'AIWatch polls 44 AI services — 16 LLM APIs, 6 coding agents, 3 voice, 8 inference & infra, 3 observability, 2 video, 2 image, and 4 AI apps — up to every 5 minutes. All timestamps are in UTC.',
     's1.sourcesTitle': 'Data sources',
     's1.sourcesDesc': 'Status, incident, and uptime data are all collected from each service\\\'s official status page. The provider\\\'s published data is the primary source, and we never fill a missing value with our own estimate — how a missing official uptime is handled is covered in the <a href="#uptime">Uptime section</a> below.',
-    's1.src.atlassian': '— many major providers', 's1.src.incidentio': '— per-component incidents + impact', 's1.src.gcloud': '— Gemini API (Google Cloud status + AI Studio component incidents, merged)', 's1.src.others': '— additional status-page platforms (incident RSS + uptime JSON)', 's1.src.flashduty': '— normalized DeepSeek status feed (status.deepseek.com)', 's1.src.awshealth': '— Amazon Bedrock — public events JSON API (incident start/end), no uptime API', 's1.src.rss': '— Azure Status (Azure OpenAI) · xAI (status.x.ai) — incident RSS only, no uptime API', 's1.src.probe': '— direct measurement of 33 AI services\\\' API endpoints',
+    's1.src.atlassian': '— many major providers', 's1.src.incidentio': '— per-component incidents + impact', 's1.src.gcloud': '— Gemini API (Google Cloud status + AI Studio component incidents, merged)', 's1.src.others': '— additional status-page platforms (incident RSS + uptime JSON)', 's1.src.flashduty': '— normalized DeepSeek status feed (status.deepseek.com)', 's1.src.awshealth': '— Amazon Bedrock — public events JSON API (incident start/end), no uptime API', 's1.src.rss': '— Azure Status (Azure OpenAI) · xAI (status.x.ai) — incident RSS only, no uptime API', 's1.src.probe': '— direct measurement of 33 AI services\\\' endpoints',
     's1.secTitle': 'Security-issue monitoring',
     's1.secDesc': 'On a track separate from status & reliability, we also track security issues affecting the AI stack, aggregated into the <strong>monthly report</strong>. This data does not feed the AIWatch Score or incident counts.',
     's1.sec.osv': '— SDK vulnerabilities (24 tracked PyPI · npm packages), enriched via GitHub Advisories', 's1.sec.nvd': '— first-party product CVEs (Claude Code, Codex, ChatGPT app, …)', 's1.sec.hn': '— security news about AI services (Algolia search API)',
@@ -658,7 +658,7 @@ const i18n = {
     's3.title': 'Uptime',
     's3.lead': 'Uptime is <strong>computed by AIWatch over a 30-day window from the incident and outage records the provider publishes</strong>. We do not copy the % a provider shows on its own page — those use different periods (30, 60 or 90 days) and different definitions of downtime, so they cannot be compared across services. <strong>Every service is on the same 30 days with the same weighting.</strong>',
     's3.why30': '<strong>Why 30 days.</strong> Providers report uptime over different periods — 30, 60 or 90 days. Figures over different periods cannot be compared, so AIWatch computes every one of them over the same 30 days. The Score uses that same period for its other components (incidents, recovery).',
-    's3.official': 'Official', 's3.officialDesc': '— computed by AIWatch over the <strong>trailing 30 days</strong> from the <strong>per-day and component-impact records</strong> the provider publishes on its status page (30 services). We do not copy the % the page itself displays: those figures use different periods (30, 60 or 90 days) and different definitions of downtime from page to page, so they cannot be compared across services. <strong>We do not hide them either.</strong> Whenever the provider figure differs from ours, the service page shows it <strong>next to ours, with the period it covers</strong>. A few status pages publish no percentage at all (ElevenLabs, Replicate, Stability) — there is nothing to compare against, so only our figure appears. And when a provider does not have 30 days of records (after moving its status page, say), we state how many days it does cover.',
+    's3.official': 'Official', 's3.officialDesc': '— computed by AIWatch over the <strong>trailing 30 days</strong> from the <strong>per-day and component-impact records</strong> the provider publishes on its status page. We do not copy the % the page itself displays: those figures use different periods (30, 60 or 90 days) and different definitions of downtime from page to page, so they cannot be compared across services. <strong>We do not hide them either.</strong> Whenever the provider figure differs from ours, the service page shows it <strong>next to ours, with the period it covers</strong>. A few status pages publish no percentage at all (ElevenLabs, Replicate, Stability) — there is nothing to compare against, so only our figure appears. And when a provider does not have 30 days of records (after moving its status page, say), we state how many days it does cover.',
     's3.platform': 'Platform', 's3.platformDesc': '— computed over the same 30 days with the same weights, but from <strong>different evidence</strong> (Together · Fireworks · HuggingFace · Modal · Luma · Helicone). These six status pages are run by Better Stack, and their outage records are <strong>downtime measured by Better Stack monitors</strong>, not incidents the provider declared. That is not the provider vouching for an SLA, so we label it separately.',
     's3.weighted': '<strong>Weighted impact time:</strong> downtime is counted not as raw incident count but as affected time weighted by severity — full outage (critical · major) = 1.0, partial outage and degraded performance (minor) = 0.3, informational = excluded, and <strong>announced maintenance = excluded</strong> (we do not penalise a provider for announcing a window). Uptime and the Score share the same weighting. Our figure can differ from the one on a provider\\'s own page — that is the consequence of applying one window and one definition to every service.',
     's3.incidentGap': 'Incident COUNT and uptime can differ. Some providers log a brief degradation in their availability record but <strong>never publish it as a formal incident</strong> (fal and Hugging Face have shown minutes-to-an-hour degradations this way). Uptime reflects that real downtime, so a service can read below 100% even with no recent incidents listed — the outage was real, the provider just did not announce it.',
@@ -680,10 +680,10 @@ const i18n = {
     's4.rec.title': 'Recovery Score (0–15)',
     's4.rec.note': 'MTTR is the 30-day median of resolved-incident durations (for a small sample of fewer than 3, an unusually long value is eased toward a 1-hour baseline so a single long incident cannot over-penalize a low-incident service).',
     's4.resp.title': 'Responsiveness Score (0–20)',
-    's4.resp.desc': 'Measures actual API endpoint speed and stability via 5-minute health-check probes (33 AI services). Combines response speed and consistency.',
+    's4.resp.desc': 'Measures actual endpoint speed and stability via 5-minute health-check probes (33 AI services). Combines response speed and consistency.',
     's4.resp.speed': 'Speed (0–10) — exp decay on p50 RTT',
     's4.resp.stability': 'Stability (0–10) — exp decay on combined coefficient of variation',
-    's4.resp.na1': 'Most apps have no public API endpoint to measure, so they aren\\'t probed. Character.AI is an exception — probed on its backend health endpoint after its status page was retired (shown on its detail page only, excluded from the latency ranking). Coding agents are probed directly when they expose their own API (e.g. Cursor), and Claude Code / Codex inherit the responsiveness of their underlying API (Claude, OpenAI). 3 other AI services outside the 32-service probe set (Bedrock, Azure OpenAI, Modal) are not probed either.',
+    's4.resp.na1': 'Most apps have no public API endpoint to measure, so they aren\\'t probed. Character.AI is an exception — probed on its backend health endpoint after its status page was retired (shown on its detail page only, excluded from the latency ranking). Coding agents are probed directly when they expose their own API (e.g. Cursor), and Claude Code / Codex inherit the responsiveness of their underlying API (Claude, OpenAI). 3 other AI services outside the 33-service probe set (Bedrock, Azure OpenAI, Modal) are not probed either.',
     's4.resp.na2': 'Their score is rescaled from the 80-point base to 100 (computed on the available components).',
     's4.resp.naFormula': 'probe-less: rescale base 80 → 100',
     's4.resp.insufficient': 'Newly added probed services receive a 5% penalty until 7 days of probe data accumulate.',
@@ -691,7 +691,7 @@ const i18n = {
     's4.noUptime.desc': 'Some services (Gemini, xAI, Bedrock, etc.) publish no official uptime. We assume no value — the 40-point uptime component is dropped and the score is rescaled over the remaining available components. Services that ARE probed (Gemini, xAI, etc.) are scored on incidents + recovery + responsiveness and included in the ranking. Services with no probe either (Bedrock, Azure OpenAI) have only incidents + recovery left as signals — too thin for a trustworthy score, so we publish no score for them and provide incident tracking only.',
     's4.grades.title': 'Grade thresholds',
     's5.title': 'Latency (Probe RTT)',
-    's5.lead': 'We measure the API endpoints of 33 AI services directly from the Cloudflare Workers edge every 5 minutes, producing p50 / p75 / p95 percentiles.',
+    's5.lead': 'We measure the endpoints of 33 AI services directly from the Cloudflare Workers edge every 5 minutes, producing p50 / p75 / p95 percentiles.',
     's5.limit.label': 'Key limit — network RTT ≠ inference latency',
     's5.limit.body': 'Probe RTT measures <strong>network round-trip time</strong>, NOT a model\\\'s inference (token-generation) latency. It reflects how fast the endpoint responds at the network layer, not how fast the service generates tokens.',
     's5.limit.probe': '<strong>No probe:</strong> The latency ranking covers directly-probed API services and coding agents with their own API (e.g. Cursor) — apps (Character.AI is probed but shown on its detail page only), API-less coding agents, and 3 other non-probed AI services (Bedrock, Azure OpenAI, Modal) are excluded.',

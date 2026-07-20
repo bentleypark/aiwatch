@@ -76,6 +76,61 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
    **Verify a `REGION_DOCS_URL` in a real browser before adding it.** The link must land the reader *on the region list*, not merely return 200 — a retired path that 301s to the top of an unrelated guide still returns 200, which is how pinecone's dead `troubleshooting/available-cloud-regions` survived (#973). Use a section anchor when the regions live inside a larger page. No verified region doc → **no entry**; the card and banner simply omit the link. A doc url for a non-switchable service can never render (the sync test asserts this).
 
 ## Documentation — service count ("N AI services")
+
+> **The count + category breakdown are CI-gated (#1074).** `api/__tests__/service-count-lockstep.test.ts`
+> derives the total + per-bucket counts from `GROUP_MEMBERS` (`worker/src/service-groups.ts`), and the
+> PROBE count from `PROBE_TARGETS`, then fails if `CLAUDE.md`, `README.md`, `README.ko.md`,
+> `index.html`, `api/_intro/html-template.ts` or `api/_methodology/html-template.ts` disagrees — per
+> locale, and per bucket on `/methodology`. Run `npm run test:src` after the steps below: a miss is a
+> red test, not a wrong number in production.
+>
+> **The probe count is covered here too** — every phrasing of it on `/methodology` plus the READMEs and
+> `CLAUDE.md`. The #678 test in `api/_methodology/__tests__/html-template.test.ts` checks it with two
+> `toContain` EXISTENCE assertions, so it alone would pass with nearly all of them wrong; it keeps
+> ownership of the non-probed service LIST (Bedrock / Azure OpenAI / Modal).
+>
+> **Also pinned:** the README **per-bucket headings** (`### Voice (3)` / `### 음성 (3개)`); the
+> URL-ENCODED **social-share badges** (`monitoring%20for%2044%20AI`); the **is-down count** (`TOTAL − 2`
+> — every service except Bedrock / Azure OpenAI, 5 copies); CLAUDE.md's **Status-Data-Flow** sentence
+> (`parallel N-service fetch`); and the **`/intro` dashboard mock**'s `+ N more services`, which must
+> equal `TOTAL −` the cards it actually renders.
+>
+> **Enumerate count occurrences by PHRASING, never by grepping the current value** — that search cannot
+> see a stale copy, by construction. Every number in the list above was found that way, and four of them
+> were already wrong when the guard was written: the badges read **39**, `/methodology`'s EN probe-set
+> read **32**, CLAUDE.md's data-flow sentence read **39** (stale across five service additions), and the
+> mock said `+ 34` beside its own `All 44` and 3 cards. Value-grepping had missed all four.
+>
+> It checks **every** occurrence of each anchored sentence, not just the first — the Edge templates
+> carry each KO string twice (inline default + `ko` i18n map) and the map copy is what renders after a
+> language toggle. Twinned strings also assert a minimum occurrence count, so **deleting or rewording**
+> one copy fails too (deliberately: the guard must be told where to look).
+>
+> **The rule: pin what a CONSTANT determines; remove what only a live fetch does.** Two counts failed
+> that test and were removed (each with a test asserting it stays removed):
+> - `/methodology` §3 "Official" said `(30 services)` — `uptimeSource` is assigned at RUNTIME and is a
+>   FLOOR (a transient fetch failure moves a service out). Live had already reached 31 after Kimi (#1067).
+> - The READMEs said `24 multi-component services` — live was **31**. The set is not config-determined:
+>   `resolveSvcComponents` is gated on `displayAllComponents` / `displayComponentIds` /
+>   `statusComponentIds` (26 services), but `parseBetterStackComponents` attaches components with no
+>   COMPONENT-LIST config gate (it takes only a denylist and self-gates on `>= 2`; reaching it needs
+>   only `betterStackUrl`), so 6 unconfigured BetterStack
+>   services render one while
+>   `characterai` — configured, but its status page is dead (#689/#800) — does not. `26 − 1 + 6 = 31`
+>   was a coincidence of the day, not a fact to publish.
+>
+> If a count is wanted back in either place, follow §3's sibling "Platform" bullet and NAME the services.
+> By contrast the READMEs' **OSV package count** (`24 AI SDK packages`) IS pinned — `OSV_PACKAGES` is a
+> static array, so that number is a config fact.
+>
+> **Not covered — still hand-checked:** the prose service LISTS themselves (the service NAMES in
+> CLAUDE.md's architecture section and the README category tables — the counts beside them are pinned,
+> the rows are not); the mock's `Operational N` / `Issues N` tabs (fabricated demo state, not derived
+> from the roster — note they do not currently sum to `All N`); `docs/aiwatch-landing.html`;
+> `CONTRIBUTING.md`; and `docs/reference/*` prose counts (`data-flow.md` held a stale 37 and 24). Also note a **docs-only PR runs none of this** — `test.yml` `paths-ignore`s
+> `*.md`, so a later edit touching only `README*.md`/`CLAUDE.md` starts no jobs (same shape as the
+> #877/#961 gaps). The add-a-service PR itself touches code, so the primary flow IS gated.
+
 11. `CLAUDE.md` — architecture section: service count, service list, category breakdown, probe count. NOTE: the KV schema (`docs/reference/kv-schema.md`) and fallback tier list (`docs/reference/fallback-tiers.md`) moved out of CLAUDE.md — update those files too if affected
 12. `README.md` — service count, service table (add row), API Services header count, feature description, API endpoint comment
 13. `README.ko.md` — same as README.md (Korean)
@@ -96,7 +151,7 @@ A service is only worth adding if its source carries real signal. **Fetch the ca
 17a. `api/_methodology/html-template.ts` — self-contained Edge SSR, **KO + EN i18n duplicated TWICE** (inline `data-i18n` defaults AND the `i18n` JS maps), so each count appears ~4×. Update ALL:
     - `hero.meta` service count ("N services · polled every 5 min") + the `<meta name="description">` count
     - **`s1.lead` category breakdown** — "N AI services — X LLM APIs, Y coding agents, Z voice, … inference & infra, … observability, … video, … AI apps" (KO `…개` + EN). The sub-counts MUST sum to the total; update the right bucket(s) for the new service's category.
-    - **probe count** (only if the new service is probed — search the page for the probe phrasings: "directly-probed" / "are probed" / `probe 세트(N개)` / "N AI services … health-check probes"; currently 31) — kept in **LOCKSTEP with `PROBE_TARGETS.length`** by `api/_methodology/__tests__/html-template.test.ts` (#678); that test FAILS until the methodology count matches the new probe-target count.
+    - **probe count** (only if the new service is probed — search the page for the probe phrasings: "directly-probed" / "are probed" / `probe 세트(N개)` / "N AI services … health-check probes"; currently 33) — kept in **LOCKSTEP with `PROBE_TARGETS.length`** — every occurrence, on this page and in the READMEs/CLAUDE.md, by `api/__tests__/service-count-lockstep.test.ts` (#1074). (`html-template.test.ts`'s #678 check is existence-only and would pass with most of them wrong.)
     - **GOTCHA — quote escaping**: the page is `return \`…\``; a literal apostrophe in an i18n string must be `\\'` (NOT `\'`, which the template literal collapses to `'` → breaks the served inline `<script>` → the lang toggle silently dies). A test asserts every inline `<script>` parses (`new Function`).
 
 ## Is X Down (if adding a dedicated page)

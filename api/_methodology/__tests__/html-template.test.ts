@@ -154,7 +154,7 @@ describe('renderMethodologyPage', () => {
     // count from the source of truth (worker/src/probe.PROBE_TARGETS) so a change to probe.ts that
     // forgets to update this page fails HERE — otherwise the two layers drift independently (the
     // exact regression #678 guards against).
-    const n = PROBE_TARGETS.length // 32 (#921 characterai + #883 cursor + #839 twelvelabs)
+    const n = PROBE_TARGETS.length // 33 as of #1067 (kimi); derived, so this comment is the only thing that can go stale
     expect(html).toContain(`${n} AI service`)  // EN (matches "32 AI services")
     expect(html).toContain(`${n}개 AI 서비스`)   // KO
     // the 3 remaining non-probed API services must be named...
