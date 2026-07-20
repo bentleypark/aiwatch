@@ -189,7 +189,7 @@ describe('#1047 filterByComponentStatus — the emptiness-keyed branches this re
   })
 
   it('claude DROPS a Claude-Code-only unlinked incident — #934 fail-open is gone, by design', () => {
-    // Pre-#1047 this incident was untagged at resolve, so `scopeResolvedToComponent`'s
+    // Pre-#1047 this incident was untagged at resolve, so `scopeIncidentsToComponent`'s
     // `names.length === 0 → keep` fail-open cross-attributed it to Claude API — the exact #934 bug.
     // Recovery makes it judgeable, so it now drops. A flip in the DROP direction (the #970 silent-loss
     // class), so it is pinned rather than left to be discovered in a Discord alert.
@@ -297,5 +297,76 @@ describe('#1047 fetchService — the REAL production call path', () => {
     // regression, it does not demonstrate #1047.
     const svc = await fetchClaude('claude')
     expect(svc.incidents.map((i) => i.id)).toContain('kqbd7wm6hnnr')
+  })
+})
+
+describe('#1090 fetchService — sibling-component incident while OUR component is degraded', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  // The precondition of the #1090 defect (our own component degraded) is unreachable in every other
+  // fetchService block in this suite — they all build `indicator: 'none'` with operational components.
+  // The pure filterByComponentStatus tests in filter-incidents.test.ts would stay green if the filtered
+  // list stopped reaching `ServiceStatus.incidents`, which is the #966/#940 tested-twin trap.
+  const FABLE5 = 'tnypgb2jbqnq'
+  const OPUS = 'opus45xyz'
+
+  // Real 2026-07-20 shape: a Claude-Code-only incident alongside an unrelated one that DOES tag Claude
+  // API — which is what put the Claude API component into degraded_performance in the first place.
+  const fable5Incident = {
+    id: FABLE5,
+    name: 'Fable 5 requiring usage credits on Max plans',
+    status: 'monitoring',
+    impact: 'minor',
+    created_at: '2026-07-20T07:35:29.166Z',
+    updated_at: '2026-07-20T07:35:29.254Z',
+    resolved_at: null,
+    incident_updates: [{
+      status: 'monitoring', created_at: '2026-07-20T07:35:29.254Z', body: 'Applied a fix.',
+      affected_components: affected([CLAUDE_CODE], 'operational'),
+    }],
+  }
+  const opusIncident = {
+    id: OPUS,
+    name: 'Elevated error rates for Opus 4.5',
+    status: 'investigating',
+    impact: 'minor',
+    created_at: '2026-07-20T07:03:46.113Z',
+    updated_at: '2026-07-20T07:03:46.234Z',
+    resolved_at: null,
+    incident_updates: [{
+      status: 'investigating', created_at: '2026-07-20T07:03:46.234Z', body: 'Investigating.',
+      affected_components: affected([CLAUDE_API, CLAUDE_CODE], 'degraded_performance'),
+    }],
+  }
+
+  const fetchDuringDegradation = (id: string) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+    const summary = {
+      status: { indicator: 'minor', description: 'Partially Degraded Service' },
+      // Claude API degraded by the Opus incident; Claude Code back to operational (the real state).
+      components: ANTHROPIC_COMPONENTS.map((c) =>
+        c.id === CLAUDE_API ? { ...c, status: 'degraded_performance' } : c),
+      incidents: [],
+    }
+    return fetchService(cfg(id), {
+      summary: summary as never,
+      incidents: { incidents: [fable5Incident, opusIncident] } as never,
+      latency: 120,
+    } as never)
+  }
+
+  it('claude does NOT carry the Claude-Code-only incident — on the path /api/status uses', async () => {
+    const svc = await fetchDuringDegradation('claude')
+    expect(svc.incidents.map((i) => i.id)).not.toContain(FABLE5)
+  })
+
+  it('claude still carries the incident that names Claude API (no over-drop)', async () => {
+    const svc = await fetchDuringDegradation('claude')
+    expect(svc.incidents.map((i) => i.id)).toContain(OPUS)
+  })
+
+  it('claudecode, the actual owner, keeps it', async () => {
+    const svc = await fetchDuringDegradation('claudecode')
+    expect(svc.incidents.map((i) => i.id)).toContain(FABLE5)
   })
 })

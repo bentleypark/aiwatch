@@ -119,7 +119,7 @@ describe('filterIncidents', () => {
     expect(filterIncidents(incidents, config)).toHaveLength(0)
   })
 
-  it('bypasses incidentExclude when incident explicitly lists this service component (#357)', () => {
+  it('bypasses incidentExclude when incident explicitly lists this service component (#359)', () => {
     // "claude.ai and API unavailable" should NOT be excluded from the Claude API service
     // even though the title contains "claude.ai" (which is in incidentExclude).
     const incident = mockIncident({
@@ -436,7 +436,9 @@ describe('filterByComponentStatus (#228)', () => {
     expect(claudeAiResult).toHaveLength(1)
     expect(claudeAiResult[0].id).toBe('old-1')
 
-    // Claude API component is degraded — should keep all incidents
+    // Claude API component is degraded — keeps all incidents. NOTE (#1090): this holds because
+    // `mockConfig` does not set `scopeIncidentsToComponent`; the real `claude` config DOES, and would
+    // now scope these by component even while degraded. See the #1090 block below.
     const claudeApiConfig = mockConfig({ id: 'claude', statusComponentId: 'k8w3r06qmzrp' })
     const claudeApiResult = filterByComponentStatus([adminApiIncident, oldResolved], 'degraded', claudeApiConfig, CLAUDE_COMPONENTS)
     expect(claudeApiResult).toHaveLength(2)
@@ -468,9 +470,9 @@ describe('filterByComponentStatus (#228)', () => {
     })
 
     it('keeps the resolved incident on Claude Code (keyword-scoped, no flag)', () => {
-      // claudecode does NOT set scopeResolvedToComponent (keyword-scoped upstream), so it is unaffected
+      // claudecode does NOT set scopeIncidentsToComponent (keyword-scoped upstream), so it is unaffected
       // by #934 and retains its own resolved incident — surfaces normally on resolution.
-      expect(claudeCode.scopeResolvedToComponent).toBeUndefined()
+      expect(claudeCode.scopeIncidentsToComponent).toBeUndefined()
       const result = filterByComponentStatus([githubIncident('resolved')], 'operational', claudeCode, CLAUDE_COMPONENTS)
       expect(result.map(i => i.id)).toEqual(['gh-1'])
     })
@@ -506,13 +508,171 @@ describe('filterByComponentStatus (#228)', () => {
       // does not literally prefix 'API' (e.g. 'Sonar API') must still be kept — the #934 name-scoping
       // would wrongly drop it, so the flag guards single-tenant services from that.
       const perplexity = SERVICES.find(s => s.id === 'perplexity')!
-      expect(perplexity.scopeResolvedToComponent).toBeUndefined()
+      expect(perplexity.scopeIncidentsToComponent).toBeUndefined()
       const sonar = mockIncident({
         id: 'px-1', title: 'Elevated latency on Sonar API', status: 'resolved',
         componentNames: ['Sonar API'], resolvedAt: '2026-07-07T00:00:00Z',
       })
       const result = filterByComponentStatus([sonar], 'operational', perplexity, [])
       expect(result.map(i => i.id)).toEqual(['px-1'])
+    })
+  })
+
+  describe('#1090 scoping applies when OUR OWN component is degraded', () => {
+    // #934 put the scoping inside the `componentStatus === 'operational'` gate, so every case above
+    // passes 'operational'. The production defect (2026-07-20) is the other branch: Claude API was
+    // degraded by an UNRELATED incident, which short-circuited the whole guard and let a
+    // Claude-Code-only incident through onto the Claude API card, Score inputs and alert pipeline.
+    const claudeApi = SERVICES.find(s => s.id === 'claude')!
+    const claudeCode = SERVICES.find(s => s.id === 'claudecode')!
+
+    // The real incident, tagged by Anthropic with the Claude Code component alone.
+    const fable5 = (status: Incident['status'] = 'monitoring') => mockIncident({
+      id: 'tnypgb2jbqnq',
+      title: 'Fable 5 requiring usage credits on Max plans',
+      status,
+      impact: 'minor',
+      componentNames: ['Claude Code'],
+      // Real posting time. Needed as well as the title: buildIncidentAlerts skips anything older than
+      // 24h, so mockIncident's April default would make the alert-chain test below vacuously green.
+      startedAt: '2026-07-20T07:35:29.166Z',
+      resolvedAt: status === 'resolved' ? '2026-07-20T09:00:00Z' : null,
+    })
+
+    it.each([
+      ['degraded' as const],
+      ['down' as const],
+    ])('drops the Claude-Code-only incident from Claude API when Claude API is %s', (ownStatus) => {
+      const result = filterByComponentStatus([fable5()], ownStatus, claudeApi, CLAUDE_COMPONENTS)
+      expect(result).toHaveLength(0)
+    })
+
+    it.each([
+      ['investigating' as const],
+      ['identified' as const],
+      ['monitoring' as const],
+      ['resolved' as const],
+    ])('drops it regardless of the incident status (%s) — scoping is status-independent', (incStatus) => {
+      const result = filterByComponentStatus([fable5(incStatus)], 'degraded', claudeApi, CLAUDE_COMPONENTS)
+      expect(result).toHaveLength(0)
+    })
+
+    it('keeps it on Claude Code, its actual owner, while Claude Code is degraded', () => {
+      // The other direction of the same mutation: the fix must not drop the incident everywhere.
+      const result = filterByComponentStatus([fable5()], 'degraded', claudeCode, CLAUDE_COMPONENTS)
+      expect(result.map(i => i.id)).toEqual(['tnypgb2jbqnq'])
+    })
+
+    it('keeps an incident naming Claude API while Claude API is degraded (#228 bulk-link intact)', () => {
+      // Anthropic's bulk-link — the #228 target — tags 4 of 6 components INCLUDING Claude API, so the
+      // scoping must not swallow a genuine platform-wide incident.
+      const bulk = mockIncident({
+        id: 'opus-1',
+        title: 'Elevated error rates for Opus 4.5',
+        status: 'investigating',
+        componentNames: ['Claude API (api.anthropic.com)', 'Claude Code', 'claude.ai', 'Claude Cowork'],
+      })
+      const result = filterByComponentStatus([bulk], 'degraded', claudeApi, CLAUDE_COMPONENTS)
+      expect(result.map(i => i.id)).toEqual(['opus-1'])
+    })
+
+    it('keeps an untagged incident while degraded (fail-open, unchanged from #934)', () => {
+      const untagged = mockIncident({ id: 'ut-2', status: 'investigating' })
+      const result = filterByComponentStatus([untagged], 'degraded', claudeApi, CLAUDE_COMPONENTS)
+      expect(result.map(i => i.id)).toEqual(['ut-2'])
+    })
+
+    it('leaves a flag-off service byte-unchanged while degraded', () => {
+      // perplexity does not opt in, so the degraded branch must still return the list untouched —
+      // this is what keeps the change scoped to `claude`.
+      const perplexity = SERVICES.find(s => s.id === 'perplexity')!
+      const sonar = mockIncident({
+        id: 'px-2', title: 'Elevated latency on Sonar API', status: 'investigating',
+        componentNames: ['Sonar API'],
+      })
+      const result = filterByComponentStatus([sonar], 'degraded', perplexity, [])
+      expect(result.map(i => i.id)).toEqual(['px-2'])
+    })
+
+    it('skips scoping — and WARNS — when the flag is set but no statusComponent NAME is configured', () => {
+      // Named for what actually makes it red: `ownComponent` is the only thing that can disable the
+      // scoping. (An earlier version of this test also stripped statusComponentId and claimed to pin
+      // an "unresolvable badge group" fail-open — but that term could not change the outcome:
+      // `inBadgeGroup`'s prefix fallback is live whenever `ownComponent` is, which this rule already
+      // requires. The test passed for the wrong reason.)
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const cfg = { ...claudeApi, statusComponent: undefined }
+      const result = filterByComponentStatus([fable5()], 'degraded', cfg, CLAUDE_COMPONENTS)
+      expect(result.map(i => i.id)).toEqual(['tnypgb2jbqnq'])
+      expect(warn.mock.calls.flat().join(' ')).toContain('component scoping is INACTIVE')
+      warn.mockRestore()
+    })
+
+    it('WARNS when scoping empties a degraded service\'s incident list', () => {
+      // The drop itself is correct, but "degraded badge + zero incidents" is the state #1032 filed as
+      // a bug, so it must never be silent (#970/#983).
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const result = filterByComponentStatus([fable5()], 'degraded', claudeApi, CLAUDE_COMPONENTS)
+      expect(result).toHaveLength(0)
+      const logged = warn.mock.calls.flat().join(' ')
+      expect(logged).toContain('#1090 claude')
+      expect(logged).toContain('dropped all 1 candidate incident')
+      expect(logged).toContain('tnypgb2jbqnq:[Claude Code]') // names WHAT was dropped, for triage
+      warn.mockRestore()
+    })
+
+    it('does NOT warn when a surviving incident still explains the degraded badge', () => {
+      // Other direction: the warn must be keyed on "nothing left", not on "we are degraded" — else it
+      // fires on every ordinary degradation and becomes noise nobody reads.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const bulk = mockIncident({
+        id: 'opus-2', status: 'investigating',
+        componentNames: ['Claude API (api.anthropic.com)', 'Claude Code'],
+      })
+      const result = filterByComponentStatus([fable5(), bulk], 'degraded', claudeApi, CLAUDE_COMPONENTS)
+      expect(result.map(i => i.id)).toEqual(['opus-2'])
+      expect(warn.mock.calls.flat().join(' ')).not.toContain('#1090')
+      warn.mockRestore()
+    })
+
+    it('does NOT warn while operational — the premise there is self-consistent', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      expect(filterByComponentStatus([fable5()], 'operational', claudeApi, CLAUDE_COMPONENTS)).toHaveLength(0)
+      expect(warn.mock.calls.flat().join(' ')).not.toContain('#1090')
+      warn.mockRestore()
+    })
+
+    // The stated production concern was never "the card looks wrong" — it was that a Claude-Code-only
+    // incident could reach buildIncidentAlerts and put "Claude API" in an alert title. The filtered
+    // array is handed to the alert builder unchanged, so drive that chain, not just the filter.
+    it('=> the New alert does NOT name Claude API for a Claude-Code-only incident', () => {
+      const active = fable5('investigating') // `monitoring` is withheld by #1039, so use the status that alerts
+      const claudeKept = filterByComponentStatus([active], 'degraded', claudeApi, CLAUDE_COMPONENTS)
+      const codeKept = filterByComponentStatus([active], 'degraded', claudeCode, CLAUDE_COMPONENTS)
+      const svcs = [
+        { ...claudeApi, status: 'degraded', incidents: claudeKept },
+        { ...claudeCode, status: 'degraded', incidents: codeKept },
+      ] as never
+      const alerts = buildIncidentAlerts(svcs, new Map(), Date.parse('2026-07-20T08:00:00Z'))
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0].key).toBe('alerted:new:tnypgb2jbqnq')
+      // The load-bearing assertion: Claude Code is named, Claude API is not.
+      expect(alerts[0].svcIds ?? []).toEqual(['claudecode'])
+      expect(alerts[0].title).not.toContain('Claude API')
+    })
+
+    it('scopes by badge-group membership, not only by statusComponent prefix', () => {
+      // The hoist widened rule 1 from #934's prefix-only to badgeGroup-or-prefix. For `claude` the two
+      // coincide, so nothing else pins WHICH semantics we chose. This config makes them differ: the
+      // incident names a badge-group component that does NOT prefix-match `statusComponent`.
+      const cfg = {
+        ...claudeApi,
+        statusComponent: 'Claude API',
+        statusComponentIds: ['k8w3r06qmzrp', 'yyzkbfz2thpt'],
+      }
+      const codeOnly = fable5()
+      const result = filterByComponentStatus([codeOnly], 'degraded', cfg, CLAUDE_COMPONENTS)
+      expect(result.map(i => i.id)).toEqual(['tnypgb2jbqnq'])
     })
   })
 
