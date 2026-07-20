@@ -730,26 +730,172 @@ export interface AiUsageCounters {
   sonnet?: number
   gemmaAttempts?: number
   sonnetAttempts?: number
+  /**
+   * #1080 — which service each `timedOut` belongs to (`{svcId: count}`).
+   *
+   * `timedOut` alone cannot answer #882's question: an overrun on a Tier-1 service is *correctly*
+   * never held, so "1 overrun happened" is only actionable once you know whether it was Tier-1. With
+   * the id, an overrun becomes findable after the fact — Discord messages are durable, so date +
+   * service is enough to open that alert and read whether it shipped with the AI section.
+   *
+   * ABSENT ≠ zero: records written before #1080 have overruns but no attribution. Read this through
+   * `timedOutAttribution()`, which distinguishes the two.
+   */
+  timedOutBy?: Record<string, number>
+  /**
+   * #1080 / #882 — the AI-hold ledger, bumped from the alert path (`index.ts`), not from an analysis.
+   *
+   * `held` is bumped once per held ALERT KEY, on the first-sight stamp only — never on the per-cycle
+   * re-holds, which would inflate it against the release counters. Note "alert key", not "incident":
+   * a merged alert (`_mergedKeys`, e.g. the Together AI grouping) spans several incidents and books
+   * one hold, because the hold gate itself is per-alert.
+   *
+   * `held` and the release counters are NOT a balanced pair — see `holdLedger()` for the two reasons
+   * (UTC-day boundary, and a held incident that resolves inside the window). Compare the two RELEASE
+   * counters against each other, not against `held`.
+   *
+   * ABSENT ≠ zero on pre-#1080 records — read via `holdLedger()`.
+   */
+  held?: number
+  /** Held, then released WITH the AI section — the #882 fix working as designed. */
+  heldReleasedWithAi?: number
+  /**
+   * Held, then released with NO AI section. Two causes it cannot tell apart at the release site: the
+   * `AI_HOLD_MS` window elapsed (fail-open), and the incident vanished from `scored` so there was
+   * nothing left to analyze (`!svc || !inc`). NOT the merged/no-model/generic skip — that is decided
+   * inside the first-sight branch, so a skipped incident is never held to begin with. A rising count
+   * is the signal that holding is not buying anything.
+   */
+  heldReleasedWithoutAi?: number
 }
 
 export function emptyUsage(): AiUsageCounters {
   return { calls: 0, success: 0, failed: 0 }
 }
 
-/** Tolerant of the pre-#955 shape (`{calls, success, failed, gemma?, sonnet?}`). */
+/**
+ * #1080 — keep only `{svcId: positiveInt}` pairs from a parsed `timedOutBy`.
+ *
+ * Returns `undefined` (not `{}`) when there is nothing usable, so the absent-vs-empty distinction
+ * `timedOutAttribution` relies on survives a corrupt value: a garbage map must read as "we don't
+ * know", never as "we know it was nobody".
+ */
+function sanitizeTimedOutBy(value: unknown): Record<string, number> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const out: Record<string, number> = {}
+  for (const [id, n] of Object.entries(value as Record<string, unknown>)) {
+    // `id &&` mirrors applyAttempt's refusal to book an empty key: without it a `{"":3}` on the wire
+    // would survive the reader even though the writer can never produce one.
+    if (id && typeof n === 'number' && Number.isFinite(n) && n > 0) out[id] = Math.floor(n)
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+/**
+ * A counter field off the wire, or `undefined` when it is absent OR unusable.
+ *
+ * The scalars ride in through the `...parsed` spread, so without this a wire value of `"3"` would
+ * make `applyHoldEvent` compute `"3" + 1 === "31"` and write the string straight back. `null` must
+ * also collapse to `undefined`, or `holdLedger`'s presence test reads it as present and returns a
+ * confident `0` — the exact absence-is-not-zero failure this change exists to prevent.
+ */
+function sanitizeCount(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined
+  return Math.floor(value)
+}
+
+/** Tolerant of the pre-#955 shape (`{calls, success, failed, gemma?, sonnet?}`) and the pre-#1080 one. */
 export function parseUsage(raw: string | null): AiUsageCounters {
   if (!raw) return emptyUsage()
   try {
     const parsed = JSON.parse(raw) as Partial<AiUsageCounters>
-    return {
+    const usage: AiUsageCounters = {
       ...emptyUsage(),
       ...parsed,
-      calls: parsed.calls ?? 0,
-      success: parsed.success ?? 0,
-      failed: parsed.failed ?? 0,
+      // Through `sanitizeCount` like every other counter, not a bare `?? 0`: a wire `"3"` would
+      // otherwise survive here and `summarizeAiUsageTrend`'s `a.calls + (u.calls ?? 0)` would build
+      // `"03"`, after which `formatAiUsageTrendLine`'s `=== 0` guard silently stops matching.
+      calls: sanitizeCount(parsed.calls) ?? 0,
+      success: sanitizeCount(parsed.success) ?? 0,
+      failed: sanitizeCount(parsed.failed) ?? 0,
     }
+    // Spreading `parsed` copied whatever was on the wire — re-derive every optional counter through a
+    // sanitizer, and DELETE rather than set-undefined so a round-trip through JSON.stringify does not
+    // resurrect the key as `"timedOutBy": undefined`-shaped noise. Deleting also keeps `null` from
+    // masquerading as "present" to `holdLedger`'s absence test.
+    const by = sanitizeTimedOutBy(parsed.timedOutBy)
+    if (by) usage.timedOutBy = by
+    else delete usage.timedOutBy
+
+    for (const field of ['timedOut', 'gemma', 'sonnet', 'gemmaAttempts', 'sonnetAttempts', 'held', 'heldReleasedWithAi', 'heldReleasedWithoutAi'] as const) {
+      const n = sanitizeCount(parsed[field])
+      if (n === undefined) delete usage[field]
+      else usage[field] = n
+    }
+    return usage
   } catch {
     return emptyUsage()
+  }
+}
+
+/**
+ * #1080 — read the `timedOut` attribution, distinguishing "no overruns" from "overruns we cannot
+ * attribute". Pure.
+ *
+ * - no overruns at all → `{ by: {}, unattributed: 0 }` (a KNOWN empty)
+ * - overruns but no map (a pre-#1080 record) → `null` (UNKNOWN — do not render this as zero)
+ * - otherwise the map, plus however many overruns it does not account for. `unattributed > 0` with a
+ *   non-empty map means some overruns are unattributed — either the day straddled the #1080 deploy,
+ *   or they hit the empty-`svcId` path (counted, deliberately not keyed).
+ */
+export function timedOutAttribution(
+  usage: AiUsageCounters,
+): { by: Record<string, number>; unattributed: number } | null {
+  const total = usage.timedOut ?? 0
+  if (total <= 0) return { by: {}, unattributed: 0 }
+  if (!usage.timedOutBy) return null
+  const attributed = Object.values(usage.timedOutBy).reduce((a, b) => a + b, 0)
+  return { by: { ...usage.timedOutBy }, unattributed: Math.max(0, total - attributed) }
+}
+
+/**
+ * #1080 — read the #882 AI-hold ledger. Pure. Returns `null` when NONE of the three counters is
+ * present (a pre-#1080 record), so a reader cannot mistake "not instrumented yet" for "zero holds".
+ *
+ * **Deliberately does NOT return a held-minus-released "in flight" figure.** That subtraction reads
+ * like a leak detector and is not one — it is unbalanced by construction for two reasons, so a
+ * nonzero value would be evidence of nothing:
+ *
+ *  1. **The counters are per-UTC-day, the hold window is not.** `AI_HOLD_MS` (~10min) against a
+ *     five-minute cron means a hold stamped at 23:58 releases against the NEXT day's key. That day then
+ *     carries a release with no matching `held`, and the previous day a `held` with no release.
+ *  2. **A held incident that resolves inside the window never reaches the release site.** With the
+ *     incident gone, `buildIncidentAlerts` emits no `alerted:new:` alert at all, so the loop never
+ *     visits it and the marker just TTLs out. That is correct behavior, not a lost release.
+ *
+ * The useful comparison is the RATIO of `releasedWithAi` to `releasedWithoutAi` over a window — that
+ * is the one #882 actually asks about: did holding buy an AI section, or did the alert ship AI-less
+ * anyway.
+ *
+ * Read it as a TREND, not as an exact tally. These counters are near-exact, not exact, and the error
+ * is not symmetric: `recordHoldEvent` is read-modify-write (concurrent crons can lose a bump), and a
+ * marker that outlives its release — `kvDel` swallows failures, and KV reads are eventually consistent
+ * — lets a #545 late joiner book a SECOND release for the same hold episode. That re-book skews toward
+ * `releasedWithAi`, because by the next cycle `refreshOrReanalyze` has usually backfilled the analysis.
+ * So the bias runs toward "the hold worked", which is exactly the direction that could make #882 look
+ * answered when it is not. A single day's numbers prove nothing; a sustained `releasedWithoutAi` share
+ * does.
+ */
+export function holdLedger(
+  usage: AiUsageCounters,
+): { held: number; releasedWithAi: number; releasedWithoutAi: number } | null {
+  if (usage.held === undefined && usage.heldReleasedWithAi === undefined && usage.heldReleasedWithoutAi === undefined) {
+    return null
+  }
+  return {
+    held: usage.held ?? 0,
+    releasedWithAi: usage.heldReleasedWithAi ?? 0,
+    releasedWithoutAi: usage.heldReleasedWithoutAi ?? 0,
   }
 }
 
@@ -760,7 +906,7 @@ export function parseUsage(raw: string | null): AiUsageCounters {
  * `usage.calls++` AFTER awaiting the model, inside the `try` — so a thrown error incremented
  * neither `calls` nor `failed` and vanished from the ledger entirely (#955).
  */
-export function applyAttempt(usage: AiUsageCounters, attempt: AnalysisAttempt): AiUsageCounters {
+export function applyAttempt(usage: AiUsageCounters, attempt: AnalysisAttempt, svcId: string): AiUsageCounters {
   const next: AiUsageCounters = { ...usage }
   next.calls++
   if (attempt.attempts.gemma) next.gemmaAttempts = (next.gemmaAttempts ?? 0) + attempt.attempts.gemma
@@ -772,9 +918,31 @@ export function applyAttempt(usage: AiUsageCounters, attempt: AnalysisAttempt): 
     else if (attempt.result.model === 'sonnet') next.sonnet = (next.sonnet ?? 0) + 1
   } else if (attempt.failure === 'aborted') {
     next.timedOut = (next.timedOut ?? 0) + 1
+    // #1080 — attribute the overrun. `svcId` is required (not optional) so the type checker flags
+    // any call site that cannot supply one: an optional param here would silently re-create the
+    // unattributed blind spot this whole change exists to remove (the #970 lesson). An empty id is
+    // still possible at runtime from a defensive `?? ''`, so skip it rather than booking a `""` key.
+    if (svcId) next.timedOutBy = { ...next.timedOutBy, [svcId]: (next.timedOutBy?.[svcId] ?? 0) + 1 }
   } else {
     next.failed++
   }
+  return next
+}
+
+/**
+ * #1080 / #882 — one AI-hold lifecycle event.
+ *
+ * `held` is emitted ONLY on an incident's first hold; the per-cycle re-holds are deliberately silent
+ * (see `AiUsageCounters.held`).
+ */
+export type AiHoldEvent = 'held' | 'releasedWithAi' | 'releasedWithoutAi'
+
+/** Fold one hold event into the daily counters. Pure. */
+export function applyHoldEvent(usage: AiUsageCounters, event: AiHoldEvent): AiUsageCounters {
+  const next: AiUsageCounters = { ...usage }
+  if (event === 'held') next.held = (next.held ?? 0) + 1
+  else if (event === 'releasedWithAi') next.heldReleasedWithAi = (next.heldReleasedWithAi ?? 0) + 1
+  else next.heldReleasedWithoutAi = (next.heldReleasedWithoutAi ?? 0) + 1
   return next
 }
 
@@ -853,7 +1021,11 @@ export async function analyzeIncidentWithBudget(
   kv: KVLike,
   apiKey: string | undefined,
   ai: Ai | undefined,
-  serviceName: string,
+  // #1080 — takes the id AND the name as one object rather than two adjacent strings. The id is what
+  // `ai:usage.timedOutBy` books and what `TIER1_IDS` is keyed by (`alerts.ts`), while the name is what
+  // the prompt reads; as two positional strings they would be silently transposable, and a swap would
+  // produce attribution that looks right and answers nothing.
+  service: { id: string; name: string },
   currentIncident: { id: string; title: string; status: string; startedAt: string; impact: string | null; timeline?: Array<{ stage: string; text: string | null; at: string }> },
   allIncidents: Incident[],
   historyRecords: IncidentHistoryRecord[] = [],
@@ -883,7 +1055,7 @@ export async function analyzeIncidentWithBudget(
     // is the right one: the analysis is a plain async function, so racing it is safe, whereas the
     // Gemma leg inside is an un-cancellable Workers-AI subrequest that must simply be awaited.
     const raced = await Promise.race([
-      analyzeFn(apiKey, serviceName, currentIncident, allIncidents, undefined, ai, historyRecords, ctrl.signal, counter),
+      analyzeFn(apiKey, service.name, currentIncident, allIncidents, undefined, ai, historyRecords, ctrl.signal, counter),
       budget,
     ])
     attempt = raced === BUDGET
@@ -897,21 +1069,39 @@ export async function analyzeIncidentWithBudget(
     // is for the type checker, which cannot see that.
     if (timer !== undefined) clearTimeout(timer)
   }
-  await recordUsage(kv, now, attempt)
+  await recordUsage(kv, now, attempt, service.id)
   return attempt
 }
 
 /** Read-modify-write the daily counters. Best-effort — bookkeeping never fails an analysis. */
-export async function recordUsage(kv: KVLike, now: number, attempt: AnalysisAttempt): Promise<void> {
+export async function recordUsage(kv: KVLike, now: number, attempt: AnalysisAttempt, svcId: string): Promise<void> {
   try {
     const usageKey = `ai:usage:${new Date(now).toISOString().split('T')[0]}`
-    const usage = applyAttempt(parseUsage(await kv.get(usageKey).catch(() => null)), attempt)
+    const usage = applyAttempt(parseUsage(await kv.get(usageKey).catch(() => null)), attempt, svcId)
     // #995 — 30d TTL (was 2d) so the Gemma-success / timedOut / failed trend survives long enough to
     // answer "is the timeout/fallback rate rising?" (the weekly briefing reads these; #995). One
     // write/day per date key already; only the retention window changes.
     await kvPut(kv, usageKey, JSON.stringify(usage), { expirationTtl: AI_USAGE_TTL_S })
   } catch (err) {
     console.warn('[ai] ai:usage counter bump failed:', err instanceof Error ? err.message : err)
+  }
+}
+
+/**
+ * #1080 / #882 — book one AI-hold lifecycle event into the same daily key.
+ *
+ * Shares `ai:usage:{date}` rather than opening a second key: it is the same daily question ("did the
+ * AI path do its job today?"), and the KV write budget is per-key-per-day, so folding these in costs
+ * no new keys. Best-effort and never throws, exactly like `recordUsage` — an alert must never be lost
+ * to bookkeeping. Inherits the same read-modify-write raciness, so treat the counts as near-exact.
+ */
+export async function recordHoldEvent(kv: KVLike, now: number, event: AiHoldEvent): Promise<void> {
+  try {
+    const usageKey = `ai:usage:${new Date(now).toISOString().split('T')[0]}`
+    const usage = applyHoldEvent(parseUsage(await kv.get(usageKey).catch(() => null)), event)
+    await kvPut(kv, usageKey, JSON.stringify(usage), { expirationTtl: AI_USAGE_TTL_S })
+  } catch (err) {
+    console.warn('[ai] ai:usage hold-event bump failed:', err instanceof Error ? err.message : err)
   }
 }
 
@@ -1055,7 +1245,7 @@ export async function refreshOrReanalyze(
                 ai,
                 svcHistory,
               )
-              await recordUsage(kv, now, attempt)
+              await recordUsage(kv, now, attempt, svc.id)
               if (attempt.result) {
                 // #1003 — this overwrite is exactly where the original prediction used to die. The
                 // re-analysis above was handed `prevPrediction`, whose prompt forbids an upper bound
@@ -1075,7 +1265,7 @@ export async function refreshOrReanalyze(
             } catch (err) {
               console.warn(`[ai] time-based re-analysis failed for ${svc.id}:${inc.id}:`, err instanceof Error ? err.message : err)
               // A throw never reached the counters before #955 — not even `calls`.
-              await recordUsage(kv, now, { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } })
+              await recordUsage(kv, now, { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } }, svc.id)
               // Keep old analysis on failure
               parsed._lastRefresh = new Date(now).toISOString()
               await putAnalysis(kv, svc.id, inc.id, parsed, parsed, 3600)
@@ -1155,7 +1345,7 @@ export async function refreshOrReanalyze(
           ai,
           svcHistory,
         )
-        await recordUsage(kv, now, attempt)
+        await recordUsage(kv, now, attempt, svc.id)
 
         if (attempt.result) {
           // No prior analysis on this KEY (the `if (raw)` branch above `continue`d otherwise) — but the
@@ -1176,7 +1366,7 @@ export async function refreshOrReanalyze(
         }
       } catch (err) {
         console.warn(`[ai] re-analysis failed for ${svc.id}:${inc.id}:`, err instanceof Error ? err.message : err)
-        await recordUsage(kv, now, { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } })
+        await recordUsage(kv, now, { result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } }, svc.id)
         await kvPut(kv, skipKey, '1', { expirationTtl: reanalysisLockTtlSec('unknown') })
         result.skipped.push(svc.id)
       }

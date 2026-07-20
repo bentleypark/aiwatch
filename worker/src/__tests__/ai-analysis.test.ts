@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { findSimilarIncidents, buildAnalysisPrompt, buildHistorySection, analyzeIncidentDetailed, refreshOrReanalyze, analysisKey, firstEstimateKey, firstEstimateOf, pinFirstEstimate, FIRST_ESTIMATE_TTL_S, parseAnalysis, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, reanalysisLockTtlSec, applyAttempt, parseUsage, emptyUsage, summarizeAiUsageTrend, formatAiUsageTrendLine, AI_USAGE_TTL_S, analyzeIncidentWithBudget, INLINE_ANALYSIS_BUDGET_MS, SONNET_MAX_TOKENS, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind, type KVLike } from '../ai-analysis'
+import { findSimilarIncidents, buildAnalysisPrompt, buildHistorySection, analyzeIncidentDetailed, refreshOrReanalyze, analysisKey, firstEstimateKey, firstEstimateOf, pinFirstEstimate, FIRST_ESTIMATE_TTL_S, parseAnalysis, isBoilerplate, isGenericIncident, shouldSkipInitialAnalysis, GENERIC_TITLE_PATTERNS_SOURCES, parseRecoveryHours, formatRecoveryDisplay, formatAnalysisEmbedSection, parseAnalysisResponse, reanalysisLockTtlSec, applyAttempt, applyHoldEvent, timedOutAttribution, holdLedger, recordHoldEvent, parseUsage, emptyUsage, summarizeAiUsageTrend, formatAiUsageTrendLine, AI_USAGE_TTL_S, analyzeIncidentWithBudget, INLINE_ANALYSIS_BUDGET_MS, SONNET_MAX_TOKENS, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind, type KVLike } from '../ai-analysis'
 import type { IncidentHistoryRecord } from '../incident-history'
 import { ANTHROPIC_TIMEOUT_MS } from '../anthropic'
 import type { Incident, ServiceStatus } from '../types'
@@ -622,7 +622,7 @@ describe('applyAttempt / parseUsage', () => {
   const sonnetResult = { ...({} as AIAnalysisResult), model: 'sonnet' as const }
 
   it('counts a Gemma success', () => {
-    const usage = applyAttempt(emptyUsage(), { result: gemmaResult, failure: null, attempts: { gemma: 1, sonnet: 0 } })
+    const usage = applyAttempt(emptyUsage(), { result: gemmaResult, failure: null, attempts: { gemma: 1, sonnet: 0 } }, 'claude')
     expect(usage).toMatchObject({ calls: 1, success: 1, failed: 0, gemma: 1, gemmaAttempts: 1 })
     expect(usage.sonnetAttempts).toBeUndefined()
   })
@@ -630,19 +630,188 @@ describe('applyAttempt / parseUsage', () => {
   // The dead-fallback signal: Sonnet was ATTEMPTED but never succeeded. The old counters
   // only tracked successes, so this was indistinguishable from "never reached".
   it('counts a Sonnet attempt even when it fails', () => {
-    const usage = applyAttempt(emptyUsage(), { result: null, failure: 'permanent', attempts: { gemma: 1, sonnet: 1 } })
+    const usage = applyAttempt(emptyUsage(), { result: null, failure: 'permanent', attempts: { gemma: 1, sonnet: 1 } }, 'claude')
     expect(usage).toMatchObject({ calls: 1, success: 0, failed: 1, gemmaAttempts: 1, sonnetAttempts: 1 })
     expect(usage.sonnet).toBeUndefined()
   })
 
   it('books an abort as timedOut, not failed', () => {
-    const usage = applyAttempt(emptyUsage(), { result: null, failure: 'aborted', attempts: { gemma: 1, sonnet: 0 } })
+    const usage = applyAttempt(emptyUsage(), { result: null, failure: 'aborted', attempts: { gemma: 1, sonnet: 0 } }, 'claude')
     expect(usage).toMatchObject({ calls: 1, success: 0, failed: 0, timedOut: 1 })
   })
 
+  // ── #1080 — attribute the overrun (the #882 blind spot) ──
+
+  it('attributes a timedOut to the service that caused it', () => {
+    const usage = applyAttempt(emptyUsage(), { result: null, failure: 'aborted', attempts: { gemma: 1, sonnet: 0 } }, 'mistral')
+    expect(usage.timedOutBy).toEqual({ mistral: 1 })
+  })
+
+  it('accumulates per service and keeps them separate', () => {
+    let usage = applyAttempt(emptyUsage(), { result: null, failure: 'aborted', attempts: { gemma: 1, sonnet: 0 } }, 'mistral')
+    usage = applyAttempt(usage, { result: null, failure: 'aborted', attempts: { gemma: 1, sonnet: 0 } }, 'mistral')
+    usage = applyAttempt(usage, { result: null, failure: 'aborted', attempts: { gemma: 1, sonnet: 0 } }, 'claude')
+    expect(usage.timedOut).toBe(3)
+    expect(usage.timedOutBy).toEqual({ mistral: 2, claude: 1 })
+  })
+
+  // The whole point of #1080: `timedOut: 1` cannot answer #882 because a Tier-1 overrun is CORRECTLY
+  // never held. Attribution is what makes the two distinguishable after the fact.
+  it('separates a Tier-1 overrun from a non-Tier-1 one', () => {
+    let usage = applyAttempt(emptyUsage(), { result: null, failure: 'aborted', attempts: { gemma: 1, sonnet: 0 } }, 'openai')
+    usage = applyAttempt(usage, { result: null, failure: 'aborted', attempts: { gemma: 1, sonnet: 0 } }, 'cursor')
+    expect(Object.keys(usage.timedOutBy ?? {}).sort()).toEqual(['cursor', 'openai'])
+  })
+
+  it('does not attribute a success or a plain failure — only aborts', () => {
+    const ok = applyAttempt(emptyUsage(), { result: gemmaResult, failure: null, attempts: { gemma: 1, sonnet: 0 } }, 'mistral')
+    expect(ok.timedOutBy).toBeUndefined()
+    const bad = applyAttempt(emptyUsage(), { result: null, failure: 'permanent', attempts: { gemma: 1, sonnet: 1 } }, 'mistral')
+    expect(bad.timedOutBy).toBeUndefined()
+  })
+
+  // `holdSvcId`-style defensive `?? ''` exists upstream; a `""` key would be worse than no key.
+  it('skips attribution for an empty service id but still counts the overrun', () => {
+    const usage = applyAttempt(emptyUsage(), { result: null, failure: 'aborted', attempts: { gemma: 1, sonnet: 0 } }, '')
+    expect(usage.timedOut).toBe(1)
+    expect(usage.timedOutBy).toBeUndefined()
+  })
+
+  // ── #1080 — absence must read as UNKNOWN, never as zero ──
+
+  it('timedOutAttribution: no overruns at all is a KNOWN empty', () => {
+    expect(timedOutAttribution(emptyUsage())).toEqual({ by: {}, unattributed: 0 })
+  })
+
+  // The aiwatch-reports#76 trap, in this repo: a pre-#1080 record HAS overruns and NO map. Reporting
+  // that as "0 non-Tier-1 overruns" would be a confident lie about every day before this shipped.
+  it('timedOutAttribution: overruns with no map read as null (unknown), not zero', () => {
+    expect(timedOutAttribution({ ...emptyUsage(), timedOut: 2 })).toBeNull()
+  })
+
+  it('timedOutAttribution: reports the shortfall when a day straddles the deploy', () => {
+    const got = timedOutAttribution({ ...emptyUsage(), timedOut: 3, timedOutBy: { mistral: 1 } })
+    expect(got).toEqual({ by: { mistral: 1 }, unattributed: 2 })
+  })
+
+  it('timedOutAttribution: returns a copy, so a caller cannot mutate the counters', () => {
+    const usage = { ...emptyUsage(), timedOut: 1, timedOutBy: { mistral: 1 } }
+    const got = timedOutAttribution(usage)
+    got!.by.mistral = 99
+    expect(usage.timedOutBy).toEqual({ mistral: 1 })
+  })
+
+  it('parseUsage: round-trips timedOutBy', () => {
+    const usage = parseUsage(JSON.stringify({ calls: 1, success: 0, failed: 0, timedOut: 1, timedOutBy: { mistral: 1 } }))
+    expect(usage.timedOutBy).toEqual({ mistral: 1 })
+  })
+
+  // A corrupt map must degrade to "unknown", not to a known-empty that reads as "it was nobody".
+  it('parseUsage: a garbage timedOutBy is dropped to absent, so it reads as unknown', () => {
+    for (const junk of ['"nope"', '[1,2]', '{"mistral":"x"}', '{"mistral":-3}', 'null']) {
+      const usage = parseUsage(`{"calls":1,"success":0,"failed":0,"timedOut":1,"timedOutBy":${junk}}`)
+      expect(usage.timedOutBy, junk).toBeUndefined()
+      expect(timedOutAttribution(usage), junk).toBeNull()
+    }
+  })
+
+  // ── #1080 / #882 — the hold ledger ──
+
+  it('applyHoldEvent: counts each lifecycle event on its own axis', () => {
+    let usage = applyHoldEvent(emptyUsage(), 'held')
+    usage = applyHoldEvent(usage, 'held')
+    usage = applyHoldEvent(usage, 'releasedWithAi')
+    usage = applyHoldEvent(usage, 'releasedWithoutAi')
+    expect(usage).toMatchObject({ held: 2, heldReleasedWithAi: 1, heldReleasedWithoutAi: 1 })
+  })
+
+  it('applyHoldEvent: leaves the analysis counters untouched', () => {
+    const usage = applyHoldEvent(emptyUsage(), 'held')
+    expect(usage).toMatchObject({ calls: 0, success: 0, failed: 0 })
+    expect(usage.timedOut).toBeUndefined()
+  })
+
+  it('holdLedger: a pre-#1080 record reads as null (unknown), not as zero holds', () => {
+    expect(holdLedger(emptyUsage())).toBeNull()
+    expect(holdLedger({ ...emptyUsage(), calls: 9, timedOut: 2 })).toBeNull()
+  })
+
+  it('holdLedger: a held-then-released-with-AI day is the #882 fix working', () => {
+    const usage = applyHoldEvent(applyHoldEvent(emptyUsage(), 'held'), 'releasedWithAi')
+    expect(holdLedger(usage)).toEqual({ held: 1, releasedWithAi: 1, releasedWithoutAi: 0 })
+  })
+
+  // The signal that the hold bought nothing — this is what a rising count would look like.
+  it('holdLedger: a fail-open day shows the release carried no AI', () => {
+    const usage = applyHoldEvent(applyHoldEvent(emptyUsage(), 'held'), 'releasedWithoutAi')
+    expect(holdLedger(usage)).toMatchObject({ held: 1, releasedWithAi: 0, releasedWithoutAi: 1 })
+  })
+
+  // #1080 review — `held` and the releases are NOT a balanced pair, so the ledger deliberately does
+  // not publish a held-minus-released figure. Two independent reasons, both routine:
+  //   (a) the key is per-UTC-day but the ~10min hold window is not, so a 23:58 hold releases against
+  //       the NEXT day's key — that day would read as a negative "in flight";
+  //   (b) a held incident that RESOLVES inside the window emits no alert at all on the next cycle, so
+  //       it never reaches the release site and the marker just TTLs out. Correct, not a lost release.
+  it('holdLedger: exposes the raw counters only — no held-minus-released figure to misread', () => {
+    const open = holdLedger(applyHoldEvent(emptyUsage(), 'held'))
+    expect(open).toEqual({ held: 1, releasedWithAi: 0, releasedWithoutAi: 0 })
+    expect(open).not.toHaveProperty('inFlight')
+  })
+
+  it('holdLedger: a release landing on the next UTC day is readable, not negative', () => {
+    // The day-2 key legitimately carries a release with no matching `held`.
+    const dayTwo = applyHoldEvent(emptyUsage(), 'releasedWithAi')
+    expect(holdLedger(dayTwo)).toEqual({ held: 0, releasedWithAi: 1, releasedWithoutAi: 0 })
+  })
+
+  // ── #1080 review — scalar counters off the wire ──
+
+  it('parseUsage: coerces a string counter instead of letting it concatenate', () => {
+    // `"3" + 1 === "31"` — applyHoldEvent would write a string straight back into the ledger.
+    const usage = parseUsage('{"calls":1,"success":0,"failed":0,"held":"3"}')
+    expect(usage.held).toBeUndefined()
+    expect(applyHoldEvent(usage, 'held').held).toBe(1)
+  })
+
+  // `calls`/`success`/`failed` are required (they default to 0 rather than going absent), but they must
+  // still be coerced: a wire `"3"` would otherwise reach `summarizeAiUsageTrend`'s `a.calls + u.calls`
+  // and build the string `"03"`, after which `formatAiUsageTrendLine`'s `=== 0` guard stops matching.
+  it('parseUsage: coerces the required base counters too, not just the optional ones', () => {
+    const usage = parseUsage('{"calls":"3","success":null,"failed":-2}')
+    expect(usage).toMatchObject({ calls: 0, success: 0, failed: 0 })
+    expect(typeof usage.calls).toBe('number')
+  })
+
+  it('parseUsage: a null counter reads as ABSENT, not as a confident zero', () => {
+    const usage = parseUsage('{"calls":1,"success":0,"failed":0,"held":null,"heldReleasedWithAi":null,"heldReleasedWithoutAi":null}')
+    expect(holdLedger(usage), 'null must not satisfy the presence test').toBeNull()
+  })
+
+  it('parseUsage: drops an empty-string key the writer could never have produced', () => {
+    const usage = parseUsage('{"calls":1,"success":0,"failed":0,"timedOut":1,"timedOutBy":{"":3}}')
+    expect(usage.timedOutBy).toBeUndefined()
+  })
+
+  it('recordHoldEvent: persists to the same daily key and survives a round-trip', async () => {
+    const store: Record<string, string> = {}
+    await recordHoldEvent(mockKV(store), Date.parse('2026-07-20T04:00:00Z'), 'held')
+    await recordHoldEvent(mockKV(store), Date.parse('2026-07-20T04:05:00Z'), 'releasedWithAi')
+    expect(holdLedger(parseUsage(store['ai:usage:2026-07-20']))).toMatchObject({ held: 1, releasedWithAi: 1 })
+  })
+
+  // Both writers share one key — a hold event must not clobber the analysis counters written that day.
+  it('recordHoldEvent: does not clobber the analysis counters already on the key', async () => {
+    const store: Record<string, string> = { 'ai:usage:2026-07-20': JSON.stringify({ calls: 4, success: 3, failed: 0, timedOut: 1, timedOutBy: { mistral: 1 } }) }
+    await recordHoldEvent(mockKV(store), Date.parse('2026-07-20T04:00:00Z'), 'held')
+    const usage = parseUsage(store['ai:usage:2026-07-20'])
+    expect(usage).toMatchObject({ calls: 4, success: 3, timedOut: 1, held: 1 })
+    expect(usage.timedOutBy).toEqual({ mistral: 1 })
+  })
+
   it('accumulates across attempts', () => {
-    let usage = applyAttempt(emptyUsage(), { result: sonnetResult, failure: null, attempts: { gemma: 1, sonnet: 1 } })
-    usage = applyAttempt(usage, { result: null, failure: 'transient', attempts: { gemma: 1, sonnet: 1 } })
+    let usage = applyAttempt(emptyUsage(), { result: sonnetResult, failure: null, attempts: { gemma: 1, sonnet: 1 } }, 'claude')
+    usage = applyAttempt(usage, { result: null, failure: 'transient', attempts: { gemma: 1, sonnet: 1 } }, 'claude')
     expect(usage).toMatchObject({ calls: 2, success: 1, failed: 1, sonnet: 1, sonnetAttempts: 2, gemmaAttempts: 2 })
   })
 
@@ -720,7 +889,7 @@ describe('analyzeIncidentWithBudget', () => {
   it('passes a live AbortSignal down to the analysis', async () => {
     const store: Record<string, string> = {}
     const analyzeFn = vi.fn().mockResolvedValue(okAttempt(mockAnalysis))
-    await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, 'Claude API', inc, [], [], 15_000, NOW, analyzeFn)
+    await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, { id: 'claude', name: 'Claude API' }, inc, [], [], 15_000, NOW, analyzeFn)
     const signal = analyzeFn.mock.calls[0][7]
     expect(signal).toBeInstanceOf(AbortSignal)
     expect(signal.aborted).toBe(false)
@@ -739,11 +908,17 @@ describe('analyzeIncidentWithBudget', () => {
       counter.gemma++
       return new Promise<AnalysisAttempt>(() => {})
     })
-    const attempt = await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, 'Claude API', inc, [], [], 5, NOW, analyzeFn as never)
+    const attempt = await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, { id: 'claude', name: 'Claude API' }, inc, [], [], 5, NOW, analyzeFn as never)
     expect(seen!.aborted).toBe(true)
     expect(attempt.failure).toBe('aborted')
     // The counter is mutated by the still-running analysis — the only honest source of attempts.
     expect(attempt.attempts).toEqual({ gemma: 1, sonnet: 0 })
+    // #1080 — behavioral round-trip through the WRITER BODY, not just the call site. Making `svcId`
+    // required protects callers (the type checker rejects a missing argument), but nothing stops the
+    // body from passing the wrong thing onward — e.g. `service.name` instead of `service.id`, which
+    // would compile, keep every pure-fn test green, and yield attribution keyed by display name. The
+    // source-scan guard covers the call sites; this covers what the function actually persists.
+    expect(parseUsage(store['ai:usage:2026-07-09']).timedOutBy).toEqual({ claude: 1 })
     const usage = JSON.parse(store['ai:usage:2026-07-09'])
     expect(usage).toMatchObject({ calls: 1, failed: 0, timedOut: 1, gemmaAttempts: 1 })
   })
@@ -752,7 +927,7 @@ describe('analyzeIncidentWithBudget', () => {
     const store: Record<string, string> = {}
     const analyzeFn = vi.fn().mockResolvedValue(okAttempt(mockAnalysis))
     const t0 = Date.now()
-    const attempt = await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, 'Claude API', inc, [], [], 60_000, NOW, analyzeFn)
+    const attempt = await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, { id: 'claude', name: 'Claude API' }, inc, [], [], 60_000, NOW, analyzeFn)
     expect(Date.now() - t0).toBeLessThan(1_000)
     expect(attempt.result).toBeTruthy()
   })
@@ -761,7 +936,7 @@ describe('analyzeIncidentWithBudget', () => {
     vi.useFakeTimers()
     try {
       const analyzeFn = vi.fn().mockResolvedValue(okAttempt(mockAnalysis))
-      await analyzeIncidentWithBudget(mockKV(), 'key', undefined, 'Claude API', inc, [], [], 15_000, NOW, analyzeFn)
+      await analyzeIncidentWithBudget(mockKV(), 'key', undefined, { id: 'claude', name: 'Claude API' }, inc, [], [], 15_000, NOW, analyzeFn)
       expect(vi.getTimerCount()).toBe(0)
     } finally {
       vi.useRealTimers()
@@ -771,7 +946,7 @@ describe('analyzeIncidentWithBudget', () => {
   it('books a successful inline analysis into ai:usage', async () => {
     const store: Record<string, string> = {}
     const analyzeFn = vi.fn().mockResolvedValue(okAttempt({ ...mockAnalysis, model: 'sonnet' }))
-    const attempt = await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, 'Claude API', inc, [], [], 15_000, NOW, analyzeFn)
+    const attempt = await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, { id: 'claude', name: 'Claude API' }, inc, [], [], 15_000, NOW, analyzeFn)
     expect(attempt.result).toBeTruthy()
     expect(JSON.parse(store['ai:usage:2026-07-09'])).toMatchObject({ calls: 1, success: 1, sonnet: 1 })
   })
@@ -780,7 +955,7 @@ describe('analyzeIncidentWithBudget', () => {
     const store: Record<string, string> = {}
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const analyzeFn = vi.fn().mockRejectedValue(new Error('boom'))
-    const attempt = await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, 'Claude API', inc, [], [], 15_000, NOW, analyzeFn)
+    const attempt = await analyzeIncidentWithBudget(mockKV(store), 'key', undefined, { id: 'claude', name: 'Claude API' }, inc, [], [], 15_000, NOW, analyzeFn)
     expect(attempt).toEqual({ result: null, failure: 'unknown', attempts: { gemma: 0, sonnet: 0 } })
     expect(JSON.parse(store['ai:usage:2026-07-09'])).toMatchObject({ calls: 1, failed: 1 })
     spy.mockRestore()
