@@ -2,6 +2,7 @@
 
 import type { Incident, ServiceStatus, ServiceComponent, ServiceConfig, DailyImpactLevel } from './types'
 export type { ServiceStatus } from './types'
+import { recordParseFailure } from './parse-failure-log'
 import { fetchWithTimeout, formatDuration, trackFetchFailure, resetFetchFailure, trackComponentMiss, resetComponentMiss, kvPut, isNonReliabilityAdvisory } from './utils'
 import { isProbeHealthy, isProbeFailing, detectConsecutiveSpikes, type ProbeSnapshot } from './probe'
 import { readSuppressions, applySuppressions } from './suppression'
@@ -2010,6 +2011,11 @@ async function fetchServiceUntagged(config: ServiceConfig, prefetched?: Prefetch
       // single transient blip does not fabricate an outage either. This closes the case #761's note
       // at the top of this file described but only mitigated: the discarded `shouldDegrade`.
       if (instatusParseFailure) {
+        // #1089 follow-up — book EVERY failure, not just the 3-strike crossings `trackFetchFailure`
+        // records. A single failed cycle already drops the service out of `/api/statusline/down` and
+        // makes the plugin monitor emit a false "✅ recovered", so the rising-edge counter is blind to
+        // the metric the remaining decision needs. 30d retention, so a weekly check sees the window.
+        await recordParseFailure(kv, Date.now(), config.id, instatusParseFailure)
         const shouldDegrade = await trackFetchFailure(kv, config.id)
         return {
           ...base,
