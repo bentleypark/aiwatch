@@ -21,9 +21,9 @@
 | ![AIWatch 대시보드](docs/screenshot.png?v=3) | ![AIWatch 모바일](docs/screenshot-mobile.png?v=1) |
 
 **공유**
-[![X에 공유](https://img.shields.io/badge/Share-X-000000?logo=x&logoColor=white)](https://twitter.com/intent/tweet?text=AIWatch%20%E2%80%94%2039%EA%B0%9C%20AI%20%EC%84%9C%EB%B9%84%EC%8A%A4%20%EC%8B%A4%EC%8B%9C%EA%B0%84%20%EC%9E%A5%EC%95%A0%20%EB%AA%A8%EB%8B%88%ED%84%B0%EB%A7%81%20%28Claude%2C%20ChatGPT%2C%20Gemini%20%EC%99%B8%29&url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch)
-[![Reddit에 공유](https://img.shields.io/badge/Share-Reddit-FF4500?logo=reddit&logoColor=white)](https://reddit.com/submit?url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&title=AIWatch%20%E2%80%94%2039%EA%B0%9C%20AI%20%EC%84%9C%EB%B9%84%EC%8A%A4%20%EC%8B%A4%EC%8B%9C%EA%B0%84%20%EC%9E%A5%EC%95%A0%20%EB%AA%A8%EB%8B%88%ED%84%B0%EB%A7%81)
-[![Hacker News에 공유](https://img.shields.io/badge/Share-Hacker%20News-FF6600?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&t=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2039%20AI%20services)
+[![X에 공유](https://img.shields.io/badge/Share-X-000000?logo=x&logoColor=white)](https://twitter.com/intent/tweet?text=AIWatch%20%E2%80%94%2044%EA%B0%9C%20AI%20%EC%84%9C%EB%B9%84%EC%8A%A4%20%EC%8B%A4%EC%8B%9C%EA%B0%84%20%EC%9E%A5%EC%95%A0%20%EB%AA%A8%EB%8B%88%ED%84%B0%EB%A7%81%20%28Claude%2C%20ChatGPT%2C%20Gemini%20%EC%99%B8%29&url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch)
+[![Reddit에 공유](https://img.shields.io/badge/Share-Reddit-FF4500?logo=reddit&logoColor=white)](https://reddit.com/submit?url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&title=AIWatch%20%E2%80%94%2044%EA%B0%9C%20AI%20%EC%84%9C%EB%B9%84%EC%8A%A4%20%EC%8B%A4%EC%8B%9C%EA%B0%84%20%EC%9E%A5%EC%95%A0%20%EB%AA%A8%EB%8B%88%ED%84%B0%EB%A7%81)
+[![Hacker News에 공유](https://img.shields.io/badge/Share-Hacker%20News-FF6600?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&t=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2044%20AI%20services)
 [![LinkedIn에 공유](https://img.shields.io/badge/Share-LinkedIn-0A66C2?logo=linkedin&logoColor=white)](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch)
 
 ## 🛰️ 라이브 데모
@@ -34,11 +34,11 @@
 
 - **실시간 상태 모니터링** — 44개 AI 서비스의 정상 / 성능 저하 / 장애 상태
 - **PWA 지원** — 홈 화면 추가, Service Worker 오프라인 캐시
-- **지연시간 측정** — 33개 probe 대상 서비스의 API 엔드포인트 직접 RTT 측정, 나머지는 상태 페이지 응답 시간
+- **지연시간 측정** — 33개 probe 대상 서비스의 엔드포인트 직접 RTT 측정, 나머지는 상태 페이지 응답 시간
 - **24시간 지연시간 추세** — Chart.js 라인 차트 (5분 간격 probe 스냅샷)
 - **인시던트 이력** — 다양한 상태 페이지 형식의 타임라인 상세 정보
 - **공식 가동률** — Statuspage, incident.io, Better Stack에서 컴포넌트별 가동률
-- **구성요소 상태 분해** — 24개 멀티컴포넌트 서비스의 서비스별 상세 + Is X Down에 구성요소별(모델·API 표면 등) 실시간 상태 표시. 많으면 섹션/모델 그룹으로 접힘
+- **구성요소 상태 분해** — 컴포넌트 단위로 추적하는 서비스의 서비스별 상세 + Is X Down에 구성요소별(모델·API 표면 등) 실시간 상태 표시. 많으면 섹션/모델 그룹으로 접힘
 - **상태 캘린더** — 30일(Statuspage) 또는 14일(incident.io) 일별 상태 시각화
 - **Discord & Slack 알림** — 상태 변경/인시던트 Discord Webhook + Slack 내장 `/feed` RSS 앱(설정 0) + RSS 피드
 - **쿠키 동의** — GA4 Consent Mode v2 (동의/필수만)
@@ -52,7 +52,7 @@
 - **스마트 알림** — degraded/down 상태 Discord 알림 (anti-flapping + 인시던트 억제 + 복구 지속 시간)
 - **오프라인 UI** — API 연결 불가 시 안내 화면 (프로덕션 전용)
 - **Is X Down SEO 페이지** — 42개 서비스 (Bedrock/Azure OpenAI 제외한 모든 모니터링 대상), 동적 OG 이미지(PNG), 공유 버튼, AIWatch 순위 (대시보드와 동일한 동률 표기), 대체 서비스 추천
-- **헬스체크 프로빙** — API 엔드포인트 직접 RTT 측정 (33개 probe 대상) + 연속 스파이크 조기 장애 감지 및 RTT 저하 추적
+- **헬스체크 프로빙** — 서비스 엔드포인트 직접 RTT 측정 (33개 probe 대상) + 연속 스파이크 조기 장애 감지 및 RTT 저하 추적
 - **페이지별 스켈레톤** — 각 페이지 레이아웃에 맞는 로딩 placeholder
 - **AI 분석 (Beta)** — 장애 발생 시 하이브리드 AI 자동 분석 (Gemma 4 primary + Sonnet fallback): 원인 추정, 예상 복구 시간, 영향 범위, 대체 서비스 추천. 인시던트 Discord 알림에 통합(단일 embed), Topbar Analyze 모달, Is X Down AI Insight 카드
 - **랜딩 페이지** — 랜딩 페이지(`/intro`), 대시보드 프리뷰 mock, KO/EN 이중 언어, Flow 애니메이션, `?banner=` 캠페인 슬롯(선택), GA4 트래킹

@@ -22,9 +22,9 @@ Real-time monitoring dashboard for **44 AI services** — track status, latency,
 | ![AIWatch Dashboard](docs/screenshot.png?v=3) | ![AIWatch Mobile](docs/screenshot-mobile.png?v=1) |
 
 **Share**
-[![Share on X](https://img.shields.io/badge/Share-X-000000?logo=x&logoColor=white)](https://twitter.com/intent/tweet?text=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2039%20AI%20services%20%28Claude%2C%20ChatGPT%2C%20Gemini%2C%20and%20more%29&url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch)
-[![Share on Reddit](https://img.shields.io/badge/Share-Reddit-FF4500?logo=reddit&logoColor=white)](https://reddit.com/submit?url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&title=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2039%20AI%20services)
-[![Share on Hacker News](https://img.shields.io/badge/Share-Hacker%20News-FF6600?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&t=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2039%20AI%20services)
+[![Share on X](https://img.shields.io/badge/Share-X-000000?logo=x&logoColor=white)](https://twitter.com/intent/tweet?text=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2044%20AI%20services%20%28Claude%2C%20ChatGPT%2C%20Gemini%2C%20and%20more%29&url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch)
+[![Share on Reddit](https://img.shields.io/badge/Share-Reddit-FF4500?logo=reddit&logoColor=white)](https://reddit.com/submit?url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&title=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2044%20AI%20services)
+[![Share on Hacker News](https://img.shields.io/badge/Share-Hacker%20News-FF6600?logo=ycombinator&logoColor=white)](https://news.ycombinator.com/submitlink?u=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch&t=AIWatch%20%E2%80%94%20Real-time%20monitoring%20for%2044%20AI%20services)
 [![Share on LinkedIn](https://img.shields.io/badge/Share-LinkedIn-0A66C2?logo=linkedin&logoColor=white)](https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fgithub.com%2Fbentleypark%2Faiwatch)
 
 ## 🛰️ Live Demo
@@ -35,11 +35,11 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 
 - **Real-time status** — Operational / Degraded / Down for 44 AI services
 - **PWA support** — Add to home screen, offline cache with Service Worker
-- **Latency monitoring** — Direct API endpoint response time (RTT) for 33 probe-capable services, status page timing as fallback
+- **Latency monitoring** — Direct endpoint response time (RTT) for 33 probe-capable services, status page timing as fallback
 - **24h latency trend** — Chart.js line chart with 5-min probe snapshots
 - **Incident history** — Timeline with details from multiple status page formats
 - **Official uptime** — Per-component uptime from Statuspage, incident.io, Better Stack
-- **Component status breakdown** — Real-time per-component status (models, API surfaces, …) on ServiceDetails + Is X Down for 24 multi-component services, with collapsible section/model groups for long lists
+- **Component status breakdown** — Real-time per-component status (models, API surfaces, …) on ServiceDetails + Is X Down for the services we track per-component, with collapsible section/model groups for long lists
 - **Status calendar** — 30-day (Statuspage) or 14-day (incident.io) daily status visualization
 - **Discord & Slack alerts** — Discord webhook on status changes/incidents + Slack via its native `/feed` RSS app (zero-config) + RSS feeds
 - **Cookie consent** — GA4 Consent Mode v2 with accept/essential-only
@@ -53,7 +53,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Smart alerts** — Discord alerts for degraded/down status with anti-flapping, incident suppression, and recovery duration
 - **Offline UI** — Graceful error state when API is unreachable (production only)
 - **Is X Down SEO pages** — 42 services (all monitored services except Bedrock / Azure OpenAI) with dynamic OG images (PNG), share buttons, AIWatch rank (matches dashboard with tied-rank display), and fallback recommendations
-- **Health check probing** — Direct RTT measurement to API endpoints (33 probe targets) with early outage detection via consecutive spike alerts and RTT degradation tracking
+- **Health check probing** — Direct RTT measurement to service endpoints (33 probe targets) with early outage detection via consecutive spike alerts and RTT degradation tracking
 - **Page-specific skeletons** — Loading placeholders matched to each page layout
 - **AI Analysis (Beta)** — Hybrid AI auto-analysis on incidents (Gemma 4 primary + Sonnet fallback): cause estimation, recovery time, affected scope, contextual fallback recommendations. Merged into incident Discord alert (single embed), Topbar Analyze modal, Is X Down AI Insight card
 - **Landing page** — Landing page (`/intro`) with dashboard preview mock, KO/EN i18n, flow animation, optional `?banner=` campaign slot, and GA4 tracking
@@ -339,7 +339,7 @@ Embed real-time status badges in your README, docs, or blog.
 
 ## Claude Code Statusline Integration
 
-Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and 36 more — directly in your [Claude Code statusline](https://docs.claude.com/en/docs/claude-code/statusline). The recommended preset keeps an always-on, clickable **AIWatch** label (`AIWatch 🟢` while all healthy, `AIWatch 🔴 Claude API` when something breaks — cmd/ctrl+click opens the dashboard). Prefer zero footprint when healthy? A minimalist preset that stays empty until something degrades is on the [presets page](https://ai-watch.dev/#statusline).
+Surface AI service outages — Claude API, OpenAI, Gemini, GitHub Copilot, and 40 more — directly in your [Claude Code statusline](https://docs.claude.com/en/docs/claude-code/statusline). The recommended preset keeps an always-on, clickable **AIWatch** label (`AIWatch 🟢` while all healthy, `AIWatch 🔴 Claude API` when something breaks — cmd/ctrl+click opens the dashboard). Prefer zero footprint when healthy? A minimalist preset that stays empty until something degrades is on the [presets page](https://ai-watch.dev/#statusline).
 
 Quickest install — add to `~/.claude/settings.json`:
 
