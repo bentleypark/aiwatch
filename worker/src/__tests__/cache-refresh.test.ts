@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { refreshStatusCacheOnChange, writeStatusCache, hasStatusEdge, refreshStatusCacheOnLiveEdge } from '../cache-refresh'
 import type { ServiceStatus } from '../services'
+import type { UpstreamCandidate } from '../upstream-feed'
 
 const CACHE_KEY = 'services:latest'
 const TTL = 900
@@ -20,11 +21,13 @@ const svc = (id: string, status: string): ServiceStatus => ({
 } as unknown as ServiceStatus)
 
 const SERVICES = [svc('chatgpt', 'down'), svc('claude', 'operational')]
+// #1072 — the non-carded upstream feeds that now ride in the same snapshot.
+const FEEDS: UpstreamCandidate[] = [{ id: 'github-platform', name: 'GitHub', status: 'degraded', incidents: [] }]
 
 describe('refreshStatusCacheOnChange (#488)', () => {
   it('writes the fresh snapshot to CACHE_KEY when an alert fired (sentCount > 0)', async () => {
     const kv = makeKV()
-    const ok = await refreshStatusCacheOnChange(kv, SERVICES, 1, CACHE_KEY, TTL, 1_700_000_000_000)
+    const ok = await refreshStatusCacheOnChange(kv, SERVICES, FEEDS, 1, CACHE_KEY, TTL, 1_700_000_000_000)
     expect(ok).toBe(true)
     const raw = kv._store.get(CACHE_KEY)
     expect(raw).toBeTruthy()
@@ -40,7 +43,7 @@ describe('refreshStatusCacheOnChange (#488)', () => {
     // /api/status/cached + the existing cacheWrite both assume `cachedAt` is an ISO string.
     const kv = makeKV()
     const before = Date.now()
-    const ok = await refreshStatusCacheOnChange(kv, SERVICES, 1, CACHE_KEY, TTL)
+    const ok = await refreshStatusCacheOnChange(kv, SERVICES, FEEDS, 1, CACHE_KEY, TTL)
     expect(ok).toBe(true)
     const parsed = JSON.parse(kv._store.get(CACHE_KEY)!)
     expect(typeof parsed.cachedAt).toBe('string')
@@ -51,7 +54,7 @@ describe('refreshStatusCacheOnChange (#488)', () => {
 
   it('does NOT write when no alert fired (sentCount === 0)', async () => {
     const kv = makeKV()
-    const ok = await refreshStatusCacheOnChange(kv, SERVICES, 0, CACHE_KEY, TTL)
+    const ok = await refreshStatusCacheOnChange(kv, SERVICES, FEEDS, 0, CACHE_KEY, TTL)
     expect(ok).toBe(false)
     expect(kv.put).not.toHaveBeenCalled()
     expect(kv._store.has(CACHE_KEY)).toBe(false)
@@ -59,7 +62,7 @@ describe('refreshStatusCacheOnChange (#488)', () => {
 
   it('does NOT write when services is empty (defensive — never cache a 0-service snapshot)', async () => {
     const kv = makeKV()
-    const ok = await refreshStatusCacheOnChange(kv, [], 3, CACHE_KEY, TTL)
+    const ok = await refreshStatusCacheOnChange(kv, [], FEEDS, 3, CACHE_KEY, TTL)
     expect(ok).toBe(false)
     expect(kv.put).not.toHaveBeenCalled()
   })
@@ -67,7 +70,7 @@ describe('refreshStatusCacheOnChange (#488)', () => {
   it('returns false (does not throw) when the KV write fails — caller keeps its throttle clock', async () => {
     const kv = makeKV()
     kv.put.mockRejectedValueOnce(new Error('kv down'))
-    const ok = await refreshStatusCacheOnChange(kv, SERVICES, 1, CACHE_KEY, TTL)
+    const ok = await refreshStatusCacheOnChange(kv, SERVICES, FEEDS, 1, CACHE_KEY, TTL)
     expect(ok).toBe(false) // kvPut swallows + returns false; no throw
   })
 
@@ -78,19 +81,21 @@ describe('refreshStatusCacheOnChange (#488)', () => {
     // The function has no throttle of its own; it writes whenever sentCount > 0. This pins that
     // contract so a future refactor doesn't accidentally reintroduce a 10-min gate here.
     const kv = makeKV()
-    await refreshStatusCacheOnChange(kv, SERVICES, 1, CACHE_KEY, TTL, 1)
-    await refreshStatusCacheOnChange(kv, SERVICES, 1, CACHE_KEY, TTL, 2) // immediately again
+    await refreshStatusCacheOnChange(kv, SERVICES, FEEDS, 1, CACHE_KEY, TTL, 1)
+    await refreshStatusCacheOnChange(kv, SERVICES, FEEDS, 1, CACHE_KEY, TTL, 2) // immediately again
     expect(kv.put).toHaveBeenCalledTimes(2)
   })
 
   it('writes byte-identically to the shared writeStatusCache primitive (no drift between #488 and #1057)', async () => {
-    // Both event-driven refreshes must produce the SAME { services, cachedAt } JSON that
-    // /api/status/cached reads. Pin that refreshStatusCacheOnChange delegates to writeStatusCache so a
-    // future edit to one shape can't silently diverge the other (feedback: shared primitive > copies).
+    // Both event-driven refreshes must produce the SAME { services, upstreamFeeds, cachedAt } JSON
+    // that /api/status/cached reads. Pin that refreshStatusCacheOnChange delegates to writeStatusCache
+    // so a future edit to one shape can't silently diverge the other (feedback: shared primitive >
+    // copies). NOTE this assertion is blind to a change that drops a key from BOTH sides identically —
+    // that is the writeStatusCache test's job above, not this one's.
     const a = makeKV()
     const b = makeKV()
-    await refreshStatusCacheOnChange(a, SERVICES, 1, CACHE_KEY, TTL, 1_700_000_000_000)
-    await writeStatusCache(b, SERVICES, CACHE_KEY, TTL, 1_700_000_000_000)
+    await refreshStatusCacheOnChange(a, SERVICES, FEEDS, 1, CACHE_KEY, TTL, 1_700_000_000_000)
+    await writeStatusCache(b, SERVICES, FEEDS, CACHE_KEY, TTL, 1_700_000_000_000)
     expect(a._store.get(CACHE_KEY)).toBe(b._store.get(CACHE_KEY))
   })
 })
@@ -141,12 +146,20 @@ describe('hasStatusEdge (#1057)', () => {
 })
 
 describe('writeStatusCache (#1057 shared primitive)', () => {
-  it('writes { services, cachedAt } to cacheKey and returns kvPut success', async () => {
+  it('writes { services, upstreamFeeds, cachedAt } to cacheKey and returns kvPut success', async () => {
     const kv = makeKV()
-    const ok = await writeStatusCache(kv, SERVICES, CACHE_KEY, TTL, 1_700_000_000_000)
+    const ok = await writeStatusCache(kv, SERVICES, FEEDS, CACHE_KEY, TTL, 1_700_000_000_000)
     expect(ok).toBe(true)
     const parsed = JSON.parse(kv._store.get(CACHE_KEY)!)
     expect(parsed.services).toEqual(SERVICES)
+    // #1072 — assert the feeds come BACK OUT, not merely that a FEEDS argument was passed in.
+    // Threading a constant through every call site proves nothing about the writer body: deleting
+    // `upstreamFeeds` from this function's JSON.stringify left the entire worker suite green, before
+    // this assertion existed.
+    // The call sites are guarded by a required parameter (a compile error); the body was guarded by
+    // nothing at all, and the body is what two status-EDGE writers route through — the write that
+    // fires when an outage begins.
+    expect(parsed.upstreamFeeds).toEqual(FEEDS)
     expect(parsed.cachedAt).toBe(new Date(1_700_000_000_000).toISOString())
     expect(kv.put).toHaveBeenCalledWith(CACHE_KEY, expect.any(String), { expirationTtl: TTL })
   })
@@ -154,7 +167,7 @@ describe('writeStatusCache (#1057 shared primitive)', () => {
   it('returns false (does not throw) when the KV write fails', async () => {
     const kv = makeKV()
     kv.put.mockRejectedValueOnce(new Error('kv down'))
-    expect(await writeStatusCache(kv, SERVICES, CACHE_KEY, TTL)).toBe(false)
+    expect(await writeStatusCache(kv, SERVICES, FEEDS, CACHE_KEY, TTL)).toBe(false)
   })
 })
 
@@ -169,16 +182,17 @@ describe('refreshStatusCacheOnLiveEdge (#1057 — the /api/status wiring)', () =
   it('force-writes CACHE_KEY when throttled (wrote=false) AND a status edge exists — the fix', async () => {
     const kv = makeKV()
     const read = vi.fn(async () => ({ services: OPERATIONAL })) // cached snapshot still operational
-    const outcome = await refreshStatusCacheOnLiveEdge(kv, false, CLAUDE_DOWN, CACHE_KEY, TTL, read, 1_700_000_000_000)
+    const outcome = await refreshStatusCacheOnLiveEdge(kv, false, CLAUDE_DOWN, FEEDS, CACHE_KEY, TTL, read, 1_700_000_000_000)
     expect(outcome).toBe('refreshed')
     const parsed = JSON.parse(kv._store.get(CACHE_KEY)!)
     expect(parsed.services).toEqual(CLAUDE_DOWN) // the fresh down-snapshot is now what OG/SSR will read
+    expect(parsed.upstreamFeeds).toEqual(FEEDS)   // #1072 — the edge write must not erase them
   })
 
   it('does NOT read or write when cacheWrite already wrote (wrote=true) — guards against a per-poll read regression', async () => {
     const kv = makeKV()
     const read = vi.fn(async () => ({ services: OPERATIONAL }))
-    const outcome = await refreshStatusCacheOnLiveEdge(kv, true, CLAUDE_DOWN, CACHE_KEY, TTL, read)
+    const outcome = await refreshStatusCacheOnLiveEdge(kv, true, CLAUDE_DOWN, FEEDS, CACHE_KEY, TTL, read)
     expect(outcome).toBe('skipped')
     expect(read).not.toHaveBeenCalled()   // the read must stay on the throttled path only
     expect(kv.put).not.toHaveBeenCalled()
@@ -187,7 +201,7 @@ describe('refreshStatusCacheOnLiveEdge (#1057 — the /api/status wiring)', () =
   it('does NOT write when throttled but status is unchanged (steady state)', async () => {
     const kv = makeKV()
     const read = vi.fn(async () => ({ services: CLAUDE_DOWN })) // cache already reflects the down state
-    const outcome = await refreshStatusCacheOnLiveEdge(kv, false, CLAUDE_DOWN, CACHE_KEY, TTL, read)
+    const outcome = await refreshStatusCacheOnLiveEdge(kv, false, CLAUDE_DOWN, FEEDS, CACHE_KEY, TTL, read)
     expect(outcome).toBe('skipped')
     expect(kv.put).not.toHaveBeenCalled()
   })
@@ -195,7 +209,7 @@ describe('refreshStatusCacheOnLiveEdge (#1057 — the /api/status wiring)', () =
   it('does NOT write when the cache is cold/null (bootstrap stays the throttled writer\'s job)', async () => {
     const kv = makeKV()
     const read = vi.fn(async () => null)
-    const outcome = await refreshStatusCacheOnLiveEdge(kv, false, CLAUDE_DOWN, CACHE_KEY, TTL, read)
+    const outcome = await refreshStatusCacheOnLiveEdge(kv, false, CLAUDE_DOWN, FEEDS, CACHE_KEY, TTL, read)
     expect(outcome).toBe('skipped')
     expect(kv.put).not.toHaveBeenCalled()
   })
@@ -204,7 +218,7 @@ describe('refreshStatusCacheOnLiveEdge (#1057 — the /api/status wiring)', () =
     const kv = makeKV()
     kv.put.mockRejectedValueOnce(new Error('kv down'))
     const read = vi.fn(async () => ({ services: OPERATIONAL }))
-    const outcome = await refreshStatusCacheOnLiveEdge(kv, false, CLAUDE_DOWN, CACHE_KEY, TTL, read)
+    const outcome = await refreshStatusCacheOnLiveEdge(kv, false, CLAUDE_DOWN, FEEDS, CACHE_KEY, TTL, read)
     expect(outcome).toBe('refresh-failed') // handler logs console.error on this — the #488-parity fix
   })
 
@@ -213,7 +227,7 @@ describe('refreshStatusCacheOnLiveEdge (#1057 — the /api/status wiring)', () =
     // next call sees no edge. Simulated by a reader returning the just-written snapshot.
     const kv = makeKV()
     const read = vi.fn(async () => ({ services: CLAUDE_DOWN })) // cache now already == fresh
-    const outcome = await refreshStatusCacheOnLiveEdge(kv, false, CLAUDE_DOWN, CACHE_KEY, TTL, read)
+    const outcome = await refreshStatusCacheOnLiveEdge(kv, false, CLAUDE_DOWN, FEEDS, CACHE_KEY, TTL, read)
     expect(outcome).toBe('skipped')
     expect(kv.put).not.toHaveBeenCalled()
   })

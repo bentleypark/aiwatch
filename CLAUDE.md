@@ -270,6 +270,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   fallback.ts        # Fallback recommendation (tiered, Score-ranked)
   service-groups.ts  # Fine service taxonomy (llm/voice/inference/…) → /api/v1/status `group` (mirror of frontend SERVICE_CATEGORIES, sync-tested) (#1068)
   upstream-link.ts   # Cross-provider upstream link (#1053) — a dependent's own incident names a provider that is itself down
+  upstream-feed.ts   # Non-carded upstream feeds (#1072) — GitHub platform status read ONLY by upstream-link; no card/Score/uptime
   incident-text.ts   # Shared "which incidents can be a CAUSE + their searchable text" primitive (#1053; supply-chain + upstream-link)
   suppression.ts     # Operator incident-suppression layer (#904)
   overrides.ts       # Operator incident duration-override layer (#1019) — pins a paperwork-inflated duration, keeps the incident

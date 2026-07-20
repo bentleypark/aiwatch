@@ -615,6 +615,7 @@ document.addEventListener('click', function (e) {
       if (d.gaTo) p.to_service = d.gaTo;
       if (d.gaMethod) { p.method = d.gaMethod; p.content_type = 'is_x_down'; }
       if (d.gaItem) p.item_id = d.gaItem;
+      if (d.gaDest) p.destination = d.gaDest;
       gtag('event', d.ga, p);
     }
   }
@@ -820,12 +821,25 @@ function upstreamRow(u: UpstreamNoteLike['upstream'][number], displayName: strin
     ? ` &middot; ${leadLabel(u.leadMinutes)} before ${esc(displayName)}&rsquo;s report`
     : ''
   // `from_service`/`to_service` are EXISTING delegated-listener params (a service→service link is
-  // exactly their semantics), so no new GA parameter or listener branch is needed. The event name is
-  // NOT `outbound_fallback_click`, so the #842 referral beacon deliberately stays out of this — that
-  // beacon counts sponsor-evidence traffic LEAVING AIWatch for the sponsor figure; this link stays on
-  // AIWatch and would inflate it.
+  // exactly their semantics), so those two needed no listener change. The event name is NOT
+  // `outbound_fallback_click`, so the #842 referral beacon deliberately stays out of this — that
+  // beacon counts sponsor-evidence traffic LEAVING AIWatch for the sponsor figure, and inflating it
+  // with a status-page click would corrupt the sponsor number. That holds for BOTH destinations here,
+  // which is why #1072's external link reuses this event rather than borrowing the outbound one.
+  //
+  // #1072 — the destination is no longer always internal, so `dest` splits the two. This one DID need
+  // a listener branch (`if (d.gaDest) p.destination = d.gaDest`, in renderDelegatedListeners above):
+  // that listener builds its param object from an explicit allowlist, so an attribute nobody added a
+  // branch for is rendered into the DOM and then silently dropped on the way to gtag. Emitting the
+  // attribute is only half the wiring, and it is the half a `toContain('data-ga-dest=…')` assertion
+  // can see — so the lockstep test pins the listener branch too.
+  //
+  // Why the split is worth a branch at all: without it the event mixes "went to our is-down page"
+  // with "left for the provider's status page" under one name, and the param is only recoverable
+  // going forward. A non-carded upstream (GitHub) has no is-down page, so its row would otherwise
+  // name an outage and offer nowhere to check it — the hole this fills.
   const link = u.href
-    ? `<div style="margin-top:6px"><a class="mono" style="font-size:11px" href="${esc(u.href)}" data-ga="upstream_link" data-ga-loc="is_down_page" data-ga-from="${esc(fromId)}" data-ga-to="${esc(u.id)}">Check ${esc(u.name)} status &rarr;</a></div>`
+    ? `<div style="margin-top:6px"><a class="mono" style="font-size:11px" href="${esc(u.href)}"${u.external ? ' target="_blank" rel="noopener noreferrer"' : ''} data-ga="upstream_link" data-ga-loc="is_down_page" data-ga-from="${esc(fromId)}" data-ga-to="${esc(u.id)}" data-ga-dest="${u.external ? 'external' : 'internal'}">Check ${esc(u.name)} status${u.external ? ' &#8599;' : ' &rarr;'}</a></div>`
     : ''
   return `<div style="padding:4px 0">
 <div style="display:flex;align-items:center;gap:8px">

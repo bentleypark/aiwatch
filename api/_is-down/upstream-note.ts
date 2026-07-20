@@ -33,7 +33,20 @@ export interface UpstreamLinkLike {
   // break anything.
   incidentTitle: string
   startedAt: string
-  upstream: Array<{ id: string; name: string; status: string; incidentTitle: string; startedAt: string }>
+  upstream: Array<{
+    id: string; name: string; status: string; incidentTitle: string; startedAt: string
+    /** #1072 — the upstream's own public status page, for a NON-CARDED upstream (a GitHub-style feed)
+     *  that has no is-down page to link to.
+     *
+     *  OPTIONAL, and that is the rule stated in this file's header being applied rather than a
+     *  judgement call: `statusUrl` was ADDED to the worker's `UpstreamLink` after #1053 shipped, so a
+     *  deployed worker serves the shape WITHOUT it — for hours-to-days, since the worker deploy is
+     *  manual and batched while Vercel ships this file on merge. Same asymmetry, same reason, as
+     *  `supply-chain-note.ts`'s `regions?: string[]` (`affectedNow` shipped in #574 and was required;
+     *  `regions` was retrofitted in #1000 and is optional). Absence means "no official link known",
+     *  which for a service upstream is the normal, permanent state. */
+    statusUrl?: string
+  }>
 }
 
 export interface UpstreamNoteUpstream {
@@ -45,8 +58,17 @@ export interface UpstreamNoteUpstream {
   status: string
   incidentTitle: string
   startedAt: string
-  /** the upstream's is-down page path, or null when it has none (bedrock/azureopenai, #263) */
+  /** Where the reader goes to check this upstream. In priority order:
+   *    1. the upstream's AIWatch is-down page (`/is-<slug>-down`) — keeps the reader on the site
+   *    2. #1072: the upstream's OWN status page, when it has no is-down page (a non-carded feed)
+   *    3. null — no destination at all
+   *  Case 3 still occurs: bedrock/azureopenai are services with no is-down page (#263) and no
+   *  `statusUrl` on the wire (that field lives on `ServiceConfig`, which never reaches the payload),
+   *  so they keep rendering a linkless row. Giving THEM an official link is a separate change. */
   href: string | null
+  /** True when `href` leaves AIWatch. Drives `target`/`rel` and splits the GA event's destination —
+   *  see `upstreamRow`, whose "this link stays on AIWatch" rationale stops holding once case 2 exists. */
+  external: boolean
   /** whole minutes this upstream incident PRECEDED the dependent's claim. Null when either timestamp
    *  is unparseable, OR when the gap is negative — gate 5 emits only an upstream that started first or
    *  simultaneously (it compares with `<=`, so a 0 lead is legal and renders as "less than a minute"),
@@ -89,6 +111,30 @@ function minutesBetween(earlier: string, later: string): number | null {
 }
 
 /**
+ * Is this a URL we are willing to put in an `href`?
+ *
+ * Not ceremony. `statusUrl` arrives across a network boundary behind a structural `as` cast (the same
+ * reason this file types `status` as `string` rather than a union), and the template's `esc()` only
+ * neutralizes markup characters — it does nothing to a `javascript:alert(1)` payload, which contains
+ * none. So an unvalidated value here is a stored-XSS sink reachable by anything that can influence the
+ * worker's response. Allowing exactly http/https closes it, and rejects the protocol-relative `//evil`
+ * form too (`new URL` needs a base for those, so they throw and fail closed).
+ *
+ * Today the only producer is our own hard-coded `UPSTREAM_FEEDS` config, so nothing hostile can reach
+ * it — which is precisely why the check belongs here rather than in a comment: the guarantee lives in
+ * a different repo layer that a future edit can change without ever reading this file.
+ */
+export function isSafeExternalUrl(url: string | undefined): boolean {
+  if (!url) return false
+  try {
+    const { protocol } = new URL(url)
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+/**
  * The note for THIS service, or null when the worker made no upstream claim about it.
  *
  * Null covers three distinct cases that all mean the same thing on the page — say nothing:
@@ -106,13 +152,26 @@ export function buildUpstreamNote(links: UpstreamLinkLike[] | undefined, service
     incidentTitle: link.incidentTitle,
     upstream: link.upstream.map((u) => {
       const slug = SERVICE_ID_TO_SLUG[u.id]
+      // Internal FIRST, always. An upstream that has both (none today, but a feed could later gain a
+      // page) must keep the reader on AIWatch — the external link exists to fill a hole, not to
+      // compete with the is-down page.
+      const external = !slug && isSafeExternalUrl(u.statusUrl)
+      // Absent vs REJECTED are the same outcome (a linkless row) but are not the same event. Absent is
+      // expected — it is the permanent state of every service upstream, and the guaranteed state of a
+      // feed upstream for the hours-to-days between this file shipping on merge and the worker deploy
+      // catching up. Rejected is a config defect. Folding a defect into a path that is normal on every
+      // deploy is how it stays invisible: nobody seeing a linkless GitHub row would suspect it.
+      if (!slug && u.statusUrl && !external) {
+        console.warn(`[is-down/upstream-note] ${u.id}: statusUrl rejected as unsafe — row renders with no destination:`, u.statusUrl)
+      }
       return {
         id: u.id,
         name: u.name,
         status: u.status,
         incidentTitle: u.incidentTitle,
         startedAt: u.startedAt,
-        href: slug ? `/is-${slug}-down` : null,
+        href: slug ? `/is-${slug}-down` : (external ? u.statusUrl! : null),
+        external,
         leadMinutes: minutesBetween(u.startedAt, link.startedAt),
       }
     }),

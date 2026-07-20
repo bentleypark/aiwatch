@@ -13,6 +13,7 @@
 // Worker-side by design (the #574 precedent): the cross-service claim is computed once, clients render text.
 
 import type { ServiceStatus } from './types'
+import type { UpstreamCandidate } from './upstream-feed'
 import { causalIncidents } from './incident-text'
 
 /** A declared dependency. CURATED, never inferred — the curation is the moat and the safety gate. */
@@ -58,10 +59,33 @@ export interface UpstreamDep {
  * like "Claude 3.5 Sonnet unavailable in Cursor" can be Cursor's OWN routing bug — a token that names
  * a model the dependent merely resells is not the dependent blaming an upstream. Add an alias when a
  * real incident shows it, not in anticipation.
+ *
+ * - chatgpt / codex → GitHub platform (#1072). 2026-07-20, read off githubstatus.com/api/v2/summary.json
+ *   and GET /api/status/cached during the live outage:
+ *     github  `Incident with GitHub Actions`  (components Actions + API Requests, partial_outage)
+ *                                                              2026-07-19T23:34:03.457Z
+ *     chatgpt/codex `Elevated errors for GitHub-dependent ChatGPT and Codex workflows`
+ *                                                              2026-07-20T00:34:34Z  — a 60m30s lead
+ *                                                              (renders as "1h 1m": minutesBetween rounds).
+ *   Both OpenAI surfaces carry that one incident (siblings of the same status.openai.com page), so both
+ *   are declared: they are separate AIWatch services with separate is-down pages, and gate 2 is
+ *   per-dependent, so omitting one would leave that page silent during the very outage that motivated
+ *   this. The upstream is a NON-CARDED feed (`upstream-feed.ts`), not a service — GitHub is not an AI
+ *   service, and the GitHub components we DO monitor (`copilot`) stayed operational throughout.
+ *
+ * `aliases: ['github']` is the token OpenAI actually used ("GitHub-dependent"). It carries a known
+ * false-positive shape — a dependent's OWN integration bug ("GitHub integration broken in Codex")
+ * names the same token without blaming an upstream, which is exactly why Cursor's entry omits
+ * `claude`. It is admitted here, unlike there, because gate 4 requires GitHub to be CONCURRENTLY
+ * impacted, and an internal integration bug does not come with a live githubstatus outage. That is a
+ * containment argument, not an absence of risk: if a false link is ever observed, the fix is to drop
+ * the alias, not to widen the gates.
  */
 export const UPSTREAM_DEPS: UpstreamDep[] = [
   { id: 'cursor', upstreamIds: ['claude'], aliases: ['anthropic'] },
   { id: 'replicate', upstreamIds: ['huggingface'], aliases: ['huggingface'] },
+  { id: 'chatgpt', upstreamIds: ['github-platform'], aliases: ['github'] },
+  { id: 'codex', upstreamIds: ['github-platform'], aliases: ['github'] },
 ]
 
 export interface UpstreamLink {
@@ -85,6 +109,10 @@ export interface UpstreamLink {
     incidentId: string
     incidentTitle: string
     startedAt: string
+    /** #1072 — the upstream's OWN status page, present only for a non-carded FEED upstream. A service
+     *  upstream omits it and is linked to its AIWatch is-down page instead. Optional on the wire, so
+     *  the Edge must treat absence as "link internally" — see `upstream-note.ts`. */
+    statusUrl?: string
   }>
 }
 
@@ -116,7 +144,7 @@ function startedMs(iso: string | undefined): number | null {
   return t
 }
 
-const isImpacted = (s?: ServiceStatus): s is ServiceStatus & { status: 'degraded' | 'down' } =>
+const isImpacted = <T extends { status: string }>(s?: T): s is T & { status: 'degraded' | 'down' } =>
   s != null && (s.status === 'degraded' || s.status === 'down')
 
 /**
@@ -156,9 +184,35 @@ const CAUSE_WINDOW_MS = 24 * 60 * 60 * 1000
  * required means the type-checker makes every call site state its clock, and it keeps this function
  * pure so the freshness gates are testable without fake timers. #970 is the counter-lesson — an
  * OPTIONAL param there silently re-emptied a derived set at the call site that forgot it.
+ *
+ * `feeds` (#1072) is REQUIRED for the same kind of reason, scoped to what THIS function controls. Its
+ * two call sites are the two response paths (`/api/status` and `/api/status/cached`), and they source
+ * their feeds differently: the live path from `fetchAllServices`, the cached path from the snapshot
+ * via `cached.upstreamFeeds ?? []`. Requiring the argument forces each to state which — a default
+ * would silently give the cached path `[]` and leave is-down, the surface that reads it, permanently
+ * linkless while the dashboard worked.
+ *
+ * NOT the argument for the cache WRITERS. This function writes nothing; the guarantee that the three
+ * snapshot writers cannot drop the feeds comes from the required params on `writeStatusCache` and
+ * `cacheWrite`, and the reasoning lives there. Restating it here would be a second copy to keep in
+ * sync, and would credit this function with a protection it does not provide.
+ *
+ * Pass `[]` to mean "no feeds", explicitly. Dependents are resolved from `services` ONLY — a feed can
+ * be an upstream, never a dependent: it has no card to annotate, and `UPSTREAM_DEPS` ids are services.
  */
-export function buildUpstreamLinks(services: ServiceStatus[], now: number): UpstreamLink[] {
-  const byId = new Map(services.map((s) => [s.id, s]))
+export function buildUpstreamLinks(
+  services: ServiceStatus[],
+  feeds: UpstreamCandidate[],
+  now: number,
+): UpstreamLink[] {
+  const byId = new Map<string, ServiceStatus>(services.map((s) => [s.id, s]))
+  // Upstream lookup spans services ∪ feeds. Services win a collision: a real monitored service is
+  // always the better answer (it has a card, an is-down page and a Score behind it), and a feed id
+  // that shadows one is a config mistake we should not let silently take precedence.
+  const upstreamById = new Map<string, ServiceStatus | UpstreamCandidate>([
+    ...feeds.map((f) => [f.id, f] as const),
+    ...services.map((s) => [s.id, s] as const),
+  ])
   const links: UpstreamLink[] = []
 
   for (const dep of UPSTREAM_DEPS) {
@@ -202,7 +256,7 @@ export function buildUpstreamLinks(services: ServiceStatus[], now: number): Upst
 
     const upstream: UpstreamLink['upstream'] = []
     for (const upId of dep.upstreamIds) {
-      const up = byId.get(upId)
+      const up = upstreamById.get(upId)
       if (!isImpacted(up)) continue // gate 4
 
       // gate 5 — only upstream incidents that started at or before the dependent's claim. Of those,
@@ -240,6 +294,11 @@ export function buildUpstreamLinks(services: ServiceStatus[], now: number): Upst
         incidentId: cause.inc.id,
         incidentTitle: cause.inc.title,
         startedAt: cause.inc.startedAt,
+        // Spread-omitted rather than set to undefined: the payload is JSON, and an explicit
+        // `statusUrl: undefined` serializes to nothing anyway — but omitting it keeps the emitted
+        // object shape identical to the pre-#1072 one for every service upstream, so a snapshot
+        // diff shows the new key ONLY where it means something.
+        ...('statusUrl' in up && up.statusUrl ? { statusUrl: up.statusUrl } : {}),
       })
     }
 

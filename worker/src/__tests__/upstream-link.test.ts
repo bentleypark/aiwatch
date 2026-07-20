@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { buildUpstreamLinks, namesUpstream, normalizeForMatch, UPSTREAM_DEPS } from '../upstream-link'
+import { UPSTREAM_FEEDS, type UpstreamCandidate } from '../upstream-feed'
 import { causalIncidents } from '../incident-text'
 import { SERVICES } from '../services'
 import type { ServiceStatus, Incident } from '../types'
@@ -53,7 +54,8 @@ const svc = (id: string, status: ServiceStatus['status'], incidents: Incident[] 
 // that has nothing to do with what it asserts.
 const NOW_HF = Date.parse('2026-07-16T09:00:00Z')      // ~28m after the replicate claim
 const NOW_CURSOR = Date.parse('2026-07-17T09:00:00Z')  // ~1h43m after the cursor claim
-const build = (services: ServiceStatus[], now: number = NOW_HF) => buildUpstreamLinks(services, now)
+const build = (services: ServiceStatus[], now: number = NOW_HF, feeds: UpstreamCandidate[] = []) =>
+  buildUpstreamLinks(services, feeds, now)
 
 // --- the two evidenced outages, verbatim -------------------------------------------------------
 // 2026-07-16: huggingface down 07:55:33Z → replicate 'HuggingFace download issues' 08:31:53Z (+36m)
@@ -385,11 +387,30 @@ describe('UPSTREAM_DEPS — the curation discipline', () => {
   // spot an absent card — something that happens a handful of times a year. Not hypothetical here:
   // service ids have been renamed before (junie-migration.test.ts, the #940 id-scheme change).
   // Same idiom as feed-slug-sync / service-site-url-sync / stale-source-config.
-  it('every declared id + upstreamId exists in SERVICES (a rename is a silent no-op forever)', () => {
+  it('every declared id + upstreamId exists in SERVICES (or, for an upstream, in UPSTREAM_FEEDS) — a rename is a silent no-op forever', () => {
     const ids = new Set(SERVICES.map((s) => s.id))
+    const feedIds = new Set(UPSTREAM_FEEDS.map((f) => f.id))
     for (const dep of UPSTREAM_DEPS) {
+      // A DEPENDENT must still be a real service: the link annotates its card / is-down page, and a
+      // feed has neither. #1072 widened only the upstream side.
       expect(ids, `dependent "${dep.id}"`).toContain(dep.id)
-      for (const up of dep.upstreamIds) expect(ids, `${dep.id} → upstream "${up}"`).toContain(up)
+      for (const up of dep.upstreamIds) {
+        expect(
+          ids.has(up) || feedIds.has(up),
+          `${dep.id} → upstream "${up}" is in neither SERVICES nor UPSTREAM_FEEDS`,
+        ).toBe(true)
+      }
+    }
+  })
+
+  it('no UPSTREAM_FEEDS id collides with a real service id (the collision resolves to the service, silently)', () => {
+    // buildUpstreamLinks lets services win an id collision on purpose (a real service is the better
+    // answer), which makes a colliding feed id a SILENT no-op — the feed is built and cached
+    // while never being consulted. (It is not "shipped": upstreamFeeds rides only in the KV snapshot,
+    // never in a response body.) Catch it here rather than as a dead upstream link.
+    const ids = new Set(SERVICES.map((s) => s.id))
+    for (const f of UPSTREAM_FEEDS) {
+      expect(ids.has(f.id), `feed "${f.id}" shadows a service id`).toBe(false)
     }
   })
 
@@ -412,8 +433,11 @@ describe('UPSTREAM_DEPS — the curation discipline', () => {
     // block correct curation.
     for (const dep of UPSTREAM_DEPS) {
       const anchors = dep.upstreamIds.flatMap((id) => {
-        const cfg = SERVICES.find((s) => s.id === id)!
-        return [normalizeForMatch(cfg.name), normalizeForMatch(cfg.provider)]
+        const cfg = SERVICES.find((s) => s.id === id)
+        if (cfg) return [normalizeForMatch(cfg.name), normalizeForMatch(cfg.provider)]
+        // #1072 — a feed upstream has a display name but no `provider` (it is consulted, not monitored).
+        const feed = UPSTREAM_FEEDS.find((f) => f.id === id)!
+        return [normalizeForMatch(feed.name)]
       })
       const hit = dep.aliases.some((a) => anchors.includes(normalizeForMatch(a)))
       expect(hit, `${dep.id}: no alias of [${dep.aliases}] matches any of [${anchors}]`).toBe(true)
@@ -463,5 +487,93 @@ describe('causalIncidents (#1053 — the primitive shared with supply-chain.ts)'
 
   it('tolerates a service with no incidents array at all', () => {
     expect(causalIncidents({ id: 'x', name: 'X', status: 'operational' } as ServiceStatus)).toEqual([])
+  })
+})
+
+// --- #1072: a NON-CARDED feed as the upstream ---------------------------------------------------
+// The evidenced outage of 2026-07-20. TITLES, TIMESTAMPS and the GitHub id are read off the wire
+// (githubstatus.com/api/v2/summary.json for the GitHub side, GET /api/status/cached for the OpenAI
+// side); the OpenAI incident id is synthetic and labelled as such below. This is the case the feature
+// exists for:
+// GitHub is not a monitored service, and the GitHub components AIWatch DOES monitor (copilot's
+// `Copilot` + `Copilot AI Model Providers`) were `operational` for the entire incident — so before
+// #1072 no arrangement of services could have produced this link.
+describe('feed upstreams (#1072)', () => {
+  const NOW_GH = Date.parse('2026-07-20T01:00:00Z') // ~25m after the OpenAI claim
+  // Titles and timestamps are wire-verbatim. The GitHub id is real (`8vfyvq16hzh9`, Statuspage short
+  // token — it is also asserted in upstream-feed.test.ts, which is the fixture that reads it off the
+  // payload). The OpenAI id is SYNTHETIC and shaped like the incident.io ULID it stands in for: this
+  // file asserts titles and ordering, never that id, so carrying a second hand-typed copy of a real
+  // 26-char ULID would be a fact no test can see — the exact way the #1053 review found one incident's
+  // head spliced onto another's tail. A synthetic id that ANNOUNCES itself cannot be mistaken for
+  // provenance; a hand-typed real one can.
+  const GH_ACTIONS = inc('8vfyvq16hzh9', 'Incident with GitHub Actions', '2026-07-19T23:34:03.457Z', {
+    componentNames: ['Actions', 'API Requests'],
+  })
+  // Both OpenAI surfaces carry this one incident — they are siblings of the same status page.
+  const OPENAI_GH = inc('SYNTHETIC-OPENAI-ULID-0001', 'Elevated errors for GitHub-dependent ChatGPT and Codex workflows', '2026-07-20T00:34:34Z')
+  const githubFeed = (status: 'operational' | 'degraded' | 'down', incidents = [GH_ACTIONS]): UpstreamCandidate =>
+    ({ id: 'github-platform', name: 'GitHub', status, incidents })
+
+  it('links chatgpt to the GitHub feed on the evidenced outage', () => {
+    const links = build([svc('chatgpt', 'degraded', [OPENAI_GH])], NOW_GH, [githubFeed('degraded')])
+    expect(links).toHaveLength(1)
+    expect(links[0].id).toBe('chatgpt')
+    expect(links[0].incidentTitle).toBe(OPENAI_GH.title)
+    expect(links[0].upstream).toHaveLength(1)
+    expect(links[0].upstream[0]).toMatchObject({
+      id: 'github-platform',
+      name: 'GitHub',
+      status: 'degraded',
+      incidentTitle: 'Incident with GitHub Actions',
+      startedAt: '2026-07-19T23:34:03.457Z',
+    })
+  })
+
+  it('links codex from the SAME feed instance (gate 2 is per-dependent, so both surfaces render)', () => {
+    const links = build(
+      [svc('chatgpt', 'degraded', [OPENAI_GH]), svc('codex', 'degraded', [OPENAI_GH])],
+      NOW_GH,
+      [githubFeed('degraded')],
+    )
+    expect(links.map((l) => l.id).sort()).toEqual(['chatgpt', 'codex'])
+  })
+
+  it('stays quiet when the dependent blames GitHub but GitHub is healthy (gate 4 — the false-positive containment)', () => {
+    // This is the case that justifies admitting the broad `github` alias at all: a dependent's OWN
+    // integration bug names the same token. Without a concurrent GitHub outage there is no link.
+    const links = build([svc('codex', 'degraded', [OPENAI_GH])], NOW_GH, [githubFeed('operational')])
+    expect(links).toEqual([])
+  })
+
+  it('stays quiet when no feeds are supplied at all (a pre-#1072 cached snapshot)', () => {
+    // The deploy-skew path: /api/status/cached reads `cached.upstreamFeeds ?? []` off a snapshot
+    // written before this feature shipped. Must degrade to silence, never to a half-built link.
+    const links = build([svc('chatgpt', 'degraded', [OPENAI_GH])], NOW_GH, [])
+    expect(links).toEqual([])
+  })
+
+  it('a feed is never treated as a DEPENDENT even if it names an upstream', () => {
+    // Feeds are upstream-only. Passing one whose own incident text names another upstream must not
+    // manufacture a link keyed on the feed — it has no card to annotate.
+    const chatty: UpstreamCandidate = {
+      id: 'github-platform', name: 'GitHub', status: 'degraded',
+      incidents: [inc('gh-2', 'Degraded due to an Anthropic issue', '2026-07-20T00:00:00Z')],
+    }
+    const links = build([svc('claude', 'down', [inc('c1', 'API errors', '2026-07-19T23:00:00Z')])], NOW_GH, [chatty])
+    expect(links.find((l) => l.id === 'github-platform')).toBeUndefined()
+  })
+
+  it('a service wins an id collision with a feed (the feed is shadowed, not merged)', () => {
+    // Pins the documented precedence in buildUpstreamLinks. The sync test above forbids this config,
+    // so this asserts the RUNTIME behaviour that test's failure message describes.
+    const shadow: UpstreamCandidate = { id: 'huggingface', name: 'Not Hugging Face', status: 'down', incidents: [GH_ACTIONS] }
+    const links = build(
+      [svc('replicate', 'degraded', [REPLICATE_HF]), svc('huggingface', 'down', [HF_HUB_DOWN])],
+      NOW_HF,
+      [shadow],
+    )
+    expect(links).toHaveLength(1)
+    expect(links[0].upstream[0].name).toBe('Hugging Face') // the service, not the shadowing feed
   })
 })
