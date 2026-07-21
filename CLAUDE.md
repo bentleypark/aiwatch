@@ -92,10 +92,11 @@ npm test           # Run Playwright E2E tests
 npm run test:src   # Run frontend unit tests (vitest, src/**/*.test.js + api/__tests__/*.test.ts incl. the CSP drift pin) — CI-gated via the always-on `Frontend Unit Tests` job (#877; the gap that let PR #871's vercel.json CSP-hash drift ship green)
 npm run test:worker # Run Worker unit tests (vitest)
 npm run typecheck:worker # tsc gate — full `tsc --noEmit`, fails on ANY type error across worker source incl tests (#533 Phase 4; two-pass: prod strict workers-types-only + tests with @types/node)
-npm run test:scripts # node:test unit tests for scripts/*.mjs (e.g. verify-reminders #541; lint-okf-bundle #891 — incl. its real-bundle assertion; check-e2e-ga-guard #998 — incl. its real-tests/ assertion, so a spec that could reach the production GA4 property fails CI; check-edge-e2e-coverage #1051 — incl. its real-api/ assertion, so a new Edge SSR page with no e2e fails CI; check-doc-symbols #1100 — incl. its real-docs assertion, so a made-up symbol name cited in CLAUDE.md/docs/reference fails CI, ALSO wired into docs-lint.yml so a docs-only PR is gated). Runs in the `Test` workflow, which `paths-ignore`s docs — so it gates CODE PRs
+npm run test:scripts # node:test unit tests for scripts/*.mjs (e.g. verify-reminders #541; lint-okf-bundle #891 — incl. its real-bundle assertion; check-e2e-ga-guard #998 — incl. its real-tests/ assertion, so a spec that could reach the production GA4 property fails CI; check-edge-e2e-coverage #1051 — incl. its real-api/ assertion, so a new Edge SSR page with no e2e fails CI; check-doc-symbols #1100 — incl. its real-docs assertion, so a made-up symbol name cited in CLAUDE.md/docs/reference fails CI, ALSO wired into docs-lint.yml so a docs-only PR is gated; lint-korean-copy #1094 — incl. its real-copy assertion + a poisoned-source wiring assertion, so a dev-token leak in Korean copy AND an unwired rule both fail CI). Runs in the `Test` workflow, which `paths-ignore`s docs — so it gates CODE PRs
 npm run lint:okf   # docs/reference OKF-bundle structural lint (frontmatter/#-truncation/dangling-link/index-drift) — gated on DOCS PRs by the separate `Docs Lint` workflow (#961; `test.yml`'s paths-ignore means a docs-only PR starts none of its jobs)
 npm run lint:docs        # #1100 — fail on a made-up symbol cited in CLAUDE.md/docs/reference (allowlist: docs/reference/doc-symbols-allow.txt)
 npm run lint:graph -- --github  # decision-graph structural lint (#967) over the LLM-Wiki memory bundle: edge grammar, dead `advances::` edges, duplicate claims, dangling wikilinks + an unclaimed-issue REPORT (judgement, exits 0). The `--` is required — `npm run lint:graph --github` swallows the flag and silently runs the offline subset. Not CI-gatable (memory is harness-global); its pure fns are, via test:scripts. Run by the `memory-lint` skill
+npm run lint:korean # Korean copy lint (#1094): dev-token leak (hard-fail) + term drift (warn). Pure fns + real-copy scan CI-gated via test:scripts; detail in workflow-hooks.md
 
 ```
 
@@ -204,7 +205,7 @@ sequential** (single prod Worker/KV). Full workflow + launch-method table + port
 ### Workflow-gate hooks (#415/#657)
 
 Written rules are passive context — loaded once per session, dropped by compaction — so they get only
-probabilistic compliance. `.claude/settings.json` wires **five** hooks (`.claude/hooks/`) that fire at
+probabilistic compliance. `.claude/settings.json` wires **six** hooks (`.claude/hooks/`) that fire at
 the decision moment instead:
 
 | Hook | Event | Enforces |
@@ -213,6 +214,7 @@ the decision moment instead:
 | `git-mutation-gate.sh` | PreToolUse/Bash | Warns before `git commit`/`push`/`gh pr create`/`merge` — step-3.5, `--no-verify`, docs-drift, methodology-drift (#937), truncated ids (#1053). Soft. |
 | `stop-nag-gate.sh` | Stop | Blocks a closing "shall I proceed / 진행할까요?" and re-prompts. |
 | `tooling-trigger.sh` | PreToolUse/Edit\|Write\|MultiEdit | Reminds to run chub / modern-web-guidance by file path. Soft. |
+| `korean-copy-trigger.sh` | PreToolUse/Edit\|Write\|MultiEdit | On a Korean-copy file (ko.js / methodology·intro templates / LegalContent·AnalysisModal), reminds to run `lint:korean` + re-read the whole card (#1094/#1097). Soft. |
 | **`step35-verify-gate.mjs`** | PreToolUse/Bash + Edit\|Write\|MultiEdit | **HARD** — DENIES a UI/Edge `git commit` with no transcript-confirmed user verification, denies `--no-verify`, denies unauthorized self-edits to `.claude/hooks/**` + `.claude/settings*.json`. Fail-closed; override = a user turn saying `검증 생략하고 커밋`. |
 
 Every fire is logged to `.claude/hook-audit.jsonl` (gitignored); `npm run hook-audit` summarizes.
