@@ -45,6 +45,76 @@ Biz/marketing work is not on the board — that is *why* the initiative pages ex
 the board re-imports the container this whole graph was built to escape. Run both skills; they answer
 different questions from different data with different orderings.
 
+## Write for the operator, not for the graph
+
+**This governs everything the skill emits** — the do-next in step 4, the per-initiative detail, and the
+`strategy:brief` mirror text in step 5. It is placed before the procedure because it constrains all of
+them, not any one step.
+
+The reader is the operator deciding what to do this week — not a maintainer of this ontology. **A brief
+they have to ask you to translate has failed, no matter how correct it is.**
+
+**The traverse/emit boundary:** the PROCEDURE sections below are written in graph vocabulary
+(`advances::`, `bounds::`, "slice", "gated") **on purpose** — that is how the skill reads the graph, and
+it must stay precise. None of those terms may appear in the **output**. Working vocabulary, not output
+vocabulary; do not "simplify" the procedure, and do not leak it into the brief.
+
+| Don't write | Write |
+|---|---|
+| `advances::` / `delivered::` | "남은 일" / "끝난 일" |
+| "slice" | name the work itself; when you must distinguish one item from the whole thread, "이 항목 하나" vs "이 방향 전체" |
+| "gated" / "ungated" / "the gate" | "이슈에 *시작하지 말 것*이라고 적혀 있다" + **who or what would open it** |
+| "cadence" / "repo attention" | "지난 30일 완료 N건" / "지난 7일 커밋 N개 중 M개만 여기에 기여" |
+| "Inputs (have) / (missing)" | "필요한 건 다 있다" / "**X가 없어서 못 한다**" |
+| "emits no action" / "revival condition" | "손 안 댐" + "되살리려면 X 하나" |
+| `[[decision_x]]` as the reason | the decision's actual claim, in one clause |
+| "preempt" | say which thing loses its value and in which direction — "A를 먼저 하면 B의 결과가 의미 없어진다" (past work wasted OR a pending reading made moot; name the one that applies) |
+
+The right column shows the **register**, not fixed strings — reword to fit the sentence. It is Korean
+because the operator reads Korean; if a run emits an English brief, apply the same rule in English (the
+ban is on field names and graph terms, not on a language).
+
+Four rules on top of the table:
+
+1. **Lead with the conclusion, then the reason.** "내일 데이터 보고 채널 정한다 — 지금 정하면 어제
+   작업이 헛수고" beats the same facts arranged as evidence→conclusion.
+2. **Every jargon term that survives must be defined inline, once, in the same sentence.** If it can't
+   be, it wasn't needed.
+3. **A number needs its meaning, not just its window.** "3 of 46 commits" is data; "시간의 93%가 다른
+   데 갔다" is the finding. Print both — the second is why the first is in the brief.
+4. **Name the mechanism when an issue is blocked.** "#861 is gated" tells the reader nothing they can
+   act on. "이슈에 *시작하지 말 것*이라 적혀 있고, 열리는 조건이 멈춰 있는 수익화 쪽 대화라 아무도 안
+   움직이면 영원히 안 열린다" tells them it is structurally dead, which is the actual finding.
+
+### Worked example — the 2026-07-20 failure that produced this section
+
+The brief emitted this as do-next item 2 (quoted in full):
+
+> **2. Growth 병렬 — #1083의 게이트를 푼다(플랜에서 `cf.botManagement`가 채워지는지 런타임 확인).**
+> 게이트가 걸린 건 #1083의 *본체*지 이 확인이 아닙니다 — 이슈 첫 박스가 바로 이 확인이고, 결과가
+> 음성이면 스코프가 UA 정규식으로 줄어듭니다. 위 판독을 선점하지 않는 유일한 미게이트 슬라이스입니다.
+> cost: 미상.
+
+The operator's reply was, verbatim: *"이게 무슨 말인지"*. Every clause was true; every clause was
+graph-speak ("게이트", "미게이트 슬라이스", "선점", `cost: 미상`). The same item, rewritten:
+
+> **2. 짬나면: 봇 판별이 가능한지 확인.** 봇을 세려면 먼저 봇인지 알아낼 방법이 있어야 합니다.
+> Cloudflare가 봇 점수를 주지만 그건 Enterprise 요금제 기능이라, **우리 요금제에서 실제로 값이 오는지
+> 확인한 적이 없습니다.** 로그 한 줄 넣고 보면 됩니다. 오면 정밀하게 가고, 안 오면 이 작업은 User-Agent
+> 문자열 검사만 하는 작은 일로 줄어듭니다. 순서를 뒤집으면 없는 기능 위에 설계를 쌓게 됩니다.
+
+**What actually changed, precisely** — the second version is not merely nicer prose, and imitating it as
+"add more words" is the wrong lesson:
+
+- Jargon removed: "게이트" became the concrete blocker (an unverified plan feature), "선점" was dropped
+  as unnecessary once the reasoning was stated plainly, `cost: 미상` became silence (an unknown cost you
+  cannot yet derive needs no field).
+- **An input was resolved rather than named.** The first version cited "the gate"; the second says what
+  the gate IS (Cloudflare bot score, Enterprise-only, never checked on our plan) and what resolving it
+  costs (one log line). That research should have happened before writing either version — per "every
+  do-next line must be executable on reading" in step 4. Half of this failure was writing, half was
+  writing before finishing the reading.
+
 ## Procedure (follow in order)
 
 ### 1. Load the standing context (the "why" + constraints)
@@ -136,9 +206,25 @@ to connect each candidate to its rationale, then output BOTH:
 - **Top — the do-next holds initiative actions ONLY**, one line per live thread, in the order a
   strategist would take them. (A previous version ranked board issues alongside them "so the two are
   weighed against each other". That was wrong on both counts — see the division of labour above. It is
-  retracted.) Each line traces its reasoning through the graph:
-  > **<initiative> — <verb + object>.** [current state] · Inputs have / missing · cost (or *unknown*) ·
-  > deadline-or-trigger · what it unblocks · consistent with [[decision_X]] · evidenced by [metric].
+  retracted.)
+
+  Each entry must answer all of the following, **in plain sentences a reader can follow without knowing
+  this skill exists**:
+
+  - what to do;
+  - what you will look at;
+  - what you will decide from it;
+  - why not the obvious alternative;
+  - what is missing, if anything, and when it can start.
+
+  The old template for this line was a single interpunct-separated chain of internal field names
+  (`Inputs have / missing`, `cost`, `deadline-or-trigger`, `consistent with [[decision_X]]`). It is
+  **retracted** — it produced technically-complete lines the operator had to ask about, which re-creates
+  at the output the exact reconstruction cost this skill exists to remove. Carry the same content as
+  prose. Note this list is deliberately NOT written as one interpunct chain: a rule against dense
+  formatting, written densely, teaches the format it bans. The banned-term table and its four rules are
+  in **"Write for the operator, not for the graph"**, above the procedure — a hard requirement, not a
+  style note.
 
   **Order: `active` threads first; within them, by what disappears if you don't act.** A `parked`
   thread emits **no action** — it emits one line naming the single thing that would revive it.
@@ -185,13 +271,20 @@ to connect each candidate to its rationale, then output BOTH:
   - If an input is **missing**, the line is not that action — it is the missing input. Rank *that*.
   - If inputs are present, **show them** (the five leads, the three unticked boxes) rather than naming
     the work abstractly. "Sync the bodies" is an instruction; the eight adjudicated boxes are a plan.
-  - **Never invent a duration.** A cost you did not derive is a lie that then drives the ranking. Write
-    `cost: unknown — after <input>` and rank on the deadline instead.
+  - **Never invent a duration.** A cost you did not derive is a lie that then drives the ranking. Say
+    in words what has to happen before anyone can estimate it — "얼마나 걸릴지는 X를 확인해야 안다" —
+    and rank on the deadline instead. (Do NOT emit a bare `cost: unknown` field: that fragment is a field of
+    the retracted template, and it appears in the worked example in "Write for the operator, not
+    for the graph", above the procedure, as evidence of failure.)
   A brief that says "choose" or "sync" without its inputs has moved the work from the page to the
   reader, which is precisely the reconstruction cost this skill exists to remove.
 - **Per-initiative detail** — for each: what shipped since the last review (`delivered::`, with the
   count as a resource signal), what remains (`advances::`), the `Next action` verbatim, and the
-  governing decision(s) inline. Flag any initiative whose live work contradicts an `active` decision.
+  governing decision(s) inline. **The `Next action` quote is the one sanctioned place internal wording
+  may appear** — it is a quotation of the page, and altering it would misrepresent the record. Quote it
+  in this lower-altitude detail block; the top-of-brief do-next states the same thing in plain language.
+  Anything you quote in a field vocabulary gets a plain-language sentence beside it. Flag any initiative
+  whose live work contradicts an `active` decision.
 - **Decisions to revisit** — every `Status: revisit` past its trigger date/condition, plus any
   `superseded` decision whose dependent issues/pages weren't updated (a silent contradiction).
 
@@ -228,6 +321,10 @@ re-synced; otherwise the briefing's 30-day staleness guard eventually fires a re
 ## Output norms
 - One brief, two altitudes (summary do-next on top, initiative detail below) — the shape this skill's
   originating session (#917) prototyped.
+- **Before emitting, re-read the brief as the operator** — specifically against the banned-term table in
+  "Write for the operator, not for the graph" (above the procedure). Any sentence that needs this
+  SKILL.md open to parse gets rewritten. This check is not optional — the skill failed it on 2026-07-20
+  while satisfying every other norm in this file.
 - Cite nodes by their memory slug / issue number so the brief is traceable back into the graph.
 - **Separate what is verified from what is read.** "These 7 slices are OPEN" is checkable and checked
   (`npm run lint:graph -- --github`, #967). "These are the *right* 7" is a dated hand reading — an issue
