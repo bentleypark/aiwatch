@@ -1,0 +1,29 @@
+# #1100 — symbols cited in CLAUDE.md / docs/reference that are NOT in this repo's source, ON PURPOSE.
+# Format: `token  # one-line reason`. A no-reason entry fails the lint. Keep this the ONLY escape hatch
+# (do not grow STOPLIST in the script). Removed/renamed symbols in a "removed"-context sentence are
+# skipped automatically — this file is for external/harness/data names the scanner can't know.
+
+# — Claude Code harness hook events / fields (documented in parallel-agents.md, workflow-hooks.md) —
+SessionStart        # Claude Code hook event, not our source
+PreCompact          # Claude Code hook event
+EnterWorktree       # Claude Code harness tool
+additionalContext   # Claude Code hookSpecificOutput field
+stop_hook_active     # Claude Code Stop-hook input field
+docs_reminder        # our workflow-hook reminder id (shell-emitted string, documented not defined as identifier)
+methodology_reminder # ditto — workflow-hook reminder id
+truncated_id         # workflow-hooks.md descriptor for the …-truncated-identifier guard, not a symbol
+
+# — Anthropic Managed-Agents API fields (parallel-agents.md) —
+projectId           # Anthropic API field
+orgId               # Anthropic API field
+projectName         # Anthropic API field
+
+# — GA4 event / param names (ga4-events.md) — event strings, live in the reports repo / gtag calls —
+analyze_modal       # GA4 event name
+withExtUtm          # GA4 helper name documented, defined in aiwatch-reports
+report_month        # GA4 param name
+
+# — external vocab / cross-repo / data —
+SpecialAnnouncement # schema.org JSON-LD type (Edge SSR), external vocabulary
+_templates          # Jekyll dir in the sibling aiwatch-reports repo, not this tree
+kv_limit_alert      # KV key name in the kv-schema table (data key column, not a code identifier)

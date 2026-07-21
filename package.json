@@ -24,7 +24,8 @@
     "test:scripts": "node --test scripts/*.test.mjs",
     "hook-audit": "node scripts/hook-audit-summary.mjs",
     "lint:okf": "node scripts/lint-okf-bundle.mjs",
-    "lint:graph": "node scripts/lint-decision-graph.mjs"
+    "lint:graph": "node scripts/lint-decision-graph.mjs",
+    "lint:docs": "node scripts/check-doc-symbols.mjs"
   },
   "dependencies": {
     "chart.js": "^4.4.7",
