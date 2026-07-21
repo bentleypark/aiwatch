@@ -100,8 +100,8 @@ export function PrivacyContent() {
         · Discord Webhook API — 알림 전달 프록시 (사용자 설정 시에만)<br /><br />
         알림용 Discord webhook을 구독하면 해당 URL을 서버에 <strong>암호화(AES-GCM)하여</strong> 저장하고, 예약된 worker가 인시던트·상태 알림을 해당 webhook으로 직접 전송합니다. URL은 이 알림 전송과 사용자가 선택한 알림 필터에만 사용되며, 설정 → 알림(구독 해제)에서 언제든 삭제할 수 있고 삭제 시 즉시 영구 제거됩니다. Slack 구독은 Slack 내장 /feed 앱이 공개 RSS 피드를 읽는 방식이라 알림이 프록시되지 않고 URL도 저장되지 않습니다.<br /><br />
         위 서비스 외의 제3자에게 정보를 제공하지 않습니다.</p>
-      <h3 style={headingStyle}>8. 이용자의 권리</h3>
-      <p style={paraStyle}>이용자는 수집된 정보에 대해 열람, 정정, 삭제를 요청할 수 있습니다. AIWatch는 개인 식별 정보를 수집하지 않으므로, 대부분의 데이터는 익명이며 개인과 연결할 수 없습니다. 분석 동의는 다음 두 가지 방법으로 언제든 철회할 수 있습니다:<br /><br />
+      <h3 style={headingStyle}>8. 사용자의 권리</h3>
+      <p style={paraStyle}>사용자는 수집된 정보에 대해 열람, 정정, 삭제를 요청할 수 있습니다. AIWatch는 개인 식별 정보를 수집하지 않으므로, 대부분의 데이터는 익명이며 개인과 연결할 수 없습니다. 분석 동의는 다음 두 가지 방법으로 언제든 철회할 수 있습니다:<br /><br />
         · <strong>권장</strong>: 브라우저 DevTools 콘솔에서 <code>localStorage.removeItem('aiwatch-cookie-consent')</code>을 실행하면 쿠키 배너가 다시 표시되며, "필수만 사용"을 선택할 수 있습니다. 대시보드 설정(테마, 언어, 활성화된 서비스)은 그대로 유지됩니다.<br />
         · <strong>수동</strong>: 브라우저 DevTools 콘솔에서 <code>localStorage.setItem('aiwatch-cookie-consent','denied')</code> 실행. 다음 페이지 로드 시 AIWatch가 이 값을 읽고 남아 있는 분석 쿠키를 자동으로 삭제합니다 — 수동 경로는 배너 "필수만 사용"과 동일한 최종 상태를 만듭니다.</p>
       <h3 style={headingStyle}>9. 14세 미만 아동</h3>

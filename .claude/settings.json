@@ -42,6 +42,12 @@
           },
           {
             "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/korean-copy-trigger.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking Korean-copy triggers (#1094)..."
+          },
+          {
+            "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/step35-verify-gate.mjs\"",
             "timeout": 10,
             "statusMessage": "Protecting workflow-gate files (#657)..."

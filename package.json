@@ -25,7 +25,8 @@
     "hook-audit": "node scripts/hook-audit-summary.mjs",
     "lint:okf": "node scripts/lint-okf-bundle.mjs",
     "lint:graph": "node scripts/lint-decision-graph.mjs",
-    "lint:docs": "node scripts/check-doc-symbols.mjs"
+    "lint:docs": "node scripts/check-doc-symbols.mjs",
+    "lint:korean": "node scripts/lint-korean-copy.mjs"
   },
   "dependencies": {
     "chart.js": "^4.4.7",
