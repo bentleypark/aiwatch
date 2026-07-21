@@ -19,6 +19,20 @@ Hook internals and operations, split out of CLAUDE.md so the always-loaded schem
 
 Every fire is logged to `.claude/hook-audit.jsonl` (gitignored). `npm run hook-audit` (= `node scripts/hook-audit-summary.mjs [--last N] [--days D]`) summarizes (by hook × decision, last-7-days, per-day trend, recent entries). **The effectiveness signal is the `Violations intercepted` tally, NOT raw `warn`/`inject` counts**: `warn` (git-mutation step-3.5 reminder) and `inject` (every-turn gate re-injection) are *preventive telemetry* that scale with workload — their trend is meaningless. A real intercepted violation is a `block` (a nag was about to ship), a step-3.5 `deny` (except `fail-closed`, which is gate-health, not an interception), or a `no_verify=1` note (`--no-verify`/`--no-gpg-sign` on a commit) — matching `isViolation` in `scripts/hook-audit-summary.mjs`. Review the **violation trend** periodically — a declining/zero count is the goal. **#657 performed the escalation** the old text anticipated: step-3.5 is now HARD-enforced by `step35-verify-gate.mjs` (a `deny` on UI/Edge commits lacking a transcript-confirmed user turn), so a step-3.5 violation is now an intercepted `deny`, not an invisible behavioral miss — correcting the earlier "the confirmation is a user message the hook never sees" claim (hooks DO receive `transcript_path`). The soft gates remain for non-UI commits + salience. **Monitoring the hard gate** (its own `🚦 step-3.5 hard gate` section in `npm run hook-audit`): because a `deny` is *ambiguous* (an intercepted skip OR a false-positive where the parser missed a real confirmation), the key signal for a HARD gate is **the false-positive rate**, not the deny count — specifically a **`commit:override` pass** (the user had to say "검증 생략" on already-verified work; the strongest proxy) and **`fail-closed`** (gate-health, should trend ~0; nonzero = the transcript read is breaking). Escalate by **tuning `CONFIRM_RE` / softening to a warn** if overrides rise, NOT by hardening further. The structural blind spot remains: a user "확인" turn proves a turn happened, not that they actually looked — so a step-3.5 *false negative* (gate passes an unverified commit) is still invisible to the log; spot-check merged UI PRs periodically.
 
+## Not hook-enforceable: the review auto-loop's own non-convergence (#1097)
+
+The PR-review auto-loop (`ship-issue` step 6, "loop until 0 Critical/Important") can fail to converge
+when the same finding *category* recurs each round because each fix reseeds it — a #1091 rationale
+rewrite ran 12 rounds and a `/methodology` copy edit ran 8, which a stop rule is meant to cut short. This is NOT
+enforceable by a hook: a `PreToolUse` hook *can* fire on the `Agent` call, but the
+convergence judgement (is this round 3 of the same category? is it 0 Critical/Important yet?) can't be
+computed from a single tool input — so the hook has nothing to decide on. So the mitigation is
+**skill-text** (`ship-issue` steps 5-6: carry prior-round categories into the next review prompt, and
+STOP editing the sentence after 3 same-category rounds to question whether the claim is load-bearing).
+Weaker than a hard gate, but it loads at the review step rather than once at session start like an
+LLM-Wiki memory page — the mode that let this session violate rules it had already recorded. The residual gap — no hard
+enforcement of loop convergence — is real and accepted; #1097 is the record.
+
 ## Related
 
 - [Reference Tooling](reference-tooling.md) — the `tooling-trigger.sh` trigger map (chub vs modern-web-guidance).
