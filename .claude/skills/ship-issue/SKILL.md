@@ -69,7 +69,22 @@ is the *procedure* — follow it top to bottom.
    - New worker logic → extract to an exported fn + unit-test it. New `src/utils/` → Vitest test.
    - **Every bug fix ships a test that would have caught the bug.**
 5. **PR review** — gate #2: `/pr-review-toolkit:review-pr`.
+   - **Track the round, and carry the prior round's finding categories into the next review prompt (#1097).**
+     The review agents are spawned fresh each round and cannot see how many rounds have run or what the
+     last round found — *you* are the only place that count lives, so make it explicit: when you re-spawn
+     a reviewer after a fix, tell it "this is round N; round N-1 flagged {categories}; check whether the
+     fix reseeded any of them." Without this the step-6 stop rule below has nothing to fire on.
 6. **Fix review findings — auto-loop** to 0 Critical/Important (Suggestions-only = converged).
+   - **A NEW finding category each round is the auto-loop working — keep going (#1052/#1049 ran several rounds each, a *different* category per round, and were legitimate). But same-category recurrence is a STOP signal (#1097).** If the same finding
+     *category* recurs for **3 rounds** — each fix reseeding the next round's finding, often a milder
+     version of the same overreach — the defect is structural, not in the sentence. STOP editing the
+     sentence and ask: **(a)** is this claim load-bearing for the point being made? If not, **delete it**
+     — an unneeded enumeration / classification / causal claim is verification debt, not content
+     (deleting a never-needed parser list ended the last-4-of-12 sub-loop in #1091 instantly). **(b)** Am I
+     holding a conclusion fixed and swapping in weaker support each round? Then weaken the *conclusion*
+     to what the evidence carries, not the wording — *milder-each-round is the tell*. This applies to
+     prose review (docs, comments, issue bodies) as much as code; a #1091 rationale rewrite took 12
+     rounds and a `/methodology` copy edit took 8, which this rule is meant to cut short.
 7. **Docs update** — update whatever the change affects: CLAUDE.md (architecture/service count/layout —
    keep it **lean, ~40k-char guideline** — check `python3 -c "print(len(open('CLAUDE.md').read()))"`,
    move detail to `docs/reference/` if near), the relevant **`docs/reference/`** file (see the
