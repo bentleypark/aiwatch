@@ -29,5 +29,17 @@ esac
 msg="🇰🇷 한국어 카피 편집 — 커밋 전 \`npm run lint:korean\` (내부-어휘 유출은 hard-fail, 용어 드리프트는 warn). 용어는 글로서리(Atlassian 근거: incident=인시던트, outage=중단, degraded=성능 저하) 대조. 문장 하나만 고치지 말고 편집 후 카드/블록 전체를 다시 읽어라 (#1094/#1097)."
 
 audit "warn" "copy:${FP##*/}"
-printf '%s\n' "$(jq -n --arg m "$msg" '{systemMessage:$m}')" 2>/dev/null || true
+# The audit line is written BEFORE the message, so an emission that silently produces nothing leaves a
+# `warn` in hook-audit.jsonl for a reminder the model never saw — a fire that reads as delivered in
+# `npm run hook-audit`. The earlier `printf "$(jq -n …)" || true` did exactly that: on a jq failure the
+# command substitution is empty, printf prints a blank line and SUCCEEDS, so `|| true` never fires.
+# Same shape + fallback as tooling-trigger.sh: jq -Rs . escapes the message into a JSON string literal;
+# if jq fails, degrade to a tr-sanitized message rather than to silence.
+esc="$(printf '%s' "$msg" | jq -Rs . 2>/dev/null)"
+if [ -n "$esc" ] && [ "$esc" != "null" ]; then
+  printf '{"systemMessage":%s}\n' "$esc"
+else
+  safe="$(printf '%s' "$msg" | tr '\n"' '  ')"
+  printf '{"systemMessage":"%s"}\n' "$safe"
+fi
 exit 0

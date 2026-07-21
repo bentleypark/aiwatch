@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -407,10 +407,40 @@ test('the hook actually EMITS a reminder — not just logs that it fired', () =>
     writeFileSync(join(hooksDir, f), readFileSync(join(REPO, '.claude/hooks', f)))
   }
   const hook = join(hooksDir, 'korean-copy-trigger.sh')
-  const fire = (file) => spawnSync('bash', [hook], {
+  const fire = (file, env) => spawnSync('bash', [hook], {
     input: JSON.stringify({ tool_input: { file_path: file } }),
     encoding: 'utf8',
+    ...(env ? { env } : {}),
   })
+  // The hook must still emit when the JSON escaper fails. A stub `jq` passes the hook's `-r` read to
+  // the real binary but fails the `-Rs` escape, forcing the fallback branch. Without the fallback the
+  // hook prints a blank line and EXITS 0 (an empty command substitution makes printf succeed, so
+  // `|| true` never fires), leaving an audit `warn` for a reminder that was never delivered.
+  const binDir = join(sandbox, 'bin')
+  mkdirSync(binDir, { recursive: true })
+  // Resolve the real jq instead of guessing directories — it is /usr/bin/jq on CI and macOS 15 but
+  // /opt/homebrew/bin/jq on an Apple Silicon box without the system copy, where a hardcoded list makes
+  // the passthrough exit 127 and this test fail for an unrelated reason. `env -i` keeps the stub from
+  // finding itself again on PATH.
+  const realJq = spawnSync('sh', ['-c', 'command -v jq'], { encoding: 'utf8' }).stdout.trim()
+  assert.ok(realJq, 'jq not installed — the hook needs it and so does this test')
+  // The stub records that it actually intercepted. Asserting only on the emitted message cannot tell
+  // the two branches apart (both say "lint:korean"), so a hook refactor spelling the flags `-R -s`
+  // would leave the stub inert, the primary branch running, and this test green while guarding
+  // nothing — the guard-whose-default-is-pass trap. The marker makes the interception observable.
+  const marker = join(sandbox, 'intercepted')
+  writeFileSync(join(binDir, 'jq'),
+    `#!/bin/sh\ncase "$*" in *-Rs*) : > '${marker}'; exit 1 ;; esac\nexec /usr/bin/env -i PATH='${dirname(realJq)}' jq "$@"\n`)
+  chmodSync(join(binDir, 'jq'), 0o755)
+  const degraded = fire(join(REPO, 'src/locales/ko.js'), { ...process.env, PATH: `${binDir}:${process.env.PATH}` })
+  // The stub couples to the literal `-Rs` spelling, so this also fires when the escape is renamed or
+  // removed entirely — say the whole emitter reverts to the old silent form. Name that, not just the
+  // fallback, or the next reader hunts a branch that is no longer there.
+  assert.ok(existsSync(marker), "stub jq never intercepted — the escape is no longer spelled 'jq -Rs'")
+  assert.equal(degraded.status, 0)
+  const degradedMsg = JSON.parse(degraded.stdout).systemMessage
+  assert.ok(degradedMsg && degradedMsg.includes('lint:korean'), 'jq escape failed → hook went silent')
+
   const onTarget = fire(join(REPO, 'src/locales/ko.js'))
   assert.equal(onTarget.status, 0)
   const msg = JSON.parse(onTarget.stdout).systemMessage
