@@ -192,8 +192,8 @@ const en = {
   // right below it, and the reader can't tell which is which. "Official" now belongs to the provider only.
   'uptime.label.official': '30-Day Uptime',
   // #1006 — not a copy of the provider's published %, but computed by AIWatch from the incident/impact
-  // records the provider publishes, over the same 30-day window with the same weighting for every
-  // service (the precondition the ranking always claimed).
+  // records the provider publishes, over a trailing 30-day window (the precondition the ranking
+  // always claimed).
   'uptime.sub.official': 'From status-page records · computed by AIWatch',
   // Both attributions on ONE line — a bare colon makes the trailing number read as the headline value.
   'uptime.compare.reported': 'Computed by AIWatch (status page shows {v}%)',
@@ -203,6 +203,13 @@ const en = {
   // When the provider's records don't reach back 30 days (a status-page migration), say so.
   'uptime.sub.official.partial': "Computed by AIWatch · provider's records go back only {d}d",
   'uptime.partialWindow.tooltip': "The provider's records for this component only go back {d} days (e.g. a status-page migration). It returns to a full 30-day window automatically.",
+  // #1110 — this label is NOT "the same computation on different evidence". `parseBetterStackUptime`
+  // ignores severity: every measured `downtime_duration` second counts at weight 1.0, `downtime` and
+  // `degraded` alike (`status` is read only to drop `not_monitored` days). Each resource is measured
+  // over its OWN monitored-day count before the resources are averaged as equals, so one page's figure
+  // can blend a 7-day monitor with 30-day ones, and no `uptimeWindowDays` is emitted. Only /methodology
+  // §3 Platform states that difference; this label and the Uptime page's `avg` legend flag different
+  // EVIDENCE only. Note `uptime.sub.platform_avg` below is still identical to `uptime.sub.official`.
   'uptime.label.platform_avg': 'Platform Average',
   'uptime.sub.platform_avg': 'From status-page records · computed by AIWatch',
   'svc.incidents': 'Incidents',

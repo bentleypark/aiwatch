@@ -7,7 +7,8 @@ import type { Incident } from '../../types'
 // is not a 30-day figure (LangSmith's tracks ~90 days and had it ranked `fair` on 60-day-old outages)
 // and is not even defined the same way page to page (OpenAI's excludes degraded/partial entirely). We
 // compute from the page's RAW `component_impacts` with the weights published on /methodology, so every
-// service is on one window and one formula.
+// incident.io service is on the same window and formula as the other Official sources (#1110 — not
+// `platform_avg`, which ignores severity and uses only each resource's monitored days).
 describe('computeIncidentIoUptime (#1006)', () => {
   const NOW = Date.parse('2026-07-14T00:00:00Z')
   const day = 86_400_000

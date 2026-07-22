@@ -27,7 +27,9 @@ import { weightedDowntimeSeconds, type OutageInterval } from './uptime-interval'
 // The fix is to stop reading their aggregate and compute from their RAW records (`component_impacts`:
 // start_at / end_at / status), which every incident.io page publishes — including the `chart_only`
 // pages (ElevenLabs / Replicate / Stability) that hide the percentage and therefore had NO uptime at
-// all under the old path. One window, one formula, every service.
+// all under the old path. That puts every incident.io page on the same trailing 30 days and the same
+// 1.0/0.3 weighting as the other Official sources — NOT "every service" (#1110): `platform_avg` ignores
+// severity and measures each resource only over its monitored days.
 
 export interface IncidentIoUptime {
   /** Uptime % over the window below, floor-rounded to 2dp (never overstate). */

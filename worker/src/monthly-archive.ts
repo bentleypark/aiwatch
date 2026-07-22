@@ -67,11 +67,12 @@ export interface MonthlyIncidentEntry {
 
 export interface MonthlyServiceData {
   uptime: number | null          // AIWatch-measured uptime% from daily ok/total counters — feeds the Score (null if no data)
-  officialUptime: number | null  // #586 — the rolling-30d official uptime (month-end daily snapshot) for the "Official Uptime" DISPLAY table; separate from the daily-counter `uptime` that feeds the Score. #951 — emitted ONLY when the Score actually consumed an official uptime (scoreConfidence 'high'); null otherwise. #1006 — this is AIWatch's OWN computation over the provider's published records (one window + one formula for every service), NOT a copy of the % on the provider's page; the report's table caption must say so, and the old "the window varies by page — 30 or 90 days" caveat is now false
+  officialUptime: number | null  // #586 — the rolling-30d official uptime (month-end daily snapshot) for the "Official Uptime" DISPLAY table; separate from the daily-counter `uptime` that feeds the Score. #951 — emitted ONLY when the Score actually consumed an official uptime (scoreConfidence 'high'); null otherwise. #1006 — this is AIWatch's OWN computation over the provider's published records, NOT a copy of the % on the provider's page; the report's table caption must say so, and the old "the window varies by page — 30 or 90 days" caveat is now false. #1110 — the Official path is a trailing 30 days with the 1.0/0.3 weighting (except the Instatus Next.js path, which honours a provider-published `customImpactPercentage`), and `platform_avg` is neither (see the `uptimeSource` note below), so do not caption it as one formula for every service
   /** #1006 — WHERE the records `officialUptime` was computed from came from: 'official' = the provider's
    *  own incident/outage records; 'platform_avg' = the status-page platform's own monitors (Better
-   *  Stack), which is a measurement rather than the provider declaring an incident. Both are AIWatch's
-   *  own 30-day computation with the same weights — only the evidence differs. Absent on archives written
+   *  Stack), which is a measurement rather than the provider declaring an incident. #1110 — the two are
+   *  NOT the same computation: `platform_avg` applies no severity weighting and drops unmonitored days
+   *  from its window, so a report must not present the two columns as like-for-like. Absent on archives written
    *  before #1006, and on a service with no uptime at all. The report's "Uptime Source" column reads this
    *  instead of inferring the taxonomy from a hand-maintained service list (which drifted, aiwatch#951). */
   uptimeSource?: 'official' | 'platform_avg'
