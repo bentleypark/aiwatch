@@ -30,7 +30,7 @@ All served by the Cloudflare Worker (`aiwatch-worker`, domain `aiwatch-worker.p2
 | Endpoint | Notes |
 |---|---|
 | `GET /badge/:serviceId` | SVG status badge |
-| `GET /api/og` | Dynamic OG image PNG (1200×630, resvg-wasm). Purely query-param-driven (`service`/`status`/`score`/`uptime`/`v`) — no live status re-fetch. The is-down page sets the `status` param from the share `?e=` hint when present (pins a tweet's card to the post moment, see status-determination.md), else from live status |
+| `GET /api/og` | Dynamic OG image PNG (1200×630, resvg-wasm). Purely query-param-driven — the PNG is drawn from `service`/`status`/`score`/`uptime` alone, no live status re-fetch. The is-down page sets the `status` param from the share `?e=` hint when present (pins a tweet's card to the post moment, see status-determination.md), else from live status. **`v` is a cache-bust the caller adds, not a param this endpoint reads** — it reaches no drawing code. The is-down page emits it only when the share is NOT pinned, so a pinned card's image URL stops moving with the wall clock (#1103); the pin rules and the residual are at the `v` line in `api/_is-down/html-template.ts` |
 
 ## Incident RSS feed (#54, #467)
 
