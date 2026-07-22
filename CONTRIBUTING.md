@@ -25,7 +25,9 @@ Shared workflow — especially:
 1. **Build + Test** before committing
 2. **Code review** before committing
 3. **Fix all Critical/Important** review findings
-4. Include `closes #N` in commit messages when the work is fully verified
+4. **Update the docs in the same PR.** The doc set is CLAUDE.md step 7 — README(.ko), the relevant
+   `docs/reference/*`, CLAUDE.md, this file, `index.html` SEO meta, `aiwatch-reports/`
+5. Include `closes #N` in commit messages when the work is fully verified
 
 ## Code Style
 
