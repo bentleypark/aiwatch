@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { buildMetaDescription, renderIncidents, renderFooter, renderRegionRecommendation, renderComponents, renderShareButtons, renderBadgeEmbed, renderPage, linkifyFaqAnswer, FOOTER_CATEGORY_ORDER, type ServiceData } from '../html-template'
@@ -1625,5 +1625,135 @@ describe('SEO_CONTENT coverage (#857)', () => {
       expect(seo!.displayName, `SEO_CONTENT["${slug}"] has empty displayName`).toBeTruthy()
       expect(seo!.faqs.length, `SEO_CONTENT["${slug}"] has no FAQs`).toBeGreaterThan(0)
     }
+  })
+})
+
+// #1103 — a PINNED share's og:image URL must not move with the wall clock. A share is pinned by the `?e=`
+// status hint (#740) and/or the `&i=` incident token (#804), either one alone. Rationale, the evidence and
+// the inference caveat: the `v` line in ../html-template.ts and the issue.
+describe('renderPage — pinned og:image URL is stable over time (#1103)', () => {
+  const ogImage = (html: string): string => {
+    const m = html.match(/<meta property="og:image" content="([^"]*)"/)
+    // Throw rather than return null: `null === null` would let a broken extractor pass every
+    // equality assertion below, turning this whole describe into a silent no-op.
+    if (!m) throw new Error('og:image meta tag not found — extractor is stale')
+    // The attribute is HTML-escaped (`&amp;` between params). Decode so param assertions match the
+    // real URL: a naive `toContain('v=')` matches inside `&amp;v=` too and passes for the wrong reason.
+    return m[1].replace(/&amp;/g, '&')
+  }
+  const hasBuster = (url: string): boolean => /[?&]v=/.test(url)
+  const busterOf = (url: string): number => Number(new URLSearchParams(url.split('?')[1]).get('v'))
+  const T0 = Date.now()
+  const T1 = T0 + 70 * 60_000 // 70 min = exactly 7 buckets (see the width assertion below)
+  // `token` is the #804 `&i=` incident token. It defaults to a real-shaped one because that is what a
+  // shared outage link carries — but it is a PARAMETER, not a constant: it is the second thing that
+  // freezes og:url, so a test that cannot vary it cannot tell `pinnedHint` from `ogUrlPinned`.
+  const renderAt = (at: number, hint: string | null, over: Partial<ServiceData> = {}, token: string | null = 'y65gwqbztbsp') => {
+    vi.setSystemTime(at)
+    // Carry a score too — the real payload has one, and it is one of the two other live values
+    // (`score`, `uptime`) that reach the URL.
+    const svc = mkService({ status: 'degraded', aiwatchScore: 67, ...over })
+    return ogImage(renderPage('claude', svc, mkSeo(), [], null, null, [], hint, null, token))
+  }
+  const renderNullService = (at: number, hint: string | null) => {
+    vi.setSystemTime(at)
+    return ogImage(renderPage('claude', null, mkSeo(), [], null, null, [], hint, null, 'y65gwqbztbsp'))
+  }
+
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  // Every pinnable hint, so the highest-traffic one (`down`) is not left to inference.
+  for (const hint of ['down', 'degraded', 'active', 'resolved']) {
+    it(`pinned share (?e=${hint}): og:image is byte-identical across a 70-minute gap, no v= buster`, () => {
+      const a = renderAt(T0, hint)
+      const b = renderAt(T1, hint)
+      expect(a).toBe(b)
+      expect(hasBuster(a)).toBe(false)
+      // The card still shows its metrics — dropping the buster must not drop Score/Uptime.
+      expect(a).toContain('score=')
+      expect(a).toContain('uptime=')
+    })
+  }
+
+  // The real field scenario: the crawler comes back hours later, by which time the incident resolved.
+  // The pinned image must ignore that — `ogStatus` comes from the hint, not from live status. Without
+  // this, a refactor letting live status leak back into the pinned URL passes every other test here.
+  it('pinned share stays byte-identical even though LIVE status drifts between crawls', () => {
+    const a = renderAt(T0, 'down', { status: 'down' })
+    const b = renderAt(T1, 'down', { status: 'operational' })
+    expect(a).toBe(b)
+    expect(a).toContain('status=down')
+  })
+
+  // The other half of the `?i=` pin: a share can carry a fresh incident token with NO status hint. og:url
+  // is frozen by the token alone, so the image must be frozen too. Keying the guard on `pinnedHint`
+  // instead of `ogUrlPinned` leaves exactly the #1103 bug reachable here, and this is the only test
+  // that fails for it — every other pinned test passes a hint as well.
+  it('pinned by the ?i= incident token alone (no ?e= hint): no v= buster, stable across time', () => {
+    const a = renderAt(T0, null, {}, 'y65gwqbztbsp')
+    const b = renderAt(T1, null, {}, 'y65gwqbztbsp')
+    expect(hasBuster(a)).toBe(false)
+    expect(a).toBe(b)
+  })
+
+  // Opposite direction — the fix must NOT reach the live page. Without this, deleting the
+  // `if (!ogUrlPinned)` guard entirely (dropping the buster everywhere) would still pass above.
+  // NOTE the explicit `null` token: with the helper's default token this render is PINNED, so before
+  // the `ogUrlPinned` widening this test was asserting the unfixed behavior as if it were correct.
+  it('unpinned live page (no ?e=, no ?i=): og:image still cache-busts, one bucket per 10 minutes', () => {
+    const a = renderAt(T0, null, {}, null)
+    const b = renderAt(T1, null, {}, null)
+    expect(hasBuster(a)).toBe(true)
+    expect(a).not.toBe(b)
+    // Pins the bucket WIDTH too: 70 min / 10 min = 7. Without this, narrowing 600_000 to 60_000
+    // (10x the live-page churn, re-creating this bug class on the one surface that still needs
+    // the buster) leaves the whole file green.
+    expect(busterOf(b) - busterOf(a)).toBe(7)
+  })
+
+  // A non-status hint is NOT a pin (the card follows live status), so it must keep the buster too.
+  // This — together with the inherited-key block below, which fails for the same reason — is what
+  // catches the guard being keyed on the raw `ogStatusHint` instead of `pinnedHint`, a plausible
+  // "simplification" since both read as "is there a hint".
+  it('non-status hint (reddit) is not a pin — buster retained', () => {
+    const a = renderAt(T0, 'reddit', {}, null)
+    const b = renderAt(T1, 'reddit', {}, null)
+    expect(hasBuster(a)).toBe(true)
+    expect(a).not.toBe(b)
+  })
+
+  // `?e=` is raw query input. With a bare `HINT_TO_OG_STATUS[hint]` lookup every inherited key resolves
+  // truthy, so it both pinned the card to a stringified builtin AND (once #1103 keyed the buster off the
+  // same expression) suppressed the buster. All of these behave alike, so the loop covers the class.
+  for (const key of ['__proto__', 'constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+    it(`inherited Object.prototype key (?e=${key}) is not a pin — buster retained, live status used`, () => {
+      const a = renderAt(T0, key, {}, null)
+      const b = renderAt(T1, key, {}, null)
+      expect(hasBuster(a)).toBe(true)
+      expect(a).not.toBe(b)
+      // The live service is `degraded`; a leaked prototype value would put a stringified builtin here.
+      expect(a).toContain('status=degraded')
+    })
+  }
+
+  // The best case for the pin: an unreadable status source omits score/uptime, so the pinned URL has no
+  // live field left in it and is frozen outright. Cheap to pin, and it documents the shape of the ideal.
+  it('pinned share with no status data: URL carries neither the buster nor any live field', () => {
+    const a = renderNullService(T0, 'down')
+    const b = renderNullService(T1, 'down')
+    expect(a).toBe(b)
+    expect(hasBuster(a)).toBe(false)
+    expect(a).not.toContain('score=')
+    expect(a).not.toContain('uptime=')
+  })
+
+  // The documented residual, as an executable fact rather than a prose claim: `score`/`uptime` are
+  // still live, so they DO move a pinned URL. If someone later freezes them (a per-share snapshot
+  // store), this test is the one that should fail and force the comment to be updated.
+  it('residual: a pinned URL still moves when score or uptime ticks', () => {
+    const base = renderAt(T0, 'down')
+    expect(renderAt(T0, 'down', { aiwatchScore: 68 })).not.toBe(base)
+    expect(renderAt(T0, 'down', { uptime30d: 99.10 })).not.toBe(base)
   })
 })

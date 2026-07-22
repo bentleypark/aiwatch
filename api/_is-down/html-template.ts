@@ -354,20 +354,48 @@ export function renderPage(
   const desc = buildMetaDescription(seo, service, aiInsight ?? null)
   const canonical = `https://ai-watch.dev/is-${slug}-down`
 
-  // Dynamic OG image URL — cache busted per 10-min window.
+  // Dynamic OG image URL — cache busted per 10-min window on the LIVE page only (see the `v` line).
   // Pin the card status to the share hint when present (so a tweet's card matches the post moment,
   // not the live status that may have drifted by unfurl time). HINT_TO_OG_STATUS (module scope) maps
   // the `?e=` hint → an og status the generator knows; 'reddit'/unknown/absent falls through to live.
-  const pinnedHint = ogStatusHint && HINT_TO_OG_STATUS[ogStatusHint] ? ogStatusHint : null
+  // `hasOwnProperty.call` (not a bare index) so an inherited key can't masquerade as a pin: with a plain
+  // lookup `?e=__proto__`/`?e=constructor` are truthy, which would pin the card to a stringified builtin
+  // as `status=` AND (since #1103 keys the buster off the same expression) suppress it. Raw query input
+  // (api/is-down.ts) — same idiom, same reason as `resolveAnnouncementFrom` (api/_intro/announcements.ts).
+  const pinnedHint = ogStatusHint && Object.prototype.hasOwnProperty.call(HINT_TO_OG_STATUS, ogStatusHint) ? ogStatusHint : null
   // #1004 — the ASSERTABLE status: the og:image + og:title are what actually get unfurled in Slack/X/
   // Discord, so an unreadable source must not publish "Having Issues" there while the page title says
   // "Status Unknown". (og.ts carries a matching `unknown` style — without it the card falls back to a
   // green "Operational".) The explicit `?e=` pinned hint still wins, as before.
   const ogStatus = (pinnedHint && HINT_TO_OG_STATUS[pinnedHint]) || (service ? assertableStatus(service) : 'operational')
+  // #1103 — "is this og:url a frozen card identity?". EITHER pin freezes it on its own (see the ogQuery
+  // build below: `e` and `i` are set independently), so an `?i=`-only share — a fresh outage token with
+  // no status hint — is just as frozen as an `?e=down` one. The cache-buster gate keys on THIS, not on
+  // `pinnedHint`: keying on the hint alone left exactly the #1103 bug (frozen og:url, moving og:image)
+  // reachable for that case. Our own emitters always pair `&i=` with `?e=` (worker/src/alerts.ts), so
+  // this is closing a latent hole, not an observed one.
+  const ogUrlPinned = Boolean(pinnedHint || ogIncidentToken)
   const ogParams = new URLSearchParams({ service: seo.displayName, status: ogStatus })
   if (service?.aiwatchScore != null && Number.isFinite(service.aiwatchScore)) ogParams.set('score', String(service.aiwatchScore))
   if (typeof service?.uptime30d === 'number' && !Number.isNaN(service.uptime30d)) ogParams.set('uptime', service.uptime30d.toFixed(2))
-  ogParams.set('v', String(Math.floor(Date.now() / 600_000))) // 10-min cache bust
+  // #1103 — the buster is for the LIVE page only. A PIN exists to make the card represent the SHARE
+  // MOMENT, so its image must not move afterwards — yet the bucket handed the crawler a fresh og:image
+  // URL every 10 minutes under a share whose og:url never changes. Gated on `ogUrlPinned` (defined
+  // above), not `pinnedHint`: an `?i=`-only share is pinned the same way.
+  //   Diagnosed on a Claude outage share whose card unfurled with title + description and no image. The
+  //   fetch tally and the ruled-out causes are recorded in #1103.
+  //   INFERRED: that the moving URL is WHY the card stays imageless. X's ingestion pipeline is not
+  //   observable to us, so only the URL-moves half is verifiable; the causal half is a hypothesis.
+  // A pinned share needs no buster: /api/og draws the PNG from `service`/`status`/`score`/`uptime` alone
+  // (the handler in worker/src/index.ts never reads `v`), so the URL changes whenever those inputs do.
+  // The live page keeps the buster as a deliberately conservative choice — the same argument makes it
+  // redundant there too, but that surface is outside #1103's evidence. It is NOT what makes the live card
+  // follow status: #488/#1057 do that upstream, by refreshing the status cache these params are read from.
+  // Residual (not addressed here): `score`/`uptime` stay live, so a pinned URL still moves when they tick.
+  // Dropping them would freeze the URL completely at the cost of stripping Score/Uptime off the card;
+  // freezing them at the share moment needs a per-share snapshot store. Revisit only if a post-fix share
+  // still unfurls imageless (#1103 verify-after).
+  if (!ogUrlPinned) ogParams.set('v', String(Math.floor(Date.now() / 600_000))) // 10-min cache bust
   const ogImageUrl = `https://aiwatch-worker.p2c2kbf.workers.dev/api/og?${ogParams.toString()}`
 
   // og:url carries the `?e=` hint AND the #804 per-incident token so each share MOMENT/OUTAGE is a
