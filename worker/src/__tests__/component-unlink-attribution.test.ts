@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { parseIncidents, resolveComponentNames, type StatuspageResponse } from '../parsers/statuspage'
-import { filterIncidents, filterByComponentStatus, includeUntaggedIncidents, fetchService, SERVICES } from '../services'
+import { filterIncidents, filterByComponentStatus, includeUntaggedIncidents, fetchService, canIdBypass, __resetMissingJoinWarnThrottle, SERVICES } from '../services'
 import type { ServiceConfig } from '../types'
 
 // #1047 — Anthropic UNLINKED every component from `kqbd7wm6hnnr` ("Elevated errors for multiple
@@ -368,5 +368,201 @@ describe('#1090 fetchService — sibling-component incident while OUR component 
   it('claudecode, the actual owner, keeps it', async () => {
     const svc = await fetchDuringDegradation('claudecode')
     expect(svc.incidents.map((i) => i.id)).toContain(FABLE5)
+  })
+})
+
+// ── #1104 — an open incident whose impact on OUR component has ended ────────────────────────────
+// Observed 2026-07-21 on openai: `Images` (a badge component) ran partial_outage 12:25→13:31Z on an
+// incident still `identified` at 14:16Z. Once the component recovered, the operational gate dropped
+// the incident — after we had alerted on it at 12:33Z — so the alert's link showed "Operational" with
+// nothing to explain it. The provider's own component tag is the evidence that it WAS ours.
+describe('#1104 filterByComponentStatus — an open incident tagged onto our badge component survives our recovery', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  // Real ULIDs from status.openai.com — an invented id would prove nothing, since the whole rule is an
+  // id intersection against the REAL badge group (`feedback_faithful_fixtures`, and the #1032 lesson
+  // that a fabricated config leaves the fix dead in production while the tests stay green).
+  const IMAGES = '01JMXBRMFE4MAP2BHSJNZ787WX' // "Images", APIs group  → openai.statusComponentIds
+  const CHATGPT_LOGIN = '01JMXBNJXG1S2D9V65P1ZZTD94' // "Login", ChatGPT group → NOT openai's
+  const INC = '01KY23YCPJ9M5BFFT6ZHKQE9MP'
+  const TITLE = 'Image generation unavailable in ChatGPT'
+
+  const COMPONENTS = [
+    { id: IMAGES, name: 'Images' },
+    { id: CHATGPT_LOGIN, name: 'Login' },
+  ]
+  /** `componentIds` OMITTED when there is no join — `attachIncidentIoComponentIds` never writes `[]`,
+   *  so `[]` would be a state production cannot produce. */
+  const openIncident = (componentIds?: string[]) => ([{
+    id: INC,
+    title: TITLE,
+    status: 'identified',
+    impact: 'major',
+    componentNames: [],
+    ...(componentIds ? { componentIds } : {}),
+  }] as unknown as Parameters<typeof filterByComponentStatus>[0])
+
+  it('premise: the fixture ids really do / do not belong to openai badge group, and the keep is reachable', () => {
+    // Every assertion below is meaningless if these drift — so they fail HERE, not silently downstream.
+    expect(cfg('openai').statusComponentIds).toContain(IMAGES)
+    expect(cfg('openai').statusComponentIds).not.toContain(CHATGPT_LOGIN)
+    expect(canIdBypass(cfg('openai'))).toBe(true)
+  })
+
+  it('KEEPS it while we read operational — the impact window closed, the incident did not', () => {
+    const kept = filterByComponentStatus(openIncident([IMAGES]), 'operational', cfg('openai'), COMPONENTS)
+    expect(kept).toHaveLength(1)
+  })
+
+  it('does NOT over-include: a tag on a component outside our badge group is still dropped', () => {
+    // The whole point of keying on ids — this is a ChatGPT-group component, and openai must not
+    // inherit it just because the two share a status page.
+    expect(filterByComponentStatus(openIncident([CHATGPT_LOGIN]), 'operational', cfg('openai'), COMPONENTS)).toEqual([])
+  })
+
+  it('a tagged non-match drops SILENTLY — a provider verdict is not a guess', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    filterByComponentStatus(openIncident([CHATGPT_LOGIN]), 'operational', cfg('openai'), COMPONENTS)
+    // Warning here would fire on every ChatGPT incident against openai, every cycle — they share a page.
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('#1104'))).toHaveLength(0)
+  })
+
+  it('a MISSING id-join drops but WARNS — evidence absent is not evidence against (#970/#983)', () => {
+    // The throttle is module state: without this reset the assertion silently reads 0 if any earlier
+    // test drove the same (service, incident) through the drop — and 0 reads as "the warn stopped".
+    __resetMissingJoinWarnThrottle()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(filterByComponentStatus(openIncident(), 'operational', cfg('openai'), COMPONENTS)).toEqual([])
+    // The one direction that separates this from the bug it fixes: the keep silently not firing.
+    const lines = () => warn.mock.calls.filter((c) => String(c[0]).includes('#1104') && String(c[0]).includes(INC))
+    expect(lines()).toHaveLength(1)
+    // …and only once per (service, incident, hour): this gate runs on EVERY /api/status request, so an
+    // un-throttled line would be ~1440/day per polling tab for one stuck incident.
+    filterByComponentStatus(openIncident(), 'operational', cfg('openai'), COMPONENTS)
+    expect(lines()).toHaveLength(1)
+    // But a join that comes back and breaks again is a NEW event: the keep path clears the throttle, so
+    // the second drop is not swallowed. Without that, drop → keep → drop goes silent on the drop that
+    // actually removes an already-alerted incident from the card.
+    expect(filterByComponentStatus(openIncident([IMAGES]), 'operational', cfg('openai'), COMPONENTS)).toHaveLength(1)
+    filterByComponentStatus(openIncident(), 'operational', cfg('openai'), COMPONENTS)
+    expect(lines()).toHaveLength(2)
+  })
+
+  it('the keep AND the warn are gated on canIdBypass — a service outside that set is untouched', () => {
+    // Both guards default to "pass", so they need a mutation aimed at THEMSELVES. `claude` reaches this
+    // gate (apiUrl + statusComponentId) but is Atlassian — no `incidentIoComponentId`, so canIdBypass is
+    // false and it can never legitimately carry componentIds. Drop either gate and: the keep fires for
+    // services with no exclude/badge-group config the moment `idsNeedHtml` is ever widened, and the warn
+    // fires for EVERY active impact-bearing incident of EVERY component-scoped service on EVERY
+    // /api/status request (`!componentIds?.length` is true for all of them).
+    __resetMissingJoinWarnThrottle()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const CLAUDE_API_ID = 'k8w3r06qmzrp'
+    expect(canIdBypass(cfg('claude'))).toBe(false)
+    const components = [{ id: CLAUDE_API_ID, name: 'Claude API (api.anthropic.com)' }]
+    // (a) TAGGED — exercises the keep's gate: without it, claude would inherit the id evidence.
+    const tagged = openIncident([CLAUDE_API_ID]).map(i => ({ ...i, id: 'claude-inc-1' })) as Parameters<typeof filterByComponentStatus>[0]
+    expect(filterByComponentStatus(tagged, 'operational', cfg('claude'), components)).toEqual([])
+    // (b) UNTAGGED — exercises the WARN's gate, which the tagged fixture cannot reach
+    // (`!componentIds?.length` is false there). This is the noisy direction: ungated, every
+    // component-scoped service would emit a #1104 line for every active incident, every request.
+    const untagged = openIncident().map(i => ({ ...i, id: 'claude-inc-2' })) as Parameters<typeof filterByComponentStatus>[0]
+    expect(filterByComponentStatus(untagged, 'operational', cfg('claude'), components)).toEqual([])
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('#1104'))).toHaveLength(0)
+  })
+
+  it('the warn throttle is keyed per SERVICE — the three bypass services share one status page', () => {
+    // openai/chatgpt/codex are exactly the canIdBypass set AND they share status.openai.com, so one
+    // incident id passes through all three in a single fetchAllServices pass. Drop `${config.id}` from
+    // the key (in BOTH the has and the add — a half-mutation goes red on its own) and two of the three
+    // services' diagnostics vanish: the silent-drop class this warn exists to prevent.
+    __resetMissingJoinWarnThrottle()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    filterByComponentStatus(openIncident(), 'operational', cfg('openai'), COMPONENTS)
+    filterByComponentStatus(openIncident(), 'operational', cfg('chatgpt'), COMPONENTS)
+    const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('#1104') && l.includes(INC))
+    expect(lines).toHaveLength(2)
+    expect(lines.some((l) => l.includes('openai'))).toBe(true)
+    expect(lines.some((l) => l.includes('chatgpt'))).toBe(true)
+  })
+
+  it('is scoped to the operational gate: while we are degraded the incident was already kept', () => {
+    expect(filterByComponentStatus(openIncident([IMAGES]), 'degraded', cfg('openai'), COMPONENTS)).toHaveLength(1)
+  })
+
+  it('does not disturb the resolved path (kept before this change, kept after)', () => {
+    const resolved = openIncident([IMAGES]).map(i => ({ ...i, status: 'resolved' })) as Parameters<typeof filterByComponentStatus>[0]
+    expect(filterByComponentStatus(resolved, 'operational', cfg('openai'), COMPONENTS)).toHaveLength(1)
+  })
+
+  it('#970 regression guard: an UNTAGGED impact:none incident is still dropped', () => {
+    const impactNone = openIncident().map(i => ({ ...i, impact: null })) as Parameters<typeof filterByComponentStatus>[0]
+    expect(filterByComponentStatus(impactNone, 'operational', cfg('openai'), COMPONENTS)).toEqual([])
+  })
+})
+
+// The pure-function block above cannot see whether `componentIds` ever REACH that gate in production,
+// nor whether an impact whose window has ENDED still yields one — and that second fact is the premise
+// the whole fix rests on (#1093 is queued to read more out of these very records). Both are
+// invisible to it, so drive the real chain: HTML → attachIncidentIoComponentIds → filterIncidents →
+// filterByComponentStatus → ServiceStatus.incidents (the #966/#940 tested-twin rule).
+describe('#1104 fetchService — the REAL production call path, with a CLOSED impact window', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  const IMAGES = '01JMXBRMFE4MAP2BHSJNZ787WX'
+  const INC = '01KY23YCPJ9M5BFFT6ZHKQE9MP'
+  const TITLE = 'Image generation unavailable in ChatGPT'
+
+  // The real 2026-07-21 record: the impact on `Images` STARTED at 12:25:05Z and ENDED at 13:31:39Z,
+  // while the incident itself is still `identified`. `end_at` is a real timestamp here, not the
+  // `$undefined` every other fixture in the repo carries — that is the point of this fixture.
+  const endedImpact = `{\\"component_id\\":\\"${IMAGES}\\",\\"end_at\\":\\"2026-07-21T13:31:39Z\\",\\"id\\":\\"IMP1104\\",` +
+    `\\"start_at\\":\\"2026-07-21T12:25:05Z\\",\\"status\\":\\"partial_outage\\",\\"status_page_incident_id\\":\\"${INC}\\"}`
+  const html = `<script>self.__next_f.push([1,"a:{\\"component_impacts\\":[${endedImpact}],` +
+    `\\"component_uptimes\\":[],\\"incident_links\\":[]}"])</script>`
+
+  // Every openai badge component back to `operational` — the state at 13:31Z, after the recovery.
+  const summary = {
+    status: { indicator: 'none', description: 'All Systems Operational' },
+    components: [{ id: IMAGES, name: 'Images', status: 'operational' }],
+    incidents: [{
+      id: INC,
+      name: TITLE,
+      status: 'identified',
+      impact: 'major',
+      created_at: '2026-07-21T10:36:02Z',
+      started_at: '2026-07-21T10:36:02Z',
+      updated_at: '2026-07-21T14:04:58Z',
+      incident_updates: [{ status: 'identified', body: 'We have identified the issue.', created_at: '2026-07-21T14:04:58Z' }],
+      components: [],
+    }],
+  }
+
+  const fetchOpenai = (uptimeHtml?: string) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+    return fetchService(cfg('openai'), { summary: summary as never, incidents: null, latency: 120, uptimeHtml } as never)
+  }
+
+  it('openai keeps the incident while its own badge reads operational — the #1104 bug, end to end', async () => {
+    const svc = await fetchOpenai(html)
+    // BOTH halves matter: the badge must stay green (the component really did recover) AND the incident
+    // must still be there to explain the alert we already sent. Asserting either alone misses the bug.
+    expect(svc.status).toBe('operational')
+    expect(svc.incidents.map((i) => i.id)).toContain(INC)
+  })
+
+  it('an ENDED impact window still yields the component id — the premise the keep stands on', async () => {
+    // Pins `parseIncidentIoIncidentComponentIds` ignoring `end_at`. If a future "only current impacts"
+    // refactor (#1093 reads these same records) starts filtering on it, componentIds goes empty, the
+    // keep silently stops firing, and #1104 returns — with every other test in this file still green.
+    const svc = await fetchOpenai(html)
+    expect(svc.incidents.find((i) => i.id === INC)?.componentIds).toContain(IMAGES)
+  })
+
+  it('without the join the incident is dropped — so the test above is measuring the join, not the title', async () => {
+    // The title matches openai's 'chatgpt' exclude, so with no ids it never survives rule 5 either.
+    // This is the mutation direction: remove the attach wiring and the previous two tests go red.
+    const svc = await fetchOpenai(undefined)
+    expect(svc.incidents.map((i) => i.id)).not.toContain(INC)
   })
 })

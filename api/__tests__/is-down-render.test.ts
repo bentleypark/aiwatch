@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderDelegatedListeners, buildMetaDescription, renderPage, exceededRecoveryTextEn, FAR_EXCEEDED_FACTOR as EDGE_FAR_EXCEEDED_FACTOR } from '../_is-down/html-template'
+import { renderDelegatedListeners, buildMetaDescription, renderPage, hasLiveIncident, exceededRecoveryTextEn, FAR_EXCEEDED_FACTOR as EDGE_FAR_EXCEEDED_FACTOR } from '../_is-down/html-template'
 import { FAR_EXCEEDED_FACTOR as FRONTEND_FAR_EXCEEDED_FACTOR } from '../../src/utils/predictionAccuracy'
 import { getSEOContent } from '../_is-down/seo-content'
 
@@ -214,5 +214,166 @@ describe('the whole is-down page agrees when the source is unreadable (#1004)', 
     const html = render({ ...base, status: 'operational', partialCount: 2 })
     expect(html).toContain('Is Junie Down? Operational')
     expect(html).not.toContain('Status Unknown')
+  })
+})
+
+// #1104 made "green badge + ongoing incident" an ORDINARY state — #970's `impact: none` keep and the
+// `unjudgeable` fail-open already made it reachable (the worker now keeps an incident whose
+// impact window on our component has closed while the incident stays open). The analysis card derived
+// "resolved" from the badge, so in exactly that state it labelled a live incident Resolved — directly
+// above an incident row its own `inc.status` renders as Investigating, on the page the alert links to.
+describe('the analysis card asks the INCIDENT, not the badge (#1104)', () => {
+  const seo = getSEOContent('junie')!
+  const base = {
+    id: 'junie', name: 'Junie', provider: 'JetBrains', category: 'agent',
+    latency: null, uptime30d: null, lastChecked: new Date().toISOString(),
+    incidents: [], aiwatchScore: null, scoreGrade: null,
+  }
+  const insight = {
+    summary: 'Image generation is unavailable for some users.',
+    estimatedRecovery: '~1h', affectedScope: ['Images'],
+    analyzedAt: new Date().toISOString(), needsFallback: true,
+  }
+  const ongoing = { id: 'i1', title: 'Image generation unavailable', status: 'identified', impact: 'major', startedAt: new Date().toISOString(), duration: null }
+  const done = { ...ongoing, id: 'i2', status: 'resolved', duration: '1h 6m' }
+  const render = (svc: object) => renderPage('junie', svc as never, seo, [{ name: 'Alt', score: 90 } as never], insight as never)
+
+  it('an ongoing incident under a green badge is NOT labelled Resolved', () => {
+    const html = render({ ...base, status: 'operational', incidents: [ongoing] })
+    expect(html).toContain('Is Junie Down? Operational')   // the badge answer is unchanged — correct
+    expect(html).toContain('Investigating')                // the incident row says it is live…
+    expect(html).not.toContain('Post-Incident Analysis')   // …so the card must not say it is over
+    expect(html).not.toContain('>Resolved<')
+  })
+
+  it('once the incident really is resolved, the card goes back to Post-Incident (no over-correction)', () => {
+    const html = render({ ...base, status: 'operational', incidents: [done] })
+    expect(html).toContain('Post-Incident Analysis')
+  })
+
+  it('an operational badge still suppresses the Alternatives block, ongoing incident or not', () => {
+    // Gated on the BADGE deliberately: recommending an alternative while we answer "Operational" at the
+    // top of the page would contradict it. Pins that #1104 did NOT widen the fallback surface.
+    expect(render({ ...base, status: 'operational', incidents: [ongoing] })).not.toContain('🔄 Alternatives')
+    expect(render({ ...base, status: 'degraded', incidents: [ongoing] })).toContain('🔄 Alternatives')
+  })
+
+  it('a RESOLVED analysis is not re-opened by an unrelated sibling incident', () => {
+    // A `monitoring` sibling is the provider confirming recovery, so it must NOT hold a resolved card
+    // open — `hasLiveIncident` excludes it for the same reason /api/status/cached does when picking
+    // which analyses to send. Pins the cut itself: count `monitoring` as live and this card wrongly
+    // reads "ongoing", printing a live recovery estimate next to its own "✅ Recovered".
+    const resolvedInsight = { ...insight, resolvedAt: new Date().toISOString(), startedAt: new Date(Date.now() - 4e6).toISOString() }
+    const html = renderPage('junie', { ...base, status: 'operational', incidents: [done, { ...ongoing, id: 'i3', status: 'monitoring' }] } as never, seo, [] as never, resolvedInsight as never)
+    expect(html).toContain('Post-Incident Analysis')
+  })
+
+  it('a resolved analysis is NOT stamped Resolved while a live incident is on the page', () => {
+    // The trap in the other direction, and the reason there is no "every insight has resolvedAt"
+    // override: /api/status/cached fills the recovered-analysis branch whenever the ACTIVE branch
+    // produced nothing — not when nothing is active. So a card can hold only resolved analyses while an
+    // `identified` incident is live (its own analysis lost the cron's 15s budget, or the provider
+    // re-opened an incident we already stamped resolvedAt). An override would print "Resolved" above
+    // "Investigating" — #1104 again, one level up.
+    const resolvedInsight = { ...insight, resolvedAt: new Date().toISOString(), startedAt: new Date(Date.now() - 4e6).toISOString() }
+    const html = renderPage('junie', { ...base, status: 'operational', incidents: [done, ongoing] } as never, seo, [] as never, resolvedInsight as never)
+    expect(html).toContain('Investigating')
+    expect(html).not.toContain('Post-Incident Analysis')
+  })
+
+  it('an incident open longer than the 7-day window still appears in the section (#1104)', () => {
+    // Otherwise the ongoing analysis card sits above "No incidents in the last 7 days" — a false
+    // all-clear. The window is for CLOSED incidents; an open one is current whatever its start date.
+    const old = { ...ongoing, id: 'i9', startedAt: new Date(Date.now() - 12 * 86_400_000).toISOString() }
+    const html = render({ ...base, status: 'operational', incidents: [old] })
+    expect(html).not.toContain('No incidents in the last 7 days')
+    expect(html).toContain('Investigating')
+    // …and the heading says so. A guard's default is to pass: without this the qualifier can be
+    // deleted and the heading goes back to claiming a window its own list no longer obeys.
+    expect(html).toContain('+ still open')
+  })
+
+  it('explains the green-badge-plus-open-incident state in the header (#1104)', () => {
+    // Withholding the "Resolved" label fixed the false claim but left a page that answers
+    // "Operational" directly above an Investigating row with nothing reconciling the two — and the AI
+    // card cannot do it, since it renders as '' whenever no analysis exists (a brand-new incident, or
+    // one whose analysis lost the cron's 15s budget). This is the surface #1104 was filed about, so
+    // the explanation cannot depend on the analysis being there.
+    const html = renderPage('junie', { ...base, status: 'operational', incidents: [ongoing] } as never, seo, [] as never, null as never)
+    expect(html).not.toContain('Post-Incident Analysis')
+    expect(html).toContain("are operational, but the provider's incident below is still open")
+  })
+
+  it('does not explain a state that is not happening', () => {
+    // The control: the note is conditional, not unconditional decoration.
+    expect(render({ ...base, status: 'operational', incidents: [done] })).not.toContain('incident below is still open')
+    expect(render({ ...base, status: 'degraded', incidents: [ongoing] })).not.toContain('incident below is still open')
+  })
+
+  it('withholds the note in the partial state, whose header already answers otherwise', () => {
+    // A `partial` header reads "Partial — X has N components affected (operational overall)". A note
+    // saying our components are operational would deny the line directly above it — and sub-threshold
+    // BetterStack per-model churn makes this state MORE common than the #1104 one the note is for.
+    const html = render({ ...base, status: 'operational', partialCount: 2, incidents: [ongoing] })
+    expect(html).toContain('components affected')
+    expect(html).not.toContain('incident below is still open')
+  })
+
+  it('withholds the note when the source is unreadable — we publish no verdict then (#1004)', () => {
+    // `asserted`, not raw `status` — and this fixture is what makes that choice load-bearing:
+    // `isStatusUnknown` is `sourceDead && !probeConfirmed`, which does not look at `status`, so the raw
+    // field still reads 'operational' while the page answers "Unknown". Gating on `service.status`
+    // would print "our components are operational" under a header that refuses to say so (#1004).
+    const html = render({ ...base, status: 'operational', sourceDead: true, incidents: [ongoing] })
+    expect(html).not.toContain('incident below is still open')
+  })
+
+  it('lists an out-of-window monitoring incident but does not call it still open (#1104)', () => {
+    // Two cuts, on purpose. MEMBERSHIP matches the dashboard (`ServiceDetails` lists any unresolved
+    // incident regardless of age) — narrowing it dropped the row here while the dashboard kept it, and
+    // this page's own header still cited it as "Last incident … (ongoing)" above "No incidents in the
+    // last 7 days". The QUALIFIER uses the live cut, so a `monitoring` row is not called "still open"
+    // on a page whose AI card heads that same incident "Post-Incident Analysis".
+    const oldMonitoring = { ...ongoing, id: 'i8', status: 'monitoring', startedAt: new Date(Date.now() - 12 * 86_400_000).toISOString() }
+    const html = render({ ...base, status: 'operational', incidents: [oldMonitoring, done] })
+    expect(html).not.toContain('No incidents in the last 7 days')
+    expect(html).toContain('Monitoring')
+    expect(html).not.toContain('+ still open')
+  })
+
+  it('drops the still-open qualifier on a stale source (#591)', () => {
+    // A frozen array's "open" incident is frozen too; claiming it is CURRENTLY open is the false
+    // currency the stale branch exists to avoid. The header note above is excluded for the same
+    // reason — both are pinned here because they are two separate conditions with one rationale.
+    const old = { ...ongoing, id: 'i7', startedAt: new Date(Date.now() - 12 * 86_400_000).toISOString() }
+    const html = render({ ...base, status: 'operational', incidentSourceStale: true, incidents: [old] })
+    expect(html).toContain('Incident history unavailable')
+    expect(html).not.toContain('+ still open')
+    // …and the header note is excluded for the SAME reason, not just the heading. It says "the
+    // provider's incident below is still open" and there is no row below to point at, so it would be
+    // both dangling and a present-tense claim about a frozen array.
+    expect(html).not.toContain('incident below is still open')
+  })
+
+  it('hasLiveIncident excludes monitoring — the same cut the worker makes for active analyses', () => {
+    // "monitoring = recovery confirmed" (worker index.ts). Counting it as live is what would let a
+    // sibling hold a genuinely resolved card open.
+    expect(hasLiveIncident({ incidents: [done] } as never)).toBe(false)
+    expect(hasLiveIncident({ incidents: [{ ...ongoing, status: 'monitoring' }] } as never)).toBe(false)
+    expect(hasLiveIncident({ incidents: [ongoing] } as never)).toBe(true)
+    expect(hasLiveIncident({ incidents: [] } as never)).toBe(false)
+    expect(hasLiveIncident(null)).toBe(false)
+  })
+
+  it('a multi-incident card keeps each sub-block self-consistent (#1104)', () => {
+    // Card-level "resolved" used to drive the per-block outcome line, so on a mixed card the RESOLVED
+    // analysis printed a live "Est. Recovery" directly above its own "✅ Recovered" line.
+    const resolvedInsight = { ...insight, incidentTitle: 'A', resolvedAt: new Date().toISOString(), startedAt: new Date(Date.now() - 4e6).toISOString(), estimatedRecoveryHours: 1, firstEstimatedRecoveryHours: 1 }
+    const liveInsight = { ...insight, incidentTitle: 'B' }
+    // 11th arg = `aiInsights`, the per-incident LIST (#926); the scalar 5th stays the meta/share primary.
+    const html = renderPage('junie', { ...base, status: 'operational', incidents: [done, ongoing] } as never, seo, [] as never,
+      resolvedInsight as never, null, undefined, null, null, null, [resolvedInsight, liveInsight] as never)
+    expect(html).toContain('Predicted vs actual')  // the resolved block scores itself…
+    expect(html).toContain('Est. Recovery')        // …while the live one still shows an estimate
   })
 })

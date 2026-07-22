@@ -682,9 +682,11 @@ export function attachIncidentIoComponentNames(
  *  components both named "Login"), so only ids can tell the APIs-group Login from the ChatGPT one.
  *
  *  Writes ONLY `componentIds` — never `componentNames`, whose emptiness `filterByComponentStatus`
- *  (#970) reads as "untagged → drop". Unknown-to-us ids are kept as-is: the
- *  sole reader intersects them with `statusComponentIds`, so an id we don't configure simply never
- *  matches. Pure; must run BEFORE `filterIncidents` (#940 — a transform after the filter is a no-op on
+ *  (#970) reads as "untagged → drop". Unknown-to-us ids are kept as-is: BOTH readers
+ *  (`filterIncidents`' #1032 exclude-bypass and `filterByComponentStatus`' #1104 active-keep) intersect
+ *  them with this service's badge group, so an id we don't configure simply never matches. Never write
+ *  an empty array — absent `componentIds` is what #1104's drop warn reads as "the join MISSED", as
+ *  distinct from "the provider says it is a sibling's". Pure; must run BEFORE `filterIncidents` (#940 — a transform after the filter is a no-op on
  *  already-dropped incidents). Returns the SAME array reference when the page has no impacts. */
 export function attachIncidentIoComponentIds(incidents: Incident[], html: string): Incident[] {
   const idsByIncident = parseIncidentIoIncidentComponentIds(html)

@@ -590,7 +590,7 @@ textarea.report-input{min-height:72px;resize:vertical}
 ${renderStatusHeader(service, seo)}
 ${renderCTA(seo, service ? assertableStatus(service) : 'operational', slug, service?.id ?? slug)}
 ${isClaudeSurface(service?.id ?? slug) ? renderExtInstallCta(EXTENSION_STORE_URL, { loc: 'is_down_page', variant: 'is-down' }) : ''}
-${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks, fallbackCapabilityLabel)}
+${renderAIInsight(aiInsights && aiInsights.length > 0 ? aiInsights : aiInsight, service ? assertableStatus(service) : undefined, fallbacks, fallbackCapabilityLabel, hasLiveIncident(service))}
 ${supplyChainNote ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; AWS infrastructure issue (${esc(supplyChainNote.regions)}) &mdash; ${supplyChainNote.confirmed ? `${esc(seo.displayName)} is degraded and attributes it to an AWS/upstream issue` : `${esc(seo.displayName)} runs on AWS and may be affected`}</p>` : ''}
 ${renderUpstreamNote(upstreamNote, seo.displayName)}
 ${renderRegionRecommendation(regionRec ?? null, slug)}
@@ -762,17 +762,50 @@ function predictedVsActualEn(predictedHours: number, actualMin: number): string 
 
 type AIInsight = { summary: string; estimatedRecovery: string; affectedScope: string[]; analyzedAt: string; needsFallback?: boolean; resolvedAt?: string; estimatedRecoveryHours?: number; firstEstimatedRecoveryHours?: number; startedAt?: string; incidentTitle?: string }
 
+/** #1104 — does the service still carry a LIVE incident? NOT the same predicate as the identically
+ *  shaped `hasOngoingIncident` in `worker/src/alerts.ts` / `src/pages/ServiceDetails.jsx`, which count
+ *  `monitoring` as ongoing — hence the different name. Excludes `monitoring` on purpose: that is the
+ *  provider saying recovery is confirmed, and it is the same cut `/api/status/cached` makes when it
+ *  decides which analyses to send ("monitoring = recovery confirmed — exclude from active analysis
+ *  display"). Matching it is what lets ONE signal answer the card, with no `resolvedAt` override to
+ *  contradict it. Exported for the unit test. The worker's #1104 keep did not INVENT
+ *  "green badge + live incident" — #970's `impact: none` keep and the `unjudgeable` fail-open already
+ *  produced it — it made it ordinary rather than rare, which is what forced every surface to ask the
+ *  incident instead of the badge. */
+export function hasLiveIncident(service: ServiceData | null | undefined): boolean {
+  return (Array.isArray(service?.incidents) ? service.incidents : [])
+    .some(i => i?.status !== 'resolved' && i?.status !== 'monitoring')
+}
+
 // #926 — accepts a SINGLE insight or the full per-incident LIST and renders ONE card for the service,
 // mirroring the dashboard AnalysisModal (which groups a service's incidents into a single card, NOT one
 // card per incident): a single "🤖 AI Analysis" header, one 🔄 Alternatives block, and one disclaimer,
 // with each active incident as a sub-block inside. A per-incident title labels each sub-block only when
 // the card holds more than one incident. The single-incident render is visually unchanged (each body is
 // wrapped in a transparent <div>; the Alternatives block + disclaimer moved up to the card level).
-function renderAIInsight(insight?: AIInsight | AIInsight[] | null, serviceStatus?: string, fallbacks?: Fallback[], capabilityLabel?: string): string {
+// #1104 — every param is REQUIRED (`| undefined`, not `?`). `ongoing` omitted would make `!ongoing`
+// true and collapse `isResolved` back to the badge — re-shipping this bug silently at a second call
+// site, with no type error. Same reason `filterByComponentStatus` takes `components` required (#970),
+// and the exact class `debugging_optional_param_reempties_derived_set` records as recurring.
+function renderAIInsight(insight: AIInsight | AIInsight[] | null | undefined, serviceStatus: string | undefined, fallbacks: Fallback[] | undefined, capabilityLabel: string | undefined, ongoing: boolean): string {
   if (!insight) return ''
   const list = Array.isArray(insight) ? insight : [insight]
   if (list.length === 0) return ''
-  const isResolved = serviceStatus === 'operational'
+  // #1104 — an operational BADGE no longer implies the incident is over. Once the provider's impact on
+  // our component ends while the incident stays open, the service reads `operational` with the incident
+  // still listed, so deriving "resolved" from the badge alone labelled a live incident "Resolved" —
+  // this card headed "Post-Incident Analysis" a few hundred px above an incident row that its own
+  // `inc.status` renders as "Investigating".
+  //
+  // ONE signal, matching the worker's own reading. `hasLiveIncident` excludes `monitoring` for the
+  // same reason /api/status/cached does when it picks which analyses to send ("monitoring = recovery
+  // confirmed"), so a monitoring sibling cannot hold a genuinely resolved card open. Do NOT add "…or
+  // every insight carries `resolvedAt`" as an override: the recovered-analysis branch fires whenever
+  // the ACTIVE branch produced nothing (not when nothing is active), so a card can legitimately hold
+  // only resolved analyses while a live incident is on the page — an analysis whose KV write lost the
+  // cron's 15s budget, or an incident the provider re-opened after we stamped `resolvedAt` (#1003).
+  // Under that override both render "Resolved" above an "Investigating" row: #1104 again, one level up.
+  const isResolved = serviceStatus === 'operational' && !ongoing
   const multi = list.length > 1
   const isRecentlyRecovered = isResolved && list.some(i => !!i.resolvedAt)
   const resolvedBadge = isResolved
@@ -781,14 +814,17 @@ function renderAIInsight(insight?: AIInsight | AIInsight[] | null, serviceStatus
   // #641 — only render the Alternatives block when we actually have a recommendation; we don't assert
   // "No operational alternatives" (a subjective claim from our own incomplete coverage). Rendered ONCE
   // per card (gated on ANY active incident wanting a fallback), like the modal.
+  // Gated on the BADGE, not on `isResolved` — recommending an alternative to a service we are
+  // reporting as operational would contradict the answer at the top of the page. So the #1104 state
+  // (green badge + ongoing incident) keeps this hidden, exactly as before that change.
   const anyNeedsFallback = list.some(i => i.needsFallback)
-  const fallbackHtml = anyNeedsFallback && !isResolved && fallbacks && fallbacks.length > 0
+  const fallbackHtml = anyNeedsFallback && serviceStatus !== 'operational' && fallbacks && fallbacks.length > 0
     ? `<div style="margin-top:8px;padding:8px 10px;background:#0d1117;border-radius:6px;border-left:3px solid #d29922">
 <span class="mono" style="font-size:11px;color:#c9d1d9;font-weight:600">🔄 Alternatives${capabilityLabel ? ` for ${esc(capabilityLabel.toLowerCase())}` : ''}</span>
 ${fallbacks.map(f => `<div class="mono" style="font-size:11px;color:#c9d1d9;margin-top:3px">• ${esc(f.name)}${f.score != null ? ` (Score: ${f.score})` : ''}</div>`).join('')}
 </div>`
     : ''
-  const bodies = list.map((ins, idx) => renderInsightBody(ins, isResolved, multi, idx)).join('')
+  const bodies = list.map((ins, idx) => renderInsightBody(ins, multi, idx)).join('')
   return `<div class="card" style="border-left:3px solid ${isResolved ? '#3fb950' : '#7C3AED'};margin:16px 0${isResolved && !isRecentlyRecovered ? ';opacity:0.75' : ''}">
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
 <span style="font-size:16px">🤖</span>
@@ -804,7 +840,7 @@ ${fallbackHtml}
 
 // One incident's analysis block inside the shared card. `multi`/`idx` control the separator + the
 // incident-title line (shown only when the card holds more than one incident, like the modal).
-function renderInsightBody(insight: AIInsight, isResolved: boolean, multi: boolean, idx: number): string {
+function renderInsightBody(insight: AIInsight, multi: boolean, idx: number): string {
   const ago = Math.floor((Date.now() - new Date(insight.analyzedAt).getTime()) / 60000)
   const agoText = ago < 1 ? 'just now' : ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ago`
   // An ACTIVE incident that has already run past its estimated recovery upper bound: the stale short
@@ -816,8 +852,12 @@ function renderInsightBody(insight: AIInsight, isResolved: boolean, multi: boole
   // resolvedAt). Null until resolved or when no usable estimate / startedAt is available.
   // #1003 — scored against the FIRST estimate (scoringBaselineEn), NOT the re-analysis-inflated current
   // one, so this public SEO card agrees with the Discord embed, /feed, the corpus and the dashboard modal.
+  // #1104 — per-INSIGHT, not per-card. On a multi-incident card the two can disagree (one analysis
+  // resolved, another still live), and the card-level flag made the resolved sub-block print a live
+  // "Est. Recovery" directly above its own "✅ Recovered 40m ago" line. `insight.resolvedAt` is the
+  // same field that line already keys on, so gating both on it is what makes the block self-consistent.
   const baseline = scoringBaselineEn(insight)
-  const outcome = isResolved && baseline != null && insight.startedAt && insight.resolvedAt
+  const outcome = baseline != null && insight.startedAt && insight.resolvedAt
     ? predictedVsActualEn(baseline, Math.round((new Date(insight.resolvedAt).getTime() - new Date(insight.startedAt).getTime()) / 60000))
     : null
   const sep = multi && idx > 0 ? 'border-top:1px solid #21262d;margin-top:10px;padding-top:10px' : ''
@@ -1005,6 +1045,20 @@ function renderStatusHeader(service: ServiceData | null, seo: ServiceSEO): strin
 <p style="font-size:20px;font-weight:600;color:${color};margin:12px 0">${answer.yesno} &mdash; ${esc(seo.displayName)} ${answer.phrase}</p>
 <p class="meta mono">${metaParts.join(' &middot; ')}</p>
 ${lastIncident ? `<p class="meta">Last incident: ${esc(formatDate(lastIncident.startedAt))} &mdash; ${esc(lastIncident.title)}${lastIncident.duration ? ` (${esc(lastIncident.duration)})` : ' (ongoing)'}</p>` : '<p class="meta">No recent incidents</p>'}
+${/* #1104 — withholding the "Resolved" label stopped the false claim but left the page answering
+      "Operational" directly above an Investigating row with nothing reconciling the two. The AI card
+      cannot do that job: it renders '' whenever no analysis exists, which is the state right after a
+      new incident and whenever the cron's 15s budget ran out. Hence a header line that does not
+      depend on the analysis.
+      Wording is "are operational", NOT "have recovered": `hasLiveIncident` is also true for the #970
+      `impact: none` keep and the `unjudgeable` fail-open, where our component never left operational
+      and there was no recovery to report. The current reading is true in every keep path.
+      Three exclusions, each because the note's claim would otherwise be FALSE, not merely noisy:
+      `asserted` (not raw `status`) because an unreadable source publishes no verdict at all (#1004),
+      so "our components have recovered" is exactly what we cannot say; `!isPartial` because that
+      header answers "N components affected" and the note would deny the line above it; `!stale`
+      because a frozen array's open incident is frozen too, and asserting it is CURRENTLY open is the
+      same #591 false-currency `renderIncidents` refuses a few hundred lines below. */''}${asserted === 'operational' && !isPartial && !stale && hasLiveIncident(service) ? `<p class="meta" style="color:#d29922">&#x26A0;&#xFE0F; The components AIWatch tracks for ${esc(seo.displayName)} are operational, but the provider's incident below is still open.</p>` : ''}
 ${'' /* #857 — this meta line always renders. When the service is ranked it leads with the rank clause;
    when it's unranked (score withheld during a new service's coverage/confidence ramp, e.g. turbopuffer)
    it leads with a monthly-report context sentence instead of the rank — so the reports pointer keeps a
@@ -1334,14 +1388,38 @@ export function renderIncidents(service: ServiceData | null): string {
 
   // 7-day window to match the dashboard ServiceDetails "Incident History" (both surfaces
   // share the same recency horizon; #incident-history-collapse).
+  // #1104 — a STILL-OPEN incident is current whatever its start date, so the window applies to closed
+  // ones only. Without this, an incident the provider leaves open past 7 days renders an ongoing AI
+  // Analysis card above the words "No incidents in the last 7 days" — a self-contradicting page, and a
+  // false all-clear of the same family as #591. Cutting the card off at 7 days instead would put us back
+  // to labelling a live incident Resolved, which is the bug this whole change exists to remove. The
+  // `startedAt`-unparseable case (NaN) now also survives while open, rather than vanishing silently.
   const cutoff = Date.now() - 7 * 86_400_000
-  const recent = incidents.filter((inc) => new Date(inc.startedAt).getTime() >= cutoff) as GroupingIncident[]
-  const heading = `<h2>Recent Incidents <span class="mono" style="font-size:12px;color:#8b949e;font-weight:400;margin-left:8px">&middot; Last 7 days</span></h2>`
+  // MEMBERSHIP and the QUALIFIER use different cuts, deliberately.
+  //
+  // Membership matches the dashboard's ServiceDetails filter exactly (`status !== 'resolved' ||
+  // inWindow`), because an unresolved incident is unresolved on both surfaces and the standing rule is
+  // that the dashboard and this page never answer differently about one incident. Narrowing it to
+  // `isLive` dropped an out-of-window `monitoring` incident here while ServiceDetails kept listing it
+  // — and this page's own header still cited it as "Last incident … (ongoing)" directly above "No
+  // incidents in the last 7 days".
+  //
+  // The QUALIFIER uses `isLive`, the cut `hasLiveIncident` and the AI card share. `monitoring` is the
+  // provider confirming recovery, so calling it "still open" in the heading would contradict the card
+  // above, which heads that same incident "Post-Incident Analysis".
+  const isLive = (inc: { status?: string }) => inc.status !== 'resolved' && inc.status !== 'monitoring'
+  const inWindow = (inc: { startedAt: string }) => new Date(inc.startedAt).getTime() >= cutoff
+  const recent = incidents.filter((inc) => inc.status !== 'resolved' || inWindow(inc)) as GroupingIncident[]
+  const hasOlderOpen = recent.some((inc) => isLive(inc) && !inWindow(inc))
+  const headingWith = (qualifier: string) => `<h2>Recent Incidents <span class="mono" style="font-size:12px;color:#8b949e;font-weight:400;margin-left:8px">&middot; Last 7 days${qualifier}</span></h2>`
+  const heading = headingWith(hasOlderOpen ? ' + still open' : '')
 
   // #591 — the incident feed is frozen, so we can't fetch recent incidents. A "No incidents" message
-  // here would be a false all-clear; say the history is unavailable instead.
+  // here would be a false all-clear; say the history is unavailable instead. The qualifier is dropped
+  // here: a frozen array's "still open" incident is frozen too, so claiming it is CURRENTLY open would
+  // be the #591 false-currency this branch exists to avoid.
   if (service.incidentSourceStale) {
-    return `${heading}
+    return `${headingWith('')}
 <div class="card"><p style="color:#8b949e;font-size:13px;padding:8px 0">Incident history unavailable &mdash; ${esc(service.name)}'s status source moved to a platform AIWatch can't currently reach, so recent incidents can't be retrieved.</p></div>`
   }
 

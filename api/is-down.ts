@@ -301,6 +301,13 @@ export default async function handler(req: Request) {
           const sameTierOnly = sourceTier >= 4 && sourceTier <= 10
           fallbacks = allServices
             // #550 — exclude candidates with an unresolved incident even if status is still 'operational'.
+            // Deliberately BROADER than BOTH `hasLiveIncident` (_is-down/html-template.ts), which excludes
+            // `monitoring`, AND worker `fallback.ts`'s own gate, which exempts #811 advisory titles. Not a
+            // mirror of either — the divergence is the point:
+            // recommending a service whose recovery is only just being confirmed is a
+            // worse error than omitting it, so this gate stays conservative. #1104 widened the window
+            // this fires in — an incident now survives our own component's recovery — see
+            // docs/reference/status-determination.md.
             // #616 — exclude stale-source services (#591): ranking-excluded → not a trusted fallback either.
             .filter(s => s.category === entry.category && s.id !== entry.id && s.status === 'operational'
               && !(s.incidents ?? []).some(i => (i as { status?: string }).status !== 'resolved')

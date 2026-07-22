@@ -2,6 +2,7 @@
 import { useLang } from '../hooks/useLang'
 import { getGroupedFallbacks, shouldShowFallback } from '../utils/constants'
 import { computePredictionOutcome, verdictLabel, estimateExceeded, exceededRecoveryText } from '../utils/predictionAccuracy'
+import { hasLiveIncident, readsResolved } from '../utils/liveIncident'
 
 function timeAgo(date, lang) {
   const diff = Date.now() - new Date(date).getTime()
@@ -115,7 +116,14 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
             const worstStatus = svcs.some(s => s.status === 'down') ? 'down'
               : svcs.some(s => s.status !== 'operational') ? 'degraded' : 'operational'
             const isAllResolved = svcs.every(s => s.status === 'operational')
-            const hasActiveInc = svcs.some(s => (s.incidents ?? []).some(i => i.status !== 'resolved' && i.status !== 'monitoring'))
+            // #1104 — the shared primitive, not a fourth hand-inlined copy of the same predicate.
+            // Its guard shape (`Array.isArray`) also differs from the `?? []` this line used to carry,
+            // and two copies that disagree on a malformed payload is the drift `liveIncident` exists
+            // to remove.
+            const hasActiveInc = svcs.some(hasLiveIncident)
+            // #1104 — "every ANALYSIS on this card is resolved". Still the right input for the three
+            // uses below (they ask about the analyses), but NOT for the Resolved pill, which is a claim
+            // about the SERVICE — see `readsResolved` in utils/liveIncident.
             const allRecovered = analyses.every(a => !!a.resolvedAt)
             // Surface the gap between the operational status dot and active analyses
             // (e.g. BetterStack per-model churn below the <30% threshold leaves the service
@@ -123,10 +131,18 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
             // Restrict to single-service groups — a sibling-shared incident that happens to
             // show operational on every surface is a real cross-service incident, not an
             // isolated one.
+            //
+            // #1104 — ALSO fire on a live INCIDENT, not just a live analysis. This modal draws from
+            // `aiAnalysis` alone, so an incident with no analysis yet has no row here at all. Dropping
+            // the "Resolved" pill for it (correct — the service is not resolved) would otherwise leave
+            // the card with nothing at all to show the reader WHY, and it would keep reading as
+            // "recovered" off the resolved analysis in its body. Same chip, same meaning: the service
+            // reads operational while something of its own is still open.
+            // (`!allRecovered` IS `analyses.some(a => !a.resolvedAt)` — the two were one condition
+            // written twice, and it is the branch that cannot see an un-analyzed incident.)
             const isolatedModelIssue = svcs.length === 1
               && isAllResolved
-              && !allRecovered
-              && analyses.some(a => !a.resolvedAt)
+              && (hasActiveInc || !allRecovered)
             // Gate on service status (not the AI's needsFallback flag) so this
             // matches the Overview ActionBanner, which shows fallbacks for any
             // down/degraded service. The AI may mark partial degradation as
@@ -147,7 +163,7 @@ export default function AnalysisModal({ aiAnalysis, services, onClose }) {
                   {analyses.length > 1 && (
                     <span className="mono text-[9px] text-[var(--text2)]">({analyses.length} {lang === 'ko' ? '건' : 'incidents'})</span>
                   )}
-                  {(allRecovered || (isAllResolved && !hasActiveInc)) && (
+                  {readsResolved(svcs) && (
                     <span className="mono text-[9px] rounded" style={{ color: 'var(--green)', background: 'var(--status-bg-green)', padding: '3px 8px', display: 'inline-block' }}>
                       Resolved
                     </span>
