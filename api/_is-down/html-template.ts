@@ -286,7 +286,16 @@ function formatDate(iso: string): string {
 
 // #539→og-fix — maps the social share `?e=` hint to an OG card status the generator renders
 // (operational/degraded/down). 'reddit'/unknown/absent → fall through to live status (see renderPage).
-const HINT_TO_OG_STATUS: Record<string, string> = { down: 'down', degraded: 'degraded', active: 'operational', resolved: 'operational' }
+// PRODUCERS of the `?e=` tokens this maps: worker/src/rss.ts (`serviceLink`) and worker/src/alerts.ts
+// (`withdrawn` comes from rss.ts only — the Discord withdrawal alert links to the dashboard hash).
+// An unlisted token is silently ignored (see `pinnedHint` below), which is safe but means the card
+// falls back to LIVE status and the og:url un-pins — so a new token that is not added here is a
+// no-op that no test or lint would surface. Pinned by the lockstep test in withdrawn.test.ts.
+// #1106 `withdrawn` → `unknown` (the grey og style, not `operational`): the provider deleted the
+// incident record, so we know nothing about the service's state at share time. Mapping it to
+// `operational` would unfurl a green "Operational" card beside a message that says we have no
+// recovery record — the one place in that feature where a surface would imply recovery.
+const HINT_TO_OG_STATUS: Record<string, string> = { down: 'down', degraded: 'degraded', active: 'operational', resolved: 'operational', withdrawn: 'unknown' }
 
 function formatElapsed(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime()

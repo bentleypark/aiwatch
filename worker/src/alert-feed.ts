@@ -16,7 +16,11 @@
 import { kvPut } from './utils'
 import type { ServiceStatus } from './services'
 
-export type AlertKind = 'new' | 'resolved' | 'down' | 'degraded' | 'recovered'
+// #1106 — `withdrawn` closes a `new` thread the way `resolved` does, but is NOT a recovery: the
+// provider deleted the incident from its status page instead of resolving it. It is a distinct kind
+// precisely so a downstream reader cannot mistake it for one (an external /api/status consumer
+// filtering on 'resolved' must not pick this up as "the outage ended").
+export type AlertKind = 'new' | 'resolved' | 'down' | 'degraded' | 'recovered' | 'withdrawn'
 
 /** The verbatim Discord embed core shared by the operator send and the per-user relay (the #475
  *  "byte-identical" contract). Footer + timestamp are added at delivery, not stored here.
@@ -54,6 +58,7 @@ const KEY_PREFIXES: ReadonlyArray<readonly [string, AlertKind]> = [
   ['alerted:down:', 'down'],
   ['alerted:degraded:', 'degraded'],
   ['alerted:recovered:', 'recovered'],
+  ['alerted:wd:', 'withdrawn'], // #1106
 ]
 
 export function kindFromKey(key: string): AlertKind | null {
@@ -66,7 +71,11 @@ export function kindFromKey(key: string): AlertKind | null {
 /** Services covered by an alert, for the per-user alertTarget filter.
  *  - status (down/degraded/recovered): the `{svcId}` tail of each key.
  *  - incident (new/resolved): services whose incidents include the `{incId}` tail(s).
- *  `keys` is alert.key plus any `_mergedKeys` (Together AI model grouping). */
+ *  `keys` is alert.key plus any `_mergedKeys` (Together AI model grouping).
+ *  #1106 — a `withdrawn` alert resolves to `[]` here BY CONSTRUCTION: its incident was deleted
+ *  upstream, so no service still carries it. That is why `buildWithdrawalAlerts` always sets
+ *  `svcIds` explicitly (the tombstone remembers them) — a caller that lets this derive the set for a
+ *  withdrawal would silently drop it from every per-user filter. */
 export function svcIdsForAlert(keys: string[], kind: AlertKind, services: ServiceStatus[]): string[] {
   // Tail after "alerted:{kind}:" — svcId for status, incId for incidents. slice(2) rejoins ids that
   // themselves contain ':' (e.g. aistudio:/vertex: incident ids).

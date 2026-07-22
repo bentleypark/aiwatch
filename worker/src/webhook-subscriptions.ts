@@ -168,14 +168,20 @@ export function normalizeFilters(raw: unknown): SubscriptionFilters {
   return { alertCondition, alertTarget, alertServices, alertIncidents }
 }
 
-const INCIDENT_KINDS = new Set<AlertKind>(['new', 'resolved'])
+// #1106 — `withdrawn` is an INCIDENT kind: it closes a thread the subscriber's own `new` alert
+// opened, so it must follow `alertIncidents` exactly as `resolved` does. Leaving it out of both sets
+// is not a neutral default — `shouldDeliver` ends in `return false`, so every per-user subscriber
+// would keep an unclosed 🔴 forever, which is the precise complaint #1106 exists to fix. This is a
+// DELIBERATE divergence from the retired client `shouldRelay` the parity comment below describes:
+// that code predates the kind and can never gain it.
+const INCIDENT_KINDS = new Set<AlertKind>(['new', 'resolved', 'withdrawn'])
 const STATUS_KINDS = new Set<AlertKind>(['down', 'degraded', 'recovered'])
 
 /** Whether a feed entry should be delivered to a subscriber, given their filters. Ported verbatim
  *  from the former client `shouldRelay` (webhookAlerts.js) so server delivery matches what the
  *  browser relay did (pinned by a parity test):
  *   - alertTarget 'custom' → at least one covered service must be in alertServices.
- *   - incident kinds (new/resolved) → gated by alertIncidents (default on).
+ *   - incident kinds (new/resolved/withdrawn — #1106) → gated by alertIncidents (default on).
  *   - status kinds → alertCondition 'down' drops degraded; 'all' keeps everything. */
 export function shouldDeliver(entry: AlertFeedEntry, filters: SubscriptionFilters): boolean {
   if (filters.alertTarget === 'custom' && !entry.svcIds?.some((id) => filters.alertServices.includes(id))) {

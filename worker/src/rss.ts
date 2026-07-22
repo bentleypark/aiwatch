@@ -5,10 +5,11 @@
 import type { ServiceStatus, Incident } from './types'
 import { escapeXml } from './badge'
 import { getGroupedFallbacks } from './fallback'
-import { defuseAutolinkDomain } from './alerts'
+import { defuseAutolinkDomain, WITHDRAWN_NOTE } from './alerts'
 import { formatRecoveryDisplay } from './ai-analysis'
 import { appendStatusHint, appendUtm, isNonReliabilityAdvisory } from './utils'
 import { durationMinOf, predictedVsActualText, resolvedAtOf, scoringBaselineHours } from './incident-history'
+import { withdrawalHold, liveIncidentIds, type WithdrawnIncident } from './withdrawn'
 
 const SITE = 'https://ai-watch.dev'
 
@@ -107,6 +108,13 @@ export const FEED_XSL = `<?xml version="1.0" encoding="UTF-8"?>
 // Cap the feed (both scopes) so a burst of incidents can't bloat the response.
 // The cached incident list is already small (recent + unresolved only).
 const MAX_ITEMS = 50
+
+// #1106 — how many TOMBSTONES one feed render may take (a multi-surface withdrawal spends one slot
+// per surface and then collapses to a single item in `dedupeSharedIncidents`, so this is an upper
+// bound on emitted items, not an exact count). See the withdrawal loop in
+// `buildFeedWithMeta`: they sort above live items, so they need their own bound to keep a burst of
+// retractions from starving running outages out of a MAX_ITEMS-capped feed.
+const MAX_WITHDRAWAL_ITEMS = 5
 
 // #759 — publish-before-analysis hold window. A freshly-detected active incident becomes visible in
 // the feed the moment it enters `services:latest`, but the cron writes `ai:analysis:{svcId}:{incId}`
@@ -220,7 +228,11 @@ export function isDownUrl(serviceId: string): string {
 function serviceLink(serviceId: string, kind: ItemKind, status: ServiceStatus['status']): string {
   // NO_IS_DOWN_PAGE services fall back to the dashboard hash (no OG page) → no hint and no utm.
   if (NO_IS_DOWN_PAGE.has(serviceId)) return isDownUrl(serviceId)
-  const hint = kind === 'resolved' ? 'resolved' : status === 'operational' ? 'active' : status
+  // #1106 — a withdrawal gets its OWN `?e=` token rather than reusing 'resolved' (which would pin a
+  // recovery card we have no evidence for) or the live status (which would re-assert the outage).
+  // A distinct token is also what gives the withdrawal message a fresh OG unfurl, the whole point of
+  // the hint: the outage post and its retraction must not share a cached card.
+  const hint = kind === 'resolved' ? 'resolved' : kind === 'withdrawn' ? 'withdrawn' : status === 'operational' ? 'active' : status
   // #548 — utm_source=rss so GA4 attributes feed-reader/Slack clicks to the RSS channel (consent-free).
   return appendUtm(appendStatusHint(isDownUrl(serviceId), hint), 'rss')
 }
@@ -249,14 +261,33 @@ function rfc822(iso: string): string {
 // incident to multiple services, so the same ID would surface as several items —
 // the provider-grouped title ("Anthropic (Claude API, claude.ai, Claude Code): …", #724) tells a
 // subscriber it's one event, not three (the old "Also affecting" line was dropped in #760 as a dup).
-function buildIncidentServiceMap(services: ServiceStatus[]): Map<string, string[]> {
+// #1106 — tombstones contribute too. A withdrawn incident is in NOBODY's live list by construction,
+// so without this its co-affected set is always empty and the retraction's title names only the
+// primary surface — while the Discord withdrawal alert correctly renders the provider-grouped form.
+// A subscriber whose 🔴 read "Anthropic (Claude API, claude.ai, Claude Code)" must not get a ⚪ that
+// looks like it is about one of them. The roster remembers the sibling svcIds; this maps them back
+// to names via `services` (a tombstone for a service we no longer carry contributes nothing).
+function buildIncidentServiceMap(services: ServiceStatus[], withdrawn?: WithdrawnIncident[]): Map<string, string[]> {
   const map = new Map<string, string[]>()
+  const add = (incId: string, name: string) => {
+    const names = map.get(incId) ?? []
+    if (!names.includes(name)) names.push(name)
+    map.set(incId, names)
+  }
   for (const svc of services) {
-    for (const inc of svc.incidents ?? []) {
-      const names = map.get(inc.id) ?? []
-      if (!names.includes(svc.name)) names.push(svc.name)
-      map.set(inc.id, names)
-    }
+    for (const inc of svc.incidents ?? []) add(inc.id, svc.name)
+  }
+  // Snapshot the LIVE ids before folding, so the check below can't be satisfied by a sibling
+  // tombstone this same loop just added (a multi-surface withdrawal must still group).
+  const liveIds = new Set(map.keys())
+  for (const w of withdrawn ?? []) {
+    // …EXCEPT a tombstone whose incident is live again (the `republished-same-id` shape). Its
+    // withdrawal item is suppressed by `withdrawalHold`, but the fold is not gated by that — and
+    // adding its name here would inject a surface into the LIVE item's provider-grouped title,
+    // naming a service that no longer carries the incident. Only genuinely-gone ids may contribute.
+    if (liveIds.has(w.incId)) continue
+    const name = services.find((s) => s.id === w.svcId)?.name
+    if (name) add(w.incId, name)
   }
   return map
 }
@@ -266,7 +297,13 @@ function buildIncidentServiceMap(services: ServiceStatus[]): Map<string, string[
 // its 'active' item (description shows Status: resolved) AND gets a 'resolved' item with a
 // DISTINCT guid + later pubDate (#467). RSS readers / Slack /feed dedup by guid, so without
 // the distinct guid a status flip to resolved never re-notifies a subscriber.
-type ItemKind = 'active' | 'resolved'
+// #1106 — 'withdrawn' is the THIRD terminal kind: the provider deleted the incident from its status
+// page instead of resolving it. It exists because the 'resolved' item is built from a live incident
+// with `status === 'resolved'`, which a deleted incident can never be — so the 'active' item just
+// disappears from the feed, and a disappearance does NOT retract the message Slack already posted
+// into a channel. Rendered from the `withdrawn.ts` tombstone, with its own guid so guid-dedup lets it
+// through as a new message (#467's reason the resolved item needs a distinct one).
+type ItemKind = 'active' | 'resolved' | 'withdrawn'
 
 // Resolution timestamp (explicit resolvedAt → last 'resolved' timeline entry → last entry → start)
 // is shared with the Discord Incident-Resolved embed via incident-history's resolvedAtOf (#846), so
@@ -303,7 +340,12 @@ function fallbackLine(svc: ServiceStatus, inc: Incident, services: ServiceStatus
 // down service → red; everything else (minor / degraded) → amber. Roughly mirrors the dashboard
 // status colors — note the feed additionally treats `major` impact as red even when the service
 // is only `degraded` (the dashboard pill stays amber there), favoring alert legibility.
-function severityEmoji(svc: ServiceStatus, inc: Incident, isResolved: boolean): string {
+function severityEmoji(svc: ServiceStatus, inc: Incident, kind: ItemKind): string {
+  // #1106 — a withdrawal is neither an outage (🔴/🟡) nor a recovery (🟢): the record was retracted,
+  // and we learned nothing about whether the service recovered. Neutral, ahead of every other branch
+  // so no impact/status value can colour it into a claim we can't support.
+  if (kind === 'withdrawn') return '⚪'
+  const isResolved = kind === 'resolved'
   // #1021 — a non-reliability advisory (usage-limits/quota/…) is informational, not an outage severity, so
   // the public feed shows ℹ️ (matching the Discord/webhook "ℹ️ Advisory" reframe) instead of 🟡/🟢. Keyed
   // on the title (OUTAGE_SIGNAL guard inside), so a real outage that reuses a quota word stays red/amber.
@@ -336,6 +378,17 @@ function descHtml(
   const latest = inc.timeline.length > 0 ? inc.timeline[inc.timeline.length - 1] : null
   const lines: string[] = []
 
+  // #1106 — a withdrawal renders ONLY the retraction sentence, and returns before every other block.
+  // Deliberately no duration (we never saw an end), no timeline (the provider deleted it), no AI
+  // analysis (a prediction about an incident whose record no longer exists is noise), and no
+  // "Try instead" (recommending an alternative implies the outage is still on). Each of those would
+  // re-assert something about an outage whose only remaining fact is that the claim was withdrawn.
+  // KEEP THIS RETURN FIRST — everything below reads fields the synthesized tombstone incident only
+  // has placeholder values for. A new block added ABOVE it would silently render those placeholders.
+  if (opts.kind === 'withdrawn') {
+    return `<p>⚪ <strong>Withdrawn by the provider</strong></p>\n<p>${escHtml(WITHDRAWN_NOTE)}</p>`
+  }
+
   if (isResolved) {
     lines.push(`<p>🟢 <strong>Resolved</strong>${inc.duration ? ` · lasted ${escHtml(inc.duration)}` : ''}</p>`)
     // #827 F4 — how our AI estimate held up (same wording as the Discord recovery alert). Only when an
@@ -364,7 +417,7 @@ function descHtml(
     // re-analysis rewriting the summary, or a fallback recommendation flip. Stability holds *given*
     // stable impact / co-affected / AI / fallback — which is the common case across investigating→identified.
     const label = inc.impact ? cap(inc.impact) : service.status === 'down' ? 'Down' : 'Degraded'
-    lines.push(`<p>${severityEmoji(service, inc, false)} <strong>${escHtml(label)}</strong></p>`)
+    lines.push(`<p>${severityEmoji(service, inc, 'active')} <strong>${escHtml(label)}</strong></p>`)
   }
   // #760 — no "Also affecting" line: it only ever appeared when coAffected.length>0, which is EXACTLY
   // when itemXml's title is provider-grouped ("Anthropic (Claude API, claude.ai, Claude Code): …") and
@@ -399,8 +452,9 @@ function itemXml(
   opts: { kind: ItemKind; pubDate: string; fallbackText?: string; analysis?: RssAiAnalysis },
 ): string {
   const isResolved = opts.kind === 'resolved'
+  const isWithdrawn = opts.kind === 'withdrawn'
   const coAffected = (incidentServices.get(inc.id) ?? []).filter((n) => n !== service.name)
-  const emoji = severityEmoji(service, inc, isResolved)
+  const emoji = severityEmoji(service, inc, opts.kind)
   // #724 — provider-grouped header for a multi-surface (shared) incident, mirroring the Discord
   // embed ("Anthropic (Claude API, claude.ai, Claude Code) — …") instead of an API-centric
   // "Claude API: …". Single-surface incidents keep the plain "<service>: …" lead.
@@ -408,8 +462,15 @@ function itemXml(
   const lead = coAffected.length > 0
     ? `${service.provider || service.name} (${[service.name, ...coAffected].join(', ')})`
     : service.name
-  const title = defuseAutolinkDomain(`${emoji} ${lead}: ${isResolved ? 'Resolved — ' : ''}${inc.title}`)
-  const guid = isResolved ? `aiwatch:${service.id}:${inc.id}:resolved` : `aiwatch:${service.id}:${inc.id}`
+  // #1106 — "Withdrawn — " never "Resolved — ": the lead word is the whole point of the item, and it
+  // is the one place a subscriber skimming a Slack channel actually reads what happened.
+  const leadWord = isResolved ? 'Resolved — ' : isWithdrawn ? 'Withdrawn — ' : ''
+  const title = defuseAutolinkDomain(`${emoji} ${lead}: ${leadWord}${inc.title}`)
+  const guid = isResolved
+    ? `aiwatch:${service.id}:${inc.id}:resolved`
+    : isWithdrawn
+      ? `aiwatch:${service.id}:${inc.id}:withdrawn` // #1106 — distinct so guid-dedup re-notifies
+      : `aiwatch:${service.id}:${inc.id}`
 
   return `    <item>
       <title>${xml(title)}</title>
@@ -480,8 +541,14 @@ export function buildFeedWithMeta(
   // item). Absent → fail-open (emit every resolved item, the pre-#793 behavior), so direct callers /
   // unit tests that don't thread it are unaffected.
   servedActive?: Set<string>,
+  // #1106 — tombstones for incidents the provider DELETED from its status page (see withdrawn.ts).
+  // They are rendered from here rather than from `services` because that is the point: the incident
+  // is gone from every live list, so the feed has no other material to close the thread with. Gated
+  // on the same `servedActive` markers as the resolved item — a withdrawal of an outage we never
+  // served is an orphan for exactly the #793 reason, so it is suppressed identically.
+  withdrawn?: WithdrawnIncident[],
 ): { xml: string; lastModified: Date | null } {
-  const incidentServices = buildIncidentServiceMap(services)
+  const incidentServices = buildIncidentServiceMap(services, withdrawn)
   const sources = opts.scope === 'service' ? [opts.service] : services
   // One item per incident, keyed by its current state (#467): an active incident emits its
   // 'active' item (guid `aiwatch:svc:inc`, red/amber); once resolved it emits ONLY the 'resolved'
@@ -517,6 +584,47 @@ export function buildFeedWithMeta(
         })
       }
     }
+  }
+  // #1106 — withdrawal items, synthesized from the tombstone rather than from a live incident: the
+  // incident is gone from every live list, which is the whole reason this kind exists.
+  //   - `status: 'investigating'` — NOT `monitoring`, which this file elsewhere reads as "recovery
+  //     already confirmed" (see the #724 gate on the AI block). A tombstone means we never learned an
+  //     outcome, so if any future reader does look at this field, `investigating` is the reading that
+  //     doesn't assert the one thing the module exists to refuse. No renderer reads it today.
+  //   - `timeline: []` is LOAD-BEARING, not shape-filler: `descHtml` dereferences `inc.timeline`
+  //     before its withdrawn early return, so omitting it throws for the whole feed request.
+  //   - `duration: null` keeps `<category>`/duration output empty; `impact: null` does the same for
+  //     `itemXml`'s `<category>`, which IS read outside the early return.
+  // `pubDate` is `prunedAt` — when AIWatch learned of the withdrawal — NOT `now`: `weakFeedEtag` hashes
+  // the body and `<lastBuildDate>` derives from the newest item's pubDate, so a wall-clock value would
+  // change the bytes on every poll, defeat the #860 304, and re-notify Slack on every content change.
+  // `prunedAt` is still LATER than the active item's pubDate, which is what makes a reader treat this
+  // as new.
+  // A withdrawal's pubDate is `prunedAt` ≈ now, so it sorts ABOVE every live active item (whose
+  // pubDate is its own first-seen). `WITHDRAWN_MAX` equals `MAX_ITEMS`, so without a cap a provider
+  // mass-deleting announced incidents could push every running outage out of the feed — the same
+  // starvation the Discord half avoids by ordering withdrawals last. A retraction is never more
+  // urgent than a live outage; the surplus stays in the roster and lands on a later poll.
+  const liveIds = liveIncidentIds(services)
+  let withdrawalItems = 0
+  for (const w of withdrawn ?? []) {
+    const svc = sources.find((s) => s.id === w.svcId)
+    if (!svc) continue // out of this feed's scope (a /feed/{other} poll), or an unknown service id
+    if (servedActive && !servedActive.has(w.incId)) continue // #793 — never served → no orphan retraction
+    // The same rule the Discord half applies, so neither channel publishes a retraction the other
+    // considers unsafe (re-published under the same id, an outage running right now, or a status
+    // source we could not read). Silent here on purpose, unlike the cron: this runs once per POLL
+    // per subscriber, so a line would be unbounded in traffic while conveying one bit of state —
+    // the cron logs the same hold every 5 minutes, which is where an operator would look.
+    if (withdrawalHold(w.incId, svc, liveIds)) continue
+    if (withdrawalItems >= MAX_WITHDRAWAL_ITEMS) continue
+    withdrawalItems++
+    items.push({
+      svc,
+      incident: { id: w.incId, title: w.title, status: 'investigating', impact: null, startedAt: w.startedAt, duration: null, timeline: [] },
+      kind: 'withdrawn',
+      pubDate: w.prunedAt,
+    })
   }
   // All-services feed (#520): collapse a multi-surface incident (one incidentId across Claude API /
   // claude.ai / Claude Code) into ONE item per (incidentId, kind) so a Slack /feed subscriber to
@@ -586,8 +694,9 @@ export function buildRssFeed(
   aiAnalysis?: RssAiAnalysisMap,
   firstSeen?: Record<string, string>,
   servedActive?: Set<string>,
+  withdrawn?: WithdrawnIncident[], // #1106
 ): string {
-  return buildFeedWithMeta(services, opts, now, aiAnalysis, firstSeen, servedActive).xml
+  return buildFeedWithMeta(services, opts, now, aiAnalysis, firstSeen, servedActive, withdrawn).xml
 }
 
 // What a /feed route was asked for — the all-services feed, or one service
@@ -619,6 +728,7 @@ export function buildFeedResponse(
   aiAnalysis?: RssAiAnalysisMap,
   firstSeen?: Record<string, string>, // #750 — incId → first-detected ISO; fresh active-item pubDate
   servedActive?: Set<string>, // #793 — incIds whose active item was already served (suppress orphan resolved)
+  withdrawn?: WithdrawnIncident[], // #1106 — provider-deleted incidents needing a closing item
 ): FeedResult {
   if (req.scope === 'service' && !isValidFeedSegment(req.segment)) {
     return { ok: false, status: 400, message: 'Invalid service slug' }
@@ -627,14 +737,14 @@ export function buildFeedResponse(
     return { ok: false, status: 503, message: 'Status data is temporarily unavailable' }
   }
   if (req.scope === 'all') {
-    const { xml, lastModified } = buildFeedWithMeta(cached.services, { scope: 'all' }, now, aiAnalysis, firstSeen, servedActive)
+    const { xml, lastModified } = buildFeedWithMeta(cached.services, { scope: 'all' }, now, aiAnalysis, firstSeen, servedActive, withdrawn)
     return { ok: true, xml, lastModified }
   }
   const service = resolveFeedService(cached.services, req.segment)
   if (!service) {
     return { ok: false, status: 404, message: 'Service not found' }
   }
-  const { xml, lastModified } = buildFeedWithMeta(cached.services, { scope: 'service', service }, now, aiAnalysis, firstSeen, servedActive)
+  const { xml, lastModified } = buildFeedWithMeta(cached.services, { scope: 'service', service }, now, aiAnalysis, firstSeen, servedActive, withdrawn)
   return { ok: true, xml, lastModified }
 }
 
