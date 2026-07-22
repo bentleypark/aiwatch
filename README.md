@@ -38,7 +38,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Latency monitoring** — Direct endpoint response time (RTT) for 33 probe-capable services, status page timing as fallback
 - **24h latency trend** — Chart.js line chart with 5-min probe snapshots
 - **Incident history** — Timeline with details from multiple status page formats
-- **Official uptime** — Per-component uptime from Statuspage, incident.io, Better Stack
+- **Uptime** — 30-day uptime **computed by AIWatch** from each provider's own published records, with one window and one formula for every service (full outage 1.0, partial/degraded 0.3, announced maintenance excluded) — so our figure can differ from the % on a provider's own page, by design ([how it works](https://ai-watch.dev/methodology))
 - **Component status breakdown** — Real-time per-component status (models, API surfaces, …) on ServiceDetails + Is X Down for the services we track per-component, with collapsible section/model groups for long lists
 - **Status calendar** — 30-day (Statuspage) or 14-day (incident.io) daily status visualization
 - **Discord & Slack alerts** — Discord webhook on status changes/incidents + Slack via its native `/feed` RSS app (zero-config) + RSS feeds
@@ -80,7 +80,7 @@ Grouped by the dashboard's category taxonomy (44 total — sidebar filters / Ove
 | Groq Cloud | Groq | incident.io (Atlassian compat) |
 | Together AI | Together | Better Stack RSS + uptime API |
 | Fireworks AI | Fireworks | Better Stack RSS + uptime API |
-| Cerebras Inference | Cerebras | Atlassian Statuspage (multi-component worst-of) |
+| Cerebras Inference | Cerebras | Atlassian Statuspage |
 | Perplexity | Perplexity AI | Instatus (Next.js SSR) |
 | xAI (Grok) | xAI | RSS feed |
 | DeepSeek API | DeepSeek | Flashduty (browser-rendered feed) |
@@ -116,7 +116,7 @@ Grouped by the dashboard's category taxonomy (44 total — sidebar filters / Ove
 | Replicate | Replicate | incident.io (Atlassian compat) |
 | fal.ai | fal | Instatus (Next.js) |
 | Pinecone | Pinecone | Atlassian Statuspage |
-| turbopuffer | turbopuffer | Atlassian Statuspage (no uptime, probe-based) |
+| turbopuffer | turbopuffer | incident.io (Atlassian compat) |
 | Voyage AI | Voyage AI | Atlassian Statuspage |
 | Modal | Modal | Better Stack RSS + uptime API |
 | Twelve Labs | Twelve Labs | Atlassian Statuspage |
@@ -125,7 +125,7 @@ Grouped by the dashboard's category taxonomy (44 total — sidebar filters / Ove
 
 | Service | Provider | Status Source |
 |---------|----------|---------------|
-| LangChain (LangSmith) | LangChain | Atlassian Statuspage (incident.io) |
+| LangChain (LangSmith) | LangChain | incident.io (global page) |
 | Helicone | Helicone | Better Stack RSS + uptime API |
 | Langfuse | Langfuse | incident.io (Atlassian compat) |
 
@@ -140,7 +140,7 @@ Grouped by the dashboard's category taxonomy (44 total — sidebar filters / Ove
 
 | Service | Provider | Status Source |
 |---------|----------|---------------|
-| Stability AI | Stability AI | Atlassian Statuspage |
+| Stability AI | Stability AI | incident.io (Atlassian compat) |
 | Black Forest Labs (FLUX) | Black Forest Labs | Atlassian Statuspage |
 
 ### AI Apps (4)
@@ -175,13 +175,16 @@ Cloudflare Worker
   └── POST /api/alert   → Discord webhook proxy (SSRF protected)
   ↓
 Parsers (worker/src/parsers/)
-  ├── impact-weights.ts  → shared MAJOR_WEIGHT/MINOR_WEIGHT (Atlassian formula, used by both)
-  ├── statuspage.ts      → Atlassian Statuspage API + uptimeData HTML (weighted official uptime)
-  ├── incident-io.ts     → incident.io compat API + component_uptimes/impacts (estimate from durations uses the same weighted formula)
+  ├── impact-weights.ts  → shared MAJOR_WEIGHT/MINOR_WEIGHT (Atlassian severity formula)
+  ├── uptime-interval.ts → shared trailing-window downtime accumulator for the interval-based parsers (#1006)
+  ├── statuspage.ts      → Atlassian Statuspage API + uptimeData HTML (uptime computed per-day)
+  ├── incident-io.ts     → incident.io compat API + component_impacts intervals (uptime computed, same weighted formula)
   ├── gcloud.ts          → Google Cloud incidents.json (Vertex Gemini)
   ├── aistudio.ts        → Google AI Studio + direct Gemini API (secondary source, merged with gcloud — #310)
   ├── instatus.ts        → Instatus Nuxt/Next.js SSR
   ├── betterstack.ts     → Better Stack RSS + /index.json uptime API + dailyImpact (status_history)
+  ├── onlineornot.ts     → OnlineOrNot React Router SSR (OpenRouter)
+  ├── flashduty.ts       → Flashduty feed (DeepSeek + DeepSeek App — browser-rendered via a scheduled Action, #618)
   └── aws.ts             → AWS Health events JSON API (Bedrock) + RSS (Azure OpenAI)
   ↓
 Cloudflare KV
@@ -191,13 +194,13 @@ Cloudflare KV
   ├── latency:24h          (30-min snapshots, max 48, TTL 25h)
   ├── probe:24h            (health check probes, max 2016, TTL 7d, 33 probe targets)
   ├── ai:analysis:{svcId}:{incId}  (AI per-incident analysis, TTL 1h, refreshed while active)
-  ├── ai:reanalysis-skip:* (re-analysis failure cooldown, TTL 30min)
-  ├── ai:usage:{date}      (daily AI usage counter, TTL 2d)
+  ├── ai:reanalysis-skip:* (re-analysis failure cooldown, TTL scaled by failure type — #955)
+  ├── ai:usage:{date}      (daily AI usage counter, TTL 30d)
   ├── alerted:*            (alert dedup keys, TTL 2h-7d)
   ├── detected:{svcId}     (earliest detection timestamp, TTL 7d)
   ├── probe-degradation:daily:{svcId}:{date} (RTT degradation counter, TTL 48h, #464)
   ├── reddit:seen:{postId} (Reddit post dedup, TTL 24h)
-  └── vitals:{YYYY-MM-DD}  (Web Vitals daily aggregation, TTL 2d)
+  └── vitals:{YYYY-MM-DD}  (Web Vitals daily aggregation, TTL 3d)
 ```
 
 ## Getting Started
@@ -270,6 +273,8 @@ npm run deploy:worker  # Deploy to Cloudflare (use npm script only)
 | `/api/report?month=YYYY-MM` | GET | Monthly reliability archive (uptime, score, incidents, latency) |
 | `/api/alert` | POST | Discord webhook proxy (SSRF protected) |
 | `/badge/:serviceId` | GET | SVG status badge (shields.io style) |
+| `/feed.xml` | GET | Incident RSS 2.0 — all services (Slack `/feed` compatible) |
+| `/feed/:slug` | GET | Incident RSS 2.0 — single service (slug or service ID) |
 | `/api/og` | GET | Dynamic OG image PNG (1200×630, resvg-wasm) |
 | `/api/v1/status` | GET | Public API — all services (lightweight, CORS `*`) |
 | `/api/v1/status/:id` | GET | Public API — single service + top 5 incidents |
@@ -288,7 +293,7 @@ curl https://aiwatch-worker.p2c2kbf.workers.dev/api/v1/status
 curl https://aiwatch-worker.p2c2kbf.workers.dev/api/v1/status/claude
 ```
 
-Response includes: `id`, `name`, `provider`, `category`, `status`, `latency`, `uptime30d`, `uptimeSource`, `lastChecked`, and up to 5 recent incidents (single service only).
+Response includes: `id`, `name`, `provider`, `category`, `group` (fine taxonomy — llm / voice / inference / …), `status`, `latency`, `uptime30d`, `uptimeSource`, `lastChecked`, and up to 5 recent incidents (single service only).
 
 ## Status Badges
 
@@ -317,25 +322,32 @@ Embed real-time status badges in your README, docs, or blog.
 
 ### Available Service IDs
 
+Every monitored service — the same ids `/api/v1/status` returns.
+
 | ID | Service | ID | Service |
 |----|---------|----|---------|
-| `claude` | Claude API | `claudeai` | claude.ai |
-| `openai` | OpenAI API | `chatgpt` | ChatGPT |
-| `gemini` | Gemini API | `claudecode` | Claude Code |
-| `mistral` | Mistral API | `copilot` | GitHub Copilot |
-| `cohere` | Cohere API | `cursor` | Cursor |
-| `groq` | Groq Cloud | `windsurf` | Windsurf |
-| `together` | Together AI | `junie` | Junie |
-| `fireworks` | Fireworks AI | `deepseek` | DeepSeek API |
-| `perplexity` | Perplexity | `xai` | xAI (Grok) |
-| `huggingface` | Hugging Face | `replicate` | Replicate |
-| `elevenlabs` | ElevenLabs | `openrouter` | OpenRouter |
-| `bedrock` | Amazon Bedrock | `pinecone` | Pinecone |
-| `azureopenai` | Azure OpenAI | `stability` | Stability AI |
-| `assemblyai` | AssemblyAI | `deepgram` | Deepgram |
-| `characterai` | Character.AI | `modal` | Modal |
-| `voyageai` | Voyage AI | `codex` | Codex |
-| `cerebras` | Cerebras Inference | `fal` | fal.ai |
+| `claude` | Claude API | `elevenlabs` | ElevenLabs |
+| `openai` | OpenAI API | `assemblyai` | AssemblyAI |
+| `gemini` | Gemini API | `deepgram` | Deepgram |
+| `bedrock` | Amazon Bedrock | `huggingface` | Hugging Face |
+| `azureopenai` | Azure OpenAI | `replicate` | Replicate |
+| `mistral` | Mistral API | `fal` | fal.ai |
+| `cohere` | Cohere API | `modal` | Modal |
+| `groq` | Groq Cloud | `voyageai` | Voyage AI |
+| `together` | Together AI | `pinecone` | Pinecone |
+| `fireworks` | Fireworks AI | `turbopuffer` | turbopuffer |
+| `cerebras` | Cerebras Inference | `twelvelabs` | Twelve Labs |
+| `perplexity` | Perplexity | `langsmith` | LangChain (LangSmith) |
+| `xai` | xAI (Grok) | `helicone` | Helicone |
+| `deepseek` | DeepSeek API | `langfuse` | Langfuse |
+| `kimi` | Kimi (Moonshot AI) | `runway` | Runway |
+| `openrouter` | OpenRouter | `luma` | Luma (Dream Machine) |
+| `claudecode` | Claude Code | `stability` | Stability AI |
+| `codex` | Codex | `bfl` | Black Forest Labs (FLUX) |
+| `cursor` | Cursor | `claudeai` | claude.ai |
+| `copilot` | GitHub Copilot | `chatgpt` | ChatGPT |
+| `windsurf` | Windsurf | `characterai` | Character.AI |
+| `junie` | Junie | `deepseekapp` | DeepSeek App |
 
 ## Claude Code Statusline Integration
 
@@ -377,64 +389,58 @@ Source + docs: [`plugin/aiwatch/`](plugin/aiwatch/). Full details: **[ai-watch.d
 ## Project Structure
 
 ```
-src/
-  components/    # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, InstallBanner
-  pages/         # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, Ranking, Statusline
-  hooks/         # usePolling, useTheme, useLang, useSettings
-  utils/         # analytics, calendar, time, pageContext, constants
-  locales/       # ko.js, en.js (flat key→string maps)
-api/
-  intro.ts             # Vercel Edge Function — landing page (/intro)
-  intro/
-    html-template.ts   # Landing page SSR template (i18n, dashboard mock, GA4)
-  is-down.ts           # Vercel Edge Function — "Is X Down?" SSR pages (42 services)
-  is-down/
-    slug-map.ts        # URL slug ↔ service ID mapping
-    seo-content.ts     # Per-service SEO text + FAQ
-    html-template.ts   # SSR HTML rendering + share buttons + dynamic OG meta
+src/                   # React 19 SPA (Vite, no router — hash routing in App.jsx)
+  components/          # Shared UI: StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, AnalysisModal, …
+  pages/               # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, Ranking, Statusline
+  hooks/               # usePolling, useTheme, useLang, useSettings, useGitHubStars, useMonthlyArchives
+  utils/               # analytics, calendar, time, pageContext, constants, hashRoute, …
+  locales/             # ko.js, en.js (flat key→string maps)
+api/                   # Helpers live in `_`-prefixed dirs and handlers run on the edge runtime,
+                       # so neither counts against the Hobby 12-Serverless-Function cap (#862/#867)
+  intro.ts             # Landing page (/intro)              _intro/       # its SSR template
+  is-down.ts           # "Is X Down?" SSR pages (42 services)   _is-down/  # slug-map, seo-content, template
+  methodology.ts       # "How AIWatch Works" (/methodology) _methodology/
+  plugin.ts            # Claude Code plugin landing         _plugin/
+  badges.ts            # Status-badge gallery (/badges)     _badges/
+  reports.ts           # /reports/* proxy → Jekyll site     _shared/      # shared Edge helpers
+  confirm.ts csp-report.ts plugin-privacy.ts extension-privacy.ts
 public/
   manifest.json        # PWA manifest
   sw.js                # Service Worker (stale-while-revalidate)
   icon-192.png         # PWA icon 192x192
   icon-512.png         # PWA icon 512x512
-scripts/
-  generate-og-intro.mjs  # OG intro image generator (node scripts/generate-og-intro.mjs)
+scripts/               # Build/CI/ops scripts (OG generation, CI lint gates, verify-reminders, …)
 worker/
   src/
-    index.ts     # Worker entry: CORS, KV cache, alerts, routing, /api/alert, /badge, /api/v1
-    services.ts  # Service configs + fetch orchestrator
-    types.ts     # Shared types (ServiceStatus, Incident, etc.)
-    utils.ts     # Shared utilities (formatDuration, fetchWithTimeout)
-    score.ts     # AIWatch Score calculation
-    badge.ts     # SVG badge generator
-    rss.ts       # Incident RSS 2.0 feed (/feed.xml + /feed/:slug)
-    og.ts        # OG image SVG generator (1200×630)
-    og-render.ts # SVG → PNG conversion (resvg-wasm)
-    alerts.ts    # Alert detection logic (incident + service alerts)
-    fallback.ts  # Fallback recommendation
-    ai-analysis.ts # Hybrid AI incident analysis (Gemma 4 primary + Sonnet fallback)
-    changelog.ts # Changelog/news collection (OpenAI RSS, Google RSS, Anthropic HTML)
-    weekly-briefing.ts # Weekly Discord briefing (changelog + incidents + stability)
-    security-monitor.ts # AI service security monitoring (HN Algolia, OSV.dev SDK vulnerabilities — 24 tracked packages)
-    daily-summary.ts # Daily Discord report (uptime, latency, AI usage)
-    monthly-archive.ts # Monthly reliability archive (permanent KV)
-    vitals.ts    # Web Vitals aggregation (p75, Discord formatting)
-    probe.ts     # Health check probing — direct RTT measurement
-    probe-archival.ts # Daily probe RTT archival + 7-day summary
-    platform-monitor.ts # Status page platform health monitoring (metastatuspage.com)
-    detection.ts # First-detection (`detected:{svcId}`) entry parsing + reset logic — feeds MTTD + the #677 AWS incident-start anchor
-    reddit.ts    # Reddit outage chatter monitoring
-    parsers/     # Platform-specific parsers
-      statuspage.ts   # Atlassian Statuspage (7 services)
-      incident-io.ts  # incident.io (6 services)
-      gcloud.ts       # Google Cloud Vertex (gemini primary source)
-      aistudio.ts     # Google AI Studio + direct Gemini API (gemini secondary, #310)
-      instatus.ts     # Instatus (2 services)
-      betterstack.ts  # Better Stack (4 services)
-      onlineornot.ts  # OnlineOrNot (1 service — OpenRouter)
-      aws.ts          # AWS Health events JSON API — Bedrock (+ RSS parser reused for Azure OpenAI)
-    parsers/__tests__/ # Vitest unit tests
+    index.ts           # Worker entry: CORS, routing, /api/*, /badge, /feed, cron scheduled handler
+    services.ts        # Service configs + fetch orchestrator + status determination
+    types.ts utils.ts  # Shared types + shared utilities
+    score.ts           # AIWatch Score calculation
+    alerts.ts          # Alert detection (incident + status-edge), holds, merges
+    ai-analysis.ts     # Hybrid AI incident analysis (Gemma 4 primary + Sonnet fallback)
+    anthropic.ts       # Anthropic Messages REST call (model id, retry, status classification)
+    probe.ts           # Health check probing — direct RTT measurement (`PROBE_TARGETS`)
+    rss.ts badge.ts og.ts og-render.ts   # Feeds, badges, OG images
+    daily-summary.ts weekly-briefing.ts monthly-archive.ts monthly-narrative.ts
+    security-monitor.ts   # AI service security monitoring (HN Algolia, OSV.dev SDK vulnerabilities — 24 tracked packages)
+    changelog.ts reddit.ts platform-monitor.ts
+    suppression.ts overrides.ts withdrawn.ts upstream-link.ts   # Operator + incident layers
+    parsers/           # Platform-specific parsers
+      statuspage.ts    # Atlassian Statuspage
+      incident-io.ts   # incident.io (Atlassian-compatible API)
+      gcloud.ts        # Google Cloud Vertex (gemini primary source)
+      aistudio.ts      # Google AI Studio + direct Gemini API (gemini secondary, #310)
+      instatus.ts      # Instatus
+      betterstack.ts   # Better Stack
+      onlineornot.ts   # OnlineOrNot (OpenRouter)
+      flashduty.ts     # Flashduty (DeepSeek + DeepSeek App)
+      aws.ts           # AWS Health events JSON API — Bedrock (+ RSS parser reused for Azure OpenAI)
+      impact-weights.ts uptime-interval.ts   # Shared uptime primitives (#1006)
+    __tests__/ parsers/__tests__/   # Vitest unit tests
 ```
+
+> This is a map, not an inventory — `worker/src/` has ~50 modules. The per-module purpose and the
+> issues that shaped each one live in **[docs/reference/directory-map.md](docs/reference/directory-map.md)**.
 
 ## Contributing
 
@@ -459,7 +465,7 @@ rules.
 ### Pull Requests
 
 - One feature or fix per PR
-- All tests must pass (`npm test` + `npm run test:src` + `npm run test:worker`)
+- All tests must pass (`npm test` + `npm run test:src` + `npm run test:worker`) — CI-gated, with E2E running on frontend changes
 - Include `closes #N` in commit messages
 - Fill out the PR checklist
 
