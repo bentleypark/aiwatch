@@ -291,6 +291,7 @@ worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts
   upstream-feed.ts   # Non-carded upstream feeds (#1072) — GitHub platform status read ONLY by upstream-link; no card/Score/uptime
   incident-text.ts   # Shared "which incidents can be a CAUSE + their searchable text" primitive (#1053; supply-chain + upstream-link)
   withdrawn.ts       # Provider-DELETED incident tombstones (#1106) — the only material the Discord/RSS withdrawal notices render from
+  withdrawal-log.ts  # Durable record that a withdrawal happened + whether its notice went out (#1106 Part 5) — every other trace expires within a week
   suppression.ts     # Operator incident-suppression layer (#904)
   overrides.ts       # Operator incident duration-override layer (#1019) — pins a paperwork-inflated duration, keeps the incident
   probe.ts probe-archival.ts   # Direct RTT probing (33 targets) + daily archival

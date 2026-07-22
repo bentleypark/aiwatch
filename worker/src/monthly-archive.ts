@@ -19,7 +19,8 @@ import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type Incide
 import { readSuppressionsFresh, readSuppressionsFreshOrNull, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
 import { readOverridesFresh, applyDurationOverrides } from './overrides'
 import { kvPut, isNonReliabilityAdvisory } from './utils'
-import { diffPrunedIncidents, appendWithdrawn } from './withdrawn'
+import { diffPrunedIncidents, appendWithdrawn, type WithdrawnIncident } from './withdrawn'
+import { recordWithdrawalsPruned } from './withdrawal-log'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
 // #951 — mirrors AIWatchScore.confidence. 'high' ⟺ the service had an official uptime% at score
@@ -641,12 +642,29 @@ export async function accumulateIncidentsOnlyIfChanged(
   // already prevents that — but a consistency one: an unpersisted prune leaves the incident still
   // present in the accumulator, so `/api/report` and the dashboard's 30/90-day list would keep
   // rendering it as an ongoing row while Discord and Slack announced it withdrawn.
+  // Hoisted out of the try so the catch can NAME what was affected. After this cycle those ids exist
+  // nowhere else — the accumulator row is already pruned, so `diffPrunedIncidents` can never
+  // re-derive them — and a bare "capture failed" would leave the loss unreconstructible.
+  let tombstones: WithdrawnIncident[] = []
   try {
-    const tombstones = diffPrunedIncidents(existing, updated, new Date().toISOString())
-    if (tombstones.length > 0) await appendWithdrawn(kv, tombstones)
+    tombstones = diffPrunedIncidents(existing, updated, new Date().toISOString())
+    if (tombstones.length > 0) {
+      await appendWithdrawn(kv, tombstones)
+      // #1106 Part 5 — the tombstone above is 48h; this is the durable record that the withdrawal
+      // happened at all. Written AFTER the roster so a KV failure here can never cost the notice
+      // itself, and unconditionally on the roster's own outcome: a withdrawal that failed to notify
+      // is precisely the case the log has to preserve.
+      await recordWithdrawalsPruned(kv, tombstones)
+    }
   } catch (err) {
-    // Never let the notification-side bookkeeping fail the accumulation it rides on.
-    console.error('[monthly-archive] #1106 withdrawn tombstone capture failed:', err instanceof Error ? err.message : err)
+    // Never let the notification-side bookkeeping fail the accumulation it rides on. Both stages are
+    // named because either can throw and the consequences differ — a roster failure costs the ⚪
+    // notice itself, a durable-log failure costs only the record of it.
+    console.error(
+      '[monthly-archive] #1106 withdrawal bookkeeping failed (tombstone roster and/or durable log):',
+      tombstones.map((w) => `${w.svcId}/${w.incId}`).join(', ') || '(ids unavailable — the diff itself threw)',
+      err instanceof Error ? err.message : err,
+    )
   }
   return 'written'
 }

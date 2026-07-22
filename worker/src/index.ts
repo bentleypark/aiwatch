@@ -8,6 +8,7 @@ import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh,
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { serviceGroupOf } from './service-groups'
 import { readWithdrawn, WITHDRAWN_TTL_S, type WithdrawnIncident } from './withdrawn'
+import { markWithdrawalsAnnounced, readWithdrawalLog, isPermanentlyUnclosed, withdrawalIdsFromAlertKeys, monthsBackFrom, type WithdrawalLogEntry } from './withdrawal-log'
 import type { AlertCandidate } from './alerts'
 import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, TIER1_IDS, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
@@ -1359,11 +1360,34 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
       console.error('[cron] tweet search build failed (alert still sent):', alert.key, err instanceof Error ? err.message : err)
     }
     const operatorDescription = appendTweetSearchSection(withDrafts, searches, reply, DIV)
-    await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
+    const operatorSent = await sendDiscordAlert(env.DISCORD_WEBHOOK_URL, {
       title: defuseAutolinkDomain(alert.title),
       description: operatorDescription,
       color: alert.color,
     })
+    // #1106 Part 5 — stamp the durable log's `announcedAt` HERE, after the send and gated on its
+    // result. `sendDiscordAlert` never throws (it returns false on a non-2xx or a network error), and
+    // the `alerted:wd:` dedup key was already written above — so a failed send is permanent: the
+    // alert will never re-fire. Stamping before the send would therefore let the log record
+    // "the thread was closed" for a notice nobody received, which is exactly the reassuring-direction
+    // lie the whole module exists to prevent. A failure leaves the row un-announced (it will read
+    // `neverClosed` after 48h, which is the truth) and says so loudly, because nothing will retry it.
+    // Fail-soft — bookkeeping must never affect the alerting that follows.
+    const wdIds = withdrawalIdsFromAlertKeys(keysToWrite)
+    if (wdIds.size > 0) {
+      if (!operatorSent) {
+        // OPERATOR webhook only: the #486 per-user relay and the `alert:feed` projection are built
+        // from this same alert and fan out after the loop, unaffected by this failure. So the row
+        // reading `neverClosed` in 48h means "no operator notice went out", not "nobody was told".
+        console.error('[cron] #1106 ⚪ withdrawal notice FAILED to send to the OPERATOR webhook and will never retry (the alerted:wd dedup key is already written; the per-user relay is unaffected) — leaving the row un-announced:', [...wdIds].join(', '))
+      } else {
+        try {
+          await markWithdrawalsAnnounced(env.STATUS_CACHE, wdIds, new Date())
+        } catch (err) {
+          console.error('[cron] #1106 withdrawal-log announce stamp failed (notice still sent):', err instanceof Error ? err.message : err)
+        }
+      }
+    }
     // #936 — send the tweet-reply draft as its OWN plain-text operator message right below the embed so
     // it's one-tap copyable on Discord MOBILE (the embed code block only copies cleanly on desktop; the
     // embed now just points here). Operator channel ONLY (never the per-user relay). Fully isolated: a
@@ -2157,6 +2181,109 @@ async function handleAdminOverride(request: Request, env: Env, cors: Record<stri
     }
   }
   return json(200, { ok: true, changed: result.changed, overrides: result.list })
+}
+
+// ── #1106 Part 5: GET /api/admin/withdrawals ──────────────────────
+// The read side of the durable withdrawal log (see withdrawal-log.ts). Read-ONLY — this is a record
+// of what happened, not an operator control surface like suppress/duration-override, so there is no
+// POST: nothing an operator could edit here would be anything but a falsified history.
+//
+// Behind the admin key rather than public because the rows name incidents a provider chose to delete
+// from its own status page. AIWatch republishing that as a permanent public index is a different
+// product decision from closing an alert thread with the subscribers who already saw it.
+//
+// `neverClosed` is DERIVED per row (see `isPermanentlyUnclosed`), so the answer to #1106's actual
+// question — "did the ⚪ path fire, and did any thread stay open?" — is the response itself and not
+// something the reader has to recompute from timestamps.
+async function handleAdminWithdrawals(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const json = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+
+  if (!env.ADMIN_API_KEY) return json(401, { ok: false, error: 'unauthorized' })
+  const provided = request.headers.get('X-Admin-Key') ?? ''
+  if (!constantTimeEqual(provided, env.ADMIN_API_KEY)) return json(401, { ok: false, error: 'unauthorized' })
+  if (!env.STATUS_CACHE) return json(503, { ok: false, error: 'Service unavailable' })
+
+  const now = new Date()
+  const params = new URL(request.url).searchParams
+  const requested = params.get('month')
+  // `01`-`12`, not just two digits: `2026-13` would read a key that cannot exist and answer
+  // `200 {count: 0}` — a misleading zero on the one endpoint whose whole contract is never to give one.
+  if (requested !== null && !/^\d{4}-(0[1-9]|1[0-2])$/.test(requested)) {
+    return json(400, { ok: false, error: 'month must be YYYY-MM' })
+  }
+  const rawMonths = params.get('months')
+  // Digits only, so `1.5` / `2x` are REJECTED rather than silently truncated by parseInt to a value
+  // the caller did not ask for. Bounded at 24: each month is a KV read, and 24 covers any realistic
+  // "did this ever fire?" lookback.
+  if (rawMonths !== null && !/^\d+$/.test(rawMonths)) {
+    return json(400, { ok: false, error: 'months must be an integer 1-24' })
+  }
+  const monthsBack = rawMonths === null ? 1 : Number.parseInt(rawMonths, 10)
+  if (monthsBack < 1 || monthsBack > 24) {
+    return json(400, { ok: false, error: 'months must be an integer 1-24' })
+  }
+  const anchor = requested ? `${requested}-01T00:00:00Z` : now.toISOString()
+  const months = monthsBackFrom(anchor, monthsBack)
+  if (months.length === 0) return json(400, { ok: false, error: 'month must be YYYY-MM' })
+
+  const nowMs = now.getTime()
+  const withVerdict: Array<WithdrawalLogEntry & { neverClosed: boolean }> = []
+  const unreadable: string[] = []
+  const malformedByMonth: Record<string, number> = {}
+  for (const m of months) {
+    const res = await readWithdrawalLog(env.STATUS_CACHE, m)
+    // An unreadable month is NOT an empty one, and the difference is the whole point of the endpoint:
+    // a silent `[]` would read as "no provider ever withdrew an incident" — the exact false negative
+    // this instrumentation exists to remove. Reported per month rather than failing the whole range,
+    // so one frozen month cannot hide the others; a single-month query still 502s (below).
+    if (!res.readable) { unreadable.push(m); continue }
+    // Per MONTH, not a range total: the remedy for a partially-eaten month is a by-hand KV repair,
+    // and a bare sum tells the operator that rows were lost without saying which key to repair.
+    if (res.droppedMalformed > 0) malformedByMonth[m] = res.droppedMalformed
+    for (const r of res.rows) withVerdict.push({ ...r, neverClosed: isPermanentlyUnclosed(r, nowMs) })
+  }
+  if (unreadable.length === months.length) {
+    return json(502, {
+      ok: false,
+      // Not a transient failure: every writer refuses to start from `[]`, so an unreadable month
+      // stops recording permanently. Say what the remedy is, or it reads as "retry later".
+      error: 'withdrawal log could not be read — these months are frozen until the KV value is repaired or deleted by hand',
+      months: unreadable,
+    })
+  }
+
+  const droppedMalformed = Object.values(malformedByMonth).reduce((a, b) => a + b, 0)
+  const partial = unreadable.length > 0 || droppedMalformed > 0
+  return json(200, {
+    // `ok: false` on a PARTIAL answer, deliberately: every other admin endpoint here trains a caller
+    // to branch on `ok`, and a body field it has to know to read would not stop a script (or a future
+    // Tier-A `assert:`) from treating a zero computed over a month it could not open as a clean zero.
+    // The rows are still returned — this says "do not trust the counts", not "nothing to see".
+    ok: !partial,
+    partial,
+    months,
+    // Which months could not be opened at all. Non-empty means the counts below are computed over a
+    // subset of the requested range.
+    unreadableMonths: unreadable,
+    // Same distinction one level down, per month so the operator knows which KV key to repair: rows
+    // that failed the shape check were excluded from every count below.
+    malformedByMonth,
+    droppedMalformed,
+    count: withVerdict.length,
+    announced: withVerdict.filter((r) => r.announcedAt).length,
+    // Split rather than one "not announced" bucket: `pending` is still inside the tombstone's 48h and
+    // may yet notify (normally a `withdrawalHold`), `neverClosed` no longer can. Only the second is
+    // the #1106 bug recurring — collapsing them would make a routine hold look like a regression.
+    // A row whose `prunedAt` cannot be parsed is neither: it is unageable, so it is counted apart
+    // rather than sitting in `pending` forever and quietly inflating the benign bucket. Scoped to
+    // un-announced rows so the four buckets really do PARTITION `count` — an announced row with a
+    // malformed timestamp would otherwise be counted twice and the totals would not add up.
+    pending: withVerdict.filter((r) => !r.announcedAt && !r.neverClosed && !Number.isNaN(Date.parse(r.prunedAt))).length,
+    neverClosed: withVerdict.filter((r) => r.neverClosed).length,
+    malformedTimestamp: withVerdict.filter((r) => !r.announcedAt && Number.isNaN(Date.parse(r.prunedAt))).length,
+    withdrawals: withVerdict,
+  })
 }
 
 export default {
@@ -3412,6 +3539,14 @@ export default {
     // incident; only corrects its duration — unlike suppression, which hides it).
     if ((request.method === 'POST' || request.method === 'GET') && url.pathname === '/api/admin/duration-override') {
       return handleAdminOverride(request, env, cors)
+    }
+
+    // #1106 Part 5 — GET /api/admin/withdrawals?month=YYYY-MM — the durable record of provider-DELETED
+    // incidents and whether each one's ⚪ closing notice actually went out. Read-only; every other
+    // trace of a withdrawal expires within a week, so this is the only surface that can answer the
+    // question months later.
+    if (request.method === 'GET' && url.pathname === '/api/admin/withdrawals') {
+      return handleAdminWithdrawals(request, env, cors)
     }
 
     // #486 — server-side per-user Discord subscription endpoints. The browser POSTs the raw URL +
