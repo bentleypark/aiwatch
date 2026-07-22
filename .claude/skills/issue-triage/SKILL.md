@@ -75,8 +75,34 @@ to the now-retired `deferred` label); `tracking` stays for meta umbrellas.
 - **P1\*** — **work already shipped; only a dated production-verify remains.** NOT a do-next coding
   item — see the verify-before-recommend gate below. Keep it off the recommended-pick list. Every
   `P1*` issue carries the persistent `verify-blocked` label so the next sweep skips it by label alone.
-- **P2** — high impact + large effort (needs a scoping/design pass first), OR medium impact + `U2-later`.
+- **P2** — high impact + large effort (needs a scoping/design pass first), OR high impact + `U2-later`,
+  OR medium impact + `U2-later`.
 - **P3** — low impact / `U3-someday`.
+
+### What `Impact` means (#1122)
+
+`Impact` stays a per-sweep judgment — but an undefined factor in a formula is not a judgment, it is a
+blank. Rank by **how wrong the product is while the issue sits open**, not by how annoying it is:
+
+1. **Wrong value shown to users** — a number, badge, or claim that is confidently incorrect. The worst
+   class: nobody can tell it is wrong by looking, so it is believed. Uptime, Score, incident
+   attribution, duration.
+2. **Silent failure** — the thing simply does not happen and emits no signal (a dead alert channel, a
+   dropped incident, a guard that passes while blind). Ranks just under (1) because there is at least
+   no false claim, but it shares the property that waiting produces no evidence.
+3. **Correct but degraded** — right answer, bad experience: missing recommendation, slow, ugly, an
+   empty state where content belongs.
+4. **Internal-only** — costs us time, no user-visible surface. Tooling, docs, CI ergonomics.
+
+**1–2 = high impact, 3 = medium, 4 = low** — the vocabulary the P-tiers above already use. The scale is
+an ordinal rank, not a multiplier: `Impact × Urgency × (1 / Effort)` names the factors you weigh, it
+does not compute (lower number = worse here, same direction as `U0…U3`). `Effort` is likewise a written
+judgment, not a defined scale.
+
+Note that `U0-now` (prod break / security / data loss) is an **urgency** gloss, not this scale — an
+issue can be Impact-1 and still be `U2-later` if it fires rarely. Impact ranks a *class* — "if it
+fires, users see a wrong value" — never evidence that it fired. When that distinction decides a
+ranking, go measure before you rank, and re-rank on what you find.
 
 ### Verify-before-RECOMMEND (the most-missed; same gate as verify-before-close)
 
@@ -111,6 +137,25 @@ board is visible.
 - Produce a **triage table**: per issue → action (`close` / `re-scope` / `keep + label`) and, for the
   live ones, `area` · `urgency` · effort → derived `P`, with a one-line reason. End with per-area
   counts + the **recommended next pick** (balanced across areas).
+- **State every deadline you are trading off, with its date.** If the pick beat another issue on
+  urgency, name the loser's clock too — a deadline you did not write down is one you did not weigh
+  (#1122). An announced third-party date is the usual kind; the date is fixed, so only your slack shrinks.
+- **Cleanup cost of already-archived data is a real ranking input, but do not assert what it is from
+  memory** — the rebuild/suppression/override mechanics differ per archive field and the repo's own
+  docs are in tension about them. Read [operator-tools.md](../../../docs/reference/operator-tools.md)
+  before putting a number or a claim on it (#1122).
+- **Any derived count needs a positive and a negative control before it moves a ranking** — a script, a
+  `jq` over `/api/report`, or a hand tally alike. Pick one case you already know must be counted and one
+  you know must not, established *outside* the thing you are checking (a hand-read of the raw payload,
+  an existing issue's verified timeline), and assert both before reporting. A scoping bug fails toward
+  alarm as readily as toward "all fine", and neither looks wrong in the output — see
+  `feedback_derived_signal_needs_scoped_diagnostic` (#1122).
+- **Never print a bare issue number.** Every `#N` in the triage table, the re-ranking, or the
+  recommended pick carries a short title or a few-word gloss — `#671 (bump actions/*@v4)`, not `#671`.
+  The operator is being asked to sanction a *ranking*, and a ranking of opaque ids cannot be checked:
+  disagreeing requires knowing what the rows are, so bare numbers quietly convert review into assent.
+  The same applies to a `refs`/`supersedes` reference in an issue comment. The rule is about rows the
+  operator is ranking — a provenance citation like the `(#1122)` on this line is exempt.
 - **Act on confirmation**: closing/commenting/relabeling issues follows the same norm as the rest of
   the workflow — propose the triage, then apply the closes/labels the user confirms (issue ops are
   reversible, but the project norm is to confirm closes; see the gates in `ship-issue`).
