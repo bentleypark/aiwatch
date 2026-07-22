@@ -19,6 +19,7 @@ import { readIncidentHistory, summarizeAccuracy, type AccuracyStats, type Incide
 import { readSuppressionsFresh, readSuppressionsFreshOrNull, isSuppressedByIdTitle, type SuppressionEntry } from './suppression'
 import { readOverridesFresh, applyDurationOverrides } from './overrides'
 import { kvPut, isNonReliabilityAdvisory } from './utils'
+import { diffPrunedIncidents, appendWithdrawn } from './withdrawn'
 
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'degrading' | 'unstable'
 // #951 — mirrors AIWatchScore.confidence. 'high' ⟺ the service had an official uptime% at score
@@ -373,6 +374,15 @@ function isIsoish(v: unknown): v is string {
  * past the miss threshold — and while it holds, the incident is already invisible on every live
  * surface, so the accumulator row is the lesser loss. The prune logs every deletion so this is
  * reconstructible rather than silent.
+ *
+ * #1106 raised the stakes of that residual: a prune now also emits a public WITHDRAWAL notice on
+ * Discord and Slack/RSS, so a false positive is no longer a quiet internal data loss but a published
+ * claim that the provider retracted an incident. `withdrawalHold` (`withdrawn.ts`) is what keeps that
+ * in check — it withholds the notice while the service carries an unresolved live incident OR is
+ * anything but cleanly `operational`. The second half is what covers THIS residual specifically: a
+ * retitled incident is by definition absent from the incident list (that is why it was pruned), so
+ * only the service's own status can still see it. The delete-plus-re-publish-under-a-new-id case
+ * above is caught by the first half. The prune's own behaviour is unchanged; only the notice is gated.
  */
 export function prunePhantomIncidents(
   data: MonthlyIncidents,
@@ -623,7 +633,22 @@ export async function accumulateIncidentsOnlyIfChanged(
   const existingServices = existing ? JSON.stringify(existing.services) : null
   if (existingServices === JSON.stringify(updated.services)) return 'unchanged'
   const ok = await kvPut(kv, incKey, JSON.stringify(updated), { expirationTtl: 60 * 86400 })
-  return ok ? 'written' : 'failed'
+  if (!ok) return 'failed'
+  // #1106 — the prune above is the LAST moment we hold a provider-deleted incident's title + start
+  // time, so record a tombstone for the notification channels that already announced it (Discord had
+  // no resolved branch to take, and the RSS `:resolved` item has no live incident to render from).
+  // Only after the accumulator write LANDED. Not a double-announce guard — `alerted:wd:{incId}` (7d)
+  // already prevents that — but a consistency one: an unpersisted prune leaves the incident still
+  // present in the accumulator, so `/api/report` and the dashboard's 30/90-day list would keep
+  // rendering it as an ongoing row while Discord and Slack announced it withdrawn.
+  try {
+    const tombstones = diffPrunedIncidents(existing, updated, new Date().toISOString())
+    if (tombstones.length > 0) await appendWithdrawn(kv, tombstones)
+  } catch (err) {
+    // Never let the notification-side bookkeeping fail the accumulation it rides on.
+    console.error('[monthly-archive] #1106 withdrawn tombstone capture failed:', err instanceof Error ? err.message : err)
+  }
+  return 'written'
 }
 
 /** #587 mid-month — synthesize a PARTIAL archive (incidentList only) from the live

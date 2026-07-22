@@ -7,7 +7,9 @@ import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidate
 import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { serviceGroupOf } from './service-groups'
-import { buildIncidentAlerts, buildServiceAlerts, mergeTogetherAlerts, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, TIER1_IDS, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
+import { readWithdrawn, WITHDRAWN_TTL_S, type WithdrawnIncident } from './withdrawn'
+import type { AlertCandidate } from './alerts'
+import { buildIncidentAlerts, buildWithdrawalAlerts, buildServiceAlerts, mergeTogetherAlerts, ALERTED_NEW_TTL_S, mergeXaiRegionalAlerts, detectServiceCountDrop, isFlapSuppressible, flapSuppressionKey, shouldHoldNewIncident, shouldHoldForAiAnalysis, TIER1_IDS, pendingAiKey, pendingNewKey, PENDING_NEW_TTL_S, buildTweetDrafts, appendTweetDraftSection, buildTweetSearches, buildTweetSearchUrl, buildReplyDraft, pushTargetFor, appendTweetSearchSection, defuseAutolinkDomain, parseAlertedRoster, sourceLivenessOf, decideSourceDeadAction, shouldSuppressSourceDeadAlert, pendingSourceDeadKey, PENDING_SOURCE_DEAD_TTL_S, buildSourceDeadEmbed } from './alerts'
 import { analyzeIncidentDetailed, analyzeIncidentWithBudget, analyzeWithSonnetDetailed, refreshOrReanalyze, analysisKey, buildAnalysisPrompt, findSimilarIncidents, formatAnalysisEmbedSection, parseAnalysis, putAnalysis, shouldSkipInitialAnalysis, recordUsage, recordHoldEvent, parseUsage, summarizeAiUsageTrend, type AIAnalysisResult, type AnalysisAttempt, type AnalysisFailureKind } from './ai-analysis'
 import type { AnthropicOutcome } from './anthropic'
 import { kvPut, kvDel, detectComponentMismatches, diffPageComponents, formatNewComponentAlert, isCacheStale, isAllowedAlertWebhook, countsAsUptimeOk, appendUtm } from './utils'
@@ -748,10 +750,65 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
     }
   }
 
+  // #1106 — closing notice for an incident the provider DELETED from its status page instead of
+  // resolving. The accumulator's #975 prune tombstoned it above (same cron run, `accumulateIncidents
+  // OnlyIfChanged`); it can never reach buildIncidentAlerts' resolved branch, which requires the
+  // incident to still be in the live list. Gated on the `alerted:new:{incId}` marker so only an
+  // incident we ACTUALLY announced produces one — `alertedNewMap` is built from live incidents only,
+  // and a withdrawn incident is by definition absent from those, so the markers are re-read here.
+  const withdrawalAlerts: AlertCandidate[] = []
+  try {
+    // `logExpired` on the CRON only: a tombstone that ages out never notified anyone, which is #1106
+    // recurring, and the 5-min cadence bounds the line. The /feed handler leaves it off (request path).
+    const withdrawnTombstones = await readWithdrawn(env.STATUS_CACHE, Date.now(), true)
+    const announcedWithdrawnIds = new Set<string>()
+    await Promise.all(withdrawnTombstones.map(async (w) => {
+      // Read failure → treat as NOT announced → stay silent. A withdrawal notice is only correct when
+      // we know an announcement preceded it; a KV blip must not be able to invent that premise.
+      // Every drop is logged, and the three causes are distinguished, because they are NOT the same
+      // event (#970/#983 — a judgement drop must never be quiet): a clean miss is usually "we never
+      // announced it", but it is ALSO what a >7d-old announcement looks like once `alerted:new:`
+      // expires — i.e. a thread we opened and will now never close, which is #1106 recurring.
+      let marker: string | null = null
+      let readFailed = false
+      try {
+        marker = await env.STATUS_CACHE.get(`alerted:new:${w.incId}`)
+      } catch (err) {
+        readFailed = true
+        console.warn('[cron] #1106 alerted:new read failed — holding the withdrawal notice this cycle:', w.incId, err instanceof Error ? err.message : err)
+      }
+      if (marker) { announcedWithdrawnIds.add(w.incId); return }
+      if (readFailed) return
+      // Split by cause. A tombstone whose incident STARTED more than the marker's 7d TTL ago is not
+      // "we never announced it" — it is a thread we DID open and can now never close, i.e. exactly
+      // #1106 recurring, so it warns. Anything younger is the benign case and stays at log level.
+      const announcedTooLongAgo = Date.now() - Date.parse(w.startedAt) > ALERTED_NEW_TTL_S * 1000
+      if (announcedTooLongAgo) {
+        console.warn('[cron] #1106 alerted:new marker has EXPIRED (incident older than its 7d TTL) — this thread can never be closed:', w.svcId, w.incId, `started ${w.startedAt}`)
+      } else {
+        console.log('[cron] #1106 tombstone has no alerted:new marker — never announced, so no withdrawal notice:', w.svcId, w.incId, `pruned ${w.prunedAt}`)
+      }
+    }))
+    // A hold is re-evaluated every cycle, so this describes a STATE, not an event: it reprints for as
+    // long as the condition holds (same cadence + reasoning as the #283/#983 flap-suppressed line).
+    // Line COUNT is therefore not a frequency — count distinct incident ids.
+    withdrawalAlerts.push(...buildWithdrawalAlerts(withdrawnTombstones, announcedWithdrawnIds, scored, (w, reason) => {
+      console.log('[cron] #1106 withdrawal notice held —', reason, `${w.svcId}/${w.incId}`, `pruned ${w.prunedAt} (roster expires ${WITHDRAWN_TTL_S / 3600}h after that)`)
+    }))
+  } catch (err) {
+    // The withdrawal notice is a closing courtesy; the New/Resolved/Down alerts below are the
+    // critical path. A throw here must never abort the whole cron tick's alerting.
+    console.error('[cron] #1106 withdrawal alert build failed (other alerts still sent):', err instanceof Error ? err.message : err)
+  }
+
   // Build alerts using pure functions
   const incidentAlerts = buildIncidentAlerts(scored, alertedNewMap, Date.now(), suppressedIncIds)
   const serviceAlerts = buildServiceAlerts(scored, alertedDownMap, alertedDegradedMap)
-  const allAlerts = [...incidentAlerts, ...serviceAlerts]
+  // #1106 — withdrawals go LAST. `sent` is capped at 5 per cycle, so ordering is a priority: a
+  // retraction of a days-old incident must never evict a live `down`/`degraded` alert. A withdrawal
+  // pushed past the cap is simply retried next cycle (its dedup key is only written on send, and the
+  // tombstone lives 48h), whereas a delayed outage alert is the thing users actually wait on.
+  const allAlerts = [...incidentAlerts, ...serviceAlerts, ...withdrawalAlerts]
 
   // Dedup: skip alerts already sent + same-batch dedup + anti-flapping for degraded
   const toSend = []
@@ -878,7 +935,15 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
 
   // Merge concurrent Together AI model-level (#283) + xAI per-region (#686) alerts into single grouped
   // alerts. Disjoint services, so order is irrelevant; both set `_mergedKeys` for the roster write below.
-  const mergedToSend = mergeXaiRegionalAlerts(mergeTogetherAlerts(toSend))
+  // #1106 — re-sink withdrawals to the tail AFTER merging, because merging is what reorders them:
+  // both merge fns return `[...rest, ...merged]`, so a collapsed live Together/xAI alert is appended
+  // BEHIND the `⚪` retractions that rode through in `rest`. Ordering `allAlerts` alone therefore does
+  // not survive to the cap below — and `mergedToSend`, not `allAlerts`, is the array that gets sliced.
+  // A withdrawal pushed past the cap is retried next cycle (no dedup key is written for an unsent
+  // alert, and the tombstone lives 48h); a live outage alert delayed a cycle is the real cost.
+  const merged = mergeXaiRegionalAlerts(mergeTogetherAlerts(toSend))
+  const isWithdrawal = (a: AlertCandidate) => a.key.startsWith('alerted:wd:')
+  const mergedToSend = [...merged.filter((a) => !isWithdrawal(a)), ...merged.filter(isWithdrawal)]
 
   // Send + mark as alerted (down/degraded: 2h TTL, incidents/recovery: 7d TTL)
   // For new incidents, run AI analysis with timeout so it can be merged into the embed
@@ -895,7 +960,12 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
   for (const alert of sent) {
     const isStatusAlert = alert.key.startsWith('alerted:down:') || alert.key.startsWith('alerted:degraded:')
     const isRecoveryAlert = alert.key.startsWith('alerted:recovered:')
-    const ttl = (isStatusAlert || isRecoveryAlert) ? 7200 : 604800
+    // #1106 — `alerted:wd:` MUST land in the 7d branch, and does so only because it is neither a
+    // status nor a recovery key. That is correct by omission, and the omission is load-bearing: its
+    // subject is a tombstone that survives 48h and reproduces the alert deterministically, so a 2h
+    // TTL would re-post the same public retraction to the operator AND every subscriber ~23 times.
+    // Pinned by a test — see `ALERTED_NEW_TTL_S` below, which is the same 7d window.
+    const ttl = (isStatusAlert || isRecoveryAlert) ? 7200 : ALERTED_NEW_TTL_S
     const kvValue = isStatusAlert ? new Date().toISOString() : '1'
     // Write dedup keys for all merged alerts (Together AI grouping)
     const keysToWrite = alert._mergedKeys ?? [alert.key]
@@ -1093,7 +1163,14 @@ async function cronAlertCheck(env: Env): Promise<CronResult> {
         }
       }))
     } else {
-      await Promise.all(keysToWrite.map(k => kvPut(env.STATUS_CACHE, k, kvValue, { expirationTtl: ttl })))
+      const writes = await Promise.all(keysToWrite.map(async k => ({ k, ok: await kvPut(env.STATUS_CACHE, k, kvValue, { expirationTtl: ttl }) })))
+      // #1106 — surface a failed `alerted:wd:` dedup write specifically. Every other kind here is
+      // bounded by its subject leaving the live feed, but a withdrawal's subject is a tombstone that
+      // sits in KV for 48h and reproduces the alert deterministically — so a lost dedup key means the
+      // same retraction re-posts to the operator AND every subscriber every 5 minutes for two days.
+      for (const { k, ok } of writes) {
+        if (!ok && k.startsWith('alerted:wd:')) console.error('[cron] #1106 alerted:wd dedup write FAILED — this withdrawal will re-fire every cycle until a write lands:', k)
+      }
     }
     // #283: write flap-suppression key when a flap-candidate *resolved* alert fires
     // (BetterStack emits "— recovered" only on resolved). This marks the end of the
@@ -3525,6 +3602,7 @@ export default {
       let feedAiAnalysis: RssAiAnalysisMap | undefined
       let feedFirstSeen: Record<string, string> | undefined // #750 — incId → first-detected ISO
       let feedServedActive: Set<string> | undefined // #793 — resolved incIds whose active item was served
+      let feedWithdrawn: WithdrawnIncident[] | undefined // #1106 — provider-deleted incidents to close out
       // #793 — ONE clock for both the emitted-marker stamp decision (handler) AND the hold/emit decision
       // (buildRssFeed), threaded as buildFeedResponse's `now`. If buildRssFeed defaulted its own (later)
       // `new Date()`, an item right at the AI_HOLD_MS boundary could be "held" at stamp time yet "released"
@@ -3639,9 +3717,29 @@ export default {
               }
             }),
         ))
+        // #1106 — the same orphan guard for withdrawal items. A tombstoned incident is normally
+        // absent from `cached.services`, so the resolved-incident loop above can never reach its
+        // marker; probe them explicitly here and fold the results into the SAME servedActive set the
+        // renderer gates on. Identical fail-open rule: a KV throw is indistinguishable from "never
+        // served", and leaving a subscriber's 🔴 message unclosed forever is worse than one
+        // withdrawal notice for an outage they might not have seen.
+        // `feedNow`, not a fresh clock: this block goes out of its way to thread ONE clock through
+        // the stamp decision and the render (#793), and the age filter is part of what the render sees.
+        const withdrawnAll = await readWithdrawn(env.STATUS_CACHE, feedNow.getTime())
+        if (withdrawnAll.length > 0) {
+          await Promise.all(withdrawnAll.filter((w) => inServedScope(w.svcId)).map(async (w) => {
+            try {
+              if (await env.STATUS_CACHE!.get(`feed:active-emitted:${w.incId}`)) servedActive.add(w.incId)
+            } catch (err) {
+              console.warn('[rss] #1106 active-emitted read failed — failing open (emit withdrawal):', w.incId, err instanceof Error ? err.message : err)
+              servedActive.add(w.incId)
+            }
+          }))
+          feedWithdrawn = withdrawnAll
+        }
         feedServedActive = servedActive
       }
-      const result = buildFeedResponse(feedCached, feedReq, feedNow, feedAiAnalysis, feedFirstSeen, feedServedActive)
+      const result = buildFeedResponse(feedCached, feedReq, feedNow, feedAiAnalysis, feedFirstSeen, feedServedActive, feedWithdrawn)
       if (!result.ok && result.status === 503) {
         // Same severity as /api/report's KV-read failure — log at error so it
         // lands in the same operator alerting tier.

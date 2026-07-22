@@ -27,6 +27,7 @@ import { regionStatusOf } from '../../api/_is-down/region-status'
 import { SERVICE_ID_TO_SLUG } from '../../api/_is-down/slug-map'
 import type { ServiceStatus } from './services'
 import type { Incident } from './types'
+import { withdrawalHold, liveIncidentIds, type WithdrawalHold, type WithdrawnIncident } from './withdrawn'
 
 // #283: Discord alert flap suppression for BetterStack auto-recovery noise.
 // BetterStack-backed feeds emit paired "<model> — down" / "<model> — recovered" incidents
@@ -162,6 +163,13 @@ const PENDING_NEW_PREFIX = 'pending:new:'
  *  lingering marker is harmless). */
 export const PENDING_NEW_TTL_S = 1800
 
+/** 7d — the dedup/roster window shared by `alerted:new:` (#545), `feed:firstseen:` (#750),
+ *  `feed:active-emitted:` (#793) and `alerted:wd:` (#1106). Named because #1106 reasons about it in
+ *  two places: a tombstone whose incident is older than this has lost its announcement marker and can
+ *  never be closed (the cron warns), and the withdrawal's own dedup key must land in this branch —
+ *  the 2h status-alert TTL would re-post the same public retraction ~23 times over a 48h tombstone. */
+export const ALERTED_NEW_TTL_S = 604800
+
 /** KV key for the #633 first-seen pending marker, scoped to the incident id. */
 export function pendingNewKey(incId: string): string {
   return `${PENDING_NEW_PREFIX}${incId}`
@@ -289,6 +297,21 @@ export interface AlertCandidate {
    *  downstream consumers keep the informational framing WITHOUT re-deriving from the title: buildTweetDrafts
    *  skips it (an advisory must not draft an "X is having an outage" tweet). The dedup `key` is unchanged. */
   advisory?: boolean
+}
+
+/** #1106 — this alert must never produce outage PROMOTION tooling (tweet draft, viral-reply search,
+ *  reply draft). Both cases are "AIWatch is not claiming an outage is happening right now": an
+ *  advisory (#1021) never was one, a withdrawal (#1106) is the provider taking the claim back.
+ *  Drafting "X is having an outage" off either would be factually false at the moment it is posted.
+ *
+ *  A withdrawal is identified by its KIND, not by a flag on the candidate: `alerted:wd:` already
+ *  states it, `kindFromKey` is the single source of truth every other consumer reads (`alert-feed.ts`),
+ *  and every call site here has just computed `kind` on the line above. A parallel boolean would be a
+ *  second, unsynchronised encoding of the same fact — and would admit `advisory && withdrawn`, a
+ *  state that cannot exist. `advisory` stays a flag because it genuinely is one: an advisory alert's
+ *  key is an ordinary `alerted:new:`, so nothing in the key distinguishes it. */
+export function isNonOutageAlert(alert: { advisory?: boolean }, kind: AlertKind | null): boolean {
+  return alert.advisory === true || kind === 'withdrawn'
 }
 
 /** #714 — the status SOURCE's observed liveness this cron cycle, distinct from the service's status.
@@ -563,6 +586,89 @@ export function buildIncidentAlerts(
     })
   }
 
+  return alerts
+}
+
+/** #1106 — the one sentence that makes a withdrawal legible. Deliberately does NOT say recovered,
+ *  resolved, or over: we do not know that the service recovered, only that the provider removed the
+ *  record. Claiming recovery from a deletion would be inventing an outcome the evidence never had. */
+// "without ever posting a resolution we could record" rather than a flat "without resolving it":
+// a provider that marks an incident resolved AND deletes it inside one 5-min cron window leaves us
+// no `resolved` snapshot and fires no `alerted:res:`, so the thread really is unclosed — but it did
+// resolve, and the flatter wording would be false in exactly that branch.
+export const WITHDRAWN_NOTE =
+  'The provider removed this incident from its status page without ever posting a resolution we could record. AIWatch has no recovery record — the report was withdrawn at the source, not confirmed fixed.'
+
+/**
+ * #1106 — build "incident withdrawn" alerts from the prune tombstones (`withdrawn.ts`).
+ *
+ * A provider-DELETED incident can never reach `buildIncidentAlerts`' resolved branch: that branch
+ * requires the incident to be PRESENT in the live list with `status === 'resolved'`, and a deleted
+ * incident never appears again at all. So a subscriber who got the 🔴 New alert is left with a thread
+ * that never closes. This is the closing counterpart, and the only one that can exist.
+ *
+ * `announcedIncIds` is the gate: ONLY an incident whose `alerted:new:{incId}` marker is still present
+ * (7d TTL) gets one. Without it a withdrawal we never announced would produce an orphan notice — a
+ * closing message for an outage the subscriber never saw. Same principle as the #793 orphan-resolution
+ * guard on the RSS side, sourced from the marker the announcement itself wrote.
+ *
+ * Grouped by incident id, mirroring `buildIncidentAlerts`: a multi-surface provider tombstones one
+ * row per affected service, and those must read as one withdrawal, not N.
+ *
+ * The `alerted:wd:` key is what marks it a non-outage: `isNonOutageAlert` reads the kind that key
+ * maps to, so every outage-promotion section (tweet draft, viral-reply search, reply draft) is
+ * suppressed — a retraction must not ship a "post this outage" draft.
+ */
+export function buildWithdrawalAlerts(
+  withdrawn: WithdrawnIncident[],
+  announcedIncIds: Set<string>,
+  services: ScoredService[],
+  // REQUIRED, not optional (#970's rule): a hold is the one drop here that can permanently lose a
+  // notice, so the type-checker must force every future call site to decide where that goes rather
+  // than let it default to silence. Pass a no-op only where silence is deliberate.
+  onHold: (w: WithdrawnIncident, reason: NonNullable<WithdrawalHold>) => void,
+): AlertCandidate[] {
+  const liveIds = liveIncidentIds(services)
+  const grouped = new Map<string, { names: string[]; ids: string[]; title: string; provider: string }>()
+  for (const w of withdrawn) {
+    if (!announcedIncIds.has(w.incId)) continue
+    const svc = services.find((s) => s.id === w.svcId)
+    // The same rule the RSS half applies, so neither channel publishes a retraction the other
+    // considers unsafe. Re-evaluated on ANY cycle inside the tombstone's 48h, not just the prune
+    // cycle — an alert crowded out by the per-cycle send cap is retried later, by which time the
+    // provider may have re-listed the incident. Every hold is reported to `onHold` so the caller can
+    // log it: this is the one drop in the feature that can permanently lose a notice, and a silent
+    // permanent loss is indistinguishable from the feature never having worked.
+    // A service missing from this cycle's list yields 'source-unreadable', so `svc` is defined below.
+    // That is deliberate: an absent service is not only a rename/removal, it is also an ordinary
+    // whole-fetch failure (see `prunePhantomIncidents`, which treats the two identically) — and
+    // announcing a retraction from a state we could not read is the fabrication this module refuses.
+    const hold = withdrawalHold(w.incId, svc, liveIds)
+    if (hold || !svc) { onHold(w, hold ?? 'source-unreadable'); continue }
+    const name = svc.name
+    const existing = grouped.get(w.incId)
+    if (existing) {
+      if (!existing.names.includes(name)) existing.names.push(name)
+      if (!existing.ids.includes(w.svcId)) existing.ids.push(w.svcId)
+      continue
+    }
+    grouped.set(w.incId, { names: [name], ids: [w.svcId], title: w.title, provider: svc.provider ?? name })
+  }
+
+  const alerts: AlertCandidate[] = []
+  for (const [incId, { names, ids, title, provider }] of grouped) {
+    const displayName = names.length > 1 ? `${provider} (${names.join(', ')})` : names[0]
+    alerts.push({
+      key: `alerted:wd:${incId}`,
+      title: `⚪ ${displayName} — Incident Withdrawn`,
+      description: `${sanitize(title)}\n${WITHDRAWN_NOTE}`,
+      // Neutral grey: this is neither the red of an outage nor the green of a recovery. Reusing
+      // either colour is what would make a subscriber read it as the wrong event at a glance.
+      color: 0x9CA3AF,
+      url: `https://ai-watch.dev/#${ids[0]}`,
+      svcIds: ids,
+    })
+  }
   return alerts
 }
 
@@ -928,7 +1034,9 @@ export function buildTweetDrafts(
 ): TweetDraft[] {
   const kind = kindFromKey(alert.key)
   if (!kind) return []
-  if (alert.advisory) return [] // #1021 — an advisory is not an outage; never draft an "X is having an outage" tweet
+  // #1021 advisory / #1106 withdrawal — neither is an outage AIWatch is claiming right now; never
+  // draft an "X is having an outage" tweet for one.
+  if (isNonOutageAlert(alert, kind)) return []
   // #545: incident alerts carry `svcIds` — the exact services this alert represents (new-incident: the
   // not-yet-alerted joiners; resolved: the full affected set) — so a service joining an already-alerted
   // incident later doesn't re-draft the services that already fired. Status alerts have no svcIds →
@@ -1059,7 +1167,8 @@ export interface TweetSearch {
 export function buildTweetSearches(alert: AlertCandidate, services: ScoredService[]): TweetSearch[] {
   const kind = kindFromKey(alert.key)
   if (!kind) return []
-  if (alert.advisory) return [] // #1021 — an advisory is not an outage; no "is X down" viral-reply search links
+  // #1021 advisory / #1106 withdrawal — no "is X down" viral-reply search links for a non-outage.
+  if (isNonOutageAlert(alert, kind)) return []
   const keys = alert._mergedKeys ?? [alert.key]
   const svcIds = alert.svcIds ?? svcIdsForAlert(keys, kind, services)
   const out: TweetSearch[] = []
@@ -1097,7 +1206,8 @@ export function buildReplyDraft(alert: AlertCandidate, services: ScoredService[]
   // #1021 — an advisory leaves the service `operational`, so this would otherwise emit a factually-FALSE
   // "🔴 yes — {name} is down right now" reply (svc.status drives the down/degraded wording). Never for an
   // advisory — same reason buildTweetDrafts is gated: a quota notice is not an outage to reply-tweet.
-  if (alert.advisory) return null
+  // #1106 — a withdrawal is the same falsehood in the other direction: the outage claim was retracted.
+  if (isNonOutageAlert(alert, kind)) return null
   const keys = alert._mergedKeys ?? [alert.key]
   const svcIds = alert.svcIds ?? svcIdsForAlert(keys, kind, services)
   const id = svcIds.find((s) => TWEET_SEARCH_TERMS[s]) // primary in-scope service
