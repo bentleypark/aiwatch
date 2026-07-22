@@ -28,6 +28,7 @@ import { sourceFlagsOf } from '../utils/statusDisplay'
 import { STATUS_URL } from '../utils/statusPageUrls'
 import { ensureChart } from '../utils/chartLoader'
 import { filterLast24h } from '../utils/time'
+import { showRecoveredChip } from '../utils/liveIncident'
 
 // ── Constants ────────────────────────────────────────────────
 
@@ -851,7 +852,12 @@ export default function ServiceDetails({ serviceId }) {
           </div>
         </div>
         <div className="flex items-center gap-1.5">
-          {!!recentlyRecovered[service.id] && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
+          {/* #1104 — a recovery marker alone is not enough. It is per-INCIDENT, but this chip is a claim
+              about the SERVICE, and "one incident recovered while another is still open" is ordinary now
+              that the worker keeps an incident past our own component's recovery. Ungated, this chip sat
+              directly above an Investigating row in the incident list below. Same predicate as the
+              AI-analysis pill (utils/liveIncident), so the two surfaces cannot disagree. */}
+          {showRecoveredChip(recentlyRecovered, service) && <span className="mono text-[9px] rounded" style={{ color: 'var(--blue)', background: 'var(--blue-dim)', padding: '3px 8px' }}>{t('overview.recovered')}</span>}
           {/* #575 — report entry (always available; input never gated). Opens the modal preset to this service. */}
           <button
             type="button"

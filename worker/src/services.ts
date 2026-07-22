@@ -801,10 +801,11 @@ export function tagAutoMonitorIncidents(incidents: Incident[], config: ServiceCo
  *  openai/chatgpt/codex today — the set the blast-radius replay measured (pinned by
  *  `openai-login-attribution.test.ts`, so a config edit that widens or empties it fails loudly).
  *
- *  ONE predicate for BOTH ends — the fetch gate (does this service need the page HTML?) and the
- *  reader (`filterIncidents`). Encoding it twice is how the two silently drift apart into a bypass
- *  that never fires: the fetch side stops supplying `componentIds` and the reader just... never
- *  matches, with no error. Same fix-the-called-path lesson as #966. */
+ *  ONE predicate for EVERY end — the fetch gate (does this service need the page HTML?) and both
+ *  readers (`filterIncidents`' #1032 exclude-bypass and `filterByComponentStatus`' #1104 active-keep).
+ *  Encoding it per-site is how they silently drift apart into a bypass that never fires: the fetch side
+ *  stops supplying `componentIds` and a reader just... never matches, with no error. Same
+ *  fix-the-called-path lesson as #966. */
 export function canIdBypass(config: ServiceConfig): boolean {
   return !!(config.incidentIoComponentId && config.incidentExclude?.length && config.statusComponentIds?.length)
 }
@@ -915,6 +916,18 @@ export function applyTitleMap(incidents: Incident[], config: ServiceConfig): Inc
   })
 }
 
+/** #1104 — `${serviceId}:${incidentId}:${hourBucket}` already warned about in THIS isolate. Log
+ *  throttle only; nothing reads it for a decision, so isolate recycling losing it is harmless (it just
+ *  re-arms the warn). Hour-bucketed and deleted on the keep path so recurrence stays visible. */
+const warnedMissingJoin = new Set<string>()
+const missingJoinKey = (serviceId: string, incidentId: string) =>
+  `${serviceId}:${incidentId}:${Math.floor(Date.now() / 3_600_000)}`
+
+/** Test-only. The Set is module state, so without this a test asserting "the warn fired once" silently
+ *  reads 0 the moment any earlier test drives the same (service, incident) through the drop — and a 0
+ *  reads as "the warn stopped working", the very thing that assertion exists to catch. */
+export function __resetMissingJoinWarnThrottle(): void { warnedMissingJoin.clear() }
+
 /**
  * Two independent rules, in order:
  *   1. `scopeIncidentsToComponent` (#934/#1090, opt-in — `claude` only) — drop any incident whose
@@ -959,10 +972,13 @@ export function applyTitleMap(incidents: Incident[], config: ServiceConfig): Inc
  * yet surfaced on the dashboard once resolved (resolved incidents pass this guard). Every
  * component-scoped Statuspage service was exposed (18 of them at the time).
  *
- * So an ACTIVE incident survives an operational component only when BOTH hold:
+ * So an ACTIVE incident survives an operational component on the NAME axis only when BOTH hold:
  *   1. `impact == null` (Statuspage `none`) — the provider itself claims no availability impact, and
  *   2. its `componentNames` name a component in THIS service's badge group.
- * Both are required. Anthropic's bulk-link — the #228 target — attaches 4 of 6 components, a strict
+ * Both are required on that axis. (#1104 adds a second, independent survival path on the ID axis —
+ * `componentIds` ∩ this service's badge-group ids — which is impact-INdependent; see the comment at
+ * the keep itself. Read the two as separate routes, not as extra clauses of this one.)
+ * Anthropic's bulk-link — the #228 target — attaches 4 of 6 components, a strict
  * subset that DOES intersect the Claude API badge group, so (2) alone would regress #228; its impact is
  * always `minor`/`major`, so (1) is what separates the two. (2) then keeps a Billing/Support-only
  * `impact: none` incident (outside the badge group) from alerting. An UNTAGGED `impact: none` incident
@@ -981,6 +997,7 @@ export function applyTitleMap(incidents: Incident[], config: ServiceConfig): Inc
  *     surfaced by the #135 miss-check below (primary id → Discord; secondary ids → warn).
  *   - untagged `impact: none` → still dropped (shared-page leak), but warn so it is never invisible.
  */
+
 export function filterByComponentStatus(
   incidents: Incident[],
   componentStatus: NormalizedStatus,
@@ -1040,10 +1057,85 @@ export function filterByComponentStatus(
   if (componentStatus !== 'operational') return scoped
   return scoped.filter(i => {
     const names = (i.componentNames ?? []).map(n => n.toLowerCase())
-    // #970 — active incident: retained only when the provider degraded nothing AND it names one of
-    // our badge-group components.
+    // An active incident survives an operational component by ONE of two independent routes: the ID
+    // axis (#1104, immediately below — impact-independent) or the NAME axis (#970, further down —
+    // `impact: none` + a badge-group name). Neither implies the other.
     if (i.status !== 'resolved' && i.status !== 'monitoring') {
-      if (i.impact !== null) return false
+      // #1104 — the provider tagged this incident onto a component in OUR badge group, so it WAS ours.
+      // "We are operational now" is not evidence it never was: an impact window can CLOSE while the
+      // incident stays open. Observed 2026-07-21 on openai — `Images` (a badge component) ran
+      // partial_outage 12:25→13:31Z on an incident still `identified` at 14:16Z. Dropping it there
+      // removed an incident we had already alerted on at 12:33Z, so the is-down page the alert's tweet
+      // draft links to rendered "Is OpenAI Down? Operational" with nothing to explain it, for the whole
+      // remaining window. Same evidence the #1032 exclude bypass already trusts, which `filterIncidents`
+      // acts on one step earlier and this gate then discarded — so it is gated on the SAME `canIdBypass`
+      // predicate, per its "ONE predicate for BOTH ends" rule, rather than re-deriving the shape here.
+      //
+      // Deliberately ABOVE the `impact !== null` drop: the keep is impact-INdependent. A provider's
+      // per-component impact RECORD outranks the incident-level impact field — the record is what says
+      // it touched us. ID-keyed, not name-keyed: names collide across product groups on a shared page
+      // (two "Login" on status.openai.com — the #1032 finding); `componentNames` is a bare tag with no
+      // impact window, so keying on it would readmit the over-tagging this rule exists to filter (#228).
+      // Matched against `badgeGroupIds(config)`, which is `statusComponentIds ?? [statusComponentId]` —
+      // marginally broader than #1032's `statusComponentIds!` in principle, but provably the same set on
+      // THIS path: `canIdBypass` itself requires `statusComponentIds?.length`, so `badgeGroupIds` can never
+      // fall through to `[statusComponentId]` here. A guarantee, not a config coincidence — do not
+      // "align" one side to the other on the assumption that it is.
+      //
+      // `unjudgeable` is a NAME-resolution failure — every configured id missing from the page's
+      // component list, which `badgeGroupNames` can only reach for an id-configured service (it seeds
+      // the set with `config.statusComponent`, so a name-configured one never qualifies). It does not
+      // apply on this axis: the id intersection needs no resolved name, so a
+      // match here is a verdict, not a guess. The BADGE is untouched either way — `svcStatus` is resolved
+      // BEFORE this filter runs and merely passed in as `componentStatus`; nothing downstream re-derives
+      // status from the returned array. That ORDERING is the guarantee, not any property of this code.
+      if (canIdBypass(config) && i.componentIds?.some(cid => ids.includes(cid))) {
+        // Re-arm the drop warn below: a later cycle whose join breaks again is a NEW event, not a
+        // repeat of the one already logged.
+        warnedMissingJoin.delete(missingJoinKey(config.id, i.id))
+        return true
+      }
+      if (i.impact !== null) {
+        // #1104 — a MISSING id-join is not a negative verdict, and the two are structurally distinct:
+        // `attachIncidentIoComponentIds` writes `componentIds` only when the join produced ids (never an
+        // empty array), so absent ⇒ we never got evidence, present-but-no-intersection ⇒ the provider
+        // says it is a sibling's. Only the first is a guess, so only the first warns. The call-site warn
+        // (`fetchService`) cannot cover this: it is `!tagged.some(...)`, so ONE joining incident silences
+        // the whole cycle — and the join is partial in normal operation (measured under #1032 at that
+        // call site). Without this line the #1104 keep
+        // fails exactly the way #1104 itself failed: silently, with the card back to green and nothing
+        // in the logs to distinguish it. What this line does NOT tell you is whether the miss is
+        // SYSTEMIC (the HTML was absent or its shape drifted, so nothing joined) or isolated to this
+        // one incident — this function cannot see that from here, and the `[fetchService]` warn only
+        // fires when NOTHING joined, i.e. never in the common partial-join case. A known limitation,
+        // written down rather than left to be rediscovered.
+        //
+        // The Set is module state and there are MANY isolates, so the real rate is one line per
+        // (service, incident, hour) PER ISOLATE, not one per hour. Every failure mode of the throttle
+        // is fail-open (more logging), which is the correct direction for a diagnostic.
+        //
+        // Throttled, NOT silenced. This runs inside `fetchAllServices`, which runs on EVERY /api/status
+        // request — not once per cron tick — so an unjoinable open incident would otherwise emit a line
+        // per request per service (~1440/day for one polling tab). The key carries an HOUR bucket rather
+        // than being permanent: "is this still happening at 16:00?" has to remain answerable, which a
+        // once-per-isolate-ever line cannot answer. The keep path also DELETES the key, so a
+        // drop → keep → drop transition re-warns instead of going quiet on the second drop — which is
+        // the harmful one, since by then the incident is already alerted on and already on the card.
+        if (canIdBypass(config) && !i.componentIds?.length && !warnedMissingJoin.has(missingJoinKey(config.id, i.id))) {
+          if (warnedMissingJoin.size >= 500) warnedMissingJoin.clear()
+          warnedMissingJoin.add(missingJoinKey(config.id, i.id))
+          console.warn(`[filterByComponentStatus] #1104 ${config.id}: dropping active incident ${i.id} — it joined NO component_impacts row from the HTML we had this cycle, so the evidence is MISSING, not negative, and the id keep could not judge it`)
+        }
+        // LIMITATION, by decision. Both the keep and the warn are gated on `canIdBypass`, i.e. exactly
+        // openai/chatgpt/codex — because per-component impact WINDOWS are the evidence the keep needs,
+        // and only incident.io publishes them. But the failure #1104 filed (an incident we already
+        // alerted on vanishing from the card while the alert's link reads Operational) is not
+        // openai-specific: for the other services reaching this gate, this `return false` is still
+        // silent. Widening the warn alone would emit a line on every ordinary #970 drop, which is the
+        // normal case for them and would bury the signal. Recorded so the uncovered span is a known
+        // limit rather than an undiscovered blind spot.
+        return false
+      }
       if (unjudgeable) {
         console.warn(`[filterByComponentStatus] #970 ${config.id}: badge group unresolvable (${ids.join(',')}) — keeping impact:none incident ${i.id} rather than dropping it silently`)
         return true

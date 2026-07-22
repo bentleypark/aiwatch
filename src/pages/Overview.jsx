@@ -23,6 +23,7 @@ import SkeletonUI from '../components/SkeletonUI'
 import StatusPill from '../components/StatusPill'
 import { resolveStatusDisplay, sourceFlagsOf, displayStatusOf, isDisplayAffected, isDisplayOperational } from '../utils/statusDisplay'
 import EmptyState from '../components/EmptyState'
+import { showRecoveredChip } from '../utils/liveIncident'
 
 // ── Status color maps ────────────────────────────────────────
 
@@ -929,7 +930,11 @@ export default function Overview() {
                   index={i}
                   t={t}
                   isProbed={probeServiceIds.includes(svc.id)}
-                  isRecovered={!!recentlyRecovered[svc.id]}
+                  // #1104 — the marker is per-INCIDENT; this chip is a claim about the SERVICE.
+                  // Ungated, it sat on the card of a service still carrying a live incident. Same
+                  // predicate as the ServiceDetails header chip (utils/liveIncident), so the two
+                  // pages cannot answer differently.
+                  isRecovered={showRecoveredChip(recentlyRecovered, svc)}
                   onClick={() => { trackEvent('select_service', { service_id: svc.id }); setPage({ name: 'service', serviceId: svc.id }) }}
                 />
               ))}

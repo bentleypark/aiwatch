@@ -167,7 +167,8 @@ describe('#1032 wiring — the mutations that would silently delete the fix', ()
   it('canIdBypass selects EXACTLY openai/chatgpt/codex from the real SERVICES (config lockstep)', () => {
     // Pins the reachable-set claim the code comment + status-determination.md both make: a config edit
     // that drops openai's statusComponentIds, or refactors incidentExclude, silently empties the fix —
-    // this fails loudly instead. Scope note: this asserts the PREDICATE, not the call sites that consume
+    // this fails loudly instead. #1104's active-keep is gated on the SAME predicate, so relaxing this
+    // test disables that fix too, not just #1032's bypass. Scope note: this asserts the PREDICATE, not the call sites that consume
     // it, so it cannot catch a gate that stops calling it (see the re-fetch test in the fetchService
     // describe for that).
     expect(SERVICES.filter(canIdBypass).map((s) => s.id)).toEqual(['openai', 'chatgpt', 'codex'])

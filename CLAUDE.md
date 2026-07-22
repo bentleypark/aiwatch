@@ -272,7 +272,7 @@ src/                 # React 19 SPA (Vite, no router — hash routing in App.jsx
   components/        # StatusPill, SkeletonUI, EmptyState, Modal, Sidebar, Topbar, CookieBanner, AnalysisModal
   pages/             # Overview, Latency, Incidents, Uptime, ServiceDetails, Settings, Ranking, Statusline
   hooks/             # usePolling, useTheme, useLang, useSettings, useGitHubStars
-  utils/             # analytics, calendar, time, pageContext, constants, hashRoute, webhookSubscription
+  utils/             # analytics, calendar, time, pageContext, constants, hashRoute, webhookSubscription, liveIncident (#1104 — the one "is this service still carrying a live incident?" rule the SPA's resolved-claims share)
   locales/           # ko.js, en.js — flat key→string maps
 worker/src/          # Cloudflare Worker: status polling, KV cache, cron, alerts, AI analysis
   index.ts           # Entry: CORS, routing, /api/*, /badge, /feed, Cron scheduled handler

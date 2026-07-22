@@ -25,9 +25,11 @@ export interface Incident {
   // their behaviour despite having no stake in #1032. (`includeUntaggedIncidents` keys on that
   // emptiness too, but only for `incidentKeywords`-scoped services — which those two are not.)
   //
-  // Sole reader TODAY is `filterIncidents`' exclude-bypass. That is a fact, not a rule the type can
-  // enforce — the field is serialized onto /api/status like `autoMonitor` (#983), so treat a new
-  // reader as a decision to make, not a violation. NOT index-aligned with `componentNames`, and the
+  // TWO judgement readers today, both intersecting it with this service's badge group and both gated on
+  // `canIdBypass`: `filterIncidents`' exclude-bypass (#1032) and `filterByComponentStatus`' active-keep
+  // (#1104). (`fetchService` also reads it for its join-health warn — a diagnostic, not a judgement.)
+  // That is a fact, not a rule the type can enforce — the field is serialized onto /api/status
+  // like `autoMonitor` (#983), so treat a new reader as a decision to make, not a violation. NOT index-aligned with `componentNames`, and the
   // two may come from different sources (e.g. `parsers/aws.ts` writes AWS REGIONS into
   // `componentNames`, which have no component id at all).
   componentIds?: string[]
