@@ -3,7 +3,7 @@
 // Uses KV cache to serve last-known-good data on fetch failures
 
 import { fetchAllServices, CACHE_KEY, COMPONENT_ID_SERVICES, SERVICES, type ServiceStatus } from './services'
-import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, type SuppressionEntry } from './suppression'
+import { SUPPRESSIONS_KEY, normalizeSuppressions, mutateSuppressions, invalidateSuppressionCache, readSuppressionsFresh, readSuppressionsFreshOrNull, type SuppressionEntry } from './suppression'
 import { OVERRIDES_KEY, normalizeOverrides, mutateOverrides, readOverridesFresh, applyDurationOverrides, type DurationOverride } from './overrides'
 import { calculateAIWatchScore, classifyProbe } from './score'
 import { serviceGroupOf } from './service-groups'
@@ -1648,7 +1648,7 @@ import { collectChangelogs, getStaleSources } from './changelog'
 import { getWeekRange, buildIncidentSummary, buildStabilityChanges, buildWeeklyBriefing, buildSecuritySummary, parseMonthlyIncidents, filterChangelogToWeek, weekDateStrings, parseStrategyBrief } from './weekly-briefing'
 import { parseVitals, writeVitalsToKV, readVitalsSummary, archiveVitals } from './vitals'
 import { parseReferralBody, recordReferral, type ReferralCounts } from './referral'
-import { buildGrowthDailyRow, recordGrowthDaily } from './growth-series'
+import { buildGrowthDailyRow, recordGrowthDaily, countIncidentsInWindow, fillOutageWindows, nominalWindowEnd, previousPeriod, periodsCoveringWindow, type GrowthDailyRow } from './growth-series'
 import { parsePageviewBody, recordOutageView, queryOutageAudience, type AudienceCounts } from './outage-audience'
 import { archiveProbeDaily, cacheProbeSummaries, getCachedProbeSummaries, type ProbeDailyData } from './probe-archival'
 import type { ProbeSummary, Incident } from './types'
@@ -2619,9 +2619,12 @@ export default {
           const allMonthlyIncidents: Parameters<typeof buildIncidentSummary>[0] = []
           const serviceNameMap: Record<string, string> = {}
           for (const svc of SERVICES) serviceNameMap[svc.id] = svc.name
-          const currMonthKey = `incidents:monthly:${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
-          const prevMonth = new Date(now); prevMonth.setUTCMonth(prevMonth.getUTCMonth() - 1)
-          const prevMonthKey = `incidents:monthly:${prevMonth.getUTCFullYear()}-${String(prevMonth.getUTCMonth() + 1).padStart(2, '0')}`
+          // #1117 — `previousPeriod` (string arithmetic), NOT `setUTCMonth(-1)`: the latter keeps the
+          // day-of-month and overflows forward on the 29th-31st, so a briefing run on the 31st read the
+          // CURRENT month twice and lost a week spanning the boundary.
+          const currPeriod = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+          const currMonthKey = `incidents:monthly:${currPeriod}`
+          const prevMonthKey = `incidents:monthly:${previousPeriod(currPeriod)}`
           // #904 — filter operator-suppressed incidents out of the raw accumulator before summarizing,
           // else a suppressed incident (e.g. FedRAMP) resurfaces in the weekly Discord incident summary.
           const weeklySuppressions = await readSuppressionsFresh(env.STATUS_CACHE)
@@ -3204,23 +3207,113 @@ export default {
 
           // #986 — mirror today's consent-free growth counters into the permanent monthly series.
           // The values above are about to expire (referral:out 2d, webhook:sub:count 7d) and nothing
-          // else accrues them, so the #547·16 lift measurement had no dataset to read. Zero extra
-          // reads; one KV write/day. Isolated: a failure here must never abort the Discord report,
+          // else accrues them, so the #547·16 lift measurement had no dataset to read. One KV write/day,
+          // plus the three reads #1117 added below. Isolated: a failure here must never abort the report,
           // and re-running the same date overwrites its row rather than duplicating it.
           //
-          // The outage-day axis is `alertCounts` (the `alert:count:{date}` DAILY accumulator), NOT
-          // `result.newCount` — the latter counts only the alerts sent by THIS 5-minute cron cycle, and
-          // the daily report runs in a single 09:00-09:04 UTC window, so an 04:00 outage would have
-          // been recorded as a quiet day. That is the one classification this dataset exists to make.
+          // `alertCounts` (the `alert:count:{date}` DAILY accumulator) is kept for continuity, but it is
+          // NOT a whole-day axis: this run reads that key at 09:00 UTC, so it only ever sees 00:00–09:00
+          // of `today`, and the rest of the day expires unread (2-day TTL, and tomorrow's run reads
+          // tomorrow's key). #1117 adds the real axis below, counted over the SAME 24h window the
+          // `audience` fields were queried over, from the durable incident record.
+          //
+          // Both month keys are read unconditionally: a window on the 1st reaches into the previous
+          // month, and the backfill pass below covers older rows whose windows do the same. Deciding
+          // per-row would mean knowing the stored series before reading it, for one extra read/day.
+          //
+          // COVERAGE IS TRACKED, NOT ASSUMED, and it is tracked per MONTH, not per run. `kv.get` returns
+          // null for an absent key WITHOUT throwing, and an unread month counts as zero incidents —
+          // which would write a fabricated quiet day into a permanent, never-recomputed row. So a
+          // period joins `covered` only after its value parsed into the expected SHAPE (a bare
+          // `JSON.parse` succeeds on `null`/`[]`/`{}`, and every layer below tolerates those, so the
+          // cast alone would let a truncated write masquerade as a quiet month). A window is counted
+          // only when every month it touches is covered.
+          //
+          // Each period gets its OWN try: a corrupt previous-month key is never repaired (the
+          // accumulator only rewrites the current month), so a shared try would disable the axis for
+          // every remaining day of the month and then freeze those rows at the month rollover.
+          let outageWindow: { started: number; windowEnd: string } | null = null
+          let outageSources: Array<MonthlyIncidents | null> | null = null
+          const covered = new Set<string>()
           try {
-            await recordGrowthDaily(env.STATUS_CACHE, buildGrowthDailyRow({
+            const periods = [today.slice(0, 7), previousPeriod(today.slice(0, 7))]
+            // #904 parity with the reports. `…OrNull` (not `readSuppressionsFresh`, which fails OPEN
+            // and returns []) because this value is PERSISTED and never recomputed: counting
+            // unfiltered on a KV blip would bake a permanent disagreement with the published reports.
+            //
+            // The #1019 duration-override layer is deliberately NOT applied, unlike the other readers
+            // of this accumulator (weekly briefing, /api/report, monthly archive). It rewrites only
+            // `durationMin` and the derived `resolvedAt` — never `startedAt` — so it cannot move a
+            // start into or out of this window. Adding it here would be a no-op plus a fail-open read.
+            const suppressions = await readSuppressionsFreshOrNull(env.STATUS_CACHE)
+            if (suppressions === null) throw new Error('suppression list unreadable — refusing to count unfiltered')
+            const parsedMonths: Array<MonthlyIncidents | null> = []
+            for (const period of periods) {
+              try {
+                const raw = await env.STATUS_CACHE.get(`incidents:monthly:${period}`)
+                if (!raw) { parsedMonths.push(null); continue }
+                const parsed: unknown = JSON.parse(raw)
+                if (!parsed || typeof parsed !== 'object' || typeof (parsed as MonthlyIncidents).services !== 'object' || !(parsed as MonthlyIncidents).services) {
+                  console.warn(`[growth-series] incidents:monthly:${period} is not a MonthlyIncidents — month left UNCOVERED`)
+                  parsedMonths.push(null)
+                  continue
+                }
+                parsedMonths.push(filterSuppressedFromMonthly(parsed as MonthlyIncidents, suppressions))
+                covered.add(period)
+              } catch (err) {
+                console.warn(`[growth-series] incidents:monthly:${period} unusable — month left UNCOVERED:`, err instanceof Error ? err.message : err)
+                parsedMonths.push(null)
+              }
+            }
+            outageSources = parsedMonths
+            const windowEnd = new Date().toISOString()
+            const livePeriods = periodsCoveringWindow(windowEnd)
+            // Same predicate as the backfill closure below, spelled the same way: `[].every()` is true,
+            // so the length check is what stops an unparseable window from counting as covered.
+            if (livePeriods.length && livePeriods.every((p) => covered.has(p))) {
+              outageWindow = { started: countIncidentsInWindow(parsedMonths, Date.parse(windowEnd)).started, windowEnd }
+            }
+          } catch (err) {
+            // Leave the axis ABSENT rather than null — the incident record is retained ~60 days, so a
+            // later run's backfill can still fill today's row. Never abort the report for it.
+            console.warn('[growth-series] outage window read failed:', err instanceof Error ? err.message : err)
+          }
+          // The axis has no reader yet (no endpoint, no Discord line), so a persistent failure would
+          // otherwise surface only when someone dumps KV months later — by which time the month has
+          // rolled over and the rows are unfillable. Say it every day it happens.
+          if (!outageWindow) {
+            console.warn(`[growth-series] outage axis ABSENT for ${today} — months covered: ${[...covered].join(',') || 'none'}`)
+          }
+          // Hoisted (rather than asserted inside the closure) so the backfill closes over a definite
+          // value. Null when nothing parsed — there is then no month to backfill any row against.
+          const backfillSources = covered.size ? outageSources : null
+
+          try {
+            const wrote = await recordGrowthDaily(env.STATUS_CACHE, buildGrowthDailyRow({
               date: today,
               alertCounts,
               referralTotal: referralReadFailed ? null : (referralCounts?.total ?? 0),
               subscribers: subscribersSnapshot,
               subscriberNewToday: webhookCounts.newToday,
               audience,
-            }))
+              outage: outageWindow,
+            }), backfillSources
+              ? (rows: GrowthDailyRow[]) => fillOutageWindows(rows, (date) => {
+                  // Older rows anchor on the NOMINAL 09:00 UTC run instant — their real run time is
+                  // not recorded. `outageWindowEnd` on each row says which anchor it got.
+                  const end = nominalWindowEnd(date)
+                  const periods = periodsCoveringWindow(end)
+                  // This is the `compute → null` branch `fillOutageWindows` documents: a row whose
+                  // window reaches into a month we could not read stays ABSENT and retries tomorrow,
+                  // rather than being frozen at a fabricated 0.
+                  if (!periods.length || !periods.every((p) => covered.has(p))) return null
+                  return { started: countIncidentsInWindow(backfillSources, Date.parse(end)).started, windowEnd: end }
+                })
+              : undefined)
+            // `recordGrowthDaily` returns false (it does not throw) when its own read or the write
+            // fails. Today's referral/subscriber/audience values cannot be re-derived tomorrow, so this
+            // is the one genuinely unrecoverable loss in the block — do not let it pass as a `[kv]` line.
+            if (!wrote) console.error(`[growth-series] row for ${today} NOT written — this day's consent-free counters are unrecoverable`)
           } catch (err) {
             console.warn('[growth-series] append failed:', err instanceof Error ? err.message : err)
           }

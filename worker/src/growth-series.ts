@@ -15,8 +15,9 @@
 // before enough accrued). A single failed cron day was an unrecoverable hole.
 //
 // This mirrors the pattern `probe-degradation:monthly` / `security:monthly` already use: at the moment
-// the cron holds the values for the Discord report, append one row to a permanent monthly key. Zero
-// extra reads; one KV write per day; one key per month.
+// the cron holds the values for the Discord report, append one row to a permanent monthly key. One
+// KV write per day; one key per month. It cost zero extra reads until #1117, which added three (the
+// suppression list + two `incidents:monthly` month keys) to count the outage axis.
 //
 // SNAPSHOT, NOT DELTA: we store `subscribers` (the confirmed-subscription count) rather than only
 // `subscriberNewToday`. A delta is comparable solely against the day before it; a snapshot lets any
@@ -28,16 +29,19 @@
 import type { KVLike } from './utils'
 import { kvPut } from './utils'
 import type { AudienceCounts } from './outage-audience'
+import type { MonthlyIncidents } from './monthly-archive'
 
 /** Rows kept per monthly key. ~31 days; the cap is a corruption guard, not a retention policy. */
 export const GROWTH_SERIES_CAP = 40
 
 export interface GrowthDailyRow {
   date: string // YYYY-MM-DD
-  // The outage-day axis. These are alerts SENT TODAY, read from the `alert:count:{date}` daily
-  // accumulator — NOT the cron cycle's own counters. The daily report runs in a single 09:00-09:04 UTC
-  // window, so a cycle-scoped count would record an 04:00 outage as a quiet day, which is exactly the
-  // classification this dataset exists to make.
+  // Alerts SENT between 00:00 and 09:00 UTC of `date`, read from the `alert:count:{date}` daily
+  // accumulator — NOT the cron cycle's own counters (a cycle-scoped count would record an 04:00 outage
+  // as a quiet day). This is NOT the outage-day axis, despite once being described as one: the key is
+  // read at the 09:00 run, so it can only ever hold the first 9 hours. See
+  // `incidentsStartedInWindow` below (#1117), which is the axis. Kept because it is still a true
+  // narrower fact, and repointing a field at a new source under its old name is the #1055 mistake.
   alertedIncidents: number | null // null = could not read the accumulator (≠ a quiet day)
   alertedResolved: number | null
   referralTotal: number | null // consent-free outbound clicks (#842). null = read failed; 0 = nobody clicked
@@ -60,6 +64,158 @@ export interface GrowthDailyRow {
   // the write site). The deploy date is to be recorded in docs/reference/kv-schema.md's
   // `growth:daily` row.
   audienceBySource: Record<string, number> | null
+  // #1117 — the WINDOW-ALIGNED outage axis. `alertedIncidents` above is not one (see its comment).
+  // The gap it left, measured on production 2026-07-22: `alert:count:2026-07-21` held 23 alerts for the
+  // full day while the 07-21 row recorded 1, because the row was written 9 hours into that date.
+  // It instead counts from the durable `incidents:monthly` record over the SAME 24h window the
+  // audience fields were queried over, so the two axes in a row describe the same span.
+  //
+  // It is a DIFFERENT QUANTITY from `alertedIncidents`, not a corrected version of it — do not expect
+  // the 23 above to reappear here. Alerts and incidents diverge in both directions: a #882 hold
+  // suppresses an alert for an incident that is still recorded, while one alert carrying merged
+  // incidents increments the alert counter once per merged incident (`_mergedKeys.length`). For the
+  // same 07-21 window this axis counts 12. Do not re-point it at an alert source without renaming, or
+  // a window spanning the change silently mixes two definitions (the #1055 `direct`-bucket lesson).
+  //
+  // STARTS ONLY, on purpose. A resolved-in-window twin was drafted and dropped: `incidents:monthly`
+  // buckets an incident under the month of its `startedAt` and only the CURRENT month is ever
+  // re-accumulated, so an incident that starts in July and resolves in August keeps `resolvedAt: null`
+  // in the July key forever — no run can write it. A resolution axis would therefore have been a
+  // silent lower bound, which is the failure this issue exists to remove, and nothing here needs it:
+  // the lift comparison asks whether an outage HAPPENED that day.
+  //
+  // TWO states only — ABSENT (not counted yet) or a number. Deliberately NOT the `null = read failed`
+  // convention the fields above use: those read TTL'd keys that are gone by the next run, so a failure
+  // there is permanent and must be recorded. The incident record is retained ~60 days, so a failed
+  // read here is RETRYABLE — leaving the field absent lets a later run fill it, where writing `null`
+  // would freeze a recoverable gap. **Retryable only within the row's own month**, though:
+  // `recordGrowthDaily` opens one key per month, so once the month rolls over an unfilled row stays
+  // unfilled forever.
+  //
+  // A number here is a count over a covered window: the writer refuses to count unless every month the
+  // window touches was read AND parsed into the expected shape, so a missing or shapeless accumulator
+  // yields ABSENT rather than a quiet day — the failure #1117 exists to remove. Counts are
+  // post-suppression (#904) as the suppression layer reports it; an unreadable list aborts rather than
+  // counting unfiltered. See `countIncidentsInWindow` for the one accepted lower bound (detail-list
+  // truncation past 200/service/month, never yet observed).
+  //
+  // Known boundary limitation: an incident enters `incidents:monthly` only once a */5 cycle has fetched
+  // it, so one starting in the last minutes before the window end can be absent from the snapshot and
+  // then land in no window at all (tomorrow's starts where this one ended). Small and deterministic;
+  // documented rather than papered over. NOTE the accumulation for THIS cycle has already run by the
+  // time the block below reads the key (`cronAlertCheck` is awaited first) — the residual gap is
+  // upstream detection latency plus KV read-after-write consistency, not ordering.
+  incidentsStartedInWindow?: number
+  // ISO end of the window the field above was counted over (start = end − 24h). Self-describing
+  // on purpose: a live write anchors on the actual run instant, a backfill on the nominal 09:00 UTC
+  // run. Those coincide within minutes on a normal day and by up to ~1h05m on a catch-up run (the only
+  // other admitted window is 10:00–10:04, `isInSummaryWindow`). Storing it lets a reader see which
+  // anchor a row got instead of assuming. It also discriminates a backfilled row from a live one,
+  // which matters because a backfill applies TODAY's suppression list to an older window.
+  outageWindowEnd?: string
+}
+
+/** The audience fields are a WAE `NOW() - INTERVAL '1' DAY` query, so the outage axis matches it. */
+const OUTAGE_WINDOW_MS = 24 * 60 * 60 * 1000
+
+/** The nominal daily-summary run instant for a row's date (the cron window is 09:00–09:04 UTC, with a
+ *  10:00–10:04 catch-up; a backfilled row is anchored here, a live one on the actual run instant). */
+export function nominalWindowEnd(date: string): string {
+  return `${date}T09:00:00.000Z`
+}
+
+/**
+ * `2026-07` → `2026-06`. Pure, and deliberately string arithmetic.
+ *
+ * `new Date(d); d.setUTCMonth(d.getUTCMonth() - 1)` is the obvious spelling and it is WRONG here: it
+ * keeps the day-of-month, so a day the target month lacks overflows forward — on 2026-07-31 it yields
+ * July again, and the previous month is never read at all. That produced a real defect in review: the
+ * first-of-month row's window reaches into the previous month, so it would have been backfilled from
+ * the wrong key and frozen (rows carrying the axis are never recomputed).
+ */
+export function previousPeriod(period: string): string {
+  const [y, m] = period.split('-').map(Number)
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`
+}
+
+/**
+ * The `YYYY-MM` periods a row's 24h window touches — its own, plus the previous one when the window
+ * reaches back across a month boundary. Pure. The caller uses this to refuse to count a window whose
+ * months it could not all read (an unread month would silently count as zero incidents).
+ */
+export function periodsCoveringWindow(windowEndIso: string): string[] {
+  const end = Date.parse(windowEndIso)
+  if (!Number.isFinite(end)) return []
+  const endPeriod = new Date(end).toISOString().slice(0, 7)
+  const startPeriod = new Date(end - OUTAGE_WINDOW_MS).toISOString().slice(0, 7)
+  return startPeriod === endPeriod ? [endPeriod] : [startPeriod, endPeriod]
+}
+
+/**
+ * Count incidents that STARTED within `[endMs - 24h, endMs)`, across one or more monthly accumulators
+ * (a window on the 1st of a month reaches into the previous one). Pure.
+ *
+ * Deduped by service+incident id, since an incident can appear in two month keys. An entry with an
+ * unparseable/absent timestamp — or no id at all — is SKIPPED rather than counted: an unknown start
+ * time is not evidence of a start inside the window, and id-less entries would otherwise all collapse
+ * onto one dedup key and count as one.
+ *
+ * ACCEPTED LOWER BOUND: the accumulator caps per-service DETAIL at 200/month, dropping the OLDEST rows
+ * first while keeping `incidentIds` whole, and pre-#375 entries have no detail list at all. Such
+ * entries are undercounted here. A gate on this was drafted and REMOVED: truncation drops oldest-first,
+ * so a live 24h window can only lose an entry if ONE service logged 200+ incidents within those 24
+ * hours, while the gate — one flag across both month keys — would have refused every remaining day of
+ * that month AND the whole backfill, destroying correct rows to avoid a miscount that has never
+ * occurred (0 of 69 service-months as of 2026-07-22). The undercount is the cheaper failure.
+ *
+ * THROWS on a non-finite `endMs`. A count over an undefined window is not a quiet day, and returning
+ * `0` here would be indistinguishable from one — then frozen onto the row, which is the exact failure
+ * mode this whole change removes.
+ */
+export function countIncidentsInWindow(
+  sources: Array<MonthlyIncidents | null | undefined>,
+  endMs: number,
+): { started: number } {
+  if (!Number.isFinite(endMs)) throw new RangeError(`countIncidentsInWindow: non-finite window end (${endMs})`)
+  const startMs = endMs - OUTAGE_WINDOW_MS
+  const startedSeen = new Set<string>()
+  const inWindow = (iso: string | null | undefined): boolean => {
+    if (!iso) return false
+    const t = Date.parse(iso)
+    return Number.isFinite(t) && t >= startMs && t < endMs
+  }
+  for (const src of sources) {
+    if (!src || typeof src !== 'object' || !src.services) continue
+    for (const [svcId, data] of Object.entries(src.services)) {
+      for (const inc of data?.incidents ?? []) {
+        if (!inc?.id) continue // no dedup key — merging them would count N as 1
+        if (inWindow(inc.startedAt)) startedSeen.add(`${svcId}::${inc.id}`)
+      }
+    }
+  }
+  return { started: startedSeen.size }
+}
+
+/**
+ * #1117 — fill the window-aligned axis on rows that predate it. Pure.
+ *
+ * `compute` returns null for a row it cannot cover (its window falls outside the retained incident
+ * record, or the read failed); such rows are left ABSENT so a later run can still fill them — writing
+ * `null` there would freeze a recoverable gap into a permanent "could not read".
+ *
+ * Rows that already carry the field are never recomputed: the suppression list moves over time, so a
+ * re-run could silently restate history.
+ */
+export function fillOutageWindows(
+  rows: GrowthDailyRow[],
+  compute: (date: string) => { started: number; windowEnd: string } | null,
+): GrowthDailyRow[] {
+  return rows.map((r) => {
+    if (r.incidentsStartedInWindow !== undefined) return r
+    const c = compute(r.date)
+    if (!c) return r
+    return { ...r, incidentsStartedInWindow: c.started, outageWindowEnd: c.windowEnd }
+  })
 }
 
 /**
@@ -75,6 +231,9 @@ export interface GrowthDailyInputs {
   subscribers: number | null
   subscriberNewToday: number | null
   audience: AudienceCounts | null | undefined
+  // #1117 — null/undefined when the incident record could not be read; the fields are then left
+  // ABSENT so a later run's backfill can still supply them (see the field docs above).
+  outage: { started: number; windowEnd: string } | null | undefined
 }
 
 /** `growth:daily:{YYYY-MM}` — permanent, no TTL. One key per month. */
@@ -102,6 +261,7 @@ export function buildGrowthDailyRow(i: GrowthDailyInputs): GrowthDailyRow {
     audienceTotal: i.audience?.total ?? null,
     audienceActiveTotal: i.audience?.activeTotal ?? null,
     audienceBySource: i.audience?.bySource ?? null,
+    ...(i.outage ? { incidentsStartedInWindow: i.outage.started, outageWindowEnd: i.outage.windowEnd } : {}),
   }
 }
 
@@ -144,7 +304,14 @@ export function parseGrowthSeries(raw: string | null | undefined): GrowthDailyRo
  *
  * A genuinely absent key (first day of the month) is `null` and correctly seeds an empty series.
  */
-export async function recordGrowthDaily(kv: KVLike, row: GrowthDailyRow): Promise<boolean> {
+export async function recordGrowthDaily(
+  kv: KVLike,
+  row: GrowthDailyRow,
+  // #1117 — optional pass over the merged series to fill the window-aligned axis on older rows.
+  // Applied to the whole series (not just today's row) because the fix is retroactive: the incident
+  // record it reads from outlives the TTL'd counter the broken axis used.
+  backfill?: (rows: GrowthDailyRow[]) => GrowthDailyRow[],
+): Promise<boolean> {
   const key = growthSeriesKey(periodOf(row.date))
   let raw: string | null
   try {
@@ -153,6 +320,19 @@ export async function recordGrowthDaily(kv: KVLike, row: GrowthDailyRow): Promis
     console.warn('[growth-series] read failed, skipping write to protect history:', err instanceof Error ? err.message : err)
     return false
   }
-  const next = appendGrowthDaily(parseGrowthSeries(raw), row)
+  const appended = appendGrowthDaily(parseGrowthSeries(raw), row)
+  // The backfill is a bonus pass over arbitrary stored rows; a throw in it must never cost TODAY's row.
+  // Today's inputs (referral:out 2d, webhook:sub:count 7d, the WAE query) cannot be re-derived
+  // tomorrow, and the backfill only ever fills rows that already exist — so losing the write loses the
+  // day permanently, while losing the backfill costs nothing a later run can't redo.
+  let next = appended
+  if (backfill) {
+    try {
+      next = backfill(appended)
+    } catch (err) {
+      console.warn('[growth-series] backfill failed, writing today only:', err instanceof Error ? err.message : err)
+      next = appended
+    }
+  }
   return await kvPut(kv, key, JSON.stringify(next)) // no expirationTtl → permanent
 }
