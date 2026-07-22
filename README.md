@@ -38,7 +38,7 @@ Visit **[ai-watch.dev](https://ai-watch.dev)** — no signup required. Updated e
 - **Latency monitoring** — Direct endpoint response time (RTT) for 33 probe-capable services, status page timing as fallback
 - **24h latency trend** — Chart.js line chart with 5-min probe snapshots
 - **Incident history** — Timeline with details from multiple status page formats
-- **Uptime** — 30-day uptime **computed by AIWatch** from each provider's own published records, with one window and one formula for every service (full outage 1.0, partial/degraded 0.3, announced maintenance excluded) — so our figure can differ from the % on a provider's own page, by design ([how it works](https://ai-watch.dev/methodology))
+- **Uptime** — 30-day uptime **computed by AIWatch** from each provider's own published records, rather than copied from the % they display (weighted: full outage 1.0, partial/degraded 0.3, announced maintenance excluded). Sources that don't fit that formula carry their own label instead — so our figure can differ from a provider's own, by design ([how it works](https://ai-watch.dev/methodology))
 - **Component status breakdown** — Real-time per-component status (models, API surfaces, …) on ServiceDetails + Is X Down for the services we track per-component, with collapsible section/model groups for long lists
 - **Status calendar** — 30-day (Statuspage) or 14-day (incident.io) daily status visualization
 - **Discord & Slack alerts** — Discord webhook on status changes/incidents + Slack via its native `/feed` RSS app (zero-config) + RSS feeds
