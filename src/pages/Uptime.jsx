@@ -146,7 +146,8 @@ export default function Uptime() {
         </h2>
         {/* #1006 — a LEGEND, not a claim. The rows are not on one basis: most services are AIWatch's own
             30-day computation from the provider's records (`off`), and the BetterStack ones are that
-            platform's monitors, same computation (`avg`). A partial-window service adds an amber `{N}d`
+            platform's monitors — a DIFFERENT computation (`avg`), which ignores severity and measures
+            each resource only over its monitored days (#1110). A partial-window service adds an amber `{N}d`
             marker inline. A single header line saying "30 days" would repeat the mistake #654 removed. */}
         <span className="mono text-[10px] text-[var(--text2)] flex items-center gap-2 flex-wrap justify-end">
           {hasUptimeData ? (

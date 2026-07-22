@@ -16,7 +16,9 @@ export const INCIDENT_IO_IMPACT_WEIGHTS: Record<string, number> = {
 
 /** #1006 — incident.io `component_impacts[].status` → the SAME weights Atlassian's uptimeData uses, so
  *  both parser families compute uptime with one formula (the precondition the Reliability Ranking has
- *  always implicitly claimed). Atlassian's own buckets are `m` (major outage, 1.0) and `p` (partial,
+ *  always implicitly claimed). Scoped to these two families ON PURPOSE — #1110: `platform_avg` does not
+ *  weight at all and Instatus's Next.js path can be overridden by the provider, so do NOT generalise
+ *  this to "one formula for every service". Atlassian's own buckets are `m` (major outage, 1.0) and `p` (partial,
  *  0.3); incident.io's three states map onto them:
  *    full_outage        → a full outage of the component            → MAJOR_WEIGHT
  *    partial_outage     → some capacity affected                    → MINOR_WEIGHT

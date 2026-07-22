@@ -110,12 +110,21 @@ export interface ServiceStatus {
    *  #1006 —
    *    'official'      → AIWatch's OWN computation over the trailing 30 days, from the provider's
    *                      published per-day / impact records, with the weights on /methodology. Atlassian,
-   *                      incident.io, Instatus and Flashduty — every source that publishes raw records.
-   *    'platform_avg'  → the same 30-day AIWatch computation, but over BetterStack's OWN monitoring
-   *                      history (`status_history`) rather than the provider's incident declarations, and
-   *                      averaged across the page's resources. Same window and same weights as 'official';
-   *                      the label survives because the EVIDENCE differs — an active monitor's downtime
-   *                      is not the provider saying "we had an incident". */
+   *                      incident.io, Instatus, OnlineOrNot and Flashduty — the five sources that carry
+   *                      the PROVIDER's own records. (Better Stack is computed by us too, but from a
+   *                      monitor rather than the provider, hence 'platform_avg' below.) Instatus's
+   *                      Next.js path is itself an exception on the weights: a provider-published
+   *                      `customImpactPercentage` wins over 1.0/0.3 (#1110).
+   *    'platform_avg'  → an AIWatch computation over BetterStack's OWN monitoring history
+   *                      (`status_history`) rather than the provider's incident declarations, averaged
+   *                      across the page's resources. The label marks a DIFFERENT computation, not just
+   *                      different evidence (#1110): `parseBetterStackUptime` ignores severity — every
+   *                      measured `downtime_duration` second counts at weight 1.0, `downtime` and
+   *                      `degraded` alike — and measures each resource only over the days it was
+   *                      monitored (`not_monitored` days leave the denominator) before averaging, so one
+   *                      page's figure can blend a 7-day monitor with 30-day ones. It emits no
+   *                      `uptimeWindowDays`. Do not describe it as "the same window and weights as
+   *                      'official'"; it is neither. */
   uptimeSource?: 'official' | 'platform_avg'
   /** #1006 — the % the PROVIDER displays on its own status page, when AIWatch's own 30-day figure differs
    *  from it (Atlassian: their ~90-day window; incident.io: their published aggregate). A disclosure, not

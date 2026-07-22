@@ -166,9 +166,10 @@ export function parseOnlineOrNotIncidents(html: string): Incident[] {
  *
  * The page publishes an aggregate % (e.g. "100% uptime"), but its own SSR payload also carries every
  * incident with `started` / `ended` / `impact` — the same start/end/severity shape incident.io exposes
- * — and `parseOnlineOrNotIncidents` already extracts them. So we compute here with the same window and
- * the same weights as every other source (/methodology), instead of reading an aggregate over the page's
- * unknown period. `parseOnlineOrNotIncidents` maps impact → 'major' | 'minor' | null; we weight
+ * — and `parseOnlineOrNotIncidents` already extracts them. So we compute here with the same trailing
+ * 30-day window and the 1.0/0.3 weighting the Official sources use (/methodology), instead of reading an
+ * aggregate over the page's unknown period. (#1110 — "every source" would be wrong: `platform_avg`
+ * applies no severity weighting and its window can be shorter.) `parseOnlineOrNotIncidents` maps impact → 'major' | 'minor' | null; we weight
  * major = 1.0, minor = 0.3, null (informational) = 0. An unresolved incident is counted to `now`.
  *
  * Returns 100 when the page is a valid OnlineOrNot page with no qualifying downtime (a clean 30 days),

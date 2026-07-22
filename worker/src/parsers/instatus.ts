@@ -675,8 +675,10 @@ function parseInstatusNextUptime(html: string, componentName: string, nowMs: num
     if (!entry) return null
 
     // #1006 — compute over the trailing 30 days from `outages` instead of copying `entry.uptime`, which
-    // is the page's own aggregate over ITS period (these pages declare `maxUptimeDays: 90`). Every source
-    // now produces a 30-day figure with the same weighting, which is what makes the ranking a ranking.
+    // is the page's own aggregate over ITS period (these pages declare `maxUptimeDays: 90`). This puts
+    // Instatus on the same trailing 30 days as the other sources. NOT "the same weighting everywhere"
+    // (#1110): a published `customImpactPercentage` wins over the 1.0/0.3 default just below, and
+    // `platform_avg` (Better Stack) applies no severity weighting at all.
     if (!Array.isArray(entry.outages)) {
       return warnNextUptimeShape(componentName, 'componentsUptime entry carries no outages array')
     }

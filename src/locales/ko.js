@@ -191,7 +191,7 @@ const ko = {
   // 충돌해 어느 쪽이 공식인지 뒤집혀 읽힌다. '공식'은 제공사 발표값에만 쓴다.
   'uptime.label.official': '30일 Uptime',
   // #1006 — 제공사 발표값을 복사하지 않고, 제공사가 공개한 인시던트·임팩트 기록에서
-  // AIWatch가 동일한 30일 창·동일한 가중 방식으로 직접 계산한다(그래야 서비스 간 비교가 성립).
+  // AIWatch가 30일 창으로 직접 계산한다(그래야 서비스 간 비교가 성립).
   'uptime.sub.official': '상태 페이지 기록으로 AIWatch가 산출',
   // 제공사 발표값과 우리 30일 측정이 다를 때 상세 페이지에 나란히 보여주는 줄.
   // 한 줄에 두 값의 귀속을 모두 담는다 — 콜론(:)만 두면 뒤 숫자가 대표값처럼 읽힌다.
@@ -202,6 +202,13 @@ const ko = {
   // 상태페이지 이전 등으로 제공사 기록이 30일을 못 채울 때: 창을 숨기지 않고 밝힌다.
   'uptime.sub.official.partial': 'AIWatch 산출 · 제공사 기록이 {d}일치뿐',
   'uptime.partialWindow.tooltip': '제공사가 이 구성요소의 기록을 {d}일치만 갖고 있습니다(상태 페이지를 옮긴 경우 등). 30일이 쌓이면 자동으로 정상 표시됩니다.',
+  // #1110 — 이 라벨은 '근거만 다른 같은 계산'이 아니다. `parseBetterStackUptime`은 심각도를
+  // 반영하지 않는다: 측정된 `downtime_duration` 초는 `downtime`이든 `degraded`든 전부 가중 1.0
+  // (`status`는 `not_monitored` 일자를 빼는 데에만 쓴다). 리소스마다 '자기' 관측일수로 비율을 낸 뒤
+  // 동등 평균하므로 한 페이지 값에 7일치 모니터와 30일치 모니터가 섞일 수 있고, `uptimeWindowDays`도
+  // 내지 않는다. 그 '차이'를 서술하는 곳은 /methodology §3 Platform뿐이고, 이 라벨과 Uptime 페이지의
+  // `avg` 범례는 근거가 다르다는 것만 알린다. 아래 `uptime.sub.platform_avg`는 아직
+  // `uptime.sub.official`과 동일 문구다 — official과 같은 계산으로 묶어 쓰지 말 것.
   'uptime.label.platform_avg': '플랫폼 평균',
   'uptime.sub.platform_avg': '상태 페이지 기록으로 AIWatch가 산출',
   'svc.incidents': '인시던트',
